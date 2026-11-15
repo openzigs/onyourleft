@@ -19,12 +19,13 @@
  *    being true.
  */
 
-import { watts } from '@onyourleft/domain';
+import { unixSeconds, watts } from '@onyourleft/domain';
 import { activityId, athleteId } from '@onyourleft/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { stubAnalysis } from '../analysis/testing';
 import type * as ZoneChartModule from '../analysis/ZoneChart';
+import type * as WeekChartModule from '../home/WeekChart';
 import { ChartSlot } from '../design/ChartSlot';
 import { stubActivity } from '../detail/testing';
 import { AnalysisView } from '../views/AnalysisView';
@@ -52,6 +53,21 @@ vi.mock('../analysis/ZoneChart', async (importOriginal) => {
         throw new Error('the zone chart failed to draw');
       }
       return real.ZoneChart(props);
+    },
+  };
+});
+
+/** #2049: Home's week chart, made to throw on demand, as the zone chart above. */
+const weekChartFails = vi.hoisted(() => ({ now: false }));
+vi.mock('../home/WeekChart', async (importOriginal) => {
+  const real = await importOriginal<typeof WeekChartModule>();
+  return {
+    ...real,
+    WeekChart: (props: WeekChartModule.WeekChartProps) => {
+      if (weekChartFails.now) {
+        throw new Error('the week chart failed to draw');
+      }
+      return real.WeekChart(props);
     },
   };
 });
@@ -234,5 +250,77 @@ describe('with a zone chart that throws while rendering — #2069', () => {
 
     expect(mounted.caughtErrors).toEqual([]);
     expect(document.querySelector('.oyl-zone-chart')).not.toBeNull();
+  });
+});
+
+describe('with Home’s week chart throwing while rendering — #2049', () => {
+  afterEach(() => {
+    weekChartFails.now = false;
+  });
+
+  /** Home through the real shell, with rides on two days of this week. */
+  async function homeWithAWeek(): Promise<Mounted> {
+    const now = Date.now() / 1000;
+    const port = stubAnalysis(athleteId('athlete-a'), [
+      {
+        activity: stubActivity({
+          id: activityId('this-week-1'),
+          name: 'Tuesday',
+          startedAt: unixSeconds(Math.floor(now - 2 * 86_400)),
+          startedAtTimeZone: 'UTC',
+        }),
+      },
+      {
+        activity: stubActivity({
+          id: activityId('this-week-2'),
+          name: 'Yesterday',
+          startedAt: unixSeconds(Math.floor(now - 86_400)),
+          startedAtTimeZone: 'UTC',
+        }),
+      },
+    ]);
+    globalThis.location.hash = '#/';
+    const result = await mount(<AppShell capabilities={NO_BLUETOOTH} analysis={port} />);
+    await settle();
+    await settle();
+    return result;
+  }
+
+  const weekTable = (): HTMLTableElement | undefined =>
+    [...document.querySelectorAll('main table')].find(
+      (each) => each.querySelector('caption')?.textContent === 'Day by day',
+    ) as HTMLTableElement | undefined;
+
+  it('is replaced by its table, open, and Home is still there around it', async () => {
+    weekChartFails.now = true;
+    mounted = await homeWithAWeek();
+
+    expect(mounted.caughtErrors.map((error) => error.message)).toContain(
+      'the week chart failed to draw',
+    );
+    expect(document.querySelector('.oyl-week-chart')).toBeNull();
+    // The text equivalent, every day of it, and not tucked in a disclosure.
+    const table = weekTable();
+    expect(table?.querySelectorAll('tbody tr')).toHaveLength(7);
+    expect(table?.closest('details')).toBeNull();
+    // The rest of Home: its title, Next up, the last ride and the week's totals.
+    expect(document.querySelector('main h1')?.textContent).toBe('Home');
+    expect(document.querySelector('main .oyl-next-up')).not.toBeNull();
+    expect(document.querySelector('main .oyl-home__last')?.textContent).toContain('Yesterday');
+    expect(document.querySelector('main .oyl-home__week .oyl-home__facts')?.textContent).toContain(
+      'Rides2',
+    );
+    const violations = auditAccessibility(document);
+    expect(formatViolations(violations)).toBe('');
+  });
+
+  it('draws the chart, with the table one press away, when nothing throws — the control', async () => {
+    mounted = await homeWithAWeek();
+
+    expect(mounted.caughtErrors).toEqual([]);
+    expect(document.querySelector('.oyl-week-chart')).not.toBeNull();
+    const table = weekTable();
+    expect(table?.querySelectorAll('tbody tr')).toHaveLength(7);
+    expect(table?.closest('details')).not.toBeNull();
   });
 });

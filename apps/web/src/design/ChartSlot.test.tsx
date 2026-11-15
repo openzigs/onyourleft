@@ -271,6 +271,62 @@ describe('with the table disclosed under the chart — #1439', () => {
   });
 });
 
+describe('with words alongside the table — the owner’s ruling of 2026-11-06 (#2049)', () => {
+  const words = <p className="alongside">You rode on 2 of the last seven days.</p>;
+
+  it('puts them behind the disclosure, before the table', async () => {
+    mounted = await mount(
+      <ChartSlot
+        caption="Day by day"
+        columns={['Day', 'Rides']}
+        rows={ROWS.map((row) => [...row])}
+        emptyMessage="No rides."
+        tablePosition="disclosed"
+        chart={<svg role="img" aria-label="Moving time per day" />}
+        alongside={words}
+      />,
+    );
+    const said = mounted.container.querySelectorAll('.alongside');
+    expect(said).toHaveLength(1);
+    const disclosure = said[0]?.closest('details');
+    expect(disclosure).not.toBeNull();
+    expect(said[0]?.nextElementSibling?.querySelector('table')).not.toBeNull();
+  });
+
+  it('keeps them, beside the open table, when the chart throws', async () => {
+    mounted = await mount(
+      <ChartSlot
+        caption="Day by day"
+        columns={['Day', 'Rides']}
+        rows={ROWS.map((row) => [...row])}
+        emptyMessage="No rides."
+        tablePosition="disclosed"
+        chart={<Boom />}
+        alongside={words}
+      />,
+    );
+    await settle();
+    expect(mounted.container.querySelector('details')).toBeNull();
+    expect(mounted.container.querySelectorAll('table')).toHaveLength(1);
+    expect(mounted.container.querySelectorAll('.alongside')).toHaveLength(1);
+  });
+
+  it('keeps them under a chart that draws with no table', async () => {
+    mounted = await mount(
+      <ChartSlot
+        caption="Day by day"
+        columns={['Day', 'Rides']}
+        rows={ROWS.map((row) => [...row])}
+        emptyMessage="No rides."
+        chart={<svg role="img" aria-label="Moving time per day" />}
+        alongside={words}
+      />,
+    );
+    expect(mounted.container.querySelector('table')).toBeNull();
+    expect(mounted.container.querySelector('svg + .alongside')).not.toBeNull();
+  });
+});
+
 describe('with a chart that throws — criterion 7', () => {
   it('falls back to the table carrying the same values', async () => {
     mounted = await mount(

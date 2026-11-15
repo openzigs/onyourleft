@@ -40,6 +40,7 @@ import {
   REPLAN_UNAVAILABLE,
   REPLANS_OFF,
   REPLANS_ON_BADGE,
+  RIDE_WITH_REPLANS,
 } from '../workout/replan-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
@@ -89,6 +90,7 @@ const trainer = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => (
   lost: undefined,
   refusal: undefined,
   releaseFault: undefined,
+  easedOffTo: undefined,
   ergRescue: undefined,
   ergHeld: undefined,
   ...overrides,
@@ -550,7 +552,10 @@ describe('re-plans during the ride — #1244', () => {
 
       await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
       expect(theSwitch(view.container)?.checked).toBe(true);
-      await activateWithKeyboard(buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement);
+      // #1329: on, the button reads "Ride, with re-plans", the name after it.
+      await activateWithKeyboard(
+        buttonSaying(view.container, `${RIDE_WITH_REPLANS}: Sweet spot`) as HTMLElement,
+      );
       expect(started).toEqual([{}, { replans: true }]);
     });
 
@@ -721,7 +726,7 @@ describe('re-plans during the ride — #1244', () => {
       // control that starts a workout (#1329: the switch is above the list).
       const badge = queryAll(view.container, '[data-oyl-replans-on]')[0] as HTMLElement;
       expect(badge.tagName).toBe('P');
-      const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
+      const ride = buttonSaying(view.container, RIDE_WITH_REPLANS) as HTMLElement;
       expect(badge.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       const input = theSwitch(view.container) as HTMLElement;
       expect(badge.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -750,6 +755,77 @@ describe('re-plans during the ride — #1244', () => {
     it('never says it where there is no switch', async () => {
       const view = await render();
       expect(onLine(view.container)).toBeUndefined();
+    });
+
+    // #1329, the owner's ruling of 2026-11-05: on every Ride button too, so a
+    // rider far down a long list, where the badge has scrolled away, still
+    // reads it on the control they press.
+    describe('on every Ride button, while it is on', () => {
+      const buttons = (root: ParentNode) => queryAll<HTMLButtonElement>(root, 'li button');
+      /** What is on the screen: the button's text less what is off it. */
+      const seen = (button: HTMLElement): string => {
+        const copy = button.cloneNode(true) as HTMLElement;
+        for (const hidden of queryAll(copy, '.oyl-visually-hidden')) hidden.remove();
+        return copy.textContent ?? '';
+      };
+      /** Its accessible name: every word in it, the hidden ones included. */
+      const named = (button: HTMLElement): string => button.textContent ?? '';
+      const two = () =>
+        workoutStub(ATHLETE, [record(), { ...record('Over-unders'), id: workoutId('w2') }]);
+
+      it('reads "Ride, with re-plans" on each one, and only while the switch is on', async () => {
+        const view = await render({ replansAvailable: true, port: two() });
+        const off = ['Ride Over-unders', 'Ride Sweet spot'];
+        expect(buttons(view.container).map(seen).sort()).toEqual(off);
+        expect(buttons(view.container).map(named).sort()).toEqual(off);
+        await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+        expect(buttons(view.container).map(seen)).toEqual([RIDE_WITH_REPLANS, RIDE_WITH_REPLANS]);
+        await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+        expect(buttons(view.container).map(seen).sort()).toEqual(off);
+        expect(buttons(view.container).map(named).sort()).toEqual(off);
+      });
+
+      it('keeps each workout’s name in its button’s name, after what is seen (SC 2.5.3)', async () => {
+        const view = await render({ replansAvailable: true, port: two() });
+        await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+        expect(buttons(view.container).map(named).sort()).toEqual([
+          `${RIDE_WITH_REPLANS}: Over-unders`,
+          `${RIDE_WITH_REPLANS}: Sweet spot`,
+        ]);
+        for (const button of buttons(view.container)) {
+          expect(named(button).startsWith(seen(button))).toBe(true);
+          expect(button.getAttribute('aria-label')).toBeNull();
+        }
+      });
+
+      it('says it on the button whose press starts that workout with re-plans', async () => {
+        const started: { readonly name: string; readonly replans: boolean }[] = [];
+        const view = await render({
+          replansAvailable: true,
+          port: two(),
+          onStart: (chosen, choices) => {
+            started.push({ name: chosen.name, replans: choices.replans === true });
+          },
+        });
+        await activateWithKeyboard(buttonSaying(view.container, 'Ride Over-unders') as HTMLElement);
+        await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+        const labelled = buttonSaying(view.container, `${RIDE_WITH_REPLANS}: Over-unders`);
+        expect(seen(labelled as HTMLElement)).toBe(RIDE_WITH_REPLANS);
+        await activateWithKeyboard(labelled as HTMLElement);
+        expect(started).toEqual([
+          { name: 'Over-unders', replans: false },
+          { name: 'Over-unders', replans: true },
+        ]);
+      });
+
+      it('never says it where there is no switch, though the rider could not have turned it on', async () => {
+        const view = await render({ port: two() });
+        expect(buttons(view.container).map(named).sort()).toEqual([
+          'Ride Over-unders',
+          'Ride Sweet spot',
+        ]);
+        expect(view.container.textContent).not.toContain(RIDE_WITH_REPLANS);
+      });
     });
 
     it('is off again when a ride starts, and when one ends, though no workout was started', async () => {

@@ -69,6 +69,11 @@ export interface EffortHistory {
   readonly rows: readonly EffortRow[];
   /** True when the store had more than {@link EFFORT_LIMIT}, so the screen can say so. */
   readonly truncated: boolean;
+  /**
+   * The rider's efforts the rule excluded (#69), at most {@link EFFORT_LIMIT}:
+   * not counted, and shown with the reason rather than dropped.
+   */
+  readonly notCounted: readonly EffortRow[];
 }
 
 /**
@@ -105,7 +110,15 @@ export async function loadHistory(
     rows.push({ effort, activity });
   }
 
-  return { segment, rows, truncated };
+  const notCounted: EffortRow[] = [];
+  for (const effort of await port.store.listExcludedEfforts(port.athleteId, id, EFFORT_LIMIT)) {
+    notCounted.push({
+      effort,
+      activity: await port.store.getActivity(port.athleteId, effort.activityId),
+    });
+  }
+
+  return { segment, rows, truncated, notCounted };
 }
 
 /**

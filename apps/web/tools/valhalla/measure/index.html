@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- #2320. A dev-only page, never in the product build: README.md beside
+         this directory's parent says how to open it and what it records. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>In-browser Valhalla: measurement</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 1rem;
+      }
+      table {
+        border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
+      }
+      th,
+      td {
+        border: 1px solid currentColor;
+        padding: 0.25rem 0.5rem;
+        text-align: right;
+      }
+      button {
+        min-height: 48px;
+        min-width: 48px;
+        margin-right: 0.5rem;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>In-browser Valhalla: measurement</h1>
+    <p id="status" role="status">Loading…</p>
+    <p>
+      <button id="start" type="button" disabled>Measure</button>
+      <button id="copy" type="button" disabled>Copy the record</button>
+    </p>
+    <div style="overflow-x: auto">
+      <table>
+        <thead id="head"></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <pre id="json"></pre>
+    <p id="attribution"></p>
+    <p>
+      <a href="licences/valhalla-browser.txt"
+        >Licences of the router and what is compiled into it</a
+      >
+    </p>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

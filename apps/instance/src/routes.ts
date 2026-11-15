@@ -8,6 +8,7 @@ import { INSTANCE_KEY_ROUTES } from './keys/routes.ts';
 import { errorResponse } from './errors.ts';
 import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { NOTICE_PAGE_PATH } from './moderation/notices.ts';
+import { OPERATE_ROUTES } from './operate/routes.ts';
 import { pageResponse } from './html.ts';
 import { LEGAL_PAGE_PATH, legalPage } from './legal.ts';
 import { TERMS_PAGE_PATH, termsPage } from './terms.ts';
@@ -16,6 +17,7 @@ import { json, type Route, type Schema } from './route-kit.ts';
 import { HISTORY_ROUTES } from './history/routes.ts';
 import { ROOM_ROUTES } from './rooms/routes.ts';
 import { SEALED_ROUTES } from './sealed/routes.ts';
+import { SEGMENT_ROUTES } from './segments/routes.ts';
 import { SYNC_ROUTES } from './sync/routes.ts';
 
 /**
@@ -239,7 +241,9 @@ export const ROUTES: readonly Route[] = [
   ...SEALED_ROUTES,
   ...IDENTITY_ROUTES,
   ...MODERATION_ROUTES,
+  ...OPERATE_ROUTES,
   ...SYNC_ROUTES,
+  ...SEGMENT_ROUTES,
   ...HISTORY_ROUTES,
   ...ANALYSIS_ROUTES,
   ...HOSTED_ROUTES,

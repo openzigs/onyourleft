@@ -11,3 +11,5 @@
 
 export const TRAINER_NAME = 'KICKR 1F2A';
 export const STRAP_NAME = 'HRM 04B1';
+/** #2047: the Battery Level the strap reports. The trainer reports none. */
+export const STRAP_BATTERY_PERCENT = 37;

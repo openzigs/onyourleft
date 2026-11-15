@@ -26,8 +26,10 @@ import {
   degreesLongitude,
   geographicPosition,
   gradePercent,
+  kilograms,
   metres,
   metresPerSecond,
+  powerZones,
   routeProfile,
   revolutionsPerMinute,
   beatsPerMinute,
@@ -37,9 +39,12 @@ import {
   HOLD_SILENCE_FALLBACK_SECONDS,
   seconds,
   thresholdShare,
+  timeInZones,
   unixSeconds,
   watts,
+  type CalorieRider,
   type RouteProfile,
+  type UnixSeconds,
   type Watts,
   type WorkoutBlock,
   REPLAN_MOVE_INTERVAL_SECONDS,
@@ -74,6 +79,7 @@ import {
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { createFakeBluetooth } from '@onyourleft/sensors/web-bluetooth/testing';
 import {
+  cpsPowerMeter,
   createSimulator,
   ftmsTrainer,
   hrsStrap,
@@ -83,6 +89,7 @@ import {
 } from '@onyourleft/sensors/simulator';
 import {
   activityId,
+  cameraFrameId,
   lapId,
   RECORDING_REPLAN_RECORDS_LIMIT,
   recordingSessionId,
@@ -93,7 +100,10 @@ import {
 } from '@onyourleft/store';
 import {
   ATHLETE_A,
+  ATHLETE_B,
+  cameraFrameFor,
   createStoreHarness,
+  recordingFor,
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
@@ -119,6 +129,8 @@ vi.mock('../recording/laps', async (importOriginal) => {
 });
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
+import { keepThisRide } from '../camera/keep';
+import { discardKeptFramesWithTheRide } from '../camera/kept-frame-discard';
 import { exportActivity, LOSSY_CHANNELS } from '../transfer/export-activity';
 import type { ActivityFileFormat } from '../transfer/file-format';
 import { importActivityFiles } from '../transfer/import-batch';
@@ -139,6 +151,12 @@ import {
   type RideWorkoutSnapshot,
 } from './controller';
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
+import { lapSplits } from '../game/hud/lap-splits';
+import { CALORIES_KEY, hudReadings } from '../game/hud/fields';
+import { atStartLine } from '../game/simulation';
+import { caloriesValue } from '../detail/CaloriesFact';
+import type { RideTotals } from '../recording/totals';
+import { formatDuration } from '../format';
 import { createGradientSession } from '../game/gradient';
 import { TargetHeldBack } from './held-back';
 import {
@@ -157,6 +175,7 @@ import {
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
+import { STEP_DOWN_UNCONFIRMED } from '../workout/session';
 import {
   linkNotMade,
   NOT_FOUND,
@@ -803,6 +822,109 @@ describe('criterion 3 — a disconnected sensor goes unavailable, and does not f
     await ride(rig, METRIC_STALE_AFTER_SECONDS);
 
     expect(metric(rig, 'heartRate').kind).toBe('live');
+    rig.controller.dispose();
+  });
+});
+
+describe('each paired sensor’s own readings — #2045', () => {
+  /** One sensor's reading on one channel, from the snapshot Home reads. */
+  const reading = (rig: Bench, id: typeof STRAP, channel: 'power' | 'heartRate') =>
+    rig.controller
+      .getSnapshot()
+      .sensors.find((sensor) => sensor.id === id)
+      ?.readings?.find((each) => each.id === channel)?.state;
+
+  it('lists only the channels each device supplies, and the strap’s number is the Ride screen’s', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+
+    const channels = (id: typeof STRAP): readonly string[] =>
+      rig.controller
+        .getSnapshot()
+        .sensors.find((sensor) => sensor.id === id)
+        ?.readings?.map((each) => each.id) ?? [];
+    expect(channels(TRAINER)).toEqual(['power', 'cadence', 'speed']);
+    expect(channels(STRAP)).toEqual(['heartRate']);
+    const strap = reading(rig, STRAP, 'heartRate');
+    expect(strap?.kind).toBe('live');
+    expect(strap).toEqual(metric(rig, 'heartRate'));
+    rig.controller.dispose();
+  });
+
+  it('two devices sending power keep their own: a power meter gone quiet is stale while the trainer and the channel stay live', async () => {
+    // The power meter first, so the power-meter role's chooser picks it; the
+    // trainer role asks for trainer-control as well, which only the trainer has.
+    const { transport, bench } = createSimulator({
+      devices: [
+        cpsPowerMeter({ id: 'meter', name: 'Crank PM' }),
+        ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A' }),
+      ],
+    });
+    const controller = createRideController({
+      transport,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('two-power'),
+      now: () => bench.now,
+    });
+    const power = (id: string) =>
+      controller
+        .getSnapshot()
+        .sensors.find((sensor) => sensor.id === deviceId(id))
+        ?.readings?.find((each) => each.id === 'power')?.state.kind;
+    const step = async (count: number): Promise<void> => {
+      for (let index = 0; index < count; index += 1) {
+        bench.advance(seconds(1));
+        await controller.tick(bench.now);
+      }
+    };
+    await controller.pair('power-meter');
+    await controller.pair('trainer');
+    await step(3);
+    expect([power('meter'), power('kickr')]).toEqual(['live', 'live']);
+
+    bench.device(deviceId('meter')).script({ kind: 'notification-dropout', duration: seconds(30) });
+    await step(METRIC_STALE_AFTER_SECONDS + 1);
+
+    expect(power('meter')).toBe('stale');
+    expect(power('kickr')).toBe('live');
+    // The Ride screen's one power channel is still live, from the trainer —
+    // which is exactly why the module cannot name a device beside it.
+    expect(controller.getSnapshot().metrics.find((each) => each.id === 'power')?.state.kind).toBe(
+      'live',
+    );
+    controller.dispose();
+  });
+
+  it('a device forgotten and paired again starts with no reading, not the one it last sent', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 2);
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('live');
+
+    await rig.controller.unpair(STRAP);
+    // Paired again inside the stale window, before it has sent anything.
+    rig.bench.device(STRAP).script({ kind: 'notification-dropout', duration: seconds(30) });
+    await rig.controller.pair('heart-rate');
+
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('waiting');
+    rig.controller.dispose();
+  });
+
+  it('a device that is not connected reads unpaired on every channel, though it sent a moment ago', async () => {
+    const rig = benchWith({ devices: 'trainer+strap' });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await ride(rig, 3);
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('live');
+
+    // Gone, with the last reading still inside the stale window.
+    rig.bench.device(STRAP).script({ kind: 'disconnect' });
+    const row = rig.controller.getSnapshot().sensors.find((sensor) => sensor.id === STRAP);
+    expect(row?.state).toBe('disconnected');
+    expect(reading(rig, STRAP, 'heartRate')?.kind).toBe('unpaired');
     rig.controller.dispose();
   });
 });
@@ -1656,6 +1778,12 @@ describe('pausing and resuming by hand', () => {
 /** The octets of a write, by op code: FTMS Table 4.15. */
 const RESET = 0x01;
 const STOP_OR_PAUSE = 0x08;
+/**
+ * The end of a workout's step-down to the trainer's floor, which is the
+ * simulator's default of 0 W — #2348. Written immediately before the Stop of
+ * every release that ends a workout holding a target above the floor.
+ */
+const STEP_DOWN_TO_ZERO = [0x05, 0, 0];
 // FTMS Set Indoor Bike Simulation Parameters.
 const SET_SIMULATION = 0x11;
 
@@ -1804,7 +1932,7 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
     expect(snapshot.trainer.lost).toBeUndefined();
     expect(snapshot.trainer.hasControl).toBe(true);
     expect(snapshot.trainer.releaseFault).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     // And the recording carries on: ending a workout is not ending a ride.
     expect(snapshot.phase).toBe('recording');
     rig.controller.dispose();
@@ -1829,7 +1957,7 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
     expect(snapshot.workout).toBeUndefined();
     expect(snapshot.trainer.lost).toBeUndefined();
     expect(snapshot.trainer.releaseFault).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     rig.controller.dispose();
   });
 
@@ -1845,7 +1973,7 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
     await rig.controller.confirmStop();
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(rig.written.some((write) => write[0] === RESET)).toBe(false);
     expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
     expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
@@ -1933,6 +2061,233 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
   });
 });
 
+describe('the end of a workout steps the trainer down before it lets go — #2348', () => {
+  // ⚠️ Seen on the simulated trainer at the end of a ramp test: the Ride
+  // screen said the trainer "may still be holding 373 W — this app can no
+  // longer tell". The end of the workout is the release, a Stop, and the
+  // measured machine keeps its last ERG target through a Stop (#372) — which
+  // after a ramp test is the hardest of the ride, under a spent rider. So the
+  // end now writes the machine's floor, THEN the Stop. Every assertion reads
+  // the wire and the device, through the real controller.
+  const THRESHOLD = watts(250);
+  const FLOOR = 40;
+
+  const workout = (blocks: readonly WorkoutBlock[]): WorkoutRecord => ({
+    id: workoutId('w2348'),
+    createdBy: ATHLETE_A,
+    name: 'Ramp',
+    workout: { name: 'Ramp', blocks },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+  /** A ramp test's shape: climbing well past threshold, and over at the top. */
+  const rampTest = (): WorkoutRecord =>
+    workout([
+      { kind: 'ramp', seconds: seconds(20), from: thresholdShare(0.6), to: thresholdShare(1.8) },
+    ]);
+  const hardAndLong = (): WorkoutRecord =>
+    workout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(1.2) }]);
+
+  const targetsIn = (writes: readonly number[][]): number[] =>
+    writes
+      .filter((write) => write[0] === 0x05)
+      .map((write) => (write[1] ?? 0) + ((write[2] ?? 0) << 8));
+
+  async function riding(options: BenchOptions = {}): Promise<Bench> {
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(FLOOR) },
+      ...options,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    return rig;
+  }
+
+  it('a ramp test ridden to its end: its top target, then the floor, then the Stop', async () => {
+    const rig = await riding();
+    const before = rig.written.length;
+    expect(rig.controller.startWorkout(rampTest(), THRESHOLD)).toBe(true);
+    await ride(rig, 25);
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout?.status).toBe('finished');
+    const sent = rig.written.slice(before);
+    const targets = targetsIn(sent);
+    // The climb was ridden: its last target is the highest of the ride.
+    const top = targets.at(-2) ?? 0;
+    expect(top).toBeGreaterThan(350);
+    expect(Math.max(...targets)).toBe(top);
+    // …and the end is the floor and then the Stop, with nothing after them.
+    expect(sent.slice(-2)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    // Read from the device: what the machine keeps through the Stop is the
+    // floor, not the ramp's top.
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    expect(snapshot.trainer.hasControl).toBe(true);
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(snapshot.trainer.lost).toBeUndefined();
+    // The owner's ruling of 2026-11-07: a confirmed step-down and Stop are said as such.
+    expect(snapshot.trainer.easedOffTo).toBe(FLOOR);
+    expect(targetSentence(snapshot.trainer)).toBe(
+      `The trainer was eased off to its lowest setting, ${String(FLOOR)} W, and released.`,
+    );
+    // The finished workout says what was last confirmed: the floor.
+    expect(snapshot.workout?.holdingWatts).toBe(FLOOR);
+    expect(snapshot.workout?.fault).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a workout the rider ends at a hard interval: the floor, then one Stop', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(300);
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeUndefined();
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(snapshot.trainer.target).toEqual({ kind: 'unknown', attempted: FLOOR });
+    rig.controller.dispose();
+  });
+
+  it('a ride stopped with a workout in it: the floor, then ONE Stop, joined with the ride’s', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    rig.controller.dispose();
+  });
+
+  it('a trainer already eased to its floor is not stepped down again: one Stop', async () => {
+    // The ride paused, which eases the workout to the floor (#441). The
+    // session knows the trainer confirmed it, so ending writes only the Stop.
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    await rig.controller.pause();
+    await ride(rig, 2);
+    await flushMicrotasks(20);
+    expect(rig.targetOnTheTrainer()).toBe(FLOOR);
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a step-down the trainer refuses: still the Stop, and one instruction — stop pedalling', async () => {
+    // Every 0x05 under 41 W is refused at the ATT layer, so the floor is the
+    // one write that does not land; the workout's own 300 W did.
+    const rig = await riding({ refuseTargetsBelow: FLOOR + 1 });
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(300);
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    // The Stop is still sent: the end of the workout is still a release.
+    expect(rig.written.slice(before)).toStrictEqual([
+      [0x05, FLOOR, 0],
+      [STOP_OR_PAUSE, 0x01],
+    ]);
+    // Read from the device: the hard target is still on the machine…
+    expect(rig.targetOnTheTrainer()).toBe(300);
+    const snapshot = rig.controller.getSnapshot();
+    // …and the rider is told one thing to do, on the trainer panel's notice.
+    expect(snapshot.trainer.releaseFault).toBe(STEP_DOWN_UNCONFIRMED);
+    expect(STEP_DOWN_UNCONFIRMED).toMatch(/^The trainer did not confirm .*Stop pedalling/);
+    expect(targetSentence(snapshot.trainer)).toBe(
+      'The trainer may still be holding 300 W — this app can no longer tell.',
+    );
+    // Taking control again clears it, as it clears every release notice.
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a step-down AND a Stop both refused: the notice is the step-down, not the release', async () => {
+    const rig = await riding({ refuseTargetsBelow: FLOOR + 1, refuseStop: true });
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBe(STEP_DOWN_UNCONFIRMED);
+    rig.controller.dispose();
+  });
+
+  it('a workout that finishes with its step-down refused says so on the workout too', async () => {
+    const rig = await riding({ refuseTargetsBelow: FLOOR + 1 });
+    rig.controller.startWorkout(rampTest(), THRESHOLD);
+    await ride(rig, 25);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout?.status).toBe('finished');
+    expect(rig.written.at(-1)).toStrictEqual([STOP_OR_PAUSE, 0x01]);
+    expect(rig.targetOnTheTrainer()).toBeGreaterThan(350);
+    expect(snapshot.trainer.releaseFault).toBe(STEP_DOWN_UNCONFIRMED);
+    expect(snapshot.workout?.fault).toBe(STEP_DOWN_UNCONFIRMED);
+    // Not "Holding <floor>": the floor was never confirmed.
+    expect(snapshot.workout?.holdingWatts).not.toBe(FLOOR);
+    rig.controller.dispose();
+  });
+
+  it('one workout replacing another is not stepped down: the next one writes straight on', async () => {
+    const rig = await riding();
+    rig.controller.startWorkout(hardAndLong(), THRESHOLD);
+    await ride(rig, 3);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.startWorkout(rampTest(), THRESHOLD);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    await flushMicrotasks(20);
+
+    expect(targetsIn(rig.written.slice(before))).not.toContain(FLOOR);
+    rig.controller.dispose();
+  });
+});
+
 describe('forgetting the trainer lets it go first — #659’s review', () => {
   // ⚠️ `detach` unsubscribes `onControlLost` and then closes the client, and
   // `close()` writes nothing. Forget used to detach first, so a workout kept
@@ -1976,7 +2331,7 @@ describe('forgetting the trainer lets it go first — #659’s review', () => {
     await flushMicrotasks(20);
 
     const snapshot = rig.controller.getSnapshot();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(snapshot.workout).toBeUndefined();
     expect(snapshot.trainer.paired).toBe(false);
     expect(snapshot.trainer.lost).toBeUndefined();
@@ -2236,7 +2591,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     rig.deliverHeldStopAnswer();
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     const snapshot = rig.controller.getSnapshot();
     expect(snapshot.workout).toBeUndefined();
     // A release is not a loss: no "Control lost".
@@ -2263,7 +2618,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     rig.deliverHeldStopAnswer();
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(rig.controller.getSnapshot().trainer.lost).toBeUndefined();
     expect(rig.controller.getSnapshot().workout).toBeUndefined();
   });
@@ -2615,7 +2970,7 @@ describe('disposing the controller lets a held trainer go first — #695', () =>
     await stopping;
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(await closed(rig)).toBe(true);
   });
 
@@ -6167,7 +6522,12 @@ describe('#516 — what the camera’s answer sends a trainer mid-workout', () =
       await ride(rig, 40);
       await flushMicrotasks(20);
       rig.controller.dispose();
-      return rig.written;
+      // #2348: the release is a step-down and then a Stop, and the Stop lands
+      // a few microtasks after `dispose` returns. Read once it has, and as a
+      // copy: `written` is the rig's own live array, which went on growing
+      // during the next script's awaits.
+      await flushMicrotasks(20);
+      return [...rig.written];
     };
     const none = await script(undefined);
     expect(await script(() => 'unknown')).toStrictEqual(none);
@@ -6996,10 +7356,10 @@ async function recordAndStop(rig: Bench, forSeconds: number): Promise<void> {
 
 describe('#548 — canStartNewRide, the one rule the screen and the controller share', () => {
   it('allows a stopped ride whose last checkpoint landed, once the save is settled safely', () => {
-    const allowed = (['saved', 'empty', 'unavailable'] as const).map((saveState) =>
+    const allowed = (['saved', 'empty', 'unavailable', 'discarded'] as const).map((saveState) =>
       canStartNewRide({ phase: 'stopped', stopping: false, storage: 'ok', saveState }),
     );
-    expect(allowed).toEqual([true, true, true]);
+    expect(allowed).toEqual([true, true, true, true]);
   });
 
   it('refuses while the ride exists only in this tab, or is still being explained', () => {
@@ -7022,6 +7382,22 @@ describe('#548 — canStartNewRide, the one rule the screen and the controller s
     ).toBe(false);
   });
 
+  it('allows a discarded ride whatever its storage says, and never while it is still stopping (#2349)', () => {
+    // A failed delete is what leaves the recorder's storage `failed` here, and
+    // the rider asked twice for the ride to go: there is nothing to protect.
+    expect(
+      (['failed', 'quota-exceeded'] as const).map((storage) =>
+        canStartNewRide({ phase: 'stopped', stopping: false, storage, saveState: 'discarded' }),
+      ),
+    ).toEqual([true, true]);
+    expect(
+      canStartNewRide({ phase: 'stopped', stopping: true, storage: 'ok', saveState: 'discarded' }),
+    ).toBe(false);
+    expect(
+      canStartNewRide({ phase: 'paused', stopping: false, storage: 'ok', saveState: 'discarded' }),
+    ).toBe(false);
+  });
+
   it('refuses while the stop is still settling, whatever the save state says', () => {
     // #565's review: the phase is `stopped` before the release, the flush and
     // the save have run, and `saveState` can still read the previous ride's.
@@ -7036,6 +7412,363 @@ describe('#548 — canStartNewRide, the one rule the screen and the controller s
       canStartNewRide({ phase, stopping: false, storage: 'ok', saveState: 'saved' }),
     );
     expect(phases).toEqual([false, false, false]);
+  });
+});
+
+describe('#2349 — ending a ride asks: Save ride, Discard ride or Keep riding', () => {
+  /** A ride holding an ERG target, so a write to the trainer would show. */
+  async function holdingTarget(options: Parameters<typeof benchWith>[0] = {}) {
+    const rig = benchWith({ rideSave: storeSavePort(), ...options });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(210));
+    await ride(rig, 6);
+    expect(rig.targetOnTheTrainer()).toBe(210);
+    return rig;
+  }
+
+  const library = async () => harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+  const onDisk = async (rig: Bench) =>
+    harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, rig.sessionIds[0] as RecordingSessionId),
+    );
+
+  it('keeps riding: the question and its discard step write nothing to the trainer, and the ride records on', async () => {
+    const rig = await holdingTarget();
+    const writes = rig.written.length;
+
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(rig.controller.getSnapshot().stopArmed).toBe(true);
+    expect(rig.controller.getSnapshot().discardArmed).toBe(true);
+    rig.controller.cancelStop();
+
+    // Nothing was sent: no Stop, no new target, no Reset.
+    expect(rig.written.slice(writes)).toEqual([]);
+    expect(rig.targetOnTheTrainer()).toBe(210);
+    const after = rig.controller.getSnapshot();
+    expect(after.phase).toBe('recording');
+    expect(after.stopArmed).toBe(false);
+    expect(after.discardArmed).toBe(false);
+    const samples = after.sampleCount;
+    await ride(rig, 3);
+    expect(rig.controller.getSnapshot().sampleCount).toBeGreaterThan(samples);
+    rig.controller.dispose();
+  });
+
+  it('never discards on one press, however the confirmation was reached', async () => {
+    const rig = await holdingTarget();
+    // The confirmation with no discard asked: refused.
+    rig.controller.armStop();
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    // The discard step with no question open: refused, so still one short.
+    rig.controller.cancelStop();
+    rig.controller.armDiscard();
+    expect(rig.controller.getSnapshot().discardArmed).toBe(false);
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(await onDisk(rig)).toBeDefined();
+    rig.controller.dispose();
+  });
+
+  it('discards on the second Discard: the trainer released as a Stop releases it, the recording gone from the store, nothing saved', async () => {
+    const rig = await holdingTarget();
+    const writes = rig.written.length;
+
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+
+    const after = rig.controller.getSnapshot();
+    expect(after.phase).toBe('stopped');
+    expect(after.saveState).toBe('discarded');
+    expect(after.leftover).toBe(false);
+    expect(after.stopping).toBe(false);
+    // The existing release (`stopTrainer`): the ERG target let go with a Stop.
+    expect(rig.written.slice(writes)).toContainEqual([STOP_OR_PAUSE, 0x01]);
+    // Read back on a fresh connection: no recording to offer back, no activity.
+    expect(await onDisk(rig)).toBeUndefined();
+    expect(await library()).toEqual([]);
+    // Nothing left in this tab to protect: a new ride may start, offered nothing.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    expect(rig.controller.getSnapshot().recoverable).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('saves on Save ride, and the saved ride is listed', async () => {
+    const rig = await holdingTarget();
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect((await library()).map((summary) => summary.id)).toEqual(['ride-1']);
+    rig.controller.dispose();
+  });
+
+  it('says so, and offers the ride back, when the delete does not go through', async () => {
+    const rig = await holdingTarget({
+      checkpointStore: {
+        deleteRecordingSession: () => Promise.reject(new Error('the device is unwell')),
+      },
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    const after = rig.controller.getSnapshot();
+    expect(after.saveState).toBe('discarded');
+    expect(after.leftover).toBe(true);
+    // Never lost silently: on the device, and offered once a new ride starts.
+    expect(await onDisk(rig)).toBeDefined();
+    expect(await rig.controller.startNewRide()).toBe(true);
+    expect(rig.controller.getSnapshot().recoverable).toHaveLength(1);
+    expect(await library()).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('says “not deleted”, never a failed save, when something throws on the way, and offers the ride back (#2349’s review)', async () => {
+    const rig = await holdingTarget();
+    const control = rig.trainerControl();
+    expect(control).toBeDefined();
+    // Something on the discard path throws — here the release's first read.
+    // Nothing on today's paths does; the controller must fail closed if one
+    // ever starts to.
+    const unwell = vi.spyOn(control as TrainerControl, 'hasControl').mockImplementation(() => {
+      throw new Error('the trainer is unwell');
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    await expect(rig.controller.confirmDiscard()).rejects.toThrow('the trainer is unwell');
+    unwell.mockRestore();
+    const after = rig.controller.getSnapshot();
+    expect(after.saveState).toBe('discarded');
+    expect(after.leftover).toBe(true);
+    expect(after.stopping).toBe(false);
+    // Still on the device, and offered back.
+    expect(await onDisk(rig)).toBeDefined();
+    expect(await library()).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('deletes only this ride: another athlete’s recording and this athlete’s older one stay, read back on a fresh connection', async () => {
+    const theirs = recordingFor(ATHLETE_B);
+    const older = recordingFor(ATHLETE_A, { state: 'stopped' });
+    await harness.write(async (store) => {
+      await store.putRecordingSession(theirs);
+      await store.putRecordingSession(older);
+    });
+    const rig = await holdingTarget();
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+
+    expect(await onDisk(rig)).toBeUndefined();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_B, theirs.id)),
+    ).resolves.toBeDefined();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_A, older.id)),
+    ).resolves.toBeDefined();
+    rig.controller.dispose();
+  });
+
+  it('takes the pictures kept during the discarded ride, and only those (B1)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    let minted = 0;
+    const keep = keepThisRide({
+      store: {
+        putCameraFrame: async (record) =>
+          harness.write(async (store) => store.putCameraFrame(record)),
+        countCameraFrames: async (owner) =>
+          harness.write(async (store) => store.countCameraFrames(owner)),
+        countSnapshots: async (owner) =>
+          harness.write(async (store) => store.countSnapshots(owner)),
+        deleteCameraFrames: async (owner) =>
+          harness.write(async (store) => store.deleteCameraFrames(owner)),
+      },
+      athleteId: ATHLETE_A,
+      newFrameId: () => {
+        minted += 1;
+        return cameraFrameId(`kept-${String(minted)}`);
+      },
+      now: () => rig.bench.now,
+    });
+    const discards = discardKeptFramesWithTheRide({
+      rides: rig.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+          harness.write(async (store) =>
+            store.deleteKeptCameraFramesCapturedBetween(owner, from, to),
+          ),
+      },
+      athleteId: ATHLETE_A,
+      now: () => rig.bench.now,
+    });
+    const picture = cameraFrameFor(ATHLETE_A);
+    const frame = {
+      bytes: picture.bytes,
+      mediaType: picture.mediaType,
+      width: picture.width,
+      height: picture.height,
+    };
+    keep.setKeeping(true);
+
+    // The first ride, kept and SAVED: its picture is that ride's to keep.
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    await keep.accept(frame);
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    await ride(rig, 2);
+    // Kept between the rides: before the next one started.
+    await keep.accept(frame);
+    await ride(rig, 2);
+    expect(await rig.controller.startNewRide()).toBe(true);
+
+    // The second ride: a picture kept during it, and another athlete's
+    // picture taken in the same seconds on this device.
+    await rig.controller.start();
+    await ride(rig, 3);
+    await keep.accept(frame);
+    const theirs = cameraFrameFor(ATHLETE_B, { capturedAt: rig.bench.now });
+    await harness.write(async (store) => store.putCameraFrame(theirs));
+    await ride(rig, 3);
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(true);
+    await discards.settled();
+
+    // Read back on a fresh connection.
+    const mine = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
+    expect(mine.map((row) => row.id).sort()).toStrictEqual(['kept-1', 'kept-2']);
+    const others = await harness.read(async (store) => store.listCameraFrames(ATHLETE_B));
+    expect(others.map((row) => row.id)).toContain(theirs.id);
+    discards.dispose();
+    rig.controller.dispose();
+  });
+
+  it('takes the pictures kept before a crash when the ride recovered from it is discarded (#2356)', async () => {
+    // The ride before the crash: a picture kept before it started, one kept
+    // during it, and then the tab goes.
+    const first = benchWith();
+    const keptBefore = cameraFrameFor(ATHLETE_A, { capturedAt: first.bench.now - 5 });
+    await harness.write(async (store) => store.putCameraFrame(keptBefore));
+    await first.controller.pair('trainer');
+    await first.controller.start();
+    await ride(first, 3);
+    const keptBeforeTheCrash = cameraFrameFor(ATHLETE_A, { capturedAt: first.bench.now });
+    await harness.write(async (store) => store.putCameraFrame(keptBeforeTheCrash));
+    await ride(first, 3);
+    first.controller.dispose();
+    const id = recordingSessionId(first.sessionIds[0] ?? '');
+
+    // Ten minutes later, a new tab: the ride's elapsed time reaches only the
+    // last slot recorded, so a window opened at `now - elapsed` would start
+    // ten minutes after the ride did.
+    const next = benchWith({
+      rideSave: storeSavePort(),
+      simulator: { startAt: unixSeconds(first.bench.now + 600) },
+    });
+    const discards = discardKeptFramesWithTheRide({
+      rides: next.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+          harness.write(async (store) =>
+            store.deleteKeptCameraFramesCapturedBetween(owner, from, to),
+          ),
+      },
+      athleteId: ATHLETE_A,
+      now: () => next.bench.now,
+    });
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(id)).toBe(true);
+    await next.controller.pair('trainer');
+    await next.controller.resume();
+    await ride(next, 2);
+    const keptAfter = cameraFrameFor(ATHLETE_A, { capturedAt: next.bench.now });
+    await harness.write(async (store) => store.putCameraFrame(keptAfter));
+    await ride(next, 2);
+    next.controller.armStop();
+    next.controller.armDiscard();
+    expect(await next.controller.confirmDiscard()).toBe(true);
+    await discards.settled();
+
+    // Read back on a fresh connection: only the picture from before the ride.
+    const mine = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
+    expect(mine.map((row) => row.id)).toStrictEqual([keptBefore.id]);
+    discards.dispose();
+    next.controller.dispose();
+  });
+
+  it('keeps the pictures of a discard whose delete did not go through: the ride is still here (B1)', async () => {
+    const rig = await holdingTarget({
+      checkpointStore: {
+        deleteRecordingSession: () => Promise.reject(new Error('the device is unwell')),
+      },
+    });
+    const deleted: unknown[] = [];
+    const discards = discardKeptFramesWithTheRide({
+      rides: rig.controller,
+      store: {
+        deleteKeptCameraFramesCapturedBetween: (...window) => {
+          deleted.push(window);
+          return Promise.resolve(0);
+        },
+      },
+      athleteId: ATHLETE_A,
+      now: () => rig.bench.now,
+    });
+    rig.controller.armStop();
+    rig.controller.armDiscard();
+    expect(await rig.controller.confirmDiscard()).toBe(false);
+    await discards.settled();
+    expect(rig.controller.getSnapshot().leftover).toBe(true);
+    expect(deleted).toEqual([]);
+    discards.dispose();
+    rig.controller.dispose();
+  });
+
+  it('the game’s port: nothing to offer before a recording or after it stops', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    expect(game.rideRecording?.()).toBeUndefined();
+    // A recording holds its first slot from the press, so it is savable at
+    // once (`recording/finish.ts` saves anything of one sample or more); the
+    // empty case is the port's own rule, in `trainer-port.test.ts`.
+    await rig.controller.start();
+    expect(rig.controller.getSnapshot().sampleCount).toBeGreaterThan(0);
+    expect(game.rideRecording?.()).toEqual({ savable: true });
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    // Stopped is not in progress: there is nothing under a game ride now.
+    expect(game.rideRecording?.()).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('the game’s Save ride stops and saves through the controller, and the ride is listed', async () => {
+    const rig = await holdingTarget();
+    const game = gameTrainerPortOver(rig.controller);
+    const writes = rig.written.length;
+    await game.saveRideRecording?.();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(rig.written.slice(writes)).toContainEqual([STOP_OR_PAUSE, 0x01]);
+    expect((await library()).map((summary) => summary.id)).toEqual(['ride-1']);
+    rig.controller.dispose();
+  });
+
+  it('the game’s Discard ride deletes the recording through the controller, and saves nothing', async () => {
+    const rig = await holdingTarget();
+    const game = gameTrainerPortOver(rig.controller);
+    const writes = rig.written.length;
+    expect(await game.discardRideRecording?.()).toBe(true);
+    expect(rig.controller.getSnapshot().saveState).toBe('discarded');
+    expect(rig.written.slice(writes)).toContainEqual([STOP_OR_PAUSE, 0x01]);
+    expect(await onDisk(rig)).toBeUndefined();
+    expect(await library()).toEqual([]);
+    rig.controller.dispose();
   });
 });
 
@@ -7918,6 +8651,34 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         ),
       ).toEqual([activityId('ride-1')]);
       expect(await held()).toEqual([]);
+    });
+
+    // #2433's review: the rider the port reads is part of what the recovered
+    // ride is saved with, so a strap-only ride keeps its heart-rate estimate.
+    it('keeps a strap-only ride’s heart-rate estimate, with the rider the port reads (#2433)', async () => {
+      const first = benchWith({ devices: 'strap' });
+      await first.controller.pair('heart-rate');
+      await first.controller.start();
+      await ride(first, 10);
+      first.controller.dispose();
+      const id = first.sessionIds[0]!;
+      const port = keepingPort(async (owner, ride, at) =>
+        harness.write(async (store) => store.moveActivityToRecentlyDeleted(owner, ride, at)),
+      );
+      const next = benchWith({
+        rideSave: {
+          ...port,
+          calorieRider: () => Promise.resolve({ sex: 'male', ageYears: 40, mass: kilograms(80) }),
+        },
+        devices: 'strap',
+      });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.discardRecovered(id)).toBe(true);
+      next.controller.dispose();
+
+      const [kept] = await held();
+      expect(kept?.summary.calories?.basis).toBe('heart-rate');
+      expect(kept?.summary.calories?.energy).toBeGreaterThan(0);
     });
   });
 
@@ -8840,6 +9601,76 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
   });
 });
 
+describe('#2080 — the HUD’s lap splits are the saved ride’s laps', () => {
+  const WHOLE = {
+    kind: 'lap',
+    distance: metres(1_000),
+    ascent: metres(14),
+    partial: false,
+  } as const;
+
+  it('shows the last and the best lap as the ride’s page will list them, read both ways', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    // The port `main.tsx` builds over this controller — the game's only way in.
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    hud.courseLine?.({ kind: 'started' });
+    // Lap 1 slow and steady, lap 2 quicker and harder, lap 3 slower again:
+    // the best is not the last, and each lap's power is its own.
+    await ride(rig, 12);
+    const afterOne = hud.courseLine?.({ ...WHOLE, again: true }) ?? [];
+    rig.bench.rider.set({ power: watts(290) });
+    await ride(rig, 8);
+    const afterTwo = hud.courseLine?.({ ...WHOLE, again: true }) ?? [];
+    rig.bench.rider.set({ power: watts(180) });
+    await ride(rig, 10);
+    const afterThree = hud.courseLine?.({ ...WHOLE, again: true }) ?? [];
+    expect([afterOne.length, afterTwo.length, afterThree.length]).toEqual([1, 2, 3]);
+
+    // What the HUD's panel shows, part-way round the fourth lap: the lap in
+    // progress on the recorder's clock, the last lap and the best.
+    await ride(rig, 4);
+    const shown = lapSplits(afterThree, hud.rideLapSeconds?.());
+    expect(shown.now).toMatchObject({ lap: '4', time: '0:04' });
+    expect([shown.last.lap, shown.last.time]).toEqual(['3', '0:10']);
+    expect([shown.best.lap, shown.best.time]).toEqual(['2', '0:08']);
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    // Read back through the store, as the ride's page reads them (§5).
+    const saved = await harness.read(async (store) =>
+      store.listLaps(ATHLETE_A, activityId('ride-1')),
+    );
+    const third = saved[2];
+    const second = saved[1];
+    expect(third?.ordinal).toBe(2);
+    expect(second?.ordinal).toBe(1);
+    // Each figure the panel shows of a whole lap is that lap's saved row.
+    expect(shown.last).toEqual({
+      label: 'Last',
+      lap: String((third?.ordinal ?? -2) + 1),
+      time: formatDuration(third?.movingTime ?? Number.NaN),
+      power: `${String(third?.averagePower)} W`,
+    });
+    expect(shown.best).toEqual({
+      label: 'Best',
+      lap: String((second?.ordinal ?? -2) + 1),
+      time: formatDuration(second?.movingTime ?? Number.NaN),
+      power: `${String(second?.averagePower)} W`,
+    });
+    // And the panel worked out from the saved rows is the panel the ride
+    // showed. (The fourth lap was never ended at a line, so it is not a row.)
+    expect(saved).toHaveLength(3);
+    const fromSaved = lapSplits(saved, undefined);
+    expect([fromSaved.last, fromSaved.best]).toEqual([shown.last, shown.best]);
+    rig.controller.dispose();
+  });
+});
+
 describe('#548 — after a ride is stopped and saved, another can be started', () => {
   it('records a second, separate activity, read back from the store', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
@@ -9178,7 +10009,7 @@ describe('a running workout owns the ERG target — #542’s review', () => {
 
     const snapshot = rig.controller.getSnapshot();
     expect(snapshot.workout).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(snapshot.trainer.lost).toBeUndefined();
     expect(snapshot.trainer.hasControl).toBe(true);
     expect(snapshot.phase).toBe('recording');
@@ -9543,8 +10374,11 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
       averagePower: record.averagePower,
       // The bench's trainer reports no heart rate, so there is none to state.
       averageHeartRate: undefined,
+      // #2433: the estimate the save wrote, from the trainer's power.
+      calories: record.calories,
       gameOutcome: undefined,
     });
+    expect(record.calories?.basis).toBe('power');
     rig.controller.dispose();
 
     const { port: refusing } = savePort({
@@ -9559,6 +10393,72 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     expect(failing.controller.getSnapshot().saveState).toBe('failed');
     expect(failing.controller.getSnapshot().savedRide).toBeUndefined();
     failing.controller.dispose();
+  });
+
+  it('#2433: a strap-only ride is estimated with the rider the port reads at save, and the card states it', async () => {
+    const written: NewActivity[] = [];
+    const asked: UnixSeconds[] = [];
+    const { port } = savePort({
+      putFinishedRide: (ride) => {
+        written.push(ride.activity);
+        return Promise.resolve(ride.activity.id);
+      },
+    });
+    const rig = benchWith({
+      rideSave: {
+        ...port,
+        calorieRider: (startedAt) => {
+          asked.push(startedAt);
+          return Promise.resolve({ sex: 'male', ageYears: 40, mass: kilograms(80) });
+        },
+      },
+      devices: 'strap',
+    });
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    const record = written[0]!;
+    // Once as the recording starts, for the HUD's estimate (#2434), and once
+    // at the save, which is the read the figure is frozen with.
+    expect(asked).toHaveLength(2);
+    expect(new Set(asked).size).toBe(1);
+    expect(record.averagePower).toBeUndefined();
+    expect(record.calories?.basis).toBe('heart-rate');
+    expect(record.calories!.energy).toBeGreaterThan(0);
+    expect(rig.controller.getSnapshot().savedRide?.calories).toStrictEqual(record.calories);
+    rig.controller.dispose();
+  });
+
+  it('#2433: a rider read that fails costs a strap-only ride its figure, never the save', async () => {
+    const written: NewActivity[] = [];
+    const { port } = savePort({
+      putFinishedRide: (ride) => {
+        written.push(ride.activity);
+        return Promise.resolve(ride.activity.id);
+      },
+    });
+    const rig = benchWith({
+      rideSave: {
+        ...port,
+        calorieRider: () => {
+          throw new Error('blocked, before any promise');
+        },
+      },
+      devices: 'strap',
+    });
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(written[0]).toBeDefined();
+    expect(written[0]).not.toHaveProperty('calories');
+    rig.controller.dispose();
   });
 
   it('states the mean of the heart rate the ride actually recorded', async () => {
@@ -9667,6 +10567,101 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     await recordAndStop(rig, 2);
     expect(rig.controller.getSnapshot().savedRide?.activityId).toBe('ride-2');
     expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('keeps whether the settled attempt was drafted beside the outcome it came with — #2425, ADR 0066 D-5.1', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGameRideEnded('beaten', true);
+    // A later game ride with nothing settled leaves the drafted outcome as it was.
+    rig.controller.noteGameRideEnded(undefined, false);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide).toMatchObject({
+      gameOutcome: 'beaten',
+      gameOutcomeDrafted: true,
+    });
+
+    // A later settled outcome that was not drafted replaces both.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteGameRideEnded('level', true);
+    rig.controller.noteGameRideEnded('not-beaten');
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcome).toBe('not-beaten');
+    expect(rig.controller.getSnapshot().savedRide?.gameOutcomeDrafted).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('saves whether the ride was drafted, and when, read back from the store — #2451, ADR 0066 D-5.3', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // A game ride stepped before the recording began: counted from, never counted.
+    rig.controller.noteSoloDraft({ inDraft: true, inDraftMetres: 500, riddenMetres: 500 });
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteSoloDraft({ inDraft: true, inDraftMetres: 520, riddenMetres: 520 });
+    await ride(rig, 2);
+    rig.controller.noteSoloDraft({ inDraft: false, inDraftMetres: 540, riddenMetres: 560 });
+    await ride(rig, 1);
+    rig.controller.noteSoloDraft({ inDraft: false, inDraftMetres: 540, riddenMetres: 600 });
+    rig.controller.noteGameRideEnded(undefined);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(saved).toBeDefined();
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    // 40 of 100 recorded metres in the draft: drafted. One span, inside the ride.
+    expect(read?.rideFacts?.drafted).toBe(true);
+    const spans = read?.rideFacts?.draftSpans ?? [];
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.to - spans[0]!.from).toBe(2);
+    expect(spans[0]!.from).toBeGreaterThanOrEqual(read!.startedAt);
+
+    // The next ride drafted nothing, and must not inherit either fact.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteSoloDraft({ inDraft: false, inDraftMetres: 0, riddenMetres: 30 });
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const next = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(next).not.toBe(saved);
+    const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
+    expect(after?.rideFacts?.drafted).toBeUndefined();
+    expect(after?.rideFacts?.draftSpans).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('counts no draft metres and opens no span while the recording is paused — #2451 review', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.noteSoloDraft({ inDraft: false, inDraftMetres: 0, riddenMetres: 100 });
+    await rig.controller.pause();
+    // Road ridden in the draft while paused is not the saved ride's.
+    rig.controller.noteSoloDraft({ inDraft: true, inDraftMetres: 400, riddenMetres: 500 });
+    await rig.controller.resume();
+    await ride(rig, 1);
+    rig.controller.noteSoloDraft({ inDraft: false, inDraftMetres: 400, riddenMetres: 600 });
+    rig.controller.noteGameRideEnded(undefined);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    expect(read?.rideFacts?.drafted).toBeUndefined();
+    expect(read?.rideFacts?.draftSpans).toBeUndefined();
     rig.controller.dispose();
   });
 
@@ -10010,13 +11005,36 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     expect(workoutGraphText(paused)).not.toContain('asks');
     expect(heldInstead(paused)).toBeUndefined();
     expect(workoutGraphKey(paused)).toBe('');
-    // #1313: the strip draws no line through the pause, though the trace
-    // still carries a range and a target, and its name says no more.
+    // #1313, the owner's ruling of 2026-11-05: through the pause the strip
+    // hides the stale dashed range, though the trace still carries one, and
+    // keeps the heart rate already ridden; its name says no range.
     const strip = workoutStripPaths(paused);
-    expect(strip.lane).toEqual({ kind: 'heart-rate', range: '', heartRate: '' });
-    expect(workoutStripPaths({ ...paused, status: 'running' }).lane).not.toEqual(strip.lane);
-    expect(workoutStripName(paused)).not.toMatch(/Your power|Heart rate|chosen range/);
+    if (strip.lane.kind !== 'heart-rate') throw new Error('not the heart-rate lane');
+    expect(strip.lane.range).toBe('');
+    expect(strip.lane.heartRate).not.toBe('');
+    // The same line it would draw running: the pause takes away the range only.
+    const asRunning = workoutStripPaths({ ...paused, status: 'running' }).lane;
+    expect(asRunning.kind === 'heart-rate' ? asRunning.heartRate : undefined).toBe(
+      strip.lane.heartRate,
+    );
+    expect(asRunning.kind === 'heart-rate' ? asRunning.range : '').not.toBe('');
+    expect(workoutStripName(paused)).toMatch(/Heart rate: \d+ bpm\./);
+    expect(workoutStripName(paused)).not.toContain('chosen range');
     expect(strip.progress.done).not.toBe('');
+
+    // And everything is back on resume, through the same controller.
+    await rig.controller.resume();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    const resumed = rig.controller.getSnapshot().workout;
+    if (resumed === undefined) throw new Error('no workout');
+    expect(resumed.status).toBe('running');
+    const back = workoutStripPaths(resumed);
+    if (back.lane.kind !== 'heart-rate') throw new Error('not the heart-rate lane');
+    expect(back.lane.range).not.toBe('');
+    expect(back.lane.heartRate).not.toBe('');
+    expect(workoutStripName(resumed)).toContain('with a chosen range of 130–140 bpm');
     rig.controller.dispose();
   });
 
@@ -10070,7 +11088,7 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     await ride(rig, 30);
     await flushMicrotasks(20);
 
-    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.slice(before)).toStrictEqual([STEP_DOWN_TO_ZERO, [STOP_OR_PAUSE, 0x01]]);
     expect(rig.controller.getSnapshot().workout).toBeUndefined();
     rig.controller.dispose();
   }, 30_000);
@@ -11172,7 +12190,8 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       const writes = rig.written.length;
       await rideOn(rig, 300);
       expect(rig.written.length).toBe(writes);
-      expect(targetsSent(rig, from)).toEqual([125, 175]);
+      // #2348: and then the end of the workout's step-down to the floor.
+      expect(targetsSent(rig, from)).toEqual([125, 175, 0]);
       rig.controller.dispose();
     });
   });
@@ -13027,6 +14046,338 @@ describe('#1435 — a trainer that sends power and will not hand over control', 
 
     expect(rig.written).toEqual([]);
     expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+    rig.controller.dispose();
+  });
+});
+
+describe('#2076 — the HUD’s ride so far is the saved ride’s', () => {
+  const lapsOf = async (id: string) =>
+    harness.read(async (store) => store.listLaps(ATHLETE_A, activityId(id)));
+
+  it('reads distance, climb and average power from the recorder, and they are what the ride is saved with', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    expect(hud.rideTotals?.()).toBeUndefined();
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    rig.bench.rider.set({ power: watts(180) });
+    await ride(rig, 6);
+    // The lap in progress counts, as the saved ride's part lap will.
+    hud.courseLine?.({ kind: 'progress', distance: metres(300), ascent: metres(9) });
+    const midway = hud.rideTotals?.();
+    expect(midway).toBe(rig.controller.getSnapshot().totals);
+    expect(midway?.distance).toBeGreaterThan(0);
+    expect(midway?.climbed).toBe(9);
+    expect(midway?.averagePower).toBe(180);
+    // The same object until the recording moves on, as `useSyncExternalStore` asks.
+    expect(hud.rideTotals?.()).toBe(midway);
+    // …and a new one as it does: three more seconds ridden, further gone.
+    await ride(rig, 3);
+    expect(hud.rideTotals?.()?.distance).toBeGreaterThan(
+      midway?.distance ?? Number.POSITIVE_INFINITY,
+    );
+
+    hud.courseLine?.({
+      kind: 'lap',
+      distance: metres(1_000),
+      ascent: metres(14),
+      partial: false,
+      again: true,
+    });
+    rig.bench.rider.set({ power: watts(260) });
+    await ride(rig, 5);
+    // Where the game says the rider stopped: a part lap that climbed 4 m.
+    hud.courseLine?.({
+      kind: 'lap',
+      distance: metres(400),
+      ascent: metres(4),
+      partial: true,
+      again: false,
+    });
+    const riding = hud.rideTotals?.();
+    expect(riding?.climbed).toBe(18);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    // Stopped, the HUD has no ride in progress to show.
+    expect(hud.rideTotals?.()).toBeUndefined();
+
+    // Read back from the store, as the library and the ride's page read it.
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    const laps = await lapsOf('ride-1');
+    const atTheEnd = rig.controller.getSnapshot().totals;
+    if (saved === undefined || atTheEnd === undefined) throw new Error('the ride was not saved');
+    expect(atTheEnd.distance).toBe(saved.distance);
+    expect(atTheEnd.averagePower).toBe(saved.averagePower);
+    expect(atTheEnd.climbed).toBe(laps.reduce((sum, lap) => sum + (lap.ascent ?? 0), 0));
+    // And what the HUD showed while riding was the same figures, short only
+    // of the samples sealed as the ride stopped.
+    expect(riding?.climbed).toBe(atTheEnd.climbed);
+    expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeGreaterThanOrEqual(0);
+    expect(saved.distance - (riding?.distance ?? Number.NaN)).toBeLessThan(30);
+    rig.controller.dispose();
+  });
+});
+
+describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
+  const RIDER = { sex: 'male', ageYears: 40, mass: kilograms(80) } as const;
+
+  /** The ride-so-far tier's *Calories*, as the HUD draws it from these totals. */
+  const hudCalories = (totals: RideTotals | undefined): string | undefined => {
+    const profile = risingRoad();
+    const state = atStartLine(profile);
+    return hudReadings({
+      profile,
+      state,
+      cadence: { value: undefined, live: false },
+      heartRate: { value: undefined, live: false },
+      rideTotals: totals,
+      movingSeconds: 60,
+    }).find((reading) => reading.key === CALORIES_KEY)?.value;
+  };
+
+  const savedRide = async () => {
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    if (saved === undefined) throw new Error('the ride was not saved');
+    return saved;
+  };
+
+  it('on a ride with power: the HUD’s last Calories is the saved ride’s, read back from the store', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    rig.bench.rider.set({ power: watts(200) });
+    await ride(rig, 8);
+    const riding = hud.rideTotals?.();
+    expect(riding?.calories?.basis).toBe('power');
+    expect(riding?.calories?.energy).toBeGreaterThan(0);
+    // The same object until the recording moves on, as `useSyncExternalStore` asks.
+    expect(hud.rideTotals?.()).toBe(riding);
+    await ride(rig, 4);
+    expect(hud.rideTotals?.()?.calories?.energy).toBeGreaterThan(riding?.calories?.energy ?? 0);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    const saved = await savedRide();
+    const atTheEnd = rig.controller.getSnapshot().totals;
+    expect(saved.calories?.basis).toBe('power');
+    expect(atTheEnd?.calories).toStrictEqual(saved.calories);
+    expect(hudCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
+    rig.controller.dispose();
+  });
+
+  it('on a strap-only ride: estimated once the rider is read, and the last figure is the saved one even when the inputs changed mid-ride', async () => {
+    let answer: (rider: CalorieRider) => void = () => undefined;
+    const riders: Promise<CalorieRider>[] = [
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+      // At the save: the rider set new details in Settings during the ride.
+      Promise.resolve({ sex: 'female', ageYears: 30, mass: kilograms(60) }),
+    ];
+    const rig = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => riders.shift() ?? Promise.resolve({}) },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 6);
+    // No rider yet: a heart-rate ride has no figure, and the HUD a dash.
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    expect(hudCalories(hud.rideTotals?.())).toBe('—');
+
+    // The read lands: the estimate is there without another sample.
+    answer(RIDER);
+    await flushMicrotasks();
+    const riding = hud.rideTotals?.();
+    expect(riding?.calories?.basis).toBe('heart-rate');
+    expect(riding?.calories?.energy).toBeGreaterThan(0);
+
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    const saved = await savedRide();
+    const atTheEnd = rig.controller.getSnapshot().totals;
+    expect(saved.calories?.basis).toBe('heart-rate');
+    expect(atTheEnd?.calories).toStrictEqual(saved.calories);
+    expect(hudCalories(atTheEnd)).toBe(caloriesValue(saved.calories!));
+    rig.controller.dispose();
+  });
+
+  it('a new ride starts with no rider, and a read that lands after its ride has gone is dropped', async () => {
+    let late: (rider: CalorieRider) => void = () => undefined;
+    const riders: Promise<CalorieRider>[] = [
+      // The first ride's read at its start, which answers only after it is over.
+      new Promise((resolve) => {
+        late = resolve;
+      }),
+      // The first ride's save.
+      Promise.resolve(RIDER),
+    ];
+    const rig = benchWith({
+      rideSave: {
+        ...storeSavePort(),
+        // The second ride's read never answers.
+        calorieRider: () => riders.shift() ?? new Promise<CalorieRider>(() => undefined),
+      },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    // The first ride ended with the rider its save read.
+    expect(rig.controller.getSnapshot().totals?.calories?.basis).toBe('heart-rate');
+
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 4);
+    // Not the last ride's rider: this one's has not been read.
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    late(RIDER);
+    await flushMicrotasks();
+    await ride(rig, 1);
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('reads the rider again on Resume, so details set while paused count from there', async () => {
+    const riders: CalorieRider[] = [{}, RIDER];
+    const rig = benchWith({
+      rideSave: {
+        ...storeSavePort(),
+        calorieRider: () => Promise.resolve(riders.shift() ?? RIDER),
+      },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 3);
+    await flushMicrotasks();
+    // Read at the start, with nothing set: no heart-rate figure.
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    await rig.controller.pause();
+    await rig.controller.resume();
+    await flushMicrotasks();
+    expect(hud.rideTotals?.()?.calories?.basis).toBe('heart-rate');
+    rig.controller.dispose();
+  });
+
+  it('a ride carried on after a crash starts with no rider, and reads its own', async () => {
+    const first = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => Promise.resolve(RIDER) },
+      devices: 'strap',
+    });
+    await first.controller.pair('heart-rate');
+    await first.controller.start();
+    // Long enough for a checkpoint to hold heart-rate samples.
+    await ride(first, 12);
+    await flushMicrotasks();
+    expect(first.controller.getSnapshot().totals?.calories?.basis).toBe('heart-rate');
+    first.controller.dispose();
+    const id = recordingSessionId(first.sessionIds[0] ?? '');
+
+    let answer: (rider: CalorieRider) => void = () => undefined;
+    const riders: Promise<CalorieRider>[] = [
+      // This controller's own ride, at its start and at its save.
+      Promise.resolve(RIDER),
+      Promise.resolve(RIDER),
+      // The ride carried on.
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    ];
+    const next = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => riders.shift() ?? Promise.resolve({}) },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(next.controller);
+    await next.controller.pair('heart-rate');
+    await next.controller.start();
+    await ride(next, 2);
+    next.controller.armStop();
+    await next.controller.confirmStop();
+    expect(next.controller.getSnapshot().totals?.calories?.basis).toBe('heart-rate');
+    expect(await next.controller.startNewRide()).toBe(true);
+
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(id)).toBe(true);
+    // Not the ride before's rider: this one's has not been read yet.
+    expect(hud.rideTotals?.()).toBeDefined();
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    answer(RIDER);
+    await flushMicrotasks();
+    expect(hud.rideTotals?.()?.calories?.basis).toBe('heart-rate');
+    next.controller.dispose();
+  });
+
+  it('a read that fails costs a strap-only ride its figure on the HUD, never the ride', async () => {
+    const rig = benchWith({
+      rideSave: { ...storeSavePort(), calorieRider: () => Promise.reject(new Error('blocked')) },
+      devices: 'strap',
+    });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('heart-rate');
+    await rig.controller.start();
+    await ride(rig, 4);
+    await flushMicrotasks();
+    expect(hud.rideTotals?.()?.distance).toBeDefined();
+    expect(hud.rideTotals?.()?.calories).toBeUndefined();
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+});
+
+describe('#2077 — the HUD’s time in each power zone is the saved ride’s', () => {
+  it('works it out over the recorder’s power, as the saved power channel reads, and holds one object between reads', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBeUndefined();
+    await rig.controller.start();
+    rig.bench.rider.set({ power: watts(150) });
+    await ride(rig, 4);
+    rig.bench.rider.set({ power: watts(340) });
+    await ride(rig, 3);
+    const riding = hud.ridePowerZoneTime?.(watts(250));
+    expect(riding?.covered).toBeGreaterThan(0);
+    // The same object until the recording moves on, as `useSyncExternalStore` asks…
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBe(riding);
+    // …and another threshold is another answer.
+    expect(hud.ridePowerZoneTime?.(watts(400))).not.toBe(riding);
+    const atTheEnd = rig.controller.powerZoneTime(watts(250));
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBeUndefined();
+
+    // What the Analysis screen reads a saved ride's zones from: its power channel.
+    const streams = await harness.read(async (store) =>
+      store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+    );
+    if (streams === undefined) throw new Error('the ride was not saved');
+    const saved = timeInZones(
+      powerZones(watts(250)),
+      streams.channels.power ?? [],
+      streams.sampleInterval,
+    );
+    expect(rig.controller.powerZoneTime(watts(250))).toEqual(saved);
+    // While riding it was the same figures, short only of what sealed at the stop.
+    expect(saved.covered - (riding?.covered ?? Number.NaN)).toBeGreaterThanOrEqual(0);
+    expect(atTheEnd?.perZone[1]).toBeGreaterThan(0);
     rig.controller.dispose();
   });
 });

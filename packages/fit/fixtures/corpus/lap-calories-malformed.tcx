@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+  <Activities>
+    <Activity Sport="Biking">
+      <Id>2024-06-15T09:00:00Z</Id>
+      <Lap StartTime="2024-06-15T09:00:00Z">
+        <TotalTimeSeconds>1.0</TotalTimeSeconds>
+        <DistanceMeters>10.0</DistanceMeters>
+        <Calories>-5</Calories>
+        <AverageHeartRateBpm>
+          <Value>118</Value>
+        </AverageHeartRateBpm>
+        <Intensity>Active</Intensity>
+        <Cadence>76</Cadence>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:00Z</Time>
+            <HeartRateBpm>
+              <Value>118</Value>
+            </HeartRateBpm>
+            <Cadence>76</Cadence>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:01Z</Time>
+            <HeartRateBpm>
+              <Value>125</Value>
+            </HeartRateBpm>
+            <Cadence>79</Cadence>
+          </Trackpoint>
+        </Track>
+        <Extensions>
+          <ns3:LX>
+            <ns3:AvgWatts>165</ns3:AvgWatts>
+          </ns3:LX>
+        </Extensions>
+      </Lap>
+      <Lap StartTime="2024-06-15T09:00:02Z">
+        <TotalTimeSeconds>1.0</TotalTimeSeconds>
+        <DistanceMeters>10.0</DistanceMeters>
+        <Calories>12.5</Calories>
+        <AverageHeartRateBpm>
+          <Value>132</Value>
+        </AverageHeartRateBpm>
+        <Intensity>Active</Intensity>
+        <Cadence>82</Cadence>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:02Z</Time>
+            <HeartRateBpm>
+              <Value>132</Value>
+            </HeartRateBpm>
+            <Cadence>82</Cadence>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:03Z</Time>
+            <HeartRateBpm>
+              <Value>139</Value>
+            </HeartRateBpm>
+            <Cadence>85</Cadence>
+          </Trackpoint>
+        </Track>
+        <Extensions>
+          <ns3:LX>
+            <ns3:AvgWatts>187</ns3:AvgWatts>
+          </ns3:LX>
+        </Extensions>
+      </Lap>
+      <Lap StartTime="2024-06-15T09:00:04Z">
+        <TotalTimeSeconds>1.0</TotalTimeSeconds>
+        <DistanceMeters>5.0</DistanceMeters>
+        <Calories>70000</Calories>
+        <AverageHeartRateBpm>
+          <Value>146</Value>
+        </AverageHeartRateBpm>
+        <Intensity>Active</Intensity>
+        <Cadence>88</Cadence>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:04Z</Time>
+            <HeartRateBpm>
+              <Value>146</Value>
+            </HeartRateBpm>
+            <Cadence>88</Cadence>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:05Z</Time>
+            <HeartRateBpm>
+              <Value>153</Value>
+            </HeartRateBpm>
+            <Cadence>91</Cadence>
+          </Trackpoint>
+        </Track>
+        <Extensions>
+          <ns3:LX>
+            <ns3:AvgWatts>209</ns3:AvgWatts>
+          </ns3:LX>
+        </Extensions>
+      </Lap>
+      <Creator xsi:type="Device_t" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <Name>On Your Left synthetic fixture generator</Name>
+      </Creator>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

@@ -166,6 +166,16 @@ const WORKOUTS: readonly WorkoutRecord[] = [
   workout('workout-free-900', 'Free ride', [{ kind: 'free-ride', seconds: seconds(900) }]),
 ];
 
+/**
+ * The rider's own workouts on Workouts, apart from the built-ins listed after
+ * them (#2304), which `BuiltInWorkouts.test.tsx` holds to the same rules.
+ */
+function saved(root: HTMLElement): HTMLElement {
+  const part = root.querySelector<HTMLElement>('[data-oyl-list="saved"]');
+  if (part === null) throw new Error('no saved workouts on this screen');
+  return part;
+}
+
 /** The cards on the page: every item of the list pane's list. */
 function cards(root: HTMLElement): HTMLElement[] {
   return queryAll(root, '.oyl-pane-list__item');
@@ -256,14 +266,14 @@ describe('#941 — the Workouts list', () => {
     const calls: string[] = [];
     mounted = await mount(<WorkoutsView port={{ ...stub, store: counted(stub.store, calls) }} />);
     await settle();
-    expect(cards(mounted.container)).toHaveLength(WORKOUTS.length);
+    expect(cards(saved(mounted.container))).toHaveLength(WORKOUTS.length);
     expect(calls).toEqual(['listWorkouts']);
   });
 
   it('adds no number to a card: its words are what they were, and its drawing has none', async () => {
     mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
     await settle();
-    const shown = cards(mounted.container);
+    const shown = cards(saved(mounted.container));
     expect(shown).toHaveLength(WORKOUTS.length);
     for (const card of shown) {
       expectDecoration(card);
@@ -295,7 +305,7 @@ describe('#941 — the Workouts list', () => {
   it('hands each row the expansion of its OWN record (#980)', async () => {
     mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
     await settle();
-    expect(cards(mounted.container)).toHaveLength(WORKOUTS.length);
+    expect(cards(saved(mounted.container))).toHaveLength(WORKOUTS.length);
     const expansions = vi.mocked(expandWorkout).mock;
     const rows = vi.mocked(workoutRow).mock.calls;
     expect(rows).toHaveLength(WORKOUTS.length);
@@ -316,7 +326,7 @@ describe('#941 — the Workouts list', () => {
   it('expands each workout once per load, and draws no card again for a keystroke', async () => {
     mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
     await settle();
-    expect(cards(mounted.container)).toHaveLength(WORKOUTS.length);
+    expect(cards(saved(mounted.container))).toHaveLength(WORKOUTS.length);
     // One expansion a workout: the card's drawing and its row share it.
     expect(vi.mocked(expandWorkout)).toHaveBeenCalledTimes(WORKOUTS.length);
     const drawn = vi.mocked(BlockChartDrawing).mock.calls.length;
@@ -354,7 +364,10 @@ describe('the Workouts list draws its cards in zone colours, and names them once
     mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
     await settle();
     const byName = new Map(
-      cards(mounted.container).map((card) => [card.querySelector('a')?.textContent ?? '', card]),
+      cards(saved(mounted.container)).map((card) => [
+        card.querySelector('a')?.textContent ?? '',
+        card,
+      ]),
     );
     expect(byName.size).toBe(WORKOUTS.length);
     const sweet = byName.get('Sweet spot over-unders with a very long name for a small screen');
@@ -390,13 +403,13 @@ describe('the Workouts list draws its cards in zone colours, and names them once
   it('names every zone any card paints, once, outside the cards', async () => {
     mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, WORKOUTS)} />);
     await settle();
-    const keys = queryAll(mounted.container, '[data-oyl-zone-key]');
+    const keys = queryAll(saved(mounted.container), '[data-oyl-zone-key]');
     expect(keys).toHaveLength(1);
     const [key] = keys;
     if (key === undefined) throw new Error('no zone key');
     expect(key.closest('.oyl-pane-list__item'), 'the key is on a card').toBeNull();
     // Above the cards, so a rider reads it before the colours it names.
-    const list = mounted.container.querySelector('.oyl-pane-list');
+    const list = saved(mounted.container).querySelector('.oyl-pane-list');
     expect(list).not.toBeNull();
     expect(
       key.compareDocumentPosition(list as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -411,7 +424,7 @@ describe('the Workouts list draws its cards in zone colours, and names them once
     const free = WORKOUTS.filter((record) => record.name === 'Free ride');
     mounted = await mount(<WorkoutsView port={workoutStub(ATHLETE, free)} />);
     await settle();
-    expect(cards(mounted.container)).toHaveLength(1);
-    expect(queryAll(mounted.container, '[data-oyl-zone-key]')).toEqual([]);
+    expect(cards(saved(mounted.container))).toHaveLength(1);
+    expect(queryAll(saved(mounted.container), '[data-oyl-zone-key]')).toEqual([]);
   });
 });

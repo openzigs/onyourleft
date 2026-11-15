@@ -138,6 +138,8 @@ import {
   degreesLongitude,
   geographicPosition,
   gradeAt,
+  kilocalories,
+  kilograms,
   metres,
   metresPerSecond,
   pacerGap,
@@ -147,6 +149,7 @@ import {
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
   type RoutePoint,
   type RouteProfile,
+  type TimeInZones,
 } from '@onyourleft/domain';
 
 import {
@@ -157,11 +160,16 @@ import {
   type Round,
 } from '../src/game/delivery/round';
 import type { GhostOutcome } from '../src/game/ghost-outcome';
-import type { ChasedGap } from '../src/game/hud/fields';
+import type { ChasedGap, ShownPower } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
+import {
+  DEFAULT_HUD_LAYOUT,
+  type HudLayoutPreference,
+} from '../src/game/hud/hud-layout-preference';
 import { RIDER_MARK_MINIMUM_PIXELS } from '../src/game/hud/plan';
 import { SoundControls } from '../src/game/SoundControls';
 import type { GameState } from '../src/game/simulation';
+import type { RideTotals } from '../src/recording/totals';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
@@ -308,6 +316,12 @@ export interface DraftMeasurement {
   readonly panel: Box | undefined;
   /** Whether the draft field's value spills out of its box, by #266's measure. */
   readonly valueOverflows: boolean;
+  /** #2426: whether this stage is in the draft (carries the shelter mark and outline). */
+  readonly sheltered: boolean;
+  /** #2426: the field's computed outline, as the browser resolved it. */
+  readonly outline: { readonly style: string; readonly width: number; readonly offset: number };
+  /** #2426: every child of the field (label, number, line, gauge), by class. */
+  readonly parts: readonly Box[];
   /** Every OTHER field's box on the stage, by label. */
   readonly others: readonly { readonly label: string; readonly box: Box }[];
   /** The part of the stage a rider sees with no scrolling. */
@@ -384,6 +398,8 @@ declare global {
   }
 }
 
+/** #2514: a Delivery round's HUD as it was drawn before the game strip. */
+const DELIVERY_EVERYTHING: HudLayoutPreference = { ...DEFAULT_HUD_LAYOUT, delivery: 'everything' };
 const errors: string[] = [];
 
 /**
@@ -443,6 +459,14 @@ const STATE: GameState = {
   // bound it is measuring.
   headwindMetresPerSecond: MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
 };
+
+/**
+ * #2420: power as \`GameView\` hands it to every ride — the 3 s average, the
+ * default — so the field is measured under the term a rider reads,
+ * *Power (3 s)*. The average is the state's own reading, so no number here
+ * changes.
+ */
+const SHOWN_POWER: ShownPower = { view: 'average', average: STATE.input.power };
 
 /** The bot, up the road — a live gap, which is the field's other shape. */
 const BOT_GAP: ChasedGap = {
@@ -507,6 +531,32 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
 const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
 
 /**
+ * #2076: the ride so far on every panel, at the widest figures a ride under
+ * ten hours plausibly reaches — `199.9 km`, `4850 m` and `425 W` — so where
+ * the three are drawn they are measured at their widest. #2434: and the
+ * calorie estimate's, `≈ 9999 kcal` (`ride-harness.tsx` §`RIDE_TOTALS`).
+ */
+const RIDE_TOTALS: RideTotals = {
+  distance: metres(199_900),
+  climbed: metres(4850),
+  averagePower: watts(425),
+  calories: { energy: kilocalories(9_999), basis: 'power' },
+};
+
+/**
+ * #2077: a weight and a threshold of the rider's own, so W/kg and the zone
+ * indicator are measured — 342 W over 72 kg is `4.8`, and over a 250 W
+ * threshold zone 6, *Anaerobic*, the longest name but one — and some time in
+ * each of the seven zones, so the bar is drawn whole.
+ */
+const RIDER_MASS = kilograms(72);
+const THRESHOLD = watts(250);
+const ZONE_TIME: TimeInZones = {
+  perZone: [600, 1200, 900, 600, 300, 120, 30].map((spent) => seconds(spent)),
+  covered: seconds(3750),
+};
+
+/**
  * The one piece of geometry here that is this file's — see the header.
  *
  * `position: relative` puts the stage in the flow, so six of them stack; the
@@ -532,11 +582,16 @@ function Harness(): JSX.Element {
           >
             <HudPanel
               profile={PROFILE}
+              shownPower={SHOWN_POWER}
               state={STATE}
               cadence={{ value: 92, live: true }}
               heartRate={{ value: 168, live: true }}
               movingSeconds={MOVING_SECONDS}
               elapsedSeconds={MOVING_SECONDS}
+              rideTotals={RIDE_TOTALS}
+              riderMass={RIDER_MASS}
+              thresholdPower={THRESHOLD}
+              powerZoneTime={ZONE_TIME}
               chases={[BOT_GAP, ghostChase(outcome)]}
               paused={false}
               onPause={() => undefined}
@@ -546,26 +601,32 @@ function Harness(): JSX.Element {
           </section>
         )),
       )}
-      {DRAFT_STAGES.map((draft) => (
+      {DRAFT_STAGES.map(({ draft, inDraft }) => (
         <section
-          key={`draft-${String(draft)}`}
+          key={`draft-${String(draft)}-${String(inDraft)}`}
           className="oyl-game oyl-game--riding"
           style={STAGE_IN_FLOW}
           data-oyl-draft-stage={String(draft)}
+          data-oyl-draft-sheltered={String(inDraft)}
         >
           <HudPanel
             profile={PROFILE}
+            shownPower={SHOWN_POWER}
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
             movingSeconds={MOVING_SECONDS}
             elapsedSeconds={MOVING_SECONDS}
+            rideTotals={RIDE_TOTALS}
+            riderMass={RIDER_MASS}
+            thresholdPower={THRESHOLD}
+            powerZoneTime={ZONE_TIME}
             chases={[]}
             paused={false}
             onPause={() => undefined}
             onEnd={() => undefined}
             announcement=""
-            room={{ nearby: 12, draft, draftShown: true }}
+            room={{ nearby: 12, draft, draftShown: true, inDraft }}
           />
         </section>
       ))}
@@ -578,20 +639,35 @@ function Harness(): JSX.Element {
         >
           <HudPanel
             profile={PROFILE}
+            shownPower={SHOWN_POWER}
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
             movingSeconds={MOVING_SECONDS}
             elapsedSeconds={MOVING_SECONDS}
+            rideTotals={RIDE_TOTALS}
+            riderMass={RIDER_MASS}
+            thresholdPower={THRESHOLD}
+            powerZoneTime={ZONE_TIME}
             chases={[]}
             paused={false}
             onPause={() => undefined}
             onEnd={() => undefined}
             announcement=""
+            // #2514: the round's fields beside every other reading, as #1812
+            // measures them: the HUD drawn as Everything, not the game strip.
+            layout={DELIVERY_EVERYTHING}
             delivery={
               round === undefined
                 ? undefined
-                : { round, week: { day, houses: 12, score: 0 }, score: roundTally(round).score }
+                : {
+                    round,
+                    week: { day, houses: 12, score: 0 },
+                    score: roundTally(round).score,
+                    // #2453: the next house, so the layout cases measure its field too;
+                    // nearly over, inside its window (#2513), so they measure "Throw now,".
+                    next: { side: 'right', metres: stage === 'end' ? 0 : 120 },
+                  }
             }
           />
         </section>
@@ -605,11 +681,16 @@ function Harness(): JSX.Element {
         >
           <HudPanel
             profile={PROFILE}
+            shownPower={SHOWN_POWER}
             state={STATE}
             cadence={{ value: 92, live: true }}
             heartRate={{ value: 168, live: true }}
             movingSeconds={MOVING_SECONDS}
             elapsedSeconds={MOVING_SECONDS}
+            rideTotals={RIDE_TOTALS}
+            riderMass={RIDER_MASS}
+            thresholdPower={THRESHOLD}
+            powerZoneTime={ZONE_TIME}
             chases={[BOT_GAP, ghostChase('level')]}
             paused={false}
             onPause={() => undefined}
@@ -637,14 +718,21 @@ function Harness(): JSX.Element {
  * model's most (a full gauge, `hud/draft-scale.ts`) and part way. Their own
  * attribute, so no other measurement on this page counts them.
  */
-const DRAFT_STAGES = [59, 20] as const;
+const DRAFT_STAGES = [
+  { draft: 59, inDraft: false },
+  { draft: 20, inDraft: false },
+  // #2426: in the draft, so the shelter mark, the outline and its words are laid out.
+  { draft: 20, inDraft: true },
+] as const;
 
 /**
  * #1812's Delivery stages: a solo ride with nobody chased, so the pacer's
  * dashed field is on it, with no round (`none`, what the others are compared
  * with), with the largest round at its start (`12 left`, day 7), and with it
  * nearly over (`10 delivered, 2 missed`, a score of 10): the widest value and
- * the widest phrase each field can show. Their own attribute, so no other
+ * the widest phrase each field can show. Nearly over, the next house is inside
+ * its throw window, so *Next house* reads "Throw now," (#2513), its widest
+ * value. Their own attribute, so no other
  * measurement on this page counts them.
  */
 const DELIVERY_STAGES: readonly {
@@ -747,6 +835,16 @@ function measure(): HudMeasurement {
     for (const field of panel.querySelectorAll('.oyl-hud__field')) {
       const value = field.querySelector('.oyl-hud__value');
       if (value === null) {
+        continue;
+      }
+      // #2076: the ride so far, where a phone's overlay hides it by clip
+      // (`theme.css` §"THE RIDE SO FAR"), is not a value laid out in a track:
+      // a 1 px box overflows by construction. Where it is drawn it is measured.
+      const box = field.getBoundingClientRect();
+      const givesWay = ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
+        field.classList.contains(name),
+      );
+      if (givesWay && box.width * box.height <= 1) {
         continue;
       }
       values.push({
@@ -895,6 +993,18 @@ function measureDraft(): DraftMeasurement[] {
     const bounds = stage.getBoundingClientRect();
     return {
       draft: Number(stage.getAttribute('data-oyl-draft-stage')),
+      sheltered: stage.getAttribute('data-oyl-draft-sheltered') === 'true',
+      outline:
+        field === undefined
+          ? { style: '', width: 0, offset: 0 }
+          : {
+              style: getComputedStyle(field).outlineStyle,
+              width: Number.parseFloat(getComputedStyle(field).outlineWidth),
+              offset: Number.parseFloat(getComputedStyle(field).outlineOffset),
+            },
+      parts: [...(field?.querySelectorAll('dt, dd, .oyl-hud__detail, .oyl-hud__gauge') ?? [])].map(
+        (each) => boxOf(each) as Box,
+      ),
       field: boxOf(field),
       gauge: boxOf(gauge),
       fill: boxOf(gauge?.querySelector('.oyl-hud__gauge-fill')),

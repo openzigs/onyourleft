@@ -124,8 +124,18 @@ pnpm run format:check
 pnpm run format
 
 # ESLint 10 + typescript-eslint, type-aware. Also enforces the SPDX header and
-# the package boundaries — see §3 and §4d.
+# the package boundaries — see §3 and §4d. Since #2272 it is scripts/lint.sh:
+# one ESLint process per directory under apps/ and packages/, then one for the
+# rest of the tree, one after another, because a single `eslint .` holds every
+# project's TypeScript program at once and ran out of its 4 GB heap in CI. Same
+# config, same files, same rules. Each process prints `lint-memory: peak heap N
+# MB of a M MB limit` to stderr; any argument reaches every process
+# (`pnpm run lint --fix`). ci.md §4c "Lint, a project per process" has the readings.
 pnpm run lint
+
+# Its suite. Fixture-driven: a problem in every place a file can be is
+# reported once and fails the run, whichever process it is in.
+bash scripts/lint.test.sh
 
 # tsc --noEmit, per package, because each package is allowed a different
 # platform surface. Runs the root config too.
@@ -145,6 +155,20 @@ pnpm run test
 # publishes the table and the HTML artefact; the required job runs the next
 # command instead. No pull request's run summary has a coverage table.
 pnpm run test:coverage
+
+# The same report as CI takes it since #2285 (§4c §"Two coverage jobs"): two
+# halves on two runners, then one merge. The first half is
+# `apps/web/src/game/`, the second every other file; each writes a Vitest blob
+# (its results and its coverage) to `coverage-blobs/coverage-<n>.json`, and
+# `test:coverage:merge` reads every blob there and writes the one report to
+# `coverage/`, as `test:coverage` does, exiting non-zero if a half had a red
+# case. Divided by PATH, not `--project`: a project filter keeps only that
+# project's own files in the report. `check:test-split` fails a half of any
+# other shape, a half over no file, and a file in no half or in two. Locally
+# `test:coverage` is the whole of both.
+pnpm run test:coverage:shard-1
+pnpm run test:coverage:shard-2
+pnpm run test:coverage:merge
 
 # The required job's Vitest run since #1280 (the owner's ruling, 2026-10-12):
 # `test:coverage` with no `--coverage`, the same files, 106–133 s less on the
@@ -179,11 +203,12 @@ pnpm run test:uninstrumented
 # `test:coverage` that is not `test:required` with `--coverage` after `run`:
 # the nightly report is of the files the required job runs. ⚠️ An
 # `--exclude` glob is matched against each Vitest PROJECT's root, not the
-# repository's, which is why it compares selections rather than globs. Lists,
-# runs no test: under a second.
+# repository's, which is why it compares selections rather than globs. ⚠️
+# Since #2285 it also holds the coverage run's halves (its rule 6), so it asks
+# `vitest list` eight times: about 8 s, and still runs no test.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 80 cases on 2026-11-04 (60 before #2154, 51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
+# Its own suite. Fixture-driven; 103 cases on 2026-11-06 (80 before #2285, 60 before #2154, 51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 
@@ -279,10 +304,10 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ THREE CI jobs since #1720 — the shards
-# `browser-1` to `browser-3`, which the job named `Repository rules` waits for
-# (§4c §"Three browser shards — #1720") — and each runs its own spec files of
-# this command, as `test:browser:shard-1` to `-3` below; this is the whole. ⚠️ Two Playwright PROJECTS
+# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ FIVE CI jobs since #2376 — the shards
+# `browser-1` to `browser-5`, which the job named `Repository rules` waits for
+# (§4c §"Five browser shards — #2376") — and each runs its own spec files of
+# this command, as `test:browser:shard-1` to `-5` below; this is the whole. ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
 # says why the game spec is last and why it is not split further. ⚠️ Since
 # #1128 they are TWO runs in this one command: `chromium` on three workers,
@@ -340,7 +365,7 @@ pnpm run test:browser:nightly:shard-3
 pnpm run test:browser:nightly:shard-4
 pnpm run test:browser:nightly:shard-5
 
-# The browser gate as CI runs it, in three parts (#1720, §4c §"Three browser
+# The browser gate as CI runs it, in five parts (#2376, §4c §"Five browser
 # shards"): each builds both pages and runs the `chromium` project over the
 # spec files it names, on the whole gate's workers and stop; the third runs
 # the `game` project after its part. Together they are `test:browser`, every
@@ -349,6 +374,8 @@ pnpm run test:browser:nightly:shard-5
 pnpm run test:browser:shard-1
 pnpm run test:browser:shard-2
 pnpm run test:browser:shard-3
+pnpm run test:browser:shard-4
+pnpm run test:browser:shard-5
 
 # The same gate with its HOSTED block turned on (#63). Renders the same harness
 # page against a real PMTiles archive over the internet and prints #63's eighth

@@ -5,21 +5,29 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTIVITY_DETAIL_ROUTE,
   ALL_ROUTES,
+  coursesRouteFor,
   CREDITS_ROUTE,
   gameDeliveryFromHash,
+  gamePlayFromHash,
   gameRouteFromHash,
   hrefFor,
+  hrefForGamePlay,
   hrefForGameRoute,
   hrefForActivity,
+  hrefForModerationSection,
   hrefForSelection,
+  navGroupOf,
   matchHash,
   matchHashAmong,
   MAXIMUM_SUMMARY_CHARACTERS,
+  MODERATION_SECTIONS,
+  moderationSectionFromQuery,
   normaliseHash,
   NOT_FOUND_ROUTE,
   routeById,
   routeForHash,
   ROUTES,
+  routesInGroup,
 } from './routes';
 import { SELECTIONS } from '../testing/populated-shell';
 import { sentencesOf } from '../testing/route-sentences';
@@ -220,6 +228,49 @@ describe('the trainer game’s developer route for a Delivery round — #1816', 
   });
 });
 
+describe('a game switched on from the Games tab — #2292', () => {
+  it('is still the game route, and reads back the route and the game it was given', () => {
+    for (const mode of ['delivery', 'lap-race'] as const) {
+      const href = hrefForGamePlay(mode, 'route/with a slash');
+      expect(routeForHash(href).id).toBe('game');
+      expect(gameRouteFromHash(href)).toBe('route/with a slash');
+      expect(gamePlayFromHash(href)).toBe(mode);
+    }
+  });
+
+  it('switches nothing on with no query, another value, or another key', () => {
+    expect(gamePlayFromHash('#/game')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?route=x')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?play=')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?play=golf')).toBeUndefined();
+    expect(gamePlayFromHash('#/game?route=delivery')).toBeUndefined();
+    expect(gamePlayFromHash('')).toBeUndefined();
+  });
+
+  it('is never the developer route, which is read at the press whatever the switch says', () => {
+    expect(gameDeliveryFromHash(hrefForGamePlay('delivery', 'x'))).toBe(false);
+  });
+
+  it('puts the setup a course opened under Games, and nothing else that names a game', () => {
+    expect(navGroupOf(matchHash(hrefForGamePlay('lap-race', 'x')))).toBe('games');
+    expect(navGroupOf(matchHash(hrefForGamePlay('delivery', 'x')))).toBe('games');
+    // An ordinary ride's setup, and one asking for no game we have, stay Ride's.
+    expect(navGroupOf(matchHash(hrefForGameRoute('x')))).toBe('ride');
+    expect(navGroupOf(matchHash('#/game?route=x&play=golf'))).toBe('ride');
+    // `play=` is the trainer game's query and no other page's.
+    expect(navGroupOf(matchHash('#/routes?play=delivery'))).toBe('routes');
+  });
+
+  it('gives Games a tab of one page, and each game a course picker under it', () => {
+    expect(routesInGroup('games').map((route) => route.id)).toEqual(['games']);
+    expect(routeForHash('#/games/delivery')).toEqual(coursesRouteFor('delivery'));
+    expect(routeForHash('#/games/lap-race')).toEqual(coursesRouteFor('lap-race'));
+    expect(coursesRouteFor('delivery').group).toBe('games');
+    expect(coursesRouteFor('lap-race').group).toBe('games');
+    expect(routeForHash('#/games/golf').id).toBe('not-found');
+  });
+});
+
 describe('routeById', () => {
   it.each(ALL_ROUTES)('finds $id', (route) => {
     expect(routeById(route.id)).toEqual(route);
@@ -346,15 +397,34 @@ describe('which routes are read and which are operated (#422)', () => {
     }
   });
 
-  it('lays out the screens of sections in columns, and nothing else — #1014', () => {
+  it('lays out the screens of sections in columns, and nothing else — #1014, #2067', () => {
     // Epic #935 Phase 2: the screens #1014 names. Home, the game picker and
     // Ride have their own layouts and issues; the list–detail screens' detail
-    // panes are columned by their pane's own container query instead.
+    // panes are columned by their pane's own container query instead. #2067
+    // added the single-column screens whose content makes sections; the
+    // side camera, moderation, a segment and not-found keep the measure, and
+    // `sections.browser.spec.ts` §"#2067" says why for each.
     expect(
       ALL_ROUTES.filter((route) => route.layout === 'sections')
         .map((route) => route.id)
         .sort(),
-    ).toEqual(['about', 'analysis', 'camera', 'devices', 'segments', 'settings', 'transfer']);
+    ).toEqual([
+      'about',
+      'activity-detail',
+      'analysis',
+      'camera',
+      'credits',
+      'delivery-courses',
+      'devices',
+      'games',
+      'instance',
+      'lap-race-courses',
+      'more',
+      'route-builder',
+      'segments',
+      'settings',
+      'transfer',
+    ]);
   });
 
   it('lays out Activities, Workouts and Routes as a list beside its detail, and nothing else — #670', () => {
@@ -396,5 +466,35 @@ describe("Settings' note does not claim nothing is sent — #1333", () => {
   it('never says that nothing here is sent anywhere, however it is reworded', () => {
     const said = [routeById('settings').summary, ...(routeById('settings').notes ?? [])].join(' ');
     expect(said).not.toMatch(/nothing( here)? is sent/i);
+  });
+});
+
+describe('the Moderation screen opened at a section — #2605', () => {
+  it('is still the Moderation route, and reads back the section it was given', () => {
+    for (const section of MODERATION_SECTIONS) {
+      const href = hrefForModerationSection(section);
+      expect(href).toBe(`#/settings/instance/moderation?section=${section}`);
+      const match = matchHash(href);
+      expect(match.route.id).toBe('moderation');
+      expect(moderationSectionFromQuery(match.query)).toBe(section);
+    }
+  });
+
+  it('is no section with no query, an unknown one, or another key', () => {
+    expect(moderationSectionFromQuery(matchHash('#/settings/instance/moderation').query)).toBe(
+      undefined,
+    );
+    for (const hash of [
+      '#/settings/instance/moderation?section=log',
+      '#/settings/instance/moderation?section=',
+      '#/settings/instance/moderation?other=approvals',
+      '#/settings/instance/moderation?section=%',
+    ]) {
+      expect(moderationSectionFromQuery(matchHash(hash).query)).toBeUndefined();
+    }
+  });
+
+  it('carries the query on Moderation and not on Operate beside it', () => {
+    expect(matchHash('#/settings/instance/operate?section=approvals').query).toBeUndefined();
   });
 });

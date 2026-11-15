@@ -51,6 +51,7 @@
 
 import { useEffect, useId, useState, type JSX } from 'react';
 
+import { CaloriesLine } from '../detail/CaloriesFact';
 import { Button, ButtonLink } from '../design/Button';
 import { Reading } from '../design/Reading';
 import {
@@ -64,7 +65,7 @@ import {
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { distanceUnit, formatDistance, shownDistance, spokenDistanceUnit } from '../units/format';
-import { GAME_OUTCOME_TEXT, type SavedRide } from './ride-result';
+import { gameOutcomeText, type SavedRide } from './ride-result';
 
 /** The unit a heart rate is shown in — `ride/MetricGrid.tsx`'s. */
 const HEART_RATE_UNIT = 'bpm';
@@ -126,9 +127,18 @@ export function RideResultCard({
 
   return (
     <div className="oyl-result" role="group" aria-labelledby={headingId} data-oyl-result-card="">
-      <h3 id={headingId} className="oyl-result__heading">
-        Ride saved
-      </h3>
+      {/* #2433: the estimate the save wrote, as the ride's page shows it, on
+        the heading's line — `CaloriesFact.tsx` §`CaloriesLine` says why. */}
+      <div className="oyl-result__head">
+        <h3 id={headingId} className="oyl-result__heading">
+          Ride saved
+        </h3>
+        <CaloriesLine
+          calories={result.calories}
+          hasPower={result.averagePower !== undefined}
+          hasHeartRate={result.averageHeartRate !== undefined}
+        />
+      </div>
       <dl className="oyl-result__facts">
         {/* #1437's review: the moving time, named as on Home and History —
             Home's "Last ride" pattern, the time alone. History's "of …
@@ -171,7 +181,7 @@ export function RideResultCard({
         )}
       </dl>
       {result.gameOutcome === undefined ? null : (
-        <p className="oyl-result__outcome">{GAME_OUTCOME_TEXT[result.gameOutcome]}</p>
+        <p className="oyl-result__outcome">{gameOutcomeText(result)}</p>
       )}
       <div className="oyl-result__actions">
         <Button onClick={onDone}>Done</Button>
@@ -200,7 +210,6 @@ export function resultSentence(result: SavedRide, spokenDistance: string | undef
     spokenDistance === undefined
       ? `Ride saved: ${time}.`
       : `Ride saved: ${time}, ${spokenDistance}.`;
-  return result.gameOutcome === undefined
-    ? facts
-    : `${facts} ${GAME_OUTCOME_TEXT[result.gameOutcome]}`;
+  const outcome = gameOutcomeText(result);
+  return outcome === undefined ? facts : `${facts} ${outcome}`;
 }

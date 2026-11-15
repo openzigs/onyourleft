@@ -48,6 +48,8 @@
  * - {@link REALISTIC_CHAIN_LINK} is the chain-link fence beside industrial,
  *   school and sports grounds (#1274): Poly Haven's, its frame coloured a
  *   vertex at a time and its wire a cut-out picture.
+ * - {@link REALISTIC_DELIVERY_CAR} is Delivery's parked car since #2540:
+ *   Kenney's CC0 sedan, a colour a corner, its wheels and indicators apart.
  *
  * `realistic-assets.test.ts` holds these tables to the pipeline's own list of
  * what it ships, in both directions.
@@ -601,6 +603,14 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 export const REALISTIC_RIDER = 'rider.glb';
 
 /**
+ * The animation in {@link REALISTIC_RIDER} that is the body's own fall and
+ * get-up in a Delivery crash — #2493, made by `tools/realistic/blender/
+ * process_rider.py` from `rider_crash.py`'s moments on #2475's timeline, and
+ * blended in by `three-renderer.ts` §`RealisticRiderBelt` (`RiderMarker.crash`).
+ */
+export const REALISTIC_RIDER_CRASH_CLIP = 'crash';
+
+/**
  * The rider's three maps — #623, drawn and baked by
  * `tools/realistic/blender/process_rider.py` onto the body's own texture
  * coordinates, dedicated `CC0-1.0` with the MakeHuman skin and eyebrow they
@@ -645,6 +655,49 @@ export type RealisticRiderMap = keyof typeof REALISTIC_RIDER_MAPS;
 
 /** The rider's maps, in a fixed order. */
 export const REALISTIC_RIDER_MAP_NAMES: readonly RealisticRiderMap[] = ['colour', 'normal', 'orm'];
+
+/**
+ * The pack's rider — #2485, the bake half of #681: the same MakeHuman body,
+ * cut by `tools/realistic/blender/process_rider.py` to about
+ * {@link RIDER_PACK_TRIANGLES} triangles with a cheaper helmet, wearing
+ * {@link REALISTIC_RIDER_MAPS} at its own MakeHuman texture coordinates, and
+ * its vertices posed on the bicycle at {@link RIDER_PACK_PHASES} crank angles.
+ *
+ * - `lod` — the body and the helmet, two skinned meshes in the rest pose;
+ * - `vat` — the vertex-animation texture: each of `lod`'s vertices, mesh by
+ *   mesh and primitive by primitive in the file's own order, posed at every
+ *   phase, in metres in the bicycle's own frame. Its layout is
+ *   `tools/realistic/rider-pack.ts` §`readRiderPackVat`.
+ *
+ * ⚠️ **Nothing draws them yet.** The belt that does is #681's second half, which
+ * waits on the owner's tablet row; they are named here because the renderer's
+ * list of files is the pipeline's (`realistic-assets.test.ts`).
+ *
+ * @test-facing held by `tools/realistic/rider-pack.test.ts`, which reads the
+ * committed bake back, until #681's belt draws it
+ */
+export const REALISTIC_RIDER_PACK = {
+  lod: 'rider_pack.glb',
+  vat: 'rider_pack_vat.bin',
+} as const;
+
+/**
+ * About how many triangles the pack's rider is, its helmet included — #681's stated figure.
+ *
+ * @test-facing held by `tools/realistic/rider-pack.test.ts` against the
+ * committed LOD, until #681's belt budgets it
+ */
+export const RIDER_PACK_TRIANGLES = 2_000;
+
+/**
+ * How many crank angles the pack's rider is baked at, evenly over one turn
+ * from a crank angle of zero (`bicycle.ts` §`legBones`' angle): phase `k` is
+ * the crank at `2πk / RIDER_PACK_PHASES`.
+ *
+ * @test-facing held by `tools/realistic/rider-pack.test.ts` against the
+ * committed texture, until #681's belt samples it
+ */
+export const RIDER_PACK_PHASES = 32;
 
 /**
  * The realistic bicycle's four small maps — #624: drawn from arithmetic by
@@ -769,6 +822,18 @@ export const REALISTIC_CHAIN_LINK = {
 } as const;
 
 /**
+ * The car a Delivery round's parked cars are drawn as in the realistic world —
+ * #2540: Kenney's CC0 Car Kit sedan, made by `tools/realistic/blender/
+ * process_vehicle.py` into eight named parts — `body`, `paint` (the body's
+ * paint, which each car wears its own of), four wheels (`wheel-front-left`
+ * and so on, each node at its hub) and `indicator-left` and
+ * `indicator-right` — each a colour a corner, with no picture and no
+ * material, so it is drawn inside the Delivery obstacles' one instanced call
+ * (`three-renderer.ts` §`DeliveryBelt`). The stylised world keeps its own car.
+ */
+export const REALISTIC_DELIVERY_CAR = 'car_sedan.glb';
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -806,6 +871,8 @@ export function realisticFiles(): readonly string[] {
     ]),
     REALISTIC_RIDER,
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
+    REALISTIC_RIDER_PACK.lod,
+    REALISTIC_RIDER_PACK.vat,
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
     REALISTIC_WORDMARK,
     ...REALISTIC_HOUSE_MODEL_IDS.map(houseModelFile),
@@ -813,6 +880,7 @@ export function realisticFiles(): readonly string[] {
     ...REALISTIC_ROADSIDE_MODEL_NAMES.map((model) => REALISTIC_ROADSIDE_MODELS[model]),
     REALISTIC_CHAIN_LINK.model,
     REALISTIC_CHAIN_LINK.wire,
+    REALISTIC_DELIVERY_CAR,
   ];
 }
 
@@ -869,6 +937,14 @@ export function realisticWorldNotice(
     ? 'The realistic world is not kept on this device for use offline, so this ride is in the standard world.'
     : 'The realistic world could not be loaded, so this ride is in the standard world.';
 }
+
+/**
+ * How big the realistic world's download is, in a rider's words — #2362,
+ * round 4 of PR #2378's review: one constant for every sentence that names
+ * it (Settings' world help and a built-in level's setup), so a grown set is
+ * not said one way in one place and another way in the other.
+ */
+export const REALISTIC_DOWNLOAD_SIZE_TEXT = 'about 33 MB';
 
 /**
  * What a rider who chose the realistic world is told BEFORE a ride, on the

@@ -31,8 +31,11 @@ import {
   drawnRoadFrame,
   drawnRoadPosition,
   localGroundPosition,
+  retracedRows,
+  ribbonNormals,
   roadCorridor,
   roadTint,
+  type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
 import {
@@ -1251,5 +1254,38 @@ describe('the frame things stand beside is the drawn road’s — #571', () => {
     // since #583 (it was called the left normal, due west, until then).
     expect(frame?.normalX).toBeCloseTo(-1, 9);
     expect(frame?.normalZ).toBeCloseTo(0, 9);
+  });
+});
+
+describe('the stretches a corridor point is tested against — #1688', () => {
+  it('ends, and finds no road ridden twice, with the last point at infinity', () => {
+    // Three quarters of a 10 m circle, a point every 5°: past the 120° that
+    // lets a corridor be asked at all, and heading neither along `x` nor
+    // along `z` at its end, so a last point at infinity in `x` leaves its
+    // turning a number and is asked too. Its stretch's box is infinite, and
+    // filed under every cell of one it would never be done: this case would
+    // run until its timeout.
+    const centre: CorridorPoint[] = [];
+    for (let degrees = 0; degrees <= 265; degrees += 5) {
+      const angle = (degrees * Math.PI) / 180;
+      const along = (degrees / 360) * 2 * Math.PI * 10;
+      centre.push({
+        x: 10 * Math.sin(angle),
+        y: 0,
+        z: 10 - 10 * Math.cos(angle),
+        distance: along,
+        along,
+      });
+    }
+    const last = centre[centre.length - 1] as CorridorPoint;
+    centre.push({
+      ...last,
+      x: Number.POSITIVE_INFINITY,
+      distance: last.along + 5,
+      along: last.along + 5,
+    });
+    const retraced = retracedRows(centre, ribbonNormals(centre), 0);
+    expect(retraced).toHaveLength(centre.length);
+    expect(Array.from(retraced)).toEqual(centre.map(() => 0));
   });
 });

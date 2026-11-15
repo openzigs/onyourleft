@@ -34,9 +34,9 @@ run against `apps/web` only; #94 has a WCAG AA contrast criterion, and putting t
 decision — §8's "read the issue's revision block first" applies.
 
 **The split that does hold is by capability, not by folder.** Computation and UI in `apps/web`;
-only what genuinely cannot be web — `PowerManager.getThermalHeadroom()` (API 30+) and the
-foreground-service wake lock — behind ports in `apps/web` with Capacitor implementations in
-`apps/mobile`, exactly as #39's sensor interface relates to #40's Web Bluetooth transport.
+only what genuinely cannot be web — such as the foreground-service wake lock — behind ports in
+`apps/web` with Capacitor implementations in `apps/mobile`, exactly as #39's sensor interface
+relates to #40's Web Bluetooth transport.
 
 ⚠️ **`apps/mobile` had no importers at all until #85's wiring branch, and that sentence used to
 stand here unqualified — a reviewer who remembers it is reading the old file.** Nothing in
@@ -97,6 +97,13 @@ condition, measured and met, that the app can take control again. So `TrainerCon
 ride ending by button or by navigating away. What survives from #442 is structural: one release; it
 is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
 takes control back after one; and a refused Stop is reported as **Not released**.
+⚠️ **Since [#2348](https://github.com/openzigs/onyourleft/issues/2348) the end of a workout writes the
+trainer's floor before its Stop.** A ramp test ended with the machine keeping its top target (373 W on
+the simulator) through the Stop, under a spent rider. So a workout's release hands `beginRelease` the
+machine's own minimum, written as a `0x05` immediately before the `0x08` on the client's one queue,
+unless the session knows the trainer is already at the floor with nothing on the wire. A step-down
+the trainer does not confirm is told as `workout/session.ts` §`STEP_DOWN_UNCONFIRMED` on *Not
+released*. *End ERG* and a game ride's release are unchanged.
 ⚠️ **Easing a rider DURING a workout is a different command**
 ([#441](https://github.com/openzigs/onyourleft/issues/441)): this trainer honours `0x05` Set Target
 Power to within ±2 W, so a free-ride block, a stalled rider and a paused ride write the machine's own
@@ -121,7 +128,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         capacitor.config.ts ships apps/web/dist — see §4h.
                         Since #237 the simulation also advances the bot pacer,
                         on the same fixed step as the rider and through
-                        #92's advanceBot rather than a second integrator
+                        #92's advanceBot rather than a second integrator.
+                        Since #2425 (ADR 0066) a SOLO ride drafts the rider
+                        behind the pacer and their own ghost: per step,
+                        fieldDraftFactors over odometers only (never a drawn
+                        place), the ghost as a ghostDistanceAt handed in at
+                        setup, never re-simulated; neither the pacer nor the
+                        ghost takes a draft from the rider.
+                        solo-draft.ts holds the inputs and the 10 % "drafted"
+                        share; solo-draft-preference.ts the device
+                        switch, whose off is today's ride to the bit. Never in
+                        a room (the room's k) or a lap race (ADR 0061 D-4)
     src/game/camera.ts  the chase camera as ONE composition (#424) — height,
                         distance behind, look-ahead and lens, which were four
                         constants in two files with four gates stated against
@@ -147,7 +164,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         it LOOKS AT THE ROAD through a bend (`scene.ts`
                         §`cameraPose`: up to 25 m up the route, nearer where
                         that would push the rider past 20° off the axis) from
-                        the eye it always had, so in a bend the pose's x/z are
+                        the eye it always had (but a Delivery round moves it off a parked car, #2396,
+                        `delivery/camera-clear.ts`), so in a bend the pose's x/z are
                         not the rider; `GameView` damps its heading
                         (`dampedHeading`, frame-rate independent, slower under
                         reduced motion); `chase-camera-bend.test.ts` rides it
@@ -305,18 +323,70 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         its odometer less a lag, at a speed whose lean on the
                         line is at most 25°, braking at 3 m/s² and picking up
                         at 1 m/s², and the lag is given back after the bend at
-                        up to 15 % over the rider's speed. ⚠️ **A drawing,
+                        up to 15 % over the rider's speed. ⚠️ Since #2422 the
+                        line it eases on is `drawn-line.ts`' (below), not
+                        `racingLine`, wherever it eases. ⚠️ **A drawing,
                         never physics**: the simulation, the trainer's grade,
                         recording, the HUD, the ghost's replay and the pacer's
                         gap stay on the odometer, and `bend-easing.test.ts`
                         holds a ride's distance, speed and grades identical
                         eased or not. Stateless — the lag a rider holding this
                         speed would have here — so a pacer or ghost level with
-                        the rider is drawn level. ⚠️ Not in a Delivery round
+                        the rider AT THEIR SPEED is drawn level. ⚠️ Since
+                        #2427 riders at different speeds are drawn in their
+                        odometers' order (ADR 0038 D-3.4): `scene.ts`
+                        §`inOdometerOrder` keeps each a quarter of its
+                        odometer gap from the next, out from the rider, who
+                        is never moved (`drawn-order.test.ts`). Without it a
+                        faster rider just ahead, lagging more, was drawn up
+                        to 30 m behind the one it shelters. ⚠️ Not in a Delivery round
                         or a lap race (`scene.ts` §`easingLine`), where the
                         drawn place is where the game meets the rider; there
                         #546's 38.7° cap and its parked cranks still bind.
                         `SceneInput.uneased` is the control
+    src/game/drawn-line.ts
+                        the path an ordinary ride's riders are drawn along and
+                        its camera follows (#2422, after the owner's tablet
+                        ride of 2026-11-10 through a recorded route's 90°
+                        junction: slowed too much, leant too far, snapped round
+                        on the wrong line, camera jerked). Three causes,
+                        measured: `racingLine` is solved on the route's own
+                        samples but the rider was drawn on the smoothed road,
+                        3.5 m inside a one-vertex corner, so the drawn path was
+                        far tighter than the curvature the lean read and folded
+                        where GPS wandered; the drawn rider was paced by the
+                        ROUTE, so it crossed a corner's shorter path at 42 % of
+                        its speed over the ground (5–33 % through a jittered
+                        junction); and lean, speed limit and facing read three
+                        different curves. Now: `racing-line.ts`
+                        §`drawnRoadLine` solves the line on the DRAWN road; a
+                        chord-length cubic spline through its points is the
+                        path, held inside the line's limit every metre between
+                        samples; a rider at odometer `d` is drawn at the
+                        path's length averaged over 60 m either side
+                        (`DRAWN_PACE_WINDOW_METRES`); and `drawnLine` is a
+                        `RacingLine` whose curvature is the path's times that
+                        pace squared, so `leanAt` and `easedPlace` read
+                        `v²/(g·r)` of what is drawn. The camera's eye stands
+                        ON the path behind the rider, held in from the kerb
+                        past 2 m (`scene.ts` §`eyeOnDrawnPath`), and looks at
+                        the path ahead. `drawn-line.test.ts` rides 200 jittered
+                        junctions (1–5 m, one or two vertices) and the
+                        planner's corner at 25–45 km/h frame by frame: floor
+                        on the speed over the ground, lean ≤ 25°, the rider's
+                        and the camera's turn rate and its change, on the road.
+                        ⚠️ **Not in a Delivery round or a lap race, nor with
+                        `uneased`** (`scene.ts` §`easingLine`): those draw
+                        `racingLine` beside the road as before, and a lap
+                        race's frame is held identical to the `uneased` one.
+                        ⚠️ **Heights are read where a rider is DRAWN**
+                        (`drawnPlaceOf`, `scene.ts` §`drawnHeight`): read at
+                        the odometer a rider floated 0.3 m over a climbing
+                        junction. ⚠️ **Built while the rider chooses**
+                        (`GameView.tsx` §`DRAWN_LINE_WARM_DELAY_MS`), about
+                        0.17 s on a 100 km route, not in the first frame.
+                        ⚠️ **A drawing**: the trainer's grade stays on the
+                        odometer (`draft-cannot-reach-trainer.test.tsx`)
     src/game/racing-line.ts
                         the line each rider rides through a bend, and the lean
                         (#499) — the least PEAK curvature inside the
@@ -716,7 +786,28 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         from MakeHuman's own targets, a baked normal map with
                         procedural creases (no cloth simulation), and a
                         modelled helmet and glasses — all inside the old
-                        8 998 triangles. ⚠️ The jersey's main colour is in NO
+                        8 998 triangles. ⚠️ The helmet's material is
+                        single-sided: a lens wound towards the face is culled
+                        from the front (#2504). `rider-gear.test.ts` reads the
+                        lenses, the closed vents, the straps on the skin and
+                        the shoes back out of the file. ⚠️ **Since #2495 it has EYES**, and
+                        a reviewer who remembers flat skin under the glasses
+                        is reading the old file: a ball in each socket at
+                        MakeHuman's own eye, drawn in `rider_kit.py`'s
+                        pupil, iris and white, in the HELMET's mesh (so on the
+                        head bone, no draw call), its 168 triangles taken out
+                        of the body's share (`rider-eyes.test.ts`). The pack's
+                        rider (#2485) keeps flat ones. ⚠️ **Since #2493 the
+                        file carries a CRASH CLIP** (`crash`, made by
+                        step 10 from `rider_crash.py` on `delivery/
+                        crash-look.ts`' times): `RealisticRiderBelt` blends
+                        the body toward it by the crash's share whenever a
+                        marker carries `crash`, never under reduced motion,
+                        and the stylised world keeps #2475's roll alone.
+                        #2505: write a lying moment with `on_road`, not in the
+                        bicycle's `x`/`y`, and name its `elbows`/`knees`; the
+                        test reads the drawn body 3 cm clear of every part of
+                        the bicycle. ⚠️ The jersey's main colour is in NO
                         map: `orm`'s blue channel is its share, premultiplied,
                         and the renderer ADDS `share × ` the body's own kit
                         colour, from `three-renderer.ts` §`RIDER_KITS`: the
@@ -776,7 +867,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and houses from `delivery-progress.ts` beside it, worded
                         "up to N houses" (#1878); it
                         cannot know the town's houses (no map in its graph),
-                        so the press decides and the HUD's *Houses* may be fewer. **The press**, in `GameView`:
+                        so the press decides and the HUD's *Houses* may be fewer.
+                        **The course picker** (#2294): with the round
+                        switched on, `GameView` counts every saved route
+                        through `courses.ts` (the same corridor port, planned
+                        as the press plans, counted by `targets.ts`
+                        §`countRoundHouses`, a ceiling on any seeded pick)
+                        and each card says "up to N houses", or is greyed
+                        with the reason in words; a greyed route is still
+                        choosable, for an ordinary ride, and the switch says
+                        so. Since #2292 the Games tab reaches the same switch,
+                        ON, through its course picker (`game/courses.ts`
+                        §`coursesFor`, `?play=delivery`), which counts the
+                        same way, and offers no course without the realistic
+                        world. **The press**, in `GameView`:
                         `ride-round.ts` §`startDeliveryRide` reads the week
                         and `assist-preference.ts` (#1813), draws ONE seed,
                         and `targets.ts` picks the houses (#1808, #1856) and
@@ -833,7 +937,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         bots are split as a room's riders are (#783), and
                         it rides without the pacer a rider chose. Started at
                         the press (assist read from the device, ONE seed
-                        nothing keeps), stepped one
+                        nothing keeps), then held on its line for a 10 s
+                        countdown of unpaused frames (#2546:
+                        §`countLapRaceDown`, read as a room's race through
+                        `room-ride.ts` §`countdownRace`, so the hold, the
+                        *Race* notice and the region are the room's; nothing
+                        steps before Go), stepped one
                         tick a simulation step that ran (bots through
                         `@onyourleft/physics` §`stepBotRace`: a field of
                         mixed personalities from the seed, at the `canny`
@@ -847,7 +956,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the grade is still sampled at the simulation's
                         odometer, BEFORE the race steps;
                         `game/lap-race-wiring.test.tsx` rides one power trace
-                        as an ordinary ride and as a race with items off and
+                        as an ordinary ride (standing still on the line
+                        through the countdown, #2546) and as a race with items off and
                         on (the rider hit), and holds every write and its time
                         equal, and the recorded ride's channels and laps. ⚠️
                         The bots ride still air on a windy ride: stated
@@ -933,6 +1043,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `OYL-REALISTIC` line and readout;
                         `realistic-lap-race.browser.spec.ts` holds it
                         (required, not nightly: the stylised world)
+    src/game/draft-cannot-reach-trainer.test.tsx
+                        ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
+                        #2421): a draft changes the rider's speed and
+                        nothing else. The real `GameView`, ride controller
+                        and #44 simulator, one power trace on
+                        `rollingRoute()` at k = 1 and at `draftWith(0.6)`,
+                        read back as control point octets: every simulation
+                        write is the road's grade at the odometer and the
+                        protocol client's defaults for the rest, a
+                        workout's ERG writes are the same bytes at the same
+                        frames, and the release the same bytes. A new
+                        drafting source (#2425, #2422) keeps it green
+                        UNMODIFIED
+    src/game/solo-draft-cannot-reach-trainer.test.tsx
+                        #2425's runs of that gate, beside it: the same
+                        assertions on the production solo path (the picker's
+                        pacer or *Race your own*, the device switch on
+                        against off, `k` set per step by the simulation),
+                        and the drafted run rode further
     src/transfer/delivery-targets-not-exported.test.tsx
     src/privacy/delivery-targets-never-sent.test.ts
                         DL11 (ADR 0059 D-4, #1817): a real recorded round
@@ -1000,7 +1129,23 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`browser/realistic/delivery.ts`), held by
                         `realistic-delivery.browser.spec.ts` (nightly); that an
                         ordinary frame is never held to 53 is
-                        `realistic-budget-village.test.ts`
+                        `realistic-budget-village.test.ts`. ⚠️ **The three
+                        calls do not bound the triangles** (#2362): every
+                        obstacle instance submits the whole roster,
+                        `three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`
+                        (1 546, one car painted per instance), pinned by
+                        `delivery-belt.test.ts`; the 20-piece village frame
+                        is held to `realistic-budget.ts`
+                        §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
+                        measured 201 356) by the same nightly spec.
+                        ⚠️ **Since #2540 the realistic world's parked car is
+                        Kenney's CC0 sedan** (`public/realistic/car_sedan.glb`,
+                        `tools/realistic/blender/process_vehicle.py`), its
+                        wheels and indicators apart and posed per instance in
+                        the same call (`withDeliveryCarPose`, from
+                        `port.ts` §`DeliveryCarMotion`), its roster
+                        `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES` (1 654), the
+                        frame 203 998; the stylised world keeps its own car
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and
@@ -1011,7 +1156,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         them and keeps its own two refusals (#1817 counts
                         them there). A
                         DRAWING: it reaches `scene.ts` §`lateralOf` through
-                        `SceneInput.steeredLateral` (the rider only) and the
+                        `SceneInput.steeredLateral` (the rider only), and the
+                        bicycle's turn and lean through `SceneInput.steeredSway`
+                        (#2456, `lane-change-lean.ts`: a damped sideways
+                        speed `GameView` holds beside the camera's heading), and the
                         obstacles through their rider offset, never
                         `simulation.ts`. A room ride ignores it (DL9). With
                         steering, `obstacles.ts` may place an obstacle that
@@ -1022,6 +1170,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a level bot or ghost making the room. One just behind
                         is held aside until its front wheel is behind the
                         camera's eye, then eases to its line (#1863)
+    src/game/lane-change-lean.ts
+                        how a lane change is DRAWN (#2456): the bicycle turns
+                        into the move and bicycle and rider lean, then
+                        straighten on arrival. Pure; the rider stays drawn at
+                        `steeredLateral`, so nothing the obstacles, race or
+                        trainer read changes. A standstill still yaws a
+                        little (the turn rate floors the speed at 10 m/s) but
+                        does not lean. ⚠️ **Since #2494 the BARS turn too**:
+                        `scene.ts` §`drawnSteer` gives each marker the
+                        kinematic steer (`bicycle.ts` §`steerAngle`, clamped
+                        at 20°) of the drawn heading's turn rate (from
+                        `SceneInput.steeredSwayRate`) or a bend's lean, and
+                        both belts turn the fork, front wheel and bar about
+                        the 72° head tube in the vertex shader
+                        (`three-renderer.ts` §`withSteering`, no draw call);
+                        the realistic hands are solved to the turned grips
     src/game/gamepad-port.ts, src/game/delivery/gamepad-input.ts
                         a gamepad's throws and lane changes (#1821), through
                         the W3C Gamepad API: polled once a frame by
@@ -1110,7 +1274,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         for and eight on one they did not** — the wind reading
                         is last and absent rather than nought in still air, on
                         the `NO_READING` precedent, and "nine" is safe only
-                        because the wind cannot change mid-ride
+                        because the wind cannot change mid-ride. Since #2426
+                        the Draft field (a room's or a solo ride's) shows the
+                        SHELTER MARK while the rider is in the draft: an arch
+                        over a filled pocket beside its label (`HudCore.tsx`
+                        §`ShelterMark`, `aria-hidden`), a solid outline, and
+                        "In the draft" on its line with the scale read after
+                        it, visually hidden. ⚠️ ONE state: `room-ride.ts`
+                        §`draftEvent`'s 10 % / 5 %, the room's from
+                        `GameView`'s `inDraftRef` and the solo one from the
+                        simulation, so the mark never flickers at 10 % and
+                        never disagrees with the room's spoken cue. Seen and
+                        not spoken (owner, #2421 item 3); never colour alone;
+                        no motion; nothing outside the Draft field changes,
+                        the power figure least of all (`draft.a11y.test.tsx`)
     src/game/audio-cues.ts
                         the ride's non-speech sounds (#400) — every rule about
                         them, against `audio-port.ts`: off by default, audio
@@ -1134,12 +1311,68 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         a ramp: the music bus is 0 whenever music is not playing.
                         #2059: every short sound while music plays ramps the
                         duck to `MUSIC_DUCK_LEVEL` and back after it ends
-                        (`setTargetAtTime`, never a step; `music-duck.test.ts`)
+                        (`setTargetAtTime`, never a step; `music-duck.test.ts`).
+                        Since #2219 *Mute sounds* is pressed while the master
+                        mute (the header's, menu routes only) is on, and its
+                        unmuting press clears the master before `begin()`
     src/game/hud/climb-ahead.ts
                         a climb or a descent ahead (#399), read off
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/hud-layout-preference.ts
+                        the panels a rider turns off and the HUD's text size
+                        (#2079), kept on the device and read as a ride starts;
+                        never the notices, the controls or the primary readings.
+                        Since #2420 also how power is shown: the 3 s average
+                        (the default; absent or unknown reads as it) or instant
+    src/game/hud/power-average.ts
+                        the HUD's 3 s power (#2420): a time-weighted mean over
+                        the ride's clock, fed by the frame loop AFTER
+                        `advanceTo` took the raw reading; a gap is left out,
+                        never a zero, and a meter not live has no average.
+                        ⚠️ Display only: the power field, W/kg, the zone, the
+                        focus readout and the spoken power (owner ruling,
+                        2026-11-09) read it; the simulation, the trainer, the
+                        recording, the totals, the zone time and the recent
+                        graph keep the raw reading
+                        (`power-shown-wiring.test.tsx` holds them identical)
+    src/game/hud/totals-strip.ts
+                        the whole ride's totals along the bottom of the road
+                        (#2387), a rider's choice, off by default: the lap (a
+                        loop's only), the route, To go, Avg speed, Energy (kJ,
+                        never a load metric) and Climbed. To go and Climbed are
+                        the tiers' own readings picked by key; Avg speed is
+                        Distance over Moving and Energy the recorder's work
+                        (`recording/totals.ts`). Drawn only on tablets: on
+                        their side between the bottom panels, upright on the
+                        actions panel (`theme.css` §"THE TOTALS STRIP" has the
+                        measurements); not on phones, a ride with a mode, or
+                        the demo
+    src/game/hud/recent-trace.ts, RecentGraph.tsx
+                        the last ten minutes of power and heart rate (#2078):
+                        a fixed ring of 600 one-second slots, written from the
+                        frame loop only when the ride's clock crosses a whole
+                        second, a dropped reading a gap (`NaN`), never a
+                        zero; the SVG is memoised on the count written, so it
+                        is redrawn at most once a second
+    src/game/hud/lap-splits.ts, LapSplits.tsx
+                        a loop's lap splits (#2080): the lap in progress, the
+                        last lap and the best, from the laps `courseLine`
+                        returned and the recorder's lap time only, so they are
+                        the saved ride's rows; on a loop only, in a race's
+                        standings' place and swapped with them
+    src/game/hud/look-ahead.ts
+                        the next 2 km of road on the HUD (#2075, #2291): the
+                        road a line at a FIXED scale (200 m of height across the
+                        strip) over five grade bands of our own, each the
+                        strip's full height with its own fill pattern;
+                        the next climb is `climb-ahead.ts`'s own `slopeAhead`,
+                        so the strip and the voice name the same one, and
+                        `climbAhead` adds the climb under the rider and the top
+                        of either (#2291). The same bands shade the whole
+                        route's strip (`routeBands`) and colour the gradient's
+                        digits (`gradeBand`, `HudCore.tsx`)
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's
@@ -1160,8 +1393,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (with a hit coming under it, outlined dashed: a shape,
                         never a tint), last and absent on any other ride; the
                         standings in a room's panel (`RaceStandings.tsx`, W/kg,
-                        never watts, never a live region), with the leader
-                        always its first line (#1967). Its five sentences
+                        never watts, never a live region), every racer of a
+                        solo field on it (#2328: eight lines, where a room's
+                        window is seven) and past that the leader always
+                        its first line (#1967). Its five sentences
                         are rank 5h, OWED as Delivery's are, the place at most
                         once every 10 s. `GameView` feeds `HudInput.lapRace`
                         on a ride running a race (#1906);
@@ -1200,7 +1435,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         out-and-back's turn changes no hill in view; the other
                         pass's ground is sunk out of sight with the turning
                         point closed round the road's end (§`retracedRoles`),
-                        or drawn a metre under where it only lies alongside
+                        or drawn a metre under where it only lies alongside.
                         ⚠️ Since #2149 a sharp bend's inside, where the fold
                         stops the rows short of the bend's centre, is closed
                         on one point (`closeFans`): within the clear band

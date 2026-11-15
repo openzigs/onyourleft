@@ -39,6 +39,9 @@ const MAY_NAME_HTTP_TYPES: readonly string[] = [
   // #784, #785: test support, never shipped — an instance's rooms routes as a
   // `fetch` double, which has to build the `Response` the instance would.
   join('rooms', 'rooms-testing.ts'),
+  // #2603: test support, never shipped — the REAL instance's handler for the
+  // Operate area's tests, which a device's `send` hands a `Request`.
+  join('testing', 'operate-instance-testing.ts'),
   // #777: the one transport to an instance (ADR 0036 D-3 (a)). Its port,
   // `instance/instance-port.ts`, names no HTTP type — only what it read.
   join('instance', 'instance-transport.ts'),

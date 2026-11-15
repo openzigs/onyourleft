@@ -72,12 +72,16 @@ import {
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_RIDER_PACK,
+  RIDER_PACK_PHASES,
+  RIDER_PACK_TRIANGLES,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
+  REALISTIC_DELIVERY_CAR,
   houseModelFile,
   type HouseModelId,
   type RealisticBicycleMap,
@@ -94,6 +98,7 @@ import {
   WORDMARK_SOURCE_WORDS,
   WORDMARK_URL,
 } from '../brand/game-wordmark';
+import { OBSTACLE_KINDS } from '../../src/game/delivery/obstacles';
 
 import {
   GENERATED_SPECIES,
@@ -189,12 +194,15 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
     ],
   },
   {
-    // The stylised world's models: committed verbatim, never through this pipeline.
+    // The stylised world's models: committed verbatim, never through this
+    // pipeline. #2540: the realistic world's car, the Car Kit's sedan, read
+    // through it -- its page, which states the licence; its archive is the
+    // owner's own download (ADR 0049's amendment of 2026-11-12).
     name: 'Kenney',
     licence: 'CC0-1.0',
     decidedBy: 'ADR 0026 D-4',
     kind: 'files',
-    prefixes: [],
+    prefixes: ['https://kenney.nl/assets/'],
   },
   {
     // Verified per asset under ADR 0023, wherever it is hosted. #1585 adopts
@@ -452,16 +460,26 @@ export interface AssetSource {
          * absent or not that digest, and only `members` are taken out. The
          * licence is still read off the model's own public record, without
          * credentials ({@link sketchfabVerdict}).
+         *
+         * #2540: and Kenney's Car Kit, whose zip comes only from a signed
+         * link a browser is handed (an automated request answers `403`): the
+         * owner had it downloaded through Kenney's own page. With no
+         * `sketchfab` record, its licence is read off that page's own words,
+         * as any other source's is.
          */
         readonly from: 'placed';
+        /** Where the owner downloaded it, as its records name it: `Sketchfab`, `Kenney`. */
+        readonly host: string;
+        /** The issue the owner placed it for, which its records cite. */
+        readonly issue: number;
         /** The archive's file name, under `build/raw/<id>/`. */
         readonly archive: string;
         /** The model's own page: the link its credit gives. */
         readonly page: string;
         /** The files taken out of the archive. */
         readonly members: readonly Pick<ArchiveMember, 'path' | 'mustContain'>[];
-        /** What the model's public record must say it is. */
-        readonly sketchfab: {
+        /** What the model's public record must say it is, where it is a Sketchfab model. */
+        readonly sketchfab?: {
           readonly uid: string;
           readonly username: string;
           readonly title: string;
@@ -965,6 +983,8 @@ function houseModel(model: (typeof HOUSE_MODEL_SOURCES)[number]): AssetSource {
     author: model.author,
     origin: {
       from: 'placed',
+      host: 'Sketchfab',
+      issue: 1585,
       archive: `${model.uid}.zip`,
       page: model.page,
       members: [
@@ -996,6 +1016,9 @@ export function sketchfabVerdict(source: AssetSource, recordText: string): Licen
     return { kept: false, reason: `${source.id}: not a placed model` };
   }
   const expected = source.origin.sketchfab;
+  if (expected === undefined) {
+    return { kept: false, reason: `${source.id}: not a Sketchfab model` };
+  }
   let record: unknown;
   try {
     record = JSON.parse(recordText);
@@ -1450,6 +1473,45 @@ export const CHAIN_LINK_SOURCE = {
 } as const;
 
 /**
+ * The car Delivery's parked cars are drawn as in the realistic world — #2540,
+ * the owner's rulings of 2026-11-12 on it: Kenney's CC0 **Car Kit** (3.1),
+ * its `sedan`, a plain civilian car with no maker's name. The kit's zip is
+ * served only from a signed link a browser is handed, so the owner had it
+ * downloaded through Kenney's own page and placed under `build/raw/<id>/`
+ * (`archive`), as #1585's house archives were; its digest is in the lock.
+ *
+ * {@link VEHICLE_SCRIPT} keeps the body whole (704 triangles in the kit),
+ * collapses one wheel from the kit's 332 to `wheelTriangles` and draws all
+ * four from it (one mesh under four nodes: 55 372 bytes, where four meshes
+ * were 90 788 and over `realistic-budget.ts` §`REALISTIC_BUILD_BYTES`), adds two
+ * indicator quads a side, and brings it to `obstacles.ts`' parked car's
+ * footprint, `lengthMetres` by `widthMetres`, at `heightMetres` tall: 1 376
+ * triangles, under `realistic-budget.ts` §`DELIVERY_CAR_TRIANGLES`, the
+ * owner's ruling of about 1 450 a car. `paintCell` is the colour map's
+ * swatch the kit paints the sedan's body with (`column,row`, 32 by 128 px
+ * cells), split off so the renderer paints it per instance.
+ *
+ * Candidates read on 2026-11-12 and not taken, in #2540's pull request:
+ * two Sketchfab cars under CC-BY-4.0 (an account to download, and one a
+ * third over the budget), Poly Haven's `covered_car` (CC0, but under a dust
+ * sheet: no wheels to turn) and Quaternius' cars (CC0, but not a source ADR
+ * 0049 D-10 admits).
+ */
+export const DELIVERY_CAR_SOURCE = {
+  id: 'kenney-car-kit',
+  page: 'https://kenney.nl/assets/car-kit',
+  archive: 'kenney-car-kit.zip',
+  model: 'Models/GLB format/sedan.glb',
+  colourMap: 'Models/GLB format/Textures/colormap.png',
+  licenceFile: 'License.txt',
+  wheelTriangles: 120,
+  lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
+  widthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfWidth,
+  heightMetres: 1.45,
+  paintCell: '13,1',
+} as const;
+
+/**
  * Every upstream input. Why each one, briefly — `docs/spikes/0005` has the
  * rest, and #474 the vegetation's own reasons:
  *
@@ -1608,6 +1670,30 @@ export const SOURCES: readonly AssetSource[] = [
     resolution: '1k',
     maps: [CHAIN_LINK_SOURCE.opacity],
   }),
+  // #2540: the realistic world's car, placed by the owner.
+  {
+    id: DELIVERY_CAR_SOURCE.id,
+    licencePage: DELIVERY_CAR_SOURCE.page,
+    licencePhrase: 'Creative Commons CC0',
+    licence: 'CC0-1.0',
+    author: 'Kenney',
+    origin: {
+      from: 'placed',
+      host: 'Kenney',
+      issue: 2540,
+      archive: DELIVERY_CAR_SOURCE.archive,
+      page: DELIVERY_CAR_SOURCE.page,
+      members: [
+        { path: DELIVERY_CAR_SOURCE.model },
+        { path: DELIVERY_CAR_SOURCE.colourMap },
+        // The kit's own licence file, which names the grant.
+        {
+          path: DELIVERY_CAR_SOURCE.licenceFile,
+          mustContain: 'License: (Creative Commons Zero, CC0)',
+        },
+      ],
+    },
+  },
 ];
 
 /** The Blender version every derived asset was made with, and the one a re-run must use. */
@@ -1863,6 +1949,18 @@ export type OutputRecipe =
        * §`drawMark` at this many pixels and handed to the run as a PNG, last.
        */
       readonly mark?: number;
+      /**
+       * #2485: the pack's rider is posed at this many crank angles —
+       * `rider-pack.ts` §`packPose`, written as JSON and handed to the run
+       * after {@link mark}.
+       */
+      readonly pose?: number;
+      /**
+       * #2493: the rider's crash clip is made on the riding pose and #2475's
+       * timeline — `rider-crash.ts` §`riderCrashPose`, written as JSON and
+       * handed to the run after {@link pose}.
+       */
+      readonly crash?: true;
     }
   /**
    * One level of a GENERATED tree — #1283, ADR 0049 D-1: `generated-trees.ts`
@@ -1879,7 +1977,7 @@ export type OutputRecipe =
       /** Whether the GLB's embedded maps are encoded as KTX2 before it ships. */
       readonly images?: 'ktx2';
       /** The impostor strips a full level's run writes. */
-      readonly alsoWrites?: readonly AlsoWritten[];
+      readonly alsoWrites?: readonly EncodedAlso[];
     };
 
 /** The other files a recipe's run writes beside its own: a tree's strips, the rider's maps. */
@@ -1895,10 +1993,18 @@ export function alsoWritten(recipe: OutputRecipe): readonly AlsoWritten[] {
 export interface AlsoWritten {
   readonly file: string;
   readonly made: string;
-  readonly ktx2: Ktx2Step;
+  /**
+   * How {@link made} is encoded into {@link file}. Absent, it ships as the
+   * run wrote it — #2485: the pack's vertex-animation texture, which no
+   * encoder may round, and which a KTX2 picture cannot hold.
+   */
+  readonly ktx2?: Ktx2Step;
   /** What it is, in words, where it is not a tree's impostor strip — #623. */
   readonly modified?: string;
 }
+
+/** A second file that IS encoded: every tree's impostor strip. */
+export type EncodedAlso = AlsoWritten & { readonly ktx2: Ktx2Step };
 
 /** One file the product ships. */
 export interface OutputSpec {
@@ -1911,7 +2017,9 @@ export interface OutputSpec {
   readonly modified?: string;
   /**
    * Who a CC-BY-4.0 file credits and the link, where it is not its one
-   * source's author and page — #1585: the atlas is every house model's.
+   * source's author and page — #1585: the atlas is every house model's. Since
+   * #2540 a CC0 file may name one too: Kenney's car, credited as the
+   * stylised world's Kenney models are, though CC0 asks for no credit.
    */
   readonly credit?: { readonly creator: string; readonly url: string };
 }
@@ -1981,6 +2089,13 @@ export const WORDMARK_TOOL = `Node.js 24 (.nvmrc), then ${PINNED_KTX}`;
 const WORDMARK_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left' };
 
 /**
+ * What the rider's two eyes cost — #2495: `blender/rider_kit.py`'s bands, a
+ * fan of twelve round the pupil and three rings of twelve quads, twice. Taken
+ * out of the body's share of the rider's 9 000 triangles, never added to it.
+ */
+export const RIDER_EYE_TRIANGLES = 168;
+
+/**
  * What `realistic:process --check` requires of a run's REPORT, as well as of
  * its bytes — #900 item 2, by output file.
  *
@@ -1994,6 +2109,24 @@ const WORDMARK_KTX2: Ktx2Step = { encoding: 'colour-alpha', origin: 'bottom-left
 export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, number>>>> = {
   'island_tree_02.glb': { repeatedTrianglesDropped: 1 },
   'island_tree_02-middle.glb': { repeatedTrianglesDropped: 1 },
+  // #2485: the pack's rider, and the texture's shape: one column a vertex of
+  // the GLB, the ones the crank moves, and a row a phase. A run that cut the
+  // body or found the moving vertices differently is not this one.
+  [REALISTIC_RIDER_PACK.lod]: { triangles: 1998, vertices: 1352, moving: 361, phases: 32 },
+  // #2495: the rider's eyes, paid for out of the body's share of its 9 000.
+  [REALISTIC_RIDER]: { eyeTriangles: RIDER_EYE_TRIANGLES, triangles: 8996, crashMoments: 6 },
+  // #2540: the car, part by part. A run that cut a wheel differently, or
+  // split the paint off another swatch, is not this one.
+  [REALISTIC_DELIVERY_CAR]: {
+    triangles: 1192,
+    bodyTriangles: 570,
+    paintTriangles: 134,
+    glassTriangles: 10,
+    wheelTriangles: 120,
+    wheels: 4,
+    indicatorTriangles: 8,
+    levelsOfDetail: 1,
+  },
 };
 
 /** Why a run's report is not what {@link EXPECTED_REPORTS} requires of `file`, or nothing. */
@@ -2014,6 +2147,10 @@ export function reportFaults(file: string, report: unknown): readonly string[] {
 /** The rider's script, and the one file its kit's numbers are in — #623. */
 export const RIDER_SCRIPT = 'blender/process_rider.py';
 export const RIDER_KIT = `${PIPELINE_DIRECTORY}blender/rider_kit.py`;
+/** The one file the rider's crash clip's moments are in — #2493. */
+export const RIDER_CRASH = `${PIPELINE_DIRECTORY}blender/rider_crash.py`;
+/** What the rider's crash clip is made on: the riding pose and #2475's timeline — #2493. */
+export const RIDER_CRASH_POSE = `${PIPELINE_DIRECTORY}rider-crash.ts`;
 /** The side of each of the rider's three maps, in texels — #623. */
 export const RIDER_TEXTURE_PIXELS = 1024;
 /** The side of the mark's picture `process_rider.py` samples. */
@@ -2024,6 +2161,12 @@ export const RIDER_MADE = {
   normal: 'rider_nor_gl.png',
   orm: 'rider_orm.png',
 } as const;
+
+/**
+ * Where the pack's joints come from — #2485: `rider-pack.ts` §`packPose`
+ * reads them off `bicycle.ts`, and the run poses the body onto them.
+ */
+export const RIDER_PACK_POSE = `${PIPELINE_DIRECTORY}rider-pack.ts`;
 
 /** Where {@link structureMap}'s script lives — #475. */
 export const TEXTURE_SCRIPT = 'blender/process_texture.py';
@@ -2036,6 +2179,9 @@ export const ROADSIDE_SCRIPT = 'blender/process_roadside_model.py';
 
 /** The script that builds the chain-link fence's 8 m piece — #1274. */
 export const CHAIN_LINK_SCRIPT = 'blender/process_chain_link.py';
+
+/** The script that makes the realistic world's car — #2540. */
+export const VEHICLE_SCRIPT = 'blender/process_vehicle.py';
 
 /** What the house models' atlas run writes, before the KTX2 step. */
 export const HOUSE_ATLAS_MADE = 'house_models_atlas.png';
@@ -2131,7 +2277,10 @@ export const OUTPUTS: readonly OutputSpec[] = [
       how: 'blender',
       script: RIDER_SCRIPT,
       args: [
-        '9000',
+        // #2504: the 8 998 a rider the frame's tables count (`realistic-budget.ts`),
+        // inside the 9 000 budget. The decimator lands on the figure it is
+        // asked for or a little under, and asked for 9 000 it now lands on it.
+        '8998',
         String(RIDER_TEXTURE_PIXELS),
         RIDER_MADE.colour,
         RIDER_MADE.normal,
@@ -2139,6 +2288,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
       ],
       alsoReads: ['makehuman-system-assets'],
       mark: RIDER_MARK_PIXELS,
+      crash: true,
       alsoWrites: [
         {
           file: REALISTIC_RIDER_MAPS.colour,
@@ -2160,8 +2310,28 @@ export const OUTPUTS: readonly OutputSpec[] = [
         },
       ],
     },
-    modified:
-      'the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, collapse-decimated to what a modelled helmet and glasses leave of 9 000 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with vents and straps) and glasses built round the head’s own vertices, one mesh coloured per vertex; in its rest pose',
+    modified: `the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses and eyes leave of 8 998 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with closed vents, and straps laid along the head) and glasses (forward-facing lenses, and arms along the temples) built round the head’s own vertices, with an eyeball in each socket (#2495) — the front of a ball at the centre and radius of MakeHuman’s own CC0 eye helper, looking along its own eye bone, drawn in a pupil, an iris and a white from the numbers in ${RIDER_KIT}, ${String(RIDER_EYE_TRIANGLES)} triangles — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493): the skeleton posed at each of the moments in ${RIDER_CRASH} — thrown, landed, down and rising, between the riding pose at the start and the end — on the timeline of src/game/delivery/crash-look.ts and from the riding joints src/game/bicycle.ts gives (read by ${RIDER_CRASH_POSE}), as src/game/three-renderer.ts poses the rider, every bone's rotation and the root's position at each. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is`,
+  },
+  // #2485: the pack's rider — the bake half of #681. The same body, cut to
+  // about 2 000 triangles, and its vertices posed at every phase of a crank
+  // revolution. Nothing draws it until #681's belt.
+  {
+    file: REALISTIC_RIDER_PACK.lod,
+    from: 'makehuman',
+    recipe: {
+      how: 'blender',
+      script: RIDER_SCRIPT,
+      args: ['lod', String(RIDER_PACK_TRIANGLES), REALISTIC_RIDER_PACK.vat],
+      pose: RIDER_PACK_PHASES,
+      alsoWrites: [
+        {
+          file: REALISTIC_RIDER_PACK.vat,
+          made: REALISTIC_RIDER_PACK.vat,
+          modified: `a vertex-animation texture of the pack's rider, made in the same run: each of its vertices skinned by its own weights, with the bones aimed as src/game/three-renderer.ts aims the rider's at the joints src/game/bicycle.ts's riderJoints gives (read by ${RIDER_PACK_POSE}) at ${String(RIDER_PACK_PHASES)} crank angles over one revolution, seated on the hoods with no body lean and no motion; positions in metres in the bicycle's own frame and normals, as half floats, every vertex once and the ones the crank moves once a phase, in the layout ${RIDER_PACK_POSE} states. The pose is this repository's own work, derived from no other product, and dedicated CC0-1.0 as the kit is`,
+        },
+      ],
+    },
+    modified: `the pack's rider: the body mesh only, in the rider's athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a cheaper helmet and glasses leave of ${String(RIDER_PACK_TRIANGLES)} triangles, with texture coordinates and no colour of its own; and the helmet (a plain shell of three rings, without vents or straps) and glasses (one forward-facing quad a lens) built round the head’s own vertices, coloured per vertex and skinned wholly to the head bone; two skinned meshes in the rest pose`,
   },
   // #624: the bicycle's four maps, drawn here. ⚠️ `top-left`: they are drawn
   // in the orientation the bicycle's texture coordinates read them — row 0 is
@@ -2207,6 +2377,24 @@ export const OUTPUTS: readonly OutputSpec[] = [
       ktx2: { encoding: 'data', origin: 'top-left' },
     },
     modified: `the wire's opacity map (${CHAIN_LINK_SOURCE.id}_${CHAIN_LINK_SOURCE.opacity}_1k.jpg), ${encodingWords({ encoding: 'data', origin: 'top-left' })}`,
+  },
+  // #2540: the realistic world's car.
+  {
+    file: REALISTIC_DELIVERY_CAR,
+    from: DELIVERY_CAR_SOURCE.id,
+    recipe: {
+      how: 'blender',
+      script: VEHICLE_SCRIPT,
+      args: [
+        String(DELIVERY_CAR_SOURCE.wheelTriangles),
+        String(DELIVERY_CAR_SOURCE.lengthMetres),
+        String(DELIVERY_CAR_SOURCE.widthMetres),
+        String(DELIVERY_CAR_SOURCE.heightMetres),
+        DELIVERY_CAR_SOURCE.paintCell,
+      ],
+    },
+    modified: `the kit's sedan: its body kept whole and its front-left wheel collapse-decimated to about ${String(DELIVERY_CAR_SOURCE.wheelTriangles)} triangles and drawn as all four, apart from the body, each at its own hub, the right-hand two turned half a turn; every corner coloured from the kit's colour map read at its own texture coordinates, and the body's paint split off as its own part, and its glass coloured a dark tint in place of the kit's pale swatch; stood on the origin and brought to ${String(DELIVERY_CAR_SOURCE.lengthMetres)} m by ${String(DELIVERY_CAR_SOURCE.widthMetres)} m by ${String(DELIVERY_CAR_SOURCE.heightMetres)} m, each wheel scaled evenly about its hub; an amber indicator added at each corner, under the lamps; its materials, picture and texture coordinates dropped, edges past 35 degrees creased and the rest shaded smooth; geometry and colour a corner only, no picture`,
+    credit: { creator: 'Kenney', url: DELIVERY_CAR_SOURCE.page },
   },
 ];
 
@@ -2504,7 +2692,9 @@ export type LicenceVerdict =
  */
 export function licenceVerdict(source: AssetSource, pageText: string): LicenceVerdict {
   if (source.origin.from === 'ambientcg') return ambientCgVerdict(source, pageText);
-  if (source.origin.from === 'placed') return sketchfabVerdict(source, pageText);
+  if (source.origin.from === 'placed' && source.origin.sketchfab !== undefined) {
+    return sketchfabVerdict(source, pageText);
+  }
   return statedLicence(source, pageText);
 }
 
@@ -2778,14 +2968,15 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   if (source === undefined) throw new Error(`${file}: ${output.from} is not in the lock`);
   const path = `${OUTPUT_DIRECTORY}/${file}`;
   // #1274: an ambientCG asset says so, and says how its page said it was made.
-  const from = SOURCES.find((each) => each.id === source.id)?.origin.from;
+  const from = SOURCES.find((each) => each.id === source.id)?.origin;
+  const placedFrom = from?.from === 'placed' ? from : undefined;
   const origin =
     source.id === 'makehuman'
       ? 'MakeHuman'
-      : from === 'ambientcg'
+      : from?.from === 'ambientcg'
         ? 'ambientCG'
-        : from === 'placed'
-          ? 'Sketchfab (the owner’s download, #1585)'
+        : placedFrom !== undefined
+          ? `${placedFrom.host} (the owner’s download, #${String(placedFrom.issue)})`
           : 'Poly Haven';
   const by =
     source.technique === undefined
@@ -2825,10 +3016,12 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
       ? (recipe.alsoWrites ?? []).find((also) => also.file === file)
       : undefined;
   // #618: a file that passed through the encoder names it as well as Blender.
+  // #2485: a second file the run wrote is encoded only where its own step says.
   const encoded =
-    recipe.how === 'ktx2' ||
-    impostor !== undefined ||
-    (recipe.how === 'blender' && (recipe.ktx2 !== undefined || recipe.images === 'ktx2'));
+    impostor !== undefined
+      ? impostor.ktx2 !== undefined
+      : recipe.how === 'ktx2' ||
+        (recipe.how === 'blender' && (recipe.ktx2 !== undefined || recipe.images === 'ktx2'));
   const tool =
     recipe.how === 'ktx2'
       ? PINNED_KTX
@@ -2842,12 +3035,11 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   // second in `modified`, where a reader making it again looks for what was
   // done. `provenance.test.ts` holds that the file named is committed.
   const second = recipe.how === 'blender' && encoded ? `${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}` : '';
+  const encoding = impostor?.ktx2 === undefined ? '' : `; then ${encodingWords(impostor.ktx2)}`;
   const described =
     impostor === undefined
       ? (output.modified ?? '')
-      : impostor.modified === undefined
-        ? `an eight-view impostor strip of one object of the pack, rendered from the full scan; then ${encodingWords(impostor.ktx2)}`
-        : `${impostor.modified}; then ${encodingWords(impostor.ktx2)}`;
+      : `${impostor.modified ?? 'an eight-view impostor strip of one object of the pack, rendered from the full scan'}${encoding}`;
   const alsoFrom = also
     .map(
       (each) =>
@@ -2856,8 +3048,10 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     .join('');
   // #1585: a CC-BY-4.0 file records whom it credits and the link (ASSET006).
   const placed = SOURCES.find((each) => each.id === source.id)?.origin;
+  // #2540: a CC0 file whose output names a credit records it too, as the
+  // stylised world's Kenney rows do, though CC0 asks for none.
   const credit =
-    source.licence !== 'CC-BY-4.0'
+    source.licence !== 'CC-BY-4.0' && output.credit === undefined
       ? []
       : [
           ['creator', output.credit?.creator ?? source.authors],
@@ -2909,7 +3103,7 @@ function generatedRecord(
     if (source === undefined) throw new Error(`${file}: ${id} is not in the lock`);
     return source;
   });
-  const strip = alsoWritten(recipe).find((also) => also.file === file);
+  const strip = (recipe.alsoWrites ?? []).find((also) => also.file === file);
   const encoded = strip !== undefined || recipe.images === 'ktx2';
   const described =
     strip === undefined

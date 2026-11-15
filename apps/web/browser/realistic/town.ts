@@ -11,9 +11,8 @@
  * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns`, since
  * #2026 `inferred-commercial`, since #1792 `mapped-paint`, since #1793
  * `start-year`, since #1794 `landmark-churches` and since #1795 `landmark-civic`.
- * Its own
- * module so that a test reads the plans the page draws, and a lever parsed
- * but not handed to the planner is a red test (`town.test.ts`).
+ * Its own module so that a test reads the plans the page draws, and a lever
+ * parsed but not handed to the planner is a red test (`town.test.ts`).
  */
 
 import {
@@ -25,6 +24,10 @@ import { landClassMask, type LandClassMask } from '../../src/game/land-class';
 import type { CorridorOrigin } from '../../src/game/terrain';
 import { NO_URBAN_CLASS, urbanClassMap, type UrbanClassMap } from '../../src/game/urban-class';
 import type { WorldCorridor } from '../../src/game/world-data/corridor';
+import { corridorOrigin } from '../../src/game/terrain';
+import fixtureLevel from '../../src/game/delivery/levels/fixtures/fixture-level.json';
+import { parseLevelFile } from '../../src/game/delivery/levels/level-file';
+import { levelCorridor, levelRoute } from '../../src/game/delivery/levels/levels';
 import type { RouteProfile } from '@onyourleft/domain';
 
 import {
@@ -36,9 +39,9 @@ import {
   inferredBarnsWithLevers,
   inferredCommercialWithLevers,
   inferredOutbuildingsWithLevers,
-  mappedPaintWithLevers,
   landmarkChurchesWithLevers,
   landmarkCivicWithLevers,
+  mappedPaintWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
   splitRoofsWithLevers,
@@ -53,6 +56,18 @@ export interface TownFixture {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly corridor: WorldCorridor;
+}
+
+/**
+ * #2362: the synthetic fixture level as a town — `town=level`: its line, and
+ * its corridor built from its own file as a ride on a level is
+ * (`levels.ts` §`levelCorridor`, ADR 0065 D-2.4). The fixture, never a
+ * shipped level (D-7.5): a frame of a real one is a Produced Work of its file.
+ */
+export function fixtureLevelTown(): TownFixture {
+  const file = parseLevelFile(fixtureLevel, 'fixture-level');
+  const { profile } = levelRoute(file);
+  return { profile, origin: corridorOrigin(profile), corridor: levelCorridor(file) };
 }
 
 /** The town's land-class mask and its plans, with `leversOff` switched off. */

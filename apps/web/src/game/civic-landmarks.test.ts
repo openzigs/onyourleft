@@ -13,6 +13,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { RoofMaterial, WallMaterial } from '@onyourleft/map-features';
+
 import {
   FACADE_DOOR,
   FACADE_OFFSET,
@@ -36,6 +38,7 @@ import {
   type CivicFootprint,
 } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
+import { surfaceOfRole } from './mapped-buildings';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { CIVIC_LANDMARK, civicLandmarkFits, civicLandmarkOf, CUPOLA } from './mapped-landmarks';
 import { drawnRoadFrame } from './terrain';
@@ -46,18 +49,35 @@ const street = civicStreetFixture();
 /** A `length` by `depth` rectangle about the hall's slot, 40 m out from the road. */
 const rectangleOf = (length: number, depth: number) => rectangleBeside(1_000, 40, length, depth);
 
-/** The street planned with its urban class, by each footprint's name. */
+/**
+ * The street planned with its urban class, by each footprint's name — since
+ * #2206 with every footprint tagged `building:material=<wallMaterial>` when
+ * one is given.
+ */
 function planStreet(
   options: FootprintPlanOptions = {},
+  wallMaterial?: WallMaterial,
+  roofMaterial?: RoofMaterial,
 ): Map<CivicFootprint['name'], FootprintPlan> {
-  const land = landClassMask(street.corridor);
+  const corridor =
+    wallMaterial === undefined && roofMaterial === undefined
+      ? street.corridor
+      : {
+          ...street.corridor,
+          buildings: street.corridor.buildings.map((building) => ({
+            ...building,
+            ...(wallMaterial === undefined ? {} : { wallMaterial }),
+            ...(roofMaterial === undefined ? {} : { roofMaterial }),
+          })),
+        };
+  const land = landClassMask(corridor);
   const { plans } = footprintPlans(
-    street.corridor,
+    corridor,
     land,
     street.profile,
     street.origin,
     undefined,
-    urbanClassMap(street.corridor, land, street.profile),
+    urbanClassMap(corridor, land, street.profile),
     options,
   );
   expect(plans).toHaveLength(CIVIC_FOOTPRINTS.length);
@@ -300,6 +320,36 @@ describe('#1795: a town hall and a school, read back from the plan', () => {
     for (const name of BLOCKS) expect(civic.get(name)?.surfaces.wall, name).toBe('brick');
     // Not vacuous: before #1795 the hipped hall's seeded draw is render.
     expect(before.get('hall')?.surfaces.wall).toBe('render');
+  });
+
+  it('puts a mapped `building:material` ahead of the civic brick — #2206', () => {
+    // #1795 asks it: a town hall tagged plaster is rendered; untagged, brick.
+    const plastered = planStreet({}, 'plaster');
+    for (const name of BLOCKS) {
+      expect(plastered.get(name)?.surfaces.wall, name).toBe('render');
+      expect(civic.get(name)?.surfaces.wall, name).toBe('brick');
+    }
+    // The halls still stand their cupolas, so the tag changed the walls and
+    // the order is what is being read.
+    for (const name of HALLS) {
+      expect(cupolaOf(plastered.get(name) as FootprintPlan).length, name).toBeGreaterThan(0);
+    }
+    // With the mapped paint lever off the tag is not read, and the brick is back.
+    const unread = planStreet({ mappedPaint: false }, 'plaster');
+    for (const name of BLOCKS) expect(unread.get(name)?.surfaces.wall, name).toBe('brick');
+  });
+
+  it('keeps a cupola’s spire in slate under a tagged roof material — #2206', () => {
+    const tagged = planStreet({}, undefined, 'metal');
+    const hall = tagged.get('hall') as FootprintPlan;
+    // The tag reaches the hipped hall's roof, and the cupola on it stays slate.
+    expect(hall.surfaces.roof).toBe('corrugated');
+    expect(hall.triangles.spire.length).toBeGreaterThan(0);
+    expect(surfaceOfRole(hall, 'spire')).toBe('slate');
+    // A flat roof reads no tag (#1792), so its cupola is its roof's, as before.
+    const flat = tagged.get('flat-hall') as FootprintPlan;
+    expect(flat.triangles.spire).toHaveLength(0);
+    expect(cupolaOf(flat).length).toBe(cupolaOf(civic.get('flat-hall') as FootprintPlan).length);
   });
 
   it('keeps a footprint the block does not fit as #1791’s civic block', () => {

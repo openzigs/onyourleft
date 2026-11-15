@@ -195,9 +195,11 @@ describe('the lazy groups are read from the source', () => {
     expect(withoutExtension('C:\\x\\a.ts')).toBe('C:/x/a');
   });
 
-  it('finds the four groups this app has, each naming at least one view that exists', () => {
+  it('finds the five groups this app has, each naming at least one view that exists', () => {
     const groups = readLazyGroups(WEB_ROOT);
     expect(groups.map((group) => group.module.split('/').at(-1))).toEqual([
+      // #2292: the Games tab's page and its course pickers.
+      'games',
       'history',
       'more',
       'ride',

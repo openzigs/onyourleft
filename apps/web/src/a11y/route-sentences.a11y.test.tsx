@@ -178,6 +178,50 @@
  * on both walks — `07:05`, the fixed local time this file now reads every
  * route at. No sentence is dropped or reworded.
  *
+ * ⚠️ **Re-recorded by #2330, awaiting the owner's approval with that pull
+ * request's screenshots**, for two dropped lines and nothing else: the game's
+ * picker shows its wind speed and direction boxes only while *Ride in a wind*
+ * is on, so "Wind speed, km/h" and "Wind direction, degrees it blows from"
+ * are no longer on the populated walk, which leaves the switch off. They are
+ * not gone from the product: `wind-wiring.test.tsx` §"#2330" turns the switch
+ * on and finds both. Nothing is added or reworded.
+ *
+ * ⚠️ **Re-recorded by #2304, awaiting the owner's approval with that pull
+ * request's screenshots**, for two added lines and nothing else: Workouts'
+ * list pane offers its two lists, *Your workouts* and *Built-in workouts*,
+ * on both walks. The walks open on the rider's own, so the built-ins'
+ * sentences are not on them; `BuiltInWorkouts.test.tsx` reads those. No
+ * sentence is dropped or reworded.
+ *
+ * ⚠️ **Re-recorded by #2358, awaiting the owner's approval with that pull
+ * request's screenshots**, for five added lines and nothing else: Devices
+ * gains its Controllers section on both walks, with no gamepad listed, so
+ * its empty state and the button test's "Nothing has moved yet." are what
+ * is recorded. `DevicesView.gamepads.test.tsx` reads a listed pad and the
+ * readout. No sentence is dropped or reworded.
+ *
+ * ⚠️ **Re-recorded by #2358 after the owner's ruling of 2026-11-08 in
+ * #2370**, for two reworded lines on Devices on both walks: the heading
+ * "Controllers" is now "Game controllers", and "Steers and throws in
+ * Delivery." is now "A gamepad such as an Xbox controller steers and throws
+ * in Delivery.". Both are lines this pull request added; nothing else moves.
+ *
+ * ⚠️ **Re-recorded by #2425, awaiting the owner's approval with that pull
+ * request**, on Settings on both walks: one line REWORDED, because the switch
+ * now also hides a solo ride's draft (ADR 0066 R-13): "Show my draft when
+ * riding in a room" is now "Show my draft", and two lines are added to its
+ * help to say so. The new *Draft on your own* section (ADR 0066 D-6) adds
+ * its heading, its help's name, six help sentences and its switch. Nothing
+ * is dropped.
+ *
+ * ⚠️ **Edited by #2461, awaiting the owner's approval with that pull
+ * request**, on Settings on both walks: one line REWORDED and one added,
+ * because ADR 0067 D-3.4 extends the *Draft on your own* switch to the lap
+ * race. "It changes nothing in a room or a race." is now "It changes nothing
+ * in a room.", and a line before it says that in a lap race the rider and the
+ * bots draft each other and that the switch turns that off for every racer.
+ * Nothing is dropped.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

@@ -11,6 +11,9 @@
  * written to a database and read back, not about a fixture the view was handed.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { kilograms, metres, unixSeconds } from '@onyourleft/domain';
@@ -654,7 +657,7 @@ describe('TransferView — exporting', () => {
     expect(document.body.textContent).toContain(
       'This format cannot carry: each lap’s average heart rate, each lap’s highest heart rate, ' +
         'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
-        'each lap’s climb. The stored ride keeps them.',
+        'each lap’s calories, each lap’s climb. The stored ride keeps them.',
     );
     expect(document.body.textContent).not.toMatch(/lap\.[a-z]/);
     expect(document.body.textContent).not.toContain('FIT carries every channel');
@@ -680,7 +683,8 @@ describe('TransferView — exporting', () => {
       'This format cannot carry: the distance at each point, each lap’s elapsed time, ' +
         'each lap’s distance, each lap’s average heart rate, each lap’s highest heart rate, ' +
         'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
-        'which splits are laps and which are part laps, each lap’s climb, moving time. ' +
+        'each lap’s calories, which splits are laps and which are part laps, each lap’s ' +
+        'climb, moving time. ' +
         'The stored ride keeps them.',
     );
     expect(document.body.textContent).not.toMatch(/point\.distance|lap\.total/);
@@ -1492,5 +1496,32 @@ describe('TransferView — the erase, in two sections (#1026)', () => {
     expect([...confirm.querySelectorAll('button')].map((button) => button.textContent)).toContain(
       'Erase everything',
     );
+  });
+});
+
+describe('TransferView — an imported ride’s calorie estimate (#2433)', () => {
+  it('estimates a heart-rate ride with the rider’s current inputs, read for the batch', async () => {
+    const port = await openPort();
+    await (harness ?? never()).write(async (store) => {
+      await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1985 });
+      await store.setAthleteMass(ATHLETE_A, kilograms(64));
+    });
+    mounted = await mount(<TransferView port={port} />);
+
+    // `nominal-ride.gpx` carries heart rate and no power, so only the
+    // athlete's inputs can give it a figure.
+    const gpx = readFileSync(
+      join(import.meta.dirname, '../../../../packages/fit/fixtures/corpus/nominal-ride.gpx'),
+      'utf8',
+    );
+    await choose([fileOf('nominal-ride.gpx', gpx)]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+
+    const [row] = await (harness ?? never()).read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A),
+    );
+    expect(row?.calories?.basis).toBe('heart-rate');
+    expect(row!.calories!.energy).toBeGreaterThan(0);
   });
 });

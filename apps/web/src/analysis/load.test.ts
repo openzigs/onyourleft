@@ -381,6 +381,77 @@ describe('loadLibraryBests', () => {
   });
 });
 
+describe('loadLibraryBests holds each ride’s curve on the port — #2194', () => {
+  it('decodes no ride twice for a second ask on the same port, and answers the same', async () => {
+    const port = stubAnalysis(OWNER, [
+      ride('sprinter', { power: [...steadyPower(600, 30), ...steadyPower(100, 3600)] }),
+      ride('rouleur', { power: steadyPower(280, 3600) }),
+    ]);
+
+    const first = await loadLibraryBests(port);
+    const second = await loadLibraryBests(port);
+
+    expect(port.channelReads).toHaveLength(2);
+    expect(second).toStrictEqual(first);
+    // The list and the summaries are still read every time: they are what
+    // says a held curve is still the ride's.
+    expect(port.listReads).toHaveLength(2);
+    expect(port.summaryReads).toHaveLength(4);
+  });
+
+  it('reads a ride written since, and only that one', async () => {
+    const rides: StubAnalysisRide[] = [ride('rouleur', { power: steadyPower(280, 600) })];
+    const port = stubAnalysis(OWNER, rides);
+    await loadLibraryBests(port);
+
+    rides.push(ride('sprinter', { power: steadyPower(700, 60) }));
+    const after = await loadLibraryBests(port);
+
+    expect(port.channelReads).toEqual(['rouleur:power', 'sprinter:power']);
+    expect(effortAt(after.curve, 60)).toBe(700);
+    expect(after.activitiesWithPower).toBe(2);
+  });
+
+  it('drops a deleted ride’s best from the line', async () => {
+    const rides: StubAnalysisRide[] = [
+      ride('rouleur', { power: steadyPower(280, 600) }),
+      ride('sprinter', { power: steadyPower(700, 60) }),
+    ];
+    const port = stubAnalysis(OWNER, rides);
+    expect(effortAt((await loadLibraryBests(port)).curve, 60)).toBe(700);
+
+    rides.splice(1, 1);
+    const after = await loadLibraryBests(port);
+
+    expect(effortAt(after.curve, 60)).toBe(280);
+    expect(after.activitiesWithPower).toBe(1);
+  });
+
+  it('reads a ride again when its stream was written again', async () => {
+    const rides: StubAnalysisRide[] = [ride('rouleur', { power: steadyPower(280, 600) })];
+    const port = stubAnalysis(OWNER, rides);
+    await loadLibraryBests(port);
+
+    rides[0] = ride('rouleur', { power: steadyPower(320, 900) });
+    const after = await loadLibraryBests(port);
+
+    expect(port.channelReads).toEqual(['rouleur:power', 'rouleur:power']);
+    expect(effortAt(after.curve, 600)).toBe(320);
+  });
+
+  it('holds nothing across two ports, so one port’s library is never another’s', async () => {
+    const rides = [ride('rouleur', { power: steadyPower(280, 600) })];
+    const one = stubAnalysis(OWNER, rides);
+    const two = stubAnalysis(OWNER, rides);
+
+    await loadLibraryBests(one);
+    await loadLibraryBests(two);
+
+    expect(one.channelReads).toHaveLength(1);
+    expect(two.channelReads).toHaveLength(1);
+  });
+});
+
 /**
  * #78's fifth criterion, in its literal form.
  *

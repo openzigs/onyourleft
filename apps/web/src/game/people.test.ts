@@ -460,11 +460,14 @@ describe('people kept off the drawn side roads — #1619', () => {
     });
   }
 
-  it('puts nobody on a side road whose mouth a mapped sidewalk runs across, as without the street somebody stands there', () => {
+  // ⚠️ Each claim below and its control are two cases since #1688, over the
+  // same frames as when they were one: together, 400 frames of the whole
+  // scene passed the 5 s timeout under the nightly coverage run on the
+  // slower runners.
+  it('puts nobody on a side road whose mouth a mapped sidewalk runs across', () => {
     const roads = frameAt(0, withStreet).sideRoads ?? [];
     expect(roads.length).toBeGreaterThan(0);
     let seen = 0;
-    let onItWithout = 0;
     for (let second = 0; second < 600; second += 3) {
       for (const person of [...(frameAt(second, withStreet).people ?? NO_PEOPLE).near]) {
         seen += 1;
@@ -472,12 +475,19 @@ describe('people kept off the drawn side roads — #1619', () => {
           -PERSON_HALF_WIDTH_METRES,
         );
       }
-      // The control: the same sidewalk with no street mapped across it.
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+
+  it('stands somebody there without the street mapped across the sidewalk — the control', () => {
+    const roads = frameAt(0, withStreet).sideRoads ?? [];
+    expect(roads.length).toBeGreaterThan(0);
+    let onItWithout = 0;
+    for (let second = 0; second < 600; second += 3) {
       for (const person of (frameAt(second, withoutStreet).people ?? NO_PEOPLE).near) {
         if (intoSideRoad(roads, person.x, person.z) > -PERSON_HALF_WIDTH_METRES) onItWithout += 1;
       }
     }
-    expect(seen).toBeGreaterThan(0);
     expect(onItWithout).toBeGreaterThan(0);
   });
 
@@ -498,7 +508,11 @@ describe('people kept off the drawn side roads — #1619', () => {
     }
   });
 
-  it('puts nobody on a village’s crossroads, which no map breaks a sidewalk over, and the rule off does', () => {
+  /** A village's crossroads with a mapped sidewalk 6 m off the road through it, and its frames. */
+  function crossroads(): {
+    readonly frame: (second: number, onTheRoad: boolean) => ReturnType<typeof sceneFrame>;
+    readonly roads: readonly SideRoadLines[];
+  } {
     const line: number[] = [];
     for (let at = village.centre - 100; at <= village.centre + 100; at += 2) {
       const road = drawnRoadFrame(FARMLAND, ORIGIN, at);
@@ -529,9 +543,13 @@ describe('people kept off the drawn side roads — #1619', () => {
     const roads = (frame(0, false).sideRoads ?? []).filter(
       (road) => road.junction.source === 'village',
     );
+    return { frame, roads };
+  }
+
+  it('puts nobody on a village’s crossroads, which no map breaks a sidewalk over', () => {
+    const { frame, roads } = crossroads();
     expect(roads.length).toBe(1);
     let seen = 0;
-    let over = 0;
     for (let second = 0; second < 600; second += 3) {
       for (const person of [...(frame(second, false).people ?? NO_PEOPLE).near]) {
         seen += 1;
@@ -539,11 +557,19 @@ describe('people kept off the drawn side roads — #1619', () => {
           -PERSON_HALF_WIDTH_METRES,
         );
       }
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+
+  it('stands somebody on that crossroads with the rule off — the control', () => {
+    const { frame, roads } = crossroads();
+    expect(roads.length).toBe(1);
+    let over = 0;
+    for (let second = 0; second < 600; second += 3) {
       for (const person of (frame(second, true).people ?? NO_PEOPLE).near) {
         if (intoSideRoad(roads, person.x, person.z) > -PERSON_HALF_WIDTH_METRES) over += 1;
       }
     }
-    expect(seen).toBeGreaterThan(0);
     expect(over).toBeGreaterThan(0);
   });
 

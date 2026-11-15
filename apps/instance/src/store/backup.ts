@@ -28,6 +28,29 @@ export function vacuumInto(databasePath: string, destination: string): void {
   }
 }
 
+/**
+ * Deletes every "back up now" still waiting from a snapshot's own database
+ * (#2606 review L1). The run taking the snapshot serves the one there is, so
+ * a restored snapshot must not ask for a backup again. It also deletes every
+ * `backup_lease` row (#2606 fourth review): the copy holds the taking run's
+ * own live leases, and a restored database would answer the next run busy
+ * for up to five minutes. A database from before migration 0042 has neither
+ * table, and nothing to delete.
+ */
+export function forgetWaitingRequests(databasePath: string): void {
+  const database = openDatabase(databasePath);
+  try {
+    const has = (name: string): boolean =>
+      database
+        .prepare(`SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = ?`)
+        .get(name) !== undefined;
+    if (has('backup_request')) database.exec('DELETE FROM backup_request WHERE record_id IS NULL');
+    if (has('backup_lease')) database.exec('DELETE FROM backup_lease');
+  } finally {
+    database.close();
+  }
+}
+
 /** Every table's row count — SQLite's and the migrator's own bookkeeping excepted. */
 export function rowCounts(databasePath: string): Record<string, number> {
   const database = openDatabase(databasePath);

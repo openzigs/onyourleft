@@ -33,13 +33,15 @@ export const WIRE_BYTES = 2;
 export const WIRE_FIXED32 = 5;
 
 export class ProtoReader {
+  // Plain fields, not parameter properties: `demo:bake` runs this file under
+  // Node's type stripping, which refuses syntax that emits code (#1931).
+  readonly buf: Uint8Array;
+  readonly end: number;
   pos: number;
 
-  constructor(
-    readonly buf: Uint8Array,
-    start: number,
-    readonly end: number,
-  ) {
+  constructor(buf: Uint8Array, start: number, end: number) {
+    this.buf = buf;
+    this.end = end;
     this.pos = start;
   }
 

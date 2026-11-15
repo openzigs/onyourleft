@@ -117,6 +117,18 @@ export interface CreditsViewProps {
    */
   readonly licenceText?: (licence: string) => Promise<string>;
   /**
+   * Reads the built-in circuits' ODbL notice (#2293, ADR 0064 D-3.2), the
+   * copy in `public/licences/`. Defaults to {@link loadCircuitsNotice}; a prop
+   * so a test can hand in one that fails to load.
+   */
+  readonly circuitsNotice?: () => Promise<string>;
+  /**
+   * Reads the built-in Delivery levels' ODbL notice (#2362, ADR 0065 D-6.2),
+   * the copy in `public/licences/`. Defaults to {@link loadLevelsNotice}; a
+   * prop so a test can hand in one that fails to load.
+   */
+  readonly levelsNotice?: () => Promise<string>;
+  /**
    * Works the build copies in rather than commits — #618. Defaults to
    * `credits.ts` §`COPIED_WORKS`; a prop so a fixture manifest can be rendered
    * with nothing beside it.
@@ -336,11 +348,28 @@ function ShippedLicences({
   );
 }
 
+/**
+ * The built-in circuits' notice, read into the page — #2293. A dynamic
+ * `import()` of the committed copy, for the reason `licence-documents.ts`
+ * gives: a link to the `.txt` would open over the app inside the Android
+ * shell and leave the rider there.
+ */
+export async function loadCircuitsNotice(): Promise<string> {
+  return (await import('../../public/licences/circuits-ODbL.txt?raw')).default;
+}
+
+/** The built-in Delivery levels' notice, read into the page — #2362, as {@link loadCircuitsNotice}. */
+export async function loadLevelsNotice(): Promise<string> {
+  return (await import('../../public/licences/levels-ODbL.txt?raw')).default;
+}
+
 export function CreditsView({
   manifest,
   notices,
   noticesDocument = loadNoticesDocument,
   licenceText = loadShippedLicence,
+  circuitsNotice = loadCircuitsNotice,
+  levelsNotice = loadLevelsNotice,
   copied = COPIED_WORKS,
 }: CreditsViewProps): JSX.Element {
   const credits = useMemo(
@@ -374,154 +403,207 @@ export function CreditsView({
         tab.
       </p>
 
-      <div data-terms="attribution">
-        <h2>Credited because the licence asks for it</h2>
-        {credits.required.length === 0 ? (
-          <StatusMessage tone="info" label="Nothing owed">
-            No asset in this build is under a licence that requires attribution. Nothing below is
-            credited because a licence asks for a credit; where a licence asks for something else,
-            that is said beside it.
-          </StatusMessage>
-        ) : (
-          <>
-            <p>{NOTICE}</p>
-            <WorkList works={credits.required} />
-          </>
-        )}
-      </div>
-
-      {credits.licenceCopy.length === 0 ? null : (
-        <div data-terms="licence-copy">
-          <h2>Shipped with a copy of its licence</h2>
-          <p>
-            Each of these is published under a licence that does not ask to be credited on a screen,
-            but does ask that a copy of the licence travel with the work. That copy ships inside
-            this app, and each licence named beside a work can be read in full below.
-          </p>
-          <WorkList works={credits.licenceCopy} />
-          <ShippedLicences works={credits.licenceCopy} load={licenceText} />
-        </div>
-      )}
-
-      <div data-terms="nothing">
-        <h2>Credited as a courtesy</h2>
-        {credits.courtesy.length === 0 ? (
-          <p>
-            {credits.licenceCopy.length === 0 && credits.unclassified.length === 0
-              ? 'Nothing else in this build came from somebody outside this project.'
-              : 'Nothing in this build is under a licence that asks for nothing at all.'}
-          </p>
-        ) : (
-          <>
-            <p>
-              Each of these is published under a licence that asks for nothing in return — no credit
-              is required and none is implied to be owed. They are here because the work was worth
-              crediting anyway.
-            </p>
-            <WorkList works={credits.courtesy} />
-          </>
-        )}
-      </div>
-
-      {credits.unclassified.length === 0 ? null : (
-        <div data-terms="unclassified">
-          <h2>Credited under another licence</h2>
-          <p>
-            This page has not been told what these licences ask for, so it says nothing about it.
-            The licence named beside each work is the one that applies.
-          </p>
-          <WorkList works={credits.unclassified} />
-        </div>
-      )}
-
-      <h2>Where this list comes from</h2>
-      <p>
-        From <code>ASSETS.toml</code> in this project&rsquo;s own repository, which records the
-        source, the licence and a checksum for every file of somebody else&rsquo;s that is committed
-        to it. A file that is not recorded there fails the build, so this page is as complete as
-        that record is.
-      </p>
-
       {/*
-        #1552, ADR 0054 D-3.6: the map data. Not a file this app ships, so not
-        in `ASSETS.toml` and not generated from it: the maps are drawn
-        from OpenStreetMap,
+        #2067: every credited group is a section, and on a tablet the sections
+        lie in rows across its width, in the order they are read.
+      */}
+      <div className="oyl-sections">
+        <div data-terms="attribution" className="oyl-sections__long">
+          <h2>Credited because the licence asks for it</h2>
+          {credits.required.length === 0 ? (
+            <StatusMessage tone="info" label="Nothing owed">
+              No asset in this build is under a licence that requires attribution. Nothing below is
+              credited because a licence asks for a credit; where a licence asks for something else,
+              that is said beside it.
+            </StatusMessage>
+          ) : (
+            <>
+              <p>{NOTICE}</p>
+              <WorkList works={credits.required} />
+            </>
+          )}
+        </div>
+
+        {credits.licenceCopy.length === 0 ? null : (
+          <div data-terms="licence-copy">
+            <h2>Shipped with a copy of its licence</h2>
+            <p>
+              Each of these is published under a licence that does not ask to be credited on a
+              screen, but does ask that a copy of the licence travel with the work. That copy ships
+              inside this app, and each licence named beside a work can be read in full below.
+            </p>
+            <WorkList works={credits.licenceCopy} />
+            <ShippedLicences works={credits.licenceCopy} load={licenceText} />
+          </div>
+        )}
+
+        <div data-terms="nothing">
+          <h2>Credited as a courtesy</h2>
+          {credits.courtesy.length === 0 ? (
+            <p>
+              {credits.licenceCopy.length === 0 && credits.unclassified.length === 0
+                ? 'Nothing else in this build came from somebody outside this project.'
+                : 'Nothing in this build is under a licence that asks for nothing at all.'}
+            </p>
+          ) : (
+            <>
+              <p>
+                Each of these is published under a licence that asks for nothing in return — no
+                credit is required and none is implied to be owed. They are here because the work
+                was worth crediting anyway.
+              </p>
+              <WorkList works={credits.courtesy} />
+            </>
+          )}
+        </div>
+
+        {credits.unclassified.length === 0 ? null : (
+          <div data-terms="unclassified">
+            <h2>Credited under another licence</h2>
+            <p>
+              This page has not been told what these licences ask for, so it says nothing about it.
+              The licence named beside each work is the one that applies.
+            </p>
+            <WorkList works={credits.unclassified} />
+          </div>
+        )}
+
+        <div data-terms="source">
+          <h2>Where this list comes from</h2>
+          <p>
+            From <code>ASSETS.toml</code> in this project&rsquo;s own repository, which records the
+            source, the licence and a checksum for every file of somebody else&rsquo;s that is
+            committed to it. A file that is not recorded there fails the build, so this page is as
+            complete as that record is.
+          </p>
+        </div>
+
+        {/*
+        #1552, ADR 0054 D-3.6: the map data. The maps are drawn from
+        OpenStreetMap read at the time, which is not a file this app ships,
         and ODbL §4.3 asks for this notice wherever the result is shown. The
         ride screen and the map show `OSM_ATTRIBUTION` beside the work itself.
+        ⚠️ Since #2293 (ADR 0064 D-3.2, D-5.2) the app DOES ship map data: the
+        built-in lap-race circuits' files, each a database derived from
+        OpenStreetMap and offered under ODbL 1.0. They are named in
+        `ASSETS.toml`, but under a licence with no `creator` key, so the art
+        list above leaves them out and they are credited here, with their
+        notice read in place.
       */}
-      <div data-terms="map-data">
-        <h2>Map data</h2>
-        <p>
-          {OSM_ATTRIBUTION}. The maps in this app are drawn from OpenStreetMap, whose data is
-          published under the{' '}
-          <a href={ODBL_LICENCE_URL} target="_blank" rel="noreferrer">
-            Open Database License 1.0
-          </a>
-          .
-        </p>
-        <p>{ODBL_NOTICE}</p>
-        {/*
+        <div data-terms="map-data">
+          <h2>Map data</h2>
+          <p>
+            {OSM_ATTRIBUTION}. The maps in this app are drawn from OpenStreetMap, whose data is
+            published under the{' '}
+            <a href={ODBL_LICENCE_URL} target="_blank" rel="noreferrer">
+              Open Database License 1.0
+            </a>
+            .
+          </p>
+          <p>{ODBL_NOTICE}</p>
+          <p data-credit="circuits">
+            This app also ships the files of its built-in lap-race circuits. Each one follows
+            streets drawn from OpenStreetMap, so each file is made available under the{' '}
+            <a href={ODBL_LICENCE_URL} target="_blank" rel="noreferrer">
+              Open Database License 1.0
+            </a>{' '}
+            too. Their heights come from the USGS 3D Elevation Program, which is in the public
+            domain.
+          </p>
+          <ReadInPlace
+            load={circuitsNotice}
+            summary="Read the circuits’ licence notice"
+            reading="Reading the notice this app carries."
+            failedLabel="Could not open the notice"
+            failed="The circuits’ licence notice could not be read just now. It is also in this project’s public repository, beside the circuit files."
+            marker={{ 'data-circuits-notice': '' }}
+          />
+          {/*
+          #2362, ADR 0065 D-6.5: and the files of the built-in Delivery
+          levels, a second database derived from OpenStreetMap: each level's
+          line and the building footprints of the corridor round it.
+        */}
+          <p data-credit="levels">
+            It also ships the files of its built-in Delivery levels. Each one follows streets and
+            holds the building footprints beside them, drawn from OpenStreetMap, so each file is
+            made available under the{' '}
+            <a href={ODBL_LICENCE_URL} target="_blank" rel="noreferrer">
+              Open Database License 1.0
+            </a>{' '}
+            too. Their heights come from the USGS 3D Elevation Program, which is in the public
+            domain.
+          </p>
+          <ReadInPlace
+            load={levelsNotice}
+            summary="Read the Delivery levels’ licence notice"
+            reading="Reading the notice this app carries."
+            failedLabel="Could not open the notice"
+            failed="The Delivery levels’ licence notice could not be read just now. It is also in this project’s public repository, beside the level files."
+            marker={{ 'data-levels-notice': '' }}
+          />
+          {/*
           #1975: the map archive also carries a land-cover layer derived from
           ESA WorldCover, which nothing here draws. CC BY 4.0 asks for the
           credit when the material is shared, and the owner ruled on
           2026-10-31 (#1557) that the app gives it.
         */}
-        <p data-credit="worldcover">
-          {WORLDCOVER_ATTRIBUTION}. The map files also hold a land-cover layer derived from ESA
-          WorldCover, which is published under the{' '}
-          <a href={CC_BY_LICENCE_URL} target="_blank" rel="noreferrer">
-            Creative Commons Attribution 4.0 licence
-          </a>
-          . This app does not draw that layer.
-        </p>
-      </div>
+          <p data-credit="worldcover">
+            {WORLDCOVER_ATTRIBUTION}. The map files also hold a land-cover layer derived from ESA
+            WorldCover, which is published under the{' '}
+            <a href={CC_BY_LICENCE_URL} target="_blank" rel="noreferrer">
+              Creative Commons Attribution 4.0 licence
+            </a>
+            . This app does not draw that layer.
+          </p>
+        </div>
 
-      <div data-terms="software">
-        <h2>Software this app includes</h2>
-        <p>
-          This app is built from open-source software written by other people, and each part is used
-          under the licence named beside it. Every one of those licences asks for its notice to
-          travel with the software, and the full third-party notices reproduce each one word for
-          word. They ship inside this app, so they open here without a network.
-        </p>
-        <ReadInPlace
-          load={noticesDocument}
-          summary="Read the full notices"
-          reading="Reading the notices this app carries."
-          failedLabel="Could not open the notices"
-          failed="The notices this app carries could not be read just now. The list below is still every package they cover."
-          marker={{ 'data-notices-document': '' }}
-        />
-        {software.app.length === 0 || software.problems.length > 0 ? (
-          <StatusMessage tone="warning" label="This list may be incomplete">
-            <p>
-              The list of software this app includes could not be read in full, so a package may be
-              missing below. The full notices, above, are still complete.
-            </p>
-            {software.problems.length === 0 ? null : (
-              <ul>
-                {software.problems.map((problem) => (
-                  <li key={problem}>{problem}</li>
-                ))}
-              </ul>
-            )}
-          </StatusMessage>
-        ) : null}
-        <h3>In the app</h3>
-        <p>
-          What a browser downloads when it opens this app. The Android app carries all of it too.
-        </p>
-        <SoftwareList items={software.app} />
-        <h3>In the Android app only</h3>
-        <p>
-          The native libraries the Android app is built with, beside the app above. A browser never
-          downloads these.
-        </p>
-        <SoftwareList items={software.android} />
-        <p>
-          Generated from this project&rsquo;s installed dependencies rather than typed by hand, and
-          checked on every change: a package added without its notice fails the build.
-        </p>
+        <div data-terms="software" className="oyl-sections__long">
+          <h2>Software this app includes</h2>
+          <p>
+            This app is built from open-source software written by other people, and each part is
+            used under the licence named beside it. Every one of those licences asks for its notice
+            to travel with the software, and the full third-party notices reproduce each one word
+            for word. They ship inside this app, so they open here without a network.
+          </p>
+          <ReadInPlace
+            load={noticesDocument}
+            summary="Read the full notices"
+            reading="Reading the notices this app carries."
+            failedLabel="Could not open the notices"
+            failed="The notices this app carries could not be read just now. The list below is still every package they cover."
+            marker={{ 'data-notices-document': '' }}
+          />
+          {software.app.length === 0 || software.problems.length > 0 ? (
+            <StatusMessage tone="warning" label="This list may be incomplete">
+              <p>
+                The list of software this app includes could not be read in full, so a package may
+                be missing below. The full notices, above, are still complete.
+              </p>
+              {software.problems.length === 0 ? null : (
+                <ul>
+                  {software.problems.map((problem) => (
+                    <li key={problem}>{problem}</li>
+                  ))}
+                </ul>
+              )}
+            </StatusMessage>
+          ) : null}
+          <h3>In the app</h3>
+          <p>
+            What a browser downloads when it opens this app. The Android app carries all of it too.
+          </p>
+          <SoftwareList items={software.app} />
+          <h3>In the Android app only</h3>
+          <p>
+            The native libraries the Android app is built with, beside the app above. A browser
+            never downloads these.
+          </p>
+          <SoftwareList items={software.android} />
+          <p>
+            Generated from this project&rsquo;s installed dependencies rather than typed by hand,
+            and checked on every change: a package added without its notice fails the build.
+          </p>
+        </div>
       </div>
     </>
   );

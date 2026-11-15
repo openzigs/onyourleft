@@ -391,6 +391,8 @@ export function DemoPage(props: DemoPageProps) {
                   withoutPacer
                   // Nor an elapsed time apart from that clock (#2072).
                   withoutElapsed
+                  // Nor the ride so far (#2076): it records nothing.
+                  withoutTotals
                   withoutEnd={withoutStop}
                   paused={!playing}
                   onPause={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}

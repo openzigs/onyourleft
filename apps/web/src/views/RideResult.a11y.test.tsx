@@ -143,7 +143,7 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
   });
 
   it('says power read zero, never "0 W", for a ride whose power readings were all 0 — #1054', async () => {
-    // `finish.ts` §`averagePowerOf` saves 0 for a ride whose every power
+    // `totals.ts` §`rideAveragePower` saves 0 for a ride whose every power
     // reading was 0, and the controller hands that to the card as it was saved.
     await show(savedSnapshot({ ...SAVED, averagePower: watts(0) }));
     const shown = card()!;
@@ -156,7 +156,7 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
   });
 
   it('draws and says no distance, never "0.0 km", for a ride that stored none — #1070', async () => {
-    // `finish.ts` §`distanceOf` saves 0 m for a ride with no speed channel.
+    // `totals.ts` §`rideDistance` saves 0 m for a ride with no speed channel.
     await show(savedSnapshot({ ...SAVED, distance: metres(0) }));
     const shown = card()!;
     expect(queryAll<HTMLElement>(shown, 'dt').map((node) => node.textContent)).toEqual([
@@ -273,6 +273,16 @@ describe('#1042 — announced politely, once', () => {
       (node) => node.closest('[data-oyl-result-card]') === null,
     );
     expect(regions.filter((node) => node.textContent?.includes('saved'))).toEqual([]);
+  });
+
+  it('says “with its draft” on the card and in its region after a drafted attempt — #2425, ADR 0066 D-5.1', async () => {
+    await show(savedSnapshot({ ...SAVED, gameOutcome: 'beaten', gameOutcomeDrafted: true }));
+    const words =
+      'In your last trainer game ride, you beat your best on that route, with its draft.';
+    expect(card()!.querySelector('.oyl-result__outcome')?.textContent).toBe(words);
+    expect(region()!.textContent).toBe(
+      `Ride saved: moving time 1:02:05, 32.4 kilometres. ${words}`,
+    );
   });
 
   it('says the game’s outcome after the facts, once', async () => {

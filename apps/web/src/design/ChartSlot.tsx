@@ -113,6 +113,19 @@ export interface ChartSlotProps {
    * failing chart leaves the table itself, open, as `'fallback'` does.
    */
   readonly tablePosition?: 'fallback' | 'beside' | 'disclosed';
+  /**
+   * Words that go WITH the table — the owner's ruling of 2026-11-06 on Home's
+   * week (#2049): the sentence and the week-before figures that were above
+   * and under the chart moved behind its disclosure, so the module is as short
+   * as the chart.
+   *
+   * Rendered just before the table wherever the table is: inside the
+   * `'disclosed'` `<details>`, above it under `'beside'`, and in the fallback
+   * when the chart throws, so a failing chart never takes these words with it.
+   * Under `'fallback'` with a chart that draws, where there is no table, they
+   * are under the chart. A caller that leaves this out renders as before.
+   */
+  readonly alongside?: ReactNode;
 }
 
 /** The disclosure's summary under `'disclosed'`: which readings, as a table. */
@@ -206,12 +219,16 @@ export function ChartSlot({
   emptyMessage,
   chart,
   tablePosition = 'fallback',
+  alongside,
   onChartError,
 }: ChartSlotProps & {
   readonly onChartError?: (error: Error, info: ErrorInfo) => void;
 }): JSX.Element {
   const table = (
-    <DataTable caption={caption} columns={columns} rows={rows} emptyMessage={emptyMessage} />
+    <>
+      {alongside}
+      <DataTable caption={caption} columns={columns} rows={rows} emptyMessage={emptyMessage} />
+    </>
   );
   if (chart === undefined) {
     return table;
@@ -232,7 +249,10 @@ export function ChartSlot({
           </details>
         </>
       ) : (
-        chart
+        <>
+          {chart}
+          {alongside}
+        </>
       )}
     </RenderBoundary>
   );

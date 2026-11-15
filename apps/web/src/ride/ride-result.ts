@@ -10,8 +10,8 @@
  * | what | where it was computed |
  * |---|---|
  * | the ride's elapsed time | the recording engine, written to the activity (`recording/finish.ts`) |
- * | its distance | `finish.ts` §`distanceOf`, written to the activity |
- * | its average power | `finish.ts` §`averagePowerOf`, written to the activity — and not shown when it is 0 W (`format.ts` §`shownAveragePower`, #1054) |
+ * | its distance | `totals.ts` §`rideDistance`, written to the activity |
+ * | its average power | `totals.ts` §`rideAveragePower`, written to the activity — and not shown when it is 0 W (`format.ts` §`shownAveragePower`, #1054) |
  * | its average heart rate, where there is one | {@link statedAverageHeartRate} — the figure the ride's page states in its heart rate trace's description (`detail/TraceChart.tsx` §`describeTrace`), computed by the page's OWN two steps over the samples the save wrote |
  * | how the race against the rider's own best ended, in the trainer game | `game/ghost-outcome.ts`, LATCHED — carried here, never re-derived |
  *
@@ -44,10 +44,11 @@ import {
   type Seconds,
   type Watts,
 } from '@onyourleft/domain';
-import type { ActivityId } from '@onyourleft/store';
+import type { ActivityCalories, ActivityId } from '@onyourleft/store';
 
 import { CHART_POINTS, downsample, traceMean } from '../detail/series';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
+import type { TestRideEstimate } from '../workouts/threshold-test-result';
 
 /** A saved ride's facts, as the result card states them. */
 export interface SavedRide {
@@ -62,11 +63,28 @@ export interface SavedRide {
   /** `undefined` for a ride with no heart rate reading at all. */
   readonly averageHeartRate: BeatsPerMinute | undefined;
   /**
+   * The calorie estimate the save wrote — #2433. `undefined` for a ride with
+   * no figure, which the card shows as a dash and a reason, never `0 kcal`.
+   */
+  readonly calories?: ActivityCalories | undefined;
+  /**
    * How the last trainer-game ride ridden during this recording ended against
    * the rider's own best, once settled — or `undefined`: no game ride, no
    * ghost, or a race not settled when the game ride ended.
    */
   readonly gameOutcome: GhostOutcome | undefined;
+  /**
+   * That the attempt {@link gameOutcome} settles was ridden in the pacer's or
+   * the ghost's draft — #2425, ADR 0066 D-5.1 and D-5.6, latched by the game
+   * with the outcome. Only ever `true` beside a {@link gameOutcome}.
+   */
+  readonly gameOutcomeDrafted?: boolean | undefined;
+  /**
+   * A threshold test ridden on this ride, and its estimate or the refusal of
+   * one — #2307. `undefined` for a ride with no test on it, which the Ride
+   * screen answers with no offer at all.
+   */
+  readonly thresholdTest?: TestRideEstimate | undefined;
 }
 
 /**
@@ -84,6 +102,18 @@ export const GAME_OUTCOME_TEXT: Readonly<Record<GhostOutcome, string>> = {
   level: 'In your last trainer game ride, you matched your best on that route.',
   'not-beaten': 'In your last trainer game ride, your best on that route finished ahead of you.',
 };
+
+/**
+ * The card's sentence about the game's outcome, or `undefined` with none —
+ * {@link GAME_OUTCOME_TEXT}, and after an attempt ridden in a draft the words
+ * *"with its draft"* (#2425, ADR 0066 D-5.1), so a result won partly on the
+ * shelter of the ghost or the pacer says so. ⚠️ Draft wording for the owner.
+ */
+export function gameOutcomeText(result: SavedRide): string | undefined {
+  if (result.gameOutcome === undefined) return undefined;
+  const text = GAME_OUTCOME_TEXT[result.gameOutcome];
+  return result.gameOutcomeDrafted === true ? `${text.replace(/\.$/, '')}, with its draft.` : text;
+}
 
 /**
  * The average heart rate the ride's page states, or `undefined` for a ride

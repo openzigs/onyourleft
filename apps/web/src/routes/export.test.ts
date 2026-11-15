@@ -50,7 +50,7 @@ function gpx(lengthMetres: number, name?: string): string {
   ].join('\n');
 }
 
-function saved(lengthMetres = 2000, name = 'Regents Park'): RouteRecord {
+function saved(lengthMetres = 2000, name = 'Mill pond loop'): RouteRecord {
   const outcome = routeFromGpx(gpx(lengthMetres, name), {
     fileName: 'route.gpx',
     owner: ATHLETE,
@@ -65,8 +65,8 @@ function saved(lengthMetres = 2000, name = 'Regents Park'): RouteRecord {
 
 describe('the file a rider gets', () => {
   it('is named after the route, with the format’s extension', () => {
-    expect(exportedFrom(saved(), 'gpx').file.fileName).toBe('Regents Park.gpx');
-    expect(exportedFrom(saved(), 'tcx').file.fileName).toBe('Regents Park.tcx');
+    expect(exportedFrom(saved(), 'gpx').file.fileName).toBe('Mill pond loop.gpx');
+    expect(exportedFrom(saved(), 'tcx').file.fileName).toBe('Mill pond loop.tcx');
   });
 
   it('does not let a route name become a path', () => {
@@ -136,7 +136,7 @@ describe('reading the route back out of the store', () => {
     const record = saved();
     const port = routeStub(ATHLETE, [record]);
     const exported = await exportRoute(port, ATHLETE, record.id, 'gpx');
-    expect(exported.file.fileName).toBe('Regents Park.gpx');
+    expect(exported.file.fileName).toBe('Mill pond loop.gpx');
   });
 
   it('refuses another athlete’s route rather than exporting it', async () => {

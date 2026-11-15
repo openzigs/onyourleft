@@ -49,7 +49,15 @@ describe('a pairing code, drawn by a library loaded only when one is shown', () 
     // The first frame: the chunk has been asked for and has not arrived.
     expect(drawn()).toBeNull();
     expect(document.body.textContent).toContain(PAIRING_CODE_DRAWING);
-    await expect.poll(() => drawn()?.getAttribute('aria-label'), { timeout: 5000 }).toBe(LABEL);
+    // The chunk the component asked for, awaited here with no deadline but the
+    // case's own: Vitest's first transform of the library is the slow part on
+    // a loaded runner, and is why the poll below had a 5 s timeout until
+    // #2525 (#1688's ruling: never a longer timeout than the default). The
+    // poll now waits only for the component's own `import()` to answer and
+    // React to draw, inside its default second. The case took under 0.15 s
+    // locally, with and without --coverage, before and after.
+    await import('./side-link-qr');
+    await expect.poll(() => drawn()?.getAttribute('aria-label')).toBe(LABEL);
     expect(document.body.textContent).not.toContain(PAIRING_CODE_DRAWING);
   });
 });

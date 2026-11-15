@@ -24,6 +24,7 @@
 
 import {
   beatsPerMinute,
+  kilocalories,
   kilograms,
   degreesBearing,
   gradePercent,
@@ -64,11 +65,15 @@ import {
   workoutId,
 } from './ids';
 import type {
+  ActivityCalories,
+  ActivityCaloriesBasis,
   ActivityRecord,
+  DraftSpan,
   RideFacts,
   RoomRaceFact,
   AthleteRecord,
   CameraFrameRecord,
+  CameraFrameSource,
   FramingCheckRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
@@ -88,7 +93,11 @@ import type {
   WorkoutRecord,
 } from './records';
 import {
+  CAMERA_FRAME_SOURCES,
+  ACTIVITY_CALORIES_BASES,
   FRAMING_CHECK_RECORDS,
+  isBirthYear,
+  parseCalorieSex,
   RIDE_WRITE_UP_SOURCES,
   RIDERLESS_SYNC_BASE_KINDS,
   SYNC_BASE_KINDS,
@@ -110,6 +119,10 @@ export interface PersistedAthlete {
   thresholdPower?: number;
   thresholdHeartRate?: number;
   mass?: number;
+  /** @see AthleteRecord.calorieSex — #2432, stored as its bare word. */
+  calorieSex?: string;
+  /** @see AthleteRecord.birthYear — #2432. */
+  birthYear?: number;
   /** @see AthleteRecord.units — a display preference, stored as its bare word. */
   units?: string;
   /** @see AthleteRecord.kitColour — a palette key, stored as its bare word. */
@@ -133,6 +146,8 @@ export interface PersistedActivity {
   /** @see ActivityRecord.routeId — the link #93's ghost lookup indexes on. */
   routeId?: string;
   averagePower?: number;
+  /** @see ActivityRecord.calories — #2433, optional, so no schema version. */
+  calories?: { energy: number; basis: string };
   /** @see ActivityRecord.effortWeightedPower — the load summary #77 reads. */
   effortWeightedPower?: number;
   effortWeightedHeartRate?: number;
@@ -165,6 +180,10 @@ export interface PersistedRideFacts {
    * shape, re-read whole on the way in and out: @see workoutBlockFactsOf
    */
   workoutBlocks?: unknown[];
+  /** @see RideFacts.drafted — #2451. */
+  drafted?: boolean;
+  /** @see RideFacts.draftSpans — #2451. Re-read whole on the way in and out: @see draftSpansOf */
+  draftSpans?: unknown[];
 }
 
 /**
@@ -310,7 +329,12 @@ export interface PersistedWorkout {
  * arrays, and a `Blob` would make the round-trip comparison asynchronous for no
  * gain.
  */
-export interface PersistedCameraFrame {
+/**
+ * A kept camera frame as it sat on disk at schema versions 10 to 20, before
+ * #1063 gave a row its source, its ride and its outline. What
+ * `migrations.ts` §`CAMERA_FRAME_SOURCE` reads and `down` writes back.
+ */
+export interface PersistedCameraFrameV20 {
   id: string;
   athleteId: string;
   capturedAt: number;
@@ -318,6 +342,14 @@ export interface PersistedCameraFrame {
   width: number;
   height: number;
   bytes: Uint8Array;
+}
+
+/** A camera frame as it sits on disk since schema version 21 (#1063). */
+export interface PersistedCameraFrame extends PersistedCameraFrameV20 {
+  source: string;
+  /** `null` for a kept frame — and so not in the `[athleteId+activityId]` index. */
+  activityId: string | null;
+  outline: { aspect: number; landmarks: { name: string; x: number; y: number }[] } | null;
 }
 
 export interface PersistedSegment {
@@ -443,6 +475,12 @@ export function toPersistedAthlete(record: AthleteRecord): PersistedAthlete {
   if (record.mass !== undefined) {
     row.mass = record.mass;
   }
+  if (record.calorieSex !== undefined) {
+    row.calorieSex = record.calorieSex;
+  }
+  if (record.birthYear !== undefined) {
+    row.birthYear = record.birthYear;
+  }
   if (record.units !== undefined) {
     row.units = record.units;
   }
@@ -496,6 +534,17 @@ export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
   // effort was. This is only ever the source of that copy.
   if (row.mass !== undefined) {
     record.mass = decoded('athlete.mass', decodedNumber('athlete.mass', row.mass), kilograms);
+  }
+  // #2432. Absent stays absent for the reason above. Present but unrecognised
+  // reads as unset rather than a `StoreDecodeError`, for `units`' reason below:
+  // these decide only whether a heart-rate ride shows a calorie figure, and
+  // unset shows none — `records.ts` §`parseCalorieSex`.
+  const calorieSex = parseCalorieSex(row.calorieSex);
+  if (calorieSex !== undefined) {
+    record.calorieSex = calorieSex;
+  }
+  if (isBirthYear(row.birthYear)) {
+    record.birthYear = row.birthYear;
   }
   // #238. Absent stays absent for the reason above. Present but unrecognised
   // becomes the default rather than a `StoreDecodeError`, which is the one
@@ -553,6 +602,11 @@ export function toPersistedActivity(record: ActivityRecord): PersistedActivity {
   if (record.averagePower !== undefined) {
     row.averagePower = record.averagePower;
   }
+  // #2433. Named field by field, as `rideFacts` is, so a member added to the
+  // type is not written until this says so.
+  if (record.calories !== undefined) {
+    row.calories = { energy: record.calories.energy, basis: record.calories.basis };
+  }
   // The load summary (#77), each written conditionally for the same reason.
   // ⚠️ At most one basis is ever set — `records.ts` states why — and this
   // function does not enforce it: a record that carried both would be written
@@ -608,7 +662,30 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   // back is written — and one that does not is left out, never the ride.
   const blocks = workoutBlockFactsOf(facts.workoutBlocks);
   if (blocks !== undefined) row.workoutBlocks = [...blocks];
+  // #2451: and the draft, the spans through their reader as the blocks are.
+  if (facts.drafted !== undefined) row.drafted = facts.drafted;
+  const spans = draftSpansOf(facts.draftSpans);
+  if (spans !== undefined) row.draftSpans = spans.map(({ from, to }) => ({ from, to }));
   return row;
+}
+
+/**
+ * A ride's draft spans (#2451), or `undefined` when there are none or the
+ * list does not read — dropped WHOLE, never the ride, as a ride's workout
+ * blocks are: a span missing from the middle would leave an effort ridden in
+ * it unmarked. Each span is two finite instants, `to` not before `from`.
+ */
+export function draftSpansOf(value: unknown): readonly DraftSpan[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const spans: DraftSpan[] = [];
+  for (const each of value as unknown[]) {
+    if (typeof each !== 'object' || each === null) return undefined;
+    const { from, to } = each as { from?: unknown; to?: unknown };
+    if (typeof from !== 'number' || typeof to !== 'number') return undefined;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return undefined;
+    spans.push({ from: unixSeconds(from), to: unixSeconds(to) });
+  }
+  return spans;
 }
 
 /**
@@ -771,6 +848,8 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   const races = racesOf(facts.races);
   // #1319: never a throw either. @see workoutBlockFactsOf
   const workoutBlocks = workoutBlockFactsOf(facts.workoutBlocks);
+  // #2451: never a throw either. @see draftSpansOf
+  const draftSpans = draftSpansOf(facts.draftSpans);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -817,6 +896,29 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...replans,
     ...(races === undefined ? {} : { races }),
     ...(workoutBlocks === undefined ? {} : { workoutBlocks }),
+    ...(facts.drafted === undefined
+      ? {}
+      : { drafted: decodedBoolean('activity.rideFacts.drafted', facts.drafted) }),
+    ...(draftSpans === undefined ? {} : { draftSpans }),
+  };
+}
+
+/** @throws {StoreDecodeError} for an energy that is not one, or a basis that is not one of the three. */
+function decodedCalories(stored: unknown): ActivityCalories {
+  const { energy, basis } = (typeof stored === 'object' && stored !== null ? stored : {}) as {
+    energy?: unknown;
+    basis?: unknown;
+  };
+  if (!ACTIVITY_CALORIES_BASES.includes(basis as ActivityCaloriesBasis)) {
+    throw new StoreDecodeError('activity.calories.basis: must be power, heart-rate or file');
+  }
+  return {
+    energy: decoded(
+      'activity.calories.energy',
+      decodedNumber('activity.calories.energy', energy),
+      kilocalories,
+    ),
+    basis: basis as ActivityCaloriesBasis,
   };
 }
 
@@ -874,6 +976,10 @@ export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
     ...(averagePower === undefined
       ? {}
       : { averagePower: decoded('activity.averagePower', averagePower, watts) }),
+    // #2433. Absent stays absent: a ride saved before it has no estimate, and a
+    // reader that invented one would be lying about the disk. Present is
+    // validated on the same terms as every other field.
+    ...(row.calories === undefined ? {} : { calories: decodedCalories(row.calories) }),
     // Absent stays absent, on `fromPersistedAthlete`'s reasoning: a row written
     // before #77 genuinely has no load summary, and a reader that invented one
     // would be lying about the disk. `apps/web` offers to compute the missing
@@ -1509,7 +1615,66 @@ export function toPersistedCameraFrame(record: CameraFrameRecord): PersistedCame
     width: record.width,
     height: record.height,
     bytes: record.bytes,
+    source: record.source,
+    activityId: record.activityId,
+    outline:
+      record.outline === null
+        ? null
+        : {
+            aspect: record.outline.aspect,
+            landmarks: record.outline.landmarks.map((landmark) => ({
+              name: landmark.name,
+              x: landmark.x,
+              y: landmark.y,
+            })),
+          },
   };
+}
+
+/**
+ * What is wrong with a camera frame's source, ride and outline taken
+ * together, or `undefined` when nothing is — #1063.
+ *
+ * One rule for both directions, as {@link framingReferenceProblem} is: the
+ * put refuses what this names, and the decoder refuses it on the way out.
+ * A snapshot names a ride; a kept frame names none and carries no outline.
+ * The outline is held to the framing reference's own rule, because it is the
+ * same numbers.
+ *
+ * ⚠️ The message names the field and the constraint and never the value (ADR
+ * 0029 D-8): a landmark is where somebody's knee was in a photograph.
+ */
+export function cameraFrameProblem(frame: {
+  readonly source: unknown;
+  readonly activityId: unknown;
+  readonly outline: unknown;
+}): string | undefined {
+  if (!(CAMERA_FRAME_SOURCES as readonly unknown[]).includes(frame.source)) {
+    return `cameraFrame.source: must be one of ${CAMERA_FRAME_SOURCES.join(', ')}`;
+  }
+  if (frame.source === 'kept') {
+    if (frame.activityId !== null) {
+      return 'cameraFrame.activityId: a kept frame names no ride';
+    }
+    if (frame.outline !== null) {
+      return 'cameraFrame.outline: a kept frame carries no outline';
+    }
+    return undefined;
+  }
+  if (typeof frame.activityId !== 'string' || frame.activityId.length === 0) {
+    return 'cameraFrame.activityId: a snapshot must name the ride it was taken in';
+  }
+  if (frame.outline === null) {
+    return undefined;
+  }
+  if (typeof frame.outline !== 'object') {
+    return 'cameraFrame.outline: must be an outline or null';
+  }
+  const { aspect, landmarks } = frame.outline as { aspect?: unknown; landmarks?: unknown };
+  const problem = framingReferenceProblem({ aspect, landmarks });
+  return problem === undefined
+    ? undefined
+    : problem.replace(/^framingReference\./, 'cameraFrame.outline.');
 }
 
 /**
@@ -1549,6 +1714,32 @@ export function fromPersistedCameraFrame(row: PersistedCameraFrame): CameraFrame
     width: decodedNumber('cameraFrame.width', row.width),
     height: decodedNumber('cameraFrame.height', row.height),
     bytes: row.bytes,
+    ...decodedFrameLink(row),
+  };
+}
+
+/** The source, ride and outline of a frame on disk, checked by {@link cameraFrameProblem}. */
+function decodedFrameLink(
+  row: PersistedCameraFrame,
+): Pick<CameraFrameRecord, 'source' | 'activityId' | 'outline'> {
+  const problem = cameraFrameProblem(row);
+  if (problem !== undefined) {
+    throw new StoreDecodeError(problem);
+  }
+  return {
+    source: row.source as CameraFrameSource,
+    activityId: row.activityId === null ? null : activityId(row.activityId),
+    outline:
+      row.outline === null
+        ? null
+        : {
+            aspect: row.outline.aspect,
+            landmarks: row.outline.landmarks.map((landmark) => ({
+              name: landmark.name,
+              x: landmark.x,
+              y: landmark.y,
+            })),
+          },
   };
 }
 

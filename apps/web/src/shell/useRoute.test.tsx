@@ -12,7 +12,7 @@
  * which is how `AppShell`'s `immersive` reaches a navigation made mid-ride.
  */
 
-import { startTransition, type JSX } from 'react';
+import { addTransitionType, startTransition, type JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -22,10 +22,15 @@ import { useRoute, type MayAnimate, type RouteUpdates } from './useRoute';
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
-  return { ...actual, startTransition: vi.fn(actual.startTransition) };
+  return {
+    ...actual,
+    startTransition: vi.fn(actual.startTransition),
+    addTransitionType: vi.fn(actual.addTransitionType),
+  };
 });
 
 const transitions = vi.mocked(startTransition);
+const types = vi.mocked(addTransitionType);
 
 let shown: string[] = [];
 let mounted: Mounted | undefined;
@@ -50,6 +55,7 @@ beforeEach(async () => {
   });
   shown = [];
   transitions.mockClear();
+  types.mockClear();
 });
 
 afterEach(() => {
@@ -78,10 +84,41 @@ describe('useRoute (#945)', () => {
     expect(mounted.container.textContent).toBe('activities');
   });
 
+  it('announces which way each animated navigation goes, inside its transition (#2054)', async () => {
+    let inside = false;
+    const during: boolean[] = [];
+    transitions.mockImplementation((scope) => {
+      inside = true;
+      try {
+        // The router's scope is synchronous; an async action would return a promise.
+        void scope();
+      } finally {
+        inside = false;
+      }
+    });
+    types.mockImplementation(() => {
+      during.push(inside);
+    });
+    try {
+      globalThis.location.hash = '#/about';
+      mounted = await mount(<Probe mayAnimate={() => true} />);
+      await navigate('#/about/credits');
+      await navigate('#/about');
+      await navigate('#/activities');
+      expect(types.mock.calls).toEqual([['oyl-deeper'], ['oyl-back'], ['oyl-across']]);
+      // Inside `startTransition`: a type added outside one is dropped by React.
+      expect(during).toEqual([true, true, true]);
+    } finally {
+      transitions.mockRestore();
+      types.mockRestore();
+    }
+  });
+
   it('applies a refused navigation outside startTransition, and still applies it', async () => {
     mounted = await mount(<Probe mayAnimate={() => false} />);
     await navigate('#/ride');
     expect(transitions).not.toHaveBeenCalled();
+    expect(types).not.toHaveBeenCalled();
     expect(mounted.container.textContent).toBe('ride');
   });
 

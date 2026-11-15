@@ -26,9 +26,13 @@ import { personalBest, RANKING_BASIS_LABEL, rankEfforts } from '@onyourleft/doma
 import { segmentId, type SegmentEffortRecord, type UnitSystem } from '@onyourleft/store';
 
 import { StatusMessage } from '../design/StatusMessage';
+import { DRAFTED_EFFORT_TEXT } from '../game/solo-draft';
 import { formatDuration } from '../format';
 import { loadHistory, loadOverlay, type EffortHistory, type OverlayResult } from '../efforts/load';
 import type { EffortPort } from '../efforts/store-port';
+import type { LeaderboardPort } from '../instance/leaderboard-port';
+import { notCountedSentence } from '../segments/excluded';
+import { InstanceBoard } from '../segments/InstanceBoard';
 import { hrefForActivity } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatSmallDistance, measurementText } from '../units/format';
@@ -56,14 +60,26 @@ export interface SegmentDetailViewProps {
   readonly port: EffortPort | undefined;
   /** The `:segment` capture. Absent when the audit renders the bare route. */
   readonly segment: string | undefined;
+  /**
+   * The rider's instance's boards (#68), or `undefined` with no instance — in
+   * which case nothing about one renders and nothing is sent.
+   */
+  readonly boards?: LeaderboardPort | undefined;
 }
 
-export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JSX.Element {
+export function SegmentDetailView({ port, segment, boards }: SegmentDetailViewProps): JSX.Element {
   const [history, setHistory] = useState<EffortHistory | undefined>(undefined);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<readonly string[]>([]);
-  const [overlay, setOverlay] = useState<OverlayResult | undefined>(undefined);
+  const [overlay, setOverlay] = useState<
+    | {
+        readonly result: OverlayResult;
+        readonly first: SegmentEffortRecord;
+        readonly second: SegmentEffortRecord;
+      }
+    | undefined
+  >(undefined);
   const units = useUnits();
 
   useEffect(() => {
@@ -104,7 +120,13 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
     () => (history === undefined ? [] : rankEfforts(history.rows.map((row) => row.effort))),
     [history],
   );
-  const best = useMemo(() => personalBest(ranked), [ranked]);
+  // #69: a segment the rider's instance says is hazardous awards no personal
+  // best — told by its board, which is the only thing here that knows.
+  const [hazardous, setHazardous] = useState(false);
+  const best = useMemo(() => (hazardous ? undefined : personalBest(ranked)), [ranked, hazardous]);
+  // #69: the efforts that do not count are still the rider's, and are shown
+  // with the reason rather than dropped (`segments/excluded.ts`).
+  const notCounted = history?.notCounted ?? [];
 
   const toggle = useCallback((id: string) => {
     setOverlay(undefined);
@@ -130,7 +152,9 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
       return;
     }
     loadOverlay(port, first, second)
-      .then(setOverlay)
+      .then((result) => {
+        setOverlay({ result, first, second });
+      })
       .catch(() => {
         setProblem('This device could not read the rides those efforts came from.');
       });
@@ -199,7 +223,10 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
                             toggle(effort.id);
                           }}
                         />{' '}
-                        <span>Compare {formatDuration(effort.elapsed)} effort</span>
+                        <span>
+                          Compare {formatDuration(effort.elapsed)} effort
+                          {effort.drafted === true ? ', drafted' : ''}
+                        </span>
                       </label>
                     </td>
                     <td>{formatDuration(effort.elapsed)}</td>
@@ -211,11 +238,17 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
                       )}
                     </td>
                     <td>
-                      {/* Words, never a colour or an icon alone (#48). */}
-                      {effort.id === best?.id ? 'Personal best' : ''}
-                      {effort.visibility === 'private-match'
-                        ? `${effort.id === best?.id ? ' · ' : ''}In a privacy zone — yours only`
-                        : ''}
+                      {/* Words, never a colour or an icon alone (#48). #2451:
+                      and a drafted effort says so, ADR 0066 D-5.2. */}
+                      {[
+                        effort.id === best?.id ? 'Personal best' : undefined,
+                        effort.visibility === 'private-match'
+                          ? 'In a privacy zone — yours only'
+                          : undefined,
+                        effort.drafted === true ? DRAFTED_EFFORT_TEXT : undefined,
+                      ]
+                        .filter((part) => part !== undefined)
+                        .join(' · ')}
                     </td>
                   </tr>
                 );
@@ -230,13 +263,77 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
         </>
       )}
 
-      {overlay === undefined ? null : <Overlay result={overlay} />}
+      {hazardous ? (
+        <StatusMessage tone="info">
+          This segment was flagged hazardous on your instance, so no personal best is awarded on it.
+        </StatusMessage>
+      ) : null}
+
+      {notCounted.length === 0 ? null : (
+        <ScrollTable
+          className="oyl-data-table"
+          caption="Your efforts on this segment that are not counted, and why"
+        >
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              <th scope="col">Ride</th>
+              <th scope="col">Why it is not counted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {notCounted.map((row) => (
+              <tr key={row.effort.id}>
+                <td>{formatDuration(row.effort.elapsed)}</td>
+                <td>
+                  {row.activity === undefined ? (
+                    'Ride no longer on this device'
+                  ) : (
+                    <a href={hrefForActivity(row.effort.activityId)}>{row.activity.name}</a>
+                  )}
+                </td>
+                <td>{notCountedSentence(history.segment, row.effort, units)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </ScrollTable>
+      )}
+
+      {overlay === undefined ? null : (
+        <Overlay result={overlay.result} first={overlay.first} second={overlay.second} />
+      )}
+
+      {/* #68: only with an instance this copy can seal to; otherwise nothing. */}
+      {boards?.offered() === true ? (
+        <InstanceBoard
+          port={boards}
+          segment={history.segment}
+          efforts={history.rows.map((row) => row.effort)}
+          onHazardous={setHazardous}
+        />
+      ) : null}
     </section>
   );
 }
 
+/**
+ * A compared effort's column heading — #2451, ADR 0066 D-5.2: a drafted effort
+ * is never silently set beside an undrafted one, so its heading says so.
+ */
+function effortHeading(which: 'First' | 'Second', effort: SegmentEffortRecord): string {
+  return effort.drafted === true ? `${which} effort, drafted` : `${which} effort`;
+}
+
 /** The comparison, as a table. The chart is a later addition over the same rows. */
-function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
+function Overlay({
+  result,
+  first,
+  second,
+}: {
+  readonly result: OverlayResult;
+  readonly first: SegmentEffortRecord;
+  readonly second: SegmentEffortRecord;
+}): JSX.Element {
   const units = useUnits();
   if (result.kind === 'no-track') {
     return (
@@ -274,8 +371,8 @@ function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
         <thead>
           <tr>
             <th scope="col">Distance</th>
-            <th scope="col">First effort</th>
-            <th scope="col">Second effort</th>
+            <th scope="col">{effortHeading('First', first)}</th>
+            <th scope="col">{effortHeading('Second', second)}</th>
             <th scope="col">Difference</th>
           </tr>
         </thead>

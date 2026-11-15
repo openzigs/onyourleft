@@ -105,6 +105,24 @@ export const POWER_ZONE_NAMES: readonly string[] = [
 ];
 
 /**
+ * Sweet spot, as fractions of threshold power: **0.88 to 0.94**, both ends
+ * inclusive — the band the training literature writes it as (#2295's survey).
+ *
+ * ⚠️ **A band, not an eighth zone.** It straddles the boundary between Tempo
+ * and Threshold at 0.91, and neither of its ends is in
+ * {@link POWER_ZONE_LOWER_FRACTIONS}, so no zone or pair of zones can say it
+ * without also admitting a tempo or a threshold set. Spike 0038 §5.2 (R-3)
+ * found that and proposed this: one named constant beside the zone tables,
+ * stated once and cited, which the built-in library's category check reads
+ * (`workout/library/catalogue.test.ts`). It classifies nothing, and no
+ * trainer target is computed from it.
+ */
+export const SWEET_SPOT_FRACTIONS: { readonly lower: number; readonly upper: number } = {
+  lower: 0.88,
+  upper: 0.94,
+};
+
+/**
  * Lower bounds as fractions of threshold heart rate, inclusive.
  *
  * Five zones rather than seven, and that is not an oversight: heart rate does

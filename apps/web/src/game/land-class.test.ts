@@ -40,6 +40,8 @@ import {
   LAND_CLASS_OF_KIND,
   LEVELLING_MAX_CHUNKS,
   LEVELLING_REACH_METRES,
+  LAND_CLASS_CELL_METRES,
+  chamfer,
   kindAt,
   landClassMask,
   landClassOfKind,
@@ -727,6 +729,75 @@ describe('how far built-up land is — #1547', () => {
     expect(builtUpDistance(solid, 100, 100)).toBe(0);
     expect(builtUpDistance(solid, 500, 100)).toBe(0);
     expect(solid.levellingBytes).toBe(4096);
+  });
+});
+
+describe('the chamfer, cell by cell — #1688', () => {
+  /**
+   * The two passes as they were written before #1688, testing each cell for
+   * the neighbours it has: the specification `chamfer` is held to.
+   */
+  const reference = (grid: Float32Array, side: number): void => {
+    const step = LAND_CLASS_CELL_METRES;
+    const diagonal = LAND_CLASS_CELL_METRES * Math.SQRT2;
+    for (let z = 0; z < side; z += 1) {
+      for (let x = 0; x < side; x += 1) {
+        const at = z * side + x;
+        let best = grid[at] as number;
+        if (x > 0) best = Math.min(best, (grid[at - 1] as number) + step);
+        if (z > 0) {
+          best = Math.min(best, (grid[at - side] as number) + step);
+          if (x > 0) best = Math.min(best, (grid[at - side - 1] as number) + diagonal);
+          if (x + 1 < side) best = Math.min(best, (grid[at - side + 1] as number) + diagonal);
+        }
+        grid[at] = best;
+      }
+    }
+    for (let z = side - 1; z >= 0; z -= 1) {
+      for (let x = side - 1; x >= 0; x -= 1) {
+        const at = z * side + x;
+        let best = grid[at] as number;
+        if (x + 1 < side) best = Math.min(best, (grid[at + 1] as number) + step);
+        if (z + 1 < side) {
+          best = Math.min(best, (grid[at + side] as number) + step);
+          if (x + 1 < side) best = Math.min(best, (grid[at + side + 1] as number) + diagonal);
+          if (x > 0) best = Math.min(best, (grid[at + side - 1] as number) + diagonal);
+        }
+        grid[at] = best;
+      }
+    }
+  };
+
+  it('gives every cell of a grid what the passes with a test per cell give it, at every size', () => {
+    // Seeded: a seed on every edge and corner of a grid, where the written-out
+    // columns and rows are, as well as inside it, and some cells already
+    // part of the way to a seed. The levelling field's own grids are 166
+    // cells a side, and nothing it stores reads their outer columns, so only
+    // this case sees them.
+    let state = 1_688;
+    const random = (): number => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+    let reached = 0;
+    for (const side of [1, 2, 3, 4, 7, 166]) {
+      for (let trial = 0; trial < 12; trial += 1) {
+        const grid = new Float32Array(side * side).fill(Number.POSITIVE_INFINITY);
+        const share = trial === 0 ? 0 : random() * 0.1;
+        for (let at = 0; at < grid.length; at += 1) {
+          if (random() < share) grid[at] = random() < 0.5 ? 0 : random() * 40;
+        }
+        // A seed in a corner, which is where the edges meet.
+        grid[trial % 2 === 0 ? 0 : grid.length - 1] = 0;
+        const expected = grid.slice();
+        reference(expected, side);
+        chamfer(grid, side);
+        expect(Array.from(grid)).toEqual(Array.from(expected));
+        reached += expected.filter((metres) => Number.isFinite(metres)).length;
+      }
+    }
+    // Non-vacuity: the seeds reached across the grids.
+    expect(reached).toBeGreaterThan(100_000);
   });
 });
 

@@ -105,6 +105,11 @@ export interface SimulatedTrainerOptions {
    * not grant control, which the simulator itself never is.
    */
   readonly refuseControl?: boolean;
+  /**
+   * Refuse every `0x05` Set Target Power under this many watts at the ATT
+   * layer — a step-down the machine does not confirm (#2348).
+   */
+  readonly refuseTargetsBelow?: number;
 }
 
 /**
@@ -144,6 +149,13 @@ export function simulatedOpenTrainer(
           writeControlPoint: (value) => {
             options.written.push([...value]);
             if (options.refuseControl === true && value[0] === 0x00) {
+              return Promise.reject(new Error('write not permitted'));
+            }
+            if (
+              options.refuseTargetsBelow !== undefined &&
+              value[0] === 0x05 &&
+              (value[1] ?? 0) + ((value[2] ?? 0) << 8) < options.refuseTargetsBelow
+            ) {
               return Promise.reject(new Error('write not permitted'));
             }
             const outcome = controlPoint.write(requestFromOctets(value));

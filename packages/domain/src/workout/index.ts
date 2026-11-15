@@ -69,6 +69,54 @@ export {
   workoutShapeText,
 } from './describe';
 
+export type {
+  ChoiceRange,
+  ChoiceRangeWithDefault,
+  FixedMainSet,
+  HeartRateZoneHoldBlock,
+  MainSet,
+  Recovery,
+  RepeatMainSet,
+  StretchMainSet,
+  TailorChoices,
+  TemplateBlock,
+  TemplateParameters,
+  WorkoutCategory,
+  WorkoutTemplate,
+} from './template';
+export {
+  LENGTH_TOLERANCE_SECONDS,
+  LENGTH_TOLERANCE_SHARE,
+  MAXIMUM_INTENSITY_PERCENT,
+  MINIMUM_COOL_DOWN_SECONDS,
+  MINIMUM_INTENSITY_PERCENT,
+  MINIMUM_WARM_UP_SECONDS,
+  tailorWorkout,
+  TEMPLATE_LENGTHS_MINUTES,
+} from './template';
+
+export { BUILT_IN_WORKOUTS } from './library';
+
+// The two threshold tests and the player that ends them (#2303).
+export type { ThresholdTest } from './library/test';
+export {
+  RAMP_MAXIMUM_SHARE,
+  RAMP_START_SHARE,
+  RAMP_STEP_SECONDS,
+  RAMP_STEP_SHARE,
+  RAMP_TEST,
+  THRESHOLD_TESTS,
+  TWENTY_MINUTE_TEST,
+} from './library/test';
+export type {
+  ThresholdTestEnd,
+  ThresholdTestPlayer,
+  ThresholdTestPlayerOptions,
+  ThresholdTestProgress,
+  ThresholdTestState,
+} from './library/test-player';
+export { createThresholdTestPlayer, TEST_OVER_REASON } from './library/test-player';
+
 export type { WorkoutSegment, WorkoutTimeline } from './timeline';
 export { expandWorkout, segmentAt, targetAt } from './timeline';
 

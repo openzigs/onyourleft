@@ -51,6 +51,15 @@
  *   ride stopped — is {@link TrainerControl.letGo}, the ride controller's one
  *   release, which sends a Stop and keeps control. The owner accepted that the
  *   machine may keep its last target after a workout (#372, 2026-09-21).
+ * - ⚠️ **So since #2348 the end of a workout steps the trainer down first.**
+ *   A Stop leaves the last target applied, and the last target of a ramp test
+ *   is the highest of the ride, under a rider who is spent: the measured
+ *   trainer would have gone on holding 373 W with nothing judging cadence.
+ *   {@link WorkoutTrainer.letGo} is handed the floor, and the ride controller
+ *   writes it as a `0x05` immediately before the Stop, on the one queue, so
+ *   what the Stop leaves applied is the least the machine can be asked to
+ *   hold. A step-down the trainer did not confirm is told as
+ *   {@link STEP_DOWN_UNCONFIRMED}.
  *
  * ⚠️ **The floor is still a target**, and that is the trade #441 names: FTMS
  * treats 0 W as a target too, and a trainer holding its floor still has the
@@ -88,7 +97,12 @@ import {
   type WorkoutRescue,
   type WorkoutTimeline,
 } from '@onyourleft/domain';
-import { createErgWriter, type ErgWriter, type TrainerControl } from '@onyourleft/sensors/protocol';
+import {
+  createErgWriter,
+  type ErgWriter,
+  type TrainerControl,
+  type TrainerRelease,
+} from '@onyourleft/sensors/protocol';
 import { TargetHeldBack } from '../ride/held-back';
 import { reliefAtFloorReason } from './rescue-text';
 
@@ -131,10 +145,32 @@ export const LARGEST_RAISE_WATTS = 50;
  * ⚠️ Required, not optional: left out, every raise would be judged as if the
  * trainer held nothing.
  */
-export type WorkoutTrainer = Pick<
-  TrainerControl,
-  'setTargetPower' | 'stop' | 'letGo' | 'targetPower'
->;
+export type WorkoutTrainer = Pick<TrainerControl, 'setTargetPower' | 'stop' | 'targetPower'> & {
+  /**
+   * Let the trainer go at the end of the workout (#372), stepping it down to
+   * `stepDownTo` first when that is given (#2348).
+   *
+   * ⚠️ **The step-down and the Stop are written together, in that order, by
+   * the ride controller's one release** (`ride/controller.ts`
+   * §`beginRelease`), not here: it is the release that is joined with any
+   * other already on the wire, and a `0x05` written after a Stop would take
+   * the machine back into ERG after the rider was told it had been let go.
+   * Rejects when the Stop could not be sent at all, as `letGo` does.
+   */
+  letGo(stepDownTo: Watts | undefined): Promise<WorkoutRelease>;
+};
+
+/** What the end of a workout achieved, as far as the machine said (#2348). */
+export interface WorkoutRelease {
+  /** The Stop's own answer. */
+  readonly stop: TrainerRelease;
+  /**
+   * Whether the trainer confirmed the step-down written before the Stop:
+   * `false` when it refused or did not answer, so it may still hold the
+   * workout's last target; `undefined` when no step-down was written.
+   */
+  readonly steppedDown: boolean | undefined;
+}
 
 export interface WorkoutSessionOptions {
   readonly timeline: WorkoutTimeline;
@@ -314,6 +350,13 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   let released = false;
   /** Whether {@link finish} has run. A release is sent once per session, ever. */
   let finished = false;
+  /**
+   * The floor the end of the workout stepped the trainer down to, once the
+   * trainer confirmed it (#2348) — what {@link WorkoutSessionState.holding}
+   * says from then on. The step-down is not the writer's, so without this a
+   * finished workout went on saying it held its last block's target.
+   */
+  let steppedDownTo: Watts | undefined;
 
   /**
    * Whether the target the workout asks for now was NOT written, because
@@ -344,7 +387,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   const snapshot = (): WorkoutSessionState => ({
     player: player.state(),
     rescue: rescueAsTold(player.state().rescue),
-    holding: writer.lastWritten(),
+    holding: steppedDownTo ?? writer.lastWritten(),
     writing: writer.busy(),
     // #1305's review: only once the raise is what the trainer acknowledged.
     raisedFrom: writer.lastWritten() === powerFloor ? raisedFrom : undefined,
@@ -439,6 +482,14 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    * "the trainer is already stopped" left the end of that workout unreleased —
    * no `letGo`, so no *Not released* notice if the machine refused it either.
    * #442 found it; it is kept through the re-scope.
+   *
+   * ⚠️ **Steps the trainer down to its floor before the Stop (#2348)**,
+   * unless this session knows the trainer is at or under it already and has
+   * nothing on the wire. "Knows" is {@link mayBeHolding}, so a target that
+   * may be held counts as held — the reason `released` starts `false` — and
+   * a target still in flight counts too: it lands before the step-down, on
+   * the client's one queue. The writer is closed FIRST, so a target waiting
+   * behind that one is dropped rather than written after the Stop.
    */
   const finish = (): void => {
     if (finished) {
@@ -449,12 +500,24 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     raiseRefused = false;
     // The workout is over: no block is asking for anything (#1305's review).
     raisedFrom = undefined;
-    void control.letGo().then(
+    const held = mayBeHolding();
+    const stepDownTo =
+      writer.busy() || (held !== undefined && held > powerFloor) ? powerFloor : undefined;
+    writer.close();
+    void control.letGo(stepDownTo).then(
       (outcome) => {
-        if (outcome.kind === 'incomplete') {
-          lastFault = RELEASE_INCOMPLETE;
+        if (outcome.steppedDown === false) {
+          lastFault = STEP_DOWN_UNCONFIRMED;
           changed();
+          return;
         }
+        if (outcome.steppedDown === true) {
+          steppedDownTo = stepDownTo;
+        }
+        if (outcome.stop.kind === 'incomplete') {
+          lastFault = RELEASE_INCOMPLETE;
+        }
+        changed();
       },
       (error: unknown) => {
         lastFault = faultText(error);
@@ -682,7 +745,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
     stop(): void {
       player.stop();
-      writer.close();
+      // `finish` closes the writer, after asking it whether anything is on
+      // the wire (#2348).
       finish();
       changed();
     },
@@ -712,6 +776,19 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
  */
 export const RELEASE_INCOMPLETE =
   'The trainer did not confirm it let go. It may still be holding resistance — ease off and check before you get off.';
+
+/**
+ * What a rider is told when the end of a workout could not step the trainer
+ * down — #2348: the trainer refused or did not answer the `0x05` to its
+ * lowest target written before the release's Stop, so it may still hold the
+ * workout's last target, which after a ramp test is the hardest of the ride.
+ *
+ * ⚠️ **One instruction, and it is to stop.** Pedalling on against an ERG
+ * target that is too high is the spiral; a rider who stops pedalling is not
+ * pushed by the machine. Wording for the owner (#2348).
+ */
+export const STEP_DOWN_UNCONFIRMED =
+  'The trainer did not confirm it eased off, so it may still be holding the last target. Stop pedalling, then get off.';
 
 /**
  * What a rider is told while a block's target is not being sent, because it

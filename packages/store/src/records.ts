@@ -31,6 +31,7 @@ import type {
   RouteProfile,
   ElevationSource,
   GradePercent,
+  Kilocalories,
   Kilograms,
   Metres,
   ReplanRecord,
@@ -85,6 +86,55 @@ const visibilitiesAgree: VisibilitiesAgree = [true, true];
 void visibilitiesAgree;
 
 /**
+ * What a stored calorie estimate was worked out from (#2433). `'power'` and
+ * `'heart-rate'` are `@onyourleft/domain`'s `CaloriesBasis`; `'file'` is
+ * reserved for a figure an imported file states itself (#2435, #2436).
+ */
+export type ActivityCaloriesBasis = 'power' | 'heart-rate' | 'file';
+
+/** Every {@link ActivityCaloriesBasis}, for the decoder. */
+export const ACTIVITY_CALORIES_BASES: readonly ActivityCaloriesBasis[] = [
+  'power',
+  'heart-rate',
+  'file',
+];
+
+/** @see ActivityRecord.calories */
+export interface ActivityCalories {
+  readonly energy: Kilocalories;
+  readonly basis: ActivityCaloriesBasis;
+}
+
+/**
+ * The sex whose coefficients a heart-rate calorie estimate uses — #2432. Two
+ * words because Keytel et al. 2005 fits two equations; *Not set* is the field
+ * being absent, never a third value.
+ */
+export type CalorieSex = 'female' | 'male';
+
+/**
+ * The stored sex, or `undefined` for anything else (#2432).
+ *
+ * An unrecognised value on disk reads as unset rather than a
+ * `StoreDecodeError`, for `unit-system.ts`' reason: a hand-edited row decides
+ * only whether a heart-rate ride shows a calorie figure, which is not worth
+ * taking a rider's library away over, and unset shows none.
+ */
+export function parseCalorieSex(value: unknown): CalorieSex | undefined {
+  return value === 'female' || value === 'male' ? value : undefined;
+}
+
+/**
+ * Whether a value can be a stored {@link AthleteRecord.birthYear}: a whole
+ * number (#2432). The plausible range — not in the future, not more than 120
+ * years back — needs today's date, which this package does not read, so the
+ * screen that takes the entry checks it.
+ */
+export function isBirthYear(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
+/**
  * The owner of the data on this device.
  *
  * Not an account: Phase 1 has no accounts and no server (owner decision D6).
@@ -137,6 +187,31 @@ export interface AthleteRecord {
    * ever the *source* of that copy.
    */
   readonly mass?: Kilograms;
+
+  /**
+   * The sex whose coefficients the heart-rate calorie estimate uses (#2432):
+   * Keytel et al. 2005 fits one equation for men and one for women, and with
+   * neither chosen a ride with heart rate and no power has no calorie figure.
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #2432 reads back with
+   * none, which is a rider who has not said, and nothing substitutes a default.
+   *
+   * ⚠️ **On this device only.** Nothing that is sent to an instance or a model
+   * reads it; the one place it leaves is the rider's own account export.
+   */
+  readonly calorieSex?: CalorieSex;
+
+  /**
+   * The year the rider was born, for the heart-rate calorie estimate's age
+   * (#2432): the age for a ride is the ride's start year minus this. A year
+   * rather than an age, which goes stale, or a date of birth, which identifies
+   * a person far better than an estimate needs.
+   *
+   * Optional for the reason `thresholdPower` gives above, and on this device
+   * only, as {@link AthleteRecord.calorieSex} is.
+   */
+  readonly birthYear?: number;
 
   /**
    * Which units this athlete reads their numbers in (#238).
@@ -276,6 +351,23 @@ export interface ActivityRecord {
    */
   readonly routeId?: RouteId;
   readonly averagePower?: Watts;
+
+  /**
+   * The ride's calorie estimate, worked out **once, when it was saved or
+   * imported** (#2433), and the basis it rests on.
+   *
+   * Stored rather than worked out on read for `averagePower`'s reason: the
+   * samples are in hand at save, and a list must not decode streams. Stored
+   * also **freezes** the rider's weight and age at the ride, so a later change
+   * in Settings does not rewrite last year's rides — the same rule
+   * `FrozenEffortAttributes` keeps for a segment board.
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `AthleteRecord.thresholdPower` gives: a ride saved before #2433, and a ride
+   * with neither power nor a heart-rate estimate, has none — a dash on screen,
+   * never `0 kcal`.
+   */
+  readonly calories?: ActivityCalories;
 
   /**
    * The **threshold-independent** half of this ride's load (#77).
@@ -481,6 +573,34 @@ export interface RideFacts {
    * @see WorkoutBlockFact
    */
   readonly workoutBlocks?: readonly WorkoutBlockFact[];
+  /**
+   * `true` when the rider rode at least the drafted share of this ride's
+   * distance in the bot pacer's or their own ghost's draft — #2451, ADR 0066
+   * D-5.3 and D-5.6. Known only while riding, like {@link workoutFinished};
+   * absent for a ride that was not drafted, and for one brought in from a file.
+   */
+  readonly drafted?: boolean;
+  /**
+   * When, on the recording's own clock, the rider was in that draft — #2451,
+   * ADR 0066 D-5.2: what marks a segment effort found in this ride, by the
+   * share of the effort's own distance ridden inside these spans. Oldest
+   * first. Absent for a ride with none.
+   *
+   * ⚠️ **A list that does not read is dropped whole, never the ride**, as
+   * {@link workoutBlocks} is. @see DraftSpan
+   */
+  readonly draftSpans?: readonly DraftSpan[];
+}
+
+/**
+ * One stretch of a ride the rider spent in the draft — #2451. Two instants on
+ * the recording's clock, the clock its samples are stamped by: the span
+ * begins when the in-draft state of ADR 0066 D-5.6 begins, and ends when it
+ * ends. `to` is never before `from`.
+ */
+export interface DraftSpan {
+  readonly from: UnixSeconds;
+  readonly to: UnixSeconds;
 }
 
 /**
@@ -922,6 +1042,15 @@ export interface SegmentEffortRecord {
    * their profile, and no test of a single ranking catches it.
    */
   readonly attributes: FrozenEffortAttributes;
+
+  /**
+   * `true` when the rider rode at least the drafted share of this effort's
+   * distance in a pacer's or their own ghost's draft — #2451, ADR 0066 D-5.2.
+   * Kept in the rider's own history and shown with its mark; never offered to
+   * an instance's board. Absent for an effort that was not drafted. Optional,
+   * so no migration.
+   */
+  readonly drafted?: boolean;
 }
 
 /** The frozen copy. Mirrors `@onyourleft/domain`'s `FrozenAttributes`. */
@@ -1144,24 +1273,35 @@ export interface RouteRecord {
  * recorder's writes, the detail view's reads, the chart downsampler, the FIT
  * exporter and the account export — and each is a path ADR 0029 forbids.
  *
- * ## ⚠️ There is deliberately no `activityId`, and D-2 names one
+ * ## Two sources, and only a snapshot names a ride (#1063)
  *
- * D-2's table says a kept frame is written *"with the activity id it belongs
- * to"*, and this record has none. That is a **gap stated rather than a column
- * left null**, and the reason is that there is nothing to put in it: an
- * `ActivityRecord` exists only once a ride has been finished and saved
- * (`apps/web/src/recording/finish.ts`), and a frame is captured while the rider
- * is on the bike. A nullable foreign key that no production writer ever sets is
- * the shape `SegmentRecord` above refuses for its own source activity, and it
- * would arrive looking like a feature.
+ * ⚠️ **Until schema version 21 this record had no `activityId`**, and a
+ * reviewer who remembers this paragraph saying *"there is deliberately no
+ * `activityId`"* is reading the old file. There was nothing to put in one: an
+ * `ActivityRecord` exists only once a ride has been saved, and #384's kept
+ * frame is captured while the rider is on the bike.
  *
- * What it costs, precisely: D-2's *"deleting the activity deletes its frames in
- * the same transaction"* is **vacuous today** — `deleteActivity` cascades
- * nothing here because nothing links. The two expiries that do work are the
- * rider deleting the pictures and the rider erasing the device, and both are
- * implemented and tested. [#388](https://github.com/openzigs/onyourleft/issues/388)
- * is the first issue with a report tied to a ride; it adds the column, its
- * index and its cascade, and this paragraph is what tells it to.
+ * [ADR 0044](../../../docs/adr/0044-side-camera-live-view-and-snapshot.md) D-3
+ * adds the second source this table holds, a **snapshot**: one still the rider
+ * pressed *Save snapshot* for, on the side camera's live view. A snapshot is
+ * held in the tab's memory until its ride is saved and written only after that
+ * (`apps/web/src/camera/snapshot-keeper.ts`), so it **always** names a ride the
+ * store holds, and {@link CameraFrameRecord.source} says which kind a row is:
+ *
+ * | `source` | `activityId` | `outline` |
+ * |---|---|---|
+ * | `'kept'` — #384's per-ride keep | `null`: the gap above still stands for it | `null` |
+ * | `'snapshot'` — #1063 | the ride it was taken in, required | the outline it was shown with, or `null` |
+ *
+ * What that buys, for a snapshot only: D-2's *"deleting the activity deletes
+ * its frames in the same transaction"* is TRUE (`deleteActivity`'s cascade),
+ * and a ride's page can read its snapshots through `listRideSnapshots`, which
+ * takes the owner first. A kept frame's deletion with its ride is still
+ * vacuous, for the old reason.
+ *
+ * ⚠️ **The join is the ride and nothing finer** (ADR 0044 D-3): no offset into
+ * the ride, no reading, no lap. `capturedAt` is kept because the export's file
+ * name uses it, and nothing reads it against the ride's streams.
  *
  * ## What is NOT on this record, and each absence is a decision
  *
@@ -1207,6 +1347,39 @@ export interface CameraFrameRecord {
    * these is green for a reason unrelated to the picture.
    */
   readonly bytes: Uint8Array;
+  /** Which of the two kinds this row is — see the table in the module note. */
+  readonly source: CameraFrameSource;
+  /**
+   * The ride a snapshot was taken in; `null` for a kept frame, which has no
+   * ride to name. `putCameraFrame` refuses a snapshot whose ride this athlete
+   * does not hold, and a kept frame that names one.
+   */
+  readonly activityId: ActivityId | null;
+  /**
+   * The pose outline a snapshot was SHOWN with — ADR 0044 D-3: *"stored as
+   * numbers and drawn when shown"*, never burned into {@link bytes}. `null`
+   * when the model found nobody in that picture, and always `null` for a kept
+   * frame. Landmarks only: **no angle, no length and no difference** is stored
+   * with it.
+   */
+  readonly outline: CameraFrameOutlineRecord | null;
+}
+
+/** The two kinds of picture this device keeps. @see CameraFrameRecord */
+export type CameraFrameSource = 'kept' | 'snapshot';
+
+/** Every {@link CameraFrameSource}, so a decoder can refuse one it does not know. */
+export const CAMERA_FRAME_SOURCES: readonly CameraFrameSource[] = ['kept', 'snapshot'];
+
+/**
+ * The outline a snapshot was shown with: the near side's landmarks as shares
+ * of the picture, and the picture's shape — the numbers
+ * {@link FramingReferenceRecord} keeps, for the same reason (#1063).
+ */
+export interface CameraFrameOutlineRecord {
+  /** The picture's width divided by its height. */
+  readonly aspect: number;
+  readonly landmarks: readonly FramingLandmarkRecord[];
 }
 
 /**

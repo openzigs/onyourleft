@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mount, queryAll, type Mounted } from '../testing/mount';
 
-import { distanceAxis, distanceProfile } from './axis';
+import { distanceAxis, distanceProfile, timeAxis, type RideAxis } from './axis';
 import TraceChart, {
   describeTrace,
+  TAP_SLOP_PX,
   TIME_AXIS_TITLE,
   traceAxes,
   type TraceChartProps,
@@ -198,48 +199,95 @@ describe('the tap and hover read-out — #2081', () => {
 
   async function point(
     svg: Element,
-    type: 'pointerdown' | 'pointermove',
+    type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
     clientX: number,
     pointerType: string,
+    clientY = 40,
   ): Promise<void> {
     await act(async () => {
-      svg.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX, pointerType }));
+      svg.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX, clientY, pointerType }));
       await Promise.resolve();
     });
   }
 
   it('moves the cursor to the moment under a tap', async () => {
-    const picked: number[] = [];
+    const picked: [number, string][] = [];
     mounted = await mount(
-      <TraceChart {...POWER} onPick={(at) => picked.push(at)} timeSpan={3600} />,
+      <TraceChart {...POWER} onPick={(at, how) => picked.push([at, how])} timeSpan={3600} />,
     );
     const svg = mounted.container.querySelector('svg.oyl-trace') as Element;
     laidOut(svg);
-    // A quarter of the way across an hour.
+    // A quarter of the way across an hour, where the finger comes up.
     await point(svg, 'pointerdown', 175, 'touch');
-    expect(picked).toStrictEqual([900]);
+    expect(picked).toStrictEqual([]);
+    await point(svg, 'pointerup', 175, 'touch');
+    expect(picked).toStrictEqual([[900, 'tap']]);
   });
 
-  it('follows a mouse hovering, and leaves a finger dragging to scroll the page', async () => {
+  it('picks nothing when a finger goes down to scroll the page — #2194', async () => {
     const picked: number[] = [];
     mounted = await mount(<TraceChart {...POWER} onPick={(at) => picked.push(at)} />);
     const svg = mounted.container.querySelector('svg.oyl-trace') as Element;
     laidOut(svg);
+    // Down and away: a vertical scroll, past the slop.
+    await point(svg, 'pointerdown', 250, 'touch', 40);
+    await point(svg, 'pointerup', 250, 'touch', 40 + TAP_SLOP_PX + 1);
+    // Down and sideways past the slop.
+    await point(svg, 'pointerdown', 250, 'touch');
+    await point(svg, 'pointerup', 250 + TAP_SLOP_PX + 1, 'touch');
+    // Down, then taken by the browser for a scroll.
+    await point(svg, 'pointerdown', 250, 'touch');
+    await point(svg, 'pointercancel', 250, 'touch');
+    await point(svg, 'pointerup', 250, 'touch');
+    // Up with no down on the drawing.
+    await point(svg, 'pointerup', 250, 'touch');
+    expect(picked).toStrictEqual([]);
+    // Within the slop it is still a tap.
+    await point(svg, 'pointerdown', 250, 'touch', 40);
+    await point(svg, 'pointerup', 250 + TAP_SLOP_PX, 'touch', 40 - TAP_SLOP_PX);
+    expect(picked).toHaveLength(1);
+  });
+
+  it('follows a mouse hovering, and leaves a finger dragging to scroll the page', async () => {
+    const picked: [number, string][] = [];
+    mounted = await mount(<TraceChart {...POWER} onPick={(at, how) => picked.push([at, how])} />);
+    const svg = mounted.container.querySelector('svg.oyl-trace') as Element;
+    laidOut(svg);
     await point(svg, 'pointermove', 250, 'mouse');
     await point(svg, 'pointermove', 400, 'touch');
-    expect(picked).toStrictEqual([1800]);
+    expect(picked).toStrictEqual([[1800, 'hover']]);
   });
 
   it('asks nothing of a drawing that has not been laid out', async () => {
     const picked: number[] = [];
     mounted = await mount(<TraceChart {...POWER} onPick={(at) => picked.push(at)} />);
-    await point(
-      mounted.container.querySelector('svg.oyl-trace') as Element,
-      'pointerdown',
-      50,
-      'mouse',
-    );
+    const svg = mounted.container.querySelector('svg.oyl-trace') as Element;
+    await point(svg, 'pointerdown', 50, 'mouse');
+    await point(svg, 'pointerup', 50, 'mouse');
     expect(picked).toStrictEqual([]);
+  });
+
+  it('draws its paths once a trace, not again for every move of the cursor — #2194', async () => {
+    let placed = 0;
+    const base = timeAxis(3600);
+    const axis: RideAxis = {
+      ...base,
+      fractionAt: (seconds) => {
+        placed += 1;
+        return base.fractionAt(seconds);
+      },
+    };
+    mounted = await mount(<TraceChart {...POWER} axis={axis} cursor={0} />);
+    expect(placed).toBeGreaterThanOrEqual(POWER.points.length);
+    const drawn = placed;
+    for (const cursor of [60, 120, 180]) {
+      await mounted.rerender(<TraceChart {...POWER} axis={axis} cursor={cursor} />);
+    }
+    // The cursor's own line, once a move: never the trace's points again.
+    expect(placed - drawn).toBe(3);
+    expect(mounted.container.querySelector('line.oyl-trace__cursor')?.getAttribute('x1')).toBe(
+      ((180 / 3600) * 600).toFixed(2),
+    );
   });
 
   it('shows the chart’s own reading at the cursor beside its title, hidden from a screen reader', async () => {

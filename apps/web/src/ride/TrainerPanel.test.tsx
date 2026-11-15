@@ -45,6 +45,7 @@ const snapshot = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => 
   lost: undefined,
   refusal: undefined,
   releaseFault: undefined,
+  easedOffTo: undefined,
   ergRescue: undefined,
   ergHeld: undefined,
   ...overrides,
@@ -203,6 +204,33 @@ describe('after a release — #372', () => {
 
     expect(text).toContain('Not released');
     expect(text).toContain('It may still be holding resistance.');
+  });
+
+  it('says "eased off … and released" only while the remembered target is that floor — #2348', async () => {
+    // `workout-end-eased-off.test.tsx` gets here through the real controller;
+    // this pins the second guard: a number written since is not the floor.
+    const eased = await render(
+      snapshot({
+        ...driven,
+        hasControl: true,
+        easedOffTo: watts(40),
+        target: { kind: 'unknown', attempted: watts(40) },
+      }),
+    );
+    expect(eased).toContain('The trainer was eased off to its lowest setting, 40 W, and released.');
+
+    const since = await render(
+      snapshot({
+        ...driven,
+        hasControl: true,
+        easedOffTo: watts(40),
+        target: { kind: 'unknown', attempted: watts(200) },
+      }),
+    );
+    expect(since).toContain(
+      'The trainer may still be holding 200 W — this app can no longer tell.',
+    );
+    expect(since).not.toContain('eased off');
   });
 });
 

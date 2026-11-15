@@ -29,14 +29,15 @@
  * | 5 | a climb or a descent ahead | event (#399) | attested | no |
  * | 5a | the side camera's link lost | event (#551) | ADR 0033 D-5 | **yes** — #551 |
  * | 5a′ | the room's connection lost | event (#782) | ruling Q3/Q6 | **yes** — #782 |
- * | 5a″ | a race's countdown, its start and its end | event (#785) | the room's own word | **yes** — #785 |
+ * | 5a″ | a race's end, then its countdown and its start | event (#785; solo since #2546) | the room's own word | the end **yes** — #785; the countdown and the start no — #2546 |
  * | 5a‴ | a rider joined or left the room | event (#784) | #784's criterion | no |
+ * | 5a⁗ | this ride is not being recorded: its recording could not start | event (#2381) | the owner's ruling of 2026-11-08 | **yes** — #2381 |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
  * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
- * | 5g | a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2 | **yes** — #1812 |
+ * | 5g | a standing obstacle ahead on a level (#2362), a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2; ADR 0065 D-10.9 | the obstacle ahead **yes** (#2362, the owner's ruling of 2026-11-08); the other four no (2026-10-28) |
  * | 5h | a lap race's finish, a hit, a lap, an item and a place, in that order | event (#1904) | ADR 0060 | no |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
@@ -59,8 +60,10 @@
  * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
  * | `side-camera-lost` | `GameView` and `ride/RideAnnouncer.tsx` | `ride/side-camera.ts` §`sideCameraLostEvent` |
  * | `room-lost` | `GameView` | `net/room-port.ts` §`RoomConnection.status` going to `lost` (#782) |
- * | `room-race` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785) |
+ * | `room-race` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785): its end |
+ * | `race-start` | `GameView` | `game/room-ride.ts` §`raceEvent`, from `RoomConnection.race` (#785) or a solo lap race's countdown (#2546): its countdown and "Go" |
  * | `room-rider` | `GameView` | `game/room-ride.ts` §`riderEvents`, from the room's frames (#784) |
+ * | `not-recording` | `GameView` | `GameTrainerPort.recordGameRide` answering `false` or throwing at the press of *Ride* (#2381) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
@@ -119,13 +122,28 @@
  *
  * ⚠️ **Ranks 5a″ and 5a‴ are #785's and #784's.** A race's countdown, its
  * "go" and its end are the room's word on what the rider is doing — held on
- * the line, riding, done — so they are in {@link ALWAYS_SPOKEN}, for the
- * room-lost reason: a rider who cannot see the notice would otherwise pedal
- * against a start line nothing tells them has lifted. A rider joining or
+ * the line, riding, done. Its end is in {@link ALWAYS_SPOKEN}, for the
+ * room-lost reason. ⚠️ **Its countdown and its "go" were too until #2546**,
+ * for the reason that a rider who cannot see the notice would otherwise pedal
+ * against a start line nothing tells them has lifted; the owner's ruling of
+ * 2026-11-12 on #2546 is that announcements off is silence for them, solo and
+ * in a room, and the *Race* notice still counts down. So they are their own
+ * kind, `race-start`, ranked just below the end. A rider joining or
  * leaving the room is #784's "announced by the HUD's live region when
  * announcements are on": the lowest room event, and never with them off —
  * nothing about it changes what the rider must do. Below the room's lost
  * connection both, and above every reading.
+ *
+ * ⚠️ **Rank 5a⁗ is #2381's**: the press of *Ride* starts a recording by
+ * default (the owner's ruling of 2026-11-08), and this one could not start,
+ * so the ride the rider is on will not be saved. Said ONCE, at the start of
+ * the ride, offered on every frame until it comes back as `kind` (#647's
+ * "owed" rule) and never on the road notice's frame. Below every room event,
+ * which is about other riders moving now; above #647's, which is about a
+ * recording that may stop — this one never started. ⚠️ **In
+ * {@link ALWAYS_SPOKEN}**, for the room-lost reason: the HUD's notice is a
+ * status (SC 4.1.3), and with announcements off — the default — a rider who
+ * cannot see it would learn only at the end that nothing was recorded.
  *
  * ⚠️ **Rank 5b is #647's**: the platform refused to keep the ride alive, so
  * it may stop if the screen goes off. BELOW the side camera, because that has
@@ -202,12 +220,18 @@
  * crash, which costs the round a point and nothing else (ADR 0059 D-2: no
  * slow-down, and nothing is felt, because the trainer is sent the same); then
  * a miss before a delivery, because a missed house drops out of the next
- * round (DL2). A lower event behind a higher one is dropped by this core, so
+ * round (DL2). Since #2362, a standing obstacle ahead on a level comes before
+ * all four: it is the one a rider has seconds to act on, it is withdrawn once
+ * passed, and a round's end never falls while one is ahead (no obstacle is
+ * placed past the round's last house). A lower event behind a higher one is dropped by this core, so
  * the caller offers each on every call until it comes back as `kind`, the
  * "owed" rule of #647 — `hud/delivery-announce.ts` holds it, one sentence per
  * kind at most, so what is owed never grows into a queue. ⚠️ **Not in
  * {@link ALWAYS_SPOKEN}**, none of the four: they follow the rider's
- * announcement setting, said only when announcements are on. That is the
+ * announcement setting, said only when announcements are on. ⚠️ **The
+ * obstacle ahead IS in it** (#2362): the owner's ruling of 2026-11-08 on PR
+ * #2378 says a hazard is always said, whatever the setting, because ADR 0065
+ * D-10.9 allows no warning carried by sight alone. That is the
  * owner's ruling of 2026-10-28 on #1812 ("Only when announcements on"), which
  * reversed this PR's first cut. It decides nothing about #1316's `lap-ended`.
  *
@@ -229,7 +253,7 @@
  * follow the rider's announcement setting. A ruling for this mode is the
  * owner's, and reversing it is the membership of one array.
  *
- * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ## ⚠️ Seven kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -289,13 +313,17 @@ export type AnnouncementEvent =
   | { readonly kind: 'side-camera-lost'; readonly text: string }
   | { readonly kind: 'room-lost'; readonly text: string }
   | { readonly kind: 'room-race'; readonly text: string }
+  | { readonly kind: 'race-start'; readonly text: string }
   | { readonly kind: 'room-rider'; readonly text: string }
+  | { readonly kind: 'not-recording'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string }
   | { readonly kind: 'hold-changed'; readonly text: string }
   | { readonly kind: 'plan-changed'; readonly text: string }
   | { readonly kind: 'lap-ended'; readonly text: string }
   | { readonly kind: 'room-draft'; readonly text: string }
+  | { readonly kind: 'delivery-obstacle-ahead'; readonly text: string }
+  | { readonly kind: 'delivery-skip-house'; readonly text: string }
   | { readonly kind: 'delivery-round-over'; readonly text: string }
   | { readonly kind: 'delivery-crash'; readonly text: string }
   | { readonly kind: 'delivery-missed'; readonly text: string }
@@ -323,7 +351,11 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'side-camera-lost',
   'room-lost',
   'room-race',
+  // #2546: a race's countdown and its "Go", solo or in a room. Rank 5a″, below its end.
+  'race-start',
   'room-rider',
+  // #2381: this ride's recording could not start. Rank 5a⁗; the module note says why here.
+  'not-recording',
   'screen-off-risk',
   'erg-held',
   // #1240: the heart-rate hold's sentence, BELOW every trainer and workout
@@ -343,6 +375,11 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'room-draft',
   // #1812: a Delivery round, below every other event and above every
   // reading. Rank 5g; the module note says why this order among the four.
+  // #2362: a standing obstacle ahead on a level, first among them, because it
+  // is the one a rider has seconds to act on and is dropped once passed.
+  'delivery-obstacle-ahead',
+  // #2365: a house ahead that must not get a parcel, next, for the same reason.
+  'delivery-skip-house',
   'delivery-round-over',
   'delivery-crash',
   'delivery-missed',
@@ -370,9 +407,19 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'side-camera-lost',
   // #782: the room gone is a status, for the side camera's reason. @see the module note, rank 5a′
   'room-lost',
-  // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
+  // #785: a race over is the room's word on what the rider is doing. Rank 5a″.
+  // #2546: and not its countdown or its "Go" (`race-start`), the owner's ruling of 2026-11-12.
   'room-race',
-  // #1812: no Delivery kind. The owner's ruling of 2026-10-28: they follow the setting. Rank 5g.
+  // #2381: this ride is not being recorded is a status, for room-lost's reason. Rank 5a⁗.
+  'not-recording',
+  // #2362: a standing obstacle ahead on a level, ALWAYS said: the owner's ruling of
+  // 2026-11-08 on PR #2378, as ADR 0065 D-10.9 requires (no hazard warned by sight alone).
+  'delivery-obstacle-ahead',
+  // #2365: a house ahead that must not get a parcel, ALWAYS said, for the same
+  // reason: ADR 0065 D-10.5 tells it apart in words, never by sight alone.
+  'delivery-skip-house',
+  // #1812: and no other Delivery kind. The owner's ruling of 2026-10-28: a
+  // delivery, a miss, a crash and the round's end follow the setting. Rank 5g.
   // #1904: and no lap-race kind, on that ruling. Rank 5h.
 ];
 

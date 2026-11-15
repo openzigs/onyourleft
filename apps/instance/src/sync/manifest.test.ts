@@ -85,11 +85,9 @@ describe('the sync manifest (#776)', () => {
     const everything = (await manifestOf(world, rider!)).map((entry) => entry.key);
     expect(seen.sort(), 'no entry missed').toEqual(everything.sort());
     expect(everything).toHaveLength(5 + 2 * 6);
-    // 1 174 ms on green `main` (38462922816, EPYC 7763) and 3 247 ms
-    // under coverage (nightly 38279988356, EPYC 9V74), 65 % of Vitest's 5 s
-    // default. About three times the slowest CI figure (docs/agents/ci.md §4c,
-    // #1262); nothing it does is changed.
-  }, 10_000);
+    // 410 ms under coverage on nightly 43413444621, and 3 247 ms on nightly
+    // 38279988356 (EPYC 9V74): under Vitest's 5 s default (#2569).
+  });
 
   it('says which ride an activity is, and refuses a cursor it did not write', async () => {
     const setup = await syncWorld(1);

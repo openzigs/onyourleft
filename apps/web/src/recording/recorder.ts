@@ -252,6 +252,12 @@ export interface Recorder {
    */
   noteOpenCourseLap(lap: RecordedCourseLap | undefined): void;
   /**
+   * The lap in progress as {@link noteOpenCourseLap} last said it, or
+   * `undefined` — #2076: the HUD's climb counts it, as the saved ride's part
+   * lap will.
+   */
+  readonly openCourseLap: RecordedCourseLap | undefined;
+  /**
    * The private races ridden during this recording, in the order they ended —
    * #785. A recorder rebuilt by {@link recoverRecorder} starts with the ones
    * its checkpoint held (#1360's review, B2).
@@ -633,6 +639,9 @@ function recorderOver(
         return;
       }
       void attempt(async () => store.putRecordingSession(header(startedAt, session.timeline)));
+    },
+    get openCourseLap() {
+      return openCourseLap;
     },
     noteOpenCourseLap(lap: RecordedCourseLap | undefined): void {
       openCourseLap = lap;

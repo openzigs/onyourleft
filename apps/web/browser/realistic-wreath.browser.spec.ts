@@ -15,17 +15,23 @@
  * town's shard holds as many loads of the page as its stop allows
  * (`nightly-split.test.ts`, #1698; docs/agents/ci.md §4c §"Four nightly
  * browser shards — #1698").
+ *
+ * ⚠️ **On a 320 × 180 page since #1937** (`SIXTEENTH_PAGE`): the case compares
+ * two frames' calls and triangles, which the canvas's shape decides and its
+ * size does not, and at 1280 × 720 a load on an EPYC 7763 ran past its 150 s.
  */
 
 import { expect, test } from '@playwright/test';
 
 import { NIGHTLY } from './nightly';
-import { REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
+import { frameReading, REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
 
 /** #1657's hold in the mixed town, the people off, on 20 Dec. */
 const WREATHED = '?ladder=0&panel=0&seconds=1&town=mixed&at=1300&date=2026-12-20&levers=-people';
 
 test.describe('the realistic page’s mapped doors’ wreath — #1626', { tag: NIGHTLY }, () => {
+  test.use({ viewport: SIXTEENTH_PAGE });
+
   test('draws the wreath on every mapped front door in no call and no triangle', async ({
     page,
   }) => {
@@ -36,8 +42,13 @@ test.describe('the realistic page’s mapped doors’ wreath — #1626', { tag: 
       `#1626 town=mixed: ${String(wreathed.result.lastFrame.calls)} draw calls and ` +
         `${String(wreathed.result.lastFrame.triangles)} triangles wreathed, ` +
         `${String(bare.result.lastFrame.calls)} and ${String(bare.result.lastFrame.triangles)} ` +
-        'with `-facade-wreath`',
+        `with \`-facade-wreath\`; frame p50/p90 ${frameReading(wreathed.result)} wreathed · ` +
+        `${frameReading(bare.result)} bare`,
     );
+    // Not vacuous: both drawn at the small page, so their frames are the cheap ones.
+    for (const load of [wreathed, bare]) {
+      expect(load.result.drawingBuffer).toEqual([SIXTEENTH_PAGE.width, SIXTEENTH_PAGE.height]);
+    }
     expect(wreathed.result.leversOff).toEqual(['people']);
     expect(bare.result.leversOff).toEqual(['facade-wreath', 'people']);
     expect(bare.result.rung).toBe(wreathed.result.rung);

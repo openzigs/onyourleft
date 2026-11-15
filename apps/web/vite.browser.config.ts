@@ -247,6 +247,10 @@ export default defineConfig({
         // real HUD and stylesheet, beside the leaning rider's box.
         // `lap-race-hud-harness.tsx` says what it does not prove.
         'lap-race-hud': 'browser/lap-race-hud.html',
+        // #2290: the ride HUD's street map over a dense synthetic corridor,
+        // and its control with none. `street-map-harness.tsx` says what it
+        // counts and what it does not prove.
+        'street-map': 'browser/street-map.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

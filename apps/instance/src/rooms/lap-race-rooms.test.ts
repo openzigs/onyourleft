@@ -298,7 +298,7 @@ describe('a lap race’s result — #1912', () => {
       expect(stored).toHaveLength(2);
       expect(keysOf(stored).filter((key) => LAP_WORDS.test(key))).toEqual([]);
     });
-  }, 30_000);
+  });
 });
 
 /** Every key anywhere in a value. */

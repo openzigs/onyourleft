@@ -36,24 +36,31 @@ import { emptyDraft } from './draft';
  */
 export const HISTORY_LIMIT = 50;
 
-export interface DraftHistory {
+/**
+ * A history of whole values: a planner's drafts, and since #2007 a saved
+ * route's line being edited (`route-edit.ts` §`EditedLine`), whose undo
+ * follows the same rules for the same reasons.
+ */
+export interface DraftHistory<T = RouteDraft> {
   /** The draft as it stands. */
-  readonly present: RouteDraft;
+  readonly present: T;
   /** Oldest first. The most recent is the one an undo returns to. */
-  readonly past: readonly RouteDraft[];
+  readonly past: readonly T[];
   /** Nearest first. Emptied by any new edit — see {@link record}. */
-  readonly future: readonly RouteDraft[];
+  readonly future: readonly T[];
 }
 
-export function newHistory(present: RouteDraft = emptyDraft()): DraftHistory {
+export function newHistory(present?: RouteDraft): DraftHistory;
+export function newHistory<T>(present: T): DraftHistory<T>;
+export function newHistory(present: unknown = emptyDraft()): DraftHistory<unknown> {
   return { present, past: [], future: [] };
 }
 
-export function canUndo(history: DraftHistory): boolean {
+export function canUndo<T>(history: DraftHistory<T>): boolean {
   return history.past.length > 0;
 }
 
-export function canRedo(history: DraftHistory): boolean {
+export function canRedo<T>(history: DraftHistory<T>): boolean {
   return history.future.length > 0;
 }
 
@@ -70,7 +77,7 @@ export function canRedo(history: DraftHistory): boolean {
  * fill the history with steps whose undo does nothing visible — which reads to
  * a rider as undo being broken.
  */
-export function record(history: DraftHistory, next: RouteDraft): DraftHistory {
+export function record<T>(history: DraftHistory<T>, next: T): DraftHistory<T> {
   if (next === history.present) {
     return history;
   }
@@ -89,11 +96,11 @@ export function record(history: DraftHistory, next: RouteDraft): DraftHistory {
  * the rider would have to press undo twice for one move — once for the
  * geometry, once for the move — and the first press would appear to do nothing.
  */
-export function settle(history: DraftHistory, resolved: RouteDraft): DraftHistory {
+export function settle<T>(history: DraftHistory<T>, resolved: T): DraftHistory<T> {
   return { ...history, present: resolved };
 }
 
-export function undo(history: DraftHistory): DraftHistory {
+export function undo<T>(history: DraftHistory<T>): DraftHistory<T> {
   const previous = history.past.at(-1);
   if (previous === undefined) {
     return history;
@@ -105,7 +112,7 @@ export function undo(history: DraftHistory): DraftHistory {
   };
 }
 
-export function redo(history: DraftHistory): DraftHistory {
+export function redo<T>(history: DraftHistory<T>): DraftHistory<T> {
   const [next, ...rest] = history.future;
   if (next === undefined) {
     return history;

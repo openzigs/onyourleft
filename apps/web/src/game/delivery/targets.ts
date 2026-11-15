@@ -74,6 +74,25 @@
  * No error message here formats a coordinate, a distance or a seed
  * (CLAUDE.md §6, ADR 0004 D): each names the field and the constraint. A
  * malformed plan is not an error: it is passed over, and nothing is said.
+ *
+ * ## Mailboxes and houses that get no parcel, on a level (#2365, ADR 0065 D-10.3)
+ *
+ * A built-in level's round asks for a share of its houses to be **mailboxes**
+ * and a share to be **houses that must not get a parcel**
+ * ({@link TargetPickInput.shares}). Both are chosen when the round starts,
+ * from the same in-memory seed as the houses and from a stream of it nothing
+ * else reads, and stored nowhere (ADR 0059 D-4, D-4.2): the level file holds
+ * the shares, never a house.
+ *
+ * - The no-delivery houses are taken from the houses picked, so the round's
+ *   spacing holds for them too, and at most as many as leave
+ *   `round.ts` §`FEWEST_DELIVERY_HOUSES` to deliver to
+ *   ({@link noDeliveryCount}). They are not on the round: {@link TargetPick}
+ *   hands them over apart, and the round's positions number the rest.
+ * - A mailbox is a house on the round whose target is a box **at the kerb**
+ *   in front of it, {@link MAILBOX_FROM_KERB_METRES} off the carriageway's
+ *   edge on the line from the road to its front step, with a smaller catch
+ *   (`throw.ts` §`MAILBOX_CATCH_RADIUS_METRES`). It is worth what a doorstep is.
  */
 
 import type { RouteProfile } from '@onyourleft/domain';
@@ -90,8 +109,8 @@ import { nearestOnDrawnRoad } from '../road-grid';
 import { fmix32, mixInto, uniformFrom } from '../seeded';
 import { drawnRoadPosition, type CorridorOrigin } from '../terrain';
 
-import { MOST_HOUSES } from './round';
-import { PARCEL_REACH_METRES } from './throw';
+import { FEWEST_DELIVERY_HOUSES, MOST_HOUSES } from './round';
+import { CARRIAGEWAY_HALF_WIDTH_METRES, PARCEL_REACH_METRES } from './throw';
 
 /**
  * How far before and after a house its throw window is reserved, metres:
@@ -154,6 +173,11 @@ export interface DeliveryTarget {
   /** How far the front step is from the drawn road's centreline, metres. */
   readonly fromRoad: number;
   readonly kind: FrontStep['kind'];
+  /**
+   * A mailbox at the kerb rather than the front step (#2365): its point,
+   * `fromRoad` and the catch are the box's. Absent, the front step.
+   */
+  readonly mailbox?: boolean;
   /** The front step, local metres, and its yaw toward the road. */
   readonly x: number;
   readonly y: number;
@@ -169,6 +193,39 @@ export interface TargetPick {
   readonly wanted: number;
   /** Whether as many were found as were wanted. `false` with none: a town with no house to deliver to. */
   readonly complete: boolean;
+  /**
+   * The picked houses that must not get a parcel (#2365), in route order,
+   * each `position` its place in this list. Never on the round: the round is
+   * {@link targets}. None unless {@link TargetPickInput.shares} asked.
+   */
+  readonly noDelivery: readonly DeliveryTarget[];
+}
+
+/** A level round's shares (#2365, ADR 0065 D-4.1), each from nought to one. */
+export interface TargetShares {
+  /** The share of the round's houses whose target is a mailbox at the kerb. */
+  readonly mailbox: number;
+  /** The share of the houses picked that must not get a parcel. */
+  readonly noDelivery: number;
+}
+
+/**
+ * How far off the carriageway's edge a mailbox stands, metres — #2365:
+ * **0.6**, a box on a post at the kerb in front of its house. This project's
+ * own number, for the owner's approval in #2365's pull request.
+ */
+export const MAILBOX_FROM_KERB_METRES = 0.6;
+
+/** Folded into the round's seed for the roles' own stream: a constant nothing else uses. */
+const ROLE_STREAM = 0x6d61_696c;
+
+/**
+ * How many of `picked` houses must not get a parcel, at `share` — #2365: the
+ * share of them rounded, and never so many that fewer than
+ * `round.ts` §`FEWEST_DELIVERY_HOUSES` are left to deliver to.
+ */
+export function noDeliveryCount(picked: number, share: number): number {
+  return Math.max(0, Math.min(Math.round(share * picked), picked - FEWEST_DELIVERY_HOUSES));
 }
 
 export interface TargetPickInput {
@@ -185,6 +242,8 @@ export interface TargetPickInput {
    * asks it; {@link MAPPED_BUILDING_TRIANGLES} by default.
    */
   readonly triangleBudget?: number;
+  /** A level round's mailboxes and no-delivery houses (#2365). Absent, none. */
+  readonly shares?: TargetShares | undefined;
 }
 
 /**
@@ -229,6 +288,121 @@ function stepOf(plan: FootprintPlan): FrontStep | undefined {
 }
 
 /**
+ * Every house a round from `riderDistance` could take before the drawn
+ * check, in route order, ties broken by index so the same input orders the
+ * same way every time: a front step in a parcel's reach of the drawn road,
+ * whose window opens no earlier than the start of the chunk after the
+ * rider's and closes by the route's end (or a lap on from the rider, on a
+ * loop).
+ */
+function candidatesOf(
+  buildings: MappedBuildings,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  riderDistance: number,
+): Candidate[] {
+  const total = profile.totalDistance;
+  /** The earliest a window may open: the start of the chunk after the rider's. */
+  const firstOpen = (mappedChunk(riderDistance) + 1) * MAPPED_CHUNK_METRES;
+  /** The latest a window may close: the route's end, or a lap on from the rider. */
+  const lastClose = profile.loop ? riderDistance + total : total;
+  const half = TARGET_WINDOW_HALF_METRES;
+
+  const candidates: Candidate[] = [];
+  buildings.plans.forEach((plan, index) => {
+    const step = stepOf(plan);
+    if (step === undefined) return;
+    const near = nearestOnDrawnRoad(profile, origin, step.x, step.z, TARGET_MOST_FROM_ROAD_METRES);
+    if (near === undefined) return;
+    const laps =
+      profile.loop && total > 0
+        ? Math.max(0, Math.ceil((firstOpen + half - near.along) / total))
+        : 0;
+    const distance = near.along + laps * total;
+    if (distance - half < firstOpen || distance + half > lastClose) return;
+    candidates.push({ index, distance, step, lateral: near.lateral, fromRoad: near.distance });
+  });
+  candidates.sort((a, b) => a.distance - b.distance || a.index - b.index);
+  return candidates;
+}
+
+/**
+ * Whether a candidate is drawn throughout its throw window: at the start of
+ * every refill chunk the window touches, and at every whole metre of it (the
+ * header). The selections are kept for the one pick, or the one count.
+ */
+function drawnThroughoutOf(
+  buildings: MappedBuildings,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  triangleBudget: number,
+): (candidate: Candidate) => boolean {
+  const half = TARGET_WINDOW_HALF_METRES;
+  const selection = new MappedSelection();
+  /** The plans drawn at each sampled rider distance. */
+  const drawnAt = new Map<number, ReadonlySet<number>>();
+  const drawnSet = (at: number): ReadonlySet<number> => {
+    const known = drawnAt.get(at);
+    if (known !== undefined) return known;
+    const here = drawnRoadPosition(profile, origin, at);
+    selectMappedBuildings(buildings, here.x, here.z, triangleBudget, selection);
+    const found = new Set(selection.plans.subarray(0, selection.count));
+    drawnAt.set(at, found);
+    return found;
+  };
+  return (candidate) => {
+    const from = candidate.distance - half;
+    const to = candidate.distance + half;
+    for (let chunk = mappedChunk(from); chunk <= mappedChunk(to); chunk += 1) {
+      if (!drawnSet(chunk * MAPPED_CHUNK_METRES).has(candidate.index)) return false;
+    }
+    for (let at = Math.ceil(from); at <= to; at += 1) {
+      if (!drawnSet(at).has(candidate.index)) return false;
+    }
+    return true;
+  };
+}
+
+/**
+ * The most houses a round started on the start line can hold, capped at
+ * `round.ts` §`MOST_HOUSES` — #2294's course picker, which says before the
+ * rider chooses which of their routes can hold a round.
+ *
+ * The candidates and the drawn check are {@link pickRoundTargets}' own, at
+ * the same triangle budget, and no seed: the houses are taken in route
+ * order, each one drawn throughout its window and at least
+ * {@link TARGET_SPACING_METRES} past the last one taken. Every window is the
+ * same length, so taking the earliest house that fits is the most houses
+ * any spacing of them allows (the interval-scheduling argument), and **no
+ * pick is longer than this, whatever its seed**. "Fewer than a round needs"
+ * is therefore certain; "this many" is a ceiling, because a seeded pick can
+ * take a house that rules out two and find fewer, which the press still
+ * decides (`ride-round.ts` §`startDeliveryRide`).
+ *
+ * It returns one number: no seed, target or position leaves it.
+ * `triangleBudget` is the pick's {@link TargetPickInput.triangleBudget}, and
+ * the press asks the pick at the default, as this does.
+ */
+export function countRoundHouses(
+  buildings: MappedBuildings,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  triangleBudget: number = MAPPED_BUILDING_TRIANGLES,
+): number {
+  const candidates = candidatesOf(buildings, profile, origin, 0);
+  const drawnThroughout = drawnThroughoutOf(buildings, profile, origin, triangleBudget);
+  let count = 0;
+  let last = -Infinity;
+  for (const candidate of candidates) {
+    if (count === MOST_HOUSES) break;
+    if (candidate.distance - last < TARGET_SPACING_METRES || !drawnThroughout(candidate)) continue;
+    count += 1;
+    last = candidate.distance;
+  }
+  return count;
+}
+
+/**
  * Pick a round of `input.houses` targets ahead of the rider, in route order,
  * no two closer than {@link TARGET_SPACING_METRES}, from the houses drawn
  * throughout their throw windows. @see the header
@@ -254,53 +428,8 @@ export function pickRoundTargets(
   }
   if (!(triangleBudget >= 0)) refuse('the triangle budget is a number, not below zero');
 
-  const total = profile.totalDistance;
-  /** The earliest a window may open: the start of the chunk after the rider's. */
-  const firstOpen = (mappedChunk(riderDistance) + 1) * MAPPED_CHUNK_METRES;
-  /** The latest a window may close: the route's end, or a lap on from the rider. */
-  const lastClose = profile.loop ? riderDistance + total : total;
-  const half = TARGET_WINDOW_HALF_METRES;
-
-  const candidates: Candidate[] = [];
-  buildings.plans.forEach((plan, index) => {
-    const step = stepOf(plan);
-    if (step === undefined) return;
-    const near = nearestOnDrawnRoad(profile, origin, step.x, step.z, TARGET_MOST_FROM_ROAD_METRES);
-    if (near === undefined) return;
-    const laps =
-      profile.loop && total > 0
-        ? Math.max(0, Math.ceil((firstOpen + half - near.along) / total))
-        : 0;
-    const distance = near.along + laps * total;
-    if (distance - half < firstOpen || distance + half > lastClose) return;
-    candidates.push({ index, distance, step, lateral: near.lateral, fromRoad: near.distance });
-  });
-  // Ties broken by index, so the same input orders the same way every time.
-  candidates.sort((a, b) => a.distance - b.distance || a.index - b.index);
-
-  const selection = new MappedSelection();
-  /** The plans drawn at each sampled rider distance, kept for the one pick. */
-  const drawnAt = new Map<number, ReadonlySet<number>>();
-  const drawnSet = (at: number): ReadonlySet<number> => {
-    const known = drawnAt.get(at);
-    if (known !== undefined) return known;
-    const here = drawnRoadPosition(profile, origin, at);
-    selectMappedBuildings(buildings, here.x, here.z, triangleBudget, selection);
-    const found = new Set(selection.plans.subarray(0, selection.count));
-    drawnAt.set(at, found);
-    return found;
-  };
-  const drawnThroughout = (candidate: Candidate): boolean => {
-    const from = candidate.distance - half;
-    const to = candidate.distance + half;
-    for (let chunk = mappedChunk(from); chunk <= mappedChunk(to); chunk += 1) {
-      if (!drawnSet(chunk * MAPPED_CHUNK_METRES).has(candidate.index)) return false;
-    }
-    for (let at = Math.ceil(from); at <= to; at += 1) {
-      if (!drawnSet(at).has(candidate.index)) return false;
-    }
-    return true;
-  };
+  const candidates = candidatesOf(buildings, profile, origin, riderDistance);
+  const drawnThroughout = drawnThroughoutOf(buildings, profile, origin, triangleBudget);
 
   const base = fmix32(seed);
   const taken: Candidate[] = [];
@@ -321,16 +450,66 @@ export function pickRoundTargets(
   }
   taken.sort((a, b) => a.distance - b.distance || a.index - b.index);
 
-  const targets = taken.map((candidate, position): DeliveryTarget => ({
-    position,
-    distance: candidate.distance,
-    side: candidate.lateral >= 0 ? 1 : -1,
-    fromRoad: candidate.fromRoad,
-    kind: candidate.step.kind,
-    x: candidate.step.x,
-    y: candidate.step.y,
-    z: candidate.step.z,
-    yaw: candidate.step.yaw,
-  }));
-  return { targets, wanted: houses, complete: targets.length === houses };
+  // #2365: which picked houses get no parcel, and which of the rest are
+  // mailboxes, each by a seeded rank from a stream nothing else reads.
+  const shares = input.shares;
+  const roles = mixInto(base, ROLE_STREAM);
+  const ranked = (stream: number, among: readonly Candidate[]): readonly Candidate[] =>
+    [...among].sort(
+      (a, b) =>
+        uniformFrom(mixInto(roles, a.index), stream) -
+          uniformFrom(mixInto(roles, b.index), stream) || a.index - b.index,
+    );
+  const skipped = new Set(
+    shares === undefined
+      ? []
+      : ranked(0, taken).slice(0, noDeliveryCount(taken.length, shares.noDelivery)),
+  );
+  const delivered = taken.filter((candidate) => !skipped.has(candidate));
+  const mailboxes = new Set(
+    shares === undefined
+      ? []
+      : ranked(1, delivered).slice(0, Math.round(shares.mailbox * delivered.length)),
+  );
+  const targetOf = (candidate: Candidate, position: number): DeliveryTarget => {
+    const target: DeliveryTarget = {
+      position,
+      distance: candidate.distance,
+      side: candidate.lateral >= 0 ? 1 : -1,
+      fromRoad: candidate.fromRoad,
+      kind: candidate.step.kind,
+      x: candidate.step.x,
+      y: candidate.step.y,
+      z: candidate.step.z,
+      yaw: candidate.step.yaw,
+    };
+    return mailboxes.has(candidate) ? atTheKerb(target, profile, origin) : target;
+  };
+  const targets = delivered.map(targetOf);
+  const noDelivery = taken.filter((candidate) => skipped.has(candidate)).map(targetOf);
+  return { targets, wanted: houses, complete: taken.length === houses, noDelivery };
+}
+
+/**
+ * `target`'s mailbox (#2365): on the line from the drawn road at its
+ * distance to its front step, {@link MAILBOX_FROM_KERB_METRES} off the
+ * carriageway's edge, at the step's height and yaw. A step nearer the road
+ * than that is its own mailbox.
+ */
+function atTheKerb(
+  target: DeliveryTarget,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+): DeliveryTarget {
+  const fromRoad = CARRIAGEWAY_HALF_WIDTH_METRES + MAILBOX_FROM_KERB_METRES;
+  if (!(target.fromRoad > fromRoad)) return { ...target, mailbox: true };
+  const road = drawnRoadPosition(profile, origin, target.distance);
+  const share = fromRoad / target.fromRoad;
+  return {
+    ...target,
+    mailbox: true,
+    fromRoad,
+    x: road.x + (target.x - road.x) * share,
+    z: road.z + (target.z - road.z) * share,
+  };
 }

@@ -22,7 +22,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 
 import { unixSeconds } from '@onyourleft/domain';
-import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
+import {
+  ATHLETE_A,
+  cameraFrameFor,
+  createStoreHarness,
+  seedAthletes,
+  seedRide,
+  snapshotFor,
+} from '@onyourleft/store/testing';
 import type { StoreHarness } from '@onyourleft/store/testing';
 import { cameraFrameId } from '@onyourleft/store';
 
@@ -64,6 +71,7 @@ function portFor(): CameraStorePort {
         harness.write(async (store) => store.putCameraFrame(record)),
       countCameraFrames: async (owner) =>
         harness.write(async (store) => store.countCameraFrames(owner)),
+      countSnapshots: async (owner) => harness.write(async (store) => store.countSnapshots(owner)),
       deleteCameraFrames: async (owner) =>
         harness.write(async (store) => store.deleteCameraFrames(owner)),
     },
@@ -367,5 +375,21 @@ describe('what the screen says about the pictures already taken', () => {
     ]) {
       expect(sentence).not.toMatch(/blob:|data:|image\/|\.jpg|src=/i);
     }
+  });
+});
+
+describe('the snapshots the delete takes too — #1063’s review', () => {
+  it('counts the side-camera snapshots among the pictures, and the delete takes them', async () => {
+    const ride = await seedRide(harness, ATHLETE_A);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(cameraFrameFor(ATHLETE_A));
+      await store.putCameraFrame(snapshotFor(ATHLETE_A, ride.id));
+      await store.putCameraFrame(snapshotFor(ATHLETE_A, ride.id));
+    });
+    const keep = keepThisRide(portFor());
+    await expect(keep.count()).resolves.toBe(3);
+    await expect(keep.countSnapshots()).resolves.toBe(2);
+    await keep.forget();
+    await expect(harness.read(async (store) => store.countSnapshots(ATHLETE_A))).resolves.toBe(0);
   });
 });

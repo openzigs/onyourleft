@@ -16,7 +16,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS } from './insets';
 import { SUBPIXEL_TOLERANCE, openRide } from './ride-stage';
 
-import { AA_LARGE_TEXT_OR_NON_TEXT, contrastRatio } from '../src/design/contrast';
+import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../src/design/contrast';
 
 /*
  * #940 — THE PRE-RIDE CHOOSER.
@@ -901,20 +901,17 @@ test.describe('#1011 — route tiles, one full-width Ride, the realistic world i
 });
 
 /*
- * #1221 — the line under *Ride* saying the ride will not be saved, and *Record
- * this ride*. `?notices=all` has nothing recording under it
- * (`ride-harness.tsx` §`rideMovingSeconds`), so the line stands with the
- * tallest stack of notices. Held: it is BELOW *Ride* — so nothing #940
- * measures above it moved — within the screen's width, its words not covered
- * once scrolled to, and *Record this ride* an ordinary 44 px target (it is not
- * pressed during a ride, so it is not on `design/ride-time-controls.ts`' list).
+ * #1221, #2381 — the line under *Ride* saying the press records the ride.
+ * `?notices=all` has nothing recording under it (`ride-harness.tsx`
+ * §`rideMovingSeconds`) and a port that can record, so the line stands with
+ * the tallest stack of notices. Held: it is BELOW *Ride* — so nothing #940
+ * measures above it moved — within the screen's width, and its words not
+ * covered once scrolled to. Since #2381 it carries no control: #1221's
+ * *Record this ride* is gone, and the line holds none.
  */
-/** `.oyl-button`'s 44 px (#316, WCAG 2.2 SC 2.5.5). */
-const RECORD_TARGET_PIXELS = 44;
-
-test.describe('#1221 — the chooser says, under Ride, that nothing is recording', () => {
+test.describe('#1221, #2381 — the chooser says, under Ride, that the press records', () => {
   for (const viewport of CHOOSER_VIEWPORTS) {
-    test(`the line is under Ride, within the screen, and its control a 44 px target — ${viewport.name}`, async ({
+    test(`the line is under Ride, within the screen, and holds no control — ${viewport.name}`, async ({
       page,
     }) => {
       await openChooser(page, viewport, 'chooser', 'all');
@@ -937,9 +934,7 @@ test.describe('#1221 — the chooser says, under Ride, that nothing is recording
           ...document.querySelectorAll<HTMLButtonElement>('.oyl-chooser__go button'),
         ].find((each) => (each.textContent ?? '').startsWith('Ride '));
         const words = line?.querySelector('p') ?? undefined;
-        const record = [...(line?.querySelectorAll('button') ?? [])].find(
-          (each) => (each.textContent ?? '').trim() === 'Record this ride',
-        );
+        const controls = line?.querySelectorAll('button, a, input').length ?? 0;
         const wordsBox = box(words);
         const hit =
           wordsBox === undefined
@@ -951,23 +946,25 @@ test.describe('#1221 — the chooser says, under Ride, that nothing is recording
         return {
           ride: box(ride),
           line: box(line),
-          record: box(record),
+          controls,
           text: words?.textContent ?? '',
           onTop: hit !== null && words !== undefined && words.contains(hit),
         };
       });
       console.log(
-        `#1221 — ${viewport.name}: Ride ends at ${String(read.ride?.bottom.toFixed(1))} px, the line at ${String(read.line?.top.toFixed(1))}–${String(read.line?.bottom.toFixed(1))} px, Record this ride ${String(read.record?.width.toFixed(0))}×${String(read.record?.height.toFixed(0))}`,
+        `#2381 — ${viewport.name}: Ride ends at ${String(read.ride?.bottom.toFixed(1))} px, the line at ${String(read.line?.top.toFixed(1))}–${String(read.line?.bottom.toFixed(1))} px`,
       );
-      expect(read.text).toContain('This ride will not be saved as an activity');
-      if (read.ride === undefined || read.line === undefined || read.record === undefined) {
-        throw new Error('the chooser has no Ride, no line under it, or no Record this ride');
+      // The owner's words of 2026-11-08 (#2381), label and sentence.
+      expect(read.text).toBe(
+        'Recording on · Pressing Ride records this ride. When you end it, you choose whether to save it or discard it.',
+      );
+      if (read.ride === undefined || read.line === undefined) {
+        throw new Error('the chooser has no Ride, or no line under it');
       }
       expect(read.line.top).toBeGreaterThanOrEqual(read.ride.bottom - SUBPIXEL_TOLERANCE);
       expect(read.line.left).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
       expect(read.line.right).toBeLessThanOrEqual(viewport.width + SUBPIXEL_TOLERANCE);
-      expect(read.record.height).toBeGreaterThanOrEqual(RECORD_TARGET_PIXELS - SUBPIXEL_TOLERANCE);
-      expect(read.record.width).toBeGreaterThanOrEqual(RECORD_TARGET_PIXELS - SUBPIXEL_TOLERANCE);
+      expect(read.controls).toBe(0);
       expect(read.onTop, 'something covers the line’s words').toBe(true);
     });
   }
@@ -1040,10 +1037,144 @@ test.describe('#1970 — the lap race’s switch is on the screen on a loop, on 
     page,
   }) => {
     await openChooser(page, TABLET_IN_THE_SHELL_CHOOSER, 'chooser', 'promise', '&lap=riding');
+    // #2330: the wind's speed and direction boxes show only while its switch
+    // is on, and before #1970 they always showed. On, with a speed it
+    // accepts, this is the loadout #1970 moved the race out from under, with
+    // no refusal adding height that loadout did not have. Off, the race last
+    // ends 743 px down on a 768 px fold, and this control would measure
+    // nothing.
+    await page.getByRole('switch', { name: 'Ride in a wind' }).click();
+    await page.getByRole('spinbutton', { name: /^Wind speed/ }).fill('12');
+    await expect(page.locator('#oyl-game-wind-problem')).toHaveCount(0);
     const seen = await readRaceSwitch(page, true);
     console.log(
       `#1970 — the control: the race switch at ${seen.top.toFixed(1)} px, the fold at ${seen.fold.toFixed(1)} px`,
     );
     expect(seen.top).toBeGreaterThan(seen.fold);
   });
+});
+
+/*
+ * #2331 — THE *BUILT-IN CIRCUITS* DISCLOSURE IS DRAWN AS A CONTROL.
+ *
+ * The owner's ruling on #2326: its open/close control read as plain text — a
+ * 16 px `▸` beside a line in body ink, with nothing behind it.
+ * `ride.html?picker=chooser&circuits=shipped` hands the chooser the shipped
+ * circuits through `loadBuiltInCircuits` (`ride-harness.tsx` §`CIRCUITS`), so
+ * the disclosure is drawn closed, as a rider with routes of their own sees it,
+ * under the real `theme.css`.
+ *
+ * Read back: the 44 px row #316's three ways (the shipped box, the
+ * declaration, and the box with the floor stripped, which must be shorter —
+ * so the declaration is what holds the target); the marker the rule's own,
+ * at one and a half times the label and in the label's `accentText`; the row
+ * filled with `surfaceOverlay`, the label at 700 and a text pair on the fill;
+ * under a pointer, `selected` and `accentHover`, still a text pair; and a
+ * press opening it to the circuits, with the marker turned.
+ */
+interface CircuitsRow {
+  readonly height: number;
+  readonly width: number;
+  readonly declared: number;
+  readonly stripped: number;
+  readonly weight: number;
+  readonly size: number;
+  readonly ink: string;
+  readonly fill: string;
+  readonly marker: string;
+  readonly markerSize: number;
+  readonly markerInk: string;
+}
+
+const CIRCUITS_SUMMARY = 'details.oyl-chooser__circuits > summary';
+
+async function readCircuitsRow(page: Page): Promise<CircuitsRow> {
+  return page.locator(CIRCUITS_SUMMARY).evaluate((element) => {
+    const style = getComputedStyle(element);
+    const marker = getComputedStyle(element, '::before');
+    const shipped = element.getBoundingClientRect();
+    const read = {
+      height: shipped.height,
+      width: shipped.width,
+      declared: Number.parseFloat(style.minHeight),
+      weight: Number(style.fontWeight),
+      size: Number.parseFloat(style.fontSize),
+      ink: style.color,
+      fill: style.backgroundColor,
+      marker: marker.content,
+      markerSize: Number.parseFloat(marker.fontSize),
+      markerInk: marker.color,
+    };
+    (element as HTMLElement).style.minHeight = '0';
+    const stripped = element.getBoundingClientRect().height;
+    (element as HTMLElement).style.minHeight = '';
+    return { ...read, stripped };
+  });
+}
+
+async function colourToken(page: Page, property: string): Promise<string> {
+  const value = await page.evaluate(
+    (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim(),
+    property,
+  );
+  return value.toLowerCase();
+}
+
+test.describe('#2331 — the built-in circuits disclosure is drawn as a control', () => {
+  for (const viewport of [
+    CHOOSER_VIEWPORTS[0] as ChooserViewport,
+    TABLET_IN_THE_SHELL_CHOOSER,
+  ] as const) {
+    test(viewport.name, async ({ page }) => {
+      await openChooser(page, viewport, 'chooser', 'promise', '&circuits=shipped');
+      const details = page.locator('details.oyl-chooser__circuits');
+      const summary = page.locator(CIRCUITS_SUMMARY);
+      await summary.scrollIntoViewIfNeeded();
+      await expect(summary).toHaveText('Built-in circuits');
+      await expect(details).not.toHaveAttribute('open');
+      const accentText = await colourToken(page, '--oyl-color-accent-text');
+      const accentHover = await colourToken(page, '--oyl-color-accent-hover');
+      const surfaceOverlay = await colourToken(page, '--oyl-color-surface-overlay');
+      const selected = await colourToken(page, '--oyl-color-selected');
+
+      const rest = await readCircuitsRow(page);
+      console.log(
+        `#2331 ${viewport.name}: the row ${rest.width.toFixed(1)}×${rest.height.toFixed(1)} px ` +
+          `(${rest.stripped.toFixed(1)} without its floor), the marker ${String(rest.markerSize)} px ` +
+          `beside a ${String(rest.size)} px label, ` +
+          `${contrastRatio(hexOf(rest.ink), hexOf(rest.fill)).toFixed(2)}:1 on its fill`,
+      );
+      expect(rest.height, 'the shipped box').toBeGreaterThanOrEqual(44);
+      expect(rest.width, 'the shipped box').toBeGreaterThanOrEqual(44);
+      expect(rest.declared, 'the declaration').toBeGreaterThanOrEqual(44);
+      expect(rest.stripped, 'with the floor stripped').toBeLessThan(44);
+      // `.oyl-details`' own glyph, never the UA triangle, and half as big again.
+      expect(rest.marker).toContain('▸');
+      expect(rest.markerSize).toBeGreaterThanOrEqual(1.5 * rest.size);
+      expect(hexOf(rest.markerInk)).toBe(accentText);
+      // A filled row in the secondary button's pair, not a line of body ink.
+      expect(hexOf(rest.ink)).toBe(accentText);
+      expect(hexOf(rest.fill)).toBe(surfaceOverlay);
+      expect(rest.weight).toBeGreaterThanOrEqual(700);
+      expect(contrastRatio(hexOf(rest.ink), hexOf(rest.fill))).toBeGreaterThanOrEqual(AA_TEXT);
+
+      await summary.hover();
+      await expect
+        .poll(async () => hexOf((await readCircuitsRow(page)).fill), {
+          message: 'the fill under a pointer',
+        })
+        .toBe(selected);
+      const hovered = await readCircuitsRow(page);
+      expect(hexOf(hovered.ink)).toBe(accentHover);
+      expect(hexOf(hovered.markerInk)).toBe(accentHover);
+      expect(contrastRatio(hexOf(hovered.ink), hexOf(hovered.fill))).toBeGreaterThanOrEqual(
+        AA_TEXT,
+      );
+
+      await summary.click();
+      await expect(details).toHaveAttribute('open');
+      await expect(details.getByRole('radio').first()).toBeVisible();
+      expect((await readCircuitsRow(page)).marker).toContain('▾');
+    });
+  }
 });

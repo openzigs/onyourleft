@@ -80,8 +80,12 @@ function plansDigest(
   // #2021 added the `steeple` flag to every plan; no footprint here has one with the type
   // unread, so it is left out of the record, which predates it.
   if (options.buildingTypes === false) expect(plans.every((plan) => !plan.steeple)).toBe(true);
+  // #2206 added the `spire` role to every plan; it is empty unless a roof tag is read, and
+  // an empty one is left out of the record, which predates it.
   const text = JSON.stringify({ plans, verdicts }, (key, value: unknown) =>
-    key === 'inferred' || key === 'steeple'
+    key === 'inferred' ||
+    key === 'steeple' ||
+    (key === 'spire' && ArrayBuffer.isView(value) && (value as Float32Array).length === 0)
       ? undefined
       : ArrayBuffer.isView(value)
         ? Array.from(value as Float32Array)

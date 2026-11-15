@@ -26,6 +26,7 @@ import {
   slopeEvent,
   slopeSentence,
   slopesOf,
+  wholePercent,
   type SlopeAnnounced,
 } from './climb-ahead';
 import type { AnnouncementEvent } from './announce';
@@ -140,6 +141,88 @@ describe('what counts as a slope', () => {
     );
     expect(slopes).toHaveLength(1);
     expect(slopes[0]?.length).toBe(430);
+  });
+});
+
+/**
+ * #2291, the owner's screenshots of 2026-11-06: a 10 % climb said "9 %" and a
+ * 4.5 % one "4 %". The profile's grade is a slope over a 100 m window, so a
+ * climb's run starts and ends partway up the ramps that window draws; these
+ * are those ramps, written out, either side of a steady body.
+ */
+describe('a climb’s average, as the rider is told it — #2291', () => {
+  /** 1 km flat, a ramp up, 500 m at `grade`, the same ramp down, 500 m flat. */
+  const ramped = (ramp: readonly number[], grade: number): RouteProfile =>
+    graded([
+      ...stretch(100, 0),
+      ...ramp,
+      ...stretch(50, grade),
+      ...[...ramp].reverse(),
+      ...stretch(50, 0),
+    ]);
+
+  it('is the mean over the climb’s body, not the ramps at its ends', () => {
+    const gentle = slopesOf(ramped([1.5, 3.2, 4, 4.4], 4.5));
+    expect(gentle).toHaveLength(1);
+    // With its ramps the mean was 4.43, said "4".
+    expect(gentle[0]?.grade).toBe(4.5);
+    const hard = slopesOf(ramped([0.5, 1.3, 2.4, 3.6, 5, 6.4, 7.6, 8.7, 9.6], 10));
+    // With its ramps 9.38, said "9". One sample of each ramp is inside the trim.
+    expect(hard[0]?.grade).toBeCloseTo(9.985, 3);
+    // The climb itself still starts and ends where it crosses the threshold.
+    expect(gentle[0]?.start).toBe(1010);
+    expect(gentle[0]?.length).toBe(560);
+  });
+
+  it('is said in whole percent, the gradient field’s tenth rounded half up', () => {
+    expect(wholePercent(4.5)).toBe(5);
+    // The gradient field shows 4.45 as 4.5, so the climb is "5", not "4".
+    expect(wholePercent(4.45)).toBe(5);
+    expect(wholePercent(4.4999)).toBe(5);
+    expect(wholePercent(4.44)).toBe(4);
+    expect(wholePercent(7)).toBe(7);
+    expect(wholePercent(9.985)).toBe(10);
+    expect(wholePercent(-10)).toBe(10);
+  });
+
+  it('reaches the voice: a 4.5 % climb is "5 percent", a 10 % one "10 percent"', () => {
+    for (const [ramp, grade, said] of [
+      [[1.5, 3.2, 4, 4.4], 4.5, '5 percent'],
+      [[0.5, 1.3, 2.4, 3.6, 5, 6.4, 7.6, 8.7, 9.6], 10, '10 percent'],
+    ] as const) {
+      const profile = ramped(ramp, grade);
+      const ahead = slopeAhead(slopesOf(profile), profile, 800, 250);
+      expect(ahead === undefined ? '' : slopeSentence(ahead, 'metric')).toMatch(
+        new RegExp(`^Climb in \\d+ metres, ${said}$`),
+      );
+    }
+  });
+
+  it('keeps the mean over all of a slope too short to have a body, and the middle of one that has', () => {
+    // Exactly MINIMUM_SLOPE_METRES (10 samples): no body past the trims, so
+    // the mean is over every sample, and never NaN.
+    const peak = [3.5, 4, 5, 6, 7, 7, 6, 5, 4, 3.5];
+    const short = slopesOf(graded([...stretch(100, 0), ...peak, ...stretch(100, 0)]));
+    expect(short).toHaveLength(1);
+    expect(short[0]?.length).toBe(100);
+    expect(Number.isFinite(short[0]?.grade)).toBe(true);
+    expect(short[0]?.grade).toBeCloseTo(5.1, 10);
+    // 110 m and 140 m: a body of one and of four samples, the middle at 8 %.
+    // A short real climb is mostly ramp, so its middle is the nearest to it.
+    for (const middle of [[8], [8, 8, 8, 8]]) {
+      const pitch = [...peak.slice(0, 5), ...middle, ...peak.slice(5)];
+      const slopes = slopesOf(graded([...stretch(100, 0), ...pitch, ...stretch(100, 0)]));
+      expect(slopes[0]?.length).toBe(pitch.length * RESOLUTION);
+      expect(slopes[0]?.grade).toBeCloseTo(8, 10);
+    }
+  });
+
+  it('on a loop, takes the mean over both halves of a climb across the line', () => {
+    // The tail at the end of the lap is 6 %, the head after the line 8 %.
+    const profile = graded([...stretch(30, 8), ...stretch(150, 0), ...stretch(30, 6), 8], true);
+    const slopes = slopesOf(profile);
+    expect(slopes).toHaveLength(1);
+    expect(slopes[0]?.grade).toBeGreaterThan(6.5);
   });
 });
 

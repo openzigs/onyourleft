@@ -12,4 +12,5 @@
 <resources>
     <color name="oyl_canvas">#101215</color>
     <drawable name="oyl_launch_background">@color/oyl_canvas</drawable>
+    <drawable name="oyl_splash_icon">@drawable/oyl_splash_mark</drawable>
 </resources>

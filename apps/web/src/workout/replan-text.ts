@@ -101,6 +101,17 @@ export const REPLANS_OFF =
  */
 export const REPLANS_ON_BADGE = 'Re-plans on';
 
+/**
+ * What every *Ride* button in the chooser reads while the per-ride switch is
+ * on, in place of "Ride" and the workout's name. #1329, the owner's ruling of
+ * 2026-11-05: {@link REPLANS_ON_BADGE} is on the heading's row and scrolls
+ * away with it, so a rider far down a long list saw neither it nor the
+ * switch; the button they press now says what pressing it does. The panel
+ * keeps the workout's name in the button's accessible name, after these
+ * words (`ride/WorkoutPanel.tsx`).
+ */
+export const RIDE_WITH_REPLANS = 'Ride, with re-plans';
+
 const REASONS: Readonly<Record<ReasonCode, string>> = {
   'heart-rate-high': 'because your heart rate stayed above the range you chose',
   'heart-rate-low': 'because your heart rate stayed below the range you chose',
@@ -290,4 +301,5 @@ export const REPLAN_FIXED_TEXTS: readonly string[] = [
   REPLAN_OFF_BUTTON,
   REPLANS_OFF,
   REPLANS_ON_BADGE,
+  RIDE_WITH_REPLANS,
 ];

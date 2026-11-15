@@ -75,6 +75,7 @@ import {
   segmentEffortId,
   type ActivityId,
   type AthleteId,
+  type CameraFrameId,
   type RouteId,
   type WorkoutId,
   type SegmentId,
@@ -133,6 +134,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
     setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
     setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
+    setAthleteCalorieInputs: async (id, inputs) => real.setAthleteCalorieInputs(id, inputs),
     setAthleteKitColour: async (id, colour) => real.setAthleteKitColour(id, colour),
     setAthleteMaskedWords: async (id, words) => real.setAthleteMaskedWords(id, words),
     setActivityLoadSummary: async (owner, activity, summary) =>
@@ -151,6 +153,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     listRaceableAttempts: async (query, limit) => real.listRaceableAttempts(query, limit),
     setActivityMayBeRaced: async (owner, activity, mayBeRaced) =>
       real.setActivityMayBeRaced(owner, activity, mayBeRaced),
+    setActivityVisibility: async (owner, activity, visibility) =>
+      real.setActivityVisibility(owner, activity, visibility),
     deleteActivity: async (owner, id) => real.deleteActivity(owner, id),
     moveActivityToRecentlyDeleted: async (owner, id, deletedAt) =>
       real.moveActivityToRecentlyDeleted(owner, id, deletedAt),
@@ -188,6 +192,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     putActivityEfforts: async (owner, activityId, efforts) =>
       real.putActivityEfforts(owner, activityId, efforts),
     listEfforts: async (owner, segment, limit) => real.listEfforts(owner, segment, limit),
+    listExcludedEfforts: async (owner, segment, limit) =>
+      real.listExcludedEfforts(owner, segment, limit),
     listSharedEfforts: async (owner, segment, limit) =>
       real.listSharedEfforts(owner, segment, limit),
     listActivityEfforts: async (owner, activityId) => real.listActivityEfforts(owner, activityId),
@@ -205,7 +211,14 @@ function bindStore(real: ActivityStore): PersistentStore {
     putCameraFrame: async (record) => real.putCameraFrame(record),
     listCameraFrames: async (owner, limit) => real.listCameraFrames(owner, limit),
     countCameraFrames: async (owner) => real.countCameraFrames(owner),
+    countExportableCameraFrames: async (owner) => real.countExportableCameraFrames(owner),
     deleteCameraFrames: async (owner) => real.deleteCameraFrames(owner),
+    deleteKeptCameraFramesCapturedBetween: async (owner, from, to) =>
+      real.deleteKeptCameraFramesCapturedBetween(owner, from, to),
+    listRideSnapshots: async (owner, activity) => real.listRideSnapshots(owner, activity),
+    countRideSnapshots: async (owner, activity) => real.countRideSnapshots(owner, activity),
+    countSnapshots: async (owner) => real.countSnapshots(owner),
+    deleteRideSnapshot: async (owner, activity, id) => real.deleteRideSnapshot(owner, activity, id),
     putFramingReference: async (record) => real.putFramingReference(record),
     getFramingReference: async (owner) => real.getFramingReference(owner),
     deleteFramingReference: async (owner) => real.deleteFramingReference(owner),
@@ -1084,6 +1097,40 @@ export function lastWordDroppedStoreFactory(): StoreFactory {
 }
 
 /**
+ * A repository whose calorie-input write **keeps the sex and drops the year of
+ * birth** — for #2432.
+ *
+ * *Wrong layer*: the write is real and commits, and the call answers with both
+ * fields as asked, so the screen says "Saved" and shows the year. A fresh
+ * connection reads a row with a sex and no year, which is a rider whose
+ * heart-rate rides quietly show no calorie figure. A round trip that checked
+ * only the sex passes against this; the red/green pair is in
+ * `activity-store.calorie-inputs.test.ts`.
+ */
+export function droppedBirthYearStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        setAthleteCalorieInputs: async (id, inputs) => {
+          const written = await real.setAthleteCalorieInputs(id, {
+            calorieSex: inputs.calorieSex,
+            birthYear: undefined,
+          });
+          return written === undefined || inputs.birthYear === undefined
+            ? written
+            : { ...written, birthYear: inputs.birthYear };
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
  * A repository that **reports an erase as complete and leaves the rows behind**.
  *
  * The fourteenth fake, for #384's kept camera frames, and it is the one whose
@@ -1121,6 +1168,41 @@ export function survivingFrameStoreFactory(): StoreFactory {
           // a weaker proof: what is being calibrated is the *round trip*, not
           // the arithmetic.
           real.countCameraFrames(owner),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **reports one snapshot deleted and keeps the picture** —
+ * #1063.
+ *
+ * ADR 0044 D-3: *"The rider can also delete one snapshot."* This store answers
+ * `deleteRideSnapshot` with `true` whenever the ride holds the snapshot — an
+ * honest answer about what it would have removed — and removes nothing. The
+ * snapshot section then drops the picture from the screen, the rider is told
+ * it is gone, and the photograph is still on the device, which is the
+ * `survivingFrameStoreFactory` failure one picture at a time.
+ *
+ * Only a read on a fresh connection notices, and
+ * `camera-frame-store.test.ts` §"one snapshot is deleted" is the red/green
+ * pair.
+ */
+export function survivingSnapshotStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        deleteRideSnapshot: async (
+          owner: AthleteId,
+          activity: ActivityId,
+          id: CameraFrameId,
+        ): Promise<boolean> =>
+          (await real.listRideSnapshots(owner, activity)).some((frame) => frame.id === id),
       };
     },
     destroy: async (name) => {

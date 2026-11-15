@@ -198,6 +198,9 @@ interface DraftMeasurement {
   readonly full: Box | undefined;
   readonly panel: Box | undefined;
   readonly valueOverflows: boolean;
+  readonly sheltered: boolean;
+  readonly outline: { readonly style: string; readonly width: number; readonly offset: number };
+  readonly parts: readonly Box[];
   readonly others: readonly { readonly label: string; readonly box: Box }[];
   readonly screen: Box;
 }
@@ -292,8 +295,14 @@ const VIEWPORTS = [
  * the track at 119 px, so this assertion stayed green. What caught it was the
  * control panel below, whose words stopped overflowing — which is the division
  * of labour between the two, and the reason neither is redundant.
+ *
+ * ⚠️ **240 since #2130, where it was 200.** On a landscape tablet the HUD's
+ * readings are set at ADR 0063 D-5's sizes, and the widest field is the clock
+ * row's `ELAPSED 9:59:59`, a label and a 2.45 rem time on one line: 205 px at
+ * 1280×800 in the pinned Chromium. A grid that failed to load is still a
+ * full-width block, over 1000 px there.
  */
-const WIDEST_CREDIBLE_TRACK = 200;
+const WIDEST_CREDIBLE_TRACK = 240;
 
 /**
  * How much fractional slack the finer comparison allows, in CSS pixels.
@@ -804,9 +813,10 @@ for (const viewport of VIEWPORTS) {
     }) => {
       const measured = await measure(page, viewport);
       // Both stages, so a harness that stopped rendering them passes over nothing.
-      expect(measured.draft.map((stage) => stage.draft)).toEqual([DRAFT_FULL_SCALE, 20]);
+      expect(measured.draft.map((stage) => stage.draft)).toEqual([DRAFT_FULL_SCALE, 20, 20]);
+      expect(measured.draft.map((stage) => stage.sheltered)).toEqual([false, false, true]);
       for (const stage of measured.draft) {
-        const name = `${viewport.name}/${String(stage.draft)} %`;
+        const name = `${viewport.name}/${String(stage.draft)} %${stage.sheltered ? ' in the draft' : ''}`;
         const { field, gauge, fill, full, panel } = stage;
         expect(field, `${name}: no draft field`).toBeDefined();
         expect(gauge, `${name}: no gauge`).toBeDefined();
@@ -832,6 +842,37 @@ for (const viewport of VIEWPORTS) {
         expect(inside(field, stage.screen), `${name}: the field is off the screen`).toBe(true);
         for (const other of stage.others) {
           expect(boxesOverlap(field, other.box), `${name} lands on ${other.label}`).toBe(false);
+        }
+        // #2426: in the draft the field's outline is a solid ring OUTSIDE its box,
+        // so it is drawn over none of the label, number, line or gauge; and, grown
+        // by the ring, the field is still in its panel and on screen and touches
+        // no neighbour.
+        if (stage.sheltered) {
+          const ring = stage.outline.width + Math.max(0, stage.outline.offset);
+          expect(stage.outline.style, `${name} outline style`).toBe('solid');
+          expect(stage.outline.width, `${name} outline width`).toBeGreaterThanOrEqual(3);
+          expect(
+            stage.outline.offset,
+            `${name}: the outline is drawn inside the field, over its content`,
+          ).toBeGreaterThanOrEqual(0);
+          for (const part of stage.parts) {
+            expect(inside(part, field), `${name}: a part of the field is outside it`).toBe(true);
+          }
+          const grown = {
+            left: field.left - ring,
+            top: field.top - ring,
+            right: field.right + ring,
+            bottom: field.bottom + ring,
+            width: field.width + 2 * ring,
+            height: field.height + 2 * ring,
+          };
+          expect(inside(grown, stage.screen), `${name}: the outline is off the screen`).toBe(true);
+          for (const other of stage.others) {
+            expect(
+              boxesOverlap(grown, other.box),
+              `${name}: the outline lands on ${other.label}`,
+            ).toBe(false);
+          }
         }
         // The fill is the share of the full scale, measured off the drawn boxes.
         expect(fill.left).toBeCloseTo(gauge.left, 0);
@@ -957,7 +998,10 @@ for (const viewport of VIEWPORTS) {
       const none = deliveryStage(measured, 'none');
       expect(none.fields).toEqual([]);
       expect(none.panel).toBeDefined();
-      // The ordinary ride's panel is the two rows every claim below is against.
+      // The ordinary ride's panel is the two rows every claim below is against
+      // — on the tablet since #2130 its six secondary tracks hold the ordinary
+      // ride's six readings in a row, and the ride so far and the rider's
+      // effort (#2076, #2077), which a phone's overlay gives way, the second.
       expect(rows(none)).toBe(2);
       for (const stage of ['start', 'end']) {
         const round = deliveryStage(measured, stage);
@@ -1074,7 +1118,8 @@ for (const viewport of [
       });
     });
     expect(primary.map((each) => each.label)).toEqual([
-      'Power',
+      // #2420: the 3 s average, as every ride hands it in.
+      'Power (3 s)',
       'Cadence',
       'Heart rate',
       'Gradient',

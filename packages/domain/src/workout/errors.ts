@@ -79,7 +79,14 @@ export type WorkoutErrorCode =
    * objects in the first place, so that a hostile file cannot spend the memory
    * before anything has had a chance to refuse it.
    */
-  | 'file-too-large';
+  | 'file-too-large'
+  /**
+   * A rider's choice for a built-in workout that its template does not allow
+   * (#2298): an intensity, a repeat count or a recovery outside the template's
+   * bounds, or a choice the template does not offer at all. Refused rather
+   * than clamped or ignored, for the reason this module's header gives.
+   */
+  | 'invalid-choice';
 
 export class WorkoutError extends Error {
   readonly code: WorkoutErrorCode;

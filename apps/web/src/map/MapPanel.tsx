@@ -179,7 +179,7 @@ export interface MapPanelProps {
 }
 
 /** @see MapPanelProps.subject */
-export type MapSubject = 'ride' | 'route' | 'draft';
+export type MapSubject = 'ride' | 'route' | 'draft' | 'edit';
 
 /**
  * Everything the panel says, per subject.
@@ -235,6 +235,16 @@ const WORDS: Readonly<
     noBasemap:
       'This build has no basemap, so there is no map to draw on. The waypoint list places and ' +
       'moves every waypoint.',
+  },
+  // #2007: a saved route being edited, whose controls take distances along it.
+  edit: {
+    label: () => 'Map of the route being edited.',
+    noRenderer:
+      'This browser cannot draw a map: it needs WebGL. The controls below make every change by ' +
+      'distance along the route.',
+    noBasemap:
+      'This build has no basemap, so there is no map to tap. The controls below make every ' +
+      'change by distance along the route.',
   },
 };
 

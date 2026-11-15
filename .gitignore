@@ -7,6 +7,8 @@ build/
 *.log
 .DS_Store
 coverage/
+# The halves of the nightly coverage run, which `test:coverage:merge` reads (#2285).
+coverage-blobs/
 
 # Python's bytecode, written beside a module a script imports: the realistic
 # pipeline's Blender scripts import siblings (#900). `check-repo-rules.sh`

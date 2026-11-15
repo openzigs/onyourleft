@@ -2664,14 +2664,14 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
     const key = (
       shrub.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
     ).customProgramCacheKey();
-    expect(key).toMatch(/\|oyl-instance-tint$/);
+    expect(key).toMatch(/\|oyl-instance-tint\|oyl-weather-shade$/);
     const tree = aTreeWithMiddle();
     new RealisticVegetationBelt(new Map([['tree-broadleaf', [tree]]]));
     const treeKey = (
       tree.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
     ).customProgramCacheKey();
     // #1623: a broadleaf's, which also turns in autumn, by its own program.
-    expect(treeKey).toMatch(/\|oyl-tree-dither\|oyl-autumn$/);
+    expect(treeKey).toMatch(/\|oyl-tree-dither\|oyl-autumn\|oyl-weather-shade$/);
   });
 
   it('refuses to teach one material as a tree and as something else', () => {

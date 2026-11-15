@@ -92,7 +92,8 @@ function rowsOf(path: string, table: string, column: string, athleteId: string):
  * here by its NAME, from the schema — every column ending `athlete_id` — so a
  * later table that names an athlete another way fails until it says which.
  *
- * - `erased`: `eraseAthlete` deletes the rows naming the erased athlete.
+ * - `erased`: no row names the erased athlete afterwards — `eraseAthlete`
+ *   deletes the rows, or, in an append-only log, empties the column.
  * - `kept`: the rows stay, naming an id that no longer resolves to anybody,
  *   and the reason is recorded here.
  */
@@ -124,9 +125,17 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'statement.target_athlete_id': {
     kept: 'a statement of reasons is what the rider was told, kept with the append-only log it explains (#910)',
   },
+  'operator_log.actor_athlete_id': {
+    kept: 'the operator log is append-only, as the moderation log is: erasing the owner’s account does not erase what the operator did (#2602)',
+  },
   'moderation_log.target_athlete_id': {
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
   },
+  'segment_flag.subject_athlete_id': { erased: true },
+  // Emptied, not deleted: the entry stays, and an erased flagger is named nowhere (#69, owner 2026-11-06).
+  'segment_integrity_log.actor_athlete_id': { erased: true },
+  // Emptied, not deleted: the event stays, and an erased rider is named nowhere (#69, owner 2026-11-06).
+  'segment_integrity_log.subject_athlete_id': { erased: true },
 };
 
 /** Every `table.column` ending `athlete_id` that has no foreign key, from the database. */
@@ -305,6 +314,11 @@ describe('erasing an athlete (#769, #35)', () => {
         },
         at: 1_790_001_070,
       });
+      // #2602: B, as the operator, took an action from the app.
+      await store.recordOperatorAction(
+        { actor: { source: 'app', athleteId: ATHLETE_B }, action: 'room_open', at: 1_790_001_080 },
+        () => ({ outcome: 'done', value: undefined }),
+      );
       // #911: B appeals the statement about their hidden name.
       const [statement] = await store.listStatements(ATHLETE_B);
       await store.putAppeal({
@@ -314,6 +328,19 @@ describe('erasing an athlete (#769, #35)', () => {
         filedAt: 1_790_001_100,
       });
     });
+    // #69: A flagged one of B's efforts. Written straight to the table, because
+    // the seed's blocks (everybody blocks everybody) would refuse the store's own route.
+    const flagging = openDatabase(harness.path);
+    try {
+      flagging
+        .prepare(
+          `INSERT INTO segment_flag (athlete_id, segment_id, effort_id, subject_athlete_id, subject_content_sha256, reason, created_at)
+           VALUES (?, 'segment-of-a', 'effort-of-b', ?, 'ride-of-b', 'vehicle', 1790000190)`,
+        )
+        .run(ATHLETE_A, ATHLETE_B);
+    } finally {
+      flagging.close();
+    }
     for (const column of columns) {
       expect(count(column, ATHLETE_B), `${column} names B before`).toBeGreaterThan(0);
     }

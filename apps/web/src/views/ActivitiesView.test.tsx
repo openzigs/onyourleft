@@ -33,6 +33,8 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { stubActivity, stubDetail, stubLap } from '../detail/testing';
+import { snapshotCountText } from '../detail/RideSnapshotsSection';
+import type { RideSnapshotsPort } from '../detail/ride-snapshots-port';
 import { PAGE_SIZE } from '../library/rows';
 import { SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { emptyLibraryStore, stubLibrary } from '../library/testing';
@@ -744,7 +746,7 @@ describe('#1041 — every ride a card, at every width', () => {
 
   it('invents no distance for a ride that stored none: no position, no power, no speed', async () => {
     // A ride recorded with no speed channel stores `metres(0)`
-    // (`recording/finish.ts` §`distanceOf`) — no distance known, not 0.0 km.
+    // (`recording/totals.ts` §`rideDistance`) — no distance known, not 0.0 km.
     const nothing = summary('no-speed', {
       name: 'Trainer, power meter off',
       hasPosition: false,
@@ -775,7 +777,7 @@ describe('#1041 — every ride a card, at every width', () => {
 
   it('invents no 0 W for a ride whose power readings were all 0 — #1054', async () => {
     // A ride recorded with power readings that were every one 0 stores an
-    // average of 0 (`recording/finish.ts` §`averagePowerOf`, asserted in
+    // average of 0 (`recording/totals.ts` §`rideAveragePower`, asserted in
     // `finish.test.ts` §"#1054"). That says nothing was measured, and "0 W"
     // drawn large reads as a measurement: no reading on the card, and an em
     // dash in the selected ride's summary, as distance has since #1041.
@@ -907,6 +909,42 @@ describe('#670 — a selected ride', () => {
     expect(queryAll(pane, 'h2').map((heading) => heading.textContent)).toEqual(['Ride number 1']);
     // And no second way back beside the pane's own.
     expect(pane.textContent).not.toContain('All rides on this device');
+  });
+
+  it('carries the ride’s side-camera snapshots, closed, into the pane — #1063 over #1439', async () => {
+    // The pane IS the ride's page since #1439, so a snapshot that only the
+    // `#/activities/<id>` page offered would be on no page a rider reaches.
+    const ride = stubActivity({ id: activityId('ride-1'), name: 'Ride number 1' });
+    const detail = stubDetail(OWNER, { activity: ride, channels: {}, laps: [] });
+    const counted: string[] = [];
+    const snapshots: RideSnapshotsPort = {
+      athleteId: OWNER,
+      store: {
+        countRideSnapshots: (_owner, id) => {
+          counted.push(id);
+          return Promise.resolve(2);
+        },
+        listRideSnapshots: () => Promise.resolve([]),
+        deleteRideSnapshot: () => Promise.resolve(false),
+      },
+      objectUrls: { create: () => 'blob:test/1', revoke: () => undefined },
+      holdSecureWindow: () => () => undefined,
+    };
+    mounted = await mount(
+      <ActivitiesView
+        library={stubLibrary(OWNER, many(3))}
+        selected="ride-1"
+        detail={detail}
+        snapshots={snapshots}
+      />,
+    );
+    await settle();
+    await settle();
+    const pane = document.querySelector('[data-oyl-pane="detail"]') as Element;
+    const summaries = queryAll(pane, 'summary').map((each) => each.textContent);
+    expect(summaries).toContain(snapshotCountText(2));
+    expect(counted).toStrictEqual(['ride-1']);
+    expect(pane.querySelectorAll('img')).toHaveLength(0);
   });
 
   it('reads the next ride’s own traces when the choice changes, not the first one’s — #1439', async () => {

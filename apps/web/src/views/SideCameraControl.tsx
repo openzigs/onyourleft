@@ -48,6 +48,8 @@ import type { CameraFacing } from '../camera/camera-port';
 import type { CameraController } from '../camera/session';
 import { ScanViewfinder } from '../camera/ScanViewfinder';
 import { SideLiveView } from '../camera/SideLiveView';
+import { SideSnapshotControl, SnapshotsNotKept } from '../camera/SideSnapshotControl';
+import type { SideSnapshotPort } from '../camera/side-snapshot-port';
 import { PAIRING_REFUSAL_TEXT, type PairingRefusal } from '../camera/side-link-code';
 import {
   SIDE_PAIRING_END_TEXT,
@@ -98,9 +100,19 @@ const OFFERS_ON_SCREEN = new WeakMap<SideCameraControlPort, number>();
 export interface SideCameraControlProps {
   readonly controller: CameraController;
   readonly pairing: SidePairingPort;
+  /**
+   * Where *Save snapshot* holds a picture for its ride (#1063,
+   * `camera/snapshot-keeper.ts`), or `undefined` where there is no ride to
+   * keep one with — and then the control is not offered.
+   */
+  readonly snapshots?: SideSnapshotPort | undefined;
 }
 
-export function SideCameraControl({ controller, pairing }: SideCameraControlProps): JSX.Element {
+export function SideCameraControl({
+  controller,
+  pairing,
+  snapshots,
+}: SideCameraControlProps): JSX.Element {
   const [current, setCurrent] = useState<TabletSidePairing | undefined>(() => {
     // An offer this screen voided on its way out (D-4, {@link Offer}) is not
     // news on the way back in: the rider left, and "You ended the session"
@@ -149,6 +161,11 @@ export function SideCameraControl({ controller, pairing }: SideCameraControlProp
         A side camera on a tripod
       </SectionHeading>
       <p>Both devices must be on the same Wi-Fi.</p>
+      {/*
+        #1063's review: snapshots a saved ride could not write, counted, and
+        said whether or not a phone is paired now.
+      */}
+      {snapshots === undefined ? null : <SnapshotsNotKept snapshots={snapshots} />}
       {current === undefined ? (
         <>
           <Button variant="secondary" onClick={pair} disabled={busy}>
@@ -161,7 +178,13 @@ export function SideCameraControl({ controller, pairing }: SideCameraControlProp
           )}
         </>
       ) : (
-        <Paired controller={controller} pairing={current} again={pair} busy={busy} />
+        <Paired
+          controller={controller}
+          pairing={current}
+          snapshots={snapshots}
+          again={pair}
+          busy={busy}
+        />
       )}
     </section>
   );
@@ -170,11 +193,13 @@ export function SideCameraControl({ controller, pairing }: SideCameraControlProp
 function Paired({
   controller,
   pairing,
+  snapshots,
   again,
   busy,
 }: {
   readonly controller: CameraController;
   readonly pairing: TabletSidePairing;
+  readonly snapshots: SideSnapshotPort | undefined;
   readonly again: () => void;
   readonly busy: boolean;
 }): JSX.Element {
@@ -210,6 +235,20 @@ function Paired({
       {pairing.liveView !== undefined &&
       (state.phone === 'framing' || state.phone === 'filming') ? (
         <SideLiveView view={pairing.liveView} controller={controller} />
+      ) : null}
+      {/*
+        #1063: one press, one picture — only beside the live view, and only
+        while it has a picture on screen (ADR 0044 D-3).
+      */}
+      {pairing.liveView !== undefined &&
+      pairing.snapshots !== undefined &&
+      snapshots !== undefined &&
+      (state.phone === 'framing' || state.phone === 'filming') ? (
+        <SideSnapshotControl
+          view={pairing.liveView}
+          source={pairing.snapshots}
+          snapshots={snapshots}
+        />
       ) : null}
     </>
   );
@@ -302,7 +341,8 @@ export const SIDE_INSTANCE_STOPPED_TEXT: Readonly<Record<SideUnavailableReason, 
  * first NAMES the service the instance sends each picture on to, as the
  * hosted consent does ({@link sideInstanceOnToText}); and pictures the
  * instance turned away for coming too often are counted on their own, not as
- * failures ({@link instanceRateLimitedText}).
+ * failures ({@link instanceRateLimitedText}) — as a part of the pictures sent,
+ * since #2192.
  */
 function instancePicturesText(state: SideAnalysisState, looked: number): string {
   const onTo = sideInstanceOnToText(state.hostedService);
@@ -317,12 +357,18 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
         'Pictures are still thrown away here as they arrive.'
       );
     case 'ready':
+      // #2192: a picture the instance turned away was still sealed and sent,
+      // so it is counted among the sent, and the turned-away count is told as
+      // a part OF that count, naming it — never beside a sent count that
+      // leaves it out, which read as a contradiction. The hosted sentence
+      // stays straight after the first and says it covers pictures READ, as
+      // the turned-away ones were never forwarded.
       return (
-        `Pictures sealed and sent to your instance, and not kept here: ${String(looked)}, ` +
+        `Pictures sealed and sent to your instance, and not kept here: ${String(looked + state.rateLimited)}, ` +
         `with you in ${String(state.posed)} of them.` +
         onTo +
-        ` Not sent, because one was already with your instance: ${String(state.skipped)}.` +
-        instanceRateLimitedText(state.rateLimited)
+        instanceRateLimitedText(state.rateLimited, looked + state.rateLimited) +
+        ` Not sent, because one was already with your instance: ${String(state.skipped)}.`
       );
   }
 }
@@ -336,17 +382,18 @@ function instancePicturesText(state: SideAnalysisState, looked: number): string 
 function sideInstanceOnToText(host: string | undefined): string {
   return host === undefined
     ? ''
-    : ` Your instance sends each one on to ${host}, the service your own key is for.`;
+    : ` Your instance sends each one it reads on to ${host}, the service your own key is for.`;
 }
 
 /**
- * How many pictures the instance turned away unread for coming too often,
- * with its leading space, or nothing when none was (#2175).
+ * How many of the pictures sent the instance turned away unread for coming
+ * too often, with its leading space, or nothing when none was (#2175). Since
+ * #2192 these are a part of the sent count it follows, not apart from it.
  */
-function instanceRateLimitedText(count: number): string {
+function instanceRateLimitedText(count: number, sent: number): string {
   return count === 0
     ? ''
-    : ` Turned away by your instance unread, because it was asked too often: ${String(count)}.`;
+    : ` Of the ${String(sent)} sent, turned away by your instance unread, because it was asked too often: ${String(count)}.`;
 }
 
 /**

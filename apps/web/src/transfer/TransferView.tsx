@@ -377,10 +377,14 @@ function ImportPanel({
     // page about the rides that did land. Cancelling is not rolling back.
     let wrote = false;
     try {
+      // #2433: the rider's current calorie inputs, read once for the batch. A
+      // read that fails costs a heart-rate ride its figure, never the import.
+      const athlete = await port.store.getAthlete(port.athleteId).catch(() => undefined);
       const report = await importActivityFiles({
         sources: chosen,
         store: port.store,
         athleteId: port.athleteId,
+        athlete,
         newActivityId: () => port.newActivityId(),
         now: () => port.now(),
         digest: async (bytes) => port.digest(bytes),
@@ -1116,6 +1120,7 @@ function ErasePanel({
         theme: port.theme,
         retiredHostedKey: port.retiredHostedKey,
         instance: port.instance,
+        heldSnapshots: port.heldSnapshots,
         instanceAnalysis: port.instanceAnalysis,
         trainerTargets: port.trainerTargets,
         athlete: port.athleteRow,

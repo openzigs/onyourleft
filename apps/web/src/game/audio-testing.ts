@@ -72,6 +72,8 @@ export function recordingOutput(): RecordingOutput {
       output.calls.push({ kind: 'suspend' });
       output.running = false;
     },
+    // A question, like `isRunning`: the count of resumes stands for the opens.
+    quietToken: () => (output.running ? undefined : output.count('resume')),
     startTone: (hz, gain) => {
       output.calls.push({ kind: 'startTone', hz, gain });
       output.sounding += 1;

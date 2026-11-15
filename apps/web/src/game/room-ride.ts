@@ -179,7 +179,7 @@ export interface StandingsLine {
 
 /** A race's standings on the HUD. */
 export interface RaceStandingsView {
-  /** At most {@link STANDINGS_LINES}, around the rider's own (a lap race's keeps the leader too). */
+  /** At most {@link STANDINGS_LINES} around the rider's own; a solo lap race's whole field of eight (#2328). */
   readonly lines: readonly StandingsLine[];
   /** The rider's own place, and how many are in the race — "4th of 12". */
   readonly place: number | undefined;
@@ -200,9 +200,18 @@ export const STANDINGS_TEXT = {
       : `You are ${String(place)} of ${String(of)}.`,
 } as const;
 
+/**
+ * A gap's size in whole seconds, as {@link gapText} writes it — shared with
+ * `hud/lap-race-hud.ts` §`behindCue`, whose window must round the way the
+ * list does (#2455 AC2).
+ */
+export function wholeSeconds(seconds: number): number {
+  return Math.round(Math.abs(seconds));
+}
+
 /** A gap as the list says it: "+12 s", "−1:05", "0 s". */
 export function gapText(seconds: number): string {
-  const whole = Math.round(Math.abs(seconds));
+  const whole = wholeSeconds(seconds);
   if (whole === 0) return '0 s';
   const sign = seconds > 0 ? '+' : '\u2212';
   if (whole < 60) return `${sign}${String(whole)} s`;
@@ -259,26 +268,29 @@ export function raceStandings(room: RoomConnection): RaceStandingsView | undefin
  * With `keepLeader` (a solo lap race's, #1967, the owner's ruling of
  * 2026-10-31: "Always show the leader"), a window that would not start at the
  * front gives its first line to the leader instead, and the rest stay around
- * the rider's own: three ahead and two behind, or as many as there are. The
- * list is never longer than {@link STANDINGS_LINES}, and a room's race is
- * windowed as ADR 0051 D-7 has it.
+ * the rider's own: with seven lines, three ahead and two behind, or as many
+ * as there are. A solo race passes `lines` for its whole field (#2328), so
+ * only a field longer than that is windowed. The list is never longer than
+ * `lines` ({@link STANDINGS_LINES} unless given),
+ * and a room's race is windowed as ADR 0051 D-7 has it.
  */
 export function windowedStandings(
   all: readonly StandingsLine[],
-  options: { readonly keepLeader?: boolean } = {},
+  options: { readonly keepLeader?: boolean; readonly lines?: number } = {},
 ): RaceStandingsView {
+  const most = options.lines ?? STANDINGS_LINES;
   const own = all.findIndex((line) => line.you);
   const centre = own === -1 ? 0 : own;
-  const half = Math.floor(STANDINGS_LINES / 2);
-  const first = Math.max(0, Math.min(centre - half, all.length - STANDINGS_LINES));
+  const half = Math.floor(most / 2);
+  const first = Math.max(0, Math.min(centre - half, all.length - most));
   const place = own === -1 ? undefined : own + 1;
   if (options.keepLeader === true && first > 0) {
-    const rest = STANDINGS_LINES - 1;
+    const rest = most - 1;
     // `first > 0` puts both terms past the leader, so it is never shown twice.
     const from = Math.min(centre - half, all.length - rest);
     return { lines: [...all.slice(0, 1), ...all.slice(from, from + rest)], place, of: all.length };
   }
-  return { lines: all.slice(first, first + STANDINGS_LINES), place, of: all.length };
+  return { lines: all.slice(first, first + most), place, of: all.length };
 }
 
 /** A room ride's memory between frames. */
@@ -474,6 +486,9 @@ export const RACE_NOTICE_LABEL = 'Race';
  * What the HUD says about a race while there is anything to say — ⚠️ draft
  * wording awaiting the owner's approval, like every sentence in the room work.
  * Nothing here ranks anybody: the standings are {@link raceStandings}'.
+ *
+ * Since #2546 a solo lap race's countdown says it in these same words, from
+ * this one object ({@link countdownRace}), so the two cannot drift apart.
  */
 export const RACE_TEXT = {
   /**
@@ -489,7 +504,31 @@ export const RACE_TEXT = {
     `The race starts in ${String(seconds)} second${seconds === 1 ? '' : 's'}.`,
   finished: 'The race is over. End the ride to see its result.',
   go: 'Go.',
+  /**
+   * A solo race paused on its line (#2546): its countdown waits for the
+   * rider, as a room's does not. ⚠️ Draft wording for the owner.
+   */
+  pausedCounting: (seconds: number): string =>
+    `Paused. The race starts ${String(seconds)} second${seconds === 1 ? '' : 's'} after you resume.`,
 } as const;
+
+/**
+ * How long "Go." stays on the HUD's *Race* notice after the race starts —
+ * #2546: long enough to be read at a glance, and then out of the way. Chosen.
+ */
+export const RACE_GO_SHOWN_MS = 2_000;
+
+/**
+ * A solo lap race's start as the HUD and the region read a room's — #2546:
+ * counting down with `countdownLeftMs` to go, and running once it is nought.
+ * So {@link raceNotice}, {@link raceEvent} and {@link heldOnTheLine} say and do
+ * for the solo race exactly what they say and do for a room's.
+ */
+export function countdownRace(countdownLeftMs: number, localMs: number): RoomRace {
+  return countdownLeftMs > 0
+    ? { kind: 'counting', endsAtLocalMs: localMs + countdownLeftMs }
+    : { kind: 'running' };
+}
 
 /** The whole seconds left of a countdown at `localMs`, never below nought. */
 export function countdownSeconds(endsAtLocalMs: number, localMs: number): number {
@@ -498,18 +537,25 @@ export function countdownSeconds(endsAtLocalMs: number, localMs: number): number
 
 /**
  * The race's notice now, or nothing while it runs. `madeIt` is whether this
- * rider made the room, and so is the one who starts it.
+ * rider made the room, and so is the one who starts it. `wentAtLocalMs` is
+ * when this device saw the race start, and "Go." stands for
+ * {@link RACE_GO_SHOWN_MS} from it (#2546).
  */
 export function raceNotice(
   race: RoomRace | undefined,
   localMs: number,
   madeIt: boolean,
+  wentAtLocalMs?: number,
 ): string | undefined {
   switch (race?.kind) {
     case 'waiting':
       return madeIt ? RACE_TEXT.waiting : RACE_TEXT.waitingForItsMaker;
     case 'counting':
       return RACE_TEXT.counting(countdownSeconds(race.endsAtLocalMs, localMs));
+    case 'running':
+      return wentAtLocalMs !== undefined && localMs - wentAtLocalMs < RACE_GO_SHOWN_MS
+        ? RACE_TEXT.go
+        : undefined;
     case 'finished':
       return RACE_TEXT.finished;
     default:
@@ -521,6 +567,10 @@ export function raceNotice(
  * What the HUD's one region says when a race changes — #785, `announce.ts`
  * rank 5a″: the countdown as it begins, "Go" at the first frame, and its end.
  * `said` is the kind last announced; nothing is said twice for one kind.
+ *
+ * #2546: the countdown and "Go" are `race-start`, which follows the rider's
+ * announcements setting (the owner's ruling of 2026-11-12: off is silence,
+ * and the notice still counts down); the end is still `room-race`.
  */
 export function raceEvent(
   said: RoomRace['kind'] | undefined,
@@ -534,12 +584,12 @@ export function raceEvent(
       return {
         said: kind,
         event: {
-          kind: 'room-race',
+          kind: 'race-start',
           text: RACE_TEXT.counting(countdownSeconds(race.endsAtLocalMs, localMs)),
         },
       };
     case 'running':
-      return { said: kind, event: { kind: 'room-race', text: RACE_TEXT.go } };
+      return { said: kind, event: { kind: 'race-start', text: RACE_TEXT.go } };
     case 'finished':
       return { said: kind, event: { kind: 'room-race', text: RACE_TEXT.finished } };
     default:

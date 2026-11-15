@@ -120,7 +120,7 @@ export function formatPowerValue(power: Watts): string {
  * when it says nothing was measured (#1054).
  *
  * The store holds no `averagePower` for a ride with no power channel
- * (`recording/finish.ts` §`averagePowerOf`, `transfer/read-activity-file.ts`).
+ * (`recording/totals.ts` §`rideAveragePower`, `transfer/read-activity-file.ts`).
  * But a ride whose power readings were ALL 0 stores `0`, and so does one whose
  * mean rounds to under a watt: the mean of readings that exist, and every one
  * of them was nought. That ride and a trainer that sent 0 W for every reading

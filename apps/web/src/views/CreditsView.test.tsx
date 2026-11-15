@@ -27,6 +27,10 @@
  *    network, which is #358's second criterion.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
@@ -340,6 +344,27 @@ describe('the gate: no credit in ASSETS.toml renders without the licence it asks
         licence,
       );
     }
+  });
+});
+
+describe('the menus’ music — #2057', () => {
+  const MUSIC = 'apps/web/public/audio/upbeat-game-loop-aurora-ride.ogg';
+
+  it('credits the loop’s title, creator and licence as a courtesy, from the real manifest', async () => {
+    // CC0 asks for nothing; the owner's lane scope asked for a courtesy line
+    // where the credits already list CC0 work, and they do.
+    await render();
+    expect(sectionOf(MUSIC)).toBe('nothing');
+    const code = queryAll<HTMLElement>(mounted?.container ?? document, 'code').find(
+      (each) => each.textContent === MUSIC,
+    );
+    const credit = code?.closest('ul')?.closest('li')?.textContent ?? '';
+    expect(credit).toContain('Venus17');
+    expect(credit).toContain('CC0-1.0');
+    expect(credit).toContain('Upbeat Game Loop - Aurora Ride');
+    expect(linksOfCreditFor(MUSIC)).toContain(
+      'https://freesound.org/people/Venus17/sounds/841299/',
+    );
   });
 });
 
@@ -724,6 +749,74 @@ describe('the map data — #1552, ADR 0054 D-3.6', () => {
   it('is there whatever the asset manifest holds, because it is not an asset', async () => {
     await render(FIXTURE);
     expect(mapData()?.textContent ?? '').toContain('© OpenStreetMap contributors');
+  });
+
+  it('says the app ships the circuits’ files under ODbL 1.0, and reads their notice in place — #2293', async () => {
+    const committed = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../game/circuits/data/LICENCE-ODbL.txt'),
+      'utf8',
+    );
+    await render();
+    const credit = mapData()?.querySelector('[data-credit="circuits"]');
+    const words = (credit?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(words).toContain('built-in lap-race circuits');
+    expect(words).toContain('Open Database License 1.0');
+    expect(words).toContain('USGS 3D Elevation Program');
+    const summary = queryAll<HTMLElement>(mapData() ?? document, 'details > summary').find(
+      (candidate) => candidate.textContent === 'Read the circuits’ licence notice',
+    );
+    expect(summary).toBeDefined();
+    if (summary === undefined) return;
+    await activateWithKeyboard(summary);
+    for (let i = 0; i < 50 && mapData()?.querySelector('[data-circuits-notice]') === null; i++) {
+      await settle();
+    }
+    // Read back through the screen's own default loader: the shipped copy,
+    // which is the notice beside the files, byte for byte.
+    expect(mapData()?.querySelector('[data-circuits-notice]')?.textContent).toBe(committed);
+  });
+
+  it('says the app ships the Delivery levels’ files under ODbL 1.0, and reads their notice in place — #2362', async () => {
+    const committed = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../game/delivery/levels/data/LICENCE-ODbL.txt',
+      ),
+      'utf8',
+    );
+    await render();
+    const words = (mapData()?.querySelector('[data-credit="levels"]')?.textContent ?? '').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(words).toContain('built-in Delivery levels');
+    expect(words).toContain('building footprints');
+    expect(words).toContain('Open Database License 1.0');
+    const summary = queryAll<HTMLElement>(mapData() ?? document, 'details > summary').find(
+      (candidate) => candidate.textContent === 'Read the Delivery levels’ licence notice',
+    );
+    if (summary === undefined) throw new Error('no levels notice disclosure');
+    await activateWithKeyboard(summary);
+    for (let i = 0; i < 50 && mapData()?.querySelector('[data-levels-notice]') === null; i++) {
+      await settle();
+    }
+    // Through the screen's own default loader: the notice beside the level files, byte for byte.
+    expect(mapData()?.querySelector('[data-levels-notice]')?.textContent).toBe(committed);
+    expect(committed).toContain('apps/web/src/game/delivery/levels/data/');
+  });
+
+  it('says so when the circuits’ notice cannot be read — #2293', async () => {
+    mounted = await mount(
+      <CreditsView circuitsNotice={() => Promise.reject(new Error('chunk failed'))} />,
+    );
+    const summary = queryAll<HTMLElement>(mapData() ?? document, 'details > summary').find(
+      (candidate) => candidate.textContent === 'Read the circuits’ licence notice',
+    );
+    if (summary === undefined) throw new Error('no circuits notice disclosure');
+    await activateWithKeyboard(summary);
+    await settle();
+    expect(mapData()?.textContent).toContain('could not be read just now');
+    expect(mapData()?.querySelector('[data-circuits-notice]')).toBeNull();
   });
 });
 

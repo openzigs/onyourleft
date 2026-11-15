@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
   "budgetBytes": 262144,
-  "totalBytes": 133435,
+  "totalBytes": 136880,
   "totalPositionCount": 1003,
   "fixtures": [
     {
@@ -183,10 +183,18 @@
     {
       "name": "lap-figures.tcx",
       "format": "tcx",
-      "bytes": 17254,
-      "sha256": "093e376b7e329d33c80a166bae6cf5e2a480b66985bbb9e6ccbe9e07c596b419",
+      "bytes": 17253,
+      "sha256": "c37012a4329a45a00c864631cc11bc9d48846e2144f2a0644622a284c0785e05",
       "positionCount": 30,
       "purpose": "Two laps carrying the figures and the kind TCX has elements for (#1321): average and highest heart rate, the lap cadence, the LX extension’s average and highest watts, Intensity and TriggerMethod — a whole lap ended by distance and a resting one ended by hand with no power. Among them sit elements a head unit also writes and this package does not read, and a lap Cadence beside every point’s, so a reader keyed on position or on the last Value it saw reads the wrong figure."
+    },
+    {
+      "name": "lap-calories-malformed.tcx",
+      "format": "tcx",
+      "bytes": 3446,
+      "sha256": "b099613035df106674b0a3e79a932bd689f1091d5f4b5725c3c6e2ddbb902864",
+      "positionCount": 0,
+      "purpose": "Three laps whose Calories TCX v2’s unsignedShort does not admit — -5, 12.5 and 70000, one a lap (#2435) — each beside a sound average heart rate, cadence and average power. Each bad value must be dropped with a fault naming Lap/Calories, and the lap’s other figures must still read: a reader that rejects the lap, or keeps a rounded or wrapped figure, is caught here."
     },
     {
       "name": "xxe-external-entity.tcx",

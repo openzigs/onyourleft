@@ -17,6 +17,8 @@
  * `browser/devices.browser.spec.ts` walks it as a new rider does: Home's own
  * link, then *Pair a smart trainer*, then the Ride screen and Home again, which
  * read the connection back through the controller mounted above the router.
+ * Since #2045 the strap can be made to beat ({@link DevicesHarness.heartRate}),
+ * so Home's sensors module is read with a live number from the real decoder.
  *
  * ## The control
  *
@@ -40,6 +42,8 @@ import { flushSync } from 'react-dom';
 
 import { athleteId, recordingSessionId } from '@onyourleft/store';
 import {
+  BATTERY_LEVEL,
+  BATTERY_SERVICE,
   createIndoorBikeDataProfile,
   FITNESS_MACHINE_CONTROL_POINT,
   FITNESS_MACHINE_FEATURE,
@@ -56,6 +60,7 @@ import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { createFakeBluetooth } from '@onyourleft/sensors/web-bluetooth/testing';
 
 import { stubAnalysis } from '../src/analysis/testing';
+import type { BatteryLevelPort } from '../src/ride/battery-port';
 import type { RecordingCheckpointStore } from '../src/recording/recorder';
 import { browserClock, createRideController } from '../src/ride/controller';
 import { openWebBluetoothTrainer } from '../src/ride/trainer';
@@ -63,7 +68,7 @@ import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
-import { STRAP_NAME, TRAINER_NAME } from './devices-fixture';
+import { STRAP_BATTERY_PERCENT, STRAP_NAME, TRAINER_NAME } from './devices-fixture';
 
 // The shipping stylesheet, which is the whole point.
 import '../src/design/theme.css';
@@ -77,6 +82,13 @@ export interface DevicesHarness {
   readonly control: boolean;
   /** How many times the page called `BluetoothDevice.forget()` on each device. */
   readonly forgets: () => { readonly trainer: number; readonly strap: number };
+  /**
+   * #2045: the strap's heart beats at `bpm` from now on — a Heart Rate
+   * Measurement notified every half second while it is connected, as a real
+   * strap notifies about once a second, so the reading never goes stale
+   * while the spec reads it. A later call changes the number.
+   */
+  readonly heartRate: (bpm: number) => void;
 }
 
 declare global {
@@ -122,7 +134,15 @@ const fake = createFakeBluetooth({
     {
       id: 'strap',
       name: STRAP_NAME,
-      services: [{ uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] }],
+      services: [
+        { uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] },
+        // #2047: the strap reports its battery; the trainer above does not.
+        {
+          uuid: BATTERY_SERVICE,
+          characteristics: [BATTERY_LEVEL],
+          readValues: { [BATTERY_LEVEL]: Uint8Array.from([STRAP_BATTERY_PERCENT]) },
+        },
+      ],
     },
   ],
 });
@@ -146,7 +166,12 @@ function run(): void {
   const transport = createWebBluetoothTransport({
     profiles: [createIndoorBikeDataProfile(), heartRateProfile],
     bluetooth: fake.bluetooth,
+    batteryLevel: true,
   });
+  // #2047: `main.tsx`'s browser port, over this transport.
+  const battery: BatteryLevelPort = {
+    readBatteryLevel: async (id) => transport.readBatteryLevel(id).catch(() => undefined),
+  };
   const capabilities: CapabilityProbe = { bluetooth: fake.bluetooth, secureContext: true };
   let session = 0;
   const rideController = control
@@ -170,6 +195,7 @@ function run(): void {
           // to Devices — the Trainer card's, or in the control, which has no
           // ride controller, the empty state's (#1429).
           analysis={stubAnalysis(ATHLETE, [])}
+          battery={battery}
         />
       </StrictMode>,
     );
@@ -181,12 +207,29 @@ const forgets = (): { trainer: number; strap: number } => ({
   strap: fake.bench.device('strap').forgets,
 });
 
+/** How often the scripted strap notifies once {@link heartRate} has started it. */
+const BEAT_EVERY_MS = 500;
+let bpm: number | undefined;
+const heartRate = (next: number): void => {
+  const started = bpm !== undefined;
+  bpm = next;
+  if (started) return;
+  window.setInterval(() => {
+    const strap = fake.bench.device('strap');
+    // Flags 0: an 8-bit value, then the beats per minute. The fake refuses a
+    // notification on a characteristic nobody subscribed to, so none is sent
+    // until the strap is paired.
+    if (bpm === undefined || !strap.notifying(HEART_RATE_SERVICE, HEART_RATE_MEASUREMENT)) return;
+    strap.notify(HEART_RATE_SERVICE, HEART_RATE_MEASUREMENT, Uint8Array.from([0, bpm]));
+  }, BEAT_EVERY_MS);
+};
+
 // #674: the view groups first, so every view renders on the render that asks. @see viewGroupsLoaded
 try {
   await viewGroupsLoaded();
   run();
-  window.__oylDevices = { ready: true, errors, control, forgets };
+  window.__oylDevices = { ready: true, errors, control, forgets, heartRate };
 } catch (error: unknown) {
   errors.push(error instanceof Error ? error.message : String(error));
-  window.__oylDevices = { ready: false, errors, control, forgets };
+  window.__oylDevices = { ready: false, errors, control, forgets, heartRate };
 }

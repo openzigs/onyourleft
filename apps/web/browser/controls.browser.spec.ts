@@ -293,6 +293,60 @@ test.describe('#946 — the menu sounds’ switch and volume', () => {
   });
 });
 
+/**
+ * #2234 — on Settings each volume's label sits beside its slider (centred on
+ * it, to its left) or directly above it, and never below. With the label and
+ * the slider as two inline boxes on one line, Chromium put the label's
+ * baseline on the slider's bottom edge — a range input has no text baseline —
+ * so the words hung at the bottom of the 44 px slider, below its thumb.
+ *
+ * `label[for]` is what ties each label to its slider, so the label measured is
+ * the one the slider's accessible name comes from.
+ */
+test.describe('#2234 — the Settings volume labels sit beside or above their slider', () => {
+  const UPRIGHT_PHONE = { width: 412, height: 915 };
+  const SLIDERS = ['Sound volume', 'Menu sound volume', 'Music volume'] as const;
+  /** Rounding in a centred flex row; the defect was 16 px. */
+  const SLACK = 1;
+
+  for (const viewport of [TABLET, UPRIGHT_PHONE]) {
+    test(`at ${String(viewport.width)}×${String(viewport.height)}`, async ({ page }) => {
+      await open(page, viewport);
+      await visit(page, 'settings');
+      // The menu sounds' volume is offered once they are on (#946).
+      await page.getByRole('switch', { name: 'Play sounds in the menus' }).click();
+      for (const name of SLIDERS) {
+        const slider = page.getByRole('slider', { name, exact: true });
+        await expect(slider, name).toHaveCount(1);
+        await slider.scrollIntoViewIfNeeded();
+        const boxes = await slider.evaluate((input) => {
+          const label = document.querySelector(`label[for="${input.id}"]`);
+          if (label === null) return undefined;
+          // The label's WORDS, not its box: a label stretched to the row's
+          // height is centred on the slider while its text sits at the top.
+          const words = document.createRange();
+          words.selectNodeContents(label);
+          return {
+            label: words.getBoundingClientRect().toJSON() as DOMRect,
+            slider: input.getBoundingClientRect().toJSON() as DOMRect,
+          };
+        });
+        expect(boxes, `${name}: no label[for] names it`).toBeDefined();
+        if (boxes === undefined) continue;
+        const { label, slider: range } = boxes;
+        const middle = (box: DOMRect): number => box.top + box.height / 2;
+        const beside =
+          label.right <= range.left + SLACK && Math.abs(middle(label) - middle(range)) <= SLACK;
+        const above = label.bottom <= range.top + SLACK;
+        expect(
+          beside || above,
+          `${name}: label ${JSON.stringify(label)} is neither beside nor above slider ${JSON.stringify(range)}`,
+        ).toBe(true);
+      }
+    });
+  }
+});
+
 test.describe('#994 — steppers', () => {
   test('every step button on Settings is a 44 × 44 target, measured three ways', async ({
     page,
@@ -641,4 +695,167 @@ test.describe('#1030 — a file input drawn as a button, with what was chosen as
       };
     });
   }
+});
+
+/*
+ * #2304: the built-in workouts' three filters on Workouts are 48 px targets,
+ * the issue's own floor (`theme.css` §"THE BUILT-IN WORKOUTS' FILTERS"), four
+ * over every other select and checkbox row. Measured #316's three ways, and
+ * the filter is the address: Back undoes the last one and a reload keeps it.
+ */
+test.describe('#2304 — the built-in workouts’ filters', () => {
+  const FILTER_TARGET = 48;
+  const FILTERS = '.oyl-filters select, .oyl-filters label:has(> input[type="checkbox"])';
+
+  /** Workouts with the built-ins as its list: `#/workouts?list=built-in`. */
+  async function builtIns(page: Page): Promise<void> {
+    const seen = await page.evaluate(
+      async (target) => window.__oylReflow?.visit(target),
+      '#/workouts?list=built-in',
+    );
+    expect(seen?.routeId, 'workouts did not render').toBe('workouts');
+  }
+
+  for (const viewport of [PHONE, TABLET]) {
+    test(`are 48 px targets at ${String(viewport.width)}×${String(viewport.height)}`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      await builtIns(page);
+      const filters = await threeWays(page, FILTERS, { height: 'min-height' });
+      expect(filters.count, 'not the three filters').toBe(3);
+      for (const box of filters.shipped) expect(box.height).toBeGreaterThanOrEqual(FILTER_TARGET);
+      expect(new Set(filters.declared)).toEqual(new Set([`${String(FILTER_TARGET)}px`]));
+      for (const height of filters.stripped) expect(height).toBeLessThan(FILTER_TARGET);
+    });
+  }
+
+  test('change which cards render, and Back and a reload keep the address’s filter', async ({
+    page,
+  }) => {
+    await open(page, PHONE);
+    await builtIns(page);
+    const cards = page.locator('main [data-oyl-built-in]');
+    const every = await cards.count();
+    expect(every, 'no built-in on Workouts').toBeGreaterThan(10);
+
+    await page.getByLabel('Category').selectOption('sweet-spot');
+    await expect(cards).toHaveCount(6);
+    await page.getByLabel('Length').selectOption('45');
+    await expect(cards.locator('a')).toHaveText([
+      'Sweet spot, rising block',
+      'Sweet spot, one long block',
+    ]);
+
+    await page.goBack();
+    await expect(cards).toHaveCount(6);
+    await expect(page.getByLabel('Length')).toHaveValue('');
+
+    await page.reload();
+    await page.waitForFunction(() => window.__oylReflow?.ready === true);
+    await expect(cards).toHaveCount(6);
+    await expect(page.getByLabel('Category')).toHaveValue('sweet-spot');
+  });
+});
+
+/*
+ * #2305: the tailor pane's controls are 48 px targets too — the length select,
+ * the steppers' buttons and boxes, and *Save a copy* (`theme.css` §"THE TAILOR
+ * PANE") — measured #316's three ways on a built-in chosen by its address.
+ */
+test.describe('#2305 — the tailor pane’s controls', () => {
+  const TAILOR_TARGET = 48;
+
+  for (const viewport of [PHONE, TABLET]) {
+    test(`are 48 px targets at ${String(viewport.width)}×${String(viewport.height)}`, async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      const seen = await page.evaluate(
+        async (target) => window.__oylReflow?.visit(target),
+        '#/workouts/selected/built-in%3Asweet-spot-3x12',
+      );
+      expect(seen?.routeId).toBe('workouts');
+      await expect(page.locator('main [data-oyl-built-in-detail]')).toBeVisible();
+      const controls = await threeWays(
+        page,
+        '.oyl-tailor select, .oyl-tailor .oyl-stepper__step, .oyl-tailor .oyl-stepper > input, ' +
+          '.oyl-tailor__save .oyl-button',
+        { height: 'min-height' },
+      );
+      // The length select, three steppers of two buttons and a box, Ride it and Save a copy.
+      expect(controls.count).toBe(12);
+      for (const box of controls.shipped) expect(box.height).toBeGreaterThanOrEqual(TAILOR_TARGET);
+      expect(new Set(controls.declared)).toEqual(new Set([`${String(TAILOR_TARGET)}px`]));
+      for (const height of controls.stripped) expect(height).toBeLessThan(TAILOR_TARGET);
+    });
+  }
+});
+
+/*
+ * The owner's ruling of 2026-11-07 on #2305, measured where the rider saw it:
+ * (c) on the tablet each tailor label stands the design system's small gap
+ * (`--oyl-space-sm`, 8 px) clear of the control beside it, where "Recovery
+ * between repeats, seconds" touched its − button; (e) on a phone the
+ * preview's Shape sentence takes the facts' whole row, not their left column.
+ */
+test.describe('#2305 — the tailor pane after the owner’s ruling of 2026-11-07', () => {
+  const GAP = 8;
+
+  async function openSweetSpot(page: Page, viewport: { width: number; height: number }) {
+    await open(page, viewport);
+    const seen = await page.evaluate(
+      async (target) => window.__oylReflow?.visit(target),
+      '#/workouts/selected/built-in%3Asweet-spot-3x12',
+    );
+    expect(seen?.routeId).toBe('workouts');
+    await expect(page.locator('main [data-oyl-built-in-detail]')).toBeVisible();
+  }
+
+  test('(c) every label stands clear of its control at 1280×800', async ({ page }) => {
+    await openSweetSpot(page, TABLET);
+    const gaps = await page.evaluate(() =>
+      [...document.querySelectorAll('main .oyl-tailor__field')].map((field) => {
+        const label = field.querySelector('label');
+        const control = label?.nextElementSibling;
+        if (label === null || label === undefined || control === null || control === undefined) {
+          return { name: field.textContent, gap: Number.NaN, sameLine: false };
+        }
+        const a = label.getBoundingClientRect();
+        // The stepper's − button, or the select: the first thing beside the label.
+        const first = control.classList.contains('oyl-stepper')
+          ? control.firstElementChild
+          : control;
+        const b = (first ?? control).getBoundingClientRect();
+        const sameLine = b.top < a.bottom && a.top < b.bottom;
+        return { name: label.textContent, gap: b.left - a.right, sameLine };
+      }),
+    );
+    expect(gaps.map((each) => each.name)).toEqual([
+      'Length',
+      'Intensity, % easier or harder',
+      'Repeats',
+      'Recovery between repeats, seconds',
+    ]);
+    for (const each of gaps) {
+      expect(each.sameLine, `${String(each.name)} beside its control`).toBe(true);
+      expect(each.gap, `${String(each.name)}`).toBeGreaterThanOrEqual(GAP - 0.5);
+    }
+  });
+
+  test('(e) the Shape sentence takes the whole row at 412×915', async ({ page }) => {
+    await openSweetSpot(page, { width: 412, height: 915 });
+    const widths = await page.evaluate(() => {
+      const facts = document.querySelector('main [data-oyl-tailor-preview] dl');
+      const shape = [...(facts?.querySelectorAll('dt') ?? [])].find(
+        (each) => each.textContent === 'Shape',
+      )?.nextElementSibling;
+      return {
+        facts: facts?.getBoundingClientRect().width ?? 0,
+        shape: shape?.getBoundingClientRect().width ?? 0,
+      };
+    });
+    expect(widths.facts).toBeGreaterThan(0);
+    expect(widths.shape).toBeGreaterThanOrEqual(widths.facts - 1);
+  });
 });

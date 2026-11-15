@@ -568,6 +568,44 @@ export const REALISTIC_VILLAGE_DRAW_CALLS = 50;
 export const DELIVERY_VILLAGE_DRAW_CALLS = 53;
 
 /**
+ * The most triangles a Delivery village frame may submit — #2362, round 6 of
+ * PR #2378's review: **205 000**. Beside {@link DELIVERY_VILLAGE_DRAW_CALLS},
+ * because the belt's calls stay at three while its obstacle geometry can grow
+ * unseen: every obstacle instance submits the whole roster
+ * (`three-renderer.ts` §`DELIVERY_OBSTACLE_TRIANGLES`, 1 522; 1 546 since #2396). Measured on the
+ * frozen frame with 20 of each piece in the pinned Chromium on 2026-11-09:
+ * 201 356 triangles (the level frame, `town=level`, 181 615). Round 5's three
+ * whole cars made it 261 436, within 2 % of the frame #1523 measured on the
+ * tablet with its GPU at the ceiling (266 739); #1815 recorded 171 874 before
+ * any car. The 2 % margin is for nothing but run-to-run noise: a change past it
+ * goes to the owner and the tablet list (#733).
+ *
+ * @test-facing held by `realistic-delivery.browser.spec.ts`; nothing in the
+ * product applies a triangle ceiling at run time
+ */
+export const DELIVERY_VILLAGE_FRAME_TRIANGLES = 205_000;
+
+/**
+ * The most triangles Delivery's car may be in the realistic world — #2540,
+ * the owner's ruling of 2026-11-12 on it: **about 1 450 a car**, "trim to
+ * fit, not raise the limit". Every obstacle instance submits the whole
+ * roster, the car's triangles included (`three-renderer.ts`
+ * §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`), so this car's share of
+ * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}' 3 644 of room on the frame of
+ * twenty that measured 201 356 is 182 an instance over the stylised car's
+ * 1 268. Kenney's sedan was 1 376 (`tools/realistic/sources.ts`
+ * §`DELIVERY_CAR_SOURCE`); since its PR met #2512's and #2518's pieces on
+ * the same frame (204 514 with the stylised car), its wheels are 120 each,
+ * not 166, and it is 1 192, so the frame still fits. ONE level of detail: a
+ * second would be more triangles in the roster every instance submits, never
+ * fewer.
+ *
+ * @test-facing held by `delivery-car.test.ts`, which reads the committed GLB
+ * back; the product builds the roster and does not read this number
+ */
+export const DELIVERY_CAR_TRIANGLES = 1_450;
+
+/**
  * The most draw calls the realistic village frame may make **while a lap
  * race runs** — #1971, ADR 0060 D-10.2: **approved by the owner on
  * 2026-11-01**. The tablet read it on 2026-11-01 (village frame held, 30 s
@@ -914,6 +952,20 @@ export const MAPPED_BUILDING_REACH_METRES = 400;
  * rebuilt only when the rider's chunk changes, never per frame.
  */
 export const MAPPED_CHUNK_METRES = 100;
+
+/**
+ * How far up the route from the rider a refill ranks the mapped buildings
+ * by — #2429: **200 m**, two chunks. A refill draws the buildings nearest
+ * the road the rider is about to ride, not the nearest to where the rider
+ * stands, so at the end of its chunk the set still reaches a chunk ahead.
+ *
+ * Ranked from the rider alone, the nearest {@link MAPPED_BUILDING_MAX} of a
+ * dense town (`footprint-fixtures-testing.ts` §`rowTownFixture`) stood
+ * within about 45 m either way and behind as much as ahead, and were held
+ * for {@link MAPPED_CHUNK_METRES}: half of its buildings first drew within
+ * 10 m of the rider, and a tenth only once they were behind it.
+ */
+export const MAPPED_RANKED_AHEAD_METRES = 2 * MAPPED_CHUNK_METRES;
 
 /**
  * The most draw calls the mapped buildings may spend — #1549: **6**, whatever
@@ -1448,3 +1500,16 @@ export function environmentMapBytes(skyWidth: number): number {
   const height = 4 * cube;
   return width * height * 8;
 }
+
+/**
+ * The most vertex attribute slots a Delivery program may use — PR #2548:
+ * **14**, two under WebGL's floor of 16 (`MAX_VERTEX_ATTRIBS`, which the
+ * pinned Chromium, the Mac and tablet Mali GPUs all report), so the next
+ * feature has room without packing again. A `mat4` is four slots, anything
+ * else one. `three-renderer.ts` §`DELIVERY_PIECE_ATTRIBUTE` says how the belt's
+ * obstacles fit: 13 slots with Kenney's car, 10 without.
+ *
+ * @test-facing `delivery-car.test.ts` and `delivery.browser.spec.ts` hold the
+ * belt's programs to it; the product does not read it
+ */
+export const DELIVERY_MOST_VERTEX_ATTRIBUTES = 14;

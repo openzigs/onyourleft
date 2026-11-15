@@ -399,7 +399,7 @@ interface RideFrame {
  * A ride a metre at a time, at 8 m/s, with the camera `GameView` draws: since
  * #1994 `sceneFrame`'s, turned to the heading damped from frame to frame.
  */
-function ride(profile: RouteProfile): readonly RideFrame[] {
+function ride(profile: RouteProfile, extra: Partial<SceneInput> = {}): readonly RideFrame[] {
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
   const frames: RideFrame[] = [];
@@ -407,6 +407,7 @@ function ride(profile: RouteProfile): readonly RideFrame[] {
     profile,
     origin,
     state: { ...start, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+    ...extra,
   });
   const drawn = drawnCamera(inputAt, 8);
   for (let distance = 0; distance < profile.totalDistance; distance += 1) {
@@ -508,8 +509,11 @@ describe('the fade ends before the near plane’s cull begins (#545)', () => {
     /** Trees the cull drops, at an aspect: how many, and the most of any of them still drawn. */
     const dropped = new Map<number, { count: number; mostKept: number }>();
     const aspects = [9 / 19.5, 10 / 16, 4 / 3, 16 / 10, 16 / 9, 19.5 / 9, 6, 8];
+    // Both cameras a ride draws since #2422: an ordinary ride's, on the drawn
+    // path, and the one beside the road a Delivery round and a lap race keep
+    // (`uneased: true` draws it).
     for (const route of Object.values(RIDES)) {
-      for (const { pose, scatter } of ride(route())) {
+      for (const { pose, scatter } of [...ride(route()), ...ride(route(), { uneased: true })]) {
         const trees = scatter.filter(isTree);
         const rig = cameraRig(pose);
         for (const aspect of aspects) {
@@ -531,6 +535,8 @@ describe('the fade ends before the near plane’s cull begins (#545)', () => {
     }
     // The control: at 8 : 1 a tree the cull drops is still partly drawn — so
     // the bound above is the fade's `gone`, not a measure that sees nothing.
+    // ⚠️ Since #2422 only the camera beside the road comes that near: the one
+    // on the drawn path, its eye held in from the kerb, reached none.
     expect(dropped.get(8)?.mostKept ?? 0).toBeGreaterThan(0);
   }, 300_000);
 });

@@ -77,6 +77,8 @@ import {
   MaskedWordsPanel,
 } from '../athlete/MaskedWordsPanel';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
+import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
+import { CALORIE_INPUTS_LEAD, CalorieInputsPanel } from '../athlete/CalorieInputsPanel';
 import { GOALS_KEY, MAXIMUM_GOALS_CHARACTERS } from '@onyourleft/store';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { DocumentsPanel } from '../rider-text/DocumentsPanel';
@@ -125,6 +127,27 @@ import {
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 import {
+  HUD_ARRANGEMENTS,
+  HUD_DELIVERY_VIEWS,
+  HUD_PANELS,
+  HUD_POWER_VIEWS,
+  HUD_ROUTE_VIEWS,
+  HUD_TEXT_SIZES,
+  deliveryEverything,
+  panelShown,
+  powerView,
+  readHudLayout,
+  totalsStripChosen,
+  writeHudLayout,
+  type HudArrangement,
+  type HudDeliveryView,
+  type HudLayoutPreference,
+  type HudPanelId,
+  type HudPowerView,
+  type HudRouteView,
+  type HudTextSize,
+} from '../game/hud/hud-layout-preference';
+import {
   readCuePreference,
   steppedVolume,
   writeCuePreference,
@@ -141,8 +164,11 @@ import {
 } from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import { REALISTIC_DOWNLOAD_SIZE_TEXT } from '../game/realistic-assets';
+import { readRealisticReport, realisticReportText } from '../game/realistic-report';
 import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
+import { readSoloDraftChoice, writeSoloDraftChoice } from '../game/solo-draft-preference';
 import {
   OBSTACLE_SETTINGS,
   readDeliveryAssist,
@@ -278,6 +304,8 @@ export const DELIVERY_ASSIST_STAYS_HERE =
  */
 export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   WEIGHT_WHERE_IT_GOES,
+  // #2432: where the sex and year of birth are kept, and that they are never sent.
+  CALORIE_INPUTS_LEAD,
   ANNOUNCEMENTS_STAY_HERE,
   DELIVERY_ASSIST_STAYS_HERE,
   'opening a ride that has GPS asks',
@@ -453,6 +481,12 @@ export interface SettingsViewProps {
    */
   readonly maskedWords?: MaskedWordsPort | undefined;
   /**
+   * The rider's sex and year of birth, for a heart-rate calorie estimate
+   * (#2432). `undefined` where this browser has no local store — the panel
+   * then says so and offers no control.
+   */
+  readonly calorieInputs?: CalorieInputsPort | undefined;
+  /**
    * The rider's goals and documents for the ride analysis (#836).
    * `undefined` where this browser has no local store — each panel then says
    * so and offers no control.
@@ -488,6 +522,7 @@ export function SettingsView({
   basemap,
   themeStorage,
   maskedWords,
+  calorieInputs,
   riderText,
   workoutGoals,
   soundOutput,
@@ -640,6 +675,9 @@ export function SettingsView({
           onRiderMassChange={onRiderMassChange}
         />
 
+        {/* #2432. Beside the weight: the heart-rate calorie estimate needs all three. */}
+        <CalorieInputsPanel port={calorieInputs} riderMass={riderMass} />
+
         {/* #623. Beside the weight: both are about the rider, and both are kept on the athlete. */}
         <KitPanel
           {...(kit === undefined ? {} : { port: kit })}
@@ -705,6 +743,14 @@ export function SettingsView({
           storage={announcements === undefined ? deviceStorage() : announcements}
           output={soundOutput}
         />
+
+        {/*
+          #2079: the ride HUD's panels and the size of its numbers — how the
+          ride looks. Here rather than in *The ride* because there it made
+          that card 2.53× the shortest in its row at 1280×800, over #1026's
+          balance rule (`sections.browser.spec.ts` §`ROW_BALANCE_LIMIT`).
+        */}
+        <HudLayoutPanel storage={announcements === undefined ? deviceStorage() : announcements} />
       </SettingsCard>
 
       <SettingsCard
@@ -730,6 +776,9 @@ export function SettingsView({
         <DraftReadingPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
         />
+
+        {/* #2425: whether a solo ride drafts behind the pacer and your own best. */}
+        <SoloDraftPanel storage={announcements === undefined ? deviceStorage() : announcements} />
 
         <MapTilesPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
@@ -1213,7 +1262,7 @@ function SoundsPanel({
           Play sounds during a ride
         </label>
       </p>
-      <p>
+      <p className="oyl-volume-row">
         <label htmlFor="oyl-sounds-volume">Sound volume</label>{' '}
         <input
           id="oyl-sounds-volume"
@@ -1306,7 +1355,7 @@ function MenuSoundsPanel({
         the tab order that does nothing. Kept, not reset, while they are off.
       */}
       {preference.enabled ? (
-        <p>
+        <p className="oyl-volume-row">
           <label htmlFor="oyl-menu-sounds-volume">Menu sound volume</label>{' '}
           <input
             id="oyl-menu-sounds-volume"
@@ -1389,7 +1438,7 @@ function MusicPanel({
           Play music in the menus
         </label>
       </p>
-      <p>
+      <p className="oyl-volume-row">
         <label htmlFor="oyl-music-volume">Music volume</label>{' '}
         <input
           id="oyl-music-volume"
@@ -1436,6 +1485,11 @@ function GameWorldPanel({
   readonly storage: PreferenceStorage | undefined;
 }): JSX.Element {
   const [chosen, setChosen] = useState(() => readRealisticWorldChoice(storage));
+  // #2289: why the last realistic ride stepped down or left, read once.
+  const [report] = useState(() => {
+    const kept = readRealisticReport(storage);
+    return kept === undefined ? undefined : realisticReportText(kept);
+  });
   // #1622: on by default, in either world — only a stored "off" turns it off.
   const [decorated, setDecorated] = useState(() => readHolidayDecorations(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
@@ -1462,10 +1516,10 @@ function GameWorldPanel({
               on one tablet, not on phones.
             </p>
             <p className="oyl-muted">
-              In a browser the realistic world is downloaded when a ride starts — about 33 MB — and
-              is not kept on this device for use offline. With no network, or if it cannot be
-              loaded, the ride is in the standard world instead and the ride screen says so. In the
-              Android app it is already on the device.
+              In a browser the realistic world is downloaded when a ride starts —{' '}
+              {REALISTIC_DOWNLOAD_SIZE_TEXT} — and is not kept on this device for use offline. With
+              no network, or if it cannot be loaded, the ride is in the standard world instead and
+              the ride screen says so. In the Android app it is already on the device.
             </p>
           </>
         }
@@ -1491,6 +1545,25 @@ function GameWorldPanel({
           Ride in the realistic world
         </label>
       </p>
+      {/* #2289: what the last realistic ride's ladder read — the owner's
+        diagnostic, and a rider's answer to "why did it go standard". Counts and
+        milliseconds only: `realistic-report.ts` keeps no coordinate. One plain
+        line; the figures behind a native "Details" disclosure (2026-11-07). */}
+      {report === undefined ? null : (
+        <div className="oyl-world__report">
+          <p className="oyl-muted">{report.summary}</p>
+          {report.details.length === 0 ? null : (
+            <details className="oyl-world__report-details">
+              <summary>Details</summary>
+              {report.details.map((line) => (
+                <p className="oyl-muted" key={line}>
+                  {line}
+                </p>
+              ))}
+            </details>
+          )}
+        </div>
+      )}
       <p>
         <label className="oyl-announce__switch">
           <input
@@ -1809,6 +1882,244 @@ function LapRaceAssistPanel({
 }
 
 /**
+ * #2079: what each panel the rider may turn off is called here. The route's
+ * names no view (#2385): what it draws is the "Route panel" choice below, and
+ * the compact one has no height profile.
+ */
+const HUD_PANEL_LABELS: Readonly<Record<HudPanelId, string>> = {
+  readings: 'Ride readings: speed, distance, the pacer and the rest',
+  route: 'The route panel',
+  graph: 'The last ten minutes of power and heart rate',
+  standings: 'A race’s standings',
+};
+
+/** #2383: what each arrangement is called here. */
+const HUD_ARRANGEMENT_LABELS: Readonly<Record<HudArrangement, string>> = {
+  full: 'Full: every reading',
+  focus:
+    'Focus: power, cadence and heart rate large, with speed, average power, distance and ride time under them',
+};
+
+/** #2387: what the totals strip is called here. */
+const HUD_TOTALS_STRIP_LABEL =
+  'The ride’s totals along the bottom: lap, route, distance to go, average speed, energy and climb';
+
+/**
+ * #2385: what each way of drawing the route panel is called here. Neither
+ * begins with a word another choice here begins with.
+ */
+const HUD_ROUTE_VIEW_LABELS: Readonly<Record<HudRouteView, string>> = {
+  full: 'Height profile and map',
+  compact: 'Compact: a small map with the gradient on it',
+};
+
+/** #2420: what each way of showing power is called here. */
+const HUD_POWER_VIEW_LABELS: Readonly<Record<HudPowerView, string>> = {
+  average: '3-second average',
+  instant: 'Instant',
+};
+
+/**
+ * #2514: what each Delivery layout is called here. ⚠️ New words, proposed to
+ * the owner in #2514's pull request (old → new).
+ */
+const HUD_DELIVERY_VIEW_LABELS: Readonly<Record<HudDeliveryView, string>> = {
+  game: 'The game strip only',
+  everything: 'Everything, as on any ride',
+};
+
+/** #2079: what each text size is called here. */
+const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
+  normal: 'Normal',
+  large: 'Large',
+  'extra-large': 'Extra large',
+};
+
+/**
+ * The ride HUD's panels and the size of its numbers — #2079. Kept on this
+ * device (`game/hud/hud-layout-preference.ts`) and read as the next ride
+ * starts. **The notices, the controls and power, cadence and heart rate are
+ * not offered**: a notice is where the HUD's safety sentences stand, and a
+ * rider must always be able to pause. Since #2383 the rider may choose the
+ * focus arrangement, which shows the gradient nowhere: it is a choice of
+ * fewer numbers, made off the bike, and the full HUD is one choice away.
+ * Since #2387 the rider may add the totals strip, off by default.
+ *
+ * Since #2385 the rider may draw the route panel compact: the map alone, with
+ * the gradient on it, which puts the gradient back beside the focus readout.
+ *
+ * Since #2420 the rider may show power instant rather than as the 3-second
+ * average, the default: what the HUD shows, and nothing the ride records.
+ *
+ * Every choice a target of at least 48 px (`theme.css` §".oyl-hud-layout"),
+ * as every ride-time control is: it is set from the bars as often as the sofa.
+ */
+function HudLayoutPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [layout, setLayout] = useState<HudLayoutPreference>(() => readHudLayout(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  function keep(next: HudLayoutPreference): void {
+    setLayout(next);
+    setMessage(
+      writeHudLayout(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+
+  return (
+    <section className="oyl-panel oyl-hud-layout" aria-labelledby="oyl-hud-layout-heading">
+      <SectionHeading
+        level={3}
+        id="oyl-hud-layout-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              What the game shows while you ride, from your next ride. Power, cadence and heart
+              rate, the ride controls and every notice are always shown. Focus shows one compact
+              readout at the top in place of every reading; a ride in a room, a Delivery round or a
+              lap race keeps the full layout and draws no totals strip. The compact route panel is a
+              small map with the gradient on it, in place of the height profile and the map. The
+              text size applies on tablets held either way, and the totals strip on a tablet on its
+              side or a tall, narrow one held upright: a phone or a short window keeps the normal
+              size, and has no strip, because it has no room for them beside the road.
+            </p>
+            <p className="oyl-muted">
+              Power changes with every pedal stroke, so by default the game shows the average of the
+              last 3 seconds, as most bike computers do. It is about a second behind a sudden
+              change; Instant shows each reading as it arrives. Either way, the trainer, the
+              recording and the ride’s totals use every reading as it arrives.
+            </p>
+          </>
+        }
+      >
+        Ride HUD
+      </SectionHeading>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Layout</legend>
+        {HUD_ARRANGEMENTS.map((arrangement) => (
+          <label key={arrangement} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-arrangement"
+              checked={(layout.arrangement ?? 'full') === arrangement}
+              onChange={() => {
+                keep({ ...layout, arrangement });
+              }}
+            />{' '}
+            {HUD_ARRANGEMENT_LABELS[arrangement]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Power</legend>
+        {HUD_POWER_VIEWS.map((view) => (
+          <label key={view} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-power-view"
+              checked={powerView(layout) === view}
+              onChange={() => {
+                keep({ ...layout, power: view });
+              }}
+            />{' '}
+            {HUD_POWER_VIEW_LABELS[view]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>During a Delivery round</legend>
+        {HUD_DELIVERY_VIEWS.map((view) => (
+          <label key={view} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-delivery-view"
+              checked={(deliveryEverything(layout) ? 'everything' : 'game') === view}
+              onChange={() => {
+                keep({ ...layout, delivery: view });
+              }}
+            />{' '}
+            {HUD_DELIVERY_VIEW_LABELS[view]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Show</legend>
+        {HUD_PANELS.map((panel) => (
+          <label key={panel} className="oyl-hud-layout__choice">
+            <input
+              type="checkbox"
+              checked={panelShown(layout, panel)}
+              onChange={(event) => {
+                const show = event.currentTarget.checked;
+                keep({
+                  ...layout,
+                  hidden: show
+                    ? layout.hidden.filter((each) => each !== panel)
+                    : [...layout.hidden, panel],
+                });
+              }}
+            />{' '}
+            {HUD_PANEL_LABELS[panel]}
+          </label>
+        ))}
+        <label className="oyl-hud-layout__choice">
+          <input
+            type="checkbox"
+            checked={totalsStripChosen(layout)}
+            onChange={(event) => {
+              keep({ ...layout, totalsStrip: event.currentTarget.checked });
+            }}
+          />{' '}
+          {HUD_TOTALS_STRIP_LABEL}
+        </label>
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Route panel</legend>
+        {HUD_ROUTE_VIEWS.map((view) => (
+          <label key={view} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-route-view"
+              checked={(layout.route ?? 'full') === view}
+              onChange={() => {
+                keep({ ...layout, route: view });
+              }}
+            />{' '}
+            {HUD_ROUTE_VIEW_LABELS[view]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Size of the numbers</legend>
+        {HUD_TEXT_SIZES.map((size) => (
+          <label key={size} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-text-size"
+              checked={layout.textSize === size}
+              onChange={() => {
+                keep({ ...layout, textSize: size });
+              }}
+            />{' '}
+            {HUD_TEXT_SIZE_LABELS[size]}
+          </label>
+        ))}
+      </fieldset>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
  * Whether a ride in a room shows and says this rider's draft — #787,
  * ADR 0038 D-5 binding #327's indicator criteria, as the owner amended them on
  * 2026-10-15: **on by default, one rider setting**. `game/draft-preference.ts`
@@ -1844,6 +2155,10 @@ function DraftReadingPanel({
               it. Turning this off changes only what you see and hear: whether a room drafts is
               chosen by whoever made it.
             </p>
+            <p className="oyl-muted">
+              On a ride on your own, this also shows the draft from the pacer and your best, when
+              you ride behind them. That draft is never spoken.
+            </p>
           </>
         }
       >
@@ -1865,7 +2180,78 @@ function DraftReadingPanel({
               );
             }}
           />{' '}
-          Show my draft when riding in a room
+          Show my draft
+        </label>
+      </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Whether a solo ride drafts the rider behind the bot pacer and their own best
+ * — #2425, ADR 0066 D-6: **the physics**, on by default, one device setting,
+ * and not {@link DraftReadingPanel}'s, which decides only what is shown.
+ * `game/solo-draft-preference.ts` says why. `oyl-solo-draft` is the tests'
+ * hook; the `oyl-announce` class for its switch's 24×24 target.
+ */
+function SoloDraftPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [drafted, setDrafted] = useState(() => readSoloDraftChoice(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  return (
+    <section
+      className="oyl-panel oyl-announce oyl-solo-draft"
+      aria-labelledby="oyl-solo-draft-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-solo-draft-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              On a ride on your own, riding close behind the pacer or your best takes less effort,
+              as behind another rider on the road. Neither of them gets anything from you. A result
+              against your best that you rode partly in its draft says so.
+            </p>
+            <p className="oyl-muted">
+              In a lap race against bots, you and the bots draft each other in the same way, and
+              turning this off turns the draft off for every racer.
+            </p>
+            <p className="oyl-muted">
+              Turn this off to ride on your own with no draft at all, as before. It changes nothing
+              in a room. Your trainer is never sent a draft, only the gradient of the road you are
+              on.
+            </p>
+          </>
+        }
+      >
+        Draft on your own
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={drafted}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              setDrafted(next);
+              setMessage(
+                writeSoloDraftChoice(storage, next)
+                  ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                  : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+              );
+            }}
+          />{' '}
+          Draft behind the pacer and your best
         </label>
       </p>
       {message === undefined ? null : (

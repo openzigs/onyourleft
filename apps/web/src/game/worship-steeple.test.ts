@@ -22,7 +22,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { BuildingFeature, BuildingType, Landmark } from '@onyourleft/map-features';
+import type {
+  BuildingFeature,
+  BuildingType,
+  Landmark,
+  RoofMaterial,
+} from '@onyourleft/map-features';
 
 import { weatheringAt } from './facade';
 import {
@@ -48,6 +53,7 @@ import {
   typedStreetFixture,
 } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
+import { surfaceOfRole } from './mapped-buildings';
 import { northRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
 import { urbanClassMap } from './urban-class';
@@ -59,7 +65,11 @@ const origin = corridorOrigin(profile);
 /** One footprint of `(along, lateral)` rings, mapped as `type` and `landmark`, planned alone. */
 function planOne(
   rings: readonly (readonly (readonly [number, number])[])[],
-  mapped: { readonly type: BuildingType | null; readonly landmark: Landmark | null },
+  mapped: {
+    readonly type: BuildingType | null;
+    readonly landmark: Landmark | null;
+    readonly roofMaterial?: RoofMaterial;
+  },
   options: FootprintPlanOptions = {},
   height = 6,
   part?: { readonly minHeightMetres: number },
@@ -68,6 +78,7 @@ function planOne(
     ...buildingBeside(profile, origin, rings, height, part),
     buildingType: mapped.type,
     landmark: mapped.landmark,
+    ...(mapped.roofMaterial === undefined ? {} : { roofMaterial: mapped.roofMaterial }),
   };
   const corridor: WorldCorridor = {
     routeId: 'worship',
@@ -622,5 +633,43 @@ describe('#2100: the steeple polished — its spire a roof, its tower a tower', 
     // And more of the tower over the roof than #2021 stood: `above`, now 6 m.
     expect(top - roofTop).toBeCloseTo(STEEPLE.above, 1);
     expect(STEEPLE.above).toBe(6);
+  });
+});
+
+describe('#2206: a spire stays slate whatever the nave’s roof tag says', () => {
+  const ring = [rectangleBeside(1_000, 40, 10, 24)];
+  const spireVertices = (plan: FootprintPlan): number =>
+    plan.triangles.spire.length / FOOTPRINT_VERTEX_FLOATS;
+
+  it.each([
+    ['metal', 'corrugated'],
+    ['roof_tiles', 'roof-tiles'],
+    ['asphalt', 'shingles'],
+  ] as const)(
+    'keeps the nave in its `%s` and draws the spire in slate',
+    (roofMaterial, surface) => {
+      for (const options of [{}, { landmarkChurches: false }]) {
+        const tagged = planOne(ring, { ...CHURCH, roofMaterial }, options);
+        const plain = planOne(ring, CHURCH, options);
+        expect(tagged.steeple).toBe(true);
+        // The tag reaches the nave: not vacuous, the roof is not the untagged one.
+        if (surface === 'shingles') expect(tagged.cladding.roof).toBe('shingle');
+        else expect(tagged.surfaces.roof).toBe(surface);
+        expect(tagged.surfaces.roof).not.toBe('flat-roof');
+        // The spire's four faces are a role of their own, in slate, and not in the nave's roof.
+        expect(spireVertices(tagged)).toBe(12);
+        expect(surfaceOfRole(tagged, 'spire')).toBe('slate');
+        expect(tagged.triangles.roof.length + tagged.triangles.spire.length).toBe(
+          plain.triangles.roof.length,
+        );
+        expect(tagged.farTriangleCount).toBe(plain.farTriangleCount);
+      }
+    },
+  );
+
+  it('leaves an untagged church’s spire in its roof, as before', () => {
+    const plain = planOne(ring, CHURCH);
+    expect(spireVertices(plain)).toBe(0);
+    expect(surfaceOfRole(plain, 'roof')).toBe(plain.surfaces.roof);
   });
 });

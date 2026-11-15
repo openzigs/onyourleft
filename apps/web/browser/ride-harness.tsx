@@ -80,6 +80,8 @@ import {
   degreesLongitude,
   expandWorkout,
   geographicPosition,
+  joules,
+  kilocalories,
   kilograms,
   metres,
   routeProfile,
@@ -89,6 +91,7 @@ import {
   watts,
   type RoutePoint,
   type RouteProfile,
+  type TimeInZones,
   type WorkoutRescue,
 } from '@onyourleft/domain';
 
@@ -97,9 +100,17 @@ import { roomPortOver } from '../src/net/room-port';
 import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
-import type { GameTrainerPort } from '../src/game/trainer-port';
+import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
+import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
+import type { RideTotals } from '../src/recording/totals';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
+import {
+  HUD_LAYOUT_STORAGE_KEY,
+  HUD_PANELS,
+  HUD_TEXT_SIZES,
+  writeHudLayout,
+} from '../src/game/hud/hud-layout-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
@@ -163,9 +174,24 @@ export interface StageMeasurement {
   readonly panels: readonly StageItem[];
   /** Every reading, the strip, the plan view, the trainer line and both controls. */
   readonly items: readonly StageItem[];
+  /**
+   * #2076: the ride-so-far readings a phone's overlay hides by clip
+   * (`theme.css` §"THE RIDE SO FAR") — set apart from {@link items} rather
+   * than listed as readings off the stage, so every case that holds the
+   * readings on the stage holds the ones that ARE drawn. Where they are drawn
+   * they are {@link items} like any reading; `ride.browser.spec.ts` §"#2076"
+   * holds which viewports give them way.
+   */
+  readonly givenWay: readonly string[];
   /** The labels of the readings, in document order, per tier. */
   readonly primary: readonly string[];
   readonly secondary: readonly string[];
+  /** #2383: the focus readout's labels and values, in document order; empty in full. */
+  readonly focus: readonly string[];
+  readonly focusValues: readonly string[];
+  /** #2387: the totals strip's labels and values, in document order; empty with none. */
+  readonly totals: readonly string[];
+  readonly totalsValues: readonly string[];
   /** Type sizes in CSS pixels, so "visibly larger" is read off the engine. */
   readonly primaryValuePixels: number;
   readonly secondaryValuePixels: number;
@@ -411,8 +437,8 @@ const RELEASE_AND_PROMISE =
  */
 const LONGEST_ROUTE_NAME = (() => {
   const words =
-    'Box Hill, Leith Hill, Ranmore Common, Coldharbour, Holmbury St Mary, Peaslake, Shere, ' +
-    'Abinger and every lane between them, twice over, the long way round';
+    'The mill, the ridge, the reservoir, the old quarry, the ford, the farm, the beacon, the green, ' +
+    'the common and every lane between them, twice over, the long way round';
   const name = words.slice(0, MAXIMUM_ROUTE_NAME_LENGTH);
   if (name.length !== MAXIMUM_ROUTE_NAME_LENGTH || name !== name.trim()) {
     throw new Error('ride harness: the longest route name is not the store’s bound');
@@ -435,7 +461,7 @@ function chooserRoutes(): readonly {
     'The coast road',
     'Two bridges',
     'Old railway line',
-    'Box Hill, Leith Hill and every lane between them the long way round',
+    'The mill, the ridge and every lane between them the long way round',
     LONGEST_ROUTE_NAME,
   ];
   return names.map((name, index) => {
@@ -498,9 +524,48 @@ const CORRIDOR =
  * itself, on Playwright's clock.
  */
 const DELIVERY = new URLSearchParams(window.location.search).get('delivery') === 'round';
+
+/** #2079: `?text=large` or `?text=extra-large`, the HUD's text size. */
+const HUD_TEXT_ASKED = new URLSearchParams(window.location.search).get('text');
+const HUD_TEXT = HUD_TEXT_SIZES.find((size) => size === HUD_TEXT_ASKED);
+
+/** #2383: `?arrangement=focus`, the focus readout in place of the two tiers. */
+const HUD_FOCUS = new URLSearchParams(window.location.search).get('arrangement') === 'focus';
+
+/** #2387: `?totals=strip`, the totals strip along the bottom of the road. */
+const HUD_TOTALS = new URLSearchParams(window.location.search).get('totals') === 'strip';
+
+/** #2514: `?deliveryview=everything`, a Delivery round's HUD as it was before the game strip. */
+const HUD_DELIVERY_EVERYTHING =
+  new URLSearchParams(window.location.search).get('deliveryview') === 'everything';
+
+/** #2079: `?hide=readings,route`, the HUD's panels turned off. */
+const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
+  (new URLSearchParams(window.location.search).get('hide') ?? '').split(',').includes(panel),
+);
 const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
 
+/**
+ * `ride.html?picker=chooser&circuits=shipped` — #2331: the chooser with the
+ * app's built-in circuits beside the rider's routes, read through the
+ * product's own `loadBuiltInCircuits` as `main.tsx` hands them, so the
+ * *Built-in circuits* disclosure is drawn (closed: the rider has routes).
+ */
+const CIRCUITS =
+  AT_THE_PICKER && new URLSearchParams(window.location.search).get('circuits') === 'shipped';
+
+/**
+ * `ride.html?power=lost` — #2546: a rider whose power meter is paired and has
+ * gone quiet, so the HUD's *Power* reads "— W Sensor lost". On a race's start
+ * line that makes the HUD's primary panel taller at 736×360, which is the case §"#1407" in
+ * `ride-room.browser.spec.ts` must survive. Until #2546 a held rider read
+ * that whatever they pedalled; now they read their power.
+ */
+const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 'lost';
+
 const GAME: GamePort = {
+  // #2077: a threshold of the rider's own, so the zone indicator is drawn.
+  ownThresholdPower: () => Promise.resolve(watts(250)),
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
     Promise.resolve([
@@ -521,6 +586,7 @@ const GAME: GamePort = {
       },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
+  ...(CIRCUITS ? { listCircuits: () => loadBuiltInCircuits() } : {}),
   ...(CORRIDOR === undefined ? {} : { loadWorldCorridor: CORRIDOR.loadWorldCorridor }),
   // #1816: the Delivery town's corridor, ready at once, so the press fixes it.
   ...(DELIVERY_TOWN === undefined
@@ -532,7 +598,9 @@ const GAME: GamePort = {
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
-    rider: { power: watts(342), live: true, paired: true },
+    rider: POWER_LOST
+      ? { power: watts(0), live: false, paired: true }
+      : { power: watts(342), live: true, paired: true },
     cadence: { value: 92, live: true, paired: true },
     heartRate: { value: 168, live: true, paired: true },
   }),
@@ -622,6 +690,59 @@ const MAY_STOP = new URLSearchParams(window.location.search).get('keepalive') ==
 const MOVING_SECONDS = 9 * 3600 + 59 * 60 + 59;
 
 /**
+ * #2076: the ride so far, at the widest figures a ride under ten hours
+ * plausibly reaches — `199.9 km`, `4850 m` and a three-digit average power —
+ * the same object every read, as `useSyncExternalStore` requires. #2387: and
+ * the work of 425 W for ten hours, `15300 kJ`, the totals strip's widest.
+ * #2434: and the calorie estimate at its widest in the ride so far, four
+ * digits, `≈ 9999 kcal`, ten hours at 232 W: a fifth digit needs over
+ * 8.37 MJ of work at the assumed 20 % (`theme.css` §"THE CALORIE ESTIMATE
+ * IN THE RIDE SO FAR" says what one costs). Not the estimate of this
+ * object's `15300 kJ`, which is the strip's widest *Energy* and would be
+ * `≈ 18284`: each figure here is its own field's widest.
+ */
+const RIDE_TOTALS: RideTotals = {
+  distance: metres(199_900),
+  climbed: metres(4850),
+  averagePower: watts(425),
+  energy: joules(15_300_000),
+  calories: { energy: kilocalories(9_999), basis: 'power' },
+};
+
+/**
+ * `ride.html?calories=none` — #2434: the ride so far with no calorie estimate
+ * (and no work, as a ride with no power has) on a recording with heart rate,
+ * so *Calories* is a dash with the longest reason it gives for one: *set your
+ * details in Settings*.
+ */
+const NO_CALORIES = new URLSearchParams(window.location.search).get('calories') === 'none';
+
+/**
+ * `ride.html?ghost=none` — #2472: the ride with the pacer and the wind and no
+ * ghost, which a rider can start by leaving *Race your own* unticked. On a
+ * tablet from 50 rem tall the wind gives way to a solo ride's draft only
+ * beside BOTH the pacer and the ghost (`theme.css` §"the wind gives way to
+ * it"), so this is the ride that pins that scope.
+ */
+const NO_GHOST = new URLSearchParams(window.location.search).get('ghost') === 'none';
+
+const RIDE_TOTALS_NOW: RideTotals = NO_CALORIES
+  ? {
+      ...RIDE_TOTALS,
+      energy: undefined,
+      averagePower: undefined,
+      calories: undefined,
+      recordedHeartRate: true,
+    }
+  : RIDE_TOTALS;
+
+/** #2077: some time in each of the seven power zones, the same object every read. */
+const ZONE_TIME: TimeInZones = {
+  perZone: [600, 1200, 900, 600, 300, 120, 30].map((spent) => seconds(spent)),
+  covered: seconds(3750),
+};
+
+/**
  * `ride.html?gradient=refused` — a trainer that refuses every gradient, so the
  * HUD carries the *Trainer* fault in its notice cell (#693's re-review: the
  * cell stacks every notice that is never put away, and keep-the-screen-on is
@@ -641,6 +762,41 @@ const REFUSED = new URLSearchParams(window.location.search).get('gradient') === 
  * names, so `ride-targets.browser.spec.ts` measures it in this state too.
  */
 const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'yes';
+
+/**
+ * `ride.html?end=asked` — #2349: *End ride* pressed, so the HUD holds the
+ * end-of-ride question in place of *Pause* and *End ride*, with something
+ * recorded under the ride so all three answers are offered.
+ * `ride-targets.browser.spec.ts` measures them as ride-time controls.
+ * `?end=discard` presses *Discard ride* as well, for the discard step and the
+ * owner's warning, the question's tallest state. `?end=unrecorded` (#2381)
+ * opens it over a ride with NOTHING recorded under it, for its one step:
+ * *Keep riding* and *End ride*.
+ */
+const END_QUERY = new URLSearchParams(window.location.search).get('end');
+const END_ASKED = END_QUERY === 'asked' || END_QUERY === 'discard' || END_QUERY === 'unrecorded';
+/** #2381: something to save under the ride, on the two pages of the question that need one. */
+const END_RECORDED = END_QUERY === 'asked' || END_QUERY === 'discard';
+
+/**
+ * `ride.html?record=refused` — #2381: the press of *Ride* could not start the
+ * recording under the ride (`GameTrainerPort.recordGameRide` answers `false`),
+ * so the HUD's notice cell says this ride is not being recorded, and why:
+ * `refused` is the ride before still saving. Round 3: `?record=` any other
+ * cause `GameTrainerPort.whyNotRecording` names (`not-saved`, `device-full`,
+ * `checkpoint-failed`) says that one instead. Every other page's press starts
+ * a recording, as a real ride controller's does.
+ */
+const RECORD_QUERY = new URLSearchParams(window.location.search).get('record');
+const RECORD_REFUSED = RECORD_QUERY !== null;
+const RECORD_CAUSE: GameNotRecordedReason | undefined =
+  RECORD_QUERY === 'refused'
+    ? 'still-saving'
+    : RECORD_QUERY === 'not-saved' ||
+        RECORD_QUERY === 'device-full' ||
+        RECORD_QUERY === 'checkpoint-failed'
+      ? RECORD_QUERY
+      : undefined;
 
 /**
  * `ride.html?room=race` — #785: the ride is in a private race that is waiting
@@ -906,14 +1062,23 @@ const TRAINER: GameTrainerPort = {
   // #1360's re-review (R3). @see ROOM_NOTICE
   recordingPaused: () => ROOM_NOTICE === 'paused',
   gameRideEnded: () => undefined,
-  // #1221: the tallest chooser has nothing recording under it, so the line
-  // under *Ride* and its *Record this ride* are laid out and measured with the
-  // rest. This double records nothing.
+  // #1221, #2381: the tallest chooser has nothing recording under it, so the
+  // line under *Ride* saying the press records is laid out and measured with
+  // the rest. This double records nothing.
   rideMovingSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
   // #2072: the elapsed time at the same widest figure, so the clock row is
   // laid out and measured with its widest time in it.
   rideElapsedSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
-  recordGameRide: () => Promise.resolve(false),
+  // #2076: the ride so far at its widest plausible figures, so where the
+  // three are drawn they are laid out and measured at their widest.
+  rideTotals: () => (ALL_NOTICES ? undefined : RIDE_TOTALS_NOW),
+  // #2077: time in every one of the seven zones, so the bar is drawn whole.
+  ridePowerZoneTime: () => (ALL_NOTICES ? undefined : ZONE_TIME),
+  // #2381: the press records, unless the page asks for the refusal.
+  recordGameRide: () => Promise.resolve(!RECORD_REFUSED),
+  whyNotRecording: () => RECORD_CAUSE,
+  // #2349: something to save under the ride, only on the pages that ask.
+  rideRecording: () => (END_RECORDED ? { savable: true } : undefined),
   watchRide: () => () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE
@@ -1004,15 +1169,46 @@ function fontPixels(selector: string): number {
   return element === null ? 0 : Number.parseFloat(window.getComputedStyle(element).fontSize);
 }
 
+/** #2425: whether the tier holding `field` draws a solo ride's draft. */
+function soloDraftDrawn(field: Element): boolean {
+  const draft = field.parentElement?.querySelector(':scope > .oyl-hud__field--solo-draft');
+  if (draft == null) return false;
+  const box = draft.getBoundingClientRect();
+  return box.width * box.height > 1;
+}
+
 function measure(): StageMeasurement {
   const stage = document.querySelector(`.${STAGE_CLASS}`);
   const world = document.querySelector('.oyl-game__world');
   const items: StageItem[] = [];
+  const givenWay: string[] = [];
   for (const field of document.querySelectorAll('.oyl-hud__field')) {
-    items.push(item(`reading: ${textOf(field.querySelector('dt'))}`, field));
+    // #2387: a totals strip's reading is named apart from the tier's reading
+    // of the same name (*To go*, *Climbed*), and gives way with its strip.
+    const strip = field.closest('.oyl-hud__totals') !== null;
+    const name = `${strip ? 'totals' : 'reading'}: ${textOf(field.querySelector('dt'))}`;
+    const box = field.getBoundingClientRect();
+    const givesWay =
+      strip ||
+      ['oyl-hud__field--total', 'oyl-hud__field--effort'].some((name) =>
+        field.classList.contains(name),
+      ) ||
+      // #2425: a solo ride's draft, away from a tablet (`theme.css` §"A SOLO
+      // RIDE'S DRAFT, ON A TABLET ONLY"), and the wind where that draft is
+      // DRAWN, which it gives way to on a tablet beside the pacer and the
+      // ghost (the same section).
+      field.classList.contains('oyl-hud__field--solo-draft') ||
+      (field.classList.contains('oyl-hud__field--wind') && soloDraftDrawn(field));
+    if (givesWay && box.width * box.height <= 1) {
+      givenWay.push(name);
+      continue;
+    }
+    items.push(item(name, field));
   }
   for (const [name, selector] of [
     ['the elevation strip', '.oyl-hud__profile-svg'],
+    // #2075: the road ahead, beside it (2 km of it since #2291).
+    ['the road ahead', '.oyl-hud__ahead-svg'],
     ['the plan view', '.oyl-hud__plan-svg'],
     ['the trainer line', '.oyl-hud__trainer'],
     ['the side camera line', '.oyl-hud__side-camera'],
@@ -1021,16 +1217,35 @@ function measure(): StageMeasurement {
     ['the plan change', '.oyl-hud__plan-change'],
     // #1552: the OpenStreetMap credit, on a ride with map data in its world.
     ['the map credit', '.oyl-hud__attribution'],
+    // #2078: the last ten minutes, where it is drawn (`givenWay` where not).
+    ['the recent graph', '.oyl-hud__recent'],
   ] as const) {
     const element = document.querySelector(selector);
-    if (element !== null) {
-      items.push(item(name, element));
+    if (element === null) continue;
+    const box = element.getBoundingClientRect();
+    if (selector === '.oyl-hud__recent' && box.width * box.height <= 1) {
+      givenWay.push(name);
+      continue;
     }
+    items.push(item(name, element));
   }
   // #1482: and the touch lock, which is the design system's toggle rather
   // than an `.oyl-hud__control`, so the stage holds it as it holds Pause.
   for (const control of document.querySelectorAll('.oyl-hud__control, .oyl-hud__lock')) {
+    // #2080: the swap between a race's standings and a loop's lap splits is
+    // drawn only where its panel is — on a tablet — and not displayed at all
+    // on a phone, where the panel is clipped to nothing (`theme.css` §"A
+    // LOOP'S LAP SPLITS"). There it has given way, and is said so.
+    const box = control.getBoundingClientRect();
+    if (control.classList.contains('oyl-hud__swap') && box.width * box.height === 0) {
+      givenWay.push(`control: ${textOf(control)}`);
+      continue;
+    }
     items.push(item(`control: ${textOf(control)}`, control));
+  }
+  // #2349: the end-of-ride question's answers, while it stands where Pause did.
+  for (const control of document.querySelectorAll('[data-oyl-end-ride] button')) {
+    items.push(item(`end ride: ${textOf(control)}`, control));
   }
   // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.
   for (const control of document.querySelectorAll('.oyl-hud__room-row button')) {
@@ -1067,7 +1282,14 @@ function measure(): StageMeasurement {
     // as a panel only when it has been lifted out — otherwise every
     // measurement would find it "over" the panel it is inside.
     panels: [
-      ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])'),
+      // #2387: the totals strip, where it is drawn; where a layout has no room
+      // for it, it is not displayed, and `givenWay` says so.
+      ...[...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].filter((each) => {
+        if (!each.classList.contains('oyl-hud__totals')) return true;
+        if (window.getComputedStyle(each).display !== 'none') return true;
+        givenWay.push('the totals strip');
+        return false;
+      }),
       // #1398: so is the sound row, in a room ride on a phone on its side
       // (`theme.css` §"A ROOM RIDE WITH SOUNDS ON, ON A PHONE").
       ...[
@@ -1075,14 +1297,24 @@ function measure(): StageMeasurement {
       ].filter((each) => window.getComputedStyle(each).position === 'absolute'),
     ].map((each) => item(each.className, each)),
     items,
+    givenWay,
     primary: labels('.oyl-hud__fields--primary'),
     secondary: labels('.oyl-hud__fields--secondary'),
-    primaryValuePixels: fontPixels('.oyl-hud__fields--primary .oyl-hud__value'),
-    secondaryValuePixels: fontPixels('.oyl-hud__fields--secondary .oyl-hud__value'),
+    // #2383: the focus readout's two rows are the two tiers' sizes there.
+    primaryValuePixels: fontPixels(
+      '.oyl-hud__fields--primary .oyl-hud__value, .oyl-hud__focus-main .oyl-hud__value',
+    ),
+    secondaryValuePixels: fontPixels(
+      '.oyl-hud__focus-more .oyl-hud__value, .oyl-hud__fields--secondary .oyl-hud__value',
+    ),
+    focus: labels('.oyl-hud__focus'),
+    focusValues: [...document.querySelectorAll('.oyl-hud__focus dd')].map(textOf),
+    totals: labels('.oyl-hud__totals'),
+    totalsValues: [...document.querySelectorAll('.oyl-hud__totals dd')].map(textOf),
     chrome: {
       header: document.querySelector('header.oyl-header') !== null,
       navigation: document.querySelector('nav[aria-label="Primary"]') !== null,
-      summary: document.querySelector('main > p.oyl-muted') !== null,
+      summary: document.querySelector('main > .oyl-view-head > p.oyl-muted') !== null,
       footer: document.querySelector('footer.oyl-footer') !== null,
       skipLink: document.querySelector('.oyl-skip-link') !== null,
     },
@@ -1282,6 +1514,24 @@ async function run(): Promise<void> {
   if (WITH_SOUNDS) {
     writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
   }
+  // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
+  // written where Settings writes them, read as the ride starts.
+  localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  if (
+    HUD_TEXT !== undefined ||
+    HUD_HIDDEN.length > 0 ||
+    HUD_FOCUS ||
+    HUD_TOTALS ||
+    HUD_DELIVERY_EVERYTHING
+  ) {
+    writeHudLayout(localStorage, {
+      textSize: HUD_TEXT ?? 'normal',
+      hidden: HUD_HIDDEN,
+      arrangement: HUD_FOCUS ? 'focus' : 'full',
+      totalsStrip: HUD_TOTALS,
+      delivery: HUD_DELIVERY_EVERYTHING ? 'everything' : 'game',
+    });
+  }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
   localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);
   if (ALL_NOTICES) {
@@ -1329,7 +1579,10 @@ async function run(): Promise<void> {
     };
     return;
   }
-  for (const text of ['pacer', 'Race your', 'Ride in a wind']) {
+  // #2472: `?ghost=none` rides with the pacer and the wind but no ghost, the
+  // solo ride whose wind does NOT give way to its draft on a tablet.
+  const ticked = NO_GHOST ? ['pacer', 'Ride in a wind'] : ['pacer', 'Race your', 'Ride in a wind'];
+  for (const text of ticked) {
     const box = labelled<HTMLInputElement>('input[type="checkbox"]', text);
     if (box === undefined || box.disabled) {
       throw new Error(`ride harness: the picker offers no usable "${text}" checkbox`);
@@ -1478,6 +1731,15 @@ async function run(): Promise<void> {
           ),
         );
       }
+      // #2546: and past its Go. "Go." stands on the *Race* notice for
+      // `RACE_GO_SHOWN_MS` from the room's first frame, and on a phone a
+      // notice takes the route panel's cell while it is up, as a lap's does
+      // (`ride-laps.browser.spec.ts` §`NOTICE_HAS_THE_ROUTE_CELL`). This page
+      // is a race under way, with a lap done and its standings drawn, so it is
+      // measured once that notice has stood down.
+      await until('Go. to stand down', () =>
+        document.querySelector('.oyl-hud__race') === null ? true : undefined,
+      );
     } else {
       await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
     }
@@ -1537,6 +1799,31 @@ async function run(): Promise<void> {
         (each) => each.textContent === 'Resume',
       ),
     );
+  }
+  // #2349: the question, reached the way a rider reaches it.
+  if (END_ASKED) {
+    const end = await until('the HUD’s End ride', () =>
+      [...document.querySelectorAll<HTMLButtonElement>('.oyl-hud__control')].find(
+        (each) => each.textContent === 'End ride',
+      ),
+    );
+    end.click();
+    await until('the question’s Keep riding', () =>
+      [...document.querySelectorAll('[data-oyl-end-ride] button')].find(
+        (each) => each.textContent === 'Keep riding',
+      ),
+    );
+    if (END_QUERY === 'discard') {
+      const discard = await until('the question’s Discard ride', () =>
+        [...document.querySelectorAll<HTMLButtonElement>('[data-oyl-end-ride] button')].find(
+          (each) => each.textContent === 'Discard ride',
+        ),
+      );
+      discard.click();
+      await until('the discard step', () =>
+        document.querySelector('[data-oyl-end-ride="discard"]'),
+      );
+    }
   }
   // ⚠️ Before anything is measured. @see hud-harness.tsx
   await document.fonts.ready;

@@ -45,6 +45,37 @@ export const HELD = '?ladder=0&panel=0&seconds=1&at=2550';
  */
 export const FRAME_DRAW_CALLS_AT_2550 = 34;
 
+/**
+ * A sixteenth of the default 1280 × 720 page, and the same 16:9 shape — #1915,
+ * and since #1937 the page of every nightly case that loads a mapped town.
+ *
+ * A case that counts a frame's draw calls and triangles reads what the frustum
+ * decides, and the frustum is the canvas's SHAPE, not its size: the renderer's
+ * resize hands the camera only the aspect (`three-renderer.ts` §`#applySize`).
+ * What the size does decide is each frame's fill under SwiftShader, and the
+ * page publishes only after a second of frames each under
+ * `MAXIMUM_FRAME_GAP_MS` (1 s, `realistic/loop.ts`), a slower one being a
+ * stall that counts for nothing. On an EPYC 7763 runner a 1280 × 720 frame of
+ * a mapped town, with #1884's rooms behind the glass, came near that second,
+ * so a load waited on chance: 25 s to over 160 s, and past a case's 300 s.
+ *
+ * ⚠️ **Not for a case that reads a frame time**, which is the size's to
+ * decide. A case on this page asserts `result.drawingBuffer` is this size, so
+ * a later change cannot quietly put the expensive frames back.
+ */
+export const SIXTEENTH_PAGE = { width: 320, height: 180 } as const;
+
+/**
+ * A load's p50/p90 frame time, frame count and stalls, for a case's log line,
+ * so that its CI readings can be compared with each other — #1937.
+ */
+export function frameReading({ frameMs, stalls }: RealisticSample): string {
+  return (
+    `${String(Math.round(frameMs.p50))}/${String(Math.round(frameMs.p90))} ms, ` +
+    `${String(frameMs.count)} frames, ${String(stalls)} stall(s)`
+  );
+}
+
 type Published = NonNullable<Window['__oylRealistic']>;
 
 /** Loads `realistic.html` with `query` and returns what it published, refusing an error. */

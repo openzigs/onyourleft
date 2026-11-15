@@ -32,7 +32,7 @@ describe('which Lucide icons a module imports — #673', () => {
     expect(importedIcons("import { icons } from 'lucide-react';").problems).toHaveLength(1);
   });
 
-  it('reads the real NavIcon as the five icons it draws', () => {
+  it('reads the real NavIcon as the six icons it draws', () => {
     const source = readFileSync(
       fileURLToPath(new URL('../../src/shell/NavIcon.tsx', import.meta.url)),
       'utf8',
@@ -40,6 +40,8 @@ describe('which Lucide icons a module imports — #673', () => {
     expect(importedIcons(source).icons).toEqual([
       'Bike',
       'Ellipsis',
+      // #2292: the Games tab.
+      'Gamepad2',
       'House',
       'RotateCcwClock',
       'Route',

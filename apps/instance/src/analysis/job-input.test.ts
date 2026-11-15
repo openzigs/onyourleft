@@ -37,7 +37,7 @@ describe('readRideInput', () => {
     expect(fieldOf({ ...RIDE_INPUT, ride: { ...RIDE_INPUT.ride, lat: 51.5 } })).toBe(
       'input.ride.lat',
     );
-    const section = { ...RIDE_INPUT.sections[0], name: 'Box Hill' };
+    const section = { ...RIDE_INPUT.sections[0], name: 'Quarry climb' };
     expect(fieldOf({ ...RIDE_INPUT, sections: [section] })).toBe('input.sections[0].name');
   });
 

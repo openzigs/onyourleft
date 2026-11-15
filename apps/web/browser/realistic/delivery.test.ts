@@ -35,7 +35,7 @@ describe('the realistic page’s Delivery round — #1815', () => {
     expect(round.markers).toHaveLength(20);
     expect(round.obstacles).toHaveLength(20);
     expect(new Set(round.obstacles.map((obstacle) => obstacle.kind))).toEqual(
-      new Set(['bin', 'trolley', 'cone']),
+      new Set(['bin', 'trolley', 'cone', 'parked-car']),
     );
   });
 

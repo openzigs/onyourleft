@@ -2111,6 +2111,8 @@ export function planFingerprint(plans: readonly FootprintPlan[], withPaint = tru
     }
     for (const role of FOOTPRINT_ROLES) {
       const floats = each.triangles[role];
+      // #2206: a role most plans leave empty, so a plan written before it hashes as it did.
+      if (role === 'spire' && floats.length === 0) continue;
       const bits = new Uint32Array(floats.buffer, floats.byteOffset, floats.length);
       mix(bits.length);
       for (const word of bits) mix(word);

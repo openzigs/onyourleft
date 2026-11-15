@@ -91,6 +91,14 @@ import {
 } from '@onyourleft/domain';
 
 import { CORRECTION_SECONDS } from '../net/correction';
+import { draftEvent } from './room-ride';
+import {
+  SOLO_DRAFT_AT_START,
+  soloDraftFactor,
+  soloDraftPercent,
+  type SoloDraftSources,
+  type SoloDraftState,
+} from './solo-draft';
 
 /**
  * The simulation's fixed step, in seconds.
@@ -297,6 +305,17 @@ export interface SimulationSetup {
    * starts: nothing in the app passes it.
    */
   readonly startMetres?: number | undefined;
+  /**
+   * Who gives the rider a draft on a solo ride — #2425, ADR 0066 D-1: the
+   * {@link pacer}, when there is one, and the rider's own ghost when
+   * `ghostAt` is handed in. `solo-draft.ts` holds the model's inputs.
+   *
+   * ⚠️ **Absent is today, to the bit** (D-6): no `k` is computed and
+   * {@link GameState.soloDraft} is absent. `GameView` hands it only on a solo
+   * ride — never in a room, whose `k` is the room's (D-1.5) — with the
+   * device's switch on and a pacer, an own ghost or a lap race to give a draft.
+   */
+  readonly soloDraft?: SoloDraftSources | undefined;
 }
 
 /** What one call to {@link GameSimulation.advanceTo} did. */
@@ -398,7 +417,7 @@ export interface GameState {
   readonly ridden: Seconds;
   /** The gradient at the rider's current position on the route. */
   readonly grade: GradePercent;
-  /** The last input the simulation was advanced with. @see RiderInput */
+  /** The last input the simulation was advanced or held with (#2546). @see RiderInput */
   readonly input: RiderInput;
   /**
    * The bot pacer's own ride, when the rider chose one — #237.
@@ -440,6 +459,17 @@ export interface GameState {
    * on the way back. @see SimulationSetup.wind, which cannot change mid-ride.
    */
   readonly headwindMetresPerSecond?: number | undefined;
+  /**
+   * The rider's draft on a solo ride, as the last step was ridden — #2425,
+   * ADR 0066: the `k`, `draftEvent`'s in-the-draft state, and the metres
+   * covered in and out of it, each advanced once per fixed step (D-5.6), so a
+   * catch-up burst credits each step to the state it was ridden in.
+   *
+   * Absent unless {@link SimulationSetup.soloDraft} was handed in. The HUD's
+   * solo Draft field reads the `k` here, and "Your best" is marked from the
+   * metres (`solo-draft.ts` §`draftedRide`), so neither computes one of its own.
+   */
+  readonly soloDraft?: SoloDraftState | undefined;
 }
 
 /**
@@ -498,9 +528,13 @@ export class GameSimulation {
 
   /**
    * The draft multiplier `k` the RIDER is ridden at — #787, ADR 0038 D-4: the
-   * room's prediction for this rider (`net/room-session.ts` §`draftFactor`),
-   * `1` on every ride with no room. The bot is never drafted: its conditions
-   * are its own (#327).
+   * room's prediction for this rider (`net/room-session.ts` §`draftFactor`).
+   * Since #2425 (ADR 0066 D-1), on a solo ride handed
+   * {@link SimulationSetup.soloDraft}, the `k` the pacer and the rider's own
+   * ghost give, computed per step from odometers in {@link advanceTo}: on a
+   * solo ride that `k` is the only one, as nothing predicts or corrects it.
+   * `1` on every other ride. The bot is never drafted, on any ride: its
+   * conditions are its own (#327, ADR 0066 D-1.1).
    */
   #draftFactor = 1;
 
@@ -530,6 +564,7 @@ export class GameSimulation {
       // dash for the field they had just set — indistinguishable from the
       // still-air ride they did not choose.
       ...headwindField(this.#headwindAt(start.distance)),
+      ...(setup.soloDraft === undefined ? {} : { soloDraft: SOLO_DRAFT_AT_START }),
     };
   }
 
@@ -568,9 +603,14 @@ export class GameSimulation {
    * power and put them metres up the road at "Go". So the origin moves up with
    * the wait, and a held ride owes no step — the same rider, the same state,
    * the same clocks.
+   *
+   * #2546: `input`, when given, is the rider's reading as it stands, kept as
+   * {@link GameState.input} for the HUD and nothing else: a rider warming up
+   * on the line sees their power, and no step is run with it.
    */
-  holdAt(nowMs: number): void {
+  holdAt(nowMs: number, input?: RiderInput): void {
     this.#originMs = nowMs - this.#stepsCredited * SIMULATION_STEP_SECONDS * 1000;
+    if (input !== undefined) this.#state = { ...this.#state, input };
   }
 
   /**
@@ -687,9 +727,22 @@ export class GameSimulation {
     // one the next frames blend towards.
     let previousRide = ride;
     let previousBot = bot;
+    const solo = this.#setup.soloDraft;
+    let soloDraft = this.#state.soloDraft;
     for (let step = 0; step < toRun; step += 1) {
       previousRide = ride;
       previousBot = bot;
+      if (solo !== undefined && solo.raced !== true) {
+        // #2425, ADR 0066 D-1.2: this step's `k`, from where everybody is as
+        // it begins — the rider's and the bot's odometers, and the ghost at
+        // the seconds ridden so far, the clock `ghostClock` reads.
+        this.#draftFactor = soloDraftFactor(ride.distance, [
+          ...(bot === undefined ? [] : [bot.state.distance]),
+          ...(solo.ghostAt === undefined
+            ? []
+            : [solo.ghostAt(seconds((this.#stepsRun + step) * SIMULATION_STEP_SECONDS))]),
+        ]);
+      }
       // Re-read per step rather than once per call: over a long stall the rider
       // crosses real terrain, and holding one grade for 200 steps would flatten
       // a hill they actually climbed.
@@ -748,6 +801,18 @@ export class GameSimulation {
           this.#courseAt(course, bot.state.distance),
         );
       }
+      if (soloDraft !== undefined) {
+        // D-5.6: `draftEvent`'s state on this step's `k`; its spoken event is
+        // never queued (D-5.5). The step's road is credited to that state.
+        const inDraft = draftEvent(soloDraft.inDraft, soloDraftPercent(this.#draftFactor)).inDraft;
+        const covered = ride.distance - previousRide.distance;
+        soloDraft = {
+          k: this.#draftFactor,
+          inDraft,
+          inDraftMetres: soloDraft.inDraftMetres + (inDraft ? covered : 0),
+          riddenMetres: soloDraft.riddenMetres + covered,
+        };
+      }
     }
 
     // Credit the whole outstanding amount even when only part of it was
@@ -778,6 +843,7 @@ export class GameSimulation {
       // step behind the gradient beside it, and on a bend the two would
       // describe different pieces of road.
       ...headwindField(this.#headwindAt(ride.distance)),
+      ...(soloDraft === undefined ? {} : { soloDraft }),
     };
     return { steps: toRun, skippedSeconds: skippedSteps * SIMULATION_STEP_SECONDS };
   }
@@ -808,7 +874,8 @@ export class GameSimulation {
    * `conditions` with the rider's draft applied — #787: `k` times the drag
    * area and nothing else (ADR 0038 D-1), the same product a room's
    * `ridingConditions(mass, position, k)` rides, to the bit. The same object
-   * when riding alone, so a ride with no room is exactly the ride it was.
+   * when riding alone, so a ride with no room and no solo draft — or a solo
+   * draft with nobody within reach (#2425) — is exactly the ride it was.
    */
   #drafted(conditions: RideConditions): RideConditions {
     const k = this.#draftFactor;

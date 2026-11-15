@@ -243,6 +243,12 @@ export interface ListDetailProps {
    * false where it would only say "choose one".
    */
   readonly detailWithoutSelection: boolean;
+  /**
+   * The address's query, kept on the links this component draws — the
+   * one-pane back link and the skip link — so they go back to the list as it
+   * was filtered (#2304, Workouts' built-in filter). Absent, they carry none.
+   */
+  readonly query?: string | undefined;
 }
 
 export function ListDetail({
@@ -255,6 +261,7 @@ export function ListDetail({
   list,
   detail,
   detailWithoutSelection,
+  query,
 }: ListDetailProps): JSX.Element {
   const two = useTwoPanes();
   const listHeadingId = useId();
@@ -413,7 +420,11 @@ export function ListDetail({
    * itself, as the shell's own skip link does; any other way of following it
    * opens this same list and item.
    */
-  const here = selection === undefined ? hrefFor(route) : hrefForSelection(route, selection);
+  const withQuery = (href: string): string =>
+    query === undefined || query === '' ? href : `${href}?${query}`;
+  const here = withQuery(
+    selection === undefined ? hrefFor(route) : hrefForSelection(route, selection),
+  );
   /*
    * The route's safety and privacy notes (#993), which the shell renders below
    * every other view and leaves to this one. At one pane they are below the
@@ -486,7 +497,7 @@ export function ListDetail({
               {!two && selection !== undefined ? (
                 <p>
                   {/* #946: a press here is the menus' "back" sound. */}
-                  <a href={hrefFor(route)} data-oyl-sound="back">
+                  <a href={withQuery(hrefFor(route))} data-oyl-sound="back">
                     {backLabel}
                   </a>
                 </p>

@@ -2383,6 +2383,105 @@ append_asset_entry apps/web/src/design/fonts/display-800.woff2 OFL-1.1-RFN \
 assert_violation "the Reserved-Font-Name OFL variant is not admitted by the suffix" ASSET004 \
   "licence OFL-1.1-RFN is not permitted"
 
+# --- ASSET004 and ODbL-1.0: a circuit file, in its one directory only ---------
+#
+# ADR 0064 D-6.2, #2293. The built-in circuits are databases derived from
+# OpenStreetMap and are offered under ODbL 1.0. The licence is admitted for a
+# `.json` file DIRECTLY in `apps/web/src/game/circuits/data/` and nowhere
+# else: each case below moves one thing -- the directory, the depth, the
+# extension, the tree -- and each must be red.
+
+write_text_asset() {
+  local rel="$1"
+  mkdir -p "$(dirname "${fixture_root}/${rel}")"
+  printf '{"format":"onyourleft-circuit"}\n' > "${fixture_root}/${rel}"
+}
+
+new_fixture
+write_good_app web
+write_text_asset apps/web/src/game/circuits/data/fixture.json
+append_asset_entry apps/web/src/game/circuits/data/fixture.json ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/circuits/data/fixture.json)"
+assert_clean "an ODbL-1.0 circuit file in the circuits' directory passes"
+
+new_fixture
+write_good_app web
+write_text_asset apps/web/src/game/circuits/fixture.json
+append_asset_entry apps/web/src/game/circuits/fixture.json ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/circuits/fixture.json)"
+assert_violation "ODbL-1.0 outside the circuits' directory is rejected" ASSET004 \
+  "apps/web/src/game/circuits/fixture.json: licence ODbL-1.0 is not permitted at this path"
+
+new_fixture
+write_good_app web
+write_text_asset apps/web/src/game/circuits/data/more/fixture.json
+append_asset_entry apps/web/src/game/circuits/data/more/fixture.json ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/circuits/data/more/fixture.json)"
+assert_violation "ODbL-1.0 in a directory below the circuits' is rejected" ASSET004 \
+  "licence ODbL-1.0 is not permitted at this path"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/src/game/circuits/data/fixture.glb
+append_asset_entry apps/web/src/game/circuits/data/fixture.glb ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/circuits/data/fixture.glb)"
+assert_violation "ODbL-1.0 on a file there that is not JSON is rejected" ASSET004 \
+  "apps/web/src/game/circuits/data/fixture.glb: licence ODbL-1.0 is not permitted at this path"
+
+new_fixture
+write_good_package domain
+write_text_asset packages/domain/fixtures/circuit.json
+append_asset_entry packages/domain/fixtures/circuit.json ODbL-1.0 \
+  "$(fixture_digest packages/domain/fixtures/circuit.json)"
+assert_violation "an ODbL-1.0 file under packages/ is rejected" ASSET004 \
+  "packages/domain/fixtures/circuit.json: licence ODbL-1.0 is not permitted at this path"
+
+new_fixture
+write_good_app web
+write_text_asset apps/web/src/game/circuits/data/fixture.json
+append_asset_entry apps/web/src/game/circuits/data/fixture.json ODbL-1.0-or-later \
+  "$(fixture_digest apps/web/src/game/circuits/data/fixture.json)"
+assert_violation "a suffixed ODbL identifier is not admitted there" ASSET004 \
+  "licence ODbL-1.0-or-later is not permitted"
+
+# --- ASSET004 and ODbL-1.0: a Delivery level file, in its one directory only --
+#
+# ADR 0065 D-7.2, #2361. The built-in Delivery levels are the second database
+# admitted, at `apps/web/src/game/delivery/levels/data/` and nowhere else
+# beyond the circuits' directory: the directory itself passes, and one up, one
+# down and another extension there are each red.
+
+new_fixture
+write_good_app web
+write_text_asset apps/web/src/game/delivery/levels/data/fixture.json
+append_asset_entry apps/web/src/game/delivery/levels/data/fixture.json ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/delivery/levels/data/fixture.json)"
+assert_clean "an ODbL-1.0 level file in the levels' directory passes"
+
+new_fixture
+write_good_app web
+write_text_asset apps/web/src/game/delivery/levels/fixture.json
+append_asset_entry apps/web/src/game/delivery/levels/fixture.json ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/delivery/levels/fixture.json)"
+assert_violation "ODbL-1.0 one directory above the levels' is rejected" ASSET004 \
+  "apps/web/src/game/delivery/levels/fixture.json: licence ODbL-1.0 is not permitted at this path"
+
+new_fixture
+write_good_app web
+write_text_asset apps/web/src/game/delivery/levels/data/more/fixture.json
+append_asset_entry apps/web/src/game/delivery/levels/data/more/fixture.json ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/delivery/levels/data/more/fixture.json)"
+assert_violation "ODbL-1.0 in a directory below the levels' is rejected" ASSET004 \
+  "licence ODbL-1.0 is not permitted at this path"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/src/game/delivery/levels/data/fixture.glb
+append_asset_entry apps/web/src/game/delivery/levels/data/fixture.glb ODbL-1.0 \
+  "$(fixture_digest apps/web/src/game/delivery/levels/data/fixture.glb)"
+assert_violation "ODbL-1.0 on a file in the levels' directory that is not JSON is rejected" ASSET004 \
+  "apps/web/src/game/delivery/levels/data/fixture.glb: licence ODbL-1.0 is not permitted at this path"
+
 # --- ASSET006: a licence that requires attribution, and the entry that owes it -
 #
 # #357 and [ADR 0023](../docs/adr/0023-cc-by-assets-and-attribution.md). CC-BY is

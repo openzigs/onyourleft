@@ -13,9 +13,24 @@
  * `route-motion.ts` §`isRideRoute`, so a route added later is walked unasked.
  * jsdom performs no layout; that the button is 44 px is measured in
  * `browser/shell.browser.spec.ts` §"#2056".
+ *
+ * ## The views are stand-ins here — #2240
+ *
+ * Every view but Home is in a lazy group (`shell/lazy/`), and the first visit
+ * to a group transforms its whole module graph: the Ride group alone (the
+ * game) took the `workouts` case to about 5 s, Vitest's default, on a loaded
+ * machine. What this file asserts is the shell's own chrome — the skip link,
+ * the header and its mute, the navigation — and a view cannot reach in front
+ * of it: the view is inside `main`, after all of them in the document, and a
+ * positive `tabindex`, the one thing that would reorder the walk, is banned by
+ * `no-positive-tabindex` (`a11y/audit.ts` §`tabbableElements`). So each
+ * group's module is replaced by one whose every view is a single button, and
+ * that button is a stop the walk must find AFTER the mute. The real views are
+ * walked by `routes.a11y.test.tsx` and the browser gate.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createElement, type JSX } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { tabbableElements } from '../a11y/audit';
 import { AUDIO_MIX_STORAGE_KEY } from '../game/audio-mix';
@@ -35,6 +50,32 @@ import { AppShell } from './AppShell';
 import { HEADER_MUTE_NAME, HeaderMute } from './HeaderMute';
 import { isRideRoute } from './route-motion';
 import { ALL_ROUTES } from './routes';
+
+const { standInGroup } = vi.hoisted(() => ({
+  /**
+   * A view group's module in which every named export is a view rendering one
+   * button — whatever the group exports, so a view added later is stood in
+   * unasked. `then` is left undefined: the module is awaited by `import()`.
+   */
+  standInGroup: (): object =>
+    new Proxy(
+      {},
+      {
+        has: (_target, name) => typeof name === 'string' && name !== 'then',
+        get: (_target, name) =>
+          typeof name === 'string' && name !== 'then'
+            ? function StandInView(): JSX.Element {
+                return createElement('button', { type: 'button' }, name);
+              }
+            : undefined,
+      },
+    ),
+}));
+
+vi.mock('./lazy/ride', () => standInGroup());
+vi.mock('./lazy/history', () => standInGroup());
+vi.mock('./lazy/routes', () => standInGroup());
+vi.mock('./lazy/more', () => standInGroup());
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -181,6 +222,13 @@ describe('the header mute is near the top of the tab order on every menu route �
         `the mute is stop ${String(at - skip)} after the skip link`,
       ).toBeGreaterThan(0);
       expect(at - skip).toBeLessThanOrEqual(3);
+      // The view's stops — a stand-in's one button, or Home's and Not found's
+      // own, which are in the entry chunk — are all after the mute.
+      const view = stops.filter((stop) => stop.closest('main') !== null);
+      expect(view.length, 'the view rendered no stop').toBeGreaterThan(0);
+      for (const stop of view) {
+        expect(stops.indexOf(stop), 'a view stop came before the mute').toBeGreaterThan(at);
+      }
     });
   }
 

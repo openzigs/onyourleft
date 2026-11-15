@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   alsoWritten,
+  assetRecord,
+  DELIVERY_CAR_SOURCE,
+  sketchfabVerdict,
   AMBIENTCG_GROUND_TEXTURES,
   AMBIENTCG_PHRASE,
   AMBIENTCG_STRUCTURE_TEXTURES,
@@ -63,6 +66,8 @@ import {
   REALISTIC_CHAIN_LINK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_RIDER,
+  REALISTIC_DELIVERY_CAR,
+  REALISTIC_RIDER_PACK,
   REALISTIC_STRUCTURE_SURFACES,
   TOWN_STRUCTURE_SURFACES,
 } from '../../src/game/realistic-assets';
@@ -122,9 +127,11 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // ⚠️ Since #1585 Sketchfab's public model records are read too, and that
     // is no new host either: D-4's "an individual model under CC-BY-4.0" row
     // admits a model wherever it is hosted, verified per asset.
+    // ⚠️ Since #2540 Kenney's own page is read too, for its Car Kit: D-4 has
+    // admitted Kenney from the start, for the stylised world's models.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com)$/,
+        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|kenney\.nl)$/,
       );
     }
     // Every ambientCG asset is read through ambientCG's OWN origin, whose page
@@ -550,6 +557,11 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
         // writes them top row first as those coordinates read them.
         const glTF = output.file === REALISTIC_RIDER;
         for (const also of recipe.alsoWrites ?? []) {
+          // #2485: the pack's vertex-animation texture is no picture, and no encoder touches it.
+          if (also.ktx2 === undefined) {
+            expect(also.file, output.file).toBe(REALISTIC_RIDER_PACK.vat);
+            continue;
+          }
           expect(also.ktx2.origin, also.file).toBe(glTF ? 'top-left' : 'bottom-left');
         }
       }
@@ -559,7 +571,14 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
   it('ships every texture as KTX2 and the sky as the upstream HDR, nothing else verbatim', () => {
     const verbatim = OUTPUTS.filter((output) => output.recipe.how === 'verbatim');
     expect(verbatim.map((output) => output.file)).toEqual(['farm_field_2k.hdr']);
-    const pictures = shippedFiles().filter((file) => !/\.(?:glb|hdr)$/.test(file));
+    // #2485: the one file that is neither a model, the sky nor a picture is
+    // the pack's vertex-animation texture, which is numbers no encoder may round.
+    expect(shippedFiles().filter((file) => !/\.(?:glb|hdr|ktx2)$/.test(file))).toEqual([
+      REALISTIC_RIDER_PACK.vat,
+    ]);
+    const pictures = shippedFiles().filter(
+      (file) => !/\.(?:glb|hdr)$/.test(file) && file !== REALISTIC_RIDER_PACK.vat,
+    );
     expect(pictures.length).toBeGreaterThanOrEqual(22);
     for (const file of pictures) expect(file).toMatch(/\.ktx2$/);
     // A colour map is colour, a normal map is normal, never the other way.
@@ -694,13 +713,28 @@ describe('the digest of a run that reads two sources — #623', () => {
 describe('what --check requires of a run’s report — #900 item 2', () => {
   it('names only outputs a Blender run makes, whose script writes the count', () => {
     const files = Object.keys(EXPECTED_REPORTS);
-    expect(files.sort()).toEqual(['island_tree_02-middle.glb', 'island_tree_02.glb']);
+    // #2485: and the pack's rider, whose texture's shape is held too; #2495:
+    // and the rider, whose eyes' cost is; and #2540's car, part by part.
+    expect(files.sort()).toEqual(
+      [
+        REALISTIC_DELIVERY_CAR,
+        'island_tree_02-middle.glb',
+        'island_tree_02.glb',
+        REALISTIC_RIDER,
+        REALISTIC_RIDER_PACK.lod,
+      ].sort(),
+    );
     for (const file of files) {
       const output = OUTPUTS.find((each) => each.file === file);
       expect(output?.recipe.how, file).toBe('blender');
       if (output?.recipe.how !== 'blender') continue;
       const script = readFileSync(join(PIPELINE, output.recipe.script), 'utf8');
-      expect(script, file).toContain('"repeatedTrianglesDropped": repeated_triangles');
+      for (const field of Object.keys(EXPECTED_REPORTS[file] ?? {})) {
+        expect(script, `${file}: ${field}`).toContain(`"${field}": `);
+      }
+      if (file.startsWith('island_tree_02')) {
+        expect(script, file).toContain('"repeatedTrianglesDropped": repeated_triangles');
+      }
     }
   });
 
@@ -1208,5 +1242,38 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
         sprig: { ...sprig, rects: [...rest, first] },
       }),
     ).not.toBe(digest);
+  });
+});
+
+describe('Kenney’s car: a placed archive with no Sketchfab record — #2540', () => {
+  const source = SOURCES.find((each) => each.id === DELIVERY_CAR_SOURCE.id) as AssetSource;
+  const lock = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'inputs.lock.json'), 'utf8'),
+  ) as InputLock;
+
+  it('is held to its own page’s words, never to a Sketchfab record it has not got', () => {
+    expect(licenceVerdict(source, '<span>Creative Commons CC0</span>')).toMatchObject({
+      kept: true,
+      licence: 'CC0-1.0',
+    });
+    expect(licenceVerdict(source, '<span>CC BY-NC 4.0</span>')).toMatchObject({ kept: false });
+    expect(sketchfabVerdict(source, '{}')).toEqual({
+      kept: false,
+      reason: `${source.id}: not a Sketchfab model`,
+    });
+  });
+
+  it('records where it came from and whom it credits, though CC0 asks for no credit', () => {
+    const record = Object.fromEntries(assetRecord('car_sedan.glb', lock, 'digest'));
+    expect(record.source).toMatch(/^Kenney \(the owner’s download, #2540\), /);
+    expect(record.licence).toBe('CC0-1.0');
+    expect(record.creator).toBe('Kenney');
+    expect(record.url).toBe(DELIVERY_CAR_SOURCE.page);
+    expect(record.script).toBe('apps/web/tools/realistic/blender/process_vehicle.py');
+    // A Sketchfab house model still says Sketchfab, and a CC0 file with no credit names none.
+    const house = Object.fromEntries(assetRecord('rva_duplex_02a.glb', lock, 'digest'));
+    expect(house.source).toMatch(/^Sketchfab \(the owner’s download, #1585\), /);
+    const lamp = Object.fromEntries(assetRecord('street_lamp_01.glb', lock, 'digest'));
+    expect(lamp.creator).toBeUndefined();
   });
 });

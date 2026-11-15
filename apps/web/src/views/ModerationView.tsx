@@ -29,7 +29,7 @@ import {
   MAXIMUM_STATEMENT_FACTS,
   MAXIMUM_STATEMENT_GROUND,
 } from '../instance/moderation-port';
-import { hrefFor, routeById } from '../shell/routes';
+import { hrefFor, routeById, type ModerationSection } from '../shell/routes';
 
 /**
  * An address safe to put in a `mailto:` link: nothing in it can add a
@@ -515,7 +515,9 @@ function Registrations({
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-pending">
-      <h2 id="oyl-moderation-pending">Waiting for approval</h2>
+      <h2 id="oyl-moderation-pending" tabIndex={-1}>
+        Waiting for approval
+      </h2>
       {registrations.length === 0 ? (
         <p className="oyl-muted">Nobody is waiting for approval.</p>
       ) : (
@@ -1096,7 +1098,9 @@ function Suspended({
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-suspended">
-      <h2 id="oyl-moderation-suspended">Suspended accounts</h2>
+      <h2 id="oyl-moderation-suspended" tabIndex={-1}>
+        Suspended accounts
+      </h2>
       {suspended === undefined ? (
         <StatusMessage tone="warning" label="Not read">
           {SUSPENDED_UNREADABLE_TEXT}
@@ -1272,7 +1276,9 @@ function Invite({ port }: { readonly port: ModerationPort }): JSX.Element {
   const [outcome, setOutcome] = useState<InviteOutcome | undefined>(undefined);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-invite">
-      <h2 id="oyl-moderation-invite">Invite a rider</h2>
+      <h2 id="oyl-moderation-invite" tabIndex={-1}>
+        Invite a rider
+      </h2>
       <p className="oyl-moderation__reason">
         <label htmlFor={reasonId}>Reason for the log</label>{' '}
         <input
@@ -1367,10 +1373,30 @@ function Log({
   );
 }
 
+/**
+ * The heading each section Operate's Accounts links to is drawn with (#2605,
+ * `shell/routes.ts` §`hrefForModerationSection`). Each carries
+ * `tabIndex={-1}`: focusable by the screen, never a stop in the tab order.
+ */
+export const MODERATION_SECTION_HEADING: Readonly<Record<ModerationSection, string>> = {
+  approvals: 'oyl-moderation-pending',
+  suspended: 'oyl-moderation-suspended',
+  invite: 'oyl-moderation-invite',
+};
+
 export function ModerationView({
   port,
+  section,
 }: {
   readonly port?: ModerationPort | undefined;
+  /**
+   * The section this screen was opened at (#2605): once the queues are drawn
+   * its heading takes focus, so a keyboard or screen-reader user lands where
+   * the link said. The shell has already moved focus to `main` for the change
+   * of route (WCAG 2.4.3); this moves it on, once, when there is a heading to
+   * move it to.
+   */
+  readonly section?: ModerationSection | undefined;
 }): JSX.Element {
   const [state, setState] = useState<ModerationRead | undefined>(undefined);
   /** What the last action on this page came to, until the next one starts. */
@@ -1424,6 +1450,17 @@ export function ModerationView({
   useEffect(() => {
     void read();
   }, [read]);
+
+  /**
+   * Keyed on whether the queues are drawn, not on the read itself: the
+   * read-back after every action draws them again, and focus must stay on the
+   * control the moderator pressed rather than jump back to the heading.
+   */
+  const drawn = state?.kind === 'moderator';
+  useEffect(() => {
+    if (!drawn || section === undefined) return;
+    document.getElementById(MODERATION_SECTION_HEADING[section])?.focus();
+  }, [drawn, section]);
 
   const onDone: Done = {
     starting: () => {

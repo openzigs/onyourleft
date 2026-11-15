@@ -70,8 +70,9 @@ import {
   type RouteProfile,
   type Seconds,
   type UnixSeconds,
+  type Watts,
 } from '@onyourleft/domain';
-import type { ActivitySummary, RouteId } from '@onyourleft/store';
+import type { ActivityId, ActivitySummary, RouteId } from '@onyourleft/store';
 
 import { HISTORY_ACTIVITY_LIMIT } from '../analysis/history';
 import type { AnalysisPort } from '../analysis/store-port';
@@ -97,6 +98,24 @@ import type { RoutePort } from '../routes/store-port';
  */
 export const WEEK_DAYS = 7;
 
+/**
+ * The seven days of `perDay` (indexed by days back from `today`), oldest
+ * first, each with its date — #2049.
+ */
+function weekDays(
+  perDay: readonly { readonly rides: number; readonly movingTime: number }[],
+  today: CalendarDay,
+): readonly HomeWeekDay[] {
+  const midnight = Date.parse(`${today}T00:00:00Z`);
+  return perDay
+    .map((totals, back) => ({
+      day: new Date(midnight - back * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      rides: totals.rides,
+      movingTime: totals.movingTime,
+    }))
+    .reverse();
+}
+
 /** Whole calendar days from `earlier` to `later`, both `YYYY-MM-DD`. */
 function calendarDaysBetween(earlier: CalendarDay, later: CalendarDay): number {
   return Math.round(
@@ -105,11 +124,22 @@ function calendarDaysBetween(earlier: CalendarDay, later: CalendarDay): number {
 }
 
 export interface HomeLastRide {
+  /** For the link to the ride's own page — #2048. */
+  readonly id: ActivityId;
   readonly name: string;
   readonly startedAt: UnixSeconds;
   readonly timeZone: string;
   readonly movingTime: Seconds;
   readonly distance: Metres;
+  /** The ride's average power, or `undefined` where none was recorded — #2048. */
+  readonly averagePower: Watts | undefined;
+  /**
+   * The saved route it was ridden on, or `undefined` — #2048, so the module
+   * can draw that route's climb from the one `getRoute` Next up already makes
+   * (`loadNextUp`): the newest ride on a route IS the newest ride whenever
+   * this is set. No stream is read for it (§"One list read" above).
+   */
+  readonly routeId: RouteId | undefined;
   /** The ride's `rideLoad`, or `undefined` when it carries no load summary. */
   readonly load: number | undefined;
   /**
@@ -147,6 +177,25 @@ export interface HomeWeek {
    * window").
    */
   readonly daysRidden: number;
+  /** Summed distance, in metres — #2049's totals. */
+  readonly distance: number;
+  /**
+   * Each of the seven calendar days, oldest first and today last — #2049's
+   * bar chart and the table beside it. A ride is on the day {@link daysRidden}
+   * counts it on (days back from today, in the zone it started in), so the
+   * days' rides add up to {@link rides} and their moving time to
+   * {@link movingTime} by construction. `day` is that date in the newest
+   * ride's zone, for the label.
+   */
+  readonly days: readonly HomeWeekDay[];
+}
+
+/** One calendar day of {@link HomeWeek} — #2049. */
+export interface HomeWeekDay {
+  readonly day: CalendarDay;
+  readonly rides: number;
+  /** Summed moving time, in seconds. */
+  readonly movingTime: number;
 }
 
 /** The seven calendar days before {@link HomeWeek}'s, counted the same way — #1010. */
@@ -279,7 +328,15 @@ export async function loadHome(
   const thresholds = thresholdsFor(await port.store.getAthlete(port.athleteId));
 
   const entries: LoadEntry[] = [];
-  let week: Omit<HomeWeek, 'daysRidden'> = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
+  let week: Omit<HomeWeek, 'daysRidden' | 'days'> = {
+    rides: 0,
+    movingTime: 0,
+    load: 0,
+    ridesWithLoad: 0,
+    distance: 0,
+  };
+  /** #2049: rides and moving time per day back, 0 (today) to 6. */
+  const perDay = Array.from({ length: WEEK_DAYS }, () => ({ rides: 0, movingTime: 0 }));
   let previousWeek: HomePreviousWeek = { rides: 0, movingTime: 0, load: 0, ridesWithLoad: 0 };
   const daysBack = new Set<number>();
   let lastRide: HomeLastRide | undefined;
@@ -305,8 +362,14 @@ export async function loadHome(
           movingTime: week.movingTime + summary.movingTime,
           load: week.load + (load ?? 0),
           ridesWithLoad: week.ridesWithLoad + (load === undefined ? 0 : 1),
+          distance: week.distance + summary.distance,
         };
         daysBack.add(back);
+        const day = perDay[back];
+        if (day !== undefined) {
+          day.rides += 1;
+          day.movingTime += summary.movingTime;
+        }
       } else if (back >= WEEK_DAYS && back < 2 * WEEK_DAYS) {
         previousWeek = {
           rides: previousWeek.rides + 1,
@@ -321,11 +384,14 @@ export async function loadHome(
     }
     // Ascending, so the last one seen is the newest.
     lastRide = {
+      id: summary.id,
       name: summary.name,
       startedAt: summary.startedAt,
       timeZone: summary.startedAtTimeZone,
       movingTime: summary.movingTime,
       distance: summary.distance,
+      averagePower: summary.averagePower,
+      routeId: summary.routeId,
       load,
       noLoadToWorkOut: hasNoLoadToWorkOut(summary),
     };
@@ -341,7 +407,11 @@ export async function loadHome(
 
   return {
     lastRide,
-    week: { ...week, daysRidden: daysBack.size },
+    week: {
+      ...week,
+      daysRidden: daysBack.size,
+      days: weekDays(perDay, localDay(now, lastRide?.timeZone ?? 'UTC')),
+    },
     previousWeek,
     lastRouteId,
     fitness: fitnessSeries(dailyLoads(entries)),

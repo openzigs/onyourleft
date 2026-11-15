@@ -51,10 +51,15 @@ import {
 import { NO_BUILDING_FIELDS, type BuildingFeature } from '@onyourleft/map-features';
 import { BUILDING_ARCHETYPES } from '../../src/game/building-archetypes';
 import { HOUSE_ARCHETYPES, ROOF_VARIANTS } from '../../src/game/house-archetypes';
-import { mappedBuildingsOf, onMappedGround } from '../../src/game/mapped-buildings';
+import {
+  clearOfDriveways,
+  mappedBuildingsOf,
+  onMappedGround,
+} from '../../src/game/mapped-buildings';
 import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { rectanglesOf } from '../../src/game/rectilinear-roofs';
 import type { ScatterItem } from '../../src/game/scatter';
+import { sideRoadNaturalMargin } from '../../src/game/scene';
 import { SETTLEMENT_CLEARED_KINDS } from '../../src/game/settlements';
 
 import { parseConfig } from './config';
@@ -431,7 +436,9 @@ describe('the realistic page’s `commercial-archetypes` lever — #1783', () =>
   // way it reaches the planting is the driveway a garden apartment gives up
   // (`building-archetypes.ts` §`GARDEN_APARTMENT_FEATURES`): with the lever off
   // its seeded garage has one, whose ground #1588 clears; with it on there is
-  // none, so that ground is planted as any other. Nothing else may move.
+  // none, so that ground is planted as any other. Since #2428 a wall, hedge or
+  // fence across that driveway is cleared off it too, and stands with it gone.
+  // Nothing else may move.
   it('moves no tree, shrub or structure but those on a driveway a garden apartment gives up — #1922', () => {
     const top = REALISTIC_LADDER[0] as QualitySettings;
     /** The page's town for `query`, built as `realistic-harness.ts` builds it. */
@@ -483,9 +490,19 @@ describe('the realistic page’s `commercial-archetypes` lever — #1783', () =>
       const controlKeys = new Set(control.map(key));
       for (const item of archetyped) {
         if (controlKeys.has(key(item))) continue;
-        // And what it plants stands on a dropped driveway's ground, and on no building's.
-        expect(SETTLEMENT_CLEARED_KINDS.has(item.kind), key(item)).toBe(true);
-        expect(onMappedGround(dropped, item.x, item.z), key(item)).toBe(true);
+        // #2428: a structure across a dropped driveway was cleared off it, and
+        // stands with the driveway gone; it stands across no other.
+        if (!SETTLEMENT_CLEARED_KINDS.has(item.kind)) {
+          expect(clearOfDriveways([item], dropped), key(item)).toStrictEqual([]);
+          expect(clearOfDriveways([item], on.town.buildings), key(item)).toStrictEqual([item]);
+          continue;
+        }
+        // And what it plants stands on a dropped driveway's ground, within its
+        // own drawn reach of it since #2428, and on no building's.
+        expect(
+          onMappedGround(dropped, item.x, item.z, sideRoadNaturalMargin(item)),
+          key(item),
+        ).toBe(true);
         expect(onMappedGround(on.town.buildings, item.x, item.z), key(item)).toBe(false);
         planted += 1;
       }

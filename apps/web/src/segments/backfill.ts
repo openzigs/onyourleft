@@ -35,7 +35,9 @@
 
 import {
   createEffort,
+  draftedDistanceShare,
   geographicPosition,
+  implausibleEffort,
   indexCorpus,
   matchRide,
   unixSeconds,
@@ -54,6 +56,8 @@ import type {
   SegmentEffortRecord,
   SegmentRecord,
 } from '@onyourleft/store';
+import { DRAFTED_SHARE } from '../game/solo-draft';
+
 import type { MatchStore } from './match-port';
 
 /**
@@ -186,6 +190,7 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
   }
 
   const zones = await privacyCirclesFor(athleteId, store);
+  const segmentsById = new Map(corpus.map((indexed) => [indexed.segment.id, indexed.segment]));
   const athlete = await store.getAthlete(athleteId);
   const attributes = athlete?.mass === undefined ? {} : { riderMass: athlete.mass };
 
@@ -206,16 +211,34 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
     }
 
     const result = matchRide(trace, corpus);
-    const found: SegmentEffortRecord[] = result.efforts.map(
-      (effort) =>
-        createEffort(effort, {
-          activityId: summary.id,
-          athleteId,
-          positions: trace.positions,
-          privacyZones: zones,
-          attributes,
-        }) as unknown as SegmentEffortRecord,
-    );
+    // #2451, ADR 0066 D-5.2: when the ride says it was in a draft, and where.
+    const spans = summary.rideFacts?.draftSpans ?? [];
+    const found: SegmentEffortRecord[] = result.efforts.map((effort) => {
+      const segment = segmentsById.get(effort.segmentId);
+      return createEffort(effort, {
+        activityId: summary.id,
+        athleteId,
+        positions: trace.positions,
+        privacyZones: zones,
+        attributes,
+        // #69: an implied speed impossible for the sport is not a personal
+        // best, and the instance would exclude it too — the same rule, here.
+        excluded:
+          segment !== undefined &&
+          implausibleEffort(segment.sport, segment.distance, effort.elapsed) !== undefined,
+        // Marked by the share of the EFFORT's own distance ridden in the
+        // draft (D-5.6), never by whether the ride as a whole was.
+        drafted:
+          spans.length > 0 &&
+          draftedDistanceShare(
+            trace.positions,
+            trace.times,
+            effort.startIndex,
+            effort.endIndex,
+            spans,
+          ) >= DRAFTED_SHARE,
+      }) as unknown as SegmentEffortRecord;
+    });
     efforts += await store.putActivityEfforts(athleteId, summary.id, found);
     for (const note of result.abandoned) {
       abandoned.push({

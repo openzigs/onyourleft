@@ -123,6 +123,8 @@ export interface ActivitiesViewProps {
   readonly riderText?: ActivityDetailViewProps['riderText'];
   /** #2069: the ride's time in zone, read as `AnalysisView` reads it. */
   readonly analysis?: ActivityDetailViewProps['analysis'];
+  /** #1063: the chosen ride's side-camera snapshots, closed until opened. */
+  readonly snapshots?: ActivityDetailViewProps['snapshots'];
 }
 
 /** The sort control's `id`, for its `<label>`. One library per page. */
@@ -249,6 +251,7 @@ export function ActivitiesView({
   instanceWriteUp,
   riderText,
   analysis,
+  snapshots,
 }: ActivitiesViewProps): JSX.Element {
   const instanceKnown = useInstanceKnown(instance);
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
@@ -420,8 +423,14 @@ export function ActivitiesView({
   // In words, not a colour or an icon. #48's criterion is that anything
   // meaning-bearing has a non-visual equivalent, and an indoor ride is the
   // common case here rather than the odd one.
-  const indoor = (row: LibraryRow): JSX.Element | undefined =>
-    row.hasPosition ? undefined : <span className="oyl-muted"> · indoor</span>;
+  // #2451, ADR 0066 D-5.3: and a drafted ride says so, by the same rule.
+  const marks = (row: LibraryRow): JSX.Element | undefined =>
+    row.hasPosition && !row.drafted ? undefined : (
+      <span className="oyl-muted">
+        {row.hasPosition ? '' : ' · indoor'}
+        {row.drafted ? ' · drafted' : ''}
+      </span>
+    );
   const selectLink = (row: LibraryRow): JSX.Element => (
     <a
       href={hrefForSelection(routeById('activities'), row.id)}
@@ -505,7 +514,7 @@ export function ActivitiesView({
                   key={row.id}
                   row={row}
                   link={selectLink(row)}
-                  indoor={indoor(row)}
+                  marks={marks(row)}
                   remove={deleteButton(row)}
                 />
               ))}
@@ -622,6 +631,7 @@ export function ActivitiesView({
               instanceWriteUp={instanceWriteUp}
               riderText={riderText}
               analysis={analysis}
+              {...(snapshots === undefined ? {} : { snapshots })}
               embedded
             />
           </>
@@ -675,18 +685,18 @@ export function ActivitiesView({
  * Average power is shown only where the ride has it. A ride with no power
  * meter is not drawn as "0 W" or "—": the reading is simply absent. So is
  * distance where the ride stored none — a ride recorded with no speed channel
- * stores 0 (`recording/finish.ts` §`distanceOf`), and "0.0 km" would be an
+ * stores 0 (`recording/totals.ts` §`rideDistance`), and "0.0 km" would be an
  * invented reading (#1041's review).
  */
 function RideCard({
   row,
   link,
-  indoor,
+  marks,
   remove,
 }: {
   readonly row: LibraryRow;
   readonly link: JSX.Element;
-  readonly indoor: JSX.Element | undefined;
+  readonly marks: JSX.Element | undefined;
   readonly remove: JSX.Element;
 }): JSX.Element {
   const units = useUnits();
@@ -694,7 +704,7 @@ function RideCard({
     <li className="oyl-panel oyl-activity-card">
       <p className="oyl-activity-card__name oyl-library__name">
         {link}
-        {indoor}
+        {marks}
       </p>
       <p className="oyl-muted oyl-activity-card__date">{row.startedAt}</p>
       <dl className="oyl-activity-card__facts">

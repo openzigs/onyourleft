@@ -23,7 +23,6 @@ import {
   CONSENT_STATEMENT,
   NO_CONSENT,
   SCREENSHOT_SENTENCE,
-  SHOWN_ON_TABLET_SENTENCE,
   consentDecision,
 } from './consent';
 
@@ -96,22 +95,23 @@ describe('what the consent screen states', () => {
     expect(all).not.toContain('there is no code in it that can');
   });
 
-  it('says a side camera’s picture is shown on this tablet, to anyone who can see it — #1061, ADR 0044 D-7', () => {
+  it('says a side camera’s picture is shown on this tablet, to anyone who can see it — #1060, ADR 0044 D-7', () => {
     // ADR 0044 D-1 superseded ADR 0033 D-6's "no picture is ever displayed on
     // the tablet"; D-7 asks the consent for this sentence, and D-6 for the
     // shared-device half: no sign-in, so whoever sees the screen sees it.
-    expect(CONSENT_STATEMENT).toContain(SHOWN_ON_TABLET_SENTENCE);
     const all = CONSENT_STATEMENT.join(' ');
-    expect(all).toContain('shown on this tablet while you set it up');
+    expect(all).toContain('shown on this tablet');
     expect(all).toContain('Anyone who can see this tablet’s screen can see it');
     expect(all).toContain('anyone else in the picture is shown too');
   });
 
-  it('says nothing yet of a picture during a ride or of a snapshot, which this build does not have — #1062, #1063', () => {
-    // ADR 0044 D-10: the words land with the build that does what they say.
+  it('says what a snapshot keeps, where it goes and where it never goes — #1060, ADR 0044 D-3, D-5, D-11', () => {
     const all = CONSENT_STATEMENT.join(' ');
-    expect(all).not.toContain('during a ride');
-    expect(all).not.toContain('Save snapshot');
+    expect(all).toContain('keeps that one picture with the ride it was taken in');
+    expect(all).toContain('joins the next ride you save, and is thrown away if you save none');
+    expect(all).toContain('It is in the account export');
+    expect(all).toContain('never put in a ride you export or share');
+    expect(all).toContain('A snapshot is never sent to your computer or to any service');
   });
 
   it('says a screenshot is blocked in the Android app and that a browser cannot block one — ADR 0044 D-12', () => {

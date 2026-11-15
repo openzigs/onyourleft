@@ -1,0 +1,201 @@
+# The demo's route data as a GitHub release asset — #1932, ADR 0056 D-4.2.
+#
+# By hand only (`workflow_dispatch`, from `main`): bakes every preset route
+# with `demo:bake` (apps/web/tools/demo/bake-route.ts), builds the demo, and
+# publishes a GitHub release whose assets are each route's `.bin`, the
+# `routes.json` that describes them and the `LICENCE-ODbL.txt` notice. Its
+# notes carry the ODbL notice too. ADR 0056 D-4.2 offers the entire
+# Derivative Database (ODbL section 4.6 a) beside the demo and as a release
+# asset, and D-4.3 has a video's post name that asset's URL; this is the
+# release it names. `docs/demo-embedding.md` gives the URLs.
+#
+# ⚠️ No pull-request trigger of any kind, on purpose. This is the release job
+# ADR 0056 D-9 means: it bakes OpenStreetMap data from the published archive,
+# which a pull request's checks never do. `tools/demo/demo-release.test.ts`
+# reads this file and holds it to that, to its pins and to its permissions.
+#
+# ⚠️ Two jobs, so the write token never meets the build. `bake` installs the
+# workspace's dependencies and runs the repository's code with `contents:
+# read`, and uploads what it staged as an artefact. `publish` alone holds
+# `contents: write`, checks out nothing and runs only `gh release create`.
+# One secret beyond the run's own GITHUB_TOKEN: the basemap archive's
+# READ-ONLY R2 token (#2275), the `basemap-archive` environment's four
+# `OYL_BASEMAP_R2_*` values, in `bake`'s bake step alone. The archive's public
+# host answers a GitHub runner with HTTP 403 (Bot Fight Mode), so the bake
+# reads the same object through R2's S3 API (tools/demo/r2-archive.ts); the
+# records still name the public URL. Standard runners only (CLAUDE.md
+# section 8), every action pinned to a full commit SHA, and the tag reaches
+# each script as an environment variable, never pasted into it.
+#
+# A bake that disagrees with a preset route's committed record fails the run
+# before anything is published (`bake-route.ts` §`settleRecord`): the release
+# holds the files the committed digests name, or nothing.
+#
+# Since #2264, each release also deploys the demo it built to GitHub Pages, at
+# https://openzigs.github.io/onyourleft/ (the owner's ruling on #2264,
+# 2026-11-07). `bake` uploads the whole demo output as the Pages artefact,
+# and a third job, `pages`, deploys it after `publish`, so the route data the
+# hosted demo serves is always on a release as well (D-4.2). `pages` alone
+# holds `pages: write` and `id-token: write`, the two permissions
+# `actions/deploy-pages` needs, and like `publish` it checks out nothing and
+# runs no repository code. Pages sends no custom header, so the demo's own
+# `<meta>` policy is the whole of its Content-Security-Policy there;
+# `docs/demo-embedding.md` §"Hosted on GitHub Pages" says what that gives up.
+# ⚠️ It fails until Pages is enabled with "GitHub Actions" as its source in the
+# repository's settings, which is the owner's step: by then the release is
+# already published, and re-running the failed job deploys it.
+
+name: Demo route release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release's tag, demo-YYYY-MM-DD (demo-YYYY-MM-DD.2 for a second that day)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  bake:
+    name: Bake the preset routes and build the demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Holds the archive's read token, and deploys from `main` alone.
+    environment: basemap-archive
+    steps:
+      - name: Refuse a ref other than main
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != 'refs/heads/main' ]; then
+            echo "::error::A demo release is built from main, not $REF"
+            exit 1
+          fi
+
+      - name: Check out the repository
+        # Pinned to a full commit SHA, as in rules.yml:
+        #   gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        #   gh api repos/actions/setup-node/git/ref/tags/v7.1.0 --jq .object.sha
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The read token in this step only: the install above and the build
+      # below never see it.
+      - name: Bake the preset routes
+        env:
+          OYL_BASEMAP_R2_ACCOUNT_ID: ${{ secrets.OYL_BASEMAP_R2_ACCOUNT_ID }}
+          OYL_BASEMAP_R2_BUCKET: ${{ secrets.OYL_BASEMAP_R2_BUCKET }}
+          OYL_BASEMAP_R2_ACCESS_KEY_ID: ${{ secrets.OYL_BASEMAP_R2_ACCESS_KEY_ID }}
+          OYL_BASEMAP_R2_SECRET_ACCESS_KEY: ${{ secrets.OYL_BASEMAP_R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          routes=$(pnpm --silent --filter @onyourleft/web run demo:release -- --list)
+          if [ -z "$routes" ]; then
+            echo '::error::apps/web/demo/routes/ holds no preset route'
+            exit 1
+          fi
+          for route in $routes; do
+            pnpm --filter @onyourleft/web run demo:bake -- --route "$route"
+          done
+
+      # The build reads the baked routes back and fails without their notice
+      # or above the per-route ceiling (tools/demo/demo-routes.ts).
+      - name: Build the demo
+        run: pnpm --filter @onyourleft/web run build:demo
+
+      - name: Stage the release
+        env:
+          TAG: ${{ inputs.tag }}
+        run: >-
+          pnpm --filter @onyourleft/web run demo:release --
+          --tag "$TAG" --stage "$RUNNER_TEMP/demo-release/assets"
+          --notes "$RUNNER_TEMP/demo-release/notes.md"
+
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
+      - name: Upload the staged release
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: demo-release
+          path: ${{ runner.temp }}/demo-release/
+          if-no-files-found: error
+          retention-days: 7
+
+      # The whole demo output, unchanged (docs/demo-embedding.md §"The files"),
+      # baked routes and their notice included. Not under `$RUNNER_TEMP`:
+      # this is what `build:demo` wrote, read back by nothing in between.
+      #   gh api repos/actions/upload-pages-artifact/git/ref/tags/v5.0.0 --jq .object.sha
+      - name: Upload the demo for GitHub Pages
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: apps/web/demo/dist/
+
+  publish:
+    name: Publish the release
+    needs: bake
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      #   gh api repos/actions/download-artifact/git/ref/tags/v8.0.2 --jq .object.sha
+      - name: Download the staged release
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: demo-release
+          path: ${{ runner.temp }}/demo-release
+
+      # Not the repository's latest release: that stays the app's (release.yml).
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/demo-release"
+          gh release create "$TAG" assets/* \
+            --target "$TARGET" \
+            --title "Demo route data $TAG" \
+            --notes-file notes.md \
+            --latest=false
+
+  pages:
+    name: Deploy the demo to GitHub Pages
+    needs: [bake, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      #   gh api repos/actions/deploy-pages/git/ref/tags/v5.0.1 --jq .object.sha
+      - name: Deploy the demo
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

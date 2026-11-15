@@ -29,7 +29,7 @@ const SET: LegalSettings = {
   contactEmail: 'contact@club.example',
   contactLanguages: ['English', 'Welsh'],
   accountablePerson: 'Jo <Bloggs>',
-  legalRepresentative: 'Rep GmbH, 1 Strasse, Berlin, rep@rep.example, +49 30 000000',
+  legalRepresentative: 'Rep GmbH, 1 Strasse, Musterstadt, rep@rep.example, +49 30 000000',
   privacyPolicyUrl: 'https://club.example/privacy',
   publicRooms: false,
 };
@@ -47,7 +47,7 @@ describe('the legal page (#908)', () => {
     expect(html).toContain('Jo &lt;Bloggs&gt; is accountable for keeping illegal content off');
     expect(html).toContain('the instance Club &amp; Co');
     expect(html).toContain('Legal representative in the European Union');
-    expect(html).toContain('Rep GmbH, 1 Strasse, Berlin');
+    expect(html).toContain('Rep GmbH, 1 Strasse, Musterstadt');
     expect(html).toContain('<a href="/report">notice page</a>');
     expect(html).toContain('<a href="https://club.example/privacy">Privacy policy</a>');
     expect(html).toContain(

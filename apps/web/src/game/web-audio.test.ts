@@ -252,3 +252,35 @@ describe('letting the audio stop after a ride — #447', () => {
     expect(output.isRunning()).toBe(true);
   });
 });
+
+describe('whether our own stream may be open, for a reading of the rider’s player — #2253', () => {
+  it('is shut with no context, open while it runs or is asked to sleep, and shut once it has slept', () => {
+    const fake = fakeContext('running');
+    const platform = fake.context as { state: string };
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
+    expect(output.quietToken(), 'no context, no stream').toBe(0);
+    output.resume();
+    expect(output.quietToken(), 'a running context holds the stream open').toBeUndefined();
+    output.suspend();
+    // The platform has not slept yet: the stream is still open.
+    expect(output.quietToken()).toBeUndefined();
+    platform.state = 'suspended';
+    const shut = output.quietToken();
+    expect(shut, 'a suspended context holds none').toBe(1);
+    expect(output.quietToken(), 'the same number while it stays shut').toBe(shut);
+  });
+
+  it('is open while a resume is in flight, and moves once it may have opened again', async () => {
+    const fake = fakeContext('suspended');
+    const output = webAudioOutput(() => fake.context, EVERY_BUS_ON);
+    output.resume();
+    // The fake leaves `state` suspended: the resume has been asked, not answered.
+    expect(output.quietToken(), 'a resume in flight may open the stream').toBeUndefined();
+    await settled();
+    const first = output.quietToken();
+    expect(first).toBeTypeOf('number');
+    output.resume();
+    await settled();
+    expect(output.quietToken(), 'a wake between two readings went unseen').not.toBe(first);
+  });
+});

@@ -3,7 +3,7 @@
 import type { JSX } from 'react';
 
 import { downsample, traceExtent, traceSegments } from '../../detail/series';
-import { paint } from './paint';
+import { paint, type PaintName } from './paint';
 import { coordinate, IllustrationSvg, type IllustrationProps } from './svg';
 
 /**
@@ -98,11 +98,21 @@ function profileOutlines(input: ProfileInput): readonly string[] {
  * written beside it in words (epic #935, principle 1). An input with no
  * elevation at all draws nothing — no flat line, which would claim a level
  * road nobody measured.
+ *
+ * `paintAs` is the layer it is painted as: the near hill by default, which is
+ * a picture's ground and is drawn beside words, never under them. A profile
+ * that stands alone on a card as its one graphic (Home's last ride, the
+ * owner's review of 2026-11-05) is painted as a `mark` instead — the accent,
+ * a non-text pair `tokens.ts` declares at 3:1 on `surfaceRaised`.
  */
 export function ProfileShape({
   className,
   profile,
-}: IllustrationProps & { readonly profile: ProfileInput }): JSX.Element {
+  paintAs = 'hillNear',
+}: IllustrationProps & {
+  readonly profile: ProfileInput;
+  readonly paintAs?: Extract<PaintName, 'hillNear' | 'mark'>;
+}): JSX.Element {
   const outlines = profileOutlines(profile);
   const width = Math.min(PROFILE_SHAPE_COLUMNS, Math.max(1, profile.elevations.length));
   return (
@@ -113,7 +123,7 @@ export function ProfileShape({
     >
       {outlines.map((outline, index) => (
         // A run's position in the list is its identity: the list is rebuilt whole.
-        <path key={index} className={paint('hillNear')} d={outline} />
+        <path key={index} className={paint(paintAs)} d={outline} />
       ))}
     </IllustrationSvg>
   );

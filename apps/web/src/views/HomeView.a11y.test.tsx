@@ -243,7 +243,7 @@ describe('the home screen — #428', () => {
     await settle();
     await settle();
     // No Trainer card to carry it, so the empty state does — once.
-    expect(document.querySelector('.oyl-home__trainer')).toBeNull();
+    expect(document.querySelector('.oyl-home__sensors')).toBeNull();
     const devices = [
       ...document.querySelectorAll(`main a[href="${hrefFor(routeById('devices'))}"]`),
     ];
@@ -278,7 +278,7 @@ describe('the home screen — #428', () => {
   });
 
   it('draws no distance, never "0.0 km", for a ride that stored none — #1070', async () => {
-    // `recording/finish.ts` §`distanceOf` stores 0 m for a ride recorded with
+    // `recording/totals.ts` §`rideDistance` stores 0 m for a ride recorded with
     // no speed channel: no distance known, as the Activities card reads it.
     await openHome([ride('still', 2, { distance: metres(0) })]);
     const terms = [...lastRide().querySelectorAll('dt')].map((t) => t.textContent);
@@ -442,8 +442,9 @@ describe('the illustrated home — #939', () => {
     const main = document.querySelector('main');
     expect(main?.querySelectorAll('img')).toHaveLength(0);
     const pictures = [...(main?.querySelectorAll('svg') ?? [])];
-    // The cards' eight, the trainer's glyph and the ring. (#2043 took Next
-    // up's three layers away: a free ride draws nothing there.)
+    // The cards' eight, the trainer's glyph and the week chart (#2049, in
+    // the ring's place). (#2043 took Next up's three layers away: a free
+    // ride draws nothing there.)
     expect(pictures.length).toBeGreaterThanOrEqual(10);
     for (const picture of pictures) {
       expect(
@@ -461,19 +462,21 @@ describe('the illustrated home — #939', () => {
 
   it('keeps the trainer’s sentence and its link to Devices (#659) when no trainer is paired', async () => {
     await openHome([]);
-    const trainer = document.querySelector('.oyl-home__trainer');
+    const trainer = document.querySelector('.oyl-home__sensors');
     expect(trainer?.textContent).toContain('No trainer paired.');
     expect(trainer?.querySelector(`a[href="${hrefFor(routeById('devices'))}"]`)?.textContent).toBe(
       'Pair one on Devices',
     );
   });
 
-  it('says how many of the last seven days were ridden, beside a ring that draws the same share', async () => {
+  it('says how many of the last seven days were ridden, beside a chart that draws a bar on exactly those days', async () => {
+    // #2049: the week's bar chart took #939's ring's place, and draws the
+    // same fact — one bar per day ridden — and each day's moving time.
     await openHome([ride('a', 5), ride('b', 2), ride('c', 2), ride('d', 30)]);
     expect(text()).toContain('You rode on 2 of the last seven days.');
-    const fill = document.querySelector('.oyl-home__ring-fill');
-    const [drawn, whole] = (fill?.getAttribute('stroke-dasharray') ?? '').split(' ').map(Number);
-    expect((drawn ?? 0) / (whole ?? 1)).toBeCloseTo(2 / 7, 5);
+    const bars = document.querySelectorAll('.oyl-home__days .oyl-week-chart rect');
+    expect(bars).toHaveLength(2);
+    expectClean('home, the week chart');
   });
 
   it('never says "0 of the last seven days" above a ride: one window for both — #939 second review', async () => {
@@ -651,7 +654,7 @@ describe('the module grid — #2044', () => {
     );
     expect(modules()).toEqual([
       'Next up',
-      'Trainer',
+      'Sensors',
       'Last ride',
       'This week',
       'Ride',
@@ -663,12 +666,12 @@ describe('the module grid — #2044', () => {
 
   it('a first open: the other ways to start stand where the last ride will, after the sensors', async () => {
     await openHome([]);
-    expect(modules()).toEqual(['Your first ride', 'Trainer', 'Nothing recorded yet']);
+    expect(modules()).toEqual(['Your first ride', 'Sensors', 'Nothing recorded yet']);
   });
 
   it('makes each module slot a section named by its own h2, each a named region (not landmark-free: an unnamed section beside another fails the audit)', async () => {
     await openHome([ride('only', 2)]);
-    for (const slot of ['.oyl-home__trainer', '.oyl-home__last', '.oyl-home__week']) {
+    for (const slot of ['.oyl-home__sensors', '.oyl-home__last', '.oyl-home__week']) {
       const section = document.querySelector(slot);
       expect(section?.tagName, slot).toBe('SECTION');
       // No role of its own: not a nav, an aside or a declared region.
@@ -699,5 +702,50 @@ describe('this week, against the week before — #1010', () => {
     );
     expect(befores).toEqual(['Week before: 2', 'Week before: 1:40:00', 'Week before: 200']);
     expectClean('home, this week');
+  });
+
+  /*
+   * The owner's ruling of 2026-11-06: the days-ridden sentence and the week
+   * before's figures are behind the chart's *Day by day* disclosure, with the
+   * table, so the week module is as short as its chart. Read through the
+   * disclosure a rider opens, and nothing of either left outside it.
+   */
+  it('puts the days-ridden sentence and the week before behind the chart’s disclosure — 2026-11-06', async () => {
+    await openHome([ride('before-a', 9), ride('before-b', 12), ride('this', 2)]);
+    const week = document.querySelector('.oyl-home__week');
+    const disclosure = week?.querySelector<HTMLDetailsElement>('details.oyl-chart-table');
+    expect(disclosure?.querySelector('summary')?.textContent).toBe(
+      'Day by day: the readings as a table',
+    );
+    expect(disclosure?.open).toBe(false);
+    expect(
+      [...(disclosure?.querySelectorAll('.oyl-home__before') ?? [])].map(
+        (each) => each.textContent,
+      ),
+    ).toEqual(['Week before: 2', 'Week before: 1:40:00', 'Week before: 200']);
+    expect([...(disclosure?.querySelectorAll('dt') ?? [])].map((each) => each.textContent)).toEqual(
+      ['Rides', 'Moving time', 'Load'],
+    );
+    expect(disclosure?.textContent).toContain('You rode on 1 of the last seven days.');
+    // Outside the disclosure: the readings, and neither the sentence nor a
+    // week-before figure.
+    const outside = [...(week?.querySelectorAll('p, dd') ?? [])].filter(
+      (each) => each.closest('.oyl-chart-table') === null,
+    );
+    expect(outside.map((each) => each.textContent).join(' | ')).not.toMatch(
+      /Week before|of the last seven days/,
+    );
+    expectClean('home, this week, disclosed');
+  });
+
+  it('with no rides this week, no chart and no disclosure: the week before stands under the sentence', async () => {
+    await openHome([ride('before-a', 9), ride('before-b', 12)]);
+    const week = document.querySelector('.oyl-home__week');
+    expect(week?.querySelector('details.oyl-chart-table')).toBeNull();
+    expect(week?.textContent).toContain('No rides in the last seven days.');
+    expect(
+      [...(week?.querySelectorAll('.oyl-home__before') ?? [])].map((each) => each.textContent),
+    ).toEqual(['Week before: 2', 'Week before: 1:40:00', 'Week before: 200']);
+    expectClean('home, no rides this week');
   });
 });

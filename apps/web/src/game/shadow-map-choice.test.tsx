@@ -36,6 +36,7 @@ import {
   qualitySettings,
   type QualitySettings,
 } from './quality';
+import { endRideAnswer } from './end-ride-testing';
 
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
@@ -236,6 +237,14 @@ describe('no world is drawn before its programs are built — #547', () => {
       await Promise.resolve();
     });
     await settle();
+    // #2349: End ride asks; a ride with nothing recorded ends on End ride, once (#2381).
+    for (const answer of ['End ride'] as const) {
+      await act(async () => {
+        endRideAnswer(document, answer).click();
+        await Promise.resolve();
+      });
+      await settle();
+    }
     const again = queryAll<HTMLButtonElement>(document.body, 'button').find((each) =>
       (each.textContent ?? '').startsWith('Ride '),
     );

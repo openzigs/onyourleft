@@ -264,7 +264,7 @@ export function formatSpeed(
  * says no distance is known (#1070).
  *
  * A ride recorded with no speed channel stores `metres(0)`
- * (`recording/finish.ts` §`distanceOf`): "no distance known", not a ride of
+ * (`recording/totals.ts` §`rideDistance`): "no distance known", not a ride of
  * 0.0 km. Drawn large it reads as a measurement, which is #1041's invented
  * zero for distance — the same decision `format.ts` §`shownAveragePower`
  * makes for power. Every surface that draws a ride's distance asks this one

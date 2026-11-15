@@ -62,11 +62,14 @@ function ride(
 
 /** Any last ride: `loadNextUp` reads only whether there is one. */
 const anyRide: HomeLastRide = {
+  id: activityId('any'),
   name: 'Ride',
   startedAt: NOW,
   timeZone: 'UTC',
   movingTime: seconds(60),
   distance: metres(100),
+  averagePower: undefined,
+  routeId: undefined,
   load: undefined,
   noLoadToWorkOut: false,
 };

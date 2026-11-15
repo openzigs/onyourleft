@@ -31,6 +31,9 @@
 
 import type { GeographicPosition, RouteProfile } from '@onyourleft/domain';
 import {
+  CIRCUIT_ROUTE_PREFIX,
+  circuitRouteId,
+  isCircuitRouteId,
   routeId,
   type AthleteId,
   type PrivacyZoneRecord,
@@ -112,6 +115,16 @@ export async function routeDigestOf(positions: readonly GeographicPosition[]): P
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * The store's key for a route's corridor — or, since #2293, a built-in
+ * circuit's, whose id is in the `circuit:` namespace `routeId` refuses (ADR
+ * 0064 D-2.2). A circuit has no route record; its corridor is kept under the
+ * owner and that key all the same.
+ */
+function corridorKey(id: string): ReturnType<typeof routeId> {
+  return isCircuitRouteId(id) ? circuitRouteId(id.slice(CIRCUIT_ROUTE_PREFIX.length)) : routeId(id);
+}
+
 const NOTHING_FOR_THIS_ROUTE: CorridorState = { kind: 'unavailable', why: 'outside-coverage' };
 
 export function createWorldCorridorPort(options: WorldCorridorPortOptions): WorldCorridorPort {
@@ -133,7 +146,7 @@ export function createWorldCorridorPort(options: WorldCorridorPortOptions): Worl
 
   const kept = async (route: CorridorRoute): Promise<WorldCorridorRecord | undefined> => {
     try {
-      return await options.store.getWorldCorridor(options.owner, routeId(route.id));
+      return await options.store.getWorldCorridor(options.owner, corridorKey(route.id));
     } catch (error) {
       log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
       return undefined;
@@ -234,7 +247,7 @@ export function createWorldCorridorPort(options: WorldCorridorPortOptions): Worl
     try {
       await options.store.putWorldCorridor({
         owner: options.owner,
-        routeId: routeId(route.id),
+        routeId: corridorKey(route.id),
         routeDigest: digest,
         archive: { url: config.archiveUrl, identity: read.identity },
         readerVersion: CORRIDOR_READER_VERSION,

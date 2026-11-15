@@ -19,7 +19,9 @@
  *    committed pictures — PNG, and since #972 the full logo's lossless WebP,
  *    read by `webp-testing.ts` so the logo's checks below still run in CI: a square icon is opaque, a maskable one keeps the mark
  *    inside the middle 80 % a browser may crop to, an Android foreground keeps
- *    it inside the 66 dp circle of its 108 dp layer, a round icon is a disc, and
+ *    it inside the 66 dp circle of its 108 dp layer, the Android 12+ splash
+ *    icon (#2052) keeps it on nothing inside the 192 dp circle of its 288 dp
+ *    layer, a round icon is a disc, and
  *    a wordmark or a logo is cut out — its corners transparent, not the
  *    checkerboard Gemini painted into the sheet.
  * 3. **The Android background layer is the icons' own blue.**
@@ -241,6 +243,21 @@ describe('the brand pictures — #965', () => {
       const markReach = reach(image, (rgba) => (rgba[3] ?? 0) > 0);
       expect(markReach).toBeGreaterThan(0.2);
       expect(markReach).toBeLessThanOrEqual(33 / 108);
+    },
+  );
+
+  it.each(outputs('splash'))(
+    '$path keeps the mark inside the 192 dp circle of its 288 dp splash icon, on nothing — #2052',
+    (output) => {
+      // Android 12+ masks a splash icon with no background to that circle, so
+      // a mark reaching past it is cropped; and a corner that is not
+      // transparent would be a tile that is not the canvas.
+      const image = picture(output.path);
+      expect(pixel(image, 0, 0)[3]).toBe(0);
+      expect(pixel(image, image.width - 1, image.height - 1)[3]).toBe(0);
+      const markReach = reach(image, (rgba) => (rgba[3] ?? 0) > 0);
+      expect(markReach).toBeGreaterThan(0.25);
+      expect(markReach).toBeLessThanOrEqual(96 / 288);
     },
   );
 

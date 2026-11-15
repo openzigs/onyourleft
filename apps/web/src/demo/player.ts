@@ -37,7 +37,13 @@ import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from '../game/foot
 import { landClassMask, NO_LAND_CLASS } from '../game/land-class';
 import { mappedBuildingsOf } from '../game/mapped-buildings';
 import { groundOf } from '../game/people';
-import { drawnRiderDistance, placedRiders, sceneFrame, type SceneInput } from '../game/scene';
+import {
+  drawnPathOf,
+  drawnRiderDistance,
+  placedRiders,
+  sceneFrame,
+  type SceneInput,
+} from '../game/scene';
 import { scatterSeed } from '../game/scatter';
 import type { GameSensors } from '../game/sensors';
 import { GameSimulation, type GameState } from '../game/simulation';
@@ -282,6 +288,7 @@ export function createDemoPlayer(
         profile,
         origin,
         riderLateral: placedRiders(input, frame.corridor)[0]?.lateral ?? 0,
+        path: drawnPathOf(input),
         groundAt,
       };
       // #1998: the tour's cameras stand on the rider where the frame DREW

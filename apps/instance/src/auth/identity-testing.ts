@@ -10,7 +10,7 @@
 
 import { webcrypto } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -50,6 +50,7 @@ import { startTestInstance, type TestInstance } from '../instance-testing.ts';
 import type { Embedder } from '../history/embedder.ts';
 import { createHistory, type History } from '../history/history.ts';
 import { scriptedEmbedder } from '../history/history-testing.ts';
+import { createSegments, type Segments } from '../segments/segments.ts';
 import { createSync, type Sync } from '../sync/sync.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
@@ -61,6 +62,8 @@ import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts'
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
 import { instanceHpkePrimitives } from './crypto.ts';
+import { createOperate } from '../operate/operate.ts';
+import { diskSpace, keysState, tunnelReadiness, type StatusSources } from '../operate/status.ts';
 import { createSealed, sha256, type Sealed } from '../sealed/sealed.ts';
 import { sealFor } from '../sealed/sealed-testing.ts';
 import { matchPath } from '../handler.ts';
@@ -211,6 +214,8 @@ export interface IdentityInstance {
   /** Sync's blobs, as the memory blob store keeps them: the object store, read directly. */
   readonly blobs: MemoryBlobs;
   readonly sync: Sync;
+  /** Published segments and their boards (#68), over the same store. */
+  readonly segments: Segments;
   /** The history index over the same store (#835): sync schedules a catch-up after each item. */
   readonly history: History;
   /** Riders' rooms (#784, #785), over the same store. */
@@ -306,6 +311,14 @@ export async function startIdentityInstance(
     observe?: (route: string | null, status: number, code: string | undefined) => void;
     /** The rooms' Discord voice (#874), as `instance.ts` hands it to them: none unless a test's. */
     voice?: RoomVoice;
+    /** A handler handed no Operate area (#2602), for the `unavailable` it answers then. */
+    withoutOperate?: boolean;
+    /**
+     * What the owner's Status reads beyond the store (#2604), over the
+     * defaults: the world's clock from its start, the real disk under the
+     * world's directory, no tunnel address, and the world's own keys.
+     */
+    operateStatus?: Partial<StatusSources>;
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -335,6 +348,8 @@ export async function startIdentityInstance(
     hostedFetch,
     observe,
     voice,
+    withoutOperate,
+    operateStatus,
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
@@ -402,6 +417,8 @@ export async function startIdentityInstance(
     },
     ghostRider: nameFor,
   });
+  // #68: over the same store and clock, as `instance.ts` builds it.
+  const segments = createSegments({ store, now: () => clock.ms });
   const listenerConfig = { bodyLimitBytes: bodyLimitBytes ?? 16_384, ...config };
   const roomRoutes: MemoryBlobs = new Map();
   const rooms = createRooms({
@@ -497,6 +514,29 @@ export async function startIdentityInstance(
       ...(observe === undefined ? {} : { observe }),
       identity,
       sync,
+      segments,
+      ...(withoutOperate === true
+        ? {}
+        : {
+            operate: createOperate({
+              store,
+              status: {
+                now: () => clock.ms,
+                startedAt: clock.ms,
+                disk: diskSpace(
+                  { databasePath: path, blobsPath: directory },
+                  { statfs: (at) => statfs(at), device: async (at) => (await stat(at)).dev },
+                ),
+                tunnel: tunnelReadiness({
+                  url: undefined,
+                  resolve: () => Promise.reject(new Error('a test resolved a name')),
+                  fetch: () => Promise.reject(new Error('a test reached for the network')),
+                }),
+                keys: keysState(instanceKeys),
+                ...operateStatus,
+              },
+            }),
+          }),
       history,
       rooms,
       instanceKeys,
@@ -652,6 +692,7 @@ export async function startIdentityInstance(
     mail,
     blobs,
     sync,
+    segments,
     history,
     rooms,
     roomRoutes,

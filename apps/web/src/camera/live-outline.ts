@@ -18,7 +18,7 @@
  */
 
 import type { OutlineSegment } from './framing';
-import type { SidePose, SidePoseLandmark } from './side-analysis-port';
+import { SIDE_POSE_LANDMARKS, type SidePose, type SidePoseLandmark } from './side-analysis-port';
 
 /** The bones drawn, head to foot and then shoulder to hand: all on the near side. */
 export const LIVE_OUTLINE_BONES: readonly (readonly [SidePoseLandmark, SidePoseLandmark])[] = [
@@ -59,4 +59,23 @@ export function liveOutline(
     }
   }
   return { bones, joints };
+}
+
+/**
+ * The outline a side-camera snapshot was SHOWN with, from the numbers its row
+ * keeps — #1063, ADR 0044 D-3: *"stored as numbers and drawn when shown"*.
+ *
+ * A stored name this build does not draw is left out rather than drawn as
+ * something it is not; the rest is {@link liveOutline}, unchanged, so a
+ * snapshot's outline is the live view's outline and nothing more (D-9).
+ */
+export function storedOutline(outline: {
+  readonly aspect: number;
+  readonly landmarks: readonly { readonly name: string; readonly x: number; readonly y: number }[];
+}): { readonly bones: readonly OutlineSegment[]; readonly joints: readonly OutlinePoint[] } {
+  const drawn = new Set<string>(SIDE_POSE_LANDMARKS);
+  const landmarks = outline.landmarks
+    .filter((mark): mark is typeof mark & { name: SidePoseLandmark } => drawn.has(mark.name))
+    .map((mark) => ({ name: mark.name, x: mark.x, y: mark.y, visibility: 1 }));
+  return liveOutline({ aspect: outline.aspect, nearSide: 'right', landmarks }, outline.aspect);
 }

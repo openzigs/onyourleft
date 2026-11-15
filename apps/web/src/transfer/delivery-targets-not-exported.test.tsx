@@ -47,16 +47,28 @@
  * Delivery, and nothing in Delivery logs or formats a coordinate.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { act } from 'react';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SIGNATURE_ALGORITHM, seconds, toHex, unixSeconds, watts } from '@onyourleft/domain';
+import {
+  SIGNATURE_ALGORITHM,
+  seconds,
+  toHex,
+  unixSeconds,
+  watts,
+  type RouteProfile,
+} from '@onyourleft/domain';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import {
   activityId,
   type DeviceKeyRecord,
   ensureDeviceSigningKey,
   lapId,
+  levelRouteId,
   recordingSessionId,
   webCryptoSha256,
   webCryptoVerifier,
@@ -65,7 +77,14 @@ import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/t
 
 import { riderMassFor } from '../athlete/mass';
 import { DELIVERY_PROGRESS_STORAGE_KEY } from '../game/delivery/delivery-progress';
+import {
+  LEVEL_PROGRESS_STORAGE_KEY,
+  readLevelProgress,
+  writeLevelProgress,
+} from '../game/delivery/level-progress';
 import { deliveryTown, DISTINCTIVE_TOWN_LAYOUT } from '../game/delivery/delivery-town-testing';
+import { parseLevelFile, type LevelFile } from '../game/delivery/levels/level-file';
+import { levelCorridor, levelRoute } from '../game/delivery/levels/levels';
 import { startDeliveryRide } from '../game/delivery/ride-round';
 import type { WeekProgress } from '../game/delivery/round';
 import type { DeliveryTarget } from '../game/delivery/targets';
@@ -80,10 +99,13 @@ import { landClassMask } from '../game/land-class';
 import { mappedBuildingsOf } from '../game/mapped-buildings';
 import type { GameRenderer, SceneFrame } from '../game/port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../game/rider';
+import { lineOffsetAt, racingLine } from '../game/racing-line';
 import { GameSimulation } from '../game/simulation';
 import { corridorOrigin, type CorridorOrigin } from '../game/terrain';
 import { gameTrainerPortOver } from '../game/trainer-port';
 import { urbanClassMap } from '../game/urban-class';
+import { writeRealisticWorldChoice } from '../game/world-preference';
+import type { WorldCorridor } from '../game/world-data/corridor';
 import { athleteKeysFrom, syncWithInstance, type SyncTransport } from '../instance/sync';
 import { rideSummaryOf, type RideSummaryStore } from '../ride-analysis/ride-summary';
 import { createRideController } from '../ride/controller';
@@ -110,6 +132,54 @@ const ROUTE: RidableRoute = {
 };
 const ORIGIN = corridorOrigin(town.profile);
 
+/**
+ * #2362: a ride on a built-in level, ADR 0065 D-13.4. The synthetic fixture
+ * level (D-7.5), its footprints moved off whole metres so a target's point is
+ * digits nothing else spells, as {@link DISTINCTIVE_TOWN_LAYOUT}'s are.
+ */
+const LEVEL = ((): LevelFile => {
+  const raw = JSON.parse(
+    readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../game/delivery/levels/fixtures/fixture-level.json',
+      ),
+      'utf8',
+    ),
+  ) as { buildings: { rings: number[][] }[]; round: Record<string, unknown> };
+  for (const building of raw.buildings) {
+    building.rings = building.rings.map((ring) =>
+      ring.map((value, at) => Math.round((value + (at % 2 === 0 ? 0.4683 : 0.3719)) * 1e4) / 1e4),
+    );
+  }
+  // #2365: with mailboxes and houses that must not get a parcel among its houses,
+  // so the scan looks for those too (ADR 0065 D-4.2).
+  raw.round = { ...raw.round, mailboxShare: 0.5, noDeliveryShare: 0.5 };
+  return parseLevelFile(raw, 'fixture-level');
+})();
+
+/** Where a ride is ridden: a rider's own route through the town, or the level. */
+interface Course {
+  readonly corridor: WorldCorridor;
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  /** The level's round, on a level. */
+  readonly level?:
+    (LevelFile['round'] & { readonly lengthMetres: number; readonly id: string }) | undefined;
+  /** #2366: the level's file is served in rain and at dusk. */
+  readonly weather?: boolean;
+  /** #1688: each frame's length, when not `FRAME_MS`: the same ride in fewer frames. Divides a second. */
+  readonly frameMs?: number;
+}
+
+const TOWN: Course = { corridor: town.corridor, profile: town.profile, origin: ORIGIN };
+const ON_LEVEL: Course = {
+  corridor: levelCorridor(LEVEL),
+  profile: levelRoute(LEVEL).profile,
+  origin: corridorOrigin(levelRoute(LEVEL).profile),
+  level: { ...LEVEL.round, lengthMetres: LEVEL.lengthMetres, id: LEVEL.id },
+};
+
 /** The round's seed: distinctive, so its digits are a marker. Under 2³². */
 const SEED = 3_141_592_653;
 
@@ -135,6 +205,36 @@ function port(): GamePort {
     listRoutes: () => Promise.resolve([ROUTE]),
     loadGhost: () => Promise.resolve(undefined),
     loadWorldCorridor: () => Promise.resolve({ kind: 'ready', corridor: town.corridor }),
+    readSensors: () => ({
+      rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
+      cadence: { value: 88, live: true, paired: true },
+      heartRate: { value: 142, live: true, paired: true },
+    }),
+  };
+}
+
+/** #2362: the game's port for a rider with no route of their own, opening the fixture level. */
+function levelPort(weather = false): GamePort {
+  // #2366: the same level, in rain and at dusk.
+  const served: LevelFile = weather
+    ? { ...LEVEL, round: { ...LEVEL.round, weather: 'rain', light: 'dusk' } }
+    : LEVEL;
+  return {
+    listRoutes: () => Promise.resolve([]),
+    // The listing names the level, first in the order so it is open: a level
+    // the listing does not name is not read (#2363), as the real port lists them.
+    listDeliveryLevels: () =>
+      Promise.resolve([
+        {
+          id: LEVEL.id,
+          name: 'Fixture level',
+          lengthMetres: LEVEL.lengthMetres,
+          houses: LEVEL.round.houses,
+          routeId: levelRouteId(LEVEL.id),
+        },
+      ]),
+    loadDeliveryLevel: (id) => Promise.resolve(id === LEVEL.id ? served : undefined),
+    loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
       rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
       cadence: { value: 88, live: true, paired: true },
@@ -171,15 +271,15 @@ function stubSeed(): void {
   );
 }
 
-/** `GameView`'s own plans of the town, as it makes them at the press. */
-function gameViewBuildings() {
-  const mask = landClassMask(town.corridor);
-  const urban = urbanClassMap(town.corridor, mask, town.profile);
+/** `GameView`'s own plans of the course's town, as it makes them at the press. */
+function gameViewBuildings(course: Course = TOWN) {
+  const mask = landClassMask(course.corridor);
+  const urban = urbanClassMap(course.corridor, mask, course.profile);
   const { plans } = footprintPlans(
-    town.corridor,
+    course.corridor,
     mask,
-    town.profile,
-    ORIGIN,
+    course.profile,
+    course.origin,
     FOOTPRINT_MAX_VERTICES,
     urban,
   );
@@ -187,16 +287,17 @@ function gameViewBuildings() {
 }
 
 /** The round the ride will pick under {@link SEED}: the same pure start `GameView` calls. */
-function theRound() {
+function theRound(course: Course = TOWN) {
   stubSeed();
   const store = new Map([[DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(WEEK)]]);
   const ride = startDeliveryRide({
-    buildings: gameViewBuildings(),
-    profile: town.profile,
-    origin: ORIGIN,
+    buildings: gameViewBuildings(course),
+    profile: course.profile,
+    origin: course.origin,
     riderDistance: 0,
-    lineOffset: 0,
+    lineOffset: course.level === undefined ? 0 : lineOffsetAt(racingLine(course.profile), 0),
     storage: { getItem: (key) => store.get(key) ?? null, setItem: () => undefined },
+    level: course.level,
   });
   vi.restoreAllMocks();
   if (ride === undefined) throw new Error('the town gave the round no house');
@@ -208,19 +309,24 @@ function theRound() {
  * ride — a `GameSimulation` built as `GameView` builds one, on the same clock
  * and power — is nearest the place a parcel lands on each house's step from.
  */
-function throwScript(round: ReturnType<typeof theRound>): ReadonlyMap<number, ThrowSide> {
+function throwScript(
+  round: ReturnType<typeof theRound>,
+  course: Course = TOWN,
+): ReadonlyMap<number, ThrowSide> {
   const simulation = new GameSimulation({
-    profile: town.profile,
+    profile: course.profile,
     conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
   });
+  const frameMs = course.frameMs ?? FRAME_MS;
   const shadow: { along: number; speed: number }[] = [];
-  for (let frame = 1; frame <= FRAMES; frame += 1) {
-    const at = START_MS + frame * FRAME_MS;
+  for (let frame = 1; frame <= (FRAMES * FRAME_MS) / frameMs; frame += 1) {
+    const at = START_MS + frame * frameMs;
     simulation.advanceTo(at, { power: watts(powerAt(at)), live: true });
     shadow.push({ along: simulation.state.ride.distance, speed: simulation.state.ride.speed });
   }
   const throws = new Map<number, ThrowSide>();
-  for (const target of round.throwTargets) {
+  // #2365: a throw at each house that must not get a parcel too, so one costs a point on the ride.
+  for (const target of [...round.throwTargets, ...round.throwNoDelivery]) {
     const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
     let best = 0;
     let bestGap = Infinity;
@@ -237,10 +343,10 @@ function throwScript(round: ReturnType<typeof theRound>): ReadonlyMap<number, Th
   return throws;
 }
 
-async function pump(): Promise<void> {
+async function pump(ms = FRAME_MS): Promise<void> {
   const next = pending.shift();
   if (next === undefined) throw new Error('the ride asked for no frame');
-  nowMs += FRAME_MS;
+  nowMs += ms;
   await act(async () => {
     next(nowMs);
     await Promise.resolve();
@@ -286,9 +392,9 @@ interface Ridden {
 }
 
 /** The ride, recorded and saved: #1816's `recordedRide`, with the round's throws pressed. */
-async function rideAndSave(): Promise<Ridden> {
-  const round = theRound();
-  const script = throwScript(round);
+async function rideAndSave(course: Course = TOWN): Promise<Ridden> {
+  const round = theRound(course);
+  const script = throwScript(round, course);
   const harness = createStoreHarness();
   await seedAthletes(harness);
   const { transport, bench } = createSimulator({
@@ -330,14 +436,33 @@ async function rideAndSave(): Promise<Ridden> {
   localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(WEEK));
   stubSeed();
   const drawn: SceneFrame[] = [];
+  if (course.level !== undefined) {
+    // #2362: opened as the Delivery picker's link opens a level, in the realistic world.
+    writeRealisticWorldChoice(localStorage, true);
+    globalThis.location.hash = `#/game?route=${levelRouteId(LEVEL.id)}&play=delivery`;
+  }
   mounted = await mount(
-    <GameView
-      port={port()}
-      trainer={gameTrainerPortOver(controller)}
-      renderer={() => Promise.resolve(capturingRenderer(drawn))}
-      now={() => nowMs}
-      delivery
-    />,
+    course.level === undefined ? (
+      <GameView
+        port={port()}
+        trainer={gameTrainerPortOver(controller)}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
+        now={() => nowMs}
+        delivery
+      />
+    ) : (
+      <GameView
+        port={levelPort(course.weather === true)}
+        trainer={gameTrainerPortOver(controller)}
+        renderer={() =>
+          Promise.resolve({
+            ...capturingRenderer(drawn),
+            loadRealisticWorld: () => Promise.resolve({ loaded: true }),
+          })
+        }
+        now={() => nowMs}
+      />
+    ),
   );
   await settle();
   await act(async () => {
@@ -345,10 +470,11 @@ async function rideAndSave(): Promise<Ridden> {
     await Promise.resolve();
   });
   await settle();
-  for (let index = 0; index < FRAMES; index += 1) {
-    await pump();
-    // The bench keeps whole seconds; five of the game's frames are one.
-    if (index % 5 === 4) {
+  const frameMs = course.frameMs ?? FRAME_MS;
+  for (let index = 0; index < (FRAMES * FRAME_MS) / frameMs; index += 1) {
+    await pump(frameMs);
+    // The bench keeps whole seconds; five of the game's frames are one (#1688: or one of 1 s).
+    if ((index + 1) % (1_000 / frameMs) === 0) {
       await act(async () => {
         bench.advance(seconds(1));
         await controller.tick(bench.now);
@@ -368,12 +494,17 @@ async function rideAndSave(): Promise<Ridden> {
   controller.dispose();
   mounted?.unmount();
   mounted = undefined;
-  return { harness, targets: round.targets, drawn, houses };
+  globalThis.location.hash = '';
+  // #2365: the houses that must not get a parcel are the round's houses too, for the scan.
+  return { harness, targets: [...round.targets, ...round.noDeliveryTargets], drawn, houses };
 }
 
 let ridden: Promise<Ridden> | undefined;
 /** The one ride every case reads, ridden by the first that asks. */
 const theRide = (): Promise<Ridden> => (ridden ??= rideAndSave());
+let riddenOnLevel: Promise<Ridden> | undefined;
+/** #2362: the one level ride its cases read, ridden by the first that asks. */
+const theLevelRide = (): Promise<Ridden> => (riddenOnLevel ??= rideAndSave(ON_LEVEL));
 
 beforeEach(() => {
   pending = [];
@@ -394,6 +525,7 @@ afterEach(() => {
 
 afterAll(async () => {
   if (ridden !== undefined) await (await ridden).harness.destroy();
+  if (riddenOnLevel !== undefined) await (await riddenOnLevel).harness.destroy();
   localStorage.clear();
 });
 
@@ -487,7 +619,11 @@ const DEGREE_PLACES = [3, 4, 5, 6, 7, 8] as const;
  * first case asserts the ride's own exports, rows and payload carry none of
  * these numbers before any leak is planted.
  */
-function roundedMarkers(name: string, target: DeliveryTarget): Marker[] {
+function roundedMarkers(
+  name: string,
+  target: DeliveryTarget,
+  origin: CorridorOrigin = ORIGIN,
+): Marker[] {
   const markers: Marker[] = [];
   for (const field of ['distance', 'fromRoad', 'x', 'z'] as const) {
     const value = target[field];
@@ -498,7 +634,7 @@ function roundedMarkers(name: string, target: DeliveryTarget): Marker[] {
       }
     }
   }
-  const [latitude, longitude] = geographicOf(ORIGIN, target.x, target.z);
+  const [latitude, longitude] = geographicOf(origin, target.x, target.z);
   for (const [field, degrees] of [
     ['latitude', latitude],
     ['longitude', longitude],
@@ -564,7 +700,7 @@ function float32Bytes(value: number): Uint8Array {
 }
 
 /** Every trace a round under {@link SEED} over `targets` would leave. */
-function markersOf(targets: readonly DeliveryTarget[]): Marker[] {
+function markersOf(targets: readonly DeliveryTarget[], origin: CorridorOrigin = ORIGIN): Marker[] {
   const markers: Marker[] = [
     { label: 'the seed', text: String(SEED) },
     { label: 'the seed in hex', text: SEED.toString(16) },
@@ -582,11 +718,11 @@ function markersOf(targets: readonly DeliveryTarget[]): Marker[] {
         { label: `${name} ${field} as float32`, bytes: float32Bytes(value) },
       );
     }
-    const [latitude, longitude] = geographicOf(ORIGIN, target.x, target.z);
+    const [latitude, longitude] = geographicOf(origin, target.x, target.z);
     markers.push(
       { label: `${name} latitude`, text: sixDecimals(latitude) },
       { label: `${name} longitude`, text: sixDecimals(longitude) },
-      ...roundedMarkers(name, target),
+      ...roundedMarkers(name, target, origin),
     );
   }
   return markers;
@@ -996,6 +1132,220 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
     expect(
       tables.flatMap(({ table, rows }) => tracesInValue(`table ${table}`, rows, markers)),
     ).toStrictEqual([]);
+  });
+});
+
+describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 D-13.4', () => {
+  /** Where a level ride's own id may be: nowhere a target is scanned for (D-8.3). */
+  const LEVEL_KEY = levelRouteId(LEVEL.id);
+  /** #2363: a level finished on this device, under an id nothing else in a ride spells. */
+  const FINISHED_ID = 'finished-marker-round';
+  /**
+   * #2363: every trace of the levels this device has finished — their key,
+   * their field and an id — in the texts `read` gives, with progress planted
+   * on the device first so there is something to find. An empty list is the
+   * answer; `levelProgressIn` going red is held by the last case below.
+   */
+  function levelProgressIn(read: () => readonly string[]): string[] {
+    expect(writeLevelProgress(localStorage, { finished: [FINISHED_ID, LEVEL.id] })).toBe(true);
+    expect(readLevelProgress(localStorage).finished).toContain(FINISHED_ID);
+    const all = read().join('\n');
+    return [LEVEL_PROGRESS_STORAGE_KEY, FINISHED_ID, '"finished"'].filter((trace) =>
+      all.includes(trace),
+    );
+  }
+
+  it('finds the levels finished when a text carries them — #2363', () => {
+    expect(
+      levelProgressIn(() => [localStorage.getItem(LEVEL_PROGRESS_STORAGE_KEY) ?? '']),
+    ).toStrictEqual([FINISHED_ID, '"finished"']);
+    expect(levelProgressIn(() => [LEVEL_PROGRESS_STORAGE_KEY])).toStrictEqual([
+      LEVEL_PROGRESS_STORAGE_KEY,
+    ]);
+  });
+  const levelMarkers = (targets: readonly DeliveryTarget[]): Marker[] =>
+    markersOf(targets, ON_LEVEL.origin);
+
+  it(
+    'rides the level’s round, with deliveries in it, over targets the scan can find',
+    RIDE,
+    async () => {
+      const ride = await theLevelRide();
+      // #2365: the houses to deliver to and those that must not get a parcel, together.
+      expect(ride.targets).toHaveLength(LEVEL.round.houses);
+      // The houses in view on the ride's first frame are the targets the scan looks for.
+      const drawnMarkers = ride.drawn[0]?.delivery?.markers ?? [];
+      expect(drawnMarkers.length).toBeGreaterThan(0);
+      for (const marker of drawnMarkers) {
+        expect(ride.targets.some(({ x, z }) => x === marker.x && z === marker.z)).toBe(true);
+      }
+      const delivered = Number(/^(\d+)/.exec(ride.houses?.detail ?? '')?.[1] ?? '0');
+      expect(delivered).toBeGreaterThan(0);
+      for (const target of ride.targets) {
+        for (const value of [target.distance, target.x, target.z]) {
+          expect(Number.isInteger(value)).toBe(false);
+        }
+      }
+    },
+  );
+
+  it('stores none of it with the ride, its streams or its laps', RIDE, async () => {
+    const ride = await theLevelRide();
+    const markers = levelMarkers(ride.targets);
+    const [activity, streams, laps] = await ride.harness.read(async (store) => [
+      await store.getActivity(ATHLETE_A, RIDE_ID),
+      await store.getStreamSet(ATHLETE_A, RIDE_ID),
+      await store.listLaps(ATHLETE_A, RIDE_ID),
+    ]);
+    expect(activity?.movingTime).toBeGreaterThan(20);
+    expect(streams?.sampleCount).toBeGreaterThan(20);
+    expect([
+      ...tracesInValue('the ride', activity, markers),
+      ...tracesInValue('its streams', streams, markers),
+      ...tracesInValue('its laps', laps, markers),
+    ]).toStrictEqual([]);
+    // No index into the level's buildings: the ride names no house, by place or by number,
+    // and no mailbox or house that got no parcel (#2365).
+    expect(jsonOf([activity, laps])).not.toMatch(/house|target|seed|building|mailbox|delivery/i);
+    // The round had both kinds in it, so there was something to leave out.
+    const round = theRound(ON_LEVEL);
+    expect(round.noDeliveryTargets.length).toBeGreaterThan(0);
+    expect(round.targets.some((target) => target.mailbox === true)).toBe(true);
+    expect(jsonOf([streams, laps])).not.toContain(LEVEL_KEY);
+  });
+
+  it(
+    'keeps nothing of the week, and nothing of the round, on the device (ADR 0065 D-9.3)',
+    RIDE,
+    async () => {
+      const ride = await theLevelRide();
+      expect(JSON.parse(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY) ?? 'null')).toEqual(
+        WEEK,
+      );
+      const markers = levelMarkers(ride.targets);
+      const kept: string[] = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (key === null) continue;
+        const own = key.startsWith('oyl.game.delivery.');
+        kept.push(
+          ...scan(`localStorage ${key}`, markers, localStorage.getItem(key) ?? '', undefined, !own),
+        );
+      }
+      expect(kept).toStrictEqual([]);
+    },
+  );
+
+  it.each(FORMATS)(
+    'exports none of it, and not the level’s id, in the single-ride export, %s',
+    async (format) => {
+      const ride = await theLevelRide();
+      const { file } = await ride.harness.read((store) =>
+        exportActivity({ store, athleteId: ATHLETE_A, activityId: RIDE_ID, format }),
+      );
+      const text = decoded(file.fileName, file.bytes);
+      expect(text).toBeDefined();
+      expect(tracesInFile(file, levelMarkers(ride.targets))).toStrictEqual([]);
+      expect(new TextDecoder().decode(file.bytes)).not.toContain(LEVEL_KEY);
+      // #2363: nor the levels this device has finished (ADR 0065 D-9.2).
+      expect(
+        levelProgressIn(() => [
+          file.fileName,
+          new TextDecoder('latin1').decode(file.bytes),
+          decoded(file.fileName, file.bytes) ?? '',
+        ]),
+      ).toStrictEqual([]);
+    },
+    RIDE.timeout,
+  );
+
+  it(
+    'sends none of it, and not the level’s id, in the payload sync builds for the ride',
+    RIDE,
+    async () => {
+      const ride = await theLevelRide();
+      const instance = scriptedInstance();
+      const deviceKey = await fixedDeviceKey();
+      await ride.harness.write((store) => store.putDeviceKey(deviceKey));
+      const report = await ride.harness.write((store) =>
+        syncWithInstance({
+          sealed: instance.sealed,
+          store,
+          athleteId: ATHLETE_A,
+          signingKey: () => ensureDeviceSigningKey(store, ATHLETE_A, { now: () => NOW }),
+          sha256: webCryptoSha256,
+          verifier: webCryptoVerifier,
+          now: () => NOW,
+          timeZone: 'Europe/London',
+          rideSummary: rideSummaryOf(store as unknown as RideSummaryStore, ATHLETE_A),
+          athleteKeys: () => athleteKeysFrom(instance.sealed),
+          newDocumentId: () => crypto.randomUUID(),
+        }),
+      );
+      expect(report.pushed).toBe(1);
+      expect(report.failures).toStrictEqual([]);
+      expect(tracesInValue('sync', instance.sent, levelMarkers(ride.targets))).toStrictEqual([]);
+      expect(jsonOf(instance.sent)).not.toContain(LEVEL_KEY);
+      // #2363: nor the levels this device has finished (ADR 0065 D-9.2).
+      expect(levelProgressIn(() => [jsonOf(instance.sent)])).toStrictEqual([]);
+    },
+  );
+});
+
+describe('a ride on a level in rain and at dusk records what a clear one does — #2366, ADR 0065 D-11', () => {
+  // #1688's ruling: cheaper, never a longer timeout. The two rides compared
+  // are the level's same 66 s in frames of 1 s, not 330 of 200 ms, with the
+  // bench a second on each frame and the throws scripted on a shadow pumped
+  // the same way: the simulation's steps are fixed at 0.05 s whatever the
+  // frame. On this Mac, Node 26, two runs each at load averages of 16 to 28,
+  // in the file's run: 1.3–1.7 s → 0.77–1.0 s without coverage, 3.2–7.6 s →
+  // 1.5–2.6 s with `--coverage`; run alone, when it also pays the first
+  // ride's warm-up, 6.9–10.9 s → 5.0 s with `--coverage`.
+  it('stores the same ride, streams and laps as the same level ridden in clear daylight', async () => {
+    // Each ride on its own clock from the start line, as each case's would be.
+    const clear = await rideAndSave({ ...ON_LEVEL, frameMs: 1_000 });
+    pending = [];
+    nowMs = START_MS;
+    const wet = await rideAndSave({
+      ...ON_LEVEL,
+      level: {
+        ...LEVEL.round,
+        weather: 'rain',
+        light: 'dusk',
+        lengthMetres: LEVEL.lengthMetres,
+        id: LEVEL.id,
+      },
+      weather: true,
+      frameMs: 1_000,
+    });
+    try {
+      const readBack = (ride: Ridden) =>
+        ride.harness.read(async (store) => [
+          await store.getActivity(ATHLETE_A, RIDE_ID),
+          await store.getStreamSet(ATHLETE_A, RIDE_ID),
+          await store.listLaps(ATHLETE_A, RIDE_ID),
+        ]);
+      const [clearRead, wetRead] = [await readBack(clear), await readBack(wet)];
+      expect(clearRead[0]).toBeDefined();
+      expect(jsonOf(wetRead)).toBe(jsonOf(clearRead));
+      // The same round's houses, in the same order: the weather picked nothing.
+      expect(wet.targets).toStrictEqual(clear.targets);
+      // Not vacuous: the wet ride's frames were drawn in rain and at dusk, the clear one's not.
+      expect(wet.drawn.length).toBeGreaterThan(20);
+      expect(
+        wet.drawn.every(
+          (frame) => frame.delivery?.weather?.rain === true && frame.delivery.weather.dusk,
+        ),
+      ).toBe(true);
+      expect(clear.drawn.some((frame) => frame.delivery?.weather?.rain === true)).toBe(false);
+      // And its markers showed later: fewer of them on its first frame.
+      expect(wet.drawn[0]?.delivery?.markers.length ?? 0).toBeLessThan(
+        clear.drawn[0]?.delivery?.markers.length ?? 0,
+      );
+    } finally {
+      await clear.harness.destroy();
+      await wet.harness.destroy();
+    }
   });
 });
 

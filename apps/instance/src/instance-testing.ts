@@ -12,6 +12,8 @@ import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
+import type { Segments } from './segments/segments.ts';
+import type { Operate } from './operate/operate.ts';
 import type { Sync } from './sync/sync.ts';
 import { createServer } from 'node:net';
 
@@ -95,6 +97,10 @@ export async function startTestInstance(
     /** A rider's own hosted key and consent (#1199). */
     hostedSettings?: HostedSettings;
     sidePose?: SidePose;
+    /** Published segments and their boards (#68). */
+    segments?: Segments;
+    /** The owner's Operate area (#2602). */
+    operate?: Operate;
     /** What `/metrics` would count of each response (#1095's never-logged test). */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
@@ -117,6 +123,8 @@ export async function startTestInstance(
     ...(options.analysis === undefined ? {} : { analysis: options.analysis }),
     ...(options.hostedSettings === undefined ? {} : { hostedSettings: options.hostedSettings }),
     ...(options.sidePose === undefined ? {} : { sidePose: options.sidePose }),
+    ...(options.segments === undefined ? {} : { segments: options.segments }),
+    ...(options.operate === undefined ? {} : { operate: options.operate }),
     ...(options.observe === undefined ? {} : { observe: options.observe }),
   });
   const listening = await listen(handler, {

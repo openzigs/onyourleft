@@ -103,6 +103,86 @@ export interface ActivityRecordTable {
    * the ride, after its privacy-zone refusal; cleared by a revocation.
    */
   readonly race_route_sha256: Generated<string | null>;
+  /**
+   * The ride's ADR 0004 visibility, as the rider's device last sent it (#68,
+   * migration 0038): `private` unless it says otherwise. Only `public`
+   * reaches a shared leaderboard.
+   */
+  readonly visibility: Generated<ActivityVisibility>;
+}
+
+/** ADR 0004 decision A's three values (#68). */
+export type ActivityVisibility = 'private' | 'followers' | 'public';
+
+/** A segment published to this instance (#68, migration 0038). */
+export interface SegmentTable {
+  /** The first 32 hex digits of the SHA-256 of `definition`'s canonical JSON. */
+  readonly id: string;
+  /** Who published it first. Their erasure takes the segment and every effort on it. */
+  readonly athlete_id: string;
+  readonly name: string;
+  readonly sport: 'ride' | 'run';
+  /** The path length the instance measured from the definition, never one it was told. */
+  readonly distance_metres: number;
+  /** The definition as published: canonical JSON, path included. */
+  readonly definition: string;
+  /** Unix seconds: when it was published HERE. Rolling-window boards start no earlier. */
+  readonly created_at: number;
+}
+
+/** One effort a rider shared on a published segment (#68, migration 0038). */
+export interface SegmentEffortTable {
+  /** Minted by the instance; opaque, and never an athlete's id. */
+  readonly id: string;
+  readonly athlete_id: string;
+  readonly segment_id: string;
+  /** The rider's synced ride it was found in: `activity_record`, by `(athlete_id, content_sha256)`. */
+  readonly content_sha256: string;
+  /** Unix seconds. */
+  readonly started_at: number;
+  readonly elapsed_seconds: number;
+  /** `private-match` is the rider's own and never on a shared board. */
+  readonly visibility: 'public' | 'private-match';
+  /** Unix seconds. */
+  readonly received_at: number;
+  /**
+   * Why the instance's own rule excluded it when it was shared (#69,
+   * migration 0039), in words, or `null`.
+   */
+  readonly excluded_reason: Generated<string | null>;
+}
+
+/** One rider's flag on an effort, or on a segment as hazardous (#69, migration 0039). */
+export interface SegmentFlagTable {
+  readonly id: Generated<number>;
+  /** The FLAGGER. */
+  readonly athlete_id: string;
+  readonly segment_id: string;
+  /** The effort flagged, or `null` for the segment itself as hazardous. */
+  readonly effort_id: string | null;
+  /** Whose effort was flagged (`null` for a hazard flag); no foreign key. */
+  readonly subject_athlete_id: string | null;
+  /** The ride that effort was on: a flag outlasts the effort's id, which a re-share mints anew. */
+  readonly subject_content_sha256: string | null;
+  /** From a closed list: `segments.ts` §`EFFORT_FLAG_REASONS`, §`HAZARD_REASONS`. */
+  readonly reason: string;
+  /** Unix seconds. */
+  readonly created_at: number;
+}
+
+/** Every exclusion and flag (#69, migration 0039). Append-only in the schema. */
+export interface SegmentIntegrityLogTable {
+  readonly id: Generated<number>;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly action: 'excluded' | 'flagged_effort' | 'flagged_hazardous';
+  /** Who did it, or `null` for the instance's own rule or a flagger who erased their account. */
+  readonly actor_athlete_id: string | null;
+  /** Whose effort it was about, or `null` for a segment or a rider who erased their account. */
+  readonly subject_athlete_id: string | null;
+  readonly segment_id: string;
+  readonly effort_id: string | null;
+  readonly reason: string;
 }
 
 /** A group ride or a race. */
@@ -330,6 +410,68 @@ export interface ModerationLogTable {
   readonly at: number;
   /** The room the action was taken in (#789). */
   readonly room_id: Generated<string | null>;
+}
+
+/**
+ * One action taken as the instance's operator (#2602, migration 0040), from
+ * the app's Operate area or the operator's CLI. Append-only: the schema
+ * refuses an UPDATE or a DELETE. No foreign key: erasure keeps it.
+ */
+export interface OperatorLogTable {
+  readonly id: Generated<number>;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly source: 'app' | 'cli';
+  /** The owner's athlete for `app`; `NULL` for `cli`, which has none. */
+  readonly actor_athlete_id: string | null;
+  readonly action: string;
+  readonly detail: string | null;
+  readonly outcome: 'done' | 'refused' | 'failed';
+}
+
+/**
+ * One run of the operator's `backup` or `backup-loop` (#2606, migration 0042):
+ * what it made, or that it failed, by name. Deleted 30 days after its run.
+ */
+export interface BackupRecordTable {
+  readonly id: Generated<number>;
+  /** When the run started, Unix seconds. */
+  readonly at: number;
+  readonly outcome: 'done' | 'failed';
+  /** A failed run's error, by name only. */
+  readonly error: string | null;
+  /** The snapshot directory's name, never its path. */
+  readonly snapshot: string | null;
+  readonly row_count: number | null;
+  readonly blob_count: number | null;
+  readonly database_sha256: string | null;
+  readonly size_bytes: number | null;
+  readonly off_box: 'copied' | 'failed' | 'not-configured' | null;
+  readonly removed: number | null;
+  readonly backups_free_bytes: number | null;
+  readonly off_box_free_bytes: number | null;
+  /** The backup service's interval: set by `backup-loop` only. */
+  readonly interval_seconds: number | null;
+}
+
+/** Which run holds a backup folder (#2606, migration 0042): one row per folder. */
+export interface BackupLeaseTable {
+  /** SHA-256 of the folder's path, hex: never the path. */
+  readonly place: string;
+  readonly token: string;
+  /** The holder's container and process, for an operator reading the row. */
+  readonly holder: string;
+  /** When the holder last showed it was alive, Unix ms. */
+  readonly heartbeat_at: number;
+}
+
+/** The owner's "back up now" (#2606, migration 0042): waiting while `record_id` is `NULL`. */
+export interface BackupRequestTable {
+  readonly id: Generated<number>;
+  /** Unix seconds. */
+  readonly requested_at: number;
+  /** The record of the run that served it. */
+  readonly record_id: number | null;
 }
 
 /**
@@ -685,6 +827,10 @@ export interface InstanceDatabase {
   readonly block: BlockTable;
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
+  readonly operator_log: OperatorLogTable;
+  readonly backup_record: BackupRecordTable;
+  readonly backup_request: BackupRequestTable;
+  readonly backup_lease: BackupLeaseTable;
   readonly room_removal: RoomRemovalTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;
@@ -707,4 +853,8 @@ export interface InstanceDatabase {
   readonly notice_step: NoticeStepTable;
   readonly notice_erasure: NoticeErasureTable;
   readonly hidden_item: HiddenItemTable;
+  readonly segment: SegmentTable;
+  readonly segment_effort: SegmentEffortTable;
+  readonly segment_flag: SegmentFlagTable;
+  readonly segment_integrity_log: SegmentIntegrityLogTable;
 }

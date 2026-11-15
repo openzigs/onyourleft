@@ -513,25 +513,32 @@ export function RouteBuilderView({
         </StatusMessage>
       ) : null}
 
-      {/* #1013: how waypoints work and the keyboard are the section's help, so
-        an empty route keeps its one line, "No waypoints yet". */}
-      <SectionHeading
-        level={2}
-        help={
-          <p>
-            Place waypoints in order, on the map or from this list. Every control here works from
-            the keyboard. Select a waypoint to move it north, south, east or west, about{' '}
-            {measurementText(
-              formatSmallDistance(NUDGE_DEGREES * METRES_PER_DEGREE_LATITUDE, units),
-            )}{' '}
-            at a time.
-          </p>
-        }
-      >
-        Waypoints
-      </SectionHeading>
-
       {/*
+        #2067: two columns on a tablet — the waypoints and their map, then
+        the legs, the routing, the figures and the save — in the order they
+        are read. One column below the breakpoint.
+      */}
+      <div className="oyl-sections oyl-sections--pair">
+        <div>
+          {/* #1013: how waypoints work and the keyboard are the section's help, so
+        an empty route keeps its one line, "No waypoints yet". */}
+          <SectionHeading
+            level={2}
+            help={
+              <p>
+                Place waypoints in order, on the map or from this list. Every control here works
+                from the keyboard. Select a waypoint to move it north, south, east or west, about{' '}
+                {measurementText(
+                  formatSmallDistance(NUDGE_DEGREES * METRES_PER_DEGREE_LATITUDE, units),
+                )}{' '}
+                at a time.
+              </p>
+            }
+          >
+            Waypoints
+          </SectionHeading>
+
+          {/*
         ⚠️ **A control that cannot act is absent, not disabled.**
         `design/Button.tsx` states the rule and #48's first criterion is behind
         it: a disabled button leaves the tab order, so a keyboard user never
@@ -539,122 +546,122 @@ export function RouteBuilderView({
         — "Undo" with nothing to undo is not a thing a rider is owed a sentence
         about — so these simply appear when they mean something.
       */}
-      <div>
-        <Button onClick={place}>Add a waypoint</Button>
-        {canUndo(history) ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setHistory(undo(history));
-            }}
-          >
-            Undo
-          </Button>
-        ) : null}
-        {canRedo(history) ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setHistory(redo(history));
-            }}
-          >
-            Redo
-          </Button>
-        ) : null}
-        {draft.waypoints.length >= 2 ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              apply(reverse(draft));
-            }}
-          >
-            Reverse
-          </Button>
-        ) : null}
-        {/* #2102: a new last waypoint where the first is, so the line ends where it starts. */}
-        {canCloseLoop(draft) ? (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              apply(closeLoop(draft, newLegMode));
-              loopHeading.current?.focus();
-            }}
-          >
-            Close the loop
-          </Button>
-        ) : null}
-        {clearArmed ? (
-          <>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                apply(clear(draft));
-                setSelected(undefined);
-                setClearArmed(false);
-              }}
-            >
-              Yes, clear the route
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setClearArmed(false);
-              }}
-            >
-              Keep the route
-            </Button>
-          </>
-        ) : isEmpty(draft) ? null : (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setClearArmed(true);
-            }}
-          >
-            Clear
-          </Button>
-        )}
-      </div>
+          <div>
+            <Button onClick={place}>Add a waypoint</Button>
+            {canUndo(history) ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setHistory(undo(history));
+                }}
+              >
+                Undo
+              </Button>
+            ) : null}
+            {canRedo(history) ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setHistory(redo(history));
+                }}
+              >
+                Redo
+              </Button>
+            ) : null}
+            {draft.waypoints.length >= 2 ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  apply(reverse(draft));
+                }}
+              >
+                Reverse
+              </Button>
+            ) : null}
+            {/* #2102: a new last waypoint where the first is, so the line ends where it starts. */}
+            {canCloseLoop(draft) ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  apply(closeLoop(draft, newLegMode));
+                  loopHeading.current?.focus();
+                }}
+              >
+                Close the loop
+              </Button>
+            ) : null}
+            {clearArmed ? (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    apply(clear(draft));
+                    setSelected(undefined);
+                    setClearArmed(false);
+                  }}
+                >
+                  Yes, clear the route
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setClearArmed(false);
+                  }}
+                >
+                  Keep the route
+                </Button>
+              </>
+            ) : isEmpty(draft) ? null : (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setClearArmed(true);
+                }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
 
-      {clearArmed ? (
-        <StatusMessage tone="warning" label="Clear the whole route?">
-          This removes all {String(draft.waypoints.length)} waypoints. Undo brings them back.
-        </StatusMessage>
-      ) : null}
+          {clearArmed ? (
+            <StatusMessage tone="warning" label="Clear the whole route?">
+              This removes all {String(draft.waypoints.length)} waypoints. Undo brings them back.
+            </StatusMessage>
+          ) : null}
 
-      {map === undefined ? null : engine.kind === 'failed' ? (
-        <p className="oyl-muted">{PLANNER_MAP_FAILED_TEXT}</p>
-      ) : engine.kind === 'loading' ? (
-        <p className="oyl-muted">Loading the map…</p>
-      ) : (
-        <>
-          {/* Only over a map there is to tap: with no basemap, or offline with
+          {map === undefined ? null : engine.kind === 'failed' ? (
+            <p className="oyl-muted">{PLANNER_MAP_FAILED_TEXT}</p>
+          ) : engine.kind === 'loading' ? (
+            <p className="oyl-muted">Loading the map…</p>
+          ) : (
+            <>
+              {/* Only over a map there is to tap: with no basemap, or offline with
               tiles on, the panel says why there is none instead. */}
-          {basemap !== undefined && (online || !tiles) ? <p>{PLANNER_MAP_TEXT}</p> : null}
-          <MapPanel
-            port={engine.port}
-            basemap={basemap}
-            tiles={tiles}
-            track={geometry}
-            subject="draft"
-            offline={!online}
-            editing={{
-              waypoints: markers,
-              pointer,
-              emptyView: EMPTY_PLANNER_VIEW,
-              onView,
-            }}
-          />
-        </>
-      )}
+              {basemap !== undefined && (online || !tiles) ? <p>{PLANNER_MAP_TEXT}</p> : null}
+              <MapPanel
+                port={engine.port}
+                basemap={basemap}
+                tiles={tiles}
+                track={geometry}
+                subject="draft"
+                offline={!online}
+                editing={{
+                  waypoints: markers,
+                  pointer,
+                  emptyView: EMPTY_PLANNER_VIEW,
+                  onView,
+                }}
+              />
+            </>
+          )}
 
-      {isEmpty(draft) ? (
-        <p>No waypoints yet. Add one to start a route.</p>
-      ) : (
-        <ol>
-          {draft.waypoints.map((waypoint, index) => (
-            <li key={waypoint.id}>
-              {/*
+          {isEmpty(draft) ? (
+            <p>No waypoints yet. Add one to start a route.</p>
+          ) : (
+            <ol>
+              {draft.waypoints.map((waypoint, index) => (
+                <li key={waypoint.id}>
+                  {/*
                 #668: selecting a waypoint changes what the nudges act on, not
                 the route, so it is a toggle. Its name stays "Waypoint N" and
                 `aria-pressed` says whether it is the selected one — a name
@@ -667,184 +674,191 @@ export function RouteBuilderView({
                 the next four stops are its moves — and the section's help
                 says so.
               */}
-              <Button
-                variant="toggle"
-                pressed={waypoint.id === selected}
-                onClick={() => {
-                  setSelected(waypoint.id === selected ? undefined : waypoint.id);
-                }}
-              >
-                {`Waypoint ${String(index + 1)}`}
-              </Button>
-              {waypoint.id === selected
-                ? (
-                    [
-                      ['North', 1, 0],
-                      ['South', -1, 0],
-                      ['East', 0, 1],
-                      ['West', 0, -1],
-                    ] as const
-                  ).map(([label, north, east]) => (
-                    <Button
-                      variant="secondary"
-                      key={label}
-                      onClick={() => {
-                        nudge(waypoint.id, north, east);
-                      }}
-                    >
-                      {`Move waypoint ${String(index + 1)} ${label.toLowerCase()}`}
-                    </Button>
-                  ))
-                : null}
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  apply(deleteWaypoint(draft, waypoint.id));
-                  if (selected === waypoint.id) setSelected(undefined);
-                }}
-              >
-                {`Delete waypoint ${String(index + 1)}`}
-              </Button>
-            </li>
-          ))}
-        </ol>
-      )}
-
-      <h2>Legs</h2>
-      {draft.legs.length === 0 ? (
-        <p>A route needs two waypoints before it has a leg.</p>
-      ) : (
-        <ScrollTable
-          caption={
-            <>
-              Each leg runs from one waypoint to the next. A freehand leg is a straight line you
-              drew yourself, so its distance is a lower bound and nothing knows its surface.
-            </>
-          }
-        >
-          <thead>
-            <tr>
-              <th scope="col">Leg</th>
-              <th scope="col">Drawn</th>
-              <th scope="col">Surface</th>
-              <th scope="col">State</th>
-              <th scope="col">
-                <VisuallyHidden>Change or split this leg</VisuallyHidden>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {draft.legs.map((leg, index) => (
-              <tr key={`leg-${String(index)}`}>
-                {/* #2006's owner review: "3 to 4" and "0.7 km" broke over two
-                    lines at tablet width. A failure's sentence still wraps. */}
-                <th
-                  scope="row"
-                  className="tw:whitespace-nowrap"
-                >{`${String(index + 1)} to ${String(index + 2)}`}</th>
-                <td>{leg.mode === 'snapped' ? 'Following roads' : 'Freehand'}</td>
-                <td>{surfaceWord(leg.surface)}</td>
-                <td className={leg.state === 'routed' ? 'tw:whitespace-nowrap' : undefined}>
-                  {leg.state === 'routed'
-                    ? measurementText(formatDistance(leg.distance, units))
-                    : (leg.failure?.message ?? 'Being routed')}
-                  {leg.failure?.retryable === true ? ' This one is worth trying again.' : ''}
-                </td>
-                <td>
-                  {/* #2006's owner review: with no routing service a leg cannot
-                      follow roads, so the offer is absent (`Button.tsx`'s rule
-                      for a control that cannot act). A snapped leg restored with
-                      none can still be drawn freehand. */}
-                  {provider !== undefined || leg.mode === 'snapped' ? (
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        apply(
-                          setLegMode(draft, index, leg.mode === 'snapped' ? 'freehand' : 'snapped'),
-                        );
-                      }}
-                    >
-                      {leg.mode === 'snapped'
-                        ? `Draw leg ${String(index + 1)} freehand`
-                        : `Follow roads on leg ${String(index + 1)}`}
-                    </Button>
-                  ) : null}
-                  {/* #2006: the list's way to do what pulling the line does. */}
+                  <Button
+                    variant="toggle"
+                    pressed={waypoint.id === selected}
+                    onClick={() => {
+                      setSelected(waypoint.id === selected ? undefined : waypoint.id);
+                    }}
+                  >
+                    {`Waypoint ${String(index + 1)}`}
+                  </Button>
+                  {waypoint.id === selected
+                    ? (
+                        [
+                          ['North', 1, 0],
+                          ['South', -1, 0],
+                          ['East', 0, 1],
+                          ['West', 0, -1],
+                        ] as const
+                      ).map(([label, north, east]) => (
+                        <Button
+                          variant="secondary"
+                          key={label}
+                          onClick={() => {
+                            nudge(waypoint.id, north, east);
+                          }}
+                        >
+                          {`Move waypoint ${String(index + 1)} ${label.toLowerCase()}`}
+                        </Button>
+                      ))
+                    : null}
                   <Button
                     variant="secondary"
                     onClick={() => {
-                      const middle = legMidpoint(draft, index);
-                      if (middle !== undefined) apply(insertWaypoint(draft, index, middle));
+                      apply(deleteWaypoint(draft, waypoint.id));
+                      if (selected === waypoint.id) setSelected(undefined);
                     }}
                   >
-                    {`Add a waypoint halfway along leg ${String(index + 1)}`}
+                    {`Delete waypoint ${String(index + 1)}`}
                   </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </ScrollTable>
-      )}
-      {unresolved === undefined ? null : (
-        <StatusMessage tone="warning" label="Some legs have no route">
-          {unresolved}
-        </StatusMessage>
-      )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
 
-      <h2>How it should be routed</h2>
-      <p>
-        <label htmlFor="surface-tolerance">What you will ride on</label>
-      </p>
-      <select
-        id="surface-tolerance"
-        value={preferences.surface}
-        onChange={(event) => {
-          setPreferences({ ...preferences, surface: event.target.value as SurfaceTolerance });
-        }}
-      >
-        {Object.entries(SURFACE_LABELS).map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-      {risk === undefined ? null : (
-        <StatusMessage tone="warning" label="This setting can refuse a route">
-          {risk}
-        </StatusMessage>
-      )}
+        <div>
+          <h2>Legs</h2>
+          {draft.legs.length === 0 ? (
+            <p>A route needs two waypoints before it has a leg.</p>
+          ) : (
+            <ScrollTable
+              caption={
+                <>
+                  Each leg runs from one waypoint to the next. A freehand leg is a straight line you
+                  drew yourself, so its distance is a lower bound and nothing knows its surface.
+                </>
+              }
+            >
+              <thead>
+                <tr>
+                  <th scope="col">Leg</th>
+                  <th scope="col">Drawn</th>
+                  <th scope="col">Surface</th>
+                  <th scope="col">State</th>
+                  <th scope="col">
+                    <VisuallyHidden>Change or split this leg</VisuallyHidden>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {draft.legs.map((leg, index) => (
+                  <tr key={`leg-${String(index)}`}>
+                    {/* #2006's owner review: "3 to 4" and "0.7 km" broke over two
+                    lines at tablet width. A failure's sentence still wraps. */}
+                    <th
+                      scope="row"
+                      className="tw:whitespace-nowrap"
+                    >{`${String(index + 1)} to ${String(index + 2)}`}</th>
+                    <td>{leg.mode === 'snapped' ? 'Following roads' : 'Freehand'}</td>
+                    <td>{surfaceWord(leg.surface)}</td>
+                    <td className={leg.state === 'routed' ? 'tw:whitespace-nowrap' : undefined}>
+                      {leg.state === 'routed'
+                        ? measurementText(formatDistance(leg.distance, units))
+                        : (leg.failure?.message ?? 'Being routed')}
+                      {leg.failure?.retryable === true ? ' This one is worth trying again.' : ''}
+                    </td>
+                    <td>
+                      {/* #2006's owner review: with no routing service a leg cannot
+                      follow roads, so the offer is absent (`Button.tsx`'s rule
+                      for a control that cannot act). A snapped leg restored with
+                      none can still be drawn freehand. */}
+                      {provider !== undefined || leg.mode === 'snapped' ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            apply(
+                              setLegMode(
+                                draft,
+                                index,
+                                leg.mode === 'snapped' ? 'freehand' : 'snapped',
+                              ),
+                            );
+                          }}
+                        >
+                          {leg.mode === 'snapped'
+                            ? `Draw leg ${String(index + 1)} freehand`
+                            : `Follow roads on leg ${String(index + 1)}`}
+                        </Button>
+                      ) : null}
+                      {/* #2006: the list's way to do what pulling the line does. */}
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          const middle = legMidpoint(draft, index);
+                          if (middle !== undefined) apply(insertWaypoint(draft, index, middle));
+                        }}
+                      >
+                        {`Add a waypoint halfway along leg ${String(index + 1)}`}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </ScrollTable>
+          )}
+          {unresolved === undefined ? null : (
+            <StatusMessage tone="warning" label="Some legs have no route">
+              {unresolved}
+            </StatusMessage>
+          )}
 
-      <h2>Distance, climbing and surface</h2>
-      <p>
-        {/* #2006: a freehand leg's length is a lower bound, so a total with one is a minimum. */}
-        {`${surfaces.freehandLegs > 0 ? 'At least ' : ''}${measurementText(formatDistance(draftDistance(draft), units))} over ${String(draft.legs.length)} ${draft.legs.length === 1 ? 'leg' : 'legs'}.`}
-      </p>
-      <p>
-        {`Paved ${measurementText(formatDistance(metres(surfaces.pavedMetres), units))}, unpaved ${measurementText(formatDistance(metres(surfaces.unpavedMetres), units))}, unknown ${measurementText(formatDistance(metres(surfaces.unknownMetres), units))}.`}
-        {surfaces.freehandLegs > 0
-          ? ` ${String(surfaces.freehandLegs)} freehand ${surfaces.freehandLegs === 1 ? 'leg is' : 'legs are'} counted as unknown, because nothing was asked about them.`
-          : ''}
-      </p>
-
-      {elevationFault === undefined ? null : (
-        <StatusMessage tone="danger" label="No elevation">
-          {elevationFault}
-        </StatusMessage>
-      )}
-      {elevation === undefined ? (
-        <p>No elevation profile yet.</p>
-      ) : (
-        <>
-          <p>{elevationSentence(elevation, units)}</p>
-          <ScrollTable
-            caption={
-              <>
-                The gradient along the route. Each row names its band, so nothing here is carried by
-                colour alone. Bands: {GRADE_BANDS.map((band) => band.name).join(', ')}.
-              </>
-            }
+          <h2>How it should be routed</h2>
+          <p>
+            <label htmlFor="surface-tolerance">What you will ride on</label>
+          </p>
+          <select
+            id="surface-tolerance"
+            value={preferences.surface}
+            onChange={(event) => {
+              setPreferences({ ...preferences, surface: event.target.value as SurfaceTolerance });
+            }}
           >
-            {/*
+            {Object.entries(SURFACE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {risk === undefined ? null : (
+            <StatusMessage tone="warning" label="This setting can refuse a route">
+              {risk}
+            </StatusMessage>
+          )}
+
+          <h2>Distance, climbing and surface</h2>
+          <p>
+            {/* #2006: a freehand leg's length is a lower bound, so a total with one is a minimum. */}
+            {`${surfaces.freehandLegs > 0 ? 'At least ' : ''}${measurementText(formatDistance(draftDistance(draft), units))} over ${String(draft.legs.length)} ${draft.legs.length === 1 ? 'leg' : 'legs'}.`}
+          </p>
+          <p>
+            {`Paved ${measurementText(formatDistance(metres(surfaces.pavedMetres), units))}, unpaved ${measurementText(formatDistance(metres(surfaces.unpavedMetres), units))}, unknown ${measurementText(formatDistance(metres(surfaces.unknownMetres), units))}.`}
+            {surfaces.freehandLegs > 0
+              ? ` ${String(surfaces.freehandLegs)} freehand ${surfaces.freehandLegs === 1 ? 'leg is' : 'legs are'} counted as unknown, because nothing was asked about them.`
+              : ''}
+          </p>
+
+          {elevationFault === undefined ? null : (
+            <StatusMessage tone="danger" label="No elevation">
+              {elevationFault}
+            </StatusMessage>
+          )}
+          {elevation === undefined ? (
+            <p>No elevation profile yet.</p>
+          ) : (
+            <>
+              <p>{elevationSentence(elevation, units)}</p>
+              <ScrollTable
+                caption={
+                  <>
+                    The gradient along the route. Each row names its band, so nothing here is
+                    carried by colour alone. Bands:{' '}
+                    {GRADE_BANDS.map((band) => band.name).join(', ')}.
+                  </>
+                }
+              >
+                {/*
               ⚠️ **The unit is in the column heading, not beside every number,
               and that is a decision rather than a side effect of the #238
               refactor.** #238's third criterion reads *"the unit is always
@@ -860,52 +874,52 @@ export function RouteBuilderView({
               above, every reading on the ride screen — still carries its own
               unit, which is where the criterion bites.
             */}
-            <thead>
-              <tr>
-                <th scope="col">From ({distanceUnit(units)})</th>
-                <th scope="col">To ({distanceUnit(units)})</th>
-                <th scope="col">Gradient</th>
-                <th scope="col">Steepest</th>
-                <th scope="col">Measured</th>
-              </tr>
-            </thead>
-            <tbody>
-              {profileRows(elevation, units).map((row) => (
-                <tr key={`${row.from}-${row.to}`}>
-                  <th scope="row">{row.from}</th>
-                  <td>{row.to}</td>
-                  <td>{row.band}</td>
-                  <td>{`${String(row.steepest)}%`}</td>
-                  <td>{row.measured ? 'Yes' : 'No — the dataset has no height here'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </ScrollTable>
-        </>
-      )}
+                <thead>
+                  <tr>
+                    <th scope="col">From ({distanceUnit(units)})</th>
+                    <th scope="col">To ({distanceUnit(units)})</th>
+                    <th scope="col">Gradient</th>
+                    <th scope="col">Steepest</th>
+                    <th scope="col">Measured</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {profileRows(elevation, units).map((row) => (
+                    <tr key={`${row.from}-${row.to}`}>
+                      <th scope="row">{row.from}</th>
+                      <td>{row.to}</td>
+                      <td>{row.band}</td>
+                      <td>{`${String(row.steepest)}%`}</td>
+                      <td>{row.measured ? 'Yes' : 'No — the dataset has no height here'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </ScrollTable>
+            </>
+          )}
 
-      {/* #2102: a short loop for a lap race, its length against a target. */}
-      <h2 ref={loopHeading} tabIndex={-1}>
-        A short loop for a lap race
-      </h2>
-      {/* The same bare native select, label above, as "What you will ride on". */}
-      <p>
-        <label htmlFor={targetId}>Target length</label>
-      </p>
-      <select
-        id={targetId}
-        value={String(loopTarget)}
-        onChange={(event) => {
-          setLoopTarget(Number(event.target.value) as LoopTargetKm);
-        }}
-      >
-        {LOOP_TARGETS_KM.map((target) => (
-          <option key={target} value={String(target)}>
-            {loopTargetText(target, units)}
-          </option>
-        ))}
-      </select>
-      {/*
+          {/* #2102: a short loop for a lap race, its length against a target. */}
+          <h2 ref={loopHeading} tabIndex={-1}>
+            A short loop for a lap race
+          </h2>
+          {/* The same bare native select, label above, as "What you will ride on". */}
+          <p>
+            <label htmlFor={targetId}>Target length</label>
+          </p>
+          <select
+            id={targetId}
+            value={String(loopTarget)}
+            onChange={(event) => {
+              setLoopTarget(Number(event.target.value) as LoopTargetKm);
+            }}
+          >
+            {LOOP_TARGETS_KM.map((target) => (
+              <option key={target} value={String(target)}>
+                {loopTargetText(target, units)}
+              </option>
+            ))}
+          </select>
+          {/*
         A polite live region, on the page from the start so a change inside it
         is announced. It holds the loop's state only: the state sentence and
         whether a loop is near, under or over its target (PR #2111 review). The
@@ -913,60 +927,62 @@ export function RouteBuilderView({
         and nudge, sit outside it, so a rider drawing a long ride does not hear
         the loop advice again after every waypoint.
       */}
-      <div role="status">
-        <p>{loop.state}</p>
-        {loop.fit === undefined ? null : (
-          <VisuallyHidden>{`${fitLabel(loop.fit)}.`}</VisuallyHidden>
-        )}
-      </div>
-      {loop.length === undefined ? null : <p>{loop.length}</p>}
-      {loop.note === undefined || loop.fit === undefined ? null : (
-        <StatusMessage
-          tone={loop.fit.kind === 'near' ? 'success' : 'warning'}
-          label={fitLabel(loop.fit)}
-        >
-          {loop.note}
-        </StatusMessage>
-      )}
-
-      {/* #2006: the drawn route, into the same library as an imported one. */}
-      {routes === undefined ? null : (
-        <>
-          <h2>Save this route</h2>
-          {draft.waypoints.length < 2 ? (
-            <p>A route needs two waypoints before it can be saved.</p>
-          ) : (
-            <form aria-label="Save this route" onSubmit={(event) => void onSave(event)}>
-              <p>
-                <label htmlFor={nameId}>Name</label>{' '}
-                <input
-                  id={nameId}
-                  name="name"
-                  type="text"
-                  autoComplete="off"
-                  className="oyl-input oyl-planner__name"
-                />
-              </p>
-              <Button type="submit" variant="secondary">
-                Save to your routes
-              </Button>
-            </form>
+          <div role="status">
+            <p>{loop.state}</p>
+            {loop.fit === undefined ? null : (
+              <VisuallyHidden>{`${fitLabel(loop.fit)}.`}</VisuallyHidden>
+            )}
+          </div>
+          {loop.length === undefined ? null : <p>{loop.length}</p>}
+          {loop.note === undefined || loop.fit === undefined ? null : (
+            <StatusMessage
+              tone={loop.fit.kind === 'near' ? 'success' : 'warning'}
+              label={fitLabel(loop.fit)}
+            >
+              {loop.note}
+            </StatusMessage>
           )}
-          {saved?.kind === 'refused' ? (
-            <StatusMessage tone="warning" live>
-              {saved.refusal.message}
-            </StatusMessage>
-          ) : null}
-          {saved?.kind === 'saved' ? (
-            <StatusMessage tone="success" live>
-              {`Saved “${saved.name}” to your routes. It is private.`}
-              {saved.flat ? ` ${FLAT_DRAWN_ROUTE_TEXT}` : ''}
-              {saved.loop ? ` ${SAVED_LOOP_TEXT}` : ''}{' '}
-              <a href={hrefForSelection(routeById('routes'), saved.id)}>Open it in Routes</a>
-            </StatusMessage>
-          ) : null}
-        </>
-      )}
+
+          {/* #2006: the drawn route, into the same library as an imported one. */}
+          {routes === undefined ? null : (
+            <>
+              <h2>Save this route</h2>
+              {draft.waypoints.length < 2 ? (
+                <p>A route needs two waypoints before it can be saved.</p>
+              ) : (
+                <form aria-label="Save this route" onSubmit={(event) => void onSave(event)}>
+                  <p>
+                    <label htmlFor={nameId}>Name</label>{' '}
+                    <input
+                      id={nameId}
+                      name="name"
+                      type="text"
+                      autoComplete="off"
+                      className="oyl-input oyl-planner__name"
+                    />
+                  </p>
+                  <Button type="submit" variant="secondary">
+                    Save to your routes
+                  </Button>
+                </form>
+              )}
+              {saved?.kind === 'refused' ? (
+                <StatusMessage tone="warning" live>
+                  {saved.refusal.message}
+                </StatusMessage>
+              ) : null}
+              {saved?.kind === 'saved' ? (
+                <StatusMessage tone="success" live>
+                  {`Saved “${saved.name}” to your routes. It is private.`}
+                  {saved.flat ? ` ${FLAT_DRAWN_ROUTE_TEXT}` : ''}
+                  {saved.loop ? ` ${SAVED_LOOP_TEXT}` : ''}{' '}
+                  <a href={hrefForSelection(routeById('routes'), saved.id)}>Open it in Routes</a>
+                </StatusMessage>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
     </>
   );
 }

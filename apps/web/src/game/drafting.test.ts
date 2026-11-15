@@ -4,8 +4,8 @@
  * Drafting on this client — #787, ADR 0038 D-4 and D-5: the draft predicted
  * for this rider from the room's newest frame, ridden by the game's own
  * simulation and corrected by the room; where riders are DRAWN against where
- * the room HOLDS them; and that nothing but a room's rider gives or takes a
- * draft. Through the production room port over a scripted room, the same
+ * the room HOLDS them; and that a pacer and a ghost give a draft only on a
+ * solo ride and never take one (#2425, ADR 0066). Through the production room port over a scripted room, the same
  * `RoomSession` and `roomFrame` the game is handed.
  */
 
@@ -21,7 +21,13 @@ import {
   watts,
   type RouteProfile,
 } from '@onyourleft/domain';
-import { advance, fieldDraftFactors, ridingConditions, START_OF_RIDE } from '@onyourleft/physics';
+import {
+  advance,
+  draftFactor,
+  fieldDraftFactors,
+  ridingConditions,
+  START_OF_RIDE,
+} from '@onyourleft/physics';
 
 import { roomPortOver, type RoomConnection } from '../net/room-port';
 import { flush, frameRider, ManualClock, ScriptedRoom } from '../net/testing';
@@ -52,12 +58,19 @@ const MASS = kilograms(70);
 
 const flat = (length: number): RouteProfile => northRoute(length, () => 10);
 
-function simulation(profile: RouteProfile, withPacer = false): GameSimulation {
+function simulation(
+  profile: RouteProfile,
+  withPacer = false,
+  soloDraft = false,
+  intensity = 3,
+): GameSimulation {
   return new GameSimulation({
     profile,
     // What a room ride rides: `ridingConditions`, the call a room makes.
     conditions: ridingConditions(MASS, 'hoods'),
-    ...(withPacer ? { pacer: botPacerPlan(3) } : {}),
+    ...(withPacer ? { pacer: botPacerPlan(intensity) } : {}),
+    // #2425: the solo draft, as `GameView` hands it with the switch on.
+    ...(soloDraft ? { soloDraft: {} } : {}),
   });
 }
 
@@ -118,8 +131,8 @@ describe('the draft this client predicts — #787', () => {
   });
 });
 
-describe('nothing but a room’s rider gives or takes a draft — #327, ADR 0038 D-5', () => {
-  it('gives no draft from a bot pacer 1 m ahead: k = 1', async () => {
+describe('a pacer and a ghost give a draft only on a solo ride, and never take one — #2425, ADR 0066 D-1, D-8', () => {
+  it('gives no draft from a bot pacer 1 m ahead in a room: the room’s k is the only k', async () => {
     const { room, connection } = await joined();
     // The room's frame has this rider alone; the game's bot is a metre up the road.
     room.frame(1, [frameRider(0, 100)]);
@@ -129,17 +142,54 @@ describe('nothing but a room’s rider gives or takes a draft — #327, ADR 0038
     expect(sim.draftFactor).toBe(1);
   });
 
-  it('never drafts the bot, whatever the rider is ridden at', () => {
+  it('drafts a solo rider about a metre behind the pacer at draftFactor(gap, 1), and they ride further than with the switch off, at k = 1', () => {
+    const profile = flat(5_000);
+    const on = simulation(profile, true, true);
+    const off = simulation(profile, true);
+    let nearAMetre = 0;
+    // 600 s at 200 W, one fixed step per call — a millisecond past each
+    // step's boundary, so no call lands on one — so each step's k is read
+    // back against the odometers it began from.
+    on.advanceTo(0, { power: watts(200), live: true });
+    off.advanceTo(0, { power: watts(200), live: true });
+    for (let step = 1; step <= 600 / SIMULATION_STEP_SECONDS; step += 1) {
+      const rider = on.state.ride.distance as number;
+      const bot = on.state.bot?.state.distance as number;
+      const at = step * SIMULATION_STEP_SECONDS * 1000 + 1;
+      expect(on.advanceTo(at, { power: watts(200), live: true }).steps).toBe(1);
+      off.advanceTo(at, { power: watts(200), live: true });
+      expect(off.draftFactor).toBe(1);
+      const gap = bot - rider;
+      // Nobody is behind a rider who is behind the pacer: k is the trailing
+      // table's at depth 1, from `@onyourleft/physics` and nothing beside it.
+      if (gap >= 0.05 && gap <= 30) expect(on.draftFactor).toBe(draftFactor(gap, 1));
+      if (gap > 0.5 && gap < 1.5) nearAMetre += 1;
+    }
+    expect(nearAMetre, 'steps ridden about a metre behind the pacer').toBeGreaterThan(100);
+    expect(on.state.ride.distance).toBeGreaterThan(off.state.ride.distance);
+  });
+
+  it('never drafts the bot, whatever the rider is ridden at, and whether or not the pacer gives a draft', () => {
     const profile = flat(5_000);
     const drafted = simulation(profile, true);
     const alone = simulation(profile, true);
+    // #2425: the pacer giving the rider a draft, with the rider behind it
+    // (200 W) and in front of it (400 W).
+    const behind = simulation(profile, true, true);
+    const ahead = simulation(profile, true, true);
     drafted.draftWith(0.5);
     for (let at = 0; at <= 10_000; at += 100) {
       drafted.advanceTo(at, { power: watts(200), live: true });
       alone.advanceTo(at, { power: watts(200), live: true });
+      behind.advanceTo(at, { power: watts(200), live: true });
+      ahead.advanceTo(at, { power: watts(400), live: true });
+      expect(behind.state.bot?.state.distance).toBe(alone.state.bot?.state.distance);
+      expect(ahead.state.bot?.state.distance).toBe(alone.state.bot?.state.distance);
     }
     expect(drafted.state.bot?.state.distance).toBe(alone.state.bot?.state.distance);
     expect(drafted.state.ride.distance).not.toBe(alone.state.ride.distance);
+    expect(behind.state.ride.distance).not.toBe(alone.state.ride.distance);
+    expect(ahead.state.ride.distance).toBeGreaterThan(alone.state.bot?.state.distance as number);
   });
 });
 

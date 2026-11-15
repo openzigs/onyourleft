@@ -17,8 +17,22 @@
  * `listRoutes` would show up on.
  */
 
-import { metres, seconds, unixSeconds } from '@onyourleft/domain';
-import { activityId, athleteId as toAthleteId, type RouteId } from '@onyourleft/store';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  routeProfile,
+  seconds,
+  unixSeconds,
+} from '@onyourleft/domain';
+import {
+  activityId,
+  athleteId as toAthleteId,
+  type RouteId,
+  type RouteRecord,
+} from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { AnalysisPort } from '../analysis/store-port';
@@ -32,6 +46,25 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
 
 const OWNER = toAthleteId('athlete-a');
+
+/** A saved route over a hill, for the last ride's climb (#2048). */
+const HILL: RouteRecord = {
+  id: stubRouteId('hill'),
+  createdBy: OWNER,
+  name: 'Up the hill',
+  profile: routeProfile(
+    Array.from({ length: 81 }, (_unused, index) => ({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (index * 50) / 111_195),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(30 + 80 * Math.sin((Math.PI * index) / 160)),
+    })),
+  ),
+  visibility: 'private',
+  createdAt: unixSeconds(1_700_000_000),
+  updatedAt: unixSeconds(1_700_000_000),
+};
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 const NOW = 1_790_000_000;
 
@@ -62,7 +95,11 @@ function counted<P extends AnalysisPort | RoutePort>(
   return { port: { ...port, athleteId: port.athleteId, store }, calls };
 }
 
-async function openHome(rides: number, routeId?: RouteId): Promise<Map<string, number>> {
+async function openHome(
+  rides: number,
+  routeId?: RouteId,
+  saved: readonly RouteRecord[] = [],
+): Promise<Map<string, number>> {
   const { port, calls } = counted(
     stubAnalysis(
       OWNER,
@@ -79,7 +116,7 @@ async function openHome(rides: number, routeId?: RouteId): Promise<Map<string, n
       })),
     ),
   );
-  const routes = counted(routeStub(OWNER), calls).port;
+  const routes = counted(routeStub(OWNER, saved), calls).port;
   globalThis.location.hash = '#/';
   mounted = await mount(
     <AppShell
@@ -105,6 +142,22 @@ describe('the store calls Home makes — #939', () => {
       expect(Object.fromEntries(calls)).toEqual({ listActivitySummaries: 1, getAthlete: 1 });
     },
   );
+});
+
+describe('the store calls the last ride makes — #2048', () => {
+  it('its numbers and its climb are from the one list read and Next up’s one getRoute: no read of its own', async () => {
+    const calls = await openHome(40, HILL.id, [HILL]);
+    // The module drew the route's climb…
+    const last = document.querySelector('main section.oyl-home__last');
+    expect(last?.textContent).toContain('Ride 39');
+    expect(last?.querySelectorAll('svg path').length ?? 0).toBeGreaterThan(0);
+    // …and the count is exactly Next up's: one summary list, never a second.
+    expect(Object.fromEntries(calls)).toEqual({
+      listActivitySummaries: 1,
+      getAthlete: 1,
+      getRoute: 1,
+    });
+  });
 });
 
 describe('the store calls next up makes — #1010', () => {

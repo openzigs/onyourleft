@@ -197,7 +197,12 @@ describe('the menus’ sounds — #946', () => {
     const output = recordingOutput();
     const sounds = createMenuSounds(output, () => ({ enabled: true, volume: 1 }));
     const button = document.createElement('button');
-    const menu: PressContext = { immersive: false, routeId: 'home', ridePhase: 'idle' };
+    const menu: PressContext = {
+      immersive: false,
+      routeId: 'home',
+      ridePhase: 'idle',
+      workoutRunning: false,
+    };
     sounds.press(button, { ...menu, immersive: true });
     sounds.press(button, { ...menu, routeId: 'ride' });
     sounds.press(button, { ...menu, routeId: 'game' });
@@ -235,7 +240,7 @@ describe('the menus’ sounds — #946', () => {
     ride.cue('interval');
     createMenuSounds(output, () => readMenuSoundPreference(store)).press(
       document.createElement('button'),
-      { immersive: false, routeId: 'home', ridePhase: 'idle' },
+      { immersive: false, routeId: 'home', ridePhase: 'idle', workoutRunning: false },
     );
     const effects = busOf(fake, output, 'select');
     const cues = busOf(fake, output, 'interval');

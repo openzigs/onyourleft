@@ -73,7 +73,7 @@ describe('rowFor', () => {
 
   it('renders a stored average of 0 W as undefined too — #1054', () => {
     // A ride whose power readings were all 0 stores an average of 0
-    // (`recording/finish.ts` §`averagePowerOf`). Until #1054 the row carried
+    // (`recording/totals.ts` §`rideAveragePower`). Until #1054 the row carried
     // '0' and the card drew "0 W" large; that says nothing was measured.
     expect(rowFor(summary('b', { averagePower: watts(0) }), 'metric').averagePower).toBeUndefined();
     // A mean under half a watt shows as 0 too, and is the same non-fact.

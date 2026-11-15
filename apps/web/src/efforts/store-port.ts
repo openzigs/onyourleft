@@ -43,6 +43,15 @@ export interface EffortStore {
    * caller cannot get it wrong.
    */
   listEfforts(owner: AthleteId, segment: SegmentId, limit?: number): Promise<SegmentEffortRecord[]>;
+  /**
+   * The efforts the rule excluded (#69): no personal best and on no board, and
+   * still the rider's, shown with the reason (`segments/excluded.ts`).
+   */
+  listExcludedEfforts(
+    owner: AthleteId,
+    segment: SegmentId,
+    limit?: number,
+  ): Promise<SegmentEffortRecord[]>;
   /** The ride an effort was found in, for its name and its date. */
   getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
   /** The time base. Sample `i` is at `startedAt + i * sampleInterval`. */

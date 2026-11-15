@@ -16,16 +16,16 @@
  *
  * - **its start**: *12 left*, day 7, the largest round there is;
  * - **nearly over**: *10 delivered, 2 missed*, reached by riding the round —
- *   two houses passed with no throw, then a throw toward the next house
- *   every quarter second of the ride's own clock (Playwright's, so the round
- *   takes seconds rather than minutes), which the assist's wider windows
- *   catch at every house after them.
+ *   two houses passed with no throw, then a press toward the next house
+ *   every 25 ms of the ride's own clock (Playwright's, so the round takes
+ *   seconds rather than minutes, and stopped between those steps, #2282),
+ *   which the assist's wider windows catch at every house after them.
  *
  * ## What is held
  *
  * At those viewports and stages: no HUD panel a rider can see is over the
  * leaning rider's box (`ride-stage.ts` §`riderBox`); every panel is whole,
- * on the stage and over no other panel; *Houses* and *Score* are laid out at
+ * on the stage and over no other panel; *Houses*, *Next house* (#2453) and *Score* are laid out at
  * a size, uncovered, and over neither the actions panel nor *Pause* nor *End
  * ride*; the three throw buttons are whole and uncovered; and on a phone the
  * pacer's, the ghost's and the wind's readings give way (laid out at no size,
@@ -65,14 +65,19 @@ import {
   overlap,
   riderBox,
   type Viewport,
+  windGivesWayToTheDraft,
 } from './ride-stage';
 
 import type { StageItem, StageMeasurement } from './ride-harness';
+import { roadsideBands, type Band } from './roadside-bands';
 
 const DELIVERY_ROUND = '?delivery=round';
 
+/** #2514: the round's HUD drawn as Everything, as it was before the game strip. */
+const EVERYTHING = '&deliveryview=everything';
+
 /** What a round adds to the secondary tier, and what gives way to it on a phone. */
-const DELIVERY_READINGS = ['reading: Houses', 'reading: Score'] as const;
+const DELIVERY_READINGS = ['reading: Houses', 'reading: Next house', 'reading: Score'] as const;
 const GIVES_WAY = ['reading: Pacer', 'reading: Your best', 'reading: Wind'] as const;
 
 /** The three throw buttons, `hud/ThrowControl.tsx` §`THROW_BUTTONS`. */
@@ -100,24 +105,93 @@ async function houses(page: Page): Promise<{ readonly left: string; readonly det
 }
 
 /**
+ * Stop the page's clock about where it is, so that nothing on the page moves
+ * unless {@link rideToNearlyOver} runs it on — #2282.
+ *
+ * `pauseAt` jumps the clock as `fastForward` does and then leaves it stopped;
+ * the jump is {@link STOP_AFTER_MS}, too short to carry the rider past a
+ * house's window. If the page's clock ran past that mark between reading it
+ * and stopping it, `pauseAt` throws, but it stops the clock before it jumps
+ * (Playwright 1.63 `ClockController.pauseAt`: `_innerPause()` first, then
+ * `_innerFastForwardTo`), so the clock is stopped where it was, which is
+ * still on the round's first steps. #2276 does the same for #1307.
+ */
+async function stopTheClock(page: Page): Promise<void> {
+  const pageNow = await page.evaluate(() => Date.now());
+  try {
+    await page.clock.pauseAt(pageNow + STOP_AFTER_MS);
+  } catch (error) {
+    if (!String(error).includes('Cannot fast-forward to the past')) throw error;
+  }
+}
+
+/** The jump {@link stopTheClock} makes as it stops the clock. */
+const STOP_AFTER_MS = 100;
+
+/**
  * Ride the round on to *10 delivered, 2 missed* on Playwright's clock: no
- * throw until two houses are missed, then one toward the next house every
- * quarter second (`throw-input.ts` §`THROW_KEYS`, the up arrow).
+ * throw until two houses are missed, then a press toward the next house
+ * (`throw-input.ts` §`THROW_KEYS`, the up arrow) every
+ * {@link PRESS_EVERY_MS} of the ride, with a look at *Houses* every
+ * {@link LOOK_EVERY_MS}.
+ *
+ * ⚠️ **On a STOPPED clock, and a press every half tick — #2282.** Until
+ * #2282 the clock was installed and left running, with one press and one
+ * `runFor(250)` a look, and *8 delivered, 3 missed* was read on a busy CI
+ * runner. Two things let a house's window pass with no throw in it:
+ *
+ * - **The runner's clock.** Between two `runFor` steps the page's clock ran
+ *   on with the runner's, so every look and every press let the rider ride on
+ *   with no throw. {@link stopTheClock} stops it first, so the ride moves
+ *   only in the steps below, every frame fired. Measured here with a 1 s wait
+ *   added before every fourth look: 4 rounds in 4 missed a third house on the
+ *   running clock, and 4 in 4 reached the end on the stopped one.
+ * - **The cool-down, at the descent's speed.** A press inside `throw.ts`
+ *   §`THROW_COOLDOWN_SECONDS` (0.5 s) is refused, not kept, so a press each
+ *   250 ms threw every 500 ms or every 750 ms, as the press fell either side
+ *   of the cool-down's last tick. The assist's catch radius (4.5 m each way,
+ *   `ASSISTED_THROW_SCALE`) takes a throw from 9 m of road before a house,
+ *   and by the round's last houses the rider is at 50 to 57 km/h downhill
+ *   (the HUD's *Speed*, 36 rounds): 750 ms there is 10 to 12 m, so a house
+ *   could fall between two throws. Even on the stopped clock 4 rounds in 72
+ *   did. `GameView` hands a press to the round on the next frame that runs a
+ *   simulation tick (`throw.ts` §`DELIVERY_TICK_SECONDS`, 50 ms), and on
+ *   Playwright's 16 ms frames those come 48 or 64 ms apart; a press every
+ *   half tick, 25 ms, is waiting at every one of them, so the throw is taken
+ *   on the first tick the cool-down allows. The throws are then 500 ms
+ *   apart, 8 m at 57 km/h, and every house has one in reach.
+ *
+ * The round's houses are its own seed's (`targets.ts` §`drawRoundSeed`),
+ * which nothing here sets, so which look a round ends on varies from run to
+ * run; the runner's speed no longer changes it.
  */
 async function rideToNearlyOver(page: Page): Promise<void> {
+  await stopTheClock(page);
   const done = '10\u00a0delivered, 2\u00a0missed';
-  for (let step = 0; step < 4_000; step += 1) {
+  for (let look = 0; look < 4_000; look += 1) {
     const now = await houses(page);
     if (now.detail === done) return;
     const missed = Number(/(\d+)\u00a0missed/.exec(now.detail)?.[1] ?? '0');
     if (missed > 2) {
       throw new Error(`the round missed a third house: ${now.detail}`);
     }
-    if (missed === 2) await page.keyboard.press('ArrowUp');
-    await page.clock.runFor(250);
+    if (missed < 2) {
+      await page.clock.runFor(LOOK_EVERY_MS);
+      continue;
+    }
+    for (let ridden = 0; ridden < LOOK_EVERY_MS; ridden += PRESS_EVERY_MS) {
+      await page.keyboard.press('ArrowUp');
+      await page.clock.runFor(PRESS_EVERY_MS);
+    }
   }
   throw new Error(`the round never reached ${done}: ${(await houses(page)).detail}`);
 }
+
+/** How much of the ride {@link rideToNearlyOver} runs between two looks at *Houses*. */
+const LOOK_EVERY_MS = 250;
+
+/** How much of the ride it runs between two presses: half of `throw.ts` §`DELIVERY_TICK_SECONDS`. */
+const PRESS_EVERY_MS = 25;
 
 /** The panels a rider can see: a 1 px clipped box is not one. */
 function seenPanels(seen: StageMeasurement): readonly StageItem[] {
@@ -140,7 +214,13 @@ async function resizeTo(page: Page, viewport: Viewport): Promise<void> {
 }
 
 /** Everything §"What is held" says, at one viewport, both ways. */
-async function holdTheStage(page: Page, viewport: Viewport, stage: string): Promise<void> {
+async function holdTheStage(
+  page: Page,
+  viewport: Viewport,
+  stage: string,
+  /** #2514: the HUD drawn as Everything, whose give-way this also holds; else the game strip. */
+  everything = false,
+): Promise<void> {
   const tablet = TABLET_VIEWPORTS.includes(viewport);
   const rider = riderBox(viewport);
   for (const [how, seen] of await bothWays(page)) {
@@ -181,8 +261,20 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       expect(inside(button.box, viewport), `${at}: ${describeItem(button)}`).toBe(true);
       expect(button.onTop, `${at}: ${describeItem(button)}`).toBe(true);
     }
+    // #2514: the game strip draws power, speed and the round's own, and no more.
+    if (!everything) {
+      expect(seen.secondary, at).toEqual(['Speed', 'Houses', 'Next house', 'Score']);
+      continue;
+    }
     // On a phone the pacer, the ghost and the wind give way, still in the list.
     for (const name of GIVES_WAY) {
+      // #2425: a round is ridden alone, so from 50 rem tall on a tablet the
+      // wind gives way to the solo draft (`theme.css` §"the wind gives way to
+      // it"), and is still in the list.
+      if (name === 'reading: Wind' && tablet && windGivesWayToTheDraft(viewport)) {
+        expect(seen.givenWay, `${at}: ${name}`).toContain(name);
+        continue;
+      }
       const reading = named(seen.items, name);
       if (tablet) {
         expect(inside(reading.box, viewport), `${at}: ${describeItem(reading)}`).toBe(true);
@@ -197,10 +289,22 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       // #2072: drawn in the primary panel's clock row.
       'Elapsed',
       'Clock',
+      // #2076: the ride so far, given way on a phone's overlay.
+      'Distance',
+      'Climbed',
+      'Avg power',
+      'Calories',
+      // #2077: the rider's effort.
+      'W/kg',
+      'Zone',
       'Pacer',
       'Your best',
+      // #2425: a solo ride's draft — a round is ridden alone — on a tablet only.
+      'Draft',
       'Wind',
       'Houses',
+      // #2453: where the next house is, between the round's count and its score.
+      'Next house',
       'Score',
     ]);
     if (!tablet) {
@@ -227,6 +331,19 @@ test.describe('a Delivery round’s HUD on the stage, beside the leaning rider �
     }
   });
 
+  test('at the round’s start, drawn as Everything, at every overlay viewport — #2514', async ({
+    page,
+  }) => {
+    await openRide(page, OVERLAY_VIEWPORTS[0] as Viewport, `${DELIVERY_ROUND}${EVERYTHING}`);
+    expect(await houses(page)).toMatchObject({ left: '12' });
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      await test.step(viewport.name, async () => {
+        await resizeTo(page, viewport);
+        await holdTheStage(page, viewport, 'at its start, as Everything', true);
+      });
+    }
+  });
+
   test('nearly over, 10 delivered and 2 missed, at every overlay viewport', async ({ page }) => {
     test.setTimeout(240_000);
     await page.clock.install();
@@ -247,7 +364,8 @@ test.describe('a Delivery round’s HUD on the stage, beside the leaning rider �
   test('the control — with the give-way rule undone, a row is added, and at 736×360 a panel is over the rider', async ({
     page,
   }) => {
-    await openRide(page, OVERLAY_VIEWPORTS[0] as Viewport, DELIVERY_ROUND);
+    // #2514: as Everything, the only HUD the give-way rule has readings to give way in.
+    await openRide(page, OVERLAY_VIEWPORTS[0] as Viewport, `${DELIVERY_ROUND}${EVERYTHING}`);
     const red: string[] = [];
     let smallest: readonly StageItem[] | undefined;
     for (const viewport of OVERLAY_VIEWPORTS.filter((each) => !TABLET_VIEWPORTS.includes(each))) {
@@ -276,5 +394,103 @@ test.describe('a Delivery round’s HUD on the stage, beside the leaning rider �
     }
     console.log(`#1816 control: red at ${red.join('; ')}`);
     expect(smallest?.map(describeItem) ?? [], 'over the rider at 736×360').not.toEqual([]);
+  });
+});
+
+/**
+ * #2514 — the roadsides clear for throwing. The owner, on the tablet at
+ * 1280×800: "It is hard to see when throwing the packages due to all side
+ * menus." The houses and their markers stand where `roadside-bands.ts` says,
+ * either side of the road from #2453's 100 m down to the edge of the frame,
+ * and on a round's ride the route panel, the lap table and the wide reading
+ * panels stood there. With the game strip (`HudCore.tsx` §`deliveryGame`,
+ * the default since #2514) no panel a rider can see is over either band, at
+ * the issue's three viewports. The control is the same ride drawn as
+ * *Everything*, the HUD the round drew before #2514, kept on the device as a
+ * rider who chose it in Settings would have (`ride-harness.tsx`
+ * §`?deliveryview=everything`): a panel is then over a band at the owner's
+ * 1280×800.
+ */
+const ROADSIDE_VIEWPORTS = OVERLAY_VIEWPORTS.filter((each) =>
+  ['1280×800', '1024×768', '800×1280'].includes(`${String(each.width)}×${String(each.height)}`),
+);
+
+/** Every panel a rider can see that is over a roadside band, as `name: band`. */
+function overRoadside(seen: StageMeasurement, viewport: Viewport): string[] {
+  const bands = roadsideBands(viewport);
+  const over: string[] = [];
+  for (const panel of seen.panels) {
+    if (panel.box.width === 0 || panel.box.height === 0) continue;
+    for (const [side, band] of Object.entries<Band>(bands)) {
+      const box = {
+        ...band,
+        width: band.right - band.left,
+        height: band.bottom - band.top,
+      };
+      if (overlap(panel.box, box)) over.push(`${describeItem(panel)}: the ${side} roadside`);
+    }
+  }
+  return over;
+}
+
+test.describe('a Delivery round’s game strip keeps the roadsides clear — #2514', () => {
+  for (const viewport of ROADSIDE_VIEWPORTS) {
+    test(`no panel is over either roadside at ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, DELIVERY_ROUND);
+      const seen = await measure(page);
+      // Not vacuous: the round is on the HUD, as the game strip, with its panels drawn.
+      expect(await houses(page)).toMatchObject({ left: '12' });
+      expect(
+        await page.evaluate(() =>
+          document.querySelector('.oyl-hud')?.classList.contains('oyl-hud--delivery-game'),
+        ),
+      ).toBe(true);
+      expect(seen.panels.length).toBeGreaterThan(1);
+      console.log(
+        `#2514 ${viewport.name}: bands ${JSON.stringify(roadsideBands(viewport))}, panels ` +
+          JSON.stringify(seen.panels.map((each) => describeItem(each))),
+      );
+      expect(overRoadside(seen, viewport)).toEqual([]);
+      // And the round's own fields are still read where a rider reads them.
+      for (const reading of DELIVERY_READINGS) {
+        expect(named(seen.items, reading).box.width).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  test('at the largest text, every panel whole and none over a roadside, on every tablet', async ({
+    page,
+  }) => {
+    for (const viewport of ROADSIDE_VIEWPORTS) {
+      await test.step(viewport.name, async () => {
+        await openRide(page, viewport, `${DELIVERY_ROUND}&text=extra-large`);
+        const seen = await measure(page);
+        expect(
+          await page.evaluate(() =>
+            document.querySelector('.oyl-hud')?.getAttribute('data-oyl-hud-text'),
+          ),
+        ).toBe('extra-large');
+        expect(seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
+          [],
+        );
+        expect(overRoadside(seen, viewport)).toEqual([]);
+        for (const reading of DELIVERY_READINGS) {
+          expect(inside(named(seen.items, reading).box, viewport), reading).toBe(true);
+        }
+      });
+    }
+  });
+
+  test('the control — drawn as Everything, a panel is over a roadside at 1280×800', async ({
+    page,
+  }) => {
+    const owners = ROADSIDE_VIEWPORTS[0];
+    if (owners === undefined) throw new Error('no 1280×800 viewport');
+    await openRide(page, owners, `${DELIVERY_ROUND}${EVERYTHING}`);
+    const seen = await measure(page);
+    expect(await houses(page)).toMatchObject({ left: '12' });
+    const over = overRoadside(seen, owners);
+    console.log(`#2514 control, drawn as Everything at ${owners.name}: ${JSON.stringify(over)}`);
+    expect(over.length).toBeGreaterThan(0);
   });
 });

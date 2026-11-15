@@ -85,8 +85,8 @@ describe('readConfig', () => {
   });
 
   it('reads the instance’s name, trimmed — #777', () => {
-    const result = readConfig({ commit: COMMIT, name: '  Lanes of the Weald ' });
-    expect(result.ok && result.config.name).toBe('Lanes of the Weald');
+    const result = readConfig({ commit: COMMIT, name: '  Lanes by the old quarry ' });
+    expect(result.ok && result.config.name).toBe('Lanes by the old quarry');
     const blank = readConfig({ commit: COMMIT, name: '   ' });
     expect(blank.ok && blank.config.name).toBeNull();
   });

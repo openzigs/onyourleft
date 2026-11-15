@@ -10,6 +10,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { metres } from '@onyourleft/domain';
+
 import { RIDE_READINGS_STORAGE_KEY, readRideReadings } from '../ride/reading-choice';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -127,5 +129,32 @@ describe('a channel with no reading yet', () => {
     expect(speed?.querySelector('.oyl-reading__value')?.textContent).toBe('—');
     expect(speed?.textContent).toContain('waiting for the first reading');
     expect(speed?.querySelector('.oyl-reading__value')?.textContent).not.toMatch(/\d/);
+  });
+});
+
+/**
+ * #2076: the ride's distance on the Ride screen, in its clock row beside the
+ * two ride times — the recorder's figure (`RideSnapshot.totals`), the one the
+ * saved ride states. That the snapshot's figure IS the saved ride's is
+ * `ride/controller.test.ts` §"#2076"; this is that the screen draws it.
+ */
+describe('the ride’s distance — #2076', () => {
+  const totals = { distance: metres(12_345), climbed: undefined, averagePower: undefined };
+  const terms = (): string[] =>
+    queryAll(document, '.oyl-ride__clock .oyl-ride__time > dt').map(
+      (each) => each.textContent ?? '',
+    );
+
+  it('is in the clock row, after the two times, from the recorder’s figure, in the rider’s unit', async () => {
+    await show({ ...ridingSnapshot(), totals });
+    expect(terms()).toEqual(['Elapsed', 'Moving', 'Distance', 'Clock', 'Recorded']);
+    expect(document.querySelector('.oyl-ride__time--distance > dd')?.textContent).toBe('12.3 km');
+    // The readings the rider chose are the four they were.
+    expect(cards()).toEqual(['Power', 'Cadence', 'Heart rate', 'Speed']);
+  });
+
+  it('is not drawn with nothing recorded', async () => {
+    await show({ ...ridingSnapshot(), totals: undefined });
+    expect(terms()).not.toContain('Distance');
   });
 });

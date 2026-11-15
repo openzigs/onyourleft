@@ -9,6 +9,7 @@ import { CHART_POINTS, downsample, gapSamples, seriesFor } from '../detail/serie
 import { describeTrace } from '../detail/TraceChart';
 import {
   GAME_OUTCOME_TEXT,
+  gameOutcomeText,
   rideResultOf,
   statedAverageHeartRate,
   type SavedRide,
@@ -51,6 +52,19 @@ describe('rideResultOf — when there is a card at all (#1042)', () => {
     { savedRide: undefined },
   ])('is nothing when %o', (change) => {
     expect(rideResultOf({ ...SAVED, ...change })).toBeUndefined();
+  });
+});
+
+describe('gameOutcomeText — #2425, ADR 0066 D-5.1', () => {
+  it('adds “with its draft” after a drafted attempt, and says each outcome as before otherwise', () => {
+    expect(gameOutcomeText(RIDE)).toBeUndefined();
+    expect(gameOutcomeText({ ...RIDE, gameOutcomeDrafted: true })).toBeUndefined();
+    expect(gameOutcomeText({ ...RIDE, gameOutcome: 'not-beaten', gameOutcomeDrafted: true })).toBe(
+      'In your last trainer game ride, your best on that route finished ahead of you, with its draft.',
+    );
+    for (const outcome of ['beaten', 'level', 'not-beaten'] as const) {
+      expect(gameOutcomeText({ ...RIDE, gameOutcome: outcome })).toBe(GAME_OUTCOME_TEXT[outcome]);
+    }
   });
 });
 

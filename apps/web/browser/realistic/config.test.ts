@@ -760,6 +760,9 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'utf8',
     );
     expect(harness).toMatch(/config\.town === 'grounds'\s*\?\s*fencedGroundsFixture\(latitude\)/);
+    // #2362: and the fixture level is ridden as a town, through its own file's corridor.
+    expect(parseConfig('?town=level').town).toBe('level');
+    expect(harness).toMatch(/config\.town === 'level'\s*\?\s*fixtureLevelTown\(\)/);
     expect(harness).toMatch(/setRealisticLitter\(litterWithLevers\(config\.leversOff\)\)/);
     expect(harness).toMatch(/setRealisticChainLink\(chainLinkWithLevers\(config\.leversOff\)\)/);
     expect(harness).toMatch(/townWithChainLink\(mappedTown\(/);

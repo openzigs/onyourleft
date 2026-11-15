@@ -218,17 +218,18 @@ describe('the activity reads (#38)', () => {
       'GET',
       `/v1/activities/${content}/streams?points=400`,
     );
-    const fullBytes = (await full.arrayBuffer()).byteLength;
+    const fullText = await full.text();
+    const fullBytes = Buffer.byteLength(fullText);
     const chartBytes = (await chart.arrayBuffer()).byteLength;
-    const fullBody = (await (
-      await authorised(world, rider!.token, 'GET', `/v1/activities/${content}/streams`)
-    ).json()) as { samples: number; points: number };
+    // The full series read once, and both counted and parsed: asking for it a
+    // second time to parse it was a third of this case's time (#2569).
+    const fullBody = JSON.parse(fullText) as { samples: number; points: number };
     expect(fullBody).toMatchObject({ samples: 14_400, points: 14_400 });
     console.log(
       `#38 transfer: full series ${String(fullBytes)} bytes, 400 points ${String(chartBytes)} bytes, ratio ${(fullBytes / chartBytes).toFixed(1)}`,
     );
     expect(fullBytes / chartBytes).toBeGreaterThan(10);
-  }, 30_000);
+  });
 
   it('keeps a gap a gap when it downsamples, and refuses a resolution out of range', async () => {
     const setup = await syncWorld(1);
@@ -332,7 +333,7 @@ describe('the activity reads (#38)', () => {
     );
     expect(timings.list).toBeLessThan(READ_BUDGET_MS);
     expect(timings.detail).toBeLessThan(READ_BUDGET_MS);
-  }, 60_000);
+  });
 });
 
 /**

@@ -38,27 +38,37 @@ export interface LaunchRelease {
 /**
  * Release `port` once, from whichever of {@link LaunchRelease}'s two calls
  * comes first. `frame` is `requestAnimationFrame` in `main.tsx`.
+ *
+ * `released` is told the same moment, once, and whether the first render
+ * failed: #2053's intro (`intro.ts`) ends there, so it takes over from the
+ * splash in the frame the splash lets go.
  */
 export function launchRelease(
   port: LaunchPort,
   frame: (callback: () => void) => void,
+  released: (failed: boolean) => void = () => undefined,
 ): LaunchRelease {
-  let released = false;
+  let done = false;
   // StrictMode runs a mount effect twice, and a later draw may run it again;
   // a failure may follow a release. Only the first call reaches the port.
-  const release = (): void => {
-    if (released) return;
-    released = true;
+  const release = (failed: boolean): void => {
+    if (done) return;
+    done = true;
     // The shell's timeout is the fallback, so a refusal changes nothing.
     port.releaseSplash().catch(() => undefined);
+    released(failed);
   };
   return {
     rendered: () => {
       frame(() => {
-        frame(release);
+        frame(() => {
+          release(false);
+        });
       });
     },
-    failed: release,
+    failed: () => {
+      release(true);
+    },
   };
 }
 

@@ -31,21 +31,44 @@
  *
  * Every change is also a press, so the parent resumes a suspended audio
  * context from here (`web-audio.ts` §"What happens when it is suspended").
+ *
+ * ## ⚠️ It also shows, and clears, the master mute — #2219
+ *
+ * The header's *Mute all sound* (#2056, `shell/HeaderMute.tsx`) silences the
+ * graph's master, cues included, and it is on the menu routes only. So a rider
+ * who muted there would start a ride with every cue silent and this button
+ * unpressed. It is therefore pressed while EITHER the ride's sounds or the
+ * master are muted — what it says is whether the ride is heard — and a press
+ * that unmutes clears both. A press that mutes is the ride's own mute, as it
+ * always was, and leaves the master alone. No control is added and none moves
+ * (`design/ride-time-controls.ts`).
+ *
+ * The master is read from storage when the controls mount: nothing on a ride
+ * route writes it but this button. The press keeps the master BEFORE it calls
+ * `onChange`, whose `RideCues.begin` resumes the output, and the output sets
+ * its buses from the mix as it is stored at that moment.
  */
 
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 
+import { readMusicAndMaster, writeMasterMuted } from './audio-mix';
 import { steppedVolume, type CuePreference } from './cue-preference';
+import { deviceStorage, type PreferenceStorage } from './hud/announce-preference';
 
 export interface SoundControlsProps {
   readonly preference: CuePreference;
   /** The rider changed something. Called from inside the press. */
   readonly onChange: (next: CuePreference) => void;
+  /** Where the master mute is kept (#2219); the device's own storage when absent. */
+  readonly storage?: PreferenceStorage | undefined;
 }
 
-export function SoundControls({ preference, onChange }: SoundControlsProps): JSX.Element {
+export function SoundControls({ preference, onChange, storage }: SoundControlsProps): JSX.Element {
+  const store = (): PreferenceStorage | undefined => storage ?? deviceStorage();
+  const [masterMuted, setMasterMuted] = useState(() => readMusicAndMaster(store()).masterMuted);
+  const silenced = preference.muted || masterMuted;
   return (
     <div className="oyl-sound" role="group" aria-label="Sounds">
       {/*
@@ -55,11 +78,17 @@ export function SoundControls({ preference, onChange }: SoundControlsProps): JSX
       */}
       <Button
         variant="toggle"
-        pressed={preference.muted}
+        pressed={silenced}
         size="ride"
         className="oyl-sound__mute"
         onClick={() => {
-          onChange({ ...preference, muted: !preference.muted });
+          if (masterMuted) {
+            // The output reads the master back from storage, so a clear the
+            // device refused would show unpressed and still be silent.
+            if (!writeMasterMuted(store(), false)) return;
+            setMasterMuted(false);
+          }
+          onChange({ ...preference, muted: !silenced });
         }}
       >
         {/*
