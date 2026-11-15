@@ -68,8 +68,8 @@ describe('the Operate area’s AI backend — #2611', () => {
       [...document.querySelectorAll('main h2, main h3')].map((each) => each.textContent),
     ).toEqual([
       'AI backend',
-      'Now',
       'What the instance offers riders',
+      'Now',
       'Pick a local model',
       'Your own hosted key',
       'Jobs',

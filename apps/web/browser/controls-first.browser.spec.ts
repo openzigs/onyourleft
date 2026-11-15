@@ -332,7 +332,13 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // what Accounts is for, and what every registration mode shares, are behind
   // each heading's ⓘ. The mode heading names the populated instance's mode,
   // read from its fixture so the two cannot drift.
-  operate: ['Status', 'Accounts', `Registration mode: ${SCRIPTED_STATUS.registration}`],
+  // #2611: the AI backend's purpose is behind its ⓘ.
+  operate: [
+    'Status',
+    'Accounts',
+    `Registration mode: ${SCRIPTED_STATUS.registration}`,
+    'AI backend',
+  ],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is
   // connected or a write-up is saved (#1103), which the populated ports are.

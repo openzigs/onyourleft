@@ -448,7 +448,6 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
   const maySave = picked !== null && passed.has(picked) && !busy;
   return (
     <AiSection>
-      <Now analysis={analysis} version={list?.version ?? null} />
       <Offers
         analysis={analysis}
         busy={busy}
@@ -463,6 +462,8 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
           });
         }}
       />
+      {/* After the switches: controls first (#666), the state they act on beneath. */}
+      <Now analysis={analysis} version={list?.version ?? null} />
 
       <h3>Pick a local model</h3>
       <KeptVisible>
