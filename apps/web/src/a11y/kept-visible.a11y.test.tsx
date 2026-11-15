@@ -88,6 +88,7 @@ import { capacitorShellSupport } from '../support/shell-support';
 import { emptyTransferPort } from '../testing/transfer-port';
 import { FILES_KEPT_VISIBLE } from '../transfer/TransferView';
 import { CAMERA_AGREED_KEPT_VISIBLE, CAMERA_KEPT_VISIBLE, CameraView } from '../views/CameraView';
+import { OPERATE_AI_KEPT_VISIBLE } from '../views/OperateAnalysisPanel';
 import {
   DEVICES_KEPT_VISIBLE,
   DEVICES_NO_BLUETOOTH_KEPT_VISIBLE,
@@ -319,8 +320,14 @@ const KEPT: Record<RouteId, Kept> = {
     populated: MODERATION_KEPT_VISIBLE,
     reason: 'the empty walk is an account that moderates nothing, so the page has no action on it',
   },
-  // #2603: the owner's log and a list of sections to come; nothing on it acts.
-  operate: { sentences: [], reason: `${NOTHING_TUCKED}: a read-only log and a list` },
+  // #2603: the owner's log and a list of sections to come, which acts on
+  // nothing; #2611: the owner's (the populated walk) AI backend — that a
+  // rider's key is their own, and that a check may slow a rider's write-up.
+  operate: {
+    sentences: [],
+    populated: OPERATE_AI_KEPT_VISIBLE,
+    reason: 'the empty walk is an account that owns nothing, so the page has no section on it',
+  },
   'route-builder': { sentences: [], reason: NOTHING_TUCKED },
   'route-editor': { sentences: [], reason: NOTHING_TUCKED },
   'activity-detail': {

@@ -806,3 +806,62 @@ describe('Switch re-plans off, in the game — #1329', () => {
     expect(offButton()).toBeUndefined();
   });
 });
+
+/**
+ * #2593: the climb callout through the real game. Its sentence is live only
+ * where this region does not say climbs, so a rider never hears the climb
+ * twice — `GameView` hands the HUD `climbsSpoken` of the preference it read
+ * as the ride began, and a HUD that was never told stays silent (the demo's).
+ */
+describe('the climb callout, beside the same region — #2593', () => {
+  const callout = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('[data-testid="oyl-hud-climb-callout"]');
+
+  /** Pump frames until the callout stands, or give up. */
+  async function pumpUntilCallout(frames: number): Promise<HTMLElement | null> {
+    for (let frame = 0; frame < frames && callout() === null; frame += 1) await pump(1);
+    return callout();
+  }
+
+  it('announces the climb itself, once, to a rider whose region says no climbs', async () => {
+    routes = [hillyRoute()];
+    await startRide();
+    const shown = await pumpUntilCallout(400);
+    expect(shown?.querySelector('.oyl-hud__climb-callout-text')?.textContent).toMatch(
+      /^Climb in \d+0 m · [5-7] % avg · 0\.5 km$/,
+    );
+    const sentence = shown?.querySelector('[role="status"]');
+    expect(sentence?.textContent).toMatch(/^Climb in \d+0 metres: [5-7] per cent average/);
+    // The region itself said nothing: announcements are off.
+    expect(region()?.textContent).toBe('');
+    expect(offered).not.toContain('climb-ahead');
+  });
+
+  it('is shown and NOT announced where the region says the climb', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 250,
+    });
+    await startRide();
+    const shown = await pumpUntilCallout(400);
+    expect(shown).not.toBeNull();
+    expect(shown?.querySelector('[role="status"], [aria-live]')).toBeNull();
+    // The region says it, once, as #399 has it.
+    expect(await pumpUntil(/^Climb/, 200)).toMatch(/^Climb in 250 metres, [5-7] percent$/);
+    expect(voicesOnTheStage()).toHaveLength(1);
+  });
+
+  it('is announced by itself where announcements are on and the climb row is never', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+    await startRide();
+    const shown = await pumpUntilCallout(400);
+    expect(shown?.querySelector('[role="status"]')?.textContent).toMatch(/^Climb in /);
+  });
+});

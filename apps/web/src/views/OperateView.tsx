@@ -14,6 +14,7 @@ import type {
 import { hrefFor, routeById } from '../shell/routes';
 import { OperateAccountsPanel } from './OperateAccountsPanel';
 import { OperateBackupsPanel } from './OperateBackupsPanel';
+import { OperateAnalysisPanel } from './OperateAnalysisPanel';
 import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
@@ -21,8 +22,9 @@ import { OperateStatusPanel } from './OperateStatusPanel';
  * the instance this device is signed in to. It shows the instance's Status
  * (#2604, `OperateStatusPanel.tsx`), its Accounts (#2605,
  * `OperateAccountsPanel.tsx`, read from the same status), its Backups (#2607,
- * `OperateBackupsPanel.tsx`, which reads its own list and asks for a backup)
- * and the operator log (#2602); the
+ * `OperateBackupsPanel.tsx`, which reads its own list and asks for a backup),
+ * its AI backend (#2611, `OperateAnalysisPanel.tsx`) and the operator log
+ * (#2602); the
  * sections later sub-issues fill are listed, not yet drawn.
  *
  * ## Shown to the owner only
@@ -53,7 +55,6 @@ export const OPERATE_PURPOSE =
 
 /** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
 export const OPERATE_SECTIONS_TO_COME: readonly string[] = [
-  'AI backend',
   'Rooms',
   'Instance keys',
   'Recent errors',
@@ -106,6 +107,11 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['load_accounts_add', 'Load-test accounts added'],
   ['load_accounts_erase', 'Load-test accounts erased'],
   ['account_erase', 'Account erased'],
+  // #2609, #2610: the AI backend's.
+  ['analysis_settings_set', 'AI settings changed'],
+  ['analysis_settings_cleared', 'AI settings returned to .env'],
+  ['analysis_model_checked', 'Model checked for tool calling'],
+  // #2641: the instance's own admin pages.
   ['admin_code_minted', 'Admin sign-in code made'],
   ['admin_sign_in', 'Signed in to the admin pages'],
   ['admin_refused', 'Admin sign-in attempts refused'],
@@ -333,6 +339,7 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       <OperateStatusPanel status={shown.status} />
       <OperateAccountsPanel status={shown.status} />
       <OperateBackupsPanel port={port} />
+      <OperateAnalysisPanel port={port} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}

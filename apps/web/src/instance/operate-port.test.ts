@@ -459,7 +459,20 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
   it('has no way to restore: the port asks for backups and nothing else that changes one', async () => {
     const { owner } = await operatedWorld();
     const methods = Object.keys(createOperatePort(owner.dependencies)).sort();
-    expect(methods).toEqual(['backUpNow', 'backups', 'log', 'standing', 'status']);
+    // #2611's are the AI backend's: none of them touches a backup.
+    expect(methods).toEqual([
+      'analysis',
+      'backUpNow',
+      'backups',
+      'checkModel',
+      'clearAnalysis',
+      'jobs',
+      'localModels',
+      'log',
+      'setAnalysis',
+      'standing',
+      'status',
+    ]);
   });
 
   /** A record as the instance writes it, every field well-formed. */
@@ -555,5 +568,192 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
         'backUpNow',
       ),
     ).toEqual({ kind: 'refused', sentence: TOO_MANY });
+  });
+});
+
+describe('the AI backend’s reads and writes — #2609, #2610, #2611', () => {
+  it('reads the settings, saves a switch and reads it back, and returns to .env, over the real instance', async () => {
+    const { owner } = await operatedWorld();
+    const port = createOperatePort(owner.dependencies);
+    const before = await port.analysis();
+    expect(before).toEqual({
+      kind: 'analysis',
+      local: {
+        url: null,
+        model: null,
+        reasoningTokens: null,
+        offered: true,
+        othersMayUse: false,
+        setIn: 'none',
+        state: 'not-set',
+      },
+      hosted: { offered: true, operatorKey: 'none', operatorKeyOrigin: null },
+    });
+    const saved = await port.setAnalysis({ offerHosted: false, othersLocal: true });
+    expect(saved.kind).toBe('analysis');
+    // Read back on a fresh request, not the save's own answer.
+    const after = await port.analysis();
+    if (after.kind !== 'analysis') throw new Error(after.kind);
+    expect([after.hosted.offered, after.local.othersMayUse]).toEqual([false, true]);
+    const cleared = await port.clearAnalysis();
+    if (cleared.kind !== 'analysis') throw new Error(cleared.kind);
+    expect([cleared.hosted.offered, cleared.local.othersMayUse]).toEqual([true, false]);
+  });
+
+  it('is told which field a save was refused for, and nothing else', async () => {
+    const { owner } = await operatedWorld();
+    expect(
+      await createOperatePort(owner.dependencies).setAnalysis({ localModel: 'two words' }),
+    ).toEqual({
+      kind: 'refused',
+      fields: ['localModel'],
+    });
+  });
+
+  it('reads the local models, a check and the jobs as the instance writes them, with no local server set', async () => {
+    const { owner } = await operatedWorld();
+    const port = createOperatePort(owner.dependencies);
+    expect(await port.localModels()).toEqual({
+      kind: 'models',
+      state: 'no-address',
+      version: null,
+      models: [],
+    });
+    expect(await port.checkModel('some-model')).toEqual({ kind: 'checked', outcome: 'no-address' });
+    const jobs = await port.jobs();
+    expect(jobs.kind).toBe('jobs');
+    if (jobs.kind === 'jobs') expect(jobs.counts.queued).toBe(0);
+  });
+
+  it('reads nothing of the AI backend for the deputy or a rider, whom the instance answers as no route', async () => {
+    const { deputy, rider, approveRider } = await operatedWorld();
+    await approveRider();
+    for (const device of [deputy, rider]) {
+      const port = createOperatePort(device.dependencies);
+      expect(await port.analysis()).toEqual({ kind: 'not-owner' });
+      expect(await port.localModels()).toEqual({ kind: 'not-owner' });
+      expect(await port.checkModel('m')).toEqual({ kind: 'not-owner' });
+      expect(await port.jobs()).toEqual({ kind: 'not-owner' });
+      expect(await port.setAnalysis({ othersLocal: true })).toEqual({ kind: 'not-owner' });
+    }
+  });
+
+  it('sends no check for a name the instance would refuse', async () => {
+    const { owner, world } = await operatedWorld();
+    const counted = countingSealed(world, '/v1/operate/analysis/check');
+    const port = createOperatePort({ ...owner.dependencies, send: counted.send });
+    expect(await port.checkModel('two words')).toEqual({ kind: 'unreachable' });
+    expect(counted.count()).toBe(0);
+  });
+
+  async function answered(
+    path: string,
+    body: unknown,
+    read: (port: ReturnType<typeof createOperatePort>) => Promise<unknown>,
+  ) {
+    const { owner, world } = await operatedWorld();
+    return read(
+      createOperatePort({
+        ...owner.dependencies,
+        send: (url, init) =>
+          world.answeringAs(path, () => Response.json(body))(new Request(url, init)),
+      }),
+    );
+  }
+
+  const MODEL = {
+    name: 'alpha:14b',
+    sizeBytes: 9_000_000_000,
+    parameters: '14.8B',
+    quantisation: 'Q4_K_M',
+    tools: 'listed',
+    gpu: 'part',
+    gpuPercent: 62,
+  };
+
+  it.each([
+    ['a model whose name is markup', { ...MODEL, name: '<img src=x>' }],
+    ['an unknown fit', { ...MODEL, gpu: 'most' }],
+    ['a percent over 100', { ...MODEL, gpuPercent: 101 }],
+    ['parameters that are free text', { ...MODEL, parameters: 'see https://example.com' }],
+  ] as const)('shows no list that holds %s', async (_name, model) => {
+    const read = (port: ReturnType<typeof createOperatePort>) => port.localModels();
+    const good = { state: 'ollama', version: '0.12.6', models: [MODEL] };
+    expect(
+      ((await answered('/v1/operate/analysis/models', good, read)) as { kind: string }).kind,
+    ).toBe('models');
+    expect(
+      await answered('/v1/operate/analysis/models', { ...good, models: [model] }, read),
+    ).toEqual({
+      kind: 'unreachable',
+    });
+  });
+
+  it('carries no field of a job or the settings beyond its own: no athlete, no key', async () => {
+    const job = {
+      kind: 'write-up',
+      source: 'local',
+      status: 'failed',
+      failure: 'model-unreachable',
+      createdAt: '2026-11-14T09:00:00.000Z',
+      endedAt: '2026-11-14T09:01:00.000Z',
+      whose: 'other',
+      athleteId: 'MARKER-athlete-2611',
+    };
+    const jobs = await answered(
+      '/v1/operate/analysis/jobs',
+      {
+        counts: { queued: 0, running: 0, succeeded: 0, failed: 1, cancelled: 0, withheld: 0 },
+        failures: [{ code: 'model-unreachable', count: 1 }],
+        recent: [job],
+      },
+      (port) => port.jobs(),
+    );
+    expect((jobs as { kind: string }).kind).toBe('jobs');
+    expect(JSON.stringify(jobs)).not.toContain('MARKER-athlete-2611');
+    const settings = await answered(
+      '/v1/operate/analysis',
+      {
+        local: {
+          url: 'http://ollama:11434/v1',
+          model: 'alpha:14b',
+          reasoningTokens: null,
+          offered: true,
+          othersMayUse: false,
+          setIn: 'app',
+          state: 'on',
+        },
+        hosted: {
+          offered: true,
+          operatorKey: 'held',
+          operatorKeyOrigin: 'https://models.example',
+          key: 'sk-MARKER-2611',
+        },
+      },
+      (port) => port.analysis(),
+    );
+    expect((settings as { kind: string }).kind).toBe('analysis');
+    expect(JSON.stringify(settings)).not.toContain('sk-MARKER-2611');
+  });
+
+  it('never carries the user and password of a local server address that has them (#2611)', async () => {
+    const settings = await answered(
+      '/v1/operate/analysis',
+      {
+        local: {
+          url: 'http://MARKER-user:MARKER-pass@ollama:11434/v1',
+          model: null,
+          reasoningTokens: null,
+          offered: true,
+          othersMayUse: false,
+          setIn: 'env',
+          state: 'not-base-url',
+        },
+        hosted: { offered: true, operatorKey: 'none', operatorKeyOrigin: null },
+      },
+      (port) => port.analysis(),
+    );
+    expect(JSON.stringify(settings)).not.toContain('MARKER');
+    expect(JSON.stringify(settings)).toContain('http://ollama:11434/v1');
   });
 });

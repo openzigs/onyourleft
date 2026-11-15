@@ -72,8 +72,10 @@ import {
   LOOK_AHEAD_METRES,
   LOOK_AHEAD_RISE_METRES,
   LOOK_AHEAD_WORDS,
+  calloutClimb,
   gradeBand,
   lookAhead,
+  lookAheadTitle,
   nextClimbLabel,
   nextClimbText,
   routeBands,
@@ -81,6 +83,7 @@ import {
   type GradeBandKey,
   type LookAhead,
 } from './look-ahead';
+import { ClimbCallout } from './ClimbCallout';
 import { ControllerIntents } from './ControllerIntents';
 import { GamepadIntents } from './GamepadIntents';
 import { ItemControl } from './ItemControl';
@@ -88,6 +91,7 @@ import { RecentGraph } from './RecentGraph';
 import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import {
   DEFAULT_HUD_LAYOUT,
+  climbCalloutChosen,
   compactRoute,
   deliveryGame,
   focusArrangement,
@@ -292,10 +296,15 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
   // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
-  const lap =
-    hasContent(props.notices) || props.standingNotice?.expanded === true
+  const noticeShown = hasContent(props.notices) || props.standingNotice?.expanded === true;
+  const lap = noticeShown ? undefined : props.lapNotice;
+  // #2593: the climb callout, in the notice cell only when nothing else is in
+  // it — it gives way to every notice and to the lap — and never on a
+  // Delivery round, whose roadsides are the throws'. @see ClimbCallout.tsx
+  const climb =
+    noticeShown || hasContent(lap) || props.delivery !== undefined || !climbCalloutChosen(layout)
       ? undefined
-      : props.lapNotice;
+      : calloutClimb(props.profile, props.state.ride.distance);
   // #1482: the touch lock, over the whole HUD. The HUD's own state rather than
   // the ride controller's: a game ride need not be recording, and the
   // controller refuses the lock with no recording in progress. This component
@@ -589,7 +598,10 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         reading the old file: each was a second voice beside this one, and the
         HUD carried three while a notice stood. `GameView` feeds both into the
         announcer as rank-1 events, so this is the only thing on the stage that
-        speaks by itself.
+        speaks by itself — save two conditional voices that are live only
+        while this region does NOT say the same thing, so nothing is said
+        twice: the lap notice (#1312) and the climb callout's sentence (#2593,
+        `climbsSpoken`).
 
         ⚠️ **It sets its text IN PLACE, unlike the Ride screen's region since
         #655**, which inserts a node per sentence (`RideAnnouncer.tsx` §"said
@@ -602,12 +614,19 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         {props.announcement}
       </p>
 
-      {hasContent(props.notices) || props.standingNotice !== undefined || hasContent(lap) ? (
+      {hasContent(props.notices) ||
+      props.standingNotice !== undefined ||
+      hasContent(lap) ||
+      climb !== undefined ? (
         <div
           className={
-            hasContent(props.notices) || props.standingNotice?.expanded === true || hasContent(lap)
+            noticeShown || hasContent(lap)
               ? 'oyl-hud__notices'
-              : 'oyl-hud__notices oyl-hud__notices--collapsed'
+              : // The callout alone: `theme.css` draws it only where the cell
+                // is not the route panel's, so a phone keeps its strip (#2593).
+                climb !== undefined
+                ? 'oyl-hud__notices oyl-hud__notices--climb'
+                : 'oyl-hud__notices oyl-hud__notices--collapsed'
           }
         >
           {props.standingNotice === undefined ? null : (
@@ -620,6 +639,13 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           )}
           {props.notices}
           {lap}
+          {climb === undefined ? null : (
+            <ClimbCallout
+              climb={climb}
+              units={props.units}
+              live={props.climbCalloutLive === true}
+            />
+          )}
         </div>
       ) : null}
 
@@ -1278,7 +1304,11 @@ function ElevationStrip(props: {
             />
           </svg>
         </div>
-        <LookAheadStrip ahead={ahead} label={nextClimbLabel(ahead.climb, props.units)} />
+        <LookAheadStrip
+          ahead={ahead}
+          label={nextClimbLabel(ahead.climb, props.units)}
+          title={lookAheadTitle(props.units)}
+        />
       </div>
       {/*
         The non-visual equivalent, which the rest of this app provides for every
@@ -1320,8 +1350,24 @@ function ElevationStrip(props: {
  * reaches it — a SHAPE, unlike the rider's solid edge. On a climb the caption
  * says how far it is; before one, the strip's name does, and the caption
  * keeps #2075's phrase (`look-ahead.ts` §`nextClimbText` says why).
+ *
+ * #2593: a TITLE, `Next 2 km` in the rider's units (`look-ahead.ts`
+ * §`lookAheadTitle`), so the strip reads as the road ahead and not as a second
+ * whole-route strip — the owner had not noticed it was one. ⚠️ **Over the
+ * strip's top end corner, on the panel's own surface, and not a row of its
+ * own**: the route panel's height is measured to the pixel against the leaning
+ * rider and a Delivery ride's map credit on a phone (`theme.css` §"THE ROAD
+ * AHEAD", §"COLUMN"), and a line over the far end of the window takes none of
+ * it. The far top corner is where the road least often is: a climb ahead
+ * rises from the floor, and only one gaining most of
+ * `LOOK_AHEAD_RISE_METRES` inside the window reaches it. `aria-hidden`: the
+ * strip's own name already begins with the window in words.
  */
-function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: string }): JSX.Element {
+function LookAheadStrip(props: {
+  readonly ahead: LookAhead;
+  readonly label: string;
+  readonly title: string;
+}): JSX.Element {
   // React's ids carry punctuation a `url(#…)` reference need not survive.
   const id = `oyl-ahead-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const { ahead } = props;
@@ -1334,74 +1380,79 @@ function LookAheadStrip(props: { readonly ahead: LookAhead; readonly label: stri
   const top =
     ahead.climb !== undefined && ahead.climb.topIn <= ahead.length ? ahead.climb.topIn : undefined;
   return (
-    <svg
-      className="oyl-hud__ahead-svg"
-      viewBox={`0 0 ${String(LOOK_AHEAD_METRES)} ${String(LOOK_AHEAD_RISE_METRES)}`}
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={`The ${LOOK_AHEAD_WORDS}: ${props.label}`}
-      data-testid="oyl-hud-look-ahead"
-    >
-      <defs>
-        {GRADE_BANDS.map((band) => (
-          <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} {...AHEAD_PATTERN} />
+    <div className="oyl-hud__ahead-box">
+      <svg
+        className="oyl-hud__ahead-svg"
+        viewBox={`0 0 ${String(LOOK_AHEAD_METRES)} ${String(LOOK_AHEAD_RISE_METRES)}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`The ${LOOK_AHEAD_WORDS}: ${props.label}`}
+        data-testid="oyl-hud-look-ahead"
+      >
+        <defs>
+          {GRADE_BANDS.map((band) => (
+            <BandPattern key={band.key} id={`${id}-${band.key}`} band={band} {...AHEAD_PATTERN} />
+          ))}
+        </defs>
+        {ahead.runs.map((run) => (
+          // The owner's review of 2026-11-05: each band at the strip's FULL
+          // height, not under the road's line. At the fixed scale a descent or
+          // a flat ends at the window's floor and was a sliver a pixel or two
+          // tall; a band's height now says nothing, so every band is as
+          // readable as a climb's, and the road's shape is the line below.
+          <rect
+            key={`${run.band}-${String(run.start)}`}
+            className={`oyl-hud__ahead-run oyl-hud__ahead-run--${run.band}`}
+            x={run.start}
+            y={0}
+            width={run.end - run.start}
+            height={LOOK_AHEAD_RISE_METRES}
+            fill={`url(#${id}-${run.band})`}
+            data-band={run.band}
+            data-start={String(run.start)}
+            data-end={String(run.end)}
+          />
         ))}
-      </defs>
-      {ahead.runs.map((run) => (
-        // The owner's review of 2026-11-05: each band at the strip's FULL
-        // height, not under the road's line. At the fixed scale a descent or
-        // a flat ends at the window's floor and was a sliver a pixel or two
-        // tall; a band's height now says nothing, so every band is as
-        // readable as a climb's, and the road's shape is the line below.
-        <rect
-          key={`${run.band}-${String(run.start)}`}
-          className={`oyl-hud__ahead-run oyl-hud__ahead-run--${run.band}`}
-          x={run.start}
-          y={0}
-          width={run.end - run.start}
-          height={LOOK_AHEAD_RISE_METRES}
-          fill={`url(#${id}-${run.band})`}
-          data-band={run.band}
-          data-start={String(run.start)}
-          data-end={String(run.end)}
-        />
-      ))}
-      {/*
+        {/*
         The road itself, at the fixed scale, over the bands: the ink line on a
         wider stroke of the panel's surface, as the whole route's marker is
         drawn, so it reads on every band's colour and pattern alike.
       */}
-      <polyline className="oyl-hud__ahead-road-edge" points={road} />
-      <polyline className="oyl-hud__ahead-road" points={road} data-testid="oyl-hud-road-ahead" />
-      {top === undefined ? null : (
-        <>
-          <line
-            className="oyl-hud__ahead-top-edge"
-            x1={top}
-            y1={0}
-            x2={top}
-            y2={LOOK_AHEAD_RISE_METRES}
-          />
-          <line
-            className="oyl-hud__ahead-top"
-            x1={top}
-            y1={0}
-            x2={top}
-            y2={LOOK_AHEAD_RISE_METRES}
-            data-testid="oyl-hud-climb-top"
-            data-ahead={String(top)}
-          />
-        </>
-      )}
-      <line
-        className="oyl-hud__ahead-here"
-        x1={0}
-        y1={0}
-        x2={0}
-        y2={LOOK_AHEAD_RISE_METRES}
-        data-height={String(ahead.riderHeight)}
-      />
-    </svg>
+        <polyline className="oyl-hud__ahead-road-edge" points={road} />
+        <polyline className="oyl-hud__ahead-road" points={road} data-testid="oyl-hud-road-ahead" />
+        {top === undefined ? null : (
+          <>
+            <line
+              className="oyl-hud__ahead-top-edge"
+              x1={top}
+              y1={0}
+              x2={top}
+              y2={LOOK_AHEAD_RISE_METRES}
+            />
+            <line
+              className="oyl-hud__ahead-top"
+              x1={top}
+              y1={0}
+              x2={top}
+              y2={LOOK_AHEAD_RISE_METRES}
+              data-testid="oyl-hud-climb-top"
+              data-ahead={String(top)}
+            />
+          </>
+        )}
+        <line
+          className="oyl-hud__ahead-here"
+          x1={0}
+          y1={0}
+          x2={0}
+          y2={LOOK_AHEAD_RISE_METRES}
+          data-height={String(ahead.riderHeight)}
+        />
+      </svg>
+      <span className="oyl-hud__ahead-title" aria-hidden="true" data-testid="oyl-hud-ahead-title">
+        {props.title}
+      </span>
+    </div>
   );
 }
 
