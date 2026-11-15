@@ -27,7 +27,12 @@ import {
   LOOK_AHEAD_METRES,
   MINIMUM_BAND_METRES,
   LOOK_AHEAD_RISE_METRES,
+  CLIMB_CALLOUT_LEAD_METRES,
+  calloutClimb,
   climbAhead,
+  climbCalloutSentence,
+  climbCalloutText,
+  lookAheadTitle,
   gradeBand,
   lookAhead,
   nextClimbLabel,
@@ -553,5 +558,74 @@ describe('a route with nothing to draw (#2075)', () => {
       nextClimb: undefined,
       climb: undefined,
     });
+  });
+});
+
+describe('the climb callout — #2593', () => {
+  const profile = route(CLIMB);
+  const climb = slopesOf(profile).find((slope) => slope.kind === 'climb');
+  if (climb === undefined) throw new Error('no climb on the synthetic route');
+
+  it('names no climb until it is within the callout’s lead, though the strip names it', () => {
+    const early = climb.start - CLIMB_CALLOUT_LEAD_METRES - 20;
+    expect(calloutClimb(profile, early)).toBeUndefined();
+    // The strip's caption names it already, from up to 2 km away.
+    expect(lookAhead(profile, early).climb?.where).toBe('ahead');
+  });
+
+  it('names the climb ahead within the lead as the strip and the announcer do', () => {
+    const at = climb.start - 300;
+    const callout = calloutClimb(profile, at);
+    const strip = lookAhead(profile, at).climb;
+    const announced = slopeAhead(slopesOf(profile), profile, at, CLIMB_CALLOUT_LEAD_METRES);
+    expect(callout?.where).toBe('ahead');
+    expect(callout).toEqual(strip);
+    expect(callout?.slope).toEqual(announced?.slope);
+    expect(callout?.startsIn).toBe(announced?.metresAhead);
+  });
+
+  it('names the climb the rider is on, until its top, and nothing after it', () => {
+    expect(calloutClimb(profile, climb.start + 100)?.where).toBe('on');
+    expect(calloutClimb(profile, climb.start + 100)).toEqual(
+      lookAhead(profile, climb.start + 100).climb,
+    );
+    expect(calloutClimb(profile, climb.start + climb.length - 1)?.where).toBe('on');
+    expect(calloutClimb(profile, climb.start + climb.length)).toBeUndefined();
+  });
+
+  it('extends the strip’s caption with the average and the length, never re-words it', () => {
+    const ahead = calloutClimb(profile, climb.start - 300);
+    if (ahead === undefined) throw new Error('no callout 300 m before the climb');
+    const caption = nextClimbText(ahead, 'metric') ?? '';
+    expect(climbCalloutText(ahead, 'metric')).toBe(`${caption} avg · 0.6 km`);
+    expect(climbCalloutText(ahead, 'metric')).toMatch(/^Climb in 300 m · 6 % avg · 0\.6 km$/);
+    expect(climbCalloutText(ahead, 'imperial')).toMatch(/^Climb in 984 ft · 6 % avg · 0\.4 mi$/);
+    const on = calloutClimb(profile, climb.start + 200);
+    if (on === undefined) throw new Error('no callout on the climb');
+    expect(climbCalloutText(on, 'metric')).toBe(nextClimbText(on, 'metric'));
+    expect(climbCalloutText(on, 'metric')).toMatch(/^Top in \d+0 m · 6 %$/);
+    expect(climbCalloutText(on, 'imperial')).toMatch(/^Top in \d+ ft · 6 %$/);
+  });
+
+  it('says each phase in words for a screen reader', () => {
+    const ahead = calloutClimb(profile, climb.start - 300);
+    const on = calloutClimb(profile, climb.start + 200);
+    if (ahead === undefined || on === undefined) throw new Error('no callout');
+    expect(climbCalloutSentence(ahead, 'metric')).toBe(
+      'Climb in 300 metres: 6 per cent average, 0.6 kilometres long.',
+    );
+    expect(climbCalloutSentence(ahead, 'imperial')).toBe(
+      'Climb in 984 feet: 6 per cent average, 0.4 miles long.',
+    );
+    expect(climbCalloutSentence(on, 'metric')).toMatch(
+      /^On the climb: top in \d+0 metres, 6 per cent\.$/,
+    );
+  });
+});
+
+describe('the road-ahead strip’s title — #2593', () => {
+  it('is the window in the rider’s units', () => {
+    expect(lookAheadTitle('metric')).toBe('Next 2 km');
+    expect(lookAheadTitle('imperial')).toBe('Next 1.2 mi');
   });
 });

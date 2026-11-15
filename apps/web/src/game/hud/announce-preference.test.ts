@@ -19,6 +19,7 @@ import {
   climbLeadChoices,
   climbLeadIn,
   climbLeadText,
+  climbsSpoken,
   DEFAULT_ANNOUNCEMENTS,
   readAnnouncementPreference,
   writeAnnouncementPreference,
@@ -136,5 +137,18 @@ describe('#1440 — climb-ahead steps in each unit system', () => {
       climbLeadMetres: climbLeadChoices('imperial')[2]!,
     });
     expect(readAnnouncementPreference(handleOver(disk)).climbLeadMetres).toBe(0.25 * MILE);
+  });
+});
+
+describe('#2593 — whether the HUD’s region says climbs', () => {
+  it('says them only with announcements on and the climb row not never', () => {
+    expect(climbsSpoken(DEFAULT_ANNOUNCEMENTS)).toBe(false);
+    expect(climbsSpoken({ ...DEFAULT_ANNOUNCEMENTS, enabled: true })).toBe(true);
+    expect(
+      climbsSpoken({ ...DEFAULT_ANNOUNCEMENTS, enabled: true, climbLeadMetres: 'never' }),
+    ).toBe(false);
+    expect(climbsSpoken({ ...DEFAULT_ANNOUNCEMENTS, enabled: false, climbLeadMetres: 100 })).toBe(
+      false,
+    );
   });
 });

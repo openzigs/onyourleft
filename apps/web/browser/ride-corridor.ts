@@ -44,8 +44,23 @@ export interface CorridorRide {
   readonly loadWorldCorridor: NonNullable<GamePort['loadWorldCorridor']>;
 }
 
-export function corridorRide(kind: CorridorRideKind, id: string, errors: string[]): CorridorRide {
-  const profile = corridorFixtureRoute();
+/**
+ * `climbFrom` — #2593: the same road with an 800 m climb at 6 % from that
+ * many metres along it, so a mapped ride's credit and the climb callout are
+ * on the stage together. Only the heights change: the corridor is the road's.
+ */
+export function corridorRide(
+  kind: CorridorRideKind,
+  id: string,
+  errors: string[],
+  climbFrom?: number,
+): CorridorRide {
+  const profile = corridorFixtureRoute(
+    false,
+    climbFrom === undefined
+      ? undefined
+      : (along) => 10 + Math.min(Math.max(along - climbFrom, 0), 800) * 0.06,
+  );
   let opened: Promise<WorldCorridorPort> | undefined;
   const port = (): Promise<WorldCorridorPort> => {
     opened ??= (async () => {
