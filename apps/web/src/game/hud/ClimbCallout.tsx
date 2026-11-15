@@ -20,8 +20,10 @@
  * (`theme.css` §"CORNERS", §"WHERE THERE IS NO FREE CELL"), and only when the
  * cell is otherwise EMPTY: it gives way to every notice, the lap's (#1312)
  * included, because a climb is nothing to act on and the strip's caption still
- * names it. ⚠️ On a phone the cell is the route panel's, so while the callout
- * stands there the route panel is not drawn, as for every notice (#437).
+ * names it. ⚠️ On a phone the cell is the route panel's, and the callout
+ * does not take it: `theme.css` clips it there (`oyl-hud__notices--climb`),
+ * its sentence still read, so the strip, its caption and the plan stay for
+ * every climb (#437's defect; the strip's caption names the climb).
  * ⚠️ **Not on a Delivery round**, either way it is drawn: on its game strip
  * (#2514) the roadsides are kept clear for the throws (#2513's lesson), and
  * drawn as *Everything* on the 4:3 tablet the round's taller readings leave

@@ -16,6 +16,9 @@
  * (`ride-hud-layout.browser.spec.ts` §"#2593"): jsdom does no layout.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -256,5 +259,37 @@ describe('the road-ahead strip’s title — #2593', () => {
     expect(root.querySelector('[data-testid="oyl-hud-ahead-title"]')?.textContent).toBe(
       'Next 1.2 mi',
     );
+  });
+});
+
+describe('what a phone shows on a climb — #2593', () => {
+  // jsdom loads no stylesheet, so the rule is read as a file, as
+  // `attribution.a11y.test.tsx` does; where it lands is the browser gate's.
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'design', 'theme.css'),
+    'utf8',
+  ).replace(/\/\*[\s\S]*?\*\//g, '');
+
+  it('marks a notice cell holding only the callout, and keeps the route panel in the tree', async () => {
+    const root = await hudAt(1200);
+    expect(root.querySelector('.oyl-hud > .oyl-hud__notices--climb')).not.toBeNull();
+    expect(root.querySelector('.oyl-hud__notices--collapsed')).toBeNull();
+    expect(root.querySelector('.oyl-hud__route [data-testid="oyl-hud-next-climb"]')).not.toBeNull();
+  });
+
+  it('does not mark a cell that holds a notice', async () => {
+    const root = await hudAt(1200, { notices: <p id="said">Trainer lost</p> });
+    expect(root.querySelector('.oyl-hud__notices--climb')).toBeNull();
+  });
+
+  it('the phone rule that hides the route panel for a notice leaves the callout out', () => {
+    const hide = /\.oyl-hud:has\(([^{]*?)\)\s*\.oyl-hud__route\s*\{\s*display:\s*none/.exec(css);
+    expect(hide?.[1]).toContain(':not(.oyl-hud__notices--climb)');
+  });
+
+  it('clips the callout where the cell is the route panel’s, as a put-away notice is', () => {
+    const rule = /\.oyl-hud \.oyl-hud__notices\.oyl-hud__notices--climb\s*\{([^}]*)\}/.exec(css);
+    expect(rule?.[1]).toContain('clip-path: inset(50%)');
+    expect(rule?.[1]).not.toContain('display: none');
   });
 });

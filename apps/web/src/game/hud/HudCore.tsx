@@ -598,7 +598,10 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         reading the old file: each was a second voice beside this one, and the
         HUD carried three while a notice stood. `GameView` feeds both into the
         announcer as rank-1 events, so this is the only thing on the stage that
-        speaks by itself.
+        speaks by itself — save two conditional voices that are live only
+        while this region does NOT say the same thing, so nothing is said
+        twice: the lap notice (#1312) and the climb callout's sentence (#2593,
+        `climbsSpoken`).
 
         ⚠️ **It sets its text IN PLACE, unlike the Ride screen's region since
         #655**, which inserts a node per sentence (`RideAnnouncer.tsx` §"said
@@ -617,9 +620,13 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       climb !== undefined ? (
         <div
           className={
-            noticeShown || hasContent(lap) || climb !== undefined
+            noticeShown || hasContent(lap)
               ? 'oyl-hud__notices'
-              : 'oyl-hud__notices oyl-hud__notices--collapsed'
+              : // The callout alone: `theme.css` draws it only where the cell
+                // is not the route panel's, so a phone keeps its strip (#2593).
+                climb !== undefined
+                ? 'oyl-hud__notices oyl-hud__notices--climb'
+                : 'oyl-hud__notices oyl-hud__notices--collapsed'
           }
         >
           {props.standingNotice === undefined ? null : (

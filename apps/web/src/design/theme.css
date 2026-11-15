@@ -10430,9 +10430,27 @@ select.oyl-input {
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding
-    .oyl-hud:has(> .oyl-hud__notices:not(.oyl-hud__notices--collapsed))
+    .oyl-hud:has(
+      > .oyl-hud__notices:not(.oyl-hud__notices--collapsed):not(.oyl-hud__notices--climb)
+    )
     .oyl-hud__route {
     display: none;
+  }
+
+  /* #2593: the climb callout does not take the route panel's cell. On these
+     layouts the cell IS the route panel's, and the callout would put away the
+     strip, its own caption and the plan for the whole of every climb — #437's
+     defect. So it is clipped as a put-away notice is, its sentence still
+     there for a screen reader, and the strip's caption names the climb. */
+  .oyl-hud .oyl-hud__notices.oyl-hud__notices--climb {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .oyl-game--riding .oyl-hud__notices {
@@ -10693,7 +10711,8 @@ select.oyl-input {
        a 1 px clipped box, so exactly one of the two is ever laid out and
        carrying the name. */
     .oyl-game--riding .oyl-hud__route,
-    .oyl-game--riding .oyl-hud__notices:not(.oyl-hud__notices--collapsed) {
+    .oyl-game--riding
+      .oyl-hud__notices:not(.oyl-hud__notices--collapsed):not(.oyl-hud__notices--climb) {
       anchor-name: --oyl-hud-bottom-start;
     }
 
