@@ -1210,12 +1210,16 @@ Until 2026-10-07 this section was §"Owner questions left open".
   2. **A field the row leaves unset falls back on its own, field by field**, never the row as a
      whole: each model setting to its `.env` value, the sources offered to **both**, as today, and
      the switch to **off**. Clearing a field returns that field to its fallback; clearing the whole
-     row returns every field, so it also turns the switch off. *The author's choice*, as the
-     simplest rule that never widens access: no unset field turns anything on.
+     row returns every field, so it turns the switch off **and offers hosted again** if the
+     operator had turned it off. *The author's choice*, as the simplest rule that never widens
+     access beyond an instance with no row: an unset switch is off, and unset sources are both, as
+     on an instance today.
   3. **Who may write it.** Only the operator, the athlete of `OYL_INSTANCE_OWNER_KEY` (Q9), from the
      app, or the operator command on the host. Never the deputy, whose request is answered as though
-     there were no such route. The app's routes are `sealed: 'only'`
-     ([ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-7), answer
+     there were no such route. The app's routes are `sealed: 'only'` and join
+     [ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-7's phase-2 row
+     for the Operate area, as every `/v1/operate/*` route does under ADR 0047's 2026-11-14 entry
+     (#2602); they answer
      `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`, and every write, from the app or
      the CLI, is an entry in the operator log
      ([#2602](https://github.com/openzigs/onyourleft/issues/2602)) that never carries a key. ⚠️
@@ -1241,8 +1245,9 @@ Until 2026-10-07 this section was §"Owner questions left open".
      hosted key is held with their consent naming its endpoint can still have a hosted job run.
      **This narrows Q13** (*"the operator's switch gates both key modes"*) **to the local model**, by
      the owner's ruling above. It is recorded here and not by a superseding ADR because the owner
-     ruled that this decision be recorded as an amendment to this ADR, as its entries of 2026-10-09
-     (Share mode withdrawn) and 2026-10-26 (D-12 and Q2 superseded) were. The 2026-10-12 entry's
+     ruled on #2608 that this decision be recorded as a dated amendment to this ADR, and the
+     narrowing, ruled on this entry's own pull request, is part of that decision; the 2026-10-26
+     entry (D-12 and Q2 superseded) recorded an owner's narrowing the same way. The 2026-10-12 entry's
      *"there is no shared key and no operator's switch"* was true of that build and no longer is for
      the switch; the shared key is still withdrawn.
   7. **Every job type, the re-plan during a ride included.** The switch and the hosted-off setting
@@ -1265,6 +1270,7 @@ Until 2026-10-07 this section was §"Owner questions left open".
   Every other rider is refused the instance's local model, post-ride and re-plan alike, until the
   operator turns the switch on, once [#2609](https://github.com/openzigs/onyourleft/issues/2609)
   builds it; before it, nothing gated them. Their hosted jobs on their own key are unaffected by
-  the switch, and are refused only while the operator has hosted turned off. ADR 0031, 0036, 0040
-  and 0048 gain no entry: each rule of theirs this cites is applied as written. The body above is
+  the switch, and are refused only while the operator has hosted turned off. ADR 0031, 0036, 0040,
+  0047 and 0048 gain no entry: each rule of theirs this cites is applied as written, and the new
+  routes join ADR 0047 D-7's phase-2 row by its existing 2026-11-14 entry. The body above is
   not edited. (#2601, #2608)
