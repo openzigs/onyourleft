@@ -187,7 +187,8 @@ async function race(database: string, count: number): Promise<string[]> {
           child.stdout.on('data', (chunk: Buffer) => {
             output += chunk.toString();
           });
-          child.on('exit', () => resolve(output.trim().split('\n')));
+          // 'close', not 'exit': stdout may still be draining at exit (fourth review).
+          child.on('close', () => resolve(output.trim().split('\n')));
         }),
     );
     const ready = children.map(

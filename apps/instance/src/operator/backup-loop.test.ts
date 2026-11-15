@@ -656,6 +656,9 @@ describe('backup: past the bound, the newest unrecorded snapshot is kept (#2606,
     try {
       // A recorded restore point first.
       await backup(paths, onBox, { keep: 1, now: () => new Date('2026-09-01T00:00:00Z') });
+      // And one from before #2606, older than it, that no record names
+      // (fourth review): F7 may never take it.
+      await mkdir(join(onBox, 'snapshot-2026-08-31T00-00-00-000Z'), { recursive: true });
       refuseEveryRecord(paths.database);
       for (const hour of ['01', '02', '03', '04', '05']) {
         await backup(paths, onBox, {
@@ -666,12 +669,34 @@ describe('backup: past the bound, the newest unrecorded snapshot is kept (#2606,
     } finally {
       quiet.mockRestore();
     }
-    // --keep 1 + 2: the recorded one, and the two newest unrecorded ones.
+    // --keep 1 + 2 = 3: the older unrecorded one and the recorded one stay,
+    // so only the newest of the failed runs' snapshots is left beside them.
     expect((await readdir(onBox)).sort()).toEqual([
+      'snapshot-2026-08-31T00-00-00-000Z',
       'snapshot-2026-09-01T00-00-00-000Z',
-      'snapshot-2026-09-01T04-00-00-000Z',
       'snapshot-2026-09-01T05-00-00-000Z',
     ]);
+  });
+});
+
+describe('backup: a snapshot carries no lease of the run that took it (#2606, fourth review)', () => {
+  it("leaves no backup_lease row in the snapshot's database, so a restored one is not busy", async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      await backup(paths, onBox, { keep: 3, now: () => new Date('2026-09-01T00:00:00Z') });
+    } finally {
+      quiet.mockRestore();
+    }
+    const opened = openDatabase(
+      join(onBox, 'snapshot-2026-09-01T00-00-00-000Z', 'instance.sqlite'),
+    );
+    try {
+      expect(opened.prepare('SELECT count(*) AS n FROM backup_lease').get()).toEqual({ n: 0 });
+    } finally {
+      opened.close();
+    }
   });
 });
 
