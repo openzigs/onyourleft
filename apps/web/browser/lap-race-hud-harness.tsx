@@ -644,6 +644,12 @@ async function run(): Promise<void> {
   if (container === null) {
     throw new Error('the harness page is missing its #hud container');
   }
+  // #2599, the corner only: every face the stylesheet declares loaded before
+  // the first render, as on a device whose fonts are cached — so the first
+  // frame is the layout a rider meets when a race opens, not one drawn in a
+  // fallback face (on the CI runner's, the large text then had no room for a
+  // line until the fonts arrived). The other stages keep the page as it was.
+  if (CORNER) await Promise.all([...document.fonts].map((face) => face.load()));
   flushSync(() => {
     createRoot(container).render(
       <StrictMode>
