@@ -107,12 +107,12 @@ describe('the round trip across the boundary (#2641)', () => {
     };
     const after = await handlerOver(world.path, world.clock, moderators);
     restarted.push(after);
-    const landing = await after.handler(adminRequest('GET', '/admin', { cookie: token }));
+    const landing = await after.handler(adminRequest('GET', '/admin/status', { cookie: token }));
     expect(landing.status).toBe(200);
     const page = await landing.text();
-    expect(page).toContain('You are signed in as the instance’s owner');
-    // The seam's round trip: the version line read from GET /v1/operate/status.
-    expect(page).toContain('Version 9.8.7, read from the instance’s status.');
+    expect(page).toContain('Signed in as the instance’s owner with a one-time code');
+    // The seam's round trip: the version row read from GET /v1/operate/status.
+    expect(page).toContain('<div><dt>Version</dt><dd>9.8.7</dd></div>');
     // Read back: the session is the OWNER's, never the deputy's.
     expect((await sessionOf(world, token))?.athleteId).toBe(world.owner.athleteId);
 
@@ -187,11 +187,14 @@ describe('a session’s life is the instance’s to end, read from admin_session
     for (let use = 0; use < 3; use += 1) {
       world.clock.ms += 15 * MINUTE - 1000;
       expect(
-        (await world.instance.handler(adminRequest('GET', '/admin', { cookie: token }))).status,
+        (await world.instance.handler(adminRequest('GET', '/admin/status', { cookie: token })))
+          .status,
       ).toBe(200);
     }
     world.clock.ms += 15 * MINUTE;
-    const idle = await world.instance.handler(adminRequest('GET', '/admin', { cookie: token }));
+    const idle = await world.instance.handler(
+      adminRequest('GET', '/admin/status', { cookie: token }),
+    );
     expect(idle.status).toBe(303);
     expect(idle.headers.get('location')).toBe('/admin/sign-in');
     expect(await sessionOf(world, token)).toBeUndefined();
@@ -204,11 +207,14 @@ describe('a session’s life is the instance’s to end, read from admin_session
     while (world.clock.ms + 10 * MINUTE < opened + 2 * 60 * MINUTE) {
       world.clock.ms += 10 * MINUTE;
       expect(
-        (await world.instance.handler(adminRequest('GET', '/admin', { cookie: token }))).status,
+        (await world.instance.handler(adminRequest('GET', '/admin/status', { cookie: token })))
+          .status,
       ).toBe(200);
     }
     world.clock.ms = opened + 2 * 60 * MINUTE;
-    const old = await world.instance.handler(adminRequest('GET', '/admin', { cookie: token }));
+    const old = await world.instance.handler(
+      adminRequest('GET', '/admin/status', { cookie: token }),
+    );
     expect(old.status).toBe(303);
     expect(await sessionOf(world, token)).toBeUndefined();
   });
@@ -245,7 +251,9 @@ describe('the owner, asked on every request (#2641, ADR 0069 D-1)', () => {
       owner: world.owner.device.publicKey,
     });
     restarted.push(same);
-    expect((await same.handler(adminRequest('GET', '/admin', { cookie: token }))).status).toBe(200);
+    expect(
+      (await same.handler(adminRequest('GET', '/admin/status', { cookie: token }))).status,
+    ).toBe(200);
 
     const moved = await handlerOver(world.path, world.clock, {
       owner: world.deputy.device.publicKey,
@@ -260,12 +268,14 @@ describe('the owner, asked on every request (#2641, ADR 0069 D-1)', () => {
     expect(out.headers.get('location')).toBe('/admin/sign-in');
     // Read back: ended, and nothing else happened.
     expect(await sessionOf(world, token)).toBeUndefined();
-    const landing = await moved.handler(adminRequest('GET', '/admin', { cookie: token }));
+    const landing = await moved.handler(adminRequest('GET', '/admin/status', { cookie: token }));
     expect(landing.status).toBe(303);
     expect(await sessionOf(world, token)).toBeUndefined();
     expect(await ownersLog(world)).toEqual(before);
     // And the old owner's cookie works on no configuration again.
-    expect((await same.handler(adminRequest('GET', '/admin', { cookie: token }))).status).toBe(303);
+    expect(
+      (await same.handler(adminRequest('GET', '/admin/status', { cookie: token }))).status,
+    ).toBe(303);
   });
 
   it('gives the deputy no sign-in: with no owner key named the pages are unavailable, and a code is not spent', async () => {
@@ -307,7 +317,7 @@ describe('the owner, asked on every request (#2641, ADR 0069 D-1)', () => {
     restarted.push(rotated);
     // The same athlete is the owner, through the new key: the pages are there.
     expect((await rotated.handler(adminRequest('GET', '/admin/sign-in'))).status).toBe(200);
-    const landing = await rotated.handler(adminRequest('GET', '/admin', { cookie: token }));
+    const landing = await rotated.handler(adminRequest('GET', '/admin/status', { cookie: token }));
     expect(landing.status).toBe(303);
     expect(await sessionOf(world, token)).toBeUndefined();
   });
@@ -323,7 +333,9 @@ describe('the owner, asked on every request (#2641, ADR 0069 D-1)', () => {
     } finally {
       database.close();
     }
-    const answer = await world.instance.handler(adminRequest('GET', '/admin', { cookie: token }));
+    const answer = await world.instance.handler(
+      adminRequest('GET', '/admin/status', { cookie: token }),
+    );
     expect(answer.status).toBe(503);
     expect(await answer.text()).toContain('No account holds the device key');
     expect(await sessionOf(world, token)).toBeUndefined();
@@ -371,7 +383,9 @@ describe('CSRF: three layers, and a refused POST changes nothing (#2641, ADR 006
       expect(refused.status).toBe(403);
       expect(refused.headers.get('set-cookie')).toBeNull();
       expect(await sessionOf(world, token)).toBeDefined();
-      expect((await handler(adminRequest('GET', '/admin', { cookie: token }))).status).toBe(200);
+      expect((await handler(adminRequest('GET', '/admin/status', { cookie: token }))).status).toBe(
+        200,
+      );
     },
   );
 
@@ -390,7 +404,9 @@ describe('CSRF: three layers, and a refused POST changes nothing (#2641, ADR 006
       '__Host-oyl-admin=; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0',
     );
     expect(await sessionOf(world, token)).toBeUndefined();
-    expect((await handler(adminRequest('GET', '/admin', { cookie: token }))).status).toBe(303);
+    expect((await handler(adminRequest('GET', '/admin/status', { cookie: token }))).status).toBe(
+      303,
+    );
   });
 
   it('refuses a sign-in from a foreign Origin before it looks at the code, which stays good', async () => {
@@ -608,7 +624,7 @@ describe('every /admin response carries the admin headers exactly (#2641, ADR 00
       await handler(adminRequest('GET', '/admin/sign-in')),
       await handler(adminRequest('GET', '/admin/sign-in', { cookie: token })),
       await handler(adminRequest('GET', '/admin')),
-      await handler(adminRequest('GET', '/admin', { cookie: token })),
+      await handler(adminRequest('GET', '/admin/status', { cookie: token })),
       await handler(adminRequest('GET', '/admin/admin.css')),
       await handler(adminRequest('GET', '/admin/nowhere')),
       await handler(adminRequest('DELETE', '/admin')),
@@ -669,7 +685,7 @@ describe('every /admin response carries the admin headers exactly (#2641, ADR 00
     const world = await adminWorld();
     const token = await signInWith(world.instance.handler, await mint(world));
     const answer = await world.instance.handler(
-      adminRequest('GET', '/admin', { host: 'rebound.example', cookie: token }),
+      adminRequest('GET', '/admin/status', { host: 'rebound.example', cookie: token }),
     );
     expect(answer.status).toBe(421);
     const page = await answer.text();
@@ -755,9 +771,13 @@ describe('no secret and no coordinate in anything the admin pages say (#2641, CL
       await handler(adminRequest('POST', '/admin/sign-in', { form: { code } }), client),
     );
     const token = cookieOf(signedIn) as string;
+    // #2645: every signed-in page, the log's older page and a cursor refused among them.
     await keep(await handler(adminRequest('GET', '/admin', { cookie: token })));
+    await keep(await handler(adminRequest('GET', '/admin/status', { cookie: token })));
+    await keep(await handler(adminRequest('GET', '/admin/log', { cookie: token })));
+    await keep(await handler(adminRequest('GET', '/admin/log?cursor=AAAA', { cookie: token })));
     await keep(
-      await handler(adminRequest('GET', '/admin', { cookie: token, host: 'evil.example' })),
+      await handler(adminRequest('GET', '/admin/status', { cookie: token, host: 'evil.example' })),
     );
     await keep(await handler(adminRequest('GET', '/admin/nowhere', { cookie: token })));
     await keep(

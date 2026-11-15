@@ -2,8 +2,9 @@
 
 /**
  * **The instance's own admin pages: the sign-in and the session** (#2641,
- * ADR 0069 D-1, D-2, D-4, D-8). The pages themselves are #2645's; passkeys
- * #2642's; the loopback listener #2643's.
+ * ADR 0069 D-1, D-2, D-4, D-8), and since #2645 the pages: the shell, Status
+ * and the operator log (`pages.ts`), answered from the admin route table
+ * (`admin-routes.ts`). Passkeys are #2642's; the loopback listener #2643's.
  *
  * Mounted only when the operator sets `OYL_INSTANCE_ADMIN_PAGES=on`
  * (`instance.ts`); otherwise `/admin` is `not_found`, as any path with no
@@ -63,6 +64,16 @@
  * minute and as the instance stops, so a flood cannot grow the append-only
  * log without bound, and a crash loses at most a minute's counts.
  *
+ * ## The pages read the routes, never the store (#2645, ADR 0069 D-2)
+ *
+ * Status is `GET /v1/operate/status` and the log `GET /v1/operate/log`, each
+ * called through {@link AdminSeam} as the owner: what a page shows is the
+ * route's answer. The log's one query, `cursor`, is the route's own cursor
+ * handed back: it is held to the shape the route writes
+ * ({@link LOG_CURSOR}) before it is put into the path the seam is called
+ * with, and the route checks it again. No other part of the browser's request
+ * reaches the seam.
+ *
  * Nothing here renders a token, a code, a key or a coordinate.
  */
 
@@ -74,12 +85,26 @@ import {
   sweepPeriodMs,
   type RateLimit,
 } from '../auth/rate-limit.ts';
-import { escapeHtml, STYLE } from '../html.ts';
+import type { OperateStatusAnswer } from '@onyourleft/operate-text';
+
+import { escapeHtml } from '../html.ts';
 import type { ModeratorRole } from '../moderation/moderation.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type { AdminSessionRecord, SqlStore } from '../store/sql-store.ts';
+import { ADMIN_LANDING, ADMIN_ROUTES } from './admin-routes.ts';
 import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
+import {
+  adminPage,
+  logBody,
+  shellPage,
+  signInPage,
+  statusBody,
+  type LogEntryAnswer,
+  type LogView,
+  type ShellView,
+} from './pages.ts';
+import { ADMIN_STYLE } from './style.ts';
 
 /** The session cookie's name on the tunnel listener (ADR 0069 D-4). */
 export const ADMIN_COOKIE = '__Host-oyl-admin';
@@ -115,6 +140,7 @@ export type AdminRefusal = 'code' | 'csrf' | 'origin' | 'rate_limited';
  * is not `read` or `change` is `not_found` there before it is called.
  */
 export interface AdminSeam {
+  /** `path` may carry a query the admin layer built and checked; the handler matches its pathname. */
   dispatch(method: 'GET', path: string, owner: Caller, client: ClientInfo): Promise<Response>;
 }
 
@@ -155,25 +181,6 @@ export function isAdminPath(pathname: string): boolean {
   return pathname === '/admin' || pathname.startsWith('/admin/');
 }
 
-/** The admin frame: the stylesheet linked, never inline. `body` is markup the caller escaped. */
-function page(title: string, body: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/admin/admin.css">
-</head>
-<body>
-<main>
-${body}
-</main>
-</body>
-</html>
-`;
-}
-
 const HTML = { 'content-type': 'text/html; charset=utf-8' } as const;
 
 function htmlAnswer(
@@ -182,7 +189,7 @@ function htmlAnswer(
   status: number,
   extra: Readonly<Record<string, string>> = {},
 ): Response {
-  return adminResponse(page(title, body), status, { ...HTML, ...extra });
+  return adminResponse(adminPage(title, body), status, { ...HTML, ...extra });
 }
 
 const seeOther = (location: string, extra: Readonly<Record<string, string>> = {}): Response =>
@@ -209,6 +216,13 @@ const UNAVAILABLE: Readonly<Record<Unavailable, string>> = {
   'no-owner':
     'No account holds the device key OYL_INSTANCE_OWNER_KEY names. Sign in to this instance once from the app on that device, then come back.',
 };
+
+/** What a signed-in page calls the seam with. */
+interface PageCall {
+  readonly caller: Caller;
+  readonly client: ClientInfo;
+  readonly seam: AdminSeam;
+}
 
 /** The owner, as the seam calls a route for them. */
 interface Owner {
@@ -252,13 +266,20 @@ function formOf(body: Uint8Array | null): URLSearchParams {
   return new URLSearchParams(body === null ? '' : new TextDecoder().decode(body));
 }
 
-/** The paths the admin layer answers, and the methods each takes. */
-const METHODS: Readonly<Record<string, readonly string[]>> = {
-  '/admin': ['GET'],
-  '/admin/sign-in': ['GET', 'POST'],
-  '/admin/sign-out': ['POST'],
-  '/admin/admin.css': ['GET'],
-};
+/** The paths the admin layer answers, and the methods each takes: the admin route table's. */
+const METHODS: ReadonlyMap<string, readonly string[]> = new Map(
+  ADMIN_ROUTES.map((route) => [route.path, route.methods]),
+);
+
+/** A page of the operator log, as the app's Operate area reads one. */
+export const LOG_PAGE_SIZE = 50;
+
+/**
+ * A cursor as the log route writes one (`pagination.ts` §`encodeCursor`:
+ * base64url, unpadded) and no longer than any it could write. Anything else
+ * is refused here, before the seam is called.
+ */
+const LOG_CURSOR = /^[A-Za-z0-9_-]{1,128}$/;
 
 export function createAdmin(options: AdminOptions): Admin {
   const { store } = options;
@@ -271,7 +292,6 @@ export function createAdmin(options: AdminOptions): Admin {
   const refuse = (kind: AdminRefusal): void => {
     refused.set(kind, (refused.get(kind) ?? 0) + 1);
   };
-  const title = options.name === null ? 'this instance' : options.name;
 
   async function ownerNow(): Promise<Owner | Unavailable> {
     if (expected === null || options.roleOf === undefined) return 'origin';
@@ -338,20 +358,8 @@ export function createAdmin(options: AdminOptions): Admin {
     return site === null || site === 'same-origin';
   }
 
-  function signInPage(problem: boolean, status: number): Response {
-    const described = problem ? ' aria-describedby="code-problem"' : '';
-    return htmlAnswer(
-      'Sign in',
-      `<h1>Sign in to the admin pages of ${escapeHtml(title)}</h1>
-<p>Only the instance’s owner can sign in. On the server machine, run <code>node src/operator/cli.ts admin-code</code> (in the home deployment, <code>docker compose exec instance node src/operator/cli.ts admin-code</code>) and type the code it prints. A code works once, for 10 minutes.</p>
-<form method="post" action="/admin/sign-in">
-<label for="code">One-time code</label>
-${problem ? '<p class="problem" id="code-problem">That code was not accepted. A code works once, for 10 minutes: mint a new one on the server machine.</p>\n' : ''}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${described}>
-<button type="submit">Sign in</button>
-</form>`,
-      status,
-    );
-  }
+  const signInAnswer = (problem: boolean, status: number): Response =>
+    adminResponse(signInPage(options.name, problem), status, HTML);
 
   const refusedForm = (): Response =>
     htmlAnswer(
@@ -360,43 +368,113 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
       403,
     );
 
-  async function landing(
+  /** The owner as the seam calls a route for them, in this session. */
+  const callerOf = (owner: Owner, session: AdminSessionRecord): Caller => ({
+    athleteId: owner.athleteId,
+    deviceKey: owner.ownerKey,
+    tokenSha256: session.tokenSha256,
+    standing: owner.standing,
+  });
+
+  /** The route's JSON when it answered 200, or `undefined`. */
+  async function read(
+    seam: AdminSeam,
+    path: string,
+    caller: Caller,
+    client: ClientInfo,
+  ): Promise<unknown> {
+    const answer = await seam.dispatch('GET', path, caller, client);
+    if (answer.status !== 200) return undefined;
+    try {
+      return await answer.json();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
+  async function statusPage(view: PageCall, shell: ShellView): Promise<string> {
+    const answer = await read(view.seam, '/v1/operate/status', view.caller, view.client);
+    const status =
+      typeof answer === 'object' && answer !== null ? (answer as OperateStatusAnswer) : undefined;
+    let body: string;
+    try {
+      body = statusBody(status, options.now());
+    } catch {
+      // An answer not in the route's shape is as good as none.
+      body = statusBody(undefined, options.now());
+    }
+    return shellPage(shell, 'Status', body);
+  }
+
+  /** The operator log: one page of `GET /v1/operate/log`, newest first, older by the route's cursor. */
+  async function logPage(view: PageCall, shell: ShellView, cursor: string | null): Promise<string> {
+    let shown: LogView;
+    if (cursor !== null && !LOG_CURSOR.test(cursor)) {
+      shown = { kind: 'bad-cursor' };
+    } else {
+      const query = new URLSearchParams({ limit: String(LOG_PAGE_SIZE) });
+      if (cursor !== null) query.set('cursor', cursor);
+      const answer = await read(
+        view.seam,
+        `/v1/operate/log?${query.toString()}`,
+        view.caller,
+        view.client,
+      );
+      const page = answer as { entries?: unknown; cursor?: unknown } | undefined;
+      shown =
+        typeof page === 'object' &&
+        page !== null &&
+        Array.isArray(page.entries) &&
+        (page.cursor === null || typeof page.cursor === 'string')
+          ? {
+              kind: 'page',
+              entries: page.entries.map((entry): LogEntryAnswer => {
+                const row = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<
+                  string,
+                  unknown
+                >;
+                return {
+                  id: row.id,
+                  at: row.at,
+                  source: row.source,
+                  action: row.action,
+                  detail: row.detail,
+                  outcome: row.outcome,
+                };
+              }),
+              older: page.cursor,
+              newest: cursor === null,
+            }
+          : cursor === null
+            ? { kind: 'unreadable' }
+            : { kind: 'bad-cursor' };
+    }
+    return shellPage(shell, 'Operator log', logBody(shown));
+  }
+
+  async function signedInPage(
+    path: string,
+    url: URL,
     owner: Owner,
-    session: AdminSessionRecord,
-    token: string,
+    session: { readonly record: AdminSessionRecord; readonly token: string },
     client: ClientInfo,
     seam: AdminSeam,
   ): Promise<Response> {
-    // ADR 0069 D-2's seam, round trip: the version from GET /v1/operate/status.
-    const status = await seam.dispatch(
-      'GET',
-      '/v1/operate/status',
-      {
-        athleteId: owner.athleteId,
-        deviceKey: owner.ownerKey,
-        tokenSha256: session.tokenSha256,
-        standing: owner.standing,
-      },
-      client,
-    );
-    let version: string | undefined;
-    if (status.status === 200) {
-      const read = (await status.json()) as { version?: unknown };
-      if (typeof read.version === 'string') version = read.version;
+    const shell = {
+      name: options.name,
+      path,
+      strength: session.record.strength,
+      listener: session.record.listener,
+      csrf: await csrfOf(session.token),
+    };
+    const view = { caller: callerOf(owner, session.record), client, seam };
+    if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+    if (path === '/admin/log') {
+      return adminResponse(await logPage(view, shell, url.searchParams.get('cursor')), 200, HTML);
     }
-    const csrf = await csrfOf(token);
-    return htmlAnswer(
-      'Admin',
-      `<h1>Admin pages of ${escapeHtml(title)}</h1>
-<p>You are signed in as the instance’s owner, with a one-time code.</p>
-<p>${version === undefined ? 'The instance’s status could not be read.' : `Version ${escapeHtml(version)}, read from the instance’s status.`}</p>
-<p class="hint">This session ends after 15 minutes without use, and 2 hours after you signed in.</p>
-<form method="post" action="/admin/sign-out">
-<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
-<button type="submit">Sign out</button>
-</form>`,
-      200,
-    );
+    // A page in the route table with no renderer here is a defect, not a page.
+    throw new Error('an admin page with no renderer');
   }
 
   async function signIn(
@@ -444,12 +522,12 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
           });
     if (opened === 'refused') {
       refuse('code');
-      return signInPage(true, 400);
+      return signInAnswer(true, 400);
     }
     // A session this browser held before is never carried on (no fixation).
     const before = await presented(request);
     if (before !== undefined) await store.endAdminSession(before.sha);
-    return seeOther('/admin', { 'set-cookie': cookieFor(token) });
+    return seeOther(ADMIN_LANDING, { 'set-cookie': cookieFor(token) });
   }
 
   async function signOut(
@@ -489,8 +567,9 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
           421,
         );
       }
-      const path = new URL(request.url).pathname;
-      const methods = METHODS[path];
+      const url = new URL(request.url);
+      const path = url.pathname;
+      const methods = METHODS.get(path);
       if (methods === undefined) {
         return htmlAnswer(
           'Not found',
@@ -507,7 +586,7 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
         );
       }
       if (path === '/admin/admin.css') {
-        return adminResponse(STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
+        return adminResponse(ADMIN_STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
       }
       if (body === 'too-large') {
         return htmlAnswer(
@@ -536,10 +615,12 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
       }
       const session = await sessionOf(request, owner);
       if (path === '/admin/sign-in') {
-        return session === undefined ? signInPage(false, 200) : seeOther('/admin');
+        return session === undefined ? signInAnswer(false, 200) : seeOther(ADMIN_LANDING);
       }
+      // Every other GET is a signed-in page: nothing of the instance's state without a session.
       if (session === undefined) return seeOther('/admin/sign-in');
-      return landing(owner, session.record, session.token, client, seam);
+      if (path === '/admin') return seeOther(ADMIN_LANDING);
+      return signedInPage(path, url, owner, session, client, seam);
     },
 
     async flushRefusals() {

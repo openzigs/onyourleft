@@ -12,8 +12,9 @@
 # ⚠️ The context is the root, not this directory, since #780: the room core
 # imports three of this repository's packages (`packages/domain`, `physics`,
 # `protocol`), the analysis agent a fourth (`packages/analysis`, #1098), sync
-# a fifth since #1195 (`packages/fit`, to decode the file it is sent), and
-# the instance has runtime dependencies (`kysely`, `ws`, and since #1096 the
+# a fifth since #1195 (`packages/fit`, to decode the file it is sent), the
+# admin pages a sixth since #2645 (`packages/operate-text`, Operate's words),
+# and the instance has runtime dependencies (`kysely`, `ws`, and since #1096 the
 # AI SDK) to install from the lockfile. `Dockerfile.dockerignore` beside this file is
 # the context's allowlist — BuildKit reads it for this Dockerfile alone — so
 # nothing else in the repository reaches the build.
@@ -56,12 +57,14 @@ COPY packages/physics/package.json packages/physics/
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/analysis/package.json packages/analysis/
 COPY packages/fit/package.json packages/fit/
+COPY packages/operate-text/package.json packages/operate-text/
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts --filter @onyourleft/instance...
 COPY packages/domain packages/domain
 COPY packages/physics packages/physics
 COPY packages/protocol packages/protocol
 COPY packages/analysis packages/analysis
 COPY packages/fit packages/fit
+COPY packages/operate-text packages/operate-text
 COPY apps/instance apps/instance
 
 FROM ghcr.io/openzigs/node:26.13.0-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9

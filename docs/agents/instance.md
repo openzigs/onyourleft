@@ -223,7 +223,15 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         instance reads, and no route reads it. It reaches a
                         route only in-process as the owner, through
                         `handler.ts` §`dispatchAsOwner`, and only one whose
-                        `admin` mark is `read` or `change`.
+                        `admin` mark is `read` or `change`. Since #2645 the
+                        pages: the shell (`admin/pages.ts`), Status and the
+                        operator log, each the route's answer through that
+                        seam and never a store read, answered from
+                        `admin/admin-routes.ts` — which `admin/pages.test.ts`
+                        (headers, CSRF, no session) and the web a11y gate
+                        both read, so a new page is held to them by being
+                        added. Status' words are `packages/operate-text`'s,
+                        which the image now copies.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

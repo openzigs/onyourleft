@@ -89,11 +89,13 @@ export async function signInWith(
   return token;
 }
 
-/** The synchronizer token the signed-in landing page's sign-out form carries. */
+/** The synchronizer token the signed-in Status page's sign-out form carries. */
 export async function csrfFrom(handler: Handler, token: string): Promise<string> {
-  const page = await (await handler(adminRequest('GET', '/admin', { cookie: token }))).text();
+  const page = await (
+    await handler(adminRequest('GET', '/admin/status', { cookie: token }))
+  ).text();
   const value = /name="csrf" value="([0-9a-f]{64})"/.exec(page)?.[1];
-  if (value === undefined) throw new Error('the landing page carried no CSRF token');
+  if (value === undefined) throw new Error('the Status page carried no CSRF token');
   return value;
 }
 

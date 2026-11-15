@@ -82,7 +82,8 @@ describe('the API ignores the admin cookie (#2641)', () => {
     expect(codeOf(await answer.json())).toBe('sealed_required');
     // The cookie was the admin layer's all along: the page still reads.
     expect(
-      (await world.instance.handler(adminRequest('GET', '/admin', { cookie: token }))).status,
+      (await world.instance.handler(adminRequest('GET', '/admin/status', { cookie: token })))
+        .status,
     ).toBe(200);
   });
 });
