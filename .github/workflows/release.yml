@@ -50,6 +50,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          # v6.3.0 turned this default off; kept on so a compile error is still annotated.
+          problem-matcher: true
 
       # Node 26 ships no corepack (#1597): rules.yml's setup says why it is
       # installed from npm, at this pinned version.
