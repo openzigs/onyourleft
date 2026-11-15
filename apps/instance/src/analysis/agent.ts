@@ -120,6 +120,25 @@ export const AGENT_TURN_MILLISECONDS = 120_000;
 /** How many times a write-up the screen withheld is sent back (ADR 0035 D-4). */
 export const AGENT_REWRITES = 1;
 
+/**
+ * The owner's tool check (#2610, `tool-check.ts`): how long the whole check
+ * may take, both of its turns included — the first asks Ollama for a model
+ * it may have to load first, which is most of it. One turn's own longest,
+ * {@link AGENT_TURN_MILLISECONDS}, is its bound.
+ *
+ * ## Provenance — ⚠️ the author's choice, not a measurement
+ */
+export const TOOL_CHECK_MILLISECONDS = AGENT_TURN_MILLISECONDS;
+
+/**
+ * What each of the check's two turns may answer: a tool call, then a short
+ * sentence. A model the operator said reasons is given its allowance on top,
+ * as a job's turn is (#1268).
+ *
+ * ## Provenance — ⚠️ the author's choice, not a measurement
+ */
+export const TOOL_CHECK_OUTPUT_TOKENS = 128;
+
 /** Why a run kept nothing. Closed: no model text, address, model name or key. */
 export type AgentFailure =
   | 'out-of-steps'

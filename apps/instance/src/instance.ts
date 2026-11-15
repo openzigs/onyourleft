@@ -303,6 +303,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let segments: Segments | undefined;
   /** Stops the rate-limit sweeps, once an identity exists to sweep (#892). */
   let stopSweeping = (): void => undefined;
+  // #2610: the owner's tool check, ended when the instance stops.
+  const operateStopped = new AbortController();
   let stopRetrying = (): void => undefined;
   let stopping = false;
   const counters = new HttpCounters();
@@ -896,6 +898,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       changed: (settings: EffectiveAnalysisSettings) => {
         logEvent(log, 'analysis-model', analysisModelLine(settings));
       },
+      stopped: operateStopped.signal,
+      // #2610: the tool check's connection, through the one module that names the SDK.
+      localModel: (settings) =>
+        createLocalModel({ settings, resolve: options.resolve ?? systemResolver }),
     };
     // Replaced, not mutated (above): the accounts when there is an origin, and
     // the instance's keys whatever there is.
@@ -1013,6 +1019,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       stopRetrying();
       // #1796: a test question out now is ended, not left for its 30 s bound.
       hostedSettings?.stop();
+      operateStopped.abort();
       await analysisJobs?.stop();
       await router.stop();
       await listening.close();

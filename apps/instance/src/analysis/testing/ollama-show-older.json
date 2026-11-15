@@ -1,0 +1,5 @@
+{
+  "alpha:14b": { "details": { "family": "alpha" }, "template": "{{ .Prompt }}" },
+  "beta:32b": { "details": { "family": "beta" } },
+  "gamma:26b": { "details": { "family": "gamma" } }
+}

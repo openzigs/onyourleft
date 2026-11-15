@@ -47,6 +47,7 @@
 import {
   analysisModelNameProblem,
   analysisModelUrlProblem,
+  localModelServer,
   readAnalysisModelSettings,
   type AnalysisModelOffCode,
   type AnalysisModelSettings,
@@ -102,6 +103,30 @@ export function resolveLocalModel(
         ? env.analysisModelReasoningTokens
         : String(row.reasoningTokens),
   });
+}
+
+/**
+ * The local SERVER the row and `.env` name, whatever model is named or not
+ * (#2610): the row's address over `.env`'s, held to `.env`'s rule, and the
+ * reasoning tokens the same way — or the code the address is refused with.
+ * What the Operate area lists the server's models from and checks one on,
+ * before the owner has picked a model to save.
+ */
+export function localServerOf(
+  row: AnalysisSettingRecord | undefined,
+  env: Config['analysisEnv'],
+):
+  | { readonly ok: true; readonly baseUrl: URL; readonly reasoningTokens?: number }
+  | { readonly ok: false; readonly code: AnalysisModelOffCode } {
+  const server = localModelServer({ analysisModelUrl: row?.localUrl ?? env.analysisModelUrl });
+  if (!('baseUrl' in server)) return { ok: false, code: server.code };
+  const envTokens = Number(env.analysisModelReasoningTokens?.trim() ?? '');
+  const tokens = row?.reasoningTokens ?? (isReasoningTokens(envTokens) ? envTokens : undefined);
+  return {
+    ok: true,
+    baseUrl: server.baseUrl,
+    ...(tokens === undefined ? {} : { reasoningTokens: tokens }),
+  };
 }
 
 /**

@@ -40,6 +40,7 @@ import { importSecretKey, ownHostedKeyState } from '../analysis/hosted-key.ts';
 import { createHostedSettings } from '../analysis/hosted-settings.ts';
 import { hostedBehindMasking, readMaskingGuard } from '../analysis/hosted.ts';
 import { forgetMaskingOnRefusal } from '../analysis/masking-item.ts';
+import { createLocalModel } from '../analysis/model.ts';
 import { hostedForPictures } from '../camera/hosted-pictures.ts';
 import type { PictureConnection } from '../camera/picture-model.ts';
 import { createSidePose } from '../camera/side-pose.ts';
@@ -548,6 +549,12 @@ export async function startIdentityInstance(
                 resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
                 now: () => clock.ms,
                 hostedKey: ownKey,
+                // #2610: as `instance.ts` builds it, through the one module that names the SDK.
+                localModel: (settings) =>
+                  createLocalModel({
+                    settings,
+                    resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
+                  }),
               },
             }),
           }),
