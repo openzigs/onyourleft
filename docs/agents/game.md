@@ -1323,7 +1323,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/hud/hud-layout-preference.ts
                         the panels a rider turns off and the HUD's text size
                         (#2079), kept on the device and read as a ride starts;
-                        never the notices, the controls or the primary readings.
+                        never the notices; the primary readings and the controls
+                        are #2600's, in ride-chrome-preference.ts.
                         Since #2420 also how power is shown: the 3 s average
                         (the default; absent or unknown reads as it) or instant
     src/game/hud/ride-chrome-preference.ts

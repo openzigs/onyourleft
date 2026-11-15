@@ -206,6 +206,24 @@ describe('a HUD panel collapses to a tab — #2600', () => {
     expect(tab('Readings')?.getAttribute('aria-expanded')).toBe('true');
   });
 
+  it('keeps focus in the HUD when the new tab cannot take it', async () => {
+    await hud();
+    await activateWithKeyboard(tab('Readings') as HTMLElement);
+    // A tab that found no clear place is drawn `visibility: hidden`, which
+    // jsdom does not model: stand in for it with a focus that does nothing.
+    const real = Reflect.get(HTMLElement.prototype, 'focus');
+    HTMLElement.prototype.focus = function (this: HTMLElement, options?: FocusOptions): void {
+      if (this.hasAttribute('data-oyl-tab')) return;
+      real.call(this, options);
+    };
+    try {
+      await activateWithKeyboard(tab('Readings') as HTMLElement);
+      expect(document.activeElement).toBe(within('.oyl-hud'));
+    } finally {
+      HTMLElement.prototype.focus = real;
+    }
+  });
+
   it('hides an open panel’s tab with the controls, and never a collapsed one’s', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     writeRideChrome(localStorage, { autoHide: true, collapsed: ['route'] });

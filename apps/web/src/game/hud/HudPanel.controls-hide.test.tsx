@@ -33,6 +33,7 @@ import { atStartLine } from '../simulation';
 import { CONTROLS_HIDE_MILLISECONDS, HIDES_ATTRIBUTE } from './controls-reveal';
 import { HudCore } from './HudCore';
 import { HudPanel, type HudPanelProps } from './HudPanel';
+import { REPORT_REASONS_MS } from './RoomReport';
 import { BOTS, RIDER, hudOf, startRace, tick } from './lap-race-testing';
 import { RIDE_CHROME_STORAGE_KEY, writeRideChrome } from './ride-chrome-preference';
 
@@ -178,6 +179,42 @@ describe('the ride controls hide until touched — #2600', () => {
     wait(CONTROLS_HIDE_MILLISECONDS - 1);
     expect(controls()).toBe('shown');
     wait(1);
+    expect(controls()).toBe('hidden');
+  });
+
+  it('swallows the pointer’s own down and up on a hidden control, not only its click', async () => {
+    await hud();
+    idle();
+    const pause = button('Pause');
+    const seen: string[] = [];
+    pause.addEventListener('pointerdown', () => seen.push('down'));
+    pause.addEventListener('pointerup', () => seen.push('up'));
+    // A touch-lock's release begins on a control's own pointerdown: none may.
+    tap(pause);
+    expect(seen).toEqual([]);
+    // Drawn now, the next press reaches the control.
+    tap(pause);
+    expect(seen).toEqual(['down', 'up']);
+  });
+
+  it('holds them drawn while a report’s reasons are on show, and lets go after', async () => {
+    await hud({
+      room: { nearby: 2 },
+      onFollowNext: () => undefined,
+      report: {
+        target: { riderId: 4, rider: 'Bea' },
+        onReport: () => Promise.resolve({ kind: 'reported' }),
+      },
+    });
+    act(() => {
+      button('Report Bea').click();
+    });
+    idle();
+    idle();
+    expect(controls()).toBe('shown');
+    // The reasons close with nothing chosen: the wait starts again.
+    wait(REPORT_REASONS_MS);
+    idle();
     expect(controls()).toBe('hidden');
   });
 

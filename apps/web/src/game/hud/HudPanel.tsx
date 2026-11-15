@@ -435,6 +435,9 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
   // device as the HUD mounts; a tab pressed mid-ride is kept at once, so the
   // next ride opens with the same panels collapsed.
   const [chrome, setChrome] = useState<RideChromePreference>(() => readRideChrome(deviceStorage()));
+  // #2600: a report's reasons or its answer are on show — held drawn, as a
+  // line read rather than pressed (`RoomReport`'s `onOpen`).
+  const [reporting, setReporting] = useState(false);
   const toggle = (panel: CollapsiblePanel): void => {
     const next = toggleCollapsed(chrome, panel);
     setChrome(next);
@@ -484,13 +487,14 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       chrome={{
         // #2600: a line the actions panel holds to be READ — the simulated
         // ride's mark (#1992, every frame of the ride), a waiting re-plan's
-        // sentence, the side camera's line — holds the controls drawn: the
+        // sentence, the side camera's line, a report's reasons and answer — holds the controls drawn: the
         // panel is clipped as they hide, and none of these may go with it.
         autoHide:
           chrome.autoHide &&
           simulated === undefined &&
           keepPlan === undefined &&
-          sideCamera?.line === undefined,
+          sideCamera?.line === undefined &&
+          !reporting,
         collapsed: chrome.collapsed,
         onToggle: toggle,
       }}
@@ -670,6 +674,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
                   key={report.target.riderId}
                   target={report.target}
                   onReport={report.onReport}
+                  onOpen={setReporting}
                 />
               )}
             </div>

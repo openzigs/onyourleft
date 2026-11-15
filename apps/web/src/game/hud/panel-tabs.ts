@@ -312,12 +312,27 @@ function subscribeTo(query: string): (onChange: () => void) => () => void {
 
 const subscribeTablet = subscribeTo(PANEL_TABS_MEDIA);
 
+let tablet: { readonly from: unknown; readonly list: MediaQueryList } | undefined;
+
+/**
+ * One list for every read — the page keeps it live, so `.matches` is current —
+ * made again only if the page's `matchMedia` is a different function.
+ */
+function tabletQuery(): MediaQueryList {
+  const from: unknown = Reflect.get(window, 'matchMedia');
+  const cached = tablet;
+  if (cached !== undefined && cached.from === from) return cached.list;
+  const list = window.matchMedia(PANEL_TABS_MEDIA);
+  tablet = { from, list };
+  return list;
+}
+
 /**
  * Whether the stage is a tablet's, {@link PANEL_TABS_MEDIA}. Where the page
  * cannot say (no `matchMedia`, as in jsdom), it is.
  */
 export function useTabletStage(): boolean {
   return useSyncExternalStore(subscribeTablet, () =>
-    typeof window.matchMedia === 'function' ? window.matchMedia(PANEL_TABS_MEDIA).matches : true,
+    typeof window.matchMedia === 'function' ? tabletQuery().matches : true,
   );
 }

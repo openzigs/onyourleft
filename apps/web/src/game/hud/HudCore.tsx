@@ -434,7 +434,14 @@ export function HudCore(props: HudCoreProps): JSX.Element {
     const panel = toggled.current;
     if (panel === undefined) return;
     toggled.current = undefined;
-    hud.current?.querySelector<HTMLElement>(`[data-oyl-tab="${panel}"]`)?.focus();
+    const next = hud.current?.querySelector<HTMLElement>(`[data-oyl-tab="${panel}"]`);
+    next?.focus();
+    // An open panel's tab that found no clear place is drawn hidden and cannot
+    // take focus, and the tab pressed has gone: focus stays in the HUD, not on
+    // the page (WCAG 2.4.3).
+    if (next !== undefined && next !== null && document.activeElement !== next) {
+      hud.current?.focus({ preventScroll: true });
+    }
   }, [chrome?.collapsed]);
   const tab = (panel: CollapsiblePanel): JSX.Element => (
     <PanelTab
@@ -451,6 +458,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   return (
     <section
       ref={hud}
+      // Only for the focus hand-off above, never in the tab order.
+      tabIndex={-1}
       className={[
         'oyl-hud',
         ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
@@ -847,6 +856,10 @@ function hasContent(node: ReactNode): boolean {
  *   rescue, a lost side camera (`HudPanelProps.notices`) — or **the road is
  *   not reaching the trainer** (`HudPanelProps.standingNotice`): the trainer
  *   link is what dropped, and the rider may want out at once.
+ *   **Any** notice holds them, an informational one too (the room notice, a
+ *   voice invite, the not-recorded and standard-world notices): the list
+ *   arrives without a severity, so the hold cannot tell them apart. A ride
+ *   where one stays up the whole time keeps the controls drawn all of it.
  * - **The rider has finished a lap race**: what is left is to end the ride.
  *
  * A lap's notice does not hold them: it is nothing to act on. Nor does it

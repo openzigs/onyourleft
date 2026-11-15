@@ -2007,17 +2007,17 @@ function HudLayoutPanel({
         help={
           <>
             <p className="oyl-muted">
-              What the game shows while you ride, from your next ride. Power, cadence and heart
-              rate, the ride controls and every notice are always shown. The ride controls hide
-              after a few seconds until you touch the screen, unless you turn that off below. On a
-              tablet each panel has a tab that collapses it during the ride, and the game remembers
-              which panels you collapsed. Focus shows one compact readout at the top in place of
-              every reading; a ride in a room, a Delivery round or a lap race keeps the full layout
-              and draws no totals strip. The compact route panel is a small map with the gradient on
-              it, in place of the height profile and the map. The text size applies on tablets held
-              either way, and the totals strip on a tablet on its side or a tall, narrow one held
-              upright: a phone or a short window keeps the normal size, and has no strip, because it
-              has no room for them beside the road.
+              What the game shows while you ride, from your next ride. Every notice is always shown,
+              and so is each panel you have not collapsed. The ride controls hide after a few
+              seconds until you touch the screen, unless you turn that off below. On a tablet each
+              panel, Power, cadence and heart rate included, has a tab that collapses it during the
+              ride, and the game remembers which panels you collapsed. Focus shows one compact
+              readout at the top in place of every reading; a ride in a room, a Delivery round or a
+              lap race keeps the full layout and draws no totals strip. The compact route panel is a
+              small map with the gradient on it, in place of the height profile and the map. The
+              text size applies on tablets held either way, and the totals strip on a tablet on its
+              side or a tall, narrow one held upright: a phone or a short window keeps the normal
+              size, and has no strip, because it has no room for them beside the road.
             </p>
             <p className="oyl-muted">
               Power changes with every pedal stroke, so by default the game shows the average of the
