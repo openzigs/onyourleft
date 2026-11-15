@@ -82,7 +82,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     spec: 'game.browser.spec.ts',
     describe: 'the realistic world — ADR 0026',
     seconds:
-      '169–170 s on the AMD EPYC 7763: the `?realistic` load (#866, measured on #1947); since #1947 its mapped town’s cases read the `?realistic&town` load above',
+      '169–170 s on the AMD EPYC 7763: the `?realistic` load (#866, measured on #1947); since #1947 its mapped town’s cases read the `?realistic&town` load above; since #2663 one phase more, the world arriving mid-ride on two fresh views (13.8 s of a 66 s load on the Mac the lane ran on, not yet read on a runner)',
     why:
       'how the opt-in realistic world looks and what it costs. The DEFAULT world’s halves of ' +
       'its cases — #501’s shader compile and D-7’s "fetches none of the realistic set" — are ' +
@@ -101,7 +101,10 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'water, #679’s gantries) is appearance and cost, and so is #1274’s crag on a steep ' +
       'bank, read on #627’s own frame. Since #1541 it also holds the people — realistic only — ' +
       'off the carriageway as DRAWN, with its control; the rule itself is required, in ' +
-      '`people.test.ts` through `sceneFrame`, control included.',
+      '`people.test.ts` through `sceneFrame`, control included. Since #2663 it also holds ' +
+      'that a view prepared after the realistic world arrives mid-ride builds no program in ' +
+      'the frames after, against the same swap drawn at once; that `GameView` prepares it ' +
+      'is required, in `realistic-arrival-wiring.test.tsx`.',
   },
   {
     spec: 'game.browser.spec.ts',
