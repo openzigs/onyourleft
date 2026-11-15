@@ -66,6 +66,7 @@ describe('the Operate area — #2603', () => {
     expect([...document.querySelectorAll('main h2')].map((each) => each.textContent)).toEqual([
       'Status',
       'Accounts',
+      'Backups',
       'Operator log',
       'Still to come',
     ]);
@@ -77,12 +78,13 @@ describe('the Operate area — #2603', () => {
     await open(scriptedOperate({ pageSize: 2 }));
     await showOlder();
     expect(audit()).toBe('');
-    // Status's Compare with main and Accounts' links (#2605) stay; the log has
-    // nothing left to press.
+    // Status's Compare with main, Accounts' links (#2605) and Backups' one
+    // button (#2607) stay; the log has nothing left to press.
     expect(controls().map((each) => each.textContent)).toEqual([
       'Compare with main',
       'Go to approvals',
       'Go to suspended accounts',
+      'Back up now',
     ]);
   });
 

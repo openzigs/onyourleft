@@ -27,6 +27,7 @@ import {
 /** The Operate area's modules, as paths from the repository root. */
 const OPERATE_MODULES = [
   'apps/web/src/views/OperateView.tsx',
+  'apps/web/src/views/OperateBackupsPanel.tsx',
   'apps/web/src/instance/operate-port.ts',
 ] as const;
 

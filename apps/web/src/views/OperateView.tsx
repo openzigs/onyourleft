@@ -13,14 +13,16 @@ import type {
 } from '../instance/operate-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { OperateAccountsPanel } from './OperateAccountsPanel';
+import { OperateBackupsPanel } from './OperateBackupsPanel';
 import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
  * **Operate** (#2603, epic #2601): the owner-only area of the app for running
  * the instance this device is signed in to. It shows the instance's Status
  * (#2604, `OperateStatusPanel.tsx`), its Accounts (#2605,
- * `OperateAccountsPanel.tsx`, read from the same status) and the operator log
- * (#2602); the
+ * `OperateAccountsPanel.tsx`, read from the same status), its Backups (#2607,
+ * `OperateBackupsPanel.tsx`, which reads its own list and asks for a backup)
+ * and the operator log (#2602); the
  * sections later sub-issues fill are listed, not yet drawn.
  *
  * ## Shown to the owner only
@@ -37,8 +39,9 @@ import { OperateStatusPanel } from './OperateStatusPanel';
  *
  * Every row comes from the instance's answer to {@link OperatePort.log}, a
  * page at a time, newest first, with *Show older entries* while the instance
- * says there is more (as `ModerationView` pages, #961). Nothing on this page
- * writes to the log.
+ * says there is more (as `ModerationView` pages, #961). The log as shown is
+ * not edited: Backups' "back up now" (#2607) is logged by the instance, and
+ * appears here when the page is read again.
  *
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
@@ -50,7 +53,6 @@ export const OPERATE_PURPOSE =
 
 /** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
 export const OPERATE_SECTIONS_TO_COME: readonly string[] = [
-  'Backups',
   'AI backend',
   'Rooms',
   'Instance keys',
@@ -92,6 +94,7 @@ export const OPERATOR_LOG_MORE_UNREADABLE_TEXT =
 const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['migrate', 'Database migrated'],
   ['backup', 'Backup taken'],
+  ['backup_requested', 'Backup asked for'],
   ['restore', 'Restored from a backup'],
   ['room_open', 'Room opened'],
   ['model_key_set', 'Hosted model key set'],
@@ -323,6 +326,7 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       <p>{OPERATE_PURPOSE}</p>
       <OperateStatusPanel status={shown.status} />
       <OperateAccountsPanel status={shown.status} />
+      <OperateBackupsPanel port={port} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}
