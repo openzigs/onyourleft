@@ -275,3 +275,16 @@ than deciding against.
   file still reads; a version-2 file is refused whole by a build that knows only version 1, which
   D-4 intends. D-1 to D-6 otherwise stand as written, and D-6's bound applies to a version-2 file
   unchanged. (#1233)
+- **2026-11-07** — **The format has a version 3, for the advisory cadence cue.**
+  [#2302](https://github.com/openzigs/onyourleft/issues/2302) (epic
+  [#2295](https://github.com/openzigs/onyourleft/issues/2295), the owner's ruling 5 there of
+  2026-11-06) adds an optional cadence cue, `{ "low": rpm, "high": rpm }`, as `cadence` on a
+  `steady` or `ramp` block and as `hardCadence` and `easyCadence` on an `intervals` block. A cue is
+  advice shown to the rider and is never written to a trainer, but it is a field that changes what a
+  workout asks for, so under D-3 and D-4 a file carrying one is `onYourLeftWorkout: 3`. A workout is
+  still written at the lowest version that carries it: no cue and no hold is version 1, a hold and no
+  cue version 2. A version-1 or version-2 file carrying a cue is refused whole, as a version-1 file
+  carrying a hold is, and a version-3 file is refused by a build that reads only 1 and 2, which D-4
+  intends. `validateWorkout` bounds a cue to whole rpm from 30 to 150, low not above high, so a
+  hand-edited store row is held to the same rule as a file. D-1 to D-6 otherwise stand as written,
+  and D-6's bound applies to a version-3 file unchanged. (#2302)

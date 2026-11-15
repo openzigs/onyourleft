@@ -56,10 +56,11 @@
  * work to close.
  */
 
-import type { BeatsPerMinute, Seconds } from '../quantities';
+import type { BeatsPerMinute, RevolutionsPerMinute, Seconds } from '../quantities';
 
 import { WorkoutError } from './errors';
 import type {
+  CadenceCue,
   FreeRideBlock,
   HeartRateHoldBlock,
   HeartRateRange,
@@ -82,32 +83,67 @@ import { validateWorkout } from './workout';
 const VERSION_KEY = 'onYourLeftWorkout';
 
 /**
- * The newest version this build reads and writes: 2, since #1239 added the
- * heart-rate hold (ADR 0048 D-3, and ADR 0017's 2026-10-09 amendment).
+ * The newest version this build reads and writes: 3, since #2302 added the
+ * advisory cadence cue (ADR 0017's 2026-11-07 amendment). Version 2 is the
+ * heart-rate hold, since #1239 (ADR 0048 D-3, the 2026-10-09 amendment).
  *
  * ⚠️ **A workout is written at the LOWEST version that can carry it**, so a
- * workout with no hold block is still a version-1 file and an older build still
- * opens it. Only a file that needs version 2 says 2 — {@link
- * workoutFileVersionFor} is that rule.
+ * workout with no hold and no cue is still a version-1 file, one with a hold
+ * and no cue a version-2 file, and an older build still opens either. Only a
+ * file that needs version 3 says 3 — {@link workoutFileVersionFor} is that
+ * rule.
  */
-export const WORKOUT_FILE_VERSION = 2;
+export const WORKOUT_FILE_VERSION = 3;
 
-/** The version a workout with no heart-rate hold is written as. */
+/** The version a workout with no heart-rate hold and no cadence cue is written as. */
 export const WORKOUT_FILE_FIRST_VERSION = 1;
+
+/** A version this build reads. */
+type FileVersion = 1 | 2 | 3;
 
 /**
  * Which block kinds each version may carry. Version 1 is exactly the four it
  * always had, so a version-1 file carrying a hold is refused — it claims a
  * version that cannot hold one, and believing either half of that would be
- * guessing (ADR 0017 D-3).
+ * guessing (ADR 0017 D-3). Version 3 adds no kind, only the cue below.
  */
-const KINDS_IN_VERSION: Readonly<Record<1 | 2, ReadonlySet<string>>> = {
+const KINDS_IN_VERSION: Readonly<Record<FileVersion, ReadonlySet<string>>> = {
   1: new Set(['steady', 'ramp', 'intervals', 'free-ride']),
   2: new Set(['steady', 'ramp', 'intervals', 'free-ride', 'heart-rate-hold']),
+  3: new Set(['steady', 'ramp', 'intervals', 'free-ride', 'heart-rate-hold']),
 };
 
+/**
+ * The keys that hold a cadence cue (#2302), and the first version that may
+ * carry one. A version-1 or version-2 file carrying a cue is refused, for the
+ * hold's reason: the file contradicts itself.
+ */
+const CUE_FIELDS: ReadonlySet<string> = new Set(['cadence', 'hardCadence', 'easyCadence']);
+const FIRST_VERSION_WITH_CUES = 3;
+
+/** Whether a block names a cadence cue. */
+function carriesCue(block: WorkoutBlock): boolean {
+  switch (block.kind) {
+    case 'steady':
+    case 'ramp':
+      return block.cadence !== undefined;
+    case 'intervals':
+      return block.hardCadence !== undefined || block.easyCadence !== undefined;
+    case 'free-ride':
+    case 'heart-rate-hold':
+      return false;
+    default: {
+      const unhandled: never = block;
+      throw new Error(`unreachable: ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
+
 /** The lowest version that can carry this workout. */
-export function workoutFileVersionFor(workout: Workout): 1 | 2 {
+export function workoutFileVersionFor(workout: Workout): FileVersion {
+  if (workout.blocks.some(carriesCue)) {
+    return FIRST_VERSION_WITH_CUES;
+  }
   return workout.blocks.some((block) => block.kind === 'heart-rate-hold')
     ? 2
     : WORKOUT_FILE_FIRST_VERSION;
@@ -166,11 +202,11 @@ export interface WorkoutFile {
  * and listing it four times would be four chances to forget it once.
  */
 const BLOCK_FIELDS = {
-  steady: { required: ['seconds', 'target'], optional: ['label'] },
-  ramp: { required: ['seconds', 'from', 'to'], optional: ['label'] },
+  steady: { required: ['seconds', 'target'], optional: ['label', 'cadence'] },
+  ramp: { required: ['seconds', 'from', 'to'], optional: ['label', 'cadence'] },
   intervals: {
     required: ['repeats', 'hardSeconds', 'hardTarget', 'easySeconds', 'easyTarget'],
-    optional: ['label'],
+    optional: ['label', 'hardCadence', 'easyCadence'],
   },
   'free-ride': { required: ['seconds'], optional: ['label'] },
   'heart-rate-hold': {
@@ -221,6 +257,10 @@ function encodeBlock(block: WorkoutBlock): Record<string, unknown> {
     if (key === 'range' && block.kind === 'heart-rate-hold') {
       // The two numbers and nothing else, for the reason above.
       out[key] = { low: block.range.low, high: block.range.high };
+    } else if (CUE_FIELDS.has(key) && value !== undefined) {
+      // A cue likewise: its two numbers and nothing else.
+      const cue = value as CadenceCue;
+      out[key] = { low: cue.low, high: cue.high };
     } else if (value !== undefined) {
       out[key] = value;
     }
@@ -292,7 +332,7 @@ function asObject(value: unknown, where: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function readVersion(document: Record<string, unknown>): 1 | 2 {
+function readVersion(document: Record<string, unknown>): FileVersion {
   const declared = document[VERSION_KEY];
   if (declared === undefined) {
     throw new WorkoutError(
@@ -301,7 +341,7 @@ function readVersion(document: Record<string, unknown>): 1 | 2 {
         `"${VERSION_KEY}" key that says what it is`,
     );
   }
-  if (declared !== 1 && declared !== 2) {
+  if (declared !== 1 && declared !== 2 && declared !== 3) {
     throw new WorkoutError(
       'unsupported-version',
       `this workout file is version ${JSON.stringify(declared)} and this program reads versions ` +
@@ -352,7 +392,7 @@ function refuseUnknownKeys(
   }
 }
 
-function decodeBlock(raw: unknown, index: number, version: 1 | 2): WorkoutBlock {
+function decodeBlock(raw: unknown, index: number, version: FileVersion): WorkoutBlock {
   const where = `block ${String(index + 1)}`;
   const record = asObject(raw, where);
 
@@ -377,6 +417,19 @@ function decodeBlock(raw: unknown, index: number, version: 1 | 2): WorkoutBlock 
   }
 
   const fields = BLOCK_FIELDS[kind];
+  if (version < FIRST_VERSION_WITH_CUES) {
+    // ⚠️ #2302: a cue in a file that says version 1 or 2. Refused whole, for
+    // the hold's reason above, and before the key table is consulted — the
+    // table is version 3's, and would otherwise accept the key.
+    const cue = Object.keys(record).find((key) => CUE_FIELDS.has(key));
+    if (cue !== undefined) {
+      throw new WorkoutError(
+        'unknown-field',
+        `${where} carries a cadence cue ("${cue}"), which a version-${String(version)} workout ` +
+          `file cannot carry: cues are version ${String(FIRST_VERSION_WITH_CUES)}.`,
+      );
+    }
+  }
   refuseUnknownKeys(record, ['kind', ...fields.required], fields.optional, where);
   const label = readOptionalLabel(record['label'], where);
 
@@ -387,6 +440,7 @@ function decodeBlock(raw: unknown, index: number, version: 1 | 2): WorkoutBlock 
         seconds: readSeconds(record['seconds'], `${where}'s length`),
         target: readShare(record['target'], `${where}'s target`),
         ...label,
+        ...readOptionalCue(record, 'cadence', where),
       } satisfies SteadyBlock;
     case 'ramp':
       return {
@@ -395,6 +449,7 @@ function decodeBlock(raw: unknown, index: number, version: 1 | 2): WorkoutBlock 
         from: readShare(record['from'], `${where}'s starting target`),
         to: readShare(record['to'], `${where}'s ending target`),
         ...label,
+        ...readOptionalCue(record, 'cadence', where),
       } satisfies RampBlock;
     case 'intervals':
       return {
@@ -405,6 +460,8 @@ function decodeBlock(raw: unknown, index: number, version: 1 | 2): WorkoutBlock 
         easySeconds: readSeconds(record['easySeconds'], `${where}'s easy interval`),
         easyTarget: readShare(record['easyTarget'], `${where}'s easy target`),
         ...label,
+        ...readOptionalCue(record, 'hardCadence', where),
+        ...readOptionalCue(record, 'easyCadence', where),
       } satisfies IntervalsBlock;
     case 'free-ride':
       return {
@@ -438,6 +495,30 @@ function readRange(value: unknown, where: string): HeartRateRange {
     low: readNumber(record['low'], `${where}'s low`) as BeatsPerMinute,
     high: readNumber(record['high'], `${where}'s high`) as BeatsPerMinute,
   };
+}
+
+/**
+ * A cadence cue, when the block has one: exactly `low` and `high`, both
+ * numbers; `validateWorkout` judges them, for {@link readSeconds}'s reason.
+ */
+function readOptionalCue<Key extends 'cadence' | 'hardCadence' | 'easyCadence'>(
+  record: Record<string, unknown>,
+  key: Key,
+  where: string,
+): Partial<Record<Key, CadenceCue>> {
+  const value = record[key];
+  if (value === undefined) {
+    return {};
+  }
+  const at = `${where}'s "${key}"`;
+  const cue = asObject(value, at);
+  refuseUnknownKeys(cue, ['low', 'high'], [], at);
+  return {
+    [key]: {
+      low: readNumber(cue['low'], `${at} low`) as RevolutionsPerMinute,
+      high: readNumber(cue['high'], `${at} high`) as RevolutionsPerMinute,
+    },
+  } as Partial<Record<Key, CadenceCue>>;
 }
 
 function isKnownKind(value: unknown): value is WorkoutBlock['kind'] {

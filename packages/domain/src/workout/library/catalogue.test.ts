@@ -105,6 +105,11 @@ const KNOWN_IDS: readonly string[] = [
   'pyramid-1-to-4',
   'pyramid-ascending',
   'pyramid-1-to-3',
+  // #2302, approved with their names on 2026-11-07 (#2295 ruling 8).
+  'cadence-spin-ups',
+  'cadence-ladder',
+  'cadence-low-strength-5min',
+  'cadence-low-strength-10min',
   'race-simulation-tempo-surges',
   'race-simulation-time-trial',
   'race-simulation-criterium',
@@ -322,6 +327,11 @@ const BANDS: Partial<Record<WorkoutCategory, Band>> = {
   // is what an ERG-held sprint would have to be in.
   sprint: { lower: zone(7), upper: Infinity, easyBetween: true, mayRelease: true },
   pyramid: { lower: zone(4), upper: zone(7), easyBetween: true },
+  // #2302: a cadence drill is the cue, ridden on a moderate target — the
+  // spin-ups and the ladder in Endurance, the low-cadence efforts and the
+  // ramps into them in Tempo — so the band is the two zones together. The
+  // easy spin between them is a recovery, below the band.
+  cadence: { lower: zone(2), upper: zone(4) },
   'race-simulation': { lower: zone(3), upper: zone(7) },
   // #2303: a ramp's steps, from its first to its declared maximum, read from
   // `test.ts`; and the 20-minute test's effort, which is the trainer released.
