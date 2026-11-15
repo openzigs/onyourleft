@@ -60,6 +60,8 @@ import type {
   LocalModels,
   OperateAnalysis,
   OperateJobs,
+  OperateBackup,
+  OperateBackUpNow,
   OperatePort,
   OperateStanding,
   OperateStatus,
@@ -860,7 +862,7 @@ export function scriptedModeration(
  */
 export interface ScriptedOperate {
   readonly port: OperatePort;
-  /** Every method called, in order: `standing`, `status`, `log`, `log <cursor>`. */
+  /** Every method called, in order: `standing`, `status`, `log`, `log <cursor>`, `backups`, `back up now`. */
   readonly calls: string[];
   held: {
     standing: OperateStanding;
@@ -885,6 +887,18 @@ export interface ScriptedOperate {
      * read after shows the old settings, as an instance whose write was lost.
      */
     saveIsLost: boolean;
+    /** The backup records (#2607), NEWEST first, or `null` to answer them as unreadable. */
+    backups: OperateBackup[] | null;
+    /** When the waiting "back up now" was asked, or `null`. */
+    pendingSince: string | null;
+    /**
+     * What "back up now" answers. A `requested` answer marks a request
+     * waiting, as the instance does, unless {@link servesAtOnce}; the
+     * records are never touched — a test adds the served one itself.
+     */
+    backUpNow: OperateBackUpNow;
+    /** Answer `requested` and leave nothing waiting: an instance that took it and never serves it. */
+    servesAtOnce: boolean;
   };
 }
 
@@ -1046,6 +1060,50 @@ export const SCRIPTED_OPERATOR_LOG: readonly OperatorLogEntry[] = [
   },
 ];
 
+/**
+ * Three backup records (#2607), NEWEST first as the instance pages them: a
+ * snapshot the owner asked for, a run that failed for a full disk, and a
+ * scheduled snapshot whose off-box copy failed. The service runs every six
+ * hours and the newest is an hour old, so nothing is stale.
+ */
+export const SCRIPTED_BACKUPS: readonly OperateBackup[] = [
+  {
+    outcome: 'done',
+    id: 3,
+    at: '2026-11-14T20:00:00.000Z',
+    ageSeconds: 3600,
+    snapshot: 'snapshot-2026-11-14T20-00-00-000Z',
+    rows: 48_213,
+    blobs: 1_204,
+    sizeBytes: 3_400_000_000,
+    offBox: 'copied',
+    intervalSeconds: 21_600,
+    requested: true,
+  },
+  {
+    outcome: 'failed',
+    id: 2,
+    at: '2026-11-14T18:00:00.000Z',
+    ageSeconds: 3 * 3600,
+    error: 'ENOSPC',
+    intervalSeconds: 21_600,
+    requested: false,
+  },
+  {
+    outcome: 'done',
+    id: 1,
+    at: '2026-11-14T12:00:00.000Z',
+    ageSeconds: 9 * 3600,
+    snapshot: 'snapshot-2026-11-14T12-00-00-000Z',
+    rows: 48_100,
+    blobs: 1_200,
+    sizeBytes: 3_390_000_000,
+    offBox: 'failed',
+    intervalSeconds: 21_600,
+    requested: false,
+  },
+];
+
 export function scriptedOperate(
   options: {
     readonly standing?: OperateStanding;
@@ -1056,6 +1114,7 @@ export function scriptedOperate(
     readonly models?: LocalModels | null;
     readonly checks?: Record<string, ToolCheckOutcome>;
     readonly jobs?: OperateJobs | null;
+    readonly backups?: readonly OperateBackup[] | null;
   } = {},
 ): ScriptedOperate {
   const calls: string[] = [];
@@ -1070,6 +1129,10 @@ export function scriptedOperate(
     checks: { ...(options.checks ?? {}) },
     jobs: options.jobs === undefined ? SCRIPTED_JOBS : options.jobs,
     saveIsLost: false,
+    backups: options.backups === null ? null : [...(options.backups ?? SCRIPTED_BACKUPS)],
+    pendingSince: null,
+    backUpNow: { kind: 'requested', requestedAt: '2026-11-14T21:00:00.000Z' },
+    servesAtOnce: false,
   };
   /** What a read answers: the held value, or the standing's refusal, or unreadable. */
   const owned = <T>(value: T | null): Promise<T | { kind: Exclude<OperateStanding, 'owner'> }> =>
@@ -1152,6 +1215,23 @@ export function scriptedOperate(
         entries: newestFirst.slice(start, end),
         next: end < newestFirst.length ? String(end) : null,
       });
+    },
+    backups: () => {
+      calls.push('backups');
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      if (held.backups === null) return Promise.resolve({ kind: 'unreachable' });
+      return Promise.resolve({
+        kind: 'backups',
+        records: [...held.backups],
+        pendingSince: held.pendingSince,
+      });
+    },
+    backUpNow: () => {
+      calls.push('back up now');
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      const answer = held.backUpNow;
+      if (answer.kind === 'requested' && !held.servesAtOnce) held.pendingSince = answer.requestedAt;
+      return Promise.resolve(answer);
     },
   };
   return { port, calls, held };
