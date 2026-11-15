@@ -272,13 +272,19 @@ export type SaveOutcome =
   | { readonly ok: false; readonly fields: readonly FieldProblem[] };
 
 /**
+ * Who may write the settings: the app or the CLI, which the row's
+ * `updated_by` names. The admin pages make no change yet (#2641, ADR 0069 D-1).
+ */
+type SettingsActor = Extract<OperatorActor, { readonly source: 'app' | 'cli' }>;
+
+/**
  * Check `body` and, if every field passes, write the row over what it held,
  * as `actor`, logged `analysis_settings_set` naming the fields it changed. A
  * refusal writes no setting and is logged `refused`, naming the fields.
  */
 export async function saveAnalysisSettings(
   store: SqlStore,
-  actor: OperatorActor,
+  actor: SettingsActor,
   body: Readonly<Record<string, unknown>>,
   options: {
     readonly resolve: Resolver;
@@ -341,7 +347,7 @@ function valuesOf(held: AnalysisSettingRecord | undefined): AnalysisSettingValue
  */
 export async function clearAnalysisSettings(
   store: SqlStore,
-  actor: OperatorActor,
+  actor: SettingsActor,
   now: () => number,
 ): Promise<boolean> {
   const { value } = await store.recordOperatorAction<boolean>(

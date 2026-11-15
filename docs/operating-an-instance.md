@@ -968,12 +968,13 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   the CLI is run by whoever can reach the data, not by an account. The commands that change state —
   `migrate`, `backup` (each run of `backup-loop` too), `restore`, `room-open`, `model-key set|clear`,
   `instance-key init|rotate|rotate-identity|reset`, `load-accounts add|erase`, `account-erase
-  --confirm` and `analysis-settings clear|others` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
+  --confirm`, `analysis-settings clear|others` and `admin-code` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
   `logged: false` and prints a line on standard error, and still exits 0, so a log write never stops a
-  deploy whose migrations applied. An entry carries when, where from (`app` or `cli`), the action, a
+  deploy whose migrations applied. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
+  `admin_tunnel` and `admin_loopback`: see "Admin pages", below), the action, a
   short detail and the outcome: `done`, `refused` or `failed`. The detail is written only from a
   closed list of words and counts **for that action** (`applied=2` for `migrate`, `cleared` for
   `model-key clear`): anything else, including a word another action uses, is refused with the
@@ -1083,6 +1084,56 @@ so the instance gains no new login. The server half is [#2602](https://github.co
     ready** for a `503`, no answer within the deadline, or anything else.
   - ⚠️ **Never publish that metrics port** (`ports:` on the `tunnel` service), and never put another
     service on `tunnel_metrics`. Leave the variable empty and nothing is asked.
+
+## Admin pages
+
+The instance can also serve **admin pages of its own**, at `/admin`, for an owner who wants to run
+it from a browser without the app ([ADR 0069](adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md),
+[#2639](https://github.com/openzigs/onyourleft/issues/2639)). What exists so far is the sign-in and
+the session ([#2641](https://github.com/openzigs/onyourleft/issues/2641)); the pages for each area,
+passkeys and a listener on the server machine itself follow.
+
+- **Off unless you turn them on.** Set `OYL_INSTANCE_ADMIN_PAGES=on` in the `.env` beside
+  `compose.yaml` and run `docker compose up -d instance`. Off, `/admin` answers as any address with
+  no route. On, the pages also need `OYL_INSTANCE_ORIGIN`, `OYL_INSTANCE_SECRET_KEY` (as Operate
+  does) and `OYL_INSTANCE_OWNER_KEY`, and an account holding that key: without any of them the page
+  says it is unavailable and names the variable, never its value.
+- **The owner only.** A sign-in opens a session for the athlete whose device holds
+  `OYL_INSTANCE_OWNER_KEY`, and nobody else; there is no name to type. The deputy has no admin
+  sign-in. The instance asks again on every request: change `OYL_INSTANCE_OWNER_KEY` and every admin
+  session ends on its next request.
+- **`operator admin-code`.** On the server machine, run
+  `docker compose exec instance node src/operator/cli.ts admin-code` (or
+  `node src/operator/cli.ts admin-code` beside the data). It prints a one-time code, four groups of
+  four letters and digits, once. Open `https://<your hostname>/admin` and type it, in either case,
+  with or without the hyphens. A code works **once, for 10 minutes**, and minting one voids any
+  unused one. The instance keeps only its SHA-256. A refused code is told one sentence that does not
+  say whether it was wrong, used or expired.
+- **The session.** A cookie, `__Host-oyl-admin` (`Secure`, `HttpOnly`, `SameSite=Strict`), with no
+  lifetime of its own, so it goes when the browser closes. The instance ends it after **15 minutes
+  without use** and **2 hours after sign-in** whatever its use, and on **Sign out**. It keeps only
+  the token's SHA-256. A session opened with a code can read; the pages that read come with
+  [#2645](https://github.com/openzigs/onyourleft/issues/2645), and no change can be made from a
+  browser until passkeys ([#2642](https://github.com/openzigs/onyourleft/issues/2642)).
+- **What protects it.** Every form carries the session's own token, and every `POST` must come from
+  the instance's own page (`Origin` exactly `OYL_INSTANCE_ORIGIN`, and `Sec-Fetch-Site:
+  same-origin` where the browser sends it), or it is refused and changes nothing. A request for
+  another host name is told which address to open. Every `/admin` answer carries a strict policy
+  (no inline script or style, never framed, never cached) and **no** `Access-Control-Allow-Origin`.
+  The API never reads the cookie: a `/v1/*` request carrying it is answered exactly as without it,
+  and a plaintext `/v1/operate/*` request is still refused `sealed_required`.
+- **Rate limits.** At most 10 sign-in attempts a minute from one address (read through
+  `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` behind the tunnel) and 30 a minute from everybody, counted
+  before any code is looked at.
+- **What is logged** in the operator log (above): `admin_code_minted` when the CLI mints a code
+  (`voided_unused` when it voided a live one), `admin_sign_in` for each sign-in (source
+  `admin_tunnel`, naming the owner), and `admin_refused` **at most once a minute for each kind** of
+  refusal (a code, a missing or wrong form token, a foreign origin, a rate limit) with how many there
+  were and no athlete, so a flood cannot grow the log. A crash loses at most a minute's counts.
+  Sign-out and a session timing out are not logged. No entry names a code, a session, an address or
+  a passkey. `migrate … down` refuses to undo migration 0044 while the log holds an admin entry.
+- ⚠️ **Through the tunnel, Cloudflare's edge sees these pages in full**, the cookie and every code
+  you type there included (ADR 0069 D-3). Use the app's sealed Operate area when that matters.
 
 ## Moderation and the operator's duties
 

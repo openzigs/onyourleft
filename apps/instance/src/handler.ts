@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import {
+  ADMIN_FORM_LIMIT_BYTES,
+  adminInternalError,
+  isAdminPath,
+  type Admin,
+} from './admin/admin.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Caller, Identity } from './auth/identity.ts';
@@ -83,12 +89,24 @@ import { SEALED_PATH } from '@onyourleft/domain';
  *   as any other method there is.
  *
  * ⚠️ **`*` and not a list of origins, and that is safe here because nothing
- * rides on ambient authority**: the instance sets no cookie and reads none,
- * and a session is a bearer token the app puts in `Authorization` itself, so a
- * page on another origin that calls the instance holds exactly what it could
- * send with `curl`. `Access-Control-Allow-Credentials` is therefore never
- * sent, and must not be — with it, `*` is refused by browsers, and a list of
- * origins that did carry credentials would be a different threat model.
+ * the API answers rides on ambient authority**: a session is a bearer token
+ * the app puts in `Authorization` itself, so a page on another origin that
+ * calls the instance holds exactly what it could send with `curl`.
+ * `Access-Control-Allow-Credentials` is therefore never sent, and must not be
+ * — with it, `*` is refused by browsers, and a list of origins that did carry
+ * credentials would be a different threat model.
+ *
+ * ⚠️ **Since #2641 the instance sets and reads ONE cookie, and only under
+ * `/admin`** (ADR 0069 D-4): the owner's admin session, `__Host-oyl-admin`,
+ * set and read by `admin/admin.ts` alone and never by a route of the table.
+ * An `/admin` request is answered by that layer BEFORE the table is matched,
+ * with `admin/headers.ts` §`ADMIN_HEADERS` — no `Access-Control-Allow-Origin`
+ * and no other CORS header — and never passes through {@link ALWAYS}. So `*`
+ * stays safe on every other path: no `/v1/*` route, `/health`, `/report` or
+ * any other reads the cookie, and a request carrying it is answered byte for
+ * byte as one without it (`admin/admin-api.test.ts`). The admin layer reaches
+ * a route only in-process, through `dispatchAsOwner`: a plaintext
+ * `/v1/operate/*` request is `sealed_required` with or without the cookie.
  *
  * **A preflight reaches nobody** (#891's choke point, step 4): it calls no
  * route and reads no store, and its answer depends on the PATH's shape alone
@@ -174,6 +192,12 @@ export interface HandlerOptions {
    * the HPKE port. Absent, `POST /v1/sealed` answers `unavailable`.
    */
   readonly sealed?: Sealed;
+  /**
+   * The instance's own admin pages (#2641, ADR 0069): mounted only when the
+   * operator set `OYL_INSTANCE_ADMIN_PAGES=on`. Absent, `/admin` is
+   * `not_found`, as any path with no route is.
+   */
+  readonly admin?: Admin;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -229,6 +253,9 @@ const PREFLIGHT_HEADERS = 'authorization, content-type';
 
 /** How long a browser may keep a preflight's answer, in seconds. */
 const PREFLIGHT_MAX_AGE_SECONDS = 600;
+
+/** What the log and `/metrics` name every `/admin` request by: the pattern, never the path. */
+const ADMIN_ROUTE = '/admin';
 
 /** Past the limit: the request is refused rather than read further. */
 const TOO_LARGE = Symbol('too large');
@@ -329,6 +356,7 @@ export function createHandler(options: HandlerOptions): Handler {
     body: Uint8Array | null,
     client: ClientInfo,
     sealedRequest: boolean,
+    asOwner?: Caller,
   ): Promise<Response> {
     const identity = options.identity;
     // #2602 (ADR 0047 D-7, D-13): the owner's area is never served in
@@ -359,7 +387,10 @@ export function createHandler(options: HandlerOptions): Handler {
     }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
-      caller = await identity?.authenticate(request.headers.get('authorization'));
+      // The admin seam's caller is the owner the admin layer signed in: no
+      // bearer token is minted or looked up (ADR 0069 D-2). Every check
+      // below runs on it as on any other.
+      caller = asOwner ?? (await identity?.authenticate(request.headers.get('authorization')));
       if (caller === undefined) {
         return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
       }
@@ -440,7 +471,76 @@ export function createHandler(options: HandlerOptions): Handler {
     return answer(found.candidate, found.params, request, url, body, client, true);
   }
 
+  /**
+   * The admin seam (#2641, ADR 0069 D-2): a route of the table called
+   * in-process AS THE OWNER, for a fixed `(method, path)` the admin layer
+   * names — never one from the browser. A route not marked `admin: 'read'` or
+   * `'change'` is `not_found` before it is called; one that is runs through
+   * {@link answer}, so its `reaches` check, its validation and its log write
+   * run unchanged.
+   */
+  async function dispatchAsOwner(
+    method: 'GET',
+    path: string,
+    owner: Caller,
+    client: ClientInfo,
+  ): Promise<Response> {
+    // The origin the Node listener builds every request URL on, never a host anybody typed.
+    const url = new URL(`http://instance.invalid${path}`);
+    for (const candidate of innerRoutes) {
+      const params = matchPath(candidate.path, url.pathname);
+      if (params === undefined || candidate.method !== method) continue;
+      if (candidate.admin !== 'read' && candidate.admin !== 'change') break;
+      return answer(
+        candidate,
+        params,
+        new Request(url, { method }),
+        url,
+        null,
+        client,
+        false,
+        owner,
+      );
+    }
+    return errorResponse('not_found');
+  }
+
+  /**
+   * An `/admin` request (#2641): answered by the admin layer BEFORE the table
+   * is matched, and sent with the admin headers alone — never {@link ALWAYS}'s
+   * CORS `*`. Logged and counted by the pattern, never the path.
+   */
+  async function answerAdmin(
+    admin: Admin,
+    request: Request,
+    client: ClientInfo,
+  ): Promise<Response> {
+    const started = now();
+    let response: Response;
+    try {
+      const body =
+        request.method === 'POST' ? await boundedBody(request, ADMIN_FORM_LIMIT_BYTES) : null;
+      response = await admin.handle(request, body === TOO_LARGE ? 'too-large' : body, client, {
+        dispatch: dispatchAsOwner,
+      });
+    } catch (error) {
+      logUnhandled(options.log, ADMIN_ROUTE, error);
+      response = adminInternalError();
+    }
+    logRequest(options.log, {
+      method: request.method,
+      route: ADMIN_ROUTE,
+      status: response.status,
+      ms: now() - started,
+    });
+    options.observe?.(ADMIN_ROUTE, response.status, undefined);
+    return response;
+  }
+
   return async (request, client = { address: null }) => {
+    if (options.admin !== undefined && isAdminPath(new URL(request.url).pathname)) {
+      return answerAdmin(options.admin, request, client);
+    }
     const started = now();
     let route: Route | undefined;
     let response: Response;

@@ -106,6 +106,9 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['load_accounts_add', 'Load-test accounts added'],
   ['load_accounts_erase', 'Load-test accounts erased'],
   ['account_erase', 'Account erased'],
+  ['admin_code_minted', 'Admin sign-in code made'],
+  ['admin_sign_in', 'Signed in to the admin pages'],
+  ['admin_refused', 'Admin sign-in attempts refused'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */
@@ -116,6 +119,9 @@ export function operatorActionLabel(action: string): string {
 const SOURCE_TEXT = {
   app: 'from the app',
   cli: 'from the command line on the host',
+  // #2641 (ADR 0069 D-8): the instance's own admin pages, by listener.
+  admin_tunnel: 'from the admin pages, through the tunnel',
+  admin_loopback: 'from the admin pages, on the server machine',
 } as const;
 
 /** A moment, in UTC, so the screen says the same thing wherever it is read. */

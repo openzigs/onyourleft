@@ -52,6 +52,8 @@ services:
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
       OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
+      # #2641: the instance's own admin pages at /admin, off unless .env says on.
+      OYL_INSTANCE_ADMIN_PAGES: ${OYL_INSTANCE_ADMIN_PAGES:-off}
       # cloudflared's `/ready` (#2604), asked for the owner's Status. Empty:
       # the tunnel shows as "not known" and nothing is asked.
       OYL_INSTANCE_TUNNEL_READY_URL: ${OYL_INSTANCE_TUNNEL_READY_URL:-}

@@ -37,6 +37,7 @@ import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type {
   AccountChangeMarkTable,
   AccountChangeTable,
+  AdminSessionTable,
   ActivityRecordTable,
   AnalysisEventTable,
   AnalysisJobTable,
@@ -965,6 +966,10 @@ export const OPERATOR_ACTIONS = [
   'analysis_settings_set',
   'analysis_settings_cleared',
   'analysis_model_checked',
+  // #2641 (ADR 0069 D-8): the admin pages' one-time code and sign-in.
+  'admin_code_minted',
+  'admin_sign_in',
+  'admin_refused',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -978,7 +983,20 @@ export type OperatorOutcome = 'done' | 'refused' | 'failed';
  * none rather than borrowing the owner's (migration 0040).
  */
 export type OperatorActor =
-  { readonly source: 'app'; readonly athleteId: string } | { readonly source: 'cli' };
+  | { readonly source: 'app'; readonly athleteId: string }
+  | { readonly source: 'cli' }
+  /**
+   * The instance's own admin pages (#2641, ADR 0069 D-8), by listener: the
+   * owner's athlete, or `null` for an `admin_refused` count, which counts
+   * attempts by unknown parties — naming the owner there would mislead an audit.
+   */
+  | { readonly source: AdminSource; readonly athleteId: string | null };
+
+/** The operator log's two admin sources (migration 0044): one per listener (ADR 0069 D-5). */
+export type AdminSource = 'admin_tunnel' | 'admin_loopback';
+
+/** Where an operator log entry came from. */
+export type OperatorSource = 'app' | 'cli' | AdminSource;
 
 /**
  * An entry's `detail`: the CLOSED vocabulary each action may write (#2602).
@@ -1034,6 +1052,16 @@ export const OPERATOR_DETAILS: {
     ],
     counts: [],
   },
+  // #2641 (ADR 0069 D-8): never a code, an athlete, a session or an address.
+  // Minting voids every unused code, and says so when one was live.
+  admin_code_minted: { words: ['voided_unused'], counts: [] },
+  // How a session was opened: `passkey` is #2642's.
+  admin_sign_in: { words: ['code', 'passkey'], counts: [] },
+  // At most one a minute per kind, carrying how many were refused.
+  admin_refused: {
+    words: ['code', 'passkey', 'step_up', 'csrf', 'origin', 'rate_limited'],
+    counts: ['refused'],
+  },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
@@ -1071,12 +1099,50 @@ export interface OperatorLogEntry {
   readonly id: number;
   /** Unix seconds. */
   readonly at: number;
-  readonly source: 'app' | 'cli';
-  /** The owner's athlete for `app`; `null` for `cli`. */
+  readonly source: OperatorSource;
+  /** The owner's athlete for `app`; `null` for `cli`; either for an admin source. */
   readonly actorAthleteId: string | null;
   readonly action: OperatorAction;
   readonly detail: string | null;
   readonly outcome: OperatorOutcome;
+}
+
+/** A one-time code for the admin pages, as it is written (#2641, migration 0044). */
+export interface AdminCodeWrite {
+  /** The SHA-256 of the code as `admin/code.ts` §`adminCodeSha256` normalises it. */
+  readonly codeSha256: string;
+  /** Unix seconds. */
+  readonly mintedAt: number;
+  readonly expiresAt: number;
+  readonly mintedBy: 'cli' | 'app';
+}
+
+/** A browser's admin session (#2641, migration 0044, ADR 0069 D-4). */
+export interface AdminSessionRecord {
+  /** The SHA-256 of the cookie's token: the token itself is never stored. */
+  readonly tokenSha256: string;
+  readonly athleteId: string;
+  /** The `OYL_INSTANCE_OWNER_KEY` the athlete held at sign-in. */
+  readonly ownerKey: string;
+  readonly listener: 'tunnel' | 'loopback';
+  readonly strength: 'code' | 'passkey';
+  readonly csrfSha256: string;
+  /** Unix seconds. */
+  readonly createdAt: number;
+  readonly lastSeenAt: number;
+  /** The absolute end: two hours after `createdAt`. */
+  readonly expiresAt: number;
+}
+
+/** What redeeming an admin code asks of the store (#2641). */
+export interface AdminCodeRedemption {
+  readonly codeSha256: string;
+  /** The session to open; its `createdAt` is now, and the code must be live then. */
+  readonly session: AdminSessionRecord;
+  /** The listener's operator log source. */
+  readonly source: AdminSource;
+  /** A session not seen for this long is over: it is pruned as this one is opened. */
+  readonly idleSeconds: number;
 }
 
 /**
@@ -2245,6 +2311,30 @@ export interface SqlStore {
     limit: number,
   ): Promise<readonly OperatorLogEntry[]>;
   /**
+   * Hold a new one-time admin code (#2641, ADR 0069 D-1), VOIDING every
+   * unused one, so at most one code is live, and forgetting every code whose
+   * life ended before this one was minted. Answers how many live codes it
+   * voided. `operator admin-code` calls it inside
+   * {@link recordOperatorAction}, so the code and its `admin_code_minted`
+   * entry are written together or not at all.
+   */
+  mintAdminCode(code: AdminCodeWrite): Promise<{ readonly voided: number }>;
+  /**
+   * Redeem a one-time admin code (#2641): in ONE transaction, the code
+   * marked used — only while it is unused and live at the session's
+   * `createdAt` — the session opened, every session past its idle or absolute
+   * end pruned, and an `admin_sign_in` entry (`code`) appended to the
+   * operator log with the session's athlete. `refused` writes nothing at all;
+   * a log write that fails rolls the code and the session back and throws.
+   */
+  openAdminSessionWithCode(redemption: AdminCodeRedemption): Promise<'opened' | 'refused'>;
+  /** The admin session whose token hashes to `tokenSha256`, ended or not. */
+  findAdminSession(tokenSha256: string): Promise<AdminSessionRecord | undefined>;
+  /** Record that the session was used at `at`, Unix seconds: its idle clock starts again. */
+  touchAdminSession(tokenSha256: string, at: number): Promise<void>;
+  /** End an admin session: its row is deleted. `false` when there was none. */
+  endAdminSession(tokenSha256: string): Promise<boolean>;
+  /**
    * One page of the suspended accounts, most recently suspended first (#961):
    * at most `limit` of them after the (suspendedAt, id) position `after`, in
    * that order, or the first when it is `undefined`.
@@ -2754,6 +2844,18 @@ const operatorLogFrom = (row: Selectable<OperatorLogTable>): OperatorLogEntry =>
   outcome: row.outcome,
 });
 
+const adminSessionFrom = (row: Selectable<AdminSessionTable>): AdminSessionRecord => ({
+  tokenSha256: row.token_sha256,
+  athleteId: row.athlete_id,
+  ownerKey: row.owner_key,
+  listener: row.listener,
+  strength: row.strength,
+  csrfSha256: row.csrf_sha256,
+  createdAt: row.created_at,
+  lastSeenAt: row.last_seen_at,
+  expiresAt: row.expires_at,
+});
+
 /** Every column of a backup record, and whether a request was served by it (#2606). */
 function backupRecordQuery(executor: Kysely<InstanceDatabase>) {
   return executor
@@ -2811,7 +2913,7 @@ async function appendOperatorLog(
     .values({
       at: entry.at,
       source: entry.actor.source,
-      actor_athlete_id: entry.actor.source === 'app' ? entry.actor.athleteId : null,
+      actor_athlete_id: entry.actor.source === 'cli' ? null : entry.actor.athleteId,
       action: entry.action,
       detail,
       outcome,
@@ -6276,6 +6378,110 @@ function storeOver(
         let query = db.selectFrom('operator_log').selectAll();
         if (beforeId !== undefined) query = query.where('id', '<', beforeId);
         return (await query.orderBy('id', 'desc').limit(limit).execute()).map(operatorLogFrom);
+      }),
+
+    mintAdminCode: (code) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const voided = await trx
+            .deleteFrom('admin_code')
+            .where('used_at', 'is', null)
+            .where('expires_at', '>', code.mintedAt)
+            .executeTakeFirst();
+          // Spent and dead codes are kept no longer than they can matter.
+          await trx.deleteFrom('admin_code').where('expires_at', '<=', code.mintedAt).execute();
+          await trx
+            .insertInto('admin_code')
+            .values({
+              code_sha256: code.codeSha256,
+              minted_at: code.mintedAt,
+              expires_at: code.expiresAt,
+              used_at: null,
+              minted_by: code.mintedBy,
+            })
+            .execute();
+          return { voided: Number(voided.numDeletedRows) };
+        }),
+      ),
+
+    openAdminSessionWithCode: (redemption) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const at = redemption.session.createdAt;
+          const taken = await trx
+            .updateTable('admin_code')
+            .set({ used_at: at })
+            .where('code_sha256', '=', redemption.codeSha256)
+            .where('used_at', 'is', null)
+            .where('expires_at', '>', at)
+            .executeTakeFirst();
+          if (Number(taken.numUpdatedRows) !== 1) return 'refused' as const;
+          await trx
+            .deleteFrom('admin_session')
+            .where((row) =>
+              row.or([
+                row('expires_at', '<=', at),
+                row('last_seen_at', '<=', at - redemption.idleSeconds),
+              ]),
+            )
+            .execute();
+          const session = redemption.session;
+          await trx
+            .insertInto('admin_session')
+            .values({
+              token_sha256: session.tokenSha256,
+              athlete_id: session.athleteId,
+              owner_key: session.ownerKey,
+              listener: session.listener,
+              strength: session.strength,
+              csrf_sha256: session.csrfSha256,
+              created_at: session.createdAt,
+              last_seen_at: session.lastSeenAt,
+              expires_at: session.expiresAt,
+            })
+            .execute();
+          // In the same transaction as the code and the session (ADR 0069
+          // D-8): a sign-in the log cannot record is not made.
+          await appendOperatorLog(
+            trx,
+            {
+              actor: { source: redemption.source, athleteId: session.athleteId },
+              action: 'admin_sign_in',
+              at,
+            },
+            'done',
+            'code',
+          );
+          return 'opened' as const;
+        }),
+      ),
+
+    findAdminSession: (tokenSha256) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('admin_session')
+          .selectAll()
+          .where('token_sha256', '=', tokenSha256)
+          .executeTakeFirst();
+        return row === undefined ? undefined : adminSessionFrom(row);
+      }),
+
+    touchAdminSession: (tokenSha256, at) =>
+      exclusive(async () => {
+        await db
+          .updateTable('admin_session')
+          .set({ last_seen_at: at })
+          .where('token_sha256', '=', tokenSha256)
+          .execute();
+      }),
+
+    endAdminSession: (tokenSha256) =>
+      exclusive(async () => {
+        const ended = await db
+          .deleteFrom('admin_session')
+          .where('token_sha256', '=', tokenSha256)
+          .executeTakeFirst();
+        return Number(ended.numDeletedRows) > 0;
       }),
 
     listSuspendedAthletes: (after, limit) =>

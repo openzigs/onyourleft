@@ -138,6 +138,9 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   backup_lease: `INSERT INTO backup_lease VALUES ('${'f'.repeat(64)}', 'token', 'host:1', 40)`,
   // #2609: the operator's settings row, every column set.
   analysis_setting: `INSERT INTO analysis_setting VALUES (1, 'http://ollama:11434/v1', 'm', 512, 1, 0, 1, 39, 'cli')`,
+  // #2641: a code redeemed, and the session it opened for athlete 'a'.
+  admin_code: `INSERT INTO admin_code VALUES ('${'a1'.repeat(32)}', 41, 641, 42, 'cli')`,
+  admin_session: `INSERT INTO admin_session VALUES ('${'a2'.repeat(32)}', 'a', 'key-a', 'tunnel', 'code', '${'a3'.repeat(32)}', 42, 43, 7242)`,
 };
 
 /**
@@ -436,6 +439,88 @@ describe('the migrations (#769)', () => {
     await withKysely(path, async (db) => {
       expect((await appliedMigrations(db)).at(-1)).toBe('0040-operator-log');
     });
+  });
+
+  it('keeps the operator log append-only through 0044’s rebuild, and widens its sources and actor rule (#2641)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO operator_log VALUES (1, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+      // The admin sources, naming the owner or nobody.
+      database.exec(
+        `INSERT INTO operator_log VALUES (2, 39, 'admin_tunnel', 'a', 'admin_sign_in', 'code', 'done')`,
+      );
+      database.exec(
+        `INSERT INTO operator_log VALUES (3, 40, 'admin_loopback', NULL, 'admin_refused', 'code,refused=2', 'refused')`,
+      );
+      for (const refused of [
+        `INSERT INTO operator_log VALUES (4, 41, 'web', NULL, 'migrate', NULL, 'done')`,
+        `INSERT INTO operator_log VALUES (4, 41, 'cli', 'a', 'migrate', NULL, 'done')`,
+        `INSERT INTO operator_log VALUES (4, 41, 'app', NULL, 'migrate', NULL, 'done')`,
+      ]) {
+        expect(() => database.exec(refused), refused).toThrow(/CHECK constraint failed/);
+      }
+      expect(() => database.exec(`UPDATE operator_log SET outcome = 'failed'`)).toThrow(
+        /append-only/,
+      );
+      expect(() => database.exec(`DELETE FROM operator_log WHERE id = 1`)).toThrow(/append-only/);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('refuses to undo 0044 while the operator log holds an admin entry, and changes nothing; with none it keeps every entry and its id (#2641)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+      database.exec(
+        `INSERT INTO operator_log VALUES (9, 39, 'admin_tunnel', NULL, 'admin_refused', 'code,refused=1', 'refused')`,
+      );
+    } finally {
+      database.close();
+    }
+    const before = snapshot(path);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0044-admin-sign-in');
+    });
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /holds entries from the admin pages/,
+    );
+    expect(snapshot(path)).toEqual(before);
+
+    // With no admin entry, `down` goes, and the CLI's entry stays with its id.
+    const other = await freshPath();
+    await withKysely(other, (db) => migrateToLatest(db));
+    const seeded = openDatabase(other);
+    try {
+      seeded.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+    } finally {
+      seeded.close();
+    }
+    await withKysely(other, (db) => migrateDownOne(db));
+    const after = openDatabase(other);
+    try {
+      expect(after.prepare('SELECT id, source FROM operator_log').all()).toEqual([
+        { id: 7, source: 'cli' },
+      ]);
+      expect(() => after.exec(`UPDATE operator_log SET outcome = 'failed'`)).toThrow(/append-only/);
+      expect(() =>
+        after.exec(
+          `INSERT INTO operator_log VALUES (8, 39, 'admin_tunnel', NULL, 'admin_refused', NULL, 'refused')`,
+        ),
+      ).toThrow(/CHECK constraint failed/);
+    } finally {
+      after.close();
+    }
   });
 
   it('refuses to undo 0039 while the leaderboard integrity log holds an entry, and changes nothing (#69)', async () => {

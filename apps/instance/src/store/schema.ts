@@ -421,12 +421,48 @@ export interface OperatorLogTable {
   readonly id: Generated<number>;
   /** Unix seconds. */
   readonly at: number;
-  readonly source: 'app' | 'cli';
-  /** The owner's athlete for `app`; `NULL` for `cli`, which has none. */
+  /** Since migration 0044 (#2641) also the admin pages, by listener (ADR 0069 D-8). */
+  readonly source: 'app' | 'cli' | 'admin_tunnel' | 'admin_loopback';
+  /**
+   * The owner's athlete for `app`; `NULL` for `cli`, which has none; the
+   * owner's athlete, or `NULL` for an `admin_refused` count, for an admin source.
+   */
   readonly actor_athlete_id: string | null;
   readonly action: string;
   readonly detail: string | null;
   readonly outcome: 'done' | 'refused' | 'failed';
+}
+
+/**
+ * A one-time code for the admin pages (#2641, migration 0044, ADR 0069 D-1),
+ * kept only as the SHA-256 of its normalised form. Single use, ten minutes.
+ */
+export interface AdminCodeTable {
+  readonly code_sha256: string;
+  /** Unix seconds. */
+  readonly minted_at: number;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+  readonly minted_by: 'cli' | 'app';
+}
+
+/**
+ * A browser's admin session (#2641, migration 0044, ADR 0069 D-4): the
+ * cookie's token and the CSRF token kept only as SHA-256s.
+ */
+export interface AdminSessionTable {
+  readonly token_sha256: string;
+  readonly athlete_id: string;
+  /** The `OYL_INSTANCE_OWNER_KEY` the athlete held at sign-in. */
+  readonly owner_key: string;
+  readonly listener: 'tunnel' | 'loopback';
+  readonly strength: 'code' | 'passkey';
+  readonly csrf_sha256: string;
+  /** Unix seconds. */
+  readonly created_at: number;
+  readonly last_seen_at: number;
+  /** Two hours after `created_at`, whatever use it saw. */
+  readonly expires_at: number;
 }
 
 /**
@@ -848,6 +884,8 @@ export interface InstanceDatabase {
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
   readonly operator_log: OperatorLogTable;
+  readonly admin_code: AdminCodeTable;
+  readonly admin_session: AdminSessionTable;
   readonly backup_record: BackupRecordTable;
   readonly backup_request: BackupRequestTable;
   readonly backup_lease: BackupLeaseTable;

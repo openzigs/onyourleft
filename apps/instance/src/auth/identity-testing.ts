@@ -14,6 +14,8 @@ import { mkdtemp, readFile, rm, stat, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createAdmin, type Admin, type AdminLimits } from '../admin/admin.ts';
+
 import {
   decodeFrame,
   openSealedRequest,
@@ -233,6 +235,8 @@ export interface IdentityInstance {
   readonly sealed: Sealed;
   /** The analysis jobs, when the world was given an engine (#1095). */
   readonly analysis: AnalysisJobs | undefined;
+  /** The admin pages (#2641), when the world was given them. */
+  readonly admin: Admin | undefined;
   /** A second, fresh store on the same file — a read the instance's store did not serve. */
   freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -326,6 +330,16 @@ export async function startIdentityInstance(
      * world's directory, no tunnel address, and the world's own keys.
      */
     operateStatus?: Partial<StatusSources>;
+    /**
+     * The instance's own admin pages (#2641), over the world's store, clock
+     * and accounts, as `instance.ts` mounts them when `OYL_INSTANCE_ADMIN_PAGES`
+     * is on: the owner is the world's `moderators.owner`.
+     */
+    admin?: {
+      readonly limits?: AdminLimits;
+      /** What the admin layer sees in place of the real store — a spy on its lookups. */
+      readonly storeSeenBy?: (store: SqlStore) => SqlStore;
+    };
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -358,6 +372,7 @@ export async function startIdentityInstance(
     withoutOperate,
     operateStatus,
     resolve,
+    admin: adminOptions,
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
@@ -514,8 +529,24 @@ export async function startIdentityInstance(
     hostedKey: ownKey,
     hosted: (key) => hostedForPictures(key, pictures?.hostedFetch),
   });
+  const madeAdmin: { value?: Admin } = {};
+  const adminFor = (identity: Identity): Admin | undefined => {
+    if (adminOptions === undefined) return undefined;
+    madeAdmin.value = createAdmin({
+      store: adminOptions.storeSeenBy === undefined ? store : adminOptions.storeSeenBy(store),
+      origin: TEST_ORIGIN,
+      ownerKey: rest.moderators?.owner,
+      secretKeySet: keyless !== true,
+      roleOf: (athleteId) => identity.moderation.roleOf(athleteId),
+      now: () => clock.ms,
+      name: config?.name ?? null,
+      ...(adminOptions.limits === undefined ? {} : { limits: adminOptions.limits }),
+    });
+    return madeAdmin.value;
+  };
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
+      ...(adminOptions === undefined ? {} : { admin: adminFor(identity) as Admin }),
       sidePose,
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
       hostedSettings,
@@ -720,6 +751,7 @@ export async function startIdentityInstance(
     instanceKeys,
     sealed,
     analysis: analysisJobs,
+    admin: madeAdmin.value,
     confirmations,
     call,
     request,

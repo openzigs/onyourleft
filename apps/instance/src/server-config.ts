@@ -31,6 +31,7 @@ export interface RawServerConfig {
   readonly discordBotTokenFile?: DiscordTokenFile | undefined;
   readonly discordGuildId?: string | undefined;
   readonly tunnelReadyUrl?: string | undefined;
+  readonly adminPages?: string | undefined;
 }
 
 /**
@@ -105,6 +106,12 @@ export interface ServerConfig {
    * rule (`history/address.ts`): a private address or a single-label name.
    */
   readonly tunnelReadyUrl: URL | undefined;
+  /**
+   * The instance's own admin pages at `/admin` (#2641, ADR 0069 D-2): OFF
+   * unless the operator sets `OYL_INSTANCE_ADMIN_PAGES=on`. A new login
+   * surface on the internet is the operator's choice to open.
+   */
+  readonly adminPages: boolean;
 }
 
 export type ServerConfigResult =
@@ -168,6 +175,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
 
   const compression = onOff(raw.compression, 'OYL_INSTANCE_WS_COMPRESSION', problems);
   const metrics = onOff(raw.metrics, 'OYL_INSTANCE_METRICS', problems);
+  const adminPages = onOff(raw.adminPages, 'OYL_INSTANCE_ADMIN_PAGES', problems);
 
   let pingIntervalMs = DEFAULT_PING_INTERVAL_MS;
   if (present(raw.pingIntervalMs)) {
@@ -297,6 +305,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       analysisHeartbeatMs,
       discord,
       tunnelReadyUrl,
+      adminPages,
     },
   };
 }

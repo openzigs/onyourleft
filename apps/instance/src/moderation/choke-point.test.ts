@@ -698,6 +698,20 @@ describe('the owner’s routes are the owner’s alone, checked in ONE place (#2
     }
   });
 
+  it('says on every owner route whether the admin pages reach it, on no other route, and lets them read only (#2641, ADR 0069 D-2)', () => {
+    for (const route of OWNER_ROUTES) {
+      expect(['read', 'change', 'never'], route.operationId).toContain(route.admin);
+      // A read is a GET; until #2642's step-up, every change stays `never`.
+      expect(route.admin, route.operationId).toBe(route.method === 'GET' ? 'read' : 'never');
+    }
+    // ADR 0069 D-9's three moderation routes are #2646's to mark; none is yet.
+    expect(
+      ROUTES.filter((route) => route.reaches !== 'owner' && route.admin !== undefined).map(
+        (route) => route.operationId,
+      ),
+    ).toEqual([]);
+  });
+
   /** A route that says it is the owner's and checks nothing itself. */
   const FORGETFUL: Route = {
     method: 'GET',

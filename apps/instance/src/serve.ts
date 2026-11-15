@@ -83,6 +83,7 @@ const server = readServerConfig(
     ),
     discordGuildId: process.env.OYL_INSTANCE_DISCORD_GUILD_ID,
     tunnelReadyUrl: process.env.OYL_INSTANCE_TUNNEL_READY_URL,
+    adminPages: process.env.OYL_INSTANCE_ADMIN_PAGES,
   },
   availableParallelism(),
 );

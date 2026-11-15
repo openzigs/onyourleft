@@ -469,6 +469,29 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       origin: `https://models-of-${athlete}.example`,
       recordedAt: 1_790_000_560,
     });
+    // Migration 0044's (#2641): an admin session each, opened with a code.
+    await store.mintAdminCode({
+      codeSha256: hexOf(`admin-code-${athlete}`),
+      mintedAt: 1_790_000_570,
+      expiresAt: 1_790_001_170,
+      mintedBy: 'cli',
+    });
+    await store.openAdminSessionWithCode({
+      codeSha256: hexOf(`admin-code-${athlete}`),
+      source: 'admin_tunnel',
+      idleSeconds: 900,
+      session: {
+        tokenSha256: hexOf(`admin-session-${athlete}`),
+        athleteId: athlete,
+        ownerKey: deviceKeyFixture(athlete).publicKey,
+        listener: 'tunnel',
+        strength: 'code',
+        csrfSha256: hexOf(`admin-csrf-${athlete}`),
+        createdAt: 1_790_000_580,
+        lastSeenAt: 1_790_000_580,
+        expiresAt: 1_790_007_780,
+      },
+    });
   }
   // Migration 0038's (#68): each published a segment, and each shared an
   // effort from their synced ride on every one of the three — so erasing one
