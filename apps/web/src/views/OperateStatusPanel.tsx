@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { JSX, ReactNode } from 'react';
+import {
+  COMPARE_WITH_MAIN_LABEL,
+  compareWithMainUrl,
+  DOCKER_DESKTOP_DISK_TEXT,
+  STATUS_NOT_READY_TEXT,
+  STATUS_PURPOSE_TEXT,
+  STATUS_READY_TEXT,
+  STATUS_UNREADABLE_TEXT,
+  statusRows,
+  type OperateRow,
+} from '@onyourleft/operate-text';
+import type { JSX } from 'react';
 
 import { ButtonLink } from '../design/Button';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
-import type { OperateDisk, OperateStatus, OperateStatusRead } from '../instance/operate-port';
-import { REGISTRATION_MODE_TEXT } from './OperateAccountsPanel';
+import type { OperateStatus, OperateStatusRead } from '../instance/operate-port';
 
 /**
  * **Status** (#2604, epic #2601): the first section of the owner's Operate
@@ -14,6 +24,13 @@ import { REGISTRATION_MODE_TEXT } from './OperateAccountsPanel';
  * count, a closed name or the deployed commit, checked by the port before it
  * gets here (`instance/operate-port.ts` §`statusFrom`): nothing secret,
  * nobody's name or id, no path on the host.
+ *
+ * ## One set of words, the app's and the admin pages'
+ *
+ * Since #2644 (ADR 0069 D-7) every sentence and every row this section draws
+ * is `@onyourleft/operate-text`'s: {@link statusRows} turns the port's checked
+ * answer into rows of label and value, and this file only draws them, so the
+ * instance's admin Status page (#2645) cannot say anything else.
  *
  * ## Compared with main: a link, never a request
  *
@@ -28,164 +45,36 @@ import { REGISTRATION_MODE_TEXT } from './OperateAccountsPanel';
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
 
-/** This repository, whose `main` a deployed commit is compared with. */
-const REPOSITORY = 'https://github.com/openzigs/onyourleft';
-
-const COMMIT = /^[0-9a-f]{40}$/;
-
-/** GitHub's page comparing `commit` with `main`, or `undefined` when there is nothing to compare. */
-export function compareWithMainUrl(
-  status: Pick<OperateStatus, 'commit' | 'upstream'>,
-): string | undefined {
-  const { commit } = status;
-  if (!status.upstream || commit === null || !COMMIT.test(commit)) return undefined;
-  return `${REPOSITORY}/compare/${commit}...main`;
-}
-
-/** Said in place of the panel when the owner's read of it did not come. */
-export const STATUS_UNREADABLE_TEXT =
-  'The instance’s status could not be read, so it is not shown here.';
-
-/** The last-backup field until a snapshot is recorded (#2606). */
-export const NOT_RECORDED = 'not recorded';
-
 /**
- * Behind Status's ⓘ (#2622's review): on Docker Desktop the data volume is
- * inside Docker's virtual machine, so the instance sees that disk and never
- * the host drive under it.
+ * Re-exported so the names this panel's tests read are the ones they read
+ * before #2644; the declarations are the package's alone
+ * (`operate-text-moved.test.ts`).
  */
-export const DOCKER_DESKTOP_DISK_TEXT =
-  'On Docker Desktop (Windows or macOS) the disk figures are Docker’s own virtual disk, not ' +
-  'the drive it is stored on. Watch that drive yourself.';
+export {
+  bytesText,
+  compareWithMainUrl,
+  DOCKER_DESKTOP_DISK_TEXT,
+  durationText,
+  NOT_RECORDED,
+  STATUS_UNREADABLE_TEXT,
+  TUNNEL_NOT_KNOWN,
+} from '@onyourleft/operate-text';
 
-/** The tunnel's state when the operator has not said where to ask (the epic's decision 4). */
-export const TUNNEL_NOT_KNOWN = 'not known';
-
-function plural(count: number, one: string, many: string): string {
-  return `${String(count)} ${count === 1 ? one : many}`;
-}
-
-/** A length of time in its two largest units: "3 days 4 hours", "17 minutes". */
-export function durationText(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  if (days > 0) {
-    const rest = hours % 24;
-    return rest === 0
-      ? plural(days, 'day', 'days')
-      : `${plural(days, 'day', 'days')} ${plural(rest, 'hour', 'hours')}`;
-  }
-  if (hours > 0) {
-    const rest = minutes % 60;
-    return rest === 0
-      ? plural(hours, 'hour', 'hours')
-      : `${plural(hours, 'hour', 'hours')} ${plural(rest, 'minute', 'minutes')}`;
-  }
-  if (minutes > 0) return plural(minutes, 'minute', 'minutes');
-  return 'less than a minute';
-}
-
-/** Bytes in decimal units, as a disk's maker counts them: "412 GB", "1.5 TB". */
-export function bytesText(bytes: number): string {
-  const units: readonly [number, string][] = [
-    [1e12, 'TB'],
-    [1e9, 'GB'],
-    [1e6, 'MB'],
-    [1e3, 'kB'],
-  ];
-  for (const [size, unit] of units) {
-    if (bytes >= size) {
-      const value = bytes / size;
-      return `${value < 10 ? value.toFixed(1) : String(Math.round(value))} ${unit}`;
-    }
-  }
-  return `${String(bytes)} bytes`;
-}
-
-const HOLDS_TEXT: Readonly<Record<OperateDisk['holds'], string>> = {
-  database: 'Disk holding the database',
-  blobs: 'Disk holding the blobs',
-  database_and_blobs: 'Disk holding the database and blobs',
-};
-
-const MIGRATIONS_TEXT: Readonly<Record<OperateStatus['checks']['migrations'], string>> = {
-  'at-head': 'up to date',
-  migrating: 'being migrated now',
-  behind: 'behind this build: run migrate',
-  ahead: 'ahead of this build',
-  unknown: 'not known',
-};
-
-const KEYS_TEXT: Readonly<Record<OperateStatus['keys'], string>> = {
-  ready: 'ready',
-  'no-secret': 'no secret key set',
-  'no-origin': 'no origin set',
-  'no-keys': 'no keys made yet',
-  unreadable: 'not readable with the secret key set',
-  busy: 'busy: an operator command holds them',
-};
-
-const OFF_BOX_TEXT: Readonly<Record<NonNullable<OperateStatus['lastBackup']>['offBox'], string>> = {
-  copied: 'its off-box copy succeeded',
-  failed: 'its off-box copy FAILED',
-  'not-configured': 'no off-box copy is set up',
-};
-
-function Fact({ name, children }: { readonly name: string; readonly children: ReactNode }) {
+function Fact({ row }: { readonly row: OperateRow }): JSX.Element {
   return (
     <div>
-      <dt>{name}</dt>
-      <dd>{children}</dd>
+      <dt>{row.label}</dt>
+      <dd>
+        {row.code ? <code>{row.value}</code> : row.value}
+        {row.warning === null ? null : (
+          <StatusMessage tone="warning" label={row.warning.label}>
+            {row.warning.text}
+          </StatusMessage>
+        )}
+      </dd>
     </div>
   );
 }
-
-function Disk({ disk }: { readonly disk: OperateDisk }): JSX.Element {
-  return (
-    <Fact name={HOLDS_TEXT[disk.holds]}>
-      {bytesText(disk.freeBytes)} free of {bytesText(disk.totalBytes)}
-      {disk.low ? (
-        <StatusMessage tone="warning" label="Low">
-          Less than a tenth of this disk is free.
-        </StatusMessage>
-      ) : null}
-    </Fact>
-  );
-}
-
-function LastBackup({
-  backup,
-  now,
-}: {
-  readonly backup: OperateStatus['lastBackup'];
-  readonly now: number;
-}): JSX.Element {
-  if (backup === null) return <Fact name="Last backup">{NOT_RECORDED}</Fact>;
-  const ageSeconds = Math.max(0, Math.floor((now - Date.parse(backup.at)) / 1000));
-  // Older than two of the backup service's intervals: at least one run was missed.
-  const stale = ageSeconds > 2 * backup.intervalSeconds;
-  return (
-    <Fact name="Last backup">
-      {`${backup.at.slice(0, 16).replace('T', ' ')} UTC`}, {durationText(ageSeconds)} ago;{' '}
-      {OFF_BOX_TEXT[backup.offBox]}.
-      {stale ? (
-        <StatusMessage tone="warning" label="Stale">
-          {`That is more than twice the backup interval of ${durationText(backup.intervalSeconds)}: a backup was missed.`}
-        </StatusMessage>
-      ) : null}
-    </Fact>
-  );
-}
-
-function tunnelText(tunnel: OperateStatus['tunnel']): string {
-  if (tunnel.state === 'ready') {
-    return `ready, ${plural(tunnel.connections, 'connection', 'connections')}`;
-  }
-  return tunnel.state === 'not_ready' ? 'not ready' : TUNNEL_NOT_KNOWN;
-}
-
-const okText = (ok: boolean): string => (ok ? 'ok' : 'not ok');
 
 function Shown({
   status,
@@ -195,14 +84,13 @@ function Shown({
   readonly now: number;
 }): JSX.Element {
   const compare = compareWithMainUrl(status);
-  const { athletes, analysis } = status.counts;
   return (
     <>
       {status.ready ? (
-        <p>The instance is up and ready for riders.</p>
+        <p>{STATUS_READY_TEXT}</p>
       ) : (
         <StatusMessage tone="warning" label="Not ready">
-          The instance is up but not ready for riders. The checks below say which failed.
+          {STATUS_NOT_READY_TEXT}
         </StatusMessage>
       )}
       {/* Its one control first, then what is deployed: a phone's fold is 783 px
@@ -211,35 +99,14 @@ function Shown({
       {compare === undefined ? null : (
         <p>
           <ButtonLink variant="secondary" external href={compare}>
-            Compare with main
+            {COMPARE_WITH_MAIN_LABEL}
           </ButtonLink>
         </p>
       )}
       <dl className="oyl-operate__status">
-        <Fact name="Version">{status.version}</Fact>
-        <Fact name="Deployed commit">
-          {status.commit === null ? 'not named' : <code>{status.commit}</code>}
-        </Fact>
-        <Fact name="Database">{okText(status.checks.database)}</Fact>
-        <Fact name="Migrations">{MIGRATIONS_TEXT[status.checks.migrations]}</Fact>
-        <Fact name="Rooms">{okText(status.checks.rooms)}</Fact>
-        <Fact name="Up for">{durationText(status.uptimeSeconds)}</Fact>
-        {status.disk.length === 0 ? (
-          <Fact name="Disk">not known</Fact>
-        ) : (
-          status.disk.map((disk) => <Disk key={disk.holds} disk={disk} />)
-        )}
-        <LastBackup backup={status.lastBackup} now={now} />
-        <Fact name="Tunnel">{tunnelText(status.tunnel)}</Fact>
-        <Fact name="Registration">{REGISTRATION_MODE_TEXT[status.registration].short}</Fact>
-        <Fact name="Accounts">
-          {`${String(athletes.active)} active, ${String(athletes.pending)} awaiting approval, ${String(athletes.suspended)} suspended`}
-        </Fact>
-        <Fact name="Rooms open">{String(status.counts.roomsOpen)}</Fact>
-        <Fact name="Analysis jobs">
-          {`${String(analysis.queued)} waiting, ${String(analysis.running)} running`}
-        </Fact>
-        <Fact name="Instance keys">{KEYS_TEXT[status.keys]}</Fact>
+        {statusRows(status, now).map((row) => (
+          <Fact key={row.label} row={row} />
+        ))}
       </dl>
     </>
   );
@@ -261,10 +128,7 @@ export function OperateStatusPanel({
         id="oyl-operate-status"
         help={
           <>
-            <p>
-              Read from your instance as this page opened. It changes nothing on the instance, and
-              shows counts and names only.
-            </p>
+            <p>{STATUS_PURPOSE_TEXT}</p>
             <p>{DOCKER_DESKTOP_DISK_TEXT}</p>
           </>
         }

@@ -138,6 +138,22 @@ packages/             Apache-2.0, without exception
                       holds the restated bounds equal to physics'. A report
                       carries power, never a position, and no message carries
                       a coordinate (`coordinates.test.ts`)
+  operate-text/       the Operate sections' wording and pure view models
+                      (#2644, ADR 0069 D-7) — the sentences, the closed-word
+                      tables and the functions that turn an Operate route's
+                      JSON into rows of label and value, so the app's Operate
+                      panels and the instance's admin pages (#2645 onwards)
+                      draw the same words. Moved out of `apps/web` and
+                      relicensed Apache-2.0 on the owner's consent (ADR 0069
+                      D-7), with NO change on screen. ⚠️ NO dependency, not
+                      even a workspace one: the route's shape is restated
+                      structurally (`status.ts`), and the app passes its
+                      checked `OperateStatus` in as it is. Renders nothing,
+                      reads no clock (`now` is a parameter). One tsconfig, as
+                      `protocol`'s, and `platformIsolation` over its tests
+                      too. `apps/web/src/views/operate-text-moved.test.ts`
+                      holds that no moved name is declared in the app again.
+                      The wording is DRAFT until the owner approves it
   store/              local activity, stream, recording-checkpoint, signed-record,
                       segment, effort and route store, and the round-trip harness
                       (#26-#28, #46, #61, #64, #66, #89); since #388 the side
@@ -177,7 +193,8 @@ packages/             Apache-2.0, without exception
 `packages/store`, `packages/physics`, — since [#768](https://github.com/openzigs/onyourleft/issues/768)
 — `packages/protocol` and — since [#1094](https://github.com/openzigs/onyourleft/issues/1094) —
 `packages/analysis` and — since [#1544](https://github.com/openzigs/onyourleft/issues/1544) —
-`packages/map-features` exist.** `apps/instance` was created by
+`packages/map-features` and — since [#2644](https://github.com/openzigs/onyourleft/issues/2644) —
+`packages/operate-text` exist.** `apps/instance` was created by
 [#767](https://github.com/openzigs/onyourleft/issues/767) on 2026-09-29, the first package that
 listens on a socket (ADR 0036).
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the

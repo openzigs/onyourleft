@@ -208,6 +208,9 @@ packages/             Apache-2.0, without exception
                       race room's plausibility rule (ADR 0028 D-2 rules 1–4)
   protocol/           the race-room wire format (#768): messages, a bounded
                       decoder and the version handshake; no dependency at all
+  operate-text/       Operate's wording and pure view models (#2644, ADR 0069
+                      D-7): the app's Operate panels and the instance's admin
+                      pages draw the same sentences and rows; no dependency
   store/              local activity, stream and recording-checkpoint store
 
 docs/
@@ -249,6 +252,7 @@ checkable.
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms; since #487 the coefficient set a ride and a race run, `PHYSICS_VERSION`, and the race room's plausibility rule | Any rendering, BLE or platform API | #88, #487 |
 | `packages/protocol` | Apache-2.0 | The race-room wire format: every message, the encoder, a bounded decoder that refuses rather than throws, and the version handshake | **Any platform API at all**, and any production dependency | #768 |
 | `packages/analysis` | Apache-2.0 | The platform-free core of a model-written ride write-up: the templates, the input builder, the history passages, the write-up screen and the angle matchers the source scan shares, the pose summary's shape, the hosted mask and the masked-word list. Moved out of `apps/web` by #1094, relicensed on the owner's consent ([ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-4), with no behaviour change; `apps/web` and the instance import it. #1103 removed the runner, its step port and its sealed step with the device's own write-up | **Any platform API at all**, `@onyourleft/store` (its record shapes are restated structurally, and the store imports the write-up bound and the masked-word parser from here), and any model SDK (ADR 0046 D-5) | #1094 |
+| `packages/operate-text` | Apache-2.0 | The Operate sections' wording and pure view models: the sentences, the closed-word tables (the registration mode, a backup's off-box state, the tunnel's state) and the functions that turn an Operate route's JSON into rows of label and value. Moved out of `apps/web` by #2644, relicensed on the owner's consent ([ADR 0069](adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md) D-7), with no change on screen; `apps/web` imports it, and the instance's admin pages from #2645 | **Any platform API at all**, **any dependency** (a route's shape is restated structurally), and anything that renders | #2644 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, its migrations, and the round-trip test harness | Anything under `apps/` | #26, #27, #28 |
 
 `packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the

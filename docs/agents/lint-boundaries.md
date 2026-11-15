@@ -98,3 +98,8 @@ Like `packages/fit` it has two tsconfigs, and **`tsconfig.platform-free.json` is
 (`lib: ["ES2024"]`, `types: []`, everything under `src/` but `*.test.ts`); the wide `tsconfig.json`
 admits `@types/node` because a few tests read files. It declares no global since #1103 removed the
 runner, and with it `src/abort.d.ts`, which declared `AbortController` for it.
+
+**`packages/operate-text`** ([#2644](https://github.com/openzigs/onyourleft/issues/2644), ADR 0069 D-7)
+takes `platformIsolation` over **every** file, its tests included, because none of them reads a file,
+plus one pattern of its own: no `@onyourleft/*` import, since it has no dependency at all. Like
+`packages/protocol` it has one tsconfig, and that one enforces (`lib: ["ES2024"]`, `types: []`).
