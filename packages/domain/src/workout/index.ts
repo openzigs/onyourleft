@@ -6,6 +6,7 @@ export type { WorkoutErrorCode } from './errors';
 export { WorkoutError } from './errors';
 
 export type {
+  CadenceCue,
   FreeRideBlock,
   HeartRateHoldBlock,
   HeartRateRange,
@@ -19,8 +20,10 @@ export type {
 
 export {
   HOLD_FLOOR_SHARE,
+  MAXIMUM_CADENCE_CUE_RPM,
   MAXIMUM_HOLD_BPM,
   MAXIMUM_HOLD_CEILING_SHARE,
+  MINIMUM_CADENCE_CUE_RPM,
   MINIMUM_HOLD_BPM,
   MINIMUM_HOLD_RANGE_BPM,
   MAXIMUM_REPEATS,
@@ -64,6 +67,7 @@ export {
 
 export {
   workoutBlockText,
+  workoutCadenceText,
   workoutDurationText,
   workoutPercent,
   workoutShapeText,
@@ -95,7 +99,7 @@ export {
   TEMPLATE_LENGTHS_MINUTES,
 } from './template';
 
-export { BUILT_IN_WORKOUTS } from './library';
+export { BUILT_IN_WORKOUTS, CADENCE_WORKOUTS } from './library';
 
 // The two threshold tests and the player that ends them (#2303).
 export type { ThresholdTest } from './library/test';
