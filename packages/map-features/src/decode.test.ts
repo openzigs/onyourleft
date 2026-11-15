@@ -62,6 +62,26 @@ function decoded(bytes: Uint8Array): DecodedTile {
 }
 
 /**
+ * The fastest of five timed decodes of `bytes`, after one untimed decode to
+ * warm the JIT, as a long-lived page would be. A wall-clock sample of ONE call
+ * also times whatever else the process did meanwhile — a collection, a
+ * preemption, the coverage writer — and #2595 is one such sample reading
+ * 50.34 ms against a 50 ms bound on a nightly runner under coverage, green on
+ * the re-run. The fastest of five is the decoder's own cost: a decoder that is
+ * slow is slow in all five.
+ */
+function bestOfFive(bytes: Uint8Array): number {
+  decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
+  let fastest = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 5; i++) {
+    const started = performance.now();
+    decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
+    fastest = Math.min(fastest, performance.now() - started);
+  }
+  return fastest;
+}
+
+/**
  * The game's projection for a tile pixel, written out independently of
  * `projection.ts`: Web Mercator to degrees, then `terrain.ts`
  * §localGroundPosition (x WEST, z north).
@@ -442,12 +462,11 @@ describe('decodeTile refuses hostile input, and never throws', () => {
   for (const fixture of HOSTILE_FIXTURES) {
     it(`${fixture.name}: refused as ${fixture.refusal.reason}, inside 50 ms`, () => {
       const bytes = fixture.bytes();
-      decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME); // warm the JIT, as a long-lived page would be
-      const started = performance.now();
-      const result = decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
-      const elapsed = performance.now() - started;
-      expect(result).toEqual(fixture.refusal);
-      expect(elapsed).toBeLessThan(50);
+      expect(decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME)).toEqual(fixture.refusal);
+      // The bound is #1544's and is not raised (#1688); only the sampling is
+      // (#2595). The slowest fixture, the tile over the vertex limit, read
+      // 10.5–17.5 ms a call under coverage on a Mac and 0.8–1.4 ms without.
+      expect(bestOfFive(bytes)).toBeLessThan(50);
     });
   }
 
@@ -514,23 +533,13 @@ describe('decodeTile at each limit', () => {
    * under the same instrumentation — so the runner divides out. Linear is 10;
    * a decoder gone quadratic would read about 100. The bound is 25.
    */
-  const best = (bytes: Uint8Array): number => {
-    decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
-    let fastest = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 5; i++) {
-      const started = performance.now();
-      decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
-      fastest = Math.min(fastest, performance.now() - started);
-    }
-    return fastest;
-  };
   for (const [limit, build, full] of [
     ['featuresPerLayer', footprintTile, MAX_FEATURES_PER_LAYER],
     ['verticesPerTile', footwayTile, MAX_VERTICES_PER_TILE],
   ] as const) {
     it(`the ${limit} fixture, one of the two densest, decodes at a cost linear in its size`, () => {
-      const dense = best(build(full));
-      const tenth = best(build(full / 10));
+      const dense = bestOfFive(build(full));
+      const tenth = bestOfFive(build(full / 10));
       console.info(
         `map-features: ${limit} at its limit decoded in ${dense.toFixed(2)} ms (best of 5); ` +
           `a tenth of it in ${tenth.toFixed(2)} ms; ${cpus()[0]?.model ?? 'unknown CPU'}`,
