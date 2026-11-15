@@ -126,4 +126,6 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/operate/analysis/models', OPERATE),
   only('POST', '/v1/operate/analysis/check', OPERATE),
   only('GET', '/v1/operate/analysis/jobs', OPERATE),
+  // #2614: the instance's recent problem lines.
+  only('GET', '/v1/operate/logs', OPERATE),
 ];

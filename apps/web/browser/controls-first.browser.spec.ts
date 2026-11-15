@@ -340,6 +340,8 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
     `Registration mode: ${SCRIPTED_STATUS.registration}`,
     'Restoring a snapshot',
     'AI backend',
+    // #2614: that the lines are memory only, and a worker's stay on standard output, is behind its ⓘ.
+    'Recent problems',
   ],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is

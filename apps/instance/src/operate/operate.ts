@@ -29,6 +29,14 @@
  * records that service writes, and asks for one by writing a request it picks
  * up. A record names a snapshot's directory and never the folder it is in.
  * Restore stays on the CLI.
+ *
+ * ## Recent problems: the log's own redacted lines, in memory
+ *
+ * The owner reads the instance's last problem lines (#2614) — exactly the
+ * lines standard output got, after `log.ts` §`redacted` — from the ring the
+ * instance's sink keeps (`log.ts` §`keepProblems`). Memory only: a restart
+ * empties it, and nothing of it is in the database or a backup. Reading it
+ * changes nothing and logs nothing.
  */
 
 import {
@@ -50,6 +58,7 @@ import {
 import type { ModelConnection } from '../analysis/model-turn.ts';
 import { analysisModelNameProblem, type AnalysisModelOffCode } from '../config.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import type { RecentProblem, RecentProblems } from '../log.ts';
 import type { Resolver } from '../history/address.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import type {
@@ -216,6 +225,12 @@ export interface Operate {
   ): Promise<OperateResult<{ readonly outcome: ToolCheckOutcome }>>;
   /** The analysis queue and the newest jobs, for the owner `athleteId` (#2610). Writes nothing. */
   jobs(athleteId: string): Promise<JobsView>;
+  /**
+   * The instance's recent problem lines, newest first, and when this process
+   * started (#2614). Writes nothing, logs nothing. `unavailable` where the
+   * instance keeps none.
+   */
+  problems(): OperateResult<{ readonly lines: readonly RecentProblem[]; readonly since: number }>;
 }
 
 /** What `unavailable` says on an instance with no keys. Names the variable, never a value. */
@@ -236,8 +251,11 @@ export function createOperate(options: {
   readonly status: StatusSources;
   /** What the analysis settings are read and written with (#2609). */
   readonly analysis: OperateAnalysisSources;
+  /** The problem lines the instance's own sink keeps (#2614); absent, none are kept. */
+  readonly problems?: RecentProblems;
 }): Operate {
   const { store, status, analysis } = options;
+  const recent = options.problems;
   const seconds = (): number => Math.floor(status.now() / 1000);
   // #2610: ONE check for the instance, so a second while one is out is `busy`.
   const toolCheck = createToolCheck({
@@ -292,6 +310,10 @@ export function createOperate(options: {
   }
 
   return {
+    problems() {
+      if (recent === undefined) return { ok: false, code: 'unavailable' };
+      return { ok: true, value: { lines: recent.list(), since: status.startedAt } };
+    },
     analysisSettings: analysisView,
     async localModels() {
       const server = await localServer();

@@ -15,6 +15,7 @@ import { hrefFor, routeById } from '../shell/routes';
 import { OperateAccountsPanel } from './OperateAccountsPanel';
 import { OperateBackupsPanel } from './OperateBackupsPanel';
 import { OperateAnalysisPanel } from './OperateAnalysisPanel';
+import { OperateProblemsPanel } from './OperateProblemsPanel';
 import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
@@ -23,8 +24,9 @@ import { OperateStatusPanel } from './OperateStatusPanel';
  * (#2604, `OperateStatusPanel.tsx`), its Accounts (#2605,
  * `OperateAccountsPanel.tsx`, read from the same status), its Backups (#2607,
  * `OperateBackupsPanel.tsx`, which reads its own list and asks for a backup),
- * its AI backend (#2611, `OperateAnalysisPanel.tsx`) and the operator log
- * (#2602); the
+ * its AI backend (#2611, `OperateAnalysisPanel.tsx`), its recent problems
+ * (#2614, `OperateProblemsPanel.tsx`, the log's own redacted lines) and the
+ * operator log (#2602); the
  * sections later sub-issues fill are listed, not yet drawn.
  *
  * ## Shown to the owner only
@@ -54,11 +56,7 @@ export const OPERATE_PURPOSE =
   'instance refuses everyone else, the deputy moderator included.';
 
 /** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
-export const OPERATE_SECTIONS_TO_COME: readonly string[] = [
-  'Rooms',
-  'Instance keys',
-  'Recent errors',
-];
+export const OPERATE_SECTIONS_TO_COME: readonly string[] = ['Rooms', 'Instance keys'];
 
 export const OPERATE_NO_PORT =
   'This app cannot reach an instance’s Operate area here, because this browser has no local ' +
@@ -340,6 +338,7 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       <OperateAccountsPanel status={shown.status} />
       <OperateBackupsPanel port={port} />
       <OperateAnalysisPanel port={port} />
+      <OperateProblemsPanel port={port} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}

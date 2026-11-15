@@ -37,6 +37,17 @@
  * A key that would be dangerous on the shared list can still be kept for ONE
  * event, and then only a value of the one shape that event writes: see
  * {@link EVENT_KEYS} (#1402).
+ *
+ * ## Recent problems, in memory — #2614
+ *
+ * A sink the instance names with {@link keepProblems} also keeps its last
+ * {@link RECENT_PROBLEMS_KEPT} PROBLEM lines ({@link isProblem}), for the
+ * owner's Operate area (`GET /v1/operate/logs`). It keeps **exactly the line
+ * {@link writeRecord} wrote**, after {@link redacted}, so it can never hold
+ * what standard output did not. Memory only: gone when the process stops,
+ * never in the database or a backup. The main process's lines only: a room
+ * worker writes its own to standard output, and `room-worker-died` is the
+ * main process's.
  */
 
 /** Where lines go. `main.ts` writes them to standard output; a test keeps them. */
@@ -208,9 +219,109 @@ export function redacted(record: Readonly<Record<string, unknown>>): Record<stri
   return kept;
 }
 
-/** Writes one record as one line, through {@link redacted}. */
+/** How many problem lines a sink keeps (#2614): the newest, the oldest dropped first. */
+export const RECENT_PROBLEMS_KEPT = 200;
+
+/**
+ * Close reasons that are the INSTANCE's trouble, not a client's (#2614): a
+ * worker that died under its room. `server-stopping` is a stop the operator
+ * asked for; every other reason is a client's (`room/close-codes.ts`).
+ */
+const SERVER_SIDE_CLOSES: ReadonlySet<string> = new Set(['room-lost']);
+
+/**
+ * Whether a written line is a PROBLEM (#2614) — the one closed list,
+ * read off what the line says once {@link redacted} has kept it:
+ *
+ * - a request answered 5xx, and an exception no route handled;
+ * - a room worker that died, a room's result or flag the instance could not
+ *   write, a rooms sweep or a history catch-up that failed, a voice request
+ *   that failed;
+ * - an analysis job that failed; the analysis model, the picture model or
+ *   the history index off; the instance keys not `ready`; a hosted model key
+ *   held with no secret or one that will not open; voice turned off by a
+ *   refusal (not merely unset); a refusal to serve over migrations;
+ * - a room socket closed for a server-side reason (`room-lost`).
+ *
+ * `docs/operating-an-instance.md` has a sentence for each.
+ */
+export function isProblem(line: Readonly<Record<string, unknown>>): boolean {
+  const { event, state, code } = line;
+  switch (event) {
+    case 'request':
+      return typeof line.status === 'number' && line.status >= 500;
+    case 'unhandled':
+    case 'room-worker-died':
+    case 'room-write-failed':
+    case 'rooms-sweep-failed':
+    case 'history-index-failed':
+    case 'voice-failed':
+    case 'refusing':
+      return true;
+    case 'analysis-job':
+      return state === 'failed';
+    case 'analysis-model':
+    case 'picture-model':
+    case 'history-index':
+      return state === 'off';
+    case 'instance-keys':
+      return state !== 'ready';
+    case 'hosted-model-key':
+      return state === 'no-secret' || state === 'unreadable';
+    case 'voice':
+      return state === 'off' && code !== 'not-set';
+    case 'room-socket-closed':
+      return typeof line.reason === 'string' && SERVER_SIDE_CLOSES.has(line.reason);
+    default:
+      return false;
+  }
+}
+
+/** One problem line as it was written (#2614), and when, Unix milliseconds. */
+export interface RecentProblem {
+  readonly at: number;
+  readonly line: string;
+}
+
+/** The problem lines a sink keeps (#2614). */
+export interface RecentProblems {
+  /** `kept` is the record AS WRITTEN — after {@link redacted} — and `line` its text. */
+  offer(kept: Readonly<Record<string, unknown>>, line: string): void;
+  /** Newest first. */
+  list(): readonly RecentProblem[];
+}
+
+/** An empty ring of at most `kept` problem lines, stamped by `now` (Unix milliseconds). */
+export function createRecentProblems(
+  now: () => number,
+  kept: number = RECENT_PROBLEMS_KEPT,
+): RecentProblems {
+  const ring: RecentProblem[] = [];
+  return {
+    offer(record, line) {
+      if (!isProblem(record)) return;
+      ring.push({ at: now(), line });
+      if (ring.length > kept) ring.splice(0, ring.length - kept);
+    },
+    list: () => [...ring].reverse(),
+  };
+}
+
+/** Which sinks keep their problem lines, and where. */
+const problemsKept = new WeakMap<LogSink, RecentProblems>();
+
+/** From now on `sink`'s problem lines are kept in `problems` (#2614): the instance's own sink. */
+export function keepProblems(sink: LogSink, problems: RecentProblems): void {
+  problemsKept.set(sink, problems);
+}
+
+/** Writes one record as one line, through {@link redacted} — and keeps it if it is a problem. */
 export function writeRecord(sink: LogSink, record: Readonly<Record<string, unknown>>): void {
-  sink(JSON.stringify(redacted(record)));
+  const kept = redacted(record);
+  const line = JSON.stringify(kept);
+  sink(line);
+  // The line as written, never the record before it was redacted.
+  problemsKept.get(sink)?.offer(kept, line);
 }
 
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);

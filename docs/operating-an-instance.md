@@ -55,6 +55,19 @@ signature, a latitude, a display name, an object — is replaced by `[redacted]`
 by the route PATTERN it matched, never its path, query, headers or body; an exception by its name,
 never its message (ADR 0004 decision D).
 
+**The last 200 problem lines are also kept in memory** ([#2614](https://github.com/openzigs/onyourleft/issues/2614)),
+for the owner's Operate area (`GET /v1/operate/logs`, the app's **Recent problems**): exactly the
+line standard output got, after that one redaction, so it never holds what standard output did not.
+A line is a problem when it is one of a closed list (`log.ts` §`isProblem`): a request answered
+`5xx`, an `unhandled` exception, `room-worker-died`, `room-write-failed`, `rooms-sweep-failed`,
+`history-index-failed`, `voice-failed`, `refusing`, an `analysis-job` that `failed`, the
+`analysis-model`, `picture-model` or `history-index` `off`, `instance-keys` not `ready`, a
+`hosted-model-key` that is `no-secret` or `unreadable`, `voice` off for a reason other than
+`not-set`, and a `room-socket-closed` for `room-lost`. Every other line, a `200` request included, is
+not kept. They are **gone when the instance restarts**, and are never written to the database or a
+backup. Only the main process's lines are kept: a room worker writes its own to standard output, and
+`room-worker-died` is the main process's. Reading them is not an operator action and logs nothing.
+
 ## Sizing
 
 From [spike 0013](spikes/0013-race-rooms-on-a-small-linux-box.md) and

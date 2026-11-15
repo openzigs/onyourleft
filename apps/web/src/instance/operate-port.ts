@@ -347,6 +347,28 @@ export type OperateBackUpNow =
   | { readonly kind: 'refused'; readonly sentence: string }
   | { readonly kind: Exclude<OperateStanding, 'owner'> };
 
+/** One problem line (#2614): when, the line exactly as logged, and its fields. */
+export interface OperateProblem {
+  /** ISO 8601, UTC. */
+  readonly at: string;
+  /** The JSON line exactly as the instance's standard output got it. */
+  readonly line: string;
+  /** The line's fields: each a number, a boolean, `null` or a short string, as the instance's redaction keeps them. */
+  readonly fields: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+/** The instance's recent problems, newest first, since it last started (#2614). */
+export interface OperateProblems {
+  readonly kind: 'problems';
+  /** When the instance last started, ISO 8601, UTC. */
+  readonly since: string;
+  readonly lines: readonly OperateProblem[];
+}
+
+/** The problems, or why there are none: a standing other than `owner`. */
+export type OperateProblemsRead =
+  OperateProblems | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
 /** What the Operate area may ask. */
 export interface OperatePort {
   /** The instance's status, read-only (#2604): one sealed request. */
@@ -371,6 +393,8 @@ export interface OperatePort {
   backups(): Promise<OperateBackupsRead>;
   /** Ask the `backup` service for a snapshot now (#2606): it takes it within 30 seconds. */
   backUpNow(): Promise<OperateBackUpNow>;
+  /** The instance's recent problem lines (#2614): read-only, and memory only on the instance. */
+  problems(): Promise<OperateProblemsRead>;
 }
 
 /** Every Operate route is sealed and signed by the owner's device key, so the port needs what a sealed call needs. */
@@ -573,6 +597,60 @@ function sentenceFrom(answer: InstanceAnswer): string | undefined {
   if (/[0-9][.,][0-9]/.test(message)) return undefined;
   if (message.split(' ').some((word) => word.length > 24)) return undefined;
   return message;
+}
+
+/** The longest line the instance's redaction could write: its keys are a closed list of short values. */
+const MAXIMUM_PROBLEM_LINE = 4096;
+
+/** The longest string the instance's redaction keeps (`apps/instance` §`log.ts`). */
+const MAXIMUM_LOGGED_STRING = 120;
+
+/** A line's fields, held to what the instance's redaction keeps — or `undefined`. */
+function problemFields(
+  line: string,
+): Readonly<Record<string, string | number | boolean | null>> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const fields = record(parsed);
+  if (fields === undefined || typeof fields.event !== 'string') return undefined;
+  const kept: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (!/^[A-Za-z]{1,32}$/.test(key)) return undefined;
+    if (
+      value === null ||
+      typeof value === 'boolean' ||
+      (typeof value === 'number' && Number.isFinite(value)) ||
+      (typeof value === 'string' && value.length <= MAXIMUM_LOGGED_STRING)
+    ) {
+      kept[key] = value;
+    } else {
+      return undefined;
+    }
+  }
+  return kept;
+}
+
+function problemsFrom(answer: InstanceAnswer): OperateProblems | undefined {
+  const body = record(answer.body);
+  const since = isoMoment(body?.since);
+  if (body === undefined || since === undefined || !Array.isArray(body.lines)) return undefined;
+  const lines: OperateProblem[] = [];
+  for (const each of body.lines as unknown[]) {
+    const row = record(each);
+    const at = isoMoment(row?.at);
+    const line = row?.line;
+    if (at === undefined || typeof line !== 'string' || line.length > MAXIMUM_PROBLEM_LINE) {
+      return undefined;
+    }
+    const fields = problemFields(line);
+    if (fields === undefined) return undefined;
+    lines.push({ at, line, fields });
+  }
+  return { kind: 'problems', since, lines };
 }
 
 /** Said for a refused "back up now" when the instance's own sentence may not be shown. */
@@ -1037,6 +1115,8 @@ export function createOperatePort(dependencies: OperatePortDependencies): Operat
         return { kind: 'unreachable' };
       }
     },
+
+    problems: () => ownerRead('GET', '/v1/operate/logs', undefined, problemsFrom),
 
     backUpNow: async () => {
       try {

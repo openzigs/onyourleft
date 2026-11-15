@@ -68,6 +68,7 @@ describe('the Operate area — #2603', () => {
       'Accounts',
       'Backups',
       'AI backend',
+      'Recent problems',
       'Operator log',
       'Still to come',
     ]);

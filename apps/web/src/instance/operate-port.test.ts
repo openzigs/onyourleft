@@ -28,6 +28,7 @@ import {
   keylessOwner,
   operatedWorld,
   writeBackups,
+  writeInstanceLine,
   writeOperatorEntries,
 } from '../testing/operate-instance-testing';
 import { LOADED_FROM_A_WEBSITE, LOADED_LOCALLY } from './testing';
@@ -459,7 +460,7 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
   it('has no way to restore: the port asks for backups and nothing else that changes one', async () => {
     const { owner } = await operatedWorld();
     const methods = Object.keys(createOperatePort(owner.dependencies)).sort();
-    // #2611's are the AI backend's: none of them touches a backup.
+    // #2611's are the AI backend's and #2614's reads the log: none of them touches a backup.
     expect(methods).toEqual([
       'analysis',
       'backUpNow',
@@ -469,6 +470,7 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
       'jobs',
       'localModels',
       'log',
+      'problems',
       'setAnalysis',
       'standing',
       'status',
@@ -755,5 +757,48 @@ describe('the AI backend’s reads and writes — #2609, #2610, #2611', () => {
     );
     expect(JSON.stringify(settings)).not.toContain('MARKER');
     expect(JSON.stringify(settings)).toContain('http://ollama:11434/v1');
+  });
+});
+
+describe('the instance’s recent problems — #2614', () => {
+  it('reads the owner the lines the instance’s own sink kept, as logged, and the deputy nothing', async () => {
+    const { owner, deputy, world } = await operatedWorld();
+    await writeInstanceLine(world, 'analysis-job', { state: 'failed', code: 'model-unreachable' });
+    await writeInstanceLine(world, 'analysis-job', { state: 'succeeded' });
+    const read = await createOperatePort(owner.dependencies).problems();
+    if (read.kind !== 'problems') throw new Error(`not read: ${read.kind}`);
+    expect(read.lines.map((each) => each.fields)).toEqual([
+      { event: 'analysis-job', state: 'failed', code: 'model-unreachable' },
+    ]);
+    expect(world.instance.lines).toContain(read.lines[0]?.line);
+    expect(await createOperatePort(deputy.dependencies).problems()).toEqual({ kind: 'not-owner' });
+  });
+
+  const LINE = JSON.stringify({ event: 'voice-failed', code: 'channel', status: 500 });
+
+  async function problemsAnswered(answer: () => Response): Promise<unknown> {
+    const { owner, world } = await operatedWorld();
+    return createOperatePort({
+      ...owner.dependencies,
+      send: (url, init) => world.answeringAs('/v1/operate/logs', answer)(new Request(url, init)),
+    }).problems();
+  }
+
+  it.each([
+    ['a line that is not JSON', 'voice failed at 51.5074,-0.1278'],
+    ['a line whose value is an object', JSON.stringify({ event: 'x', where: { lat: 51.5 } })],
+    [
+      'a line with a string longer than the instance keeps',
+      JSON.stringify({ event: 'x', code: 'k'.repeat(121) }),
+    ],
+    ['a line with no event', JSON.stringify({ code: 'channel' })],
+  ] as const)('shows no problems when the answer holds %s', async (_name, line) => {
+    const body = (lines: string[]) => () =>
+      Response.json({
+        since: '2026-11-14T08:00:00.000Z',
+        lines: lines.map((each) => ({ at: '2026-11-14T09:00:00.000Z', line: each })),
+      });
+    expect(await problemsAnswered(body([LINE]))).toMatchObject({ kind: 'problems' });
+    expect(await problemsAnswered(body([LINE, line]))).toEqual({ kind: 'unreachable' });
   });
 });

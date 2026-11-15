@@ -32,6 +32,14 @@ export {
   snapshotPlace,
 } from './backups';
 export {
+  noProblemsText,
+  PROBLEMS_HELD_TEXT,
+  PROBLEMS_UNREADABLE_TEXT,
+  problemSentence,
+  problemsSinceText,
+  RAW_LINE_LABEL,
+} from './problems';
+export {
   COMPARE_WITH_MAIN_LABEL,
   compareWithMainUrl,
   DISK_HOLDS_TEXT,
