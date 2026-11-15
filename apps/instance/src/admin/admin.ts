@@ -383,12 +383,22 @@ export function createAdmin(options: AdminOptions): Admin {
     caller: Caller,
     client: ClientInfo,
   ): Promise<unknown> {
+    return (await readWithStatus(seam, path, caller, client)).body;
+  }
+
+  /** {@link read}, with the status the route answered, for a page that tells one refusal from another. */
+  async function readWithStatus(
+    seam: AdminSeam,
+    path: string,
+    caller: Caller,
+    client: ClientInfo,
+  ): Promise<{ readonly status: number; readonly body: unknown }> {
     const answer = await seam.dispatch('GET', path, caller, client);
-    if (answer.status !== 200) return undefined;
+    if (answer.status !== 200) return { status: answer.status, body: undefined };
     try {
-      return await answer.json();
+      return { status: 200, body: await answer.json() };
     } catch {
-      return undefined;
+      return { status: 200, body: undefined };
     }
   }
 
@@ -415,7 +425,7 @@ export function createAdmin(options: AdminOptions): Admin {
     } else {
       const query = new URLSearchParams({ limit: String(LOG_PAGE_SIZE) });
       if (cursor !== null) query.set('cursor', cursor);
-      const answer = await read(
+      const { status, body: answer } = await readWithStatus(
         view.seam,
         `/v1/operate/log?${query.toString()}`,
         view.caller,
@@ -446,9 +456,11 @@ export function createAdmin(options: AdminOptions): Admin {
               older: page.cursor,
               newest: cursor === null,
             }
-          : cursor === null
-            ? { kind: 'unreadable' }
-            : { kind: 'bad-cursor' };
+          : // Only the route's own refusal (400, validation_failed) says the cursor is not ours;
+            // any other failed read is an unreadable log, whichever page was asked for.
+            cursor !== null && status === 400
+            ? { kind: 'bad-cursor' }
+            : { kind: 'unreadable' };
     }
     return shellPage(shell, 'Operator log', logBody(shown));
   }

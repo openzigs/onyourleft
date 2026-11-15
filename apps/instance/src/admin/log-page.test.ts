@@ -189,3 +189,72 @@ describe('an entry outside the log’s closed vocabulary is not shown (#2645, OP
     expect(items[0]).toBe(LOG_ENTRY_NOT_SHOWN_TEXT);
   });
 });
+
+describe('what the admin layer forwards, and what a failed read says (#2645, ADR 0069 D-2)', () => {
+  /** The log route, wrapped: every query it is asked, a status to answer in place of its own after the first, an entry altered. */
+  function spied(
+    options: { readonly status?: number; readonly entry?: Record<string, unknown> } = {},
+  ): { routes: readonly Route[]; queries: string[] } {
+    const queries: string[] = [];
+    const routes = ROUTES.map((route) =>
+      route.path === '/v1/operate/log' && route.method === 'GET'
+        ? {
+            ...route,
+            handle: async (context: Parameters<Route['handle']>[0]) => {
+              queries.push(new URL(context.request.url).search);
+              const real = await route.handle(context);
+              if (options.status !== undefined && queries.length > 1) {
+                return new Response('{}', { status: options.status });
+              }
+              if (options.entry === undefined) return real;
+              const body = (await real.json()) as { entries: Record<string, unknown>[] };
+              return json({
+                ...body,
+                entries: body.entries.map((entry, index) =>
+                  index === 0 ? { ...entry, ...options.entry } : entry,
+                ),
+              });
+            },
+          }
+        : route,
+    );
+    return { routes, queries };
+  }
+
+  it('never lets a cursor of the wrong shape reach the route; a well-formed one goes through', async () => {
+    const spy = spied();
+    const made = await world(spy.routes);
+    const token = await signedIn(made);
+    const before = spy.queries.length;
+    for (const cursor of ['a%20b', 'a.b', 'x'.repeat(129)]) {
+      await logPage(made, token, `/admin/log?cursor=${cursor}`);
+    }
+    expect(spy.queries.length).toBe(before);
+    await logPage(made, token, '/admin/log?cursor=AAAAAAAA');
+    expect(spy.queries.slice(before)).toEqual(['?limit=50&cursor=AAAAAAAA']);
+  });
+
+  it('says the log could not be read, not that the cursor is wrong, when a valid older page fails', async () => {
+    const spy = spied({ status: 503 });
+    const made = await world(spy.routes);
+    const token = await signedIn(made);
+    await seedMigrations(made, 60);
+    const first = await logPage(made, token, '/admin/log');
+    const older = olderOf(first) as string;
+    const page = await logPage(made, token, older);
+    expect(page).toContain('could not be read from the instance');
+    expect(page).not.toContain('does not name a page');
+  });
+
+  it.each([
+    ['a source outside the vocabulary', { source: 'telepathy' }],
+    ['an outcome outside the vocabulary', { outcome: 'maybe' }],
+    ['a moment that is not an ISO 8601 UTC one', { at: '2026-01-01' }],
+  ] as const)('%s: the row says it could not be shown', async (_name, entry) => {
+    const made = await world(spied({ entry }).routes);
+    const token = await signedIn(made);
+    await seedMigrations(made, 1);
+    const items = itemsOf(await logPage(made, token, '/admin/log'));
+    expect(items[0]).toBe(LOG_ENTRY_NOT_SHOWN_TEXT);
+  });
+});

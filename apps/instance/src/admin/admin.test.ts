@@ -771,7 +771,7 @@ describe('no secret and no coordinate in anything the admin pages say (#2641, CL
       await handler(adminRequest('POST', '/admin/sign-in', { form: { code } }), client),
     );
     const token = cookieOf(signedIn) as string;
-    // #2645: every signed-in page, the log's older page and a cursor refused among them.
+    // #2645: every signed-in page, the log's newest page and a cursor refused among them.
     await keep(await handler(adminRequest('GET', '/admin', { cookie: token })));
     await keep(await handler(adminRequest('GET', '/admin/status', { cookie: token })));
     await keep(await handler(adminRequest('GET', '/admin/log', { cookie: token })));
