@@ -239,6 +239,14 @@ describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => 
   });
 });
 
+/**
+ * The longest the backup service's shell may run in a test (#1688): the
+ * child's own limit, as `commands.test.ts`'s `CHILD_WAIT_MS` is, not a test
+ * case's. Vitest cannot interrupt a synchronous child, so this is what stops
+ * a shell that loops; it runs in a few milliseconds.
+ */
+const SHELL_WAIT_MS = 4_000;
+
 describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
   const backup = service('backup');
 
@@ -275,8 +283,7 @@ describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
           OYL_BACKUP_KEEP: '14',
           OYL_BACKUP_INTERVAL_SECONDS: '21600',
         },
-        // The child's own limit, not a test case's: what stops a shell that loops.
-        timeout: 4_000,
+        timeout: SHELL_WAIT_MS,
       });
       return readFileSync(join(image, 'calls'), 'utf8').trim().split('\n');
     } finally {
