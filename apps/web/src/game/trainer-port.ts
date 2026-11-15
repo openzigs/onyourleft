@@ -439,12 +439,14 @@ export interface GameTrainerPort {
    * {@link resumeRecording} is called only for a pause made here (#516: a
    * pause somebody else made is not resumed for them).
    *
-   * ⚠️ **Sends the trainer nothing on a ride with no workout**: the
-   * controller's `pause()` writes no target, and the game's own loop, which
-   * is what drives the gradient, stops with the game as it did before #2656.
-   * Under a running workout the workout pauses with the ride, as it does on
-   * the Ride screen's *Pause* and on an auto-pause (`ride/controller.ts`
-   * §`tick`, #441's ease). Optional, as {@link recordingPaused} is;
+   * ⚠️ **Sends the trainer nothing, and so refuses under a workout**: the
+   * controller's `pause()` writes no target on a ride with none, and the
+   * game's own loop, which drives the gradient, stops with the game as it did
+   * before #2656. With a workout loaded `pause()` would make the next tick
+   * ease the machine to its floor and `resume()` write the interval's target
+   * again (`ride/controller.ts` §`tick`, #441's ease): a trainer command the
+   * issue rules out, so this answers `false` and the recording carries on as
+   * it did. Optional, as {@link recordingPaused} is;
    * `gameTrainerPortOver` always supplies it, and `WIRE003` goes red if
    * `GameView` stops calling it.
    */
@@ -520,8 +522,9 @@ export interface GameTrainerPort {
    * ⚠️ **What keeps the moving time current while the GAME is paused.** The
    * render loop does not run while the game is paused, so a figure read only
    * during the tick's render froze at the press — while the recording, which
-   * the game's Pause does not pause, went on counting until its own
-   * auto-pause, or for as long as the rider kept pedalling. `GameView` reads
+   * the game's Pause did not pause before #2656 and still does not under a
+   * workout, went on counting until its own auto-pause, or for as long as the
+   * rider kept pedalling. `GameView` reads
    * {@link rideMovingSeconds} through `useSyncExternalStore` over this, so the
    * HUD re-renders on the controller's own tick (once a second, on the ride's
    * clock) whatever the game is doing. A notification, not a clock: the
@@ -850,6 +853,13 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       // Only a recording that is recording: one already paused is left as
       // whoever paused it left it. @see GameTrainerPort.pauseRecording
       if (controller?.pause === undefined || controller.getSnapshot().phase !== 'recording') {
+        return false;
+      }
+      // #2656's review (B1): not under a workout. The controller's `pause()`
+      // makes the next tick ease the machine to its floor and `resume()`
+      // writes the interval's target again, and the issue rules out any new
+      // resistance or ERG command. The recording carries on, as before.
+      if (controller.getSnapshot().workout !== undefined) {
         return false;
       }
       await controller.pause();

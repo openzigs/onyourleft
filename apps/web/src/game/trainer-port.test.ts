@@ -843,10 +843,10 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
 
   describe('the HUD’s Pause and Resume — #2656', () => {
     type Phase = 'idle' | 'recording' | 'paused' | 'stopped';
-    function sourceAt(phase: Phase) {
+    function sourceAt(phase: Phase, workout?: unknown) {
       const calls: string[] = [];
       const port = gameTrainerPortOver({
-        getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined, phase }),
+        getSnapshot: () => ({ trainer: NO_CONTROL, workout: workout as undefined, phase }),
         simulationControl: () => undefined,
         requestTrainerControl: () => Promise.resolve(),
         noteGameRideEnded: () => undefined,
@@ -876,6 +876,12 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
         expect(other.calls, phase).toEqual([]);
       }
       expect(await gameTrainerPortOver(undefined).pauseRecording?.()).toBe(false);
+    });
+
+    it('leaves a recording under a workout recording, so the workout is sent no ease and no target (#2656, B1)', async () => {
+      const underWorkout = sourceAt('recording', { running: true });
+      expect(await underWorkout.port.pauseRecording?.()).toBe(false);
+      expect(underWorkout.calls).toEqual([]);
     });
 
     it('resumes only a paused recording, through the controller’s own resume', async () => {

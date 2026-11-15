@@ -1088,6 +1088,61 @@ describe('the ride’s moving time while the GAME is paused — #1111’s review
   });
 });
 
+describe('a quick Pause, Resume, Pause on the HUD — #2656’s review (L1)', () => {
+  it('takes the second pause only once the first has been told, and resumes the first’s recording before it', async () => {
+    const log: string[] = [];
+    let releaseFirst: (paused: boolean) => void = () => undefined;
+    let pauses = 0;
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
+      rideMovingSeconds: () => 65,
+      watchRide: () => () => undefined,
+      pauseRecording: () => {
+        log.push('pause');
+        pauses += 1;
+        return pauses === 1
+          ? new Promise<boolean>((resolve) => {
+              releaseFirst = resolve;
+            })
+          : Promise.resolve(true);
+      },
+      resumeRecording: () => {
+        log.push('resume');
+        return Promise.resolve();
+      },
+    };
+    mounted = await mount(
+      <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />,
+    );
+    await settle();
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find((each) =>
+        (each.textContent ?? '').startsWith('Ride '),
+      ),
+    );
+    const press = (name: string) =>
+      clickThrough(
+        queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+          (each) => each.textContent === name,
+        ),
+      );
+    await press('Pause');
+    await press('Resume');
+    await press('Pause');
+    // The first pause is still being written: the second waits behind it.
+    expect(log).toEqual(['pause']);
+    await act(async () => {
+      releaseFirst(true);
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    });
+    expect(log).toEqual(['pause', 'resume', 'pause']);
+  });
+});
+
 describe('the choice itself', () => {
   /** The pacer's switch, found by the words beside it. */
   function pacerSwitch(): HTMLInputElement | undefined {

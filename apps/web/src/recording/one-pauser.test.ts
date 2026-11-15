@@ -182,7 +182,7 @@ describe('every pause and resume in the client — #516', () => {
     const port = code(join('game', 'trainer-port.ts'));
     expect(port.match(/\bcontroller\.pause\s*\(/g)).toHaveLength(1);
     expect(port).toMatch(
-      /pauseRecording: async \(\) => \{[^{}]*\{[^{}]*\}\s*await controller\.pause\(\);/,
+      /pauseRecording: async \(\) => \{[^{}]*\{[^{}]*\}\s*(?:if[^{}]*\{[^{}]*\}\s*)?await controller\.pause\(\);/,
     );
     // …which nothing calls but the HUD's Pause press, in `GameView`.
     const portCallers = sources().filter((path) => /\.pauseRecording\b/.test(code(path)));

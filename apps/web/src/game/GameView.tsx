@@ -1653,6 +1653,15 @@ function GameScreen({
    * written.
    */
   const recordingPausedHereRef = useRef<Promise<boolean> | undefined>(undefined);
+  /**
+   * The recording work of every press so far, in order — #2656's review (L1).
+   * `pauseRecording` answers from the controller's cached snapshot, which says
+   * `recording` until the awaited pause has been told, so a second *Pause*
+   * inside the first's checkpoint write would see no pause to take and answer
+   * `true`, and the first *Resume* would then resume the recording under a
+   * paused game. Each press waits for the one before it.
+   */
+  const recordingWorkRef = useRef<Promise<unknown>>(Promise.resolve());
   const sidePairingRef = useRef(props.sidePairing);
   sidePairingRef.current = props.sidePairing;
   const sideLostRef = useRef(false);
@@ -4844,17 +4853,21 @@ function GameScreen({
             setPhase('riding');
             const pausedHere = recordingPausedHereRef.current;
             recordingPausedHereRef.current = undefined;
-            void pausedHere
-              ?.then((paused) => (paused ? trainer?.resumeRecording?.() : undefined))
-              .catch(() => undefined);
+            if (pausedHere !== undefined) {
+              recordingWorkRef.current = pausedHere
+                .then((paused) => (paused ? trainer?.resumeRecording?.() : undefined))
+                .catch(() => undefined);
+            }
             return;
           }
           setPhase('paused');
           // A pause that did not take is a recording that carries on, which
           // is what it did before #2656; the HUD's *Moving* shows it.
-          recordingPausedHereRef.current = (
-            trainer?.pauseRecording?.() ?? Promise.resolve(false)
-          ).catch(() => false);
+          const pausedHere = recordingWorkRef.current
+            .then(() => trainer?.pauseRecording?.() ?? false)
+            .catch(() => false);
+          recordingPausedHereRef.current = pausedHere;
+          recordingWorkRef.current = pausedHere;
         }}
         // #2349: *End ride* ASKS, and never ends the ride on one press.
         onEnd={askToEnd}
