@@ -7926,6 +7926,408 @@
         }
       }
     },
+    "/v1/operate/analysis/check": {
+      "post": {
+        "operationId": "checkOperateAnalysisModel",
+        "summary": "Check that a model on the configured local server calls tools (#2610, ADR 0046 D-7), before it is saved: the instance sends it a fixed instruction and one fixed, harmless tool — no ride, no rider’s text, no history — and the outcome is `tools-ok` only if it called the tool and then answered; else `no-tool-call`, `does-not-support-tools`, `server-error`, `not-local`, `out-of-time`, `stopped` (the instance stopped), `no-address` or `busy` (another check is out: one at a time). ⚠️ **Asking the server for a model loads it, which may unload the model a rider’s job is using.** Only the local source: a hosted service has its own test (`POST /v1/analysis/hosted/test`). Logged `analysis_model_checked` with the outcome, never the model’s name. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "model"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "tools-ok",
+                        "no-tool-call",
+                        "does-not-support-tools",
+                        "server-error",
+                        "not-local",
+                        "out-of-time",
+                        "stopped",
+                        "no-address",
+                        "busy"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "outcome"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/operate/analysis/jobs": {
+      "get": {
+        "operationId": "getOperateAnalysisJobs",
+        "summary": "The analysis queue (#2610): how many jobs are queued and running, how many ended in each status in the last 7 days and the failed ones by failure code; and the newest 50 jobs — write-up or re-plan, local or hosted, status, failure code, when made and ended, and whether it was your own or another rider’s. Never which rider, and never a job’s input, events, sections or write-up. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "queued": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "succeeded": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "cancelled": {
+                          "type": "integer"
+                        },
+                        "withheld": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "queued",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "withheld"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "count"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "recent": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "write-up",
+                              "re-plan"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "local",
+                              "hosted"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "queued",
+                              "running",
+                              "succeeded",
+                              "failed",
+                              "cancelled",
+                              "withheld"
+                            ]
+                          },
+                          "failure": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "endedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "whose": {
+                            "type": "string",
+                            "enum": [
+                              "own",
+                              "other"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "source",
+                          "status",
+                          "failure",
+                          "createdAt",
+                          "endedAt",
+                          "whose"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "counts",
+                    "failures",
+                    "recent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/operate/analysis/models": {
+      "get": {
+        "operationId": "getOperateAnalysisModels",
+        "summary": "What the configured local model server offers (#2610), for picking a model: whether it is Ollama (and its version) or another OpenAI-compatible server (names alone); and each model’s name, size, parameters and quantisation, whether the server lists `tools` among its capabilities (`not-reported` where it lists none, as older servers do), and how much of it is in GPU memory — `all`, `part` with a percent, or `none` for a model that is loaded, and `not-loaded` for one that is not: Ollama does not say how much memory the card has, so no fit is guessed from a size. The address is the one `GET /v1/operate/analysis` shows, checked as every request to it is: a name must resolve, at each request, to local addresses only. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "ollama",
+                        "openai-compatible",
+                        "no-address",
+                        "not-local",
+                        "unresolved",
+                        "unreachable"
+                      ]
+                    },
+                    "version": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "sizeBytes": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "parameters": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "quantisation": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "tools": {
+                            "type": "string",
+                            "enum": [
+                              "listed",
+                              "not-listed",
+                              "not-reported"
+                            ]
+                          },
+                          "gpu": {
+                            "type": "string",
+                            "enum": [
+                              "all",
+                              "part",
+                              "none",
+                              "not-loaded",
+                              "not-reported",
+                              "not-known"
+                            ]
+                          },
+                          "gpuPercent": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "sizeBytes",
+                          "parameters",
+                          "quantisation",
+                          "tools",
+                          "gpu",
+                          "gpuPercent"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "version",
+                    "models"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/operate/backups": {
       "get": {
         "operationId": "getOperateBackups",
@@ -8233,7 +8635,8 @@
                               "account_erase",
                               "backup_requested",
                               "analysis_settings_set",
-                              "analysis_settings_cleared"
+                              "analysis_settings_cleared",
+                              "analysis_model_checked"
                             ]
                           },
                           "detail": {

@@ -386,6 +386,10 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   operateCounts: {
     notAScopedRead: 'the owner’s Status: counts across the instance, no row of anybody (#2604)',
   },
+  operateJobs: {
+    notAScopedRead:
+      'the owner’s Operate read of every athlete’s jobs, naming none of them: own or another’s (#2610); operate/analysis-models-route.test.ts',
+  },
   recordBackup: { notAScopedRead: 'the backup service’s write (#2606); sql-store.backup.test.ts' },
   listBackupRecords: {
     notAScopedRead: 'the instance’s backups, for its owner: no row of any athlete (#2606)',

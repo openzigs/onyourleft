@@ -8,6 +8,7 @@
  * (`operate.ts`). `moderation/choke-point.test.ts` holds the table to both.
  */
 
+import { TOOL_CHECK_OUTCOMES } from '../analysis/tool-check.ts';
 import { REGISTRATION_MODES, REPOSITORY, type Config } from '../config.ts';
 import { errorResponse } from '../errors.ts';
 import type { Readiness } from '../readiness.ts';
@@ -284,6 +285,100 @@ const backupRecordSchema: Schema = {
 
 const isoOf = (seconds: number): string => new Date(seconds * 1000).toISOString();
 
+const JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled', 'withheld'] as const;
+
+/** What the local model server offers (#2610). Names and sizes; never an address. */
+const localModelsSchema: Schema = {
+  type: 'object',
+  properties: {
+    /** What the server is, or why it could not be read. */
+    state: {
+      type: 'string',
+      enum: ['ollama', 'openai-compatible', 'no-address', 'not-local', 'unresolved', 'unreachable'],
+    },
+    /** Ollama's version, when it said one. */
+    version: { type: ['string', 'null'] },
+    models: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          /** On disk, as `/api/tags` says. */
+          sizeBytes: nullableCount,
+          /** `7.6B`, as the server writes it. */
+          parameters: { type: ['string', 'null'] },
+          /** `Q4_K_M`, as the server writes it. */
+          quantisation: { type: ['string', 'null'] },
+          /** Whether `/api/show` lists `tools` among its capabilities, or lists none. */
+          tools: { type: 'string', enum: ['listed', 'not-listed', 'not-reported'] },
+          /** How much of it is in GPU memory: of a LOADED model only, never guessed from its size. */
+          gpu: {
+            type: 'string',
+            enum: ['all', 'part', 'none', 'not-loaded', 'not-reported', 'not-known'],
+          },
+          /** For `part`, the whole percent in GPU memory, 1–99. */
+          gpuPercent: nullableCount,
+        },
+        required: ['name', 'sizeBytes', 'parameters', 'quantisation', 'tools', 'gpu', 'gpuPercent'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['state', 'version', 'models'],
+  additionalProperties: false,
+};
+
+/** The analysis queue and the newest jobs (#2610): never an athlete, an input or a write-up. */
+const jobsSchema: Schema = {
+  type: 'object',
+  properties: {
+    /** Jobs queued and running now; the ended ones, those that ended in the last 7 days. */
+    counts: {
+      type: 'object',
+      properties: Object.fromEntries(JOB_STATUSES.map((status) => [status, count])),
+      required: [...JOB_STATUSES],
+      additionalProperties: false,
+    },
+    /** The failed jobs of the last 7 days, by failure code, most first. */
+    failures: {
+      type: 'array',
+      items: {
+        type: 'object',
+        /** `code` is one of `analysis/jobs.ts` §`JOB_FAILURES`. */
+        properties: { code: { type: ['string', 'null'] }, count },
+        required: ['code', 'count'],
+        additionalProperties: false,
+      },
+    },
+    /** The newest 50 jobs, newest first. */
+    recent: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['write-up', 're-plan'] },
+          source: { type: 'string', enum: ['local', 'hosted'] },
+          status: { type: 'string', enum: JOB_STATUSES },
+          /** One of `analysis/jobs.ts` §`JOB_FAILURES` for a failed job. */
+          failure: { type: ['string', 'null'] },
+          /** ISO 8601, UTC. */
+          createdAt: { type: 'string' },
+          endedAt: { type: ['string', 'null'] },
+          /** The owner's own job, or another rider's: never which rider. */
+          whose: { type: 'string', enum: ['own', 'other'] },
+        },
+        required: ['kind', 'source', 'status', 'failure', 'createdAt', 'endedAt', 'whose'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['counts', 'failures', 'recent'],
+  additionalProperties: false,
+};
+
+const isoOfMs = (milliseconds: number): string => new Date(milliseconds).toISOString();
+
 export const OPERATE_ROUTES: readonly Route[] = [
   {
     method: 'GET',
@@ -351,6 +446,86 @@ export const OPERATE_ROUTES: readonly Route[] = [
     response: { contentType: 'application/json', schema: analysisSchema },
     handle: async (context) =>
       json(await operateOf(context).clearAnalysisSettings(ownerOf(context))),
+  },
+  {
+    method: 'GET',
+    path: '/v1/operate/analysis/models',
+    sealed: 'only',
+    operationId: 'getOperateAnalysisModels',
+    reaches: 'owner',
+    summary: `What the configured local model server offers (#2610), for picking a model: whether it is Ollama (and its version) or another OpenAI-compatible server (names alone); and each model’s name, size, parameters and quantisation, whether the server lists \`tools\` among its capabilities (\`not-reported\` where it lists none, as older servers do), and how much of it is in GPU memory — \`all\`, \`part\` with a percent, or \`none\` for a model that is loaded, and \`not-loaded\` for one that is not: Ollama does not say how much memory the card has, so no fit is guessed from a size. The address is the one \`GET /v1/operate/analysis\` shows, checked as every request to it is: a name must resolve, at each request, to local addresses only. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: { contentType: 'application/json', schema: localModelsSchema },
+    handle: async (context) => json(await operateOf(context).localModels()),
+  },
+  {
+    method: 'POST',
+    path: '/v1/operate/analysis/check',
+    sealed: 'only',
+    operationId: 'checkOperateAnalysisModel',
+    reaches: 'owner',
+    summary: `Check that a model on the configured local server calls tools (#2610, ADR 0046 D-7), before it is saved: the instance sends it a fixed instruction and one fixed, harmless tool — no ride, no rider’s text, no history — and the outcome is \`tools-ok\` only if it called the tool and then answered; else \`no-tool-call\`, \`does-not-support-tools\`, \`server-error\`, \`not-local\`, \`out-of-time\`, \`stopped\` (the instance stopped), \`no-address\` or \`busy\` (another check is out: one at a time). ⚠️ **Asking the server for a model loads it, which may unload the model a rider’s job is using.** Only the local source: a hosted service has its own test (\`POST /v1/analysis/hosted/test\`). Logged \`analysis_model_checked\` with the outcome, never the model’s name. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    request: {
+      type: 'object',
+      properties: { model: { type: 'string' } },
+      required: ['model'],
+      additionalProperties: false,
+    },
+    errors: ['unauthenticated', 'validation_failed'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: { outcome: { type: 'string', enum: TOOL_CHECK_OUTCOMES } },
+        required: ['outcome'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const checked = await operateOf(context).checkModel(ownerOf(context), context.json);
+      if (!checked.ok) {
+        return errorResponse(
+          checked.code,
+          checked.fields === undefined ? {} : { fields: checked.fields },
+        );
+      }
+      return json(checked.value);
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/operate/analysis/jobs',
+    sealed: 'only',
+    operationId: 'getOperateAnalysisJobs',
+    reaches: 'owner',
+    summary: `The analysis queue (#2610): how many jobs are queued and running, how many ended in each status in the last 7 days and the failed ones by failure code; and the newest 50 jobs — write-up or re-plan, local or hosted, status, failure code, when made and ended, and whether it was your own or another rider’s. Never which rider, and never a job’s input, events, sections or write-up. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: { contentType: 'application/json', schema: jobsSchema },
+    handle: async (context) => {
+      const view = await operateOf(context).jobs(ownerOf(context));
+      return json({
+        counts: view.counts,
+        failures: view.failures,
+        recent: view.recent.map((job) => ({
+          kind: job.kind,
+          source: job.source,
+          status: job.status,
+          failure: job.failure,
+          createdAt: isoOfMs(job.createdAt),
+          endedAt: job.endedAt === null ? null : isoOfMs(job.endedAt),
+          whose: job.whose,
+        })),
+      });
+    },
   },
   {
     method: 'GET',

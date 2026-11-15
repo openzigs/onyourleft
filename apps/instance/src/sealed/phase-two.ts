@@ -122,4 +122,8 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/operate/analysis', OPERATE),
   only('POST', '/v1/operate/analysis', OPERATE),
   only('DELETE', '/v1/operate/analysis', OPERATE),
+  // #2610: what the local server offers, the tool check, and the job queue.
+  only('GET', '/v1/operate/analysis/models', OPERATE),
+  only('POST', '/v1/operate/analysis/check', OPERATE),
+  only('GET', '/v1/operate/analysis/jobs', OPERATE),
 ];

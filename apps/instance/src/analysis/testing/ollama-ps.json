@@ -1,0 +1,22 @@
+{
+  "models": [
+    {
+      "name": "alpha:14b",
+      "model": "alpha:14b",
+      "size": 10500000000,
+      "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "details": { "parameter_size": "14.8B", "quantization_level": "Q4_K_M" },
+      "expires_at": "2026-11-14T10:05:00.000000000Z",
+      "size_vram": 10500000000
+    },
+    {
+      "name": "beta:32b",
+      "model": "beta:32b",
+      "size": 25000000000,
+      "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "details": { "parameter_size": "32.8B", "quantization_level": "Q4_K_M" },
+      "expires_at": "2026-11-14T10:05:00.000000000Z",
+      "size_vram": 15500000000
+    }
+  ]
+}

@@ -485,7 +485,13 @@ describe('every path a blocked athlete could use is refused, as though nobody we
     '%s answers an ordinary rider AND the deputy as though there were no such route (#2602)',
     async (_operation, route) => {
       const path = route.path.replace(/\{[A-Za-z]+\}/g, unrelated.athleteId);
-      const body = route.method === 'GET' ? undefined : {};
+      // #2610: the tool check refuses a body that names no model, so the control names one.
+      const body =
+        route.method === 'GET'
+          ? undefined
+          : route.operationId === 'checkOperateAnalysisModel'
+            ? { model: 'some-model' }
+            : {};
       const nowhere = await world.as(viewer, 'GET', '/v1/no-such-route');
       for (const caller of [viewer, world.deputy]) {
         const answer = await world.as(caller, route.method, path, body);
