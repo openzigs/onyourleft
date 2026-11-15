@@ -288,7 +288,12 @@ describe('what a phone shows on a climb — #2593', () => {
   });
 
   it('clips the callout where the cell is the route panel’s, as a put-away notice is', () => {
-    const rule = /\.oyl-hud \.oyl-hud__notices\.oyl-hud__notices--climb\s*\{([^}]*)\}/.exec(css);
+    // The cell and the callout's own panel both: a 1 px cell alone left the
+    // panel laid out at its border and padding, 21 × 43 px (PR #2633's CI).
+    const rule =
+      /\.oyl-hud \.oyl-hud__notices\.oyl-hud__notices--climb,\s*\.oyl-hud \.oyl-hud__notices--climb > \.oyl-hud__climb-callout\s*\{([^}]*)\}/.exec(
+        css,
+      );
     expect(rule?.[1]).toContain('clip-path: inset(50%)');
     expect(rule?.[1]).not.toContain('display: none');
   });

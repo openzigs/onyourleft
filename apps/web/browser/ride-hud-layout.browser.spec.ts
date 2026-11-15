@@ -782,8 +782,12 @@ for (const viewport of OVERLAY_VIEWPORTS) {
  * `?climb=on` starts the ride on it, so it counts down to the top. Each is
  * held to the layout's own invariants at every overlay viewport, both ways
  * (#1120) — every panel whole, none over another, none over the leaning
- * rider — with the callout among them, drawn and uncovered; and at the
- * tablets' large text sizes, where the 4:3 tablet's middle row is shortest.
+ * rider — with the callout among them, drawn and uncovered on a tablet; and
+ * at the tablets' large text sizes, where the 4:3 tablet's middle row is
+ * shortest. On a phone the notice cell is the route panel's, and the callout
+ * does not take it (`theme.css` §"#2593"): there it must be clipped to a
+ * pixel, its panel too and not only its cell, and the strip, the road ahead
+ * and the plan drawn and uncovered for the whole climb.
  * Each on a plain ride and on a mapped one (`?corridor=archive`), whose map
  * credit hangs at the foot of the same notice row on a tablet: as a panel of
  * the stage it is held clear of the callout by the same invariants. The
@@ -812,10 +816,30 @@ async function calloutText(page: Page): Promise<string | undefined> {
   );
 }
 
-/** The callout drawn, whole and uncovered, off the rider, and the layout's own faults. */
+/** The layouts whose notice cell is the route panel's: a phone's, where the callout gives way. */
+const ROUTE_CELL = new Set(
+  OVERLAY_VIEWPORTS.filter((each) => !TABLET_VIEWPORTS.includes(each)).map((each) => each.name),
+);
+
+/** What the route panel draws, which a phone keeps for every climb. */
+const ROUTE_PANEL = ['the elevation strip', 'the road ahead', 'the plan view'];
+
+/**
+ * On a tablet, the callout drawn, whole and uncovered, off the rider; on a
+ * phone, the callout clipped to a pixel and the route panel drawn and
+ * uncovered in its cell; and the layout's own faults.
+ */
 function calloutFaults(seen: StageMeasurement, viewport: Viewport): string[] {
-  const { faults } = sizeFaults(seen, viewport);
+  const { faults, clipped } = sizeFaults(seen, viewport);
   const callout = named(seen.items, CALLOUT);
+  if (ROUTE_CELL.has(viewport.name)) {
+    if (!clipped.includes(CALLOUT)) faults.push(`drawn on a phone: ${CALLOUT}`);
+    for (const name of ROUTE_PANEL) {
+      const each = named(seen.items, name);
+      if (!inside(each.box, viewport) || !each.onTop) faults.push(`lost: ${name}`);
+    }
+    return faults;
+  }
   if (!inside(callout.box, viewport) || !callout.onTop) faults.push(`lost: ${CALLOUT}`);
   if (overlap(callout.box, riderBox(viewport))) faults.push(`${CALLOUT} over the rider`);
   return faults;
