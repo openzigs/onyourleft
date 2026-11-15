@@ -27,6 +27,7 @@ import {
   instanceSeconds,
   keylessOwner,
   operatedWorld,
+  roomMadeBy,
   writeBackups,
   writeOperatorEntries,
 } from '../testing/operate-instance-testing';
@@ -459,16 +460,18 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
   it('has no way to restore: the port asks for backups and nothing else that changes one', async () => {
     const { owner } = await operatedWorld();
     const methods = Object.keys(createOperatePort(owner.dependencies)).sort();
-    // #2611's are the AI backend's: none of them touches a backup.
+    // #2611's are the AI backend's and #2612's the rooms': none of them touches a backup.
     expect(methods).toEqual([
       'analysis',
       'backUpNow',
       'backups',
       'checkModel',
       'clearAnalysis',
+      'endRoom',
       'jobs',
       'localModels',
       'log',
+      'rooms',
       'setAnalysis',
       'standing',
       'status',
@@ -755,5 +758,88 @@ describe('the AI backend’s reads and writes — #2609, #2610, #2611', () => {
     );
     expect(JSON.stringify(settings)).not.toContain('MARKER');
     expect(JSON.stringify(settings)).toContain('http://ollama:11434/v1');
+  });
+});
+
+describe('the open rooms, and ending one — #2612', () => {
+  /** A room as the instance writes one, every field well-formed. */
+  const ROOM = {
+    roomId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    shortCode: 'a1b2c3',
+    kind: 'race',
+    visibility: 'private',
+    phase: 'riding',
+    openedAt: '2026-11-14T19:30:00.000Z',
+    host: 'Ann',
+    riders: ['Ann', null],
+    riderCount: 2,
+  };
+
+  async function roomsAnswered(answer: () => Response): Promise<unknown> {
+    const { owner, world } = await operatedWorld();
+    return createOperatePort({
+      ...owner.dependencies,
+      send: (url, init) => world.answeringAs('/v1/operate/rooms', answer)(new Request(url, init)),
+    }).rooms();
+  }
+
+  it('carries the room’s own fields and nothing else the instance sent beside them', async () => {
+    const read = await roomsAnswered(() =>
+      Response.json({ rooms: [{ ...ROOM, distanceMetres: 1234.5, powerWatts: 317 }] }),
+    );
+    expect(read).toEqual({
+      kind: 'rooms',
+      rooms: [
+        {
+          roomId: ROOM.roomId,
+          shortCode: 'a1b2c3',
+          kind: 'race',
+          visibility: 'private',
+          phase: 'riding',
+          openedAt: ROOM.openedAt,
+          host: 'Ann',
+          riders: ['Ann', null],
+        },
+      ],
+    });
+  });
+
+  it.each([
+    ['a count that is not its riders’', { riderCount: 3 }],
+    ['a name longer than any the instance takes', { riders: ['x'.repeat(65), null] }],
+    ['a rider who is a number', { riders: [42, null] }],
+    ['a phase it does not know', { phase: 'paused' }],
+    ['a short code that is not one', { shortCode: 'A1 B2' }],
+    ['an id that is a path', { roomId: '../a1b2' }],
+  ] as const)('shows no rooms when a room holds %s', async (_name, change) => {
+    const body = (rooms: unknown[]) => () => Response.json({ rooms });
+    // The control: the same answer, well-formed, is the rooms.
+    expect(await roomsAnswered(body([ROOM]))).toMatchObject({ kind: 'rooms' });
+    expect(await roomsAnswered(body([ROOM, { ...ROOM, ...change }]))).toEqual({
+      kind: 'unreachable',
+    });
+  });
+
+  it('sends no end for a room id the instance could not have written, or a reason it does not take', async () => {
+    const { owner, sent } = await operatedWorld();
+    const port = createOperatePort(owner.dependencies);
+    const before = sent.length;
+    expect(await port.endRoom('../etc', 'other', 'abc')).toEqual({ kind: 'not-ended' });
+    expect(await port.endRoom(ROOM.roomId, 'because' as 'other', 'a1b2c3')).toEqual({
+      kind: 'not-ended',
+    });
+    expect(sent.length).toBe(before);
+  });
+
+  it('is told an end the owner’s own instance refused, for a wrong code, as not ended', async () => {
+    const { owner, rider, approveRider, world } = await operatedWorld();
+    await approveRider();
+    const room = await roomMadeBy(world, rider.athleteId(), 'race');
+    const port = createOperatePort(owner.dependencies);
+    expect(await port.endRoom(room, 'other', 'zzzzzz')).toEqual({ kind: 'not-ended' });
+    const read = await port.rooms();
+    expect(read.kind === 'rooms' ? read.rooms.map((each) => each.roomId) : read).toEqual([room]);
+    expect(await port.endRoom(room, 'other', room.slice(0, 6))).toMatchObject({ kind: 'ended' });
+    expect(await port.rooms()).toEqual({ kind: 'rooms', rooms: [] });
   });
 });

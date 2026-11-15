@@ -12,7 +12,13 @@ import { REFUSAL_CLOSE, ROOM_LOST, type CloseFrame } from '../close-codes.ts';
 import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
 import type { FromWorker, ToWorker, UpgradeRequest, WorkerSettings } from './ipc.ts';
-import type { HostMetrics, RoomFlagRaised, RoomResult, RoomSeat } from './room-host.ts';
+import type {
+  HostedRoomSummary,
+  HostMetrics,
+  RoomFlagRaised,
+  RoomResult,
+  RoomSeat,
+} from './room-host.ts';
 
 /**
  * The self-hosted room server's front half (#780): one room-worker process
@@ -124,6 +130,11 @@ export interface WorkerStatus {
   readonly alive: boolean;
 }
 
+/** A room a live worker holds (#2612), and which worker. */
+export interface WorkerRoomSummary extends HostedRoomSummary {
+  readonly worker: number;
+}
+
 export interface WorkerMetrics extends HostMetrics {
   readonly index: number;
   readonly rssBytes: number;
@@ -220,6 +231,13 @@ export class RoomRouter {
   readonly #seatsWaiting = new Map<
     number,
     { readonly slot: Slot; readonly resolve: (seat: RoomSeat | undefined) => void }
+  >();
+  readonly #roomsWaiting = new Map<
+    number,
+    {
+      readonly slot: Slot;
+      readonly resolve: (rooms: readonly HostedRoomSummary[] | undefined) => void;
+    }
   >();
   /**
    * Rooms the rooms' sweep is ending (#948), each `true` once the sweep is
@@ -370,6 +388,60 @@ export class RoomRouter {
       this.#seatsWaiting.set(id, { slot, resolve });
       this.#post(slot, { type: 'seat', id, roomId, riderId });
     });
+  }
+
+  /**
+   * Every room each live worker holds (#2612), for the owner's Operate area:
+   * its id, its phase and the athletes in it, and which worker. A worker that
+   * dies before it answers is left out.
+   */
+  async roomSummaries(): Promise<readonly WorkerRoomSummary[]> {
+    const live = this.#slots.filter((slot) => slot.alive);
+    const answers = await Promise.all(
+      live.map(
+        (slot) =>
+          new Promise<readonly WorkerRoomSummary[]>((resolve) => {
+            this.#nextRequest += 1;
+            const id = this.#nextRequest;
+            this.#roomsWaiting.set(id, {
+              slot,
+              resolve: (rooms) => {
+                resolve((rooms ?? []).map((room) => ({ ...room, worker: slot.index })));
+              },
+            });
+            this.#post(slot, { type: 'rooms', id });
+          }),
+      ),
+    );
+    return answers.flat();
+  }
+
+  /**
+   * The owner ends `roomId` (#2612). From now until it is done no socket is
+   * placed in it — one whose lookup read the room as open is refused
+   * `room-closed`, as the sweep's rooms are (#948) — while `commit` writes
+   * that the room is over; then the worker holding it, if one does, closes
+   * every socket in it `4005 room-closed` and lets it go (`room-host.ts`
+   * §`end`). `commit`'s answer: `false` when it ended nothing, and then no
+   * worker is asked. A `commit` that throws asks no worker either.
+   */
+  async endRoom(roomId: string, commit: () => Promise<boolean>): Promise<boolean> {
+    this.#ending.set(roomId, false);
+    try {
+      if (!(await commit())) return false;
+      const slot = this.#placement.get(roomId);
+      if (slot !== undefined && slot.alive) {
+        await new Promise<boolean>((resolve) => {
+          this.#nextRequest += 1;
+          const id = this.#nextRequest;
+          this.#startsWaiting.set(id, { slot, resolve });
+          this.#post(slot, { type: 'end', id, roomId });
+        });
+      }
+      return true;
+    } finally {
+      this.releaseEnding(roomId);
+    }
   }
 
   /** Each live worker's metrics. */
@@ -575,8 +647,15 @@ export class RoomRouter {
         waiting?.resolve({ ...message.metrics, index: slot.index, rssBytes: message.rssBytes });
         return;
       }
+      case 'rooms': {
+        const waiting = this.#roomsWaiting.get(message.id);
+        this.#roomsWaiting.delete(message.id);
+        waiting?.resolve(message.rooms);
+        return;
+      }
       case 'started':
-      case 'removed': {
+      case 'removed':
+      case 'ended': {
         const waiting = this.#startsWaiting.get(message.id);
         this.#startsWaiting.delete(message.id);
         waiting?.resolve(message.ok);
@@ -616,6 +695,11 @@ export class RoomRouter {
     for (const [id, waiting] of this.#seatsWaiting) {
       if (waiting.slot !== slot) continue;
       this.#seatsWaiting.delete(id);
+      waiting.resolve(undefined);
+    }
+    for (const [id, waiting] of this.#roomsWaiting) {
+      if (waiting.slot !== slot) continue;
+      this.#roomsWaiting.delete(id);
       waiting.resolve(undefined);
     }
     if (this.#stopping) {
