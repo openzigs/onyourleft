@@ -68,13 +68,22 @@ import { MAXIMUM_SEALED_CALL_MILLISECONDS, type InstanceAnswer } from './instanc
  */
 export type OperateStanding = 'owner' | 'not-owner' | 'signed-out' | 'unreachable' | 'no-keys';
 
+/** Where an operator log entry was taken. */
+export type OperatorLogSource = 'app' | 'cli' | 'admin_tunnel' | 'admin_loopback';
+
+const SOURCES: readonly string[] = ['app', 'cli', 'admin_tunnel', 'admin_loopback'];
+
 /** One entry of the operator log, as the instance pages it (#2602). */
 export interface OperatorLogEntry {
   readonly id: number;
   /** When, as ISO 8601 in UTC. */
   readonly at: string;
-  /** Taken in the app's Operate area, or with the operator's CLI on the host. */
-  readonly source: 'app' | 'cli';
+  /**
+   * Taken in the app's Operate area, with the operator's CLI on the host, or
+   * on the instance's own admin pages through the tunnel or on the server
+   * machine (#2641, ADR 0069 D-8).
+   */
+  readonly source: OperatorLogSource;
   /** The instance's own name for the action — `backup`, `room_open`, … */
   readonly action: string;
   /** Closed words, each optionally `=` a whole number — or `null`. */
@@ -404,7 +413,8 @@ function entryFrom(value: unknown): OperatorLogEntry | undefined {
     !Number.isSafeInteger(row.id) ||
     row.id < 1 ||
     at === undefined ||
-    (row.source !== 'app' && row.source !== 'cli') ||
+    typeof row.source !== 'string' ||
+    !SOURCES.includes(row.source) ||
     typeof row.action !== 'string' ||
     !ACTION.test(row.action) ||
     !(row.detail === null || (typeof row.detail === 'string' && DETAIL.test(row.detail))) ||
@@ -415,7 +425,7 @@ function entryFrom(value: unknown): OperatorLogEntry | undefined {
   return {
     id: row.id,
     at,
-    source: row.source,
+    source: row.source as OperatorLogSource,
     action: row.action,
     detail: row.detail,
     outcome: row.outcome,

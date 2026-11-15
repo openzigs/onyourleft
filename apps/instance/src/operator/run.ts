@@ -3,6 +3,7 @@
 import { DEFAULT_BLOBS_PATH, DEFAULT_DATABASE_PATH } from '../server-config.ts';
 import {
   accountErase,
+  adminCode,
   analysisSettingsClear,
   analysisSettingsOthers,
   backup,
@@ -37,6 +38,7 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   load-accounts erase
   account-erase [--confirm]   (the rider's recovery code on standard input)
   analysis-settings clear | others on|off
+  admin-code   (a one-time code for the admin pages, valid 10 minutes)
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -237,6 +239,11 @@ export async function runCommand(
         } else {
           throw new CommandError(USAGE);
         }
+        break;
+      }
+      case 'admin-code': {
+        if (args.length > 0) throw new CommandError(USAGE);
+        report = await adminCode(paths);
         break;
       }
       case 'account-erase': {

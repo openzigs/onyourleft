@@ -213,7 +213,17 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         calls' own transactions savepoints. The CLI's state
                         changes log through it too (`source: 'cli'`, no
                         athlete). docs/operating-an-instance.md §"The
-                        Operate area".
+                        Operate area". Since #2641 `src/admin/` is the
+                        instance's own admin pages (ADR 0069), mounted only
+                        with `OYL_INSTANCE_ADMIN_PAGES=on`: a one-time code
+                        from `operator admin-code`, the `__Host-oyl-admin`
+                        cookie session (migration 0044), CSRF, and
+                        `admin/headers.ts` — answered BEFORE the route table,
+                        never with the CORS `*`. ⚠️ The ONE cookie the
+                        instance reads, and no route reads it. It reaches a
+                        route only in-process as the owner, through
+                        `handler.ts` §`dispatchAsOwner`, and only one whose
+                        `admin` mark is `read` or `change`.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
