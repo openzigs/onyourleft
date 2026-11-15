@@ -492,7 +492,14 @@ beforeAll(() => {
   const shadow = shadowRide(FRAMES);
   for (let seed = 1; seed < 200; seed += 1) {
     const found = scriptFor(seed, RACE, shadow);
-    if (found.hits >= 2 && found.finishedFrame !== undefined && found.finishedFrame < FRAMES - 20) {
+    // #2665: and moved the rider off their effort distance, which the bots'
+    // longer dwell and gust-only flight no longer do on every seed that hits twice.
+    if (
+      found.hits >= 2 &&
+      found.finishedFrame !== undefined &&
+      found.finishedFrame < FRAMES - 20 &&
+      Math.min(...found.offsets) < -1
+    ) {
       script = found;
       return;
     }
