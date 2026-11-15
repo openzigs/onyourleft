@@ -12,13 +12,26 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0069 is [ADR 0069](../adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md)**,
+  taken by [#2640](https://github.com/openzigs/onyourleft/issues/2640) on 2026-11-15 for the
+  instance's own admin pages: a browser sign-in for the owner and a TLS-only admin channel, on the
+  owner's rulings of 2026-11-15 on [#2601](https://github.com/openzigs/onyourleft/issues/2601),
+  [#2639](https://github.com/openzigs/onyourleft/issues/2639) and
+  [#2646](https://github.com/openzigs/onyourleft/issues/2646). It is **Proposed** until the owner
+  approves it on its pull request. It supersedes, in part, the owner's ruling of 2026-11-14 on #2601
+  (*"no new login surface"*) and ADR 0047 D-7's Operate row, D-7's two phase-1 moderator rows, D-8
+  and D-11, as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed decision to a new
+  ADR; ADR 0047 gained one dated `## Amendments` entry pointing here. #2640 claimed it by its title.
+  It took the next free number after 0068; **0057 and 0058 stay claimed** by #1748 and #1752.
+  **The next free number is 0070.** A reviewer who remembers this file offering 0069 is reading the
+  old file.
   ⚠️ **0068 is [ADR 0068](../adr/0068-a-delivery-round-holds-the-realistic-worlds-floor.md)**,
   taken by [#2513](https://github.com/openzigs/onyourleft/issues/2513) on 2026-11-12 for a Delivery
   round holding the realistic world's floor. It is **Accepted** (2026-11-12), on the owner's
   [ruling of that day](https://github.com/openzigs/onyourleft/pull/2530#issuecomment-6828858146) on #2530. It supersedes ADR 0026 D-3's step out of realism, only while a
   round runs, as an ADR rather than an amendment, because ADR 0013 D-3 sends a reversed decision to
   a new ADR. It took the next free number after 0067; **0057 and 0058 stay claimed** by #1748 and
-  #1752. **The next free number is 0069.** A reviewer who remembers this file offering 0068 is
+  #1752. The next free number was then 0069. A reviewer who remembers this file offering 0068 is
   reading the old file.
   ⚠️ **0067 is [ADR 0067](../adr/0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)**,
   taken by [#2457](https://github.com/openzigs/onyourleft/issues/2457) on 2026-11-11 for lap-race
