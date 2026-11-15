@@ -15,15 +15,19 @@ import type { InstanceSend } from './instance-transport';
 import {
   createOperatePort,
   OPERATOR_LOG_PAGE,
+  type OperateBackupsRead,
   type OperateStatusRead,
   type OperatorLogRead,
 } from './operate-port';
 import {
+  aSnapshot,
   closeOperateWorlds,
   countingSealed,
   deviceStorage,
+  instanceSeconds,
   keylessOwner,
   operatedWorld,
+  writeBackups,
   writeOperatorEntries,
 } from '../testing/operate-instance-testing';
 import { LOADED_FROM_A_WEBSITE, LOADED_LOCALLY } from './testing';
@@ -312,5 +316,180 @@ describe('the instance’s status — #2604', () => {
     // The control: the same answer, well-formed, is a status.
     expect((await answeredWith(GOOD)).kind).toBe('status');
     expect(await answeredWith({ ...GOOD, ...change })).toEqual({ kind: 'unreachable' });
+  });
+});
+
+describe('the backups, and “back up now” — #2606, #2607', () => {
+  function asBackups(read: OperateBackupsRead) {
+    if (read.kind !== 'backups') throw new Error(`not the backups: ${read.kind}`);
+    return read;
+  }
+
+  /** `apps/instance` §`MESSAGES.too_many`, the sentence the instance refuses with. */
+  const TOO_MANY =
+    'A backup is already waiting, or one was made in the last 15 minutes. Nothing was asked for: each extra backup removes an older one.';
+
+  it('reads the owner the records newest first, with their ages, as the instance holds them', async () => {
+    const { owner, world } = await operatedWorld();
+    await writeBackups(world, [
+      aSnapshot(world, 12 * 3600, { offBox: 'failed' }),
+      {
+        outcome: 'failed',
+        at: instanceSeconds(world) - 6 * 3600,
+        error: 'ENOSPC',
+        intervalSeconds: 21_600,
+      },
+      aSnapshot(world, 3600),
+    ]);
+    const read = asBackups(await createOperatePort(owner.dependencies).backups());
+    expect(read.pendingSince).toBeNull();
+    expect(read.records.map((each) => [each.outcome, each.ageSeconds])).toEqual([
+      ['done', 3600],
+      ['failed', 6 * 3600],
+      ['done', 12 * 3600],
+    ]);
+    expect(read.records[0]).toEqual({
+      outcome: 'done',
+      id: 3,
+      at: new Date((instanceSeconds(world) - 3600) * 1000).toISOString(),
+      ageSeconds: 3600,
+      snapshot: aSnapshot(world, 3600).snapshot,
+      rows: 100 + 3600,
+      blobs: 7,
+      sizeBytes: 2_000_000,
+      offBox: 'copied',
+      intervalSeconds: 21_600,
+      requested: false,
+    });
+    expect(read.records[1]).toMatchObject({ outcome: 'failed', error: 'ENOSPC' });
+    // The SHA-256 and the free space are the instance's, not the screen's.
+    expect(JSON.stringify(read)).not.toContain('a'.repeat(64));
+  });
+
+  it('asks once: the request waits, is logged, and a second ask is refused with the instance’s own sentence', async () => {
+    const { owner, world } = await operatedWorld();
+    const port = createOperatePort(owner.dependencies);
+    const asked = await port.backUpNow();
+    expect(asked).toEqual({
+      kind: 'requested',
+      requestedAt: new Date(instanceSeconds(world) * 1000).toISOString(),
+    });
+    // Read back through the instance: the request waits, in the store and in the route.
+    expect(
+      await world.freshRead(async (store) => (await store.pendingBackupRequest()) !== undefined),
+    ).toBe(true);
+    expect(asBackups(await port.backups()).pendingSince).toBe(
+      asked.kind === 'requested' ? asked.requestedAt : 'never',
+    );
+    expect(await port.backUpNow()).toEqual({ kind: 'refused', sentence: TOO_MANY });
+    // The operator log, read through `GET /v1/operate/log`: asked, then refused.
+    const log = await port.log();
+    if (log.kind !== 'page') throw new Error(`no log: ${log.kind}`);
+    expect(log.entries.map((entry) => [entry.action, entry.source, entry.outcome])).toEqual([
+      ['backup_requested', 'app', 'refused'],
+      ['backup_requested', 'app', 'done'],
+    ]);
+  });
+
+  it.each(['deputy', 'rider'] as const)(
+    'reads the %s nothing, and their “back up now” asks for nothing and logs nothing',
+    async (who) => {
+      const operated = await operatedWorld();
+      if (who === 'rider') await operated.approveRider();
+      const port = createOperatePort(operated[who].dependencies);
+      expect(await port.backups()).toEqual({ kind: 'not-owner' });
+      expect(await port.backUpNow()).toEqual({ kind: 'not-owner' });
+      // Read back through the instance's store and the owner's log: nothing changed.
+      expect(
+        await operated.world.freshRead((store) => store.pendingBackupRequest()),
+      ).toBeUndefined();
+      const log = await createOperatePort(operated.owner.dependencies).log();
+      expect(log).toEqual({ kind: 'page', entries: [], next: null });
+    },
+  );
+
+  it('is no-keys on an instance with no OYL_INSTANCE_SECRET_KEY, and on one with no Operate area', async () => {
+    const device = await keylessOwner();
+    expect(await createOperatePort(device.dependencies).backups()).toEqual({ kind: 'no-keys' });
+    expect(await createOperatePort(device.dependencies).backUpNow()).toEqual({ kind: 'no-keys' });
+    const { owner } = await operatedWorld({ withoutOperate: true });
+    expect(await createOperatePort(owner.dependencies).backups()).toEqual({ kind: 'no-keys' });
+  });
+
+  it('has no way to restore: the port asks for backups and nothing else that changes one', async () => {
+    const { owner } = await operatedWorld();
+    const methods = Object.keys(createOperatePort(owner.dependencies)).sort();
+    expect(methods).toEqual(['backUpNow', 'backups', 'log', 'standing', 'status']);
+  });
+
+  /** A record as the instance writes it, every field well-formed. */
+  const GOOD = {
+    id: 1,
+    at: '2026-11-14T20:00:00.000Z',
+    ageSeconds: 60,
+    outcome: 'done',
+    error: null,
+    snapshot: 'snapshot-2026-11-14T20-00-00-000Z',
+    rows: 10,
+    blobs: 2,
+    databaseSha256: 'b'.repeat(64),
+    sizeBytes: 1000,
+    offBox: 'copied',
+    removed: 0,
+    freeBytes: { backups: 1, offBox: 1 },
+    intervalSeconds: 21_600,
+    requested: false,
+  };
+
+  async function answeredWith(
+    answer: () => Response,
+    method: 'backups' | 'backUpNow' = 'backups',
+  ): Promise<unknown> {
+    const { owner, world } = await operatedWorld();
+    const port = createOperatePort({
+      ...owner.dependencies,
+      send: (url, init) => world.answeringAs('/v1/operate/backups', answer)(new Request(url, init)),
+    });
+    return method === 'backups' ? port.backups() : port.backUpNow();
+  }
+
+  it.each([
+    [
+      'an error that is a message, which may name a path',
+      { outcome: 'failed', error: 'ENOENT: /srv/backups' },
+    ],
+    ['a snapshot that is a path', { snapshot: '/srv/backups/snapshot-2026-11-14T20-00-00-000Z' }],
+    ['a snapshot that climbs out', { snapshot: 'snapshot-../../etc' }],
+    ['a done run with no snapshot', { snapshot: null }],
+    ['an unknown off-box outcome', { offBox: 'maybe' }],
+    ['an age that is not whole', { ageSeconds: 1.5 }],
+    ['a time that is not ISO 8601', { at: 'today' }],
+  ] as const)('shows no backups when a record holds %s', async (_name, change) => {
+    const body = (records: unknown[]) => () => Response.json({ backups: records, pending: null });
+    // The control: the same answer, well-formed, is the backups.
+    expect(await answeredWith(body([GOOD]))).toMatchObject({ kind: 'backups' });
+    expect(await answeredWith(body([GOOD, { ...GOOD, id: 2, ...change }]))).toEqual({
+      kind: 'unreachable',
+    });
+  });
+
+  it.each([
+    ['a key', 'Refused: the key is 0123456789abcdef0123456789abcdef.'],
+    ['a coordinate', 'Refused near 51.5007, -0.1246.'],
+    ['markup', 'Refused <img src=x onerror=alert(1)>'],
+  ])('shows the app’s own sentence, not a refusal that carries %s', async (_name, message) => {
+    const refused = await answeredWith(
+      () => Response.json({ error: { code: 'too_many', message } }, { status: 429 }),
+      'backUpNow',
+    );
+    expect(refused).toMatchObject({ kind: 'refused' });
+    expect(JSON.stringify(refused)).not.toContain(message);
+    // The control: the instance's own sentence is shown as it is.
+    expect(
+      await answeredWith(
+        () => Response.json({ error: { code: 'too_many', message: TOO_MANY } }, { status: 429 }),
+        'backUpNow',
+      ),
+    ).toEqual({ kind: 'refused', sentence: TOO_MANY });
   });
 });

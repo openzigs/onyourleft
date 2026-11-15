@@ -44,13 +44,47 @@ interface OperatorLogWriter {
   ): Promise<{ logId: number }>;
 }
 
+/** One backup run as the `backup` command records it (`apps/instance` §`BackupRun`). */
+export type BackupRunWritten =
+  | {
+      readonly outcome: 'done';
+      readonly at: number;
+      readonly snapshot: string;
+      readonly rows: number;
+      readonly blobs: number;
+      readonly databaseSha256: string;
+      readonly sizeBytes: number;
+      readonly offBox: 'copied' | 'failed' | 'not-configured';
+      readonly removed: number;
+      readonly backupsFreeBytes: number | null;
+      readonly offBoxFreeBytes: number | null;
+      readonly intervalSeconds: number | null;
+    }
+  | {
+      readonly outcome: 'failed';
+      readonly at: number;
+      readonly error: string;
+      readonly intervalSeconds: number | null;
+    };
+
+/** What a test writes backups and reads requests with, through the instance's own store (#2606). */
+interface BackupWriter {
+  recordBackup(
+    run: BackupRunWritten,
+    requestId?: number,
+  ): Promise<{ readonly id: number; readonly served: boolean }>;
+  pendingBackupRequest(): Promise<
+    { readonly id: number; readonly requestedAt: number } | undefined
+  >;
+}
+
 export interface OperateInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
   readonly clock: { ms: number };
   readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
   /** A handler answering, as this instance, one sealed inner route. */
   answeringAs(path: string, answer: () => Response): (request: Request) => Promise<Response>;
-  freshRead<T>(read: (store: OperatorLogWriter) => Promise<T>): Promise<T>;
+  freshRead<T>(read: (store: OperatorLogWriter & BackupWriter) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -241,6 +275,64 @@ export async function writeOperatorEntries(world: OperateInstance, count: number
         () => ({ outcome: 'done', detail: `blobs=${String(index)}`, value: undefined }),
       );
     }
+  });
+}
+
+/** The instance's clock, in Unix seconds. */
+export function instanceSeconds(world: OperateInstance): number {
+  return Math.floor(world.clock.ms / 1000);
+}
+
+/**
+ * A scheduled snapshot `ageSeconds` old by the instance's clock, as
+ * `backup-loop` records one: six-hourly, its name made from its time.
+ */
+export function aSnapshot(
+  world: OperateInstance,
+  ageSeconds: number,
+  extra: Partial<Extract<BackupRunWritten, { outcome: 'done' }>> = {},
+): Extract<BackupRunWritten, { outcome: 'done' }> {
+  const at = instanceSeconds(world) - ageSeconds;
+  return {
+    outcome: 'done',
+    at,
+    snapshot: `snapshot-${new Date(at * 1000).toISOString().replace(/[:.]/g, '-')}`,
+    rows: 100 + ageSeconds,
+    blobs: 7,
+    databaseSha256: 'a'.repeat(64),
+    sizeBytes: 2_000_000,
+    offBox: 'copied',
+    removed: 0,
+    backupsFreeBytes: 9_000_000_000,
+    offBoxFreeBytes: 9_000_000_000,
+    intervalSeconds: 21_600,
+    ...extra,
+  };
+}
+
+/** Record each run, oldest first, as the `backup` service writes them. */
+export async function writeBackups(
+  world: OperateInstance,
+  runs: readonly BackupRunWritten[],
+): Promise<void> {
+  await world.freshRead(async (store) => {
+    for (const run of runs) await store.recordBackup(run);
+  });
+}
+
+/**
+ * Serve the waiting "back up now" as `backup-loop` does: the run's record and
+ * the request marked served in one transaction. Throws when none waits.
+ */
+export async function serveBackupRequest(
+  world: OperateInstance,
+  run: BackupRunWritten,
+): Promise<void> {
+  await world.freshRead(async (store) => {
+    const request = await store.pendingBackupRequest();
+    if (request === undefined) throw new Error('no backup request is waiting');
+    const { served } = await store.recordBackup(run, request.id);
+    if (!served) throw new Error('the request was not served');
   });
 }
 

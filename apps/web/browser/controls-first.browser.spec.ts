@@ -331,8 +331,15 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // and is drawn only for the owner, whom only the populated ports are. #2605:
   // what Accounts is for, and what every registration mode shares, are behind
   // each heading's ⓘ. The mode heading names the populated instance's mode,
-  // read from its fixture so the two cannot drift.
-  operate: ['Status', 'Accounts', `Registration mode: ${SCRIPTED_STATUS.registration}`],
+  // read from its fixture so the two cannot drift. #2607: why a restore is
+  // steps rather than a button, and where a one-off snapshot is, are behind
+  // Restoring a snapshot's ⓘ.
+  operate: [
+    'Status',
+    'Accounts',
+    `Registration mode: ${SCRIPTED_STATUS.registration}`,
+    'Restoring a snapshot',
+  ],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is
   // connected or a write-up is saved (#1103), which the populated ports are.

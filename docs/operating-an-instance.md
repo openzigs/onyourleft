@@ -987,9 +987,21 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   `docker compose up -d instance`, which recreates the container with the new value;
   `docker compose restart` does not read `.env` again. The deputy keeps the Moderation screen,
   reached from the Instance screen, and sees no Operate.
-- **Backups** ([#2606](https://github.com/openzigs/onyourleft/issues/2606)). The records the
-  `backup` service writes, newest first, and "back up now": see "Backup", above. The route set has no
-  restore.
+- **Backups** ([#2606](https://github.com/openzigs/onyourleft/issues/2606),
+  [#2607](https://github.com/openzigs/onyourleft/issues/2607)). The third section of Operate, read
+  from `GET /v1/operate/backups`: the records the `backup` service writes, newest first, each with
+  its time, age, size, row and blob counts and how its off-box copy went, with a warning on a failed
+  off-box copy, on a failed run (named by its error, never its message) and on a newest scheduled
+  snapshot older than twice the interval. **Back up now** asks for a snapshot after a plain
+  confirmation saying that the oldest snapshot beyond the number kept is removed, as a scheduled run
+  would remove it; while the request waits, the button is replaced by "Waiting for the backup
+  service" and the list is read again every 5 seconds until the snapshot's record appears. A refusal
+  (`too_many`) shows the instance's sentence and leaves the list as it was. See "Backup", above. The
+  route set has no restore, and neither has the app: the section shows the **steps** of "Restore",
+  above, as the home deployment's commands, with the snapshot you pick filled in by its directory
+  name under `/backups` (the folder `OYL_BACKUP_DIR` is mounted at inside the `backup` service; a
+  one-off such as the pre-deploy snapshot under `/backups/pre-deploy`). The instance never sends a
+  host path, so none is shown.
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

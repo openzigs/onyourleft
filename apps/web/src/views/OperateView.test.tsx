@@ -138,8 +138,9 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 3)).toEqual(['Status', 'Accounts', 'Operator log']);
+    expect(headings.slice(0, 4)).toEqual(['Status', 'Accounts', 'Backups', 'Operator log']);
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
+    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Backups');
   });
 
   it.each(['deputy', 'rider'] as const)(
@@ -247,7 +248,8 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()[2]).toContain(
       'Database migrated, 2026-11-14 09:00 UTC, from the command line on the host: done (applied=40).',
     );
-    expect(scripted.calls).toEqual(['standing', 'status', 'log', 'log 2']);
+    // Backups (#2607) reads its own list as it is drawn.
+    expect(scripted.calls).toEqual(['standing', 'status', 'log', 'backups', 'log 2']);
     expect(showOlder()).toBeUndefined();
   });
 
@@ -276,6 +278,10 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()).toEqual([
       'tunnel check, 2026-11-14 09:00 UTC, from the command line on the host: done.',
     ]);
+  });
+
+  it('names “back up now” in the log as the owner asked for it (#2607)', () => {
+    expect(operatorActionLabel('backup_requested')).toBe('Backup asked for');
   });
 
   it.each([
