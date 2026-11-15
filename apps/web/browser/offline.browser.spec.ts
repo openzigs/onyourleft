@@ -898,6 +898,7 @@ test.describe('a second version arrives', () => {
       // survived the browser closing, and three CI runs on 2026-11-05 answered
       // one entry short (87 of 88, 87 of 88, 88 of 89) for all 30 s, where the
       // case passes in 1.3 to 1.7 s. Waiting longer could never have helped.
+      // Why the reopened profile is one entry short is follow-up #2254.
       // What this case stands on is the first worker controlling the page.
       // The fill itself is asserted by `what the worker actually cached`.
       await waitForController(opened.page);
