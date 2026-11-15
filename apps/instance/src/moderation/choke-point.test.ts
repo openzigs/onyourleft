@@ -205,6 +205,13 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
  * not say "athlete". Until #899 the body was matched by `/athlete/i` alone.
  */
 const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
+  // #2609: the operator's analysis settings, on the owner's route alone.
+  localUrl: 'the base URL of the instance’s local model server, which the operator sets',
+  localModel: 'the name of the model on the instance’s local server, which the operator sets',
+  offerLocal: 'whether the instance offers its local model at all, the operator’s setting',
+  offerHosted: 'whether the instance offers a hosted model service at all, the operator’s setting',
+  othersLocal:
+    'the operator’s switch for whether riders other than the operator may use the local model (ADR 0046 D-9); it names no rider',
   v: 'the sealed envelope’s version (ADR 0047); the route inside is checked as itself',
   keyId: 'which of the INSTANCE’s keys a sealed envelope is sealed to (ADR 0047)',
   enc: 'a sealed envelope’s encapsulated key (HPKE, ADR 0047)',

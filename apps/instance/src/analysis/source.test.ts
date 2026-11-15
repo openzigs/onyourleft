@@ -248,3 +248,79 @@ describe('a job’s source (#1097)', () => {
     });
   });
 });
+
+describe('the operator’s settings, per job (#2609, ADR 0046 2026-11-14)', () => {
+  const offering = (localOffered: boolean, hostedOffered: boolean, local = vi.fn(() => LOCAL)) => ({
+    local,
+    forJob: vi.fn(() => Promise.resolve({ local, localOffered, hostedOffered })),
+  });
+
+  it('refuses a hosted job hosted_unavailable while hosted is not offered, before the consent or the key is read, and deletes nothing', async () => {
+    const hostedKey = vi.fn(() => Promise.resolve(HELD));
+    const recordedConsent = vi.fn(consentTo(ORIGIN));
+    const refusedForNoConsentOrKey = vi.fn(() => Promise.resolve());
+    const behindMasking = vi.fn(() => LOCAL);
+    const { forJob } = offering(true, false);
+    expect(
+      await modelForSource('instance-hosted', 'a', {
+        local: undefined,
+        forJob,
+        hostedKey,
+        recordedConsent,
+        guard: () => Promise.resolve(PLANTED_GUARD),
+        behindMasking,
+        refusedForNoConsentOrKey,
+      }),
+    ).toEqual({ ok: false, failure: 'hosted_unavailable' });
+    expect(forJob).toHaveBeenCalledWith('a');
+    expect(recordedConsent).not.toHaveBeenCalled();
+    expect(hostedKey).not.toHaveBeenCalled();
+    expect(behindMasking).not.toHaveBeenCalled();
+    expect(refusedForNoConsentOrKey).not.toHaveBeenCalled();
+  });
+
+  it('runs the same hosted job once hosted is offered — the control', async () => {
+    const hostedKey = vi.fn(() => Promise.resolve(HELD));
+    const { forJob } = offering(false, true);
+    expect(
+      await modelForSource('instance-hosted', 'a', {
+        local: undefined,
+        forJob,
+        hostedKey,
+        recordedConsent: consentTo(ORIGIN),
+        guard: () => Promise.resolve(PLANTED_GUARD),
+        behindMasking: () => LOCAL,
+      }),
+    ).toEqual({ ok: true, model: LOCAL });
+    expect(hostedKey).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a local job local_unavailable while the local model is not offered to the athlete, without building it', async () => {
+    const local = vi.fn(() => LOCAL);
+    const { forJob } = offering(false, true, local);
+    expect(
+      await modelForSource('instance-local', 'a', {
+        local: LOCAL,
+        forJob,
+        hostedKey: () => Promise.resolve(HELD),
+      }),
+    ).toEqual({ ok: false, failure: 'local_unavailable' });
+    expect(local).not.toHaveBeenCalled();
+  });
+
+  it('runs a local job on the model the settings give for THIS job, not the one it was handed at start', async () => {
+    const now: ModelConnection = { turn: () => Promise.reject(new Error('not called')) };
+    const { forJob } = offering(
+      true,
+      true,
+      vi.fn(() => now),
+    );
+    expect(
+      await modelForSource('instance-local', 'a', {
+        local: LOCAL,
+        forJob,
+        hostedKey: () => Promise.resolve(HELD),
+      }),
+    ).toEqual({ ok: true, model: now });
+  });
+});

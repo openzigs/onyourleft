@@ -34,6 +34,7 @@ import { TEST_ORIGIN } from '../src/auth/identity-testing.ts';
 import { readAnalysisModelSettings } from '../src/config.ts';
 import { startInstance, type StartedInstance } from '../src/instance.ts';
 import { testConfig } from '../src/instance-testing.ts';
+import { analysisSettingsOthers } from '../src/operator/commands.ts';
 import { readServerConfig } from '../src/server-config.ts';
 import { migrateForDeploy } from '../src/store/serving.ts';
 import {
@@ -93,6 +94,9 @@ async function instance(
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-round-trip-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
+  // #2609: the run's throwaway accounts are not the operator, so the operator's
+  // switch for other riders is turned on, as on an instance this is run against.
+  await analysisSettingsOthers({ database: path, blobs: join(directory, 'blobs') }, true);
   const server = readServerConfig({ database: path, origin: TEST_ORIGIN, roomWorkers: '1' }, 1);
   if (!server.ok) throw new Error(server.problems.join(' '));
   running = await startInstance({

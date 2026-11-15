@@ -20,7 +20,8 @@ import {
 } from './analysis/hosted-key.ts';
 import { createHostedSettings, type HostedSettings } from './analysis/hosted-settings.ts';
 import { agentEngine, replanEngine } from './analysis/engine.ts';
-import type { SourceOptions } from './analysis/source.ts';
+import type { SourceOptions, SourcesForJob } from './analysis/source.ts';
+import { effectiveAnalysisSettings, type EffectiveAnalysisSettings } from './analysis/settings.ts';
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import { forgetMaskingOnRefusal } from './analysis/masking-item.ts';
 import {
@@ -54,7 +55,7 @@ import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
-import { createOperate } from './operate/operate.ts';
+import { createOperate, type OperateAnalysisSources } from './operate/operate.ts';
 import { statusSources, type DiskProbe } from './operate/status.ts';
 import { createSegments, type Segments } from './segments/segments.ts';
 import { createSync, type Sync } from './sync/sync.ts';
@@ -222,6 +223,16 @@ function refusalFor(state: MigrationState, databasePath: string): string | undef
     return `The database at ${databasePath} was migrated by a newer build than this one. Run the newer build, or restore a backup taken before it (docs/operating-an-instance.md).`;
   }
   return undefined;
+}
+
+/**
+ * The `analysis-model` log line's fields (#1096, #2609): the state, the code it
+ * is off for, and where it is set. Never the model's name or address.
+ */
+function analysisModelLine(settings: EffectiveAnalysisSettings): Record<string, unknown> {
+  return settings.local.kind === 'on'
+    ? { state: 'on', setIn: settings.setIn }
+    : { state: 'off', code: settings.local.code, setIn: settings.setIn };
 }
 
 /**
@@ -504,6 +515,17 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       'analysis-model',
       analysis.kind === 'on' ? { state: 'on' } : { state: 'off', code: analysis.code },
     );
+    // #2609: and, when the operator's settings row sets the model, what it gives.
+    const settingsAtOpen = store;
+    void settingsAtOpen
+      .getAnalysisSetting()
+      .then((row) => {
+        const settings = effectiveAnalysisSettings(row, options.config);
+        if (settings.setIn === 'app') logEvent(log, 'analysis-model', analysisModelLine(settings));
+      })
+      .catch((error: unknown) => {
+        logUnhandled(log, null, error);
+      });
     // The picture model (#1106): off unless the operator named one. No model name is logged.
     logEvent(
       log,
@@ -728,10 +750,37 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       const local = analysisModel;
       // #1229: the agent's history tool searches the index this instance keeps.
       const indexed = history;
+      // #2609: the operator's analysis settings, the row over `.env`, read for
+      // EVERY job — so a change from the app or the CLI applies to the next
+      // job with no restart, and a job already running keeps the connection
+      // it began with. The switch for other riders covers the local model
+      // only; the operator is the athlete of OYL_INSTANCE_OWNER_KEY (Q9).
+      const resolve = options.resolve ?? systemResolver;
+      const roles = identity.moderation;
+      const forJob = async (athleteId: string): Promise<SourcesForJob> => {
+        const settings = effectiveAnalysisSettings(
+          await reading.getAnalysisSetting(),
+          options.config,
+        );
+        const operator = (await roles.roleOf(athleteId)) === 'owner';
+        const model = settings.local;
+        return {
+          // No row setting the model: the connection built at start, as before.
+          local: () =>
+            settings.setIn !== 'app'
+              ? local
+              : model.kind === 'on'
+                ? createLocalModel({ settings: model, resolve })
+                : undefined,
+          localOffered: settings.offerLocal && (operator || settings.othersLocal),
+          hostedOffered: settings.offerHosted,
+        };
+      };
       // What a hosted job's model is chosen from, and (#1251) what the test
       // question's is: one object, so the two pass the same gate.
       const sources: SourceOptions = {
         local,
+        forJob,
         hostedKey,
         // Q10 (#1199): the athlete's own recorded consent, naming an origin.
         recordedConsent: async (athleteId) => (await reading.getHostedConsent(athleteId))?.origin,
@@ -774,7 +823,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         replan: replanEngine({ reads: store, sources, clock: { now } }),
         // A hosted model needs only a secret to hold a rider's own key under
         // (#1199): a rider who has none is refused `hosted_unavailable`.
-        available: async () => local !== undefined || (await secretKey) !== undefined,
+        // #2609: a local model as the settings give it now.
+        available: async () =>
+          effectiveAnalysisSettings(await reading.getAnalysisSetting(), options.config).local
+            .kind === 'on' || (await secretKey) !== undefined,
         // #1796: a hosted start names the service the rider's consent names.
         hostedConsent: sources.recordedConsent,
         now,
@@ -824,6 +876,19 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         stopErasingNoticeDetails();
       };
     }
+    // #2609: the owner's analysis settings, read and written through Operate.
+    // A write logs the model's state and code as at start, and where it is
+    // set — never its name or its address.
+    const keyStore = store;
+    const operateAnalysis: OperateAnalysisSources = {
+      environment: options.config,
+      resolve: options.resolve ?? systemResolver,
+      now,
+      hostedKey: async (athleteId) => ownHostedKeyState(keyStore, await secretKey, athleteId),
+      changed: (settings: EffectiveAnalysisSettings) => {
+        logEvent(log, 'analysis-model', analysisModelLine(settings));
+      },
+    };
     // Replaced, not mutated (above): the accounts when there is an origin, and
     // the instance's keys whatever there is.
     handler = createHandler({
@@ -852,6 +917,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
                 fetch: globalThis.fetch,
                 disk: NODE_DISK_PROBE,
               }),
+              analysis: operateAnalysis,
             }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),

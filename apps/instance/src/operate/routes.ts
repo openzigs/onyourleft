@@ -56,6 +56,65 @@ export function runsUpstreamSource(config: Pick<Config, 'sourceUrl'>): boolean {
 
 const count: Schema = { type: 'integer' };
 
+/** Why the local model is off: the codes `.env` is refused with (`config.ts`). */
+const LOCAL_STATES = [
+  'on',
+  'not-set',
+  'not-a-url',
+  'not-base-url',
+  'not-local',
+  'tls-by-name',
+  'no-model',
+  'bad-model',
+  'bad-reasoning',
+] as const;
+
+/** The operator's analysis settings, as the owner reads them (#2609). Never a key. */
+const analysisSchema: Schema = {
+  type: 'object',
+  properties: {
+    local: {
+      type: 'object',
+      properties: {
+        /** The local model's base URL: the one a job is built with while `on`. */
+        url: { type: ['string', 'null'] },
+        model: { type: ['string', 'null'] },
+        reasoningTokens: { type: ['integer', 'null'] },
+        /** Whether the instance offers the local model at all. */
+        offered: { type: 'boolean' },
+        /** ADR 0046 D-9's switch: riders other than the operator may use it. Off by default. */
+        othersMayUse: { type: 'boolean' },
+        /** Where the model's settings come from: the app's row, `.env`, or nowhere. */
+        setIn: { type: 'string', enum: ['app', 'env', 'none'] },
+        state: { type: 'string', enum: LOCAL_STATES },
+      },
+      required: ['url', 'model', 'reasoningTokens', 'offered', 'othersMayUse', 'setIn', 'state'],
+      additionalProperties: false,
+    },
+    hosted: {
+      type: 'object',
+      properties: {
+        offered: { type: 'boolean' },
+        operatorKey: { type: 'string', enum: ['none', 'held', 'held-unreadable'] },
+        operatorKeyOrigin: { type: ['string', 'null'] },
+      },
+      required: ['offered', 'operatorKey', 'operatorKeyOrigin'],
+      additionalProperties: false,
+    },
+  },
+  required: ['local', 'hosted'],
+  additionalProperties: false,
+};
+
+/** The owner, whom the handler admitted: an Operate route is called with no other caller. */
+function ownerOf(context: RouteContext): string {
+  if (context.caller === undefined) throw new Error('operate route called without a caller');
+  return context.caller.athleteId;
+}
+
+const ANALYSIS_SUMMARY_TAIL =
+  'The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.';
+
 const statusSchema: Schema = {
   type: 'object',
   properties: {
@@ -226,6 +285,73 @@ const backupRecordSchema: Schema = {
 const isoOf = (seconds: number): string => new Date(seconds * 1000).toISOString();
 
 export const OPERATE_ROUTES: readonly Route[] = [
+  {
+    method: 'GET',
+    path: '/v1/operate/analysis',
+    sealed: 'only',
+    operationId: 'getOperateAnalysis',
+    reaches: 'owner',
+    summary: `The operator’s analysis settings (#2609, ADR 0046’s 2026-11-14 amendment): the local model’s base URL, name and reasoning tokens, whether each is set in the app or in \`.env\`, and whether it is \`on\` or the code it is off for; whether the instance offers the local model and a hosted service; the switch that lets riders other than the operator use the local model (off by default); and whether the operator’s own hosted key is held, and for which origin — never the key. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: { contentType: 'application/json', schema: analysisSchema },
+    handle: async (context) => json(await operateOf(context).analysisSettings(ownerOf(context))),
+  },
+  {
+    // POST, not PUT: the route table takes GET, POST and DELETE, and a field
+    // left out is unchanged, which is not a PUT's whole replacement either.
+    method: 'POST',
+    path: '/v1/operate/analysis',
+    sealed: 'only',
+    operationId: 'setOperateAnalysis',
+    reaches: 'owner',
+    summary: `Save the operator’s analysis settings (#2609): every field is optional, a field left out is unchanged, and \`null\` returns it to its fallback — a model field to its \`.env\` line, a source to offered, the switch to off. They apply from the next job, with no restart; a job already running keeps its own. \`localUrl\` is held to the rule \`.env\`’s address is, and a name must resolve, now, to local addresses only; a field that fails is \`validation_failed\` with its code (\`not-a-url\`, \`not-base-url\`, \`not-local\`, \`tls-by-name\`, \`unresolved\`, \`bad-model\`, \`bad-reasoning\`) as the problem, and nothing is saved. Logged \`analysis_settings_set\` in the operator log, naming the fields changed and never a value. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    request: {
+      type: 'object',
+      properties: {
+        localUrl: { type: ['string', 'null'] },
+        localModel: { type: ['string', 'null'] },
+        reasoningTokens: { type: ['integer', 'null'] },
+        offerLocal: { type: ['boolean', 'null'] },
+        offerHosted: { type: ['boolean', 'null'] },
+        othersLocal: { type: ['boolean', 'null'] },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    errors: ['unauthenticated', 'validation_failed'],
+    response: { contentType: 'application/json', schema: analysisSchema },
+    handle: async (context) => {
+      const saved = await operateOf(context).setAnalysisSettings(ownerOf(context), context.json);
+      if (!saved.ok) {
+        return errorResponse(
+          saved.code,
+          saved.fields === undefined ? {} : { fields: saved.fields },
+        );
+      }
+      return json(saved.value);
+    },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/operate/analysis',
+    sealed: 'only',
+    operationId: 'clearOperateAnalysis',
+    reaches: 'owner',
+    summary: `Clear the operator’s analysis settings (#2609): every field falls back — the local model to \`.env\`, both sources to offered, the switch for other riders to off — from the next job. Logged \`analysis_settings_cleared\`. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: { contentType: 'application/json', schema: analysisSchema },
+    handle: async (context) =>
+      json(await operateOf(context).clearAnalysisSettings(ownerOf(context))),
+  },
   {
     method: 'GET',
     path: '/v1/operate/status',

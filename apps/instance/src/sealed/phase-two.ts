@@ -118,4 +118,8 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // #2606: the backups the `backup` service recorded, and "back up now".
   only('GET', '/v1/operate/backups', OPERATE),
   only('POST', '/v1/operate/backups', OPERATE),
+  // #2609: the operator's analysis settings, read, saved and cleared.
+  only('GET', '/v1/operate/analysis', OPERATE),
+  only('POST', '/v1/operate/analysis', OPERATE),
+  only('DELETE', '/v1/operate/analysis', OPERATE),
 ];

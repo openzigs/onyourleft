@@ -170,6 +170,44 @@ it**: its API has no authentication.
 | `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
 | `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"` | the setting is malformed; standard error says which |
 
+**Setting it from the app** (#2609, ADR 0046's amendment of 2026-11-14). The owner — the athlete
+of `OYL_INSTANCE_OWNER_KEY`, never the deputy — can set the local model's address, its name and its
+reasoning tokens from the Operate area, sealed (`GET`, `POST` and `DELETE /v1/operate/analysis`;
+`unavailable` without `OYL_INSTANCE_SECRET_KEY`). **While a field is set there, the database wins
+over `.env` for that field**; a field it leaves unset is still the `.env` line's, so setting only the
+model keeps `.env`'s address. A change applies **from the next job, with no restart**; a job already
+running, a re-plan included, finishes on the model it started with. An address set in the app is
+held to the rule above when it is saved — a name must resolve, then and there, to local addresses
+only (`unresolved` or `not-local` otherwise), and nothing is saved when any field fails — and again
+on every request. Every save is an entry in the operator log, `analysis_settings_set`, naming which
+fields changed and never their values.
+
+**Which sources riders are offered, and the switch for other riders.** The same settings say
+whether the instance offers its local model and a hosted service at all (both, unless turned off),
+and whether **riders other than you may use the local model: off by default, on an existing
+instance as on a new one**. While it is off, another rider's local job — post-ride or re-plan — is
+refused `local_unavailable` before the model is called. With hosted turned off, every hosted job and
+test question is refused `hosted_unavailable` before a consent or a key is read, and nothing is
+deleted. A rider's hosted job still runs only on their own key, under their own consent naming the
+endpoint; the switch does not change that.
+
+**Back to `.env`.** Clear the settings from the app (`DELETE /v1/operate/analysis`), or on the host:
+
+```
+docker compose exec instance node src/operator/cli.ts analysis-settings clear
+```
+
+Every field then falls back: the model to `.env`, both sources to offered, the switch to off. The
+switch alone can be set on the host too, which is how an instance with no `OYL_INSTANCE_OWNER_KEY`
+turns it on: `node src/operator/cli.ts analysis-settings others on` (or `off`). Both are logged in
+the operator log as the CLI's. Rolling the database back past migration 0043 removes the settings,
+which is the same as clearing them.
+
+| You see | It means |
+|---|---|
+| `"event":"analysis-model","state":"on","setIn":"app"` after a save, or at start | the settings from the app give a model; its name and address are not logged |
+| `…"state":"off","code":"…","setIn":"app"` | the app's fields and `.env`'s together leave it off, for the code given (the table above) |
+
 What the agent sends the model and what it may read is in
 [`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".
 
@@ -928,8 +966,8 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   (`node src/operator/cli.ts …`, the owner's ruling of 2026-11-14), naming **no athlete**, because
   the CLI is run by whoever can reach the data, not by an account. The commands that change state —
   `migrate`, `backup` (each run of `backup-loop` too), `restore`, `room-open`, `model-key set|clear`,
-  `instance-key init|rotate|rotate-identity|reset`, `load-accounts add|erase` and `account-erase
-  --confirm` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
+  `instance-key init|rotate|rotate-identity|reset`, `load-accounts add|erase`, `account-erase
+  --confirm` and `analysis-settings clear|others` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
@@ -990,6 +1028,12 @@ so the instance gains no new login. The server half is [#2602](https://github.co
 - **Backups** ([#2606](https://github.com/openzigs/onyourleft/issues/2606)). The records the
   `backup` service writes, newest first, and "back up now": see "Backup", above. The route set has no
   restore.
+- **The AI backend** ([#2609](https://github.com/openzigs/onyourleft/issues/2609), its instance
+  half; the panel is [#2611](https://github.com/openzigs/onyourleft/issues/2611)).
+  `GET`, `POST` and `DELETE /v1/operate/analysis`: the local model's settings over `.env`, which
+  sources riders are offered, and the switch for other riders' analysis on the local model, off by
+  default. §"Analysis model" above says what each does. The read shows whether your own hosted key is
+  held and for which origin, **never the key**.
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

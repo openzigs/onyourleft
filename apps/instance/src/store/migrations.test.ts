@@ -136,6 +136,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   backup_record: `INSERT INTO backup_record VALUES (1, 39, 'done', NULL, 'snapshot-x', 10, 2, '${'e'.repeat(64)}', 4096, 'copied', 0, 1000, 2000, 21600)`,
   backup_request: `INSERT INTO backup_request VALUES (1, 39, 1)`,
   backup_lease: `INSERT INTO backup_lease VALUES ('${'f'.repeat(64)}', 'token', 'host:1', 40)`,
+  // #2609: the operator's settings row, every column set.
+  analysis_setting: `INSERT INTO analysis_setting VALUES (1, 'http://ollama:11434/v1', 'm', 512, 1, 0, 1, 39, 'cli')`,
 };
 
 /**
@@ -766,6 +768,37 @@ describe('the migrations (#769)', () => {
     const redone = snapshot(path);
     expect(named()).toHaveLength(4);
     expect([redone.rows.analysis_job, redone.rows.analysis_event]).toEqual([0, 0]);
+  });
+
+  it('takes the operator’s analysis settings away with 0043, row and all — every field back to .env — and puts the table back empty (#2609)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    const settingsRead = () =>
+      withKysely(path, (db) =>
+        createSqlStore(db as unknown as Parameters<typeof createSqlStore>[0]).getAnalysisSetting(),
+      );
+    await withKysely(path, (db) =>
+      createSqlStore(db as unknown as Parameters<typeof createSqlStore>[0]).putAnalysisSetting({
+        localUrl: 'http://ollama:11434/v1',
+        localModel: 'm',
+        reasoningTokens: null,
+        offerLocal: null,
+        offerHosted: false,
+        othersLocal: true,
+        updatedAt: 40,
+        updatedBy: 'app',
+      }),
+    );
+    expect(await settingsRead()).toMatchObject({ localModel: 'm', othersLocal: true });
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0043-analysis-setting') {
+        await migrateDownOne(db);
+      }
+      await migrateDownOne(db);
+    });
+    expect(snapshot(path).rows.analysis_setting).toBeUndefined();
+    await withKysely(path, (db) => migrateToLatest(db));
+    expect(await settingsRead()).toBeUndefined();
   });
 
   it('refuses a migration with no down, rather than letting Kysely skip it', async () => {

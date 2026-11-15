@@ -929,6 +929,19 @@ export type ModerationOutcome =
   | { readonly outcome: 'not_applicable' };
 
 /**
+ * The operator's analysis settings by the word the operator log names each
+ * with (#2609): `analysis_settings_set` lists the ones a write changed.
+ */
+export const ANALYSIS_SETTING_FIELD_WORDS = [
+  'local_url',
+  'local_model',
+  'reasoning_tokens',
+  'offer_local',
+  'offer_hosted',
+  'others_local',
+] as const;
+
+/**
  * The operator's actions (#2602): the CLOSED list `operator_log.action` is
  * written from. #2602 adds the operator CLI's commands that change state (the
  * owner's ruling of 2026-11-14 on #2601); each Operate sub-issue adds its own.
@@ -949,6 +962,8 @@ export const OPERATOR_ACTIONS = [
   'load_accounts_erase',
   'account_erase',
   'backup_requested',
+  'analysis_settings_set',
+  'analysis_settings_cleared',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -996,6 +1011,12 @@ export const OPERATOR_DETAILS: {
   // #2606: why "back up now" was refused — a request already waits, or a
   // backup ran in the last 15 minutes.
   backup_requested: { words: ['pending', 'too_soon'], counts: [] },
+  // #2609: WHICH settings a write changed, never their values.
+  analysis_settings_set: {
+    words: [...ANALYSIS_SETTING_FIELD_WORDS, 'unchanged'],
+    counts: [],
+  },
+  analysis_settings_cleared: { words: ['cleared', 'none_set'], counts: [] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
@@ -1008,6 +1029,24 @@ export function operatorDetailFits(action: OperatorAction, detail: string): bool
     if (count === undefined) return words.includes(key);
     return rest.length === 0 && counts.includes(key) && /^[0-9]{1,9}$/.test(count);
   });
+}
+
+/**
+ * The operator's analysis settings, as they are stored (#2609, migration
+ * 0043). `null` is "not set here": each field falls back on its own
+ * (`analysis/settings.ts`).
+ */
+export interface AnalysisSettingRecord {
+  readonly localUrl: string | null;
+  readonly localModel: string | null;
+  readonly reasoningTokens: number | null;
+  readonly offerLocal: boolean | null;
+  readonly offerHosted: boolean | null;
+  /** The switch for other riders' analysis on the local model (ADR 0046 D-9). */
+  readonly othersLocal: boolean | null;
+  /** Unix seconds. */
+  readonly updatedAt: number;
+  readonly updatedBy: 'app' | 'cli';
 }
 
 /** One entry of the operator log, as it is read. */
@@ -1488,6 +1527,18 @@ export interface SqlStore {
   putHostedModelKey(athleteId: string, key: SealedHostedModelKey): Promise<HostedKeyPut>;
   /** The held key, sealed, or `undefined`. The instance's one, so no athlete is asked for. */
   getHostedModelKey(): Promise<HeldHostedModelKey | undefined>;
+  /**
+   * The operator's analysis settings (#2609), or `undefined` when no row is
+   * written. Read for every job, so a change applies to the next one.
+   */
+  getAnalysisSetting(): Promise<AnalysisSettingRecord | undefined>;
+  /**
+   * Write the one row whole. Only `analysis/settings.ts` calls it, inside
+   * {@link recordOperatorAction}, after checking every field.
+   */
+  putAnalysisSetting(record: AnalysisSettingRecord): Promise<void>;
+  /** Remove the row, so every field falls back: `true` if there was one. */
+  clearAnalysisSetting(): Promise<boolean>;
   /**
    * Clear the held key: `true` if there was one. With `secure_delete` on, and
    * the write-ahead log checkpointed and truncated after, so the ciphertext
@@ -6981,6 +7032,52 @@ function storeOver(
             : ({ outcome: 'no-athlete' } as const);
         }),
       ),
+
+    getAnalysisSetting: () =>
+      exclusive(async () => {
+        const row = await db.selectFrom('analysis_setting').selectAll().executeTakeFirst();
+        const flag = (value: number | null): boolean | null =>
+          value === null ? null : value === 1;
+        return row === undefined
+          ? undefined
+          : {
+              localUrl: row.local_url,
+              localModel: row.local_model,
+              reasoningTokens: row.reasoning_tokens,
+              offerLocal: flag(row.offer_local),
+              offerHosted: flag(row.offer_hosted),
+              othersLocal: flag(row.others_local),
+              updatedAt: row.updated_at,
+              updatedBy: row.updated_by,
+            };
+      }),
+
+    putAnalysisSetting: (record) =>
+      exclusive(async () => {
+        const flag = (value: boolean | null): number | null =>
+          value === null ? null : value ? 1 : 0;
+        const columns = {
+          local_url: record.localUrl,
+          local_model: record.localModel,
+          reasoning_tokens: record.reasoningTokens,
+          offer_local: flag(record.offerLocal),
+          offer_hosted: flag(record.offerHosted),
+          others_local: flag(record.othersLocal),
+          updated_at: record.updatedAt,
+          updated_by: record.updatedBy,
+        };
+        await db
+          .insertInto('analysis_setting')
+          .values({ slot: 1, ...columns })
+          .onConflict((conflict) => conflict.column('slot').doUpdateSet(columns))
+          .execute();
+      }),
+
+    clearAnalysisSetting: () =>
+      exclusive(async () => {
+        const result = await db.deleteFrom('analysis_setting').executeTakeFirst();
+        return Number(result.numDeletedRows) > 0;
+      }),
 
     getHostedModelKey: () =>
       exclusive(async () => {
