@@ -82,6 +82,12 @@ function stage(program: 'meshphysical' | 'meshbasic', which: 'vertex' | 'fragmen
   return found[1];
 }
 
+/**
+ * Any of the facade weathering's names — but not PR #2522's `oylWeatherShade`,
+ * the dusk's shade every realistic house wears, which is not weathering.
+ */
+const FACADE_WEATHERING = /oylWeather(?!Shade\b)/;
+
 interface Compiled {
   readonly vertex: string;
   readonly fragment: string;
@@ -343,8 +349,8 @@ describe('a lot’s walls and roofs weathered by the mapped facades’ own funct
     const roof = compiledOf(tiles).fragment;
     expect(roof).toContain('oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, vOylAge, oylWpw)');
     expect(roof).not.toContain('oylWeatherGrime(oylUpFacing');
-    expect(compiledOf(planks).fragment).not.toContain('oylWeather');
-    expect(compiledOf(flat.brick).fragment).not.toContain('oylWeather');
+    expect(compiledOf(planks).fragment).not.toMatch(FACADE_WEATHERING);
+    expect(compiledOf(flat.brick).fragment).not.toMatch(FACADE_WEATHERING);
     expect(carriesLotRealism(planks as never)).toBe(false);
     expect(carriesLotRealism(flat.brick as never)).toBe(false);
   });
@@ -439,9 +445,9 @@ describe('the `lot-realism` lever — #1665', () => {
     const wallOff = compiledOf(off.brick);
     const glassOff = compiledOf(off.glass);
     const roofOff = compiledOf(off.tiles);
-    expect(wallOff.fragment).not.toContain('oylWeather');
+    expect(wallOff.fragment).not.toMatch(FACADE_WEATHERING);
     expect(wallOff.vertex).not.toContain('vOylWorld');
-    expect(roofOff.fragment).not.toContain('oylWeather');
+    expect(roofOff.fragment).not.toMatch(FACADE_WEATHERING);
     expect(glassOff.fragment).not.toContain('oylInterior');
     expect(glassOff.fragment).not.toContain('metalnessFactor = mix(metalnessFactor, 0.0');
     expect(glassOff.vertex).not.toContain('vOylPane');

@@ -569,3 +569,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   §`nextWorldQuality` now steps the realistic rungs down, and out to the stylised top, only on
   sustained frame time over `FRAME_MS_REDUCE_ABOVE` (45 ms, unchanged); the whole-world rule and
   every other part of D-3 stand. ADR 0008 carries the matching entry.
+- **2026-11-12** — **D-3's step out of realism is held while a Delivery round runs.** This is a
+  decision, not an amendment, and is made by [ADR 0068](0068-a-delivery-round-holds-the-realistic-worlds-floor.md),
+  which supersedes that part of D-3 and no other ([#2513](https://github.com/openzigs/onyourleft/issues/2513)).

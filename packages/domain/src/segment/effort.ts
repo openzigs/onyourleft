@@ -94,6 +94,13 @@ export interface SegmentEffort {
   readonly deviation: Metres;
   readonly visibility: EffortVisibility;
   readonly attributes: FrozenAttributes;
+  /**
+   * `true` when the rider rode at least the drafted share of the effort's
+   * distance in a draft — ADR 0066 D-5.2 (#2451). Shown with its mark wherever
+   * the effort is, and never on a shared board ({@link countsOnSharedBoard}).
+   * Absent for an effort that was not drafted.
+   */
+  readonly drafted?: boolean;
 }
 
 /** Everything {@link createEffort} needs that the match itself does not carry. */
@@ -113,6 +120,18 @@ export interface EffortContext {
   readonly attributes: FrozenAttributes;
   /** Set when #69's integrity work has already ruled the effort out. */
   readonly excluded?: boolean;
+  /**
+   * Set when the rider rode at least the drafted share of the effort's
+   * distance in a draft (#2451) — decided by the caller, which knows the
+   * share's value: @see draftedDistanceShare
+   */
+  readonly drafted?: boolean;
+}
+
+/** One stretch of a ride spent in a draft: two instants on the ride's clock. */
+export interface DraftedSpan {
+  readonly from: UnixSeconds;
+  readonly to: UnixSeconds;
 }
 
 /** A privacy zone, reduced to the two numbers this file needs. */
@@ -211,7 +230,38 @@ export function createEffort(matched: MatchedEffort, context: EffortContext): Se
     // Spread rather than referenced: the caller's object must not be able to
     // change what the effort recorded, which is the whole point of freezing.
     attributes: { ...context.attributes },
+    ...(context.drafted === true ? { drafted: true } : {}),
   };
+}
+
+/**
+ * The share of a traversal's distance, from 0 to 1, ridden inside `spans` —
+ * ADR 0066 D-5.6 (#2451): **distance, not time**, because a segment is a
+ * stretch of road and a drafted rider covers it in less time.
+ *
+ * Each step between two neighbouring samples counts as in the draft when its
+ * FIRST sample's instant lies inside a span, from its start up to but not
+ * including its end. `0` for a traversal that covers no distance.
+ */
+export function draftedDistanceShare(
+  positions: readonly GeographicPosition[],
+  times: readonly UnixSeconds[],
+  startIndex: number,
+  endIndex: number,
+  spans: readonly DraftedSpan[],
+): number {
+  let covered = 0;
+  let drafted = 0;
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const from = positions[index];
+    const to = positions[index + 1];
+    const at = times[index];
+    if (from === undefined || to === undefined || at === undefined) continue;
+    const step = distanceBetween(from, to);
+    covered += step;
+    if (spans.some((span) => at >= span.from && at < span.to)) drafted += step;
+  }
+  return covered > 0 ? drafted / covered : 0;
 }
 
 /**
@@ -228,10 +278,13 @@ export function countsTowardPersonalBest(effort: SegmentEffort): boolean {
 /**
  * Whether an effort may appear on a board anyone else can see.
  *
- * `private-match` does **not**. Publishing it is publishing an address.
+ * `private-match` does **not**. Publishing it is publishing an address. Nor
+ * does a drafted effort (#2451): it is kept to the rider's own history.
  */
 export function countsOnSharedBoard(effort: SegmentEffort): boolean {
-  return effort.visibility === 'public';
+  // #2451, ADR 0066 D-5.2: a drafted effort is the rider's own, and is not
+  // offered to a board anyone else reads.
+  return effort.visibility === 'public' && effort.drafted !== true;
 }
 
 // --- Ranking (#67) -----------------------------------------------------------

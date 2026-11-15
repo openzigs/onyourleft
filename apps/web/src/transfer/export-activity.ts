@@ -33,9 +33,11 @@
 
 import {
   geographicPosition,
+  kilocalories,
   metres,
   seconds,
   unixSeconds,
+  type Kilocalories,
   type Metres,
   type Seconds,
   type UnixSeconds,
@@ -86,6 +88,8 @@ const LAP_DISTANCE = 'lap.distance';
  * #1471's. Its kind (which splits are laps, and the part-lap mark) is carried
  * since #1320, in a developer field of this client's own (`fit-lap-mark.ts`).
  * Named as TCX's lap names them, which is how GPX's codec list names them too.
+ * Its calories since #2435, which TCX carries and FIT will once #2436 has a
+ * lawfully held file showing the field.
  *
  * @see LOSSY_CHANNELS
  */
@@ -95,6 +99,7 @@ const FIT_LAP_LOSSY_CHANNELS = [
   'lap.averageCadence',
   'lap.averagePower',
   'lap.maxPower',
+  'lap.calories',
   LAP_ASCENT,
 ];
 
@@ -150,6 +155,7 @@ const LOSSY_CHANNEL_NAMES: Readonly<Record<string, string>> = {
   'lap.averageCadence': 'each lap’s average cadence',
   'lap.averagePower': 'each lap’s average power',
   'lap.maxPower': 'each lap’s best power',
+  'lap.calories': 'each lap’s calories',
   [LAP_ASCENT]: 'each lap’s climb',
   [LAP_DISTANCE]: 'each lap’s distance',
   // One phrase for the pair: a lap's kind is both of them together, and
@@ -912,7 +918,71 @@ function tenths(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+/**
+ * Each written lap's part of the ride's stored calorie figure, in the whole
+ * kilocalories TCX's `Calories` holds — #2435. `undefined` for every lap of a
+ * ride with no figure, which then writes no `Calories` at all.
+ *
+ * ## Shared out, not worked out again
+ *
+ * The stored figure is the ride's, frozen when it was saved (#2433) — and
+ * frozen with it are the rider's weight, sex and age, which the store does not
+ * keep beside it. So a lap's figure is the ride's figure shared out by what it
+ * was worked out from, and never a fresh estimate from today's Settings:
+ *
+ * - **By work, when the ride has a power reading.** On the power basis that is
+ *   `rideCalories` over the lap's slice of the samples exactly, because the
+ *   estimate from work is proportional to the work (`@onyourleft/domain`
+ *   §`caloriesFromWork`) and every sample stands for the same interval.
+ * - **By heartbeats, else, when it has a heart rate.** Keytel's rate rises with
+ *   the heart rate, so a lap at a higher one takes more; it is not quite
+ *   proportional to it, and the rider's inputs that would make it exact are not
+ *   stored.
+ * - **By elapsed time, else** — a figure from an imported file (`basis:
+ *   'file'`) over a ride with neither channel.
+ *
+ * ⚠️ **The laps add up to the ride**: each is the difference of two running
+ * totals rounded to a whole kilocalorie, as {@link trackActivityOf} does for a
+ * lap's time and distance, so their sum is the stored figure rounded, within
+ * half a kilocalorie of it, however many laps there are.
+ */
+function lapCaloriesOf(
+  activity: ActivityRecord,
+  laps: readonly ExportLap[],
+): readonly (Kilocalories | undefined)[] {
+  const stored = activity.calories;
+  if (stored === undefined) {
+    return laps.map(() => undefined);
+  }
+  const points = laps.flatMap((lap) => lap.points);
+  const weightOf: (lap: ExportLap) => number = points.some((point) => point.power !== undefined)
+    ? (lap) => sumOf(lap.points.map((point) => point.power))
+    : points.some((point) => point.heartRate !== undefined)
+      ? (lap) => sumOf(lap.points.map((point) => point.heartRate))
+      : (lap) => lap.elapsedTime;
+  const through: number[] = [];
+  let running = 0;
+  for (const lap of laps) {
+    running += weightOf(lap);
+    through.push(running);
+  }
+  // Nothing to share by — a ride whose every reading is nought, or a single
+  // instant — and the figure is shared evenly instead.
+  const shareThrough = (ordinal: number): number =>
+    running > 0 ? (through[ordinal] ?? 0) / running : (ordinal + 1) / laps.length;
+  return laps.map((_, ordinal) => {
+    const before = ordinal === 0 ? 0 : Math.round(stored.energy * shareThrough(ordinal - 1));
+    return kilocalories(Math.round(stored.energy * shareThrough(ordinal)) - before);
+  });
+}
+
+/** The readings that exist, added up. */
+function sumOf(values: readonly (number | undefined)[]): number {
+  return values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+}
+
 function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): TrackActivity {
+  const calories = lapCaloriesOf(activity, laps);
   return {
     startTime: activity.startedAt,
     name: activity.name,
@@ -940,12 +1010,15 @@ function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): 
     // under the half as a float, so the codec's `toFixed(1)` writes `38613.3`
     // and `Math.round(x * 10) / 10` gives `38613.4` (#1316's third review).
     laps: laps.map((lap, ordinal) => {
+      // #2435: GPX has nowhere to put it (`GPX_LOSSY_CHANNELS`).
+      const own = calories[ordinal] === undefined ? {} : { calories: calories[ordinal] };
       if (lap.wholeRide === true) {
         return {
           startTime: lap.startedAt,
           totalElapsedTime: lap.elapsedTime,
           totalDistance: lap.distance,
           points: lap.points,
+          ...own,
         };
       }
       const before = laps[ordinal - 1]?.rideThrough ?? { elapsedTime: 0, distance: 0 };
@@ -957,6 +1030,7 @@ function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): 
         totalDistance: metres(tenths(tenths(lap.rideThrough.distance) - tenths(before.distance))),
         points: lap.points,
         ...tcxLapFiguresOf(lap),
+        ...own,
       };
     }),
   };

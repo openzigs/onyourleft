@@ -76,6 +76,7 @@ import type {
   RecordedCourseLap,
   RecordedWorkoutBlock,
   RecordingSessionId,
+  RideFacts,
   RoomRaceFact,
   StreamChannelValue,
 } from '@onyourleft/store';
@@ -159,6 +160,13 @@ export interface RideToSaveInput {
    * gets its figure and a heart-rate ride gets none.
    */
   readonly rider?: CalorieRider | undefined;
+  /**
+   * Whether this ride was drafted, and when the rider was in the draft —
+   * #2451, ADR 0066 D-5.3: known only while riding, like
+   * {@link workoutFinished} (`ride/solo-draft-record.ts`). Absent for a ride
+   * with no draft, and for one recovered after a crash.
+   */
+  readonly draft?: Pick<RideFacts, 'drafted' | 'draftSpans'> | undefined;
 }
 
 /**
@@ -242,6 +250,11 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
         : {
             workoutBlocks: workoutBlocksToSave(input.workoutBlocks, series, input.movingTime),
           }),
+      // #2451: known only to the ride that rode it, like the blocks above.
+      ...(input.draft?.drafted === true ? { drafted: true } : {}),
+      ...(input.draft?.draftSpans === undefined || input.draft.draftSpans.length === 0
+        ? {}
+        : { draftSpans: input.draft.draftSpans }),
     },
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

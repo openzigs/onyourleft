@@ -68,6 +68,7 @@ import type {
   ActivityCalories,
   ActivityCaloriesBasis,
   ActivityRecord,
+  DraftSpan,
   RideFacts,
   RoomRaceFact,
   AthleteRecord,
@@ -179,6 +180,10 @@ export interface PersistedRideFacts {
    * shape, re-read whole on the way in and out: @see workoutBlockFactsOf
    */
   workoutBlocks?: unknown[];
+  /** @see RideFacts.drafted — #2451. */
+  drafted?: boolean;
+  /** @see RideFacts.draftSpans — #2451. Re-read whole on the way in and out: @see draftSpansOf */
+  draftSpans?: unknown[];
 }
 
 /**
@@ -657,7 +662,30 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   // back is written — and one that does not is left out, never the ride.
   const blocks = workoutBlockFactsOf(facts.workoutBlocks);
   if (blocks !== undefined) row.workoutBlocks = [...blocks];
+  // #2451: and the draft, the spans through their reader as the blocks are.
+  if (facts.drafted !== undefined) row.drafted = facts.drafted;
+  const spans = draftSpansOf(facts.draftSpans);
+  if (spans !== undefined) row.draftSpans = spans.map(({ from, to }) => ({ from, to }));
   return row;
+}
+
+/**
+ * A ride's draft spans (#2451), or `undefined` when there are none or the
+ * list does not read — dropped WHOLE, never the ride, as a ride's workout
+ * blocks are: a span missing from the middle would leave an effort ridden in
+ * it unmarked. Each span is two finite instants, `to` not before `from`.
+ */
+export function draftSpansOf(value: unknown): readonly DraftSpan[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const spans: DraftSpan[] = [];
+  for (const each of value as unknown[]) {
+    if (typeof each !== 'object' || each === null) return undefined;
+    const { from, to } = each as { from?: unknown; to?: unknown };
+    if (typeof from !== 'number' || typeof to !== 'number') return undefined;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return undefined;
+    spans.push({ from: unixSeconds(from), to: unixSeconds(to) });
+  }
+  return spans;
 }
 
 /**
@@ -820,6 +848,8 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   const races = racesOf(facts.races);
   // #1319: never a throw either. @see workoutBlockFactsOf
   const workoutBlocks = workoutBlockFactsOf(facts.workoutBlocks);
+  // #2451: never a throw either. @see draftSpansOf
+  const draftSpans = draftSpansOf(facts.draftSpans);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -866,6 +896,10 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...replans,
     ...(races === undefined ? {} : { races }),
     ...(workoutBlocks === undefined ? {} : { workoutBlocks }),
+    ...(facts.drafted === undefined
+      ? {}
+      : { drafted: decodedBoolean('activity.rideFacts.drafted', facts.drafted) }),
+    ...(draftSpans === undefined ? {} : { draftSpans }),
   };
 }
 

@@ -87,6 +87,7 @@ import type { RideTotals } from '../recording/totals';
 import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
+import type { SoloDraftState } from './solo-draft';
 import type { WorkoutHold } from '../workout/hold-text';
 import { planChangeMayBeSpoken, type WaitingReplan } from '../workout/replan-text';
 import type { WorkoutGraphInput } from '../workout/workout-graph';
@@ -360,6 +361,16 @@ export interface GameTrainerPort {
    */
   gameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
   /**
+   * The simulation stepped a solo ride with a draft to give — #2451, ADR 0066
+   * D-5.3: its in-draft state and the metres behind it, on every frame, kept
+   * by the ride controller (`noteSoloDraft`) so the saved ride says whether it
+   * was drafted, and when. ⚠️ Not about the trainer, which never feels a draft
+   * (D-7): on this port for {@link gameRideEnded}'s reason, and named so
+   * nothing else in production calls a method of that name. Optional, as
+   * {@link recordRoomRide} is; `gameTrainerPortOver` always supplies it.
+   */
+  soloDraftStepped?(draft: SoloDraftState): void;
+  /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
    * ride controller's `recordForRoom`). Answers whether a recording is
@@ -618,6 +629,8 @@ interface GameTrainerSource {
   powerZoneTime?(threshold: Watts): TimeInZones | undefined;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
+  /** #2451. @see GameTrainerPort.soloDraftStepped. Optional for a source with no recording. */
+  noteSoloDraft?(reading: SoloDraftState): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -777,6 +790,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
     gameRideEnded: (outcome, drafted) => {
       controller?.noteGameRideEnded(outcome, drafted);
+    },
+    soloDraftStepped: (draft) => {
+      controller?.noteSoloDraft?.(draft);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
     // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide

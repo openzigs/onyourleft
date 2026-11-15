@@ -360,6 +360,13 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listModerationLogPage: {
     notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',
   },
+  recordOperatorAction: {
+    notAScopedRead:
+      'the operator’s write, with its log entry (#2602); its change is the caller’s own; sql-store.operator-log.test.ts',
+  },
+  listOperatorLogPage: {
+    notAScopedRead: 'the operator’s own record, a page at a time, newest first (#2602)',
+  },
   listSuspendedAthletes: {
     notAScopedRead: 'the moderators’ list of suspended accounts, a page at a time (#961)',
   },
@@ -376,6 +383,28 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead: 'a write to the moderators’ log (#876); sql-store.moderation.test.ts',
   },
   listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
+  operateCounts: {
+    notAScopedRead: 'the owner’s Status: counts across the instance, no row of anybody (#2604)',
+  },
+  recordBackup: { notAScopedRead: 'the backup service’s write (#2606); sql-store.backup.test.ts' },
+  listBackupRecords: {
+    notAScopedRead: 'the instance’s backups, for its owner: no row of any athlete (#2606)',
+  },
+  newestServiceBackup: {
+    notAScopedRead:
+      'the instance’s newest backup, for its owner’s Status: no row of any athlete (#2606)',
+  },
+  pendingBackupRequest: {
+    notAScopedRead:
+      'the owner’s waiting “back up now”, for the backup service: names nobody (#2606)',
+  },
+  requestBackup: { notAScopedRead: 'the owner’s write, logged with it (#2606)' },
+  hasBackupRecord: {
+    notAScopedRead: 'whether a snapshot directory is recorded, for the backup service (#2606)',
+  },
+  takeBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
+  heartbeatBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
+  releaseBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
   listLoadAthletes: {
     notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',
   },

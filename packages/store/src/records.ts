@@ -573,6 +573,34 @@ export interface RideFacts {
    * @see WorkoutBlockFact
    */
   readonly workoutBlocks?: readonly WorkoutBlockFact[];
+  /**
+   * `true` when the rider rode at least the drafted share of this ride's
+   * distance in the bot pacer's or their own ghost's draft — #2451, ADR 0066
+   * D-5.3 and D-5.6. Known only while riding, like {@link workoutFinished};
+   * absent for a ride that was not drafted, and for one brought in from a file.
+   */
+  readonly drafted?: boolean;
+  /**
+   * When, on the recording's own clock, the rider was in that draft — #2451,
+   * ADR 0066 D-5.2: what marks a segment effort found in this ride, by the
+   * share of the effort's own distance ridden inside these spans. Oldest
+   * first. Absent for a ride with none.
+   *
+   * ⚠️ **A list that does not read is dropped whole, never the ride**, as
+   * {@link workoutBlocks} is. @see DraftSpan
+   */
+  readonly draftSpans?: readonly DraftSpan[];
+}
+
+/**
+ * One stretch of a ride the rider spent in the draft — #2451. Two instants on
+ * the recording's clock, the clock its samples are stamped by: the span
+ * begins when the in-draft state of ADR 0066 D-5.6 begins, and ends when it
+ * ends. `to` is never before `from`.
+ */
+export interface DraftSpan {
+  readonly from: UnixSeconds;
+  readonly to: UnixSeconds;
 }
 
 /**
@@ -1014,6 +1042,15 @@ export interface SegmentEffortRecord {
    * their profile, and no test of a single ranking catches it.
    */
   readonly attributes: FrozenEffortAttributes;
+
+  /**
+   * `true` when the rider rode at least the drafted share of this effort's
+   * distance in a pacer's or their own ghost's draft — #2451, ADR 0066 D-5.2.
+   * Kept in the rider's own history and shown with its mark; never offered to
+   * an instance's board. Absent for an effort that was not drafted. Optional,
+   * so no migration.
+   */
+  readonly drafted?: boolean;
 }
 
 /** The frozen copy. Mirrors `@onyourleft/domain`'s `FrozenAttributes`. */

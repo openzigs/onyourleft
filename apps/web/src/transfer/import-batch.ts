@@ -44,6 +44,7 @@
 import { seconds, unixSeconds, type UnixSeconds } from '@onyourleft/domain';
 import {
   lapId,
+  type ActivityCalories,
   type ActivityId,
   type AthleteId,
   type AthleteRecord,
@@ -328,9 +329,14 @@ async function storeRide(
   sha256: string,
 ): Promise<ActivityId> {
   const id = options.newActivityId();
-  // #2433: by the rule a recorded ride's figure is worked out by
-  // (`recording/totals.ts` §`recordedRideCalories`), from the decoded channels.
-  const calories = recordedRideCalories(ride, calorieRiderFor(options.athlete, ride.startedAt));
+  // #2435: the file's own figure, when it states one — shown as *from the
+  // file* rather than recomputed (epic #2430, question 5). Else #2433's: by
+  // the rule a recorded ride's figure is worked out by (`recording/totals.ts`
+  // §`recordedRideCalories`), from the decoded channels.
+  const calories: ActivityCalories | undefined =
+    ride.statedCalories === undefined
+      ? recordedRideCalories(ride, calorieRiderFor(options.athlete, ride.startedAt))
+      : { energy: ride.statedCalories, basis: 'file' };
   const record: NewActivity = {
     id,
     athleteId: options.athleteId,

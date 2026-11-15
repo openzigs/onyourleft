@@ -267,3 +267,15 @@ bot in a drafting room (D-4).
 - **Riders read a bot's surge as rubber-banding**: a climb attack that happens to land as the rider
   closes in looks like catch-up whatever its cause. The fixed-from-the-course plan is the answer, and
   if riders do not believe it, the surge ceiling is the knob.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-11** — **Once [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)
+  is Accepted, D-1, D-2, D-3, D-4, D-6, D-8.1, D-8.5 and D-8.6 are superseded by it** (D-4 because
+  its D-3 answer (b) keeps drafting in the lap race), on the owner's
+  [ruling of 2026-11-10](https://github.com/openzigs/onyourleft/issues/2455#issuecomment-6782129845)
+  that there can be no rule on racing strategy: a bot may read the race, its capacity is fixed and
+  its strategy spends it, and D-8.1's mean tolerance is restated against capacity (ADR 0067 D-1.3).
+  D-5, D-7's answers, D-8.2, D-8.3 and D-8.4 are unchanged. This entry only points there.

@@ -677,6 +677,52 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
   });
 });
 
+describe('a Delivery round holds the realistic world — #2513', () => {
+  function sustainHeld(
+    state: WorldQualityState,
+    sample: QualitySample,
+    count: number,
+    hold: boolean,
+  ): WorldQualityState {
+    let current = state;
+    for (let index = 0; index < count; index += 1) {
+      current = nextWorldQuality(current, sample, hold);
+    }
+    return current;
+  }
+
+  it('steps down within realism and holds its floor, however long the frames stay slow', () => {
+    const held = sustainHeld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 20, true);
+    expect(held.realistic).toBe(true);
+    expect(held.quality.level).toBe(REALISTIC_LADDER.length - 1);
+    expect(worldRung(held)).toBe(REALISTIC_LADDER.at(-1));
+  });
+
+  it('steps down exactly as an ordinary ride does until the floor', () => {
+    const almost = sustainHeld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES - 1, true);
+    expect(almost).toEqual(
+      sustainHeld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES - 1, false),
+    );
+    expect(nextWorldQuality(almost, HOT, true).quality.level).toBe(1);
+  });
+
+  it('climbs back from the floor when the frames are comfortable again', () => {
+    const held = sustainHeld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 4, true);
+    const cooled = sustainHeld(held, COOL, SUSTAINED_SAMPLES * 4, true);
+    expect(cooled).toMatchObject({ realistic: true, quality: { level: 0 } });
+  });
+
+  it('leaves for the stylised top on the same frames without the hold — the control', () => {
+    const left = sustainHeld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 2, false);
+    expect(left).toEqual({ realistic: false, quality: INITIAL_QUALITY });
+  });
+
+  it('does not bring a ride that already left back into realism', () => {
+    const stylised: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
+    expect(sustainHeld(stylised, COOL, SUSTAINED_SAMPLES * 10, true).realistic).toBe(false);
+  });
+});
+
 describe('the realistic ladder waits for its world — #2289', () => {
   function sustainWorld(
     state: WorldQualityState,

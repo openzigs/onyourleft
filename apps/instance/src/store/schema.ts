@@ -413,6 +413,68 @@ export interface ModerationLogTable {
 }
 
 /**
+ * One action taken as the instance's operator (#2602, migration 0040), from
+ * the app's Operate area or the operator's CLI. Append-only: the schema
+ * refuses an UPDATE or a DELETE. No foreign key: erasure keeps it.
+ */
+export interface OperatorLogTable {
+  readonly id: Generated<number>;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly source: 'app' | 'cli';
+  /** The owner's athlete for `app`; `NULL` for `cli`, which has none. */
+  readonly actor_athlete_id: string | null;
+  readonly action: string;
+  readonly detail: string | null;
+  readonly outcome: 'done' | 'refused' | 'failed';
+}
+
+/**
+ * One run of the operator's `backup` or `backup-loop` (#2606, migration 0042):
+ * what it made, or that it failed, by name. Deleted 30 days after its run.
+ */
+export interface BackupRecordTable {
+  readonly id: Generated<number>;
+  /** When the run started, Unix seconds. */
+  readonly at: number;
+  readonly outcome: 'done' | 'failed';
+  /** A failed run's error, by name only. */
+  readonly error: string | null;
+  /** The snapshot directory's name, never its path. */
+  readonly snapshot: string | null;
+  readonly row_count: number | null;
+  readonly blob_count: number | null;
+  readonly database_sha256: string | null;
+  readonly size_bytes: number | null;
+  readonly off_box: 'copied' | 'failed' | 'not-configured' | null;
+  readonly removed: number | null;
+  readonly backups_free_bytes: number | null;
+  readonly off_box_free_bytes: number | null;
+  /** The backup service's interval: set by `backup-loop` only. */
+  readonly interval_seconds: number | null;
+}
+
+/** Which run holds a backup folder (#2606, migration 0042): one row per folder. */
+export interface BackupLeaseTable {
+  /** SHA-256 of the folder's path, hex: never the path. */
+  readonly place: string;
+  readonly token: string;
+  /** The holder's container and process, for an operator reading the row. */
+  readonly holder: string;
+  /** When the holder last showed it was alive, Unix ms. */
+  readonly heartbeat_at: number;
+}
+
+/** The owner's "back up now" (#2606, migration 0042): waiting while `record_id` is `NULL`. */
+export interface BackupRequestTable {
+  readonly id: Generated<number>;
+  /** Unix seconds. */
+  readonly requested_at: number;
+  /** The record of the run that served it. */
+  readonly record_id: number | null;
+}
+
+/**
  * A notice of illegal content, from anybody (#907, migration 0026). Append-only:
  * the schema refuses a DELETE, and every UPDATE but the erasure of its notifier
  * details (#1381, migration 0036). No column is a client address.
@@ -765,6 +827,10 @@ export interface InstanceDatabase {
   readonly block: BlockTable;
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
+  readonly operator_log: OperatorLogTable;
+  readonly backup_record: BackupRecordTable;
+  readonly backup_request: BackupRequestTable;
+  readonly backup_lease: BackupLeaseTable;
   readonly room_removal: RoomRemovalTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;

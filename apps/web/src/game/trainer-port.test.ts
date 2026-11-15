@@ -684,6 +684,26 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     }).not.toThrow();
   });
 
+  it('hands each stepped solo draft to the ride controller, and to nothing without one — #2451', () => {
+    const noted: unknown[] = [];
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      noteSoloDraft: (reading) => {
+        noted.push(reading);
+      },
+      subscribe: () => () => undefined,
+    });
+    const stepped = { k: 0.7, inDraft: true, inDraftMetres: 12, riddenMetres: 40 };
+    port.soloDraftStepped?.(stepped);
+    expect(noted).toEqual([stepped]);
+    expect(() => {
+      gameTrainerPortOver(undefined).soloDraftStepped?.(stepped);
+    }).not.toThrow();
+  });
+
   it('reads the moving time of a ride in progress off the controller, and nothing otherwise — #1111', () => {
     let snapshot: { phase: 'idle' | 'recording' | 'paused' | 'stopped'; movingSeconds: number } = {
       phase: 'idle',

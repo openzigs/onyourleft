@@ -47,6 +47,15 @@ afterEach(() => {
 
 const STEP = 10;
 
+/**
+ * Where a fixture's road runs: north from 0°, 0° (#2259). Synthetic on
+ * purpose, as `CLAUDE.md` §6 asks of location data in this public
+ * repository; the strip reads only the distances and the elevations.
+ */
+function along(index: number): ReturnType<typeof geographicPosition> {
+  return geographicPosition(degreesLatitude((index * STEP) / 111_320), degreesLongitude(0));
+}
+
 /** 1 km flat at 100 m, 600 m at 6 %, 1.4 km flat — `look-ahead.test.ts`'s climb. */
 function climb(): RouteProfile {
   const elevations = [100];
@@ -54,10 +63,7 @@ function climb(): RouteProfile {
     elevations.push(metre <= 1000 ? 100 : metre <= 1600 ? 100 + ((metre - 1000) * 6) / 100 : 136);
   }
   const points: RoutePoint[] = elevations.map((elevation, index) => ({
-    position: geographicPosition(
-      degreesLatitude(51.5 + (index * STEP) / 111_320),
-      degreesLongitude(-0.12),
-    ),
+    position: along(index),
     elevation: altitudeMetres(elevation),
   }));
   return routeProfile(points);
@@ -289,10 +295,7 @@ describe('the climb view on the HUD (#2291)', () => {
     }
     const long = routeProfile(
       elevations.map((elevation, index) => ({
-        position: geographicPosition(
-          degreesLatitude(51.5 + (index * STEP) / 111_320),
-          degreesLongitude(-0.12),
-        ),
+        position: along(index),
         elevation: altitudeMetres(elevation),
       })),
     );

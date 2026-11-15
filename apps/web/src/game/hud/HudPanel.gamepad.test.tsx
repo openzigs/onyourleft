@@ -30,6 +30,8 @@ import {
 
 import { mount, type Mounted } from '../../testing/mount';
 import { startSteer, steerToward, type SteerState } from '../delivery/steer';
+import type { ControllerPort } from '../delivery/controller-port';
+import { createSteeringController } from '../../ride/steering-controller';
 import type { SteerInputPort } from '../delivery/steer-port';
 import type { ThrowIntent } from '../delivery/throw-input';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
@@ -80,7 +82,10 @@ function route(): ReturnType<typeof routeProfile> {
 let steered: SteerState | undefined;
 let thrown: ThrowIntent[] = [];
 
-function RideWithDelivery(props: { readonly delivery: boolean }): JSX.Element {
+function RideWithDelivery(props: {
+  readonly delivery: boolean;
+  readonly controller?: ControllerPort | undefined;
+}): JSX.Element {
   const profile = useMemo(route, []);
   const [steer, setSteer] = useState<SteerState>(() => startSteer(0));
   steered = steer;
@@ -108,14 +113,15 @@ function RideWithDelivery(props: { readonly delivery: boolean }): JSX.Element {
       onEnd={() => undefined}
       throwing={props.delivery ? throwing : undefined}
       steering={props.delivery ? steering : undefined}
+      controller={props.controller}
     />
   );
 }
 
-async function ride(delivery = true): Promise<void> {
+async function ride(delivery = true, controller?: ControllerPort): Promise<void> {
   steered = undefined;
   thrown = [];
-  mounted = await mount(<RideWithDelivery delivery={delivery} />);
+  mounted = await mount(<RideWithDelivery delivery={delivery} controller={controller} />);
 }
 
 function pad(down: readonly number[] = [], stick = 0): PadSnapshot {
@@ -360,5 +366,87 @@ describe('a generic pad on a Delivery ride in the Android shell — #1858', () =
     expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeTypeOf('function');
     endRide();
     expect(Reflect.get(window, FORWARDED_BUTTON_GLOBAL)).toBeUndefined();
+  });
+});
+
+/**
+ * #2514: the owner, on the tablet, could not see the roadsides for the side
+ * panels. A pad (or a paired controller) throws for the rider, so the HUD
+ * stops drawing the three throw buttons while one is in use; Pause and End
+ * ride stay, and a key still throws.
+ */
+describe('the throw buttons give way to a pad in use — #2514', () => {
+  const throwButtons = (): number =>
+    mounted?.container.querySelectorAll('[aria-label="Throw a parcel"] button').length ?? 0;
+  const control = (name: string): HTMLButtonElement | undefined =>
+    [...(mounted?.container.querySelectorAll('button') ?? [])].find(
+      (each) => (each.textContent ?? '').trim() === name,
+    );
+
+  it('hides them from a pad’s first press, keeps Pause and End ride and the keys, and draws them again when it goes', async () => {
+    await ride();
+    expect(throwButtons()).toBe(3);
+    // Connected and not yet pressed: not in use, so they stay.
+    listed = [pad()];
+    event('gamepadconnected');
+    frames(3);
+    expect(throwButtons()).toBe(3);
+    // Its first press throws, and from then on the pad is in use.
+    listed = [pad([2])];
+    frames(3);
+    expect(thrown).toEqual(['left']);
+    expect(throwButtons()).toBe(0);
+    expect(control('Pause')).toBeDefined();
+    expect(control('End ride')).toBeDefined();
+    // A key still throws with the buttons gone.
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }),
+      );
+    });
+    expect(thrown).toEqual(['left', 'left']);
+    // Gone, so the buttons come back.
+    listed = [null];
+    event('gamepaddisconnected');
+    frames(3);
+    expect(throwButtons()).toBe(3);
+  });
+
+  it('draws the buttons with a controller handed in and nothing paired, then none once one pairs, and again after it forgets', async () => {
+    // The app hands the HUD its steering controller on every Bluetooth-capable
+    // platform, paired or not: the real one, driven from none to connected.
+    let drop: () => void = () => undefined;
+    const controller = createSteeringController({
+      requestAndConnect: () =>
+        Promise.resolve({
+          name: 'Handlebar',
+          onEvents: () => () => undefined,
+          onDisconnect: (listener) => {
+            drop = listener;
+            return () => undefined;
+          },
+          disconnect: () => undefined,
+        }),
+    });
+    await ride(true, controller);
+    expect(controller.state.kind).toBe('none');
+    expect(throwButtons()).toBe(3);
+    await act(async () => {
+      await controller.pair();
+    });
+    expect(controller.state.kind).toBe('connected');
+    expect(throwButtons()).toBe(0);
+    expect(control('Pause')).toBeDefined();
+    expect(control('End ride')).toBeDefined();
+    act(() => {
+      drop();
+    });
+    expect(controller.state.kind).toBe('none');
+    expect(throwButtons()).toBe(3);
+  });
+
+  it('draws the buttons for a bare port that never says it is paired', async () => {
+    await ride(true, { onControllerEvents: () => () => undefined });
+    expect(throwButtons()).toBe(3);
   });
 });

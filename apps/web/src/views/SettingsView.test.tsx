@@ -1199,13 +1199,16 @@ describe('drafting on your own — #2425, ADR 0066 D-6', () => {
     again.unmount();
   });
 
-  it('says it changes nothing in a room or a race, and never in watts', async () => {
+  it('says it changes nothing in a room, that it reaches a lap race (#2461), and never in watts', async () => {
     const mounted = await settings(disk());
     const copy = (mounted.container.querySelector('.oyl-solo-draft')?.textContent ?? '').replace(
       /\s+/g,
       ' ',
     );
-    expect(copy).toContain('It changes nothing in a room or a race');
+    expect(copy).toContain('It changes nothing in a room.');
+    // ADR 0067 D-3.4: the switch reaches the lap race, for every racer.
+    expect(copy).toContain('turning this off turns the draft off for every racer');
+    expect(copy).not.toContain('in a room or a race');
     expect(copy).not.toMatch(/\bW\b|watt/i);
     mounted.unmount();
   });

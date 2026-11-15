@@ -309,6 +309,7 @@ export function stubRideController(
     unlockTouch: () => {
       calls.unlockTouch += 1;
     },
+    noteSoloDraft: () => undefined,
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },

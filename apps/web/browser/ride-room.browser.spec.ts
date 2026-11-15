@@ -768,18 +768,25 @@ test.describe('a room ride with sounds on — #1398', () => {
  * 42 px at 390×844, and the race ran its actions panel and its notice 7 px
  * below a 736×360 stage. The control undoes §"#1407" and requires the same
  * measurement to fail at 360×752 and at 736×360.
+ *
+ * The race is measured with the rider's power sensor lost (`?power=lost`):
+ * "— W Sensor lost" wraps the HUD's primary panel to a line more, the tallest
+ * that panel is on the line. Until #2546 the held rider read that whatever
+ * they pedalled, which is the race these numbers were taken from; with a live
+ * reading on the line the panel was 14 px shorter on the CI runner's fonts,
+ * and the race fitted at 736×360 with or without §"#1407".
  */
 const REPORT_WITH_SOUNDS = `${REPORT_OPEN}&sounds=on`;
 
-const RACE_WITH_SOUNDS = '?room=race&sounds=on';
+const RACE_WITH_SOUNDS = '?room=race&sounds=on&power=lost';
 
 /**
  * #875: the same race on its line, its welcome carrying the room's Discord
  * voice link, which `GameView` draws as a button beside *Start the race*
  * (`game/room-voice.ts`). Held to everything `?room=race&sounds=on` is, both
- * ways; §"#875" holds the button itself.
+ * ways, with the sensor lost as it is; §"#875" holds the button itself.
  */
-const RACE_VOICE_WITH_SOUNDS = '?room=race-voice&sounds=on';
+const RACE_VOICE_WITH_SOUNDS = '?room=race-voice&sounds=on&power=lost';
 
 const VOLUME = 'sound: Sound volume';
 
@@ -1289,8 +1296,9 @@ test.describe('a race’s voice button on its line — #875', () => {
  * one, began 50 px into the leaning rider at 360×752 and 36 px at 360×800,
  * and covered *Stop side camera* at 390×844. The control takes §"#1409"'s
  * rules out of the live stylesheet, puts back #1398's exception for a side
- * camera, and requires the same measurement to fail at 1024×768, 736×360 and
- * 360×752.
+ * camera, and requires the same measurement to fail at 736×360 and 360×752.
+ * It ran at 1024×768 as well until #2130, after which it found nothing there
+ * (the note on the control below; `theme.css` §"#1409" has the measurement).
  */
 const ROOM_SOUNDS_SIDE = `${FOLLOWING_WITH_SOUNDS}&side=filming`;
 

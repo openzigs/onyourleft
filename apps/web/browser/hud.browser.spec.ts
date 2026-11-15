@@ -198,6 +198,9 @@ interface DraftMeasurement {
   readonly full: Box | undefined;
   readonly panel: Box | undefined;
   readonly valueOverflows: boolean;
+  readonly sheltered: boolean;
+  readonly outline: { readonly style: string; readonly width: number; readonly offset: number };
+  readonly parts: readonly Box[];
   readonly others: readonly { readonly label: string; readonly box: Box }[];
   readonly screen: Box;
 }
@@ -810,9 +813,10 @@ for (const viewport of VIEWPORTS) {
     }) => {
       const measured = await measure(page, viewport);
       // Both stages, so a harness that stopped rendering them passes over nothing.
-      expect(measured.draft.map((stage) => stage.draft)).toEqual([DRAFT_FULL_SCALE, 20]);
+      expect(measured.draft.map((stage) => stage.draft)).toEqual([DRAFT_FULL_SCALE, 20, 20]);
+      expect(measured.draft.map((stage) => stage.sheltered)).toEqual([false, false, true]);
       for (const stage of measured.draft) {
-        const name = `${viewport.name}/${String(stage.draft)} %`;
+        const name = `${viewport.name}/${String(stage.draft)} %${stage.sheltered ? ' in the draft' : ''}`;
         const { field, gauge, fill, full, panel } = stage;
         expect(field, `${name}: no draft field`).toBeDefined();
         expect(gauge, `${name}: no gauge`).toBeDefined();
@@ -838,6 +842,37 @@ for (const viewport of VIEWPORTS) {
         expect(inside(field, stage.screen), `${name}: the field is off the screen`).toBe(true);
         for (const other of stage.others) {
           expect(boxesOverlap(field, other.box), `${name} lands on ${other.label}`).toBe(false);
+        }
+        // #2426: in the draft the field's outline is a solid ring OUTSIDE its box,
+        // so it is drawn over none of the label, number, line or gauge; and, grown
+        // by the ring, the field is still in its panel and on screen and touches
+        // no neighbour.
+        if (stage.sheltered) {
+          const ring = stage.outline.width + Math.max(0, stage.outline.offset);
+          expect(stage.outline.style, `${name} outline style`).toBe('solid');
+          expect(stage.outline.width, `${name} outline width`).toBeGreaterThanOrEqual(3);
+          expect(
+            stage.outline.offset,
+            `${name}: the outline is drawn inside the field, over its content`,
+          ).toBeGreaterThanOrEqual(0);
+          for (const part of stage.parts) {
+            expect(inside(part, field), `${name}: a part of the field is outside it`).toBe(true);
+          }
+          const grown = {
+            left: field.left - ring,
+            top: field.top - ring,
+            right: field.right + ring,
+            bottom: field.bottom + ring,
+            width: field.width + 2 * ring,
+            height: field.height + 2 * ring,
+          };
+          expect(inside(grown, stage.screen), `${name}: the outline is off the screen`).toBe(true);
+          for (const other of stage.others) {
+            expect(
+              boxesOverlap(grown, other.box),
+              `${name}: the outline lands on ${other.label}`,
+            ).toBe(false);
+          }
         }
         // The fill is the share of the full scale, measured off the drawn boxes.
         expect(fill.left).toBeCloseTo(gauge.left, 0);

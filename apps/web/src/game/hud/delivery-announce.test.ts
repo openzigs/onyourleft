@@ -55,6 +55,8 @@ const QUIET: AnnouncementPreference = {
 
 const DELIVERY_KINDS = [
   'delivery-obstacle-ahead',
+  // #2365: a house ahead that must not get a parcel, beside the obstacle ahead.
+  'delivery-skip-house',
   'delivery-round-over',
   'delivery-crash',
   'delivery-missed',
@@ -124,9 +126,12 @@ describe('Delivery follows the rider’s announcement setting — #1812, the own
   }
 
   it('says no delivery, miss, crash or round’s end with announcements off, the default', () => {
-    // The four follow the setting (2026-10-28); the hazard ahead does not (2026-11-08, #2362).
+    // The four follow the setting (2026-10-28); the hazard ahead does not (2026-11-08, #2362),
+    // and nor does a house ahead that must not get a parcel (#2365, ADR 0065 D-10.5).
     for (const kind of DELIVERY_KINDS) {
-      expect(ALWAYS_SPOKEN.includes(kind)).toBe(kind === 'delivery-obstacle-ahead');
+      expect(ALWAYS_SPOKEN.includes(kind)).toBe(
+        kind === 'delivery-obstacle-ahead' || kind === 'delivery-skip-house',
+      );
     }
     expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
     expect(rideARound(DEFAULT_ANNOUNCEMENTS)).toEqual([]);

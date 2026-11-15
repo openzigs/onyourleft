@@ -214,6 +214,14 @@
  * its heading, its help's name, six help sentences and its switch. Nothing
  * is dropped.
  *
+ * ⚠️ **Edited by #2461, awaiting the owner's approval with that pull
+ * request**, on Settings on both walks: one line REWORDED and one added,
+ * because ADR 0067 D-3.4 extends the *Draft on your own* switch to the lap
+ * race. "It changes nothing in a room or a race." is now "It changes nothing
+ * in a room.", and a line before it says that in a lap race the rider and the
+ * bots draft each other and that the switch turns that off for every racer.
+ * Nothing is dropped.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

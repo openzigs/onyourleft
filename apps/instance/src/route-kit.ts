@@ -13,6 +13,7 @@ import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
+import type { Operate } from './operate/operate.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
 import type { Segments } from './segments/segments.ts';
@@ -162,6 +163,8 @@ export interface RouteContext {
   readonly sidePose: SidePose | undefined;
   /** Published segments and their boards (#68). Present for every route that declares `segments`. */
   readonly segments: Segments | undefined;
+  /** The owner's Operate area (#2602). Present for every route that declares `operate`. */
+  readonly operate: Operate | undefined;
   /**
    * The instance's own keys (#1189). Absent until the store is open, and on
    * a test's handler that was handed none.
@@ -199,11 +202,17 @@ export interface RouteContext {
  *   answer as for an athlete who does not exist.
  * - `'moderation'` — the instance's moderators only; anybody else gets
  *   `not_found`, as though the route were not there.
+ * - `'owner'` — the athlete holding `OYL_INSTANCE_OWNER_KEY` only (#2602, the
+ *   Operate area); anybody else — the DEPUTY included, and a rider awaiting
+ *   approval or suspended — gets `not_found`, as though the route were not
+ *   there. Asked in the handler, never by the route, as `'moderation'` is.
+ *   On an instance that seals nothing (no `OYL_INSTANCE_SECRET_KEY`), such a
+ *   route answers `unavailable`, naming the variable, to everybody.
  * - `{ exempt: reason }` — it reaches other athletes, and does not ask the
  *   choke point, for the reason given.
  */
 export type Reach =
-  'own' | { readonly athlete: string } | 'moderation' | { readonly exempt: string };
+  'own' | { readonly athlete: string } | 'moderation' | 'owner' | { readonly exempt: string };
 
 export interface Route {
   readonly method: 'GET' | 'POST' | 'DELETE';
@@ -251,6 +260,11 @@ export interface Route {
    * handed none answers `unavailable` without calling it.
    */
   readonly segments?: true;
+  /**
+   * The route needs the owner's Operate area (#2602). An instance handed none
+   * answers `unavailable` without calling it.
+   */
+  readonly operate?: true;
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**

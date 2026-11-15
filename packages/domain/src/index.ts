@@ -742,6 +742,7 @@ export {
   SIMILARITY_METRES,
 } from './segment/match';
 export type {
+  DraftedSpan,
   EffortContext,
   EffortVisibility,
   FrozenAttributes,
@@ -752,6 +753,7 @@ export {
   countsOnSharedBoard,
   countsTowardPersonalBest,
   createEffort,
+  draftedDistanceShare,
   effortId,
   effortVisibility,
   personalBest,

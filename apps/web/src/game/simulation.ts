@@ -312,9 +312,8 @@ export interface SimulationSetup {
    *
    * ⚠️ **Absent is today, to the bit** (D-6): no `k` is computed and
    * {@link GameState.soloDraft} is absent. `GameView` hands it only on a solo
-   * ride — never in a room, whose `k` is the room's (D-1.5), and never in a
-   * lap race (D-2) — with the device's switch on and a pacer or an own ghost
-   * to give a draft.
+   * ride — never in a room, whose `k` is the room's (D-1.5) — with the
+   * device's switch on and a pacer, an own ghost or a lap race to give a draft.
    */
   readonly soloDraft?: SoloDraftSources | undefined;
 }
@@ -418,7 +417,7 @@ export interface GameState {
   readonly ridden: Seconds;
   /** The gradient at the rider's current position on the route. */
   readonly grade: GradePercent;
-  /** The last input the simulation was advanced with. @see RiderInput */
+  /** The last input the simulation was advanced or held with (#2546). @see RiderInput */
   readonly input: RiderInput;
   /**
    * The bot pacer's own ride, when the rider chose one — #237.
@@ -604,9 +603,14 @@ export class GameSimulation {
    * power and put them metres up the road at "Go". So the origin moves up with
    * the wait, and a held ride owes no step — the same rider, the same state,
    * the same clocks.
+   *
+   * #2546: `input`, when given, is the rider's reading as it stands, kept as
+   * {@link GameState.input} for the HUD and nothing else: a rider warming up
+   * on the line sees their power, and no step is run with it.
    */
-  holdAt(nowMs: number): void {
+  holdAt(nowMs: number, input?: RiderInput): void {
     this.#originMs = nowMs - this.#stepsCredited * SIMULATION_STEP_SECONDS * 1000;
+    if (input !== undefined) this.#state = { ...this.#state, input };
   }
 
   /**
@@ -728,7 +732,7 @@ export class GameSimulation {
     for (let step = 0; step < toRun; step += 1) {
       previousRide = ride;
       previousBot = bot;
-      if (solo !== undefined) {
+      if (solo !== undefined && solo.raced !== true) {
         // #2425, ADR 0066 D-1.2: this step's `k`, from where everybody is as
         // it begins — the rider's and the bot's odometers, and the ghost at
         // the seconds ridden so far, the clock `ghostClock` reads.

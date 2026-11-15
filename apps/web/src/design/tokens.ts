@@ -385,6 +385,15 @@ export const COLOUR_TOKENS = {
   hudMapWater: '#1d3a50',
   hudMapStreet: '#7f8a88',
   hudMapRoute: '#f0785c',
+  /**
+   * The shelter mark on the Draft field (#2426, `game/hud/HudCore.tsx`
+   * §`ShelterMark`): the Hi-Vis lime (ADR 0063 D-1), the dark palette's
+   * `accent`, here on the HUD's own surface. ⚠️ **Never the only carrier**:
+   * the mark's shape, the field's heavier outline and the words *"In the
+   * draft"* each say it with no colour. 3:1 against `hudSurface` (SC 1.4.11)
+   * in {@link CONTRAST_REQUIREMENTS}.
+   */
+  hudShelter: '#aff13c',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -1540,6 +1549,14 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     measured: { light: 6.74, dark: 6.74 },
     where:
       'the route on the HUD’s street map, on its casing of the panel’s surface, and the rider’s ring on it (SC 1.4.11, #2290)',
+  },
+  {
+    foreground: 'hudShelter',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    measured: { light: 13.82, dark: 13.82 },
+    where:
+      'the shelter mark on the HUD’s Draft field while the rider is in the draft: its arch and its filled pocket (SC 1.4.11, #2426)',
   },
   {
     foreground: 'accentText',

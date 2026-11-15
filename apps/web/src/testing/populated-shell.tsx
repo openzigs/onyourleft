@@ -79,7 +79,7 @@ import { addWaypoint, emptyDraft, type RouteDraft } from '../routing/draft';
 import { DRAFT_STORAGE_KEY, serialiseDraft } from '../routing/draft-storage';
 import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments } from '../segments/testing';
-import { scriptedInstance, scriptedModeration } from '../instance/testing';
+import { scriptedInstance, scriptedModeration, scriptedOperate } from '../instance/testing';
 import {
   SCRIPTED_HOSTED_KEY,
   scriptedHostedSettings,
@@ -238,6 +238,8 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__notices li' },
   // #955: a moderator's queues; empty, an account that moderates nothing.
   moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
+  // #2603: the owner's operator log; empty, an account that owns nothing.
+  operate: { kind: 'fixture', marker: '.oyl-main .oyl-operate__log li' },
   more: { kind: 'none', reason: 'static: a list of the More pages (#1429)' },
   // #2292: the fixture's routes are not loops and its week is a fresh one,
   // so both cards say the same in both walks.
@@ -310,6 +312,7 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'route-builder': { kind: 'none', reason: 'a canvas to draw on, which is its own empty state' },
   instance: { kind: 'none', reason: 'a form to connect, the same with nothing connected' },
   moderation: { kind: 'none', reason: 'the queues of a moderator, not in the list #943 names' },
+  operate: { kind: 'none', reason: 'the owner’s operator log, not in the list #943 names' },
   'side-camera': { kind: 'none', reason: 'a pairing flow, not a list' },
   'activity-detail': { kind: 'none', reason: 'one ride, opened by its id' },
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
@@ -903,6 +906,10 @@ export function PopulatedShell({
           suspended: { 'rider-erin': 1_790_020_000 },
         }).port
       }
+      // #2603: the owner, whose log holds a detail as long as the instance
+      // admits, a page of two so *Show older entries* is laid out; empty, an
+      // account that owns nothing.
+      operate={scriptedOperate({ standing: populated ? 'owner' : 'not-owner', pageSize: 2 }).port}
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
       instanceAnalysis={instanceAnalysisPort(populated)}

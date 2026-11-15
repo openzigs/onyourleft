@@ -32,6 +32,7 @@ export type {
   ActivityRecord,
   ActivitySummary,
   RideFacts,
+  DraftSpan,
   RoomRaceFact,
   WorkoutBlockFact,
   WorkoutBlockOutcome,

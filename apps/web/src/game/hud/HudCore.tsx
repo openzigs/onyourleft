@@ -24,7 +24,16 @@
  * `HudPanel` renders it.
  */
 
-import { useEffect, useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+  type ReactNode,
+} from 'react';
 
 import { POWER_ZONE_NAMES } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
@@ -32,6 +41,7 @@ import type { UnitSystem } from '@onyourleft/store';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
+import { VisuallyHidden } from '../../design/VisuallyHidden';
 
 import {
   CALORIES_KEY,
@@ -79,6 +89,7 @@ import { FOCUS_MORE_KEYS, focusReadings } from './focus-readout';
 import {
   DEFAULT_HUD_LAYOUT,
   compactRoute,
+  deliveryGame,
   focusArrangement,
   panelShown,
   totalsStripChosen,
@@ -239,6 +250,13 @@ function keptWithReadingsHidden(reading: HudReading): boolean {
   );
 }
 
+/**
+ * The readings a Delivery round's game strip draws — #2514: power and speed,
+ * and the round's own (`isDeliveryReading`). Everything else a ride reads is
+ * left out of the strip, and comes back with *Everything* in Settings.
+ */
+const DELIVERY_STRIP_KEYS: ReadonlySet<string> = new Set(['power', 'speed']);
+
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {
   const all = hudReadings(props);
@@ -254,8 +272,11 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // #2385: the route panel as a tile, where the rider chose it and the
   // figure is the route's map. @see HudCoreProps.routeTile
   const compact = compactRoute(layout) && props.routeTile === true;
+  // #2514: a Delivery round's game strip. @see deliveryGame
+  const game = deliveryGame(layout, props.delivery);
   const readings = all.filter(
     (reading) =>
+      !(game && !isDeliveryReading(reading) && !DELIVERY_STRIP_KEYS.has(reading.key)) &&
       !(props.withoutPacer === true && reading.key === EMPTY_GAP_KEY) &&
       !(props.withoutElapsed === true && reading.key === ELAPSED_TIME_KEY) &&
       !(props.withoutTotals === true && isRideTotalReading(reading)) &&
@@ -281,6 +302,14 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // is mounted for exactly one game ride, so a lock never outlives the ride.
   const hud = useRef<HTMLElement>(null);
   const [touchLocked, setTouchLocked] = useState(false);
+  // #2514: whether a gamepad is in use, which the throw buttons give way to.
+  const [padInUse, setPadInUse] = useState(false);
+  // #2514: a controller is handed in whether or not one is paired, so the
+  // buttons go only while it says it is (a port that says nothing: not paired).
+  const controllerPaired = useSyncExternalStore(
+    (onChange) => props.controller?.subscribe?.(onChange) ?? (() => undefined),
+    () => props.controller?.paired === true,
+  );
   useTouchLock(hud, touchLocked);
   // #2349: while the end-of-ride question is open it stands where Pause and
   // End ride do, and when it closes with the ride still on (Keep riding),
@@ -302,6 +331,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         'oyl-hud',
         ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
         ...(focus ? ['oyl-hud--focus'] : []),
+        // A test hook (#2514): no stylesheet rule reads it.
+        ...(game ? ['oyl-hud--delivery-game'] : []),
       ].join(' ')}
       aria-label="Ride metrics"
       data-oyl-hud-text={layout.textSize}
@@ -337,8 +368,9 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         #2079: the route panel holds the strip and the plan, and the recent
         graph; each may be turned off, and with both off there is no panel.
       */}
-      {!panelShown(layout, 'route') &&
-      (props.recent === undefined || !panelShown(layout, 'graph')) ? null : (
+      {game ||
+      (!panelShown(layout, 'route') &&
+        (props.recent === undefined || !panelShown(layout, 'graph'))) ? null : (
         <div
           className={`oyl-hud__panel oyl-hud__route${compact ? ' oyl-hud__route--compact' : ''}`}
           data-oyl-route-view={compact ? 'compact' : 'full'}
@@ -468,8 +500,17 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           touch lock refuses a tap on them as on Pause: none is exempt
           (ADR 0059 D-5). What the lock does to them is why it is handed in.
         */}
+        {/*
+          #2514: its buttons not drawn while a pad or a paired controller
+          throws for the rider, so the corner gives the road its room back;
+          Pause and End ride stay, and a key still throws.
+        */}
         {props.throwing === undefined || asking ? null : (
-          <ThrowControl port={props.throwing} touchLocked={touchLocked} />
+          <ThrowControl
+            port={props.throwing}
+            touchLocked={touchLocked}
+            buttonless={padInUse || controllerPaired}
+          />
         )}
         {/*
           #1901: a lap race's item use, where the throws stand on a round.
@@ -491,7 +532,12 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         {props.throwing === undefined &&
         props.steering === undefined &&
         props.items === undefined ? null : (
-          <GamepadIntents throwing={props.throwing} steering={props.steering} items={props.items} />
+          <GamepadIntents
+            throwing={props.throwing}
+            steering={props.steering}
+            items={props.items}
+            onPadInUse={setPadInUse}
+          />
         )}
         {/* #1827: a paired steering controller's lane changes, lanes and throws, to a round's ports. Nothing drawn. */}
         {props.controller === undefined ||
@@ -638,6 +684,9 @@ function fieldClass(reading: HudReading): string {
     // coming is outlined (`theme.css` §"A LAP RACE ON THE HUD").
     ...(isLapRaceReading(reading) ? ['oyl-hud__field--lap-race'] : []),
     ...(reading.alert === true ? ['oyl-hud__field--alert'] : []),
+    // #2426: in the draft, a heavier SOLID outline (`theme.css` §"IN THE
+    // DRAFT"): a shape, beside the shelter mark and the words.
+    ...(reading.sheltered === true ? ['oyl-hud__field--sheltered'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
     // #2076: the ride so far (`theme.css` §"THE RIDE SO FAR").
     ...(isRideTotalReading(reading) ? ['oyl-hud__field--total'] : []),
@@ -683,6 +732,7 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           // #2420: the power field's view, in the term and out of its capitals.
           <span className="oyl-hud__label-qualifier"> ({reading.qualifier})</span>
         )}
+        {reading.sheltered === true ? <ShelterMark /> : null}
       </dt>
       <dd
         className={
@@ -697,6 +747,10 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           <span className="oyl-hud__unit">
             {' '}
             {reading.unit}
+            {reading.unitSaid === undefined ? null : (
+              // #2472: heard, not drawn — `fields.ts` §`HudReading.unitSaid`.
+              <VisuallyHidden> {reading.unitSaid}</VisuallyHidden>
+            )}
             {reading.slope === undefined ? null : (
               <SlopeGlyph
                 slope={reading.slope}
@@ -715,6 +769,7 @@ function Field(props: { readonly reading: HudReading }): JSX.Element {
           // why the phrase is not folded into the value instead.
           <span className="oyl-hud__detail"> {reading.detail}</span>
         )}
+        {reading.said === undefined ? null : <VisuallyHidden> {reading.said}</VisuallyHidden>}
         {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
         {reading.zone === undefined ? null : <ZoneBar shares={reading.zone.shares} />}
         {reading.stale ? (
@@ -1034,6 +1089,32 @@ const SLOPE_RISE: Readonly<Record<GradeBandKey, number>> = {
   steep: 8,
   wall: 10,
 };
+
+/**
+ * The shelter mark — #2426: the Draft field's sign that the rider is IN the
+ * draft. A low arch, the rider ahead, over a solid filled pocket, the
+ * sheltered air the rider sits in: a closed, filled shape drawn here and taken
+ * from no icon set, which reads at HUD size with no colour at all. Drawn
+ * beside the field's label rather than its number, so it can never push the
+ * unit off the number's line (#2130) or add a line to the field.
+ *
+ * ⚠️ `aria-hidden`: the words under the number say it (`fields.ts`
+ * §`HudReading.sheltered`). No motion: it is there or it is not.
+ */
+function ShelterMark(): JSX.Element {
+  return (
+    <svg
+      className="oyl-hud__shelter"
+      viewBox="0 0 16 12"
+      aria-hidden="true"
+      focusable="false"
+      data-oyl-shelter=""
+    >
+      <path className="oyl-hud__shelter-arch" d="M1 9 Q8 -1 15 9" />
+      <path className="oyl-hud__shelter-pocket" d="M4 11 Q8 4 12 11 Z" />
+    </svg>
+  );
+}
 
 /**
  * A field's gauge — #787, the draft's (#327's indicator criteria): a bar

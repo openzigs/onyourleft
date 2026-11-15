@@ -374,6 +374,7 @@ describe('LOSSY_CHANNELS in plain words — #1452', () => {
       'each lap’s average cadence',
       'each lap’s average power',
       'each lap’s best power',
+      'each lap’s calories',
       'each lap’s climb',
     ]);
     expect(lossyChannelNames('tcx')).toEqual([
@@ -392,6 +393,7 @@ describe('LOSSY_CHANNELS in plain words — #1452', () => {
       'each lap’s average cadence',
       'each lap’s average power',
       'each lap’s best power',
+      'each lap’s calories',
       'which splits are laps and which are part laps',
       'each lap’s climb',
       'moving time',

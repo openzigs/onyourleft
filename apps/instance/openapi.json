@@ -7338,6 +7338,650 @@
         }
       }
     },
+    "/v1/operate/backups": {
+      "get": {
+        "operationId": "getOperateBackups",
+        "summary": "The instance’s backups (#2606), read from the records the `backup` service writes — the instance never reads the backup folders: the newest 50, newest first, each with when it ran and its age, whether it made a snapshot (a failed run names its error, never its message), the snapshot directory’s name, its row and blob counts and database SHA-256 from its manifest, its size, how its off-box copy went, how many old snapshots it removed, the free space where snapshots and their off-box copies go, and the backup service’s interval (`null` for a one-off run); and the “back up now” still waiting, if any. No host path. Restore is not here: it stays on the CLI. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "backups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "ageSeconds": {
+                            "type": "integer"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "failed"
+                            ]
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "snapshot": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rows": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "blobs": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "databaseSha256": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "sizeBytes": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "offBox": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "removed": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "freeBytes": {
+                            "type": "object",
+                            "properties": {
+                              "backups": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "offBox": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "backups",
+                              "offBox"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "intervalSeconds": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "requested": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "ageSeconds",
+                          "outcome",
+                          "error",
+                          "snapshot",
+                          "rows",
+                          "blobs",
+                          "databaseSha256",
+                          "sizeBytes",
+                          "offBox",
+                          "removed",
+                          "freeBytes",
+                          "intervalSeconds",
+                          "requested"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "pending": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "requestedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "requestedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "backups",
+                    "pending"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "requestOperateBackup",
+        "summary": "“Back up now” (#2606): asks the `backup` service for a snapshot, which it takes within 30 seconds; answers 202 at once — the instance itself takes none, holding neither the backup folders nor a reason to. The request and its `backup_requested` entry in the operator log are written in one transaction. Refused `too_many`, and logged `refused`, while a request already waits or a backup was made in the last 15 minutes: each extra backup with `--keep` removes an older one, and shortens how far back a restore can go. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requestedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "requestedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "description": "One of `rate_limited`, `too_many`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/operate/log": {
+      "get": {
+        "operationId": "getOperatorLog",
+        "summary": "The operator log (#2602): every action taken as the instance’s operator, from the app or the CLI on the host, NEWEST first, a page at a time — `?limit=` (1–200, default 50) and `?cursor=` from the page before. Append-only. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "app",
+                              "cli"
+                            ]
+                          },
+                          "action": {
+                            "type": "string",
+                            "enum": [
+                              "migrate",
+                              "backup",
+                              "restore",
+                              "room_open",
+                              "model_key_set",
+                              "model_key_clear",
+                              "instance_key_init",
+                              "instance_key_rotate",
+                              "instance_key_rotate_identity",
+                              "instance_key_reset",
+                              "load_accounts_add",
+                              "load_accounts_erase",
+                              "account_erase",
+                              "backup_requested"
+                            ]
+                          },
+                          "detail": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "refused",
+                              "failed"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "at",
+                          "source",
+                          "action",
+                          "detail",
+                          "outcome"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "entries",
+                    "cursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/operate/status": {
+      "get": {
+        "operationId": "getOperateStatus",
+        "summary": "The instance’s Status (#2604), read-only: the checks `GET /ready` makes, the version and deployed commit, the registration mode, uptime, disk space, the last backup, the tunnel’s readiness (`unknown` unless `OYL_INSTANCE_TUNNEL_READY_URL` is set), how many athletes are in each standing, rooms open and analysis jobs waiting or running, and the instance keys’ state. Counts and names only: no secret, no row of anybody, no path on the host. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ready": {
+                      "type": "boolean"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "properties": {
+                        "database": {
+                          "type": "boolean"
+                        },
+                        "migrations": {
+                          "type": "string",
+                          "enum": [
+                            "at-head",
+                            "migrating",
+                            "behind",
+                            "ahead",
+                            "unknown"
+                          ]
+                        },
+                        "rooms": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "database",
+                        "migrations",
+                        "rooms"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "upstream": {
+                      "type": "boolean"
+                    },
+                    "registration": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "approval",
+                        "invite",
+                        "closed"
+                      ]
+                    },
+                    "uptimeSeconds": {
+                      "type": "integer"
+                    },
+                    "disk": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holds": {
+                            "type": "string",
+                            "enum": [
+                              "database",
+                              "blobs",
+                              "database_and_blobs"
+                            ]
+                          },
+                          "freeBytes": {
+                            "type": "integer"
+                          },
+                          "totalBytes": {
+                            "type": "integer"
+                          },
+                          "low": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "holds",
+                          "freeBytes",
+                          "totalBytes",
+                          "low"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "lastBackup": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "at": {
+                          "type": "string"
+                        },
+                        "offBox": {
+                          "type": "string",
+                          "enum": [
+                            "copied",
+                            "failed",
+                            "not-configured"
+                          ]
+                        },
+                        "intervalSeconds": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "at",
+                        "offBox",
+                        "intervalSeconds"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "tunnel": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "unknown",
+                            "ready",
+                            "not_ready"
+                          ]
+                        },
+                        "connections": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "connections"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "athletes": {
+                          "type": "object",
+                          "properties": {
+                            "active": {
+                              "type": "integer"
+                            },
+                            "pending": {
+                              "type": "integer"
+                            },
+                            "suspended": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "active",
+                            "pending",
+                            "suspended"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "roomsOpen": {
+                          "type": "integer"
+                        },
+                        "analysis": {
+                          "type": "object",
+                          "properties": {
+                            "queued": {
+                              "type": "integer"
+                            },
+                            "running": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "queued",
+                            "running"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "athletes",
+                        "roomsOpen",
+                        "analysis"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "keys": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "no-secret",
+                        "no-origin",
+                        "no-keys",
+                        "unreadable",
+                        "busy"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ready",
+                    "checks",
+                    "version",
+                    "commit",
+                    "upstream",
+                    "registration",
+                    "uptimeSeconds",
+                    "disk",
+                    "lastBackup",
+                    "tunnel",
+                    "counts",
+                    "keys"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/reports": {
       "post": {
         "operationId": "reportAthlete",
@@ -10840,6 +11484,7 @@
                   "record_key_revoked",
                   "model_without_pictures",
                   "rate_limited",
+                  "too_many",
                   "internal",
                   "picture_model_failed",
                   "unavailable",
@@ -11356,6 +12001,16 @@
       },
       "rate_limited": {
         "description": "`rate_limited` (429), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "too_many": {
+        "description": "`too_many` (429), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

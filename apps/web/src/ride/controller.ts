@@ -103,6 +103,7 @@ import type {
   LapId,
   RecordedCourseLap,
   RecordingSessionId,
+  RideFacts,
   RoomRaceFact,
   WorkoutRecord,
 } from '@onyourleft/store';
@@ -145,6 +146,13 @@ import {
 } from '../recording/laps';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
 import { statedAverageHeartRate, type SavedRide } from './ride-result';
+import {
+  endSoloDraftRide,
+  NO_SOLO_DRAFT,
+  noteSoloDraftReading,
+  soloDraftFacts,
+  type SoloDraftReading,
+} from './solo-draft-record';
 
 import {
   metricStateFor,
@@ -1223,6 +1231,15 @@ export interface RideController {
    */
   noteGameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
   /**
+   * The game stepped a solo ride with a draft to give — #2451, ADR 0066 D-5.3:
+   * its in-draft state and the metres behind it (`GameState.soloDraft`), on
+   * every frame. Kept for the recording in progress, so the saved ride says
+   * whether it was drafted and when (`solo-draft-record.ts`); ignored for a
+   * ride that is not recording, beyond what the next reading is counted from.
+   * Decides no write to the trainer.
+   */
+  noteSoloDraft(reading: SoloDraftReading): void;
+  /**
    * A game ride in a room is starting — #785, the owner's ruling of
    * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
    * is under it: a recording or paused ride carries on (a paused one stays
@@ -1528,6 +1545,8 @@ export function createRideController(options: RideControllerOptions): RideContro
    * of its own: `gameOutcome`'s is the one that matters.
    */
   let gameOutcomeDrafted = false;
+  /** The draft of the ride being recorded — #2451. @see RideController.noteSoloDraft */
+  let soloDraft = NO_SOLO_DRAFT;
   /**
    * The course laps of this recording as the HUD was told them, in order —
    * each worked out as its line was crossed. What is SAVED is the recorder's
@@ -2441,6 +2460,15 @@ export function createRideController(options: RideControllerOptions): RideContro
     return error instanceof Error ? error.message : String(error);
   };
 
+  /**
+   * The recording's own clock while it records — #2451: where a span in the
+   * draft begins and ends, the clock its samples are stamped by. `undefined`
+   * while nothing records, paused included: road ridden then is not the
+   * saved ride's.
+   */
+  const draftClock = (): UnixSeconds | undefined =>
+    phase === 'recording' ? recorder?.session.timeline : undefined;
+
   /** Where the recording is now, on its own clock: both halves off the session. */
   const markOf = (current: Recorder): LapMark => ({
     at: current.session.timeline,
@@ -3050,6 +3078,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     workoutFinished: boolean | undefined,
     replans: readonly ReplanRecord[],
     rider: CalorieRider,
+    draft?: Pick<RideFacts, 'drafted' | 'draftSpans'>,
   ): FinishedRide | undefined => {
     const series = current.session.series();
     return rideToSave({
@@ -3083,6 +3112,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       recordingSession: current.sessionId,
       // #2433: the rider the calorie estimate is frozen with.
       rider,
+      // #2451: what only this ride knew of its draft. A recovered ride passes none.
+      ...(draft === undefined ? {} : { draft }),
     });
   };
 
@@ -3171,6 +3202,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       workoutFinished,
       replans,
       await savedRider(port, current),
+      soloDraftFacts(soloDraft, current.session.timeline),
     );
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -4032,6 +4064,9 @@ export function createRideController(options: RideControllerOptions): RideContro
     },
 
     noteGameRideEnded(outcome: GhostOutcome | undefined, drafted = false): void {
+      // #2451: the game ride's span in the draft ends with it, and the next
+      // game ride counts its metres from nought.
+      soloDraft = endSoloDraftRide(soloDraft, draftClock());
       if (phase !== 'recording' && phase !== 'paused') {
         return;
       }
@@ -4042,6 +4077,10 @@ export function createRideController(options: RideControllerOptions): RideContro
         gameOutcome = outcome;
         gameOutcomeDrafted = drafted;
       }
+    },
+
+    noteSoloDraft(reading: SoloDraftReading): void {
+      soloDraft = noteSoloDraftReading(soloDraft, reading, draftClock());
     },
 
     async recordForRoom(): Promise<boolean> {
@@ -4384,6 +4423,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       lastManualLap = undefined;
       // #947: the same place, for the same reason.
       workoutFinishedInRide = false;
+      // #2451: and the draft ridden on that ride.
+      soloDraft = NO_SOLO_DRAFT;
       // #2307: and the threshold test ridden on that ride.
       testInRide = undefined;
       // #1244: and the re-plan decisions that went with that ride.

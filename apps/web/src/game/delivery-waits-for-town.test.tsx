@@ -42,9 +42,16 @@ import { endRideAnswer } from './end-ride-testing';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import { TOWN_LOADING_TEXT } from './hud/delivery-announce';
 import type { GameRenderer, SceneFrame } from './port';
-import { REALISTIC_ARRIVAL_LIMIT_MS } from './quality';
+import {
+  FRAME_MS_REDUCE_ABOVE,
+  REALISTIC_ARRIVAL_LIMIT_MS,
+  REALISTIC_LADDER,
+  REALISTIC_SETTLING_SAMPLES,
+  SUSTAINED_SAMPLES,
+  type QualitySettings,
+} from './quality';
 import { lineOffsetAt, racingLine } from './racing-line';
-import type { RealisticWorldOutcome } from './realistic-assets';
+import { REALISTIC_WORLD_LEFT_NOTICE, type RealisticWorldOutcome } from './realistic-assets';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { GameSimulation } from './simulation';
 import { corridorOrigin } from './terrain';
@@ -106,7 +113,10 @@ const port: GamePort = {
 };
 
 /** A renderer whose realistic world arrives when the test settles {@link settleLoad}. */
-function arrivingRenderer(frames: SceneFrame[]): {
+function arrivingRenderer(
+  frames: SceneFrame[],
+  told: QualitySettings[] = [],
+): {
   readonly renderer: GameRenderer;
   readonly settleLoad: (outcome: RealisticWorldOutcome | Error) => Promise<void>;
   readonly asked: () => boolean;
@@ -126,7 +136,9 @@ function arrivingRenderer(frames: SceneFrame[]): {
         render: (frame: SceneFrame) => {
           frames.push(frame);
         },
-        setQuality: () => undefined,
+        setQuality: (settings: QualitySettings) => {
+          told.push(settings);
+        },
         setRiderKit: () => undefined,
         setSeason: () => undefined,
         resize: () => undefined,
@@ -235,7 +247,18 @@ function loadingSaid(): number {
  * first house's window on the round a press would have begun: the ride's own
  * simulation, built as `GameView` builds one, and the round's own pick.
  */
-const FRAMES_PAST_FIRST_HOUSE = ((): number => {
+const FRAMES_PAST_FIRST_HOUSE = framesPastHouse('first');
+
+/** #2513: a frame a whole second long, so riding past a round's last house costs few frames. */
+const LONG_FRAME_MS = 1000;
+
+/**
+ * #2513: the same count past the LAST house of a round begun at the press,
+ * where the round is over and nothing on the ride needs the realistic world.
+ */
+const FRAMES_PAST_LAST_HOUSE = framesPastHouse('last', LONG_FRAME_MS);
+
+function framesPastHouse(which: 'first' | 'last', frameMs = FRAME_MS): number {
   const store = new Map([[DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(WEEK)]]);
   const spy = vi
     .spyOn(globalThis.crypto, 'getRandomValues')
@@ -252,21 +275,21 @@ const FRAMES_PAST_FIRST_HOUSE = ((): number => {
     storage: { getItem: (key) => store.get(key) ?? null, setItem: () => undefined },
   });
   spy.mockRestore();
-  const first = atPress?.throwTargets[0];
+  const first = which === 'first' ? atPress?.throwTargets[0] : atPress?.throwTargets.at(-1);
   if (first === undefined) throw new Error('the town gave a press no round');
   const simulation = new GameSimulation({
     profile: town.profile,
     conditions: rideConditionsFor(riderMassFor(undefined).mass, DEFAULT_RIDING_POSITION),
   });
   for (let frame = 1; frame < 2_000; frame += 1) {
-    simulation.advanceTo(START_MS + frame * FRAME_MS, { power: watts(300), live: true });
+    simulation.advanceTo(START_MS + frame * frameMs, { power: watts(300), live: true });
     // Two metres on, so the round's own sweep of the frame is past it too.
     if (simulation.state.ride.distance > first.along + THROW_WINDOW_AFTER_METRES + 2) {
       return frame + 1;
     }
   }
-  throw new Error('the ride never passed the first house');
-})();
+  throw new Error('the ride never passed the house');
+}
 
 /**
  * The owner's tablet (2026-11-09): no trainer, and a ride that may stop if the
@@ -289,9 +312,16 @@ async function pressRide(
   renderer: GameRenderer,
   load: () => Promise<GameRenderer> = () => Promise.resolve(renderer),
   trainer?: GameTrainerPort,
+  delivery = true,
 ): Promise<void> {
   mounted = await mount(
-    <GameView port={port} renderer={load} trainer={trainer} now={() => nowMs} delivery />,
+    <GameView
+      port={port}
+      renderer={load}
+      trainer={trainer}
+      now={() => nowMs}
+      delivery={delivery}
+    />,
   );
   await settle();
   await clickThrough(buttonStarting('Ride '));
@@ -470,5 +500,80 @@ describe('a Delivery round waits for the realistic town before counting a house 
     // A ride that loads no town never says it is loading one.
     expect(notices()).not.toContain(TOWN_LOADING_TEXT);
     expect(said).not.toContain(TOWN_LOADING_TEXT);
+  });
+});
+
+/**
+ * #2513: the owner's tablet showed "Next house 0 ft on the right" beside an
+ * empty verge. A round's houses are the town's mapped buildings, which only
+ * the realistic world draws (`three-renderer.ts` §`updateMapped`), and a slow
+ * device used to step out of realism mid-round for the stylised world, which
+ * draws none of them. While a round runs, the ladder now holds realism's floor.
+ */
+describe('a Delivery round holds the realistic world while it runs — #2513', () => {
+  /** A frame slower than the ladder allows, by the pacer's own sample. */
+  const SLOW_MS = FRAME_MS_REDUCE_ABOVE + 5;
+  /** The swap's frames, then three whole runs of slow ones: one more than leaving realism takes. */
+  const SLOW_FRAMES = REALISTIC_SETTLING_SAMPLES + 3 * SUSTAINED_SAMPLES;
+
+  it('steps down to realism’s floor and stays there, its houses still drawn and counted', async () => {
+    const drawn: SceneFrame[] = [];
+    const told: QualitySettings[] = [];
+    const arriving = arrivingRenderer(drawn, told);
+    await pressRide(arriving.renderer);
+    await arriving.settleLoad({ loaded: true });
+    for (let index = 0; index < SLOW_FRAMES; index += 1) await pump(SLOW_MS);
+    await settle();
+    // Non-vacuity: the round is running, and the ladder did step down.
+    expect(begunAt).toHaveLength(1);
+    expect(Number(field('Houses')?.value)).toBeGreaterThan(0);
+    expect(told).toContain(REALISTIC_LADDER[1]);
+    // It never left: every rung it was told is a realistic one, and nothing said it left.
+    expect(told.every((each) => each.world === 'realistic')).toBe(true);
+    expect(notices()).not.toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    expect(drawn.at(-1)?.delivery?.markers.length).toBeGreaterThan(0);
+  });
+
+  it('leaves realism as an ordinary ride does once its round is over, and not before', async () => {
+    const told: QualitySettings[] = [];
+    const arriving = arrivingRenderer([], told);
+    await pressRide(arriving.renderer);
+    await arriving.settleLoad({ loaded: true });
+    // Every frame here is slow (a second, over the ladder's limit), so the
+    // ladder sits at realism's floor, held there by the round, until the last
+    // house is passed and missed; then it leaves on the next slow frame.
+    let leftWith: string | undefined;
+    const ride = async (frames: number, ms: number): Promise<void> => {
+      for (let index = 0; index < frames; index += 1) {
+        await pump(ms);
+        if (leftWith === undefined && told.some((each) => each.world === 'stylised')) {
+          leftWith = field('Houses')?.value;
+        }
+      }
+    };
+    await ride(FRAMES_PAST_LAST_HOUSE, LONG_FRAME_MS);
+    await ride(2 * SUSTAINED_SAMPLES, SLOW_MS);
+    await settle();
+    expect(begunAt).toEqual([0]);
+    expect(field('Houses')).toEqual({
+      value: '0',
+      detail: `0\u00a0delivered, ${String(WEEK.houses)}\u00a0missed`,
+    });
+    expect(told.at(-1)?.world).toBe('stylised');
+    expect(notices()).toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    // It left with no house left on the round, never while one was.
+    expect(leftWith).toBe('0');
+  });
+
+  it('leaves realism on the same frames on a ride with no round — the control', async () => {
+    const told: QualitySettings[] = [];
+    const arriving = arrivingRenderer([], told);
+    await pressRide(arriving.renderer, undefined, undefined, false);
+    await arriving.settleLoad({ loaded: true });
+    for (let index = 0; index < SLOW_FRAMES; index += 1) await pump(SLOW_MS);
+    await settle();
+    expect(begunAt).toEqual([]);
+    expect(told.at(-1)?.world).toBe('stylised');
+    expect(notices()).toContain(REALISTIC_WORLD_LEFT_NOTICE);
   });
 });
