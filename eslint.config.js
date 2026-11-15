@@ -210,6 +210,20 @@ const MAP_FEATURES_IMPORT_PATTERNS = [
 ];
 
 /**
+ * What `packages/operate-text` may not name on top of the shared list (#2644,
+ * ADR 0069 D-7): any other workspace package. It has no dependency, so the
+ * instance's admin pages and the app take nothing with it. React is already
+ * on the shared list: it returns strings and rows, and each app draws them.
+ */
+const OPERATE_TEXT_IMPORT_PATTERNS = [
+  {
+    group: ['@onyourleft/*'],
+    message:
+      'packages/operate-text has no dependency (#2644, ADR 0069 D-7): restate the shape it reads as a structural type, as status.ts does.',
+  },
+];
+
+/**
  * Globals a platform-isolated package may not name.
  *
  * The package's own `tsconfig.json` is the closure here — `lib: ["ES2024"]` with
@@ -892,6 +906,18 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-restricted-imports': ['error', { patterns: ANALYSIS_IMPORT_PATTERNS }],
     },
+  },
+
+  // --- packages/operate-text is Operate's wording, and platform-free --------
+  // #2644, ADR 0069 D-7. The same sentences and rows are drawn by the app (a
+  // browser, the Android WebView) and by the instance's admin pages (Node), so
+  // the package takes packages/domain's isolation over EVERY file, its tests
+  // included: none of them reads a file. `packages/operate-text/tsconfig.json`
+  // is the closure and this is the fast duplicate; on top of it, no other
+  // workspace package and no renderer.
+  {
+    files: ['packages/operate-text/**/*.{ts,tsx}'],
+    rules: platformIsolation([...BLE_LIBRARY_IMPORT_PATTERNS, ...OPERATE_TEXT_IMPORT_PATTERNS]),
   },
 
   // --- packages/map-features decodes untrusted tiles, and is platform-free ----

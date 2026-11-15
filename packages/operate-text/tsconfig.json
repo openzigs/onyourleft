@@ -1,0 +1,18 @@
+{
+  // `lib` is ES2024 and nothing else, and `types` is empty — packages/domain's
+  // and packages/protocol's closure, for the reason docs/agents/lint-boundaries.md §4d
+  // gives: the same sentences are drawn by the app (a browser, the Android
+  // WebView) and by the instance's admin pages (Node), so nothing here may name
+  // a platform. With `types: []`, `document`, `fetch`, `process` and `Buffer`
+  // are all compile errors, and so is a JSX element: nothing here renders.
+  //
+  // One program, not two, as packages/protocol: no test here reads a file, so
+  // the main tsconfig IS the one that enforces. `vitest.config.ts` imports
+  // nothing, so that it cannot pull `/// <reference types="node" />` back in.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}
