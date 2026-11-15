@@ -152,3 +152,22 @@ describe('#2669 — what this phone remembers about a paired sensor', () => {
     expect(transportSeed(memory)().map((one) => one.id)).toEqual([STRAP]);
   });
 });
+
+describe('#2672 — the steering controller, remembered beside the sensors', () => {
+  const CONTROLLER = deviceId('D1:0B:1C:00:4E:21');
+
+  it('keeps a controller across a restart, with the role controller', () => {
+    const device = storage();
+    createRememberedSensors(device).remember({ id: CONTROLLER, name: 'Ctrl', role: 'controller' });
+    expect(createRememberedSensors(device).list()).toEqual([
+      { id: CONTROLLER, name: 'Ctrl', role: 'controller' },
+    ]);
+  });
+
+  it('does not hand the controller to the transport, which never pairs one', () => {
+    const memory = createRememberedSensors(storage());
+    memory.remember({ id: STRAP, name: 'HRM-Pro', role: 'heart-rate' });
+    memory.remember({ id: CONTROLLER, name: 'Ctrl', role: 'controller' });
+    expect(transportSeed(memory)().map((one) => one.id)).toEqual([STRAP]);
+  });
+});

@@ -24,7 +24,9 @@ do not build automatic reconnection; it is unavailable in Web Workers; and there
 background operation. **Plan for ~3 concurrent connections**, not 7. Do not design a UI that hides
 any of this. ⚠️ The Android shell is not Web Bluetooth: since
 [#2669](https://github.com/openzigs/onyourleft/issues/2669) it remembers paired sensors
-(`apps/web/src/ride/remembered-sensors.ts`) and reconnects them itself, asking a trainer for nothing.
+(`apps/web/src/ride/remembered-sensors.ts`) and reconnects them itself, asking a trainer for nothing;
+since [#2672](https://github.com/openzigs/onyourleft/issues/2672) the steering controller too
+(`ride/shell-steering-controller.ts`).
 
 **And `'bluetooth' in navigator` is not the feature detect.** Chrome on Linux exposes the object and
 WebBluetoothCG's own status file says *"Linux is partially implemented and not supported"*. #40's

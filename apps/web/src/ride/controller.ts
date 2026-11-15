@@ -1169,8 +1169,12 @@ export interface RideControllerOptions {
  */
 export const RECONNECT_BACKOFF_SECONDS: readonly number[] = [2, 4, 8, 16, 30];
 
-/** The wait before try number `attempt` (counting from zero). */
-function backoffSeconds(attempt: number): number {
+/**
+ * The wait before try number `attempt` (counting from zero). The steering
+ * controller's reconnect uses it too (#2672), so both say *Reconnecting…* on
+ * the same rhythm.
+ */
+export function backoffSeconds(attempt: number): number {
   return (
     RECONNECT_BACKOFF_SECONDS[Math.min(attempt, RECONNECT_BACKOFF_SECONDS.length - 1)] ??
     RECONNECT_BACKOFF_SECONDS[0] ??
@@ -4129,9 +4133,13 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (remembered === undefined || disposed) {
         return;
       }
+      // #2672: the steering controller is remembered beside the sensors and is
+      // its own client's to reconnect (`steering-controller.ts`), never this one's.
       const wanted = remembered
         .list()
-        .filter((sensor) => !sensors.has(sensor.id) && !forgetting.has(sensor.id));
+        .flatMap(({ id, role }) =>
+          role === 'controller' || sensors.has(id) || forgetting.has(id) ? [] : [{ id, role }],
+        );
       if (wanted.length === 0) {
         // Nothing to ask the transport for, so the stack is not brought up:
         // a rider who never paired is not asked for Bluetooth at launch.

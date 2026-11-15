@@ -38,6 +38,7 @@ import {
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { createShellRideController } from './ride/shell-ride-controller';
+import { createShellSteeringController } from './ride/shell-steering-controller';
 import {
   createSteeringController,
   STEERING_CONTROLLER_BUTTONS,
@@ -480,8 +481,15 @@ async function buildPlatform(
     };
     // #1826. The same `plugin`, so the controller's link is one of the
     // links this object holds, against the same connection budget.
-    const steering = createSteeringController(
+    // #2672: remembered in the sensors' memory and reconnected after them,
+    // in what they leave of that budget (`ride/shell-steering-controller.ts`).
+    const steering = createShellSteeringController(
       mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
+      {
+        remembered: rememberedSensors,
+        ride: rideController,
+        budget: transport.traits.maxConcurrentConnections,
+      },
     );
     // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
     // others in `MainActivity`: media keys have nothing to do with a link.
