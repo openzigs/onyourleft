@@ -427,6 +427,36 @@ export interface GameTrainerPort {
    */
   recordingPaused?(): boolean;
   /**
+   * The HUD's *Pause* pausing the recording under the ride — #2656. The ride
+   * controller's own `pause()`, the one the Ride screen's *Pause* calls, so a
+   * pause in the game is the same pause: *Moving* stops, the engine takes no
+   * reading until it resumes, and the saved ride carries the pause as paused
+   * time rather than as the trainer's zeros.
+   *
+   * Answers whether it paused one: `false` with nothing recording, and with
+   * a recording already paused — by the rider on the Ride screen, by the
+   * engine's auto-pause, or after a recovery — which it leaves as it was, so
+   * {@link resumeRecording} is called only for a pause made here (#516: a
+   * pause somebody else made is not resumed for them).
+   *
+   * ⚠️ **Sends the trainer nothing on a ride with no workout**: the
+   * controller's `pause()` writes no target, and the game's own loop, which
+   * is what drives the gradient, stops with the game as it did before #2656.
+   * Under a running workout the workout pauses with the ride, as it does on
+   * the Ride screen's *Pause* and on an auto-pause (`ride/controller.ts`
+   * §`tick`, #441's ease). Optional, as {@link recordingPaused} is;
+   * `gameTrainerPortOver` always supplies it, and `WIRE003` goes red if
+   * `GameView` stops calling it.
+   */
+  pauseRecording?(): Promise<boolean>;
+  /**
+   * The HUD's *Resume* resuming the recording that {@link pauseRecording}
+   * paused — #2656. The controller's own `resume()`; nothing when the
+   * recording is not paused. `GameView` calls it only for a pause its own
+   * *Pause* made.
+   */
+  resumeRecording?(): Promise<void>;
+  /**
    * The moving time of the ride being RECORDED, in seconds — or `undefined`
    * when no ride is in progress (recording or paused) — #1111.
    *
@@ -438,11 +468,15 @@ export interface GameTrainerPort {
    * that is not being recorded has none, and the HUD says so with a dash
    * rather than inventing one from the simulation's clock.
    *
-   * ⚠️ The game's own *Pause* pauses the SIMULATION; the recording is the
-   * Ride screen's (`RideSession`, above the router), and its auto-pause is
-   * what stops this figure when the rider stops. So this is the time the
-   * saved ride will say, which is the point of reading it — and why the HUD
-   * does not read it on the frame alone: see {@link watchRide}.
+   * ⚠️ The game's own *Pause* pauses the simulation AND, since #2656, the
+   * recording ({@link pauseRecording}): until then it paused the simulation
+   * only, a trainer's flywheel still turning counted as movement, and this
+   * figure ran on through the pause. The recording is still the Ride
+   * screen's (`RideSession`, above the router), and its auto-pause is what
+   * stops this figure when the rider stops without pressing anything. So
+   * this is the time the saved ride will say, which is the point of reading
+   * it — and why the HUD does not read it on the frame alone: see
+   * {@link watchRide}.
    *
    * A snapshot read, a property access. On the port for
    * {@link recordingMayStop}'s reason — `WIRE003` goes red if `GameView` stops
@@ -639,6 +673,12 @@ interface GameTrainerSource {
   recordForRoom?(): Promise<boolean>;
   noteRoomRace?(race: RoomRaceFact): void;
   /**
+   * #2656. @see GameTrainerPort.pauseRecording, GameTrainerPort.resumeRecording.
+   * Optional for {@link recordForRoom}'s reason; the ride controller has both.
+   */
+  pause?(): Promise<void>;
+  resume?(): Promise<void>;
+  /**
    * #1312. @see GameTrainerPort.courseLine. Optional for
    * {@link GameTrainerSource.getSnapshot}'s `keepAliveFailed` reason: a source
    * with no recording has no laps. The ride controller always has it.
@@ -806,6 +846,21 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       controller?.noteRoomRace?.(race);
     },
     recordingPaused: () => controller?.getSnapshot().phase === 'paused',
+    pauseRecording: async () => {
+      // Only a recording that is recording: one already paused is left as
+      // whoever paused it left it. @see GameTrainerPort.pauseRecording
+      if (controller?.pause === undefined || controller.getSnapshot().phase !== 'recording') {
+        return false;
+      }
+      await controller.pause();
+      return true;
+    },
+    resumeRecording: async () => {
+      if (controller?.resume === undefined || controller.getSnapshot().phase !== 'paused') {
+        return;
+      }
+      await controller.resume();
+    },
     watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
     courseLine: (event) => controller?.noteCourseLine?.(event),
     rideLapSeconds: () => {

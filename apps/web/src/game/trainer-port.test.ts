@@ -841,6 +841,56 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     });
   });
 
+  describe('the HUD’s Pause and Resume — #2656', () => {
+    type Phase = 'idle' | 'recording' | 'paused' | 'stopped';
+    function sourceAt(phase: Phase) {
+      const calls: string[] = [];
+      const port = gameTrainerPortOver({
+        getSnapshot: () => ({ trainer: NO_CONTROL, workout: undefined, phase }),
+        simulationControl: () => undefined,
+        requestTrainerControl: () => Promise.resolve(),
+        noteGameRideEnded: () => undefined,
+        subscribe: () => () => undefined,
+        pause: () => {
+          calls.push('pause');
+          return Promise.resolve();
+        },
+        resume: () => {
+          calls.push('resume');
+          return Promise.resolve();
+        },
+      });
+      return { port, calls };
+    }
+
+    it('pauses a recording that is recording, through the controller’s own pause, and says it did', async () => {
+      const riding = sourceAt('recording');
+      expect(await riding.port.pauseRecording?.()).toBe(true);
+      expect(riding.calls).toEqual(['pause']);
+    });
+
+    it('leaves any other recording as it is, and says it paused nothing', async () => {
+      for (const phase of ['idle', 'paused', 'stopped'] as const) {
+        const other = sourceAt(phase);
+        expect(await other.port.pauseRecording?.(), phase).toBe(false);
+        expect(other.calls, phase).toEqual([]);
+      }
+      expect(await gameTrainerPortOver(undefined).pauseRecording?.()).toBe(false);
+    });
+
+    it('resumes only a paused recording, through the controller’s own resume', async () => {
+      const paused = sourceAt('paused');
+      await paused.port.resumeRecording?.();
+      expect(paused.calls).toEqual(['resume']);
+      for (const phase of ['idle', 'recording', 'stopped'] as const) {
+        const other = sourceAt(phase);
+        await other.port.resumeRecording?.();
+        expect(other.calls, phase).toEqual([]);
+      }
+      await expect(gameTrainerPortOver(undefined).resumeRecording?.()).resolves.toBeUndefined();
+    });
+  });
+
   it('reads a finished workout for the audio, as main.tsx did — #447', () => {
     const { controller } = controllerWith({ ...NO_CONTROL, hasControl: true }, 'finished');
     expect(gameTrainerPortOver(controller).readTrainer()).toMatchObject({

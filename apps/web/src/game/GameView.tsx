@@ -841,9 +841,11 @@ function watchNothing(): () => void {
  *
  * ⚠️ **Subscribed, not only read during render**, for {@link useOneNoticeOnly}'s
  * reason. A running game re-renders on every frame, but a PAUSED one does not
- * — and the game's *Pause* does not pause the RECORDING (`trainer-port.ts`
- * §`GameTrainerPort.rideMovingSeconds`), so a figure read only on the tick's
- * render froze at the press while the recorder went on counting. The
+ * — and until #2656 the game's *Pause* did not pause the RECORDING
+ * (`trainer-port.ts` §`GameTrainerPort.rideMovingSeconds`), so a figure read
+ * only on the tick's render froze at the press while the recorder went on
+ * counting. It still goes on counting through a pause the game did not make,
+ * and *Elapsed* through every pause. The
  * controller tells its subscribers on every tick of the ride's clock
  * (`ride/controller.ts` §`tick`), and `useSyncExternalStore` re-renders only
  * when the figure has changed. It is still read on every other render, so a
@@ -876,9 +878,10 @@ function useRideElapsedSeconds(trainer: GameTrainerPort | undefined): number | u
 
 /**
  * The moving time of the lap in progress, kept current — #1312. The
- * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason: a
- * paused GAME does not pause the recording, and the lap's clock is the
- * recording's.
+ * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason:
+ * the lap's clock is the recording's, and a paused game holds it only when
+ * its *Pause* paused the recording too (#2656), which a recording already
+ * paused, or woken from an auto-pause, it did not.
  */
 function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undefined {
   const watch = useCallback(
@@ -1639,6 +1642,17 @@ function GameScreen({
   const powerZoneTime = useRidePowerZoneTime(props.trainer, thresholdPower);
   /** @see useRecordingPaused */
   const recordingPaused = useRecordingPaused(props.trainer);
+  /**
+   * Whether the HUD's own *Pause* paused the recording under the ride — #2656:
+   * the answer of `GameTrainerPort.pauseRecording` for the press that paused
+   * the game, `undefined` while the game is not paused. Its *Resume* resumes
+   * the recording only when this says the game paused it (#516: a pause the
+   * rider made on the Ride screen, the engine's, or a recovery's is not resumed
+   * for them). A promise because the press does not wait: the game pauses on
+   * the frame it is pressed, and the recording as soon as its checkpoint is
+   * written.
+   */
+  const recordingPausedHereRef = useRef<Promise<boolean> | undefined>(undefined);
   const sidePairingRef = useRef(props.sidePairing);
   sidePairingRef.current = props.sidePairing;
   const sideLostRef = useRef(false);
@@ -4821,7 +4835,26 @@ function GameScreen({
         // during the ride.
         corridor={rideHasCorridor ? worldCorridorRef.current : undefined}
         onPause={() => {
-          setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
+          // #2656: the ride's pause, not only the game's. The simulation stops
+          // with the loop, and the recording with the controller's own
+          // `pause()`, so *Moving* stops and no paused second's reading
+          // reaches an average, the saved ride or an export.
+          const trainer = props.trainer;
+          if (phase === 'paused') {
+            setPhase('riding');
+            const pausedHere = recordingPausedHereRef.current;
+            recordingPausedHereRef.current = undefined;
+            void pausedHere
+              ?.then((paused) => (paused ? trainer?.resumeRecording?.() : undefined))
+              .catch(() => undefined);
+            return;
+          }
+          setPhase('paused');
+          // A pause that did not take is a recording that carries on, which
+          // is what it did before #2656; the HUD's *Moving* shows it.
+          recordingPausedHereRef.current = (
+            trainer?.pauseRecording?.() ?? Promise.resolve(false)
+          ).catch(() => false);
         }}
         // #2349: *End ride* ASKS, and never ends the ride on one press.
         onEnd={askToEnd}
@@ -4934,9 +4967,12 @@ function GameScreen({
           // freeze. After the side camera, in `announce.ts`'s order.
           // #1360's review (N1): and, in the same place, a recording paused
           // under the ride in the room — said, never resumed for the rider.
-          roomRideNotice(roomRef.current?.status(), recordingPaused) === undefined ? undefined : (
+          // #2656: not while the HUD's own *Pause* holds the ride, whose
+          // *Resume* is in view and resumes the recording it paused.
+          roomRideNotice(roomRef.current?.status(), recordingPaused && phase !== 'paused') ===
+          undefined ? undefined : (
             <StatusMessage key="room" tone="warning" label={ROOM_NOTICE_LABEL}>
-              {roomRideNotice(roomRef.current?.status(), recordingPaused)}
+              {roomRideNotice(roomRef.current?.status(), recordingPaused && phase !== 'paused')}
             </StatusMessage>
           ),
           // #785: a race held on its line, counting down, or over — the room's
