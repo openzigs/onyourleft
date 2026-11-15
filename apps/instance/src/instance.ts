@@ -4,6 +4,7 @@ import { lookup } from 'node:dns/promises';
 import { mkdir, stat, statfs } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { createAdmin, type Admin } from './admin/admin.ts';
 import { createIdentity, type Identity } from './auth/identity.ts';
 import { sweepPeriodMs } from './auth/rate-limit.ts';
 import { createDiskBlobStore } from './blob/disk-blob-store.ts';
@@ -312,6 +313,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   // #2610: the owner's tool check, ended when the instance stops.
   const operateStopped = new AbortController();
   let stopRetrying = (): void => undefined;
+  let admin: Admin | undefined;
+  let stopAdmin = (): void => undefined;
   let stopping = false;
   const counters = new HttpCounters();
 
@@ -916,10 +919,43 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       localModel: (settings) =>
         createLocalModel({ settings, resolve: options.resolve ?? systemResolver }),
     };
+    // #2641 (ADR 0069 D-2): the instance's own admin pages, only where the
+    // operator turned them on. With no accounts, no secret or no owner they
+    // say so, naming the variable.
+    if (server.adminPages) {
+      const accounts = identity;
+      const pages = createAdmin({
+        store,
+        origin: server.origin,
+        ownerKey: options.config.moderators.owner,
+        secretKeySet: server.secretKey !== undefined,
+        roleOf:
+          accounts === undefined ? undefined : (athleteId) => accounts.moderation.roleOf(athleteId),
+        now,
+        name: options.config.name,
+      });
+      admin = pages;
+      // Each minute: the coalesced refusals written, and the sign-in limits'
+      // addresses forgotten at the end of their window (#892's promise).
+      stopAdmin = sweepOnBoundaries(
+        {
+          periodMs: sweepPeriodMs([
+            { limit: 1, windowMs: pages.rateLimitSweepPeriodMs },
+            { limit: 1, windowMs: 60_000 },
+          ]),
+          run: () => {
+            pages.sweepRateLimits();
+            void pages.flushRefusals();
+          },
+        },
+        options.sweepTimers,
+      );
+    }
     // Replaced, not mutated (above): the accounts when there is an origin, and
     // the instance's keys whatever there is.
     handler = createHandler({
       ...handlerOptions,
+      ...(admin === undefined ? {} : { admin }),
       instanceKeys: keys,
       // #1191: sealed requests need the accounts, so they come with them.
       ...(identity === undefined
@@ -1031,6 +1067,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       if (keysTimer !== undefined) clearTimeout(keysTimer);
       stopSweeping();
       stopRetrying();
+      stopAdmin();
       // #1796: a test question out now is ended, not left for its 30 s bound.
       hostedSettings?.stop();
       operateStopped.abort();
@@ -1038,6 +1075,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       await router.stop();
       await listening.close();
       await history?.idle();
+      // #2641: the refusals counted since the last minute, before the store goes.
+      await admin?.flushRefusals();
       await store?.close();
     },
   };

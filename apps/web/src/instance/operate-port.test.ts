@@ -177,6 +177,46 @@ describe('the operator log — #2602, #2603', () => {
     ]);
   });
 
+  it('shows the instance’s admin pages’ entries, which name the owner or nobody, by listener (#2641)', async () => {
+    const { owner, world } = await operatedWorld();
+    await world.freshRead(async (store) => {
+      await store.recordOperatorAction(
+        {
+          actor: { source: 'admin_tunnel', athleteId: owner.athleteId() },
+          action: 'admin_sign_in',
+          at: 1_790_004_000,
+        },
+        () => ({ outcome: 'done', detail: 'code', value: undefined }),
+      );
+      await store.recordOperatorAction(
+        {
+          actor: { source: 'admin_loopback', athleteId: null },
+          action: 'admin_refused',
+          at: 1_790_004_060,
+        },
+        () => ({ outcome: 'refused', detail: 'code,refused=3', value: undefined }),
+      );
+    });
+    expect(asPage(await createOperatePort(owner.dependencies).log()).entries).toEqual([
+      {
+        id: 2,
+        at: new Date(1_790_004_060 * 1000).toISOString(),
+        source: 'admin_loopback',
+        action: 'admin_refused',
+        detail: 'code,refused=3',
+        outcome: 'refused',
+      },
+      {
+        id: 1,
+        at: new Date(1_790_004_000 * 1000).toISOString(),
+        source: 'admin_tunnel',
+        action: 'admin_sign_in',
+        detail: 'code',
+        outcome: 'done',
+      },
+    ]);
+  });
+
   it('is never read for the deputy or a rider, whom the instance answers as no route', async () => {
     const { deputy, rider, world, approveRider } = await operatedWorld();
     await writeOperatorEntries(world, 2);

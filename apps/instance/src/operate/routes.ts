@@ -5,7 +5,9 @@
  * (`routes.ts`). Every one is `sealed: 'only'` and `reaches: 'owner'`: the
  * handler answers anybody but the owner `not_found` before the route is
  * called, and every one answers `unavailable` on an instance with no keys
- * (`operate.ts`). `moderation/choke-point.test.ts` holds the table to both.
+ * (`operate.ts`). `moderation/choke-point.test.ts` holds the table to both,
+ * and to every one declaring `admin` (#2641, ADR 0069 D-2): which the
+ * instance's own admin pages may call in-process, as the owner.
  */
 
 import { TOOL_CHECK_OUTCOMES } from '../analysis/tool-check.ts';
@@ -29,8 +31,12 @@ const entrySchema: Schema = {
     id: { type: 'integer' },
     /** ISO 8601, UTC. */
     at: { type: 'string' },
-    /** Where it was taken: the app's Operate area, or the operator's CLI on the host. */
-    source: { type: 'string', enum: ['app', 'cli'] },
+    /**
+     * Where it was taken: the app's Operate area, the operator's CLI on the
+     * host, or the instance's own admin pages through the tunnel or on the
+     * server machine (#2641, ADR 0069 D-8).
+     */
+    source: { type: 'string', enum: ['app', 'cli', 'admin_tunnel', 'admin_loopback'] },
     action: { type: 'string', enum: OPERATOR_ACTIONS },
     detail: { type: ['string', 'null'] },
     outcome: { type: 'string', enum: ['done', 'refused', 'failed'] },
@@ -418,6 +424,8 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'getOperateRooms',
     reaches: 'owner',
+    // ADR 0069 D-2: a read; #2649's admin Rooms page renders it.
+    admin: 'read',
     summary: `Every open rider’s room (#2612), newest first: its id and short code, whether it is a group ride, a race or a lap race, private or public, its phase (\`lobby\`, \`countdown\`, \`riding\`, \`finished\`), when it was made, its host’s display name, and the display name of each rider in it — read from the room worker holding it — with a count. A name the owner may not see is \`null\`, “a rider”. **Never** a rider’s place, distance, speed, power, heart rate or Discord id. Changes nothing, so it logs nothing. \`unavailable\` where the instance has no room router. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -456,6 +464,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'endOperateRoom',
     reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
     summary: `End a rider’s room (#2612): \`confirm\` must be the room’s short code and \`reason\` one of ${ROOM_END_REASONS.map((reason) => `\`${reason}\``).join(', ')}, or it is \`validation_failed\` and nothing changes. The room is over, as a finished one is: its route deleted, every socket in it sent \`refuse room-closed\` and closed \`4005\`, a rejoin refused, its voice channel deleted, and every result already final kept. A rider in it rides on alone; nothing is sent to anybody’s trainer. Logged \`room_ended\` with the reason, its kind and how many riders were in it, in the same transaction as the close. \`not_found\` for a room that is not an open rider’s room. \`unavailable\` where the instance has no room router. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -503,6 +514,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'getOperateAnalysis',
     reaches: 'owner',
+    admin: 'read',
     summary: `The operator’s analysis settings (#2609, ADR 0046’s 2026-11-14 amendment): the local model’s base URL, name and reasoning tokens, whether each is set in the app or in \`.env\`, and whether it is \`on\` or the code it is off for; whether the instance offers the local model and a hosted service; the switch that lets riders other than the operator use the local model (off by default); and whether the operator’s own hosted key is held, and for which origin — never the key. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -519,6 +531,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'setOperateAnalysis',
     reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
     summary: `Save the operator’s analysis settings (#2609): every field is optional, a field left out is unchanged, and \`null\` returns it to its fallback — a model field to its \`.env\` line, a source to offered, the switch to off. They apply from the next job, with no restart; a job already running keeps its own. \`localUrl\` is held to the rule \`.env\`’s address is, and a name must resolve, now, to local addresses only; a field that fails is \`validation_failed\` with its code (\`not-a-url\`, \`not-base-url\`, \`not-local\`, \`tls-by-name\`, \`unresolved\`, \`bad-model\`, \`bad-reasoning\`) as the problem, and nothing is saved. Logged \`analysis_settings_set\` in the operator log, naming the fields changed and never a value. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -555,6 +570,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'clearOperateAnalysis',
     reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
     summary: `Clear the operator’s analysis settings (#2609): every field falls back — the local model to \`.env\`, both sources to offered, the switch for other riders to off — from the next job. Logged \`analysis_settings_cleared\`. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -570,6 +588,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'getOperateAnalysisModels',
     reaches: 'owner',
+    admin: 'read',
     summary: `What the configured local model server offers (#2610), for picking a model: whether it is Ollama (and its version) or another OpenAI-compatible server (names alone); and each model’s name, size, parameters and quantisation, whether the server lists \`tools\` among its capabilities (\`not-reported\` where it lists none, as older servers do), and how much of it is in GPU memory — \`all\`, \`part\` with a percent, or \`none\` for a model that is loaded, and \`not-loaded\` for one that is not: Ollama does not say how much memory the card has, so no fit is guessed from a size. The address is the one \`GET /v1/operate/analysis\` shows, checked as every request to it is: a name must resolve, at each request, to local addresses only. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -584,6 +603,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'checkOperateAnalysisModel',
     reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
     summary: `Check that a model on the configured local server calls tools (#2610, ADR 0046 D-7), before it is saved: the instance sends it a fixed instruction and one fixed, harmless tool — no ride, no rider’s text, no history — and the outcome is \`tools-ok\` only if it called the tool and then answered; else \`no-tool-call\`, \`does-not-support-tools\`, \`server-error\`, \`not-local\`, \`out-of-time\`, \`stopped\` (the instance stopped), \`no-address\` or \`busy\` (another check is out: one at a time). ⚠️ **Asking the server for a model loads it, which may unload the model a rider’s job is using.** Only the local source: a hosted service has its own test (\`POST /v1/analysis/hosted/test\`). Logged \`analysis_model_checked\` with the outcome, never the model’s name. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -621,6 +643,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'getOperateAnalysisJobs',
     reaches: 'owner',
+    admin: 'read',
     summary: `The analysis queue (#2610): how many jobs are queued and running, how many ended in each status in the last 7 days and the failed ones by failure code; and the newest 50 jobs — write-up or re-plan, local or hosted, status, failure code, when made and ended, and whether it was your own or another rider’s. Never which rider, and never a job’s input, events, sections or write-up. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -650,6 +673,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'getOperateStatus',
     reaches: 'owner',
+    admin: 'read',
     summary:
       'The instance’s Status (#2604), read-only: the checks `GET /ready` makes, the version and deployed commit, the registration mode, uptime, disk space, the last backup, the tunnel’s readiness (`unknown` unless `OYL_INSTANCE_TUNNEL_READY_URL` is set), how many athletes are in each standing, rooms open and analysis jobs waiting or running, and the instance keys’ state. Counts and names only: no secret, no row of anybody, no path on the host. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
     identity: true,
@@ -687,6 +711,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'getOperatorLog',
     reaches: 'owner',
+    admin: 'read',
     summary:
       'The operator log (#2602): every action taken as the instance’s operator, from the app or the CLI on the host, NEWEST first, a page at a time — `?limit=` (1–200, default 50) and `?cursor=` from the page before. Append-only. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
     identity: true,
@@ -729,6 +754,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'getOperateBackups',
     reaches: 'owner',
+    admin: 'read',
     summary:
       'The instance’s backups (#2606), read from the records the `backup` service writes — the instance never reads the backup folders: the newest 50, newest first, each with when it ran and its age, whether it made a snapshot (a failed run names its error, never its message), the snapshot directory’s name, its row and blob counts and database SHA-256 from its manifest, its size, how its off-box copy went, how many old snapshots it removed, the free space where snapshots and their off-box copies go, and the backup service’s interval (`null` for a one-off run); and the “back up now” still waiting, if any. No host path. Restore is not here: it stays on the CLI. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
     identity: true,
@@ -783,6 +809,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'requestOperateBackup',
     reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
     summary:
       '“Back up now” (#2606): asks the `backup` service for a snapshot, which it takes within 30 seconds; answers 202 at once — the instance itself takes none, holding neither the backup folders nor a reason to. The request and its `backup_requested` entry in the operator log are written in one transaction. Refused `too_many`, and logged `refused`, while a request already waits or a backup was made in the last 15 minutes: each extra backup with `--keep` removes an older one, and shortens how far back a restore can go. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
     identity: true,

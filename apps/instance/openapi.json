@@ -8614,7 +8614,9 @@
                             "type": "string",
                             "enum": [
                               "app",
-                              "cli"
+                              "cli",
+                              "admin_tunnel",
+                              "admin_loopback"
                             ]
                           },
                           "action": {
@@ -8637,6 +8639,9 @@
                               "analysis_settings_set",
                               "analysis_settings_cleared",
                               "analysis_model_checked",
+                              "admin_code_minted",
+                              "admin_sign_in",
+                              "admin_refused",
                               "room_ended"
                             ]
                           },

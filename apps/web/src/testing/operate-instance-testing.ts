@@ -36,7 +36,11 @@ import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 interface OperatorLogWriter {
   recordOperatorAction(
     entry: {
-      actor: { source: 'app'; athleteId: string } | { source: 'cli' };
+      actor:
+        | { source: 'app'; athleteId: string }
+        | { source: 'cli' }
+        // #2641: the instance's own admin pages, by listener.
+        | { source: 'admin_tunnel' | 'admin_loopback'; athleteId: string | null };
       action: string;
       at: number;
     },

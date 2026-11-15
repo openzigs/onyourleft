@@ -33,6 +33,19 @@ describe('readServerConfig (#780, #791)', () => {
     expect(readServerConfig({ compression: 'yes' }, 1).ok).toBe(false);
   });
 
+  it('keeps the admin pages OFF unless OYL_INSTANCE_ADMIN_PAGES is the word on (#2641, ADR 0069 D-2)', () => {
+    const unset = readServerConfig({}, 1);
+    expect(unset.ok && unset.config.adminPages).toBe(false);
+    const on = readServerConfig({ adminPages: 'On' }, 1);
+    expect(on.ok && on.config.adminPages).toBe(true);
+    const off = readServerConfig({ adminPages: 'off' }, 1);
+    expect(off.ok && off.config.adminPages).toBe(false);
+    expect(readServerConfig({ adminPages: 'yes' }, 1)).toEqual({
+      ok: false,
+      problems: ['OYL_INSTANCE_ADMIN_PAGES must be on or off.'],
+    });
+  });
+
   it('takes an origin alone, https unless it is this machine', () => {
     const ok = readServerConfig({ origin: 'https://ride.example' }, 1);
     expect(ok.ok && ok.config.origin).toBe('https://ride.example');

@@ -34,6 +34,7 @@ import {
   NO_KEYS_SENTENCE,
   type InstanceKeys,
 } from '../keys/instance-keys.ts';
+import { ADMIN_CODE_LIFETIME_SECONDS, newAdminCode } from '../admin/code.ts';
 import { clearAnalysisSettings, saveAnalysisSettings } from '../analysis/settings.ts';
 import { randomHex } from '../auth/crypto.ts';
 import { recoveryCodeSha256 } from '../auth/identity.ts';
@@ -1300,6 +1301,41 @@ export async function modelKeyClear(paths: DataPaths) {
       (held) => (held ? 'cleared' : 'none_held'),
     );
     return { command: 'model-key clear', cleared };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `admin-code` (#2641, ADR 0069 D-1): a one-time code for the instance's own
+ * admin pages, printed ONCE and stored only as its SHA-256. It lives ten
+ * minutes, opens one session for the athlete holding
+ * `OYL_INSTANCE_OWNER_KEY`, and minting it voids every unused code, so at
+ * most one is live. The code and its `admin_code_minted` entry are written in
+ * one transaction; the entry names no code (`voided_unused` when a live one
+ * was voided). Whoever can run this on the host already holds more than the
+ * code gives.
+ */
+export async function adminCode(paths: DataPaths, now?: () => Date) {
+  const store = openServingStore(paths.database);
+  try {
+    const { code, sha256 } = await newAdminCode();
+    const mintedAt = secondsOf(now);
+    const expiresAt = mintedAt + ADMIN_CODE_LIFETIME_SECONDS;
+    const { voided } = await asOperatorAction(
+      store,
+      'admin_code_minted',
+      (inside) =>
+        inside.mintAdminCode({ codeSha256: sha256, mintedAt, expiresAt, mintedBy: 'cli' }),
+      (minted) => (minted.voided > 0 ? 'voided_unused' : null),
+      now,
+    );
+    return {
+      command: 'admin-code',
+      code,
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+      voidedUnused: voided > 0,
+    };
   } finally {
     await store.close();
   }

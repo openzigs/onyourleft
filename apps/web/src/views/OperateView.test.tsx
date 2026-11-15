@@ -293,6 +293,35 @@ describe('the Operate area over a scripted instance — #2603', () => {
     ]);
   });
 
+  it('names the instance’s admin pages as an entry’s source, by listener (#2641)', async () => {
+    const scripted = scriptedOperate({
+      entries: [
+        {
+          id: 2,
+          at: '2026-11-15T09:01:00.000Z',
+          source: 'admin_loopback',
+          action: 'admin_refused',
+          detail: 'code,refused=3',
+          outcome: 'refused',
+        },
+        {
+          id: 1,
+          at: '2026-11-15T09:00:00.000Z',
+          source: 'admin_tunnel',
+          action: 'admin_sign_in',
+          detail: 'code',
+          outcome: 'done',
+        },
+      ],
+    });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    expect([...logLines()].sort()).toEqual([
+      'Admin sign-in attempts refused, 2026-11-15 09:01 UTC, from the admin pages, on the server machine: refused (code,refused=3).',
+      'Signed in to the admin pages, 2026-11-15 09:00 UTC, from the admin pages, through the tunnel: done (code).',
+    ]);
+  });
+
   it.each([
     ['analysis_settings_set', 'AI settings changed'],
     ['analysis_settings_cleared', 'AI settings returned to .env'],

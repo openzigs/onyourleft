@@ -367,6 +367,16 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listOperatorLogPage: {
     notAScopedRead: 'the operator’s own record, a page at a time, newest first (#2602)',
   },
+  mintAdminCode: { notAScopedRead: 'a write; an admin code names no athlete (#2641)' },
+  openAdminSessionWithCode: {
+    notAScopedRead:
+      'a write: the code is what admits, and the session is opened for the owner the admin layer named (#2641)',
+  },
+  findAdminSession: {
+    notAScopedRead: 'authentication: the admin cookie’s token is what names the athlete (#2641)',
+  },
+  touchAdminSession: { notAScopedRead: 'a write, by the token (#2641)' },
+  endAdminSession: { notAScopedRead: 'a write, by the token (#2641)' },
   listSuspendedAthletes: {
     notAScopedRead: 'the moderators’ list of suspended accounts, a page at a time (#961)',
   },

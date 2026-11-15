@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { NO_LEGAL_SETTINGS } from './legal.ts';
+import type { Admin } from './admin/admin.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Identity } from './auth/identity.ts';
@@ -102,6 +103,8 @@ export async function startTestInstance(
     segments?: Segments;
     /** The owner's Operate area (#2602). */
     operate?: Operate;
+    /** The instance's own admin pages (#2641). */
+    admin?: Admin;
     /** What `/metrics` would count of each response (#1095's never-logged test). */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
@@ -126,6 +129,7 @@ export async function startTestInstance(
     ...(options.sidePose === undefined ? {} : { sidePose: options.sidePose }),
     ...(options.segments === undefined ? {} : { segments: options.segments }),
     ...(options.operate === undefined ? {} : { operate: options.operate }),
+    ...(options.admin === undefined ? {} : { admin: options.admin }),
     ...(options.observe === undefined ? {} : { observe: options.observe }),
   });
   const listening = await listen(handler, {

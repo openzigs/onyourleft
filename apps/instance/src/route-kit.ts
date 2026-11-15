@@ -268,6 +268,19 @@ export interface Route {
   /** Whether the route reaches another athlete, and how (#83). */
   readonly reaches: Reach;
   /**
+   * Whether the instance's own admin pages may call this route in-process,
+   * as the owner (#2641, ADR 0069 D-2): `read`, `change` or `never`, and
+   * absent is `never` — the admin seam (`handler.ts` §`dispatchAsOwner`)
+   * answers a `never` route `not_found` before calling it. ⚠️ **Declared on
+   * every `reaches: 'owner'` route**, so a new Operate route cannot be added
+   * without saying whether a browser reaches it; `moderation/choke-point.test.ts`
+   * holds the table to that. A route that carries a secret in, or whose
+   * answer is worth something only because the edge cannot write it, is
+   * `never`. It is never read from a request: an HTTP client reaches the
+   * route as before, sealed.
+   */
+  readonly admin?: 'read' | 'change' | 'never';
+  /**
    * An athlete awaiting approval (#775) may call this route. Every other
    * session route answers such a caller `registration_pending`.
    */
