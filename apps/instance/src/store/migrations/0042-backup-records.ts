@@ -24,7 +24,14 @@
  *   as it writes the record, so a request is served once. It names no
  *   athlete: the operator log says who asked.
  *
- * Neither table is append-only: the 30-day limit deletes from both. `down`
+ * - **`backup_lease`** — which run holds each backup folder (#2606, third
+ *   review): one row per folder, keyed by the SHA-256 of its path (never the
+ *   path), naming the holder's token, its container and process, and when it
+ *   last showed it was alive (`heartbeat_at`, Unix ms). Every run already
+ *   opens this database, so its write lock is the one atomic step every
+ *   container shares; a run takes the row inside `BEGIN IMMEDIATE`.
+ *
+ * Neither records table is append-only: the 30-day limit deletes from both. `down`
  * drops both, rows and all — they are a cache of what the backup folders
  * hold, and the next run writes a record again.
  */
@@ -90,9 +97,20 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .column('id')
     .where(sql.ref('record_id'), 'is', null)
     .execute();
+  await db.schema
+    .createTable('backup_lease')
+    .addColumn('place', 'text', (column) =>
+      column.primaryKey().check(sql`length(place) = 64 and place not glob '*[^0-9a-f]*'`),
+    )
+    .addColumn('token', 'text', (column) => column.notNull())
+    .addColumn('holder', 'text', (column) => column.notNull())
+    .addColumn('heartbeat_at', 'integer', (column) => column.notNull())
+    .modifyEnd(sql`strict`)
+    .execute();
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
+  await db.schema.dropTable('backup_lease').execute();
   await db.schema.dropIndex('backup_request_pending').execute();
   await db.schema.dropTable('backup_request').execute();
   await db.schema.dropIndex('backup_record_at').execute();

@@ -2186,6 +2186,26 @@ export interface SqlStore {
    * request, written.
    */
   requestBackup(at: number): Promise<BackupRequestOutcome>;
+  /** Whether a backup record names the snapshot directory `snapshot` (#2606). */
+  hasBackupRecord(snapshot: string): Promise<boolean>;
+  /**
+   * Take the lease on one backup folder (#2606, third review), in ONE
+   * `BEGIN IMMEDIATE` transaction: `taken` when no run holds it, or when its
+   * holder's heartbeat is older than `staleBefore` — taken over by a
+   * conditional update on that holder's token, so of two takers one wins —
+   * and `busy` otherwise. Times are Unix ms.
+   */
+  takeBackupLease(lease: {
+    readonly place: string;
+    readonly token: string;
+    readonly holder: string;
+    readonly now: number;
+    readonly staleBefore: number;
+  }): Promise<'taken' | 'busy'>;
+  /** The holder's heartbeat: `false` when the lease is no longer `token`'s. */
+  heartbeatBackupLease(place: string, token: string, now: number): Promise<boolean>;
+  /** Give the lease up, if it is still `token`'s. */
+  releaseBackupLease(place: string, token: string): Promise<void>;
   /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
   listLoadAthletes(): Promise<readonly string[]>;
   /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
@@ -6340,6 +6360,70 @@ function storeOver(
           return { outcome: 'requested', request: { id: row.id, requestedAt: at } };
         }),
       ),
+
+    hasBackupRecord: (snapshot) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('backup_record')
+          .select('id')
+          .where('snapshot', '=', snapshot)
+          .limit(1)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    takeBackupLease: (lease) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<'taken' | 'busy'> => {
+          const held = await trx
+            .selectFrom('backup_lease')
+            .select(['token', 'heartbeat_at'])
+            .where('place', '=', lease.place)
+            .executeTakeFirst();
+          if (held === undefined) {
+            await trx
+              .insertInto('backup_lease')
+              .values({
+                place: lease.place,
+                token: lease.token,
+                holder: lease.holder,
+                heartbeat_at: lease.now,
+              })
+              .execute();
+            return 'taken';
+          }
+          if (held.heartbeat_at >= lease.staleBefore) return 'busy';
+          // Only over the holder judged stale: a lease that changed hands
+          // meanwhile is not this taker's to take.
+          const taken = await trx
+            .updateTable('backup_lease')
+            .set({ token: lease.token, holder: lease.holder, heartbeat_at: lease.now })
+            .where('place', '=', lease.place)
+            .where('token', '=', held.token)
+            .executeTakeFirst();
+          return taken.numUpdatedRows > 0n ? 'taken' : 'busy';
+        }),
+      ),
+
+    heartbeatBackupLease: (place, token, now) =>
+      exclusive(async () => {
+        const beat = await db
+          .updateTable('backup_lease')
+          .set({ heartbeat_at: now })
+          .where('place', '=', place)
+          .where('token', '=', token)
+          .executeTakeFirst();
+        return beat.numUpdatedRows > 0n;
+      }),
+
+    releaseBackupLease: (place, token) =>
+      exclusive(async () => {
+        await db
+          .deleteFrom('backup_lease')
+          .where('place', '=', place)
+          .where('token', '=', token)
+          .execute();
+      }),
 
     listLoadAthletes: () =>
       exclusive(async () =>

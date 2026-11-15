@@ -40,7 +40,7 @@ import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
 import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
-import { lockFolder, RUN_LIMIT_MS, type FolderLock } from './folder-lock.ts';
+import { takeLease, type Lease, type LeaseOptions } from './backup-lease.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 import type { BackupRun, OperatorAction, SqlStore } from '../store/sql-store.ts';
 import { createSync } from '../sync/sync.ts';
@@ -274,6 +274,8 @@ export interface BackupOptions {
   readonly intervalSeconds?: number;
   /** The owner's waiting request this run serves (#2606). */
   readonly requestId?: number;
+  /** The folder leases' clock and heartbeat (`backup-lease.ts`): a test's. */
+  readonly lease?: LeaseOptions;
 }
 
 /**
@@ -298,9 +300,11 @@ export const OFF_BOX_FAILED =
 /**
  * How many snapshots beyond `--keep` a place may hold because their runs
  * could not be recorded (#2606, second review M1). Such a run removes no
- * older snapshot — a recorded restore point is never given up for one that
- * is not — and when the place already holds `--keep` + this many, it
- * removes the snapshot it has just taken instead.
+ * recorded snapshot. Past `--keep` + this many, it removes the OLDEST
+ * snapshot no record names that is newer than every recorded one there —
+ * so the newest is kept (third review F7) — and never a recorded snapshot,
+ * nor one older than them (a snapshot from before #2606, which no record
+ * names either).
  */
 export const UNRECORDED_ALLOWANCE = 2;
 
@@ -310,36 +314,86 @@ export async function backup(paths: DataPaths, destination: string, options: Bac
     throw new CommandError('--keep is a whole number of snapshots, 1 or more.');
   }
   const at = (options.now ?? (() => new Date()))();
-  // One run at a time in a folder, for the whole run (second review B1): a
-  // run that cannot take the lock is refused, and recorded `failed` by name.
-  let here: FolderLock;
+  // One run at a time in a folder, for the whole run (`backup-lease.ts`): a
+  // run that cannot take the folder's lease is refused, and recorded
+  // `failed` by name. The lease's connection stays open for its heartbeat.
+  const leases = openServingStore(paths.database);
+  let here: Lease | undefined;
   try {
     await mkdir(destination, { recursive: true });
-    here = await lockFolder(destination);
+    here = await takeLease(leases, destination, options.lease);
   } catch (error) {
+    await leases.close();
     await recordFailedBackup(paths.database, at, error, options);
     throw error;
   }
+  let there: Lease | undefined;
   try {
-    // The off-box place is locked too; one that cannot be locked is a copy
-    // that failed, and is neither written nor pruned.
-    let there: FolderLock | undefined;
+    // The off-box place is leased too; one whose lease cannot be taken is a
+    // copy that failed, and is neither written nor pruned.
+    let offBoxHeld = false;
     if (options.copyTo !== undefined) {
       try {
         await mkdir(options.copyTo, { recursive: true });
-        there = await lockFolder(options.copyTo);
+        there = await takeLease(leases, options.copyTo, options.lease);
+        offBoxHeld = true;
       } catch {
-        there = undefined;
+        offBoxHeld = false;
       }
     }
-    try {
-      return await takeAndRecord(paths, destination, at, options, there !== undefined);
-    } finally {
-      await there?.release();
-    }
+    return await takeAndRecord(paths, destination, at, options, offBoxHeld, async () => {
+      await here?.confirm();
+      await there?.confirm();
+    });
   } finally {
-    await here.release();
+    await there?.release();
+    await here?.release();
+    await leases.close();
   }
+}
+
+/** Every `snapshot-…` name in `place`, oldest first. */
+async function snapshotsIn(place: string): Promise<string[]> {
+  return (await readdir(place)).filter((name) => name.startsWith('snapshot-')).sort();
+}
+
+/**
+ * Past `--keep` + {@link UNRECORDED_ALLOWANCE}, removes from the place
+ * `made` is in the oldest snapshots no record names that are newer than every
+ * recorded one there (third review F7). Answers whether `made` itself went.
+ * A record that cannot be READ either removes `made` alone, as the safe way.
+ */
+async function capUnrecorded(database: string, made: string, limit: number): Promise<boolean> {
+  const place = dirname(made);
+  const names = await snapshotsIn(place);
+  if (names.length <= limit) return false;
+  const madeName = made.slice(place.length + 1);
+  let droppable: string[];
+  const store = openServingStore(database);
+  try {
+    const recorded: boolean[] = [];
+    for (const name of names) recorded.push(await store.hasBackupRecord(name));
+    const newestRecorded = recorded.lastIndexOf(true);
+    // With no recorded snapshot here, every other one may be from before
+    // #2606: only this run's own may go.
+    droppable =
+      newestRecorded < 0
+        ? [madeName]
+        : names.slice(newestRecorded + 1).filter((each) => {
+            return !recorded[names.indexOf(each)];
+          });
+  } catch {
+    droppable = [madeName];
+  } finally {
+    await store.close();
+  }
+  // Oldest first: the newest is the last to go.
+  let removedMade = false;
+  for (const name of droppable.slice(0, names.length - limit)) {
+    await rm(join(place, name), { recursive: true, force: true });
+    if (name === madeName) removedMade = true;
+  }
+  return removedMade;
 }
 
 async function takeAndRecord(
@@ -347,18 +401,22 @@ async function takeAndRecord(
   destination: string,
   at: Date,
   options: BackupOptions,
-  offBoxLocked: boolean,
+  offBoxHeld: boolean,
+  confirm: () => Promise<void>,
 ) {
   let taken: Awaited<ReturnType<typeof takeBackup>>;
   try {
-    taken = await takeBackup(paths, destination, at, options, offBoxLocked);
+    taken = await takeBackup(paths, destination, at, options, offBoxHeld);
+    // Still this run's folders, or nothing is recorded or pruned (third
+    // review): a heartbeat that failed, or a lease another run took.
+    await confirm();
   } catch (error) {
     await recordFailedBackup(paths.database, at, error, options);
     throw error;
   }
   const { recorded, logged, prune } = await recordTakenBackup(paths.database, at, taken, options);
   // Pruned only once the run is recorded (#2606 review H1): a run whose
-  // record cannot be written removes no older snapshot.
+  // record cannot be written removes no recorded snapshot.
   let removed = 0;
   let kept = true;
   if (prune) {
@@ -367,18 +425,10 @@ async function takeAndRecord(
       removed += 1;
     }
   } else if (options.keep !== undefined) {
-    // …and holds no more than `--keep` + UNRECORDED_ALLOWANCE (second review
-    // M1): past that it gives up the snapshot it has just taken, never one
-    // that was there before.
     const limit = options.keep + UNRECORDED_ALLOWANCE;
-    const places = [taken.snapshot, ...(taken.copiedTo === null ? [] : [taken.copiedTo])];
-    for (const made of places) {
-      const count = (await readdir(dirname(made))).filter((name) =>
-        name.startsWith('snapshot-'),
-      ).length;
-      if (count > limit) {
-        await rm(made, { recursive: true, force: true });
-        if (made === taken.snapshot) kept = false;
+    for (const made of [taken.snapshot, ...(taken.copiedTo === null ? [] : [taken.copiedTo])]) {
+      if ((await capUnrecorded(paths.database, made, limit)) && made === taken.snapshot) {
+        kept = false;
       }
     }
   }
@@ -406,19 +456,26 @@ async function takeAndRecord(
 export const PARTIAL = '.partial-';
 
 /**
- * Removes the partial snapshots a run that died left in `place`. Called only
- * while holding `place`'s lock (`folder-lock.ts`), and — a second guard —
- * removes only a partial last changed longer ago than any run lasts.
+ * A partial snapshot last changed longer ago than this was left by a run
+ * that died: a second guard behind the folder's lease.
  */
-async function removePartials(place: string): Promise<void> {
+export const PARTIAL_AGE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Removes the partial snapshots a run that died left in `place`. Called only
+ * while holding `place`'s lease (`backup-lease.ts`); never removes `mine`,
+ * this run's own; and — a second guard — removes only a partial last changed
+ * more than {@link PARTIAL_AGE_MS} ago.
+ */
+async function removePartials(place: string, mine: string): Promise<void> {
   for (const name of await readdir(place)) {
-    if (!name.startsWith(`${PARTIAL}snapshot-`)) continue;
+    if (!name.startsWith(`${PARTIAL}snapshot-`) || name === mine) continue;
     const path = join(place, name);
     const changed = await stat(path).then(
       (found) => found.mtimeMs,
       () => undefined,
     );
-    if (changed !== undefined && Date.now() - changed > RUN_LIMIT_MS) {
+    if (changed !== undefined && Date.now() - changed > PARTIAL_AGE_MS) {
       await rm(path, { recursive: true, force: true });
     }
   }
@@ -477,12 +534,12 @@ async function takeBackup(
   destination: string,
   at: Date,
   options: BackupOptions,
-  offBoxLocked: boolean,
+  offBoxHeld: boolean,
 ) {
   const started = performance.now();
   const name = `snapshot-${stamp(at)}`;
   const snapshot = join(destination, name);
-  await removePartials(destination);
+  await removePartials(destination, `${PARTIAL}${name}`);
   const partial = join(destination, `${PARTIAL}${name}`);
   let manifest: Manifest;
   let blobs: string[];
@@ -521,8 +578,8 @@ async function takeBackup(
     const copy = join(options.copyTo, name);
     const partialCopy = join(options.copyTo, `${PARTIAL}${name}`);
     try {
-      if (!offBoxLocked) throw new Error('the off-box place is not this run’s');
-      await removePartials(options.copyTo);
+      if (!offBoxHeld) throw new Error('the off-box place is not this run’s');
+      await removePartials(options.copyTo, `${PARTIAL}${name}`);
       await cp(snapshot, partialCopy, { recursive: true });
       await renameRetrying(partialCopy, copy);
       copiedTo = copy;
@@ -670,9 +727,14 @@ function snapshotTime(name: string): number | undefined {
   return Number.isNaN(at) ? undefined : at;
 }
 
-/** The newest complete snapshot in `folder`, by the time its name holds, or `undefined`. */
+/**
+ * The newest complete snapshot in `folder` by the time its name holds, or
+ * `undefined` — ignoring any named after `now`, which a wrong clock made and
+ * which would otherwise hold off every run after each restart (third review F6).
+ */
 async function newestSnapshotIn(
   folder: string,
+  now: number,
 ): Promise<{ readonly name: string; readonly at: number } | undefined> {
   let names: string[];
   try {
@@ -683,7 +745,9 @@ async function newestSnapshotIn(
   let newest: { readonly name: string; readonly at: number } | undefined;
   for (const name of names) {
     const at = snapshotTime(name);
-    if (at !== undefined && (newest === undefined || at > newest.at)) newest = { name, at };
+    if (at !== undefined && at <= now && (newest === undefined || at > newest.at)) {
+      newest = { name, at };
+    }
   }
   return newest;
 }
@@ -787,11 +851,9 @@ export async function backupLoop(
           const now = clock().getTime();
           nextDue =
             last === undefined ? now : Math.min(last.at * 1000 + intervalMs, now + intervalMs);
-          const onDisk = await newestSnapshotIn(destination);
-          if (
-            onDisk !== undefined &&
-            !(await store.listBackupRecords(50)).some((record) => record.snapshot === onDisk.name)
-          ) {
+          const onDisk = await newestSnapshotIn(destination, now);
+          // Against every record, not only the newest (third review F6).
+          if (onDisk !== undefined && !(await store.hasBackupRecord(onDisk.name))) {
             quietUntil = Math.min(onDisk.at + intervalMs, now + intervalMs);
             nextDue = Math.max(nextDue, quietUntil);
           }

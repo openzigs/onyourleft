@@ -29,13 +29,15 @@ import {
   backup,
   BACKUP_POLL_SECONDS,
   backupLoop,
+  PARTIAL_AGE_MS,
   renameRetrying,
   UNRECORDED_ALLOWANCE,
   type DataPaths,
   type Manifest,
 } from './commands.ts';
-import { RUN_LIMIT_MS } from './folder-lock.ts';
+
 import { MIGRATIONS } from '../store/migrations/index.ts';
+import { placeOf } from './backup-lease.ts';
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { migrateAllBut } from '../store/testing/index.ts';
 import { runCommand } from './run.ts';
@@ -376,7 +378,7 @@ describe('backup-loop: a failure never costs a restore point (#2606 review H1)',
     const paths = await migratedAlone();
     const onBox = join(paths.root, 'on-box');
     const offBox = join(paths.root, 'off-box');
-    const longAgo = (Date.now() - RUN_LIMIT_MS - 60_000) / 1000;
+    const longAgo = (Date.now() - PARTIAL_AGE_MS - 60_000) / 1000;
     for (const place of [onBox, offBox]) {
       const dead = join(place, '.partial-snapshot-2026-08-31T23-59-00-000Z');
       await mkdir(dead, { recursive: true });
@@ -436,7 +438,8 @@ describe('backup: one run at a time in a folder (#2606, second review B1)', () =
   it('records every snapshot two runs at once leave complete against its manifest, and refuses the second by name', async () => {
     const paths = await migratedAlone();
     const blobs = createDiskBlobStore(paths.blobs);
-    for (let i = 0; i < 400; i += 1) await blobs.put(new TextEncoder().encode(`blob ${String(i)}`));
+    // Fifty: enough to be caught mid-copy, few enough to be quick anywhere (third review F5).
+    for (let i = 0; i < 50; i += 1) await blobs.put(new TextEncoder().encode(`blob ${String(i)}`));
     const onBox = join(paths.root, 'on-box');
     const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     let outcomes: PromiseSettledResult<unknown>[];
@@ -523,6 +526,152 @@ describe('backup: one run at a time in a folder (#2606, second review B1)', () =
         Promise.reject(Object.assign(new Error('gone'), { code: failures[0] })),
       ),
     ).rejects.toThrow('gone');
+  });
+});
+
+/** A lease row written straight into the database: a live run in another container. */
+function leaseHeldElsewhere(database: string, folder: string): void {
+  const opened = openDatabase(database);
+  try {
+    opened
+      .prepare('INSERT INTO backup_lease VALUES (?, ?, ?, ?)')
+      .run(placeOf(folder), 'elsewhere', 'elsewhere:1', Date.now());
+  } finally {
+    opened.close();
+  }
+}
+
+describe('backup: the folders’ leases (#2606, third review)', () => {
+  it('neither writes nor prunes off the box while another live run holds that folder', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const offBox = join(paths.root, 'off-box');
+    const older = await restorePoints(offBox);
+    leaseHeldElsewhere(paths.database, offBox);
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const taken = await backup(paths, onBox, {
+        keep: 1,
+        copyTo: offBox,
+        now: () => new Date('2026-09-01T00:00:00Z'),
+      });
+      expect(taken.offBox).toBe('failed');
+      expect(taken.recorded).toBe(true);
+    } finally {
+      quiet.mockRestore();
+    }
+    expect((await readdir(offBox)).sort()).toEqual(older);
+    expect(await readdir(onBox)).toEqual(['snapshot-2026-09-01T00-00-00-000Z']);
+  });
+
+  it('is refused by name, taking nothing, while another live run holds its folder', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const older = await restorePoints(onBox);
+    leaseHeldElsewhere(paths.database, onBox);
+    await expect(backup(paths, onBox, { keep: 1 })).rejects.toThrow(/Another backup run/);
+    expect((await readdir(onBox)).sort()).toEqual(older);
+    const store = openServingStore(paths.database);
+    try {
+      expect((await store.listBackupRecords(1))[0]).toMatchObject({
+        outcome: 'failed',
+        error: 'BackupFolderBusy',
+      });
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('stops before recording or pruning when its heartbeat cannot be written', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const older = await restorePoints(onBox);
+    const opened = openDatabase(paths.database);
+    try {
+      opened.exec(`create trigger backup_lease_refuses_test before update on backup_lease
+        begin select raise(abort, 'the heartbeat was refused'); end`);
+    } finally {
+      opened.close();
+    }
+    await expect(
+      backup(paths, onBox, { keep: 1, now: () => new Date('2026-09-01T00:00:00Z') }),
+    ).rejects.toThrow(/no longer holds/);
+    // Nothing pruned: every restore point is there.
+    expect((await readdir(onBox)).filter((name) => older.includes(name))).toEqual(older);
+    const store = openServingStore(paths.database);
+    try {
+      const [record] = await store.listBackupRecords(1);
+      expect(record).toMatchObject({ outcome: 'failed', error: 'BackupLeaseLost' });
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+describe('backup-loop: the hold-off reads the folder against every record (#2606, third review F6)', () => {
+  it('does not hold off for the newest snapshot when a record names it, however many records came after', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      // The newest snapshot on disk, recorded by a run by hand ten minutes ago.
+      await backup(paths, onBox, { now: () => new Date('2026-08-31T23:50:00Z') });
+    } finally {
+      quiet.mockRestore();
+    }
+    const store = openServingStore(paths.database);
+    try {
+      // Sixty records after it, each of a snapshot in another folder.
+      for (let i = 0; i < 60; i += 1) {
+        await store.recordBackup({
+          outcome: 'failed',
+          at: Date.parse('2026-08-31T23:30:00Z') / 1000 + i,
+          error: 'Error',
+          intervalSeconds: null,
+        });
+      }
+    } finally {
+      await store.close();
+    }
+    // No service run is recorded, so one is due at once: the recorded
+    // snapshot is no reason to wait.
+    const { result } = await pollFor(paths, onBox, 10, { intervalSeconds: 3600 });
+    expect(result.runs).toBe(1);
+  });
+
+  it('ignores a snapshot folder named after now, which a wrong clock left', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    await mkdir(join(onBox, 'snapshot-2027-01-01T00-00-00-000Z'), { recursive: true });
+    const { result } = await pollFor(paths, onBox, 3, { intervalSeconds: 3600 });
+    expect(result.runs).toBe(1);
+  });
+});
+
+describe('backup: past the bound, the newest unrecorded snapshot is kept (#2606, third review F7)', () => {
+  it('drops the oldest unrecorded snapshot newer than the recorded ones, never a recorded one', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      // A recorded restore point first.
+      await backup(paths, onBox, { keep: 1, now: () => new Date('2026-09-01T00:00:00Z') });
+      refuseEveryRecord(paths.database);
+      for (const hour of ['01', '02', '03', '04', '05']) {
+        await backup(paths, onBox, {
+          keep: 1,
+          now: () => new Date(`2026-09-01T${hour}:00:00Z`),
+        });
+      }
+    } finally {
+      quiet.mockRestore();
+    }
+    // --keep 1 + 2: the recorded one, and the two newest unrecorded ones.
+    expect((await readdir(onBox)).sort()).toEqual([
+      'snapshot-2026-09-01T00-00-00-000Z',
+      'snapshot-2026-09-01T04-00-00-000Z',
+      'snapshot-2026-09-01T05-00-00-000Z',
+    ]);
   });
 });
 

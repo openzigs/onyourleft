@@ -135,6 +135,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   // #2606: a snapshot the backup service made, and the request it served.
   backup_record: `INSERT INTO backup_record VALUES (1, 39, 'done', NULL, 'snapshot-x', 10, 2, '${'e'.repeat(64)}', 4096, 'copied', 0, 1000, 2000, 21600)`,
   backup_request: `INSERT INTO backup_request VALUES (1, 39, 1)`,
+  backup_lease: `INSERT INTO backup_lease VALUES ('${'f'.repeat(64)}', 'token', 'host:1', 40)`,
 };
 
 /**

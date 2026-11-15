@@ -731,26 +731,49 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
 - **A failure never costs a restore point.** Old snapshots are removed only after the run's record is
   written. If the record cannot be written (a full disk, a lock held too long), the run removes no
   older snapshot.
-- **The bound while records fail.** A run whose record cannot be written keeps its snapshot only
-  while the folder holds no more than `--keep` + 2 snapshots. Beyond that it removes the snapshot it
-  has just taken, and never one that was already there. So a folder never holds more than
-  `--keep` + 2 snapshots because of failed records, or what it held before if that was more.
+- **The bound while records fail.** A run whose record cannot be written removes no recorded
+  snapshot. A folder holds at most `--keep` + 2 snapshots because of failed records, or what it held
+  before if that was more. Past that bound, the run removes the oldest unrecorded snapshots that are
+  newer than every recorded snapshot in the folder, so the newest snapshot is always kept. It never
+  removes a recorded snapshot, or an unrecorded one older than them, such as one the shell loop made
+  before #2606. If the folder has no recorded snapshot at all, the run removes only the snapshot it
+  has just taken.
 - **How often it runs while records fail.** The loop holds back a request it has already tried for
   one interval. When it starts, it also holds off every run, the owner's requests included, until
   one interval after the newest snapshot in the folder that no record names. That snapshot may come
-  from a run whose record failed before a restart, or from the shell loop before an upgrade. So
-  neither restarts nor a waiting request take snapshots more often than once per interval.
-- **One run at a time in a folder.** A run holds a lock file, `.backup.lock`, in each folder it
-  writes, for the whole run. The file is created exclusively (`O_EXCL`), which works on a Windows
-  drive mounted into Docker Desktop. A second run into the same folder, such as a `backup` run by hand
-  while the service is running, is refused and recorded `failed` as `BackupFolderBusy`. If the
-  off-box folder is locked, that run's copy is recorded `failed`. A lock left by a run that died is
-  taken over in three cases: the same container's process id after a restart, a process that is no
-  longer alive, or a lock more than six hours old.
+  from a run whose record failed before a restart, or from the shell loop before an upgrade. It is
+  checked against every record. A folder named after the present moment, which a wrong clock left,
+  is ignored. So neither restarts nor a waiting request take snapshots more often than once per
+  interval.
+- **One run at a time in a folder: the lease.** A run holds a **lease** on each folder it writes:
+  the snapshot folder, and the off-box folder. The lease is a row in the instance's own database
+  (`backup_lease`, keyed by the SHA-256 of the folder's path, never the path), held for the whole
+  run. Every run opens that database, whichever container it runs in: the `backup` service, a
+  `backup` run by hand, `deploy.sh`'s pre-deploy snapshot. SQLite's write lock is the one atomic step
+  they all share, so a run takes the lease in a single `BEGIN IMMEDIATE` transaction, and only one
+  run can.
+  - While it runs, the holder writes a heartbeat every 30 seconds, including during the off-box copy.
+    A run that is slow, or hung but alive, keeps its lease however long it takes.
+  - A lease whose heartbeat is more than **5 minutes** old was left by a run that died. The next
+    run takes it over with a conditional update on the dead run's token, so of two runs only one
+    can win.
+  - **A stuck lease needs no command to clear**: it expires 5 minutes after the run that held it
+    stopped. If the holder is alive but hung, for example on a share that stopped answering, stop
+    it (`docker compose restart backup`). Its lease is free 5 minutes later.
+  - A second run into a folder that is held is refused, and recorded `failed` as
+    `BackupFolderBusy`. A run whose off-box lease is held elsewhere records its copy `failed`, and
+    neither writes nor prunes there.
+  - A run that loses its lease, because a heartbeat cannot be written or another run took it, stops
+    before it records or prunes anything (`BackupLeaseLost`).
+  - On a database from before migration 0042, which has no lease table, runs take no lease, as
+    before.
+  - One limit: `VACUUM INTO` holds the process while it copies the database, so no heartbeat is
+    written during it. A database that takes more than five minutes to copy would lose its lease.
+    That is far beyond the size of one person's instance.
 - **A snapshot is written under `.partial-snapshot-…`** and renamed `snapshot-…` only once it is
   complete, both on the box and off it. `--keep` never counts a partial one. A run removes partial
-  snapshots only while it holds the folder's lock, and only those last changed more than six hours
-  ago, which is longer than any run lasts. A rename that Windows refuses for a moment (`EACCES` or
+  snapshots only while it holds the folder's lease, never its own, and only those last changed more
+  than six hours ago. A rename that Windows refuses for a moment (`EACCES` or
   `EPERM`, for example while a scanner holds the folder) is retried a few times.
 - **A snapshot taken for "back up now" does not hold that request as waiting**, so restoring it does
   not ask for another backup.

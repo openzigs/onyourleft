@@ -454,6 +454,17 @@ export interface BackupRecordTable {
   readonly interval_seconds: number | null;
 }
 
+/** Which run holds a backup folder (#2606, migration 0042): one row per folder. */
+export interface BackupLeaseTable {
+  /** SHA-256 of the folder's path, hex: never the path. */
+  readonly place: string;
+  readonly token: string;
+  /** The holder's container and process, for an operator reading the row. */
+  readonly holder: string;
+  /** When the holder last showed it was alive, Unix ms. */
+  readonly heartbeat_at: number;
+}
+
 /** The owner's "back up now" (#2606, migration 0042): waiting while `record_id` is `NULL`. */
 export interface BackupRequestTable {
   readonly id: Generated<number>;
@@ -819,6 +830,7 @@ export interface InstanceDatabase {
   readonly operator_log: OperatorLogTable;
   readonly backup_record: BackupRecordTable;
   readonly backup_request: BackupRequestTable;
+  readonly backup_lease: BackupLeaseTable;
   readonly room_removal: RoomRemovalTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;
