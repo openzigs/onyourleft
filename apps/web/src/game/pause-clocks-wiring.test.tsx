@@ -40,11 +40,19 @@ import {
   metresPerSecond,
   revolutionsPerMinute,
   seconds,
+  thresholdShare,
+  unixSeconds,
   watts,
   type Seconds,
 } from '@onyourleft/domain';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
-import { activityId, recordingSessionId, type ActivityRecord } from '@onyourleft/store';
+import {
+  activityId,
+  recordingSessionId,
+  workoutId,
+  type ActivityRecord,
+  type WorkoutRecord,
+} from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { createRideController } from '../ride/controller';
@@ -53,6 +61,7 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { exportActivity } from '../transfer/export-activity';
 import type { ActivityFileFormat } from '../transfer/file-format';
 import { readActivityFile, type ImportedRide } from '../transfer/read-activity-file';
+import { RideView } from '../views/RideView';
 
 import { GameView, type RidableRoute } from './GameView';
 import { DEFAULT_HUD_LAYOUT, writeHudLayout } from './hud/hud-layout-preference';
@@ -428,5 +437,286 @@ describe('a pause on the HUD pauses the ride — #2656', () => {
     const paused = await ridden(true);
     expect(straight.written.length).toBeGreaterThan(1);
     expect(paused.written).toStrictEqual(straight.written);
+  });
+});
+
+/**
+ * Under a running ERG workout — the owner's ruling on #2667, 2026-11-15:
+ * *"During a workout, the game HUD's Pause should behave like the Ride
+ * screen's Pause: it pauses the recording and the workout, which eases the
+ * trainer to its floor, and Resume sets the interval's target again."*
+ *
+ * The same production path as above, with the trainer under control and one
+ * long steady interval running. The machine's floor is not 0 W, so the ease
+ * is told apart from any other write; the interval's target is 300 W.
+ */
+const FLOOR = 40;
+const THRESHOLD = watts(250);
+const INTERVAL_WATTS = 300;
+/** FTMS *Set Target Power*: op code 0x05, then the watts as a little-endian sint16. */
+function setTargetPower(target: number): readonly number[] {
+  return [0x05, target & 0xff, (target >> 8) & 0xff];
+}
+
+const HARD_AND_LONG: WorkoutRecord = {
+  id: workoutId('w2656-pause'),
+  createdBy: ATHLETE_A,
+  name: 'Hard',
+  workout: {
+    name: 'Hard',
+    blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(1.2) }],
+  },
+  createdAt: unixSeconds(1),
+  updatedAt: unixSeconds(1),
+};
+
+/** Who pressed *Pause*: nobody, the game HUD, or the Ride screen. */
+type PausedBy = 'nobody' | 'hud' | 'ride-screen';
+
+/** What a workout ride left. */
+interface WorkoutRidden {
+  /** Every write to the trainer's control point, as octets. */
+  readonly written: readonly (readonly number[])[];
+  /** The writes from the *Pause* press to the *Resume* press. */
+  readonly whilePaused: readonly (readonly number[])[];
+  /**
+   * The writes from the *Pause* press to the end of the first second after it,
+   * the rider still pedalling: the pause's own ease, told apart from a stall
+   * rescue's (#585), which eases a rider who stops pedalling.
+   */
+  readonly atPause: readonly (readonly number[])[];
+  /** The writes from the *Resume* press to the end of the first second after it. */
+  readonly onResume: readonly (readonly number[])[];
+  /** The HUD's figures at the *Pause* press and before *Resume*; game rides only. */
+  readonly duringPause: { readonly from: HudFigures; readonly to: HudFigures } | undefined;
+  /**
+   * The bench seconds from the *Pause* press to the *Resume* press. More than
+   * {@link PAUSED_SECONDS}: the simulated trainer takes a bench second to
+   * answer each control-point write (`simulated-trainer-testing.ts`), and
+   * the ease is written inside the pause.
+   */
+  readonly pausedFor: number;
+  /** The HUD's figures before the end; game rides only. */
+  readonly hud: HudFigures | undefined;
+  readonly activity: ActivityRecord;
+}
+
+/** One workout ride, recorded by the real controller against the #44 simulator. */
+async function workoutRide(pausedBy: PausedBy): Promise<WorkoutRidden> {
+  pending = [];
+  nowMs = START_MS;
+  writeHudLayout(localStorage, { ...DEFAULT_HUD_LAYOUT, totalsStrip: true });
+  const harness = createStoreHarness();
+  await seedAthletes(harness);
+  const { transport, bench } = createSimulator({
+    devices: [ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A', minTargetPower: watts(FLOOR) })],
+  });
+  const written: number[][] = [];
+  const controller = createRideController({
+    transport,
+    store: {
+      putRecordingSession: async (record) =>
+        harness.write(async (store) => store.putRecordingSession(record)),
+      appendRecordingChunk: async (chunk) =>
+        harness.write(async (store) => store.appendRecordingChunk(chunk)),
+      readRecordingSessions: async (owner) =>
+        harness.write(async (store) => store.readRecordingSessions(owner)),
+      recoverRecording: async (owner, id) =>
+        harness.write(async (store) => store.recoverRecording(owner, id)),
+      deleteRecordingSession: async (owner, id) =>
+        harness.write(async (store) => store.deleteRecordingSession(owner, id)),
+    },
+    athleteId: ATHLETE_A,
+    newSessionId: () => recordingSessionId('ride-1'),
+    now: () => bench.now,
+    openTrainer: simulatedOpenTrainer(bench, { written, refuseControl: false }),
+    rideSave: {
+      newActivityId: () => activityId('the-ride'),
+      newLapId: () => {
+        throw new Error('this ride has no laps');
+      },
+      timeZone: 'Europe/London',
+      store: {
+        putFinishedRide: (finished) =>
+          harness.write(async (store) => store.putFinishedRide(finished)),
+      },
+    },
+  });
+  await controller.pair('trainer');
+  await controller.requestTrainerControl();
+  await controller.start();
+  expect(controller.startWorkout(HARD_AND_LONG, THRESHOLD)).toBe(true);
+
+  const inGame = pausedBy !== 'ride-screen';
+  if (inGame) {
+    mounted = await mount(
+      <GameView
+        port={{
+          listRoutes: () => Promise.resolve([ROUTE]),
+          loadGhost: () => Promise.resolve(undefined),
+          readSensors: () => gameSensors(controller.getSnapshot()),
+        }}
+        trainer={gameTrainerPortOver(controller)}
+        renderer={() => Promise.resolve(renderer())}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find((each) =>
+        (each.textContent ?? '').startsWith('Ride '),
+      ),
+    );
+  } else {
+    mounted = await mount(<RideView controller={controller} />);
+    await settle();
+  }
+
+  const second = async (): Promise<void> => {
+    await act(async () => {
+      bench.advance(seconds(1));
+      await controller.tick(bench.now);
+    });
+  };
+  let ridden = 0;
+  const rideFor = async (count: number): Promise<void> => {
+    for (let each = 0; each < count; each += 1) {
+      bench.rider.set({
+        power: watts(powerInSecond(ridden)),
+        cadence: revolutionsPerMinute(90),
+        speed: metresPerSecond(9),
+      });
+      ridden += 1;
+      await second();
+      if (inGame) for (let frame = 0; frame < FRAMES_PER_SECOND; frame += 1) await pump();
+    }
+  };
+
+  await rideFor(RIDDEN_EACH_SIDE);
+  let whilePaused: number[][] = [];
+  let eased: number[][] = [];
+  let onResume: number[][] = [];
+  let duringPause: WorkoutRidden['duringPause'];
+  let pausedFor = 0;
+  if (pausedBy !== 'nobody') {
+    const atPause = written.length;
+    const benchAtPause = Number(bench.now);
+    // The HUD's button, or the Ride screen's: both are named so to a rider.
+    await clickThrough(button('Pause'));
+    const from = inGame ? hudFigures() : undefined;
+    // The first second still pedalling, as a rider presses Pause before they
+    // stop: the ease that comes in it is the pause's, as a stall rescue
+    // (#585) eases a rider at 0 rpm too, and nothing else is.
+    await second();
+    eased = written.slice(atPause);
+    // Then off the bike: no watts, no cadence, and the flywheel still turning.
+    bench.rider.set({
+      power: watts(0),
+      cadence: revolutionsPerMinute(0),
+      speed: metresPerSecond(3),
+    });
+    for (let each = 1; each < PAUSED_SECONDS; each += 1) await second();
+    await settle();
+    if (from !== undefined) duringPause = { from, to: hudFigures() };
+    const atResume = written.length;
+    pausedFor = Number(bench.now) - benchAtPause;
+    whilePaused = written.slice(atPause, atResume);
+    await clickThrough(button('Resume'));
+    await rideFor(1);
+    await settle();
+    onResume = written.slice(atResume);
+    await rideFor(RIDDEN_EACH_SIDE - 1);
+  } else {
+    await rideFor(RIDDEN_EACH_SIDE);
+  }
+  await settle();
+  const hud = inGame ? hudFigures() : undefined;
+
+  await act(async () => {
+    controller.armStop();
+    await controller.confirmStop();
+  });
+  for (let index = 0; index < 10; index += 1) await settle();
+  expect(controller.getSnapshot().saveState).toBe('saved');
+  const activity = await harness.read(async (store) =>
+    store.getActivity(ATHLETE_A, activityId('the-ride')),
+  );
+  if (activity === undefined) throw new Error('the ride was not saved');
+  controller.dispose();
+  await harness.destroy();
+  mounted?.unmount();
+  mounted = undefined;
+  localStorage.clear();
+  return { written, whilePaused, atPause: eased, onResume, duringPause, pausedFor, hud, activity };
+}
+
+/** Each workout ride, ridden once by the first case that asks for it (#1688). */
+const workoutRides = new Map<PausedBy, Promise<WorkoutRidden>>();
+function workoutRidden(pausedBy: PausedBy): Promise<WorkoutRidden> {
+  let run = workoutRides.get(pausedBy);
+  if (run === undefined) {
+    run = workoutRide(pausedBy);
+    workoutRides.set(pausedBy, run);
+  }
+  return run;
+}
+
+describe('a pause on the HUD under a workout is the Ride screen’s pause — owner ruling on #2667', () => {
+  it('eases the trainer to its floor at the pause, and writes nothing else while paused', async () => {
+    const { atPause, whilePaused } = await workoutRidden('hud');
+    expect(atPause).toStrictEqual([setTargetPower(FLOOR)]);
+    expect(whilePaused).toStrictEqual([setTargetPower(FLOOR)]);
+  });
+
+  it('writes the interval’s target again on Resume, and nothing else', async () => {
+    const { onResume } = await workoutRidden('hud');
+    expect(onResume).toStrictEqual([setTargetPower(INTERVAL_WATTS)]);
+  });
+
+  it('sends the trainer exactly what the Ride screen’s Pause and Resume send it', async () => {
+    const hud = await workoutRidden('hud');
+    const rideScreen = await workoutRidden('ride-screen');
+    // Non-vacuity: the Ride screen's pause eased and re-targeted too.
+    expect(rideScreen.atPause).toStrictEqual([setTargetPower(FLOOR)]);
+    expect(rideScreen.whilePaused).toStrictEqual([setTargetPower(FLOOR)]);
+    expect(rideScreen.onResume).toStrictEqual([setTargetPower(INTERVAL_WATTS)]);
+    expect(hud.atPause).toStrictEqual(rideScreen.atPause);
+    expect(hud.whilePaused).toStrictEqual(rideScreen.whilePaused);
+    expect(hud.onResume).toStrictEqual(rideScreen.onResume);
+    expect(hud.written).toStrictEqual(rideScreen.written);
+  });
+
+  it('keeps the pause out of Moving and the averages, on the HUD and in the saved ride', async () => {
+    const straight = await workoutRidden('nobody');
+    const paused = await workoutRidden('hud');
+    const rideScreen = await workoutRidden('ride-screen');
+    const during = paused.duringPause;
+    if (during === undefined || paused.hud === undefined || straight.hud === undefined) {
+      throw new Error('the game ride drew no HUD');
+    }
+    // Through the pause the HUD holds Moving and every average, while Elapsed,
+    // wall time from the start, goes on.
+    expect(during.to.moving).toBe(during.from.moving);
+    expect(during.to.averagePower).toBe(during.from.averagePower);
+    expect(during.to.distance).toBe(during.from.distance);
+    expect(during.to.energy).toBe(during.from.energy);
+    expect(secondsOf(during.to.elapsed) - secondsOf(during.from.elapsed)).toBe(paused.pausedFor);
+    // Non-vacuity: with nobody pausing, Moving is Elapsed.
+    expect(straight.hud.moving).toBe(straight.hud.elapsed);
+    expect(straight.activity.movingTime).toBe(straight.activity.elapsedTime);
+    expect(paused.pausedFor).toBeGreaterThanOrEqual(PAUSED_SECONDS);
+    // …and with the HUD's pause, Moving is Elapsed less the pause: on the HUD
+    // and in the saved ride.
+    expect(secondsOf(paused.hud.moving)).toBe(secondsOf(paused.hud.elapsed) - paused.pausedFor);
+    expect(paused.activity.movingTime).toBe(paused.activity.elapsedTime - paused.pausedFor);
+    // The paused seconds' readings — the trainer at its floor, the rider's
+    // 0 W — are not in the average. With them it would fall under 200 W.
+    expect(straight.activity.averagePower).toBeGreaterThan(250);
+    expect(paused.activity.averagePower).toBeGreaterThan(250);
+    // The same saved ride as the Ride screen's Pause makes, figure for figure.
+    expect(paused.activity.movingTime).toBe(rideScreen.activity.movingTime);
+    expect(paused.activity.elapsedTime).toBe(rideScreen.activity.elapsedTime);
+    expect(paused.activity.averagePower).toBe(rideScreen.activity.averagePower);
+    expect(paused.activity.distance).toBe(rideScreen.activity.distance);
   });
 });

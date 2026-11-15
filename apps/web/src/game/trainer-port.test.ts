@@ -878,10 +878,10 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
       expect(await gameTrainerPortOver(undefined).pauseRecording?.()).toBe(false);
     });
 
-    it('leaves a recording under a workout recording, so the workout is sent no ease and no target (#2656, B1)', async () => {
+    it('pauses a recording under a workout too, as the Ride screen’s Pause does (owner ruling on #2667)', async () => {
       const underWorkout = sourceAt('recording', { running: true });
-      expect(await underWorkout.port.pauseRecording?.()).toBe(false);
-      expect(underWorkout.calls).toEqual([]);
+      expect(await underWorkout.port.pauseRecording?.()).toBe(true);
+      expect(underWorkout.calls).toEqual(['pause']);
     });
 
     it('resumes only a paused recording, through the controller’s own resume', async () => {
