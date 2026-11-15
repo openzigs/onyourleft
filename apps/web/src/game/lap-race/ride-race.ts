@@ -394,7 +394,7 @@ function drawnSpeed(bot: LapRaceBot, offsetRates: ReadonlyMap<string, number>): 
 /**
  * The field as the pack layout reads it (#2544): every racer's race place and
  * lane, the rider where they steered, and each bot's speed along the race,
- * its race offset's rate with it (#2665).
+ * its race offset's rate with it (#2665), and that rate alone (#2636).
  */
 function packField(
   race: ItemRaceState,
@@ -417,6 +417,8 @@ function packField(
     ...(before.has(entry.racer.id) ? { alongBefore: before.get(entry.racer.id) } : {}),
     lateral: entry.racer.id === LAP_RACE_RIDER_ID ? input.steer.offset : laneLateral(entry.lane),
     speed: speeds.get(entry.racer.id) ?? 0,
+    // #2636: an item's push, which a bot's row step counts toward its own.
+    ...(offsetRates.has(entry.racer.id) ? { offsetRate: offsetRates.get(entry.racer.id) } : {}),
     // #2665: where the rider is steering to, which the bots look to.
     ...(entry.racer.id === LAP_RACE_RIDER_ID
       ? { heading: LANE_OFFSETS_METRES[input.steer.lane], lateralBefore: steeredBefore }

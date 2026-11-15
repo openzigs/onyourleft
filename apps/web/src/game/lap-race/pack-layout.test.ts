@@ -186,6 +186,56 @@ describe('rows a bike length apart, the rider’s the anchor (#2544)', () => {
     expect(() => stepPackLayout([], RIDER, before, Number.NaN)).toThrow(RangeError);
     expect(() => stepPackLayout([], RIDER, before, -1)).toThrow(RangeError);
   });
+
+  describe('counts an item’s push toward a row step, never on top of it (#2636)', () => {
+    // A bot alone a row ahead of a rider far behind, so nothing but its row
+    // moves it: its row's shift is a bike length, and it is drawn 0.75 m
+    // short of it (or past it), already moving toward it at the close-up speed.
+    const moving = (shift: number, rate: number): PackPlace => ({
+      ...held({ shift, lateral: 0 }),
+      rowShift: BIKE_LENGTH_METRES,
+      shiftBefore: shift - rate * LAP_RACE_TICK_SECONDS,
+    });
+    const stepped = (place: PackPlace, offsetRate: number | undefined): number => {
+      const bot: PackRacer = {
+        ...at('a', 100),
+        ...(offsetRate === undefined ? {} : { offsetRate }),
+      };
+      const next = stepPackLayout(
+        [bot, at(RIDER, 0)],
+        RIDER,
+        new Map([['a', place]]),
+        LAP_RACE_TICK_SECONDS,
+      );
+      return ((next.get('a')?.shift as number) - place.shift) / LAP_RACE_TICK_SECONDS;
+    };
+    const closing = moving(BIKE_LENGTH_METRES - 0.75, PACK_CLOSE_UP_METRES_PER_SECOND);
+    const dropping = moving(BIKE_LENGTH_METRES + 0.75, -PACK_CLOSE_UP_METRES_PER_SECOND);
+
+    it.each([
+      ['no item', undefined, PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['the drift back', -0.25, PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['a tailwind', 1.5, PACK_CLOSE_UP_METRES_PER_SECOND - 1.5],
+      ['a tow', 2, 0],
+    ] as const)(
+      'closes up on its row under %s at what is left of the close-up speed',
+      (_, offsetRate, rate) => {
+        expect(stepped(closing, offsetRate)).toBeCloseTo(rate, 9);
+      },
+    );
+
+    it.each([
+      ['no item', undefined, -PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['a tailwind', 1.5, -PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['a puddle', -1.5, -(PACK_CLOSE_UP_METRES_PER_SECOND - 1.5)],
+      ['a gust', -2, 0],
+    ] as const)(
+      'drops back to its row under %s at what is left of its give-way',
+      (_, offsetRate, rate) => {
+        expect(stepped(dropping, offsetRate)).toBeCloseTo(rate, 9);
+      },
+    );
+  });
 });
 
 describe('rows and lanes that do not flicker — #2665', () => {
@@ -1415,6 +1465,10 @@ describe('a racer a lap apart on the loop is kept clear where it is drawn (#2516
         alongBefore: placesBefore.get(entry.racer.id),
         lateral: entry.racer.id === RIDER ? ride.input.steer.offset : laneLateral(entry.lane),
         speed: botSpeeds.get(entry.racer.id) ?? riderSpeed,
+        // #2636: and that rate alone, which the row step reads.
+        ...(ride.offsetRates.has(entry.racer.id)
+          ? { offsetRate: ride.offsetRates.get(entry.racer.id) }
+          : {}),
         ...(entry.racer.id === RIDER
           ? {
               heading: LANE_OFFSETS_METRES[ride.input.steer.lane],

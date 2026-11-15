@@ -97,6 +97,18 @@
  * speeds up to close up over ticks, never from one tick to the next. The
  * layout is stepped with the race, a tick at a time: a pure function of the
  * field and the layout before.
+ *
+ * ## Through an item's effects
+ *
+ * An item moves a racer's race offset at up to 2 m/s for 4 s (`items.ts`),
+ * and the offset drifts back after. That rate is in the speed each bot is
+ * read at, so the frames between ticks draw a bot an item is moving where the
+ * layout cleared it (#2665): before, they drew it back along its effort speed
+ * alone, up to a tick's worth of the push off, and bots on the same lap were
+ * drawn inside each other on hundreds of frames a race with items on, up to a
+ * place across (#2636). And a row step counts an item's push toward its own
+ * {@link PACK_CLOSE_UP_METRES_PER_SECOND} and give-way, never on top of them
+ * (§`shiftToward`).
  */
 
 import { SIDEWAYS_METRES_PER_SECOND } from '../lanes';
@@ -253,6 +265,14 @@ export interface PackRacer {
    * never drawn going backwards. Absent, its speed is taken.
    */
   readonly alongBefore?: number | undefined;
+  /**
+   * How fast its race offset moved over the tick, metres a second (#2636): an
+   * item's effect, a tailwind, a tow, a puddle or a gust, or the drift back
+   * after one. Already in {@link speed}; read again here so a row step does
+   * not add its own close-up on top of an item's push (§`shiftToward`).
+   * Absent, nought, as with items off.
+   */
+  readonly offsetRate?: number | undefined;
 }
 
 /** Where the layout draws one bot, against where the race has it. */
@@ -790,6 +810,17 @@ function shiftRates(
  * allows. Arriving needs no braking of its own: the row step's rates are
  * within {@link PACK_CLOSE_UP_METRES_PER_SECOND} either way, so stopping from
  * either is inside the ease.
+ *
+ * An item's push counts toward those rates (#2636): a bot a tailwind or a tow
+ * carries forward closes up on its row only by what is left of
+ * {@link PACK_CLOSE_UP_METRES_PER_SECOND} after the push, and one a puddle or
+ * a gust holds back gives way only by what is left of its give-way. Before,
+ * the row step was added on top: a bot under a tailwind closing up on the row
+ * it shared with another came up on that bot at 3.5 m/s plus the other's
+ * drift, faster than either could ease aside, and the two were drawn up to
+ * 12 mm inside each other between ticks (`pack-harness.test.ts`, the flat
+ * circuit with items on, seed 3). With items off nothing moves an offset, and
+ * this is the row step as it was.
  */
 function shiftToward(
   racer: PackRacer,
@@ -798,8 +829,11 @@ function shiftToward(
   elapsedSeconds: number,
 ): number {
   if (elapsedSeconds <= 0) return was.shift;
-  const { least, most } = shiftRates(racer, was, giveWay(racer), elapsedSeconds);
-  const wants = (target - was.shift) / elapsedSeconds;
+  const pushed = racer.offsetRate ?? 0;
+  const forward = Math.max(0, PACK_CLOSE_UP_METRES_PER_SECOND - Math.max(0, pushed));
+  const back = Math.max(0, giveWay(racer) - Math.max(0, -pushed));
+  const { least, most } = shiftRates(racer, was, back, elapsedSeconds);
+  const wants = Math.max(-back, Math.min(forward, (target - was.shift) / elapsedSeconds));
   return was.shift + Math.max(least, Math.min(most, wants)) * elapsedSeconds;
 }
 
