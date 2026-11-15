@@ -43,11 +43,16 @@
  *
  * ## What is deliberately not here
  *
- * **No automatic reconnection.** Web Bluetooth has no silent reconnect that is
- * shippable in 2026 (docs/agents/web-bluetooth.md §8) and `requestDevice` needs a gesture per
- * device. A dropped sensor becomes a visible state and a button; a controller
- * that retried in a loop would produce a screen that appears to be connecting
- * for ever.
+ * **No automatic reconnection in a browser.** Web Bluetooth has no silent
+ * reconnect that is shippable in 2026 (docs/agents/web-bluetooth.md §8) and
+ * `requestDevice` needs a gesture per device. A dropped sensor becomes a
+ * visible state and a button; a controller that retried in a loop would
+ * produce a screen that appears to be connecting for ever. ⚠️ **The Android
+ * shell is the exception, since #2669**: it hands the controller
+ * {@link RideControllerOptions.remembered}, and then a remembered sensor is
+ * reconnected when the app opens and when its link drops, on a backoff
+ * ({@link RECONNECT_BACKOFF_SECONDS}), and says *Reconnecting…* while it is.
+ * A reconnected trainer is asked for nothing (§`reconnect`).
  *
  * **No timers.** `tick(now)` is called by whatever owns the clock — a browser
  * interval in `useRideController`, a loop in a test. A controller that set its
@@ -166,6 +171,7 @@ import type { RiderPresence, RiderPresencePort } from './presence-port';
 import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
 import type { TrainerTargetMemory } from './trainer-target-memory';
+import type { RememberedSensors } from './remembered-sensors';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import {
   createWorkoutSession,
@@ -1133,6 +1139,43 @@ export interface RideControllerOptions {
    * only while the page lives, which is what it did before.
    */
   readonly trainerTargets?: TrainerTargetMemory | undefined;
+  /**
+   * The sensors this phone remembers — #2669, the Android shell's only
+   * (`ride/remembered-sensors.ts`). With it, and a transport that can
+   * reconnect with no gesture (`traits.canReconnectWithoutUserGesture`), a
+   * sensor that paired is remembered, a forgotten one is let go of here too,
+   * {@link RideController.restoreRemembered} reconnects them when the app
+   * opens, and a link that drops is reconnected on
+   * {@link RECONNECT_BACKOFF_SECONDS}.
+   *
+   * ⚠️ Supplied by `ride/shell-ride-controller.ts`, which REQUIRES it, so a
+   * `main.tsx` that stopped passing it is a type error rather than a green
+   * `check:wiring`. A browser passes none, and nothing it does changes.
+   */
+  readonly remembered?: RememberedSensors | undefined;
+}
+
+/**
+ * How long the controller waits before each try at a dropped or remembered
+ * sensor — #2669's "back off between tries". The first is at once on the
+ * app's opening and two seconds after a drop; the last is repeated for as
+ * long as the sensor stays listed, so a sensor switched off is tried every
+ * thirty seconds until it is switched on or forgotten.
+ *
+ * ⚠️ **A pick, not a measurement.** A sensor that dropped for a moment is back
+ * on the first or second try; one that was switched off costs a connect
+ * attempt every half-minute, which on Android is a page-scan the radio makes
+ * anyway for the rider's other devices.
+ */
+export const RECONNECT_BACKOFF_SECONDS: readonly number[] = [2, 4, 8, 16, 30];
+
+/** The wait before try number `attempt` (counting from zero). */
+function backoffSeconds(attempt: number): number {
+  return (
+    RECONNECT_BACKOFF_SECONDS[Math.min(attempt, RECONNECT_BACKOFF_SECONDS.length - 1)] ??
+    RECONNECT_BACKOFF_SECONDS[0] ??
+    0
+  );
 }
 
 export interface RideController {
@@ -1177,6 +1220,18 @@ export interface RideController {
    * able to reach it again. Never throws.
    */
   unpair(id: DeviceId): Promise<void>;
+  /**
+   * Reconnect the sensors this phone remembers, with no chooser — #2669,
+   * what the Android shell does as the app opens. Each is listed at once,
+   * *Reconnecting…*, and tried on {@link RECONNECT_BACKOFF_SECONDS} until it
+   * connects or the rider forgets it. No more are listed than the transport's
+   * `maxConcurrentConnections`.
+   *
+   * Does nothing without {@link RideControllerOptions.remembered}, or on a
+   * transport that cannot reconnect with no gesture. ⚠️ A trainer reconnected
+   * here is asked for nothing: no control, no target. Never throws.
+   */
+  restoreRemembered(): Promise<void>;
 
   start(): Promise<void>;
   pause(): Promise<void>;
@@ -1517,10 +1572,30 @@ interface SensorEntry {
    * that was already listed when it did (@see lateForget).
    */
   readonly pairing: number;
+  /**
+   * The link is being got back with no chooser — #2669. `at` is when the next
+   * try is due on the controller's clock, and `running` is a try in flight.
+   * `undefined` for a link that is up, or that nothing is getting back.
+   */
+  retry: ReconnectTry | undefined;
+}
+
+/** One sensor's next try at its link — #2669. @see SensorEntry.retry */
+interface ReconnectTry {
+  /** How many tries have failed, counting from zero. */
+  readonly attempt: number;
+  /** When the try is due, on the controller's clock. */
+  readonly at: number;
+  /** A try is in flight, so a tick does not start a second. */
+  running: boolean;
 }
 
 export function createRideController(options: RideControllerOptions): RideController {
   const { transport, store, athleteId, newSessionId, now, openTrainer } = options;
+  /** #2669: only where the shell remembers AND the transport can reconnect alone. */
+  const remembered = transport.traits.canReconnectWithoutUserGesture
+    ? options.remembered
+    : undefined;
   const staleAfterSeconds = options.staleAfterSeconds ?? METRIC_STALE_AFTER_SECONDS;
   // #390. `undefined` with no camera, which leaves every recorder exactly as it
   // was: `recorder.ts` §`RecorderOptions.presence`. Read afresh on every
@@ -2670,7 +2745,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         capabilities: [...entry.device.capabilities].filter(
           (capability): capability is MeasurementCapability => capability !== 'trainer-control',
         ),
-        state: entry.state,
+        // #2669: a link being got back reads as that, never as "link lost —
+        // forget it and pair it again", which would send the rider to undo
+        // the reconnect.
+        state:
+          entry.retry !== undefined && entry.state !== 'connected' ? 'reconnecting' : entry.state,
         readings: RIDE_METRIC_IDS.filter((metric) =>
           entry.device.capabilities.has(METRIC_CAPABILITY[metric]),
         ).map((metric) => ({
@@ -2815,6 +2894,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       trainer: undefined,
       controlChoice: NO_TRAINER_CONTROL,
       pairing: (pairingsMade += 1),
+      retry: undefined,
     };
     // #2045: a new pairing starts with no reading of its own, so a device
     // forgotten and paired again never shows what it read the last time.
@@ -2917,6 +2997,19 @@ export function createRideController(options: RideControllerOptions): RideContro
         if (state === 'connected' && previous !== 'connected') {
           entry.trainer?.control.linkRestored();
         }
+        // #2669: a link that DROPPED is got back with no chooser, where this
+        // platform can. Only from `connected`: a connect that failed is the
+        // try's own to reschedule (@see reconnect), and a Forget releases
+        // this observer before it lets the link go, so it never lands here.
+        if (
+          remembered !== undefined &&
+          state === 'disconnected' &&
+          previous === 'connected' &&
+          sensors.get(id) === entry &&
+          !disposed
+        ) {
+          entry.retry ??= { attempt: 0, at: now() + backoffSeconds(0), running: false };
+        }
         changed();
       }),
     );
@@ -2973,6 +3066,91 @@ export function createRideController(options: RideControllerOptions): RideContro
         );
       }
       stillWanted();
+    }
+  };
+
+  /**
+   * One try at getting a listed sensor's link back with no chooser — #2669.
+   * Used for a link that dropped and for a sensor remembered from the last
+   * time the app was open; either way the entry stays listed, saying
+   * *Reconnecting…*, until a try connects or the rider forgets it.
+   *
+   * ⚠️ **Everything the link had is let go and wired afresh**, through the one
+   * {@link wire} a pairing uses: the measurements, and for a trainer a NEW
+   * control client from `openTrainer`. That is the trainer-safety half of
+   * #2669, and it is the reason this does not keep the old client: a new
+   * client has never been granted control, and opening one asks the machine
+   * for nothing — Request Control is a separate press
+   * (`requestTrainerControl`, rule 2 at the top of the file) — so nothing a
+   * reconnect does can write a target, a slope or a resistance. What the
+   * trainer is given next comes from the rider, or from a workout the rider
+   * starts, through the paths every target takes (`gatedTargets`,
+   * `erg-safety.ts`, the remembered target's age in `trainer-target-memory.ts`).
+   * `controller.test.ts` reads the control point's writes after a reconnect.
+   *
+   * ⚠️ **A workout running on the dropped trainer ends here, writing nothing.**
+   * Its session holds the client it was started with, which the drop has
+   * already cost its control (`onControlLost` paused the workout) and which
+   * is about to be closed — so it could only refuse every target. It is
+   * superseded rather than released: the link is down, so a release has no
+   * machine to reach and would only report a Stop that could not land. The
+   * ride itself carries on recording.
+   *
+   * A failed try lets go of whatever it acquired and is put back on
+   * {@link RECONNECT_BACKOFF_SECONDS}. One the rider forgot meanwhile ends
+   * quietly: `unpair` has done the rest.
+   */
+  const reconnect = async (entry: SensorEntry, retry: ReconnectTry): Promise<void> => {
+    const id = entry.device.identity.id;
+    retry.running = true;
+    if (entry.trainer !== undefined && workout !== undefined && trainerEntry() === entry) {
+      endWorkoutSession('replace');
+    }
+    try {
+      detach(entry);
+    } catch {
+      // #704: every step has run; what is left is the new wiring below.
+    }
+    try {
+      await wire(entry);
+    } catch {
+      try {
+        detach(entry);
+      } catch {
+        // As above.
+      }
+      if (sensors.get(id) !== entry || disposed) {
+        // Forgotten (or disposed) while the try was running: nothing to report.
+        // ⚠️ And nothing to disconnect: the id may already be a NEW pairing
+        // of the same device, made after the Forget, whose link this would cut.
+        return;
+      }
+      // A link that came up and then failed to subscribe is let go, so a
+      // sensor is never up and delivering nothing between two tries.
+      await transport.disconnect(id).catch(() => undefined);
+      if (sensors.get(id) !== entry || disposed) {
+        return;
+      }
+      entry.state = 'disconnected';
+      entry.retry = {
+        attempt: retry.attempt + 1,
+        at: now() + backoffSeconds(retry.attempt + 1),
+        running: false,
+      };
+      changed();
+      return;
+    }
+    entry.retry = undefined;
+    changed();
+  };
+
+  /** Every listed sensor whose next try is due by `at`. @see reconnect */
+  const reconnectDue = (at: UnixSeconds): void => {
+    for (const entry of [...sensors.values()]) {
+      const retry = entry.retry;
+      if (retry !== undefined && !retry.running && retry.at <= at) {
+        void reconnect(entry, retry);
+      }
     }
   };
 
@@ -3927,11 +4105,71 @@ export function createRideController(options: RideControllerOptions): RideContro
         // ends here with nothing listed.
         if (await attach(device, role)) {
           askAgainIfRefused();
+          // #2669: remembered once it has PAIRED, and not before — a sensor
+          // whose link never came up is not one to reconnect to.
+          remembered?.remember({ id, name: device.name ?? '', role });
         }
       } catch (error) {
         tell(pairingFailureWords(error, step, chosen));
       } finally {
         choosing.delete(overlapped);
+      }
+    },
+
+    async restoreRemembered(): Promise<void> {
+      if (remembered === undefined || disposed) {
+        return;
+      }
+      const wanted = remembered
+        .list()
+        .filter((sensor) => !sensors.has(sensor.id) && !forgetting.has(sensor.id));
+      if (wanted.length === 0) {
+        // Nothing to ask the transport for, so the stack is not brought up:
+        // a rider who never paired is not asked for Bluetooth at launch.
+        return;
+      }
+      let known: readonly SensorDevice[];
+      try {
+        known = await transport.knownDevices();
+      } catch {
+        // Bluetooth off, or a permission withdrawn. The rider pairs by hand;
+        // the Devices screen says why that does not work either.
+        return;
+      }
+      // Every one listed first, *Reconnecting…*, so the screen shows them all
+      // at once; then tried in turn, which is the order the plugin's own
+      // queue would run them in anyway.
+      const listed: { readonly entry: SensorEntry; readonly retry: ReconnectTry }[] = [];
+      for (const sensor of wanted) {
+        // #2669: the connection budget. A sensor beyond it stays remembered
+        // and is not listed, so it never counts against a link in use.
+        if (disposed || sensors.size >= transport.traits.maxConcurrentConnections) {
+          break;
+        }
+        const device = known.find((one) => one.identity.id === sensor.id);
+        if (device === undefined || sensors.has(sensor.id) || forgetting.has(sensor.id)) {
+          continue;
+        }
+        const retry: ReconnectTry = { attempt: 0, at: now(), running: false };
+        const entry: SensorEntry = {
+          device,
+          role: sensor.role,
+          release: [],
+          measurements: [],
+          // A device `knownDevices` has only just handed out has no link yet.
+          state: 'disconnected',
+          trainer: undefined,
+          controlChoice: NO_TRAINER_CONTROL,
+          pairing: (pairingsMade += 1),
+          retry,
+        };
+        latestByDevice.delete(sensor.id);
+        sensors.set(sensor.id, entry);
+        listed.push({ entry, retry });
+      }
+      changed();
+      for (const { entry, retry } of listed) {
+        await reconnect(entry, retry);
       }
     },
 
@@ -3976,6 +4214,10 @@ export function createRideController(options: RideControllerOptions): RideContro
         // below — #706's review. Set here, `changed()` rendered "is
         // forgotten" while the transport had not let go yet.
         sensors.delete(id);
+        // #2669: and this phone stops remembering it, so the next time the
+        // app opens it is not reconnected. Here, after the trainer was let
+        // go: one that refused to let go is still listed, and still kept.
+        remembered?.drop(id);
         changed();
         let refused = false;
         let unconfirmed = false;
@@ -4922,6 +5164,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       // somebody stops pedalling. No control check here: losing control, a
       // release and an unpair each end the hand-set target where they happen.
       manual?.erg.tick(rideSeconds(at));
+      // #2669: a dropped or remembered sensor whose next try is due. In every
+      // phase: a link is got back whether or not anything is recording.
+      reconnectDue(at);
       // Unconditionally: staleness is a function of the clock, so a channel
       // goes quiet on the tick whether or not anything is recording.
       changed();
