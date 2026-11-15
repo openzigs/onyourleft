@@ -4026,6 +4026,8 @@ function GameScreen({
           }
         } else {
           preparingViewRef.current = view;
+          // The arrival's own bump (above) carries the guarantee that a warm-up it
+          // overtook readies nothing; this one is defence in depth.
           prepareRoundRef.current += 1;
           const round = prepareRoundRef.current;
           void view.prepare(frame).then(() => {

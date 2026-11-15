@@ -279,6 +279,24 @@ describe('the realistic world arriving in a lap race’s countdown is prepared b
     ]);
   });
 
+  it('lets a prepare that settles before the next frame ready nothing: the arrival bumps the round itself', async () => {
+    const calls: Call[] = [];
+    const { renderer, arrive, settlePrepare } = arrivingRenderer(calls);
+    await rideARace(renderer);
+    // The stylised warm-up is in flight when the set lands, and it settles in
+    // the window between the arrival and the next animation frame: its round
+    // is still the current one unless the arrival moved it on.
+    await pump();
+    await arrive();
+    await settlePrepare();
+    await pump(10);
+    expect(calls.filter((each) => each.kind === 'render')).toEqual([]);
+    expect(after(calls, { kind: 'setQuality', world: 'realistic' })[0]).toEqual({
+      kind: 'prepare',
+      world: 'realistic',
+    });
+  });
+
   it('still counts the race down on the ride’s frames while the realistic world is prepared', async () => {
     const calls: Call[] = [];
     const { renderer, arrive, settlePrepare } = arrivingRenderer(calls);
