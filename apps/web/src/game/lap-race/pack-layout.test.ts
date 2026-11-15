@@ -1057,3 +1057,131 @@ describe('a bot exactly a place across from the rider is clear of them (#2558’
     expect(ahead).toBeGreaterThan(0);
   });
 });
+
+describe('a racer a lap apart on the loop is kept clear where it is drawn (#2516, the owner’s ruling on #2544)', () => {
+  /** A loop of 500 m. */
+  const LAP = 500;
+
+  /** How far two racers are inside each other on the loop, by the pack's rule: nought or less is clear. */
+  function insideOnTheLoop(
+    one: { readonly along: number; readonly lateral: number },
+    other: { readonly along: number; readonly lateral: number },
+  ): number {
+    const apart = one.along - other.along - LAP * Math.round((one.along - other.along) / LAP);
+    return Math.min(
+      BIKE_LENGTH_METRES - 1e-9 - Math.abs(apart),
+      PACK_ABREAST_METRES - 1e-9 - Math.abs(one.lateral - other.lateral),
+    );
+  }
+
+  /**
+   * The rider at 18 m/s in the lane at 0 m, coming up on a bot a lap down at
+   * 8 m/s in the same lane, 20 m up the road: the deepest it is drawn inside
+   * the rider over 4 s, on every tick and on the frames between them.
+   */
+  function lapping(lap: number | undefined): number {
+    let layout: PackLayout = NO_PACK_LAYOUT;
+    let deepest = Number.NEGATIVE_INFINITY;
+    for (let tick = 0; tick <= 80; tick += 1) {
+      const seconds = tick * LAP_RACE_TICK_SECONDS;
+      const rider = { id: RIDER, along: 1_000 + 18 * seconds, lateral: 0, speed: 18 };
+      const bot = { id: 'a', along: 1_000 + 20 - LAP + 8 * seconds, lateral: 0, speed: 8 };
+      layout = stepPackLayout(
+        [rider, bot],
+        RIDER,
+        layout,
+        tick === 0 ? 0 : LAP_RACE_TICK_SECONDS,
+        lap,
+      );
+      const a = layout.get('a') as PackLayout extends ReadonlyMap<string, infer P> ? P : never;
+      for (const back of [0, 0.25, 0.5, 0.75]) {
+        const behind = back * LAP_RACE_TICK_SECONDS;
+        deepest = Math.max(
+          deepest,
+          insideOnTheLoop(
+            { along: rider.along - 18 * behind, lateral: 0 },
+            {
+              along:
+                bot.along -
+                8 * behind +
+                a.shift +
+                (a.shiftBefore - a.shift) * (tick === 0 ? 0 : back),
+              lateral: a.lateral,
+            },
+          ),
+        );
+      }
+    }
+    return deepest;
+  }
+
+  it('has the rider lapping a bot in their lane go round it, never through it, on any tick or between them', () => {
+    expect(lapping(LAP)).toBeLessThanOrEqual(0);
+    // The control: laid out without the lap, the same bot is drawn inside the rider.
+    expect(lapping(undefined)).toBeGreaterThan(0.5);
+  });
+
+  it('keeps two bots a lap apart, level on the road in one lane, out of each other', () => {
+    // Both behind the rider in race places: b a lap up on a, in the row behind
+    // the rider (a bike length back), a in the row behind that (two). So
+    // without the lap the two are drawn 0.3 m apart along on the road.
+    const A = 100;
+    const B = A + LAP - BIKE_LENGTH_METRES + 0.3;
+    const racers = [
+      { id: RIDER, along: 700, lateral: 0, speed: 10 },
+      { id: 'a', along: A, lateral: 1.75, speed: 10 },
+      { id: 'b', along: B, lateral: 1.75, speed: 10 },
+    ];
+    const step = (lap: number | undefined): PackLayout => {
+      let layout = stepPackLayout(racers, RIDER, NO_PACK_LAYOUT, 0, lap);
+      for (let tick = 0; tick < 200; tick += 1) {
+        layout = stepPackLayout(racers, RIDER, layout, LAP_RACE_TICK_SECONDS, lap);
+      }
+      return layout;
+    };
+    const apart = (layout: PackLayout): number =>
+      insideOnTheLoop(
+        {
+          along: A + (layout.get('a')?.shift as number),
+          lateral: layout.get('a')?.lateral as number,
+        },
+        {
+          along: B + (layout.get('b')?.shift as number),
+          lateral: layout.get('b')?.lateral as number,
+        },
+      );
+    expect(apart(step(LAP))).toBeLessThanOrEqual(0);
+    // The control: without the lap the two are drawn inside each other on the road.
+    expect(apart(step(undefined))).toBeGreaterThan(0);
+  });
+
+  it('lays a field on one lap out exactly as it did without the lap', () => {
+    const racers = [
+      at('a', 102.6, -1.75),
+      at('b', 101.95, 0),
+      at(RIDER, 100.65, 0.3),
+      at('d', 100, 0),
+      at('e', 99.35, 0),
+      at('f', 90, 1.75),
+    ];
+    let without = stepPackLayout(racers, RIDER, NO_PACK_LAYOUT, 0);
+    let withLap = stepPackLayout(racers, RIDER, NO_PACK_LAYOUT, 0, LAP);
+    for (let tick = 0; tick < 100; tick += 1) {
+      const moved = racers.map((racer) => ({
+        ...racer,
+        along: racer.along + racer.speed * tick * LAP_RACE_TICK_SECONDS,
+      }));
+      without = stepPackLayout(moved, RIDER, without, LAP_RACE_TICK_SECONDS);
+      withLap = stepPackLayout(moved, RIDER, withLap, LAP_RACE_TICK_SECONDS, LAP);
+      expect(withLap).toEqual(without);
+    }
+  });
+
+  it('refuses a lap that is not a finite number of metres above zero', () => {
+    for (const lap of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => stepPackLayout([], RIDER, NO_PACK_LAYOUT, 0, lap), String(lap)).toThrow(
+        RangeError,
+      );
+    }
+  });
+});

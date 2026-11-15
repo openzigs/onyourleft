@@ -57,6 +57,20 @@
  * no faster than {@link PACK_GIVE_WAY_SHARE} of its own speed, so its drawn
  * place goes forward from Go on and no bot stands still waiting for its place.
  *
+ * ## A lap apart, on a loop
+ *
+ * Rows are laid out in race places, so a bot a lap down rides in a row far
+ * behind the rider's. But the scene draws every bot on the lap of the road the
+ * frame shows (`scene.ts` §`onTheCorridorsLap`, #2516), so that bot stands on
+ * the road beside the rider and the bots on the rider's lap. Given the lap
+ * ({@link stepPackLayout}'s `lapMetres`), every measure of how far apart two
+ * racers are along the road reads to the other's nearest place on the loop:
+ * whether a row is passing the rider, whether two are inside each other, and
+ * where a bot may go to keep clear. A bot a lap apart is therefore kept clear,
+ * and goes round, as one on the same lap is (the owner's ruling on #2544:
+ * riders never ghost through each other). Two racers under half a lap apart
+ * read exactly as they did.
+ *
  * ## Never a jump
  *
  * A row changes when the order does, and a lane when a bot steers. So every
@@ -201,6 +215,14 @@ export function drawnShift(place: PackPlace, behindSeconds: number, tickSeconds:
 /** A layout before the first step: every bot goes straight to its place. */
 export const NO_PACK_LAYOUT: PackLayout = new Map();
 
+/**
+ * `along` moved by whole laps of `lap` to its place nearest `to`, metres: where
+ * a racer is on the road beside one at `to` (#2516). As it is with no lap.
+ */
+function nearestOnTheLoop(along: number, to: number, lap: number | undefined): number {
+  return lap === undefined ? along : along + lap * Math.round((to - along) / lap);
+}
+
 /** `value` moved toward `target` by at most `most`. */
 function toward(value: number, target: number, most: number): number {
   return value + Math.max(-most, Math.min(most, target - value));
@@ -290,11 +312,13 @@ function passing(
   rider: PackRacer,
   shift: number,
   previous: PackLayout,
+  lap: number | undefined,
 ): boolean {
   return row.some((racer) => {
     if (racer.id === rider.id) return false;
     const was = previous.get(racer.id)?.shift ?? shift;
-    const gap = racer.along + was - rider.along;
+    // On a loop, to where the rider is on the road: a row a lap down passes too (#2516).
+    const gap = racer.along + was - nearestOnTheLoop(rider.along, racer.along + was, lap);
     const shifting = Math.sign(shift - was) * PACK_CLOSE_UP_METRES_PER_SECOND;
     const closing = -Math.sign(gap) * (racer.speed + shifting - rider.speed);
     return (
@@ -315,6 +339,7 @@ function targets(
   riderId: string,
   previous: PackLayout,
   grid: boolean,
+  lap?: number,
 ): Map<string, Target> {
   const built = rows(racers, riderId);
   const riderRow = built.findIndex((row) => row.some((racer) => racer.id === riderId));
@@ -327,7 +352,7 @@ function targets(
     // A row passing the rider, or being passed, is laid out across as if the
     // rider rode in it: its bots ease aside and leave the rider their place,
     // so every pass goes round (the owner's ruling of 2026-11-13 on #2544).
-    const makingWay = rider !== undefined && (grid || passing(row, rider, shift, previous));
+    const makingWay = rider !== undefined && (grid || passing(row, rider, shift, previous, lap));
     const laid = makingWay && rider !== undefined && at !== riderRow ? [...row, rider] : row;
     const lanes = new Map<number, PackRacer[]>();
     for (const racer of laid) {
@@ -390,18 +415,25 @@ export function gridPackLayout(racers: readonly PackRacer[], riderId: string): P
  * kept: their place is their own.
  *
  * @param racers - the field, the rider among them.
- * @throws {RangeError} for an elapsed time that is not finite or is below zero.
+ * @param lapMetres - the loop's lap, metres, on which a racer a lap apart is
+ *   drawn beside the others and kept clear of them (#2516); absent, none is.
+ * @throws {RangeError} for an elapsed time that is not finite or is below
+ *   zero, or a lap that is not a finite number of metres above zero.
  */
 export function stepPackLayout(
   racers: readonly PackRacer[],
   riderId: string,
   previous: PackLayout,
   elapsedSeconds: number,
+  lapMetres?: number,
 ): PackLayout {
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
     throw new RangeError('a pack layout steps a finite number of seconds, 0 or more');
   }
-  const wanted = targets(racers, riderId, previous, false);
+  if (lapMetres !== undefined && !(Number.isFinite(lapMetres) && lapMetres > 0)) {
+    throw new RangeError('a pack layout’s lap is a finite number of metres above zero');
+  }
+  const wanted = targets(racers, riderId, previous, false, lapMetres);
   const rider = racers.find((racer) => racer.id === riderId);
   const next = new Map<string, PackPlace>();
   for (const racer of racers) {
@@ -445,7 +477,7 @@ export function stepPackLayout(
       sway: elapsedSeconds > 0 ? (lateral - was.lateral) / elapsedSeconds : 0,
     });
   }
-  return clear(racers, riderId, next, previous, elapsedSeconds);
+  return clear(racers, riderId, next, previous, elapsedSeconds, lapMetres);
 }
 
 /**
@@ -534,14 +566,17 @@ const PACK_ROUNDING_METRES = 1e-9;
  * bike length apart along, times how far under a place apart across, square
  * metres, each within {@link PACK_ROUNDING_METRES}. Nought is clear; it
  * shrinks as either moves off the other, so a step aside counts before the
- * two are clear.
+ * two are clear. On a loop of `lap`, along the road to the other's nearest
+ * place on it (#2516).
  */
 function overlap(
   one: { along: number; lateral: number },
   other: { along: number; lateral: number },
+  lap: number | undefined,
 ): number {
+  const apart = one.along - nearestOnTheLoop(other.along, one.along, lap);
   return (
-    Math.max(0, BIKE_LENGTH_METRES - PACK_ROUNDING_METRES - Math.abs(one.along - other.along)) *
+    Math.max(0, BIKE_LENGTH_METRES - PACK_ROUNDING_METRES - Math.abs(apart)) *
     Math.max(0, PACK_ABREAST_METRES - PACK_ROUNDING_METRES - Math.abs(one.lateral - other.lateral))
   );
 }
@@ -630,6 +665,7 @@ function clear(
   layout: Map<string, PackPlace>,
   previous: PackLayout,
   elapsedSeconds: number,
+  lap: number | undefined,
 ): PackLayout {
   const rider = racers.find((racer) => racer.id === riderId);
   // Where every racer is while each bot is placed: the rider where they are,
@@ -678,6 +714,7 @@ function clear(
         rider,
         across,
         elapsedSeconds,
+        lap,
       );
       where.set(racer.id, {
         along: racer.along + placed.shift,
@@ -711,6 +748,7 @@ function clearOf(
   rider: PackRacer | undefined,
   across: number,
   elapsedSeconds: number,
+  lap: number | undefined,
 ): Candidate {
   const others = [...where].filter(([id]) => id !== racer.id).map(([, other]) => other);
   const drawnAt = (each: Candidate) => ({ along: racer.along + each.shift, lateral: each.lateral });
@@ -727,6 +765,7 @@ function clearOf(
       ? overlap(
           { along: before, lateral: each.lateral },
           { along: other.before, lateral: other.lateral },
+          lap,
         )
       : 0;
   // Inside the rider: on this tick, and on the frames back to the tick
@@ -735,7 +774,7 @@ function clearOf(
   const insideRider = (each: Candidate): number =>
     rider === undefined || riderDrawn === undefined
       ? 0
-      : overlap(drawnAt(each), rider) + insideBefore(each, riderDrawn, true);
+      : overlap(drawnAt(each), rider, lap) + insideBefore(each, riderDrawn, true);
   const riderSoon = (each: Candidate): number =>
     rider === undefined
       ? 0
@@ -745,12 +784,13 @@ function clearOf(
             overlap(
               { along: racer.along + each.shift + racer.speed * seconds, lateral: each.lateral },
               { along: rider.along + rider.speed * seconds, lateral: rider.lateral },
+              lap,
             ),
           0,
         );
   const insideAny = (each: Candidate): number =>
     others.reduce(
-      (sum, other) => sum + overlap(drawnAt(each), other) + insideBefore(each, other),
+      (sum, other) => sum + overlap(drawnAt(each), other, lap) + insideBefore(each, other),
       0,
     );
   const now = { shift: place.shift, lateral: place.lateral };
@@ -777,8 +817,10 @@ function clearOf(
   const most = was.shift + rates.most * elapsedSeconds;
   const reach = (shift: number): number => Math.min(most, Math.max(least, shift));
   const near = others.filter(
-    (other) => overlap(drawnAt(now), other) > 0 || overlap(drawnAt(was), other) > 0,
+    (other) => overlap(drawnAt(now), other, lap) > 0 || overlap(drawnAt(was), other, lap) > 0,
   );
+  // Where a racer is on the road beside this bot: on a loop, a lap apart is beside it (#2516).
+  const beside = (along: number): number => nearestOnTheLoop(along, racer.along + now.shift, lap);
   // Along: where it was laid out, where it was, as far back and as far on as
   // it may go, a bike length either side of each racer near it, and a bike
   // length either side of where the rider will be a moment on, so a bot
@@ -791,14 +833,14 @@ function clearOf(
     least,
     most,
     ...near.flatMap((other) =>
-      [-1, 1].map((side) => other.along + side * BIKE_LENGTH_METRES - racer.along),
+      [-1, 1].map((side) => beside(other.along) + side * BIKE_LENGTH_METRES - racer.along),
     ),
     ...(rider === undefined
       ? []
       : PACK_SEEN_AHEAD_SECONDS.flatMap((seconds) =>
           [-1, 1].map(
             (side) =>
-              rider.along +
+              beside(rider.along) +
               (rider.speed - racer.speed) * seconds +
               side * (BIKE_LENGTH_METRES + PACK_CLEAR_METRES) -
               racer.along,
@@ -836,8 +878,8 @@ function clearOf(
   const holding = near.find(
     (other) =>
       other.race < racer.along &&
-      other.along > racer.along + chosen.shift &&
-      overlap(drawnAt(now), other) > 0,
+      nearestOnTheLoop(other.along, racer.along + chosen.shift, lap) > racer.along + chosen.shift &&
+      overlap(drawnAt(now), other, lap) > 0,
   );
   if (holding !== undefined && chosen.shift < now.shift) {
     const first = Math.sign(was.lateral - holding.lateral) || 1;
