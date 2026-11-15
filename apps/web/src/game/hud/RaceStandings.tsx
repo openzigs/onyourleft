@@ -70,7 +70,7 @@ export function RaceStandings(props: {
       {/*
         #2599: a named region a keyboard can reach and scroll with the arrow
         keys, where the list scrolls — and a plain box where it does not, so
-        it is no extra stop on the way to Pause.
+        it adds no tab stop after the ride's controls.
       */}
       <div
         ref={list}

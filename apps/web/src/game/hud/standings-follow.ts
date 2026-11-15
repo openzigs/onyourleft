@@ -20,7 +20,7 @@
  * at (`data-oyl-more`, `theme.css` §"#2599").
  *
  * Display only: nothing here reaches the race, the room or the trainer.
- * `standings-follow.test.ts` holds the arithmetic and `RaceStandings.tsx`
+ * `standings-follow.test.tsx` holds the arithmetic and the hook and `RaceStandings.tsx`
  * wires it; `browser/lap-race-hud.browser.spec.ts` §"#2599" scrolls it.
  */
 
@@ -65,7 +65,27 @@ export function moreBeyond(list: {
   return [above ? 'above' : '', below ? 'below' : ''].filter((edge) => edge !== '').join(' ');
 }
 
-const RIDER_SCROLLS = ['touchstart', 'touchmove', 'pointerdown', 'wheel', 'keydown'] as const;
+const RIDER_SCROLLS = ['touchstart', 'touchmove', 'pointerdown', 'wheel'] as const;
+
+/**
+ * The keys that scroll a focused list (PR #2621's review): only these take the
+ * rider's hold, so Tab leaving the list, or a modifier, does not stop it
+ * following for {@link STANDINGS_RETURN_MS}.
+ */
+const SCROLLING_KEYS: ReadonlySet<string> = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  ' ',
+]);
+
+/** Set the list's edge cue only when it changes: a scroll event comes about once a frame. */
+function cue(element: HTMLElement, more: string): void {
+  if (element.getAttribute('data-oyl-more') !== more) element.setAttribute('data-oyl-more', more);
+}
 
 /**
  * Keep the list's own line in view: `own` is its index in the list, and
@@ -82,6 +102,9 @@ export function useOwnLineInView(
   // fonts arriving, a rotation, the text size), which it jumps to, where a
   // new place in the same room is a move a rider sees, which it eases to.
   const centredIn = useRef<number | undefined>(undefined);
+  // The room now, for the listeners, which are bound once.
+  const roomNow = useRef<number | undefined>(room);
+  roomNow.current = room;
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const centre = useRef<(smooth: boolean) => void>(() => undefined);
   centre.current = (smooth: boolean): void => {
@@ -98,7 +121,7 @@ export function useOwnLineInView(
       const still = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
       element.scrollTo({ top: target, behavior: smooth && !still ? 'smooth' : 'instant' });
     }
-    element.setAttribute('data-oyl-more', moreBeyond(edgesOf(element, target)));
+    cue(element, moreBeyond(edgesOf(element, target)));
   };
 
   // When the list opens, when the own line moves, and when the room changes:
@@ -123,9 +146,15 @@ export function useOwnLineInView(
     if (element === null) return undefined;
     const release = (): void => {
       hold.current = undefined;
-      centre.current(true);
+      // A list that no longer scrolls has nothing to return to; a room that
+      // changed while the rider held the list is a new layout, jumped to.
+      if (roomNow.current === undefined) return;
+      centre.current(centredIn.current === roomNow.current);
+      centredIn.current = roomNow.current;
     };
     const touched = (): void => {
+      // A list that does not scroll is nobody's to hold.
+      if (roomNow.current === undefined) return;
       hold.current = heldUntil(Date.now());
       clearTimeout(timer.current);
       timer.current = setTimeout(release, STANDINGS_RETURN_MS);
@@ -134,13 +163,20 @@ export function useOwnLineInView(
       // The rider's momentum after a finger lifts: still theirs. A scroll of
       // the list's own, back to the line, comes when nobody holds it.
       if (!following(hold.current, Date.now())) touched();
-      element.setAttribute('data-oyl-more', moreBeyond(edgesOf(element, element.scrollTop)));
+      if (roomNow.current !== undefined) {
+        cue(element, moreBeyond(edgesOf(element, element.scrollTop)));
+      }
+    };
+    const keyed = (event: KeyboardEvent): void => {
+      if (SCROLLING_KEYS.has(event.key)) touched();
     };
     for (const kind of RIDER_SCROLLS) element.addEventListener(kind, touched, { passive: true });
+    element.addEventListener('keydown', keyed, { passive: true });
     element.addEventListener('scroll', scrolled, { passive: true });
     return () => {
       clearTimeout(timer.current);
       for (const kind of RIDER_SCROLLS) element.removeEventListener(kind, touched);
+      element.removeEventListener('keydown', keyed);
       element.removeEventListener('scroll', scrolled);
     };
   }, [list]);

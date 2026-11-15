@@ -167,6 +167,12 @@ export interface FirstFrame {
   readonly stage: string;
   readonly standings: Box | undefined;
   readonly actions: Box | undefined;
+  /**
+   * PR #2621's second review: whether the rider's own line is wholly inside
+   * the list in that frame, or `undefined` where the list is not drawn (a
+   * phone) — so "opens on the own line, before paint" is read in the browser.
+   */
+  readonly ownInView: boolean | undefined;
 }
 
 declare global {
@@ -574,10 +580,16 @@ function firstFrame(): readonly FirstFrame[] {
     const origin = stage.getBoundingClientRect();
     const standings = stage.querySelector('.oyl-hud__standings');
     const actions = stage.querySelector('.oyl-hud__actions');
+    const list = stage.querySelector('.oyl-hud__standings-scroll')?.getBoundingClientRect();
+    const own = stage.querySelector('.oyl-hud__standings-line--you')?.getBoundingClientRect();
     return {
       stage: stage.getAttribute('data-oyl-lap-race-stage') ?? '',
       standings: standings === null ? undefined : boxIn(standings, origin),
       actions: actions === null ? undefined : boxIn(actions, origin),
+      ownInView:
+        list === undefined || own === undefined || list.width <= 1 || list.height <= 1
+          ? undefined
+          : own.top >= list.top - 1 && own.bottom <= list.bottom + 1,
     };
   });
 }

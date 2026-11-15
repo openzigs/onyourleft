@@ -28,11 +28,19 @@ import { STANDINGS_SCROLL_LABEL } from './RaceStandings';
 
 let mounted: Mounted | undefined;
 
+/** jsdom's own `scrollTo`, put back after each test (PR #2621's review). */
+const realScrollTo = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTo');
+
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  if (realScrollTo === undefined) {
+    Reflect.deleteProperty(Element.prototype, 'scrollTo');
+  } else {
+    Object.defineProperty(Element.prototype, 'scrollTo', realScrollTo);
+  }
 });
 
 function route(): ReturnType<typeof routeProfile> {
@@ -228,7 +236,7 @@ describe('a race’s standings that scroll — #2599', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
-  it('is no stop on the way to Pause where it does not scroll', async () => {
+  it('adds no tab stop where it does not scroll', async () => {
     await hud(EIGHT);
     const region = document.querySelector<HTMLElement>('.oyl-hud__standings-scroll');
     expect(region?.hasAttribute('role')).toBe(false);

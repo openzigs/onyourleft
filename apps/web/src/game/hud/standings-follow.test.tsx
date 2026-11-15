@@ -60,6 +60,8 @@ let scrollTop = 0;
 const scrolls: { top: number; behavior: string }[] = [];
 let reducedMotion = false;
 let mounted: Mounted | undefined;
+/** jsdom's own `scrollTo`, put back after each test (PR #2621's review). */
+const realScrollTo = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTo');
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -86,10 +88,13 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(100);
   vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(200);
   vi.spyOn(Element.prototype, 'scrollTop', 'get').mockImplementation(() => scrollTop);
-  Element.prototype.scrollTo = function (options?: ScrollToOptions | number): void {
+  // As a browser does, the list's scroll fires the list's `scroll` event —
+  // so the hook's own scrolls reach its listener as a rider's would.
+  Element.prototype.scrollTo = function (this: Element, options?: ScrollToOptions | number): void {
     if (typeof options !== 'object') return;
     scrollTop = options.top ?? scrollTop;
     scrolls.push({ top: scrollTop, behavior: options.behavior ?? 'auto' });
+    this.dispatchEvent(new Event('scroll'));
   };
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: query.includes('reduce') && reducedMotion,
@@ -102,6 +107,11 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  if (realScrollTo === undefined) {
+    Reflect.deleteProperty(Element.prototype, 'scrollTo');
+  } else {
+    Object.defineProperty(Element.prototype, 'scrollTo', realScrollTo);
+  }
 });
 
 function List(props: { own: number; room: number | undefined }): JSX.Element {
@@ -188,9 +198,72 @@ describe('useOwnLineInView — #2599', () => {
     reducedMotion = true;
     mounted = await mount(<List own={7} room={100} />);
     const list = listOf(mounted.container);
-    list.dispatchEvent(new Event('keydown'));
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' }));
     scrollTop = 0;
     vi.advanceTimersByTime(STANDINGS_RETURN_MS);
     expect(scrolls.at(-1)).toEqual({ top: 100, behavior: 'instant' });
+  });
+
+  it('does not count the list’s own scrolls as the rider’s', async () => {
+    mounted = await mount(<List own={7} room={100} />);
+    const list = listOf(mounted.container);
+    list.dispatchEvent(new Event('touchstart'));
+    scrollTop = 0;
+    // The return scrolls the list, and fires its scroll event.
+    vi.advanceTimersByTime(STANDINGS_RETURN_MS);
+    expect(scrolls).toHaveLength(2);
+    // The list is followed again at once: a new place is eased to, not held.
+    await mounted.rerender(<List own={5} room={100} />);
+    expect(scrolls.at(-1)).toEqual({ top: 87.5, behavior: 'smooth' });
+  });
+
+  it('takes a hold for a key that scrolls the list, and none for Tab', async () => {
+    mounted = await mount(<List own={7} room={100} />);
+    const list = listOf(mounted.container);
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
+    await mounted.rerender(<List own={4} room={100} />);
+    expect(scrolls).toHaveLength(2);
+    list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    await mounted.rerender(<List own={6} room={100} />);
+    expect(scrolls).toHaveLength(2);
+  });
+
+  it('takes no hold on a list that does not scroll', async () => {
+    mounted = await mount(<List own={7} room={undefined} />);
+    listOf(mounted.container).dispatchEvent(new Event('touchstart'));
+    // The room grows short: the list opens on the own line at once.
+    await mounted.rerender(<List own={7} room={100} />);
+    expect(scrolls).toEqual([{ top: 100, behavior: 'instant' }]);
+  });
+
+  it('does not return a list that stopped scrolling while it was held', async () => {
+    mounted = await mount(<List own={7} room={100} />);
+    const list = listOf(mounted.container);
+    list.dispatchEvent(new Event('wheel'));
+    await mounted.rerender(<List own={7} room={undefined} />);
+    scrollTop = 0;
+    vi.advanceTimersByTime(STANDINGS_RETURN_MS);
+    expect(scrolls).toHaveLength(1);
+    expect(list.hasAttribute('data-oyl-more')).toBe(false);
+  });
+
+  it('jumps back, rather than easing, to a room that changed while the list was held', async () => {
+    mounted = await mount(<List own={7} room={100} />);
+    listOf(mounted.container).dispatchEvent(new Event('wheel'));
+    await mounted.rerender(<List own={7} room={125} />);
+    scrollTop = 0;
+    vi.advanceTimersByTime(STANDINGS_RETURN_MS);
+    expect(scrolls.at(-1)).toEqual({ top: 100, behavior: 'instant' });
+  });
+
+  it('writes the edge cue only when it changes', async () => {
+    mounted = await mount(<List own={7} room={100} />);
+    const list = listOf(mounted.container);
+    const writes = vi.spyOn(list, 'setAttribute');
+    for (let tick = 0; tick < 3; tick += 1) list.dispatchEvent(new Event('scroll'));
+    expect(writes).not.toHaveBeenCalled();
+    scrollTop = 50;
+    list.dispatchEvent(new Event('scroll'));
+    expect(writes).toHaveBeenCalledWith('data-oyl-more', 'above below');
   });
 });

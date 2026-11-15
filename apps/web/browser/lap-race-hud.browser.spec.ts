@@ -425,7 +425,15 @@ function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: 
 async function ownLine(
   page: Page,
   stage: string,
-): Promise<{ inView: boolean; scrollTop: number; x: number; y: number }> {
+): Promise<{
+  inView: boolean;
+  scrollTop: number;
+  more: string | null;
+  x: number;
+  y: number;
+  left: number;
+  right: number;
+}> {
   return page.evaluate((name) => {
     const list = document.querySelector<HTMLElement>(
       `[data-oyl-lap-race-stage="${name}"] .oyl-hud__standings-scroll`,
@@ -439,8 +447,11 @@ async function ownLine(
     return {
       inView: box.top >= view.top - 1 && box.bottom <= view.bottom + 1,
       scrollTop: list.scrollTop,
+      more: list.getAttribute('data-oyl-more'),
       x: view.left + view.width / 2,
       y: view.top + view.height / 2,
+      left: view.left,
+      right: view.right,
     };
   }, stage);
 }
@@ -457,6 +468,13 @@ for (const { viewport, text } of CORNER_CASES) {
       'the first frame was read',
     ).toEqual([...CORNER_STAGES]);
     for (const frame of first ?? []) {
+      // PR #2621's second review: the list opens on the own line before paint.
+      if (isTablet(viewport)) {
+        expect(
+          frame.ownInView,
+          `${viewport.name}, ${frame.stage}: the own line in the first frame`,
+        ).toBe(true);
+      }
       const { standings, actions } = frame;
       if (standings === undefined || actions === undefined) continue;
       expect(
@@ -502,38 +520,101 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
     // the CI runner's Linux Chromium without it the gesture moved nothing.
     test.use({ hasTouch: true });
 
-    test('a finger’s scroll moves the list, never the page, and never presses Use item', async ({
+    /** A finger down at `x, from`, drawn to `to` in twelve steps, and lifted: raw touch input. */
+    async function swipe(page: Page, x: number, from: number, to: number): Promise<void> {
+      const cdp = await page.context().newCDPSession(page);
+      const at = async (
+        type: 'touchStart' | 'touchMove' | 'touchEnd',
+        y: number | undefined,
+      ): Promise<void> => {
+        await cdp.send('Input.dispatchTouchEvent', {
+          type,
+          touchPoints: y === undefined ? [] : [{ x: Math.round(x), y: Math.round(y) }],
+        });
+      };
+      await at('touchStart', from);
+      for (let step = 1; step <= 12; step += 1)
+        await at('touchMove', from + ((to - from) * step) / 12);
+      await at('touchEnd', undefined);
+    }
+
+    /** Two frames, so a scroll the gesture started has been drawn. */
+    async function frames(page: Page): Promise<void> {
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          }),
+      );
+    }
+
+    test('a finger drawn down scrolls the list up', async ({ page }) => {
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      const before = await ownLine(page, 'corner-back');
+      await swipe(page, before.x, before.y - 40, before.y + 80);
+      await expect
+        .poll(async () => (await ownLine(page, 'corner-back')).scrollTop, {
+          message: 'the list scrolled up under the finger',
+        })
+        .toBeLessThan(before.scrollTop);
+    });
+
+    test('a finger drawn up on a list at its foot never moves the page', async ({ page }) => {
+      await open(page, fourByThree, '?corner=race&text=normal');
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      // The rider last of eight: the list opens at its foot, so a finger
+      // drawn up has nothing left to scroll there, and the pan would chain.
+      const before = await ownLine(page, 'corner-back');
+      expect(before.more, 'the list opens at its foot').toBe('above');
+      await swipe(page, before.x, before.y + 40, before.y - 80);
+      await frames(page);
+      expect(await page.evaluate(() => window.scrollY), 'the page did not move').toBe(0);
+    });
+
+    test('a swipe that starts on the list and lifts over Use item never presses it', async ({
       page,
     }) => {
       await open(page, fourByThree, '?corner=race&text=normal');
       await page.evaluate(() => {
         window.scrollTo(0, 0);
       });
-      const before = await ownLine(page, 'corner-back');
-      const pageBefore = await page.evaluate(() => window.scrollY);
-      const cdp = await page.context().newCDPSession(page);
-      // A finger put down on the list, drawn 120 px down in steps, and lifted:
-      // raw touch input, which the compositor scrolls as a finger's pan.
-      const x = Math.round(before.x);
-      const y = Math.round(before.y) - 40;
-      const touch = async (
-        type: 'touchStart' | 'touchMove' | 'touchEnd',
-        at: number | undefined,
-      ): Promise<void> => {
-        await cdp.send('Input.dispatchTouchEvent', {
-          type,
-          touchPoints: at === undefined ? [] : [{ x, y: at }],
-        });
-      };
-      await touch('touchStart', y);
-      for (let step = 1; step <= 12; step += 1) await touch('touchMove', y + step * 10);
-      await touch('touchEnd', undefined);
-      await expect
-        .poll(async () => (await ownLine(page, 'corner-back')).scrollTop, {
-          message: 'the list scrolled up under the finger',
-        })
-        .toBeLessThan(before.scrollTop);
-      expect(await page.evaluate(() => window.scrollY), 'the page did not move').toBe(pageBefore);
+      const list = await ownLine(page, 'corner-back');
+      const item = await page.evaluate(() => {
+        const button = [
+          ...document.querySelectorAll(
+            '[data-oyl-lap-race-stage="corner-back"] .oyl-hud__actions button',
+          ),
+        ].find((each) => each.textContent?.trim() === 'Use item');
+        const box = button?.getBoundingClientRect();
+        return box === undefined
+          ? undefined
+          : { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      });
+      if (item === undefined) throw new Error('no Use item');
+      // Down the one column both share, from the list's middle to Use item's.
+      const x = Math.min(Math.max(item.x, list.left + 8), list.right - 8);
+      const lifted = await page.evaluate(
+        ([px, py]) => document.elementFromPoint(px ?? 0, py ?? 0)?.closest('button')?.textContent,
+        [x, item.y],
+      );
+      expect(lifted?.trim(), 'the finger lifts over Use item').toBe('Use item');
+      // And it goes down on the list, not on a control: touch events go to
+      // the element the finger went down on, so this is what keeps a swipe
+      // that ends over Use item from ever being Use item's.
+      const downOn = await page.evaluate(
+        ([px, py]) =>
+          document.elementFromPoint(px ?? 0, py ?? 0)?.closest('.oyl-hud__standings-scroll') !==
+          null,
+        [x, list.y],
+      );
+      expect(downOn, 'the finger goes down on the list').toBe(true);
+      await swipe(page, x, list.y, item.y);
+      await frames(page);
       expect(await page.evaluate(() => window.__oylLapRaceHudItemsUsed ?? 0)).toBe(0);
     });
   });
@@ -557,10 +638,11 @@ test.describe('#2599 the standings scroll at 1024×768', () => {
         false,
       );
       await page.clock.runFor(STANDINGS_RETURN_MS - 500);
-      expect(
-        (await ownLine(page, 'corner-back')).inView,
-        'still the rider’s, before the time',
-      ).toBe(false);
+      const early = await ownLine(page, 'corner-back');
+      expect(early.inView, 'still the rider’s, before the time').toBe(false);
+      // The cue is written for the return's target at once, so an early
+      // return shows here even while a smooth scroll is still on its way.
+      expect(early.more, 'no return begun before the time').toBe('below');
       await page.clock.runFor(1_000);
       await expect.poll(async () => (await ownLine(page, 'corner-back')).inView).toBe(true);
     });
