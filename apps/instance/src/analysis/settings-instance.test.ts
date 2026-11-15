@@ -144,7 +144,7 @@ async function sealed(
   return { status: answer.status, body: answer.text === '' ? null : JSON.parse(answer.text) };
 }
 
-/** One job of `athleteId`'s, run to its end: the result event's data. */
+/** One job of `athleteId`'s, run to its end: the result event's data, or the start's refusal. */
 async function jobOf(
   instance: StartedInstance,
   athleteId: string,
@@ -154,7 +154,8 @@ async function jobOf(
   if (jobs === undefined) throw new Error('no analysis jobs');
   const caller = { athleteId } as Caller;
   const started = await jobs.start(caller, body);
-  if (!started.ok) throw new Error(`not started: ${JSON.stringify(started)}`);
+  // #2609: a source not offered to the athlete is refused at the start.
+  if (!started.ok) return { refusedAtStart: started.code };
   await jobs.idle();
   const stream = await jobs.events(caller, started.value.jobId, null);
   return parseStream((await stream?.text()) ?? '').events.at(-1)?.data;
@@ -336,10 +337,7 @@ describe('the switch for other riders’ analysis covers the local model, off by
         .offered;
 
     // Off on an instance that never set it: refused before a model is called.
-    expect(await jobOf(instance, rider.athleteId)).toEqual({
-      status: 'failed',
-      failure: 'local_unavailable',
-    });
+    expect(await jobOf(instance, rider.athleteId)).toEqual({ refusedAtStart: 'local_unavailable' });
     expect(model.requests).toEqual([]);
     expect(await offered(rider)).toEqual({ local: false, hosted: true });
     expect(await offered(owner)).toEqual({ local: true, hosted: true });
@@ -356,10 +354,7 @@ describe('the switch for other riders’ analysis covers the local model, off by
     expect(
       (await sealed(instance, owner, 'POST', '/v1/operate/analysis', { offerLocal: false })).status,
     ).toBe(200);
-    expect(await jobOf(instance, owner.athleteId)).toEqual({
-      status: 'failed',
-      failure: 'local_unavailable',
-    });
+    expect(await jobOf(instance, owner.athleteId)).toEqual({ refusedAtStart: 'local_unavailable' });
     expect(model.requests).toHaveLength(2);
   });
 });
@@ -416,8 +411,7 @@ describe('hosted turned off, and no Share mode (#2609, ADR 0046 D-9)', () => {
 
     const hostedJob = { ...jobBody(), source: 'instance-hosted', endpoint: HOSTED.origin };
     expect(await jobOf(instance, owner.athleteId, hostedJob)).toEqual({
-      status: 'failed',
-      failure: 'hosted_unavailable',
+      refusedAtStart: 'hosted_unavailable',
     });
     const tested = await sealed(instance, owner, 'POST', '/v1/analysis/hosted/test');
     expect(tested.status).toBe(409);

@@ -12,7 +12,12 @@ import { describe, expect, it } from 'vitest';
 
 import { readAnalysisModelSettings, readConfig, type AnalysisModelEnv } from '../config.ts';
 import type { AnalysisSettingRecord } from '../store/sql-store.ts';
-import { checkedSettings, effectiveAnalysisSettings, resolveLocalModel } from './settings.ts';
+import {
+  checkedSettings,
+  effectiveAnalysisSettings,
+  resolveLocalModel,
+  SAVE_LOOKUP_WAIT_MS,
+} from './settings.ts';
 
 const NOTHING: AnalysisSettingRecord = {
   localUrl: null,
@@ -191,5 +196,18 @@ describe('a save is checked field by field before anything is written (#2609)', 
       ok: false,
       fields: [{ field: 'apiKey', problem: 'is not a field of this request' }],
     });
+  });
+
+  it('refuses a name that does not resolve within its deadline, unresolved, rather than holding the save', async () => {
+    const hangs = () => new Promise<readonly string[]>(() => undefined);
+    expect(await checkedSettings({ localUrl: 'http://models-box:11434/v1' }, hangs, 20)).toEqual({
+      ok: false,
+      fields: [{ field: 'localUrl', problem: 'unresolved' }],
+    });
+  });
+
+  it('waits SAVE_LOOKUP_WAIT_MS by default, a few seconds', () => {
+    expect(SAVE_LOOKUP_WAIT_MS).toBeGreaterThanOrEqual(1_000);
+    expect(SAVE_LOOKUP_WAIT_MS).toBeLessThanOrEqual(5_000);
   });
 });

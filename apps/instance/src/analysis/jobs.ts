@@ -268,6 +268,15 @@ export interface AnalysisJobsOptions {
    */
   readonly available: () => boolean | Promise<boolean>;
   /**
+   * Whether `source` is offered to `athleteId` now (#2609): the operator's
+   * settings — the local model offered, and the switch for other riders on
+   * for anybody but the operator; hosted offered. `false`, the start is
+   * refused `local_unavailable` or `hosted_unavailable` and nothing is
+   * queued — for a hosted start before its consent is read. Absent, every
+   * source is offered; the run's own gate (`source.ts`) checks again.
+   */
+  readonly offered?: (athleteId: string, source: AnalysisSource) => Promise<boolean>;
+  /**
    * The origin `athleteId`'s own recorded hosted consent names, or `undefined`
    * when they have none (#1796): `source.ts` §`SourceOptions.recordedConsent`,
    * the same function, so the start and the run read one consent. A hosted
@@ -686,6 +695,20 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     });
   }
 
+  /** #2609: a source the operator's settings do not offer this athlete, refused at the start. */
+  async function refusedSource(
+    athleteId: string,
+    source: AnalysisSource,
+  ): Promise<Outcome<never> | undefined> {
+    if (options.offered === undefined || (await options.offered(athleteId, source))) {
+      return undefined;
+    }
+    return {
+      ok: false,
+      code: source === 'instance-local' ? 'local_unavailable' : 'hosted_unavailable',
+    };
+  }
+
   return {
     async start(caller, body) {
       if (!(await options.available())) return { ok: false, code: 'analysis_off' };
@@ -713,6 +736,8 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       const input = readRideInput(body.input);
       if (!input.ok) return refused(input.fields);
       const source = body.source as AnalysisSource;
+      const notOffered = await refusedSource(caller.athleteId, source);
+      if (notOffered !== undefined) return notOffered;
       const { hostedConsent } = options;
       const moved = await endpointProblem(
         source,
@@ -778,6 +803,8 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       ) {
         return refused([{ field: 'source', problem: 'must be instance-local or instance-hosted' }]);
       }
+      const notOffered = await refusedSource(caller.athleteId, body.source as AnalysisSource);
+      if (notOffered !== undefined) return notOffered;
       const input = readReplanInput(body.input);
       if (!input.ok) return refused(input.fields);
       await recovering.catch(() => undefined);

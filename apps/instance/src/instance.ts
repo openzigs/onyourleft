@@ -829,6 +829,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             .kind === 'on' || (await secretKey) !== undefined,
         // #1796: a hosted start names the service the rider's consent names.
         hostedConsent: sources.recordedConsent,
+        // #2609: a source the settings do not offer this athlete is refused at
+        // the start, as the run's own gate would refuse it.
+        offered: async (athleteId, source) => {
+          const now = await forJob(athleteId);
+          return source === 'instance-local'
+            ? now.localOffered && now.local() !== undefined
+            : now.hostedOffered;
+        },
         now,
         log,
         heartbeatMs: server.analysisHeartbeatMs,

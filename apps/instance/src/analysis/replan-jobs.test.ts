@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Proposal } from '@onyourleft/domain';
 import { PROPOSAL_KEYS } from '@onyourleft/domain';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import type { Resolver } from '../history/address.ts';
@@ -575,5 +575,16 @@ describe('scoped to the session’s athlete (three riders)', () => {
       { id: 2, kind: 'result', data: { status: 'failed', failure: 'not-a-proposal' } },
     ]);
     expect(JSON.stringify(events)).not.toContain('500');
+  });
+});
+
+describe('a re-plan the operator does not offer the rider (#2609, ADR 0046 2026-11-14 point 7)', () => {
+  it('is refused local_unavailable at the start, and nothing is queued', async () => {
+    const offered = vi.fn(() => Promise.resolve(false));
+    const { world: w, replans, riders } = await replanWorld(1, { analysis: { offered } });
+    const answer = await startReplan(w, riders[0]!.token);
+    expect([answer.status, codeOf(answer)]).toStrictEqual([409, 'local_unavailable']);
+    expect(offered).toHaveBeenCalledWith(riders[0]!.athleteId, 'instance-local');
+    expect(replans.runs).toEqual([]);
   });
 });

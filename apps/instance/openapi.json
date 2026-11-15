@@ -1856,7 +1856,7 @@
     "/v1/analysis/jobs": {
       "post": {
         "operationId": "startAnalysisJob",
-        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. `rideId`, optional, is the synced id of the ride being written up — one of YOUR live synced rides, else `validation_failed` — and lets the history tool say how long before it each earlier ride it finds was; without it the write-up names no ride's age. `endpoint`, on a hosted job only and required there, is the service your device showed you beside its press, and `validation_failed` on `endpoint` unless it is the one your recorded consent names (#1796). Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "summary": "Queue a write-up of one ride, on a model this instance reaches (`source`: `instance-local` or `instance-hosted`, ADR 0046 D-9). `input` is the ride as `@onyourleft/analysis` builds it (#809): its exact shape and nothing else, no picture, at most 4 KiB. `templateVersion` is the agent template's. `rideId`, optional, is the synced id of the ride being written up — one of YOUR live synced rides, else `validation_failed` — and lets the history tool say how long before it each earlier ride it finds was; without it the write-up names no ride's age. `endpoint`, on a hosted job only and required there, is the service your device showed you beside its press, and `validation_failed` on `endpoint` unless it is the one your recorded consent names (#1796). Answers 202 at once with the job's id; the work is not done in the request. `job_running` while you have a job queued or running, `rate_limited` past 12 starts an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all. `local_unavailable` or `hosted_unavailable` (#2609) when its operator does not offer you that source now — the local model turned off, or not yet opened to riders other than the operator; hosted turned off — refused before any consent or key is read, and nothing is queued.",
         "security": [
           {
             "session": []
@@ -1937,7 +1937,14 @@
             "$ref": "#/components/responses/method_not_allowed"
           },
           "409": {
-            "$ref": "#/components/responses/job_running"
+            "description": "One of `job_running`, `hosted_unavailable`, `local_unavailable`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -2249,7 +2256,7 @@
     "/v1/analysis/replans": {
       "post": {
         "operationId": "startReplanJob",
-        "summary": "Queue a re-plan of the workout you are riding (ADR 0048), on a model this instance reaches (`source`: `instance-local`, or `instance-hosted` on your own key only). `input` is `{ revision, summarySeq, currentBlock, goals, blocks, summaries }`: the plan's revision and the summary's number, the block being ridden, your typed workout goals, the plan's blocks as shares of threshold power with no label, and one summary for each block ridden (seconds, heart rate, seconds in range, mean power as a share, cadence, rescues, an effort check-in). Its exact shape and nothing else, no picture, at most 8 KiB. `templateVersion` is `re-plan-1`. Answers 202 at once with a job's id; read, follow, cancel and acknowledge it through the job routes. Its `result` event is `{ status: \"succeeded\", proposal }`, where `proposal` is one `{ revision, summarySeq, move, reason }` from the closed lists of moves and reasons, or `null` when the workout should stay as it is; or `{ status: \"failed\", failure }` with no proposal. It carries no text, and the instance changes nothing: your device decides whether to apply a proposal. `job_running` while you have a job of either kind queued or running, `rate_limited` past 24 re-plans an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "summary": "Queue a re-plan of the workout you are riding (ADR 0048), on a model this instance reaches (`source`: `instance-local`, or `instance-hosted` on your own key only). `input` is `{ revision, summarySeq, currentBlock, goals, blocks, summaries }`: the plan's revision and the summary's number, the block being ridden, your typed workout goals, the plan's blocks as shares of threshold power with no label, and one summary for each block ridden (seconds, heart rate, seconds in range, mean power as a share, cadence, rescues, an effort check-in). Its exact shape and nothing else, no picture, at most 8 KiB. `templateVersion` is `re-plan-1`. Answers 202 at once with a job's id; read, follow, cancel and acknowledge it through the job routes. Its `result` event is `{ status: \"succeeded\", proposal }`, where `proposal` is one `{ revision, summarySeq, move, reason }` from the closed lists of moves and reasons, or `null` when the workout should stay as it is; or `{ status: \"failed\", failure }` with no proposal. It carries no text, and the instance changes nothing: your device decides whether to apply a proposal. `job_running` while you have a job of either kind queued or running, `rate_limited` past 24 re-plans an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all. `local_unavailable` or `hosted_unavailable` (#2609) when its operator does not offer you that source now, and nothing is queued: the plan stays as it is.",
         "security": [
           {
             "session": []
@@ -2324,7 +2331,14 @@
             "$ref": "#/components/responses/method_not_allowed"
           },
           "409": {
-            "$ref": "#/components/responses/job_running"
+            "description": "One of `job_running`, `hosted_unavailable`, `local_unavailable`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "413": {
             "$ref": "#/components/responses/payload_too_large"
@@ -12050,6 +12064,7 @@
                   "job_running",
                   "picture_source_unavailable",
                   "hosted_unavailable",
+                  "local_unavailable",
                   "payload_too_large",
                   "file_type_unsupported",
                   "file_undecodable",
@@ -12478,6 +12493,16 @@
       },
       "hosted_unavailable": {
         "description": "`hosted_unavailable` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "local_unavailable": {
+        "description": "`local_unavailable` (409), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

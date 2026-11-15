@@ -186,9 +186,10 @@ fields changed and never their values.
 whether the instance offers its local model and a hosted service at all (both, unless turned off),
 and whether **riders other than you may use the local model: off by default, on an existing
 instance as on a new one**. While it is off, another rider's local job — post-ride or re-plan — is
-refused `local_unavailable` before the model is called. With hosted turned off, every hosted job and
-test question is refused `hosted_unavailable` before a consent or a key is read, and nothing is
-deleted. A rider's hosted job still runs only on their own key, under their own consent naming the
+refused `local_unavailable` when it is started, and nothing is queued. With hosted turned off, every
+hosted job and test question is refused `hosted_unavailable` — a job when it is started, before the
+consent it names is checked, and again when it would run — before any key is read, and nothing is
+deleted. A job already queued when a source is turned off is refused when it comes to run. A rider's hosted job still runs only on their own key, under their own consent naming the
 endpoint; the switch does not change that.
 
 **Back to `.env`.** Clear the settings from the app (`DELETE /v1/operate/analysis`), or on the host:

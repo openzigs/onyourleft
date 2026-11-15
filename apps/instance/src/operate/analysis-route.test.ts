@@ -227,12 +227,8 @@ describe('what POST /v1/operate/analysis saves is what is read back, and logged 
 });
 
 describe('a setting that fails the address rule is refused when saved, and nothing is written (#2609, ADR 0040 D-6)', () => {
-  let world: ModerationWorld;
-  beforeAll(async () => {
-    world = await startModerationWorld({ resolve });
-  });
-  afterAll(() => world.close());
-
+  // Each case in a world of its own (#2628's review): a save one case let
+  // through must not be the row the next case finds.
   it.each([
     ['a public host name', 'http://models.example.com/v1', 'not-local'],
     ['a .local name', 'http://box.local:11434/v1', 'not-local'],
@@ -240,45 +236,61 @@ describe('a setting that fails the address rule is refused when saved, and nothi
     ['a name that resolves to a public address too', 'http://leaky-box:11434/v1', 'not-local'],
     ['a name that does not resolve', 'http://nowhere-box:11434/v1', 'unresolved'],
     ['a public address', 'http://8.8.8.8/v1', 'not-local'],
+    ['the IPv4 unspecified address', 'http://0.0.0.0:11434/v1', 'not-local'],
+    ['the IPv6 unspecified address', 'http://[::]:11434/v1', 'not-local'],
+    ['an IPv4-mapped public address', 'http://[::ffff:8.8.8.8]:11434/v1', 'not-local'],
+    ['a URL with credentials', 'http://ann:hunter2@models-box:11434/v1', 'not-base-url'],
     ['not a URL', 'models-box', 'not-a-url'],
     ['a URL with a query', 'http://models-box:11434/v1?key=1', 'not-base-url'],
   ])('refuses %s with its code, naming the field and not the value', async (_name, url, code) => {
-    const before = await wholeLog(world);
-    const answer = await world.as(world.owner, 'POST', ANALYSIS, {
-      localUrl: url,
-      localModel: 'some-model',
-      othersLocal: true,
-    });
-    expect(answer.status).toBe(400);
-    expect(codeOf(answer.body)).toBe('validation_failed');
-    expect((answer.body as { error: { fields: unknown } }).error.fields).toEqual([
-      { field: 'localUrl', problem: code },
-    ]);
-    expect(JSON.stringify(answer.body)).not.toContain(url);
-    // Read back: no row, not even the fields that passed.
-    expect(await settingsRow(world)).toBeUndefined();
-    const after = await wholeLog(world);
-    expect(after).toHaveLength(before.length + 1);
-    expect(after[0]).toMatchObject({
-      action: 'analysis_settings_set',
-      detail: 'local_url',
-      outcome: 'refused',
-    });
+    const world = await startModerationWorld({ resolve });
+    try {
+      const before = await wholeLog(world);
+      const answer = await world.as(world.owner, 'POST', ANALYSIS, {
+        localUrl: url,
+        localModel: 'some-model',
+        othersLocal: true,
+      });
+      expect(answer.status).toBe(400);
+      expect(codeOf(answer.body)).toBe('validation_failed');
+      expect((answer.body as { error: { fields: unknown } }).error.fields).toEqual([
+        { field: 'localUrl', problem: code },
+      ]);
+      const body = JSON.stringify(answer.body);
+      expect(body).not.toContain(url);
+      expect(body).not.toContain('hunter2');
+      // Read back: no row, not even the fields that passed.
+      expect(await settingsRow(world)).toBeUndefined();
+      const after = await wholeLog(world);
+      expect(after).toHaveLength(before.length + 1);
+      expect(after[0]).toMatchObject({
+        action: 'analysis_settings_set',
+        detail: 'local_url',
+        outcome: 'refused',
+      });
+    } finally {
+      await world.close();
+    }
   });
 
   it('refuses a bad model name, bad reasoning tokens, a flag that is not one and a field it does not know', async () => {
-    const answer = await world.as(world.owner, 'POST', ANALYSIS, {
-      localModel: 'two words',
-      reasoningTokens: 0,
-      offerLocal: 'yes',
-    });
-    expect(answer.status).toBe(400);
-    expect((answer.body as { error: { fields: unknown } }).error.fields).toEqual([
-      { field: 'localModel', problem: 'bad-model' },
-      { field: 'reasoningTokens', problem: 'bad-reasoning' },
-      { field: 'offerLocal', problem: 'must-be-boolean-or-null' },
-    ]);
-    expect(await settingsRow(world)).toBeUndefined();
+    const world = await startModerationWorld({ resolve });
+    try {
+      const answer = await world.as(world.owner, 'POST', ANALYSIS, {
+        localModel: 'two words',
+        reasoningTokens: 0,
+        offerLocal: 'yes',
+      });
+      expect(answer.status).toBe(400);
+      expect((answer.body as { error: { fields: unknown } }).error.fields).toEqual([
+        { field: 'localModel', problem: 'bad-model' },
+        { field: 'reasoningTokens', problem: 'bad-reasoning' },
+        { field: 'offerLocal', problem: 'must-be-boolean-or-null' },
+      ]);
+      expect(await settingsRow(world)).toBeUndefined();
+    } finally {
+      await world.close();
+    }
   });
 });
 

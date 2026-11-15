@@ -17,7 +17,8 @@
  *   local model is `.env`'s exactly as before ({@link effectiveAnalysisSettings}).
  * - **Which sources the instance offers riders** (point 5): each on unless the
  *   row says off. With hosted off, every hosted job and test question is
- *   refused `hosted_unavailable` BEFORE a consent or a key is read; with local
+ *   refused `hosted_unavailable` — at the start before its consent is read, and
+ *   at the run before any consent or key is read; with local
  *   off, every local job is refused `local_unavailable`. Nothing is deleted.
  * - **The switch for other riders** (point 6): off unless the row says on, on
  *   an existing instance as on a new one. It covers the LOCAL model only:
@@ -159,6 +160,7 @@ export type SaveProblem = AnalysisModelOffCode | 'unresolved' | 'must-be-boolean
 export async function checkedSettings(
   body: Readonly<Record<string, unknown>>,
   resolve: Resolver,
+  lookupWaitMs: number = SAVE_LOOKUP_WAIT_MS,
 ): Promise<
   | { readonly ok: true; readonly values: Partial<AnalysisSettingValues> }
   | { readonly ok: false; readonly fields: readonly FieldProblem[] }
@@ -171,7 +173,8 @@ export async function checkedSettings(
   const url = body.localUrl;
   if (url === null) values.localUrl = null;
   else if (url !== undefined) {
-    const problem = typeof url === 'string' ? await urlProblem(url, resolve) : 'not-a-url';
+    const problem =
+      typeof url === 'string' ? await urlProblem(url, resolve, lookupWaitMs) : 'not-a-url';
     if (problem === undefined) values.localUrl = (url as string).trim();
     else fields.push({ field: 'localUrl', problem });
   }
@@ -198,14 +201,37 @@ export async function checkedSettings(
 }
 
 /**
- * `.env`'s rule for the address, then — for a name — where it resolves to
- * NOW: every address local, or `not-local`; none, `unresolved`.
+ * How long a save waits for a name to resolve before it is refused
+ * `unresolved` (#2628's review): a resolver that hangs must not hold the
+ * owner's request, as #2604's tunnel probe is bounded. A lookup still running
+ * then is left to finish unread.
  */
-async function urlProblem(url: string, resolve: Resolver): Promise<SaveProblem | undefined> {
+export const SAVE_LOOKUP_WAIT_MS = 3_000;
+
+/**
+ * `.env`'s rule for the address, then — for a name — where it resolves to
+ * NOW: every address local, or `not-local`; none, or none within
+ * {@link SAVE_LOOKUP_WAIT_MS}, `unresolved`.
+ */
+async function urlProblem(
+  url: string,
+  resolve: Resolver,
+  waitMs: number,
+): Promise<SaveProblem | undefined> {
   const problem = analysisModelUrlProblem(url);
   if (problem !== undefined) return problem;
-  const checked = await localAddressesOnly(new URL(url.trim()).hostname, resolve);
-  return checked.ok ? undefined : checked.why;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<'unresolved'>((settle) => {
+    timer = setTimeout(() => settle('unresolved'), waitMs);
+  });
+  const looked = localAddressesOnly(new URL(url.trim()).hostname, resolve).then((checked) =>
+    checked.ok ? undefined : checked.why,
+  );
+  try {
+    return await Promise.race([looked, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The words of the fields `next` changes from `before`, in the log's order. */
@@ -229,10 +255,15 @@ export async function saveAnalysisSettings(
   store: SqlStore,
   actor: OperatorActor,
   body: Readonly<Record<string, unknown>>,
-  options: { readonly resolve: Resolver; readonly now: () => number },
+  options: {
+    readonly resolve: Resolver;
+    readonly now: () => number;
+    /** {@link SAVE_LOOKUP_WAIT_MS} unless a test's. */
+    readonly lookupWaitMs?: number;
+  },
 ): Promise<SaveOutcome> {
   const at = Math.floor(options.now() / 1000);
-  const checked = await checkedSettings(body, options.resolve);
+  const checked = await checkedSettings(body, options.resolve, options.lookupWaitMs);
   const { value } = await store.recordOperatorAction<SaveOutcome>(
     { actor, action: 'analysis_settings_set', at },
     async (inside) => {
