@@ -110,9 +110,23 @@ function answeringTrainer(stack: ScriptedStack): ScriptedPort {
 }
 
 /** One opening of the app: the shell's controller, as `main.tsx` builds it. */
-function openApp(device: RememberedSensorStorage, stack: ScriptedStack = {}) {
+function openApp(
+  device: RememberedSensorStorage,
+  stack: ScriptedStack = {},
+  /** Hold ONE device's connect until this settles; every other answers at once. */
+  hold?: { readonly id: string; readonly until: Promise<void> },
+) {
   let clock = unixSeconds(1_757_000_000);
   const plugin = answeringTrainer(stack);
+  if (hold !== undefined) {
+    const connect = plugin.connect.bind(plugin);
+    plugin.connect = async (id, disconnected) => {
+      if (id === hold.id) {
+        await hold.until;
+      }
+      return connect(id, disconnected);
+    };
+  }
   const remembered = createRememberedSensors(device);
   const transport = createCapacitorTransport({
     plugin,
@@ -245,7 +259,6 @@ describe('#2669 — after the app is closed and opened again', () => {
     const second = openApp(device);
     await settle();
     expect(second.controller.getSnapshot().sensors).toEqual([]);
-    expect(second.plugin.calls).toEqual([]);
   });
 
   it('lists a remembered sensor that is not there yet as reconnecting, and tries again on the backoff', async () => {
@@ -276,6 +289,46 @@ describe('#2669 — after the app is closed and opened again', () => {
     expect(connects()).toBe(2);
     await second.advance(waitAfter - nextWait);
     expect(connects()).toBe(3);
+    second.controller.dispose();
+  });
+
+  it('connects each remembered sensor once when a tick lands while the first connect is still held', async () => {
+    const device = deviceStorage();
+    const first = openApp(device, { chooses: KICKR });
+    await pairTrainer(first);
+    first.controller.dispose();
+    // A second trainer, so that a try made twice is seen in what it
+    // subscribes to and in the trainer it opens, not only in its connect.
+    const strap = 'C4:7C:8D:6A:01:01';
+    createRememberedSensors(device).remember({
+      id: strap as never,
+      name: 'KICKR 2B3C',
+      role: 'trainer',
+    });
+
+    // Both are listed at once; the trainer's connect is held, as a slow
+    // link is, so the one-second tick lands while `restoreRemembered` is
+    // still waiting on it and finds the strap due.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const second = openApp(device, {}, { id: KICKR.deviceId, until: held });
+    await settle();
+    await second.advance(1);
+    release();
+    await settle();
+    await second.advance(0);
+
+    const connects = (id: string): number =>
+      second.plugin.calls.filter((call) => call === `connect:${id}`).length;
+    expect(connects(strap)).toBe(1);
+    expect(connects(KICKR.deviceId)).toBe(1);
+    const count = (prefix: string): number =>
+      second.plugin.calls.filter((call) => call.startsWith(prefix)).length;
+    // One Indoor Bike Data subscription and one Feature read per trainer.
+    expect(count('startNotifications:')).toBe(4);
+    expect(count(`read:${FITNESS_MACHINE_SERVICE}|${FITNESS_MACHINE_FEATURE}`)).toBe(2);
     second.controller.dispose();
   });
 

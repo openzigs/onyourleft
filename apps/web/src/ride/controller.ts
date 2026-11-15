@@ -3086,7 +3086,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * trainer is given next comes from the rider, or from a workout the rider
    * starts, through the paths every target takes (`gatedTargets`,
    * `erg-safety.ts`, the remembered target's age in `trainer-target-memory.ts`).
-   * `controller.test.ts` reads the control point's writes after a reconnect.
+   * `shell-reconnect.test.ts` reads the control point's writes after a reconnect.
    *
    * ⚠️ **A workout running on the dropped trainer ends here, writing nothing.**
    * Its session holds the client it was started with, which the drop has
@@ -3102,6 +3102,15 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   const reconnect = async (entry: SensorEntry, retry: ReconnectTry): Promise<void> => {
     const id = entry.device.identity.id;
+    // ⚠️ One try per link at a time, and only the try the entry holds. A second
+    // caller — `restoreRemembered` walking its list while `tick` has already
+    // started this entry's try — would connect again, subscribe again (every
+    // reading twice) and open a second trainer client over the first, which
+    // is then never closed. A try that has finished has replaced or cleared
+    // `entry.retry`, so a stale one is refused here as well.
+    if (retry.running || entry.retry !== retry || sensors.get(id) !== entry || disposed) {
+      return;
+    }
     retry.running = true;
     if (entry.trainer !== undefined && workout !== undefined && trainerEntry() === entry) {
       endWorkoutSession('replace');
