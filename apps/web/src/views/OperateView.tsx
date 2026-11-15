@@ -13,6 +13,7 @@ import type {
 } from '../instance/operate-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { OperateAccountsPanel } from './OperateAccountsPanel';
+import { OperateAnalysisPanel } from './OperateAnalysisPanel';
 import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
@@ -20,7 +21,7 @@ import { OperateStatusPanel } from './OperateStatusPanel';
  * the instance this device is signed in to. It shows the instance's Status
  * (#2604, `OperateStatusPanel.tsx`), its Accounts (#2605,
  * `OperateAccountsPanel.tsx`, read from the same status) and the operator log
- * (#2602); the
+ * (#2602), and its AI backend (#2611, `OperateAnalysisPanel.tsx`); the
  * sections later sub-issues fill are listed, not yet drawn.
  *
  * ## Shown to the owner only
@@ -51,7 +52,6 @@ export const OPERATE_PURPOSE =
 /** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
 export const OPERATE_SECTIONS_TO_COME: readonly string[] = [
   'Backups',
-  'AI backend',
   'Rooms',
   'Instance keys',
   'Recent errors',
@@ -103,6 +103,10 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['load_accounts_add', 'Load-test accounts added'],
   ['load_accounts_erase', 'Load-test accounts erased'],
   ['account_erase', 'Account erased'],
+  // #2609, #2610: the AI backend's.
+  ['analysis_settings_set', 'AI settings changed'],
+  ['analysis_settings_cleared', 'AI settings returned to .env'],
+  ['analysis_model_checked', 'Model checked for tool calling'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */
@@ -323,6 +327,7 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       <p>{OPERATE_PURPOSE}</p>
       <OperateStatusPanel status={shown.status} />
       <OperateAccountsPanel status={shown.status} />
+      <OperateAnalysisPanel port={port} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}

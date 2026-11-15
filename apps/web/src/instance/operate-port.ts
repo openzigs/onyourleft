@@ -41,7 +41,7 @@ import {
   type HeldSealedSession,
   type SealingDependencies,
 } from './instance-port';
-import type { InstanceAnswer } from './instance-transport';
+import { MAXIMUM_SEALED_CALL_MILLISECONDS, type InstanceAnswer } from './instance-transport';
 
 /**
  * Whether this device's account is its instance's owner (#2603).
@@ -145,6 +145,138 @@ export interface OperateStatus {
 export type OperateStatusRead =
   OperateStatus | { readonly kind: Exclude<OperateStanding, 'owner'> };
 
+/** Why the local model is off, by the instance's own code (`apps/instance` §`AnalysisModelOffCode`). */
+export const LOCAL_MODEL_STATES = [
+  'on',
+  'not-set',
+  'not-a-url',
+  'not-base-url',
+  'not-local',
+  'tls-by-name',
+  'no-model',
+  'bad-model',
+  'bad-reasoning',
+] as const;
+export type LocalModelState = (typeof LOCAL_MODEL_STATES)[number];
+
+/** The operator's analysis settings, as `GET /v1/operate/analysis` says them (#2609). Never a key. */
+export interface OperateAnalysis {
+  readonly kind: 'analysis';
+  readonly local: {
+    /** The local server's base URL: what a job is built with while `on`. */
+    readonly url: string | null;
+    readonly model: string | null;
+    readonly reasoningTokens: number | null;
+    /** Whether the instance offers the local model to riders at all. */
+    readonly offered: boolean;
+    /** Whether riders other than the owner may use it (ADR 0046 D-9). */
+    readonly othersMayUse: boolean;
+    /** Where the model's settings come from: this app, the instance's `.env`, or nowhere. */
+    readonly setIn: 'app' | 'env' | 'none';
+    readonly state: LocalModelState;
+  };
+  readonly hosted: {
+    readonly offered: boolean;
+    readonly operatorKey: 'none' | 'held' | 'held-unreadable';
+    readonly operatorKeyOrigin: string | null;
+  };
+}
+
+/** The settings, or why there are none: a standing other than `owner`. */
+export type OperateAnalysisRead =
+  OperateAnalysis | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+/** What a save may change: a field left out is unchanged, `null` returns it to its fallback. */
+export interface OperateAnalysisChange {
+  readonly localModel?: string | null;
+  readonly offerLocal?: boolean | null;
+  readonly offerHosted?: boolean | null;
+  readonly othersLocal?: boolean | null;
+}
+
+/** What a save did: the instance's settings after it, refused naming the fields, or a standing. */
+export type OperateAnalysisSave =
+  | OperateAnalysis
+  | { readonly kind: 'refused'; readonly fields: readonly string[] }
+  | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+/** How much of a model is in GPU memory (#2610): of a loaded model only, never guessed. */
+export type GpuFit = 'all' | 'part' | 'none' | 'not-loaded' | 'not-reported' | 'not-known';
+
+/** One model the local server offers (#2610). */
+export interface LocalModel {
+  readonly name: string;
+  readonly sizeBytes: number | null;
+  readonly parameters: string | null;
+  readonly quantisation: string | null;
+  readonly tools: 'listed' | 'not-listed' | 'not-reported';
+  readonly gpu: GpuFit;
+  /** For `part`, the whole percent in GPU memory. */
+  readonly gpuPercent: number | null;
+}
+
+/** What the local server is, or why it could not be read (#2610). */
+export type LocalServerState =
+  'ollama' | 'openai-compatible' | 'no-address' | 'not-local' | 'unresolved' | 'unreachable';
+
+export interface LocalModels {
+  readonly kind: 'models';
+  readonly state: LocalServerState;
+  readonly version: string | null;
+  readonly models: readonly LocalModel[];
+}
+
+export type LocalModelsRead = LocalModels | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+/** How a tool check went (#2610), by the instance's own word. */
+export const TOOL_CHECK_OUTCOMES = [
+  'tools-ok',
+  'no-tool-call',
+  'does-not-support-tools',
+  'server-error',
+  'not-local',
+  'out-of-time',
+  'stopped',
+  'no-address',
+  'busy',
+] as const;
+export type ToolCheckOutcome = (typeof TOOL_CHECK_OUTCOMES)[number];
+
+export type ToolCheckRead =
+  | { readonly kind: 'checked'; readonly outcome: ToolCheckOutcome }
+  | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+export const JOB_STATUSES = [
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+  'cancelled',
+  'withheld',
+] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+/** One analysis job as the owner is shown it (#2610): never which rider, nor what it said. */
+export interface OperateJob {
+  readonly kind: 'write-up' | 're-plan';
+  readonly source: 'local' | 'hosted';
+  readonly status: JobStatus;
+  readonly failure: string | null;
+  /** ISO 8601, UTC. */
+  readonly createdAt: string;
+  readonly endedAt: string | null;
+  readonly whose: 'own' | 'other';
+}
+
+export interface OperateJobs {
+  readonly kind: 'jobs';
+  readonly counts: Readonly<Record<JobStatus, number>>;
+  readonly failures: readonly { readonly code: string | null; readonly count: number }[];
+  readonly recent: readonly OperateJob[];
+}
+
+export type OperateJobsRead = OperateJobs | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
 /** What the Operate area may ask. */
 export interface OperatePort {
   /** The instance's status, read-only (#2604): one sealed request. */
@@ -153,6 +285,18 @@ export interface OperatePort {
   standing(): Promise<OperateStanding>;
   /** One page of the operator log, newest first: the first, or the one after `cursor`. */
   log(cursor?: string): Promise<OperatorLogRead>;
+  /** The operator's analysis settings (#2609). */
+  analysis(): Promise<OperateAnalysisRead>;
+  /** Save the fields `change` names (#2609): the settings as the instance holds them after. */
+  setAnalysis(change: OperateAnalysisChange): Promise<OperateAnalysisSave>;
+  /** Every field back to the instance's `.env` (#2609). */
+  clearAnalysis(): Promise<OperateAnalysisRead>;
+  /** What the local model server offers (#2610). */
+  localModels(): Promise<LocalModelsRead>;
+  /** Whether `model` on the local server calls tools (#2610). */
+  checkModel(model: string): Promise<ToolCheckRead>;
+  /** The analysis queue and the newest jobs (#2610). */
+  jobs(): Promise<OperateJobsRead>;
 }
 
 /** Every Operate route is sealed and signed by the owner's device key, so the port needs what a sealed call needs. */
@@ -349,6 +493,198 @@ function statusFrom(answer: InstanceAnswer): OperateStatus | undefined {
 }
 
 /**
+ * How long the app waits for the models read (#2610): the instance gives the
+ * server 15 s (`apps/instance` §`LOCAL_SERVER_READ_MS`), and the sealed round
+ * trip is on top of that.
+ */
+export const LOCAL_MODELS_WAIT_MILLISECONDS = 25_000;
+
+/**
+ * How long the app waits for a tool check (#2610): the longest one sealed
+ * call may wait, 60 s. The instance's own budget is 50 s inside it
+ * (`apps/instance` §`TOOL_CHECK_MILLISECONDS`), most of it the server loading
+ * the model, so the round trip has the rest.
+ */
+export const TOOL_CHECK_WAIT_MILLISECONDS = MAXIMUM_SEALED_CALL_MILLISECONDS;
+
+/** A model's name as the instance's settings accept one (`apps/instance` §`MODEL_NAME`). */
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
+/** A base URL: `http:` or `https:`, short, and nothing a screen would run. */
+const BASE_URL = /^https?:\/\/[^\s<>"']{1,500}$/;
+/** An origin, as `hosted-key.ts` §`hostedOriginOf` writes one. */
+const ORIGIN = /^https:\/\/[^\s/<>"']{1,253}$/;
+const LABEL = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,39}$/;
+/** A failure code as `apps/instance` §`JOB_FAILURES` writes one. */
+const FAILURE = /^[a-z][a-z_-]{0,39}$/;
+
+const nullableText = (value: unknown, shape: RegExp): value is string | null =>
+  value === null || (typeof value === 'string' && shape.test(value));
+
+/** The settings as the instance writes them, or `undefined` when any part is not. */
+function analysisFrom(answer: InstanceAnswer): OperateAnalysis | undefined {
+  const body = record(answer.body);
+  const local = record(body?.local);
+  const hosted = record(body?.hosted);
+  if (
+    local === undefined ||
+    hosted === undefined ||
+    !nullableText(local.url, BASE_URL) ||
+    !nullableText(local.model, MODEL_NAME) ||
+    !(local.reasoningTokens === null || whole(local.reasoningTokens)) ||
+    typeof local.offered !== 'boolean' ||
+    typeof local.othersMayUse !== 'boolean' ||
+    !oneOf(local.setIn, ['app', 'env', 'none'] as const) ||
+    !oneOf(local.state, LOCAL_MODEL_STATES) ||
+    typeof hosted.offered !== 'boolean' ||
+    !oneOf(hosted.operatorKey, ['none', 'held', 'held-unreadable'] as const) ||
+    !nullableText(hosted.operatorKeyOrigin, ORIGIN)
+  ) {
+    return undefined;
+  }
+  return {
+    kind: 'analysis',
+    local: {
+      url: local.url,
+      model: local.model,
+      reasoningTokens: local.reasoningTokens,
+      offered: local.offered,
+      othersMayUse: local.othersMayUse,
+      setIn: local.setIn,
+      state: local.state,
+    },
+    hosted: {
+      offered: hosted.offered,
+      operatorKey: hosted.operatorKey,
+      operatorKeyOrigin: hosted.operatorKeyOrigin,
+    },
+  };
+}
+
+function modelFrom(value: unknown): LocalModel | undefined {
+  const row = record(value);
+  if (
+    row === undefined ||
+    typeof row.name !== 'string' ||
+    !MODEL_NAME.test(row.name) ||
+    !(row.sizeBytes === null || whole(row.sizeBytes)) ||
+    !nullableText(row.parameters, LABEL) ||
+    !nullableText(row.quantisation, LABEL) ||
+    !oneOf(row.tools, ['listed', 'not-listed', 'not-reported'] as const) ||
+    !oneOf(row.gpu, ['all', 'part', 'none', 'not-loaded', 'not-reported', 'not-known'] as const) ||
+    !(row.gpuPercent === null || (whole(row.gpuPercent) && row.gpuPercent <= 100))
+  ) {
+    return undefined;
+  }
+  return {
+    name: row.name,
+    sizeBytes: row.sizeBytes,
+    parameters: row.parameters,
+    quantisation: row.quantisation,
+    tools: row.tools,
+    gpu: row.gpu,
+    gpuPercent: row.gpuPercent,
+  };
+}
+
+function modelsFrom(answer: InstanceAnswer): LocalModels | undefined {
+  const body = record(answer.body);
+  if (
+    body === undefined ||
+    !oneOf(body.state, [
+      'ollama',
+      'openai-compatible',
+      'no-address',
+      'not-local',
+      'unresolved',
+      'unreachable',
+    ] as const) ||
+    !nullableText(body.version, LABEL) ||
+    !Array.isArray(body.models)
+  ) {
+    return undefined;
+  }
+  const models = body.models.map(modelFrom);
+  if (models.some((each) => each === undefined)) return undefined;
+  return {
+    kind: 'models',
+    state: body.state,
+    version: body.version,
+    models: models as LocalModel[],
+  };
+}
+
+function jobFrom(value: unknown): OperateJob | undefined {
+  const row = record(value);
+  const createdAt = isoMoment(row?.createdAt);
+  const endedAt = row?.endedAt === null ? null : isoMoment(row?.endedAt);
+  if (
+    row === undefined ||
+    !oneOf(row.kind, ['write-up', 're-plan'] as const) ||
+    !oneOf(row.source, ['local', 'hosted'] as const) ||
+    !oneOf(row.status, JOB_STATUSES) ||
+    !nullableText(row.failure, FAILURE) ||
+    createdAt === undefined ||
+    endedAt === undefined ||
+    !oneOf(row.whose, ['own', 'other'] as const)
+  ) {
+    return undefined;
+  }
+  return {
+    kind: row.kind,
+    source: row.source,
+    status: row.status,
+    failure: row.failure,
+    createdAt,
+    endedAt,
+    whose: row.whose,
+  };
+}
+
+function jobsFrom(answer: InstanceAnswer): OperateJobs | undefined {
+  const body = record(answer.body);
+  const counts = record(body?.counts);
+  if (
+    counts === undefined ||
+    !JOB_STATUSES.every((status) => whole(counts[status])) ||
+    !Array.isArray(body?.failures) ||
+    !Array.isArray(body.recent)
+  ) {
+    return undefined;
+  }
+  const failures = body.failures.map((value: unknown) => {
+    const row = record(value);
+    return row !== undefined && nullableText(row.code, FAILURE) && whole(row.count)
+      ? { code: row.code, count: row.count }
+      : undefined;
+  });
+  const recent = body.recent.map(jobFrom);
+  if (failures.some((each) => each === undefined) || recent.some((each) => each === undefined)) {
+    return undefined;
+  }
+  return {
+    kind: 'jobs',
+    counts: Object.fromEntries(JOB_STATUSES.map((status) => [status, counts[status]])) as Record<
+      JobStatus,
+      number
+    >,
+    failures: failures as { code: string | null; count: number }[],
+    recent: recent as OperateJob[],
+  };
+}
+
+/** The field names a `validation_failed` names, each a field of the request and nothing else. */
+function refusedFields(answer: InstanceAnswer): readonly string[] | undefined {
+  if (answer.status !== 400 || errorCode(answer) !== 'validation_failed') return undefined;
+  const fields = record(record(answer.body)?.error)?.fields;
+  if (!Array.isArray(fields)) return [];
+  return fields
+    .map((each: unknown) => record(each)?.field)
+    .filter(
+      (field): field is string => typeof field === 'string' && /^[A-Za-z]{1,32}$/.test(field),
+    );
+}
+
+/**
  * Whether an answer is the INSTANCE saying this account is not its owner — the
  * status AND its own code. An Operate route answers anybody but the owner as a
  * route that does not exist; an account pending approval or suspended is
@@ -371,6 +707,41 @@ function closedStanding(
 /** The production {@link OperatePort}: `main.tsx` builds it, and nothing else in the client. */
 export function createOperatePort(dependencies: OperatePortDependencies): OperatePort {
   const sealedSession = heldSealedSession(dependencies);
+
+  /** An owner's answer read by `parse`, or the standing the instance's answer says. */
+  function standingOr<T>(
+    answer: InstanceAnswer,
+    parse: (answer: InstanceAnswer) => T | undefined,
+  ): T | { readonly kind: Exclude<OperateStanding, 'owner'> } {
+    if (answer.status === 401) return { kind: 'signed-out' };
+    if (answer.status === 200) return parse(answer) ?? { kind: 'unreachable' };
+    if (isNotTheOwner(answer)) return { kind: 'not-owner' };
+    // #2602: an instance with no OYL_INSTANCE_SECRET_KEY offers no Operate area.
+    if (errorCode(answer) === 'unavailable') return { kind: 'no-keys' };
+    return { kind: 'unreachable' };
+  }
+
+  /** One sealed Operate request as the owner, its answer read by `parse`. */
+  async function ownerRead<T>(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body: Readonly<Record<string, unknown>> | undefined,
+    parse: (answer: InstanceAnswer) => T | undefined,
+    timeoutMilliseconds?: number,
+  ): Promise<T | { readonly kind: Exclude<OperateStanding, 'owner'> }> {
+    try {
+      const session = await sealedSession();
+      if (session.kind === 'closed') return { kind: closedStanding(session) };
+      const answer = await session.sealed.call(method, path, {
+        token: session.token,
+        ...(body === undefined ? {} : { body }),
+        ...(timeoutMilliseconds === undefined ? {} : { timeoutMilliseconds }),
+      });
+      return standingOr(answer, parse);
+    } catch {
+      return { kind: 'unreachable' };
+    }
+  }
 
   return {
     standing: async () => {
@@ -407,6 +778,52 @@ export function createOperatePort(dependencies: OperatePortDependencies): Operat
         return { kind: 'unreachable' };
       }
     },
+
+    analysis: () => ownerRead('GET', '/v1/operate/analysis', undefined, analysisFrom),
+
+    setAnalysis: async (change) => {
+      try {
+        const session = await sealedSession();
+        if (session.kind === 'closed') return { kind: closedStanding(session) };
+        const answer = await session.sealed.call('POST', '/v1/operate/analysis', {
+          token: session.token,
+          body: { ...change },
+        });
+        const refused = refusedFields(answer);
+        if (refused !== undefined) return { kind: 'refused', fields: refused };
+        return standingOr(answer, analysisFrom);
+      } catch {
+        return { kind: 'unreachable' };
+      }
+    },
+
+    clearAnalysis: () => ownerRead('DELETE', '/v1/operate/analysis', undefined, analysisFrom),
+
+    localModels: () =>
+      ownerRead(
+        'GET',
+        '/v1/operate/analysis/models',
+        undefined,
+        modelsFrom,
+        LOCAL_MODELS_WAIT_MILLISECONDS,
+      ),
+
+    checkModel: (model) => {
+      // A name the instance would refuse is sent nowhere.
+      if (!MODEL_NAME.test(model)) return Promise.resolve({ kind: 'unreachable' as const });
+      return ownerRead(
+        'POST',
+        '/v1/operate/analysis/check',
+        { model },
+        (answer) => {
+          const outcome = record(answer.body)?.outcome;
+          return oneOf(outcome, TOOL_CHECK_OUTCOMES) ? { kind: 'checked', outcome } : undefined;
+        },
+        TOOL_CHECK_WAIT_MILLISECONDS,
+      );
+    },
+
+    jobs: () => ownerRead('GET', '/v1/operate/analysis/jobs', undefined, jobsFrom),
 
     log: async (cursor) => {
       // A cursor the instance could not have written is sent nowhere.

@@ -56,7 +56,16 @@ import {
   type OpenAppeal,
   type SuspendedAccount,
 } from './moderation-port';
-import type { OperatePort, OperateStanding, OperateStatus, OperatorLogEntry } from './operate-port';
+import type {
+  LocalModels,
+  OperateAnalysis,
+  OperateJobs,
+  OperatePort,
+  OperateStanding,
+  OperateStatus,
+  OperatorLogEntry,
+  ToolCheckOutcome,
+} from './operate-port';
 
 export interface ScriptedInstance {
   readonly port: InstancePort;
@@ -863,8 +872,112 @@ export interface ScriptedOperate {
     logReadable: boolean;
     /** What the instance's status says (#2604), or `null` to answer it as one that could not be read. */
     status: OperateStatus | null;
+    /** The operator's analysis settings as the instance holds them (#2609), or `null` for unreadable. */
+    analysis: OperateAnalysis | null;
+    /** What the local server offers (#2610), or `null` for unreadable. */
+    models: LocalModels | null;
+    /** What a tool check of each model answers (#2610); a model not named answers `no-tool-call`. */
+    checks: Record<string, ToolCheckOutcome>;
+    /** The analysis queue (#2610), or `null` for unreadable. */
+    jobs: OperateJobs | null;
+    /**
+     * `true` to answer a save as the instance would and then NOT keep it: the
+     * read after shows the old settings, as an instance whose write was lost.
+     */
+    saveIsLost: boolean;
   };
 }
+
+/** The operator's analysis settings (#2609): `.env`'s server, no model picked, both sources offered. */
+export const SCRIPTED_ANALYSIS: OperateAnalysis = {
+  kind: 'analysis',
+  local: {
+    url: 'http://ollama:11434/v1',
+    model: null,
+    reasoningTokens: null,
+    offered: true,
+    othersMayUse: false,
+    setIn: 'env',
+    state: 'no-model',
+  },
+  hosted: { offered: true, operatorKey: 'none', operatorKeyOrigin: null },
+};
+
+/**
+ * The local server's models (#2610), made up for the screen: one loaded
+ * whole, one in part (62 % — `size_vram / size = 0.62`), and one not loaded.
+ * No real model's name: the panel names none, and its tests say so.
+ */
+export const SCRIPTED_MODELS: LocalModels = {
+  kind: 'models',
+  state: 'ollama',
+  version: '0.12.6',
+  models: [
+    {
+      name: 'alpha:14b',
+      sizeBytes: 9_000_000_000,
+      parameters: '14.8B',
+      quantisation: 'Q4_K_M',
+      tools: 'listed',
+      gpu: 'all',
+      gpuPercent: null,
+    },
+    {
+      name: 'beta:32b',
+      sizeBytes: 19_900_000_000,
+      parameters: '32.8B',
+      quantisation: 'Q4_K_M',
+      tools: 'listed',
+      gpu: 'part',
+      gpuPercent: 62,
+    },
+    {
+      name: 'gamma:26b',
+      sizeBytes: 17_000_000_000,
+      parameters: '25.8B',
+      quantisation: 'Q8_0',
+      tools: 'not-reported',
+      gpu: 'not-loaded',
+      gpuPercent: null,
+    },
+  ],
+};
+
+/** The analysis queue (#2610): one job waiting, one of the owner's done, one of another rider's failed. */
+export const SCRIPTED_JOBS: OperateJobs = {
+  kind: 'jobs',
+  counts: { queued: 1, running: 0, succeeded: 4, failed: 1, cancelled: 0, withheld: 0 },
+  failures: [{ code: 'model-without-tools', count: 1 }],
+  recent: [
+    {
+      kind: 'write-up',
+      source: 'local',
+      status: 'queued',
+      failure: null,
+      createdAt: '2026-11-14T10:05:00.000Z',
+      endedAt: null,
+      whose: 'other',
+    },
+    {
+      kind: 're-plan',
+      source: 'hosted',
+      status: 'failed',
+      failure: 'model-without-tools',
+      createdAt: '2026-11-14T09:50:00.000Z',
+      endedAt: '2026-11-14T09:51:00.000Z',
+      whose: 'other',
+    },
+    {
+      kind: 'write-up',
+      source: 'local',
+      status: 'succeeded',
+      failure: null,
+      createdAt: '2026-11-14T09:00:00.000Z',
+      endedAt: '2026-11-14T09:02:00.000Z',
+      whose: 'own',
+    },
+  ],
+};
 
 /**
  * An instance's status (#2604) with something in every field to draw: a
@@ -939,6 +1052,10 @@ export function scriptedOperate(
     readonly entries?: readonly OperatorLogEntry[];
     readonly pageSize?: number;
     readonly status?: OperateStatus | null;
+    readonly analysis?: OperateAnalysis | null;
+    readonly models?: LocalModels | null;
+    readonly checks?: Record<string, ToolCheckOutcome>;
+    readonly jobs?: OperateJobs | null;
   } = {},
 ): ScriptedOperate {
   const calls: string[] = [];
@@ -948,7 +1065,17 @@ export function scriptedOperate(
     pageSize: options.pageSize ?? 25,
     logReadable: true,
     status: options.status === undefined ? SCRIPTED_STATUS : options.status,
+    analysis: options.analysis === undefined ? SCRIPTED_ANALYSIS : options.analysis,
+    models: options.models === undefined ? SCRIPTED_MODELS : options.models,
+    checks: { ...(options.checks ?? {}) },
+    jobs: options.jobs === undefined ? SCRIPTED_JOBS : options.jobs,
+    saveIsLost: false,
   };
+  /** What a read answers: the held value, or the standing's refusal, or unreadable. */
+  const owned = <T>(value: T | null): Promise<T | { kind: Exclude<OperateStanding, 'owner'> }> =>
+    Promise.resolve(
+      held.standing !== 'owner' ? { kind: held.standing } : (value ?? { kind: 'unreachable' }),
+    );
   const port: OperatePort = {
     status: () => {
       calls.push('status');
@@ -958,6 +1085,59 @@ export function scriptedOperate(
     standing: () => {
       calls.push('standing');
       return Promise.resolve(held.standing);
+    },
+    analysis: () => {
+      calls.push('analysis');
+      return owned(held.analysis);
+    },
+    setAnalysis: (change) => {
+      calls.push(`setAnalysis ${JSON.stringify(change)}`);
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      const before = held.analysis;
+      if (before === null) return Promise.resolve({ kind: 'unreachable' });
+      const local = {
+        ...before.local,
+        ...(change.localModel === undefined ? {} : { model: change.localModel }),
+        ...(change.offerLocal === undefined ? {} : { offered: change.offerLocal ?? true }),
+        ...(change.othersLocal === undefined ? {} : { othersMayUse: change.othersLocal ?? false }),
+      };
+      const next: OperateAnalysis = {
+        kind: 'analysis',
+        local: {
+          ...local,
+          setIn: change.localModel === undefined ? local.setIn : 'app',
+          state: local.model === null ? 'no-model' : 'on',
+        },
+        hosted: {
+          ...before.hosted,
+          ...(change.offerHosted === undefined ? {} : { offered: change.offerHosted ?? true }),
+        },
+      };
+      if (!held.saveIsLost) held.analysis = next;
+      return Promise.resolve(next);
+    },
+    clearAnalysis: () => {
+      calls.push('clearAnalysis');
+      if (held.standing === 'owner' && held.analysis !== null) {
+        held.analysis = {
+          ...SCRIPTED_ANALYSIS,
+          hosted: { ...SCRIPTED_ANALYSIS.hosted, ...held.analysis.hosted, offered: true },
+        };
+      }
+      return owned(held.analysis);
+    },
+    localModels: () => {
+      calls.push('localModels');
+      return owned(held.models);
+    },
+    checkModel: (model) => {
+      calls.push(`checkModel ${model}`);
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      return Promise.resolve({ kind: 'checked', outcome: held.checks[model] ?? 'no-tool-call' });
+    },
+    jobs: () => {
+      calls.push('jobs');
+      return owned(held.jobs);
     },
     log: (cursor) => {
       calls.push(cursor === undefined ? 'log' : `log ${cursor}`);

@@ -1047,6 +1047,12 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   counts the queue and the last seven days' jobs, failures by code, and lists the newest 50, each
   marked yours or another rider's — never which rider, and never a job's input or write-up. The
   address is checked on every request to the server, as a job's is.
+  In the app ([#2611](https://github.com/openzigs/onyourleft/issues/2611)) this is Operate's **AI
+  backend** section: what the local model is now and where it is set, a switch for each source riders
+  are offered and the switch for other riders, the local server's models with their GPU fit, **Check
+  it calls tools** and **Save this model** (offered only after that model's check said `tools-ok`),
+  whether your own hosted key is held — set, replaced or removed on the Instance screen, never here —
+  the jobs, and **Return to .env**. No model is recommended or picked for you.
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

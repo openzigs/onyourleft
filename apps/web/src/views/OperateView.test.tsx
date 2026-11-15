@@ -138,7 +138,7 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 3)).toEqual(['Status', 'Accounts', 'Operator log']);
+    expect(headings.slice(0, 4)).toEqual(['Status', 'Accounts', 'AI backend', 'Operator log']);
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
   });
 
@@ -247,7 +247,12 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()[2]).toContain(
       'Database migrated, 2026-11-14 09:00 UTC, from the command line on the host: done (applied=40).',
     );
-    expect(scripted.calls).toEqual(['standing', 'status', 'log', 'log 2']);
+    // The log's own reads, among the AI backend's (#2611).
+    expect(
+      scripted.calls.filter(
+        (call) => ['standing', 'status'].includes(call) || call.startsWith('log'),
+      ),
+    ).toEqual(['standing', 'status', 'log', 'log 2']);
     expect(showOlder()).toBeUndefined();
   });
 
