@@ -709,8 +709,9 @@ the pull request decides it.
 
 Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
-- **2026-11-15** — What #2643 built differs from D-5 and D-11 Q-C, and this entry is **not** the
-  owner's ruling: until the owner accepts or reverses it, #2643 does not merge. (1) Q-C is not
+- **2026-11-15** — What #2643 built differs from D-5 and D-11 Q-C. **Owner ruling, 2026-11-15:**
+  the owner accepted (1) and (2) below: "So most items will be available through the tunnel but
+  not adding of the passkey. If that is what you are saying I am good with that." (1) Q-C is not
   applied on the loopback listener: the owner's answer was that a passkey enrolled there needs no
   confirmation, but #2643 enrols it unconfirmed, so it needs `operator admin-passkeys confirm`
   like a tunnel one. (2) The Constraints line for #2643, "proves the tunnel container cannot reach
@@ -721,6 +722,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   condition under "What would make this ADR wrong". (3) D-3's dedicated `*.localhost` host name
   was deferred to #2643 and is deferred again, unprobed; the loopback cookie is
   `oyl-admin-loopback`. (4) The allowlist `OYL_INSTANCE_ADMIN_ADDRESSES` keys an IPv6 entry by
-  its /64, as the rate limits do, so an entry admits its whole /64. The owner decides: accept this
-  (Q-C's answer is then withdrawn for the loopback listener), or require a design that keeps the
-  tunnel container off the listener (then a superseding ADR).
+  its /64, as the rate limits do, so an entry admits its whole /64. Q-C's answer is therefore
+  withdrawn for the loopback listener: a passkey enrolled on either listener reads and changes
+  nothing until it is confirmed on the host. (3) and (4) are recorded here, not ruled on.
