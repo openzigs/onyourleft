@@ -390,6 +390,37 @@ function route(): RouteProfile {
 }
 
 /**
+ * `ride.html?climb=ahead` / `?climb=on` — #2593: the same 40 km as
+ * {@link route}, flat at 60 m but for one 800 m climb at 6 %, 300 m from the
+ * start (`ahead`, so the climb callout says how far it is) or from the start
+ * itself (`on`, so it counts down to the top). The rest of the ride is the
+ * widest one, as ever. With `?corridor=` the corridor's own 2 km road carries
+ * the same climb (`ride-corridor.ts`), so the map credit stands beside it.
+ */
+const CLIMB_QUERY = new URLSearchParams(window.location.search).get('climb');
+const CLIMB_AT = CLIMB_QUERY === 'ahead' ? 300 : CLIMB_QUERY === 'on' ? 0 : undefined;
+
+function climbRoute(from: number): RouteProfile {
+  const points: RoutePoint[] = [];
+  const spacing = 100;
+  for (let index = 0; index <= 400; index += 1) {
+    const along = index * spacing;
+    const climbed = Math.min(Math.max(along - from, 0), 800) * 0.06;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + along / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(60 + climbed),
+    });
+  }
+  return routeProfile(points);
+}
+
+/** #2593: `?callout=off`, the climb callout turned off in Settings, the control. */
+const HUD_CALLOUT_OFF = new URLSearchParams(window.location.search).get('callout') === 'off';
+
+/**
  * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SEVEN
  * routes, and NOT ridden: the page stops once the chooser offers *Ride*, so
  * `pre-ride.browser.spec.ts` §"#940" can choose the last card and measure where
@@ -505,8 +536,11 @@ function restoreTheList(): void {
  * none, and the ride screen credits OpenStreetMap or does not. @see ride-corridor.ts
  */
 const CORRIDOR_KIND = corridorRideKind(window.location.search);
+// #2593: `&climb=` puts its climb on the corridor's road too.
 const CORRIDOR =
-  CORRIDOR_KIND === undefined ? undefined : corridorRide(CORRIDOR_KIND, 'harness', errors);
+  CORRIDOR_KIND === undefined
+    ? undefined
+    : corridorRide(CORRIDOR_KIND, 'harness', errors, CLIMB_AT);
 
 /**
  * `ride.html?delivery=round` — #1816: the widest ride the picker starts, with
@@ -580,9 +614,11 @@ const GAME: GamePort = {
             ? DELIVERY_TOWN.profile
             : CORRIDOR !== undefined
               ? CORRIDOR.profile
-              : new URLSearchParams(window.location.search).get('lap') === null
-                ? route()
-                : lapCircuit(),
+              : new URLSearchParams(window.location.search).get('lap') !== null
+                ? lapCircuit()
+                : CLIMB_AT !== undefined
+                  ? climbRoute(CLIMB_AT)
+                  : route(),
         attempts: 1,
       },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
@@ -1232,6 +1268,8 @@ function measure(): StageMeasurement {
     ['the map credit', '.oyl-hud__attribution'],
     // #2078: the last ten minutes, where it is drawn (`givenWay` where not).
     ['the recent graph', '.oyl-hud__recent'],
+    // #2593: the climb callout, in the notice cell, on a ride with a climb near.
+    ['the climb callout', '.oyl-hud__climb-callout'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element === null) continue;
@@ -1539,7 +1577,8 @@ async function run(): Promise<void> {
     HUD_HIDDEN.length > 0 ||
     HUD_FOCUS ||
     HUD_TOTALS ||
-    HUD_DELIVERY_EVERYTHING
+    HUD_DELIVERY_EVERYTHING ||
+    HUD_CALLOUT_OFF
   ) {
     writeHudLayout(localStorage, {
       textSize: HUD_TEXT ?? 'normal',
@@ -1547,6 +1586,7 @@ async function run(): Promise<void> {
       arrangement: HUD_FOCUS ? 'focus' : 'full',
       totalsStrip: HUD_TOTALS,
       delivery: HUD_DELIVERY_EVERYTHING ? 'everything' : 'game',
+      climbCallout: !HUD_CALLOUT_OFF,
     });
   }
   // #2600: the ride controls DRAWN, as every layout here measures them, unless

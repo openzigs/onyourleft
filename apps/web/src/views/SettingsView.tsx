@@ -133,6 +133,7 @@ import {
   HUD_POWER_VIEWS,
   HUD_ROUTE_VIEWS,
   HUD_TEXT_SIZES,
+  climbCalloutChosen,
   deliveryEverything,
   panelShown,
   powerView,
@@ -1909,6 +1910,9 @@ const HUD_ARRANGEMENT_LABELS: Readonly<Record<HudArrangement, string>> = {
 const HUD_TOTALS_STRIP_LABEL =
   'The ride’s totals along the bottom: lap, route, distance to go, average speed, energy and climb';
 
+/** #2593: the climb callout's choice, on by default. */
+const HUD_CLIMB_CALLOUT_LABEL = 'A climb callout: how far to the next climb, then to its top';
+
 /**
  * #2385: what each way of drawing the route panel is called here. Neither
  * begins with a word another choice here begins with.
@@ -2103,6 +2107,16 @@ function HudLayoutPanel({
             }}
           />{' '}
           {HUD_TOTALS_STRIP_LABEL}
+        </label>
+        <label className="oyl-hud-layout__choice">
+          <input
+            type="checkbox"
+            checked={climbCalloutChosen(layout)}
+            onChange={(event) => {
+              keep({ ...layout, climbCallout: event.currentTarget.checked });
+            }}
+          />{' '}
+          {HUD_CLIMB_CALLOUT_LABEL}
         </label>
       </fieldset>
       <fieldset className="oyl-hud-layout__group">

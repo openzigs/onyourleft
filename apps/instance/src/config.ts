@@ -658,8 +658,12 @@ export function readPictureModelSettings(raw: RawConfig): PictureModelSettings {
   return { kind: 'on', baseUrl: server.baseUrl, model };
 }
 
-/** The local model server's base URL, or why `OYL_INSTANCE_ANALYSIS_MODEL_URL` gives none. */
-function localModelServer(
+/**
+ * The local model server's base URL, or why `OYL_INSTANCE_ANALYSIS_MODEL_URL`
+ * gives none. Exported for the Operate area's read of what the server offers
+ * and its tool check (#2610), which need the server before a model is named.
+ */
+export function localModelServer(
   raw: RawConfig,
 ): { readonly baseUrl: URL } | Extract<AnalysisModelSettings, { readonly kind: 'off' }> {
   const off = (code: AnalysisModelOffCode, reason: string) =>

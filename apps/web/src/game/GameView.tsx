@@ -219,6 +219,7 @@ import { NO_URBAN_CLASS, urbanClassMap } from './urban-class';
 import type { MappedTown } from './settlements';
 import {
   climbLeadIn,
+  climbsSpoken,
   DEFAULT_ANNOUNCEMENTS,
   deviceStorage,
   readAnnouncementPreference,
@@ -4602,6 +4603,9 @@ function GameScreen({
         recent={recentTrace}
         // #2079: the rider's panels and text size.
         layout={hudLayout}
+        // #2593: the climb callout's sentence is live only where the HUD's
+        // one region does not say climbs, so a climb is never said twice.
+        climbCalloutLive={!climbsSpoken(announcementsRef.current)}
         // #2420: power as a 3 s average or instant, as the rider chose.
         shownPower={{
           view: powerView(hudLayout),

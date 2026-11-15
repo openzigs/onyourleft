@@ -75,6 +75,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       route: 'full',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -95,9 +96,10 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     );
     // Four panels, three sizes, (#2383) two arrangements, (#2385) two route
     // panels, (#2387) the strip, (#2420) two ways to show power and (#2514)
-    // two Delivery layouts — none of which hides it — and (#2600) the ride
-    // controls' auto-hide, which only fades them until the screen is touched.
-    expect(offered).toHaveLength(17);
+    // two Delivery layouts, (#2593) the climb callout — none of which hides it —
+    // and (#2600) the ride controls' auto-hide, which only hides them until the
+    // screen is touched.
+    expect(offered).toHaveLength(18);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
@@ -121,6 +123,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       route: 'full',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -149,6 +152,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       route: 'full',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
     // And Settings, opened again, says the same.
     await settings();
@@ -157,6 +161,22 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     // And off again.
     await press(choice('The ride’s totals'));
     expect(readHudLayout(localStorage).totalsStrip).toBe(false);
+  });
+
+  it('offers the climb callout, on by default, and keeps it turned off on the device — #2593', async () => {
+    await settings();
+    expect(choice('A climb callout').checked).toBe(true);
+
+    await press(choice('A climb callout'));
+    // What the next ride reads.
+    expect(readHudLayout(localStorage).climbCallout).toBe(false);
+    // And Settings, opened again, says the same.
+    await settings();
+    expect(choice('A climb callout').checked).toBe(false);
+
+    // And on again.
+    await press(choice('A climb callout'));
+    expect(readHudLayout(localStorage).climbCallout).toBe(true);
   });
 
   it('chooses the compact route panel, kept beside the route turned off — #2385', async () => {
@@ -179,6 +199,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       route: 'compact',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
 
     // Turning the route off keeps the choice of how it is drawn, and hides it.
@@ -191,6 +212,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       route: 'compact',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
 
     // And Settings, opened again, says the same.
@@ -225,6 +247,7 @@ describe('the Ride HUD panel in Settings — #2079', () => {
       route: 'full',
       power: 'instant',
       delivery: 'game',
+      climbCallout: true,
     });
     // And Settings, opened again (a reload), says the same.
     await settings();

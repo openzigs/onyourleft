@@ -42,6 +42,7 @@ import {
   type RidableRoute,
 } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
+import { HUD_LAYOUT_STORAGE_KEY, writeHudLayout } from './hud/hud-layout-preference';
 import { createGradientSession } from './gradient';
 import {
   gameTrainerPortOver,
@@ -887,6 +888,17 @@ describe('the Ride press asks the trainer for control — #503', () => {
 });
 
 describe('a standing notice gives the route panel back once it has been read — #437', () => {
+  // #2593: the hill route starts on a climb, and the climb callout stands in
+  // the notice cell of its own accord once the notice is put away — which is
+  // `climb-callout.test.tsx`'s. These cases are the standing notice's alone,
+  // so the rider has turned the callout off, as Settings would.
+  beforeEach(() => {
+    writeHudLayout(localStorage, { hidden: [], textSize: 'normal', climbCallout: false });
+  });
+  afterEach(() => {
+    localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  });
+
   // `FRAME_MS` is half a second of ride per pumped frame.
   const framesFor = (seconds: number): number => Math.ceil((seconds * 1000) / FRAME_MS);
 

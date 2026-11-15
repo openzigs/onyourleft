@@ -1,0 +1,8 @@
+{
+  "alpha:14b": { "details": { "family": "alpha" }, "capabilities": ["completion", "tools"] },
+  "beta:32b": {
+    "details": { "family": "beta" },
+    "capabilities": ["completion", "tools", "thinking"]
+  },
+  "gamma:26b": { "details": { "family": "gamma" }, "capabilities": ["completion", "vision"] }
+}

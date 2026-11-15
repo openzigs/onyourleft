@@ -1389,6 +1389,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         of either (#2291). The same bands shade the whole
                         route's strip (`routeBands`) and colour the gradient's
                         digits (`gradeBand`, `HudCore.tsx`)
+    src/game/hud/ClimbCallout.tsx
+                        the climb callout (#2593), on by default, a rider's
+                        choice in `hud-layout-preference.ts`: in the notice cell,
+                        only when it is otherwise empty, `look-ahead.ts`
+                        §`calloutClimb` — the strip's and the announcer's own
+                        climb — within 500 m and then to the top; never on a
+                        Delivery round. Its sentence is live only where the
+                        HUD's one region does not say climbs
+                        (`announce-preference.ts` §`climbsSpoken`), and held
+                        for the phase, never the countdown. The road-ahead
+                        strip's title (`Next 2 km`) is over its far top corner
+                        and takes no height
     src/game/hud/delivery-announce.ts
                         a Delivery round through the HUD's one region (#1812,
                         ADR 0059): a delivery, a miss, a crash and the round's

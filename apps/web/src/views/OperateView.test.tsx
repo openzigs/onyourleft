@@ -138,7 +138,13 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 4)).toEqual(['Status', 'Accounts', 'Backups', 'Operator log']);
+    expect(headings.slice(0, 5)).toEqual([
+      'Status',
+      'Accounts',
+      'Backups',
+      'AI backend',
+      'Operator log',
+    ]);
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Backups');
   });
@@ -248,8 +254,13 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()[2]).toContain(
       'Database migrated, 2026-11-14 09:00 UTC, from the command line on the host: done (applied=40).',
     );
-    // Backups (#2607) reads its own list as it is drawn.
-    expect(scripted.calls).toEqual(['standing', 'status', 'log', 'backups', 'log 2']);
+    // Backups (#2607) reads its own list as it is drawn; the log's own reads,
+    // among the AI backend's (#2611).
+    expect(
+      scripted.calls.filter(
+        (call) => ['standing', 'status', 'backups'].includes(call) || call.startsWith('log'),
+      ),
+    ).toEqual(['standing', 'status', 'log', 'backups', 'log 2']);
     expect(showOlder()).toBeUndefined();
   });
 
@@ -278,6 +289,14 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()).toEqual([
       'tunnel check, 2026-11-14 09:00 UTC, from the command line on the host: done.',
     ]);
+  });
+
+  it.each([
+    ['analysis_settings_set', 'AI settings changed'],
+    ['analysis_settings_cleared', 'AI settings returned to .env'],
+    ['analysis_model_checked', 'Model checked for tool calling'],
+  ])('names the AI backend’s action %s in words (#2611)', (action, label) => {
+    expect(operatorActionLabel(action)).toBe(label);
   });
 
   it('names “back up now” in the log as the owner asked for it (#2607)', () => {

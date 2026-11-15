@@ -15,8 +15,8 @@
  * Its own file, not `lap-race-wiring.test.tsx`: ADR 0067 D-3.6 restates that
  * file "only as follows" and says nothing else in it changes. The harness here
  * is the least this one case needs: the real game, the real simulation (its
- * draft multiplier `k` watched at each `advanceTo`), a renderer that draws
- * nothing and a clock the test turns.
+ * draft multiplier `k` and its odometer watched at each `advanceTo`), a view
+ * with no drawing context and a clock the test turns.
  */
 
 import { act } from 'react';
@@ -55,8 +55,15 @@ import { GameSimulation } from './simulation';
 import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
 import { gameTrainerPortOver, type GameTrainerPort } from './trainer-port';
 
-/** The rider's draft multiplier `k` at each `advanceTo` of the ride being ridden. */
-const draftTrace = vi.hoisted(() => ({ recorded: undefined as number[] | undefined }));
+/**
+ * The rider's draft multiplier `k` at each `advanceTo` of the ride being
+ * ridden, and the ride's odometer after the latest one, from the simulation's
+ * own state: the `GameState.ride.distance` a drawn frame would be built from.
+ */
+const draftTrace = vi.hoisted(() => ({
+  recorded: undefined as number[] | undefined,
+  odometer: Number.NaN,
+}));
 vi.mock('./simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./simulation')>();
   class TracedSimulation extends actual.GameSimulation {
@@ -64,23 +71,12 @@ vi.mock('./simulation', async (importOriginal) => {
       ...args: Parameters<InstanceType<typeof actual.GameSimulation>['advanceTo']>
     ): ReturnType<InstanceType<typeof actual.GameSimulation>['advanceTo']> {
       draftTrace.recorded?.push(this.draftFactor);
-      return super.advanceTo(...args);
+      const advanced = super.advanceTo(...args);
+      if (draftTrace.recorded !== undefined) draftTrace.odometer = this.state.ride.distance;
+      return advanced;
     }
   }
   return { ...actual, GameSimulation: TracedSimulation };
-});
-
-/** The ride's odometer at each frame the game drew, from the simulation's own state. */
-const odometers = vi.hoisted((): number[] => []);
-vi.mock('./scene', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./scene')>();
-  return {
-    ...actual,
-    sceneFrame: (...args: Parameters<typeof actual.sceneFrame>) => {
-      odometers.push(args[0].state.ride.distance);
-      return actual.sceneFrame(...args);
-    },
-  };
 });
 
 const RADIUS = 40;
@@ -102,7 +98,6 @@ let mounted: Mounted | undefined;
 beforeEach(() => {
   pending = [];
   nowMs = START_MS;
-  odometers.length = 0;
   localStorage.clear();
   localStorage.setItem(
     ANNOUNCEMENTS_STORAGE_KEY,
@@ -119,6 +114,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   draftTrace.recorded = undefined;
+  draftTrace.odometer = Number.NaN;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -134,11 +130,21 @@ function stubSeed(seed: number): void {
   );
 }
 
+/**
+ * A view with no drawing context, which `GameView` prepares with one frame and
+ * hands no more (#2524), as `lap-race-wiring.test.tsx` rides the cases that
+ * read no frame. Neither case here reads a frame: the odometer is the
+ * simulation's (`draftTrace`), the `k` trace is the simulation's, and the
+ * saved ride is the store's. Building every frame for nobody made these rides
+ * hit the 5 s case limit under coverage (#2619). That a drawing view sends
+ * the trainer what a blind one does is `blind-view-wiring.test.tsx`'s, and for
+ * this draft source the D-3.6 case's drawn race in `lap-race-wiring.test.tsx`.
+ */
 const renderer: GameRenderer = {
   loadRealisticWorld: () =>
     Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' }),
   create: () => ({
-    hasContext: true,
+    hasContext: false,
     prepare: () => Promise.resolve(),
     render: () => undefined,
     setQuality: () => undefined,
@@ -179,7 +185,7 @@ async function rideFlat(
 ): Promise<{ readonly odometer: number; readonly trace: readonly number[] }> {
   pending = [];
   nowMs = START_MS;
-  odometers.length = 0;
+  draftTrace.odometer = Number.NaN;
   const trace: number[] = [];
   draftTrace.recorded = trace;
   stubSeed(SEED);
@@ -214,7 +220,7 @@ async function rideFlat(
     await recorder?.onFrame();
   }
   await recorder?.atEnd();
-  const odometer = odometers.at(-1) ?? Number.NaN;
+  const odometer = draftTrace.odometer;
   mounted.unmount();
   mounted = undefined;
   draftTrace.recorded = undefined;

@@ -567,6 +567,41 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     }),
   clearOperateAnalysis: async (world) =>
     send(world, 'DELETE', '/v1/operate/analysis', await moderatorToken(world)),
+  // #2610: no local address here, so the models read and the check say so.
+  getOperateAnalysisModels: async (world) =>
+    send(world, 'GET', '/v1/operate/analysis/models', await moderatorToken(world)),
+  checkOperateAnalysisModel: async (world) =>
+    send(world, 'POST', '/v1/operate/analysis/check', await moderatorToken(world), {
+      model: 'some-model',
+    }),
+  // #2610: a job that ended, to shape-check a row with every field.
+  getOperateAnalysisJobs: async (world) => {
+    const token = await moderatorToken(world);
+    const owner = (await world.call('GET', '/v1/auth/session', { token })).body as {
+      athleteId: string;
+    };
+    await world.freshRead(async (store) => {
+      if (
+        (await store.createAnalysisJob({
+          id: 'openapi-job-2610',
+          athleteId: owner.athleteId,
+          source: 'instance-local',
+          templateVersion: '1',
+          inputJson: '{}',
+          createdAt: world.clock.ms,
+        })) === 'created'
+      ) {
+        await store.endAnalysisJob(owner.athleteId, 'openapi-job-2610', {
+          status: 'failed',
+          failure: 'model-unreachable',
+          candidate: null,
+          data: '{"status":"failed"}',
+          at: world.clock.ms,
+        });
+      }
+    });
+    return send(world, 'GET', '/v1/operate/analysis/jobs', token);
+  },
 
   createChallenge: async (world) =>
     send(world, 'POST', '/v1/auth/challenge', undefined, {

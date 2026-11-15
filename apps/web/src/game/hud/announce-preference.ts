@@ -104,6 +104,16 @@ export function climbLeadIn(stored: Every, units: UnitSystem): Every {
 }
 
 /**
+ * Whether the HUD's one region says a climb ahead on a ride under this
+ * preference — #2593: announcements on, and the climb row not *never*. The
+ * climb callout's own sentence is live only where this is `false`, so a
+ * rider whose region says the climb does not hear it twice.
+ */
+export function climbsSpoken(preference: AnnouncementPreference): boolean {
+  return preference.enabled && preference.climbLeadMetres !== 'never';
+}
+
+/**
  * A climb-ahead step as a rider reads it — #1440: `100 m`, `500 ft`, `0.25 mi`.
  * The quarter and half mile are said in miles, which is how they are judged.
  */

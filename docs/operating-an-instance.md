@@ -1047,6 +1047,24 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   sources riders are offered, and the switch for other riders' analysis on the local model, off by
   default. §"Analysis model" above says what each does. The read shows whether your own hosted key is
   held and for which origin, **never the key**.
+  [#2610](https://github.com/openzigs/onyourleft/issues/2610) adds three more, the owner's alone and
+  sealed like the rest. `GET /v1/operate/analysis/models` lists what the local server offers: for
+  Ollama, each model's size, parameters and quantisation, whether it lists `tools`, and how much of it
+  is in GPU memory — all, part (a percent) or none for a loaded model, and **not known until it is
+  loaded** otherwise, because Ollama does not say how much memory the card has; another
+  OpenAI-compatible server gives names alone. `POST /v1/operate/analysis/check` asks one model a fixed
+  question with one fixed tool — no ride and nothing of any rider's — and says whether it called the
+  tool (`tools-ok`), one check at a time, logged `analysis_model_checked`. ⚠️ **Asking Ollama for a
+  model loads it, which may unload the model a rider's job is using.** `GET /v1/operate/analysis/jobs`
+  counts the queue and the last seven days' jobs, failures by code, and lists the newest 50, each
+  marked yours or another rider's — never which rider, and never a job's input or write-up. The
+  address is checked on every request to the server, as a job's is.
+  In the app ([#2611](https://github.com/openzigs/onyourleft/issues/2611)) this is Operate's **AI
+  backend** section: what the local model is now and where it is set, a switch for each source riders
+  are offered and the switch for other riders, the local server's models with their GPU fit, **Check
+  it calls tools** and **Save this model** (offered only after that model's check said `tools-ok`),
+  whether your own hosted key is held — set, replaced or removed on the Instance screen, never here —
+  the jobs, and **Return to .env**. No model is recommended or picked for you.
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

@@ -1,0 +1,55 @@
+{
+  "models": [
+    {
+      "name": "alpha:14b",
+      "model": "alpha:14b",
+      "modified_at": "2026-11-01T10:00:00.000000000Z",
+      "size": 9000000000,
+      "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "alpha",
+        "families": ["alpha"],
+        "parameter_size": "14.8B",
+        "quantization_level": "Q4_K_M"
+      }
+    },
+    {
+      "name": "beta:32b",
+      "model": "beta:32b",
+      "modified_at": "2026-11-02T10:00:00.000000000Z",
+      "size": 19900000000,
+      "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "beta",
+        "families": ["beta"],
+        "parameter_size": "32.8B",
+        "quantization_level": "Q4_K_M"
+      }
+    },
+    {
+      "name": "gamma:26b",
+      "model": "gamma:26b",
+      "modified_at": "2026-11-03T10:00:00.000000000Z",
+      "size": 17000000000,
+      "digest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "gamma",
+        "families": ["gamma"],
+        "parameter_size": "25.8B",
+        "quantization_level": "Q8_0"
+      }
+    },
+    {
+      "name": "two words",
+      "model": "two words",
+      "size": 1000,
+      "details": { "parameter_size": "1B", "quantization_level": "F16" }
+    }
+  ]
+}

@@ -964,6 +964,7 @@ export const OPERATOR_ACTIONS = [
   'backup_requested',
   'analysis_settings_set',
   'analysis_settings_cleared',
+  'analysis_model_checked',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1017,6 +1018,22 @@ export const OPERATOR_DETAILS: {
     counts: [],
   },
   analysis_settings_cleared: { words: ['cleared', 'none_set'], counts: [] },
+  // #2610: how the owner's tool check went — `analysis/tool-check.ts`
+  // §`ToolCheckOutcome`, each `-` an `_`. Never the model's name.
+  analysis_model_checked: {
+    words: [
+      'tools_ok',
+      'no_tool_call',
+      'does_not_support_tools',
+      'server_error',
+      'not_local',
+      'out_of_time',
+      'stopped',
+      'no_address',
+      'busy',
+    ],
+    counts: [],
+  },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
@@ -1091,6 +1108,39 @@ export const OPERATE_COUNT_QUERIES = [
   "SELECT count(*) AS n FROM analysis_job WHERE status = 'queued'",
   "SELECT count(*) AS n FROM analysis_job WHERE status = 'running'",
 ] as const;
+
+/**
+ * One analysis job as the owner's Operate area lists it (#2610): what kind,
+ * on which source, how it went and when — and whether it was the owner's own
+ * or another rider's. ⚠️ **Never the athlete's id**, nor the job's input,
+ * events, sections or write-up: the store reads none of those columns for it.
+ */
+export interface OperateJob {
+  /** The owner's own job, or another rider's. */
+  readonly own: boolean;
+  readonly status: AnalysisJobStatus;
+  readonly source: AnalysisJobTable['source'];
+  /** The template it ran under: what tells a write-up from a re-plan. */
+  readonly templateVersion: string;
+  /** One of `analysis/jobs.ts` §`JobFailure` for a failed job; `null` otherwise. */
+  readonly failure: string | null;
+  /** Unix milliseconds. */
+  readonly createdAt: number;
+  readonly endedAt: number | null;
+}
+
+/**
+ * The owner's view of the analysis queue (#2610): how many jobs are in each
+ * status — `queued` and `running` now, the ended ones those that ended since
+ * `since` — the failed ones by their failure code, and the newest jobs.
+ */
+export interface OperateJobs {
+  readonly counts: { readonly [status in AnalysisJobStatus]: number };
+  /** The failed jobs since `since` by failure code, most first. */
+  readonly failures: readonly { readonly code: string | null; readonly count: number }[];
+  /** The newest jobs, newest first. */
+  readonly recent: readonly OperateJob[];
+}
 
 /**
  * How long after a backup "back up now" is refused (#2606): each extra run
@@ -2210,6 +2260,13 @@ export interface SqlStore {
   listPendingAthletes(): Promise<readonly AthleteRecord[]>;
   /** How many athletes are in each standing, rooms are open and jobs wait or run (#2604). Counts only. */
   operateCounts(): Promise<OperateCounts>;
+  /**
+   * The analysis queue for the owner's Operate area (#2610): the counts by
+   * status — ended ones since `since`, Unix milliseconds — the failures by
+   * code, and the newest `limit` jobs, each marked the owner's (`ownerId`)
+   * or not. Every athlete's jobs, naming none of them.
+   */
+  operateJobs(ownerId: string, since: number, limit: number): Promise<OperateJobs>;
   /**
    * Write one backup run's record (#2606), and in the SAME transaction delete
    * every record and served request more than {@link BACKUP_RECORD_DAYS} days
@@ -6295,6 +6352,69 @@ function storeOver(
           },
           roomsOpen: open,
           analysis: { queued, running },
+        };
+      }),
+
+    operateJobs: (ownerId, since, limit) =>
+      exclusive(async () => {
+        const counts: { -readonly [status in AnalysisJobStatus]: number } = {
+          queued: 0,
+          running: 0,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0,
+          withheld: 0,
+        };
+        const byStatus = await db
+          .selectFrom('analysis_job')
+          .select(['status', (row) => row.fn.countAll<number>().as('n')])
+          .where((row) =>
+            row.or([row('status', 'in', ['queued', 'running']), row('ended_at', '>=', since)]),
+          )
+          .groupBy('status')
+          .execute();
+        for (const row of byStatus) counts[row.status] = Number(row.n);
+        const failures = await db
+          .selectFrom('analysis_job')
+          .select(['failure', (row) => row.fn.countAll<number>().as('n')])
+          .where('status', '=', 'failed')
+          .where('ended_at', '>=', since)
+          .groupBy('failure')
+          .orderBy('n', 'desc')
+          .orderBy('failure')
+          .execute();
+        // The columns it needs and no other: never `input_json`, `candidate`
+        // or an event, and the athlete only to say whether it is the owner.
+        const recent = await db
+          .selectFrom('analysis_job')
+          .select([
+            'athlete_id',
+            'status',
+            'source',
+            'template_version',
+            'failure',
+            'created_at',
+            'ended_at',
+          ])
+          .orderBy('created_at', 'desc')
+          .orderBy('id', 'desc')
+          .limit(limit)
+          .execute();
+        return {
+          counts,
+          failures: failures.map((row) => ({
+            code: row.failure,
+            count: Number(row.n),
+          })),
+          recent: recent.map((row) => ({
+            own: row.athlete_id === ownerId,
+            status: row.status,
+            source: row.source,
+            templateVersion: row.template_version,
+            failure: row.failure,
+            createdAt: row.created_at,
+            endedAt: row.ended_at,
+          })),
         };
       }),
 

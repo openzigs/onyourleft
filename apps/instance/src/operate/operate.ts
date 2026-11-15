@@ -34,19 +34,30 @@
 import {
   clearAnalysisSettings,
   effectiveAnalysisSettings,
+  localServerOf,
   saveAnalysisSettings,
   type AnalysisEnvironment,
   type EffectiveAnalysisSettings,
 } from '../analysis/settings.ts';
 import { hostedOriginOf, type HostedKeyState } from '../analysis/hosted-key.ts';
-import type { AnalysisModelOffCode } from '../config.ts';
+import { readLocalServer, type LocalServerRead } from '../analysis/local-server.ts';
+import { REPLAN_TEMPLATE } from '../analysis/replan-template.ts';
+import {
+  createToolCheck,
+  type ToolCheckOutcome,
+  type ToolCheckTarget,
+} from '../analysis/tool-check.ts';
+import type { ModelConnection } from '../analysis/model-turn.ts';
+import { analysisModelNameProblem, type AnalysisModelOffCode } from '../config.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { Resolver } from '../history/address.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import type {
+  AnalysisJobStatus,
   BackupRecord,
   BackupRequestOutcome,
   OperateCounts,
+  OperateJobs,
   OperatorLogEntry,
   SqlStore,
 } from '../store/sql-store.ts';
@@ -121,6 +132,34 @@ export interface AnalysisSettingsView {
   };
 }
 
+/** How many of the newest analysis jobs the owner is shown (#2610). */
+export const JOBS_SHOWN = 50;
+
+/** How far back the ended jobs are counted (#2610): the seven days an ended job is kept. */
+export const JOBS_COUNTED_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * One analysis job as the owner is shown it (#2610): never the athlete, the
+ * input, the events or the write-up — only whether it was the owner's own.
+ */
+export interface OperateJobView {
+  readonly kind: 'write-up' | 're-plan';
+  readonly source: 'local' | 'hosted';
+  readonly status: AnalysisJobStatus;
+  readonly failure: string | null;
+  /** Unix milliseconds. */
+  readonly createdAt: number;
+  readonly endedAt: number | null;
+  readonly whose: 'own' | 'other';
+}
+
+/** The owner's view of the analysis queue (#2610). */
+export interface JobsView {
+  readonly counts: OperateJobs['counts'];
+  readonly failures: OperateJobs['failures'];
+  readonly recent: readonly OperateJobView[];
+}
+
 /** What the analysis settings are read and written with (#2609). */
 export interface OperateAnalysisSources {
   readonly environment: AnalysisEnvironment;
@@ -132,6 +171,13 @@ export interface OperateAnalysisSources {
   readonly hostedKey: (athleteId: string) => Promise<HostedKeyState>;
   /** Told the settings after every write, for the `analysis-model` log line. */
   readonly changed?: (settings: EffectiveAnalysisSettings) => void;
+  /** Aborted when the instance stops: a tool check that is out ends then (#2610). */
+  readonly stopped?: AbortSignal;
+  /**
+   * The connection a tool check goes through (#2610): `model.ts`
+   * §`createLocalModel` with this resolver, built where the SDK may be named.
+   */
+  readonly localModel: (target: ToolCheckTarget) => ModelConnection;
 }
 
 export interface Operate {
@@ -157,6 +203,19 @@ export interface Operate {
   ): Promise<OperateResult<AnalysisSettingsView>>;
   /** Back to `.env` for every field, logged. */
   clearAnalysisSettings(athleteId: string): Promise<AnalysisSettingsView>;
+  /** What the configured local server offers (#2610). Writes nothing, logs nothing. */
+  localModels(): Promise<LocalServerRead>;
+  /**
+   * Whether the model `body.model` on the configured local server calls
+   * tools (#2610), as the owner `athleteId`: logged `analysis_model_checked`
+   * with the outcome. `validation_failed` for a body that names no model.
+   */
+  checkModel(
+    athleteId: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<OperateResult<{ readonly outcome: ToolCheckOutcome }>>;
+  /** The analysis queue and the newest jobs, for the owner `athleteId` (#2610). Writes nothing. */
+  jobs(athleteId: string): Promise<JobsView>;
 }
 
 /** What `unavailable` says on an instance with no keys. Names the variable, never a value. */
@@ -180,6 +239,17 @@ export function createOperate(options: {
 }): Operate {
   const { store, status, analysis } = options;
   const seconds = (): number => Math.floor(status.now() / 1000);
+  // #2610: ONE check for the instance, so a second while one is out is `busy`.
+  const toolCheck = createToolCheck({
+    connect: analysis.localModel,
+    now: analysis.now,
+    ...(analysis.stopped === undefined ? {} : { stopped: analysis.stopped }),
+  });
+
+  /** The configured local server: the row's address over `.env`'s. */
+  async function localServer(): Promise<ReturnType<typeof localServerOf>> {
+    return localServerOf(await store.getAnalysisSetting(), analysis.environment.analysisEnv);
+  }
 
   async function analysisView(athleteId: string): Promise<AnalysisSettingsView> {
     const row = await store.getAnalysisSetting();
@@ -223,6 +293,76 @@ export function createOperate(options: {
 
   return {
     analysisSettings: analysisView,
+    async localModels() {
+      const server = await localServer();
+      if (!server.ok) {
+        return {
+          state: server.code === 'not-local' ? 'not-local' : 'no-address',
+          version: null,
+          models: [],
+        };
+      }
+      return readLocalServer(server.baseUrl, { resolve: analysis.resolve });
+    },
+    async checkModel(athleteId, body) {
+      const fields: FieldProblem[] = [];
+      for (const name of Object.keys(body)) {
+        if (name !== 'model')
+          fields.push({ field: name, problem: 'is not a field of this request' });
+      }
+      const model = body.model;
+      if (typeof model !== 'string' || analysisModelNameProblem(model) !== undefined) {
+        fields.push({ field: 'model', problem: 'bad-model' });
+      }
+      if (fields.length > 0 || typeof model !== 'string') {
+        return { ok: false, code: 'validation_failed', fields };
+      }
+      const server = await localServer();
+      const outcome: ToolCheckOutcome = server.ok
+        ? await toolCheck.run({
+            baseUrl: server.baseUrl,
+            model: model.trim(),
+            ...(server.reasoningTokens === undefined
+              ? {}
+              : { reasoningTokens: server.reasoningTokens }),
+          })
+        : server.code === 'not-local'
+          ? 'not-local'
+          : 'no-address';
+      // Logged once the check is over, so the store is not held while a
+      // model loads. A log that cannot be written is the request's failure:
+      // the owner is not told an outcome the log does not hold.
+      const sent = outcome !== 'busy' && outcome !== 'no-address' && outcome !== 'not-local';
+      await store.recordOperatorAction(
+        {
+          actor: { source: 'app', athleteId },
+          action: 'analysis_model_checked',
+          at: Math.floor(analysis.now() / 1000),
+        },
+        () => ({
+          outcome: sent ? 'done' : 'refused',
+          detail: outcome.replaceAll('-', '_'),
+          value: undefined,
+        }),
+      );
+      return { ok: true, value: { outcome } };
+    },
+    async jobs(athleteId) {
+      const read = await store.operateJobs(athleteId, analysis.now() - JOBS_COUNTED_MS, JOBS_SHOWN);
+      return {
+        counts: read.counts,
+        failures: read.failures,
+        recent: read.recent.map((job) => ({
+          kind: job.templateVersion === REPLAN_TEMPLATE.version ? 're-plan' : 'write-up',
+          source: job.source === 'instance-hosted' ? 'hosted' : 'local',
+          status: job.status,
+          failure: job.failure,
+          createdAt: job.createdAt,
+          endedAt: job.endedAt,
+          whose: job.own ? 'own' : 'other',
+        })),
+      };
+    },
     async setAnalysisSettings(athleteId, body) {
       const saved = await saveAnalysisSettings(store, { source: 'app', athleteId }, body, {
         resolve: analysis.resolve,
