@@ -1118,9 +1118,27 @@ passkeys and a listener on the server machine itself follow.
 - **The session.** A cookie, `__Host-oyl-admin` (`Secure`, `HttpOnly`, `SameSite=Strict`), with no
   lifetime of its own, so it goes when the browser closes. The instance ends it after **15 minutes
   without use** and **2 hours after sign-in** whatever its use, and on **Sign out**. It keeps only
-  the token's SHA-256. A session opened with a code can read; the pages that read come with
-  [#2645](https://github.com/openzigs/onyourleft/issues/2645), and no change can be made from a
-  browser until passkeys ([#2642](https://github.com/openzigs/onyourleft/issues/2642)).
+  the token's SHA-256. A session opened with a code can read every page and **add one passkey**,
+  and nothing else; the pages that read come with
+  [#2645](https://github.com/openzigs/onyourleft/issues/2645).
+- **Passkeys** ([#2642](https://github.com/openzigs/onyourleft/issues/2642), ADR 0069 D-1). Signed
+  in with a code, open **Passkeys** and **Add a passkey**: the browser asks your authenticator (a
+  phone, a security key, the computer's own) to make one, with user verification, Ed25519 or ES256
+  only, at most ten. Adding it ends the code's session, and you sign in with **Sign in with a
+  passkey**, which proves it works. A passkey is bound to the instance's host name (the host of
+  `OYL_INSTANCE_ORIGIN`) and to the `OYL_INSTANCE_OWNER_KEY` it was added under: change either and
+  it is listed as not usable until you revoke it and add another.
+- ⚠️ **A passkey added through the tunnel reads, and changes nothing, until you confirm it on the
+  server machine** (the owner's answer to ADR 0069 Q-C): `node src/operator/cli.ts admin-passkeys
+  list` shows its id, and `node src/operator/cli.ts admin-passkeys confirm <id>` confirms it. An
+  edge that swapped its own passkey in while you enrolled cannot run that.
+- **Every change needs a fresh passkey check.** A change made from the admin pages asks your
+  authenticator again, for that change and its fields, once, within two minutes, and only a
+  confirmed passkey can answer. Revoking a passkey is such a change, and ends every session that
+  passkey opened. On the host, `admin-passkeys revoke <id>` does the same with nothing but the
+  shell; lost every passkey, mint a code and add one again.
+- **With no passkey support**, or with the page's script blocked, every page still reads with a
+  one-time code, and no change can be made.
 - **What protects it.** Every form carries the session's own token, and every `POST` must come from
   the instance's own page (`Origin` exactly `OYL_INSTANCE_ORIGIN`, and `Sec-Fetch-Site:
   same-origin` where the browser sends it), or it is refused and changes nothing. A request for
@@ -1129,12 +1147,16 @@ passkeys and a listener on the server machine itself follow.
   The API never reads the cookie: a `/v1/*` request carrying it is answered exactly as without it,
   and a plaintext `/v1/operate/*` request is still refused `sealed_required`.
 - **Rate limits.** At most 10 sign-in attempts a minute from one address (read through
-  `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` behind the tunnel) and 30 a minute from everybody, counted
-  before any code is looked at.
+  `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` behind the tunnel) and 30 a minute from everybody — a code
+  redeemed and a passkey sign-in begun or finished alike — counted before any code or passkey is
+  looked at; and at most 30 passkey checks for a change a minute in one session.
 - **What is logged** in the operator log (above): `admin_code_minted` when the CLI mints a code
   (`voided_unused` when it voided a live one), `admin_sign_in` for each sign-in (source
-  `admin_tunnel`, naming the owner), and `admin_refused` **at most once a minute for each kind** of
-  refusal (a code, a missing or wrong form token, a foreign origin, a rate limit) with how many there
+  `admin_tunnel`, naming the owner; `code` or `passkey`), `admin_passkey_enrolled` (its algorithm),
+  `admin_passkey_revoked` (how many sessions it ended; source `cli` from the command line),
+  `admin_passkey_confirmed` (from the command line), and `admin_refused` **at most once a minute for
+  each kind** of refusal (a code, a passkey, a step-up, a signature counter that did not rise, a
+  missing or wrong form token, a foreign origin, a rate limit) with how many there
   were and no athlete, so a flood cannot grow the log. A crash loses at most a minute's counts.
   Sign-out and a session timing out are not logged. No entry names a code, a session, an address or
   a passkey. `migrate … down` refuses to undo migration 0044 while the log holds an admin entry.

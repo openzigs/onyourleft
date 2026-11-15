@@ -8641,7 +8641,10 @@
                               "analysis_model_checked",
                               "admin_code_minted",
                               "admin_sign_in",
-                              "admin_refused"
+                              "admin_refused",
+                              "admin_passkey_enrolled",
+                              "admin_passkey_revoked",
+                              "admin_passkey_confirmed"
                             ]
                           },
                           "detail": {

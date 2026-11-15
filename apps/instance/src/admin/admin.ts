@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * **The instance's own admin pages: the sign-in and the session** (#2641,
- * ADR 0069 D-1, D-2, D-4, D-8). The pages themselves are #2645's; passkeys
- * #2642's; the loopback listener #2643's.
+ * **The instance's own admin pages: the sign-in, the session and the
+ * owner's passkeys** (#2641, #2642, ADR 0069 D-1, D-2, D-4, D-8). The Operate
+ * pages themselves are #2645's and after; the loopback listener #2643's.
  *
  * Mounted only when the operator sets `OYL_INSTANCE_ADMIN_PAGES=on`
  * (`instance.ts`); otherwise `/admin` is `not_found`, as any path with no
@@ -15,12 +15,12 @@
  * ## Who may sign in
  *
  * Only **the athlete holding `OYL_INSTANCE_OWNER_KEY`**, and there is no
- * name to type: a good one-time code opens a session for that athlete. The
- * deputy has no admin sign-in at all (ADR 0046 D-9 Q9). Every request asks
- * again: a session whose stored owner key is not the current
- * `OYL_INSTANCE_OWNER_KEY`, or whose athlete no longer holds it
- * (`moderation.roleOf`), is ENDED — its row deleted — and the browser is sent
- * to sign in. With no `OYL_INSTANCE_ORIGIN` (no accounts), no
+ * name to type: a good one-time code, or an assertion by one of the owner's
+ * passkeys, opens a session for that athlete. The deputy has no admin sign-in
+ * at all (ADR 0046 D-9 Q9). Every request asks again: a session whose stored
+ * owner key is not the current `OYL_INSTANCE_OWNER_KEY`, or whose athlete no
+ * longer holds it (`moderation.roleOf`), is ENDED — its row deleted — and the
+ * browser is sent to sign in. With no `OYL_INSTANCE_ORIGIN` (no accounts), no
  * `OYL_INSTANCE_SECRET_KEY` (as every Operate route), no
  * `OYL_INSTANCE_OWNER_KEY`, or no account holding it, the pages say they are
  * unavailable and why, naming the variable and never its value.
@@ -31,9 +31,31 @@
  * with no `Max-Age`, carrying 32 random bytes; the store keeps only its
  * SHA-256 (`admin_session`). **15 minutes idle and 2 hours absolute,
  * enforced here from the row**, never by the cookie. A new token at every
- * sign-in, and a cookie already held is never adopted. A code session can
- * read; it changes nothing (ADR 0069 D-1, the owner's Q-A answer), and
- * this issue adds no change for it to make.
+ * sign-in, and a cookie already held is never adopted.
+ *
+ * ## Passkeys (#2642, ADR 0069 D-1, and the owner's answers to Q-A and Q-C)
+ *
+ * - **A code session can read every page and enrol ONE passkey**, and
+ *   nothing else, on either listener (Q-A: no). Enrolling ends it, and the
+ *   owner signs in with the new passkey, which proves it works.
+ * - **The RP ID is the host of `OYL_INSTANCE_ORIGIN`** and the origin is
+ *   checked exactly; a passkey whose stored RP ID is another host stays
+ *   listed, marked not usable here, until it is revoked. `userVerification:
+ *   'required'`, `attestation: 'none'`, Ed25519 and ES256 only, at most ten.
+ *   The verifier is `webauthn.ts`, by hand against WebCrypto (D-6).
+ * - **A passkey is bound to the `OYL_INSTANCE_OWNER_KEY` it was enrolled
+ *   under**: once the operator names another key, it signs nobody in until
+ *   it is revoked, as a session of the old key ends (the epic's owner-only
+ *   constraint, read for passkeys).
+ * - **A passkey enrolled through the tunnel reads, and changes nothing,
+ *   until `operator admin-passkeys confirm <id>` is run on the host** (Q-C,
+ *   limit 2): an edge that substituted its own credential at enrolment
+ *   cannot confirm it.
+ * - **Every change needs a fresh step-up** (D-4, `step-up.ts`): an assertion
+ *   by a CONFIRMED passkey, in the same `POST`, over a challenge the instance
+ *   issued for this session, for that action and the SHA-256 of its fields,
+ *   single use, two minutes. Revoking a passkey is the one change this issue
+ *   adds; it ends every session that passkey opened.
  *
  * ## CSRF: three layers (ADR 0069 D-4)
  *
@@ -52,21 +74,21 @@
  *
  * ## Rate limits and the log
  *
- * Sign-in attempts: at most 10 a minute per client address (the address the
- * Node listener read through `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` from a
- * trusted proxy) and 30 a minute in all (ADR 0069 D-4, which sets these over
- * the issue's 5 a minute and 20 an hour), counted before any code is looked
- * up. Every sign-in is an `admin_sign_in` entry in the operator log, in the
- * same transaction as the code and the session. Refusals are counted in
- * memory, by kind, and {@link Admin.flushRefusals} writes at most one
- * `admin_refused` entry per kind with the count: `instance.ts` runs it every
- * minute and as the instance stops, so a flood cannot grow the append-only
- * log without bound, and a crash loses at most a minute's counts.
+ * Sign-in attempts — a code redeemed, a passkey sign-in begun or finished:
+ * at most 10 a minute per client address and 30 a minute in all (ADR 0069
+ * D-4); step-up challenges at most 30 a minute per session. Every sign-in is
+ * an `admin_sign_in` entry, every enrolment an `admin_passkey_enrolled` and
+ * every revocation an `admin_passkey_revoked`, each in the same transaction
+ * as its change. Refusals are counted in memory, by kind, and
+ * {@link Admin.flushRefusals} writes at most one `admin_refused` entry per
+ * kind with the count: `instance.ts` runs it every minute and as the
+ * instance stops, so a flood cannot grow the append-only log without bound,
+ * and a crash loses at most a minute's counts.
  *
  * Nothing here renders a token, a code, a key or a coordinate.
  */
 
-import { randomToken, sha256Hex } from '../auth/crypto.ts';
+import { randomHex, randomToken, sha256Hex } from '../auth/crypto.ts';
 import type { Caller } from '../auth/identity.ts';
 import {
   addressKey,
@@ -77,9 +99,33 @@ import {
 import { escapeHtml, STYLE } from '../html.ts';
 import type { ModeratorRole } from '../moderation/moderation.ts';
 import type { ClientInfo } from '../route-kit.ts';
-import type { AdminSessionRecord, SqlStore } from '../store/sql-store.ts';
+import type {
+  AdminPasskeyRecord,
+  AdminSessionRecord,
+  OperatorChange,
+  SqlStore,
+} from '../store/sql-store.ts';
 import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
+import { PASSKEY_SCRIPT } from './passkey-script.ts';
+import {
+  ADMIN_CHALLENGE_SECONDS,
+  ADMIN_CHANGES,
+  bindingOf,
+  boundFields,
+  isAdminChange,
+  type AdminChange,
+} from './step-up.ts';
+import {
+  challengeOf,
+  COSE_ALGORITHMS,
+  fromBase64Url,
+  MAX_CREDENTIAL_ID_BYTES,
+  verifyAssertion,
+  verifyRegistration,
+  WebAuthnRefused,
+  type AssertionResponse,
+} from './webauthn.ts';
 
 /** The session cookie's name on the tunnel listener (ADR 0069 D-4). */
 export const ADMIN_COOKIE = '__Host-oyl-admin';
@@ -90,23 +136,37 @@ export const ADMIN_IDLE_SECONDS = 15 * 60;
 /** A session is over this long after it was opened, however it was used, in seconds. */
 export const ADMIN_LIFETIME_SECONDS = 2 * 60 * 60;
 
-/** The largest form an `/admin` `POST` may send, in bytes: a code or a token, and nothing more. */
+/**
+ * The largest form an `/admin` `POST` may send, in bytes: a code or a token,
+ * or a passkey ceremony's response: a credential id of the longest WebAuthn
+ * allows, its key and its client data come to about 2.2 KiB as base64url.
+ */
 export const ADMIN_FORM_LIMIT_BYTES = 4096;
+
+/** The most passkeys the owner may hold (ADR 0069 D-1). */
+export const MAX_ADMIN_PASSKEYS = 10;
+
+/** The longest name the owner may give a passkey, in characters. */
+export const PASSKEY_LABEL_LIMIT = 60;
 
 export interface AdminLimits {
   /** Sign-in attempts per client address. */
   readonly perAddress: RateLimit;
   /** Sign-in attempts from everybody together. */
   readonly overall: RateLimit;
+  /** Step-up challenges per session (#2642); 30 a minute unless a test sets its own. */
+  readonly stepUpPerSession?: RateLimit;
 }
 
-export const DEFAULT_ADMIN_LIMITS: AdminLimits = {
+export const DEFAULT_ADMIN_LIMITS: Required<AdminLimits> = {
   perAddress: { limit: 10, windowMs: 60_000 },
   overall: { limit: 30, windowMs: 60_000 },
+  stepUpPerSession: { limit: 30, windowMs: 60_000 },
 };
 
 /** What a refusal is counted as, in its `admin_refused` entry. */
-export type AdminRefusal = 'code' | 'csrf' | 'origin' | 'rate_limited';
+export type AdminRefusal =
+  'code' | 'passkey' | 'step_up' | 'counter' | 'csrf' | 'origin' | 'rate_limited';
 
 /**
  * The seam ADR 0069 D-2 decides: a route of the table called IN-PROCESS, as
@@ -155,8 +215,11 @@ export function isAdminPath(pathname: string): boolean {
   return pathname === '/admin' || pathname.startsWith('/admin/');
 }
 
+/** The one script, linked on the pages with a passkey ceremony; never inline. */
+const SCRIPT_TAG = '<script src="/admin/passkey.js" defer></script>\n';
+
 /** The admin frame: the stylesheet linked, never inline. `body` is markup the caller escaped. */
-function page(title: string, body: string): string {
+function page(title: string, body: string, script = false): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -164,7 +227,7 @@ function page(title: string, body: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="/admin/admin.css">
-</head>
+${script ? SCRIPT_TAG : ''}</head>
 <body>
 <main>
 ${body}
@@ -181,9 +244,14 @@ function htmlAnswer(
   body: string,
   status: number,
   extra: Readonly<Record<string, string>> = {},
+  script = false,
 ): Response {
-  return adminResponse(page(title, body), status, { ...HTML, ...extra });
+  return adminResponse(page(title, body, script), status, { ...HTML, ...extra });
 }
+
+/** A ceremony's options, or its refusal, for the page's own script. */
+const jsonAnswer = (value: unknown, status: number): Response =>
+  adminResponse(JSON.stringify(value), status, { 'content-type': 'application/json' });
 
 const seeOther = (location: string, extra: Readonly<Record<string, string>> = {}): Response =>
   adminResponse(null, 303, { location, ...extra });
@@ -252,19 +320,82 @@ function formOf(body: Uint8Array | null): URLSearchParams {
   return new URLSearchParams(body === null ? '' : new TextDecoder().decode(body));
 }
 
+/** A field sent once, or `undefined`. */
+function single(form: URLSearchParams, name: string): string | undefined {
+  const values = form.getAll(name);
+  return values.length === 1 ? values[0] : undefined;
+}
+
+/** The base64url of the longest credential id. */
+const MAX_CREDENTIAL_ID_TEXT = Math.ceil((MAX_CREDENTIAL_ID_BYTES * 4) / 3);
+
+/** An assertion as the page's script submits it, decoded; `undefined` when it is not one. */
+function assertionFrom(
+  form: URLSearchParams,
+): { readonly credentialId: string; readonly response: AssertionResponse } | undefined {
+  const credentialId = single(form, 'credential');
+  const parts = ['clientDataJSON', 'authenticatorData', 'signature'].map((name) => {
+    const text = single(form, name);
+    return text === undefined ? undefined : fromBase64Url(text);
+  });
+  const [clientDataJSON, authenticatorData, signature] = parts;
+  if (
+    credentialId === undefined ||
+    credentialId.length === 0 ||
+    credentialId.length > MAX_CREDENTIAL_ID_TEXT ||
+    fromBase64Url(credentialId) === undefined ||
+    clientDataJSON === undefined ||
+    authenticatorData === undefined ||
+    signature === undefined
+  ) {
+    return undefined;
+  }
+  return { credentialId, response: { clientDataJSON, authenticatorData, signature } };
+}
+
+/** A passkey's name as the owner typed it: trimmed, 1 to 60 characters, no control character. */
+function labelFrom(form: URLSearchParams): string | undefined {
+  const label = single(form, 'label')?.trim();
+  if (label === undefined || label.length === 0 || [...label].length > PASSKEY_LABEL_LIMIT) {
+    return undefined;
+  }
+  // eslint-disable-next-line no-control-regex -- the control characters are what is refused
+  return /[\u0000-\u001f\u007f]/.test(label) ? undefined : label;
+}
+
+/** A moment, in UTC: the same on every screen. */
+const when = (seconds: number): string =>
+  `${new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+
+/** A passkey id as {@link randomHex} writes 8 bytes. */
+const PASSKEY_ID = /^[0-9a-f]{16}$/;
+const REVOKE_PATH = /^\/admin\/passkeys\/([^/]+)\/revoke$/;
+
 /** The paths the admin layer answers, and the methods each takes. */
 const METHODS: Readonly<Record<string, readonly string[]>> = {
   '/admin': ['GET'],
   '/admin/sign-in': ['GET', 'POST'],
+  '/admin/sign-in/passkey-options': ['POST'],
+  '/admin/sign-in/passkey': ['POST'],
   '/admin/sign-out': ['POST'],
+  '/admin/passkeys': ['GET'],
+  '/admin/passkeys/options': ['POST'],
+  '/admin/passkeys/add': ['POST'],
+  '/admin/passkeys/{id}/revoke': ['POST'],
+  '/admin/step-up': ['POST'],
   '/admin/admin.css': ['GET'],
+  '/admin/passkey.js': ['GET'],
 };
+
+/** What the sign-in page says above its forms. */
+type SignInNotice = 'code-refused' | 'passkey-refused' | 'enrolled' | null;
 
 export function createAdmin(options: AdminOptions): Admin {
   const { store } = options;
-  const limits = options.limits ?? DEFAULT_ADMIN_LIMITS;
+  const limits = { ...DEFAULT_ADMIN_LIMITS, ...options.limits };
   const perAddress = createRateLimiter(limits.perAddress, options.now);
   const overall = createRateLimiter(limits.overall, options.now);
+  const stepUps = createRateLimiter(limits.stepUpPerSession, options.now);
   const seconds = (): number => Math.floor(options.now() / 1000);
   const expected = options.origin === null ? null : new URL(options.origin);
   const refused = new Map<AdminRefusal, number>();
@@ -303,15 +434,17 @@ export function createAdmin(options: AdminOptions): Admin {
     return { token, sha: await sha256Hex(token) };
   }
 
+  interface Session {
+    readonly record: AdminSessionRecord;
+    readonly token: string;
+  }
+
   /**
    * The live session the request carries, its idle clock restarted; or
    * `undefined`, and a session that is over — idle, too old, or no longer
    * the current owner's — is ended on the way.
    */
-  async function sessionOf(
-    request: Request,
-    owner: Owner,
-  ): Promise<{ readonly record: AdminSessionRecord; readonly token: string } | undefined> {
+  async function sessionOf(request: Request, owner: Owner): Promise<Session | undefined> {
     const cookie = await presented(request);
     if (cookie === undefined) return undefined;
     const record = await store.findAdminSession(cookie.sha);
@@ -338,18 +471,55 @@ export function createAdmin(options: AdminOptions): Admin {
     return site === null || site === 'same-origin';
   }
 
-  function signInPage(problem: boolean, status: number): Response {
-    const described = problem ? ' aria-describedby="code-problem"' : '';
+  /** The WebAuthn RP ID and origin of this listener (ADR 0069 D-1). */
+  function relyingParty(): { readonly rpId: string; readonly origin: string } {
+    const url = expected as URL;
+    return { rpId: url.hostname, origin: url.origin };
+  }
+
+  /** A sign-in attempt counted, per address and in all, BEFORE anything is looked up. */
+  function attemptAllowed(client: ClientInfo): boolean {
+    const addressAllowed = perAddress.allow(addressKey(client.address ?? 'unknown'));
+    return addressAllowed && overall.allow('all');
+  }
+
+  const tooMany = (): Response =>
+    htmlAnswer(
+      'Too many attempts',
+      '<h1>Too many sign-in attempts</h1>\n<p>Wait a minute, then <a href="/admin/sign-in">try again</a>.</p>',
+      429,
+      { 'retry-after': '60' },
+    );
+
+  function signInPage(notice: SignInNotice, status: number): Response {
+    const codeProblem = notice === 'code-refused';
+    const described = codeProblem ? ' aria-describedby="code-problem"' : '';
+    const top =
+      notice === 'enrolled'
+        ? '<p class="notice" role="status">Your passkey was added, and the one-time code’s session has ended. Sign in with the passkey now. A passkey added through the tunnel can read every page and changes nothing until you confirm it on the server machine: <code>operator admin-passkeys confirm &lt;id&gt;</code>, with the id <code>operator admin-passkeys list</code> shows.</p>\n'
+        : notice === 'passkey-refused'
+          ? '<p class="problem" role="alert">That passkey was not accepted, so you are not signed in. Try again, or sign in with a one-time code.</p>\n'
+          : '';
     return htmlAnswer(
       'Sign in',
       `<h1>Sign in to the admin pages of ${escapeHtml(title)}</h1>
-<p>Only the instance’s owner can sign in. On the server machine, run <code>node src/operator/cli.ts admin-code</code> (in the home deployment, <code>docker compose exec instance node src/operator/cli.ts admin-code</code>) and type the code it prints. A code works once, for 10 minutes.</p>
+${top}<p>Only the instance’s owner can sign in.</p>
+<h2>With a passkey</h2>
+<form method="post" action="/admin/sign-in/passkey" data-passkey="sign-in" data-passkey-supported hidden>
+<button type="submit">Sign in with a passkey</button>
+<p data-passkey-status role="status"></p>
+</form>
+<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. Sign in with a one-time code instead.</p>
+<h2>With a one-time code</h2>
+<p>On the server machine, run <code>node src/operator/cli.ts admin-code</code> (in the home deployment, <code>docker compose exec instance node src/operator/cli.ts admin-code</code>) and type the code it prints. A code works once, for 10 minutes. A code session can read every page and add one passkey; it changes nothing else.</p>
 <form method="post" action="/admin/sign-in">
 <label for="code">One-time code</label>
-${problem ? '<p class="problem" id="code-problem">That code was not accepted. A code works once, for 10 minutes: mint a new one on the server machine.</p>\n' : ''}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${described}>
+${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted. A code works once, for 10 minutes: mint a new one on the server machine.</p>\n' : ''}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${described}>
 <button type="submit">Sign in</button>
 </form>`,
       status,
+      {},
+      true,
     );
   }
 
@@ -360,10 +530,40 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
       403,
     );
 
+  const nothingChanged = (status: number, why: string): Response =>
+    htmlAnswer(
+      'Nothing changed',
+      `<h1>Nothing was changed</h1>\n<p>${escapeHtml(why)}</p>\n<p><a href="/admin/passkeys">Go back to the passkeys</a>.</p>`,
+      status,
+    );
+
+  /**
+   * A `POST` of a signed-in page: from this origin's page, in a live session,
+   * carrying that session's CSRF token — or the answer that refuses it, having
+   * changed nothing.
+   */
+  async function signedInPost(
+    request: Request,
+    form: URLSearchParams,
+    owner: Owner,
+  ): Promise<Session | Response> {
+    if (!fromOurPage(request)) {
+      refuse('origin');
+      return refusedForm();
+    }
+    const session = await sessionOf(request, owner);
+    if (session === undefined) return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
+    const sent = single(form, 'csrf');
+    if (sent === undefined || !sameText(await sha256Hex(sent), session.record.csrfSha256)) {
+      refuse('csrf');
+      return refusedForm();
+    }
+    return session;
+  }
+
   async function landing(
     owner: Owner,
-    session: AdminSessionRecord,
-    token: string,
+    session: Session,
     client: ClientInfo,
     seam: AdminSeam,
   ): Promise<Response> {
@@ -374,7 +574,7 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
       {
         athleteId: owner.athleteId,
         deviceKey: owner.ownerKey,
-        tokenSha256: session.tokenSha256,
+        tokenSha256: session.record.tokenSha256,
         standing: owner.standing,
       },
       client,
@@ -384,12 +584,17 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
       const read = (await status.json()) as { version?: unknown };
       if (typeof read.version === 'string') version = read.version;
     }
-    const csrf = await csrfOf(token);
+    const csrf = await csrfOf(session.token);
+    const how =
+      session.record.strength === 'passkey'
+        ? 'with a passkey'
+        : 'with a one-time code, which can read every page and add one passkey';
     return htmlAnswer(
       'Admin',
       `<h1>Admin pages of ${escapeHtml(title)}</h1>
-<p>You are signed in as the instance’s owner, with a one-time code.</p>
+<p>You are signed in as the instance’s owner, ${how}.</p>
 <p>${version === undefined ? 'The instance’s status could not be read.' : `Version ${escapeHtml(version)}, read from the instance’s status.`}</p>
+<p><a href="/admin/passkeys">Passkeys</a></p>
 <p class="hint">This session ends after 15 minutes without use, and 2 hours after you signed in.</p>
 <form method="post" action="/admin/sign-out">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
@@ -410,15 +615,9 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
       return refusedForm();
     }
     // Counted before any code is looked at, so a flood never reaches the store.
-    const addressAllowed = perAddress.allow(addressKey(client.address ?? 'unknown'));
-    if (!addressAllowed || !overall.allow('all')) {
+    if (!attemptAllowed(client)) {
       refuse('rate_limited');
-      return htmlAnswer(
-        'Too many attempts',
-        '<h1>Too many sign-in attempts</h1>\n<p>Wait a minute, then <a href="/admin/sign-in">try again</a>.</p>',
-        429,
-        { 'retry-after': '60' },
-      );
+      return tooMany();
     }
     const codeSha256 = await adminCodeSha256(formOf(body).get('code') ?? '');
     const at = seconds();
@@ -430,26 +629,194 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
             codeSha256,
             source: 'admin_tunnel',
             idleSeconds: ADMIN_IDLE_SECONDS,
-            session: {
-              tokenSha256: await sha256Hex(token),
-              athleteId: owner.athleteId,
-              ownerKey: owner.ownerKey,
-              listener: 'tunnel',
-              strength: 'code',
-              csrfSha256: await sha256Hex(await csrfOf(token)),
-              createdAt: at,
-              lastSeenAt: at,
-              expiresAt: at + ADMIN_LIFETIME_SECONDS,
-            },
+            session: await newSession(owner, token, 'code', at),
           });
     if (opened === 'refused') {
       refuse('code');
-      return signInPage(true, 400);
+      return signInPage('code-refused', 400);
     }
+    return signedIn(request, token);
+  }
+
+  async function newSession(
+    owner: Owner,
+    token: string,
+    strength: AdminSessionRecord['strength'],
+    at: number,
+  ): Promise<AdminSessionRecord> {
+    return {
+      tokenSha256: await sha256Hex(token),
+      athleteId: owner.athleteId,
+      ownerKey: owner.ownerKey,
+      listener: 'tunnel',
+      strength,
+      csrfSha256: await sha256Hex(await csrfOf(token)),
+      createdAt: at,
+      lastSeenAt: at,
+      expiresAt: at + ADMIN_LIFETIME_SECONDS,
+    };
+  }
+
+  /** The browser sent to the landing page with its new cookie; a session it held before is ended. */
+  async function signedIn(request: Request, token: string): Promise<Response> {
     // A session this browser held before is never carried on (no fixation).
     const before = await presented(request);
     if (before !== undefined) await store.endAdminSession(before.sha);
     return seeOther('/admin', { 'set-cookie': cookieFor(token) });
+  }
+
+  /** A new challenge: what the browser signs, and the SHA-256 the store keeps. */
+  async function newChallenge(): Promise<{ readonly challenge: string; readonly sha: string }> {
+    const challenge = randomToken(32);
+    return { challenge, sha: await sha256Hex(challenge) };
+  }
+
+  /**
+   * Whether `passkey` may make an assertion here: enrolled for this RP ID by
+   * the owner key that is the owner now, and for a change, confirmed.
+   */
+  function usableHere(passkey: AdminPasskeyRecord, owner: Owner, forChange: boolean): boolean {
+    return (
+      passkey.rpId === relyingParty().rpId &&
+      passkey.ownerKey === owner.ownerKey &&
+      (!forChange || passkey.confirmedAt !== null)
+    );
+  }
+
+  /** The passkeys an assertion may be made with here. */
+  async function usable(owner: Owner, forChange: boolean): Promise<readonly AdminPasskeyRecord[]> {
+    return (await store.listAdminPasskeys()).filter((passkey) =>
+      usableHere(passkey, owner, forChange),
+    );
+  }
+
+  async function passkeySignInOptions(
+    request: Request,
+    owner: Owner,
+    client: ClientInfo,
+  ): Promise<Response> {
+    if (!fromOurPage(request)) {
+      refuse('origin');
+      return jsonAnswer({ error: 'refused' }, 403);
+    }
+    if (!attemptAllowed(client)) {
+      refuse('rate_limited');
+      return jsonAnswer({ error: 'rate_limited' }, 429);
+    }
+    const at = seconds();
+    const { challenge, sha } = await newChallenge();
+    await store.issueAdminChallenge(
+      {
+        challengeSha256: sha,
+        purpose: 'sign_in',
+        sessionSha256: null,
+        action: null,
+        fieldsSha256: null,
+        userHandle: null,
+        expiresAt: at + ADMIN_CHALLENGE_SECONDS,
+      },
+      at,
+    );
+    return jsonAnswer(
+      {
+        challenge,
+        rpId: relyingParty().rpId,
+        allowCredentials: (await usable(owner, false)).map((passkey) => passkey.credentialId),
+        timeout: ADMIN_CHALLENGE_SECONDS * 1000,
+      },
+      200,
+    );
+  }
+
+  /**
+   * An assertion verified against the passkey it names, for `challenge`
+   * (base64url) — or the refusal's kind. Every check is the verifier's; this
+   * finds the passkey, here, at this RP ID.
+   */
+  async function verified(
+    assertion: { readonly credentialId: string; readonly response: AssertionResponse },
+    challenge: string,
+    owner: Owner,
+    forChange: boolean,
+  ): Promise<{ readonly passkey: AdminPasskeyRecord; readonly signCount: number } | AdminRefusal> {
+    const party = relyingParty();
+    const passkey = await store.findAdminPasskeyByCredential(assertion.credentialId);
+    if (passkey === undefined || !usableHere(passkey, owner, false)) return 'passkey';
+    // ADR 0069 Q-C: a tunnel passkey changes nothing until the host confirmed it.
+    if (forChange && !usableHere(passkey, owner, true)) return 'step_up';
+    try {
+      const { signCount } = await verifyAssertion(assertion.response, passkey, {
+        ...party,
+        challenge,
+      });
+      return { passkey, signCount };
+    } catch (error) {
+      if (error instanceof WebAuthnRefused)
+        return error.reason === 'counter' ? 'counter' : 'passkey';
+      throw error;
+    }
+  }
+
+  /** The challenge a response names, or `undefined` when it names none. */
+  function namedChallenge(clientDataJSON: Uint8Array): string | undefined {
+    try {
+      return challengeOf(clientDataJSON);
+    } catch (error) {
+      if (error instanceof WebAuthnRefused) return undefined;
+      throw error;
+    }
+  }
+
+  async function passkeySignIn(
+    request: Request,
+    body: Uint8Array | null,
+    owner: Owner,
+    client: ClientInfo,
+  ): Promise<Response> {
+    if (!fromOurPage(request)) {
+      refuse('origin');
+      return refusedForm();
+    }
+    if (!attemptAllowed(client)) {
+      refuse('rate_limited');
+      return tooMany();
+    }
+    const at = seconds();
+    const assertion = assertionFrom(formOf(body));
+    const challenge =
+      assertion === undefined ? undefined : namedChallenge(assertion.response.clientDataJSON);
+    // Taken, once, whatever the rest of the answer is.
+    const issued =
+      challenge === undefined
+        ? undefined
+        : await store.takeAdminChallenge(
+            'sign_in',
+            { challengeSha256: await sha256Hex(challenge) },
+            at,
+          );
+    if (assertion === undefined || challenge === undefined || issued === undefined) {
+      refuse('passkey');
+      return signInPage('passkey-refused', 400);
+    }
+    const proved = await verified(assertion, challenge, owner, false);
+    if (typeof proved === 'string') {
+      refuse(proved);
+      return signInPage('passkey-refused', 400);
+    }
+    const token = randomToken(32);
+    const opened = await store.openAdminSessionWithPasskey({
+      passkeyId: proved.passkey.id,
+      signCountWas: proved.passkey.signCount,
+      signCount: proved.signCount,
+      source: 'admin_tunnel',
+      idleSeconds: ADMIN_IDLE_SECONDS,
+      session: await newSession(owner, token, 'passkey', at),
+    });
+    if (opened === 'refused') {
+      refuse('counter');
+      return signInPage('passkey-refused', 400);
+    }
+    return signedIn(request, token);
   }
 
   async function signOut(
@@ -457,19 +824,371 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
     body: Uint8Array | null,
     owner: Owner,
   ): Promise<Response> {
-    if (!fromOurPage(request)) {
-      refuse('origin');
-      return refusedForm();
-    }
-    const session = await sessionOf(request, owner);
-    if (session === undefined) return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
-    const sent = formOf(body).get('csrf');
-    if (sent === null || !sameText(await sha256Hex(sent), session.record.csrfSha256)) {
-      refuse('csrf');
-      return refusedForm();
-    }
+    const session = await signedInPost(request, formOf(body), owner);
+    if (session instanceof Response) return session;
     await store.endAdminSession(session.record.tokenSha256);
     return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
+  }
+
+  async function passkeysPage(owner: Owner, session: Session): Promise<Response> {
+    const { rpId } = relyingParty();
+    const passkeys = await store.listAdminPasskeys();
+    const csrf = escapeHtml(await csrfOf(session.token));
+    const byPasskey = session.record.strength === 'passkey';
+    const items = passkeys.map((passkey) => {
+      const label = escapeHtml(passkey.label);
+      const standing =
+        passkey.ownerKey !== owner.ownerKey
+          ? 'Not usable: it was added under another owner key than OYL_INSTANCE_OWNER_KEY names now. Revoke it.'
+          : passkey.rpId !== rpId
+            ? `Not usable at this address: it was added for ${escapeHtml(passkey.rpId)}. Revoke it, and add one here.`
+            : passkey.confirmedAt === null
+              ? `Can read, and change nothing until it is confirmed on the server machine: <code>operator admin-passkeys confirm ${escapeHtml(passkey.id)}</code>.`
+              : 'Can read and make changes, with a fresh check each time.';
+      const revoke = byPasskey
+        ? `<form method="post" action="/admin/passkeys/${escapeHtml(passkey.id)}/revoke" data-step-up="passkey_revoke">
+<input type="hidden" name="csrf" value="${csrf}">
+<input type="hidden" name="id" value="${escapeHtml(passkey.id)}">
+<button type="submit">Revoke ${label}</button>
+<p data-passkey-status role="status"></p>
+</form>`
+        : '';
+      return `<li>
+<h3>${label}</h3>
+<dl>
+<dt>Id</dt><dd><code>${escapeHtml(passkey.id)}</code></dd>
+<dt>Added</dt><dd>${when(passkey.enrolledAt)}</dd>
+<dt>Last used</dt><dd>${passkey.lastUsedAt === null ? 'Never' : when(passkey.lastUsedAt)}</dd>
+<dt>For</dt><dd>${escapeHtml(passkey.rpId)}</dd>
+</dl>
+<p>${standing}</p>
+${revoke}
+</li>`;
+    });
+    const list =
+      items.length === 0
+        ? '<p>There are no passkeys yet.</p>'
+        : `<ul class="passkeys">\n${items.join('\n')}\n</ul>`;
+    const add = byPasskey
+      ? '<p>To add another passkey, sign in with a one-time code from the server machine: a code session can add one.</p>'
+      : passkeys.length >= MAX_ADMIN_PASSKEYS
+        ? `<p>You hold ${String(MAX_ADMIN_PASSKEYS)} passkeys, the most there may be. Revoke one before adding another.</p>`
+        : `<h2>Add a passkey</h2>
+<p>This adds one passkey for ${escapeHtml(rpId)}, then signs you out so you can sign in with it. Revoking a passkey needs a passkey sign-in.</p>
+<form method="post" action="/admin/passkeys/add" data-passkey="enrol" data-passkey-supported hidden>
+<input type="hidden" name="csrf" value="${csrf}">
+<label for="label">A name for this passkey</label>
+<input type="text" id="label" name="label" maxlength="${String(PASSKEY_LABEL_LIMIT)}" autocomplete="off" required>
+<button type="submit">Add a passkey</button>
+<p data-passkey-status role="status"></p>
+</form>
+<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. You can keep using the admin pages with a one-time code, which reads every page and changes nothing.</p>`;
+    return htmlAnswer(
+      'Passkeys',
+      `<h1>Passkeys</h1>
+<p><a href="/admin">Back to the admin pages</a></p>
+${list}
+${add}`,
+      200,
+      {},
+      true,
+    );
+  }
+
+  async function enrolOptions(
+    request: Request,
+    body: Uint8Array | null,
+    owner: Owner,
+  ): Promise<Response> {
+    const session = await signedInPost(request, formOf(body), owner);
+    if (session instanceof Response) return session;
+    if (session.record.strength !== 'code') {
+      refuse('passkey');
+      return jsonAnswer({ error: 'not_a_code_session' }, 403);
+    }
+    const held = await store.listAdminPasskeys();
+    if (held.length >= MAX_ADMIN_PASSKEYS) return jsonAnswer({ error: 'full' }, 409);
+    const at = seconds();
+    const { challenge, sha } = await newChallenge();
+    // One random handle for the instance's owner, never an athlete id (ADR 0069 D-1).
+    const userHandle = held[0]?.userHandle ?? randomToken(16);
+    await store.issueAdminChallenge(
+      {
+        challengeSha256: sha,
+        purpose: 'enrol',
+        sessionSha256: session.record.tokenSha256,
+        action: null,
+        fieldsSha256: null,
+        userHandle,
+        expiresAt: at + ADMIN_CHALLENGE_SECONDS,
+      },
+      at,
+    );
+    const { rpId } = relyingParty();
+    return jsonAnswer(
+      {
+        challenge,
+        rpId,
+        rpName: title,
+        userHandle,
+        algorithms: [COSE_ALGORITHMS.ed25519, COSE_ALGORITHMS.es256],
+        excludeCredentials: held
+          .filter((passkey) => passkey.rpId === rpId)
+          .map((passkey) => passkey.credentialId),
+        timeout: ADMIN_CHALLENGE_SECONDS * 1000,
+      },
+      200,
+    );
+  }
+
+  async function enrol(request: Request, body: Uint8Array | null, owner: Owner): Promise<Response> {
+    const form = formOf(body);
+    const session = await signedInPost(request, form, owner);
+    if (session instanceof Response) return session;
+    if (session.record.strength !== 'code') {
+      refuse('passkey');
+      return nothingChanged(403, 'A passkey is added from a one-time code’s session.');
+    }
+    const label = labelFrom(form);
+    if (label === undefined) {
+      return nothingChanged(400, 'A passkey’s name is 1 to 60 characters.');
+    }
+    const at = seconds();
+    // Taken, once, whatever the rest of the answer is.
+    const issued = await store.takeAdminChallenge(
+      'enrol',
+      { sessionSha256: session.record.tokenSha256 },
+      at,
+    );
+    const clientDataJSON = fromBase64Url(single(form, 'clientDataJSON') ?? '');
+    const attestationObject = fromBase64Url(single(form, 'attestationObject') ?? '');
+    const challenge = clientDataJSON === undefined ? undefined : namedChallenge(clientDataJSON);
+    if (
+      issued === undefined ||
+      issued.userHandle === null ||
+      clientDataJSON === undefined ||
+      attestationObject === undefined ||
+      challenge === undefined ||
+      (await sha256Hex(challenge)) !== issued.challengeSha256
+    ) {
+      refuse('passkey');
+      return nothingChanged(
+        400,
+        'The passkey was not added: the browser’s answer was not accepted.',
+      );
+    }
+    let registration: Awaited<ReturnType<typeof verifyRegistration>>;
+    try {
+      registration = await verifyRegistration(
+        { clientDataJSON, attestationObject },
+        { ...relyingParty(), challenge },
+      );
+    } catch (error) {
+      if (!(error instanceof WebAuthnRefused)) throw error;
+      refuse('passkey');
+      return nothingChanged(
+        400,
+        'The passkey was not added: the browser’s answer was not accepted.',
+      );
+    }
+    const userHandle = issued.userHandle;
+    const { value } = await store.recordOperatorAction(
+      {
+        actor: { source: 'admin_tunnel', athleteId: owner.athleteId },
+        action: 'admin_passkey_enrolled',
+        at,
+      },
+      async (inside): Promise<OperatorChange<'enrolled' | 'refused'>> => {
+        const held = await inside.listAdminPasskeys();
+        const live = await inside.findAdminSession(session.record.tokenSha256);
+        if (
+          held.length >= MAX_ADMIN_PASSKEYS ||
+          held.some((passkey) => passkey.credentialId === registration.credentialId) ||
+          live === undefined
+        ) {
+          return { outcome: 'refused', detail: null, value: 'refused' };
+        }
+        await inside.addAdminPasskey({
+          id: randomHex(8),
+          credentialId: registration.credentialId,
+          rpId: relyingParty().rpId,
+          algorithm: registration.algorithm,
+          publicKey: registration.publicKey,
+          signCount: registration.signCount,
+          userHandle,
+          ownerKey: owner.ownerKey,
+          label,
+          listener: 'tunnel',
+          enrolledAt: at,
+          lastUsedAt: null,
+          // ADR 0069 Q-C: through the tunnel, unconfirmed until the host confirms it.
+          confirmedAt: null,
+        });
+        // A code session enrols once, and ends (ADR 0069 D-1).
+        await inside.endAdminSession(session.record.tokenSha256);
+        return { outcome: 'done', detail: registration.algorithm, value: 'enrolled' };
+      },
+    );
+    if (value === 'refused') {
+      return nothingChanged(
+        409,
+        'The passkey was not added: it is held already, or there are ten.',
+      );
+    }
+    return seeOther('/admin/sign-in?enrolled', { 'set-cookie': CLEARED_COOKIE });
+  }
+
+  async function stepUpOptions(
+    request: Request,
+    body: Uint8Array | null,
+    owner: Owner,
+  ): Promise<Response> {
+    const form = formOf(body);
+    const session = await signedInPost(request, form, owner);
+    if (session instanceof Response) return session;
+    // A code session changes nothing (ADR 0069 Q-A), so it is issued no step-up.
+    if (session.record.strength !== 'passkey') {
+      refuse('step_up');
+      return jsonAnswer({ error: 'not_a_passkey_session' }, 403);
+    }
+    if (!stepUps.allow(session.record.tokenSha256)) {
+      refuse('rate_limited');
+      return jsonAnswer({ error: 'rate_limited' }, 429);
+    }
+    const action = single(form, 'action');
+    const fields =
+      action === undefined || !isAdminChange(action)
+        ? undefined
+        : boundFields(ADMIN_CHANGES[action].fields, form);
+    if (action === undefined || fields === undefined) {
+      refuse('step_up');
+      return jsonAnswer({ error: 'not_a_change' }, 400);
+    }
+    const at = seconds();
+    const { challenge, sha } = await newChallenge();
+    await store.issueAdminChallenge(
+      {
+        challengeSha256: sha,
+        purpose: 'step_up',
+        sessionSha256: session.record.tokenSha256,
+        action,
+        fieldsSha256: await bindingOf(action, fields),
+        userHandle: null,
+        expiresAt: at + ADMIN_CHALLENGE_SECONDS,
+      },
+      at,
+    );
+    return jsonAnswer(
+      {
+        challenge,
+        rpId: relyingParty().rpId,
+        allowCredentials: (await usable(owner, true)).map((passkey) => passkey.credentialId),
+        timeout: ADMIN_CHALLENGE_SECONDS * 1000,
+      },
+      200,
+    );
+  }
+
+  /**
+   * The step-up a change's `POST` carries, verified (ADR 0069 D-4): the
+   * session's pending challenge TAKEN — so it answers once, whatever the
+   * outcome — and held to this action and these fields, then the assertion
+   * verified by a confirmed passkey here. Answers the passkey and its new
+   * counter, or `undefined` with the refusal counted.
+   */
+  async function steppedUp(
+    owner: Owner,
+    session: Session,
+    action: AdminChange,
+    fields: Readonly<Record<string, string>>,
+    form: URLSearchParams,
+  ): Promise<{ readonly passkey: AdminPasskeyRecord; readonly signCount: number } | undefined> {
+    const pending = await store.takeAdminChallenge(
+      'step_up',
+      { sessionSha256: session.record.tokenSha256 },
+      seconds(),
+    );
+    const assertion = assertionFrom(form);
+    const challenge =
+      assertion === undefined ? undefined : namedChallenge(assertion.response.clientDataJSON);
+    if (
+      pending === undefined ||
+      assertion === undefined ||
+      challenge === undefined ||
+      (await sha256Hex(challenge)) !== pending.challengeSha256 ||
+      pending.action !== action ||
+      pending.fieldsSha256 !== (await bindingOf(action, fields))
+    ) {
+      refuse('step_up');
+      return undefined;
+    }
+    const proved = await verified(assertion, challenge, owner, true);
+    if (typeof proved === 'string') {
+      refuse(proved === 'counter' ? 'counter' : 'step_up');
+      return undefined;
+    }
+    return proved;
+  }
+
+  async function revoke(
+    request: Request,
+    body: Uint8Array | null,
+    owner: Owner,
+    pathId: string,
+  ): Promise<Response> {
+    const form = formOf(body);
+    const session = await signedInPost(request, form, owner);
+    if (session instanceof Response) return session;
+    if (session.record.strength !== 'passkey') {
+      refuse('step_up');
+      return nothingChanged(
+        403,
+        'Revoking a passkey needs a passkey sign-in: a one-time code’s session changes nothing.',
+      );
+    }
+    const fields = boundFields(ADMIN_CHANGES.passkey_revoke.fields, form);
+    if (fields === undefined || fields.id !== pathId || !PASSKEY_ID.test(pathId)) {
+      refuse('step_up');
+      return nothingChanged(400, 'That form did not name one passkey.');
+    }
+    const stepped = await steppedUp(owner, session, 'passkey_revoke', fields, form);
+    if (stepped === undefined) {
+      return nothingChanged(
+        403,
+        'The passkey check did not pass: a change needs a fresh check by a confirmed passkey, made for this change.',
+      );
+    }
+    const at = seconds();
+    const { value } = await store.recordOperatorAction(
+      {
+        actor: { source: 'admin_tunnel', athleteId: owner.athleteId },
+        action: 'admin_passkey_revoked',
+        at,
+      },
+      async (inside): Promise<OperatorChange<boolean>> => {
+        const used = await inside.recordAdminPasskeyUse(
+          stepped.passkey.id,
+          stepped.passkey.signCount,
+          stepped.signCount,
+          at,
+        );
+        if (!used) return { outcome: 'refused', detail: null, value: false };
+        const removed = await inside.removeAdminPasskey(pathId);
+        if (!removed.removed) return { outcome: 'refused', detail: null, value: false };
+        return {
+          outcome: 'done',
+          detail: `sessions_ended=${String(Math.min(removed.sessionsEnded, 999_999_999))}`,
+          value: true,
+        };
+      },
+    );
+    if (!value)
+      return nothingChanged(409, 'There is no such passkey, or it was just used elsewhere.');
+    // The passkey this session was opened with ends it.
+    if ((await store.findAdminSession(session.record.tokenSha256)) === undefined) {
+      return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
+    }
+    return seeOther('/admin/passkeys');
   }
 
   return {
@@ -490,7 +1209,9 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
         );
       }
       const path = new URL(request.url).pathname;
-      const methods = METHODS[path];
+      const revokeId = REVOKE_PATH.exec(path)?.[1];
+      const route = revokeId === undefined ? path : '/admin/passkeys/{id}/revoke';
+      const methods = METHODS[route];
       if (methods === undefined) {
         return htmlAnswer(
           'Not found',
@@ -506,8 +1227,13 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
           { allow: methods.join(', ') },
         );
       }
-      if (path === '/admin/admin.css') {
+      if (route === '/admin/admin.css') {
         return adminResponse(STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
+      }
+      if (route === '/admin/passkey.js') {
+        return adminResponse(PASSKEY_SCRIPT, 200, {
+          'content-type': 'text/javascript; charset=utf-8',
+        });
       }
       if (body === 'too-large') {
         return htmlAnswer(
@@ -530,16 +1256,34 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
         );
       }
       if (request.method === 'POST') {
-        return path === '/admin/sign-in'
-          ? signIn(request, body, owner, client)
-          : signOut(request, body, owner);
+        switch (route) {
+          case '/admin/sign-in':
+            return signIn(request, body, owner, client);
+          case '/admin/sign-in/passkey-options':
+            return passkeySignInOptions(request, owner, client);
+          case '/admin/sign-in/passkey':
+            return passkeySignIn(request, body, owner, client);
+          case '/admin/passkeys/options':
+            return enrolOptions(request, body, owner);
+          case '/admin/passkeys/add':
+            return enrol(request, body, owner);
+          case '/admin/step-up':
+            return stepUpOptions(request, body, owner);
+          case '/admin/passkeys/{id}/revoke':
+            return revoke(request, body, owner, revokeId as string);
+          default:
+            return signOut(request, body, owner);
+        }
       }
       const session = await sessionOf(request, owner);
       if (path === '/admin/sign-in') {
-        return session === undefined ? signInPage(false, 200) : seeOther('/admin');
+        if (session !== undefined) return seeOther('/admin');
+        const enrolled = new URL(request.url).searchParams.has('enrolled');
+        return signInPage(enrolled ? 'enrolled' : null, 200);
       }
       if (session === undefined) return seeOther('/admin/sign-in');
-      return landing(owner, session.record, session.token, client, seam);
+      if (path === '/admin/passkeys') return passkeysPage(owner, session);
+      return landing(owner, session, client, seam);
     },
 
     async flushRefusals() {
@@ -568,7 +1312,12 @@ ${problem ? '<p class="problem" id="code-problem">That code was not accepted. A 
     sweepRateLimits() {
       perAddress.sweep();
       overall.sweep();
+      stepUps.sweep();
     },
-    rateLimitSweepPeriodMs: sweepPeriodMs([limits.perAddress, limits.overall]),
+    rateLimitSweepPeriodMs: sweepPeriodMs([
+      limits.perAddress,
+      limits.overall,
+      limits.stepUpPerSession,
+    ]),
   };
 }

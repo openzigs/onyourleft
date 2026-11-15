@@ -224,6 +224,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         route only in-process as the owner, through
                         `handler.ts` §`dispatchAsOwner`, and only one whose
                         `admin` mark is `read` or `change`.
+                        Since #2642 the owner's passkeys too (migration
+                        0045, `admin/webauthn.ts` by hand against WebCrypto
+                        over the bounded `admin/cbor.ts`): a code session
+                        enrols one; every change needs a step-up bound to
+                        its action and fields (`admin/step-up.ts`) by a
+                        passkey `operator admin-passkeys confirm` confirmed.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
