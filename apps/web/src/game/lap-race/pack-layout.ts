@@ -63,13 +63,14 @@
  * behind the rider's. But the scene draws every bot on the lap of the road the
  * frame shows (`scene.ts` §`onTheCorridorsLap`, #2516), so that bot stands on
  * the road beside the rider and the bots on the rider's lap. Given the lap
- * ({@link stepPackLayout}'s `lapMetres`), every measure of how far apart two
- * racers are along the road reads to the other's nearest place on the loop:
- * whether a row is passing the rider, whether two are inside each other, and
- * where a bot may go to keep clear. A bot a lap apart is therefore kept clear,
- * and goes round, as one on the same lap is (the owner's ruling on #2544:
- * riders never ghost through each other). Two racers under half a lap apart
- * read exactly as they did.
+ * ({@link stepPackLayout}'s `lapMetres`), how far apart two racers are along
+ * the road reads to the other's nearest place on the loop, both where a row is
+ * passing the rider and where two are inside each other, so a bot a lap apart
+ * is kept clear as one on the same lap is. And two bots a lap apart that close
+ * on each other in one place across are laid out a place apart (§`aLapApart`),
+ * so the one coming up goes round rather than being held behind. Riders never
+ * ghost through each other (the owner's ruling on #2544). Two racers under
+ * half a lap apart read exactly as they did.
  *
  * ## Never a jump
  *
@@ -366,7 +367,49 @@ function targets(
       }
     }
   });
+  if (lap !== undefined) aLapApart(racers, riderId, previous, lap, found);
   return found;
+}
+
+/**
+ * Two bots a lap apart never share a row, since rows are laid out in race
+ * places, so neither is laid out beside the other when one comes up on the
+ * other on the road (#2516). Held behind, a bot was drawn at the slower one's
+ * speed for good, ever further behind its race place. So where two bots a lap
+ * apart are level on the road or closing to be, as {@link passing} reads it,
+ * in one place across, the one the race has ahead is laid out a place beside
+ * the other, on the side it was, and goes round.
+ */
+function aLapApart(
+  racers: readonly PackRacer[],
+  riderId: string,
+  previous: PackLayout,
+  lap: number,
+  found: Map<string, Target>,
+): void {
+  const bots = racers.filter((racer) => racer.id !== riderId);
+  for (const ahead of bots) {
+    for (const behind of bots) {
+      if (ahead.along - behind.along <= lap / 2) continue;
+      const aheadTarget = found.get(ahead.id) as Target;
+      const behindTarget = found.get(behind.id) as Target;
+      if (Math.abs(aheadTarget.lateral - behindTarget.lateral) >= PACK_ABREAST_METRES) continue;
+      const passes = passing(
+        [ahead],
+        { ...behind, along: behind.along + (previous.get(behind.id)?.shift ?? behindTarget.shift) },
+        aheadTarget.shift,
+        previous,
+        lap,
+      );
+      if (!passes) continue;
+      const was = previous.get(ahead.id)?.lateral ?? ahead.lateral;
+      const side = Math.sign(was - behindTarget.lateral) || 1;
+      found.set(ahead.id, {
+        ...aheadTarget,
+        lateral: behindTarget.lateral + side * PACK_ABREAST_METRES,
+      });
+    }
+  }
 }
 
 /** The lane of a row's bot nearest the rider's place, or the rider's own place when no bot shares it. */
@@ -819,8 +862,6 @@ function clearOf(
   const near = others.filter(
     (other) => overlap(drawnAt(now), other, lap) > 0 || overlap(drawnAt(was), other, lap) > 0,
   );
-  // Where a racer is on the road beside this bot: on a loop, a lap apart is beside it (#2516).
-  const beside = (along: number): number => nearestOnTheLoop(along, racer.along + now.shift, lap);
   // Along: where it was laid out, where it was, as far back and as far on as
   // it may go, a bike length either side of each racer near it, and a bike
   // length either side of where the rider will be a moment on, so a bot
@@ -833,14 +874,14 @@ function clearOf(
     least,
     most,
     ...near.flatMap((other) =>
-      [-1, 1].map((side) => beside(other.along) + side * BIKE_LENGTH_METRES - racer.along),
+      [-1, 1].map((side) => other.along + side * BIKE_LENGTH_METRES - racer.along),
     ),
     ...(rider === undefined
       ? []
       : PACK_SEEN_AHEAD_SECONDS.flatMap((seconds) =>
           [-1, 1].map(
             (side) =>
-              beside(rider.along) +
+              rider.along +
               (rider.speed - racer.speed) * seconds +
               side * (BIKE_LENGTH_METRES + PACK_CLEAR_METRES) -
               racer.along,
@@ -878,7 +919,7 @@ function clearOf(
   const holding = near.find(
     (other) =>
       other.race < racer.along &&
-      nearestOnTheLoop(other.along, racer.along + chosen.shift, lap) > racer.along + chosen.shift &&
+      other.along > racer.along + chosen.shift &&
       overlap(drawnAt(now), other, lap) > 0,
   );
   if (holding !== undefined && chosen.shift < now.shift) {
