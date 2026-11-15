@@ -585,7 +585,7 @@ describe('a race’s result — #785', () => {
       // W/kg, never watts: no field anywhere names a power.
       expect(JSON.stringify(got.body)).not.toMatch(/"(watts|power)[A-Za-z]*"(?<!PerKilogram")/i);
     }
-  }, 30_000);
+  });
 
   it('is not read by anybody while the race runs — not even a rider already over the line (ADR 0028 D-7.7)', async () => {
     const w = await open();
@@ -631,7 +631,7 @@ describe('a race’s result — #785', () => {
     expect((await as(bea.token)).status).toBe(200);
     expect((await as(watcher.token)).status).toBe(404);
     expect((await as(stranger.token)).status).toBe(404);
-  }, 30_000);
+  });
 
   it('keeps the others’ results when one rider erases their account, and shows them as “a rider” with no name', async () => {
     const w = await open();
@@ -670,5 +670,5 @@ describe('a race’s result — #785', () => {
       expect(rows[0]?.displayName).not.toBeNull();
       expect(rows[2]?.displayName).not.toBeNull();
     }
-  }, 30_000);
+  });
 });

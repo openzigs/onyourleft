@@ -34,7 +34,7 @@ import { STANDARD_GRAVITY_METRES_PER_SECOND_SQUARED } from '@onyourleft/physics'
 
 import { EASED_LEAN_RADIANS } from './bend-easing';
 import { RIDER_HALF_WIDTH_METRES, combinedLean } from './bicycle';
-import { dampedHeading, type GroundHeading } from './camera';
+import { CAMERA_ABOVE_METRES, cameraRig, dampedHeading, type GroundHeading } from './camera';
 import { DRAWN_PACE_WINDOW_METRES, drawnLine, drawnLineAt } from './drawn-line';
 import { LINE_LIMIT_METRES, racingLine } from './racing-line';
 import { distanceToDrawnRoad } from './road-grid';
@@ -399,6 +399,46 @@ describe('the rider is drawn ON the road through a climbing corner — #2422’s
         worst = Math.max(worst, Math.abs(marker.y - roadHeightUnder(corridor, marker.x, marker.z)));
       }
       expect(worst, `${name}: the most the wheels are off the road`).toBeLessThanOrEqual(
+        ON_THE_TARMAC_METRES,
+      );
+    });
+
+    it(`${name}: the camera's eye 2 m over the road under it — #2470`, () => {
+      // `camera.ts` §`cameraRig` stands the eye `CAMERA_ABOVE_METRES` over
+      // `eyeRoadY`, and on a drawn path the eye stands on the path the chase
+      // distance back (`scene.ts` §`eyeOnDrawnPath`), which the pacing puts
+      // metres along the road from the odometer through a corner. Read at
+      // the odometer's place, the eye stood up to 0.30 m off on the 8 %
+      // jittered junction, 0.24 m on the planner's corner and 0.17 m round
+      // the hairpin, measured here. Held to the rider's own bound: the same
+      // reference, with the same rounding.
+      const profile = route();
+      const origin = corridorOrigin(profile);
+      const start = atStartLine(profile);
+      const corner = name.includes('hairpin') ? 400 : CORNER;
+      let worst = 0;
+      for (let odometer = corner - 60; odometer <= corner + 90; odometer += 0.5) {
+        const input: SceneInput = {
+          profile,
+          origin,
+          state: {
+            ...start,
+            ride: { speed: metresPerSecond(25 / 3.6), distance: metres(odometer) },
+          },
+        };
+        const drawnAt = drawnRiderDistance(input);
+        const corridor = roadCorridor(profile, origin, drawnAt);
+        const rider = placedRiders(input, corridor)[0];
+        if (rider === undefined) throw new Error('no rider in the frame');
+        const path = drawnPathOf(input);
+        if (path === undefined) throw new Error('an ordinary ride with no drawn path');
+        const { eye } = cameraRig(
+          cameraPose(corridor, drawnAt, rider.lateral, rider.lateral, path),
+        );
+        const over = eye.y - CAMERA_ABOVE_METRES - roadHeightUnder(corridor, eye.x, eye.z);
+        worst = Math.max(worst, Math.abs(over));
+      }
+      expect(worst, `${name}: the most the eye is off 2 m over the road`).toBeLessThanOrEqual(
         ON_THE_TARMAC_METRES,
       );
     });

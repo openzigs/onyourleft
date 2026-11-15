@@ -128,16 +128,19 @@ import {
 } from '../game/hud/announce-preference';
 import {
   HUD_ARRANGEMENTS,
+  HUD_DELIVERY_VIEWS,
   HUD_PANELS,
   HUD_POWER_VIEWS,
   HUD_ROUTE_VIEWS,
   HUD_TEXT_SIZES,
+  deliveryEverything,
   panelShown,
   powerView,
   readHudLayout,
   totalsStripChosen,
   writeHudLayout,
   type HudArrangement,
+  type HudDeliveryView,
   type HudLayoutPreference,
   type HudPanelId,
   type HudPowerView,
@@ -1916,6 +1919,15 @@ const HUD_POWER_VIEW_LABELS: Readonly<Record<HudPowerView, string>> = {
   instant: 'Instant',
 };
 
+/**
+ * #2514: what each Delivery layout is called here. ⚠️ New words, proposed to
+ * the owner in #2514's pull request (old → new).
+ */
+const HUD_DELIVERY_VIEW_LABELS: Readonly<Record<HudDeliveryView, string>> = {
+  game: 'The game strip only',
+  everything: 'Everything, as on any ride',
+};
+
 /** #2079: what each text size is called here. */
 const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
   normal: 'Normal',
@@ -2016,6 +2028,22 @@ function HudLayoutPanel({
               }}
             />{' '}
             {HUD_POWER_VIEW_LABELS[view]}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>During a Delivery round</legend>
+        {HUD_DELIVERY_VIEWS.map((view) => (
+          <label key={view} className="oyl-hud-layout__choice">
+            <input
+              type="radio"
+              name="oyl-hud-delivery-view"
+              checked={(deliveryEverything(layout) ? 'everything' : 'game') === view}
+              onChange={() => {
+                keep({ ...layout, delivery: view });
+              }}
+            />{' '}
+            {HUD_DELIVERY_VIEW_LABELS[view]}
           </label>
         ))}
       </fieldset>
@@ -2194,9 +2222,13 @@ function SoloDraftPanel({
               against your best that you rode partly in its draft says so.
             </p>
             <p className="oyl-muted">
+              In a lap race against bots, you and the bots draft each other in the same way, and
+              turning this off turns the draft off for every racer.
+            </p>
+            <p className="oyl-muted">
               Turn this off to ride on your own with no draft at all, as before. It changes nothing
-              in a room or a race. Your trainer is never sent a draft, only the gradient of the road
-              you are on.
+              in a room. Your trainer is never sent a draft, only the gradient of the road you are
+              on.
             </p>
           </>
         }

@@ -69,6 +69,7 @@ export {
   STEER_CODES,
   STEER_INTENTS,
   STEER_KEYS,
+  sidewaysSpeedOf,
   steeredLateralFor,
   steerIntentOfKey,
   steerToward,

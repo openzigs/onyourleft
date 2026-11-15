@@ -8,6 +8,7 @@ import { CORRECTION_THRESHOLD_METRES } from '../net/correction';
 import type { DrawnRemoteRider } from '../net/snapshots';
 import {
   acrossTheRoomsLine,
+  countdownRace,
   DRAFT_IN_PERCENT,
   DRAFT_OUT_PERCENT,
   DRAFT_SPOKEN,
@@ -21,6 +22,7 @@ import {
   ROOM_RECORDING_PAUSED_TEXT,
   roomRideNotice,
   raceNotice,
+  RACE_GO_SHOWN_MS,
   RACE_TEXT,
   riderEvents,
   roomFrame,
@@ -310,6 +312,27 @@ describe('a race on the HUD — #785', () => {
     expect(RACE_TEXT.waitingForItsMaker).toContain('the rider who made the room starts it');
   });
 
+  it('shows “Go.” for a moment from when this device saw the race start, then nothing — #2546', () => {
+    expect(raceNotice({ kind: 'running' }, 5_000, true, 5_000)).toBe(RACE_TEXT.go);
+    expect(raceNotice({ kind: 'running' }, 5_000 + RACE_GO_SHOWN_MS - 1, false, 5_000)).toBe(
+      RACE_TEXT.go,
+    );
+    expect(raceNotice({ kind: 'running' }, 5_000 + RACE_GO_SHOWN_MS, true, 5_000)).toBeUndefined();
+    expect(raceNotice({ kind: 'running' }, 5_000, true)).toBeUndefined();
+  });
+
+  it('reads a solo race’s countdown as a room’s, and says it waits for a paused rider — #2546', () => {
+    expect(countdownRace(7_200, 1_000)).toEqual({ kind: 'counting', endsAtLocalMs: 8_200 });
+    expect(heldOnTheLine(countdownRace(1, 0))).toBe(true);
+    expect(countdownRace(0, 1_000)).toEqual({ kind: 'running' });
+    expect(heldOnTheLine(countdownRace(0, 0))).toBe(false);
+    expect(raceNotice(countdownRace(7_200, 1_000), 1_000, false)).toBe(
+      'The race starts in 8 seconds.',
+    );
+    expect(RACE_TEXT.pausedCounting(7)).toBe('Paused. The race starts 7 seconds after you resume.');
+    expect(RACE_TEXT.pausedCounting(1)).toBe('Paused. The race starts 1 second after you resume.');
+  });
+
   it('says each change of the race once — the countdown, “Go”, and its end', () => {
     let said: Parameters<typeof raceEvent>[0];
     const heard: string[] = [];
@@ -330,6 +353,17 @@ describe('a race on the HUD — #785', () => {
       'Go.',
       'The race is over. End the ride to see its result.',
     ]);
+  });
+
+  it('says the countdown and “Go” as the start, which follows the setting, and the end as the room’s word — #2546', () => {
+    const kinds = (
+      [
+        { kind: 'counting', endsAtLocalMs: 10_000 },
+        { kind: 'running' },
+        { kind: 'finished', order: [1], place: null },
+      ] as const
+    ).map((race) => raceEvent(undefined, race, 0).event?.kind);
+    expect(kinds).toEqual(['race-start', 'race-start', 'room-race']);
   });
 });
 

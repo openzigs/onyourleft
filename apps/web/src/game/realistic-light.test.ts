@@ -7,6 +7,19 @@ import {
   AGX_WHITE_INPUT,
   directionalFogColour,
   drawnHorizonColour,
+  DUSK_CLOUD_KNEE,
+  DUSK_SKY_FIELD,
+  DUSK_SKY_HORIZON,
+  DUSK_SKY_RECOLOUR,
+  DUSK_SKY_TOP_DEGREES,
+  DUSK_SKY_ZENITH,
+  duskSkyAt,
+  duskSkyTexel,
+  RAIN_SKY_GREY_TINT,
+  RAIN_SKY_GREYING,
+  rainSkyTexel,
+  REALISTIC_DUSK_EXPOSURE_SHARE,
+  REALISTIC_RAIN_SKY_SHARE,
   environmentIntensity,
   flattenedTable,
   halfToFloat,
@@ -440,5 +453,103 @@ describe('the air leans towards the sky in the direction looked — #622', () =>
     );
     expect(valleyHazeFactor(-400, 100)).toBeCloseTo(REALISTIC_VALLEY_HAZE, 12);
     expect(valleyHazeFactor(0, 100, 2, 200)).toBeCloseTo(1.5, 12);
+  });
+});
+
+describe('the photographed sky at a Delivery level’s dusk — #2508', () => {
+  const degrees = (value: number): number => (value * Math.PI) / 180;
+  /** Rec. 709 luminance of linear light. */
+  const light = ([r, g, b]: readonly number[]): number =>
+    0.2126 * (r as number) + 0.7152 * (g as number) + 0.0722 * (b as number);
+  /** A clear sky's blue, about the sky's mean, and a white cloud eight times as bright. */
+  const UPWARD = 1;
+  const BLUE = [0.55, 0.85, 1.6] as const;
+  const CLOUD = [7.6, 7.8, 8.2] as const;
+
+  it('pins the dusk’s exposure, its rain sky and its grade, for the owner’s approval', () => {
+    expect(REALISTIC_DUSK_EXPOSURE_SHARE).toBe(0.7);
+    expect(REALISTIC_RAIN_SKY_SHARE).toBe(0.7);
+    expect(DUSK_SKY_HORIZON).toEqual([2.6, 1.15, 0.62]);
+    expect(RAIN_SKY_GREYING).toBe(0.8);
+    expect(RAIN_SKY_GREY_TINT).toEqual([0.95, 1, 1.08]);
+    expect(DUSK_SKY_ZENITH).toEqual([0.1, 0.15, 0.42]);
+    expect(DUSK_SKY_FIELD).toEqual([0.42, 0.33, 0.27]);
+    expect(DUSK_SKY_TOP_DEGREES).toBe(30);
+    expect(DUSK_SKY_RECOLOUR).toBe(0.85);
+    expect(DUSK_CLOUD_KNEE).toBe(1.5);
+  });
+
+  it('grades from an orange-pink horizon to a deep blue from 30° up, smoothly', () => {
+    expect(duskSkyAt(0)).toEqual(DUSK_SKY_HORIZON);
+    expect(duskSkyAt(degrees(30))).toEqual(DUSK_SKY_ZENITH);
+    expect(duskSkyAt(degrees(80))).toEqual(DUSK_SKY_ZENITH);
+    const middle = duskSkyAt(degrees(15));
+    for (const channel of [0, 1, 2]) {
+      expect(middle[channel]).toBeCloseTo(
+        ((DUSK_SKY_HORIZON[channel] as number) + (DUSK_SKY_ZENITH[channel] as number)) / 2,
+        12,
+      );
+    }
+  });
+
+  it('turns the blue sky warm at the horizon and deep blue overhead, darker overhead than at the horizon', () => {
+    const horizon = duskSkyTexel(...BLUE, degrees(2), UPWARD);
+    const overhead = duskSkyTexel(...BLUE, degrees(60), UPWARD);
+    // The day's blue had more blue than red; at the dusk's horizon it has more red than blue.
+    expect(BLUE[2]).toBeGreaterThan(BLUE[0]);
+    expect(horizon[0]).toBeGreaterThan(horizon[2]);
+    expect(overhead[2]).toBeGreaterThan(overhead[0]);
+    expect(light(overhead)).toBeLessThan(light(horizon) / 3);
+    // And both darker than the day's.
+    expect(light(horizon)).toBeLessThan(light(BLUE));
+  });
+
+  it('presses a bright white cloud down toward the sky around it', () => {
+    const at = degrees(20);
+    const day = light(CLOUD) / light(BLUE);
+    const dusk =
+      light(duskSkyTexel(...CLOUD, at, UPWARD)) / light(duskSkyTexel(...BLUE, at, UPWARD));
+    // By day the cloud is eight times the blue; at dusk under half that.
+    expect(day).toBeGreaterThan(7);
+    expect(dusk).toBeLessThan(day / 2);
+    expect(dusk).toBeGreaterThan(1);
+  });
+
+  it('draws the photograph’s field below the horizon darker and warmer, its hue otherwise kept', () => {
+    const field = [0.3, 0.32, 0.2] as const;
+    const graded = duskSkyTexel(...field, degrees(-5), UPWARD);
+    const pressed = 1 / (1 + light(field) / (DUSK_CLOUD_KNEE * UPWARD));
+    graded.forEach((value, channel) =>
+      expect(value).toBeCloseTo(
+        (field[channel] as number) * pressed * (DUSK_SKY_FIELD[channel] as number),
+        12,
+      ),
+    );
+    expect(light(graded)).toBeLessThan(light(field) / 2);
+  });
+});
+
+describe('the photographed sky in a Delivery level’s rain — #2508', () => {
+  const light = ([r, g, b]: readonly number[]): number =>
+    0.2126 * (r as number) + 0.7152 * (g as number) + 0.0722 * (b as number);
+  const spread = (colour: readonly number[]): number => Math.max(...colour) / Math.min(...colour);
+
+  it('draws the blue toward a cool grey of its own brightness, so the sky reads overcast', () => {
+    const blue = [0.55, 0.85, 1.6] as const;
+    const grey = rainSkyTexel(...blue);
+    expect(spread(grey)).toBeLessThan(spread(blue) / 1.8);
+    expect(light(grey)).toBeCloseTo(light(blue), 1);
+    // Still a little cool: blue above red.
+    expect(grey[2]).toBeGreaterThan(grey[0]);
+  });
+
+  it('leaves a grey texel grey, at its own brightness', () => {
+    const cloud = rainSkyTexel(4, 4, 4);
+    cloud.forEach((value, channel) =>
+      expect(value).toBeCloseTo(
+        4 * (1 - RAIN_SKY_GREYING) + 4 * RAIN_SKY_GREYING * (RAIN_SKY_GREY_TINT[channel] as number),
+        12,
+      ),
+    );
   });
 });

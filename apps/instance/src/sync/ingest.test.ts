@@ -461,7 +461,7 @@ describe('ingesting a signed record (#37)', () => {
       `#37 budget: a 4-hour ride (${String(bytes.length)} bytes of GPX, 14 400 points) ingested in ${took.toFixed(0)} ms, against ${String(INGEST_BUDGET_MS)} ms`,
     );
     expect(took).toBeLessThan(INGEST_BUDGET_MS);
-  }, 30_000);
+  });
 });
 
 /**

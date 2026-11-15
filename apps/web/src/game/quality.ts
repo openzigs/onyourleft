@@ -1145,11 +1145,25 @@ export function realisticArrivalLapsed(
  * itself a frame-time spike that would push it straight back down. The same
  * argument {@link keepsShadowMap} makes, for the same reason.
  *
+ * ## Except while a Delivery round runs — #2513
+ *
+ * With `holdRealism`, a step past the realistic floor holds the floor instead
+ * of leaving. A Delivery round's houses are the town's mapped buildings
+ * (`delivery/targets.ts`, ADR 0059 D-4.1), and the stylised world draws no
+ * mapped building at all, so a round that left realism kept counting houses
+ * the rider could no longer see: on the owner's tablet, a marker by an empty
+ * verge and "Next house 0 ft" beside nothing. ADR 0059 D-3.1 runs Delivery in
+ * the realistic world and D-3.4 accepts more dropped frames on the tablet for
+ * it, so the round keeps the world its houses are drawn in. `GameView` passes
+ * it only while a round is running; an ordinary ride, and a round that has
+ * ended, leave as before.
+ *
  * Pure: the state is the caller's.
  */
 export function nextWorldQuality(
   state: WorldQualityState,
   sample: QualitySample,
+  holdRealism = false,
 ): WorldQualityState {
   if (!state.realistic) {
     return { realistic: false, quality: nextQuality(state.quality, sample) };
@@ -1161,7 +1175,7 @@ export function nextWorldQuality(
     return { ...state, settling: settling - 1 };
   }
   const moved = step(state.quality, sample, REALISTIC_LADDER.length - 1);
-  if (moved.pastTheFloor) {
+  if (moved.pastTheFloor && !holdRealism) {
     return { realistic: false, quality: INITIAL_QUALITY };
   }
   return { realistic: true, quality: { level: moved.level, pressure: moved.pressure } };

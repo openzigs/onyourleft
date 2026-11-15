@@ -1330,6 +1330,19 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
   const CREASE_STEEPEST = 1;
 
   /**
+   * How much steeper than the ground with no other leg a step past
+   * {@link CREASE_STEEPEST} may be before it is a crease, in metres:
+   * **0.05** — #2470. A crease is what a seam adds to the ground. The relief
+   * alone steps by up to 2.4 m over 2 m of road at the 300 m column just past
+   * a 147° bend to the left at −6 %, with or without the approach leg in the
+   * corridor, measured. The eye on the drawn path (#2470) frames two of those
+   * steps, at 199 m and the frame's edge, where the eye at the odometer's
+   * place framed none. There the mesh and `terrainHeightAt` step alike to the
+   * centimetre, and #2117's creases were metres steeper than the relief.
+   */
+  const CREASE_OWN_SLACK_METRES = 0.05;
+
+  /**
    * Every pair of neighbouring rows' vertices at one column out to
    * `lastColumn`, both in the frame within 200 m and drawn on top, that
    * differ in height over the road beside them by more than
@@ -1344,6 +1357,8 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
   ): { readonly steep: string[]; readonly judged: number } => {
     const steep: string[] = [];
     let judged = 0;
+    const origin = corridorOrigin(profile);
+    const seed = scatterSeed(profile);
     for (let at = first; at <= last; at += 10) {
       const frame = sceneAt(profile, at);
       const rig = cameraRig(frame.camera);
@@ -1367,6 +1382,24 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
         const depth = framed(rig, point(row, side, column));
         return depth !== undefined && depth <= 200;
       };
+      // #2470: the step the ground with no other leg takes between the same
+      // two points (`terrainHeightAt`, which knows no seam), over the road
+      // beside each. Asked only of a step already too steep.
+      const ownLift = (row: number, side: number, column: number): number => {
+        const field = vertex(row, side, column) / 3;
+        return (
+          terrainHeightAt(
+            profile,
+            origin,
+            seed,
+            (centre[row] as { distance: number }).distance,
+            ground.fields[field * 2 + 1] as number,
+            NO_LAND_CLASS,
+          ) - (centre[row] as { y: number }).y
+        );
+      };
+      const ownStep = (row: number, side: number, column: number): number =>
+        Math.abs(ownLift(row + 1, side, column) - ownLift(row, side, column));
       // Under another leg's ground it is not on the screen. Asked last, of a
       // step already too steep: it walks every triangle.
       const onTop = (row: number, side: number, column: number): boolean => {
@@ -1387,6 +1420,7 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
               (v[next + 2] as number) - (v[here + 2] as number),
             );
             if (step <= CREASE_STEEPEST * Math.max(apart, 1)) continue;
+            if (step <= ownStep(row, side, column) + CREASE_OWN_SLACK_METRES) continue;
             if (!onTop(row, side, column) || !onTop(row + 1, side, column)) continue;
             steep.push(
               `${step.toFixed(2)} m over ${apart.toFixed(1)} m at ${String(at)}, row ${String(row)}, column ${String(column)}`,
@@ -1683,13 +1717,21 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
       // standing up to 2.02 m over it (140° to the right at 10 %); on main,
       // up to 19.25 m.
       //
-      // And where the far road does face the eye — a few points of it at
-      // 6 % and 8 %, none at 10 % — it is held as the test above holds it
+      // And where the far road does face the eye — three points of it at
+      // 6 %, none at 8 % or 10 % — it is held as the test above holds it
       // (#2150): a ray to 10 cm over the road passes over the ground with
       // 5 cm to spare, the last 6 m excepted. The eye there is less than half
       // a metre above the road's plane, so the margin is nought, not that
-      // test's half metre, which would leave out every point at 8 %.
-      // Measured on this head: at least 1.0 m clear.
+      // test's half metre, which would leave out most of them.
+      // Measured on #2470's head: at least 1.32 m clear.
+      //
+      // ⚠️ #2470: the eye stands 2 m over the road under it on the drawn
+      // path, where before it stood 2 m over the road at the odometer's
+      // place. Coming up to the bend the pacing draws the eye metres short of
+      // that place and so lower down the climb. Read there, the eye was high
+      // enough to see three points of the far road at 8 %, and eight at
+      // 6 %. The rays to 1 m over the far leg clear the ground by exactly
+      // what they cleared before, measured.
       let rays = 0;
       let facing = 0;
       const hidden: string[] = [];
@@ -1724,10 +1766,10 @@ describe('no bank stands on the inside of a very sharp bend — #2101, the owner
         }
       }
       expect(hidden).toEqual([]);
-      // Non-vacuity: the far leg really is in the frame, and below 10 % some
-      // of its road faces the eye.
+      // Non-vacuity: the far leg really is in the frame, and at 6 % some of
+      // its road faces the eye.
       expect(rays).toBeGreaterThan(300);
-      if (grade < 0.1) expect(facing).toBeGreaterThan(0);
+      if (grade < 0.08) expect(facing).toBeGreaterThan(0);
     },
     120_000,
   );

@@ -3,7 +3,7 @@
 /**
  * The More group's views — the More menu (#1429), Devices, Files, Camera, the
  * side camera, Settings, connecting to an instance (#777), moderating one
- * (#955), About and Credits.
+ * (#955), operating one (#2603), About and Credits.
  *
  * One module per navigation group (#674), so the bundler writes each group
  * into a chunk of its own that `AppShell` loads with `import()` only when a
@@ -19,6 +19,7 @@ export { SideCameraView } from '../../views/SideCameraView';
 export { SettingsView } from '../../views/SettingsView';
 export { InstanceView } from '../../views/InstanceView';
 export { ModerationView } from '../../views/ModerationView';
+export { OperateView } from '../../views/OperateView';
 export { AboutView } from '../../views/AboutView';
 export { CreditsView } from '../../views/CreditsView';
 export { MoreView } from '../../views/MoreView';

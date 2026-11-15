@@ -57,6 +57,7 @@ export type RouteId =
   | 'credits'
   | 'instance'
   | 'moderation'
+  | 'operate'
   | 'more'
   | 'not-found';
 
@@ -651,6 +652,34 @@ export const MODERATION_ROUTE: RouteDefinition = {
 };
 
 /**
+ * Operating the instance this device's account OWNS (#2603, epic #2601): the
+ * operator log today, and the instance's status, accounts, backups, AI
+ * backend, rooms and keys as later sub-issues fill it.
+ *
+ * **Not in {@link ROUTES}**, for {@link MODERATION_ROUTE}'s reason: only the
+ * instance's owner has any use for it. The Instance screen links to it when
+ * `instance/operate-port.ts` §`OperatePort.standing` says this device's account
+ * is the owner — never the deputy (ADR 0046 D-9 Q9) — and anybody else who
+ * opens its address is told only that their own account is not the owner,
+ * which the instance's own `not_found` already told them. In
+ * {@link ALL_ROUTES}, so the accessibility gate and the reflow walk audit it
+ * unasked.
+ */
+export const OPERATE_ROUTE: RouteDefinition = {
+  id: 'operate',
+  group: 'more',
+  layout: 'prose',
+  path: '/settings/instance/operate',
+  navLabel: 'Operate',
+  title: 'Operate',
+  summary: 'Run the instance you own, from this app.',
+  help: [
+    'Run the instance you own from this app: what was done to it, and by what. Only its owner ' +
+      'sees this page.',
+  ],
+};
+
+/**
  * The tripod phone's side-camera screen (#528, ADR 0033).
  *
  * **Not in {@link ROUTES}**, for {@link CREDITS_ROUTE}'s reason: it is a mode
@@ -756,6 +785,7 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   CREDITS_ROUTE,
   INSTANCE_ROUTE,
   MODERATION_ROUTE,
+  OPERATE_ROUTE,
   MORE_ROUTE,
   DELIVERY_COURSES_ROUTE,
   LAP_RACE_COURSES_ROUTE,
@@ -806,10 +836,12 @@ export interface RouteMatch {
    */
   readonly play?: GameMode;
   /**
-   * The hash's query on the Workouts and Ride routes, and on no other. On
-   * Workouts (#2304) the built-in list's filter (`workouts/built-in.ts`
-   * §`builtInFilterFromQuery`); on Ride (#2306) a tailored built-in to ride
-   * (`workouts/built-in-ride.ts` §`builtInRideFromQuery`). Kept in the
+   * The hash's query on the Workouts, Ride and Moderation routes, and on no
+   * other. On Workouts (#2304) the built-in list's filter
+   * (`workouts/built-in.ts` §`builtInFilterFromQuery`); on Ride (#2306) a
+   * tailored built-in to ride (`workouts/built-in-ride.ts`
+   * §`builtInRideFromQuery`); on Moderation (#2605) the section Operate's
+   * Accounts opened it at ({@link moderationSectionFromQuery}). Kept in the
    * address so a reload, a shared link and Back all show the same. Absent
    * where there is no query.
    */
@@ -845,7 +877,11 @@ export interface RouteMatch {
  */
 export function matchHash(hash: string): RouteMatch {
   const match = matchHashAmong(MATCHABLE_ROUTES, hash);
-  if (match.route.id === 'workouts' || match.route.id === 'ride') {
+  if (
+    match.route.id === 'workouts' ||
+    match.route.id === 'ride' ||
+    match.route.id === 'moderation'
+  ) {
     const query = hashQuery(hash);
     return query === undefined || query === '' ? match : { ...match, query };
   }
@@ -1011,6 +1047,34 @@ export function hrefForSelection(route: RouteDefinition, id: string): string {
 /** The link to one ride's detail view. */
 export function hrefForActivity(id: string): string {
   return hrefFor(ACTIVITY_DETAIL_ROUTE, id);
+}
+
+/**
+ * The sections of the Moderation screen that Operate's Accounts (#2605) opens
+ * it at: the approval queue, the suspended accounts and the invitation.
+ */
+export const MODERATION_SECTIONS = ['approvals', 'suspended', 'invite'] as const;
+export type ModerationSection = (typeof MODERATION_SECTIONS)[number];
+
+/**
+ * The Moderation screen opened at one of its sections — #2605. A QUERY, for
+ * {@link hrefForGameRoute}'s reason: it is still the Moderation route, which
+ * shows a moderator every section as before; the screen only moves focus to
+ * the named section's heading once it has drawn it. A nested `#id` would not
+ * do: the hash is the route, so a second fragment is not an anchor the browser
+ * scrolls to.
+ */
+export function hrefForModerationSection(section: ModerationSection): string {
+  return `${hrefFor(MODERATION_ROUTE)}?section=${section}`;
+}
+
+/** The section {@link hrefForModerationSection} named, or `undefined` for none this screen has. */
+export function moderationSectionFromQuery(
+  query: string | undefined,
+): ModerationSection | undefined {
+  if (query === undefined) return undefined;
+  const asked = new URLSearchParams(query).get('section');
+  return MODERATION_SECTIONS.find((section) => section === asked);
 }
 
 /**

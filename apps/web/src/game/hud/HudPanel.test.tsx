@@ -1031,7 +1031,12 @@ describe('the rider’s HUD layout — #2079', () => {
       expect(own.length).toBeGreaterThan(0);
       mounted.unmount();
       mounted = await mount(
-        <HudPanel {...base} {...input} layout={{ hidden: ['readings'], textSize: 'normal' }} />,
+        // #2514: a round drawn as everything, which is what this case is about.
+        <HudPanel
+          {...base}
+          {...input}
+          layout={{ hidden: ['readings'], textSize: 'normal', delivery: 'everything' }}
+        />,
       );
       expect(secondaryLabels()).toEqual(['Moving', 'Ride', 'Clock', ...own]);
     });
@@ -1117,6 +1122,26 @@ describe('the lap splits panel — #2080', () => {
     queryAll(mounted?.container ?? document, 'button').find(
       (each): each is HTMLButtonElement => each.textContent === name,
     );
+
+  it('draws no lap table on a Delivery round’s game strip, and draws it as Everything — #2514', async () => {
+    const delivery = { round: startRound(4), week: FRESH_WEEK, score: 0, next: undefined };
+    mounted = await mount(
+      <HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} delivery={delivery} />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
+    mounted.unmount();
+    mounted = await mount(
+      <HudPanel
+        {...base}
+        profile={loop}
+        laps={laps}
+        lapSeconds={75}
+        delivery={delivery}
+        layout={{ hidden: [], textSize: 'normal', delivery: 'everything' }}
+      />,
+    );
+    expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
+  });
 
   it('draws the lap in progress, the last lap and the best on a loop', async () => {
     mounted = await mount(<HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} />);

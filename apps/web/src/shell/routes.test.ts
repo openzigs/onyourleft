@@ -14,11 +14,14 @@ import {
   hrefForGamePlay,
   hrefForGameRoute,
   hrefForActivity,
+  hrefForModerationSection,
   hrefForSelection,
   navGroupOf,
   matchHash,
   matchHashAmong,
   MAXIMUM_SUMMARY_CHARACTERS,
+  MODERATION_SECTIONS,
+  moderationSectionFromQuery,
   normaliseHash,
   NOT_FOUND_ROUTE,
   routeById,
@@ -463,5 +466,35 @@ describe("Settings' note does not claim nothing is sent — #1333", () => {
   it('never says that nothing here is sent anywhere, however it is reworded', () => {
     const said = [routeById('settings').summary, ...(routeById('settings').notes ?? [])].join(' ');
     expect(said).not.toMatch(/nothing( here)? is sent/i);
+  });
+});
+
+describe('the Moderation screen opened at a section — #2605', () => {
+  it('is still the Moderation route, and reads back the section it was given', () => {
+    for (const section of MODERATION_SECTIONS) {
+      const href = hrefForModerationSection(section);
+      expect(href).toBe(`#/settings/instance/moderation?section=${section}`);
+      const match = matchHash(href);
+      expect(match.route.id).toBe('moderation');
+      expect(moderationSectionFromQuery(match.query)).toBe(section);
+    }
+  });
+
+  it('is no section with no query, an unknown one, or another key', () => {
+    expect(moderationSectionFromQuery(matchHash('#/settings/instance/moderation').query)).toBe(
+      undefined,
+    );
+    for (const hash of [
+      '#/settings/instance/moderation?section=log',
+      '#/settings/instance/moderation?section=',
+      '#/settings/instance/moderation?other=approvals',
+      '#/settings/instance/moderation?section=%',
+    ]) {
+      expect(moderationSectionFromQuery(matchHash(hash).query)).toBeUndefined();
+    }
+  });
+
+  it('carries the query on Moderation and not on Operate beside it', () => {
+    expect(matchHash('#/settings/instance/operate?section=approvals').query).toBeUndefined();
   });
 });

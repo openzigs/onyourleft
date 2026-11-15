@@ -43,6 +43,7 @@ import {
   type LapRaceRide,
 } from './lap-race/ride-race';
 import { LAP_RACE_MOST_BOTS } from './lap-race/choice';
+import { BIKE_LENGTH_METRES, PACK_ABREAST_METRES } from './lap-race/pack-layout';
 import type { RiderMarker } from './port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { circuitRoute } from './route-fixtures-testing';
@@ -74,6 +75,21 @@ const RIDER_METRES_PER_SECOND = 18;
 /** How long the rider rides: until the last bot of the field is lapped and behind. */
 const RIDDEN_SECONDS = 45;
 
+/**
+ * How near a marker stands to the place its bot is at to be that bot's, along
+ * the road and across it: under half the pack's least spacing (#2544,
+ * `PACK_ABREAST_METRES` 0.55 m abreast, `BIKE_LENGTH_METRES` 1.75 m a row), so
+ * a marker beside or behind its bot is never taken for it.
+ */
+const MATCHED_WITHIN_METRES = 0.25;
+
+/**
+ * The most frames of this ride a racer a lap apart is drawn inside the rider
+ * or a bot: **48**, as measured when #2516 was brought up to date with #2544's
+ * pack. A known limit held, not a target: see the loop below.
+ */
+const LAPPED_INSIDE_MOST_FRAMES = 48;
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -101,15 +117,27 @@ function started(): LapRaceRide {
   return ride;
 }
 
-/** Where on the corridor `along` is, between its points. */
-function centreAt(corridor: RoadCorridor, along: number): { x: number; z: number } {
+/**
+ * Where on the corridor `along` is, between its points, and `lateral` across
+ * the road along its normal `(−headingZ, headingX)`, as `scene.ts` §`markerAt`
+ * puts a marker. #2544's pack lays bots out up to 1.75 m to the side and two
+ * or three abreast, so a place on the centre line alone no longer says which
+ * bot a marker is.
+ */
+function placeAt(corridor: RoadCorridor, along: number, lateral: number): { x: number; z: number } {
   const points = corridor.centre;
   for (let index = 1; index < points.length; index += 1) {
     const to = points[index] as CorridorPoint;
     if (to.along < along) continue;
     const from = points[index - 1] as CorridorPoint;
     const t = to.along > from.along ? (along - from.along) / (to.along - from.along) : 0;
-    return { x: from.x + (to.x - from.x) * t, z: from.z + (to.z - from.z) * t };
+    const length = Math.hypot(to.x - from.x, to.z - from.z);
+    const headingX = length > 0 ? (to.x - from.x) / length : 0;
+    const headingZ = length > 0 ? (to.z - from.z) / length : 1;
+    return {
+      x: from.x + (to.x - from.x) * t - headingZ * lateral,
+      z: from.z + (to.z - from.z) * t + headingX * lateral,
+    };
   }
   throw new Error('a place in view is on the corridor');
 }
@@ -136,6 +164,9 @@ describe('a lap race’s bots are drawn on every frame they are in view, laps in
     let pending = 0;
     let checked = 0;
     let lappedInView = 0;
+    let besideALapApart = 0;
+    const insideALapApart: number[] = [];
+    let deepest = 0;
     let heldToTheScene = false;
     for (let frame = 0; frame * FRAME_SECONDS < RIDDEN_SECONDS; frame += 1) {
       pending += FRAME_SECONDS;
@@ -169,19 +200,21 @@ describe('a lap race’s bots are drawn on every frame they are in view, laps in
       const inView = drawing.raceBots
         .map((bot) => ({
           ahead: (((bot.distanceMetres - eye) % LAP) + LAP) % LAP,
+          lateral: bot.lateralMetres,
           lapApart: bot.distanceMetres < first || bot.distanceMetres > last,
         }))
         .filter((bot) => eye + bot.ahead <= last);
       const label = `frame ${String(frame)}, the rider at ${along.toFixed(1)} m`;
 
-      // The scene: one racer marker for each bot in view, standing on the road where that bot is.
+      // The scene: one racer marker for each bot in view, standing on the road
+      // where that bot is, along it AND across it (#2544's pack).
       expect(racers.length, label).toBeGreaterThanOrEqual(inView.length);
       // One marker for one bot: a marker already matched to a bot is not matched again.
       const matched = new Set<number>();
       for (const bot of inView) {
-        const wanted = centreAt(corridor, eye + bot.ahead);
+        const wanted = placeAt(corridor, eye + bot.ahead, bot.lateral);
         let nearest = -1;
-        let nearestGap = 4;
+        let nearestGap = MATCHED_WITHIN_METRES;
         racers.forEach((marker, index) => {
           const gap = Math.hypot(marker.x - wanted.x, marker.z - wanted.z);
           if (!matched.has(index) && gap < nearestGap) {
@@ -193,6 +226,37 @@ describe('a lap race’s bots are drawn on every frame they are in view, laps in
         expect(nearest >= 0, `${label}: a bot ${bot.ahead.toFixed(1)} m up the road`).toBe(true);
         if (bot.lapApart) lappedInView += 1;
       }
+
+      // ⚠️ A KNOWN LIMIT, held here so it cannot grow unseen (#2516 on #2544's
+      // pack). The pack lays the field out by race place (`pack-layout.ts`),
+      // so it keeps a bot clear of the racers on its own lap; a bot a lap
+      // down, drawn on the rider's lap, is laid out with no regard to the
+      // rider or the bots it is drawn beside there, and can be drawn inside
+      // them. `pack-layout.ts`'s own rule: inside is under a bike length along
+      // AND under a place abreast across. Tablet check: the rider lapping the
+      // field in the lane a lapped bot rides in.
+      const drawnHere = [
+        { at: drawing.riderDistance, lateral: drawing.steeredLateral, lapApart: false },
+        ...inView.map((bot) => ({
+          at: eye + bot.ahead,
+          lateral: bot.lateral,
+          lapApart: bot.lapApart,
+        })),
+      ];
+      let insideHere = false;
+      drawnHere.forEach((one, index) => {
+        for (const other of drawnHere.slice(index + 1)) {
+          if (one.lapApart === other.lapApart) continue;
+          const along = Math.abs(one.at - other.at);
+          const across = Math.abs(one.lateral - other.lateral);
+          if (along < BIKE_LENGTH_METRES) besideALapApart += 1;
+          if (along < BIKE_LENGTH_METRES - 1e-3 && across < PACK_ABREAST_METRES - 1e-3) {
+            insideHere = true;
+            deepest = Math.max(deepest, PACK_ABREAST_METRES - across);
+          }
+        }
+      });
+      if (insideHere) insideALapApart.push(frame);
 
       // The renderer: the nearest racers wear the realistic bodies, the rest
       // ride in the stylised belt's instances, and none is left out of both.
@@ -219,6 +283,13 @@ describe('a lap race’s bots are drawn on every frame they are in view, laps in
     // The controls: the ride saw the field, and saw it a lap down.
     expect(checked).toBeGreaterThan(10_000);
     expect(lappedInView).toBeGreaterThan(10_000);
+    // And it rode level with racers a lap apart from them, the rider among them.
+    expect(besideALapApart).toBeGreaterThan(50);
+    // The known limit, as measured when it was found: on 48 frames (0.8 s) of
+    // the 2 700, while the rider rode through a lapped bot in their lane,
+    // and fully abreast at worst. Fewer is better; more is red.
+    expect(insideALapApart.length).toBeLessThanOrEqual(LAPPED_INSIDE_MOST_FRAMES);
+    expect(deepest).toBeLessThanOrEqual(PACK_ABREAST_METRES);
     expect(heldToTheScene).toBe(true);
     // The rider lapped every bot by the end.
     const rider = ride.race.racers.find((entry) => entry.racer.id === 'rider');

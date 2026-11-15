@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CALORIES_KEY,
   CLOCK_KEY,
+  CRASHED_TEXT,
   DELIVERY_HOUSES_KEY,
   DELIVERY_NEXT_KEY,
   DELIVERY_SCORE_KEY,
@@ -1547,6 +1548,17 @@ describe('a Delivery round on the HUD — #1812', () => {
     ]);
   });
 
+  it('says “Crashed” under the score while a crash is drawn, and the day again after — #2454', () => {
+    const detail = (crashed: boolean | undefined): string | undefined =>
+      hudReadings({ ...base, delivery: { ...delivery, crashed } }).find(
+        (each) => each.key === DELIVERY_SCORE_KEY,
+      )?.detail;
+    expect(detail(true)).toBe(CRASHED_TEXT);
+    expect(CRASHED_TEXT).toBe('Crashed');
+    expect(detail(false)).toBe('Day 3 of 7');
+    expect(detail(undefined)).toBe('Day 3 of 7');
+  });
+
   it('shows the round’s score it is handed, a crash in it, rather than the deliveries counted — #1816', () => {
     // Two delivered and one crash: the round's score is 1 (`obstacles.ts` §`scoreAfter`).
     const shown = hudReadings({ ...base, delivery: { ...delivery, score: 1 } });
@@ -1629,8 +1641,9 @@ describe('a Delivery round on the HUD — #1812', () => {
         (each) => each.key === DELIVERY_NEXT_KEY,
       );
     expect(next(delivery)).toMatchObject({ label: 'Next house', value: '85', unit: 'm' });
+    // #2513: nought is inside the house's window, so a word, never "0 m".
     expect(next({ ...delivery, next: { side: 'left', metres: 0 } })).toMatchObject({
-      value: '0',
+      value: 'Throw now,',
       detail: 'on the left',
     });
     // 84.6 m is 277.6 ft: the rider's units, through `units/format.ts`.
@@ -1643,6 +1656,35 @@ describe('a Delivery round on the HUD — #1812', () => {
       unit: 'm',
       stale: false,
     });
+  });
+
+  it('says “Throw now, on the right” inside the house’s window rather than counting to nought — #2513', () => {
+    const next = (hud: DeliveryHud, units?: 'metric' | 'imperial') =>
+      hudReadings({ ...base, delivery: hud, ...(units === undefined ? {} : { units }) }).find(
+        (each) => each.key === DELIVERY_NEXT_KEY,
+      );
+    for (const units of ['metric', 'imperial'] as const) {
+      // Inside the window: a word, set as one, with the side under it and no unit.
+      expect(next({ ...delivery, next: { side: 'right', metres: 0 } }, units)).toEqual({
+        key: DELIVERY_NEXT_KEY,
+        label: 'Next house',
+        value: 'Throw now,',
+        unit: '',
+        stale: false,
+        word: true,
+        detail: 'on the right',
+      });
+      expect(next({ ...delivery, next: { side: 'left', metres: 0 } }, units)?.detail).toBe(
+        'on the left',
+      );
+    }
+    // Short of the window, however near, it is still a distance to the throw point.
+    expect(next({ ...delivery, next: { side: 'right', metres: 2 } })).toMatchObject({
+      value: '2',
+      unit: 'm',
+      detail: 'on the right',
+    });
+    expect(next({ ...delivery, next: { side: 'right', metres: 2 } })?.word).toBeUndefined();
   });
 });
 

@@ -88,6 +88,7 @@ export const ERROR_STATUS = {
   record_key_revoked: 422,
   model_without_pictures: 422,
   rate_limited: 429,
+  too_many: 429,
   internal: 500,
   picture_model_failed: 502,
   unavailable: 503,
@@ -187,6 +188,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   method_not_allowed: 'This address does not accept that method.',
   payload_too_large: 'The request body is larger than this instance accepts.',
   rate_limited: 'Too many requests. Wait and try again.',
+  too_many:
+    'A backup is already waiting, or one was made in the last 15 minutes. Nothing was asked for: each extra backup removes an older one.',
   internal: 'The instance could not answer this request.',
 };
 

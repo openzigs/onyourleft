@@ -69,8 +69,12 @@ import {
 } from './ride-stage';
 
 import type { StageItem, StageMeasurement } from './ride-harness';
+import { roadsideBands, type Band } from './roadside-bands';
 
 const DELIVERY_ROUND = '?delivery=round';
+
+/** #2514: the round's HUD drawn as Everything, as it was before the game strip. */
+const EVERYTHING = '&deliveryview=everything';
 
 /** What a round adds to the secondary tier, and what gives way to it on a phone. */
 const DELIVERY_READINGS = ['reading: Houses', 'reading: Next house', 'reading: Score'] as const;
@@ -210,7 +214,13 @@ async function resizeTo(page: Page, viewport: Viewport): Promise<void> {
 }
 
 /** Everything §"What is held" says, at one viewport, both ways. */
-async function holdTheStage(page: Page, viewport: Viewport, stage: string): Promise<void> {
+async function holdTheStage(
+  page: Page,
+  viewport: Viewport,
+  stage: string,
+  /** #2514: the HUD drawn as Everything, whose give-way this also holds; else the game strip. */
+  everything = false,
+): Promise<void> {
   const tablet = TABLET_VIEWPORTS.includes(viewport);
   const rider = riderBox(viewport);
   for (const [how, seen] of await bothWays(page)) {
@@ -250,6 +260,11 @@ async function holdTheStage(page: Page, viewport: Viewport, stage: string): Prom
       const button = named(seen.items, name);
       expect(inside(button.box, viewport), `${at}: ${describeItem(button)}`).toBe(true);
       expect(button.onTop, `${at}: ${describeItem(button)}`).toBe(true);
+    }
+    // #2514: the game strip draws power, speed and the round's own, and no more.
+    if (!everything) {
+      expect(seen.secondary, at).toEqual(['Speed', 'Houses', 'Next house', 'Score']);
+      continue;
     }
     // On a phone the pacer, the ghost and the wind give way, still in the list.
     for (const name of GIVES_WAY) {
@@ -316,6 +331,19 @@ test.describe('a Delivery round’s HUD on the stage, beside the leaning rider �
     }
   });
 
+  test('at the round’s start, drawn as Everything, at every overlay viewport — #2514', async ({
+    page,
+  }) => {
+    await openRide(page, OVERLAY_VIEWPORTS[0] as Viewport, `${DELIVERY_ROUND}${EVERYTHING}`);
+    expect(await houses(page)).toMatchObject({ left: '12' });
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      await test.step(viewport.name, async () => {
+        await resizeTo(page, viewport);
+        await holdTheStage(page, viewport, 'at its start, as Everything', true);
+      });
+    }
+  });
+
   test('nearly over, 10 delivered and 2 missed, at every overlay viewport', async ({ page }) => {
     test.setTimeout(240_000);
     await page.clock.install();
@@ -336,7 +364,8 @@ test.describe('a Delivery round’s HUD on the stage, beside the leaning rider �
   test('the control — with the give-way rule undone, a row is added, and at 736×360 a panel is over the rider', async ({
     page,
   }) => {
-    await openRide(page, OVERLAY_VIEWPORTS[0] as Viewport, DELIVERY_ROUND);
+    // #2514: as Everything, the only HUD the give-way rule has readings to give way in.
+    await openRide(page, OVERLAY_VIEWPORTS[0] as Viewport, `${DELIVERY_ROUND}${EVERYTHING}`);
     const red: string[] = [];
     let smallest: readonly StageItem[] | undefined;
     for (const viewport of OVERLAY_VIEWPORTS.filter((each) => !TABLET_VIEWPORTS.includes(each))) {
@@ -365,5 +394,103 @@ test.describe('a Delivery round’s HUD on the stage, beside the leaning rider �
     }
     console.log(`#1816 control: red at ${red.join('; ')}`);
     expect(smallest?.map(describeItem) ?? [], 'over the rider at 736×360').not.toEqual([]);
+  });
+});
+
+/**
+ * #2514 — the roadsides clear for throwing. The owner, on the tablet at
+ * 1280×800: "It is hard to see when throwing the packages due to all side
+ * menus." The houses and their markers stand where `roadside-bands.ts` says,
+ * either side of the road from #2453's 100 m down to the edge of the frame,
+ * and on a round's ride the route panel, the lap table and the wide reading
+ * panels stood there. With the game strip (`HudCore.tsx` §`deliveryGame`,
+ * the default since #2514) no panel a rider can see is over either band, at
+ * the issue's three viewports. The control is the same ride drawn as
+ * *Everything*, the HUD the round drew before #2514, kept on the device as a
+ * rider who chose it in Settings would have (`ride-harness.tsx`
+ * §`?deliveryview=everything`): a panel is then over a band at the owner's
+ * 1280×800.
+ */
+const ROADSIDE_VIEWPORTS = OVERLAY_VIEWPORTS.filter((each) =>
+  ['1280×800', '1024×768', '800×1280'].includes(`${String(each.width)}×${String(each.height)}`),
+);
+
+/** Every panel a rider can see that is over a roadside band, as `name: band`. */
+function overRoadside(seen: StageMeasurement, viewport: Viewport): string[] {
+  const bands = roadsideBands(viewport);
+  const over: string[] = [];
+  for (const panel of seen.panels) {
+    if (panel.box.width === 0 || panel.box.height === 0) continue;
+    for (const [side, band] of Object.entries<Band>(bands)) {
+      const box = {
+        ...band,
+        width: band.right - band.left,
+        height: band.bottom - band.top,
+      };
+      if (overlap(panel.box, box)) over.push(`${describeItem(panel)}: the ${side} roadside`);
+    }
+  }
+  return over;
+}
+
+test.describe('a Delivery round’s game strip keeps the roadsides clear — #2514', () => {
+  for (const viewport of ROADSIDE_VIEWPORTS) {
+    test(`no panel is over either roadside at ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, DELIVERY_ROUND);
+      const seen = await measure(page);
+      // Not vacuous: the round is on the HUD, as the game strip, with its panels drawn.
+      expect(await houses(page)).toMatchObject({ left: '12' });
+      expect(
+        await page.evaluate(() =>
+          document.querySelector('.oyl-hud')?.classList.contains('oyl-hud--delivery-game'),
+        ),
+      ).toBe(true);
+      expect(seen.panels.length).toBeGreaterThan(1);
+      console.log(
+        `#2514 ${viewport.name}: bands ${JSON.stringify(roadsideBands(viewport))}, panels ` +
+          JSON.stringify(seen.panels.map((each) => describeItem(each))),
+      );
+      expect(overRoadside(seen, viewport)).toEqual([]);
+      // And the round's own fields are still read where a rider reads them.
+      for (const reading of DELIVERY_READINGS) {
+        expect(named(seen.items, reading).box.width).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  test('at the largest text, every panel whole and none over a roadside, on every tablet', async ({
+    page,
+  }) => {
+    for (const viewport of ROADSIDE_VIEWPORTS) {
+      await test.step(viewport.name, async () => {
+        await openRide(page, viewport, `${DELIVERY_ROUND}&text=extra-large`);
+        const seen = await measure(page);
+        expect(
+          await page.evaluate(() =>
+            document.querySelector('.oyl-hud')?.getAttribute('data-oyl-hud-text'),
+          ),
+        ).toBe('extra-large');
+        expect(seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
+          [],
+        );
+        expect(overRoadside(seen, viewport)).toEqual([]);
+        for (const reading of DELIVERY_READINGS) {
+          expect(inside(named(seen.items, reading).box, viewport), reading).toBe(true);
+        }
+      });
+    }
+  });
+
+  test('the control — drawn as Everything, a panel is over a roadside at 1280×800', async ({
+    page,
+  }) => {
+    const owners = ROADSIDE_VIEWPORTS[0];
+    if (owners === undefined) throw new Error('no 1280×800 viewport');
+    await openRide(page, owners, `${DELIVERY_ROUND}${EVERYTHING}`);
+    const seen = await measure(page);
+    expect(await houses(page)).toMatchObject({ left: '12' });
+    const over = overRoadside(seen, owners);
+    console.log(`#2514 control, drawn as Everything at ${owners.name}: ${JSON.stringify(over)}`);
+    expect(over.length).toBeGreaterThan(0);
   });
 });

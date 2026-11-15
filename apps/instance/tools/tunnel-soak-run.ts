@@ -19,12 +19,18 @@ export interface SoakOptions {
   /** The instance's origin: `https://rides.example.org`, or `http://127.0.0.1:8787`. */
   readonly url: string;
   readonly roomId: string;
+  /** How long the riders ride, from when every one of them is signed in. */
   readonly durationMs: number;
   readonly riders: number;
   /** How often each rider pings when it has sent nothing else — ADR 0037 D-8.1's 30 s. */
   readonly keepaliveMs: number;
   /** Called with each rider's live socket as it opens: the test closes one to force a rejoin. */
   readonly onSocket?: (rider: number, socket: WebSocket) => void;
+  /**
+   * Ends the soak early once it holds of each rider's frame count, checked at
+   * every frame: a test's condition, with `durationMs` its bound (#2569).
+   */
+  readonly until?: (framesReceived: readonly number[]) => boolean;
 }
 
 export interface SoakReport {
@@ -105,8 +111,7 @@ export async function soak(options: SoakOptions): Promise<SoakReport> {
   let finished = false;
   const open = new Set<WebSocket>();
 
-  async function ride(rider: number): Promise<void> {
-    const device = await signIn(instance, `Soak ${String(rider + 1)}`);
+  async function ride(rider: number, device: Device): Promise<void> {
     frames[rider] = 0;
     let closedAt: number | undefined;
     let sequence = 0;
@@ -138,7 +143,10 @@ export async function soak(options: SoakOptions): Promise<SoakReport> {
           rejoinMs.push(now - closedAt);
           closedAt = undefined;
         }
-        if (decoded.message.type === 'frame') frames[rider] = (frames[rider] ?? 0) + 1;
+        if (decoded.message.type === 'frame') {
+          frames[rider] = (frames[rider] ?? 0) + 1;
+          if (options.until?.(frames) === true) endEarly();
+        }
       });
       const report = setInterval(() => {
         if (socket.readyState !== WebSocket.OPEN) return;
@@ -164,8 +172,21 @@ export async function soak(options: SoakOptions): Promise<SoakReport> {
     }
   }
 
-  const riders = Array.from({ length: options.riders }, (_, rider) => ride(rider));
-  await new Promise((done) => setTimeout(done, options.durationMs));
+  // Signed in before the soak's time starts (#2569): signing in is not riding,
+  // and a slow sign-in would otherwise come out of the time the riders ride.
+  const devices = await Promise.all(
+    Array.from({ length: options.riders }, (_, rider) =>
+      signIn(instance, `Soak ${String(rider + 1)}`),
+    ),
+  );
+  let endEarly: () => void = () => undefined;
+  const riders = devices.map((device, rider) => ride(rider, device));
+  let bound: NodeJS.Timeout | undefined;
+  await new Promise<void>((done) => {
+    endEarly = done;
+    bound = setTimeout(done, options.durationMs);
+  });
+  clearTimeout(bound);
   finished = true;
   // Close whatever is open; each rider's loop ends on its close.
   for (const socket of open) socket.close(1000, 'the soak is over');

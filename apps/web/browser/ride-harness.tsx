@@ -535,6 +535,10 @@ const HUD_FOCUS = new URLSearchParams(window.location.search).get('arrangement')
 /** #2387: `?totals=strip`, the totals strip along the bottom of the road. */
 const HUD_TOTALS = new URLSearchParams(window.location.search).get('totals') === 'strip';
 
+/** #2514: `?deliveryview=everything`, a Delivery round's HUD as it was before the game strip. */
+const HUD_DELIVERY_EVERYTHING =
+  new URLSearchParams(window.location.search).get('deliveryview') === 'everything';
+
 /** #2079: `?hide=readings,route`, the HUD's panels turned off. */
 const HUD_HIDDEN = HUD_PANELS.filter((panel) =>
   (new URLSearchParams(window.location.search).get('hide') ?? '').split(',').includes(panel),
@@ -549,6 +553,15 @@ const DELIVERY_TOWN = DELIVERY ? deliveryTown('harness') : undefined;
  */
 const CIRCUITS =
   AT_THE_PICKER && new URLSearchParams(window.location.search).get('circuits') === 'shipped';
+
+/**
+ * `ride.html?power=lost` — #2546: a rider whose power meter is paired and has
+ * gone quiet, so the HUD's *Power* reads "— W Sensor lost". On a race's start
+ * line that makes the HUD's primary panel taller at 736×360, which is the case §"#1407" in
+ * `ride-room.browser.spec.ts` must survive. Until #2546 a held rider read
+ * that whatever they pedalled; now they read their power.
+ */
+const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 'lost';
 
 const GAME: GamePort = {
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
@@ -585,7 +598,9 @@ const GAME: GamePort = {
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
-    rider: { power: watts(342), live: true, paired: true },
+    rider: POWER_LOST
+      ? { power: watts(0), live: false, paired: true }
+      : { power: watts(342), live: true, paired: true },
     cadence: { value: 92, live: true, paired: true },
     heartRate: { value: 168, live: true, paired: true },
   }),
@@ -1502,12 +1517,19 @@ async function run(): Promise<void> {
   // #2079: the HUD's panels and text size, as `?text=` and `?hide=` ask —
   // written where Settings writes them, read as the ride starts.
   localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
-  if (HUD_TEXT !== undefined || HUD_HIDDEN.length > 0 || HUD_FOCUS || HUD_TOTALS) {
+  if (
+    HUD_TEXT !== undefined ||
+    HUD_HIDDEN.length > 0 ||
+    HUD_FOCUS ||
+    HUD_TOTALS ||
+    HUD_DELIVERY_EVERYTHING
+  ) {
     writeHudLayout(localStorage, {
       textSize: HUD_TEXT ?? 'normal',
       hidden: HUD_HIDDEN,
       arrangement: HUD_FOCUS ? 'focus' : 'full',
       totalsStrip: HUD_TOTALS,
+      delivery: HUD_DELIVERY_EVERYTHING ? 'everything' : 'game',
     });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
@@ -1709,6 +1731,15 @@ async function run(): Promise<void> {
           ),
         );
       }
+      // #2546: and past its Go. "Go." stands on the *Race* notice for
+      // `RACE_GO_SHOWN_MS` from the room's first frame, and on a phone a
+      // notice takes the route panel's cell while it is up, as a lap's does
+      // (`ride-laps.browser.spec.ts` §`NOTICE_HAS_THE_ROUTE_CELL`). This page
+      // is a race under way, with a lap done and its standings drawn, so it is
+      // measured once that notice has stood down.
+      await until('Go. to stand down', () =>
+        document.querySelector('.oyl-hud__race') === null ? true : undefined,
+      );
     } else {
       await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
     }

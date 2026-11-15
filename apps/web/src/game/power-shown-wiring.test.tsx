@@ -72,11 +72,12 @@ let nowMs = START_MS;
 let pending: FrameRequestCallback[] = [];
 let mounted: Mounted | undefined;
 
+/** A renderer that draws nothing, and says so, so no frame is built for it (#2524). */
 function renderer(): GameRenderer {
   return {
     loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
-      hasContext: true,
+      hasContext: false,
       prepare: () => Promise.resolve(),
       render: () => undefined,
       setQuality: () => undefined,
@@ -299,63 +300,84 @@ function spread(values: readonly (number | undefined)[]): number {
   return Math.max(...numbers) - Math.min(...numbers);
 }
 
-/** Two recorded rides: well under a second each on an M-series Mac without coverage. */
-const TWO_RIDES = { timeout: 15_000 } as const;
+/**
+ * Each view's recorded ride, ridden once by the first case that asks for it,
+ * so a case pays for one ride (#2524, #1688's ruling: a slow case is made
+ * cheaper, never given a longer timeout). The two rides were one case of
+ * 1.8 s, and 1.8 s under --coverage, locally on an Apple M4 Pro at a load
+ * average of 13 to 23; after, at 10 to 15, 1.1 s and 0.47 s, and 1.2 s and
+ * 0.78 s under --coverage.
+ */
+const rides = new Map<HudPowerView, Promise<Ridden>>();
+function ridden(view: HudPowerView): Promise<Ridden> {
+  let run = rides.get(view);
+  if (run === undefined) {
+    run = ride(view);
+    rides.set(view, run);
+  }
+  return run;
+}
+
+/** From the sixth second on, when three seconds are in the average. */
+const settled = (values: readonly (number | undefined)[]): readonly (number | undefined)[] =>
+  values.slice(5 * FRAMES_PER_SECOND);
 
 describe('power as a 3 s average or instant, on the ride — #2420', () => {
-  it(
-    'draws a steadier power in 3 s than instant, and the simulation, the trainer, the recording and the totals are the same in both',
-    TWO_RIDES,
-    async () => {
-      const average = await ride('average');
-      const instant = await ride('instant');
+  it('draws the 3 s average close to 250 on a ride of 200 and 300 by turns, and says it', async () => {
+    const average = await ridden('average');
+    expect(average.term).toBe('Power (3 s)');
+    expect(spread(settled(average.shown))).toBeLessThanOrEqual(34);
+    expect(average.spoken.length).toBe(1);
+    for (const each of average.spoken) expect(each.said).toBe(each.shown);
+  });
 
-      // The term says which, as a rider and a screen reader read it.
-      expect(average.term).toBe('Power (3 s)');
-      expect(instant.term).toBe('Power (instant)');
+  it('draws a steadier power in 3 s than instant, and the simulation, the trainer, the recording and the totals are the same in both', async () => {
+    const average = await ridden('average');
+    const instant = await ridden('instant');
 
-      // Instant is the reading as it arrives, frame by frame, as before #2420.
-      expect(instant.shown).toEqual(instant.raw);
-      // Non-vacuity: the readings really were noisy, 200 and 300 by turns.
-      const settled = (values: readonly (number | undefined)[]) =>
-        values.slice(5 * FRAMES_PER_SECOND);
-      expect(spread(settled(instant.shown))).toBe(100);
-      // The 3 s average, once three seconds are in it, stays close to 250.
-      expect(spread(settled(average.shown))).toBeLessThanOrEqual(34);
-      for (const value of settled(average.shown)) {
-        expect(value).toBeGreaterThanOrEqual(232);
-        expect(value).toBeLessThanOrEqual(268);
-      }
+    // The term says which, as a rider and a screen reader read it.
+    expect(average.term).toBe('Power (3 s)');
+    expect(instant.term).toBe('Power (instant)');
 
-      // Spoken power follows the choice (owner ruling, 2026-11-09): what the
-      // announcer said is what the HUD drew on that frame, in either view —
-      // the 3 s average in one, a raw 200 or 300 in the other.
-      expect(average.spoken.length).toBe(1);
-      expect(instant.spoken.length).toBe(1);
-      for (const each of [...average.spoken, ...instant.spoken]) {
-        expect(each.said).toBe(each.shown);
-      }
-      for (const each of average.spoken) {
-        expect(each.said).toBeGreaterThanOrEqual(232);
-        expect(each.said).toBeLessThanOrEqual(268);
-      }
-      for (const each of instant.spoken) expect([200, 300]).toContain(each.said);
+    // Instant is the reading as it arrives, frame by frame, as before #2420.
+    expect(instant.shown).toEqual(instant.raw);
+    // Non-vacuity: the readings really were noisy, 200 and 300 by turns.
+    expect(spread(settled(instant.shown))).toBe(100);
+    // The 3 s average, once three seconds are in it, stays close to 250.
+    expect(spread(settled(average.shown))).toBeLessThanOrEqual(34);
+    for (const value of settled(average.shown)) {
+      expect(value).toBeGreaterThanOrEqual(232);
+      expect(value).toBeLessThanOrEqual(268);
+    }
 
-      // The ride itself, the same in both views. Non-vacuity first: it was
-      // simulated, written, recorded and totalled.
-      expect(average.simulated.length).toBeGreaterThan(FRAMES / 2);
-      expect(average.simulated.some((input) => input.power === watts(300))).toBe(true);
-      expect(average.written.length).toBeGreaterThan(1);
-      expect(average.totals.at(-1)).toMatch(/^\d+ W$/);
-      // The simulation was advanced with the raw readings, never an average
-      // between them (before the first reading, a meter not live: 0 W).
-      for (const input of average.simulated) expect([0, 200, 300]).toContain(input.power);
-      expect(instant.simulated).toStrictEqual(average.simulated);
-      expect(instant.written).toStrictEqual(average.written);
-      expect(instant.recorded).toStrictEqual(average.recorded);
-      expect(instant.totals).toStrictEqual(average.totals);
-      // And the raw readings the two rides were fed are the same readings.
-      expect(instant.raw).toStrictEqual(average.raw);
-    },
-  );
+    // Spoken power follows the choice (owner ruling, 2026-11-09): what the
+    // announcer said is what the HUD drew on that frame, in either view —
+    // the 3 s average in one, a raw 200 or 300 in the other.
+    expect(average.spoken.length).toBe(1);
+    expect(instant.spoken.length).toBe(1);
+    for (const each of [...average.spoken, ...instant.spoken]) {
+      expect(each.said).toBe(each.shown);
+    }
+    for (const each of average.spoken) {
+      expect(each.said).toBeGreaterThanOrEqual(232);
+      expect(each.said).toBeLessThanOrEqual(268);
+    }
+    for (const each of instant.spoken) expect([200, 300]).toContain(each.said);
+
+    // The ride itself, the same in both views. Non-vacuity first: it was
+    // simulated, written, recorded and totalled.
+    expect(average.simulated.length).toBeGreaterThan(FRAMES / 2);
+    expect(average.simulated.some((input) => input.power === watts(300))).toBe(true);
+    expect(average.written.length).toBeGreaterThan(1);
+    expect(average.totals.at(-1)).toMatch(/^\d+ W$/);
+    // The simulation was advanced with the raw readings, never an average
+    // between them (before the first reading, a meter not live: 0 W).
+    for (const input of average.simulated) expect([0, 200, 300]).toContain(input.power);
+    expect(instant.simulated).toStrictEqual(average.simulated);
+    expect(instant.written).toStrictEqual(average.written);
+    expect(instant.recorded).toStrictEqual(average.recorded);
+    expect(instant.totals).toStrictEqual(average.totals);
+    // And the raw readings the two rides were fed are the same readings.
+    expect(instant.raw).toStrictEqual(average.raw);
+  });
 });

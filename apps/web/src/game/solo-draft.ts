@@ -70,6 +70,14 @@ export const DRAFTED_EFFORT_TEXT = 'Drafted — yours only';
  */
 export interface SoloDraftSources {
   /**
+   * A lap race rides the rider (ADR 0067 D-3.7, #2461): the `k` is the
+   * race's, handed in by `GameSimulation.draftWith` after each step and never
+   * computed here, so the simulation only keeps the in-draft state and the road
+   * behind it, for the Draft field and the drafted mark. Has no pacer or ghost
+   * beside it.
+   */
+  readonly raced?: boolean | undefined;
+  /**
    * Where the rider's OWN ghost is after `ridden` seconds of riding —
    * `ghostDistanceAt(track, ridden)`, handed in so the ghost is replayed and
    * never re-simulated (ADR 0066 D-1.1). Absent with no own ghost. ⚠️ Never

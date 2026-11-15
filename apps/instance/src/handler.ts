@@ -10,6 +10,7 @@ import { openApiDocument } from './openapi.ts';
 import type { ClientInfo, InstanceProbes, SidePose } from './route-kit.ts';
 import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
+import { OPERATE_NEEDS_KEYS, type Operate } from './operate/operate.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
 import type { Segments } from './segments/segments.ts';
@@ -59,7 +60,9 @@ import { SEALED_PATH } from '@onyourleft/domain';
  *    `not_found`, byte for byte what an athlete who does not exist gets, and
  *    it comes BEFORE the body is looked at, so not even a malformed request
  *    can tell the two apart. A moderators' route is `not_found` to everybody
- *    else. No route checks a block for itself.
+ *    else, and an owner's route (#2602) to everybody but the owner — asked
+ *    straight after the session, so a rider awaiting approval or suspended is
+ *    told nothing about it either. No route checks a block for itself.
  * 5. **The route's own answer**, and anything it throws is `internal` in the
  *    one error shape — no message, no stack, no path (#36, ADR 0004 D) — while
  *    the log gets the error's name alone (`log.ts`).
@@ -156,6 +159,11 @@ export interface HandlerOptions {
    * them answers `unavailable`.
    */
   readonly segments?: Segments;
+  /**
+   * The owner's Operate area (#2602). Absent, every route that needs it
+   * answers `unavailable`.
+   */
+  readonly operate?: Operate;
   /**
    * The instance's own keys (#1189, ADR 0047 D-4). Absent, `GET
    * /v1/instance/keys` answers `unavailable`.
@@ -307,6 +315,8 @@ export function createHandler(options: HandlerOptions): Handler {
     const moderation = options.identity?.moderation;
     if (caller === undefined || moderation === undefined) return false;
     if (reach === 'moderation') return (await moderation.roleOf(caller.athleteId)) !== undefined;
+    // #2602: the owner's, and not the deputy's (ADR 0046 D-9 Q9).
+    if (reach === 'owner') return (await moderation.roleOf(caller.athleteId)) === 'owner';
     const subject = params[reach.athlete];
     return subject !== undefined && (await moderation.canSee(caller.athleteId, subject));
   }
@@ -321,6 +331,11 @@ export function createHandler(options: HandlerOptions): Handler {
     sealedRequest: boolean,
   ): Promise<Response> {
     const identity = options.identity;
+    // #2602 (ADR 0047 D-7, D-13): the owner's area is never served in
+    // plaintext. An instance that seals nothing has none, and says why.
+    if (matched.reaches === 'owner' && !sealsRoutes()) {
+      return errorResponse('unavailable', { message: OPERATE_NEEDS_KEYS });
+    }
     if (matched.identity === true && identity === undefined) return errorResponse('unavailable');
     if (matched.sync === true && options.sync === undefined) return errorResponse('unavailable');
     if (matched.history === true && options.history === undefined) {
@@ -339,11 +354,19 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.segments === true && options.segments === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.operate === true && options.operate === undefined) {
+      return errorResponse('unavailable');
+    }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
       caller = await identity?.authenticate(request.headers.get('authorization'));
       if (caller === undefined) {
         return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
+      }
+      // #2602: the owner's routes are not there for anybody else — not even
+      // to say their account is awaiting approval or suspended.
+      if (matched.reaches === 'owner' && !(await reachable(matched, params, caller))) {
+        return errorResponse('not_found');
       }
       // An athlete awaiting approval reaches their own account and nothing
       // else (#775): not other riders, not rooms, not reports.
@@ -383,6 +406,7 @@ export function createHandler(options: HandlerOptions): Handler {
       hostedSettings: options.hostedSettings,
       sidePose: options.sidePose,
       segments: options.segments,
+      operate: options.operate,
       instanceKeys: options.instanceKeys,
       probes: options.probes,
       sealed: options.sealed,

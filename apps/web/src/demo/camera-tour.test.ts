@@ -53,14 +53,16 @@ interface Shot {
 /**
  * Ride `player` at 20 Hz for `forSeconds`, keeping every frame it would draw,
  * or, given `only`, every frame of those shots, or, given `atMs`, the frames
- * at those clock times: the ride still advances at 20 Hz, but a frame nobody
- * reads is never built.
+ * at those clock times, or, given `keep`, the frames it keeps by the time into
+ * their shot: the ride still advances at 20 Hz, but a frame nobody reads is
+ * never built.
  */
 function film(
   player: DemoPlayer,
   forSeconds: number,
   only?: ReadonlySet<ShotKind>,
   atMs?: ReadonlySet<number>,
+  keep?: (ms: number, intoShotSeconds: number) => boolean,
 ): Shot[] {
   player.play();
   const shots: Shot[] = [];
@@ -69,6 +71,7 @@ function film(
     if (atMs !== undefined && !atMs.has(ms)) continue;
     const placed = shotAt(player.tour, player.rideMs / 1000);
     if (only !== undefined && !only.has(placed.shot.kind)) continue;
+    if (keep !== undefined && !keep(ms, player.rideMs / 1000 - placed.startedAt)) continue;
     shots.push({
       seconds: player.rideMs / 1000,
       kind: placed.shot.kind,
@@ -112,6 +115,15 @@ const filmOf = (preset: DemoPreset) => {
 /** The shots the reduced-motion test reads frames of. */
 const CHECKED_UNDER_REDUCED_MOTION: ReadonlySet<ShotKind> = new Set(['overhead', 'roadside']);
 
+/**
+ * The frames of those shots it reads (#2525): every one of a shot's first
+ * {@link BLEND_SECONDS}, where a blend would be, and one in four after, 0.2 s
+ * apart, where a pan, which turns the camera all through its shot, still
+ * shows on every one of them.
+ */
+const WHERE_A_BLEND_OR_A_PAN_SHOWS = (ms: number, intoShotSeconds: number): boolean =>
+  intoShotSeconds <= BLEND_SECONDS || (ms / FRAME_MS) % 4 === 0;
+
 describe('the demo camera tour — #1649', () => {
   it('every preset tour opens behind the rider, has all three shots, and blends for at most 1.5 s', () => {
     expect(BLEND_SECONDS).toBeLessThanOrEqual(1.5);
@@ -136,45 +148,46 @@ describe('the demo camera tour — #1649', () => {
     expect(Math.abs(foot.x)).toBeLessThan(0.05);
   });
 
-  it(
-    'is pure: the same ride gives the same poses, pinned at ten times per preset',
-    { timeout: 30_000 },
-    () => {
-      const pins: Record<string, string> = {};
-      for (const preset of DEMO_PRESETS) {
-        const { player, shots } = filmOf(preset);
-        const lap = lapSeconds(player.tour);
-        const times = Array.from(
-          { length: 10 },
-          (_, index) => Math.round(((index + 0.5) * lap * 1000) / 10 / FRAME_MS) * FRAME_MS,
-        );
-        const poses = times.map((at) => {
-          const shot = shots[at / FRAME_MS];
-          if (shot === undefined) throw new Error(`no frame at ${at} ms`);
-          const pose: Readonly<Record<string, number>> = { ...shot.frame.camera };
-          return Object.values(pose).map((value) => value.toFixed(6));
-        });
-        // A second player, filmed afresh, shoots the same. It rides the whole
-        // lap but builds only the ten frames compared: #1721's nightly
-        // coverage run took up to 24 s building every frame of it.
-        const again = film(createDemoPlayer(preset), lap, undefined, new Set(times));
-        expect(again).toHaveLength(10);
-        for (const [index, at] of times.entries()) {
-          expect(again[index]?.frame.camera).toEqual(shots[at / FRAME_MS]?.frame.camera);
-        }
-        pins[preset.id] = createHash('sha256').update(JSON.stringify(poses)).digest('hex');
+  it('is pure: the same ride gives the same poses, pinned at ten times per preset', () => {
+    // #2525: 0.86 s, and 0.54 s under --coverage, locally on an Apple M4 Pro at
+    // a load average of 14 to 17, with a 30 s timeout that #1688's ruling
+    // removes. #1721 had already made it cheap, and it is unchanged: 0.3 to
+    // 1.5 s, and 0.5 to 2.3 s under --coverage, after, at a load average of
+    // 15 to 24.
+    const pins: Record<string, string> = {};
+    for (const preset of DEMO_PRESETS) {
+      const { player, shots } = filmOf(preset);
+      const lap = lapSeconds(player.tour);
+      const times = Array.from(
+        { length: 10 },
+        (_, index) => Math.round(((index + 0.5) * lap * 1000) / 10 / FRAME_MS) * FRAME_MS,
+      );
+      const poses = times.map((at) => {
+        const shot = shots[at / FRAME_MS];
+        if (shot === undefined) throw new Error(`no frame at ${at} ms`);
+        const pose: Readonly<Record<string, number>> = { ...shot.frame.camera };
+        return Object.values(pose).map((value) => value.toFixed(6));
+      });
+      // A second player, filmed afresh, shoots the same. It rides the whole
+      // lap but builds only the ten frames compared: #1721's nightly
+      // coverage run took up to 24 s building every frame of it.
+      const again = film(createDemoPlayer(preset), lap, undefined, new Set(times));
+      expect(again).toHaveLength(10);
+      for (const [index, at] of times.entries()) {
+        expect(again[index]?.frame.camera).toEqual(shots[at / FRAME_MS]?.frame.camera);
       }
-      // Re-pinned by #1994: the chase camera looks at the road through a bend,
-      // and every pose carries `targetAheadMetres`.
-      expect(pins).toMatchInlineSnapshot(`
+      pins[preset.id] = createHash('sha256').update(JSON.stringify(poses)).digest('hex');
+    }
+    // Re-pinned by #1994: the chase camera looks at the road through a bend,
+    // and every pose carries `targetAheadMetres`.
+    expect(pins).toMatchInlineSnapshot(`
         {
           "climb": "3b9b3e75e806355b7edbe71fd87295785bc435436d8788745334604244770760",
           "group": "b963b0237b8f475f8a1772e9ce3305edfddcdfc9948e7712676598f3facb79f4",
           "sprint": "112a9b6ee0828bcc46b8567ceab2815b50af585efefd59412fdaaee75feb77d4",
         }
       `);
-    },
-  );
+  });
 
   it('behind is the product’s chase pose for the same drawn ride, field by field', () => {
     for (const preset of [GROUP_PRESET, SPRINT_PRESET]) {
@@ -342,35 +355,48 @@ describe('the demo camera tour — #1649', () => {
     expect(Math.abs(centred.y)).toBeLessThan(1e-6);
   });
 
-  it(
-    'under reduced motion there is no blend and no pan: every change of shot is a cut',
-    { timeout: 30_000 },
-    () => {
-      const reduced = reducedMotionTour(planTour(GROUP_PRESET));
-      expect(reduced.shots.every((shot) => shot.into === 'cut')).toBe(true);
-      for (const preset of DEMO_PRESETS) {
-        const player = createDemoPlayer(preset, { reducedMotion: true });
-        expect(player.tour.shots.map((shot) => shot.into)).not.toContain('blend');
-        // One lap holds every shot of the tour, and only the overhead and
-        // roadside frames are read: #1716's coverage run took 46 s filming two
-        // laps of every frame of every preset.
-        const shots = film(player, lapSeconds(player.tour), CHECKED_UNDER_REDUCED_MOTION);
-        expect(shots.some((shot) => shot.kind === 'overhead')).toBe(true);
-        expect(shots.some((shot) => shot.kind === 'roadside')).toBe(true);
-        for (const shot of shots) {
-          if (shot.kind !== 'overhead') continue;
-          // From its first frame, overhead is overhead: the rider is centred.
-          const at = projectThrough(shot.frame.camera, riderOf(shot.frame, 1), ASPECT);
-          expect(Math.abs(at.x) + Math.abs(at.y), `${preset.id} at ${shot.seconds}`).toBeLessThan(
-            1e-6,
-          );
-        }
-        for (const shot of shots) {
-          if (shot.kind !== 'roadside') continue;
-          const first = shots.find((s) => s.startedAt === shot.startedAt) as Shot;
-          expect(shot.frame.camera.headingX).toBe(first.frame.camera.headingX);
-          expect(shot.frame.camera.headingZ).toBe(first.frame.camera.headingZ);
-        }
+  it('under reduced motion there is no blend and no pan: every change of shot is a cut', () => {
+    // #2525, #1688's ruling (a slow case is made cheaper, never given a longer
+    // timeout): this case filmed every preset's reduced-motion lap, with a
+    // 30 s timeout. 1.6 s, and 3.5 s under --coverage, locally on an Apple M4
+    // Pro at a load average of 14 to 17. Building only the frames
+    // {@link WHERE_A_BLEND_OR_A_PAN_SHOWS}, 428 of 1 160, was not enough: the
+    // nightly coverage run on this branch (43237229409) took 6.3 s and timed
+    // out. Each preset's lap is now a case of its own, below.
+    const reduced = reducedMotionTour(planTour(GROUP_PRESET));
+    expect(reduced.shots.every((shot) => shot.into === 'cut')).toBe(true);
+  });
+
+  it.each(DEMO_PRESETS.map((preset) => [preset.id, preset] as const))(
+    'under reduced motion the %s tour neither blends nor pans, from the first frame of each shot',
+    (_, preset) => {
+      const player = createDemoPlayer(preset, { reducedMotion: true });
+      expect(player.tour.shots.map((shot) => shot.into)).not.toContain('blend');
+      // One lap holds every shot of the tour, and only the overhead and
+      // roadside frames are read: #1716's coverage run took 46 s filming two
+      // laps of every frame of every preset.
+      const shots = film(
+        player,
+        lapSeconds(player.tour),
+        CHECKED_UNDER_REDUCED_MOTION,
+        undefined,
+        WHERE_A_BLEND_OR_A_PAN_SHOWS,
+      );
+      expect(shots.some((shot) => shot.kind === 'overhead')).toBe(true);
+      expect(shots.some((shot) => shot.kind === 'roadside')).toBe(true);
+      for (const shot of shots) {
+        if (shot.kind !== 'overhead') continue;
+        // From its first frame, overhead is overhead: the rider is centred.
+        const at = projectThrough(shot.frame.camera, riderOf(shot.frame, 1), ASPECT);
+        expect(Math.abs(at.x) + Math.abs(at.y), `${preset.id} at ${shot.seconds}`).toBeLessThan(
+          1e-6,
+        );
+      }
+      for (const shot of shots) {
+        if (shot.kind !== 'roadside') continue;
+        const first = shots.find((s) => s.startedAt === shot.startedAt) as Shot;
+        expect(shot.frame.camera.headingX).toBe(first.frame.camera.headingX);
+        expect(shot.frame.camera.headingZ).toBe(first.frame.camera.headingZ);
       }
     },
   );

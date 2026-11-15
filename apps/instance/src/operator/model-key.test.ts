@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   HOSTED_KEY_UNREADABLE,
@@ -37,6 +37,7 @@ import { startInstance, type StartedInstance } from '../instance.ts';
 import { testConfig } from '../instance-testing.ts';
 import { readServerConfig } from '../server-config.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
+import { runCommand } from './run.ts';
 import {
   ATHLETE_A,
   ATHLETE_B,
@@ -47,6 +48,12 @@ import {
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
 const CLI = fileURLToPath(new URL('./cli.ts', import.meta.url));
+/**
+ * The longest one command's child process may take (#2568, #1688). Vitest
+ * cannot interrupt a synchronous child, so this is what stops a hung one,
+ * and it is below the case's 5 s default. One command takes about 0.2 s locally.
+ */
+const CHILD_WAIT_MS = 4_000;
 const URL_TEXT = 'https://models.example/v1';
 const SECRET = secretText(11);
 const OTHER_SECRET = secretText(12);
@@ -110,7 +117,7 @@ function cli(
     encoding: 'utf8',
     env,
     input: options.input ?? '',
-    timeout: 30_000,
+    timeout: CHILD_WAIT_MS,
   });
   const report =
     result.status === 0
@@ -120,6 +127,34 @@ function cli(
 }
 
 const SET = ['model-key', 'set', '--url', URL_TEXT, '--model', 'a-model'] as const;
+
+/**
+ * A command in this process, as set-up: `runCommand`, which `cli.ts` only
+ * calls with its environment and standard input. A Node start is the slowest
+ * part of a run (#2568: about 0.2 s locally, 0.5–0.8 s under coverage on CI).
+ * What a case is about still runs through {@link cli}.
+ */
+async function here(data: Data, args: readonly string[], secret?: string, input = '') {
+  let stdout = '';
+  const out = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+    stdout += String(chunk);
+    return true;
+  });
+  let status: number;
+  try {
+    status = await runCommand(args, {
+      database: data.database,
+      blobs: data.blobs,
+      secret,
+      ownerKey: OWNER_A,
+      readStandardInput: () => Promise.resolve(input),
+    });
+  } finally {
+    out.mockRestore();
+  }
+  expect(status, args.join(' ')).toBe(0);
+  return JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as Record<string, unknown>;
+}
 
 function setKey(data: Data, ownerKey: string = OWNER_A) {
   return cli(data, SET, { secret: SECRET, input: `${MARKER_KEY}\n`, ownerKey });
@@ -316,23 +351,32 @@ describe('held for the operator, on an instance with other riders (#1097, ADR 00
 });
 
 describe('backups hold ciphertext only (#1097)', () => {
-  it('backs up no plaintext, and a restore under another secret reads the key as unreadable', async () => {
+  // Two cases, not one (#2568): set, backup, restore and two statuses as five
+  // child processes took 3 456 ms on green `main` (38337365635) and 3 624 ms
+  // under coverage (nightly 43466611146, EPYC 7763), with an 11 s case
+  // timeout that is now gone. Each case spawns only what it is about.
+  it('backs up no plaintext', async () => {
     const data = await instanceWith(ATHLETE_A);
-    expect(setKey(data).status).toBe(0);
-    const backups = join(directory!, 'backups');
-    const taken = cli(data, ['backup', backups]);
+    await here(data, SET, SECRET, `${MARKER_KEY}\n`);
+    const taken = cli(data, ['backup', join(directory!, 'backups')]);
     expect(taken.status, taken.stderr).toBe(0);
     expect((taken.report.rows as Record<string, number>).hosted_model_key).toBe(1);
-    const snapshot = taken.report.snapshot as string;
-    const held = await bytesUnder(snapshot);
+    const held = await bytesUnder(taken.report.snapshot as string);
     expect(held).toContain(URL_TEXT);
     expect(held).not.toContain(MARKER);
+  });
+
+  it('restored under another secret, the key reads as unreadable — and under its own, as held', async () => {
+    const data = await instanceWith(ATHLETE_A);
+    await here(data, SET, SECRET, `${MARKER_KEY}\n`);
+    const snapshot = (await here(data, ['backup', join(directory!, 'backups')])).snapshot as string;
 
     const elsewhere = {
       database: join(directory!, 'elsewhere', 'instance.sqlite'),
       blobs: join(directory!, 'elsewhere', 'blobs'),
     };
-    expect(cli(elsewhere, ['restore', snapshot]).status).toBe(0);
+    const restored = cli(elsewhere, ['restore', snapshot]);
+    expect(restored.status, restored.stderr).toBe(0);
     const other = cli(elsewhere, ['model-key', 'status'], { secret: OTHER_SECRET });
     expect(other.status, other.stderr).toBe(0);
     expect(other.report).toMatchObject({
@@ -340,14 +384,18 @@ describe('backups hold ciphertext only (#1097)', () => {
       readable: false,
       problem: HOSTED_KEY_UNREADABLE,
     });
-    expect(cli(elsewhere, ['model-key', 'status'], { secret: SECRET }).report).toMatchObject({
-      readable: true,
-    });
-    // Five child processes: 3 456 ms on green `main` (38337365635, EPYC 7763)
-    // and 3 355 ms under coverage (nightly 38384633205, EPYC 7763), 69 % of
-    // Vitest's 5 s default. About three times the slowest CI figure
-    // (docs/agents/ci.md §4c, #1262); nothing it does is changed.
-  }, 11_000);
+    // The control: the same restored row opens under the secret it was sealed
+    // under, read through the store as the other cases here read a key.
+    const store = openServingStore(elsewhere.database);
+    try {
+      expect(await hostedKeyState(store, await secretKeyOf(SECRET))).toMatchObject({
+        kind: 'held',
+        key: MARKER_KEY,
+      });
+    } finally {
+      await store.close();
+    }
+  });
 });
 
 describe('model-key clear (#1097)', () => {

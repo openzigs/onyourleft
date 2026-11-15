@@ -867,6 +867,10 @@ const KEEPS_THE_MEASURE: Partial<Record<RouteId, string>> = {
   moderation:
     'in the walk’s fixture this device is not a moderator: one notice and one link to the ' +
     'Instance screen',
+  operate:
+    '#2603’s owner-only page, prose as Moderation is: a sentence, the operator log read top to ' +
+    'bottom a page at a time, and the list of sections still to come; whether it spreads into ' +
+    'columns as those sections arrive (#2604–#2614) is theirs to decide',
   'segment-detail':
     'one table and its compare: in two columns the table scrolled in half the width beside an ' +
     'almost empty column, which #2067 tried and put back',
