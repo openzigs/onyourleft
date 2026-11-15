@@ -22,7 +22,10 @@
  *   word in `code` — inside the viewport, and *Compare with main* is a target
  *   whose `href` is GitHub's compare page, opened outside the app;
  * - Accounts (#2605) is drawn second, and its links — targets of that size,
- *   by the button walk above — open the Moderation screen at a section.
+ *   by the button walk above — open the Moderation screen at a section;
+ * - Backups (#2607) is drawn third: *Back up now* and the snapshot picker are
+ *   targets of that size, and the restore steps' commands — long unbroken
+ *   words in `code` — stay inside the viewport.
  *
  * ## The control
  *
@@ -86,7 +89,7 @@ async function layoutFaults(page: Page): Promise<string[]> {
         faults.push(`${element.tagName.toLowerCase()} reaches ${String(box.right)} px`);
       }
     }
-    for (const button of main.querySelectorAll('button, a.oyl-button')) {
+    for (const button of main.querySelectorAll('button, a.oyl-button, select')) {
       const box = button.getBoundingClientRect();
       if (box.width < target || box.height < target) {
         faults.push(`${button.textContent ?? ''} is ${String(box.width)} × ${String(box.height)}`);
@@ -127,6 +130,11 @@ test.describe('the Operate area — #2603', () => {
         'href',
         hrefForModerationSection('suspended'),
       );
+      // #2607: Backups, third, with its one button and its snapshot picker.
+      await expect(page.locator('main h2').nth(2)).toHaveText('Backups');
+      await expect(page.getByRole('button', { name: 'Back up now' })).toHaveCount(1);
+      await expect(page.getByLabel('Snapshot to restore')).toHaveCount(1);
+      await expect(page.locator('main .oyl-operate__backups > li')).toHaveCount(3);
       const commit = await page.locator('main .oyl-operate__status code').boundingBox();
       expect(commit?.x ?? -1).toBeGreaterThanOrEqual(0);
       expect((commit?.x ?? 0) + (commit?.width ?? 0)).toBeLessThanOrEqual(width + 0.5);
