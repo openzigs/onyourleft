@@ -240,6 +240,17 @@ function jobLine(job: OperateJob): string {
   return `${kind}, ${source}, ${whose}: ${STATUS_WORD[job.status]}${failure}, ${when(job.createdAt)}`;
 }
 
+/** Whether the settings the instance reads back hold every field `change` set. */
+function holds(read: OperateAnalysis, change: OperateAnalysisChange): boolean {
+  return (
+    (change.localModel === undefined || read.local.model === change.localModel) &&
+    (change.offerLocal === undefined || read.local.offered === (change.offerLocal ?? true)) &&
+    (change.othersLocal === undefined ||
+      read.local.othersMayUse === (change.othersLocal ?? false)) &&
+    (change.offerHosted === undefined || read.hosted.offered === (change.offerHosted ?? true))
+  );
+}
+
 type Message = { readonly tone: 'success' | 'warning'; readonly text: string } | null;
 
 function Now({
@@ -278,12 +289,18 @@ function Offers({
   readonly onChange: (change: OperateAnalysisChange) => void;
 }): JSX.Element {
   const hostedId = useId();
-  const box = (label: string, checked: boolean, change: (on: boolean) => OperateAnalysisChange) => (
+  const box = (
+    label: string,
+    checked: boolean,
+    change: (on: boolean) => OperateAnalysisChange,
+    describedBy?: string,
+  ) => (
     <label className="oyl-announce__switch">
       <input
         type="checkbox"
         checked={checked}
         disabled={busy}
+        aria-describedby={describedBy}
         onChange={(event) => {
           onChange(change(event.target.checked));
         }}
@@ -299,8 +316,13 @@ function Offers({
         <li>
           {box(OFFER_OTHERS_LABEL, analysis.local.othersMayUse, (on) => ({ othersLocal: on }))}
         </li>
-        <li aria-describedby={hostedId}>
-          {box(OFFER_HOSTED_LABEL, analysis.hosted.offered, (on) => ({ offerHosted: on }))}
+        <li>
+          {box(
+            OFFER_HOSTED_LABEL,
+            analysis.hosted.offered,
+            (on) => ({ offerHosted: on }),
+            hostedId,
+          )}
         </li>
       </ul>
       <KeptVisible>
@@ -381,26 +403,20 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
   }, [port]);
 
   useEffect(() => {
-    void (async () => {
-      const [settings, list, queue] = await Promise.all([
-        port.analysis(),
-        port.localModels(),
-        port.jobs(),
-      ]);
-      setAnalysis(settings);
-      setModels(list);
-      setJobs(queue);
-    })();
+    // Each read is drawn as it answers: a slow local-server read must not hold the switches back.
+    void port.analysis().then(setAnalysis);
+    void port.localModels().then(setModels);
+    void port.jobs().then(setJobs);
   }, [port]);
 
-  /** Save `change`, then show what the instance reads back — never the form. */
+  /** Save `change`, then show what the instance reads back — never the form. `true` only if the read-back holds the change. */
   async function save(change: OperateAnalysisChange): Promise<boolean> {
     setBusy(true);
     try {
       const answer = await port.setAnalysis(change);
       const after = await port.analysis();
       setAnalysis(after);
-      return answer.kind === 'analysis' && after.kind === 'analysis';
+      return answer.kind === 'analysis' && after.kind === 'analysis' && holds(after, change);
     } finally {
       setBusy(false);
     }
@@ -495,6 +511,7 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
               models={models.models}
               picked={picked}
               onPick={(name) => {
+                asking.current = null;
                 setPicked(name);
                 setChecked(null);
                 setSaved(null);
@@ -585,8 +602,8 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
             <li>
               {`Last seven days: ${String(jobs.counts.succeeded)} done, ${String(jobs.counts.failed)} failed, ${String(jobs.counts.withheld)} withheld, ${String(jobs.counts.cancelled)} cancelled`}
             </li>
-            {jobs.failures.map((failure) => (
-              <li key={failure.code ?? 'none'}>
+            {jobs.failures.map((failure, index) => (
+              <li key={`${String(index)}-${failure.code ?? ''}`}>
                 {`Failed ${failure.code ?? 'with no reason'}: ${String(failure.count)}`}
               </li>
             ))}
@@ -634,15 +651,26 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
         confirmLabel={RETURN_BUTTON}
         cancelLabel={RETURN_KEEP}
         onConfirm={async () => {
-          const cleared = await port.clearAnalysis();
-          const after = await port.analysis();
-          setAnalysis(after);
-          setPicked(null);
-          setReturned(
-            cleared.kind === 'analysis' && after.kind === 'analysis'
-              ? { tone: 'success', text: RETURNED_TEXT }
-              : { tone: 'warning', text: RETURN_FAILED_TEXT },
-          );
+          setBusy(true);
+          try {
+            const cleared = await port.clearAnalysis();
+            const after = await port.analysis();
+            setAnalysis(after);
+            // What was checked, saved or offered was said of settings that are gone.
+            asking.current = null;
+            setPicked(null);
+            setPassed(new Set());
+            setChecked(null);
+            setSaved(null);
+            setOffered(null);
+            setReturned(
+              cleared.kind === 'analysis' && after.kind === 'analysis'
+                ? { tone: 'success', text: RETURNED_TEXT }
+                : { tone: 'warning', text: RETURN_FAILED_TEXT },
+            );
+          } finally {
+            setBusy(false);
+          }
         }}
       >
         <p>{RETURN_SENTENCE}</p>

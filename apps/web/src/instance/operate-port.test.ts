@@ -695,4 +695,25 @@ describe('the AI backend’s reads and writes — #2609, #2610, #2611', () => {
     expect((settings as { kind: string }).kind).toBe('analysis');
     expect(JSON.stringify(settings)).not.toContain('sk-MARKER-2611');
   });
+
+  it('never carries the user and password of a local server address that has them (#2611)', async () => {
+    const settings = await answered(
+      '/v1/operate/analysis',
+      {
+        local: {
+          url: 'http://MARKER-user:MARKER-pass@ollama:11434/v1',
+          model: null,
+          reasoningTokens: null,
+          offered: true,
+          othersMayUse: false,
+          setIn: 'env',
+          state: 'not-base-url',
+        },
+        hosted: { offered: true, operatorKey: 'none', operatorKeyOrigin: null },
+      },
+      (port) => port.analysis(),
+    );
+    expect(JSON.stringify(settings)).not.toContain('MARKER');
+    expect(JSON.stringify(settings)).toContain('http://ollama:11434/v1');
+  });
 });

@@ -668,6 +668,10 @@ export const TOOL_CHECK_WAIT_MILLISECONDS = MAXIMUM_SEALED_CALL_MILLISECONDS;
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 /** A base URL: `http:` or `https:`, short, and nothing a screen would run. */
 const BASE_URL = /^https?:\/\/[^\s<>"']{1,500}$/;
+/** A base URL with any `user:password@` taken out: the screen never draws a secret. */
+function withoutUserinfo(url: string): string {
+  return url.replace(/^(https?:\/\/)[^/?#]*@/, '$1');
+}
 /** An origin, as `hosted-key.ts` §`hostedOriginOf` writes one. */
 const ORIGIN = /^https:\/\/[^\s/<>"']{1,253}$/;
 const LABEL = /^[0-9A-Za-z][0-9A-Za-z._+-]{0,39}$/;
@@ -701,7 +705,7 @@ function analysisFrom(answer: InstanceAnswer): OperateAnalysis | undefined {
   return {
     kind: 'analysis',
     local: {
-      url: local.url,
+      url: local.url === null ? null : withoutUserinfo(local.url),
       model: local.model,
       reasoningTokens: local.reasoningTokens,
       offered: local.offered,

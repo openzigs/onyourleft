@@ -24,7 +24,9 @@ import {
   CHECK_BUTTON,
   CHECK_TEXT,
   HOSTED_OFFER_SENTENCE,
+  MODEL_SAVE_FAILED_TEXT,
   MODEL_SAVED_TEXT,
+  OFFER_FAILED_TEXT,
   OFFER_HOSTED_LABEL,
   OFFER_LOCAL_LABEL,
   OFFER_OTHERS_LABEL,
@@ -116,6 +118,9 @@ describe('the Now line is what the instance read back (#2611)', () => {
     await press(button(SAVE_BUTTON));
     expect(now()).toContain('Model: none chosen');
     expect(now().join(' ')).not.toContain('alpha:14b');
+    // The line says what the read-back shows: the save was lost, so it does not say saved.
+    expect(text()).toContain(MODEL_SAVE_FAILED_TEXT);
+    expect(text()).not.toContain(MODEL_SAVED_TEXT);
   });
 
   it('says where the setting comes from, and the state as a sentence', async () => {
@@ -244,6 +249,59 @@ describe('the offers are the instance’s answer after the press (#2611)', () =>
     await open(scripted);
     await press(box(OFFER_HOSTED_LABEL));
     expect(box(OFFER_HOSTED_LABEL).checked).toBe(true);
+    expect(text()).toContain(OFFER_FAILED_TEXT);
+    expect(text()).not.toContain(OFFER_SAVED_TEXT);
+  });
+
+  it('describes the hosted switch itself by the kept-visible sentence', async () => {
+    await open(scriptedOperate());
+    const id = box(OFFER_HOSTED_LABEL).getAttribute('aria-describedby');
+    expect(id).not.toBeNull();
+    expect(document.getElementById(id ?? '')?.textContent).toBe(HOSTED_OFFER_SENTENCE);
+  });
+});
+
+describe('each read is drawn as it answers (#2611)', () => {
+  it('lets the owner switch the local model off while the local server’s list is still being read', async () => {
+    const scripted = scriptedOperate();
+    const slow = Promise.withResolvers<Awaited<ReturnType<typeof scripted.port.localModels>>>();
+    const port = { ...scripted.port, localModels: () => slow.promise };
+    mounted = await mount(
+      <main>
+        <OperateAnalysisPanel port={port} />
+      </main>,
+    );
+    await settle();
+    expect(text()).toContain('Reading the list…');
+    expect(box(OFFER_LOCAL_LABEL).disabled).toBe(false);
+    expect(now()).toContain('Model: none chosen');
+    slow.resolve(await scripted.port.localModels());
+    await settle();
+    expect(text()).not.toContain('Reading the list…');
+  });
+});
+
+describe('a check answers for the model it was asked about (#2611)', () => {
+  it('draws no outcome under another model picked while the check ran', async () => {
+    const scripted = scriptedOperate({ checks: { 'alpha:14b': 'tools-ok' } });
+    const slow = Promise.withResolvers<Awaited<ReturnType<typeof scripted.port.checkModel>>>();
+    const port = { ...scripted.port, checkModel: () => slow.promise };
+    mounted = await mount(
+      <main>
+        <OperateAnalysisPanel port={port} />
+      </main>,
+    );
+    await settle();
+    await press(radio('alpha:14b'));
+    await press(button(CHECK_BUTTON));
+    await press(radio('beta:32b'));
+    slow.resolve({ kind: 'checked', outcome: 'tools-ok' });
+    await settle();
+    expect(text()).not.toContain(CHECK_TEXT['tools-ok']);
+    expect(button(SAVE_BUTTON).getAttribute('aria-disabled') ?? '').not.toBe('false');
+    expect(
+      button(CHECK_BUTTON).disabled || button(CHECK_BUTTON).hasAttribute('aria-disabled'),
+    ).toBe(false);
   });
 });
 
@@ -295,5 +353,43 @@ describe('the jobs and the way back to .env (#2611)', () => {
     await press(confirm);
     expect(scripted.calls.slice(-2)).toEqual(['clearAnalysis', 'analysis']);
     expect(now()).toContain('Model: none chosen');
+  });
+
+  it('forgets what was said of the settings it replaced, and holds the switches while it runs', async () => {
+    const scripted = scriptedOperate({ checks: { 'alpha:14b': 'tools-ok' } });
+    const slow = Promise.withResolvers<void>();
+    const port = {
+      ...scripted.port,
+      clearAnalysis: async () => {
+        await slow.promise;
+        return scripted.port.clearAnalysis();
+      },
+    };
+    mounted = await mount(
+      <main>
+        <OperateAnalysisPanel port={port} />
+      </main>,
+    );
+    await settle();
+    await press(radio('alpha:14b'));
+    await press(button(CHECK_BUTTON));
+    await press(button(SAVE_BUTTON));
+    await press(box(OFFER_HOSTED_LABEL));
+    expect(text()).toContain(CHECK_TEXT['tools-ok']);
+    expect(text()).toContain(MODEL_SAVED_TEXT);
+    expect(text()).toContain(OFFER_SAVED_TEXT);
+    await press(button(RETURN_BUTTON));
+    const confirm = [
+      ...(document.querySelector('[role=alertdialog]')?.querySelectorAll('button') ?? []),
+    ].find((each) => each.textContent === RETURN_BUTTON);
+    if (confirm === undefined) throw new Error('no confirmation');
+    await press(confirm);
+    expect(box(OFFER_HOSTED_LABEL).disabled).toBe(true);
+    slow.resolve();
+    await settle();
+    expect(box(OFFER_HOSTED_LABEL).disabled).toBe(false);
+    expect(text()).not.toContain(CHECK_TEXT['tools-ok']);
+    expect(text()).not.toContain(MODEL_SAVED_TEXT);
+    expect(text()).not.toContain(OFFER_SAVED_TEXT);
   });
 });

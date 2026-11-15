@@ -291,6 +291,14 @@ describe('the Operate area over a scripted instance — #2603', () => {
     ]);
   });
 
+  it.each([
+    ['analysis_settings_set', 'AI settings changed'],
+    ['analysis_settings_cleared', 'AI settings returned to .env'],
+    ['analysis_model_checked', 'Model checked for tool calling'],
+  ])('names the AI backend’s action %s in words (#2611)', (action, label) => {
+    expect(operatorActionLabel(action)).toBe(label);
+  });
+
   it('names “back up now” in the log as the owner asked for it (#2607)', () => {
     expect(operatorActionLabel('backup_requested')).toBe('Backup asked for');
   });
