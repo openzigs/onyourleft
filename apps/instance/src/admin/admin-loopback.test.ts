@@ -364,6 +364,28 @@ describe('the tunnel sign-in allowlist, OYL_INSTANCE_ADMIN_ADDRESSES (#2643, ADR
     ).toEqual(['admin_tunnel address,refused=3']);
   });
 
+  it('refuses a client whose address is unknown, fail closed, when an allowlist is set', async () => {
+    const world = await adminWorld(['198.51.100.7']);
+    const code = await mint(world);
+    const unknown = await world.instance.handler(
+      adminRequest('POST', '/admin/sign-in', { form: { code } }),
+      { address: null },
+    );
+    expect(unknown.status).toBe(403);
+  });
+
+  it('keys an IPv6 entry by its /64, as the rate limits do, and refuses another /64', async () => {
+    const world = await adminWorld(['2001:db8:1:2::1']);
+    const handler = world.instance.handler;
+    const code = await mint(world);
+    const other = await handler(adminRequest('POST', '/admin/sign-in', { form: { code } }), {
+      address: '2001:db8:1:3::1',
+    });
+    expect(other.status).toBe(403);
+    // The same /64 is the listed network (a rider's privacy addresses rotate the low 64 bits).
+    await signInWith(handler, code, { address: '2001:db8:1:2:aaaa:bbbb:cccc:dddd' });
+  });
+
   it('takes any address when it is empty, the default', async () => {
     const world = await adminWorld([]);
     await signInWith(world.instance.handler, await mint(world), { address: '203.0.113.9' });

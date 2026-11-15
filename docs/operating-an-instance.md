@@ -1173,7 +1173,21 @@ passkeys and a listener on the server machine itself follow.
   host's loopback only and on the same port on both sides: the instance checks that `Host` is
   `localhost:<the port it listens on>`, so a remapped port would be refused. Open it as
   **`localhost`**, not `127.0.0.1`. An IP address cannot be a passkey's RP ID, and the page answers
-  only to `localhost`. With the variable empty, nothing listens there.
+  only to `localhost`. With the variable empty, the instance listens on no second port. ⚠️ The
+  compose file's `ports:` line still publishes `127.0.0.1:8788` then, and Docker binds that host
+  port anyway: a clash with another program fails `compose up`, and a connection to it is accepted
+  and then reset rather than refused. Free the port or set the variable to another free one.
+- **Trusted proxies.** The listener refuses any peer named in `OYL_INSTANCE_TRUSTED_PROXIES`. If
+  `cloudflared` runs on the same machine as the instance (not in a container), it arrives from
+  `127.0.0.1` like your browser, so do not list `127.0.0.1` there: your own connections would be
+  reset.
+- **Allowlist.** `OYL_INSTANCE_ADMIN_ADDRESSES` limits tunnel sign-ins to the addresses it names.
+  An IPv6 entry is matched by its /64, as the rate limits do, so it admits the whole /64.
+- **Not settled.** The owner has not yet ruled on the departures from ADR 0069 recorded in its
+  2026-11-15 amendment (a loopback passkey here needs `admin-passkeys confirm`, and the tunnel
+  container can reach this listener on Docker Desktop), nor approved screenshots at the server
+  machine and through the tunnel. Treat this section as provisional until that ruling.
+- **Not measured.** Microsoft Edge, and the dedicated `*.localhost` host name (deferred again).
 - **What it changes.** The listener marks its own requests as loopback; no header and no peer
   address can do that, so a request on the main listener is a tunnel request whatever it carries.
   It has its own origin (`http://localhost:8788`), its own session cookie (`oyl-admin-loopback`),

@@ -273,6 +273,14 @@ describe('with the port unset, and against the tunnel container (#2643, ADR 0069
     expect(await connects(portOf(instance))).toBe('connected');
   });
 
+  it('frees the loopback port when the instance stops', async () => {
+    const { instance, loopback } = await start();
+    expect(await connects(loopback)).toBe('connected');
+    await instance.stop();
+    running = undefined;
+    expect(await connects(loopback)).toBe('ECONNREFUSED');
+  });
+
   it('closes a connection from a trusted proxy unread, on the loopback listener and not on the main one', async () => {
     // 127.0.0.1 stands in for cloudflared's fixed address here: the peer every test connects from.
     const { instance, loopback } = await start({ trustedProxies: ['127.0.0.1'] });

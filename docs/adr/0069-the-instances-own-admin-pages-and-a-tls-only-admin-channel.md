@@ -704,3 +704,23 @@ the pull request decides it.
   the card is not shown in the browser at all and D-5's one difference goes.
 - **A passkey provider the owner uses that offers neither Ed25519 nor ES256**, which D-1 refuses.
 - **The owner not accepting D-3's "can do 4"** (D-11 Q-C), which makes the tunnel read-only.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-15** — What #2643 built differs from D-5 and D-11 Q-C, and this entry is **not** the
+  owner's ruling: until the owner accepts or reverses it, #2643 does not merge. (1) Q-C is not
+  applied on the loopback listener: the owner's answer was that a passkey enrolled there needs no
+  confirmation, but #2643 enrols it unconfirmed, so it needs `operator admin-passkeys confirm`
+  like a tunnel one. (2) The Constraints line for #2643, "proves the tunnel container cannot reach
+  it", was not met: measured on Docker Desktop (Docker 29.5.3, macOS, 2026-11-15), a container
+  reaches a port published on `127.0.0.1` through `host.docker.internal`, arriving from Docker's
+  gateway like the host's own browser; the listener refuses `OYL_INSTANCE_TRUSTED_PROXIES` peers,
+  which closes only the direct path, and Linux Docker Engine was not measured. This is the first
+  condition under "What would make this ADR wrong". (3) D-3's dedicated `*.localhost` host name
+  was deferred to #2643 and is deferred again, unprobed; the loopback cookie is
+  `oyl-admin-loopback`. (4) The allowlist `OYL_INSTANCE_ADMIN_ADDRESSES` keys an IPv6 entry by
+  its /64, as the rate limits do, so an entry admits its whole /64. The owner decides: accept this
+  (Q-C's answer is then withdrawn for the loopback listener), or require a design that keeps the
+  tunnel container off the listener (then a superseding ADR).

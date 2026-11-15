@@ -482,8 +482,13 @@ export function createAdmin(options: AdminOptions): Admin {
    */
   function placeFor(listener: AdminListener, origin: URL): AdminSeamHandler {
     const loopbackPort = options.loopbackPort;
+    if (listener === 'loopback' && loopbackPort === undefined) {
+      // The adapter marks a request loopback only when it owns that listener,
+      // which exists only with a port; never mix the tunnel's origin in.
+      throw new Error('a loopback admin request arrived with no loopback port configured');
+    }
     const place =
-      listener === 'loopback' && loopbackPort !== undefined
+      listener === 'loopback'
         ? {
             origin: `http://localhost:${String(loopbackPort)}`,
             host: `localhost:${String(loopbackPort)}`,
