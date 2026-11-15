@@ -1066,7 +1066,17 @@ export const OPERATOR_DETAILS: {
   // `counter` (#2642): a passkey whose signature counter did not rise — a
   // cloned authenticator, or a replay — counted apart from other refusals.
   admin_refused: {
-    words: ['code', 'passkey', 'step_up', 'counter', 'csrf', 'origin', 'rate_limited'],
+    words: [
+      'code',
+      'passkey',
+      'step_up',
+      'counter',
+      'csrf',
+      'origin',
+      'rate_limited',
+      // #2643: a tunnel sign-in from outside OYL_INSTANCE_ADMIN_ADDRESSES.
+      'address',
+    ],
     counts: ['refused'],
   },
   // #2642: the algorithm, never the passkey's id, label or RP ID.
