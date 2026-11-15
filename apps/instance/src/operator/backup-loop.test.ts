@@ -441,10 +441,27 @@ describe('backup: one run at a time in a folder (#2606, second review B1)', () =
     const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     let outcomes: PromiseSettledResult<unknown>[];
     try {
-      outcomes = await Promise.allSettled([
-        backup(paths, onBox, { keep: 5, now: () => new Date('2026-09-01T00:00:00Z') }),
-        backup(paths, onBox, { keep: 5, now: () => new Date('2026-09-01T00:00:01Z') }),
-      ]);
+      // The second run starts once the first is writing its partial snapshot:
+      // the moment a run that cleans up partials would delete it.
+      let settled = false;
+      const first = backup(paths, onBox, {
+        keep: 5,
+        now: () => new Date('2026-09-01T00:00:00Z'),
+      }).finally(() => {
+        settled = true;
+      });
+      const writing = async (): Promise<boolean> =>
+        (await readdir(onBox).catch(() => [] as string[])).some((name) =>
+          name.startsWith('.partial-snapshot-'),
+        );
+      while (!settled && !(await writing())) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      const second = backup(paths, onBox, {
+        keep: 5,
+        now: () => new Date('2026-09-01T00:00:01Z'),
+      });
+      outcomes = await Promise.allSettled([first, second]);
     } finally {
       quiet.mockRestore();
     }
