@@ -8317,6 +8317,51 @@ select.oyl-input {
   color: var(--oyl-color-hud-ink);
 }
 
+/*
+ * THE ROAD AHEAD'S TITLE — #2593: `Next 2 km`, so the strip reads as the road
+ * ahead and not as a second whole-route strip. Over the strip's top end
+ * corner, on the panel's own surface and in its ink (a declared pair), and
+ * not a row of its own, so the route panel is no taller anywhere
+ * (`HudCore.tsx` §`LookAheadStrip` says why). It takes no pointer, as the
+ * strip takes none.
+ */
+.oyl-hud__ahead-box {
+  position: relative;
+}
+
+.oyl-hud__ahead-title {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  padding: 0 var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1.2;
+  background: var(--oyl-color-hud-surface);
+  color: var(--oyl-color-hud-ink);
+  pointer-events: none;
+}
+
+/*
+ * THE CLIMB CALLOUT — #2593, `game/hud/ClimbCallout.tsx`. A panel of the HUD's
+ * own surface in the notice cell, which the layout keeps clear of the leaning
+ * rider and of every panel, with an ink rule at its start edge so it is told
+ * from a status notice by shape. Its phrase is set at the large step, bold, in
+ * tabular figures, so the countdown does not jitter as it moves; it wraps
+ * where the cell is narrow. `ride-hud-layout.browser.spec.ts` §"#2593"
+ * measures it at every overlay viewport.
+ */
+.oyl-hud__climb-callout {
+  border-inline-start: 4px solid var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__climb-callout-text {
+  margin: 0;
+  font-size: var(--oyl-font-size-lg);
+  font-weight: 700;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
 /* #285 — the route in plan, with the rider on it.
 
    Both colours are tokens `contrast.a11y.test.ts` already walks against the HUD
@@ -10424,9 +10469,32 @@ select.oyl-input {
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding
-    .oyl-hud:has(> .oyl-hud__notices:not(.oyl-hud__notices--collapsed))
+    .oyl-hud:has(
+      > .oyl-hud__notices:not(.oyl-hud__notices--collapsed):not(.oyl-hud__notices--climb)
+    )
     .oyl-hud__route {
     display: none;
+  }
+
+  /* #2593: the climb callout does not take the route panel's cell. On these
+     layouts the cell IS the route panel's, and the callout would put away the
+     strip, its own caption and the plan for the whole of every climb — #437's
+     defect. So it is clipped as a put-away notice is, its sentence still
+     there for a screen reader, and the strip's caption names the climb.
+     ⚠️ The callout's own panel is clipped to the same pixel: inside a 1 px
+     cell its border and padding alone still laid it out 21 px wide and 43
+     tall, a box no rider sees and the layout measure counted as drawn. */
+  .oyl-hud .oyl-hud__notices.oyl-hud__notices--climb,
+  .oyl-hud .oyl-hud__notices--climb > .oyl-hud__climb-callout {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
   .oyl-game--riding .oyl-hud__notices {
@@ -10687,7 +10755,8 @@ select.oyl-input {
        a 1 px clipped box, so exactly one of the two is ever laid out and
        carrying the name. */
     .oyl-game--riding .oyl-hud__route,
-    .oyl-game--riding .oyl-hud__notices:not(.oyl-hud__notices--collapsed) {
+    .oyl-game--riding
+      .oyl-hud__notices:not(.oyl-hud__notices--collapsed):not(.oyl-hud__notices--climb) {
       anchor-name: --oyl-hud-bottom-start;
     }
 

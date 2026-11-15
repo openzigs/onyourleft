@@ -78,6 +78,15 @@
  * drew before #2514. It changes only a ride with a round; the notices and the
  * controls are drawn in both.
  *
+ * ## The climb callout — #2593
+ *
+ * On or off ({@link HudLayoutPreference.climbCallout}), ON by default (the
+ * owner's ruling, 2026-11-13): a short line in the HUD's notice cell as a
+ * climb approaches — how far to its start, its average grade and its length —
+ * and on the climb how far to its top (`ClimbCallout.tsx`). It changes only
+ * what the HUD draws: the road-ahead strip's caption and the spoken climb,
+ * which keeps its own setting (`announce-preference.ts`), are as they were.
+ *
  * Never throws: a store that cannot be read is the defaults, and a write that
  * is refused says so, as every preference here does.
  */
@@ -150,6 +159,11 @@ export interface HudLayoutPreference {
    * #2514. Absent is `game`, the new default.
    */
   readonly delivery?: HudDeliveryView;
+  /**
+   * Whether the climb callout is drawn — #2593. Absent is ON, the default, so
+   * a preference kept before #2593 reads as a rider who has not turned it off.
+   */
+  readonly climbCallout?: boolean;
 }
 
 export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
@@ -160,6 +174,7 @@ export const DEFAULT_HUD_LAYOUT: HudLayoutPreference = {
   route: 'full',
   power: 'average',
   delivery: 'game',
+  climbCallout: true,
 };
 
 /** Namespaced, because the origin is shared. The `v1` is the shape's. */
@@ -214,6 +229,8 @@ export function readHudLayout(storage: PreferenceStorage | undefined): HudLayout
     route: isRouteView(row['route']) ? row['route'] : 'full',
     power: isPowerView(row['power']) ? row['power'] : 'average',
     delivery: isDeliveryView(row['delivery']) ? row['delivery'] : 'game',
+    // Only a stored `false` turns it off: anything else is the default, on.
+    climbCallout: row['climbCallout'] !== false,
   };
 }
 
@@ -242,6 +259,11 @@ export function panelShown(preference: HudLayoutPreference, panel: HudPanelId): 
 /** Whether the rider chose #2387's totals strip under this preference. */
 export function totalsStripChosen(preference: HudLayoutPreference): boolean {
   return preference.totalsStrip === true;
+}
+
+/** Whether the rider keeps #2593's climb callout under this preference. Absent is on. */
+export function climbCalloutChosen(preference: HudLayoutPreference): boolean {
+  return preference.climbCallout !== false;
 }
 
 /** Whether the HUD draws #2383's focus readout under this preference. */

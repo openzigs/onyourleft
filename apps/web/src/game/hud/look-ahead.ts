@@ -64,7 +64,14 @@ import {
 } from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
-import { formatSmallDistance, measurementText, spokenSmallDistanceUnit } from '../../units/format';
+import {
+  distanceIn,
+  distanceUnit,
+  formatSmallDistance,
+  measurementText,
+  spokenDistanceUnit,
+  spokenSmallDistanceUnit,
+} from '../../units/format';
 
 import {
   SLOPE_GRADE_PERCENT,
@@ -439,6 +446,69 @@ export function nextClimbLabel(climb: ClimbAhead | undefined, units: UnitSystem)
   const grade = `${String(wholePercent(climb.slope.grade))} per cent average`;
   if (climb.where === 'on') return `on a climb, top in ${spoken(climb.topIn)}, ${grade}`;
   return `next climb in ${spoken(climb.startsIn)}, ${grade}, top in ${spoken(climb.topIn)}`;
+}
+
+/**
+ * The road-ahead strip's title — #2593: `Next 2 km`, or `Next 1.2 mi`, so it
+ * reads as the road ahead and not as a second whole-route strip. The window
+ * in the rider's units, to one decimal where it is not a whole number.
+ */
+export function lookAheadTitle(units: UnitSystem): string {
+  const window = Number(distanceIn(LOOK_AHEAD_METRES, units).toFixed(1));
+  return `Next ${String(window)} ${distanceUnit(units)}`;
+}
+
+/**
+ * How far ahead of a climb's start the climb callout appears, in metres —
+ * #2593, the owner's to tune. The strip names a climb from 2 km away; the
+ * callout is the short-lived warning, about a minute's riding at 30 km/h.
+ */
+export const CLIMB_CALLOUT_LEAD_METRES = 500;
+
+/**
+ * The climb the callout names at `distance`, or `undefined` — #2593. The
+ * climb under the rider, or else the next one starting within
+ * {@link CLIMB_CALLOUT_LEAD_METRES}: {@link climbAhead} over `slopeAhead`, the
+ * same two the strip's caption and the announcer read, so the callout can
+ * never name a different climb from them or a different grade. Gone at the
+ * top, where `climbAhead` stops finding the rider on it. Pure.
+ */
+export function calloutClimb(profile: RouteProfile, distance: number): ClimbAhead | undefined {
+  const next = slopeAhead(climbsOf(profile), profile, distance, CLIMB_CALLOUT_LEAD_METRES);
+  return climbAhead(profile, distance, next);
+}
+
+/**
+ * The callout in a phrase — #2593: `Climb in 350 m · 6 % avg · 0.6 km` before
+ * the climb, its length in the rider's ride-scale unit, and `Top in 420 m ·
+ * 7 %` on it. ⚠️ **The strip's caption, extended, never re-worded**: the
+ * distance and the grade are {@link nextClimbText}'s own, so the two say the
+ * same digits on the same frame, and on the climb they are the same phrase.
+ */
+export function climbCalloutText(climb: ClimbAhead, units: UnitSystem): string {
+  const caption = nextClimbText(climb, units) as string;
+  if (climb.where === 'on') return caption;
+  return `${caption} avg · ${climbLength(climb, units)}`;
+}
+
+/**
+ * The callout's sentence for a screen reader — #2593: the units in words, as
+ * {@link nextClimbLabel} says them. It is what the callout ANNOUNCES, once,
+ * when it appears and again when the rider reaches the climb, never as the
+ * countdown moves (`ClimbCallout.tsx` says why).
+ */
+export function climbCalloutSentence(climb: ClimbAhead, units: UnitSystem): string {
+  const spoken = (metres: number): string =>
+    `${formatSmallDistance(roundedAhead(metres), units).value} ${spokenSmallDistanceUnit(units)}`;
+  const grade = `${String(wholePercent(climb.slope.grade))} per cent`;
+  if (climb.where === 'on') return `On the climb: top in ${spoken(climb.topIn)}, ${grade}.`;
+  const length = `${distanceIn(climb.slope.length, units).toFixed(1)} ${spokenDistanceUnit(units)}`;
+  return `Climb in ${spoken(climb.startsIn)}: ${grade} average, ${length} long.`;
+}
+
+/** A climb's length in the rider's ride-scale unit, to the tenth: `0.6 km`. */
+function climbLength(climb: ClimbAhead, units: UnitSystem): string {
+  return `${distanceIn(climb.slope.length, units).toFixed(1)} ${distanceUnit(units)}`;
 }
 
 /** Tens of metres: "in 350 m", not "in 347 m", and never "in 0 m". */

@@ -2200,7 +2200,14 @@ describe('ending a game ride asks first — #2349', () => {
     expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
     expect(hudRegion()).toBe(`${END_RIDE_TEXT.askLabel} ${END_RIDE_TEXT.ask}`);
     // The HUD keeps its one region (#445): the question is no second one.
-    expect(queryAll(document, '.oyl-game [role="status"], .oyl-game [aria-live]').length).toBe(1);
+    // (#2593: nor counted is the climb callout's own sentence, live on this
+    // climbing route because announcements are off — `ClimbCallout.tsx`.)
+    expect(
+      queryAll(
+        document,
+        '.oyl-game [role="status"]:not([data-oyl-climb-callout-sentence]), .oyl-game [aria-live]',
+      ).length,
+    ).toBe(1);
     expect(seen).toEqual(fresh());
   });
 
