@@ -340,6 +340,8 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
     `Registration mode: ${SCRIPTED_STATUS.registration}`,
     'Restoring a snapshot',
     'AI backend',
+    // #2613: what the card and the fingerprint are, and what a rotation does, are behind its ⓘ.
+    'Instance keys',
   ],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is

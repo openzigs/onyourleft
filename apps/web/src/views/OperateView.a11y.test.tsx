@@ -68,6 +68,7 @@ describe('the Operate area — #2603', () => {
       'Accounts',
       'Backups',
       'AI backend',
+      'Instance keys',
       'Operator log',
       'Still to come',
     ]);
@@ -92,6 +93,8 @@ describe('the Operate area — #2603', () => {
       'Read the list again',
       'Set, replace or remove it on the Instance screen',
       'Return to .env',
+      // #2613: the Keys section's one control.
+      'Rotate the encryption key',
     ]);
   });
 

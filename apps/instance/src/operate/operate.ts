@@ -29,6 +29,19 @@
  * records that service writes, and asks for one by writing a request it picks
  * up. A record names a snapshot's directory and never the folder it is in.
  * Restore stays on the CLI.
+ *
+ * ## Keys: the card, and the routine rotation
+ *
+ * The owner is shown the instance's card and its identity key's fingerprint
+ * whole — what `instance-key show` prints, public material only — and the
+ * current encryption key's serial, age and next rotation (#2613). **Rotate
+ * the encryption key** is what `instance-key rotate` does, no more: it takes
+ * the same key lease, so while the instance's own maintenance pass holds it
+ * the answer is `busy` and nothing is written; and it runs over the operator
+ * log's transaction, so a rotation is logged `instance_key_rotate` or not
+ * made. Devices pick the new key up from `GET /v1/instance/keys` by
+ * themselves, and nobody pins again. `--drop-old`, `rotate-identity` and
+ * `reset` make devices pin again, or answer a leak: they stay on the CLI.
  */
 
 import {
@@ -61,7 +74,18 @@ import type {
   OperatorLogEntry,
   SqlStore,
 } from '../store/sql-store.ts';
-import type { DiskSpace, KeysState, StatusSources, TunnelState } from './status.ts';
+import {
+  ENCRYPTION_KEY_LIFE_SECONDS,
+  InstanceKeysUnavailable,
+  type InstanceKeys,
+} from '../keys/instance-keys.ts';
+import {
+  keysState,
+  type DiskSpace,
+  type KeysState,
+  type StatusSources,
+  type TunnelState,
+} from './status.ts';
 
 export type OperateResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -160,6 +184,50 @@ export interface JobsView {
   readonly recent: readonly OperateJobView[];
 }
 
+/**
+ * The instance's keys as the owner reads them (#2613): public material only.
+ * Never a private half, nor anything derived from `OYL_INSTANCE_SECRET_KEY`.
+ */
+export interface KeysView {
+  /** `ready`, or why the keys cannot be read now (`status.ts` §`KeysState`). */
+  readonly state: KeysState;
+  /** The identity key's SHA-256 fingerprint, 64 lower-case hex; `null` unless `ready`. */
+  readonly fingerprint: string | null;
+  /** `oyl-instance:<origin>#<52 characters>`, whole; `null` unless `ready`. */
+  readonly card: string | null;
+  /** The current encryption key, or `null`. */
+  readonly current: {
+    readonly serial: number;
+    /** Unix seconds. */
+    readonly createdAt: number;
+    /** When the instance rotates it by itself, Unix seconds. */
+    readonly rotatesAt: number;
+  } | null;
+  /** How many superseded encryption keys are still held, each for 7 days after its successor. */
+  readonly olderHeld: number;
+}
+
+/**
+ * What the owner's Keys reads and rotates with (#2613). Absent — a world
+ * handed none — both Keys routes answer `unavailable`.
+ */
+export interface OperateKeySources {
+  /** The instance's own keys: what is shown, and their state. */
+  readonly keys: Pick<InstanceKeys, 'show'>;
+  /**
+   * The same keys over `store` — the operator log's transaction — for a
+   * rotation that is logged or not made: the CLI's `withInstanceKeys` does
+   * the same.
+   */
+  readonly over: (store: SqlStore) => Pick<InstanceKeys, 'rotate'>;
+}
+
+/** What `POST /v1/operate/keys/rotate` came to (#2613). */
+export type KeyRotation =
+  | { readonly outcome: 'rotated'; readonly serial: number }
+  /** The key lease is held — the instance's own maintenance pass — and nothing was written. */
+  | { readonly outcome: 'busy' };
+
 /** What the analysis settings are read and written with (#2609). */
 export interface OperateAnalysisSources {
   readonly environment: AnalysisEnvironment;
@@ -216,6 +284,18 @@ export interface Operate {
   ): Promise<OperateResult<{ readonly outcome: ToolCheckOutcome }>>;
   /** The analysis queue and the newest jobs, for the owner `athleteId` (#2610). Writes nothing. */
   jobs(athleteId: string): Promise<JobsView>;
+  /** The card, the fingerprint and the encryption keys (#2613). Writes nothing. `unavailable` with no keys source. */
+  keys(): Promise<OperateResult<KeysView>>;
+  /**
+   * Rotate the encryption key as the owner `athleteId` (#2613): `body` must
+   * be `{ confirm: 'rotate' }`, else `validation_failed` and nothing is
+   * written or logged. Logged `instance_key_rotate` — `refused` with `busy`
+   * while the key lease is held — in the same transaction as the rotation.
+   */
+  rotateKey(
+    athleteId: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<OperateResult<KeyRotation>>;
 }
 
 /** What `unavailable` says on an instance with no keys. Names the variable, never a value. */
@@ -236,8 +316,11 @@ export function createOperate(options: {
   readonly status: StatusSources;
   /** What the analysis settings are read and written with (#2609). */
   readonly analysis: OperateAnalysisSources;
+  /** The instance's keys (#2613); absent, the Keys routes answer `unavailable`. */
+  readonly keys?: OperateKeySources;
 }): Operate {
   const { store, status, analysis } = options;
+  const keySources = options.keys;
   const seconds = (): number => Math.floor(status.now() / 1000);
   // #2610: ONE check for the instance, so a second while one is out is `busy`.
   const toolCheck = createToolCheck({
@@ -292,6 +375,64 @@ export function createOperate(options: {
   }
 
   return {
+    async keys() {
+      if (keySources === undefined) return { ok: false, code: 'unavailable' };
+      const state = await keysState(keySources.keys)();
+      if (state !== 'ready') {
+        return {
+          ok: true,
+          value: { state, fingerprint: null, card: null, current: null, olderHeld: 0 },
+        };
+      }
+      const shown = await keySources.keys.show();
+      const current = shown.encryptionKeys
+        .filter((key) => key.supersededAt === null)
+        .sort((a, b) => b.serial - a.serial)[0];
+      return {
+        ok: true,
+        value: {
+          state,
+          fingerprint: shown.fingerprint,
+          card: shown.card,
+          current:
+            current === undefined
+              ? null
+              : {
+                  serial: current.serial,
+                  createdAt: current.createdAt,
+                  rotatesAt: current.createdAt + ENCRYPTION_KEY_LIFE_SECONDS,
+                },
+          olderHeld: shown.encryptionKeys.filter((key) => key.supersededAt !== null).length,
+        },
+      };
+    },
+    async rotateKey(athleteId, body) {
+      if (keySources === undefined) return { ok: false, code: 'unavailable' };
+      const fields: FieldProblem[] = [];
+      for (const name of Object.keys(body)) {
+        if (name !== 'confirm')
+          fields.push({ field: name, problem: 'is not a field of this request' });
+      }
+      if (body.confirm !== 'rotate') fields.push({ field: 'confirm', problem: 'must be rotate' });
+      if (fields.length > 0) return { ok: false, code: 'validation_failed', fields };
+      const sources = keySources;
+      const { value } = await store.recordOperatorAction<KeyRotation>(
+        { actor: { source: 'app', athleteId }, action: 'instance_key_rotate', at: seconds() },
+        async (inside) => {
+          try {
+            // No `dropOld`, no `serialAbove`: the routine rotation, and only it.
+            const rotated = await sources.over(inside).rotate();
+            return { outcome: 'done', value: { outcome: 'rotated', serial: rotated.serial } };
+          } catch (error) {
+            if (error instanceof InstanceKeysUnavailable && error.code === 'busy') {
+              return { outcome: 'refused', detail: 'busy', value: { outcome: 'busy' } };
+            }
+            throw error;
+          }
+        },
+      );
+      return { ok: true, value };
+    },
     analysisSettings: analysisView,
     async localModels() {
       const server = await localServer();

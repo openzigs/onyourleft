@@ -26,6 +26,9 @@
  * - Backups (#2607) is drawn third: *Back up now* and the snapshot picker are
  *   targets of that size, and the restore steps' commands — long unbroken
  *   words in `code` — stay inside the viewport.
+ * - Instance keys (#2613): the card is drawn whole at every width — every
+ *   character of it laid out, none clipped or scrolled away — inside the
+ *   viewport, and *Rotate the encryption key* is a target by the walk above.
  *
  * ## The control
  *
@@ -38,6 +41,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { SCRIPTED_KEYS } from '../src/instance/testing';
 import { hrefFor, hrefForModerationSection, routeById } from '../src/shell/routes';
 
 import type { ReflowMeasurement } from './reflow-harness';
@@ -135,6 +139,22 @@ test.describe('the Operate area — #2603', () => {
       await expect(page.getByRole('button', { name: 'Back up now' })).toHaveCount(1);
       await expect(page.getByLabel('Snapshot to restore')).toHaveCount(1);
       await expect(page.locator('main .oyl-operate__backups > li')).toHaveCount(3);
+      // #2613: the card, whole: every character laid out, none hidden behind an overflow.
+      const card = page.locator('main code.oyl-instance__card');
+      await expect(card).toHaveText(SCRIPTED_KEYS.card ?? '');
+      const cardBox = await card.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return {
+          left: box.left,
+          right: box.right,
+          clipped: element.scrollWidth > element.clientWidth + 1,
+          hidden: getComputedStyle(element).textOverflow === 'ellipsis',
+        };
+      });
+      expect(cardBox.left).toBeGreaterThanOrEqual(0);
+      expect(cardBox.right).toBeLessThanOrEqual(width + 0.5);
+      expect(cardBox.clipped).toBe(false);
+      expect(cardBox.hidden).toBe(false);
       const commit = await page.locator('main .oyl-operate__status code').boundingBox();
       expect(commit?.x ?? -1).toBeGreaterThanOrEqual(0);
       expect((commit?.x ?? 0) + (commit?.width ?? 0)).toBeLessThanOrEqual(width + 0.5);

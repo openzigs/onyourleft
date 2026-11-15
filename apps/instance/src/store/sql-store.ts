@@ -1021,7 +1021,8 @@ export const OPERATOR_DETAILS: {
   model_key_set: { words: [], counts: [] },
   model_key_clear: { words: ['cleared', 'none_held'], counts: [] },
   instance_key_init: { words: [], counts: [] },
-  instance_key_rotate: { words: [], counts: [] },
+  // #2613: a rotation from the app refused while the key lease is held.
+  instance_key_rotate: { words: ['busy'], counts: [] },
   instance_key_rotate_identity: { words: [], counts: [] },
   instance_key_reset: { words: [], counts: [] },
   load_accounts_add: { words: [], counts: ['added'] },

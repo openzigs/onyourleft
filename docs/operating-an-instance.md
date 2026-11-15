@@ -1066,6 +1066,22 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   it calls tools** and **Save this model** (offered only after that model's check said `tools-ok`),
   whether your own hosted key is held — set, replaced or removed on the Instance screen, never here —
   the jobs, and **Return to .env**. No model is recommended or picked for you.
+- **Instance keys** ([#2613](https://github.com/openzigs/onyourleft/issues/2613)).
+  `GET /v1/operate/keys` shows what `instance-key show` prints, public material only: the keys' state,
+  the identity key's **full** fingerprint, the **instance card** whole (as text and as a QR code, so
+  you can hand it to a rider), the current encryption key's serial, when it was made and when the
+  instance rotates it by itself (30 days on), and how many older encryption keys are still held (each
+  for 7 days after the next was made). Neither private half, nor anything derived from
+  `OYL_INSTANCE_SECRET_KEY`, is ever in it. **Rotate the encryption key** (`POST
+  /v1/operate/keys/rotate` with `{ "confirm": "rotate" }`, typed in the app) does what `instance-key
+  rotate` does, with no `--drop-old` and no `--serial-above`: the old key goes on opening requests for
+  its 7 days, devices pick the new one up from `GET /v1/instance/keys` by themselves, and nobody pins
+  the card again. It takes the same key lease as the instance's own maintenance pass, so while that
+  pass holds it the answer is `busy` and nothing is written. It is logged `instance_key_rotate`
+  (`refused` with `busy`) in the same transaction as the rotation. `rotate --drop-old`,
+  `rotate-identity` and `reset` each make every device pin again, or answer a leak, so they **stay on
+  the CLI** (§"The instance's keys"). The section names them as commands and has no button for them.
+  The instance's own admin pages never read this route through the tunnel (ADR 0069 D-2).
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

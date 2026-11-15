@@ -126,4 +126,7 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/operate/analysis/models', OPERATE),
   only('POST', '/v1/operate/analysis/check', OPERATE),
   only('GET', '/v1/operate/analysis/jobs', OPERATE),
+  // #2613: the instance's keys, and the routine rotation.
+  only('GET', '/v1/operate/keys', OPERATE),
+  only('POST', '/v1/operate/keys/rotate', OPERATE),
 ];

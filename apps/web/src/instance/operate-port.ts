@@ -347,6 +347,38 @@ export type OperateBackUpNow =
   | { readonly kind: 'refused'; readonly sentence: string }
   | { readonly kind: Exclude<OperateStanding, 'owner'> };
 
+/**
+ * The instance's keys (#2613), as `GET /v1/operate/keys` writes them: public
+ * material only, each field held to its shape here so nothing else is drawn.
+ */
+export interface OperateKeys {
+  readonly kind: 'keys';
+  readonly state: OperateKeysState;
+  /** 64 lower-case hex, or `null` unless `ready`. */
+  readonly fingerprint: string | null;
+  /** `oyl-instance:<origin>#<52 characters>`, whole, or `null` unless `ready`. */
+  readonly card: string | null;
+  readonly current: {
+    readonly serial: number;
+    /** ISO 8601, UTC. */
+    readonly createdAt: string;
+    readonly rotatesAt: string;
+  } | null;
+  readonly olderHeld: number;
+}
+
+/** The keys, or why there are none: a standing other than `owner`. */
+export type OperateKeysRead = OperateKeys | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+/** What *Rotate the encryption key* did (#2613). */
+export type OperateKeyRotation =
+  | { readonly kind: 'rotated'; readonly serial: number }
+  /** The instance's own key maintenance held the lease: nothing was rotated. */
+  | { readonly kind: 'busy' }
+  /** The instance refused the request as written: nothing was rotated. */
+  | { readonly kind: 'not-rotated' }
+  | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
 /** What the Operate area may ask. */
 export interface OperatePort {
   /** The instance's status, read-only (#2604): one sealed request. */
@@ -371,6 +403,10 @@ export interface OperatePort {
   backups(): Promise<OperateBackupsRead>;
   /** Ask the `backup` service for a snapshot now (#2606): it takes it within 30 seconds. */
   backUpNow(): Promise<OperateBackUpNow>;
+  /** The card, the fingerprint and the encryption keys (#2613): read-only. */
+  keys(): Promise<OperateKeysRead>;
+  /** Rotate the encryption key, with the word the owner typed (#2613). */
+  rotateKey(confirm: string): Promise<OperateKeyRotation>;
 }
 
 /** Every Operate route is sealed and signed by the owner's device key, so the port needs what a sealed call needs. */
@@ -573,6 +609,46 @@ function sentenceFrom(answer: InstanceAnswer): string | undefined {
   if (/[0-9][.,][0-9]/.test(message)) return undefined;
   if (message.split(' ').some((word) => word.length > 24)) return undefined;
   return message;
+}
+
+/** The identity key's fingerprint as the instance writes it: SHA-256, lower-case hex. */
+const FINGERPRINT = /^[0-9a-f]{64}$/;
+
+/** An instance card, whole: `oyl-instance:`, an origin, `#`, and 52 base32 characters. */
+const CARD = /^oyl-instance:https?:\/\/[A-Za-z0-9.:[\]-]{1,260}#[A-Z2-7]{52}$/;
+
+const KEYS_STATES: readonly OperateKeysState[] = [
+  'ready',
+  'no-secret',
+  'no-origin',
+  'no-keys',
+  'unreadable',
+  'busy',
+];
+
+function keysFrom(answer: InstanceAnswer): OperateKeys | undefined {
+  const body = record(answer.body);
+  if (body === undefined) return undefined;
+  const { state, fingerprint, card, olderHeld } = body;
+  if (
+    !oneOf(state, KEYS_STATES) ||
+    !(fingerprint === null || (typeof fingerprint === 'string' && FINGERPRINT.test(fingerprint))) ||
+    !(card === null || (typeof card === 'string' && CARD.test(card))) ||
+    !whole(olderHeld)
+  ) {
+    return undefined;
+  }
+  let current: OperateKeys['current'] = null;
+  if (body.current !== null) {
+    const held = record(body.current);
+    const createdAt = isoMoment(held?.createdAt);
+    const rotatesAt = isoMoment(held?.rotatesAt);
+    if (!whole(held?.serial) || createdAt === undefined || rotatesAt === undefined) {
+      return undefined;
+    }
+    current = { serial: held.serial, createdAt, rotatesAt };
+  }
+  return { kind: 'keys', state, fingerprint, card, current, olderHeld };
 }
 
 /** Said for a refused "back up now" when the instance's own sentence may not be shown. */
@@ -1031,6 +1107,35 @@ export function createOperatePort(dependencies: OperatePortDependencies): Operat
         if (answer.status === 200) return backupsFrom(answer) ?? { kind: 'unreachable' };
         if (isNotTheOwner(answer)) return { kind: 'not-owner' };
         // #2602: an instance with no OYL_INSTANCE_SECRET_KEY offers no Operate area.
+        if (errorCode(answer) === 'unavailable') return { kind: 'no-keys' };
+        return { kind: 'unreachable' };
+      } catch {
+        return { kind: 'unreachable' };
+      }
+    },
+
+    keys: () => ownerRead('GET', '/v1/operate/keys', undefined, keysFrom),
+
+    rotateKey: async (confirm) => {
+      // Only the one word the instance takes is sent at all.
+      if (confirm !== 'rotate') return { kind: 'not-rotated' };
+      try {
+        const session = await sealedSession();
+        if (session.kind === 'closed') return { kind: closedStanding(session) };
+        const answer = await session.sealed.call('POST', '/v1/operate/keys/rotate', {
+          token: session.token,
+          body: { confirm },
+        });
+        if (answer.status === 401) return { kind: 'signed-out' };
+        if (answer.status === 200) {
+          const body = record(answer.body);
+          if (body?.outcome === 'busy') return { kind: 'busy' };
+          return body?.outcome === 'rotated' && whole(body.serial)
+            ? { kind: 'rotated', serial: body.serial }
+            : { kind: 'unreachable' };
+        }
+        if (errorCode(answer) === 'validation_failed') return { kind: 'not-rotated' };
+        if (isNotTheOwner(answer)) return { kind: 'not-owner' };
         if (errorCode(answer) === 'unavailable') return { kind: 'no-keys' };
         return { kind: 'unreachable' };
       } catch {
