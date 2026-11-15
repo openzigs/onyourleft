@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { openServingStore } from '../store/serving.ts';
 import { ATHLETE_A, activityRecordFixture, seedWorld } from '../store/testing/index.ts';
+import { backupLoop } from './commands.ts';
 import { runCommand } from './run.ts';
 
 const INSTANCE = fileURLToPath(new URL('../..', import.meta.url));
@@ -155,6 +156,50 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
     } finally {
       await log.close();
     }
+  });
+
+  it('restores a snapshot `backup-loop` made for the owner’s “back up now”, and a known activity comes back (#2606)', async () => {
+    const { directory: root, live, store, keys } = await populated();
+    const asked = await store.requestBackup(Math.floor(Date.now() / 1000));
+    expect(asked.outcome).toBe('requested');
+    // The backup service, until it has served the request; the store stays open.
+    const stop = new AbortController();
+    const served = await backupLoop(live, join(root, 'backups'), {
+      intervalSeconds: 21_600,
+      signal: stop.signal,
+      wait: () => {
+        stop.abort();
+        return Promise.resolve();
+      },
+      report: () => undefined,
+    });
+    expect(served.runs).toBe(1);
+    expect(await store.pendingBackupRequest()).toBeUndefined();
+    expect((await store.listBackupRecords(1))[0]).toMatchObject({
+      outcome: 'done',
+      requested: true,
+    });
+    await store.close();
+
+    const [snapshot] = await readdir(join(root, 'backups'));
+    const second = {
+      database: join(root, 'second-machine', 'instance.sqlite'),
+      blobs: join(root, 'second-machine', 'blobs'),
+    };
+    const restored = run(second, 'restore', join(root, 'backups', snapshot ?? ''));
+    expect(restored.status, restored.stderr).toBe(0);
+    const fresh = openServingStore(second.database);
+    try {
+      const known = activityRecordFixture(ATHLETE_A);
+      const read = await fresh.getActivityRecord(ATHLETE_A, known.contentSha256);
+      expect(read?.signedRecord).toEqual(known.signedRecord);
+      // The request this snapshot served does not wait in it (#2606 review L1).
+      expect(await fresh.pendingBackupRequest()).toBeUndefined();
+    } finally {
+      await fresh.close();
+    }
+    const blobs = createDiskBlobStore(second.blobs);
+    for (const key of keys) expect(await blobs.has(key)).toBe(true);
   });
 
   // Two cases, not one (#2568): six child processes in one case took 3.8 s

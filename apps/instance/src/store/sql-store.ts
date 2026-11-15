@@ -51,6 +51,7 @@ import type {
   ModerationLogTable,
   NoticeErasureTable,
   OperatorLogTable,
+  BackupRecordTable,
   NoticeTable,
   StatementTable,
   AppealTable,
@@ -947,6 +948,7 @@ export const OPERATOR_ACTIONS = [
   'load_accounts_add',
   'load_accounts_erase',
   'account_erase',
+  'backup_requested',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -979,7 +981,7 @@ export const OPERATOR_DETAILS: {
   };
 } = {
   migrate: { words: [], counts: ['applied'] },
-  backup: { words: [], counts: ['blobs', 'removed'] },
+  backup: { words: ['offbox_failed', 'requested'], counts: ['blobs', 'removed'] },
   restore: { words: ['keys_rotated', 'keys_not_rotated'], counts: ['blobs'] },
   room_open: { words: ['ride', 'race'], counts: [] },
   model_key_set: { words: [], counts: [] },
@@ -991,6 +993,9 @@ export const OPERATOR_DETAILS: {
   load_accounts_add: { words: [], counts: ['added'] },
   load_accounts_erase: { words: [], counts: ['erased'] },
   account_erase: { words: [], counts: [] },
+  // #2606: why "back up now" was refused — a request already waits, or a
+  // backup ran in the last 15 minutes.
+  backup_requested: { words: ['pending', 'too_soon'], counts: [] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
@@ -1048,7 +1053,77 @@ export const OPERATE_COUNT_QUERIES = [
   "SELECT count(*) AS n FROM analysis_job WHERE status = 'running'",
 ] as const;
 
-/** What an operator action's change answers: how it ended, a detail for the log, and its own value. */
+/**
+ * How long after a backup "back up now" is refused (#2606): each extra run
+ * with `--keep N` prunes an older snapshot, and shortens how far back the
+ * owner can restore.
+ */
+export const BACKUP_REQUEST_GAP_SECONDS = 15 * 60;
+
+/** How long a backup's record is kept (#2606): the 30-day backup limit (#1381). */
+export const BACKUP_RECORD_DAYS = 30;
+
+/** One run of `backup` or `backup-loop`, as it is written (#2606, migration 0042). */
+export type BackupRun =
+  | {
+      readonly outcome: 'done';
+      /** When the run started, Unix seconds. */
+      readonly at: number;
+      /** The snapshot directory's NAME, never its path. */
+      readonly snapshot: string;
+      readonly rows: number;
+      readonly blobs: number;
+      readonly databaseSha256: string;
+      readonly sizeBytes: number;
+      readonly offBox: 'copied' | 'failed' | 'not-configured';
+      readonly removed: number;
+      readonly backupsFreeBytes: number | null;
+      readonly offBoxFreeBytes: number | null;
+      /** The backup service's interval: `backup-loop`'s runs only. */
+      readonly intervalSeconds: number | null;
+    }
+  | {
+      readonly outcome: 'failed';
+      readonly at: number;
+      /** The error's NAME, never its message. */
+      readonly error: string;
+      readonly intervalSeconds: number | null;
+    };
+
+/** One backup's record, as it is read (#2606). */
+export interface BackupRecord {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly at: number;
+  readonly outcome: 'done' | 'failed';
+  readonly error: string | null;
+  readonly snapshot: string | null;
+  readonly rows: number | null;
+  readonly blobs: number | null;
+  readonly databaseSha256: string | null;
+  readonly sizeBytes: number | null;
+  readonly offBox: 'copied' | 'failed' | 'not-configured' | null;
+  readonly removed: number | null;
+  readonly backupsFreeBytes: number | null;
+  readonly offBoxFreeBytes: number | null;
+  readonly intervalSeconds: number | null;
+  /** It was run because the owner asked for it. */
+  readonly requested: boolean;
+}
+
+/** The owner's "back up now", waiting (#2606). */
+export interface BackupRequest {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly requestedAt: number;
+}
+
+/** What asking for a backup did (#2606). */
+export type BackupRequestOutcome =
+  | { readonly outcome: 'requested'; readonly request: BackupRequest }
+  | { readonly outcome: 'pending' }
+  | { readonly outcome: 'too_soon' };
+
 export interface OperatorChange<T> {
   readonly outcome: Exclude<OperatorOutcome, 'failed'>;
   /** Held to the action's vocabulary ({@link OPERATOR_DETAILS}), or `null`. */
@@ -2084,6 +2159,53 @@ export interface SqlStore {
   listPendingAthletes(): Promise<readonly AthleteRecord[]>;
   /** How many athletes are in each standing, rooms are open and jobs wait or run (#2604). Counts only. */
   operateCounts(): Promise<OperateCounts>;
+  /**
+   * Write one backup run's record (#2606), and in the SAME transaction delete
+   * every record and served request more than {@link BACKUP_RECORD_DAYS} days
+   * older than it, and — `requestId` given and still waiting — mark that
+   * request served by it, so a request is served once. Answers the record's
+   * id and whether it served the request.
+   */
+  recordBackup(
+    run: BackupRun,
+    requestId?: number,
+  ): Promise<{ readonly id: number; readonly served: boolean }>;
+  /** The newest backup records, newest first, at most `limit` (#2606). */
+  listBackupRecords(limit: number): Promise<readonly BackupRecord[]>;
+  /**
+   * The newest record made by the backup service (`intervalSeconds` set), or
+   * `undefined` (#2606); `doneOnly` leaves out failed runs.
+   */
+  newestServiceBackup(doneOnly: boolean): Promise<BackupRecord | undefined>;
+  /** The oldest "back up now" still waiting, or `undefined` (#2606). */
+  pendingBackupRequest(): Promise<BackupRequest | undefined>;
+  /**
+   * Ask for a backup now (#2606), in ONE transaction with the checks:
+   * `pending` while a request already waits, `too_soon` when a backup was
+   * made within {@link BACKUP_REQUEST_GAP_SECONDS} of `at`; otherwise the
+   * request, written.
+   */
+  requestBackup(at: number): Promise<BackupRequestOutcome>;
+  /** Whether a backup record names the snapshot directory `snapshot` (#2606). */
+  hasBackupRecord(snapshot: string): Promise<boolean>;
+  /**
+   * Take the lease on one backup folder (#2606, third review), in ONE
+   * `BEGIN IMMEDIATE` transaction: `taken` when no run holds it, or when its
+   * holder's heartbeat is older than `staleBefore` — taken over by a
+   * conditional update on that holder's token, so of two takers one wins —
+   * and `busy` otherwise. Times are Unix ms.
+   */
+  takeBackupLease(lease: {
+    readonly place: string;
+    readonly token: string;
+    readonly holder: string;
+    readonly now: number;
+    readonly staleBefore: number;
+  }): Promise<'taken' | 'busy'>;
+  /** The holder's heartbeat: `false` when the lease is no longer `token`'s. */
+  heartbeatBackupLease(place: string, token: string, now: number): Promise<boolean>;
+  /** Give the lease up, if it is still `token`'s. */
+  releaseBackupLease(place: string, token: string): Promise<void>;
   /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
   listLoadAthletes(): Promise<readonly string[]>;
   /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
@@ -2522,6 +2644,43 @@ const operatorLogFrom = (row: Selectable<OperatorLogTable>): OperatorLogEntry =>
   action: row.action as OperatorAction,
   detail: row.detail,
   outcome: row.outcome,
+});
+
+/** Every column of a backup record, and whether a request was served by it (#2606). */
+function backupRecordQuery(executor: Kysely<InstanceDatabase>) {
+  return executor
+    .selectFrom('backup_record')
+    .selectAll('backup_record')
+    .select((eb) =>
+      eb
+        .exists(
+          eb
+            .selectFrom('backup_request')
+            .select('backup_request.id')
+            .whereRef('backup_request.record_id', '=', 'backup_record.id'),
+        )
+        .as('requested'),
+    );
+}
+
+const backupRecordFrom = (
+  row: Selectable<BackupRecordTable> & { readonly requested: unknown },
+): BackupRecord => ({
+  id: row.id,
+  at: row.at,
+  outcome: row.outcome,
+  error: row.error,
+  snapshot: row.snapshot,
+  rows: row.row_count,
+  blobs: row.blob_count,
+  databaseSha256: row.database_sha256,
+  sizeBytes: row.size_bytes,
+  offBox: row.off_box,
+  removed: row.removed,
+  backupsFreeBytes: row.backups_free_bytes,
+  offBoxFreeBytes: row.off_box_free_bytes,
+  intervalSeconds: row.interval_seconds,
+  requested: Number(row.requested) === 1,
 });
 
 /** Append one operator log entry through `executor`, answering its id (#2602). */
@@ -6086,6 +6245,184 @@ function storeOver(
           roomsOpen: open,
           analysis: { queued, running },
         };
+      }),
+
+    recordBackup: (run, requestId) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const done = run.outcome === 'done' ? run : undefined;
+          const row = await trx
+            .insertInto('backup_record')
+            .values({
+              at: run.at,
+              outcome: run.outcome,
+              error: run.outcome === 'failed' ? run.error : null,
+              snapshot: done?.snapshot ?? null,
+              row_count: done?.rows ?? null,
+              blob_count: done?.blobs ?? null,
+              database_sha256: done?.databaseSha256 ?? null,
+              size_bytes: done?.sizeBytes ?? null,
+              off_box: done?.offBox ?? null,
+              removed: done?.removed ?? null,
+              backups_free_bytes: done?.backupsFreeBytes ?? null,
+              off_box_free_bytes: done?.offBoxFreeBytes ?? null,
+              interval_seconds: run.intervalSeconds,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          // By AGE, not by count: the 30-day limit is a time (#1381).
+          const cutoff = run.at - BACKUP_RECORD_DAYS * 86_400;
+          // Requests first: each served one names its record. A request is
+          // never later than the run that served it, so every request whose
+          // record goes is among these.
+          // And every request a record that goes served, whatever time the
+          // request carries: a clock stepped back must not leave one naming
+          // a record that is gone (second review).
+          await trx
+            .deleteFrom('backup_request')
+            .where('record_id', 'is not', null)
+            .where((eb) =>
+              eb.or([
+                eb('requested_at', '<', cutoff),
+                eb(
+                  'record_id',
+                  'in',
+                  eb.selectFrom('backup_record').select('id').where('at', '<', cutoff),
+                ),
+              ]),
+            )
+            .execute();
+          await trx.deleteFrom('backup_record').where('at', '<', cutoff).execute();
+          let served = false;
+          if (requestId !== undefined) {
+            const updated = await trx
+              .updateTable('backup_request')
+              .set({ record_id: row.id })
+              .where('id', '=', requestId)
+              .where('record_id', 'is', null)
+              .executeTakeFirst();
+            served = updated.numUpdatedRows > 0n;
+          }
+          return { id: row.id, served };
+        }),
+      ),
+
+    listBackupRecords: (limit) =>
+      exclusive(async () =>
+        (
+          await backupRecordQuery(db).orderBy('backup_record.id', 'desc').limit(limit).execute()
+        ).map(backupRecordFrom),
+      ),
+
+    newestServiceBackup: (doneOnly) =>
+      exclusive(async () => {
+        let query = backupRecordQuery(db).where('backup_record.interval_seconds', 'is not', null);
+        if (doneOnly) query = query.where('backup_record.outcome', '=', 'done');
+        const row = await query.orderBy('backup_record.id', 'desc').limit(1).executeTakeFirst();
+        return row === undefined ? undefined : backupRecordFrom(row);
+      }),
+
+    pendingBackupRequest: () =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('backup_request')
+          .select(['id', 'requested_at'])
+          .where('record_id', 'is', null)
+          .orderBy('id')
+          .limit(1)
+          .executeTakeFirst();
+        return row === undefined ? undefined : { id: row.id, requestedAt: row.requested_at };
+      }),
+
+    requestBackup: (at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<BackupRequestOutcome> => {
+          const waiting = await trx
+            .selectFrom('backup_request')
+            .select('id')
+            .where('record_id', 'is', null)
+            .limit(1)
+            .executeTakeFirst();
+          if (waiting !== undefined) return { outcome: 'pending' };
+          const recent = await trx
+            .selectFrom('backup_record')
+            .select('id')
+            .where('outcome', '=', 'done')
+            .where('at', '>', at - BACKUP_REQUEST_GAP_SECONDS)
+            .limit(1)
+            .executeTakeFirst();
+          if (recent !== undefined) return { outcome: 'too_soon' };
+          const row = await trx
+            .insertInto('backup_request')
+            .values({ requested_at: at, record_id: null })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          return { outcome: 'requested', request: { id: row.id, requestedAt: at } };
+        }),
+      ),
+
+    hasBackupRecord: (snapshot) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('backup_record')
+          .select('id')
+          .where('snapshot', '=', snapshot)
+          .limit(1)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    takeBackupLease: (lease) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<'taken' | 'busy'> => {
+          const held = await trx
+            .selectFrom('backup_lease')
+            .select(['token', 'heartbeat_at'])
+            .where('place', '=', lease.place)
+            .executeTakeFirst();
+          if (held === undefined) {
+            await trx
+              .insertInto('backup_lease')
+              .values({
+                place: lease.place,
+                token: lease.token,
+                holder: lease.holder,
+                heartbeat_at: lease.now,
+              })
+              .execute();
+            return 'taken';
+          }
+          if (held.heartbeat_at >= lease.staleBefore) return 'busy';
+          // Only over the holder judged stale: a lease that changed hands
+          // meanwhile is not this taker's to take.
+          const taken = await trx
+            .updateTable('backup_lease')
+            .set({ token: lease.token, holder: lease.holder, heartbeat_at: lease.now })
+            .where('place', '=', lease.place)
+            .where('token', '=', held.token)
+            .executeTakeFirst();
+          return taken.numUpdatedRows > 0n ? 'taken' : 'busy';
+        }),
+      ),
+
+    heartbeatBackupLease: (place, token, now) =>
+      exclusive(async () => {
+        const beat = await db
+          .updateTable('backup_lease')
+          .set({ heartbeat_at: now })
+          .where('place', '=', place)
+          .where('token', '=', token)
+          .executeTakeFirst();
+        return beat.numUpdatedRows > 0n;
+      }),
+
+    releaseBackupLease: (place, token) =>
+      exclusive(async () => {
+        await db
+          .deleteFrom('backup_lease')
+          .where('place', '=', place)
+          .where('token', '=', token)
+          .execute();
       }),
 
     listLoadAthletes: () =>

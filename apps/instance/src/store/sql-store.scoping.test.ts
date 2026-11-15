@@ -386,6 +386,25 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   operateCounts: {
     notAScopedRead: 'the owner’s Status: counts across the instance, no row of anybody (#2604)',
   },
+  recordBackup: { notAScopedRead: 'the backup service’s write (#2606); sql-store.backup.test.ts' },
+  listBackupRecords: {
+    notAScopedRead: 'the instance’s backups, for its owner: no row of any athlete (#2606)',
+  },
+  newestServiceBackup: {
+    notAScopedRead:
+      'the instance’s newest backup, for its owner’s Status: no row of any athlete (#2606)',
+  },
+  pendingBackupRequest: {
+    notAScopedRead:
+      'the owner’s waiting “back up now”, for the backup service: names nobody (#2606)',
+  },
+  requestBackup: { notAScopedRead: 'the owner’s write, logged with it (#2606)' },
+  hasBackupRecord: {
+    notAScopedRead: 'whether a snapshot directory is recorded, for the backup service (#2606)',
+  },
+  takeBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
+  heartbeatBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
+  releaseBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
   listLoadAthletes: {
     notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',
   },

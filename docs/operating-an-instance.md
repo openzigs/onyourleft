@@ -681,6 +681,110 @@ copies the snapshot to a second place — the off-box copy. The home deployment 
 schedule (the `backup` service: every six hours, fourteen kept, into `OYL_BACKUP_DIR` with a copy in
 `OYL_OFFBOX_DIR`).
 
+**A copy that cannot be written does not lose the snapshot** ([#2606](https://github.com/openzigs/onyourleft/issues/2606)).
+The snapshot stays, its record says the off-box copy `failed`, the off-box folder's older copies are
+not pruned (so a drive that is full or gone keeps what it had), and the command prints its report,
+then a line on standard error, and exits 1.
+
+### Each backup is recorded in the database
+
+Every run of `backup` writes a record into the instance's own database (migration 0042), and the owner
+reads them in the app's Operate area (`GET /v1/operate/backups`). The instance cannot list the backup
+folders: in the home deployment only the `backup` service mounts them, and the instance holds
+`OYL_INSTANCE_SECRET_KEY`, which this document keeps away from backup destinations. A record holds:
+when the run started; whether it made a snapshot; the snapshot directory's **name** (never the folder
+it is in); its row and blob counts and database SHA-256 from its `manifest.json`; its size; how its
+off-box copy went (`copied`, `failed` or `not-configured`); how many old snapshots `--keep` removed;
+and the free space where the snapshots and their off-box copies go. A run that fails is recorded too,
+by its error's **name** or Node's code (`ENOSPC`, `EACCES`), never its message, which may name a path.
+A run deletes every record more than 30 days older than itself, so the records never outlive the
+30-day limit below. The record and the run's entry in the operator log are written in one transaction.
+The `pre-deploy` snapshot `deploy.sh` takes is recorded as well, as a one-off: it has no interval, and
+the Status's **last backup** is the `backup` service's newest snapshot, not it.
+
+### "Back up now", from the app
+
+The owner can ask for a backup from the Operate area (`POST /v1/operate/backups`, answered `202` at
+once). The instance takes none itself: it writes a request into the database, with its `backup_requested` entry in the operator
+log in the same transaction, and the `backup` service takes the snapshot **within 30 seconds**. It
+serves a request once — the run's record and the request marked served are one transaction — and a
+request made while the service is stopped waits in the database until it starts again. **A request is
+refused (`too_many`) while one already waits, or for 15 minutes after a backup**, and the refusal is
+logged: each extra run with `--keep N` removes an older snapshot, so asking repeatedly would shorten
+how far back you can restore. A requested backup is an ordinary snapshot, restored as below.
+**Restore stays on the CLI**: the app shows the steps and does not run them.
+
+### The `backup` service
+
+```bash
+node src/operator/cli.ts backup-loop <directory> --interval <seconds> [--keep N] [--copy-to <second directory>]
+```
+
+Since [#2606](https://github.com/openzigs/onyourleft/issues/2606) the home deployment's `backup` service
+runs `backup-loop` rather than a shell loop. `OYL_BACKUP_KEEP` and `OYL_BACKUP_INTERVAL_SECONDS`
+mean what they meant: a snapshot, then the interval, then a snapshot. It also looks for a waiting
+request every 30 seconds, opening the database only for that moment. After a restart its first run is
+an interval after its newest recorded run, rather than at once, so a restart does not take an extra
+snapshot and remove an older one. A run that fails is recorded and the loop carries on.
+`docker compose stop backup` lets a run in progress finish (the service has a two-minute grace period).
+
+- **A failure never costs a restore point.** Old snapshots are removed only after the run's record is
+  written. If the record cannot be written (a full disk, a lock held too long), the run removes no
+  older snapshot.
+- **The bound while records fail.** A run whose record cannot be written removes no recorded
+  snapshot. A folder holds at most `--keep` + 2 snapshots because of failed records, or what it held
+  before if that was more. Past that bound, the run removes the oldest unrecorded snapshots that are
+  newer than every recorded snapshot in the folder, so the newest snapshot is always kept. It never
+  removes a recorded snapshot, or an unrecorded one older than them, such as one the shell loop made
+  before #2606. If the folder has no recorded snapshot at all, the run removes only the snapshot it
+  has just taken.
+- **How often it runs while records fail.** The loop holds back a request it has already tried for
+  one interval. When it starts, it also holds off every run, the owner's requests included, until
+  one interval after the newest snapshot in the folder that no record names. That snapshot may come
+  from a run whose record failed before a restart, or from the shell loop before an upgrade. It is
+  checked against every record. A folder named after the present moment, which a wrong clock left,
+  is ignored. So neither restarts nor a waiting request take snapshots more often than once per
+  interval.
+- **One run at a time in a folder: the lease.** A run holds a **lease** on each folder it writes:
+  the snapshot folder, and the off-box folder. The lease is a row in the instance's own database
+  (`backup_lease`, keyed by the SHA-256 of the folder's path, never the path), held for the whole
+  run. Every run opens that database, whichever container it runs in: the `backup` service, a
+  `backup` run by hand, `deploy.sh`'s pre-deploy snapshot. SQLite's write lock is the one atomic step
+  they all share, so a run takes the lease in a single `BEGIN IMMEDIATE` transaction, and only one
+  run can.
+  - While it runs, the holder writes a heartbeat every 30 seconds, including during the off-box copy.
+    A run that is slow, or hung but alive, keeps its lease however long it takes.
+  - A lease whose heartbeat is more than **5 minutes** old was left by a run that died. The next
+    run takes it over with a conditional update on the dead run's token, so of two runs only one
+    can win.
+  - **A stuck lease needs no command to clear**: it expires 5 minutes after the run that held it
+    stopped. If the holder is alive but hung, for example on a share that stopped answering, stop
+    it (`docker compose restart backup`). Its lease is free 5 minutes later.
+  - A second run into a folder that is held is refused, and recorded `failed` as
+    `BackupFolderBusy`. A run whose off-box lease is held elsewhere records its copy `failed`, and
+    neither writes nor prunes there.
+  - A run that loses its lease, because a heartbeat cannot be written or another run took it, stops
+    before it records or prunes anything (`BackupLeaseLost`).
+  - On a database from before migration 0042, which has no lease table, runs take no lease, as
+    before.
+  - One limit: `VACUUM INTO` holds the process while it copies the database, so no heartbeat is
+    written during it. A database that takes more than five minutes to copy would lose its lease.
+    That is far beyond the size of one person's instance.
+- **A snapshot is written under `.partial-snapshot-…`** and renamed `snapshot-…` only once it is
+  complete, both on the box and off it. `--keep` never counts a partial one. A run removes partial
+  snapshots only while it holds the folder's lease, never its own, and only those last changed more
+  than six hours ago. A rename that Windows refuses for a moment (`EACCES` or
+  `EPERM`, for example while a scanner holds the folder) is retried a few times.
+- **A snapshot taken for "back up now" does not hold that request as waiting**, so restoring it does
+  not ask for another backup.
+- **On a rollback** to an image from before `backup-loop` existed, the service checks whether the
+  image has the command. If it does not, it runs the old shell loop, so backups carry on. That loop
+  now stops on `docker compose stop` between runs.
+- ⚠️ **The off-box copy has no time limit.** A share that stops answering blocks the copy inside a
+  file-system call, which Node cannot cancel, and the service waits with it. The snapshot on the box
+  is already complete by then. If the Status shows the last backup getting old, check
+  `docker compose logs backup` and the share. A watchdog for this is [#2626](https://github.com/openzigs/onyourleft/issues/2626).
+
 ⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
 the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
 account that was erased. The privacy policy tells riders and notifiers that the project's own
@@ -705,8 +809,9 @@ node src/operator/cli.ts restore <snapshot directory> [--force]
 node src/operator/cli.ts verify
 ```
 
-**Stop the instance first** (`docker compose stop instance`): a restore writes where it keeps its
-data. It refuses to write over a database that is there without `--force`, and refuses a snapshot
+**Stop the instance and the backup service first** (`docker compose stop instance backup`): a
+restore writes where they keep their data, and the backup service opens the database every 30 seconds
+to look for a "back up now". `deploy.sh`'s rollback stops both. It refuses to write over a database that is there without `--force`, and refuses a snapshot
 whose database is not the one its manifest describes. After copying it **checks what it restored**
 — SQLite's integrity check, every table's row count and the blob count against the manifest, and
 every blob's content against its name — and fails loudly if anything differs. `verify` prints the
@@ -718,7 +823,8 @@ It then **rotates the instance's encryption key** ("The instance's keys", above)
 
 A restore has been **performed** in a test, not only written: `apps/instance/src/operator/commands.test.ts`
 backs up a populated instance while it is open and writing, restores the snapshot into an empty
-place, and reads a known activity record back through the store. Restoring **on a second machine**
+place, and reads a known activity record back through the store — and does the same with a snapshot
+`backup-loop` made to serve a "back up now" (#2606). Restoring **on a second machine**
 is an owner's step — see [issue #733](https://github.com/openzigs/onyourleft/issues/733).
 
 ## Erasing a rider's account when they email to ask
@@ -821,9 +927,9 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   neither: from the app, naming the owner's athlete, and from the CLI on the host
   (`node src/operator/cli.ts …`, the owner's ruling of 2026-11-14), naming **no athlete**, because
   the CLI is run by whoever can reach the data, not by an account. The commands that change state —
-  `migrate`, `backup`, `restore`, `room-open`, `model-key set|clear`, `instance-key
-  init|rotate|rotate-identity|reset`, `load-accounts add|erase` and `account-erase --confirm` — are
-  logged; reads are not. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
+  `migrate`, `backup` (each run of `backup-loop` too), `restore`, `room-open`, `model-key set|clear`,
+  `instance-key init|rotate|rotate-identity|reset`, `load-accounts add|erase` and `account-erase
+  --confirm` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
@@ -855,8 +961,9 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   `GET /ready` makes (database, migrations, rooms), the version, the deployed commit, the registration
   mode, how long the process has been up, free and total space on the disk holding the database (and
   on the blob directory's, when that is another device) with a warning under 10 % free, the last
-  backup ("not recorded" until [#2606](https://github.com/openzigs/onyourleft/issues/2606) records
-  snapshots), the tunnel, how many athletes are active, awaiting approval and suspended, how many
+  backup (the `backup` service's newest snapshot, its off-box outcome and the service's interval, from
+  its record — [#2606](https://github.com/openzigs/onyourleft/issues/2606); "not recorded" until it
+  has made one), the tunnel, how many athletes are active, awaiting approval and suspended, how many
   rooms are open and analysis jobs waiting or running, and the instance keys' state. ⚠️ **On Docker
   Desktop (Windows or macOS) the disk figures are Docker's own virtual disk**, not the host drive it
   is stored on: the `data` volume lives inside Docker's virtual machine, and nothing in a container
@@ -880,6 +987,9 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   `docker compose up -d instance`, which recreates the container with the new value;
   `docker compose restart` does not read `.env` again. The deputy keeps the Moderation screen,
   reached from the Instance screen, and sees no Operate.
+- **Backups** ([#2606](https://github.com/openzigs/onyourleft/issues/2606)). The records the
+  `backup` service writes, newest first, and "back up now": see "Backup", above. The route set has no
+  restore.
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

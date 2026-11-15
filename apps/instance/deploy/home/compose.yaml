@@ -193,7 +193,21 @@ services:
   # The scheduled backup (#791 criterion 7, #807): an online snapshot into a
   # second directory on the box, and a copy of it OFF the box — a USB drive
   # or a share, whatever OYL_OFFBOX_DIR names. The newest OYL_BACKUP_KEEP of
-  # each are kept.
+  # each are kept. Since #2606 it is `backup-loop`: a run every
+  # OYL_BACKUP_INTERVAL_SECONDS as before, and within 30 s of the owner's
+  # "back up now" from the app's Operate area, which reaches it through the
+  # database — this is the ONLY service that mounts the backup folders, and
+  # the instance (which holds OYL_INSTANCE_SECRET_KEY) never does. Each run
+  # is recorded in the database. `docker compose stop backup` lets a run in
+  # progress finish, within the grace period.
+  #
+  # ⚠️ The command asks the IMAGE whether it has `backup-loop` (#2606
+  # review): `deploy.sh --rollback` starts the previous image with this
+  # file, and an image from before #2606 does not know the command — it
+  # would exit at once, restart, and take no backup again. Such an image
+  # runs the shell loop it always ran, which now stops on SIGTERM between
+  # runs (its sleep is waited on, so the trap is not held up). `exec` makes
+  # Node the container's first process, so `docker compose stop` reaches it.
   backup:
     <<: *instance-image
     depends_on:
@@ -202,12 +216,17 @@ services:
     restart: unless-stopped
     healthcheck:
       disable: true
+    stop_grace_period: 120s
     entrypoint: ['sh', '-c']
     command:
       - >-
+        if grep -q "'backup-loop'" src/operator/run.ts; then
+        exec node src/operator/cli.ts backup-loop /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox --interval "$${OYL_BACKUP_INTERVAL_SECONDS}";
+        fi;
+        trap 'exit 0' TERM;
         while true; do
         node src/operator/cli.ts backup /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox;
-        sleep "$${OYL_BACKUP_INTERVAL_SECONDS}";
+        sleep "$${OYL_BACKUP_INTERVAL_SECONDS}" & wait $$!;
         done
     environment:
       OYL_BACKUP_KEEP: ${OYL_BACKUP_KEEP:-14}

@@ -8,7 +8,10 @@
  * tunnel — one rate-limit bucket for everybody — with every other test green.
  */
 
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -233,5 +236,91 @@ describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => 
     const read = readServerConfig({ tunnelReadyUrl: url }, 1);
     expect(read.ok && read.config.tunnelReadyUrl?.hostname).toBe(address);
     expect(COMPOSE).toMatch(/OYL_INSTANCE_TUNNEL_READY_URL: \$\{OYL_INSTANCE_TUNNEL_READY_URL:-\}/);
+  });
+});
+
+/**
+ * The longest the backup service's shell may run in a test (#1688): the
+ * child's own limit, as `commands.test.ts`'s `CHILD_WAIT_MS` is, not a test
+ * case's. Vitest cannot interrupt a synchronous child, so this is what stops
+ * a shell that loops; it runs in a few milliseconds.
+ */
+const SHELL_WAIT_MS = 4_000;
+
+describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
+  const backup = service('backup');
+
+  /** The service's shell command as `sh` receives it: the folded lines, `$$` as `$`. */
+  function script(): string {
+    const block = /command:\n\s+- >-\n([\s\S]*?)\n\s{4}environment:/.exec(backup)?.[1] ?? '';
+    return block
+      .split('\n')
+      .map((line) => line.trim())
+      .join(' ')
+      .replaceAll('$$', '$');
+  }
+
+  /**
+   * Runs the command in a stand-in image whose `run.ts` is `runTs`, with a
+   * `node` that writes its arguments and a `sleep` that ends the shell, so
+   * the old shell loop runs once. Answers each `node` call's arguments.
+   */
+  function runIn(runTs: string, status?: { code: number | null }): string[] {
+    const image = mkdtempSync(join(tmpdir(), 'oyl-backup-service-'));
+    try {
+      mkdirSync(join(image, 'src', 'operator'), { recursive: true });
+      writeFileSync(join(image, 'src', 'operator', 'run.ts'), runTs);
+      const bin = join(image, 'bin');
+      mkdirSync(bin);
+      writeFileSync(join(bin, 'node'), `#!/bin/sh\necho "$*" >> "${image}/calls"\n`, {
+        mode: 0o755,
+      });
+      writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nkill -TERM $PPID\n', { mode: 0o755 });
+      const ran = spawnSync('/bin/sh', ['-c', script()], {
+        cwd: image,
+        env: {
+          PATH: `${bin}:/usr/bin:/bin`,
+          OYL_BACKUP_KEEP: '14',
+          OYL_BACKUP_INTERVAL_SECONDS: '21600',
+        },
+        timeout: SHELL_WAIT_MS,
+      });
+      if (status !== undefined) status.code = ran.status;
+      return readFileSync(join(image, 'calls'), 'utf8').trim().split('\n');
+    } finally {
+      rmSync(image, { recursive: true, force: true });
+    }
+  }
+
+  it('runs backup-loop with today’s keep, off-box copy and interval, on an image that has it', () => {
+    expect(runIn("      case 'backup-loop': {\n")).toEqual([
+      'src/operator/cli.ts backup-loop /backups --keep 14 --copy-to /offbox --interval 21600',
+    ]);
+  });
+
+  it('runs the shell loop it always ran on an image from before #2606, which a rollback starts — and stops it on SIGTERM', () => {
+    const status: { code: number | null } = { code: null };
+    expect(runIn("      case 'backup': {\n", status)).toEqual([
+      'src/operator/cli.ts backup /backups --keep 14 --copy-to /offbox',
+    ]);
+    // The stub `sleep` sent the shell SIGTERM: it exited 0 by its trap, not killed by the signal.
+    expect(status.code).toBe(0);
+  });
+
+  it('asks the image for the very word this checkout’s run.ts answers to', () => {
+    const run = readFileSync(new URL('./operator/run.ts', import.meta.url), 'utf8');
+    expect(run).toContain("case 'backup-loop':");
+    expect(script()).toContain(`grep -q "'backup-loop'" src/operator/run.ts`);
+  });
+
+  it('is the only service that mounts the backup folders: the instance, which holds the secret key, does not', () => {
+    const block = /^services:\n([\s\S]*?)(?=^[a-z])/m.exec(COMPOSE)?.[1] ?? '';
+    const services = [...block.matchAll(/^ {2}([a-z][a-z0-9_-]*):\s*$/gm)].map(
+      (match) => match[1] ?? '',
+    );
+    expect(services).toContain('instance');
+    for (const folder of ['OYL_BACKUP_DIR', 'OYL_OFFBOX_DIR']) {
+      expect(services.filter((name) => service(name).includes(folder))).toEqual(['backup']);
+    }
   });
 });
