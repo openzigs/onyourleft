@@ -674,9 +674,13 @@ describe('skill is its own axis, and never capacity (#1959, ADR 0067 D-4, D-7)',
   it('a crafty bot beats a naive one of the same tier and capacity more often than not, with the same CP, W′ and peak', () => {
     // #2523: at the quarter-second sub-step, not `advance`'s 10 ms (#1688's
     // ruling: a slow case is made cheaper, never given a longer timeout).
+    // #2652: two bots, not three, and 48 seeds, a whole number of the six that
+    // cycle the personality and which id is crafty. Under coverage on a CI runner
+    // the case, at three bots over 150 seeds, passed 5 s. The canny third bot is
+    // not what the claim is about.
     let ahead = 0;
     let behind = 0;
-    for (let seed = 1; seed <= 150; seed += 1) {
+    for (let seed = 1; seed <= 48; seed += 1) {
       // Which id is crafty alternates, so a tie broken by id favours neither.
       const crafty = seed % 2 === 0 ? 'a' : 'b';
       const naive = crafty === 'a' ? 'b' : 'a';
@@ -686,14 +690,6 @@ describe('skill is its own axis, and never capacity (#1959, ADR 0067 D-4, D-7)',
         [
           { id: crafty, tier: 'hard', strategy: { personality, skill: 'crafty' } },
           { id: naive, tier: 'hard', strategy: { personality, skill: 'naive' } },
-          {
-            id: 'c',
-            tier: 'hard',
-            strategy: {
-              personality: BOT_PERSONALITIES[(seed + 1) % 3] as BotStrategy['personality'],
-              skill: 'canny',
-            },
-          },
         ],
         seed,
         true,
