@@ -64,13 +64,14 @@
  * frame shows (`scene.ts` §`onTheCorridorsLap`, #2516), so that bot stands on
  * the road beside the rider and the bots on the rider's lap. Given the lap
  * ({@link stepPackLayout}'s `lapMetres`), how far apart two racers are along
- * the road reads to the other's nearest place on the loop, both where a row is
- * passing the rider and where two are inside each other, so a bot a lap apart
- * is kept clear as one on the same lap is. And two bots a lap apart that close
- * on each other in one place across are laid out a place apart (§`aLapApart`),
- * so the one coming up goes round rather than being held behind. Riders never
- * ghost through each other (the owner's ruling on #2544). Two racers under
- * half a lap apart read exactly as they did.
+ * the road reads to the other's nearest place on the loop where a row is
+ * passing the rider, where a bot is inside the rider or soon will be, and on
+ * the frames between ticks; a bot a lap apart from the rider may step to a
+ * place beside them; and two bots a lap apart that close on each other in one
+ * place across are laid out a place apart (§`aLapApart`), so the one coming
+ * up goes round rather than being held behind. Riders never ghost through
+ * each other (the owner's ruling on #2544). A field on one lap is laid out
+ * exactly as without the lap.
  *
  * ## Never a jump
  *
@@ -609,13 +610,14 @@ const PACK_ROUNDING_METRES = 1e-9;
  * bike length apart along, times how far under a place apart across, square
  * metres, each within {@link PACK_ROUNDING_METRES}. Nought is clear; it
  * shrinks as either moves off the other, so a step aside counts before the
- * two are clear. On a loop of `lap`, along the road to the other's nearest
- * place on it (#2516).
+ * two are clear. Given the loop's `lap`, along the road to the other's
+ * nearest place on it (#2516). It is given wherever a case or the race sweep
+ * in `lap-race-lapped.test.ts` needs it, and nowhere else.
  */
 function overlap(
   one: { along: number; lateral: number },
   other: { along: number; lateral: number },
-  lap: number | undefined,
+  lap?: number,
 ): number {
   const apart = one.along - nearestOnTheLoop(other.along, one.along, lap);
   return (
@@ -833,7 +835,7 @@ function clearOf(
         );
   const insideAny = (each: Candidate): number =>
     others.reduce(
-      (sum, other) => sum + overlap(drawnAt(each), other, lap) + insideBefore(each, other),
+      (sum, other) => sum + overlap(drawnAt(each), other) + insideBefore(each, other),
       0,
     );
   const now = { shift: place.shift, lateral: place.lateral };
@@ -860,7 +862,7 @@ function clearOf(
   const most = was.shift + rates.most * elapsedSeconds;
   const reach = (shift: number): number => Math.min(most, Math.max(least, shift));
   const near = others.filter(
-    (other) => overlap(drawnAt(now), other, lap) > 0 || overlap(drawnAt(was), other, lap) > 0,
+    (other) => overlap(drawnAt(now), other) > 0 || overlap(drawnAt(was), other) > 0,
   );
   // Along: where it was laid out, where it was, as far back and as far on as
   // it may go, a bike length either side of each racer near it, and a bike
@@ -901,6 +903,15 @@ function clearOf(
           toward(was.lateral, other.lateral + side * PACK_ABREAST_METRES, across),
         ),
       ),
+      // And, for a bot a lap apart from the rider, a step toward a place
+      // either side of the rider (#2516). It never shares the rider's row, so
+      // nothing else lays it beside them, and a bot level with it on the road
+      // on one side must not leave it held in the rider's line.
+      ...(rider === undefined || nearestOnTheLoop(rider.along, racer.along, lap) === rider.along
+        ? []
+        : [-1, 1].map((side) =>
+            toward(was.lateral, rider.lateral + side * PACK_ABREAST_METRES, across),
+          )),
     ]),
   ];
   for (const shift of alongs) {
@@ -920,7 +931,7 @@ function clearOf(
     (other) =>
       other.race < racer.along &&
       other.along > racer.along + chosen.shift &&
-      overlap(drawnAt(now), other, lap) > 0,
+      overlap(drawnAt(now), other) > 0,
   );
   if (holding !== undefined && chosen.shift < now.shift) {
     const first = Math.sign(was.lateral - holding.lateral) || 1;

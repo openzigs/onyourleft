@@ -35,6 +35,7 @@ import { kilograms, metres } from '@onyourleft/domain';
 
 import { CAMERA_BEHIND_METRES } from './camera';
 import {
+  askRaceLane,
   LAP_RACE_TICK_SECONDS,
   lapRaceBotConditions,
   lapRaceDrawing,
@@ -239,11 +240,15 @@ describe('a lap race’s bots are drawn on every frame they are in view, laps in
         if (inside.length > 0) ghosted.push(`tick at frame ${String(frame)}: ${inside.join(', ')}`);
       }
       // As `GameView` hands it over: the drawn frame a part-step behind the newest.
-      const drawing = lapRaceDrawing(ride, along, LAP_RACE_TICK_SECONDS - pending, false);
+      // The rider drawn back by as much as the bots, as `simulation.ts`
+      // §`drawnAt` blends a frame between the step before and the newest.
+      const behind = LAP_RACE_TICK_SECONDS - pending;
+      const drawnAlong = Math.max(0, along - RIDER_METRES_PER_SECOND * behind);
+      const drawing = lapRaceDrawing(ride, drawnAlong, behind, false);
       const input: SceneInput = {
         profile: LOOP,
         origin: ORIGIN,
-        state: { ...start, ride: { ...start.ride, distance: metres(along) } },
+        state: { ...start, ride: { ...start.ride, distance: metres(drawnAlong) } },
         riderDistance: drawing.riderDistance,
         steeredLateral: drawing.steeredLateral,
         raceBots: drawing.raceBots,
@@ -342,5 +347,232 @@ describe('a lap race’s bots are drawn on every frame they are in view, laps in
     }
     expect(VIEW_BEHIND_METRES + VIEW_AHEAD_METRES).toBeLessThan(LAP);
     belt.dispose();
+  });
+});
+
+/**
+ * #2516's review: the reproduction above is one seed on one loop. These ride
+ * other seeds and loops (300 m, 502 m, 1 km) through the race and the drawing
+ * `GameView` is handed, the rider steering a lane every 0.6 to 2.6 s or not
+ * at all, at a constant pace, a varying one, and a surge between 5 and
+ * 19 m/s, lapping the field or lapped by it. Every tick is read, and the two
+ * 60 fps frames between it and the one before, the rider blended back as
+ * `simulation.ts` §`drawnAt` blends it. A pair is a lap apart when its
+ * odometers are over half a lap apart; along the road it is read to the
+ * nearer place on the loop, as the scene draws it.
+ *
+ * No race is drawn through the scene here: each ride is under a second.
+ */
+describe('a lap race on other seeds and loops draws no racer inside one a lap apart — #2516', () => {
+  /** A steady pace, metres a second. */
+  const steady = (pace: number) => (): number => pace;
+  /** 10 s at 5 m/s, then 10 s at 19 m/s, and again. */
+  const surge = (seconds: number): number => (Math.floor(seconds / 10) % 2 === 0 ? 5 : 19);
+
+  interface Sweep {
+    readonly name: string;
+    /** The circuit's radius, metres: 47.75 is about 300 m round, 80 about 502 m and 159.15 about 1 km. */
+    readonly radius: number;
+    readonly seed: number;
+    readonly pace: (seconds: number) => number;
+    readonly seconds: number;
+    readonly steers: boolean;
+    readonly itemsOn: boolean;
+  }
+
+  const RIDES: readonly Sweep[] = [
+    {
+      name: '300 m, 17 m/s, seed 1',
+      radius: 47.75,
+      seed: 1,
+      pace: steady(17),
+      seconds: 90,
+      steers: true,
+      itemsOn: true,
+    },
+    {
+      name: '300 m, 13 to 19 m/s, seed 7',
+      radius: 47.75,
+      seed: 7,
+      pace: (s) => 16 + 3 * Math.sin(s / 5),
+      seconds: 90,
+      steers: true,
+      itemsOn: true,
+    },
+    {
+      name: '300 m, 4 m/s and lapped, seed 42',
+      radius: 47.75,
+      seed: 42,
+      pace: steady(4),
+      seconds: 180,
+      steers: true,
+      itemsOn: true,
+    },
+    {
+      name: '300 m, a surge, items off, seed 9001',
+      radius: 47.75,
+      seed: 9_001,
+      pace: surge,
+      seconds: 120,
+      steers: true,
+      itemsOn: false,
+    },
+    {
+      name: '502 m, 18 m/s, no steering, seed 2516',
+      radius: 80,
+      seed: 2_516,
+      pace: steady(18),
+      seconds: 90,
+      steers: false,
+      itemsOn: true,
+    },
+    {
+      name: '502 m, a surge, seed 5',
+      radius: 80,
+      seed: 5,
+      pace: surge,
+      seconds: 150,
+      steers: true,
+      itemsOn: true,
+    },
+    {
+      name: '1 km, 18 m/s, seed 3',
+      radius: 159.15,
+      seed: 3,
+      pace: steady(18),
+      seconds: 120,
+      steers: true,
+      itemsOn: true,
+    },
+    {
+      name: '1 km, 3.5 m/s and lapped, seed 11',
+      radius: 159.15,
+      seed: 11,
+      pace: steady(3.5),
+      seconds: 300,
+      steers: true,
+      itemsOn: true,
+    },
+    {
+      name: '1 km, a surge, seed 2516',
+      radius: 159.15,
+      seed: 2_516,
+      pace: surge,
+      seconds: 200,
+      steers: true,
+      itemsOn: true,
+    },
+  ];
+
+  /**
+   * ⚠️ A KNOWN LIMIT, and the pack's own, not a lap's. On this ride two bots
+   * crawling under `PACK_ROLLING_METRES_PER_SECOND` keep their places a place
+   * either side of the rider's line, and a third rides in it. Closing at
+   * 10.6 m/s, the rider leaves the third no place to go, so on two ticks it is
+   * drawn up to 0.331 m inside the rider, a place across being 0.55 m. The
+   * same jam on ONE lap draws the rider inside a bot too
+   * (`pack-layout.test.ts`, "a lane jammed three abreast"). Held here so it
+   * cannot grow unseen; every other ride is held to none.
+   */
+  const KNOWN_LIMIT: Readonly<
+    Record<string, { readonly ticks: number; readonly deepest: number }>
+  > = {
+    '300 m, 13 to 19 m/s, seed 7': { ticks: 2, deepest: 0.331 },
+  };
+
+  /** Every tick on which a racer is drawn inside one a lap apart, and how deep, metres under a place across. */
+  function ridden(sweep: Sweep): {
+    readonly ticks: number[];
+    readonly deepest: number;
+    readonly lapApart: number;
+  } {
+    const loop = circuitRoute(sweep.radius);
+    const lap = loop.totalDistance as number;
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = sweep.seed;
+        return array;
+      },
+    );
+    let ride = startLapRaceRide({
+      choice: { laps: 6, bots: LAP_RACE_MOST_BOTS, tier: 'steady', itemsOn: sweep.itemsOn },
+      profile: loop,
+      conditions: lapRaceBotConditions(
+        loop,
+        rideConditionsFor(kilograms(75), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      draft: true,
+      riderMassKilograms: 75,
+    });
+    vi.restoreAllMocks();
+    if (ride === undefined) throw new Error('a loop starts a race');
+    // The steering, from the seed: a lane left or right every 0.6 to 2.6 s.
+    let state = sweep.seed * 7_919 + 1;
+    const random = (): number => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+    let steerAt = 1;
+    let along = 0;
+    const ticks: number[] = [];
+    let deepest = 0;
+    let lapApart = 0;
+    const count = Math.round(sweep.seconds / LAP_RACE_TICK_SECONDS);
+    for (let tick = 1; tick <= count; tick += 1) {
+      const seconds = tick * LAP_RACE_TICK_SECONDS;
+      const pace = sweep.pace(seconds);
+      if (sweep.steers && seconds >= steerAt) {
+        ride = askRaceLane(ride, random() < 0.5 ? 'lane-left' : 'lane-right');
+        steerAt = seconds + 0.6 + 2 * random();
+      }
+      along += pace * LAP_RACE_TICK_SECONDS;
+      ride = stepLapRaceRide(ride, { ticks: 1, along, riderWatts: 200 });
+      let inside = false;
+      for (const back of [0, 1 / 3, 2 / 3]) {
+        const behind = back * LAP_RACE_TICK_SECONDS;
+        const drawing = lapRaceDrawing(ride, along - pace * behind, behind, false);
+        const drawn = [
+          { at: drawing.riderDistance, lateral: drawing.steeredLateral },
+          ...drawing.raceBots.map((bot) => ({
+            at: bot.distanceMetres,
+            lateral: bot.lateralMetres,
+          })),
+        ];
+        drawn.forEach((one, index) => {
+          for (const other of drawn.slice(index + 1)) {
+            const odometers = one.at - other.at;
+            if (Math.abs(odometers) <= lap / 2) continue;
+            const apart = Math.abs(odometers - lap * Math.round(odometers / lap));
+            const across = Math.abs(one.lateral - other.lateral);
+            if (apart < BIKE_LENGTH_METRES) lapApart += 1;
+            if (
+              apart < BIKE_LENGTH_METRES - CLEAR_WITHIN_METRES &&
+              across < PACK_ABREAST_METRES - CLEAR_WITHIN_METRES
+            ) {
+              inside = true;
+              deepest = Math.max(deepest, PACK_ABREAST_METRES - across);
+            }
+          }
+        });
+      }
+      if (inside) ticks.push(tick);
+    }
+    return { ticks, deepest, lapApart };
+  }
+
+  it.each(RIDES)('$name', (sweep) => {
+    const { ticks, deepest, lapApart } = ridden(sweep);
+    const limit = KNOWN_LIMIT[sweep.name];
+    if (limit === undefined) {
+      expect(ticks, 'ticks with a racer drawn inside one a lap apart').toEqual([]);
+    } else {
+      expect(ticks.length).toBeLessThanOrEqual(limit.ticks);
+      expect(deepest).toBeLessThanOrEqual(limit.deepest + CLEAR_WITHIN_METRES);
+    }
+    // Not vacuous: racers a lap apart were drawn level on the road.
+    expect(lapApart).toBeGreaterThan(0);
   });
 });
