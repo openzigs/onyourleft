@@ -997,3 +997,44 @@ describe('erasure', () => {
     ).toHaveLength(2);
   });
 });
+
+describe('a source the operator does not offer the rider is refused at the start (#2609)', () => {
+  it('refuses local_unavailable and hosted_unavailable through the route, queues nothing, and reads no consent for the hosted start', async () => {
+    const hostedConsent = vi.fn(() => Promise.resolve('https://models.example'));
+    const offered = vi.fn<(athleteId: string, source: string) => Promise<boolean>>(() =>
+      Promise.resolve(false),
+    );
+    const {
+      world: w,
+      engine,
+      riders,
+    } = await jobsWorld(1, {
+      analysis: { hostedConsent, offered },
+    });
+    const [anna] = riders;
+    const local = await startJob(w, anna!.token);
+    expect(local.status).toBe(409);
+    expect((local.body as { error: { code: string } }).error.code).toBe('local_unavailable');
+    const hosted = await startJob(w, anna!.token, {
+      ...jobBody(),
+      source: 'instance-hosted',
+      endpoint: 'https://models.example',
+    });
+    expect(hosted.status).toBe(409);
+    expect((hosted.body as { error: { code: string } }).error.code).toBe('hosted_unavailable');
+    expect(offered.mock.calls).toEqual([
+      [anna!.athleteId, 'instance-local'],
+      [anna!.athleteId, 'instance-hosted'],
+    ]);
+    expect(hostedConsent).not.toHaveBeenCalled();
+    expect(engine.runs).toEqual([]);
+
+    // Offered again: the same start is queued — the control.
+    offered.mockImplementation(() => Promise.resolve(true));
+    const queued = await startJob(w, anna!.token);
+    expect(queued.status, JSON.stringify(queued.body)).toBe(202);
+    const run = await engine.next();
+    run.finish({ kind: 'cancelled' });
+    await w.analysis?.idle();
+  });
+});

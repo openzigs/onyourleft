@@ -677,6 +677,26 @@ export interface HostedModelKeyTable {
 }
 
 /**
+ * The operator's analysis settings (#2609, migration 0043): at most one row,
+ * `slot` 1. Every setting column is `NULL` for "not set here", and falls back
+ * on its own: a model field to its `.env` line, a source offered to on, and
+ * the switch for other riders to off (ADR 0046, the 2026-11-14 amendment).
+ */
+export interface AnalysisSettingTable {
+  readonly slot: number;
+  readonly local_url: string | null;
+  readonly local_model: string | null;
+  readonly reasoning_tokens: number | null;
+  /** `0` or `1`. */
+  readonly offer_local: number | null;
+  readonly offer_hosted: number | null;
+  readonly others_local: number | null;
+  /** Unix seconds. */
+  readonly updated_at: number;
+  readonly updated_by: 'app' | 'cli';
+}
+
+/**
  * A rider's OWN hosted model key (#1199, ADR 0046 D-9 as the owner ruled it
  * on 2026-10-09: bring-your-own only). Added by migration 0021. One row an
  * athlete; the key is AES-256-GCM ciphertext under `OYL_INSTANCE_SECRET_KEY`,
@@ -837,6 +857,7 @@ export interface InstanceDatabase {
   readonly history_source: HistorySourceTable;
   readonly history_passage: HistoryPassageTable;
   readonly hosted_model_key: HostedModelKeyTable;
+  readonly analysis_setting: AnalysisSettingTable;
   readonly instance_key: InstanceKeyTable;
   readonly instance_key_statement: InstanceKeyStatementTable;
   readonly instance_key_lease: InstanceKeyLeaseTable;

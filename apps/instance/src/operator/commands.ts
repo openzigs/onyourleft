@@ -34,6 +34,7 @@ import {
   NO_KEYS_SENTENCE,
   type InstanceKeys,
 } from '../keys/instance-keys.ts';
+import { clearAnalysisSettings, saveAnalysisSettings } from '../analysis/settings.ts';
 import { randomHex } from '../auth/crypto.ts';
 import { recoveryCodeSha256 } from '../auth/identity.ts';
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
@@ -1299,6 +1300,54 @@ export async function modelKeyClear(paths: DataPaths) {
       (held) => (held ? 'cleared' : 'none_held'),
     );
     return { command: 'model-key clear', cleared };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `analysis-settings clear` (#2609): the operator's analysis settings row
+ * removed, so every field falls back — the local model to `.env`, both
+ * sources to offered, the switch for other riders to off. A running instance
+ * reads the settings for every job, so it applies from the next one with no
+ * restart. Logged `analysis_settings_cleared`.
+ */
+export async function analysisSettingsClear(paths: DataPaths) {
+  const store = openServingStore(paths.database);
+  try {
+    const cleared = await clearAnalysisSettings(store, FROM_THE_CLI, () => Date.now());
+    return { command: 'analysis-settings clear', cleared };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `analysis-settings others on|off` (#2609, ADR 0046 D-9): whether riders
+ * other than the operator may have their rides analysed by the instance's
+ * local model. Off by default. It is the switch an instance with no
+ * `OYL_INSTANCE_OWNER_KEY`, and so no owner to reach Operate, is turned on
+ * with. Logged `analysis_settings_set`, naming the field.
+ */
+export async function analysisSettingsOthers(paths: DataPaths, on: boolean) {
+  const store = openServingStore(paths.database);
+  try {
+    const saved = await saveAnalysisSettings(
+      store,
+      FROM_THE_CLI,
+      { othersLocal: on },
+      {
+        // Only the switch is written, so no name is ever looked up.
+        resolve: () => Promise.reject(new Error('analysis-settings others resolves nothing')),
+        now: () => Date.now(),
+      },
+    );
+    if (!saved.ok) throw new CommandError('analysis-settings others is on or off.');
+    return {
+      command: 'analysis-settings others',
+      othersLocal: on,
+      changed: saved.changed.length > 0,
+    };
   } finally {
     await store.close();
   }

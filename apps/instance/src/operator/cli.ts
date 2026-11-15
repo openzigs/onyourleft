@@ -6,7 +6,7 @@ import { resolveExtensionless } from '../node-imports.ts';
 
 /**
  * `node src/operator/cli.ts <command> …` — the operator's commands (#791):
- * `migrate`, `backup`, `backup-loop`, `restore`, `verify`, `room-open`, `model-key`, `instance-key`, `load-accounts`, `account-erase`. `commands.ts` says
+ * `migrate`, `backup`, `backup-loop`, `restore`, `verify`, `room-open`, `model-key`, `instance-key`, `load-accounts`, `account-erase`, `analysis-settings`. `commands.ts` says
  * what each does. The resolve hook goes first, as in `main.ts`.
  *
  * The data it works on is where the instance keeps it: `OYL_INSTANCE_DATABASE`

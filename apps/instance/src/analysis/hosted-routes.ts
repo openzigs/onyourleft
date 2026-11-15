@@ -47,8 +47,16 @@ const status: Schema = {
       required: ['origin', 'recordedAt'],
       additionalProperties: false,
     },
+    offered: {
+      type: 'object',
+      description:
+        'Which sources this instance offers you now (#2609): `local`, a local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; `hosted`, that the operator offers a hosted service at all. A hosted job still needs your own key and your consent naming its endpoint.',
+      properties: { local: { type: 'boolean' }, hosted: { type: 'boolean' } },
+      required: ['local', 'hosted'],
+      additionalProperties: false,
+    },
   },
-  required: ['key', 'consent'],
+  required: ['key', 'consent', 'offered'],
   additionalProperties: false,
 };
 
@@ -172,7 +180,7 @@ export const HOSTED_ROUTES: readonly Route[] = [
     operationId: 'sendHostedTestQuestion',
     summary:
       'Send your hosted service one test question that carries none of your data (#1251): two fixed sentences, on your own key, to the origin your consent names. It passes the same checks as a hosted job, and is limited to a few every ten minutes, one at a time (`rate_limited`, with nothing sent), so `not-ready` — with nothing sent — means a job would be refused `hosted_unavailable`: no key of your own, no consent naming its origin, or no masking list on this instance. The answer is `result` and whether the model reasoned first; nothing the service said is returned.',
-    errors: ['unauthenticated', 'unavailable', 'rate_limited'],
+    errors: ['unauthenticated', 'unavailable', 'rate_limited', 'hosted_unavailable'],
     response: {
       contentType: 'application/json',
       schema: {
@@ -200,6 +208,7 @@ export const HOSTED_ROUTES: readonly Route[] = [
       const got = ready(context);
       if (got === undefined) return errorResponse('unavailable');
       const tested = await got.hostedSettings.testQuestion(got.caller, context.request.signal);
+      if (tested === 'not-offered') return errorResponse('hosted_unavailable');
       return tested === undefined ? errorResponse('rate_limited') : json(tested);
     },
   },

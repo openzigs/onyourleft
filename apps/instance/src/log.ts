@@ -166,6 +166,14 @@ export const EVENT_KEYS: ReadonlyMap<
       item: (value) => typeof value === 'string' && LOGGED_ITEM_KEYS.has(value),
     },
   ],
+  // #2609: where the analysis model's settings come from — the operator's
+  // row in the app, `.env`, or nowhere. Never the model's name or address.
+  [
+    'analysis-model',
+    {
+      setIn: (value) => value === 'app' || value === 'env' || value === 'none',
+    },
+  ],
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */

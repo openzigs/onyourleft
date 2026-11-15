@@ -46,7 +46,8 @@ import { createSidePose } from '../camera/side-pose.ts';
 import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
 import type { BlobStore } from '../blob/blob-store.ts';
 import type { Config } from '../config.ts';
-import { startTestInstance, type TestInstance } from '../instance-testing.ts';
+import { startTestInstance, testConfig, type TestInstance } from '../instance-testing.ts';
+import type { Resolver } from '../history/address.ts';
 import type { Embedder } from '../history/embedder.ts';
 import { createHistory, type History } from '../history/history.ts';
 import { scriptedEmbedder } from '../history/history-testing.ts';
@@ -314,6 +315,11 @@ export async function startIdentityInstance(
     /** A handler handed no Operate area (#2602), for the `unavailable` it answers then. */
     withoutOperate?: boolean;
     /**
+     * Where a name resolves to, for the Operate area's analysis settings
+     * (#2609): a save checks it. Absent, a name looked up is a failed lookup.
+     */
+    resolve?: Resolver;
+    /**
      * What the owner's Status reads beyond the store (#2604), over the
      * defaults: the world's clock from its start, the real disk under the
      * world's directory, no tunnel address, and the world's own keys.
@@ -350,6 +356,7 @@ export async function startIdentityInstance(
     voice,
     withoutOperate,
     operateStatus,
+    resolve,
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
@@ -534,6 +541,13 @@ export async function startIdentityInstance(
                 }),
                 keys: keysState(instanceKeys),
                 ...operateStatus,
+              },
+              // #2609: as `instance.ts` builds them, over the world's store and clock.
+              analysis: {
+                environment: testConfig(listenerConfig),
+                resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
+                now: () => clock.ms,
+                hostedKey: ownKey,
               },
             }),
           }),

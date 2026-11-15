@@ -6,7 +6,9 @@
  * result, and records how long every leg it can see took. Not a test and not
  * a gate: it needs a running instance with an analysis model
  * (`OYL_INSTANCE_ANALYSIS_MODEL_URL`, `OYL_INSTANCE_ANALYSIS_MODEL`) that
- * admits a new device.
+ * admits a new device. Its accounts are not the operator, so on the local
+ * model it also needs the operator's switch for other riders on (#2609:
+ * `operator analysis-settings others on`, or Operate in the app).
  *
  *     node tools/replan-round-trip.ts --url https://rides.example.org \
  *       [--transport sealed|plaintext] [--runs 30] [--cold-runs 5] \

@@ -87,6 +87,14 @@ export interface HostedStatus {
     /** Unix seconds. */
     readonly recordedAt: number;
   } | null;
+  /**
+   * Which sources this instance offers YOU now (#2609), so the app can say
+   * why a job would be refused: `local` is a local model configured and
+   * offered to you (for anybody but the operator, the operator's switch for
+   * other riders is on), `hosted` that the operator offers hosted at all —
+   * your own key and consent are still needed.
+   */
+  readonly offered: { readonly local: boolean; readonly hosted: boolean };
 }
 
 export type HostedOutcome =
@@ -116,10 +124,15 @@ export interface HostedSettings {
    * `undefined`, with nothing sent, when the caller is over
    * {@link DEFAULT_HOSTED_TESTS} or already has a test in flight: the address
    * is the rider's to choose, so the test carries a job's kind of limit.
+   * `not-offered`, with nothing read or sent, while the operator offers no
+   * hosted source (#2609): the route answers `hosted_unavailable`.
    * `signal` ends the request to the service when the caller goes away, and
    * {@link HostedSettings.stop} ends every one.
    */
-  testQuestion(caller: Caller, signal?: AbortSignal): Promise<HostedTestOutcome | undefined>;
+  testQuestion(
+    caller: Caller,
+    signal?: AbortSignal,
+  ): Promise<HostedTestOutcome | 'not-offered' | undefined>;
   /**
    * The instance is stopping (#1796): every test question out now is aborted
    * at once, rather than left for its 30 s bound (`hosted-test.ts`
@@ -213,6 +226,18 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
     );
   }
 
+  /** What the operator's settings offer `athleteId` now (#2609). */
+  async function offered(athleteId: string): Promise<HostedStatus['offered']> {
+    const sources = options.sources;
+    if (sources === undefined) return { local: false, hosted: false };
+    if (sources.forJob === undefined) return { local: sources.local !== undefined, hosted: true };
+    const now = await sources.forJob(athleteId);
+    return {
+      local: now.localOffered && now.local() !== undefined,
+      hosted: now.hostedOffered,
+    };
+  }
+
   async function status(athleteId: string): Promise<HostedStatus> {
     const own = await store.getAthleteHostedKey(athleteId);
     const operators = own === undefined ? await store.getHostedModelKey() : undefined;
@@ -239,6 +264,7 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       key,
       consent:
         consent === undefined ? null : { origin: consent.origin, recordedAt: consent.recordedAt },
+      offered: await offered(athleteId),
     };
   }
 
@@ -334,6 +360,8 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       if (options.sources === undefined || stopping.signal.aborted) {
         return { result: 'not-ready', reasoned: false };
       }
+      // #2609: hosted not offered — refused before the limit, a consent or a key is read.
+      if (!(await offered(caller.athleteId)).hosted) return 'not-offered';
       if (testing.has(caller.athleteId)) return undefined;
       testLimit.sweep();
       if (!testLimit.allow(caller.athleteId)) return undefined;

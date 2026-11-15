@@ -3,6 +3,8 @@
 import { DEFAULT_BLOBS_PATH, DEFAULT_DATABASE_PATH } from '../server-config.ts';
 import {
   accountErase,
+  analysisSettingsClear,
+  analysisSettingsOthers,
   backup,
   backupLoop,
   CommandError,
@@ -34,6 +36,7 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   load-accounts add     (the public keys \`race-load keys\` printed, on standard input)
   load-accounts erase
   account-erase [--confirm]   (the rider's recovery code on standard input)
+  analysis-settings clear | others on|off
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -216,6 +219,21 @@ export async function runCommand(
           );
         } else if (action === 'erase' && args.length === 0) {
           report = await loadAccountsErase(paths);
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'analysis-settings': {
+        const action = args.shift();
+        if (action === 'clear' && args.length === 0) {
+          report = await analysisSettingsClear(paths);
+        } else if (
+          action === 'others' &&
+          args.length === 1 &&
+          (args[0] === 'on' || args[0] === 'off')
+        ) {
+          report = await analysisSettingsOthers(paths, args[0] === 'on');
         } else {
           throw new CommandError(USAGE);
         }

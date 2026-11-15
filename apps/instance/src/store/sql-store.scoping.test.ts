@@ -459,6 +459,14 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead:
       'the operator’s write, for the operator’s athlete (sql-store.hosted-key.test.ts)',
   },
+  getAnalysisSetting: {
+    notAScopedRead:
+      'the instance’s ONE analysis settings row (#2609): names no athlete, read for every job and by the owner’s Operate area',
+  },
+  putAnalysisSetting: { notAScopedRead: 'the owner’s or the CLI’s write, logged with it (#2609)' },
+  clearAnalysisSetting: {
+    notAScopedRead: 'the owner’s or the CLI’s write, logged with it (#2609)',
+  },
   getHostedModelKey: {
     notAScopedRead:
       'the instance’s ONE key, read by the instance and the operator command, never served to a rider; who may USE it is analysis/source.ts’s, held to its athlete (source.test.ts)',
