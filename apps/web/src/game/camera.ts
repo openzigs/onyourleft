@@ -580,9 +580,8 @@ export function dampedHeading(
 }
 
 /**
- * A rectangle in the frame, as fractions of its width and height from the top left.
- *
- * @test-facing the return type of {@link riderFrameBox}, whose reason applies unchanged.
+ * A rectangle in the frame, as fractions of its width and height from the top
+ * left: what {@link riderFrameBox} answers.
  */
 export interface FrameBox {
   readonly left: number;
@@ -648,9 +647,10 @@ export interface FrameBox {
  * `game.browser.spec.ts` compares the rendered rider on a straight, where
  * nobody leans, with the upright box.
  *
- * @test-facing the renderer never needs to know where the rider ended up — three
- * projects them. It is the composition stated as a rectangle, for the two
- * browser gates above to hold the layout and the renderer to.
+ * The renderer never needs to know where the rider ended up — three projects
+ * them. It is the composition stated as a rectangle, for the two browser
+ * gates above to hold the layout and the renderer to, and since #2600 for
+ * `hud/panel-tabs.ts` to keep a panel's tab off the rider.
  */
 export function riderFrameBox(aspect: number, leanRadians = 0): FrameBox {
   const t = verticalHalfTangent(aspect);

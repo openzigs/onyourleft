@@ -92,6 +92,7 @@ import type { LapFigures } from '../src/recording/laps';
 // The shipping stylesheet, which is the whole point.
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
+import { writeRideChrome } from '../src/game/hud/ride-chrome-preference';
 
 /** A box, serialisable, relative to its own stage's top-left corner. */
 export interface Box {
@@ -650,6 +651,9 @@ async function run(): Promise<void> {
   // fallback face (on the CI runner's, the large text then had no room for a
   // line until the fonts arrived). The other stages keep the page as it was.
   if (CORNER) await Promise.all([...document.fonts].map((face) => face.load()));
+  // #2600: the ride controls drawn and every panel open, as this page
+  // measures them; `ride-chrome.browser.spec.ts` measures them hidden.
+  writeRideChrome(localStorage, { autoHide: false, collapsed: [] });
   flushSync(() => {
     createRoot(container).render(
       <StrictMode>

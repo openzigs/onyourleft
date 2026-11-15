@@ -76,6 +76,7 @@ import type { TraceSample } from '../src/game/hud/recent-trace';
 
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
+import { writeRideChrome } from '../src/game/hud/ride-chrome-preference';
 
 /** What a ride of the page reports. */
 export interface StreetMapRide {
@@ -343,6 +344,9 @@ function ride(frames: number, metresPerFrame: number, paced: boolean): Promise<S
 async function run(): Promise<void> {
   const container = document.querySelector<HTMLDivElement>('#hud');
   if (container === null) throw new Error('the harness page is missing its #hud container');
+  // #2600: the ride controls drawn and every panel open, as this page
+  // measures them; `ride-chrome.browser.spec.ts` measures them hidden.
+  writeRideChrome(localStorage, { autoHide: false, collapsed: [] });
   flushSync(() => {
     createRoot(container).render(
       <StrictMode>

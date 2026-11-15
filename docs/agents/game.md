@@ -1326,6 +1326,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         never the notices, the controls or the primary readings.
                         Since #2420 also how power is shown: the 3 s average
                         (the default; absent or unknown reads as it) or instant
+    src/game/hud/ride-chrome-preference.ts
+                        #2600: whether the ride controls hide until touched
+                        (on by default; Settings turns it off) and which
+                        panels are collapsed to a tab, written by the ride at
+                        each tap; its own key, so the ride never rewrites
+                        hud-layout-preference.ts. controls-reveal.ts hides
+                        them after 5 s with no input: CLIPPED, never faded
+                        (hud-surface.a11y.test.ts bans opacity), so a hidden
+                        control stays focusable and a tap that began hidden
+                        presses none. Held drawn while paused, asking to end,
+                        a notice stands, the road is not reaching the trainer,
+                        a lap race is finished, a round's throw buttons or a
+                        read-only line is in the actions panel
+                        (HudCore.tsx §controlsHeld). panel-tabs.ts places an
+                        open panel's tab outside it, on tablets only;
+                        browser/ride-chrome.browser.spec.ts measures both
     src/game/hud/power-average.ts
                         the HUD's 3 s power (#2420): a time-weighted mean over
                         the ride's clock, fed by the frame loop AFTER

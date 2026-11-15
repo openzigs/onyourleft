@@ -11,6 +11,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { HUD_LAYOUT_STORAGE_KEY, readHudLayout } from '../game/hud/hud-layout-preference';
+import {
+  RIDE_CHROME_STORAGE_KEY,
+  readRideChrome,
+  writeRideChrome,
+} from '../game/hud/ride-chrome-preference';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { ANNOUNCEMENTS_NOT_KEPT, SettingsView } from './SettingsView';
@@ -21,6 +26,7 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
   localStorage.removeItem(HUD_LAYOUT_STORAGE_KEY);
+  localStorage.removeItem(RIDE_CHROME_STORAGE_KEY);
 });
 
 async function settings(store: Pick<Storage, 'getItem' | 'setItem'> = localStorage): Promise<void> {
@@ -89,8 +95,9 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     );
     // Four panels, three sizes, (#2383) two arrangements, (#2385) two route
     // panels, (#2387) the strip, (#2420) two ways to show power and (#2514)
-    // two Delivery layouts — none of which hides it.
-    expect(offered).toHaveLength(16);
+    // two Delivery layouts — none of which hides it — and (#2600) the ride
+    // controls' auto-hide, which only fades them until the screen is touched.
+    expect(offered).toHaveLength(17);
     for (const word of ['Power', 'Pause', 'notice']) {
       expect(offered.some((each) => each.startsWith(word))).toBe(false);
     }
@@ -249,5 +256,23 @@ describe('the Ride HUD panel in Settings — #2079', () => {
     expect(readHudLayout(localStorage).delivery).toBe('everything');
     await press(choice('The game strip only'));
     expect(readHudLayout(localStorage).delivery).toBe('game');
+  });
+
+  it('turns the ride controls’ auto-hide off, kept on the device beside the collapsed panels — #2600', async () => {
+    // A panel the rider collapsed mid-ride, which this choice must not undo.
+    writeRideChrome(localStorage, { autoHide: true, collapsed: ['route'] });
+    await settings();
+    expect(choice('Hide Pause').checked).toBe(true);
+
+    await press(choice('Hide Pause'));
+
+    // What the next ride reads.
+    expect(readRideChrome(localStorage)).toEqual({ autoHide: false, collapsed: ['route'] });
+    // And the HUD layout is untouched by it.
+    expect(localStorage.getItem(HUD_LAYOUT_STORAGE_KEY)).toBeNull();
+    await settings();
+    expect(choice('Hide Pause').checked).toBe(false);
+    await press(choice('Hide Pause'));
+    expect(readRideChrome(localStorage).autoHide).toBe(true);
   });
 });

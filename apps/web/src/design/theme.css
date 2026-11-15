@@ -14033,3 +14033,128 @@ select.oyl-input {
 .oyl-operate__status dd {
   margin: 0;
 }
+
+/*
+ * #2600: THE RIDE CONTROLS HIDE UNTIL TOUCHED, AND A PANEL COLLAPSES TO A TAB.
+ *
+ * HIDDEN, the actions panel is CLIPPED to the trainer's line at its top
+ * (`--oyl-hud-actions-kept`, measured by `HudCore.tsx`), or to nothing with no
+ * line, and every open panel's tab is clipped to nothing. ⚠️ **Clipped, never
+ * faded and never made see-through**: `hud-surface.a11y.test.ts` forbids
+ * `opacity` and every background but the HUD's own token anywhere in the HUD
+ * (#423: a translucent panel cannot be contrast-checked), and a clip leaves
+ * what is drawn fully opaque. A clip is also what `oyl-visually-hidden` uses,
+ * so a clipped control stays in the tab order and the accessibility tree
+ * (`controls-reveal.ts`), and a finger lands on the road under it rather than
+ * on it — the first touch shows the controls and presses nothing. The panel is
+ * wiped away over `--oyl-motion-medium`, which a rider who asked for less
+ * motion does not see (the reduced-motion block above), and comes back at once.
+ */
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions {
+  animation: oyl-hud-controls-hide var(--oyl-motion-medium) var(--oyl-motion-ease-standard);
+  clip-path: inset(0 0 calc(100% - var(--oyl-hud-actions-kept, 0px)) 0);
+}
+
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__tab--open {
+  clip-path: inset(50%);
+}
+
+@keyframes oyl-hud-controls-hide {
+  from {
+    clip-path: inset(-100vmax);
+  }
+}
+
+/*
+ * The tab layer: the whole stage, and catching no touch itself, so a finger on
+ * the road or on a panel under it reaches what it always did. `> .oyl-hud__tabs`
+ * so it outranks the stage's `.oyl-hud > *`, which hands every panel the
+ * pointer back.
+ */
+.oyl-hud__tabs {
+  display: none;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* Drawn on a tablet only (`panel-tabs.ts` §`PANEL_TABS_MEDIA`), by the
+   stylesheet as well as by the HUD, so a window resized to a phone's draws no
+   tab in the frame before the HUD has heard of it. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-hud__tabs {
+    display: block;
+  }
+}
+
+.oyl-game--riding .oyl-hud > .oyl-hud__tabs {
+  pointer-events: none;
+}
+
+/*
+ * A tab: #669's 48 px both ways, the HUD's own surface and border, a word and
+ * a glyph. Its focus ring is drawn INSIDE it, on its own surface (`hudInk` on
+ * `hudSurface`, declared in `tokens.ts`): an open panel's tab stands over the
+ * road, where a ring outside it would be on a colour nothing checks (#748).
+ */
+.oyl-hud__tab {
+  align-items: center;
+  background: var(--oyl-color-hud-surface);
+  border: 2px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-hud-ink);
+  display: inline-flex;
+  font-size: var(--oyl-font-size-sm);
+  gap: var(--oyl-space-xs);
+  justify-content: center;
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0 var(--oyl-space-sm);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.oyl-hud__tab--open {
+  position: absolute;
+}
+
+/* Until `panel-tabs.ts` has found it a clear place, which it may not. */
+.oyl-hud__tab--open:not([data-oyl-placed]) {
+  visibility: hidden;
+}
+
+.oyl-hud__tab:focus-visible {
+  outline: 3px solid var(--oyl-color-hud-ink);
+  outline-offset: -6px;
+}
+
+.oyl-hud__tab-glyph {
+  font-size: var(--oyl-font-size-lg);
+  line-height: 1;
+}
+
+/*
+ * A collapsed panel is its tab and nothing else, in the panel's own place:
+ * the panel's class keeps its grid area and its corner, and this takes away
+ * its size, its padding and its border, so the tab's own are what is drawn.
+ * On a tablet only, as the tabs are (`panel-tabs.ts` §`PANEL_TABS_MEDIA`).
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud .oyl-hud__panel.oyl-hud__panel--collapsed {
+    border: 0;
+    display: block;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    padding: 0;
+    /* The tab's width, not the grid area's: a panel the grid stretched would
+       keep the panel's whole width and give none of it back. An area aligned
+       to its end keeps the tab at its end (`justify-self: end` stays). */
+    width: max-content;
+  }
+
+  .oyl-game--riding .oyl-hud .oyl-hud__trainer--collapsed {
+    margin: 0;
+    width: max-content;
+  }
+}

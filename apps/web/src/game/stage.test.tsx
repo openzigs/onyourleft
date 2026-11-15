@@ -89,11 +89,18 @@ let mounted: Mounted | undefined;
 /** Every live observer's callback, so a test can fire a resize by hand. */
 let observers: (() => void)[] = [];
 let disconnected = 0;
+/**
+ * Every observer made. #2600's tab layer observes several boxes with ONE
+ * observer, as `standings-room.ts` does, so a count of `observe` calls is not
+ * a count of observers to disconnect.
+ */
+let created = 0;
 
 beforeEach(() => {
   pending = [];
   observers = [];
   disconnected = 0;
+  created = 0;
   nowMs = 1_000_000;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
@@ -108,6 +115,7 @@ beforeEach(() => {
       readonly #callback: () => void;
       constructor(callback: () => void) {
         this.#callback = callback;
+        created += 1;
       }
       observe(): void {
         observers.push(this.#callback);
@@ -293,7 +301,7 @@ describe('a canvas that changes shape reaches the renderer — #423', () => {
 
   it('stops observing when the ride ends', async () => {
     await ride();
-    const live = observers.length;
+    const live = created;
     expect(live).toBeGreaterThan(0);
 
     await press('End ride');

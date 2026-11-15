@@ -166,6 +166,13 @@ function chrome(): Record<string, Element | null> {
   };
 }
 
+/**
+ * #2600: the collapse tab of each panel a plain ride draws — the two readings
+ * tiers and the route — as a tab's text reads: its word, the rest of its name,
+ * and its glyph.
+ */
+const PANEL_TAB_STOPS = ['Power panel−', 'Readings panel−', 'Route panel−'];
+
 describe('a ride takes the screen over — #423', () => {
   it('has all of its chrome while a rider is choosing a route', async () => {
     // The control for everything below. If the picker already had no header,
@@ -206,8 +213,9 @@ describe('a ride takes the screen over — #423', () => {
     await press('Ride ');
 
     const stops = tabbableElements(document.body).map((each) => each.textContent);
-    // #1482: and the HUD's touch lock, after them.
-    expect(stops).toEqual(['Pause', 'End ride', 'Lock']);
+    // #1482: and the HUD's touch lock, after them; #2600: and each panel's
+    // collapse tab, after the panels.
+    expect(stops).toEqual(['Pause', 'End ride', 'Lock', ...PANEL_TAB_STOPS]);
   });
 
   it('keeps the landmark and the heading that names it', async () => {
@@ -309,8 +317,9 @@ describe('an update is not offered mid-ride, and is not lost — #423', () => {
     expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
     expect(updateOffer()).toBeNull();
     const stops = tabbableElements(document.body).map((each) => each.textContent);
-    // #1482: and the HUD's touch lock, after them.
-    expect(stops).toEqual(['Pause', 'End ride', 'Lock']);
+    // #1482: and the HUD's touch lock, after them; #2600: and each panel's
+    // collapse tab, after the panels.
+    expect(stops).toEqual(['Pause', 'End ride', 'Lock', ...PANEL_TAB_STOPS]);
     expect(waiting.activations()).toBe(0);
   });
 
