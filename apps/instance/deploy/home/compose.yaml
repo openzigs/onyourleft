@@ -205,8 +205,9 @@ services:
   # review): `deploy.sh --rollback` starts the previous image with this
   # file, and an image from before #2606 does not know the command — it
   # would exit at once, restart, and take no backup again. Such an image
-  # runs the shell loop it always ran. `exec` makes Node the container's
-  # first process, so `docker compose stop` reaches it.
+  # runs the shell loop it always ran, which now stops on SIGTERM between
+  # runs (its sleep is waited on, so the trap is not held up). `exec` makes
+  # Node the container's first process, so `docker compose stop` reaches it.
   backup:
     <<: *instance-image
     depends_on:
@@ -222,9 +223,10 @@ services:
         if grep -q "'backup-loop'" src/operator/run.ts; then
         exec node src/operator/cli.ts backup-loop /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox --interval "$${OYL_BACKUP_INTERVAL_SECONDS}";
         fi;
+        trap 'exit 0' TERM;
         while true; do
         node src/operator/cli.ts backup /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox;
-        sleep "$${OYL_BACKUP_INTERVAL_SECONDS}";
+        sleep "$${OYL_BACKUP_INTERVAL_SECONDS}" & wait $$!;
         done
     environment:
       OYL_BACKUP_KEEP: ${OYL_BACKUP_KEEP:-14}

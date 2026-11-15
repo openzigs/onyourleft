@@ -382,6 +382,8 @@ const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/instance.ts',
   'apps/instance/src/node-imports.ts',
   'apps/instance/src/operator/commands.ts',
+  // #2606: the backup folder's lock file, by process id and host.
+  'apps/instance/src/operator/folder-lock.ts',
   'apps/instance/src/store/backup.ts',
   'apps/instance/src/store/serving.ts',
   'apps/instance/src/store/node-sqlite.ts',

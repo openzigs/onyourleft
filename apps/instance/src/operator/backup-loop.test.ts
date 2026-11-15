@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,19 @@ import {
 import { openDatabase } from '../store/node-sqlite.ts';
 import { openServingStore } from '../store/serving.ts';
 import { BACKUP_RECORD_DAYS } from '../store/sql-store.ts';
-import { backup, BACKUP_POLL_SECONDS, backupLoop, type DataPaths } from './commands.ts';
+import {
+  backup,
+  BACKUP_POLL_SECONDS,
+  backupLoop,
+  renameRetrying,
+  UNRECORDED_ALLOWANCE,
+  type DataPaths,
+  type Manifest,
+} from './commands.ts';
+import { RUN_LIMIT_MS } from './folder-lock.ts';
+import { MIGRATIONS } from '../store/migrations/index.ts';
+import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
+import { migrateAllBut } from '../store/testing/index.ts';
 import { runCommand } from './run.ts';
 
 const BACKUPS = '/v1/operate/backups';
@@ -318,7 +330,8 @@ describe('backup-loop: a failure never costs a restore point (#2606 review H1)',
       await store.close();
     }
     refuseEveryRecord(paths.database);
-    // Forty polls, twenty minutes, an interval of ten: two tries, not forty.
+    // Forty polls, twenty minutes, an interval of ten: two tries, not forty;
+    // and the second, past `--keep` + the allowance, gives up its own snapshot.
     const { result } = await pollFor(paths, onBox, 40, {
       intervalSeconds: 600,
       keep: 2,
@@ -327,9 +340,11 @@ describe('backup-loop: a failure never costs a restore point (#2606 review H1)',
     expect(result.runs).toBe(2);
     for (const place of [onBox, offBox]) {
       const kept = await readdir(place);
-      // Every restore point still there, and only the two snapshots taken.
+      // Every restore point still there, and no more than the bound.
       expect(kept.filter((name) => older.includes(name))).toEqual(older);
-      expect(kept.filter((name) => name.startsWith('snapshot-'))).toHaveLength(older.length + 2);
+      expect(kept.filter((name) => name.startsWith('snapshot-'))).toHaveLength(
+        2 + UNRECORDED_ALLOWANCE,
+      );
     }
   });
 
@@ -361,8 +376,12 @@ describe('backup-loop: a failure never costs a restore point (#2606 review H1)',
     const paths = await migratedAlone();
     const onBox = join(paths.root, 'on-box');
     const offBox = join(paths.root, 'off-box');
+    const longAgo = (Date.now() - RUN_LIMIT_MS - 60_000) / 1000;
     for (const place of [onBox, offBox]) {
-      await mkdir(join(place, '.partial-snapshot-2026-08-31T23-59-00-000Z'), { recursive: true });
+      const dead = join(place, '.partial-snapshot-2026-08-31T23-59-00-000Z');
+      await mkdir(dead, { recursive: true });
+      // Last changed longer ago than any run lasts: a run that died.
+      await utimes(dead, longAgo, longAgo);
       await mkdir(join(place, 'snapshot-2026-08-01T00-00-00-000Z'), { recursive: true });
     }
     const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
@@ -410,6 +429,176 @@ describe('backup-loop: a failure never costs a restore point (#2606 review H1)',
       intervalSeconds: 120,
     });
     expect(result.runs).toBe(1);
+  });
+});
+
+describe('backup: one run at a time in a folder (#2606, second review B1)', () => {
+  it('records every snapshot two runs at once leave complete against its manifest, and refuses the second by name', async () => {
+    const paths = await migratedAlone();
+    const blobs = createDiskBlobStore(paths.blobs);
+    for (let i = 0; i < 400; i += 1) await blobs.put(new TextEncoder().encode(`blob ${String(i)}`));
+    const onBox = join(paths.root, 'on-box');
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    let outcomes: PromiseSettledResult<unknown>[];
+    try {
+      outcomes = await Promise.allSettled([
+        backup(paths, onBox, { keep: 5, now: () => new Date('2026-09-01T00:00:00Z') }),
+        backup(paths, onBox, { keep: 5, now: () => new Date('2026-09-01T00:00:01Z') }),
+      ]);
+    } finally {
+      quiet.mockRestore();
+    }
+    // Every snapshot there is whole: its blob count is its manifest's.
+    const names = (await readdir(onBox)).filter((name) => name.startsWith('snapshot-'));
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      const manifest = JSON.parse(
+        await readFile(join(onBox, name, 'manifest.json'), 'utf8'),
+      ) as Manifest;
+      const held = await readdir(join(onBox, name, 'blobs', 'objects'), {
+        recursive: true,
+        withFileTypes: true,
+      });
+      expect(held.filter((entry) => entry.isFile())).toHaveLength(manifest.blobs);
+    }
+    const store = openServingStore(paths.database);
+    try {
+      const records = await store.listBackupRecords(10);
+      // Every snapshot recorded done is one of those whole ones.
+      for (const record of records.filter((each) => each.outcome === 'done')) {
+        expect(names).toContain(record.snapshot);
+      }
+      expect(records.map((record) => record.error).sort()).toEqual(['BackupFolderBusy', null]);
+    } finally {
+      await store.close();
+    }
+    expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(['fulfilled', 'rejected']);
+  });
+
+  it('removes no partial younger than any run lasts, even while holding the lock', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const young = join(onBox, '.partial-snapshot-2026-08-31T23-59-00-000Z');
+    await mkdir(young, { recursive: true });
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      await backup(paths, onBox, { keep: 2, now: () => new Date('2026-09-01T00:00:00Z') });
+    } finally {
+      quiet.mockRestore();
+    }
+    expect(await readdir(onBox)).toContain('.partial-snapshot-2026-08-31T23-59-00-000Z');
+  });
+
+  it('tries a rename again when Windows answers EPERM or EACCES for a moment, and not for anything else', async () => {
+    const calls: string[] = [];
+    let failures = ['EPERM', 'EACCES'];
+    await renameRetrying('from', 'to', () => {
+      const code = failures.shift();
+      calls.push(code ?? 'ok');
+      return code === undefined
+        ? Promise.resolve()
+        : Promise.reject(Object.assign(new Error('held'), { code }));
+    });
+    expect(calls).toEqual(['EPERM', 'EACCES', 'ok']);
+    failures = ['ENOENT'];
+    await expect(
+      renameRetrying('from', 'to', () =>
+        Promise.reject(Object.assign(new Error('gone'), { code: failures[0] })),
+      ),
+    ).rejects.toThrow('gone');
+  });
+});
+
+describe('backup-loop: restore points stay bounded while records fail (#2606, second review M1)', () => {
+  it('in a crash loop of ten one-poll restarts with a request waiting, takes one snapshot and keeps every restore point', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const offBox = join(paths.root, 'off-box');
+    const older = await restorePoints(onBox, offBox);
+    const store = openServingStore(paths.database);
+    try {
+      expect((await store.requestBackup(1)).outcome).toBe('requested');
+    } finally {
+      await store.close();
+    }
+    refuseEveryRecord(paths.database);
+    let runs = 0;
+    for (let restart = 0; restart < 10; restart += 1) {
+      // Each life is one poll, a minute apart.
+      const life = await pollFor(paths, onBox, 1, {
+        intervalSeconds: 600,
+        keep: 2,
+        copyTo: offBox,
+      });
+      runs += life.result.runs;
+    }
+    expect(runs).toBe(1);
+    for (const place of [onBox, offBox]) {
+      const kept = (await readdir(place)).filter((name) => name.startsWith('snapshot-'));
+      expect(kept.filter((name) => older.includes(name))).toEqual(older);
+      expect(kept).toHaveLength(older.length + 1);
+    }
+  });
+
+  it('over many intervals with records failing, never holds more than --keep + the allowance, and gives up none it had', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const store = openServingStore(paths.database);
+    try {
+      expect((await store.requestBackup(1)).outcome).toBe('requested');
+    } finally {
+      await store.close();
+    }
+    refuseEveryRecord(paths.database);
+    // Ten intervals of polls, from an empty folder.
+    const { result } = await pollFor(paths, onBox, 200, { intervalSeconds: 600, keep: 2 });
+    expect(result.runs).toBe(10);
+    const kept = (await readdir(onBox)).filter((name) => name.startsWith('snapshot-')).sort();
+    expect(kept).toHaveLength(2 + UNRECORDED_ALLOWANCE);
+    // The first ones taken: none was removed to make room for a later one.
+    expect(kept[0]).toBe('snapshot-2026-09-01T00-00-00-000Z');
+  });
+
+  it('after an upgrade, waits an interval after the newest snapshot the shell loop left, before any run', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    // The shell loop's last snapshot, five minutes before the service starts: no record names it.
+    await mkdir(join(onBox, 'snapshot-2026-08-31T23-55-00-000Z'), { recursive: true });
+    const store = openServingStore(paths.database);
+    try {
+      expect((await store.requestBackup(1)).outcome).toBe('requested');
+    } finally {
+      await store.close();
+    }
+    const { result } = await pollFor(paths, onBox, 20, { intervalSeconds: 3600 });
+    expect(result.runs).toBe(0);
+    const later = await pollFor(paths, onBox, 140, { intervalSeconds: 3600 });
+    expect(later.result.runs).toBe(1);
+  });
+});
+
+describe('backup on a database from before migration 0042 (#2606, second review M2)', () => {
+  it('prunes to --keep as it always did: it has no record to wait for', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'oyl-backup-loop-'));
+    const paths = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
+    const names = Object.keys(MIGRATIONS);
+    const first = names.indexOf('0042-backup-records');
+    if (first < 0) throw new Error('no migration named 0042-backup-records in MIGRATIONS');
+    await migrateAllBut(paths.database, names.length - first);
+    const onBox = join(directory, 'on-box');
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      for (const second of ['00', '01', '02']) {
+        const taken = await backup(paths, onBox, {
+          keep: 1,
+          now: () => new Date(`2026-09-01T00:00:${second}Z`),
+        });
+        expect(taken.recorded).toBe(false);
+      }
+    } finally {
+      quiet.mockRestore();
+    }
+    expect(await readdir(onBox)).toEqual(['snapshot-2026-09-01T00-00-02-000Z']);
   });
 });
 

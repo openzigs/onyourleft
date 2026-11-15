@@ -6255,10 +6255,22 @@ function storeOver(
           // Requests first: each served one names its record. A request is
           // never later than the run that served it, so every request whose
           // record goes is among these.
+          // And every request a record that goes served, whatever time the
+          // request carries: a clock stepped back must not leave one naming
+          // a record that is gone (second review).
           await trx
             .deleteFrom('backup_request')
             .where('record_id', 'is not', null)
-            .where('requested_at', '<', cutoff)
+            .where((eb) =>
+              eb.or([
+                eb('requested_at', '<', cutoff),
+                eb(
+                  'record_id',
+                  'in',
+                  eb.selectFrom('backup_record').select('id').where('at', '<', cutoff),
+                ),
+              ]),
+            )
             .execute();
           await trx.deleteFrom('backup_record').where('at', '<', cutoff).execute();
           let served = false;

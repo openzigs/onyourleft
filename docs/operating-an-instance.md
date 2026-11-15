@@ -729,20 +729,38 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
 `docker compose stop backup` lets a run in progress finish (the service has a two-minute grace period).
 
 - **A failure never costs a restore point.** Old snapshots are removed only after the run's record is
-  written. If the record cannot be written (a full disk, a lock held too long), the run removes
-  nothing. The loop also holds back a request it has already tried for one interval, so a failure
-  that repeats takes at most one snapshot per interval and never prunes.
+  written. If the record cannot be written (a full disk, a lock held too long), the run removes no
+  older snapshot.
+- **The bound while records fail.** A run whose record cannot be written keeps its snapshot only
+  while the folder holds no more than `--keep` + 2 snapshots. Beyond that it removes the snapshot it
+  has just taken, and never one that was already there. So a folder never holds more than
+  `--keep` + 2 snapshots because of failed records, or what it held before if that was more.
+- **How often it runs while records fail.** The loop holds back a request it has already tried for
+  one interval. When it starts, it also holds off every run, the owner's requests included, until
+  one interval after the newest snapshot in the folder that no record names. That snapshot may come
+  from a run whose record failed before a restart, or from the shell loop before an upgrade. So
+  neither restarts nor a waiting request take snapshots more often than once per interval.
+- **One run at a time in a folder.** A run holds a lock file, `.backup.lock`, in each folder it
+  writes, for the whole run. The file is created exclusively (`O_EXCL`), which works on a Windows
+  drive mounted into Docker Desktop. A second run into the same folder, such as a `backup` run by hand
+  while the service is running, is refused and recorded `failed` as `BackupFolderBusy`. If the
+  off-box folder is locked, that run's copy is recorded `failed`. A lock left by a run that died is
+  taken over in three cases: the same container's process id after a restart, a process that is no
+  longer alive, or a lock more than six hours old.
 - **A snapshot is written under `.partial-snapshot-…`** and renamed `snapshot-…` only once it is
-  complete, both on the box and off it. `--keep` never counts a partial one, and the next run removes
-  any partial snapshot that a stop or crash left behind.
+  complete, both on the box and off it. `--keep` never counts a partial one. A run removes partial
+  snapshots only while it holds the folder's lock, and only those last changed more than six hours
+  ago, which is longer than any run lasts. A rename that Windows refuses for a moment (`EACCES` or
+  `EPERM`, for example while a scanner holds the folder) is retried a few times.
 - **A snapshot taken for "back up now" does not hold that request as waiting**, so restoring it does
   not ask for another backup.
 - **On a rollback** to an image from before `backup-loop` existed, the service checks whether the
-  image has the command. If it does not, it runs the old shell loop, so backups carry on.
+  image has the command. If it does not, it runs the old shell loop, so backups carry on. That loop
+  now stops on `docker compose stop` between runs.
 - ⚠️ **The off-box copy has no time limit.** A share that stops answering blocks the copy inside a
   file-system call, which Node cannot cancel, and the service waits with it. The snapshot on the box
   is already complete by then. If the Status shows the last backup getting old, check
-  `docker compose logs backup` and the share.
+  `docker compose logs backup` and the share. A watchdog for this is [#2626](https://github.com/openzigs/onyourleft/issues/2626).
 
 ⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
 the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an

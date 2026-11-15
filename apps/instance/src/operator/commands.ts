@@ -40,6 +40,7 @@ import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
 import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
+import { lockFolder, RUN_LIMIT_MS, type FolderLock } from './folder-lock.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 import type { BackupRun, OperatorAction, SqlStore } from '../store/sql-store.ts';
 import { createSync } from '../sync/sync.ts';
@@ -294,28 +295,91 @@ export function errorName(error: unknown): string {
 export const OFF_BOX_FAILED =
   'operator: the snapshot was taken and recorded, but its off-box copy (--copy-to) failed.\n';
 
+/**
+ * How many snapshots beyond `--keep` a place may hold because their runs
+ * could not be recorded (#2606, second review M1). Such a run removes no
+ * older snapshot — a recorded restore point is never given up for one that
+ * is not — and when the place already holds `--keep` + this many, it
+ * removes the snapshot it has just taken instead.
+ */
+export const UNRECORDED_ALLOWANCE = 2;
+
 export async function backup(paths: DataPaths, destination: string, options: BackupOptions = {}) {
   if (!existsSync(paths.database)) throw new CommandError('There is no database to back up.');
   if (options.keep !== undefined && (!Number.isInteger(options.keep) || options.keep < 1)) {
     throw new CommandError('--keep is a whole number of snapshots, 1 or more.');
   }
   const at = (options.now ?? (() => new Date()))();
+  // One run at a time in a folder, for the whole run (second review B1): a
+  // run that cannot take the lock is refused, and recorded `failed` by name.
+  let here: FolderLock;
+  try {
+    await mkdir(destination, { recursive: true });
+    here = await lockFolder(destination);
+  } catch (error) {
+    await recordFailedBackup(paths.database, at, error, options);
+    throw error;
+  }
+  try {
+    // The off-box place is locked too; one that cannot be locked is a copy
+    // that failed, and is neither written nor pruned.
+    let there: FolderLock | undefined;
+    if (options.copyTo !== undefined) {
+      try {
+        await mkdir(options.copyTo, { recursive: true });
+        there = await lockFolder(options.copyTo);
+      } catch {
+        there = undefined;
+      }
+    }
+    try {
+      return await takeAndRecord(paths, destination, at, options, there !== undefined);
+    } finally {
+      await there?.release();
+    }
+  } finally {
+    await here.release();
+  }
+}
+
+async function takeAndRecord(
+  paths: DataPaths,
+  destination: string,
+  at: Date,
+  options: BackupOptions,
+  offBoxLocked: boolean,
+) {
   let taken: Awaited<ReturnType<typeof takeBackup>>;
   try {
-    taken = await takeBackup(paths, destination, at, options);
+    taken = await takeBackup(paths, destination, at, options, offBoxLocked);
   } catch (error) {
     await recordFailedBackup(paths.database, at, error, options);
     throw error;
   }
   const { recorded, logged, prune } = await recordTakenBackup(paths.database, at, taken, options);
   // Pruned only once the run is recorded (#2606 review H1): a run whose
-  // record cannot be written removes nothing, so no failure — however often
-  // it repeats — costs a restore point.
+  // record cannot be written removes no older snapshot.
   let removed = 0;
+  let kept = true;
   if (prune) {
     for (const old of taken.prune) {
       await rm(old, { recursive: true, force: true });
       removed += 1;
+    }
+  } else if (options.keep !== undefined) {
+    // …and holds no more than `--keep` + UNRECORDED_ALLOWANCE (second review
+    // M1): past that it gives up the snapshot it has just taken, never one
+    // that was there before.
+    const limit = options.keep + UNRECORDED_ALLOWANCE;
+    const places = [taken.snapshot, ...(taken.copiedTo === null ? [] : [taken.copiedTo])];
+    for (const made of places) {
+      const count = (await readdir(dirname(made))).filter((name) =>
+        name.startsWith('snapshot-'),
+      ).length;
+      if (count > limit) {
+        await rm(made, { recursive: true, force: true });
+        if (made === taken.snapshot) kept = false;
+      }
     }
   }
   return {
@@ -329,6 +393,7 @@ export async function backup(paths: DataPaths, destination: string, options: Bac
     offBox: taken.run.offBox,
     recorded,
     logged,
+    kept,
   };
 }
 
@@ -336,15 +401,46 @@ export async function backup(paths: DataPaths, destination: string, options: Bac
  * The prefix a snapshot is written under until it is complete (#2606): a
  * run cut short — a stop past the grace period, a crash, a full disk —
  * leaves a `.partial-snapshot-…` directory, which `--keep` never counts and
- * the next run removes. Only a complete snapshot is renamed `snapshot-…`.
+ * a later run removes. Only a complete snapshot is renamed `snapshot-…`.
  */
 export const PARTIAL = '.partial-';
 
-/** Removes every partial snapshot a run cut short left in `place`. */
+/**
+ * Removes the partial snapshots a run that died left in `place`. Called only
+ * while holding `place`'s lock (`folder-lock.ts`), and — a second guard —
+ * removes only a partial last changed longer ago than any run lasts.
+ */
 async function removePartials(place: string): Promise<void> {
   for (const name of await readdir(place)) {
-    if (name.startsWith(`${PARTIAL}snapshot-`)) {
-      await rm(join(place, name), { recursive: true, force: true });
+    if (!name.startsWith(`${PARTIAL}snapshot-`)) continue;
+    const path = join(place, name);
+    const changed = await stat(path).then(
+      (found) => found.mtimeMs,
+      () => undefined,
+    );
+    if (changed !== undefined && Date.now() - changed > RUN_LIMIT_MS) {
+      await rm(path, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * `rename`, tried again a few times when Windows answers `EACCES` or `EPERM`
+ * because a scanner holds a handle in the folder for a moment (second review).
+ */
+export async function renameRetrying(
+  from: string,
+  to: string,
+  move: (from: string, to: string) => Promise<void> = rename,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await move(from, to);
+      return;
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (attempt >= 4 || (code !== 'EACCES' && code !== 'EPERM')) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
     }
   }
 }
@@ -373,13 +469,19 @@ async function bytesUnder(root: string): Promise<number> {
  * ⚠️ The off-box copy has no time limit. A share that stops answering blocks
  * the copy inside a file-system call, which Node cannot cancel, and the loop
  * waits with it; the snapshot on the box is already complete. Watch
- * `docker compose logs backup` and the age of the last backup in Status.
+ * `docker compose logs backup` and the age of the last backup in Status;
+ * #2626 is the child-process watchdog that would stop it.
  */
-async function takeBackup(paths: DataPaths, destination: string, at: Date, options: BackupOptions) {
+async function takeBackup(
+  paths: DataPaths,
+  destination: string,
+  at: Date,
+  options: BackupOptions,
+  offBoxLocked: boolean,
+) {
   const started = performance.now();
   const name = `snapshot-${stamp(at)}`;
   const snapshot = join(destination, name);
-  await mkdir(destination, { recursive: true });
   await removePartials(destination);
   const partial = join(destination, `${PARTIAL}${name}`);
   let manifest: Manifest;
@@ -404,7 +506,7 @@ async function takeBackup(paths: DataPaths, destination: string, at: Date, optio
       databaseSha256: await sha256Of(database),
     };
     await writeFile(join(partial, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
-    await rename(partial, snapshot);
+    await renameRetrying(partial, snapshot);
   } catch (error) {
     await rm(partial, { recursive: true, force: true }).catch(() => undefined);
     throw error;
@@ -419,10 +521,10 @@ async function takeBackup(paths: DataPaths, destination: string, at: Date, optio
     const copy = join(options.copyTo, name);
     const partialCopy = join(options.copyTo, `${PARTIAL}${name}`);
     try {
-      await mkdir(options.copyTo, { recursive: true });
+      if (!offBoxLocked) throw new Error('the off-box place is not this run’s');
       await removePartials(options.copyTo);
       await cp(snapshot, partialCopy, { recursive: true });
-      await rename(partialCopy, copy);
+      await renameRetrying(partialCopy, copy);
       copiedTo = copy;
       offBox = 'copied';
     } catch {
@@ -557,6 +659,35 @@ async function recordFailedBackup(
   }
 }
 
+/** A snapshot directory's name, and the time it names, Unix ms. */
+function snapshotTime(name: string): number | undefined {
+  const parts = /^snapshot-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(name);
+  if (parts === null) return undefined;
+  const [, day, hours, minutes, seconds, ms] = parts;
+  const at = Date.parse(
+    `${day ?? ''}T${hours ?? ''}:${minutes ?? ''}:${seconds ?? ''}.${ms ?? ''}Z`,
+  );
+  return Number.isNaN(at) ? undefined : at;
+}
+
+/** The newest complete snapshot in `folder`, by the time its name holds, or `undefined`. */
+async function newestSnapshotIn(
+  folder: string,
+): Promise<{ readonly name: string; readonly at: number } | undefined> {
+  let names: string[];
+  try {
+    names = await readdir(folder);
+  } catch {
+    return undefined;
+  }
+  let newest: { readonly name: string; readonly at: number } | undefined;
+  for (const name of names) {
+    const at = snapshotTime(name);
+    if (at !== undefined && (newest === undefined || at > newest.at)) newest = { name, at };
+  }
+  return newest;
+}
+
 /** How often `backup-loop` looks for the owner's "back up now" (#2606): within 30 s. */
 export const BACKUP_POLL_SECONDS = 30;
 
@@ -597,8 +728,11 @@ function waitFor(ms: number, signal: AbortSignal | undefined): Promise<void> {
  * - **A failure never makes it run more often than its interval** (#2606
  *   review H1). A request it tried and that is still waiting — its record
  *   could not be written — is not tried again until an interval has passed,
- *   remembered here and not in the database, which is what failed. And a
- *   run whose record failed removes no old snapshot (`backup`).
+ *   remembered here and not in the database, which is what failed. Across a
+ *   restart the folder remembers: the newest snapshot no record names holds
+ *   off every run for an interval after it (second review M1). And a run
+ *   whose record failed removes no older snapshot, and keeps at most
+ *   `--keep` + {@link UNRECORDED_ALLOWANCE} in a place (`backup`).
  * - **It keeps going.** A failed run is recorded by its error's name and the
  *   loop carries on; a database it cannot read is tried again at the next poll.
  *
@@ -634,6 +768,13 @@ export async function backupLoop(
   let runs = 0;
   /** When each request was last tried, Unix ms: in memory, as the database is what may be failing. */
   const attempted = new Map<number, number>();
+  /**
+   * Until when no run starts at all, Unix ms (second review M1): an interval
+   * after the newest snapshot in the folder that no record names — a run
+   * whose record failed, before a restart, or the shell loop's before
+   * #2606 — so neither a restart nor a waiting request takes another early.
+   */
+  let quietUntil = Number.NEGATIVE_INFINITY;
   while (!stopped()) {
     let pending: { readonly id: number } | undefined;
     try {
@@ -646,6 +787,14 @@ export async function backupLoop(
           const now = clock().getTime();
           nextDue =
             last === undefined ? now : Math.min(last.at * 1000 + intervalMs, now + intervalMs);
+          const onDisk = await newestSnapshotIn(destination);
+          if (
+            onDisk !== undefined &&
+            !(await store.listBackupRecords(50)).some((record) => record.snapshot === onDisk.name)
+          ) {
+            quietUntil = Math.min(onDisk.at + intervalMs, now + intervalMs);
+            nextDue = Math.max(nextDue, quietUntil);
+          }
         }
         pending = await store.pendingBackupRequest();
       } finally {
@@ -659,7 +808,9 @@ export async function backupLoop(
     const now = clock().getTime();
     const tried = pending === undefined ? undefined : attempted.get(pending.id);
     const served =
-      pending !== undefined && (tried === undefined || now - tried >= intervalMs)
+      pending !== undefined &&
+      now >= quietUntil &&
+      (tried === undefined || now - tried >= intervalMs)
         ? pending.id
         : undefined;
     if (served !== undefined || now >= nextDue) {

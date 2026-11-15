@@ -207,6 +207,25 @@ describe('“back up now” in the store (#2606)', () => {
     expect(waiting.outcome).toBe('requested');
   });
 
+  it('deletes a request with the record that served it, even one stamped later by a clock running ahead', async () => {
+    const store = await opened();
+    await store.write(async (writer) => {
+      // The instance's clock ran forty days ahead of the backup service's.
+      const asked = await writer.requestBackup(T + 40 * DAY);
+      if (asked.outcome !== 'requested') throw new Error('not requested');
+      await writer.recordBackup(snapshotRun(T), asked.request.id);
+    });
+    // A month on, the record goes; its request must not be left naming it.
+    await store.write((writer) => writer.recordBackup(snapshotRun(T + 31 * DAY)));
+    expect(await store.read(ats)).toEqual([T + 31 * DAY]);
+    const database = openDatabase(store.path);
+    try {
+      expect(database.prepare('SELECT count(*) AS n FROM backup_request').get()).toEqual({ n: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
   it('holds a record to its shape in the schema: no path for a snapshot, no message for an error', async () => {
     const store = await opened();
     await store.write(() => Promise.resolve());

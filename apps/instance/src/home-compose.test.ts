@@ -265,7 +265,7 @@ describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
    * `node` that writes its arguments and a `sleep` that ends the shell, so
    * the old shell loop runs once. Answers each `node` call's arguments.
    */
-  function runIn(runTs: string): string[] {
+  function runIn(runTs: string, status?: { code: number | null }): string[] {
     const image = mkdtempSync(join(tmpdir(), 'oyl-backup-service-'));
     try {
       mkdirSync(join(image, 'src', 'operator'), { recursive: true });
@@ -276,7 +276,7 @@ describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
         mode: 0o755,
       });
       writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nkill -TERM $PPID\n', { mode: 0o755 });
-      spawnSync('/bin/sh', ['-c', script()], {
+      const ran = spawnSync('/bin/sh', ['-c', script()], {
         cwd: image,
         env: {
           PATH: `${bin}:/usr/bin:/bin`,
@@ -285,6 +285,7 @@ describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
         },
         timeout: SHELL_WAIT_MS,
       });
+      if (status !== undefined) status.code = ran.status;
       return readFileSync(join(image, 'calls'), 'utf8').trim().split('\n');
     } finally {
       rmSync(image, { recursive: true, force: true });
@@ -297,10 +298,13 @@ describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
     ]);
   });
 
-  it('runs the shell loop it always ran on an image from before #2606, which a rollback starts', () => {
-    expect(runIn("      case 'backup': {\n")).toEqual([
+  it('runs the shell loop it always ran on an image from before #2606, which a rollback starts — and stops it on SIGTERM', () => {
+    const status: { code: number | null } = { code: null };
+    expect(runIn("      case 'backup': {\n", status)).toEqual([
       'src/operator/cli.ts backup /backups --keep 14 --copy-to /offbox',
     ]);
+    // The stub `sleep` sent the shell SIGTERM: it exited 0 by its trap, not killed by the signal.
+    expect(status.code).toBe(0);
   });
 
   it('asks the image for the very word this checkout’s run.ts answers to', () => {
