@@ -248,7 +248,10 @@ export function OperateBackupsPanel({
 
   const reread = useCallback(async (): Promise<void> => {
     const next = await port.backups();
-    if (mounted.current) setRead(next);
+    // One transient failure does not drop what was last read: a request that waits goes on being
+    // looked for. The first read, and any other answer (signed out, no longer the owner), stands.
+    if (mounted.current)
+      setRead((last) => (next.kind === 'unreachable' && last?.kind === 'backups' ? last : next));
   }, [port]);
 
   useEffect(() => {

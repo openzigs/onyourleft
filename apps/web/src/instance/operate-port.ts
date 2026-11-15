@@ -334,7 +334,7 @@ function lastBackupFrom(value: unknown): OperateLastBackup | null | undefined {
 }
 
 /** A run's error as the instance records it: a name or Node's code, never a message. */
-const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const ERROR_NAME = /^[A-Za-z0-9_]{1,64}$/;
 
 /** A snapshot directory's name as `backup` makes one: `snapshot-` and the time, `:` and `.` as `-`. */
 const SNAPSHOT = /^snapshot-[0-9A-Za-z-]{1,40}$/;

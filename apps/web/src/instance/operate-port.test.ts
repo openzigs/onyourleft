@@ -474,6 +474,30 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
   });
 
   it.each([
+    ['a pending request that names no time', { requestedAt: null }],
+    ['a pending request that is not an object', 'now'],
+  ] as const)('shows no backups when the answer holds %s', async (_name, pending) => {
+    expect(await answeredWith(() => Response.json({ backups: [GOOD], pending }))).toEqual({
+      kind: 'unreachable',
+    });
+  });
+
+  it('does not take a 202 that names no time as a request made', async () => {
+    const accepted = (body: unknown) => () => Response.json(body, { status: 202 });
+    expect(
+      await answeredWith(accepted({ requestedAt: '2026-11-14T20:00:00.000Z' }), 'backUpNow'),
+    ).toEqual({ kind: 'requested', requestedAt: '2026-11-14T20:00:00.000Z' });
+    expect(await answeredWith(accepted({}), 'backUpNow')).toEqual({ kind: 'unreachable' });
+  });
+
+  it('reads a failed run whose error name the instance may write, such as one starting with _', async () => {
+    const failed = { ...GOOD, outcome: 'failed', snapshot: null, error: '_Odd9' };
+    expect(
+      await answeredWith(() => Response.json({ backups: [failed], pending: null })),
+    ).toMatchObject({ kind: 'backups' });
+  });
+
+  it.each([
     ['a key', 'Refused: the key is 0123456789abcdef0123456789abcdef.'],
     ['a coordinate', 'Refused near 51.5007, -0.1246.'],
     ['markup', 'Refused <img src=x onerror=alert(1)>'],

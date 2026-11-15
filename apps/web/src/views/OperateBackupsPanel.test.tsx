@@ -11,7 +11,11 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createOperatePort, type OperateBackup } from '../instance/operate-port';
+import {
+  createOperatePort,
+  type OperateBackup,
+  type OperateBackupsRead,
+} from '../instance/operate-port';
 import { SCRIPTED_BACKUPS, scriptedOperate } from '../instance/testing';
 import {
   aSnapshot,
@@ -337,6 +341,73 @@ describe('Backups over a scripted instance — #2607', () => {
     );
     await settle();
     expect(text().includes('more than twice the backup interval of 6 hours')).toBe(stale);
+  });
+
+  it('still calls the scheduled snapshot stale when a fresh one-off lies above it', async () => {
+    const [newest, ...rest] = SCRIPTED_BACKUPS;
+    if (newest === undefined) throw new Error('no backups');
+    const freshOneOff: OperateBackup = {
+      outcome: 'done',
+      id: 99,
+      at: '2026-11-14T19:00:00.000Z',
+      ageSeconds: 60,
+      snapshot: 'snapshot-2026-11-14T19-00-00-000Z',
+      rows: 1,
+      blobs: 1,
+      sizeBytes: 1,
+      offBox: 'not-configured',
+      intervalSeconds: null,
+      requested: false,
+    };
+    mounted = await mount(
+      <OperateBackupsPanel
+        port={
+          scriptedOperate({
+            backups: [freshOneOff, { ...newest, ageSeconds: 2 * 21_600 + 1 }, ...rest],
+          }).port
+        }
+        every={handClock().every}
+      />,
+    );
+    await settle();
+    expect(text()).toContain('more than twice the backup interval of 6 hours');
+  });
+
+  it('keeps waiting for a request through one failed re-read', async () => {
+    const [newest, ...rest] = SCRIPTED_BACKUPS;
+    if (newest === undefined) throw new Error('no backups');
+    const waitingRead: OperateBackupsRead = {
+      kind: 'backups',
+      records: [newest, ...rest],
+      pendingSince: '2026-11-14T20:00:00.000Z',
+    };
+    const answers: OperateBackupsRead[] = [
+      waitingRead,
+      { kind: 'unreachable' },
+      { ...waitingRead, pendingSince: null },
+    ];
+    const clock = handClock();
+    mounted = await mount(
+      <OperateBackupsPanel
+        port={{
+          backups: () => Promise.resolve(answers.shift() ?? { kind: 'unreachable' }),
+          backUpNow: () => Promise.resolve({ kind: 'unreachable' }),
+        }}
+        every={clock.every}
+      />,
+    );
+    await settle();
+    expect(text()).toContain(BACKUP_WAITING_TEXT);
+    clock.tick();
+    await settle();
+    // The failed re-read changed nothing: still waiting, still reading again.
+    expect(text()).toContain(BACKUP_WAITING_TEXT);
+    expect(text()).not.toContain(BACKUPS_UNREADABLE_TEXT);
+    expect(clock.running()).toEqual([BACKUPS_REREAD_MILLISECONDS]);
+    clock.tick();
+    await settle();
+    expect(text()).not.toContain(BACKUP_WAITING_TEXT);
+    expect(clock.running()).toEqual([]);
   });
 
   it('says the backups could not be read, and offers nothing', async () => {
