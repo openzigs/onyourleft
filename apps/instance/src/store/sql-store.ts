@@ -6252,12 +6252,15 @@ function storeOver(
             .executeTakeFirstOrThrow();
           // By AGE, not by count: the 30-day limit is a time (#1381).
           const cutoff = run.at - BACKUP_RECORD_DAYS * 86_400;
-          await trx.deleteFrom('backup_record').where('at', '<', cutoff).execute();
+          // Requests first: each served one names its record. A request is
+          // never later than the run that served it, so every request whose
+          // record goes is among these.
           await trx
             .deleteFrom('backup_request')
             .where('record_id', 'is not', null)
             .where('requested_at', '<', cutoff)
             .execute();
+          await trx.deleteFrom('backup_record').where('at', '<', cutoff).execute();
           let served = false;
           if (requestId !== undefined) {
             const updated = await trx

@@ -704,8 +704,8 @@ the Status's **last backup** is the `backup` service's newest snapshot, not it.
 
 ### "Back up now", from the app
 
-The owner can ask for a backup from the Operate area (`POST /v1/operate/backups`). The instance takes
-none itself: it writes a request into the database, with its `backup_requested` entry in the operator
+The owner can ask for a backup from the Operate area (`POST /v1/operate/backups`, answered `202` at
+once). The instance takes none itself: it writes a request into the database, with its `backup_requested` entry in the operator
 log in the same transaction, and the `backup` service takes the snapshot **within 30 seconds**. It
 serves a request once — the run's record and the request marked served are one transaction — and a
 request made while the service is stopped waits in the database until it starts again. **A request is
@@ -727,6 +727,22 @@ request every 30 seconds, opening the database only for that moment. After a res
 an interval after its newest recorded run, rather than at once, so a restart does not take an extra
 snapshot and remove an older one. A run that fails is recorded and the loop carries on.
 `docker compose stop backup` lets a run in progress finish (the service has a two-minute grace period).
+
+- **A failure never costs a restore point.** Old snapshots are removed only after the run's record is
+  written. If the record cannot be written (a full disk, a lock held too long), the run removes
+  nothing. The loop also holds back a request it has already tried for one interval, so a failure
+  that repeats takes at most one snapshot per interval and never prunes.
+- **A snapshot is written under `.partial-snapshot-…`** and renamed `snapshot-…` only once it is
+  complete, both on the box and off it. `--keep` never counts a partial one, and the next run removes
+  any partial snapshot that a stop or crash left behind.
+- **A snapshot taken for "back up now" does not hold that request as waiting**, so restoring it does
+  not ask for another backup.
+- **On a rollback** to an image from before `backup-loop` existed, the service checks whether the
+  image has the command. If it does not, it runs the old shell loop, so backups carry on.
+- ⚠️ **The off-box copy has no time limit.** A share that stops answering blocks the copy inside a
+  file-system call, which Node cannot cancel, and the service waits with it. The snapshot on the box
+  is already complete by then. If the Status shows the last backup getting old, check
+  `docker compose logs backup` and the share.
 
 ⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
 the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an

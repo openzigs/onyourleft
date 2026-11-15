@@ -193,6 +193,8 @@ describe('backup and a performed restore — #791 criterion 4, #52, #807', () =>
       const known = activityRecordFixture(ATHLETE_A);
       const read = await fresh.getActivityRecord(ATHLETE_A, known.contentSha256);
       expect(read?.signedRecord).toEqual(known.signedRecord);
+      // The request this snapshot served does not wait in it (#2606 review L1).
+      expect(await fresh.pendingBackupRequest()).toBeUndefined();
     } finally {
       await fresh.close();
     }

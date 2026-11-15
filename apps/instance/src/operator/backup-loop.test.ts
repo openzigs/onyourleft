@@ -22,6 +22,7 @@ import {
   startSoleModeratorWorld,
   type SoleModeratorWorld,
 } from '../moderation/moderation-testing.ts';
+import { openDatabase } from '../store/node-sqlite.ts';
 import { openServingStore } from '../store/serving.ts';
 import { BACKUP_RECORD_DAYS } from '../store/sql-store.ts';
 import { backup, BACKUP_POLL_SECONDS, backupLoop, type DataPaths } from './commands.ts';
@@ -166,7 +167,7 @@ describe('backup-loop: “back up now” (#2606)', () => {
     const { result } = await drive(on, paths, backups, 3600, async (waits) => {
       if (waits === 1) {
         const asked = await on.as(on.owner, 'POST', BACKUPS);
-        expect(asked.status).toBe(200);
+        expect(asked.status).toBe(202);
         requestedAt = (asked.body as { requestedAt: string }).requestedAt;
         expect((await backupsOf(on)).pending).toEqual({ requestedAt });
       }
@@ -200,7 +201,7 @@ describe('backup-loop: “back up now” (#2606)', () => {
     await earlierServiceRun(on, 20 * 60, 3600);
     // The first service is stopped right after the owner asks: before it polls again.
     const first = await drive(on, paths, backups, 3600, async () => {
-      expect((await on.as(on.owner, 'POST', BACKUPS)).status).toBe(200);
+      expect((await on.as(on.owner, 'POST', BACKUPS)).status).toBe(202);
       return true;
     });
     expect(first.result.runs).toBe(0);
@@ -220,7 +221,7 @@ describe('backup-loop: “back up now” (#2606)', () => {
     const blocked = join(directory ?? '', 'not-a-directory');
     await writeFile(blocked, 'a file');
     const { result, reports } = await drive(on, paths, blocked, 3600, async (waits) => {
-      if (waits === 1) expect((await on.as(on.owner, 'POST', BACKUPS)).status).toBe(200);
+      if (waits === 1) expect((await on.as(on.owner, 'POST', BACKUPS)).status).toBe(202);
       return waits === 4;
     });
     expect(result.runs).toBe(1);
@@ -241,7 +242,174 @@ describe('backup-loop: “back up now” (#2606)', () => {
     const status = await on.as(on.owner, 'GET', '/v1/operate/status');
     expect((status.body as { lastBackup: { offBox: string } }).lastBackup.offBox).toBe('copied');
     // And, the request served, the owner may ask again.
-    expect((await on.as(on.owner, 'POST', BACKUPS)).status).toBe(200);
+    expect((await on.as(on.owner, 'POST', BACKUPS)).status).toBe(202);
+  });
+});
+
+/** A migrated database of its own, in the test's directory, with nothing else in it. */
+async function migratedAlone(): Promise<DataPaths & { readonly root: string }> {
+  directory = await mkdtemp(join(tmpdir(), 'oyl-backup-loop-'));
+  const paths = { database: join(directory, 'instance.sqlite'), blobs: join(directory, 'blobs') };
+  const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    expect(await runCommand(['migrate'], paths)).toBe(0);
+  } finally {
+    quiet.mockRestore();
+  }
+  return { ...paths, root: directory };
+}
+
+/** The real database, made to refuse every backup record: the write a run ends with. */
+function refuseEveryRecord(database: string): void {
+  const opened = openDatabase(database);
+  try {
+    opened.exec(`create trigger backup_record_refuses_test before insert on backup_record
+      begin select raise(abort, 'the record was refused'); end`);
+  } finally {
+    opened.close();
+  }
+}
+
+/** Restore points already there: three older snapshots in each place. */
+async function restorePoints(...places: string[]): Promise<readonly string[]> {
+  const names = ['snapshot-2026-01-01', 'snapshot-2026-01-02', 'snapshot-2026-01-03'];
+  for (const place of places) {
+    for (const name of names) await mkdir(join(place, name), { recursive: true });
+  }
+  return names;
+}
+
+/** `polls` polls of the loop, 30 s of the clock apart, from 2026-09-01. */
+async function pollFor(
+  paths: DataPaths,
+  destination: string,
+  polls: number,
+  options: { readonly intervalSeconds: number; readonly keep?: number; readonly copyTo?: string },
+) {
+  let now = Date.parse('2026-09-01T00:00:00Z');
+  let waits = 0;
+  const stop = new AbortController();
+  const reports: unknown[] = [];
+  const result = await backupLoop(paths, destination, {
+    ...options,
+    now: () => new Date(now),
+    signal: stop.signal,
+    wait: (ms) => {
+      now += ms;
+      waits += 1;
+      if (waits === polls) stop.abort();
+      return Promise.resolve();
+    },
+    report: (line) => reports.push(line),
+  });
+  return { result, reports };
+}
+
+describe('backup-loop: a failure never costs a restore point (#2606 review H1)', () => {
+  it('takes one snapshot an interval, and removes nothing, while a request waits whose record cannot be written', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const offBox = join(paths.root, 'off-box');
+    const older = await restorePoints(onBox, offBox);
+    const store = openServingStore(paths.database);
+    try {
+      expect((await store.requestBackup(1)).outcome).toBe('requested');
+    } finally {
+      await store.close();
+    }
+    refuseEveryRecord(paths.database);
+    // Forty polls, twenty minutes, an interval of ten: two tries, not forty.
+    const { result } = await pollFor(paths, onBox, 40, {
+      intervalSeconds: 600,
+      keep: 2,
+      copyTo: offBox,
+    });
+    expect(result.runs).toBe(2);
+    for (const place of [onBox, offBox]) {
+      const kept = await readdir(place);
+      // Every restore point still there, and only the two snapshots taken.
+      expect(kept.filter((name) => older.includes(name))).toEqual(older);
+      expect(kept.filter((name) => name.startsWith('snapshot-'))).toHaveLength(older.length + 2);
+    }
+  });
+
+  it('tries a failed run once an interval when even its failure cannot be recorded, and leaves no partial snapshot', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const older = await restorePoints(onBox);
+    // The blobs cannot be read: every run fails after its snapshot was begun.
+    await mkdir(paths.blobs, { recursive: true });
+    await writeFile(join(paths.blobs, 'objects'), 'not a directory');
+    const store = openServingStore(paths.database);
+    try {
+      expect((await store.requestBackup(1)).outcome).toBe('requested');
+    } finally {
+      await store.close();
+    }
+    refuseEveryRecord(paths.database);
+    const { result, reports } = await pollFor(paths, onBox, 40, { intervalSeconds: 600, keep: 1 });
+    expect(result.runs).toBe(2);
+    expect(reports).toEqual([
+      { command: 'backup', failed: expect.stringMatching(/^E[A-Z]+$/) as unknown },
+      { command: 'backup', failed: expect.stringMatching(/^E[A-Z]+$/) as unknown },
+    ]);
+    // Only the restore points: no snapshot, and nothing partial for --keep to count.
+    expect((await readdir(onBox)).sort()).toEqual(older);
+  });
+
+  it('removes a partial snapshot a stopped run left, here and off the box, and --keep does not count it', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const offBox = join(paths.root, 'off-box');
+    for (const place of [onBox, offBox]) {
+      await mkdir(join(place, '.partial-snapshot-2026-08-31T23-59-00-000Z'), { recursive: true });
+      await mkdir(join(place, 'snapshot-2026-08-01T00-00-00-000Z'), { recursive: true });
+    }
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const taken = await backup(paths, onBox, {
+        keep: 2,
+        copyTo: offBox,
+        now: () => new Date('2026-09-01T00:00:00Z'),
+      });
+      expect(taken.removed).toBe(0);
+    } finally {
+      quiet.mockRestore();
+    }
+    for (const place of [onBox, offBox]) {
+      expect((await readdir(place)).sort()).toEqual([
+        'snapshot-2026-08-01T00-00-00-000Z',
+        'snapshot-2026-09-01T00-00-00-000Z',
+      ]);
+    }
+  });
+
+  it('runs within an interval of starting even when its newest record is dated ahead of the clock', async () => {
+    const paths = await migratedAlone();
+    const store = openServingStore(paths.database);
+    try {
+      // Written by a clock running a day fast.
+      await store.recordBackup({
+        outcome: 'done',
+        at: Date.parse('2026-09-02T00:00:00Z') / 1000,
+        snapshot: 'snapshot-ahead',
+        rows: 1,
+        blobs: 0,
+        databaseSha256: '0'.repeat(64),
+        sizeBytes: 1,
+        offBox: 'not-configured',
+        removed: 0,
+        backupsFreeBytes: null,
+        offBoxFreeBytes: null,
+        intervalSeconds: 120,
+      });
+    } finally {
+      await store.close();
+    }
+    const { result } = await pollFor(paths, join(paths.root, 'on-box'), 5, {
+      intervalSeconds: 120,
+    });
+    expect(result.runs).toBe(1);
   });
 });
 

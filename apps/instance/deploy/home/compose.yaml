@@ -200,6 +200,13 @@ services:
   # the instance (which holds OYL_INSTANCE_SECRET_KEY) never does. Each run
   # is recorded in the database. `docker compose stop backup` lets a run in
   # progress finish, within the grace period.
+  #
+  # ⚠️ The command asks the IMAGE whether it has `backup-loop` (#2606
+  # review): `deploy.sh --rollback` starts the previous image with this
+  # file, and an image from before #2606 does not know the command — it
+  # would exit at once, restart, and take no backup again. Such an image
+  # runs the shell loop it always ran. `exec` makes Node the container's
+  # first process, so `docker compose stop` reaches it.
   backup:
     <<: *instance-image
     depends_on:
@@ -209,16 +216,19 @@ services:
     healthcheck:
       disable: true
     stop_grace_period: 120s
-    entrypoint: ['node', 'src/operator/cli.ts']
+    entrypoint: ['sh', '-c']
     command:
-      - backup-loop
-      - /backups
-      - --keep
-      - '${OYL_BACKUP_KEEP:-14}'
-      - --copy-to
-      - /offbox
-      - --interval
-      - '${OYL_BACKUP_INTERVAL_SECONDS:-21600}'
+      - >-
+        if grep -q "'backup-loop'" src/operator/run.ts; then
+        exec node src/operator/cli.ts backup-loop /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox --interval "$${OYL_BACKUP_INTERVAL_SECONDS}";
+        fi;
+        while true; do
+        node src/operator/cli.ts backup /backups --keep "$${OYL_BACKUP_KEEP}" --copy-to /offbox;
+        sleep "$${OYL_BACKUP_INTERVAL_SECONDS}";
+        done
+    environment:
+      OYL_BACKUP_KEEP: ${OYL_BACKUP_KEEP:-14}
+      OYL_BACKUP_INTERVAL_SECONDS: ${OYL_BACKUP_INTERVAL_SECONDS:-21600}
     volumes:
       - data:/data
       - ${OYL_BACKUP_DIR:?set OYL_BACKUP_DIR to a directory on this machine for the snapshots}:/backups

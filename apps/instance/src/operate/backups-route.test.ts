@@ -180,7 +180,7 @@ describe('POST /v1/operate/backups — “back up now” (#2606)', () => {
     const world = await startModerationWorld();
     try {
       const first = await world.as(world.owner, 'POST', BACKUPS);
-      expect(first.status).toBe(200);
+      expect(first.status).toBe(202);
       const requestedAt = (first.body as { requestedAt: string }).requestedAt;
       expect(Date.parse(requestedAt)).toBe(Math.floor(world.clock.ms / 1000) * 1000);
       const second = await world.as(world.owner, 'POST', BACKUPS);
@@ -246,7 +246,7 @@ describe('POST /v1/operate/backups — “back up now” (#2606)', () => {
       });
       expect((await backupsOf(world)).pending).toBeNull();
       world.clock.ms += 2 * 60_000;
-      expect((await world.as(world.owner, 'POST', BACKUPS)).status).toBe(200);
+      expect((await world.as(world.owner, 'POST', BACKUPS)).status).toBe(202);
     } finally {
       await world.close();
     }
@@ -342,7 +342,7 @@ describe('/v1/operate/backups carries no secret the instance holds (#2606)', () 
       const listed = await world.as(world.owner, 'GET', BACKUPS);
       expect(listed.status).toBe(200);
       expect((listed.body as BackupBody).backups).toHaveLength(1);
-      expect(asked.status).toBe(200);
+      expect(asked.status).toBe(202);
 
       const privateHalves: string[] = [];
       for (const row of await world.freshRead((store) => store.listInstanceKeys())) {

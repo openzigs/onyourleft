@@ -78,7 +78,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .createTable('backup_request')
     .addColumn('id', 'integer', (column) => column.primaryKey())
     .addColumn('requested_at', 'integer', (column) => column.notNull())
-    .addColumn('record_id', 'integer')
+    // The run that served it. A served request is deleted with its 30 days
+    // no later than its record is (`SqlStore.recordBackup`), so it never
+    // points at a record that is gone.
+    .addColumn('record_id', 'integer', (column) => column.references('backup_record.id'))
     .modifyEnd(sql`strict`)
     .execute();
   await db.schema
