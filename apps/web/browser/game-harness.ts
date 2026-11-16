@@ -91,6 +91,12 @@ import type { WorldStyle } from '../src/game/world';
 
 import { chaseRider, sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { drawnCamera } from '../src/game/chase-camera-testing';
+import {
+  behind,
+  FADE_PROBE_BEHIND_METRES,
+  riderFadeProbe,
+  type RiderFadeReading,
+} from './rider-fade-probe';
 import { retainedFrame } from '../src/game/frame-testing';
 import {
   ROAD_WIDTH_METRES,
@@ -199,6 +205,7 @@ import { buildingPlan, glassPanesOf, onFace, OPENING_RECESS_METRES } from '../sr
 import {
   bicycleTreadOf,
   lapRaceDrawnOf,
+  riderFadeOf,
   riderKitOf,
   compressedRealisticLoaders,
   drawnWorldOf,
@@ -8771,6 +8778,14 @@ export interface RealisticMeasurement {
    */
   readonly shoulderRock: number;
   readonly shoulderRockControl: number;
+  /** #2596: a bot held between the camera and the rider, in the realistic world. @see riderFadeProbe */
+  readonly riderFade: RiderFadeReading;
+  /** #2596: the draw calls of the rider alone, and with that bot faded out and whole. */
+  readonly riderFadeCalls: {
+    readonly alone: number;
+    readonly faded: number;
+    readonly whole: number;
+  };
   /**
    * The realistic rider's shadow read off the drawing buffer from straight
    * above, the rider left out so it cannot hide it — #626. `fill` is how much
@@ -10998,6 +11013,16 @@ const NO_REALISTIC: RealisticMeasurement = {
   crankHeldPixels: 0,
   shoulderRock: 0,
   shoulderRockControl: 0,
+  riderFade: {
+    pixels: 0,
+    bot: { faded: 0, whole: 0 },
+    rider: { faded: 0, whole: 0 },
+    aside: { faded: 0, whole: 0 },
+    beside: { faded: 0, whole: 0 },
+    riderDrawn: 0,
+    frame: { faded: 0, whole: 0 },
+  },
+  riderFadeCalls: { alone: 0, faded: 0, whole: 0 },
   riderShadow: NO_SHADOW_SHAPE,
   riderShadowControl: NO_SHADOW_SHAPE,
   riderShadowBlack: NO_SHADOW_SHAPE,
@@ -12347,6 +12372,38 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   );
   phaseEnds('realistic: road luminance and cranks');
 
+  // #2596: a bot held between the camera and the rider, the realistic bodies'.
+  const riderFade = riderFadeProbe(view, gl, canvas, riding(level, 400));
+  // And what it costs: the draw calls of the rider alone, with that bot faded
+  // out, and with it whole (the control) — a body faded out entirely is not
+  // drawn, and the bicycles' instanced calls are the same either way.
+  const riderFadeCalls = ((): { alone: number; faded: number; whole: number } => {
+    const base = riding(level, 400);
+    const rider = base.markers.find((marker) => marker.kind === 'rider');
+    if (rider === undefined) return { alone: 0, faded: 0, whole: 0 };
+    const alone: SceneFrame = { ...base, scatter: [], markers: [rider] };
+    const withBot: SceneFrame = {
+      ...alone,
+      markers: [rider, behind(rider, FADE_PROBE_BEHIND_METRES, 0)],
+    };
+    let counted = { alone: 0, faded: 0, whole: 0 };
+    countingNonEmptyDrawCalls((calls) => {
+      const of = (frame: SceneFrame): number => {
+        view.render(frame);
+        const before = calls();
+        view.render(frame);
+        return calls() - before;
+      };
+      const faded = of(withBot);
+      riderFadeOf(view, 'off');
+      const whole = of(withBot);
+      riderFadeOf(view, 'fade');
+      counted = { alone: of(alone), faded, whole };
+    });
+    return counted;
+  })();
+  phaseEnds('realistic: rider fade — #2596');
+
   // #626: the rider's shadow from 6 m straight above — nearly: a heading a
   // thousandth of a unit long puts `cameraRig`'s eye and target a few
   // millimetres apart over the rider, and still tells three which way the
@@ -12576,32 +12633,54 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   plainHouse.destroy();
   phaseEnds('realistic: house window');
 
-  // #621, on the same view and the level road.
-  const tint = tintProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: seeded tints');
+  // #2596: the fade is off from the tint probe (#621) to the kit probe (#623),
+  // and for every probe between them: the tints (#621), pavement (#1535), the
+  // mapped side's pavement (#1551), people (#1541), levelling (#1547), the
+  // tread (#624) and the kit (#623). #621 and #623 draw a bot and the ghost in
+  // the rider's own place under a camera brought close, which is the space a
+  // rider other than the rider's own fades out of, and they read each rider's
+  // colours, so they read them with the fade off; the five between draw no
+  // rider but the rider's own, which never fades, so it changes nothing for
+  // them. In a `finally`, so a throw cannot leave every later probe unfaded.
+  // A probe added inside this window runs with the fade off: name it here.
+  riderFadeOf(view, 'off');
+  let tint: ReturnType<typeof tintProbe>;
+  let pavement: ReturnType<typeof pavementProbe>;
+  let mappedPavement: ReturnType<typeof mappedPavementProbe>;
+  let people: ReturnType<typeof peopleProbe>;
+  let levelling: ReturnType<typeof levellingProbe>;
+  let tread: ReturnType<typeof treadProbe>;
+  let kit: ReturnType<typeof kitProbe>;
+  try {
+    // #621, on the same view and the level road.
+    tint = tintProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: seeded tints');
 
-  // #1535, on the same view: a village's pavement, in ambientCG's paving.
-  const pavement = pavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement — #1535');
+    // #1535, on the same view: a village's pavement, in ambientCG's paving.
+    pavement = pavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement — #1535');
 
-  // #1551, on the same view and #1535's village: the pavement on the mapped side.
-  const mappedPavement = mappedPavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement on the mapped side — #1551');
+    // #1551, on the same view and #1535's village: the pavement on the mapped side.
+    mappedPavement = mappedPavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement on the mapped side — #1551');
 
-  // #1541, on the same view and #1535's village: people, never on the carriageway.
-  const people = peopleProbe(view, gl, canvas);
-  phaseEnds('realistic: people — #1541');
+    // #1541, on the same view and #1535's village: people, never on the carriageway.
+    people = peopleProbe(view, gl, canvas);
+    phaseEnds('realistic: people — #1541');
 
-  // #1547, on the same view: the ground under a mapped town, levelled.
-  const levelling = levellingProbe(view);
-  phaseEnds('realistic: a town on the flat — #1547');
+    // #1547, on the same view: the ground under a mapped town, levelled.
+    levelling = levellingProbe(view);
+    phaseEnds('realistic: a town on the flat — #1547');
 
-  // #624, on the same view and the same road.
-  const tread = treadProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: the tread — #624');
+    // #624, on the same view and the same road.
+    tread = treadProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: the tread — #624');
 
-  // #623, on the same view and the same road.
-  const kit = kitProbe(view, gl, canvas, riding(level, 400));
+    // #623, on the same view and the same road.
+    kit = kitProbe(view, gl, canvas, riding(level, 400));
+  } finally {
+    riderFadeOf(view, 'fade');
+  }
   phaseEnds('realistic: the kit — #623');
 
   // #620, on the same view and the same road; then what a whole wooded frame
@@ -12808,6 +12887,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     crankHeldPixels: pixelsChanged(turned, held),
     shoulderRock,
     shoulderRockControl,
+    riderFade,
+    riderFadeCalls,
     riderShadow: riderShadow.shape,
     riderShadowControl: riderShadow.control,
     riderShadowBlack: riderShadow.black,
