@@ -12,6 +12,15 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0070 is [ADR 0070](../adr/0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**,
+  taken by [#2684](https://github.com/openzigs/onyourleft/issues/2684) on 2026-11-15 for houses on
+  inferred built-up land in a suburb that OpenStreetMap maps only by its streets, on the owner's
+  ruling of that day on #2684. It is **Proposed** until the owner approves it on its pull request.
+  It supersedes ADR 0054 D-5.1 in part, as an ADR rather than an amendment, because ADR 0013 D-3
+  sends a reversed decision to a new ADR; ADR 0054 gained one dated `## Amendments` entry pointing
+  here. It took the next free number after 0069; **0057 and 0058 stay claimed** by #1748 and #1752.
+  **The next free number is 0071.** A reviewer who remembers this file offering 0070 is reading the
+  old file.
   ⚠️ **0069 is [ADR 0069](../adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md)**,
   taken by [#2640](https://github.com/openzigs/onyourleft/issues/2640) on 2026-11-15 for the
   instance's own admin pages: a browser sign-in for the owner and a TLS-only admin channel, on the
@@ -23,7 +32,7 @@ It has the same authority as the root file. Where the text below says "this file
   and D-11, as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed decision to a new
   ADR; ADR 0047 gained one dated `## Amendments` entry pointing here. #2640 claimed it by its title.
   It took the next free number after 0068; **0057 and 0058 stay claimed** by #1748 and #1752.
-  **The next free number is 0070.** A reviewer who remembers this file offering 0069 is reading the
+  The next free number was then 0070. A reviewer who remembers this file offering 0069 is reading the
   old file.
   ⚠️ **0068 is [ADR 0068](../adr/0068-a-delivery-round-holds-the-realistic-worlds-floor.md)**,
   taken by [#2513](https://github.com/openzigs/onyourleft/issues/2513) on 2026-11-12 for a Delivery

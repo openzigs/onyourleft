@@ -546,3 +546,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   ceilings do not rise. What still holds, unchanged: the rest of the 2026-11-10 entry, including
   its pending owner approval; the 2026-11-03 landmarks; D-5.6's cap; D-5.1, whose rule for a suburb
   with no footprints at all is left to a separate issue; and D-3.1 to D-3.6.
+- **2026-11-15** — **D-5.1 and D-5.3 are superseded in part by
+  [ADR 0070](0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**
+  ([#2684](https://github.com/openzigs/onyourleft/issues/2684)), on the owner's ruling of that day:
+  a suburb that OpenStreetMap maps by its streets alone, with no footprint and no built-up land use,
+  has its ground read as **inferred built-up land** — near a residential street, where the streets
+  are as dense as a suburb's — and procedural lots stand there. D-5.3's *"no built-up land"* reads
+  *"no built-up land, mapped or inferred"*. **Proposed** until the owner approves ADR 0070 on its
+  pull request. What still holds, unchanged: D-5.2, D-5.4 to D-5.7, and the rest of D-5.1. This
+  entry is a pointer and changes nothing else here.

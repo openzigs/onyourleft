@@ -411,6 +411,159 @@ export const UNZONED_SUBURB_TO = 2_600;
 /** Where they stand on one side of the road only: **1 800**. */
 export const UNZONED_SUBURB_ONE_SIDED = 1_800;
 
+/** A mapped street from `(along, lateral)` pairs beside the fixture road, `kind_detail` `detail`. */
+export function streetBeside(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  pairs: readonly (readonly [number, number])[],
+  detail: string,
+  grade: StreetFeature['grade'] = 'ground',
+): StreetFeature {
+  return {
+    kind: detail === 'residential' || detail === 'service' ? 'minor_road' : 'other',
+    kindDetail: detail,
+    grade,
+    line: ringBeside(profile, origin, pairs),
+  };
+}
+
+/**
+ * #2684's suburb: a grid of residential streets with **no footprint and no
+ * land use** — many US suburbs as OpenStreetMap has them. 3 km of level road;
+ * from {@link STREET_SUBURB_FROM} to {@link STREET_SUBURB_TO} the route is
+ * itself a mapped `residential` street, with four more parallel to it at
+ * 90 m and 180 m either side and cross streets every 120 m out to 240 m: about
+ * 160 street metres a hectare, a gridded suburb's. Open ground before and after.
+ * `detail` is the streets' `kind_detail`, `grade` their grade: the controls.
+ * Covered throughout. Arithmetic, not a real place.
+ */
+export function streetSuburbFixture(
+  detail = 'residential',
+  grade: StreetFeature['grade'] = 'ground',
+  landUse: (profile: RouteProfile, origin: CorridorOrigin) => readonly LandUseFeature[] = () => [],
+): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const streets: StreetFeature[] = [];
+  for (const lateral of [-180, -90, 0, 90, 180]) {
+    streets.push(
+      streetBeside(
+        profile,
+        origin,
+        [
+          [STREET_SUBURB_FROM, lateral],
+          [STREET_SUBURB_TO, lateral],
+        ],
+        detail,
+        grade,
+      ),
+    );
+  }
+  for (let along = STREET_SUBURB_FROM; along <= STREET_SUBURB_TO; along += 120) {
+    streets.push(
+      streetBeside(
+        profile,
+        origin,
+        [
+          [along, -240],
+          [along, 240],
+        ],
+        detail,
+        grade,
+      ),
+    );
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'street-suburb',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: landUse(profile, origin),
+      buildings: [],
+      paths: [],
+      streets,
+    },
+  };
+}
+
+/** Where {@link streetSuburbFixture}'s streets start along its road, metres: **1 000**. */
+export const STREET_SUBURB_FROM = 1_000;
+
+/** Where they end: **2 440**. */
+export const STREET_SUBURB_TO = 2_440;
+
+/**
+ * #2684's rural control: a farm road with a house every few hundred metres
+ * and no footprint mapped. The route is a mapped `residential` road its whole
+ * 3 km — as the US road import tagged many a farm road — with one crossroads
+ * at 1 500 m and a 120 m `service` driveway every 300 m, alternately left and
+ * right: about 34 street metres a hectare at the crossroads, and less
+ * everywhere else (`land-class.ts` §`INFERRED_DENSITY_WINDOW_CELLS`' window). No land use. Arithmetic, not a real place.
+ */
+export function farmRoadFixture(): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const streets: StreetFeature[] = [
+    streetBeside(
+      profile,
+      origin,
+      [
+        [5, 0],
+        [2_995, 0],
+      ],
+      'residential',
+    ),
+    streetBeside(
+      profile,
+      origin,
+      [
+        [1_500, -250],
+        [1_500, 250],
+      ],
+      'residential',
+    ),
+  ];
+  for (let along = 150; along < 3_000; along += 300) {
+    const side = Math.round(along / 300) % 2 === 0 ? 1 : -1;
+    streets.push(
+      streetBeside(
+        profile,
+        origin,
+        [
+          [along, 0],
+          [along, 120 * side],
+        ],
+        'service',
+      ),
+    );
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'farm-road',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets,
+    },
+  };
+}
+
 /**
  * #1581's fixture: a town of mixed footprints, as a real map has them, where
  * #1549's are identical boxes in rows. Along 1 km of level road from 1 000 m,

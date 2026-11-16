@@ -1511,6 +1511,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `-land-planting`, `-land-boundaries`,
                         `-ground-clutter`, `-hedge-breaks`,
                         `-small-stones`, shown on `town=countryside`)
+                        ⚠️ Since #2684 (ADR 0070) `built-up` includes
+                        INFERRED land: unmapped ground within 60 m of a
+                        residential street where the streets are a
+                        suburb's (`inferBuiltUp`), so a suburb mapped by
+                        its streets alone gets lots and no field fences.
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
