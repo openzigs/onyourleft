@@ -737,7 +737,7 @@ import {
   type WaterSurface,
 } from './waterways';
 import { roadTintIn, WeatherShading, sunColourIn, weatheredWorld } from './weather-look';
-import { BARE_SURFACES } from './land-class';
+import { BARE_SURFACES, type BareSurface } from './land-class';
 import {
   bareSurfaceColourIn,
   groundColourIn,
@@ -4770,7 +4770,7 @@ function bareGroundTints(
   const ground = BARE_GROUND_SCRATCH.setHex(groundColour);
   for (let index = 0; index < BARE_SURFACES.length; index += 1) {
     const surface = BARE_SURFACE_SCRATCH.setHex(
-      bareSurfaceColourIn(BARE_SURFACES[index] as (typeof BARE_SURFACES)[number], snowCover),
+      bareSurfaceColourIn(BARE_SURFACES[index] as BareSurface, snowCover),
     );
     BARE_TINTS[index * 3] = surface.r / Math.max(ground.r, 1e-4);
     BARE_TINTS[index * 3 + 1] = surface.g / Math.max(ground.g, 1e-4);

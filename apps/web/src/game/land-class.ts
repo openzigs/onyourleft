@@ -122,12 +122,13 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
 
 /**
  * What `bare` ground is made of — #2700, in precedence order, least first: a
- * cell two bare polygons cover is the later one's, so a runway drawn over its
- * airfield is paved. `landform.ts` writes it for every vertex of the ground
+ * cell two bare polygons cover is the more built one's, so a runway drawn over
+ * its airfield is paved, and a pier or platform drawn across a beach is paved
+ * where the two overlap (a pier starts on the sand), whichever came first. `landform.ts` writes it for every vertex of the ground
  * and `three-renderer.ts` §`TerrainBelt` draws each in its own colour
  * (`world.ts` §`bareSurfaceColourIn`) instead of the grass's.
  */
-export const BARE_SURFACES = ['earth', 'stone', 'paved', 'ice', 'sand'] as const;
+export const BARE_SURFACES = ['earth', 'stone', 'ice', 'sand', 'paved'] as const;
 export type BareSurface = (typeof BARE_SURFACES)[number];
 
 /**

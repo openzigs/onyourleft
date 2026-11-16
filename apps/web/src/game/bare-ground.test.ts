@@ -215,6 +215,19 @@ describe('#2700 what bare ground is made of, through landClassMask', () => {
     }
   });
 
+  it('paves a pier drawn across a beach, whichever polygon comes first', () => {
+    const shore: Box = { minX: 0, maxX: 300, minZ: 0, maxZ: 300 };
+    const pier: Box = { minX: 100, maxX: 200, minZ: 100, maxZ: 200 };
+    for (const features of [
+      [rectangle('beach', shore), rectangle('pier', pier)],
+      [rectangle('pier', pier), rectangle('beach', shore)],
+    ]) {
+      const land = landClassMask(corridorOf(features, shore));
+      expect(land.bareSurfaceAt(150, 150)).toBe('paved');
+      expect(land.bareSurfaceAt(50, 50)).toBe('sand');
+    }
+  });
+
   it('keeps built-up land over bare ground: an airport’s terminal is not paved over', () => {
     const airfield: Box = { minX: 0, maxX: 300, minZ: 0, maxZ: 300 };
     const terminal: Box = { minX: 100, maxX: 200, minZ: 100, maxZ: 200 };
@@ -269,6 +282,12 @@ describe('#2700 a beach drawn as sand, through the renderer’s own ground', () 
     const half = bareSurfaceColourIn('sand', 0.5);
     expect(half).not.toBe(BARE_SURFACE_COLOURS.sand);
     expect(half).not.toBe(snow);
+    // And what the renderer uploads there is that colour, read back through the belt.
+    const partway = drawn(land, 0.5, snow);
+    const halfBeach = partway.vertices.filter((v) => within(BEACH, v.x, v.z));
+    expect(halfBeach.length).toBeGreaterThan(100);
+    for (const v of halfBeach)
+      expectColour(v.surface, linear(half), `half-snowy beach at ${String(v.x)}`);
   });
 
   it('draws the ground round a turning point on a beach as sand too', () => {
