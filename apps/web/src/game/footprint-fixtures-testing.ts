@@ -435,12 +435,15 @@ export function streetBeside(
  * 90 m and 180 m either side and cross streets every 120 m out to 240 m: about
  * 160 street metres a hectare, a gridded suburb's. Open ground before and after.
  * `detail` is the streets' `kind_detail`, `grade` their grade: the controls.
+ * The streets share a node at every crossing, as OpenStreetMap's do; `joined`
+ * false leaves the same lines with none (ADR 0070 D-1.4's control).
  * Covered throughout. Arithmetic, not a real place.
  */
 export function streetSuburbFixture(
   detail = 'residential',
   grade: StreetFeature['grade'] = 'ground',
   landUse: (profile: RouteProfile, origin: CorridorOrigin) => readonly LandUseFeature[] = () => [],
+  joined = true,
 ): {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
@@ -449,13 +452,22 @@ export function streetSuburbFixture(
   const profile = northRoute(3_000, () => 10);
   const origin = corridorOrigin(profile);
   const streets: StreetFeature[] = [];
-  for (const lateral of [-180, -90, 0, 90, 180]) {
+  // As OpenStreetMap has a junction: a node both streets hold, so a join is a
+  // vertex they share (`land-class.ts` §`INFERRED_JOIN_SNAP_METRES`).
+  // `joined` false: the same lines with no node in common, so no join to count.
+  const crossings: number[] = [];
+  for (let along = STREET_SUBURB_FROM; along <= STREET_SUBURB_TO; along += 120)
+    crossings.push(along);
+  const stations = joined ? crossings : [];
+  const laterals = [-180, -90, 0, 90, 180];
+  for (const lateral of laterals) {
     streets.push(
       streetBeside(
         profile,
         origin,
         [
           [STREET_SUBURB_FROM, lateral],
+          ...stations.map((along) => [along, lateral] as const),
           [STREET_SUBURB_TO, lateral],
         ],
         detail,
@@ -463,13 +475,14 @@ export function streetSuburbFixture(
       ),
     );
   }
-  for (let along = STREET_SUBURB_FROM; along <= STREET_SUBURB_TO; along += 120) {
+  for (const along of crossings) {
     streets.push(
       streetBeside(
         profile,
         origin,
         [
           [along, -240],
+          ...(joined ? laterals.map((lateral) => [along, lateral] as const) : []),
           [along, 240],
         ],
         detail,

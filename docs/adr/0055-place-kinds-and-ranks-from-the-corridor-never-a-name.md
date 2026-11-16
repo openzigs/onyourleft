@@ -28,12 +28,12 @@
 
 ### The ruling this records
 
-The owner, 2026-10-24, ruling (a) on #1628: *"Infer an urban class per stretch of route (unknown /
+The owner, 2026-10-24, ruling (a) on #1628: _"Infer an urban class per stretch of route (unknown /
 rural / village / town / city centre) from data already read: footprint coverage, commercial land
 share and tagged storeys. ALSO read the Protomaps `places` layer's kind and rank
 (city/town/village/suburb), never the name. That reverses ADR 0054 D-2.2 … the plan must include an
 issue for a new ADR that supersedes D-2.2 … and state the privacy reasoning: the rank only, no names,
-nothing leaves the device."* This is that ADR.
+nothing leaves the device."_ This is that ADR.
 
 ### Why built form alone is not enough
 
@@ -49,25 +49,25 @@ without its name, so the name was never the obstacle.
 
 Read on **2026-10-24**.
 
-| What | Where | Finding |
-|---|---|---|
-| The layer's fields | `https://docs.protomaps.com/basemaps/layers` (read as a summary, so secondary; the authority for every field is the `Places.java` row below, at a pinned commit) | `places`: `kind` (`country`, `region`, `locality`, `macrohood`, `neighbourhood`), `kind_detail`, `capital`, `population`, `population_rank` (integer), `wikidata`, and the names |
-| How the archive writes them | protomaps/basemaps `tiles/src/main/java/com/protomaps/basemap/layers/Places.java` at [`c809cd18`](https://github.com/protomaps/basemaps/blob/c809cd1833/tiles/src/main/java/com/protomaps/basemap/layers/Places.java) (tiles 4.14.9, the last change to that file before the archive's 4.15.2, and identical to `main` on that day) | `place=city/town/village` becomes `kind=locality`; `place=suburb` becomes `kind=neighbourhood` with `kind_detail=suburb`; `place=quarter` becomes `kind=macrohood`. `kind_detail` is written from the OSM `place` tag. **The zoom table's default `maxzoom` is 15, and `locality`, `neighbourhood` and `macrohood` keep it** (only `country` and `region` stop earlier; the 99 in `getZoomsPops` is the fallback for a feature no rule matches). `population_rank` is `i + 1` for the highest of 18 population breaks the population reaches, so **1 to 18**, and a `wikidata` config row may override it. A label grid thins points: at z15, 16-pixel cells of at most 3 points each |
-| Whether places reach the corridor's z15 tiles | The published archive `basemap-us-20260914.pmtiles`, decoded by hand with a throwaway script (never committed) that read only `kind`, `kind_detail` and `population_rank` and printed counts | The table below |
+| What                                          | Where                                                                                                                                                                                                                                                                                                                               | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The layer's fields                            | `https://docs.protomaps.com/basemaps/layers` (read as a summary, so secondary; the authority for every field is the `Places.java` row below, at a pinned commit)                                                                                                                                                                    | `places`: `kind` (`country`, `region`, `locality`, `macrohood`, `neighbourhood`), `kind_detail`, `capital`, `population`, `population_rank` (integer), `wikidata`, and the names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| How the archive writes them                   | protomaps/basemaps `tiles/src/main/java/com/protomaps/basemap/layers/Places.java` at [`c809cd18`](https://github.com/protomaps/basemaps/blob/c809cd1833/tiles/src/main/java/com/protomaps/basemap/layers/Places.java) (tiles 4.14.9, the last change to that file before the archive's 4.15.2, and identical to `main` on that day) | `place=city/town/village` becomes `kind=locality`; `place=suburb` becomes `kind=neighbourhood` with `kind_detail=suburb`; `place=quarter` becomes `kind=macrohood`. `kind_detail` is written from the OSM `place` tag. **The zoom table's default `maxzoom` is 15, and `locality`, `neighbourhood` and `macrohood` keep it** (only `country` and `region` stop earlier; the 99 in `getZoomsPops` is the fallback for a feature no rule matches). `population_rank` is `i + 1` for the highest of 18 population breaks the population reaches, so **1 to 18**, and a `wikidata` config row may override it. A label grid thins points: at z15, 16-pixel cells of at most 3 points each |
+| Whether places reach the corridor's z15 tiles | The published archive `basemap-us-20260914.pmtiles`, decoded by hand with a throwaway script (never committed) that read only `kind`, `kind_detail` and `population_rank` and printed counts                                                                                                                                        | The table below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 **The z15 sample, 2026-10-24.** Each corridor is a straight line through the place named, with ADR
 0054 D-2.3's 300 m half-width, and the tiles are every z15 tile within 300 m of it — the tiles the
-corridor read fetches. Counts only. *In the tiles* counts every place point in those tiles; *within
-300 m* counts those inside the corridor itself. The names are of the sampled downtowns and suburbs, which are
+corridor read fetches. Counts only. _In the tiles_ counts every place point in those tiles; _within
+300 m_ counts those inside the corridor itself. The names are of the sampled downtowns and suburbs, which are
 public places and not any rider's; no coordinate is recorded.
 
-| Corridor | z15 tiles | Tiles with a place point | `locality`/`city` in the tiles (within 300 m) | `neighbourhood`/`suburb` in the tiles (within 300 m) | `macrohood`/`quarter` (within 300 m) | `neighbourhood`/`neighbourhood` (within 300 m) | `population_rank` seen |
-|---|---|---|---|---|---|---|---|
-| Downtown: Chicago Loop, State Street | 10 | 10 | 1 (1) | 2 (1) | 2 (1) | 14 (8) | 1–13 |
-| Downtown: Denver, 16th Street | 7 | 7 | 2 (0) | 0 | 0 | 24 (7) | 1–12 |
-| Downtown: Minneapolis, Nicollet | 7 | 6 | 1 (0) | 1 (0) | 1 (1) | 6 (2) | 1–12 |
-| Suburb: Naperville IL, Washington Street | 9 | 1 | 1 (1) | 0 | 0 | 0 | 9 |
-| Suburb: Arlington VA, Wilson Boulevard | 9 | 7 | 2 (2) | 5 (4) | 0 | 4 (0) | 1–10 |
+| Corridor                                 | z15 tiles | Tiles with a place point | `locality`/`city` in the tiles (within 300 m) | `neighbourhood`/`suburb` in the tiles (within 300 m) | `macrohood`/`quarter` (within 300 m) | `neighbourhood`/`neighbourhood` (within 300 m) | `population_rank` seen |
+| ---------------------------------------- | --------- | ------------------------ | --------------------------------------------- | ---------------------------------------------------- | ------------------------------------ | ---------------------------------------------- | ---------------------- |
+| Downtown: Chicago Loop, State Street     | 10        | 10                       | 1 (1)                                         | 2 (1)                                                | 2 (1)                                | 14 (8)                                         | 1–13                   |
+| Downtown: Denver, 16th Street            | 7         | 7                        | 2 (0)                                         | 0                                                    | 0                                    | 24 (7)                                         | 1–12                   |
+| Downtown: Minneapolis, Nicollet          | 7         | 6                        | 1 (0)                                         | 1 (0)                                                | 1 (1)                                | 6 (2)                                          | 1–12                   |
+| Suburb: Naperville IL, Washington Street | 9         | 1                        | 1 (1)                                         | 0                                                    | 0                                    | 0                                              | 9                      |
+| Suburb: Arlington VA, Wilson Boulevard   | 9         | 7                        | 2 (2)                                         | 5 (4)                                                | 0                                    | 4 (0)                                          | 1–10                   |
 
 What it shows:
 
@@ -90,14 +90,14 @@ What it shows:
 
 ### D-1 — What of ADR 0054 D-2.2 this supersedes, and what still holds
 
-| ADR 0054 D-2.2 | After this ADR |
-|---|---|
-| *"Four layers"* | **Five**: `landuse`, `water`, `buildings`, `roads` and **`places`** |
-| *"`pois` and `places` are not read"* | **Superseded for `places`**, for D-2's fields only. `pois` is still not read |
-| *"they carry names, and the world names no place"* | **Still true.** No name from any layer is read (D-3), and ADR 0054 D-5.7, *"Nothing names a place"*, stands unchanged |
-| *"From `buildings`, `addr_housenumber` is dropped on read"* | **Still true** |
-| *"No OSM identifier is kept"* | **Still true**, and `wikidata` counts as one (D-3) |
-| `water` is read for D-5's own rule | **Unchanged** |
+| ADR 0054 D-2.2                                              | After this ADR                                                                                                        |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| _"Four layers"_                                             | **Five**: `landuse`, `water`, `buildings`, `roads` and **`places`**                                                   |
+| _"`pois` and `places` are not read"_                        | **Superseded for `places`**, for D-2's fields only. `pois` is still not read                                          |
+| _"they carry names, and the world names no place"_          | **Still true.** No name from any layer is read (D-3), and ADR 0054 D-5.7, _"Nothing names a place"_, stands unchanged |
+| _"From `buildings`, `addr_housenumber` is dropped on read"_ | **Still true**                                                                                                        |
+| _"No OSM identifier is kept"_                               | **Still true**, and `wikidata` counts as one (D-3)                                                                    |
+| `water` is read for D-5's own rule                          | **Unchanged**                                                                                                         |
 
 ### D-2 — What is read from `places`
 
@@ -161,8 +161,8 @@ the question returns to the owner; it does not become option C by default.
 ### D-6 — Where it is held: the ODbL store `worldCorridors`
 
 1. **In the existing store, as a fifth kind of record.** ADR 0054 D-3.3's sentence of records, as its
-   amendment of 2026-10-22 has it, gains *"place points with `kind`, `kind_detail` and
-   `population_rank`"*, and reads from this ADR's acceptance: building footprint polygons with `kind`,
+   amendment of 2026-10-22 has it, gains _"place points with `kind`, `kind_detail` and
+   `population_rank`"_, and reads from this ADR's acceptance: building footprint polygons with `kind`,
    `height` and `min_height`; land-use polygons with `kind`; water polygons; footway lines with
    `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and whether each is a bridge or
    a tunnel; place points with `kind`, `kind_detail` and `population_rank`; and which tiles were read
@@ -232,12 +232,12 @@ the question returns to the owner; it does not become option C by default.
 
 ### Constraints this places on other work
 
-| Issue | Constraint |
-|---|---|
+| Issue                                                       | Constraint                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [#1632](https://github.com/openzigs/onyourleft/issues/1632) | D-2 and D-3 in full, with the sentinel test that is red if `name` is read; D-2.5's limit; D-4's unchanged request count; D-5 with its named, provisional constants, including D-5.2's rank gate as the owner rules Q1; D-6.2's version bump in both directions; D-7.2's two tests over a corridor with places; the `records.ts` doc comment that lists place points |
-| [#1630](https://github.com/openzigs/onyourleft/issues/1630) | Its readings may change `PLACE_PRIOR_MIN_COVERAGE`, `PLACE_PRIOR_REACH_METRES` and `PLACE_PRIOR_MIN_CITY_RANK`, as numbers, not the rules |
-| Any future use of a place point | D-5.3 and D-5.4: a prior only, never shown. A name, a `wikidata` id or `population` is a change to this ADR |
-| ADR 0054 | One appended entry under ADR 0013 pointing here, in the pull request that writes this ADR |
+| [#1630](https://github.com/openzigs/onyourleft/issues/1630) | Its readings may change `PLACE_PRIOR_MIN_COVERAGE`, `PLACE_PRIOR_REACH_METRES` and `PLACE_PRIOR_MIN_CITY_RANK`, as numbers, not the rules                                                                                                                                                                                                                           |
+| Any future use of a place point                             | D-5.3 and D-5.4: a prior only, never shown. A name, a `wikidata` id or `population` is a change to this ADR                                                                                                                                                                                                                                                         |
+| ADR 0054                                                    | One appended entry under ADR 0013 pointing here, in the pull request that writes this ADR                                                                                                                                                                                                                                                                           |
 
 ---
 
@@ -276,3 +276,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   identifier, no name, no address. What still stands, unchanged: D-1 to D-8. The place points are
   read, held and used exactly as above, and no building field is a prior in `urban-class.ts` under
   this ADR.
+
+- **2026-11-15** — **D-5.4 admits a second reader of the place points: `land-class.ts`'s inference of
+  built-up land**, on the owner's ruling of that day on
+  [#2684](https://github.com/openzigs/onyourleft/issues/2684) that the nearest `place` label is one
+  cue, among several, between a suburb and the country
+  ([ADR 0070](0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md) D-1.7).
+  It reads a point's kind, detail and position as a cue and nothing else: no name, no `wikidata` id, no
+  `population`, no rank, and nothing it reads is shown. `world-data/places-never-shown.test.ts` admits
+  `land-class.ts` beside `urban-class.ts` and `corridor.ts`. What still stands, unchanged: D-1 to D-8
+  other than this admission.

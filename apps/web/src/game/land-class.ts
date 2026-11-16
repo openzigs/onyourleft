@@ -54,7 +54,7 @@ import {
   type Box,
   type GridSpec,
   type LandUseFeature,
-  type StreetFeature,
+  type PlaceFeature,
 } from '@onyourleft/map-features';
 
 import type { WorldCorridor } from './world-data/corridor';
@@ -180,6 +180,44 @@ export const INFERRED_DENSITY_WINDOW_CELLS = 3;
 export const INFERRED_MIN_STREET_DENSITY = 45;
 
 /**
+ * ADR 0070 D-1.4, the owner's ruling of 2026-11-15: a join is a vertex of one
+ * counted street within this many metres of another's segment — a side street
+ * meeting a street, or two crossing — counted once a place: **6**.
+ */
+export const INFERRED_JOIN_SNAP_METRES = 6;
+
+/**
+ * Street joins a hectare, over the same 560 m square, from which the streets
+ * read as a grid or a run of cul-de-sacs and not a road with a few driveways:
+ * **0.15** (ADR 0070 D-1.4). One cue of five, never enough alone.
+ */
+export const INFERRED_MIN_JOINS_PER_HECTARE = 0.15;
+
+/**
+ * The share of the 560 m square that is mapped farmland, meadow or farmyard
+ * (all `farmland` here) from which the ground reads as rural: **0.15** (ADR
+ * 0070 D-1.5). A cue against, which one cue for cancels.
+ */
+export const INFERRED_RURAL_FARMLAND_SHARE = 0.15;
+
+/**
+ * Mapped footprints in the 560 m square, or this share of it mapped built-up
+ * land, which are evidence of a suburb's edge (ADR 0070 D-1.6): **5**
+ * footprints, or **0.05** of the square.
+ */
+export const INFERRED_EDGE_FOOTPRINTS = 5;
+export const INFERRED_EDGE_BUILT_SHARE = 0.05;
+
+/**
+ * How far a `place` point speaks for the ground, in metres (ADR 0070 D-1.7):
+ * a `suburb`, `quarter`, neighbourhood, `town` or `city` within **1 500** is
+ * a cue for; a `hamlet` within **600** is a cue against. The nearest place
+ * within the reach speaks, and a `village` speaks neither way.
+ */
+export const INFERRED_PLACE_REACH_METRES = 1_500;
+export const INFERRED_HAMLET_REACH_METRES = 600;
+
+/**
  * The most cell tests inference may take, so a hostile or very dense archive
  * cannot freeze the press: past it the rest of the cells are not inferred,
  * today's world. {@link LAND_CLASS_MAX_WORK}'s precedent.
@@ -212,9 +250,19 @@ const CLASS_OF_CODE: readonly LandClass[] = [
   'park',
   'wood',
   'water',
+  // #2684: `built-up` by inference, no polygon's. Last, so that no polygon's
+  // class is its code: it is written once, after every polygon.
+  'built-up',
 ];
 const CODE_OTHER = 1;
+const CODE_FARMLAND = CLASS_OF_CODE.indexOf('farmland');
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
+const CODE_INFERRED = CLASS_OF_CODE.length - 1;
+
+/** Whether a stored code is built-up land, mapped or inferred. */
+function isBuiltCode(code: number): boolean {
+  return code === CODE_BUILT_UP || code === CODE_INFERRED;
+}
 
 /**
  * #2684: an `other` cell a land-use polygon covers — a beach, an aerodrome, a
@@ -266,6 +314,13 @@ export interface LandClassMask {
   /** True where the corridor is covered (P-8), whatever the class. */
   covered(x: number, z: number): boolean;
   /**
+   * #2684, ADR 0070 D-2: whether `classAt(x, z)` is `built-up` by inference
+   * from the streets, not by a land-use polygon. A lot there is sparser than
+   * one on mapped land ({@link PLOT_BUILT_SHARE}'s inferred share): the map
+   * says people built there, and not how many.
+   */
+  inferredAt(x: number, z: number): boolean;
+  /**
    * Metres to the nearest mapped built-up land at each of `count` points —
    * #1547 — `points` holding them as `x, z` pairs and `into` taking one
    * distance a point. Read off a field built once, with the mask, and
@@ -291,6 +346,7 @@ export interface LandClassMask {
 export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   classAt: (): LandClass => 'unknown',
   covered: (): boolean => false,
+  inferredAt: (): boolean => false,
   builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
     into.fill(Number.POSITIVE_INFINITY, 0, count);
   },
@@ -514,8 +570,12 @@ export function landClassMask(
   // that inference leaves them alone — all but Protomaps' own `other` kind.
   let work = maxWork;
   let mappedOther = false;
+  let polygonsPainted = true;
   for (const feature of corridor.landUse) {
-    if (work <= 0) break;
+    if (work <= 0) {
+      polygonsPainted = false;
+      break;
+    }
     let code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
     if (code === CODE_OTHER && feature.kind !== 'other') {
       code = CODE_MAPPED_OTHER;
@@ -525,8 +585,8 @@ export function landClassMask(
   }
   // 2a. #2684: inferred built-up land — only where every polygon was painted,
   // so a wood the work cap left out is never read as open land beside a street.
-  if (work > 0 && maxInferenceWork > 0) {
-    inferBuiltUp(chunks, corridor.streets, maxInferenceWork);
+  if (polygonsPainted && maxInferenceWork > 0) {
+    inferBuiltUp(chunks, corridor, maxInferenceWork);
   }
   if (mappedOther) {
     for (const chunk of chunks.values()) {
@@ -538,13 +598,13 @@ export function landClassMask(
   // 3. #1547: how far every cell near built-up land is from it.
   const { levels, bytes: levellingBytes } = levellingField(chunks, maxLevelledChunks);
 
-  const classAt = (x: number, z: number): LandClass => {
+  const codeAt = (x: number, z: number): number => {
     const column = Math.floor(x / CHUNK_METRES);
     const row = Math.floor(z / CHUNK_METRES);
     // `NaN` fails both comparisons, so it is `unknown` too.
-    if (!inRange(column, row)) return 'unknown';
+    if (!inRange(column, row)) return 0;
     const chunk = chunks.get(chunkKey(column, row));
-    if (chunk === undefined) return 'unknown';
+    if (chunk === undefined) return 0;
     const cellX = Math.min(
       LAND_CLASS_CHUNK_CELLS - 1,
       Math.floor((x - column * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
@@ -553,8 +613,9 @@ export function landClassMask(
       LAND_CLASS_CHUNK_CELLS - 1,
       Math.floor((z - row * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
     );
-    return CLASS_OF_CODE[chunk[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number] as LandClass;
+    return chunk[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number;
   };
+  const classAt = (x: number, z: number): LandClass => CLASS_OF_CODE[codeAt(x, z)] as LandClass;
   /** The stored distance at a cell, by its index across the whole grid. */
   const levelCell = (cellX: number, cellZ: number): number => {
     const column = Math.floor(cellX / LAND_CLASS_CHUNK_CELLS);
@@ -623,7 +684,8 @@ export function landClassMask(
   };
   return {
     classAt,
-    covered: (x, z) => classAt(x, z) !== 'unknown',
+    covered: (x, z) => codeAt(x, z) !== 0,
+    inferredAt: (x, z) => codeAt(x, z) === CODE_INFERRED,
     builtUpDistances,
     bytes: chunks.size * CHUNK_BYTES,
     levellingBytes,
@@ -655,11 +717,11 @@ function levellingField(
   const builtUp = new Set<number>();
   const throughout = new Set<number>();
   for (const [key, chunk] of chunks) {
-    if (!chunk.includes(CODE_BUILT_UP)) continue;
+    if (!chunk.includes(CODE_BUILT_UP) && !chunk.includes(CODE_INFERRED)) continue;
     builtUp.add(key);
     let every = true;
     for (let cell = 0; cell < CHUNK_BYTES && every; cell += 1) {
-      every = chunk[cell] === CODE_BUILT_UP;
+      every = isBuiltCode(chunk[cell] as number);
     }
     if (every) throughout.add(key);
   }
@@ -702,7 +764,7 @@ function levellingField(
         const toZ = Math.min(LAND_CLASS_CHUNK_CELLS, side - offsetZ);
         for (let cellZ = fromZ; cellZ < toZ; cellZ += 1) {
           for (let cellX = fromX; cellX < toX; cellX += 1) {
-            if (neighbour[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] === CODE_BUILT_UP) {
+            if (isBuiltCode(neighbour[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number)) {
               scratch[(cellZ + offsetZ) * side + cellX + offsetX] = 0;
             }
           }
@@ -890,6 +952,9 @@ function precedence(code: number): number {
 /** Density cells either side of the origin a key can name: the chunks' own 2 621 km. */
 const DENSITY_RANGE = Math.ceil((CHUNK_RANGE * CHUNK_METRES) / INFERRED_DENSITY_CELL_METRES);
 
+/** Land-class cells in one density cell: 256. */
+const DENSITY_CELL_CELLS = (INFERRED_DENSITY_CELL_METRES / LAND_CLASS_CELL_METRES) ** 2;
+
 /** The density window's area, in hectares: 31.36. */
 const DENSITY_WINDOW_HECTARES =
   ((2 * INFERRED_DENSITY_WINDOW_CELLS + 1) * INFERRED_DENSITY_CELL_METRES) ** 2 / 10_000;
@@ -907,17 +972,123 @@ function densityInRange(column: number, row: number): boolean {
   );
 }
 
+/** Whether `(x, z)` is within `reach` of the segment from `(ax, az)` to `(bx, bz)`. */
+function nearSegment(
+  x: number,
+  z: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  reach: number,
+): boolean {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const span = dx * dx + dz * dz;
+  const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+  const ox = ax + dx * t - x;
+  const oz = az + dz * t - z;
+  return ox * ox + oz * oz <= reach * reach;
+}
+
+/** The sum of a per-density-cell count over the window about a cell. */
+function windowSum(counts: ReadonlyMap<number, number>, column: number, row: number): number {
+  const window = INFERRED_DENSITY_WINDOW_CELLS;
+  let sum = 0;
+  for (let dRow = -window; dRow <= window; dRow += 1) {
+    for (let dColumn = -window; dColumn <= window; dColumn += 1) {
+      if (!densityInRange(column + dColumn, row + dRow)) continue;
+      sum += counts.get(densityKey(column + dColumn, row + dRow)) ?? 0;
+    }
+  }
+  return sum;
+}
+
+/** What the nearest `place` within reach says of a window: for a suburb, against, or nothing. */
+export type PlaceCue = 'suburban' | 'hamlet' | 'none';
+
+/**
+ * ADR 0070 D-1.7: the nearest `place` point within
+ * {@link INFERRED_PLACE_REACH_METRES} of `(x, z)`. A `suburb`, `quarter`,
+ * neighbourhood, `town` or `city` is for a suburb; a `hamlet` within
+ * {@link INFERRED_HAMLET_REACH_METRES} is against; a `village`, or a hamlet
+ * further off, is nearer than what it hides and speaks neither way.
+ */
+export function nearestPlace(
+  places: readonly PlaceFeature[] | undefined,
+  x: number,
+  z: number,
+): PlaceCue {
+  if (places === undefined) return 'none';
+  let best = INFERRED_PLACE_REACH_METRES * INFERRED_PLACE_REACH_METRES;
+  let cue: PlaceCue = 'none';
+  for (const place of places) {
+    const d = (place.x - x) ** 2 + (place.z - z) ** 2;
+    if (!(d <= best)) continue;
+    best = d;
+    if (
+      place.kind !== 'locality' ||
+      place.kindDetail === 'suburb' ||
+      place.kindDetail === 'quarter' ||
+      place.kindDetail === 'town' ||
+      place.kindDetail === 'city'
+    ) {
+      cue = 'suburban';
+    } else {
+      cue =
+        place.kindDetail === 'hamlet' && d <= INFERRED_HAMLET_REACH_METRES ** 2 ? 'hamlet' : 'none';
+    }
+  }
+  return cue;
+}
+
+/**
+ * ADR 0070 D-1.3 to D-1.7: whether the 560 m square about a cell is a
+ * suburb's, from what the map holds there. The street density is **required**
+ * ({@link INFERRED_MIN_STREET_DENSITY}). Beyond it, three cues are for a
+ * suburb (a grid's joins, mapped footprints or built-up land near, a
+ * suburban place near) and two against (mapped farmland, a hamlet near), and
+ * the square reads as a suburb where the cues for outnumber those against.
+ * So a dense street with none either way needs none (one cue for beats no
+ * cue against is not asked): it needs **one for, net**. No cue alone is
+ * enough: the density without a cue for is not.
+ */
+export function suburbCues(window: {
+  readonly metres: number;
+  readonly joins: number;
+  readonly farmland: number;
+  readonly mapped: number;
+  readonly footprints: number;
+  readonly place: PlaceCue;
+}): boolean {
+  if (window.metres / DENSITY_WINDOW_HECTARES < INFERRED_MIN_STREET_DENSITY) return false;
+  const cells = (2 * INFERRED_DENSITY_WINDOW_CELLS + 1) ** 2 * DENSITY_CELL_CELLS;
+  let score = 0;
+  if (window.joins / DENSITY_WINDOW_HECTARES >= INFERRED_MIN_JOINS_PER_HECTARE) score += 1;
+  if (
+    window.footprints >= INFERRED_EDGE_FOOTPRINTS ||
+    window.mapped / cells >= INFERRED_EDGE_BUILT_SHARE
+  ) {
+    score += 1;
+  }
+  if (window.place === 'suburban') score += 1;
+  if (window.farmland / cells >= INFERRED_RURAL_FARMLAND_SHARE) score -= 1;
+  if (window.place === 'hamlet') score -= 1;
+  return score >= 1;
+}
+
 /**
  * Inferred built-up land — #2684, ADR 0070 D-1. Every covered cell that
  * holds plain `other` (no land-use polygon reaches it, or only Protomaps' own
- * `other` kind) becomes `built-up` where both hold:
+ * `other` kind) becomes `built-up` (code {@link CODE_INFERRED}) where both hold:
  *
  * 1. its centre is within {@link INFERRED_REACH_METRES} of a street whose
  *    `kind_detail` is one of {@link INFERRED_NEAR_STREET_DETAILS}, not in a
  *    tunnel; and
- * 2. the {@link INFERRED_DENSITY_STREET_DETAILS} streets in the 560 m square
- *    about it come to {@link INFERRED_MIN_STREET_DENSITY} street metres a
- *    hectare or more.
+ * 2. the 560 m square about it reads as a suburb, {@link suburbCues}: the
+ *    street density is {@link INFERRED_MIN_STREET_DENSITY} or more, and the
+ *    other cues — joins, farmland, footprints and built-up land, places — do
+ *    not cancel one another out. No cue but the density is enough alone.
  *
  * Never on farmland, meadow, wood, water or park, nor on any polygon of
  * another kind that classes `other` (an aerodrome, a beach, a heath): those
@@ -928,16 +1099,25 @@ function densityInRange(column: number, row: number): boolean {
  */
 function inferBuiltUp(
   chunks: Map<number, Uint8Array>,
-  streets: readonly StreetFeature[],
+  corridor: WorldCorridor,
   maxWork: number,
 ): void {
+  const streets = corridor.streets;
   let work = maxWork;
-  // 1. The counted streets' metres in each density cell.
+  // 1. The counted streets' metres, and their joins, in each density cell.
   const metres = new Map<number, number>();
+  const joins = new Map<number, number>();
+  // Every counted segment, filed under the density cells its pieces pass through.
+  const segments: number[] = [];
+  const segmentsIn = new Map<number, number[]>();
+  const counted: { readonly line: Float32Array; readonly owner: number }[] = [];
   const piece = INFERRED_DENSITY_CELL_METRES / 4;
+  let owner = 0;
   for (const street of streets) {
     if (!INFERRED_DENSITY_STREET_DETAILS.has(street.kindDetail)) continue;
+    owner += 1;
     const line = street.line;
+    counted.push({ line, owner });
     for (let at = 0; at + 3 < line.length; at += 2) {
       const ax = line[at] as number;
       const az = line[at + 1] as number;
@@ -945,6 +1125,20 @@ function inferBuiltUp(
       const dz = (line[at + 3] as number) - az;
       const length = Math.hypot(dx, dz);
       if (!Number.isFinite(length) || length === 0) continue;
+      // A segment with an end past the grid's reach is nothing: it is skipped
+      // before it is charged, so a corrupt one cannot turn inference off for the ride.
+      if (
+        !densityInRange(
+          Math.floor(ax / INFERRED_DENSITY_CELL_METRES),
+          Math.floor(az / INFERRED_DENSITY_CELL_METRES),
+        ) ||
+        !densityInRange(
+          Math.floor((ax + dx) / INFERRED_DENSITY_CELL_METRES),
+          Math.floor((az + dz) / INFERRED_DENSITY_CELL_METRES),
+        )
+      ) {
+        continue;
+      }
       const pieces = Math.ceil(length / piece);
       if (pieces > work) return;
       work -= pieces;
@@ -955,25 +1149,120 @@ function inferBuiltUp(
         if (!densityInRange(column, row)) continue;
         const key = densityKey(column, row);
         metres.set(key, (metres.get(key) ?? 0) + length / pieces);
+        const filed = segmentsIn.get(key);
+        const index = segments.length / 5;
+        if (filed === undefined) segmentsIn.set(key, [index]);
+        else if (filed[filed.length - 1] !== index) filed.push(index);
       }
+      segments.push(ax, az, ax + dx, az + dz, owner);
+    }
+  }
+  // 1+. Joins: a vertex of one counted street within the snap of another's
+  // segment, counted once a place. OpenStreetMap's nodes are not all kept by
+  // the tiles, so the test is by distance and not by a shared vertex.
+  const joined = new Set<number>();
+  const snap = INFERRED_JOIN_SNAP_METRES;
+  for (const { line, owner: mine } of counted) {
+    for (let at = 0; at + 1 < line.length; at += 2) {
+      const x = line[at] as number;
+      const z = line[at + 1] as number;
+      const column = Math.floor(x / INFERRED_DENSITY_CELL_METRES);
+      const row = Math.floor(z / INFERRED_DENSITY_CELL_METRES);
+      if (!densityInRange(column, row)) continue;
+      const spot = Math.round(x / snap) * 2 ** 22 + Math.round(z / snap);
+      if (joined.has(spot)) continue;
+      let found = false;
+      for (let dRow = -1; dRow <= 1 && !found; dRow += 1) {
+        for (let dColumn = -1; dColumn <= 1 && !found; dColumn += 1) {
+          if (!densityInRange(column + dColumn, row + dRow)) continue;
+          const filed = segmentsIn.get(densityKey(column + dColumn, row + dRow));
+          if (filed === undefined) continue;
+          if (filed.length > work) return;
+          work -= filed.length;
+          for (const index of filed) {
+            const base = index * 5;
+            if ((segments[base + 4] as number) === mine) continue;
+            if (
+              nearSegment(
+                x,
+                z,
+                segments[base] as number,
+                segments[base + 1] as number,
+                segments[base + 2] as number,
+                segments[base + 3] as number,
+                snap,
+              )
+            ) {
+              found = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!found) continue;
+      joined.add(spot);
+      const cell = densityKey(column, row);
+      joins.set(cell, (joins.get(cell) ?? 0) + 1);
     }
   }
   if (metres.size === 0) return;
+  // 1a. Farmland, and mapped built-up land, by density cell: read off the mask
+  // before a single cell is inferred, so the cue is the map's alone.
+  const farmland = new Map<number, number>();
+  const mapped = new Map<number, number>();
+  const cellsPerDensity = INFERRED_DENSITY_CELL_METRES / LAND_CLASS_CELL_METRES;
+  const densityPerChunk = LAND_CLASS_CHUNK_CELLS / cellsPerDensity;
+  for (const [key, chunk] of chunks) {
+    if (CHUNK_BYTES > work) return;
+    work -= CHUNK_BYTES;
+    const column = (key % CHUNK_STRIDE) - CHUNK_RANGE;
+    const row = Math.floor(key / CHUNK_STRIDE) - CHUNK_RANGE;
+    for (let cellZ = 0; cellZ < LAND_CLASS_CHUNK_CELLS; cellZ += 1) {
+      const start = cellZ * LAND_CLASS_CHUNK_CELLS;
+      const rowKey = row * densityPerChunk + Math.floor(cellZ / cellsPerDensity);
+      for (let cellX = 0; cellX < LAND_CLASS_CHUNK_CELLS; cellX += 1) {
+        const code = chunk[start + cellX] as number;
+        if (code !== CODE_FARMLAND && code !== CODE_BUILT_UP) continue;
+        const cell = densityKey(
+          column * densityPerChunk + Math.floor(cellX / cellsPerDensity),
+          rowKey,
+        );
+        const into = code === CODE_FARMLAND ? farmland : mapped;
+        into.set(cell, (into.get(cell) ?? 0) + 1);
+      }
+    }
+  }
+  // 1b. Mapped footprints, by density cell: the first vertex of the first ring.
+  const footprints = new Map<number, number>();
+  for (const building of corridor.buildings) {
+    if (work <= 0) return;
+    work -= 1;
+    const ring = building.rings[0];
+    if (ring === undefined || ring.length < 2) continue;
+    const column = Math.floor((ring[0] as number) / INFERRED_DENSITY_CELL_METRES);
+    const row = Math.floor((ring[1] as number) / INFERRED_DENSITY_CELL_METRES);
+    if (!densityInRange(column, row)) continue;
+    const cell = densityKey(column, row);
+    footprints.set(cell, (footprints.get(cell) ?? 0) + 1);
+  }
   // 2. Whether a density cell's window is a suburb's, asked once a cell.
   const suburb = new Map<number, boolean>();
-  const window = INFERRED_DENSITY_WINDOW_CELLS;
   const suburbAt = (column: number, row: number): boolean => {
     const key = densityKey(column, row);
     const known = suburb.get(key);
     if (known !== undefined) return known;
-    let sum = 0;
-    for (let dRow = -window; dRow <= window; dRow += 1) {
-      for (let dColumn = -window; dColumn <= window; dColumn += 1) {
-        if (!densityInRange(column + dColumn, row + dRow)) continue;
-        sum += metres.get(densityKey(column + dColumn, row + dRow)) ?? 0;
-      }
-    }
-    const is = sum / DENSITY_WINDOW_HECTARES >= INFERRED_MIN_STREET_DENSITY;
+    const is = suburbCues({
+      metres: windowSum(metres, column, row),
+      joins: windowSum(joins, column, row),
+      farmland: windowSum(farmland, column, row),
+      mapped: windowSum(mapped, column, row),
+      footprints: windowSum(footprints, column, row),
+      place: nearestPlace(
+        corridor.places,
+        (column + 0.5) * INFERRED_DENSITY_CELL_METRES,
+        (row + 0.5) * INFERRED_DENSITY_CELL_METRES,
+      ),
+    });
     suburb.set(key, is);
     return is;
   };
@@ -1047,7 +1336,7 @@ function inferBuiltUp(
           if (ox * ox + oz * oz > reachSquared) continue;
           const densityColumn = Math.floor(x / INFERRED_DENSITY_CELL_METRES);
           const densityRow = Math.floor(z / INFERRED_DENSITY_CELL_METRES);
-          if (suburbAt(densityColumn, densityRow)) chunk[cell] = CODE_BUILT_UP;
+          if (suburbAt(densityColumn, densityRow)) chunk[cell] = CODE_INFERRED;
         }
       }
     }

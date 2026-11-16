@@ -18,11 +18,18 @@
 import { describe, expect, it } from 'vitest';
 
 import { metres, type RouteProfile } from '@onyourleft/domain';
-import type { LandUseFeature } from '@onyourleft/map-features';
+import type {
+  BuildingFeature,
+  LandUseFeature,
+  PlaceFeature,
+  StreetFeature,
+} from '@onyourleft/map-features';
 
 import { footprintPlans, FOOTPRINT_MAX_VERTICES, mappedTown } from './footprint-buildings';
 import {
   besideRoad,
+  buildingBeside,
+  rectangleBeside,
   farmRoadFixture,
   landBeside,
   STREET_SUBURB_FROM,
@@ -31,9 +38,17 @@ import {
   streetSuburbFixture,
 } from './footprint-fixtures-testing';
 import {
+  INFERRED_EDGE_BUILT_SHARE,
+  INFERRED_EDGE_FOOTPRINTS,
+  INFERRED_HAMLET_REACH_METRES,
+  INFERRED_MIN_JOINS_PER_HECTARE,
   INFERRED_MIN_STREET_DENSITY,
+  INFERRED_PLACE_REACH_METRES,
   INFERRED_REACH_METRES,
+  INFERRED_RURAL_FARMLAND_SHARE,
   landClassMask,
+  nearestPlace,
+  suburbCues,
   LAND_CLASS_MAX_BYTES,
   LAND_CLASS_MAX_WORK,
   LEVELLING_MAX_CHUNKS,
@@ -123,6 +138,16 @@ function maskWithoutInference(corridor: WorldCorridor): LandClassMask {
   );
 }
 
+function suburbPlace(x: number, z: number, kindDetail: PlaceFeature['kindDetail'] = 'suburb') {
+  return {
+    kind: kindDetail === 'suburb' ? 'neighbourhood' : 'locality',
+    kindDetail,
+    populationRank: 5,
+    x,
+    z,
+  } as const satisfies PlaceFeature;
+}
+
 /** A land-use polygon from `from` to `to` along the suburb, `near` to `far` out on the right. */
 function polygon(kind: string, layer: LandUseFeature['layer'] = 'landuse') {
   return (profile: RouteProfile, origin: CorridorOrigin): readonly LandUseFeature[] => [
@@ -177,7 +202,16 @@ describe('inferred built-up land: a suburb of streets with no footprints and no 
         );
       }
     }
-    const lattice = { ...suburb, corridor: { ...suburb.corridor, streets } };
+    // Diagonals share no node, so no join is counted: a suburban place near stands for the grid.
+    const [placeX, placeZ] = besideRoad(suburb.profile, suburb.origin, 1_700, 0);
+    const lattice = {
+      ...suburb,
+      corridor: {
+        ...suburb.corridor,
+        streets,
+        places: [suburbPlace(placeX, placeZ)],
+      },
+    };
     const ground = lotGround(lattice, landClassMask(lattice.corridor), 1_300, 2_100);
     expect(ground.filter((here) => here !== 'built-up')).toEqual([]);
   });
@@ -279,24 +313,278 @@ describe('what inference never reads as built-up — #2684', () => {
   });
 
   it('infers nothing where the polygon pass ran out of work, so an unpainted wood is never a suburb', () => {
-    const fixture = streetSuburbFixture('residential', 'ground', polygon('wood'));
+    // Two polygons, the first of which uses the whole budget: the second is
+    // never painted, and the cells it would have held are not read as open land.
+    const fixture = streetSuburbFixture('residential', 'ground', (profile, origin) => [
+      ...polygon('wood')(profile, origin),
+      ...polygon('wood')(profile, origin),
+    ]);
     const short = landClassMask(fixture.corridor, LAND_CLASS_MAX_BYTES, 1);
     expect(builtUpCells(fixture, short)).toBe(0);
   });
 
-  it('stops at its own work cap, and infers nothing past it', () => {
-    // 1 000 cell tests: the density takes 672 (13 440 street metres in 20 m
-    // pieces), which leaves 328 for the cells — a few rows of the first street.
+  it('infers where the last polygon used the whole budget: every polygon was painted', () => {
+    const fixture = streetSuburbFixture('residential', 'ground', polygon('wood'));
+    for (const budget of [1, 2, 50, 500, 5_000]) {
+      const exact = landClassMask(fixture.corridor, LAND_CLASS_MAX_BYTES, budget);
+      expect(classBeside(fixture, exact, 1_600, -20), String(budget)).toBe('built-up');
+    }
+  });
+
+  it('stops at its own work cap: cells inferred before it are kept, and the rest are not', () => {
+    // 500 000 cell tests: the streets, the chunk scan (about 330 000) and the
+    // first rows of cells — a part of the whole 35 060, never the whole, never none.
     const suburb = streetSuburbFixture();
     const capped = landClassMask(
       suburb.corridor,
       LAND_CLASS_MAX_BYTES,
       LAND_CLASS_MAX_WORK,
       LEVELLING_MAX_CHUNKS,
-      1_000,
+      500_000,
     );
     const whole = builtUpCells(suburb, landClassMask(suburb.corridor));
-    expect(builtUpCells(suburb, capped)).toBeLessThanOrEqual(328);
-    expect(whole).toBeGreaterThan(10_000);
+    expect(builtUpCells(suburb, capped)).toBeGreaterThan(0);
+    expect(builtUpCells(suburb, capped)).toBeLessThan(whole);
+    // And one that cannot even read the map is today's world.
+    const starved = landClassMask(
+      suburb.corridor,
+      LAND_CLASS_MAX_BYTES,
+      LAND_CLASS_MAX_WORK,
+      LEVELLING_MAX_CHUNKS,
+      1_000,
+    );
+    expect(builtUpCells(suburb, starved)).toBe(0);
+  });
+
+  it('skips a hostile segment past the grid instead of giving up the ride', () => {
+    const suburb = streetSuburbFixture();
+    const hostile: StreetFeature = {
+      kind: 'minor_road',
+      kindDetail: 'residential',
+      grade: 'ground',
+      line: Float32Array.from([0, 0, 1e12, 1e12]),
+    };
+    const corrupt = {
+      ...suburb,
+      corridor: { ...suburb.corridor, streets: [hostile, ...suburb.corridor.streets] },
+    };
+    expect(builtUpCells(corrupt, landClassMask(corrupt.corridor))).toBe(
+      builtUpCells(suburb, landClassMask(suburb.corridor)),
+    );
+  });
+});
+
+describe('the density threshold, either side of 45 street metres a hectare — #2684', () => {
+  // A spine along the route with a street across it at every 80 m density
+  // cell, `half` metres either side: 7 across in a 560 m window, so the
+  // window holds 560 + 7 x 2 x half street metres, and 31.36 ha.
+  function ladder(half: number): Fixture {
+    const base = streetSuburbFixture();
+    const { profile, origin } = base;
+    const streets: StreetFeature[] = [];
+    const stations: number[] = [];
+    for (let along = 1_000 + 40; along < 2_000; along += 80) stations.push(along);
+    streets.push(
+      streetBeside(
+        profile,
+        origin,
+        [[1_000, 0], ...stations.map((along) => [along, 0] as const), [2_000, 0]],
+        'residential',
+      ),
+    );
+    for (const along of stations) {
+      streets.push(
+        streetBeside(
+          profile,
+          origin,
+          [
+            [along, -half],
+            [along, 0],
+            [along, half],
+          ],
+          'residential',
+        ),
+      );
+    }
+    // A suburban place near stands for every other cue: only the density varies.
+    const [placeX, placeZ] = besideRoad(profile, origin, 1_500, 0);
+    return {
+      ...base,
+      corridor: { ...base.corridor, streets, places: [suburbPlace(placeX, placeZ)] },
+    };
+  }
+
+  it('is a suburb at about 51 and open ground at about 38', () => {
+    // The middle window: 560 + 14 x 75 = 1 610 m over 31.36 ha is 51.3, and
+    // 560 + 14 x 45 = 1 190 m is 37.9 — the 38 and 50 ADR 0070 D-5 puts 45 between.
+    expect(INFERRED_MIN_STREET_DENSITY).toBe(45);
+    const dense = ladder(75);
+    const thin = ladder(45);
+    expect(classBeside(dense, landClassMask(dense.corridor), 1_500, 20)).toBe('built-up');
+    expect(classBeside(thin, landClassMask(thin.corridor), 1_500, 20)).toBe('other');
+  });
+});
+
+describe('suburb or rural: the cues, combined — the owner’s ruling of 2026-11-15 on #2684', () => {
+  /** The streets' ground 20 m off the road at 1 600 m. */
+  const inferred = (fixture: Fixture): boolean =>
+    classBeside(fixture, landClassMask(fixture.corridor), 1_600, -20) === 'built-up';
+  const bare = (): Fixture => streetSuburbFixture('residential', 'ground', () => [], false);
+  const near = (fixture: Fixture) => besideRoad(fixture.profile, fixture.origin, 1_600, 0);
+
+  it('does not read a dense grid as a suburb on its density alone', () => {
+    // The same streets with no node in common: no join, and no other cue.
+    expect(inferred(bare())).toBe(false);
+    expect(inferred(streetSuburbFixture())).toBe(true);
+  });
+
+  it('reads a suburban place near, or mapped footprints near, as a cue for', () => {
+    const withPlace = bare();
+    const [x, z] = near(withPlace);
+    expect(
+      inferred({
+        ...withPlace,
+        corridor: { ...withPlace.corridor, places: [suburbPlace(x, z)] },
+      }),
+    ).toBe(true);
+    const withHouses = bare();
+    const buildings: BuildingFeature[] = [];
+    for (let i = 0; i < INFERRED_EDGE_FOOTPRINTS; i += 1) {
+      buildings.push({
+        ...buildingBeside(
+          withHouses.profile,
+          withHouses.origin,
+          [rectangleBeside(1_560 + i * 20, -250, 8, 18)],
+          7,
+        ),
+        buildingType: 'house',
+      });
+    }
+    expect(inferred({ ...withHouses, corridor: { ...withHouses.corridor, buildings } })).toBe(true);
+    expect(
+      inferred({
+        ...withHouses,
+        corridor: { ...withHouses.corridor, buildings: buildings.slice(1) },
+      }),
+    ).toBe(false);
+  });
+
+  it('reads farmland near, or a hamlet near, as a cue against, which a cue for cancels', () => {
+    const fields = (joined: boolean): Fixture =>
+      streetSuburbFixture(
+        'residential',
+        'ground',
+        (profile, origin) => [
+          landBeside(profile, origin, 'landuse', 'farmland', 1_300, 1_900, 100, 400),
+        ],
+        joined,
+      );
+    // Joined streets and farmland about: one for, one against, net nothing.
+    expect(inferred(fields(true))).toBe(false);
+    // A suburban place besides: two for, one against.
+    const joinedFields = fields(true);
+    const [x, z] = near(joinedFields);
+    expect(
+      inferred({
+        ...joinedFields,
+        corridor: { ...joinedFields.corridor, places: [suburbPlace(x, z)] },
+      }),
+    ).toBe(true);
+    // A hamlet within reach against the joins: net nothing.
+    const hamlet = streetSuburbFixture();
+    const [hx, hz] = near(hamlet);
+    expect(
+      inferred({
+        ...hamlet,
+        corridor: { ...hamlet.corridor, places: [suburbPlace(hx, hz, 'hamlet')] },
+      }),
+    ).toBe(false);
+  });
+
+  it('draws sparser houses on inferred land than on mapped residential land', () => {
+    const mapped = streetSuburbFixture('residential', 'ground', (profile, origin) => [
+      landBeside(profile, origin, 'landuse', 'residential', 900, 2_600, -400, 400),
+    ]);
+    const infer = streetSuburbFixture();
+    const count = (fixture: Fixture): number =>
+      housesOf(frameAt(fixture, 1_700, undefined, STRUCTURE_MAX_ITEMS).scatter).length;
+    const onMapped = count(mapped);
+    const onInferred = count(infer);
+    expect(onInferred).toBeGreaterThan(5);
+    expect(onInferred).toBeLessThan(onMapped * 0.7);
+  });
+
+  it('tells inferred land from mapped land through inferredAt', () => {
+    const suburb = streetSuburbFixture();
+    const land = landClassMask(suburb.corridor);
+    const [x, z] = besideRoad(suburb.profile, suburb.origin, 1_600, -20);
+    expect(land.inferredAt(x, z)).toBe(true);
+    const mapped = streetSuburbFixture('residential', 'ground', (profile, origin) => [
+      landBeside(profile, origin, 'landuse', 'residential', 900, 2_600, -400, 400),
+    ]);
+    const [mx, mz] = besideRoad(mapped.profile, mapped.origin, 1_600, -20);
+    const mappedLand = landClassMask(mapped.corridor);
+    expect(mappedLand.classAt(mx, mz)).toBe('built-up');
+    expect(mappedLand.inferredAt(mx, mz)).toBe(false);
+    expect(land.inferredAt(Number.NaN, 0)).toBe(false);
+  });
+
+  it('levels the ground to inferred land as to mapped: 0 m on it, finite beside it', () => {
+    const suburb = streetSuburbFixture();
+    const land = landClassMask(suburb.corridor);
+    const on = besideRoad(suburb.profile, suburb.origin, 1_600, -20);
+    const off = besideRoad(suburb.profile, suburb.origin, 1_600, 240 + INFERRED_REACH_METRES + 40);
+    const into = new Float64Array(2);
+    land.builtUpDistances(Float64Array.from([...on, ...off]), 2, into);
+    expect(into[0]).toBe(0);
+    expect(into[1]).toBeGreaterThan(0);
+    expect(into[1]).toBeLessThan(150);
+  });
+
+  it('suburbCues: each threshold, pinned either side', () => {
+    const hectares = 31.36;
+    const cells = 49 * 256;
+    const base = { metres: 60 * hectares, joins: 0, farmland: 0, mapped: 0, footprints: 0 };
+    const joins = (n: number) => ({ ...base, joins: n * hectares, place: 'none' as const });
+    expect(suburbCues({ ...joins(INFERRED_MIN_JOINS_PER_HECTARE), place: 'none' })).toBe(true);
+    expect(suburbCues({ ...joins(INFERRED_MIN_JOINS_PER_HECTARE - 0.01), place: 'none' })).toBe(
+      false,
+    );
+    const dense = { ...base, place: 'suburban' as const };
+    expect(suburbCues({ ...dense, metres: 45 * hectares })).toBe(true);
+    expect(suburbCues({ ...dense, metres: 44.9 * hectares })).toBe(false);
+    const farm = { ...dense, farmland: INFERRED_RURAL_FARMLAND_SHARE * cells };
+    // A suburban place against farmland: one for, one against.
+    expect(suburbCues(farm)).toBe(false);
+    expect(suburbCues({ ...farm, joins: 99 })).toBe(true);
+    expect(suburbCues({ ...farm, farmland: farm.farmland - 1, place: 'none', joins: 99 })).toBe(
+      true,
+    );
+    expect(suburbCues({ ...base, footprints: INFERRED_EDGE_FOOTPRINTS, place: 'none' })).toBe(true);
+    expect(suburbCues({ ...base, footprints: INFERRED_EDGE_FOOTPRINTS - 1, place: 'none' })).toBe(
+      false,
+    );
+    expect(suburbCues({ ...base, mapped: INFERRED_EDGE_BUILT_SHARE * cells, place: 'none' })).toBe(
+      true,
+    );
+    expect(
+      suburbCues({ ...base, mapped: INFERRED_EDGE_BUILT_SHARE * cells - 1, place: 'none' }),
+    ).toBe(false);
+    expect(suburbCues({ ...base, place: 'hamlet', joins: 99 })).toBe(false);
+  });
+
+  it('nearestPlace: the nearest within reach speaks, a village speaks neither way', () => {
+    const at = (kindDetail: PlaceFeature['kindDetail'], x: number) => suburbPlace(x, 0, kindDetail);
+    expect(nearestPlace([at('suburb', INFERRED_PLACE_REACH_METRES)], 0, 0)).toBe('suburban');
+    expect(nearestPlace([at('suburb', INFERRED_PLACE_REACH_METRES + 1)], 0, 0)).toBe('none');
+    expect(nearestPlace([at('hamlet', INFERRED_HAMLET_REACH_METRES)], 0, 0)).toBe('hamlet');
+    expect(nearestPlace([at('hamlet', INFERRED_HAMLET_REACH_METRES + 1)], 0, 0)).toBe('none');
+    for (const kind of ['town', 'city', 'quarter'] as const) {
+      expect(nearestPlace([at(kind, 900)], 0, 0), kind).toBe('suburban');
+    }
+    // A hamlet nearer than a suburb wins; a village nearer than both hides them.
+    expect(nearestPlace([at('suburb', 1_000), at('hamlet', 300)], 0, 0)).toBe('hamlet');
+    expect(nearestPlace([at('suburb', 1_000), at('village', 300)], 0, 0)).toBe('none');
+    expect(nearestPlace(undefined, 0, 0)).toBe('none');
   });
 });
