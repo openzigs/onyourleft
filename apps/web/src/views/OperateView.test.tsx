@@ -138,14 +138,16 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 5)).toEqual([
+    expect(headings.slice(0, 6)).toEqual([
       'Status',
       'Accounts',
       'Backups',
       'AI backend',
+      'Rooms',
       'Operator log',
     ]);
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
+    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Rooms');
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Backups');
   });
 

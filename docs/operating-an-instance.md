@@ -1066,6 +1066,27 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   it calls tools** and **Save this model** (offered only after that model's check said `tools-ok`),
   whether your own hosted key is held — set, replaced or removed on the Instance screen, never here —
   the jobs, and **Return to .env**. No model is recommended or picked for you.
+- **Rooms** ([#2612](https://github.com/openzigs/onyourleft/issues/2612)). `GET /v1/operate/rooms`
+  lists every open rider's room, newest first — the rooms Status counts: whether it is a group ride,
+  a race or a lap race, private or public, its phase (waiting to start, counting down, under way,
+  finished), when it was made, its host's display name and the display name of each rider in it,
+  with a count. What is in a room comes from the room worker holding it, asked over its IPC; a room
+  no worker holds has nobody in it. **Only names**: never a rider's place, distance, speed, power,
+  heart rate, Discord id or account id. A name you may not see — a rider who blocked you, say — is
+  shown as "a rider". `POST /v1/operate/rooms/{roomId}/end` ends one, with `reason` (`abuse`,
+  `stuck`, `maintenance` or `other`) and `confirm`, the room's **short code**: the first six
+  characters of its id, shown beside it. In the app, **End room** cannot be pressed until you have
+  typed that code, and the route itself refuses a request without it, so nothing changes and nothing
+  is logged. Ending a room is the same close as a room that is over by itself: its route is deleted
+  (unless another open room rides the same bytes), every socket in it is sent `refuse room-closed`
+  and closed `4005` (§"Room close codes"), a rejoin is refused, and its Discord voice channel is
+  deleted. **Every result already final is kept**, as `docker compose stop` keeps them (§"Shutting
+  down, sleeping and rebooting"); a race ended before it was decided has no published result, like
+  one a restart interrupted. **No rider's trainer is touched**: a rider in an ERG workout inside the
+  room goes on riding on their own, and their device goes on recording. The close and its
+  `room_ended` entry (the reason, the kind and how many riders were in it) are written in one
+  transaction. Rooms an operator opened with `room-open` are not listed. On an instance with no room
+  router — the Durable Object adapter, not deployed — both routes answer `unavailable`.
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

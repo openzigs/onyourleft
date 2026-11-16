@@ -406,8 +406,11 @@ function labelFrom(form: URLSearchParams): string | undefined {
   if (label === undefined || label.length === 0 || [...label].length > PASSKEY_LABEL_LIMIT) {
     return undefined;
   }
+  // C0, DEL, C1 (the 8-bit CSI among them) and the bidi controls: the CLI prints a label on the host's terminal.
   // eslint-disable-next-line no-control-regex -- the control characters are what is refused
-  return /[\u0000-\u001f\u007f]/.test(label) ? undefined : label;
+  return /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(label)
+    ? undefined
+    : label;
 }
 
 /** A moment, in UTC: the same on every screen. */
@@ -905,7 +908,7 @@ ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted
       const assertion = assertionFrom(formOf(body));
       const challenge =
         assertion === undefined ? undefined : namedChallenge(assertion.response.clientDataJSON);
-      // Taken, once, whatever the rest of the answer is.
+      // Taken, once, whatever the rest of the answer is (past the session and label checks).
       const issued =
         challenge === undefined
           ? undefined
@@ -1078,7 +1081,7 @@ ${add}`,
         return nothingChanged(400, 'A passkey’s name is 1 to 60 characters.');
       }
       const at = seconds();
-      // Taken, once, whatever the rest of the answer is.
+      // Taken, once, whatever the rest of the answer is (past the session and label checks).
       const issued = await store.takeAdminChallenge(
         'enrol',
         { sessionSha256: session.record.tokenSha256 },

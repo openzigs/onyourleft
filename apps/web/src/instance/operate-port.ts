@@ -347,6 +347,59 @@ export type OperateBackUpNow =
   | { readonly kind: 'refused'; readonly sentence: string }
   | { readonly kind: Exclude<OperateStanding, 'owner'> };
 
+/**
+ * Why the owner ends a room (#2612): the instance's closed list
+ * (`apps/instance` §`ROOM_END_REASONS`). Written here, not imported from
+ * `@onyourleft/operate-text`: this directory reaches no other package
+ * (`instance-transport.test.ts`).
+ */
+export const OPERATE_ROOM_END_REASONS = ['abuse', 'stuck', 'maintenance', 'other'] as const;
+
+export type OperateRoomEndReason = (typeof OPERATE_ROOM_END_REASONS)[number];
+
+/** A room's kind, as the route writes it. */
+export type OperateRoomKind = 'group' | 'race' | 'lap-race';
+
+/** Where a room is, as the route writes it. */
+export type OperateRoomPhase = 'lobby' | 'countdown' | 'riding' | 'finished';
+
+/**
+ * One open room (#2612), as `GET /v1/operate/rooms` writes it: riders by
+ * display name, `null` for one the owner may not see — and never a place, a
+ * speed, a power or an id of a rider.
+ */
+export interface OperateRoom {
+  readonly roomId: string;
+  /** What the owner types to end it. */
+  readonly shortCode: string;
+  readonly kind: OperateRoomKind;
+  readonly visibility: 'private' | 'public';
+  readonly phase: OperateRoomPhase;
+  /** When it was made, ISO 8601, UTC. */
+  readonly openedAt: string;
+  readonly host: string | null;
+  readonly riders: readonly (string | null)[];
+}
+
+/** The open rooms, newest first. */
+export interface OperateRooms {
+  readonly kind: 'rooms';
+  readonly rooms: readonly OperateRoom[];
+}
+
+/** The rooms, or why there are none: a standing other than `owner`. */
+export type OperateRoomsRead = OperateRooms | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+/** What ending a room did (#2612). */
+export type OperateEndRoom =
+  | { readonly kind: 'ended'; readonly endedAt: string }
+  /**
+   * The instance ended nothing: the room is over already, or the code or the
+   * reason was not one it takes. Nothing changed.
+   */
+  | { readonly kind: 'not-ended' }
+  | { readonly kind: Exclude<OperateStanding, 'owner' | 'not-owner'> };
+
 /** What the Operate area may ask. */
 export interface OperatePort {
   /** The instance's status, read-only (#2604): one sealed request. */
@@ -371,6 +424,10 @@ export interface OperatePort {
   backups(): Promise<OperateBackupsRead>;
   /** Ask the `backup` service for a snapshot now (#2606): it takes it within 30 seconds. */
   backUpNow(): Promise<OperateBackUpNow>;
+  /** Every open room and who is in it (#2612): read-only. */
+  rooms(): Promise<OperateRoomsRead>;
+  /** End `roomId`, `confirm` being the room's short code as the owner typed it (#2612). */
+  endRoom(roomId: string, reason: OperateRoomEndReason, confirm: string): Promise<OperateEndRoom>;
 }
 
 /** Every Operate route is sealed and signed by the owner's device key, so the port needs what a sealed call needs. */
@@ -573,6 +630,69 @@ function sentenceFrom(answer: InstanceAnswer): string | undefined {
   if (/[0-9][.,][0-9]/.test(message)) return undefined;
   if (message.split(' ').some((word) => word.length > 24)) return undefined;
   return message;
+}
+
+/** A room's id as the instance writes one, and as its socket path takes it. */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A room's short code: the first characters of its id, lower case. */
+const SHORT_CODE = /^[a-z0-9_-]{1,16}$/;
+
+/** The longest display name shown (`moderation-port.ts` holds the same). */
+const MAXIMUM_SHOWN_NAME = 64;
+
+/** A display name as it may be shown, `null` for "a rider", or `undefined` when it is neither. */
+function shownName(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' || [...trimmed].length > MAXIMUM_SHOWN_NAME ? undefined : trimmed;
+}
+
+const ROOM_KINDS: readonly OperateRoomKind[] = ['group', 'race', 'lap-race'];
+const ROOM_PHASES: readonly OperateRoomPhase[] = ['lobby', 'countdown', 'riding', 'finished'];
+
+function roomFrom(value: unknown): OperateRoom | undefined {
+  const row = record(value);
+  if (row === undefined) return undefined;
+  const { roomId, shortCode, kind, visibility, phase, riders, riderCount } = row;
+  const openedAt = isoMoment(row.openedAt);
+  const host = shownName(row.host);
+  if (
+    typeof roomId !== 'string' ||
+    !ROOM_ID.test(roomId) ||
+    typeof shortCode !== 'string' ||
+    !SHORT_CODE.test(shortCode) ||
+    !oneOf(kind, ROOM_KINDS) ||
+    !oneOf(visibility, ['private', 'public'] as const) ||
+    !oneOf(phase, ROOM_PHASES) ||
+    openedAt === undefined ||
+    host === undefined ||
+    !Array.isArray(riders) ||
+    riderCount !== riders.length
+  ) {
+    return undefined;
+  }
+  const names = riders.map(shownName);
+  if (names.some((name) => name === undefined)) return undefined;
+  return {
+    roomId,
+    shortCode,
+    kind,
+    visibility,
+    phase,
+    openedAt,
+    host,
+    riders: names as (string | null)[],
+  };
+}
+
+function roomsFrom(answer: InstanceAnswer): OperateRooms | undefined {
+  const body = record(answer.body);
+  if (body === undefined || !Array.isArray(body.rooms)) return undefined;
+  const rooms = body.rooms.map(roomFrom);
+  if (rooms.some((room) => room === undefined)) return undefined;
+  return { kind: 'rooms', rooms: rooms as OperateRoom[] };
 }
 
 /** Said for a refused "back up now" when the instance's own sentence may not be shown. */
@@ -1031,6 +1151,42 @@ export function createOperatePort(dependencies: OperatePortDependencies): Operat
         if (answer.status === 200) return backupsFrom(answer) ?? { kind: 'unreachable' };
         if (isNotTheOwner(answer)) return { kind: 'not-owner' };
         // #2602: an instance with no OYL_INSTANCE_SECRET_KEY offers no Operate area.
+        if (errorCode(answer) === 'unavailable') return { kind: 'no-keys' };
+        return { kind: 'unreachable' };
+      } catch {
+        return { kind: 'unreachable' };
+      }
+    },
+
+    rooms: () => ownerRead('GET', '/v1/operate/rooms', undefined, roomsFrom),
+
+    endRoom: async (roomId, reason, confirm) => {
+      // A room the instance could not have named, or a reason it does not take, is sent nowhere.
+      if (
+        !ROOM_ID.test(roomId) ||
+        !(OPERATE_ROOM_END_REASONS as readonly string[]).includes(reason) ||
+        confirm.length > 64
+      ) {
+        return { kind: 'not-ended' };
+      }
+      try {
+        const session = await sealedSession();
+        if (session.kind === 'closed') return { kind: closedStanding(session) };
+        const answer = await session.sealed.call(
+          'POST',
+          `/v1/operate/rooms/${encodeURIComponent(roomId)}/end`,
+          { token: session.token, body: { reason, confirm } },
+        );
+        if (answer.status === 401) return { kind: 'signed-out' };
+        if (answer.status === 200) {
+          const endedAt = isoMoment(record(answer.body)?.endedAt);
+          return endedAt === undefined ? { kind: 'unreachable' } : { kind: 'ended', endedAt };
+        }
+        // The owner's own `not_found` is a room that is over, and a code or
+        // reason refused changed nothing: either way the list is read again.
+        if (isNotTheOwner(answer) || errorCode(answer) === 'validation_failed') {
+          return { kind: 'not-ended' };
+        }
         if (errorCode(answer) === 'unavailable') return { kind: 'no-keys' };
         return { kind: 'unreachable' };
       } catch {

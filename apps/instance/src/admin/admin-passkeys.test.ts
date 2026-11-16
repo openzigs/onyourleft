@@ -322,10 +322,50 @@ describe('enrolment from a code session, and sign-in with the passkey across a r
     ).toBe(false);
   });
 
+  it('refuses an enrolment answered over a challenge the instance did not issue to that session', async () => {
+    const world = await adminWorld();
+    const handler = world.instance.handler;
+    const code = await codeSession(world);
+    const csrf = await csrfOn(handler, code);
+    // The instance issues a challenge, which is never answered...
+    const asked = await handler(
+      adminRequest('POST', '/admin/passkeys/options', { cookie: code, form: { csrf } }),
+    );
+    expect(asked.status).toBe(200);
+    // ...and the registration is signed over one the client chose, which it does name.
+    const chosen = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+    const made = await (
+      await softwareAuthenticator('es256')
+    ).register({ rpId: 'ride.example', origin: TEST_ORIGIN, challenge: chosen });
+    const answer = await handler(
+      adminRequest('POST', '/admin/passkeys/add', {
+        cookie: code,
+        form: {
+          csrf,
+          label: 'Chosen',
+          clientDataJSON: made.clientDataJSON,
+          attestationObject: made.attestationObject,
+        },
+      }),
+    );
+    expect(answer.status).toBe(400);
+    expect(await passkeysOf(world)).toEqual([]);
+    expect(
+      (await ownersLog(world)).some((entry) => entry.action === 'admin_passkey_enrolled'),
+    ).toBe(false);
+  });
+
   it('holds a passkey’s name to 1–60 characters and renders it escaped', async () => {
     const world = await adminWorld();
     const handler = world.instance.handler;
-    for (const label of ['', ' '.repeat(3), 'x'.repeat(61), 'tab\there']) {
+    for (const label of [
+      '',
+      ' '.repeat(3),
+      'x'.repeat(61),
+      'tab\there',
+      'c1\u009b31m',
+      'bidi\u202eevil',
+    ]) {
       const answer = await enrolWith(
         handler,
         await codeSession(world),
@@ -530,9 +570,25 @@ describe('the step-up every change needs (#2642, ADR 0069 D-4)', () => {
     expect((await ownersLog(world)).some((entry) => entry.action === 'admin_passkey_revoked')).toBe(
       false,
     );
-    // The control: a fresh step-up for A revokes A.
+    // The control: a fresh step-up for B revokes B.
     const fresh = await stepUpWith(handler, token, one, 'passkey_revoke', { id: second.id });
     expect((await revoke(world, token, second.id, fresh)).status).toBe(303);
+  });
+
+  it('refuses a revoke whose path names another passkey than the one the step-up is bound to', async () => {
+    const world = await adminWorld();
+    const { one, first, second, token } = await twoPasskeys(world);
+    const handler = world.instance.handler;
+    // A step-up made for B, whose form says B, posted to A's path.
+    const forSecond = await stepUpWith(handler, token, one, 'passkey_revoke', { id: second.id });
+    const crossed = await revoke(world, token, first.id, forSecond);
+    expect(crossed.status).toBe(400);
+    expect((await passkeysOf(world)).map((each) => each.id).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+    expect((await ownersLog(world)).some((entry) => entry.action === 'admin_passkey_revoked')).toBe(
+      false,
+    );
   });
 
   it('refuses a challenge issued for back up now, spent on revoking a passkey — read back, nothing changed', async () => {

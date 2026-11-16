@@ -944,6 +944,14 @@ export const ANALYSIS_SETTING_FIELD_WORDS = [
 ] as const;
 
 /**
+ * Why the owner ended a room from Operate (#2612): a closed list, so the
+ * reason is a word in the operator log and never free text.
+ */
+export const ROOM_END_REASONS = ['abuse', 'stuck', 'maintenance', 'other'] as const;
+
+export type RoomEndReason = (typeof ROOM_END_REASONS)[number];
+
+/**
  * The operator's actions (#2602): the CLOSED list `operator_log.action` is
  * written from. #2602 adds the operator CLI's commands that change state (the
  * owner's ruling of 2026-11-14 on #2601); each Operate sub-issue adds its own.
@@ -975,6 +983,7 @@ export const OPERATOR_ACTIONS = [
   'admin_passkey_enrolled',
   'admin_passkey_revoked',
   'admin_passkey_confirmed',
+  'room_ended',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1083,6 +1092,9 @@ export const OPERATOR_DETAILS: {
   admin_passkey_enrolled: { words: ['ed25519', 'es256'], counts: [] },
   admin_passkey_revoked: { words: [], counts: ['sessions_ended'] },
   admin_passkey_confirmed: { words: [], counts: [] },
+  // #2612: why the owner ended a room, what kind it was and how many riders
+  // were in it — never the room's id, a rider or a place.
+  room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */

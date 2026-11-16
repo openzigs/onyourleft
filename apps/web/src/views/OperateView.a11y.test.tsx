@@ -68,6 +68,7 @@ describe('the Operate area — #2603', () => {
       'Accounts',
       'Backups',
       'AI backend',
+      'Rooms',
       'Operator log',
       'Still to come',
     ]);
@@ -92,6 +93,9 @@ describe('the Operate area — #2603', () => {
       'Read the list again',
       'Set, replace or remove it on the Instance screen',
       'Return to .env',
+      // #2612: each open room's own.
+      'End room',
+      'End room',
     ]);
   });
 
