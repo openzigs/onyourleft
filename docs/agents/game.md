@@ -1926,7 +1926,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         rising as the parapet) and abutments a concrete grey,
                         in the belt's second instanced box
                         (`BridgeBelt.overpassMesh`), one draw call more on a
-                        frame with one in view
+                        frame with one in view. ⚠️ **Since the owner's "there
+                        are no roads connected to it" (#2699) its street runs
+                        on off both ends of the deck**: one strip an overpass in
+                        the side roads' mesh (`SideRoadBelt`, the road's own
+                        material, no draw call more), over the deck's top and
+                        160 m past each end, down from the deck at 6 % until it
+                        meets the ground (steeper where the ground falls away),
+                        on an embankment walled in the concrete, then fading
+                        into the ground. It follows the mapped street through
+                        the ways meeting it end to end on the land read, then
+                        its last heading; stops short of the carriageway and
+                        water; and the scenery is kept off it
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

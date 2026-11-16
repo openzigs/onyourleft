@@ -65,6 +65,30 @@
  *   {@link OVERPASS_EDGE_DROP_METRES} below its underside, so a rider under it
  *   sees a light edge either side of a dark deck — and that it is still five
  *   boxes, as #2661 drew, is what keeps the frame's share of the belt.
+ * - **An overpass's road — #2699**, the owner's "Odd thing with overpass is
+ *   there are no roads connected to it": the street it carries, as one strip
+ *   in the side roads' mesh (`cross-streets.ts` §`SideRoadMesh`, drawn by
+ *   `three-renderer.ts` §`SideRoadBelt` in the main road's own material, the
+ *   photograph and its wear on a realistic rung) — so a frame with one in view
+ *   makes no draw call more for it, and nothing scattered stands on it
+ *   (`scene.ts` hands it to the scenery with the side roads). Over the deck it
+ *   is the deck's top, between the parapets. Past each end of the deck it is
+ *   an **approach** {@link APPROACH_METRES} long: down from the deck's top at
+ *   {@link APPROACH_GRADE} until it meets the ground, or straight to the
+ *   ground before its fade where the ground falls away faster (§`rampOf`),
+ *   on an embankment walled in the abutments' concrete wherever it stands
+ *   above the ground, then on the ground, and over its last
+ *   {@link APPROACH_FADE_METRES} narrowing and sinking under it, as a side
+ *   road fades. It follows the MAPPED street ({@link GradeCrossing.approaches}:
+ *   the bridge way on from the crossing and each way that meets it end to end,
+ *   while it is on the land read), moving onto it from the deck's line over
+ *   12 m; where the street is not mapped any further, it carries on along the
+ *   last heading it had — the deck's line itself where nothing past the bridge
+ *   is. It stops short of the main carriageway and its verge, and of water.
+ *   ⚠️ **One road an overpass, and no more overpasses than the boxes allow**:
+ *   {@link APPROACH_TRIANGLES_PER_OVERPASS} each and
+ *   {@link OVERPASS_ROAD_FRAME_TRIANGLES} a frame, in the side roads' mesh
+ *   beside `cross-streets.ts` §`SIDE_ROAD_FRAME_TRIANGLES`.
  * - **An underpass**: a parapet with its coping along each edge of the road
  *   over the street's width and {@link UNDERPASS_MARGIN_METRES} either side,
  *   in pieces that follow the road's height — the stream bridge's own
@@ -86,25 +110,36 @@
 
 import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/domain';
 
+import type { StreetFeature } from '@onyourleft/map-features';
+
 import {
   JUNCTION_MIN_ANGLE_DEGREES,
   JUNCTION_TOLERANCE_METRES,
+  linearColour,
   resampled,
+  SIDE_ROAD_END_WIDTH_SHARE,
+  SIDE_ROAD_LIFT_METRES,
+  SIDE_ROAD_SINK_METRES,
   SIDE_ROAD_WIDTHS,
+  stationAt,
   STREET_MAX_METRES,
+  TARMAC,
   widthClassOf,
+  type SideRoad,
   type WidthClass,
 } from './cross-streets';
 import type { LandClassMask } from './land-class';
-import { terrainHeightAt } from './landform';
+import { terrainHeightAt, VERGE_METRES } from './landform';
 import { nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
 import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import {
   BRIDGE_PIECE_METRES,
   COPING_DEPTH_METRES,
   COPING_OVERHANG_METRES,
+  inWater,
   PARAPET_HEIGHT_METRES,
   PARAPET_THICKNESS_METRES,
+  waterways,
   type BridgeFinish,
   type BridgePart,
 } from './waterways';
@@ -181,6 +216,96 @@ export const MAX_GRADE_CROSSINGS = 1_000;
  */
 export const OVERPASS_FRAME_PARTS = 48;
 
+/** The boxes one overpass is: its deck, two edge beams and two abutments. */
+const OVERPASS_BOXES = 5;
+
+/**
+ * How far past each end of an overpass's deck its street is drawn, in metres:
+ * **160** — #2699, the owner's "there are no roads connected to it". About
+ * where the fog (`world.ts`) has taken most of a road off to the side, and
+ * past the 60 m a side road is drawn (`cross-streets.ts` §`SIDE_ROAD_METRES`).
+ */
+export const APPROACH_METRES = 160;
+
+/**
+ * How steeply an approach falls from the deck until it meets the ground:
+ * **6 %**, a street's ramp. Steeper only where the ground falls away faster
+ * (`rampOf`).
+ */
+export const APPROACH_GRADE = 0.06;
+
+/** How far apart an approach's rows are, in metres: **4**. */
+export const APPROACH_STEP_METRES = 4;
+
+/**
+ * The last this many metres of an approach narrow and go under the ground,
+ * in metres: **40** — as a side road fades (`cross-streets.ts`
+ * §`SIDE_ROAD_END_WIDTH_SHARE`, §`SIDE_ROAD_SINK_METRES`), with no transparency.
+ */
+export const APPROACH_FADE_METRES = 40;
+
+/**
+ * How far above the ground an approach stands where it has come down to it,
+ * in metres: **0.08**. More than a side road's 0.03, because its rows are 4 m
+ * apart rather than 2 and the ground between two of them may rise a little
+ * above the straight line between them.
+ */
+export const APPROACH_GROUND_LIFT_METRES = 0.08;
+
+/** Over how many metres past the deck an approach moves from the deck's line onto the mapped street's: **12**. */
+const APPROACH_BLEND_METRES = 12;
+
+/** How far below the ground an approach's embankment wall reaches, in metres: **0.1**. */
+const APPROACH_WALL_FOOT_METRES = 0.1;
+
+/**
+ * An approach's embankment walls: **`0xa7a49c`**, the concrete of the
+ * overpass's edge beams and abutments (`three-renderer.ts`
+ * §`OVERPASS_COLOURS`, which `overpasses.test.ts` holds this to).
+ */
+export const APPROACH_WALL_COLOUR = 0xa7a49c;
+
+/** Linear, as a side road's vertex colours are. */
+const WALL = linearColour(APPROACH_WALL_COLOUR);
+
+/** How far apart two ways' ends may be and still meet, in metres: **1**. */
+const APPROACH_JOIN_METRES = 1;
+
+/** The most ways one approach is followed through: **16**. */
+const APPROACH_MAX_WAYS = 16;
+
+/** The most an approach turns where one way meets the next and is still followed: **60°**. */
+const APPROACH_TURN_COSINE = Math.cos(Math.PI / 3);
+
+/**
+ * How much of a street is read on from a crossing, either way, in metres:
+ * past the widest half-deck (about 24 m, a motorway's at 30°), and
+ * {@link APPROACH_METRES} beyond it.
+ */
+const APPROACH_READ_METRES = APPROACH_METRES + 60;
+
+/** How far from the drawn road an approach's ground is read, in metres. */
+const APPROACH_GROUND_REACH_METRES = APPROACH_READ_METRES + 40;
+
+/**
+ * The most triangles one overpass's road may be — #2699: {@link APPROACH_METRES}
+ * a side at {@link APPROACH_STEP_METRES}, each step a quad of road and an
+ * embankment wall each side, and the deck's top. **482**.
+ */
+export const APPROACH_TRIANGLES_PER_OVERPASS =
+  2 + 2 * 6 * Math.ceil(APPROACH_METRES / APPROACH_STEP_METRES);
+
+/**
+ * The most triangles a frame's overpass roads may add to the side roads' mesh
+ * (`three-renderer.ts` §`SideRoadBelt`) — #2699: one road an overpass, and no
+ * more overpasses than {@link OVERPASS_FRAME_PARTS} has room for. **4 338**.
+ *
+ * @test-facing held by `overpasses.test.ts`, which counts what the belt is
+ * handed on a frame of overpasses; nothing in the product applies it at run time
+ */
+export const OVERPASS_ROAD_FRAME_TRIANGLES =
+  Math.floor(OVERPASS_FRAME_PARTS / OVERPASS_BOXES) * APPROACH_TRIANGLES_PER_OVERPASS;
+
 /** How far past the frame's corridor a crossing is still drawn, in metres: **40**. */
 const IN_VIEW_REACH_METRES = 40;
 
@@ -200,6 +325,14 @@ export interface GradeCrossing {
   /** Its heading there in plan, a unit vector towards the road's right (its normal). */
   readonly dx: number;
   readonly dz: number;
+  /**
+   * The mapped street on from where it crosses — #2699: `[back, on]`, the
+   * first along `−(dx, dz)` and the second along `(dx, dz)`, each
+   * `x0, z0, x1, z1, …` from `(x, z)`, through the ways that meet it end to
+   * end, as far as the land read and {@link APPROACH_READ_METRES} go. Empty
+   * for a tunnel. @see the header
+   */
+  readonly approaches: readonly [Float32Array, Float32Array];
 }
 
 /** The road's frame at `along`: where, and its forward and normal directions. */
@@ -239,6 +372,137 @@ function metresOf(line: Float32Array): number {
   return total;
 }
 
+/** A tunnel's approaches: none. */
+const NO_APPROACHES: readonly [Float32Array, Float32Array] = [
+  new Float32Array(0),
+  new Float32Array(0),
+];
+
+/** Every street but a tunnel, by each end, to the metre: where one way meets the next. */
+type Joins = ReadonlyMap<string, readonly StreetFeature[]>;
+
+function joinKey(x: number, z: number): string {
+  return `${String(Math.round(x))},${String(Math.round(z))}`;
+}
+
+function joinsOf(streets: readonly StreetFeature[]): Joins {
+  const joins = new Map<string, StreetFeature[]>();
+  for (const street of streets) {
+    const line = street.line;
+    if (street.grade === 'tunnel' || line.length < 4) continue;
+    for (const at of [0, line.length - 2]) {
+      const x = line[at] as number;
+      const z = line[at + 1] as number;
+      if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+      const key = joinKey(x, z);
+      const known = joins.get(key);
+      // A way with both ends in one cell is listed twice there, which costs a second look and no more.
+      if (known === undefined) joins.set(key, [street]);
+      else known.push(street);
+    }
+  }
+  return joins;
+}
+
+/**
+ * The way that goes on from `(x, z)`, heading `(hx, hz)`: one not yet
+ * followed with an end there, turning least and less than 60°. Its points are
+ * read from `start`, in `step`.
+ */
+function joinedAt(
+  joins: Joins,
+  x: number,
+  z: number,
+  hx: number,
+  hz: number,
+  followed: ReadonlySet<StreetFeature>,
+): { readonly street: StreetFeature; readonly start: number; readonly step: 1 | -1 } | undefined {
+  let best: { street: StreetFeature; start: number; step: 1 | -1 } | undefined;
+  let straightest = APPROACH_TURN_COSINE;
+  for (let i = -1; i <= 1; i += 1) {
+    for (let j = -1; j <= 1; j += 1) {
+      for (const street of joins.get(joinKey(x + i, z + j)) ?? []) {
+        if (followed.has(street)) continue;
+        const line = street.line;
+        const last = line.length / 2 - 1;
+        for (const [end, next, step] of [
+          [0, 1, 1],
+          [last, last - 1, -1],
+        ] as const) {
+          const ex = line[end * 2] as number;
+          const ez = line[end * 2 + 1] as number;
+          if (Math.hypot(ex - x, ez - z) > APPROACH_JOIN_METRES) continue;
+          const ox = (line[next * 2] as number) - ex;
+          const oz = (line[next * 2 + 1] as number) - ez;
+          const length = Math.hypot(ox, oz);
+          if (!(length > 0)) continue;
+          const cosine = (ox * hx + oz * hz) / length;
+          if (cosine > straightest) {
+            straightest = cosine;
+            best = { street, start: next, step };
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The mapped street on from a crossing at `(x, z)`, heading `(headingX,
+ * headingZ)` — #2699: `points` from `start` in `step`, then each way that meets it end to end
+ * ({@link joinedAt}), while the points are on the land read and until
+ * {@link APPROACH_READ_METRES}. `x0, z0, …` from the crossing. @see GradeCrossing.approaches
+ */
+function mappedApproach(
+  x: number,
+  z: number,
+  headingX: number,
+  headingZ: number,
+  points: readonly number[],
+  start: number,
+  step: 1 | -1,
+  street: StreetFeature,
+  corridor: WorldCorridor,
+  joins: Joins,
+): Float32Array {
+  const out = [x, z];
+  const followed = new Set([street]);
+  let line: ArrayLike<number> = points;
+  let cursor = start;
+  let direction: 1 | -1 = step;
+  let metres = 0;
+  let px = x;
+  let pz = z;
+  let hx = headingX;
+  let hz = headingZ;
+  for (let ways = 0; ways < APPROACH_MAX_WAYS; ways += 1) {
+    for (; cursor >= 0 && cursor * 2 + 1 < line.length; cursor += direction) {
+      const qx = line[cursor * 2] as number;
+      const qz = line[cursor * 2 + 1] as number;
+      if (!Number.isFinite(qx) || !Number.isFinite(qz) || !corridor.covered(qx, qz)) {
+        return Float32Array.from(out);
+      }
+      const length = Math.hypot(qx - px, qz - pz);
+      if (!(length > 0)) continue;
+      hx = (qx - px) / length;
+      hz = (qz - pz) / length;
+      out.push(qx, qz);
+      metres += length;
+      px = qx;
+      pz = qz;
+      if (metres >= APPROACH_READ_METRES) return Float32Array.from(out);
+    }
+    const next = joinedAt(joins, px, pz, hx, hz, followed);
+    if (next === undefined) break;
+    followed.add(next.street);
+    line = next.street.line;
+    cursor = next.start;
+    direction = next.step;
+  }
+  return Float32Array.from(out);
+}
+
 /** One corridor's crossings, kept with the profile they were found against. */
 const crossingsFound = new WeakMap<
   WorldCorridor,
@@ -260,6 +524,8 @@ export function mappedGradeCrossings(
   const found: GradeCrossing[] = [];
   const budget = { metres: STREET_MAX_METRES };
   const steepest = Math.cos((JUNCTION_MIN_ANGLE_DEGREES * Math.PI) / 180);
+  // Built at the first overpass, and never on a corridor without one.
+  let joins: Joins | undefined;
   for (const street of corridor.streets) {
     if (street.grade === 'ground') continue;
     if (street.grade === 'tunnel' && metresOf(street.line) > UNDERPASS_MAX_METRES) continue;
@@ -300,9 +566,21 @@ export function mappedGradeCrossings(
       dz /= length;
       const road = roadAt(profile, origin, along);
       if (Math.abs(dx * road.forwardX + dz * road.forwardZ) > steepest) continue;
-      if (dx * road.normalX + dz * road.normalZ < 0) {
+      // Whether `(dx, dz)` runs the way the street's points do.
+      const onward = dx * road.normalX + dz * road.normalZ >= 0;
+      if (!onward) {
         dx = -dx;
         dz = -dz;
+      }
+      let approaches = NO_APPROACHES;
+      if (street.grade === 'bridge') {
+        joins ??= joinsOf(corridor.streets);
+        // Up the points from `index + 1`, or down them from `index`.
+        const ux = onward ? dx : -dx;
+        const uz = onward ? dz : -dz;
+        const up = mappedApproach(x, z, ux, uz, points, index + 1, 1, street, corridor, joins);
+        const down = mappedApproach(x, z, -ux, -uz, points, index, -1, street, corridor, joins);
+        approaches = onward ? [down, up] : [up, down];
       }
       found.push({
         along,
@@ -312,6 +590,7 @@ export function mappedGradeCrossings(
         z,
         dx,
         dz,
+        approaches,
       });
     }
   }
@@ -345,6 +624,15 @@ function levelBox(
   return { x, y, z, axisX, axisY: 0, axisZ, length, width, height, finish };
 }
 
+/** An overpass's boxes, and where its deck's top is: what its road is built on. */
+interface OverpassBuilt {
+  readonly parts: BridgePart[];
+  /** The deck's top, local metres. */
+  readonly deckTop: number;
+  /** How far the deck runs either way from the crossing, along the street. */
+  readonly halfSpan: number;
+}
+
 /** An overpass's boxes. @see the header */
 function overpassBoxes(
   crossing: GradeCrossing,
@@ -352,7 +640,7 @@ function overpassBoxes(
   origin: CorridorOrigin,
   seed: number,
   land: LandClassMask,
-): BridgePart[] {
+): OverpassBuilt {
   const road = roadAt(profile, origin, crossing.along);
   const sine = crossing.dx * road.normalX + crossing.dz * road.normalZ;
   const cosine = crossing.dx * road.forwardX + crossing.dz * road.forwardZ;
@@ -438,7 +726,256 @@ function overpassBoxes(
       ),
     );
   }
-  return parts;
+  return { parts, deckTop, halfSpan: span / 2 };
+}
+
+/** `0` at `0`, `1` at `1`, level at both ends: the smoothstep of `share`, clamped. */
+function smooth(share: number): number {
+  const s = Math.min(1, Math.max(0, share));
+  return s * s * (3 - 2 * s);
+}
+
+/** Where one row across an overpass's road is: its middle, and how far past the deck's end. */
+interface ApproachStation {
+  readonly x: number;
+  readonly z: number;
+  /** Metres past the deck's end: `0` at it. */
+  readonly past: number;
+}
+
+/**
+ * The middles of one approach's rows — #2699: from the deck's end, every
+ * {@link APPROACH_STEP_METRES} to {@link APPROACH_METRES}, moving off the
+ * deck's line onto the mapped street's over {@link APPROACH_BLEND_METRES},
+ * and carried on along the mapped street's last heading where it is no longer
+ * mapped (`cross-streets.ts` §`stationAt`) — along the deck's line itself
+ * where none of it is. It stops short of anywhere the road would cover the
+ * main carriageway or its verge, or run into water, as a side road does.
+ */
+function approachStations(
+  crossing: GradeCrossing,
+  side: -1 | 1,
+  halfSpan: number,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+): ApproachStation[] {
+  const line = crossing.approaches[side < 0 ? 0 : 1];
+  const half = SIDE_ROAD_WIDTHS[crossing.widthClass] / 2;
+  const ways = waterways(profile, seed);
+  const stations: ApproachStation[] = [];
+  for (let past = 0; ; past = Math.min(past + APPROACH_STEP_METRES, APPROACH_METRES)) {
+    const metres = halfSpan + past;
+    let x = crossing.x + side * crossing.dx * metres;
+    let z = crossing.z + side * crossing.dz * metres;
+    if (line.length >= 4) {
+      const mapped = stationAt(line, metres);
+      const share = smooth(past / APPROACH_BLEND_METRES);
+      x += (mapped.x - x) * share;
+      z += (mapped.z - z) * share;
+    }
+    if (past > 0) {
+      const near = nearestOnDrawnRoad(profile, origin, x, z, APPROACH_GROUND_REACH_METRES);
+      if (near === undefined) break;
+      if (near.distance < ROAD_HALF_WIDTH_METRES + VERGE_METRES + half) break;
+      if (inWater(ways, profile, near.along, near.lateral)) break;
+    }
+    stations.push({ x, z, past });
+    if (past >= APPROACH_METRES) break;
+  }
+  return stations;
+}
+
+/** The ground's height under `(x, z)`, local metres, or `undefined` where it is not read. */
+function groundBeneath(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask,
+  x: number,
+  z: number,
+): number | undefined {
+  const near = nearestOnDrawnRoad(profile, origin, x, z, APPROACH_GROUND_REACH_METRES);
+  return near === undefined
+    ? undefined
+    : terrainHeightAt(profile, origin, seed, near.along, near.lateral, land);
+}
+
+/**
+ * How high one approach's road stands at `past` metres past the deck's end,
+ * before the ground — #2699: down from the deck's top at
+ * {@link APPROACH_GRADE} until it meets the ground, as a street's ramp does.
+ * Where the ground falls away faster than that and the two would not meet
+ * before the approach's fade begins (or halfway along a short one), a
+ * straight ramp from the deck's top to the ground there instead, steeper than
+ * the grade — never a road held up in the air to the end of the view. It
+ * never climbs above the deck: a ground rising to meet it is what it lands on.
+ */
+function rampOf(
+  stations: readonly ApproachStation[],
+  length: number,
+  deckTop: number,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask,
+): (past: number) => number {
+  const top = deckTop + SIDE_ROAD_LIFT_METRES;
+  const groundAt = (station: ApproachStation): number =>
+    (groundBeneath(profile, origin, seed, land, station.x, station.z) ?? top) +
+    APPROACH_GROUND_LIFT_METRES;
+  const latest = Math.max(length - APPROACH_FADE_METRES, length / 2);
+  let previous: ApproachStation | undefined;
+  for (const station of stations) {
+    if (station.past > latest && previous !== undefined) {
+      // Not met by `latest`: straight down to the ground there.
+      const from = groundAt(previous);
+      const share = (latest - previous.past) / (station.past - previous.past);
+      const landing = from + (groundAt(station) - from) * share;
+      return (past) => (past === 0 ? top : top + ((landing - top) * past) / latest);
+    }
+    if (groundAt(station) >= top - APPROACH_GRADE * station.past) break;
+    previous = station;
+  }
+  return (past) => top - APPROACH_GRADE * past;
+}
+
+/** One row across an overpass's road, as built. */
+interface RoadRow {
+  /** Its two road vertices, left and right. */
+  readonly l: number;
+  readonly r: number;
+  readonly half: number;
+  /** How far each edge stands above the ground, and the ground there. */
+  readonly lift: readonly [number, number];
+  readonly ground: readonly [number, number];
+}
+
+/**
+ * An overpass's road — #2699: one strip along the street from the far end of
+ * one approach, over the deck's top, to the far end of the other, in the
+ * side roads' mesh (`cross-streets.ts` §`SideRoadMesh`), so it wears the
+ * main road's own material and nothing scattered stands on it. @see the header
+ */
+function overpassRoad(
+  crossing: GradeCrossing,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask,
+  deck: OverpassBuilt,
+): SideRoad {
+  const half = SIDE_ROAD_WIDTHS[crossing.widthClass] / 2;
+  const back = approachStations(crossing, -1, deck.halfSpan, profile, origin, seed);
+  const on = approachStations(crossing, 1, deck.halfSpan, profile, origin, seed);
+  const lengths = [back[back.length - 1]?.past ?? 0, on[on.length - 1]?.past ?? 0] as const;
+  const ramps = [
+    rampOf(back, lengths[0], deck.deckTop, profile, origin, seed, land),
+    rampOf(on, lengths[1], deck.deckTop, profile, origin, seed, land),
+  ] as const;
+  // One strip, from the back approach's far end to the other's: heading `(dx, dz)` over the deck.
+  const strip = [
+    ...back.map((station) => ({ ...station, side: 0 as const })).reverse(),
+    ...on.map((station) => ({ ...station, side: 1 as const })),
+  ];
+  const positions: number[] = [];
+  const colours: number[] = [];
+  const across: number[] = [];
+  const indices: number[] = [];
+  const vertex = (
+    x: number,
+    y: number,
+    z: number,
+    colour: readonly number[],
+    a: number,
+  ): number => {
+    positions.push(x, y, z);
+    colours.push(colour[0] as number, colour[1] as number, colour[2] as number);
+    across.push(a);
+    return positions.length / 3 - 1;
+  };
+  const rows: RoadRow[] = [];
+  for (let index = 0; index < strip.length; index += 1) {
+    const station = strip[index] as (typeof strip)[number];
+    // Along the strip here: the deck's heading at its ends, else between the rows either side.
+    let hx = crossing.dx;
+    let hz = crossing.dz;
+    if (station.past > 0) {
+      const before = strip[Math.max(0, index - 1)] as ApproachStation;
+      const after = strip[Math.min(strip.length - 1, index + 1)] as ApproachStation;
+      const length = Math.hypot(after.x - before.x, after.z - before.z);
+      if (length > 0) {
+        hx = (after.x - before.x) / length;
+        hz = (after.z - before.z) / length;
+      }
+    }
+    const length = lengths[station.side];
+    const fadeMetres = Math.min(APPROACH_FADE_METRES, length);
+    const fade = fadeMetres > 0 ? smooth((station.past - (length - fadeMetres)) / fadeMetres) : 0;
+    const halfHere = half * (1 - (1 - SIDE_ROAD_END_WIDTH_SHARE) * fade);
+    // Down from the deck's top to the ground, and never under the ground.
+    const ramp = ramps[station.side](station.past);
+    const corner = (sign: -1 | 1): { x: number; y: number; z: number; ground: number } => {
+      const x = station.x + hz * halfHere * sign;
+      const z = station.z - hx * halfHere * sign;
+      const ground = groundBeneath(profile, origin, seed, land, x, z) ?? ramp;
+      const standing = Math.max(ramp, ground + APPROACH_GROUND_LIFT_METRES);
+      return { x, y: standing + (ground - SIDE_ROAD_SINK_METRES - standing) * fade, z, ground };
+    };
+    const left = corner(-1);
+    const right = corner(1);
+    rows.push({
+      l: vertex(left.x, left.y, left.z, TARMAC, -halfHere),
+      r: vertex(right.x, right.y, right.z, TARMAC, halfHere),
+      half: halfHere,
+      lift: [left.y - left.ground, right.y - right.ground],
+      ground: [left.ground, right.ground],
+    });
+  }
+  const segments: number[] = [];
+  const halfWidths: number[] = [];
+  for (let index = 0; index + 1 < rows.length; index += 1) {
+    const a = rows[index] as RoadRow;
+    const b = rows[index + 1] as RoadRow;
+    indices.push(a.l, b.l, b.r, a.l, b.r, a.r);
+    const from = strip[index] as ApproachStation;
+    const to = strip[index + 1] as ApproachStation;
+    // The deck's top: over the main road, which nothing scattered stands on anyway.
+    if (from.past === 0 && to.past === 0) continue;
+    segments.push(from.x, from.z, to.x, to.z);
+    halfWidths.push(half);
+    // An embankment wall down each side, wherever the road stands above the ground.
+    for (const edge of [0, 1] as const) {
+      if (Math.max(a.lift[edge], b.lift[edge]) <= APPROACH_GROUND_LIFT_METRES + 0.02) continue;
+      const sign = edge === 0 ? -1 : 1;
+      const wall = (row: RoadRow, foot: boolean): number => {
+        const at = edge === 0 ? row.l : row.r;
+        return vertex(
+          positions[at * 3] as number,
+          foot ? row.ground[edge] - APPROACH_WALL_FOOT_METRES : (positions[at * 3 + 1] as number),
+          positions[at * 3 + 2] as number,
+          WALL,
+          sign * row.half,
+        );
+      };
+      const ta = wall(a, false);
+      const tb = wall(b, false);
+      const fb = wall(b, true);
+      const fa = wall(a, true);
+      indices.push(ta, tb, fb, ta, fb, fa);
+    }
+  }
+  return {
+    junction: { along: crossing.along, source: 'mapped', arms: [] },
+    mesh: {
+      positions: Float32Array.from(positions),
+      colours: Float32Array.from(colours),
+      across: Float32Array.from(across),
+      indices: Uint32Array.from(indices),
+    },
+    segments: Float32Array.from(segments),
+    halfWidths: Float32Array.from(halfWidths),
+  };
 }
 
 /** An underpass's boxes: the stream bridge's parapets and copings, over the street. @see the header */
@@ -499,23 +1036,30 @@ function underpassBoxes(
   return parts;
 }
 
-/**
- * Every crossing's boxes, built on first sight — per land-class mask, since
- * #1547 levels the ground an abutment stands on under mapped built-up land.
- */
-const built = new WeakMap<LandClassMask, WeakMap<GradeCrossing, readonly BridgePart[]>>();
+/** One crossing as it is drawn: its boxes, and an overpass's road. */
+interface CrossingBuilt {
+  readonly parts: readonly BridgePart[];
+  readonly road: SideRoad | undefined;
+}
 
 /**
- * One crossing's boxes, built once per land-class mask: an overpass's deck,
- * parapets and abutments, or an underpass's parapets. @see the header
+ * Every crossing's boxes and road, built on first sight — per land-class
+ * mask, since #1547 levels the ground an abutment and an approach stand on
+ * under mapped built-up land.
  */
-function overpassPartsOf(
+const built = new WeakMap<LandClassMask, WeakMap<GradeCrossing, CrossingBuilt>>();
+
+/**
+ * One crossing, built once per land-class mask: an overpass's deck, edge
+ * beams, abutments and road, or an underpass's parapets. @see the header
+ */
+function crossingBuilt(
   crossing: GradeCrossing,
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
   land: LandClassMask,
-): readonly BridgePart[] {
+): CrossingBuilt {
   let byCrossing = built.get(land);
   if (byCrossing === undefined) {
     byCrossing = new WeakMap();
@@ -523,21 +1067,36 @@ function overpassPartsOf(
   }
   const known = byCrossing.get(crossing);
   if (known !== undefined) return known;
-  const parts =
-    crossing.grade === 'bridge'
-      ? overpassBoxes(crossing, profile, origin, seed, land)
-      : underpassBoxes(crossing, profile, origin);
-  byCrossing.set(crossing, parts);
-  return parts;
+  let made: CrossingBuilt;
+  if (crossing.grade === 'bridge') {
+    const deck = overpassBoxes(crossing, profile, origin, seed, land);
+    made = { parts: deck.parts, road: overpassRoad(crossing, profile, origin, seed, land, deck) };
+  } else {
+    made = { parts: underpassBoxes(crossing, profile, origin), road: undefined };
+  }
+  byCrossing.set(crossing, made);
+  return made;
 }
 
+/** What a frame draws of the crossings in view — #2699. @see gradeCrossingsAt */
+export interface CrossingsInView {
+  /** Their boxes, for the frame's bridges (`scene.ts` §`water`). */
+  readonly parts: readonly BridgePart[];
+  /** Each overpass's road, for the frame's side roads (`SceneFrame.sideRoads`). */
+  readonly roads: readonly SideRoad[];
+}
+
+/** No crossing in view. */
+export const NO_CROSSINGS_IN_VIEW: CrossingsInView = { parts: [], roads: [] };
+
 /**
- * The boxes of every crossing within the odometer span
- * `[fromMetres, toMetres)`, widened a little — nearest `riderMetres` first,
- * each crossing once however many laps the span covers, whole crossings only,
- * and no more than {@link OVERPASS_FRAME_PARTS}.
+ * Every crossing within the odometer span `[fromMetres, toMetres)`, widened a
+ * little — nearest `riderMetres` first, each once however many laps the span
+ * covers, whole crossings only, and no more boxes than `room` or
+ * {@link OVERPASS_FRAME_PARTS}: their boxes, and each overpass's road, the
+ * same objects every call. @see the header
  */
-export function overpassesAt(
+export function gradeCrossingsAt(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
@@ -546,8 +1105,9 @@ export function overpassesAt(
   riderMetres: number,
   crossings: readonly GradeCrossing[],
   land: LandClassMask,
-): readonly BridgePart[] {
-  if (crossings.length === 0) return [];
+  room: number = OVERPASS_FRAME_PARTS,
+): CrossingsInView {
+  if (crossings.length === 0) return NO_CROSSINGS_IN_VIEW;
   const from = fromMetres - IN_VIEW_REACH_METRES;
   const to = toMetres + IN_VIEW_REACH_METRES;
   const total: number = profile.totalDistance;
@@ -564,11 +1124,14 @@ export function overpassesAt(
     }
   }
   found.sort((a, b) => a.gap - b.gap);
+  const most = Math.min(room, OVERPASS_FRAME_PARTS);
   const parts: BridgePart[] = [];
+  const roads: SideRoad[] = [];
   for (const { crossing } of found) {
-    const boxes = overpassPartsOf(crossing, profile, origin, seed, land);
-    if (parts.length + boxes.length > OVERPASS_FRAME_PARTS) break;
-    parts.push(...boxes);
+    const drawn = crossingBuilt(crossing, profile, origin, seed, land);
+    if (parts.length + drawn.parts.length > most) break;
+    parts.push(...drawn.parts);
+    if (drawn.road !== undefined) roads.push(drawn.road);
   }
-  return parts;
+  return parts.length === 0 ? NO_CROSSINGS_IN_VIEW : { parts, roads };
 }

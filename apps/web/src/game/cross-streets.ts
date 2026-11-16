@@ -29,7 +29,8 @@
  *   tile may not flag on every way. The route's own grade is not known: a
  *   route crossing a street on its own bridge still gets a junction there.
  *   Such a street is drawn, as an overpass or an underpass, by
- *   `overpasses.ts` since #2661.
+ *   `overpasses.ts` since #2661 — and since #2699 an overpass's road, in this
+ *   file's mesh, kept clear of the scenery as a side road is.
  * - **Procedural** ({@link villageJunction}): one crossroads at the centre of
  *   every procedural village (`settlements.ts` §`Site`), square to the road,
  *   so that the world with no map data (ADR 0054 D-4) has them too. The plots
@@ -552,12 +553,13 @@ function linear(byte: number): number {
   return proportion <= 0.04045 ? proportion / 12.92 : Math.pow((proportion + 0.055) / 1.055, 2.4);
 }
 
-function linearColour(packed: number): readonly [number, number, number] {
+/** A packed sRGB colour in linear light. `overpasses.ts` colours its approaches with it — #2699. */
+export function linearColour(packed: number): readonly [number, number, number] {
   return [linear((packed >> 16) & 0xff), linear((packed >> 8) & 0xff), linear(packed & 0xff)];
 }
 
-/** The side road's tarmac: the level road's own tint. */
-const TARMAC = linearColour(roadTint(0));
+/** The side road's tarmac: the level road's own tint. An overpass's approaches wear it too — #2699. */
+export const TARMAC = linearColour(roadTint(0));
 
 /** Its give-way line: the main road's paint, which #628's wear reads as paint. */
 const PAINT = linearColour(MARKING_COLOUR);
@@ -634,14 +636,18 @@ class MeshBuilder {
 }
 
 /** A point along a polyline, by arc length, and its direction there. */
-interface Station {
+export interface Station {
   readonly x: number;
   readonly z: number;
   readonly dx: number;
   readonly dz: number;
 }
 
-function stationAt(line: Float32Array, metres: number): Station {
+/**
+ * Where a polyline is `metres` along it, carried on along its last segment
+ * past its end. `overpasses.ts` follows an overpass's approaches with it — #2699.
+ */
+export function stationAt(line: Float32Array, metres: number): Station {
   let travelled = 0;
   for (let at = 0; at + 3 < line.length; at += 2) {
     const ax = line[at] as number;

@@ -480,7 +480,9 @@ export interface SceneFrame {
    * streets and one crossroads at each procedural village, the same objects
    * every frame while the same junctions are in view, drawn in both worlds in
    * the road's own material by one mesh (`three-renderer.ts`
-   * §`SideRoadBelt`). Empty away from a junction.
+   * §`SideRoadBelt`). Empty away from a junction. Since #2699 each mapped
+   * overpass in view's road too, after them (`overpasses.ts`): its deck's top
+   * and its approaches, kept clear of the scenery as a side road is.
    */
   readonly sideRoads: readonly SideRoad[];
   /**

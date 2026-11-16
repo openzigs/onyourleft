@@ -10295,9 +10295,10 @@ function pavementGeometry(
 
 /**
  * Every cross street in view — #1565 (`cross-streets.ts`): the side roads a
- * short way off the route at each junction, and their give-way lines. **One
- * mesh and one draw call** however many are in view, and none where a frame
- * holds none.
+ * short way off the route at each junction, and their give-way lines — and
+ * since #2699 each overpass's road (`overpasses.ts`), its deck's top and its
+ * approaches, with their embankment walls. **One mesh and one draw call**
+ * however many are in view, and none where a frame holds none.
  *
  * ⚠️ **It wears the ROAD's material, whatever the road wears** —
  * `ThreeGameView` hands it the road mesh's own every frame: the stylised
