@@ -1,10 +1,9 @@
 # ADR 0072: A model directs the bot pacer during a ride — superseding #92 criterion 6, ADR 0066 D-1.1 and ADR 0071 D-2 for the pacer
 
-- **Status**: **Proposed**, 2026-11-16. Accepted only on the owner's approval on this ADR's pull
-  request, recorded in a D-11 added with the owner's words as **Owner ruling:**. **The build in the same
-  pull request does not merge until then** (#2712: *"The owner must approve it before the build
-  merges"*). **The owner's ruling of 2026-11-16 on the patent risk was never open**: Context quotes
-  it and nothing here re-argues it
+- **Status**: **Accepted**, 2026-11-16, by the owner on #2723, with the answers recorded in D-11.
+  Proposed the same day. R-8 (the setup wording and the *"Your pacer"* label) is approved with the
+  pull request's screenshots, and the build does not merge before that. **The owner's ruling of
+  2026-11-16 on the patent risk was never open**: Context quotes it and nothing here re-argues it
 - **Date**: 2026-11-16
 - **Deciders**: **the owner**, whose rulings of 2026-11-14 on #2616 and 2026-11-16 on #2712 are
   quoted in Context. **The author** decided what those leave open, and each such point is marked
@@ -274,6 +273,25 @@ The owner approves this ADR as a whole (R-1), and confirms or overrules each cho
 | **R-6** | The log is an optional ride fact with no store schema version (unlike ADR 0071 D-4.4), keeps no text, and a recording keeps its last directed game ride's log | **Yes** | D-5.4 |
 | **R-7** | An ask every 5 s of riding, 5 s late, 15 s lapse; a refusal ends the ride's asks | **Yes**, to be measured on the tablet ride | D-7 |
 | **R-8** | The draft wording on the setup (D-1.3) and the *"Your pacer"* label, from the pull request's screenshots | **Approve or reword** | D-1, D-4 |
+
+### D-11 — The owner's answers
+
+**Owner ruling, 2026-11-16:** asked whether they approve R-1 to R-7 as recommended, and whether the
+pacer should stay within 80 % to 110 % of its set power or be given more freedom, the owner answered
+*"Approve. And 80-110 is good"*. So:
+
+- **R-1**: ADR 0072 is approved.
+- **R-2**: the model picks a plan (`rolling`, `even`, `climber`) and an intent (`hold`, `lift`,
+  `ease`), held inside #92's 80 % to 110 % envelope. The owner kept that envelope rather than widen
+  it.
+- **R-3**: one consent, ADR 0071's, covers a model in an AI-bots race and in an AI-pacer ride.
+- **R-4**: the line is at most 80 characters, with no digits, no markup, no metric trademark and no
+  medical wording. It is shown for 8 s, and spoken only with announcements on, as the lowest event.
+- **R-5**: a line that fails the screen voids the whole answer.
+- **R-6**: the log is an optional ride fact with no store schema version, and keeps no text.
+- **R-7**: an ask every 5 s of riding, 5 s late and 15 s lapse; a refusal ends the ride's asks. It
+  is to be measured on the tablet ride.
+- **R-8**: open until the owner approves the pull request's screenshots.
 
 ## Consequences
 
