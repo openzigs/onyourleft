@@ -453,7 +453,13 @@ function besideTheMap(profile: RouteProfile, invented: Waterways, land: LandClas
   const kept = invented.lakes.filter((lake) => !lakeMapped(profile, origin, land, lake));
   const bridged = mappedCrossings(profile, origin, land);
   const unmapped = invented.crossings.filter(
-    (crossing) => !crossingMapped(profile, origin, land, crossing),
+    (crossing) =>
+      !crossingMapped(profile, origin, land, crossing) &&
+      !bridged.some(
+        (mappedCrossing) =>
+          Math.abs(routeOffset(profile, mappedCrossing.distance, crossing.distance)) <
+          MAPPED_CROSSING_SPACING_METRES,
+      ),
   );
   if (
     mapped.length === 0 &&
@@ -580,6 +586,10 @@ function mappedCrossings(
   for (const along of found) {
     if (crossings.length >= MAXIMUM_WATERWAYS) break;
     const distance = distanceOnRoute(profile, along);
+    // Only on road the map was read beside: past the mask's cap, or through a
+    // tile that reaches uncovered road, the water is not the map's to place.
+    const at = drawnRoadPosition(profile, origin, distance);
+    if (!land.covered(at.x, at.z)) continue;
     const near = crossings.some(
       (crossing) =>
         Math.abs(routeOffset(profile, distance, crossing.distance)) <

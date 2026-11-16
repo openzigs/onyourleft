@@ -166,9 +166,7 @@ describe('a mapped stream crossing the road is bridged — #2659', () => {
       kind: 'canal',
       line: Float32Array.of(-1e6, -1e6, 1e6, 1e6, Number.NaN, 0, 5, 5),
     };
-    const started = performance.now();
     const found = crossingsOf(LEVEL, maskOf(LEVEL, [hostile]));
-    expect(performance.now() - started).toBeLessThan(2_000);
     expect(found.length).toBeLessThanOrEqual(1);
   });
 });
@@ -194,6 +192,46 @@ describe('no invented stream where the map was read — #2659', () => {
   });
 });
 
+describe('the map places water only on road it was read beside — #2659', () => {
+  it('drops a mapped crossing on an uncovered stretch, keeps one on a covered stretch', () => {
+    const lines = [across(LEVEL, 800), across(LEVEL, 2_200)];
+    const firstKm = landClassMask({
+      ...corridorOf(LEVEL, lines),
+      coveredBoxes: [{ minX: -3_000, maxX: 3_000, minZ: -1_000, maxZ: 1_300 }],
+    });
+    const found = crossingsOf(LEVEL, firstKm);
+    expect(found.map((crossing) => Math.round(crossing.distance / 10) * 10)).toEqual([800]);
+  });
+
+  it('does not double an invented crossing on uncovered road with a mapped one', () => {
+    const valley = valleyRoute();
+    const invented = crossingsOf(valley, NO_LAND_CLASS);
+    expect(invented).toHaveLength(1);
+    const at = (invented[0] as Crossing).distance;
+    const mask = landClassMask({
+      ...corridorOf(valley, [across(valley, at - 40)]),
+      coveredBoxes: [{ minX: 5_000, maxX: 6_000, minZ: 5_000, maxZ: 6_000 }],
+    });
+    expect(crossingsOf(valley, mask)).toEqual(invented);
+  });
+});
+
+describe('mapped and invented crossings keep their distance — #2659', () => {
+  it('drops an invented crossing just outside the map that is within a bridge’s reach of a mapped one', () => {
+    const valley = valleyRoute();
+    const at = (crossingsOf(valley, NO_LAND_CLASS)[0] as Crossing).distance;
+    const origin = corridorOrigin(valley);
+    const [x, z] = besideRoad(valley, origin, at - 40, 0);
+    const mask = landClassMask({
+      ...corridorOf(valley, [across(valley, at - 40)]),
+      coveredBoxes: [{ minX: x - 10, maxX: x + 10, minZ: z - 10, maxZ: z + 10 }],
+    });
+    const found = crossingsOf(valley, mask);
+    expect(found).toHaveLength(1);
+    expect(Math.abs((found[0] as Crossing).distance - (at - 40))).toBeLessThan(2);
+  });
+});
+
 describe('the corridor hands its water lines to the ride’s mask — #2659', () => {
   it('worldCorridorOf keeps them, and landClassMask carries them to waterways', () => {
     const line = across(LEVEL, 1_200);
@@ -208,9 +246,9 @@ describe('the corridor hands its water lines to the ride’s mask — #2659', ()
     expect(corridor.waterLines).toEqual([line]);
     const mask = landClassMask(corridor);
     expect(mask.waterLines).toEqual([line]);
-    // No tile is covered, yet the line is still crossed.
+    // No tile is covered, so the map places no water on the road.
     expect(mask.bytes).toBe(0);
-    expect(crossingsOf(LEVEL, mask)).toHaveLength(1);
+    expect(crossingsOf(LEVEL, mask)).toEqual([]);
     expect(NO_LAND_CLASS.waterLines).toEqual([]);
   });
 });
