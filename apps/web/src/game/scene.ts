@@ -615,6 +615,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     terrain: {
       mesh: ground,
       horizon: horizonRelief(input.profile, input.origin, seed),
+      // #2699: and each overpass's embankment, in the ground's own material.
+      embankments: crossings.embankments,
     },
     // #459. The waterways are found once per route (`waterways.ts` §`computed`)
     // and the surfaces and bridges built for this stretch of it, from the same

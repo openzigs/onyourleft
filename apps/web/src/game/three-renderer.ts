@@ -550,6 +550,7 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import type { Embankment } from './overpasses';
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
@@ -4785,6 +4786,18 @@ function reserve(mesh: InstancedMesh, needed: number): void {
  * rung saves is the fill of the far ground, which is most of this mesh's
  * fragments and is already fogged by the time a rider could see it.
  *
+ * ## And the overpasses' embankments — #2699
+ *
+ * A second mesh, {@link embankmentMesh}: every mapped overpass in view's
+ * banks (`overpasses.ts` §`Embankment`), in **this mesh's own material,
+ * whichever it is** — the photographed grass and its patchwork, or the
+ * stylised pair — because the owner asked for banks "wearing the ground's
+ * own grass or earth look". `#mount` puts the one material on both, so
+ * the two can never disagree. Its buffers carry what that material reads and
+ * no more (position, normal, colour, `fields`), each face its own normal.
+ * Rebuilt only when the SET of embankments changes, as {@link SideRoadBelt}
+ * is, and not drawn where a frame holds none.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class TerrainBelt {
@@ -4825,20 +4838,33 @@ export class TerrainBelt {
    */
   #uploadedIndices: Uint32Array | undefined;
 
+  /** The overpasses' embankments — #2699, in {@link #mesh}'s material. */
+  readonly #embankments: Mesh;
+  /** The embankments {@link #embankments} holds, in the order it holds them. */
+  #heldEmbankments: readonly Embankment[] = [];
+
   constructor() {
     this.#mesh = new Mesh(this.#geometry, this.#materials.lit);
     // For the road's reason: rebuilt in world coordinates every frame, always
     // under the camera, and one mesh — a cull could only ever lose it.
     this.#mesh.frustumCulled = false;
+    this.#embankments = new Mesh(new BufferGeometry(), this.#materials.lit);
+    this.#embankments.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.#mesh);
+    scene.add(this.#embankments);
   }
 
-  /** The one mesh. For `three-renderer.test.ts`. */
+  /** The ground's mesh. For `three-renderer.test.ts`. */
   get mesh(): Mesh {
     return this.#mesh;
+  }
+
+  /** The overpasses' embankments' mesh — #2699. For `overpasses.test.ts`. */
+  get embankmentMesh(): Mesh {
+    return this.#embankments;
   }
 
   /** @see QualitySettings.shading */
@@ -4873,7 +4899,27 @@ export class TerrainBelt {
   }
 
   #mount(): void {
-    this.#mesh.material = this.#photographic ?? this.#materials[this.#shading];
+    const material = this.#photographic ?? this.#materials[this.#shading];
+    this.#mesh.material = material;
+    this.#embankments.material = material;
+  }
+
+  /**
+   * This frame's overpass embankments — #2699. The same objects every frame
+   * while the same overpasses are in view, so the mesh is rebuilt only when
+   * that set changes.
+   */
+  updateEmbankments(embankments: readonly Embankment[]): void {
+    const held = this.#heldEmbankments;
+    const same =
+      embankments.length === held.length &&
+      embankments.every((embankment, index) => embankment === held[index]);
+    if (!same) {
+      this.#heldEmbankments = embankments;
+      this.#embankments.geometry.dispose();
+      this.#embankments.geometry = embankmentGeometry(embankments);
+    }
+    this.#embankments.visible = embankments.length > 0;
   }
 
   /** How many bands of ground this rung draws, innermost first. @see QualitySettings.terrainBands */
@@ -4944,6 +4990,7 @@ export class TerrainBelt {
 
   dispose(): void {
     this.#geometry.dispose();
+    this.#embankments.geometry.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
   }
@@ -4952,6 +4999,42 @@ export class TerrainBelt {
   #applyRange(): void {
     this.#geometry.setDrawRange(0, Math.min(this.#indexCount, this.#bands * this.#indicesPerBand));
   }
+}
+
+/** Every embankment as one geometry, with the attributes the ground's material reads — #2699. */
+function embankmentGeometry(embankments: readonly Embankment[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const embankment of embankments) {
+    vertices += embankment.positions.length / 3;
+    indices += embankment.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const fields = new Float32Array(vertices * 2);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const embankment of embankments) {
+    positions.set(embankment.positions, vertex * 3);
+    normals.set(embankment.normals, vertex * 3);
+    colours.set(embankment.colours, vertex * 3);
+    fields.set(embankment.fields, vertex * 2);
+    for (let each = 0; each < embankment.indices.length; each += 1) {
+      index[at + each] = (embankment.indices[each] as number) + vertex;
+    }
+    vertex += embankment.positions.length / 3;
+    at += embankment.indices.length;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('fields', new BufferAttribute(fields, 2));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 /**
@@ -10297,7 +10380,7 @@ function pavementGeometry(
  * Every cross street in view — #1565 (`cross-streets.ts`): the side roads a
  * short way off the route at each junction, and their give-way lines — and
  * since #2699 each overpass's road (`overpasses.ts`), its deck's top and its
- * approaches, with their embankment walls. **One mesh and one draw call**
+ * approaches (their embankments are ground, {@link TerrainBelt}'s). **One mesh and one draw call**
  * however many are in view, and none where a frame holds none.
  *
  * ⚠️ **It wears the ROAD's material, whatever the road wears** —
@@ -24995,6 +25078,8 @@ class ThreeGameView implements GameView {
     SEASON.oylVergeSlush.value = vergeSlushIn(frame.world, winter);
     const ground = winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter);
     this.#terrain.update(frame.terrain.mesh, ground);
+    // #2699: and the overpasses' embankments, in the ground's own material.
+    this.#terrain.updateEmbankments(frame.terrain.embankments);
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,

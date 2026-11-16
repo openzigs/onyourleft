@@ -1931,13 +1931,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on off both ends of the deck**: one strip an overpass in
                         the side roads' mesh (`SideRoadBelt`, the road's own
                         material, no draw call more), over the deck's top and
-                        160 m past each end, down from the deck at 6 % until it
-                        meets the ground (steeper where the ground falls away),
-                        on an embankment walled in the concrete, then fading
-                        into the ground. It follows the mapped street through
-                        the ways meeting it end to end on the land read, then
-                        its last heading; stops short of the carriageway and
-                        water; and the scenery is kept off it
+                        up to 160 m past each end, one straight ramp from the
+                        deck at 6 % or steeper that is on the ground where its
+                        fade begins, then fading into the ground. It follows
+                        the mapped street through the ways meeting it end to
+                        end on the land read only while that street heads away
+                        from the route (a frontage road beside it is not
+                        followed), then its last heading; stops short of the
+                        carriageway and water; and the scenery is kept off it.
+                        ⚠️ **Since #2699's third round, slopes, not walls**:
+                        the abutments' backs stand 15 m off the carriageway's
+                        edge, nothing else of it is over a metre up inside
+                        that, and the approach stands on a 1 : 2 embankment in
+                        the ground's own material (`TerrainBelt.embankmentMesh`,
+                        a normal for each face, one draw call more on a frame
+                        with one in view), cut off at the abutments' backs
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

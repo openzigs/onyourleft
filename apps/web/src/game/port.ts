@@ -41,6 +41,7 @@ import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { MappedBuildingsInView } from './mapped-buildings';
+import type { Embankment } from './overpasses';
 import type { PeopleInView } from './people';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
@@ -655,6 +656,14 @@ export interface DeliveryMarkerPiece extends DeliveryPiece {
 export interface TerrainFrame {
   readonly mesh: TerrainMesh;
   readonly horizon: HorizonRelief;
+  /**
+   * Each mapped overpass in view's embankment — #2699 (`overpasses.ts`): the
+   * banks its approaches stand on, drawn by `three-renderer.ts`
+   * §`TerrainBelt` in the ground's own material, the same objects every frame
+   * while the same overpasses are in view. Empty away from one, and with no
+   * map data.
+   */
+  readonly embankments: readonly Embankment[];
 }
 
 /** A live 3D view. Created by a {@link GameRenderer}, destroyed by its owner. */

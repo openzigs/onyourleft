@@ -25,15 +25,20 @@ import {
   APPROACH_METRES,
   APPROACH_REACH_METRES,
   APPROACH_TRIANGLES_PER_OVERPASS,
-  APPROACH_WALL_COLOUR,
+  EMBANKMENT_FRAME_TRIANGLES,
+  EMBANKMENT_RUN,
+  EMBANKMENT_TRIANGLES_PER_OVERPASS,
   gradeCrossingsAt,
   mappedGradeCrossings,
+  OVERPASS_CLEAR_VERGE_METRES,
   OVERPASS_CLEARANCE_METRES,
   OVERPASS_FRAME_PARTS,
   OVERPASS_ROAD_FRAME_TRIANGLES,
   OVERPASS_SETBACK_METRES,
+  OVERPASS_VERGE_HEIGHT_METRES,
   UNDERPASS_MARGIN_METRES,
   UNDERPASS_MAX_METRES,
+  type Embankment,
   type GradeCrossing,
 } from './overpasses';
 import { nearestOnDrawnRoad } from './road-grid';
@@ -41,7 +46,13 @@ import { circuitRoute, northRoute, valleyRoute } from './route-fixtures-testing'
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { BridgeBelt, OVERPASS_COLOURS, PavementBelt, SideRoadBelt } from './three-renderer';
+import {
+  BridgeBelt,
+  OVERPASS_COLOURS,
+  PavementBelt,
+  SideRoadBelt,
+  TerrainBelt,
+} from './three-renderer';
 import { corridorOrigin, drawnRoadFrame, ROAD_COLOUR, ROAD_WIDTH_METRES } from './terrain';
 import { MAXIMUM_BRIDGE_PARTS, waterways, type BridgePart } from './waterways';
 import type { WorldCorridor } from './world-data/corridor';
@@ -278,7 +289,16 @@ describe('an overpass — #2661', () => {
       // highest road it spans, and no more than a metre and a half past it.
       const lowest = Math.min(...parts.slice(0, 3).map((part) => part.y - part.height / 2));
       expect(lowest - roadHeight(CLIMB, 1_000)).toBeGreaterThanOrEqual(OVERPASS_CLEARANCE_METRES);
-      expect(lowest - roadHeight(CLIMB, 1_000)).toBeLessThan(OVERPASS_CLEARANCE_METRES + 1.5);
+      // On the 8 % climb, the highest of the road it spans is as far up it as
+      // the deck reaches along it, skew: the abutments 15 m off the edge, so
+      // the deck is level over the road that far either way.
+      const reach =
+        (ROAD_HALF + OVERPASS_CLEAR_VERGE_METRES) /
+          Math.tan((Math.min(angle, 180 - angle) * Math.PI) / 180) +
+        10;
+      expect(lowest - roadHeight(CLIMB, 1_000)).toBeLessThan(
+        OVERPASS_CLEARANCE_METRES + 0.08 * reach,
+      );
       expect(underside).toBeGreaterThan(lowest);
       // Over the middle of the road, over both its edges, and over both abutments' places.
       const sine = Math.sin((angle * Math.PI) / 180);
@@ -300,7 +320,10 @@ describe('an overpass — #2661', () => {
           ROAD_HALF + OVERPASS_SETBACK_METRES + ABUTMENT_THICKNESS_METRES / 2,
           1,
         );
-        expect(abutment.y + abutment.height / 2).toBeCloseTo(underside, 6);
+        // Since #2699's third round, up to a hair under the deck's top, so
+        // that past the deck's sides it retains the embankment behind it.
+        expect(abutment.y + abutment.height / 2).toBeGreaterThan(underside);
+        expect(abutment.y + abutment.height / 2).toBeLessThan(deck.y + deck.height / 2);
         // Below the ground at both its ends and its middle, on a climbing road.
         const bottom = abutment.y - abutment.height / 2;
         for (const end of [-0.5, 0, 0.5]) {
@@ -318,7 +341,7 @@ describe('an overpass — #2661', () => {
             ),
           );
         }
-        // Its top's middle is under the deck.
+        // Its top's middle is inside the deck.
         expect(inside(deck, abutment.x, underside + 0.01, abutment.z)).toBe(true);
       }
     });
@@ -676,13 +699,20 @@ function aMaterial(): ConstructorParameters<typeof SideRoadBelt>[0] {
   >[0];
 }
 
-/** The bend in {@link carriedStreet}'s mapped street, 40 m out on each side. */
+/** The bend in {@link carriedStreet}'s mapped street, {@link BEND_METRES} out on each side. */
 const BEND_RADIANS = (25 * Math.PI) / 180;
+
+/**
+ * How far out from the crossing {@link carriedStreet}'s street bends: **60 m**,
+ * past where the approach has moved onto the mapped street from the deck's
+ * line, at 35° as at 90° (the deck reaching 15 m past the carriageway's edge).
+ */
+const BEND_METRES = 60;
 
 /**
  * A street carried over the road at `along`, `angle` degrees from its
  * heading, as a map has it: a bridge way 25 m each side of the road, and a
- * ground way on from each end of it, bending 25° 40 m out — the one on the
+ * ground way on from each end of it, bending 25° {@link BEND_METRES} out — the one on the
  * road's right drawn outwards, the one on its left drawn inwards.
  */
 function carriedStreet(along: number, angle: number) {
@@ -699,15 +729,15 @@ function carriedStreet(along: number, angle: number) {
   const straight = (u: number): [number, number] => [here.x + dx * u, here.z + dz * u];
   /** Along the mapped street, `u` metres from the crossing on `side`. */
   const mapped = (side: -1 | 1, u: number): [number, number] => {
-    if (u <= 40) return straight(side * u);
-    const [bx, bz] = straight(side * 40);
+    if (u <= BEND_METRES) return straight(side * u);
+    const [bx, bz] = straight(side * BEND_METRES);
     return side > 0
-      ? [bx + rx * (u - 40), bz + rz * (u - 40)]
-      : [bx + lx * (u - 40), bz + lz * (u - 40)];
+      ? [bx + rx * (u - BEND_METRES), bz + rz * (u - BEND_METRES)]
+      : [bx + lx * (u - BEND_METRES), bz + lz * (u - BEND_METRES)];
   };
   /** The mapped street's heading there, outwards. */
   const heading = (side: -1 | 1, u: number): [number, number] =>
-    u <= 40 ? [dx * side, dz * side] : side > 0 ? [rx, rz] : [lx, lz];
+    u <= BEND_METRES ? [dx * side, dz * side] : side > 0 ? [rx, rz] : [lx, lz];
   const street = (grade: StreetGrade, points: [number, number][]): StreetFeature => ({
     kind: 'major_road',
     kindDetail: '',
@@ -721,8 +751,8 @@ function carriedStreet(along: number, angle: number) {
     heading,
     streets: [
       street('bridge', [straight(-25), straight(25)]),
-      street('ground', [straight(25), straight(40), mapped(1, 230)]),
-      street('ground', [mapped(-1, 230), straight(-40), straight(-25)]),
+      street('ground', [straight(25), straight(BEND_METRES), mapped(1, 250)]),
+      street('ground', [mapped(-1, 250), straight(-BEND_METRES), straight(-25)]),
     ],
   };
 }
@@ -788,8 +818,75 @@ function isTarmac(triangle: DrawnTriangle): boolean {
   return triangle.colour.every((channel, at) => Math.abs(channel - (TARMAC[at] as number)) < 1e-4);
 }
 
-function isWall(triangle: DrawnTriangle): boolean {
-  return sameColour(triangle.colour, OVERPASS_COLOURS.concrete);
+/** One drawn embankment triangle, read back out of the buffers `TerrainBelt.updateEmbankments` built. */
+interface BankTriangle {
+  readonly corners: readonly (readonly [number, number, number])[];
+  /** The normal each corner was given. */
+  readonly normals: readonly (readonly [number, number, number])[];
+  /** The ground's fields each corner was given: route distance and signed lateral. */
+  readonly fields: readonly (readonly [number, number])[];
+}
+
+function bankTriangles(belt: TerrainBelt): BankTriangle[] {
+  const geometry = belt.embankmentMesh.geometry;
+  const position = geometry.getAttribute('position').array as Float32Array;
+  const normal = geometry.getAttribute('normal').array as Float32Array;
+  const fields = geometry.getAttribute('fields').array as Float32Array;
+  const index = geometry.index?.array ?? new Uint32Array(0);
+  const out: BankTriangle[] = [];
+  const three = (array: Float32Array, v: number) =>
+    [array[v * 3] as number, array[v * 3 + 1] as number, array[v * 3 + 2] as number] as const;
+  for (let at = 0; at + 2 < index.length; at += 3) {
+    const vertices = [0, 1, 2].map((k) => index[at + k] as number);
+    out.push({
+      corners: vertices.map((v) => three(position, v)),
+      normals: vertices.map((v) => three(normal, v)),
+      fields: vertices.map((v) => [fields[v * 2] as number, fields[v * 2 + 1] as number] as const),
+    });
+  }
+  return out;
+}
+
+/** A triangle's own normal, from its winding: the side three draws as its front. */
+function facing(corners: readonly (readonly [number, number, number])[]): [number, number, number] {
+  const [a, b, c] = corners as [
+    readonly [number, number, number],
+    readonly [number, number, number],
+    readonly [number, number, number],
+  ];
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const uz = b[2] - a[2];
+  const vx = c[0] - a[0];
+  const vy = c[1] - a[1];
+  const vz = c[2] - a[2];
+  const n: [number, number, number] = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  const length = Math.hypot(...n);
+  return length > 0 ? [n[0] / length, n[1] / length, n[2] / length] : [0, 0, 0];
+}
+
+function areaOf(corners: readonly (readonly [number, number, number])[]): number {
+  const [a, b, c] = corners as [
+    readonly [number, number, number],
+    readonly [number, number, number],
+    readonly [number, number, number],
+  ];
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const uz = b[2] - a[2];
+  const vx = c[0] - a[0];
+  const vy = c[1] - a[1];
+  const vz = c[2] - a[2];
+  return Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+}
+
+/** The highest embankment over `(x, z)`, or `undefined` for none. */
+function bankAt(triangles: readonly BankTriangle[], x: number, z: number): number | undefined {
+  return surfaceAt(
+    triangles.map((triangle) => ({ corners: triangle.corners, colour: TARMAC })),
+    x,
+    z,
+  );
 }
 
 /** The drawn road's height over `(x, z)`: the highest tarmac triangle there, or `undefined` for none. */
@@ -848,14 +945,22 @@ function carriedRoad(
     NO_LAND_CLASS,
   );
   expect(inView.roads).toHaveLength(1);
+  expect(inView.embankments).toHaveLength(1);
   const belt = new SideRoadBelt(aMaterial());
   belt.update(inView.roads);
+  const ground = new TerrainBelt();
+  ground.updateEmbankments(inView.embankments);
   const deck = inView.parts[0] as BridgePart;
   return {
     corridor,
     road: inView.roads[0] as SideRoad,
+    embankment: inView.embankments[0] as Embankment,
     belt,
+    ground,
     triangles: drawnTriangles(belt),
+    banks: bankTriangles(ground),
+    deck,
+    abutments: inView.parts.slice(3),
     deckTop: deck.y + deck.height / 2,
     halfSpan: deck.length / 2,
   };
@@ -890,7 +995,10 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
   for (const angle of [90, 35]) {
     it(`draws the road over the deck and down to the ground along the mapped street, crossing at ${String(angle)}°`, () => {
       const street = carriedStreet(1_000, angle);
-      const { belt, triangles, deckTop, halfSpan } = carriedRoad(street.streets, 1_000);
+      const { belt, ground, triangles, banks, deckTop, halfSpan } = carriedRoad(
+        street.streets,
+        1_000,
+      );
       expect(belt.mesh.visible).toBe(true);
       const origin = corridorOrigin(CLIMB);
 
@@ -916,14 +1024,16 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
       for (const side of [-1, 1] as const) {
         const label = `side ${String(side)}`;
         // On at the deck's height past its end: no step at the abutment.
-        const [nx, nz] = street.mapped(side, halfSpan + 1);
-        expect(surfaceAt(triangles, nx, nz), label).toBeGreaterThan(deckTop - 0.5);
+        const [nx, nz] = street.mapped(side, halfSpan + 0.1);
+        expect(surfaceAt(triangles, nx, nz), label).toBeGreaterThan(deckTop - 0.1);
         // Along the mapped street, never under the ground before its fade and
         // never above the deck, and down to the ground somewhere on the way.
         let reached = false;
         const length = approachLengthOf(street, side, halfSpan);
         expect(length, label).toBeGreaterThan(APPROACH_FADE_METRES);
-        for (let past = 4; past <= length - APPROACH_FADE_METRES; past += 4) {
+        // On the ground by where its fade begins, or halfway along a short one: within the view.
+        const fade = Math.min(APPROACH_FADE_METRES, length / 2);
+        for (let past = 4; past <= length - fade; past += 4) {
           const [x, z] = street.mapped(side, halfSpan + past);
           const surface = surfaceAt(triangles, x, z);
           const where = `${label} at ${String(past)} m`;
@@ -959,35 +1069,59 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
           );
         }
         expect(reached, `${label} deck ${deckTop.toFixed(2)} ${debug.join(' ')}`).toBe(true);
-        // An embankment wall each side of it while it stands above the ground:
-        // at a row's edge, from the road's edge down into the ground.
+        // #2699's third round: a sloped bank each side of it while it stands
+        // above the ground, not a wall — from the road's edge outwards and
+        // down, at the bank's slope, to under the ground.
         const [wx, wz] = street.mapped(side, halfSpan + 12);
         const [hx, hz] = street.heading(side, halfSpan + 12);
-        const walls = triangles.filter(isWall).flatMap((triangle) => triangle.corners);
+        const half = SIDE_ROAD_WIDTHS.major / 2;
         for (const sign of [-1, 1]) {
-          const ex = wx + hz * (SIDE_ROAD_WIDTHS.major / 2) * sign;
-          const ez = wz - hx * (SIDE_ROAD_WIDTHS.major / 2) * sign;
-          const here = walls.filter(([x, , z]) => Math.hypot(x - ex, z - ez) < 0.05);
           const edgeLabel = `${label}, edge ${String(sign)}`;
-          expect(here.length, edgeLabel).toBeGreaterThan(0);
-          const heights = here.map(([, y]) => y);
-          const edge = surfaceAt(triangles, wx + (ex - wx) * 0.99, wz + (ez - wz) * 0.99) ?? 0;
-          expect(edge - groundAt(ex, ez), edgeLabel).toBeGreaterThan(1);
-          expect(Math.max(...heights), edgeLabel).toBeGreaterThan(edge - 0.05);
-          expect(Math.min(...heights), edgeLabel).toBeLessThan(groundAt(ex, ez));
+          const ox = hz * sign;
+          const oz = -hx * sign;
+          const edge = surfaceAt(triangles, wx + ox * half * 0.99, wz + oz * half * 0.99) ?? 0;
+          expect(edge - groundAt(wx + ox * half, wz + oz * half), edgeLabel).toBeGreaterThan(1);
+          // Just off the road's edge the bank is there, a hair under the road.
+          const [ix, iz] = [wx + ox * (half + 0.3), wz + oz * (half + 0.3)];
+          const inner = bankAt(banks, ix, iz);
+          expect(inner, edgeLabel).toBeDefined();
+          expect(edge - (inner ?? 0), edgeLabel).toBeLessThan(0.3);
+          // Two metres further out it is a metre lower: the slope, not a wall.
+          const [mx, mz] = [wx + ox * (half + 2.3), wz + oz * (half + 2.3)];
+          const middle = bankAt(banks, mx, mz);
+          expect(middle, edgeLabel).toBeDefined();
+          expect((inner ?? 0) - (middle ?? 0), edgeLabel).toBeCloseTo(2 / EMBANKMENT_RUN, 0);
+          // Its foot is under the ground, where the slope comes down to it.
+          const toe = (edge - groundAt(wx + ox * half, wz + oz * half)) * EMBANKMENT_RUN;
+          let footed = false;
+          for (let out = 0.25; out <= toe * 3 + 2; out += 0.25) {
+            const [fx, fz] = [wx + ox * (half + out), wz + oz * (half + out)];
+            const bank = bankAt(banks, fx, fz);
+            if (bank === undefined) {
+              // Or it ran towards the route and was cut off at the abutments' backs.
+              const near = nearestOnDrawnRoad(CLIMB, origin, fx, fz, 200);
+              const line = ROAD_HALF + OVERPASS_CLEAR_VERGE_METRES;
+              if (Math.abs((near?.distance ?? 0) - line) < 0.3) footed = true;
+              break;
+            }
+            if (bank < groundAt(fx, fz)) footed = true;
+          }
+          expect(footed, edgeLabel).toBe(true);
         }
       }
+      expect(ground.embankmentMesh.visible).toBe(true);
 
       // The mapped street's bend is followed each side, not the deck's line past it.
       for (const side of [-1, 1] as const) {
-        const bent =
-          halfSpan + approachLengthOf(street, side, halfSpan) - APPROACH_FADE_METRES + 10;
+        // Near its far end, where the bend has taken the street well off the deck's line.
+        const bent = halfSpan + approachLengthOf(street, side, halfSpan) - 4;
         const [bx, bz] = street.mapped(side, bent);
         expect(surfaceAt(triangles, bx, bz), `side ${String(side)}`).toBeDefined();
         const [sx, sz] = street.straight(side * bent);
         expect(surfaceAt(triangles, sx, sz), `side ${String(side)}`).toBeUndefined();
       }
       belt.dispose();
+      ground.dispose();
     });
   }
 
@@ -1003,7 +1137,8 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
     for (const side of [-1, 1] as const) {
       const label = `side ${String(side)}`;
       const length = approachLengthOf(street, side, halfSpan, 'straight');
-      const far = halfSpan + length - APPROACH_FADE_METRES;
+      // Where the unread way has bent well off the deck's line, in the fade.
+      const far = halfSpan + length - 4;
       // Along the deck's line, not the unread way's bend.
       const [x, z] = street.straight(side * far);
       expect(surfaceAt(triangles, x, z), label).toBeDefined();
@@ -1025,7 +1160,7 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
         const [cx, cz] = street.straight(side * u);
         return surfaceAt(triangles, cx + hz * full * 0.6, cz - hx * full * 0.6);
       };
-      expect(offEdge(far - 20), label).toBeDefined();
+      expect(offEdge(halfSpan + length - APPROACH_FADE_METRES - 20), label).toBeDefined();
       expect(offEdge(halfSpan + length - 1), label).toBeUndefined();
     }
   });
@@ -1077,14 +1212,32 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
     expect(surfaceAt(triangles, ox, oz)).toBeDefined();
   });
 
-  it('walls its embankment in the overpass’s own concrete', () => {
-    expect(APPROACH_WALL_COLOUR).toBe(OVERPASS_COLOURS.concrete);
+  it('draws its embankment in the ground’s own material, whichever the ground wears', () => {
+    const belt = new TerrainBelt();
+    const bridges = new BridgeBelt();
+    expect(belt.embankmentMesh.material).toBe(belt.mesh.material);
+    belt.setShading('flat');
+    expect(belt.embankmentMesh.material).toBe(belt.mesh.material);
+    // A realistic rung's photographed ground: a lit standard material, which this file may
+    // not build itself (`three-seam.test.ts`), so the bridges' own stands in for it.
+    bridges.setWorld('realistic');
+    const photographed = bridges.overpassMesh.material as Parameters<
+      TerrainBelt['setPhotographic']
+    >[0];
+    belt.setPhotographic(photographed);
+    expect(belt.mesh.material).toBe(photographed);
+    expect(belt.embankmentMesh.material).toBe(photographed);
+    belt.setPhotographic(undefined);
+    expect(belt.embankmentMesh.material).toBe(belt.mesh.material);
+    expect(belt.embankmentMesh.material).not.toBe(photographed);
+    belt.dispose();
+    bridges.dispose();
   });
 
   it('reaches the frame’s side roads, which keep the scenery off it, only with map data', () => {
     // At 1 400 m, where the scenery stands close enough to the road to be on it.
     const street = carriedStreet(1_400, 90);
-    const { corridor, road } = carriedRoad(street.streets, 1_400);
+    const { corridor, road, embankment, banks } = carriedRoad(street.streets, 1_400);
     const start = atStartLine(CLIMB);
     const input = {
       profile: CLIMB,
@@ -1092,8 +1245,10 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
       state: { ...start, ride: { ...start.ride, distance: metres(1_380) } },
     };
     const mapped = sceneFrame({ ...input, worldCorridor: corridor });
-    // The same object the belt drew: the side roads' mesh draws it.
+    // The same object the belt drew: the side roads' mesh draws it, and the
+    // ground's draws its embankment.
     expect(mapped.sideRoads).toContain(road);
+    expect(mapped.terrain.embankments).toContain(embankment);
     const belt = new SideRoadBelt(aMaterial());
     belt.update(mapped.sideRoads);
     const [cx, cz] = street.straight(0);
@@ -1107,7 +1262,13 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
     expect(onIt(mapped.scatter)).toBe(0);
     const without = sceneFrame(input);
     expect(without.sideRoads).not.toContain(road);
+    expect(without.terrain.embankments).toEqual([]);
     expect(onIt(without.scatter)).toBeGreaterThan(0);
+    // Nor on its embankment, out to the bank's foot: read off the drawn banks.
+    const onBank = (items: readonly { x: number; z: number }[]): number =>
+      items.filter((item) => bankAt(banks, item.x, item.z) !== undefined).length;
+    expect(onBank(mapped.scatter)).toBe(0);
+    expect(onBank(without.scatter)).toBeGreaterThan(0);
   });
 
   it('keeps a frame’s overpass roads to their triangle budget, one road an overpass', () => {
@@ -1133,6 +1294,17 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
       expect(road.mesh.indices.length / 3).toBeLessThanOrEqual(APPROACH_TRIANGLES_PER_OVERPASS);
     }
     belt.dispose();
+    // And their embankments, one an overpass, in the ground's second mesh.
+    expect(inView.embankments).toHaveLength(inView.roads.length);
+    const ground = new TerrainBelt();
+    ground.updateEmbankments(inView.embankments);
+    const banks = (ground.embankmentMesh.geometry.index?.count ?? 0) / 3;
+    expect(banks).toBeGreaterThan(0);
+    expect(banks).toBeLessThanOrEqual(EMBANKMENT_FRAME_TRIANGLES);
+    for (const embankment of inView.embankments) {
+      expect(embankment.indices.length / 3).toBeLessThanOrEqual(EMBANKMENT_TRIANGLES_PER_OVERPASS);
+    }
+    ground.dispose();
     // An underpass carries none.
     const under = gradeCrossingsAt(
       CLIMB,
@@ -1146,6 +1318,7 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
     );
     expect(under.parts.length).toBeGreaterThan(0);
     expect(under.roads).toEqual([]);
+    expect(under.embankments).toEqual([]);
   });
 });
 
@@ -1187,7 +1360,7 @@ describe('an overpass approach stops where it must — #2699', () => {
     // The stream crosses at the valley's floor, 1 000 m: an overpass over its channel
     // has water at once beside it; one well clear of it has a whole approach.
     const clear = trianglesOf(roadsAt(1_500));
-    expect(clear).toBeGreaterThan(100);
+    expect(clear).toBeGreaterThan(40);
     expect(trianglesOf(roadsAt(1_005))).toBeLessThan(clear / 4);
   });
 
@@ -1207,7 +1380,7 @@ describe('an overpass approach stops where it must — #2699', () => {
     const bent = (streets: readonly StreetFeature[]): boolean[] => {
       const { triangles, halfSpan } = carriedRoad(streets, 1_000);
       return ([-1, 1] as const).map((side) => {
-        const u = halfSpan + approachLengthOf(street, side, halfSpan) - APPROACH_FADE_METRES + 10;
+        const u = halfSpan + approachLengthOf(street, side, halfSpan) - 4;
         const [x, z] = street.mapped(side, u);
         return surfaceAt(triangles, x, z) !== undefined;
       });
@@ -1258,5 +1431,217 @@ describe('what a frame holds of overpass roads and boxes — #2699', () => {
     );
     expect(inView.parts).toHaveLength(10);
     expect(inView.roads).toHaveLength(2);
+  });
+});
+
+// --- #2699's third round: slopes, not walls; a visible ramp; nothing over the verge ---
+
+/**
+ * A street carried over the road at 1 000 m, square to it, whose map turns
+ * it on the road's right to run beside the route — a frontage road or a slip
+ * road — 40 m out, for 175 m. On the left it carries straight on.
+ */
+function frontageStreet() {
+  const here = roadAt(CLIMB, 1_000);
+  /** `along` metres up the route from the crossing and `lateral` to its right. */
+  const at = (along: number, lateral: number): [number, number] => [
+    here.x + here.forwardX * along + here.normalX * lateral,
+    here.z + here.forwardZ * along + here.normalZ * lateral,
+  ];
+  const street = (grade: StreetGrade, points: [number, number][]): StreetFeature => ({
+    kind: 'major_road',
+    kindDetail: '',
+    grade,
+    line: Float32Array.from(points.flat()),
+  });
+  return {
+    here,
+    at,
+    streets: [
+      street('bridge', [at(0, -30), at(0, 30)]),
+      street('ground', [at(0, 30), at(8, 37), at(25, 40), at(200, 40)]),
+      street('ground', [at(0, -30), at(0, -230)]),
+    ],
+  };
+}
+
+/** Whether `(x, z)` is under the deck, in plan: the bridge itself, which the verge rule leaves out. */
+function underDeck(deck: BridgePart, x: number, z: number): boolean {
+  return inside(deck, x, deck.y, z);
+}
+
+/** Every point of the road and the embankment more than the verge allows above the ground, with where it is. */
+function overTheVerge(
+  triangles: readonly DrawnTriangle[],
+  banks: readonly BankTriangle[],
+  deck: BridgePart,
+): string[] {
+  const origin = corridorOrigin(CLIMB);
+  const found: string[] = [];
+  const corners = [
+    ...triangles.map((triangle) => ({ corners: triangle.corners, colour: TARMAC, kind: 'road' })),
+    ...banks.map((triangle) => ({ corners: triangle.corners, colour: TARMAC, kind: 'bank' })),
+  ];
+  for (const triangle of corners) {
+    for (const [x, y, z] of pointsOnTriangle(triangle)) {
+      if (underDeck(deck, x, z)) continue;
+      const near = nearestOnDrawnRoad(CLIMB, origin, x, z, ROAD_HALF + OVERPASS_CLEAR_VERGE_METRES);
+      if (near === undefined) continue;
+      // A centimetre's grace on the line itself, where the abutment's back is.
+      if (near.distance - ROAD_HALF > OVERPASS_CLEAR_VERGE_METRES - 0.01) continue;
+      const height = y - groundAt(x, z);
+      if (height > OVERPASS_VERGE_HEIGHT_METRES) {
+        found.push(
+          `${triangle.kind} ${height.toFixed(2)} m up, ${(near.distance - ROAD_HALF).toFixed(2)} m off, ${(near.along - 1_000).toFixed(1)} m along`,
+        );
+      }
+    }
+  }
+  return found;
+}
+
+describe('an overpass’s approach slopes down to the ground, and nothing walls the verge — #2699', () => {
+  for (const angle of [90, 35]) {
+    it(`keeps all but the bridge under a metre within 15 m of the carriageway, crossing at ${String(angle)}°`, () => {
+      const street = carriedStreet(1_000, angle);
+      const { triangles, banks, deck, abutments, belt, ground } = carriedRoad(
+        street.streets,
+        1_000,
+      );
+      expect(banks.length).toBeGreaterThan(0);
+      expect(overTheVerge(triangles, banks, deck)).toEqual([]);
+      // The abutments' backs are on the line, so the bridge ends where the rule begins.
+      const origin = corridorOrigin(CLIMB);
+      for (const abutment of abutments) {
+        const near = nearestOnDrawnRoad(CLIMB, origin, abutment.x, abutment.z, 40);
+        expect(Math.abs(near?.lateral ?? 0) + abutment.width / 2 - ROAD_HALF).toBeCloseTo(
+          OVERPASS_CLEAR_VERGE_METRES,
+          1,
+        );
+      }
+      belt.dispose();
+      ground.dispose();
+    });
+
+    it(`lights each bank face as the slope it is, and sinks its foot into the ground, crossing at ${String(angle)}°`, () => {
+      const street = carriedStreet(1_000, angle);
+      const { road, banks, abutments, belt, ground } = carriedRoad(street.streets, 1_000);
+      const origin = corridorOrigin(CLIMB);
+      const outer = ROAD_HALF + OVERPASS_CLEAR_VERGE_METRES;
+      const roadEdges = road.mesh.positions;
+      const isRoadEdge = (x: number, y: number, z: number): boolean => {
+        for (let v = 0; v < roadEdges.length / 3; v += 1) {
+          if (
+            Math.abs((roadEdges[v * 3] as number) - x) < 1e-3 &&
+            Math.abs((roadEdges[v * 3 + 1] as number) - y) < 1e-3 &&
+            Math.abs((roadEdges[v * 3 + 2] as number) - z) < 1e-3
+          ) {
+            return true;
+          }
+        }
+        return false;
+      };
+      const behindAnAbutment = (x: number, z: number): boolean =>
+        abutments.some((abutment) => {
+          const along = (x - abutment.x) * abutment.axisX + (z - abutment.z) * abutment.axisZ;
+          return Math.abs(along) <= abutment.length / 2;
+        });
+      let tall = 0;
+      for (const triangle of banks) {
+        const face = facing(triangle.corners);
+        // Faces up, the way three draws it, and every corner carries that normal.
+        expect(face[1]).toBeGreaterThan(0);
+        for (const normal of triangle.normals) {
+          expect(normal[0] * face[0] + normal[1] * face[1] + normal[2] * face[2]).toBeGreaterThan(
+            0.999,
+          );
+        }
+        // Where its foot is cut off at the abutment's back, the abutment retains it.
+        const cut = triangle.corners.some(([x, y, z]) => {
+          const near = nearestOnDrawnRoad(CLIMB, origin, x, z, 40);
+          return y > groundAt(x, z) && Math.abs((near?.distance ?? 0) - outer) < 0.05;
+        });
+        if (areaOf(triangle.corners) < 0.2 || cut) continue;
+        const heights = triangle.corners.map(([, y]) => y);
+        if (Math.max(...heights) - Math.min(...heights) > 1) {
+          tall += 1;
+          // Not lit as level ground: its normal leans out, as its face does —
+          // and a slope, not a wall.
+          expect(triangle.normals[0]?.[1] ?? 1).toBeLessThan(0.95);
+          // A wall's face is all but vertical; a bank's, where two of its
+          // steps fan out round a bend, is at worst a sliver some way off it.
+          expect(face[1]).toBeGreaterThan(0.2);
+        }
+        for (const [x, y, z] of triangle.corners) {
+          // Each corner is the road's edge, under the ground, or cut off at the
+          // abutment's back where the abutment stands in front of it.
+          if (isRoadEdge(x, y, z) || y < groundAt(x, z)) continue;
+          const near = nearestOnDrawnRoad(CLIMB, origin, x, z, 40);
+          const where = `(${x.toFixed(1)}, ${y.toFixed(2)}, ${z.toFixed(1)}) ground ${groundAt(x, z).toFixed(2)}`;
+          expect(Math.abs((near?.distance ?? 0) - outer), where).toBeLessThan(0.05);
+          expect(behindAnAbutment(x, z), where).toBe(true);
+        }
+        // Its fields are the ground's: where it is, along the route and across it.
+        for (const [index, [x, , z]] of triangle.corners.entries()) {
+          const near = nearestOnDrawnRoad(CLIMB, origin, x, z, 200);
+          const [along, lateral] = triangle.fields[index] as readonly [number, number];
+          expect(Math.abs(along - (near?.along ?? 0))).toBeLessThan(1.5);
+          expect(Math.abs(lateral - (near?.lateral ?? 0))).toBeLessThan(1.5);
+        }
+      }
+      expect(tall).toBeGreaterThan(0);
+      belt.dispose();
+      ground.dispose();
+    });
+  }
+
+  it('does not follow a street that turns to run beside the route, and brings the road down away from it', () => {
+    const street = frontageStreet();
+    const { triangles, banks, deck, abutments, belt, ground } = carriedRoad(street.streets, 1_000);
+    // Not along the frontage road, 40 m out beside the route.
+    for (const along of [50, 80, 110]) {
+      const [x, z] = street.at(along, 40);
+      expect(surfaceAt(triangles, x, z), `${String(along)} m up`).toBeUndefined();
+      expect(bankAt(banks, x, z), `${String(along)} m up`).toBeUndefined();
+    }
+    // Nothing raised more than a metre runs along the route past the abutments:
+    // no wall beside the rider.
+    const origin = corridorOrigin(CLIMB);
+    const reach = Math.max(...abutments.map((abutment) => abutment.length / 2));
+    const raised = [...triangles, ...banks].flatMap((triangle) =>
+      pointsOnTriangle({ corners: triangle.corners, colour: TARMAC }).filter(
+        ([x, y, z]) => !underDeck(deck, x, z) && y - groundAt(x, z) > OVERPASS_VERGE_HEIGHT_METRES,
+      ),
+    );
+    expect(raised.length).toBeGreaterThan(0);
+    for (const [x, , z] of raised) {
+      const near = nearestOnDrawnRoad(CLIMB, origin, x, z, 200);
+      expect(Math.abs((near?.along ?? 0) - 1_000)).toBeLessThan(reach + 1);
+    }
+    expect(overTheVerge(triangles, banks, deck)).toEqual([]);
+    // And the road is down on the ground on the right too, carried on straight.
+    let landed = false;
+    for (let lateral = 30; lateral < APPROACH_REACH_METRES; lateral += 2) {
+      for (let along = 0; along < 40; along += 1) {
+        const [x, z] = street.at(along, lateral);
+        const surface = surfaceAt(triangles, x, z);
+        if (surface !== undefined && surface - groundAt(x, z) < 0.15) landed = true;
+      }
+    }
+    expect(landed).toBe(true);
+    belt.dispose();
+    ground.dispose();
+  });
+
+  it('builds the embankments’ mesh again only when the set in view changes', () => {
+    const street = carriedStreet(1_000, 90);
+    const { embankment, ground } = carriedRoad(street.streets, 1_000);
+    const built = ground.embankmentMesh.geometry;
+    ground.updateEmbankments([embankment]);
+    expect(ground.embankmentMesh.geometry).toBe(built);
+    ground.updateEmbankments([]);
+    expect(ground.embankmentMesh.geometry).not.toBe(built);
+    expect(ground.embankmentMesh.visible).toBe(false);
+    ground.dispose();
   });
 });

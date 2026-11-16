@@ -1089,9 +1089,15 @@ export function onSideRoad(
       const az = s[segment * 4 + 1] as number;
       const bx = s[segment * 4 + 2] as number;
       const bz = s[segment * 4 + 3] as number;
-      const clear = (road.halfWidths[segment] as number) + margin;
-      // A cheap reject: the segment's middle further than it could reach.
-      if (Math.hypot((ax + bx) / 2 - at.x, (az + bz) / 2 - at.z) > reach + SIDE_ROAD_STEP_METRES)
+      const half = road.halfWidths[segment] as number;
+      const clear = half + margin;
+      // A cheap reject: the segment's middle further than it could reach —
+      // with its own half-width, which since #2699 an overpass's embankment
+      // makes wider than the 10 m `reach` allows a side road.
+      if (
+        Math.hypot((ax + bx) / 2 - at.x, (az + bz) / 2 - at.z) >
+        reach + half + SIDE_ROAD_STEP_METRES
+      )
         continue;
       for (let p = 0; p + 1 < points.length; p += 2) {
         if (
