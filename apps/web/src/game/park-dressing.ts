@@ -10,10 +10,18 @@
  *
  * ## The golf course
  *
- * - **Mown stripes** over the whole course, and **greens** — a close-mown
- *   disc, a fringe round it — each with a **flag** on a pole, and **sand
- *   bunkers** beside it. Bunkers are also drawn **where the map has them**:
- *   a `sand` polygon inside the course ({@link SAND_KINDS}).
+ * - **Fairways and rough**: mown, striped fairway in broad lanes with rough
+ *   between them, and **greens** — a close-mown disc, a fringe round it, on
+ *   fairway — each with a **flag** on a pole, and **sand bunkers** beside it.
+ *   Bunkers are also drawn **where the map has them**: a `sand` polygon
+ *   inside the course ({@link SAND_KINDS}).
+ * - **A flag at every green the ground paints**, as far as the window reaches
+ *   — the owner's ruling of 2026-11-16: from four public roads beside public
+ *   courses the nearest green was 165 to 377 m away while flags were drawn
+ *   only within 150 m, so nothing showed. Past
+ *   {@link FLAG_TRUE_SIZE_METRES} a flag is its far form: the same flag
+ *   scaled with distance, so it keeps the size on screen it has there
+ *   ({@link flagScaleAt}).
  * - A green stands on a {@link GOLF_GREEN_CELL_METRES} grid, one at most a
  *   square, seeded, and only where the course is all round it, away from the
  *   road, and off every stand of trees (`scatter.ts` §`golfStandAt`), so no
@@ -25,8 +33,12 @@
  *   a grid of {@link HEADSTONE_ROW_METRES} rows and {@link HEADSTONE_PITCH_METRES}
  *   slots, the rows running north and south and the stones facing east, as a
  *   churchyard's traditionally do. Every {@link HEADSTONE_PATH_ROWS}th row is
- *   a **gravel path**, and so is every {@link HEADSTONE_CROSS_SLOTS}th pair of
- *   slots across them.
+ *   left for a **gravel path**, and so is every {@link HEADSTONE_CROSS_SLOTS}th
+ *   pair of slots across them. Since the owner's ruling of 2026-11-16 a path
+ *   is {@link HEADSTONE_PATH_WIDTH_METRES} wide down the middle of the row or
+ *   slots left for it, in a gravel toned toward the grass, and none is drawn
+ *   within {@link CEMETERY_PATH_ROAD_CLEARANCE_METRES} of the road: before,
+ *   the nearest path was a bright band the row's full width up to the kerb.
  * - A **low stone wall** along the cemetery's mapped outline, broken where the
  *   road comes within {@link CEMETERY_WALL_ROAD_CLEARANCE_METRES}.
  *
@@ -123,7 +135,9 @@ export interface GolfGreen {
  * - **R**: 255 on a golf course;
  * - **G**: 255 on a cemetery;
  * - **B**: 255 on mapped sand inside a golf course — a bunker where mapped;
- * - **A**: 0, unused.
+ * - **A**: 255 on a cemetery whose cell centre is at least
+ *   {@link CEMETERY_PATH_ROAD_CLEARANCE_METRES} from the drawn road: where
+ *   its paths may be drawn. 0 everywhere else.
  */
 export interface ParkGround {
   readonly originX: number;
@@ -148,8 +162,19 @@ export const NO_PARK_DRESSING: ParkDressingInView = Object.freeze({
   ground: undefined,
 });
 
-/** How far from the camera a piece is drawn, in metres: **150**. */
+/**
+ * How far from the camera a headstone or a piece of wall is drawn, in metres:
+ * **150**. A flag is drawn at every green the window holds, however far.
+ */
 export const PARK_DRESSING_REACH_METRES = 150;
+
+/**
+ * How far a flag is drawn at its own size, in metres: **120**. Past it a flag
+ * is scaled with distance, so it keeps the size on screen it has at 120 m —
+ * a pole about 10 px tall on a 720-line frame — rather than shrinking below
+ * a pixel. @see flagScaleAt
+ */
+export const FLAG_TRUE_SIZE_METRES = 120;
 
 /**
  * The most pieces a frame draws: **512** — inside what the worst realistic
@@ -215,6 +240,20 @@ export const HEADSTONE_PATH_ROWS = 7;
  */
 export const HEADSTONE_CROSS_SLOTS = 25;
 export const HEADSTONE_CROSS_PATH_SLOTS = 2;
+
+/**
+ * How wide a cemetery's gravel path is drawn, in metres: **1.5**, a walk
+ * between graves, down the middle of the 3.2 m row or pair of slots left for
+ * it (`three-renderer.ts` §`PARK_GROUND_MIX`).
+ */
+export const HEADSTONE_PATH_WIDTH_METRES = 1.5;
+
+/**
+ * How far from the drawn road's centreline a cemetery's paths start, in
+ * metres: **12** — past the verge, the kerb and the first rows of stones
+ * ({@link HEADSTONE_ROAD_CLEARANCE_METRES}), so no path runs up to the road.
+ */
+export const CEMETERY_PATH_ROAD_CLEARANCE_METRES = 12;
 
 /** The share of slots left empty, so the rows read as a cemetery's and not a grid's: **0.15**. */
 export const HEADSTONE_GAP_SHARE = 0.15;
@@ -336,7 +375,7 @@ export function parkDressingInView(
   const viewKey = `${Math.round(cameraX / VIEW_STEP_METRES)},${Math.round(cameraZ / VIEW_STEP_METRES)}`;
   if (dressing.view?.key === viewKey) return dressing.view.value;
   const ground = groundWindow(dressing, cameraX, cameraZ);
-  const pieces = piecesInReach(dressing, cameraX, cameraZ);
+  const pieces = piecesInReach(dressing, ground, cameraX, cameraZ);
   const value = ground === undefined && pieces.length === 0 ? NO_PARK_DRESSING : { pieces, ground };
   dressing.view = { key: viewKey, value };
   return value;
@@ -723,8 +762,20 @@ function greensNear(dressing: Dressing, x: number, z: number, reach: number): Go
   return greens;
 }
 
-/** A green's flag: its pole and the flag at the top of it, flying east. */
-function flagPieces(green: GolfGreen): readonly [ParkPiece, ParkPiece] {
+/**
+ * How much a flag `distance` metres from the camera is scaled: 1 within
+ * {@link FLAG_TRUE_SIZE_METRES}, and past it in step with the distance, so
+ * the far form keeps the size on screen the flag has there.
+ */
+export function flagScaleAt(distance: number): number {
+  return Math.max(1, distance / FLAG_TRUE_SIZE_METRES);
+}
+
+/**
+ * A green's flag: its pole and the flag at the top of it, flying east, both
+ * scaled by `scale` ({@link flagScaleAt}) about the foot of the pole.
+ */
+function flagPieces(green: GolfGreen, scale: number): readonly [ParkPiece, ParkPiece] {
   return [
     {
       kind: 'flag-pole',
@@ -733,32 +784,38 @@ function flagPieces(green: GolfGreen): readonly [ParkPiece, ParkPiece] {
       z: green.pinZ,
       lift: 0,
       yaw: 0,
-      width: FLAG_POLE_THICKNESS_METRES,
-      height: FLAG_POLE_HEIGHT_METRES,
-      depth: FLAG_POLE_THICKNESS_METRES,
+      width: FLAG_POLE_THICKNESS_METRES * scale,
+      height: FLAG_POLE_HEIGHT_METRES * scale,
+      depth: FLAG_POLE_THICKNESS_METRES * scale,
       colour: FLAG_POLE_COLOUR,
     },
     {
       kind: 'flag',
-      x: green.pinX + FLAG_WIDTH_METRES / 2,
+      x: green.pinX + (FLAG_WIDTH_METRES / 2) * scale,
       y: 0,
       z: green.pinZ,
-      lift: FLAG_POLE_HEIGHT_METRES - FLAG_HEIGHT_METRES,
+      lift: (FLAG_POLE_HEIGHT_METRES - FLAG_HEIGHT_METRES) * scale,
       yaw: 0,
-      width: FLAG_WIDTH_METRES,
-      height: FLAG_HEIGHT_METRES,
-      depth: FLAG_THICKNESS_METRES,
+      width: FLAG_WIDTH_METRES * scale,
+      height: FLAG_HEIGHT_METRES * scale,
+      depth: FLAG_THICKNESS_METRES * scale,
       colour: green.flagColour,
     },
   ];
 }
 
 /**
- * The pieces within {@link PARK_DRESSING_REACH_METRES} of the camera, at
- * most {@link PARK_DRESSING_CAPACITY}: the walls and flags first, nearest
- * first, up to their share, then the stones, nearest first.
+ * The stones and walls within {@link PARK_DRESSING_REACH_METRES} of the
+ * camera and a flag at every green `ground` paints, at most
+ * {@link PARK_DRESSING_CAPACITY}: the walls and flags first, nearest first,
+ * up to their share, then the stones, nearest first.
  */
-function piecesInReach(dressing: Dressing, cameraX: number, cameraZ: number): readonly ParkPiece[] {
+function piecesInReach(
+  dressing: Dressing,
+  ground: ParkGround | undefined,
+  cameraX: number,
+  cameraZ: number,
+): readonly ParkPiece[] {
   const reach = PARK_DRESSING_REACH_METRES;
   const reachSquared = reach * reach;
   const fixtures: { piece: ParkPiece; squared: number }[] = [];
@@ -786,10 +843,12 @@ function piecesInReach(dressing: Dressing, cameraX: number, cameraZ: number): re
       }
     }
   }
-  for (const green of greensNear(dressing, cameraX, cameraZ, reach)) {
-    for (const flag of flagPieces(green)) {
-      const squared = near(flag);
-      if (squared <= reachSquared) fixtures.push({ piece: flag, squared });
+  // Every green the ground paints, so a flag never stands on grass and a
+  // painted green never stands without one — at any distance the window holds.
+  for (const green of ground?.greens ?? []) {
+    const away = Math.hypot(green.pinX - cameraX, green.pinZ - cameraZ);
+    for (const flag of flagPieces(green, flagScaleAt(away))) {
+      fixtures.push({ piece: flag, squared: near(flag) });
     }
   }
   forgetFarStones(dressing, cameraX, cameraZ);
@@ -856,10 +915,13 @@ function buildWindow(dressing: Dressing, middleX: number, middleZ: number): Park
   const looks = new Uint8Array(cells * cells * 4);
   let golf = false;
   let cemetery = false;
+  const { profile, origin } = dressing;
+  const clearance = CEMETERY_PATH_ROAD_CLEARANCE_METRES;
   for (let row = 0; row < cells; row += 1) {
     const z = originZ + (row + 0.5) * cell;
     for (let column = 0; column < cells; column += 1) {
-      const look = land.parkLookAt(originX + (column + 0.5) * cell, z);
+      const x = originX + (column + 0.5) * cell;
+      const look = land.parkLookAt(x, z);
       const at = (row * cells + column) * 4;
       if (look === 'golf') {
         looks[at] = 255;
@@ -867,6 +929,10 @@ function buildWindow(dressing: Dressing, middleX: number, middleZ: number): Park
       } else if (look === 'cemetery') {
         looks[at + 1] = 255;
         cemetery = true;
+        // Its paths only past the clearance: none runs up to the kerb.
+        if (distanceToDrawnRoad(profile, origin, x, z, clearance) >= clearance) {
+          looks[at + 3] = 255;
+        }
       }
     }
   }

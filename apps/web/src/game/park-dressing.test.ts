@@ -19,8 +19,12 @@ import { parksFixture } from './footprint-fixtures-testing';
 import { landClassMask, type LandClassMask } from './land-class';
 import { standingOnGround } from './landform';
 import {
+  CEMETERY_PATH_ROAD_CLEARANCE_METRES,
   CEMETERY_WALL_PIECE_METRES,
   CEMETERY_WALL_ROAD_CLEARANCE_METRES,
+  FLAG_POLE_HEIGHT_METRES,
+  FLAG_TRUE_SIZE_METRES,
+  flagScaleAt,
   GOLF_GREEN_ROAD_CLEARANCE_METRES,
   HEADSTONE_INSET_METRES,
   HEADSTONE_PITCH_METRES,
@@ -219,10 +223,30 @@ describe('#2685 a cemetery: rows of headstones, paths and a wall', () => {
   it('paints its ground in the window: green channel on the cemetery, nothing off it', () => {
     const ground = dressed.ground as ParkGround;
     expect(ground).toBeDefined();
-    expect(texel(ground, 80, 2_600)).toEqual([0, 255, 0, 0]);
+    // Far enough from the road for its paths: alpha too.
+    expect(texel(ground, 80, 2_600)).toEqual([0, 255, 0, 255]);
     expect(texel(ground, -80, 2_600)).toEqual([0, 0, 0, 0]);
     expect(ground.cells).toBe(PARK_LOOK_CELLS);
     expect(ground.greens).toEqual([]);
+  });
+
+  it('keeps its paths off the road, where the cemetery is mapped up to it', () => {
+    // The owner's ruling of 2026-11-16: the nearest path was a bright band
+    // running up to the kerb. Mapped from x = −40 across the road to x = 140.
+    const near = place(rectangle('cemetery', { ...CEMETERY, minX: -40 }));
+    const ground = view(near, 0, 2_600).ground as ParkGround;
+    let open = 0;
+    for (let x = -37.5; x < 140; x += 5) {
+      const [, cemetery, , paths] = texel(ground, x, 2_602.5);
+      // The whole of it is cemetery ground, up to the road…
+      expect(cemetery, `x ${String(x)}`).toBe(255);
+      // …and its paths only past the clearance, on both sides of the road.
+      const clear = Math.abs(x) >= CEMETERY_PATH_ROAD_CLEARANCE_METRES;
+      expect(paths, `x ${String(x)}`).toBe(clear ? 255 : 0);
+      if (!clear) open += 1;
+    }
+    // Non-vacuity: some of its cells are inside the clearance.
+    expect(open).toBeGreaterThanOrEqual(4);
   });
 
   it('dresses nothing for the same ground as a plain park, or out of reach', () => {
@@ -362,24 +386,47 @@ describe('#2685 a golf course: stripes, greens, flags and bunkers', () => {
     }
   });
 
-  it('stands a flag on its pole at each green in reach', () => {
+  it('stands a flag on its pole at every green the ground paints, however far', () => {
+    // The owner's ruling of 2026-11-16: from a public road the nearest green
+    // was past the 150 m flags were drawn within, so none showed.
     const poles = ofKind(dressed.pieces, 'flag-pole');
     const flags = ofKind(dressed.pieces, 'flag');
-    const inReach = ground.greens.filter(
-      (green) => Math.hypot(green.pinX - 300, green.pinZ - 2_700) <= PARK_DRESSING_REACH_METRES - 1,
-    );
-    expect(inReach.length).toBeGreaterThan(0);
-    expect(poles.length).toBeGreaterThanOrEqual(inReach.length);
-    for (const green of inReach) {
-      expect(poles.some((pole) => pole.x === green.pinX && pole.z === green.pinZ)).toBe(true);
-    }
-    for (const flag of flags) {
-      // At the top of a pole.
-      const pole = poles.find((each) => Math.abs(each.z - flag.z) < 1e-9);
+    expect(poles.length).toBe(ground.greens.length);
+    expect(flags.length).toBe(ground.greens.length);
+    const away = (green: GolfGreen): number => Math.hypot(green.pinX - 300, green.pinZ - 2_700);
+    for (const green of ground.greens) {
+      const pole = poles.find((each) => each.x === green.pinX && each.z === green.pinZ);
       expect(pole).toBeDefined();
-      expect(flag.lift + flag.height).toBeCloseTo((pole as ParkPiece).height, 6);
+      // Its own size near, and past FLAG_TRUE_SIZE_METRES the size on screen it has there.
+      expect((pole as ParkPiece).height).toBeCloseTo(
+        FLAG_POLE_HEIGHT_METRES * Math.max(1, away(green) / FLAG_TRUE_SIZE_METRES),
+        9,
+      );
+    }
+    // Non-vacuity: greens on both sides of the flags' true-size reach, and
+    // past the stones' reach too.
+    expect(ground.greens.some((green) => away(green) < FLAG_TRUE_SIZE_METRES)).toBe(true);
+    expect(ground.greens.some((green) => away(green) > PARK_DRESSING_REACH_METRES)).toBe(true);
+    for (const flag of flags) {
+      // At the top of a pole, flying from it.
+      const pole = poles.find((each) => Math.abs(each.z - flag.z) < 1e-9) as ParkPiece;
+      expect(pole).toBeDefined();
+      expect(flag.lift + flag.height).toBeCloseTo(pole.height, 6);
+      expect(flag.x - flag.width / 2).toBeCloseTo(pole.x, 6);
+      expect(flag.height / pole.height).toBeCloseTo(0.25, 6);
     }
     expect(ofKind(dressed.pieces, 'headstone')).toEqual([]);
+  });
+
+  it('scales a far flag with its distance, and a near one not at all', () => {
+    expect(flagScaleAt(0)).toBe(1);
+    expect(flagScaleAt(FLAG_TRUE_SIZE_METRES)).toBe(1);
+    expect(flagScaleAt(FLAG_TRUE_SIZE_METRES * 3)).toBeCloseTo(3, 12);
+    // Its height over its distance — its size on screen — is held past the reach.
+    const onScreen = (distance: number): number =>
+      (FLAG_POLE_HEIGHT_METRES * flagScaleAt(distance)) / distance;
+    expect(onScreen(400)).toBeCloseTo(onScreen(FLAG_TRUE_SIZE_METRES), 12);
+    expect(onScreen(60)).toBeGreaterThan(onScreen(FLAG_TRUE_SIZE_METRES));
   });
 
   it('paints the course red in the window, and mapped sand blue only inside it', () => {

@@ -1535,10 +1535,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         photographic ground's own call: a window of the mask's
                         park looks round the rider (`ParkGround`, an 800 m
                         RGBA texture, `three-renderer.ts` §`ParkGroundPaint`)
-                        that §`PARK_GROUND_MIX` paints a course's mown
-                        stripes, greens, fringes and bunkers (seeded, and
-                        mapped `sand` inside a course) and a cemetery's kept
-                        grass and gravel paths from — no triangle, no call.
+                        that §`PARK_GROUND_MIX` paints a course's striped
+                        fairway lanes and rough, greens, fringes and bunkers
+                        (seeded, and mapped `sand` inside a course) and a
+                        cemetery's kept grass and narrow gravel paths from,
+                        the paths only past `CEMETERY_PATH_ROAD_CLEARANCE_METRES`
+                        (the window's alpha) — no triangle, no call. A flag
+                        stands at every green the window paints, scaled past
+                        `FLAG_TRUE_SIZE_METRES` (§`flagScaleAt`), the owner's
+                        ruling of 2026-11-16 that golf read from a public road.
                         Standing on it: headstones in rows (the paths' grid is
                         the shader's twin, §`isPathRow`), a low wall along a
                         cemetery's outline open at the road, and a flag at

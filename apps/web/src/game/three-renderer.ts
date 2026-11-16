@@ -557,6 +557,7 @@ import {
   HEADSTONE_CROSS_PATH_SLOTS,
   HEADSTONE_CROSS_SLOTS,
   HEADSTONE_PATH_ROWS,
+  HEADSTONE_PATH_WIDTH_METRES,
   HEADSTONE_PITCH_METRES,
   HEADSTONE_ROW_METRES,
   PARK_DRESSING_CAPACITY,
@@ -16010,6 +16011,27 @@ function glslLinear(packed: number): string {
 export const GOLF_STRIPE_METRES = 18;
 
 /**
+ * A golf course's fairways and rough — #2685, the owner's ruling of
+ * 2026-11-16 ("stronger mown fairway and rough stripes"): lanes of striped
+ * fairway {@link GOLF_FAIRWAY_WIDTH_METRES} wide, one every
+ * {@link GOLF_FAIRWAY_PERIOD_METRES}, running across the mower's stripes,
+ * with unstriped, darker rough between them: lanes broad enough to read from
+ * the road at 100 m and more, where the 9 m stripes have blurred into one
+ * tone. 60 m in every 80 keeps three quarters of the course striped, so a
+ * road beside it is seldom faced with rough alone: 45 m in 80 left the near
+ * view mostly rough on the owner's `town=parks` page. This repository's own
+ * figures, for the owner's screenshots to settle.
+ */
+export const GOLF_FAIRWAY_PERIOD_METRES = 80;
+export const GOLF_FAIRWAY_WIDTH_METRES = 60;
+
+/**
+ * How far past a green's edge it stands on fairway, its approach, whatever
+ * lane it falls in, in metres: **10**.
+ */
+export const GOLF_APPROACH_METRES = 10;
+
+/**
  * The look of a golf course and a cemetery on the ground — #2685, as
  * multipliers of the grass the ground already is, so the world's colour and
  * the season still lead; the sand and the gravel are their own. This
@@ -16019,9 +16041,14 @@ export const GOLF_STRIPE_METRES = 18;
 export const PARK_GROUND_LOOK = {
   /** Close-mown fairway: fresher and a little brighter than the rough. */
   fairway: [0.92, 1.12, 0.78],
-  /** The mower's light and dark passes. */
-  stripePale: 1.22,
-  stripeDeep: 0.8,
+  /**
+   * The mower's light and dark passes: since the owner's ruling of 2026-11-16
+   * further apart than the 1.22 and 0.8 the course did not read with.
+   */
+  stripePale: 1.32,
+  stripeDeep: 0.72,
+  /** The rough between the fairways: longer grass, darker and yellower, unstriped. */
+  rough: [0.82, 0.9, 0.62],
   /** The fringe round a green: darker. */
   fringe: [0.78, 0.98, 0.66],
   /** The green itself: smooth, bright and fresh. */
@@ -16030,8 +16057,13 @@ export const PARK_GROUND_LOOK = {
   sand: 0xdccb9e,
   /** A cemetery's short, kept grass. */
   neat: [0.95, 1.08, 0.88],
-  /** Its paths' gravel, packed sRGB. */
-  gravel: 0xa69d8b,
+  /**
+   * Its paths' gravel, packed sRGB, laid at {@link PARK_GROUND_LOOK}.path of
+   * the grass: since the owner's ruling of 2026-11-16 a darker, browner
+   * gravel than the 0xa69d8b laid whole, which read as a bright band.
+   */
+  gravel: 0x958c79,
+  path: 0.7,
 } as const;
 
 const PARK_GROUND_PARS = /* glsl */ `
@@ -16051,13 +16083,22 @@ float oylParkBand(float at, float from, float to, float aa) {
  * nothing runs where the window holds no golf course or cemetery. The
  * cemetery's paths are `park-dressing.ts`' grid: row `i` is a path where
  * `i mod 7 = 6` (§`isPathRow`), and the last two of every 25 slots across
- * (§`isCrossPathSlot`).
+ * (§`isCrossPathSlot`); each path is §`HEADSTONE_PATH_WIDTH_METRES` down the
+ * middle of them, and only where the window's alpha says the road is far
+ * enough (§`CEMETERY_PATH_ROAD_CLEARANCE_METRES`). A course is striped
+ * fairway in lanes ({@link GOLF_FAIRWAY_PERIOD_METRES}) with rough between,
+ * and fairway round every green ({@link GOLF_APPROACH_METRES}).
  */
 export const PARK_GROUND_MIX = ((): string => {
   const look = PARK_GROUND_LOOK;
   const vec = (value: readonly number[]): string => `vec3(${value.map(glslFloat).join(', ')})`;
   const rowPeriod = HEADSTONE_PATH_ROWS * HEADSTONE_ROW_METRES;
   const crossPeriod = HEADSTONE_CROSS_SLOTS * HEADSTONE_PITCH_METRES;
+  // Each path down the middle of the row, or the pair of slots, left for it.
+  const rowPath = (HEADSTONE_PATH_ROWS - 0.5) * HEADSTONE_ROW_METRES;
+  const crossPath =
+    (HEADSTONE_CROSS_SLOTS - HEADSTONE_CROSS_PATH_SLOTS / 2) * HEADSTONE_PITCH_METRES;
+  const halfPath = HEADSTONE_PATH_WIDTH_METRES / 2;
   const greens = String(GOLF_GREENS_DRAWN);
   const bunkers = String(GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN);
   return /* glsl */ `
@@ -16065,6 +16106,8 @@ export const PARK_GROUND_MIX = ((): string => {
   vec2 oylAt = vOylGround.xz;
   float oylStripeAt = dot(oylAt, vec2(0.866025, 0.5)) / ${glslFloat(GOLF_STRIPE_METRES)};
   float oylStripeAa = fwidth(oylStripeAt);
+  float oylLaneAt = dot(oylAt, vec2(-0.5, 0.866025));
+  float oylLaneAa = fwidth(oylLaneAt);
   vec2 oylPathAa = fwidth(oylAt);
   vec2 oylLookUv = (oylAt - oylParkWindow.xy) * oylParkWindow.z;
   float oylInWindow = step(0.0, oylLookUv.x) * step(oylLookUv.x, 1.0)
@@ -16078,8 +16121,7 @@ export const PARK_GROUND_MIX = ((): string => {
     if (oylGolf > 0.0) {
       float oylPass = abs(fract(oylStripeAt) * 2.0 - 1.0);
       float oylStripe = smoothstep(0.5 - oylStripeAa, 0.5 + oylStripeAa, oylPass);
-      vec3 oylCourse = diffuseColor.rgb * ${vec(look.fairway)}
-        * mix(${glslFloat(look.stripeDeep)}, ${glslFloat(look.stripePale)}, oylStripe);
+      float oylFairway = oylParkBand(mod(oylLaneAt, ${glslFloat(GOLF_FAIRWAY_PERIOD_METRES)}), 0.0, ${glslFloat(GOLF_FAIRWAY_WIDTH_METRES)}, oylLaneAa);
       float oylGreen = 0.0;
       float oylFringe = 0.0;
       float oylSand = oylLook.b;
@@ -16089,7 +16131,11 @@ export const PARK_GROUND_MIX = ((): string => {
         float oylD = distance(oylAt, oylG.xy);
         oylGreen = max(oylGreen, 1.0 - smoothstep(oylG.z - 0.4, oylG.z + 0.4, oylD));
         oylFringe = max(oylFringe, 1.0 - smoothstep(oylG.z + 1.6, oylG.z + 2.4, oylD));
+        oylFairway = max(oylFairway, 1.0 - smoothstep(oylG.z + ${glslFloat(GOLF_APPROACH_METRES - 2)}, oylG.z + ${glslFloat(GOLF_APPROACH_METRES + 2)}, oylD));
       }
+      vec3 oylMown = diffuseColor.rgb * ${vec(look.fairway)}
+        * mix(${glslFloat(look.stripeDeep)}, ${glslFloat(look.stripePale)}, oylStripe);
+      vec3 oylCourse = mix(diffuseColor.rgb * ${vec(look.rough)}, oylMown, oylFairway);
       for (int i = 0; i < ${bunkers}; i++) {
         vec4 oylB = oylBunkers[i];
         if (oylB.z <= 0.0) continue;
@@ -16107,9 +16153,11 @@ export const PARK_GROUND_MIX = ((): string => {
       diffuseColor.rgb = mix(diffuseColor.rgb, oylCourse, oylGolf);
     }
     if (oylCemetery > 0.0) {
-      float oylRowPath = oylParkBand(mod(oylAt.x, ${glslFloat(rowPeriod)}), ${glslFloat((HEADSTONE_PATH_ROWS - 1) * HEADSTONE_ROW_METRES)}, ${glslFloat(rowPeriod)}, oylPathAa.x);
-      float oylCrossPath = oylParkBand(mod(oylAt.y, ${glslFloat(crossPeriod)}), ${glslFloat((HEADSTONE_CROSS_SLOTS - HEADSTONE_CROSS_PATH_SLOTS) * HEADSTONE_PITCH_METRES)}, ${glslFloat(crossPeriod)}, oylPathAa.y);
-      vec3 oylKept = mix(diffuseColor.rgb * ${vec(look.neat)}, ${glslLinear(look.gravel)}, max(oylRowPath, oylCrossPath));
+      float oylRowPath = oylParkBand(mod(oylAt.x, ${glslFloat(rowPeriod)}), ${glslFloat(rowPath - halfPath)}, ${glslFloat(rowPath + halfPath)}, oylPathAa.x);
+      float oylCrossPath = oylParkBand(mod(oylAt.y, ${glslFloat(crossPeriod)}), ${glslFloat(crossPath - halfPath)}, ${glslFloat(crossPath + halfPath)}, oylPathAa.y);
+      // No path within the clearance of the road: the window's alpha.
+      float oylPath = max(oylRowPath, oylCrossPath) * oylLook.a * ${glslFloat(look.path)};
+      vec3 oylKept = mix(diffuseColor.rgb * ${vec(look.neat)}, ${glslLinear(look.gravel)}, oylPath);
       diffuseColor.rgb = mix(diffuseColor.rgb, oylKept, oylCemetery);
     }
   }

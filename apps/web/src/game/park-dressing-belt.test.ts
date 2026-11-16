@@ -20,6 +20,7 @@ import {
   HEADSTONE_CROSS_PATH_SLOTS,
   HEADSTONE_CROSS_SLOTS,
   HEADSTONE_PATH_ROWS,
+  HEADSTONE_PATH_WIDTH_METRES,
   HEADSTONE_PITCH_METRES,
   HEADSTONE_ROW_METRES,
   isCrossPathSlot,
@@ -31,7 +32,11 @@ import {
 } from './park-dressing';
 import { REALISTIC_PARK_DRESSING_TRIANGLES } from './realistic-budget';
 import {
+  GOLF_APPROACH_METRES,
+  GOLF_FAIRWAY_PERIOD_METRES,
+  GOLF_FAIRWAY_WIDTH_METRES,
   PARK_DRESSING_TRIANGLES,
+  PARK_GROUND_LOOK,
   PARK_GROUND_MIX,
   PARK_PIECE_TRIANGLES,
   ParkDressingBelt,
@@ -245,7 +250,7 @@ describe('#2685 the golf courses’ and cemeteries’ ground', () => {
     expect((bare.uniforms['oylParkWindow']?.value as { w: number }).w).toBe(0);
   });
 
-  it('draws the cemetery’s paths where park-dressing.ts leaves its rows and slots empty', () => {
+  it('draws the cemetery’s narrow paths only where park-dressing.ts leaves its rows and slots empty', () => {
     const shader = compiledGround(new ParkGroundPaint());
     const band = glslFunction(shader.fragmentShader, 'oylParkBand');
     // Each call site's own numbers, read off the program three is handed.
@@ -256,26 +261,93 @@ describe('#2685 the golf courses’ and cemeteries’ ground', () => {
       if (found === null) throw new Error(`no path band along ${axis}`);
       return [Number(found[1]), Number(found[2]), Number(found[3])];
     };
-    const drawnAt = (at: number, [period, from, to]: readonly [number, number, number]): unknown =>
-      band(((at % period) + period) % period, from, to, 0.01);
+    const drawnAt = (at: number, [period, from, to]: readonly [number, number, number]): number =>
+      band(((at % period) + period) % period, from, to, 0.01) as number;
+    // Across a stretch of rows and of slots, a centimetre at a time: the
+    // path is drawn only inside a row or slot park-dressing.ts leaves empty
+    // of stones, and is the path's width each time, down its middle.
+    const walk = (
+      [period, from, to]: readonly [number, number, number],
+      pitch: number,
+      empty: (index: number) => boolean,
+    ): number => {
+      let widths = 0;
+      let drawn = 0;
+      for (let at = -3 * period; at < 3 * period; at += 0.01) {
+        if (drawnAt(at, [period, from, to]) < 0.5) {
+          if (drawn > 0) {
+            expect(drawn * 0.01).toBeCloseTo(HEADSTONE_PATH_WIDTH_METRES, 1);
+            widths += 1;
+          }
+          drawn = 0;
+          continue;
+        }
+        expect(empty(Math.floor(at / pitch)), `at ${at.toFixed(2)}`).toBe(true);
+        drawn += 1;
+      }
+      return widths;
+    };
     const rows = call('x');
     const slots = call('y');
-    let paths = 0;
-    for (let row = -20; row < 40; row += 1) {
-      const x = (row + 0.5) * HEADSTONE_ROW_METRES;
-      expect(drawnAt(x, rows), `row ${String(row)}`).toBe(isPathRow(row) ? 1 : 0);
-      if (isPathRow(row)) paths += 1;
-    }
-    for (let slot = -30; slot < 60; slot += 1) {
-      const z = (slot + 0.5) * HEADSTONE_PITCH_METRES;
-      expect(drawnAt(z, slots), `slot ${String(slot)}`).toBe(isCrossPathSlot(slot) ? 1 : 0);
-    }
-    expect(paths).toBeGreaterThan(5);
-    expect(rows[0]).toBeCloseTo(HEADSTONE_PATH_ROWS * HEADSTONE_ROW_METRES, 9);
-    expect(slots[0]).toBeCloseTo(HEADSTONE_CROSS_SLOTS * HEADSTONE_PITCH_METRES, 9);
-    expect(slots[1]).toBeCloseTo(
-      (HEADSTONE_CROSS_SLOTS - HEADSTONE_CROSS_PATH_SLOTS) * HEADSTONE_PITCH_METRES,
+    expect(walk(rows, HEADSTONE_ROW_METRES, isPathRow)).toBeGreaterThanOrEqual(5);
+    expect(walk(slots, HEADSTONE_PITCH_METRES, isCrossPathSlot)).toBeGreaterThanOrEqual(5);
+    // Down the middle of the row and of the pair of slots.
+    expect((rows[1] + rows[2]) / 2).toBeCloseTo(
+      (HEADSTONE_PATH_ROWS - 0.5) * HEADSTONE_ROW_METRES,
       9,
     );
+    expect((slots[1] + slots[2]) / 2).toBeCloseTo(
+      (HEADSTONE_CROSS_SLOTS - HEADSTONE_CROSS_PATH_SLOTS / 2) * HEADSTONE_PITCH_METRES,
+      9,
+    );
+    expect(rows[0]).toBeCloseTo(HEADSTONE_PATH_ROWS * HEADSTONE_ROW_METRES, 9);
+    expect(slots[0]).toBeCloseTo(HEADSTONE_CROSS_SLOTS * HEADSTONE_PITCH_METRES, 9);
+  });
+
+  it('lays the cemetery’s paths only where the window’s alpha clears them of the road, toned toward the grass', () => {
+    const program = compiledGround(new ParkGroundPaint()).fragmentShader;
+    // The paths' share is the bands, times the window's alpha, times the tone.
+    const share = /float oylPath = max\(oylRowPath, oylCrossPath\) \* oylLook\.a \* ([\d.]+);/.exec(
+      program,
+    );
+    expect(share).not.toBeNull();
+    expect(Number(share?.[1])).toBeCloseTo(PARK_GROUND_LOOK.path, 9);
+    expect(PARK_GROUND_LOOK.path).toBeLessThan(1);
+    expect(program).toMatch(/oylKept = mix\([^;]*, oylPath\);/);
+  });
+
+  it('stripes a course’s fairways in lanes with rough between, and fairway round every green', () => {
+    const program = compiledGround(new ParkGroundPaint()).fragmentShader;
+    const band = glslFunction(program, 'oylParkBand');
+    const lane =
+      /float oylFairway = oylParkBand\(mod\(oylLaneAt, ([\d.]+)\), ([\d.]+), ([\d.]+), oylLaneAa\);/.exec(
+        program,
+      );
+    if (lane === null) throw new Error('no fairway lane');
+    const [period, from, to] = [Number(lane[1]), Number(lane[2]), Number(lane[3])];
+    expect([period, from, to]).toEqual([GOLF_FAIRWAY_PERIOD_METRES, 0, GOLF_FAIRWAY_WIDTH_METRES]);
+    // The lane's share of the course is fairway, the rest rough.
+    let fairway = 0;
+    const steps = 8_000;
+    for (let step = 0; step < steps; step += 1) {
+      fairway += band((step / steps) * period, from, to, 0.01) as number;
+    }
+    expect(fairway / steps).toBeCloseTo(GOLF_FAIRWAY_WIDTH_METRES / GOLF_FAIRWAY_PERIOD_METRES, 2);
+    // The rough is its own tone, and the fairway's stripes are the mown ground's.
+    expect(program).toMatch(
+      /vec3 oylCourse = mix\(diffuseColor\.rgb \* vec3\([^)]*\), oylMown, oylFairway\);/,
+    );
+    // Round each green, its approach is fairway whatever lane it is in.
+    const approach =
+      /oylFairway = max\(oylFairway, 1\.0 - smoothstep\(oylG\.z \+ ([\d.]+), oylG\.z \+ ([\d.]+), oylD\)\);/.exec(
+        program,
+      );
+    expect(approach).not.toBeNull();
+    expect((Number(approach?.[1]) + Number(approach?.[2])) / 2).toBeCloseTo(
+      GOLF_APPROACH_METRES,
+      9,
+    );
+    // And the stripes are further apart than the 1.22 and 0.8 the owner held.
+    expect(PARK_GROUND_LOOK.stripePale - PARK_GROUND_LOOK.stripeDeep).toBeGreaterThan(0.42);
   });
 });
