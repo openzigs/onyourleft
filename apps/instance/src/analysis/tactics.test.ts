@@ -172,7 +172,11 @@ describe('the race state and the answer, as the spike builds and reads them (#27
       format: { properties: { bots: { items: { properties: Record<string, unknown> } } } };
       messages: { content: string }[];
     };
-    expect(Object.keys(body.format.properties.bots.items.properties)).toEqual(['bot', 'move']);
+    expect(Object.keys(body.format.properties.bots.items.properties)).toEqual([
+      'bot',
+      'move',
+      'effort',
+    ]);
     for (const field of ['quietS', 'attackOpen', 'ahead', 'aheadMove', 'secondsInMove']) {
       expect(body.messages[1]?.content).toContain(`"${field}"`);
     }

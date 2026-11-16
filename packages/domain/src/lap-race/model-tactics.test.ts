@@ -97,7 +97,7 @@ describe('the race state the spike builds since #2708 (#2709)', () => {
       properties: { bots: { items: { properties: Record<string, unknown> } } };
       additionalProperties: boolean;
     };
-    expect(Object.keys(format.properties.bots.items.properties)).toEqual(['bot', 'move']);
+    expect(Object.keys(format.properties.bots.items.properties)).toEqual(['bot', 'move', 'effort']);
     expect(format.additionalProperties).toBe(false);
     expect(read({ bots: [{ bot: 1, move: 'follow', target: 'rider' }] }).ok).toBe(true);
   });
@@ -179,6 +179,31 @@ describe('a model tactics answer (#2709, ADR 0071 D-3.2)', () => {
     });
   });
 
+  it('reads an effort from the closed list, and refuses a number or a word outside it', () => {
+    expect(read({ bots: [{ bot: 1, move: 'attack', effort: 'all-out' }] })).toEqual({
+      ok: true,
+      moves: [{ bot: 1, move: 'attack', effort: 'all-out' }],
+    });
+    expect(read({ bots: [{ bot: 1, move: 'attack', effort: null }] })).toEqual({
+      ok: true,
+      moves: [{ bot: 1, move: 'attack' }],
+    });
+    for (const effort of [900, 'max', '']) {
+      expect(read({ bots: [{ bot: 1, move: 'attack', effort }] })).toEqual({
+        ok: false,
+        reason: 'bad-effort',
+      });
+    }
+  });
+
+  it('asks the model for an effort in the format, and never makes it required', () => {
+    const format = JSON.stringify(modelTacticsAnswerFormat([0, 1]));
+    expect(format).toContain(
+      '"effort":{"type":"string","enum":["easy","tempo","threshold","all-out"]}',
+    );
+    expect(format).toContain('"required":["bot","move"]');
+  });
+
   it('is nothing for text that is not JSON, not an object, or not a list', () => {
     expect(read('attack!')).toEqual({ ok: false, reason: 'not-json' });
     expect(read('[]')).toEqual({ ok: false, reason: 'not-an-object' });
@@ -202,7 +227,12 @@ describe('a model tactics answer (#2709, ADR 0071 D-3.2)', () => {
       properties: { bots: { items: { properties: Record<string, unknown> } } };
       additionalProperties: boolean;
     };
-    expect(Object.keys(schema.properties.bots.items.properties)).toEqual(['bot', 'move', 'target']);
+    expect(Object.keys(schema.properties.bots.items.properties)).toEqual([
+      'bot',
+      'move',
+      'effort',
+      'target',
+    ]);
     expect(schema.additionalProperties).toBe(false);
     expect(JSON.stringify(schema)).toContain('"enum":[0,2]');
   });

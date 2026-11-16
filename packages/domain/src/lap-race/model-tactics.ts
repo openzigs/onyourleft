@@ -36,7 +36,7 @@
  */
 
 import { BOT_ARCHETYPES, type BotArchetype } from './archetype';
-import { BOT_TACTICS, type BotTactic } from './tactics';
+import { BOT_EFFORTS, BOT_TACTICS, type BotEffort, type BotTactic } from './tactics';
 
 /**
  * The most bots a model race has: **7**, the lap race's own most
@@ -123,6 +123,8 @@ export interface ModelTacticsMove {
   readonly bot: number;
   readonly move: BotTactic;
   readonly target?: ModelTacticsTarget;
+  /** How hard to ride it, from a closed list, never a number (ADR 0073 D-2.5, #2710). Absent: the move's own. */
+  readonly effort?: BotEffort;
 }
 
 /** Why an answer was read as no decision at all. A closed list (ADR 0071 D-4.2's `invalid`). */
@@ -135,7 +137,8 @@ export type ModelTacticsInvalid =
   | 'bad-bot'
   | 'duplicate-bot'
   | 'bad-move'
-  | 'bad-target';
+  | 'bad-target'
+  | 'bad-effort';
 
 /** An answer, read. */
 export type ModelTacticsAnswer =
@@ -181,6 +184,7 @@ export function modelTacticsAnswerSchema(
           properties: {
             bot: { type: 'integer', enum: [...seats] },
             move: { type: 'string', enum: [...BOT_TACTICS] },
+            effort: { type: 'string', enum: [...BOT_EFFORTS] },
             target: {
               anyOf: [
                 { type: 'string', enum: ['rider'] },
@@ -219,6 +223,7 @@ export function modelTacticsAnswerFormat(
           properties: {
             bot: { type: 'integer', enum: [...seats] },
             move: { type: 'string', enum: [...BOT_TACTICS] },
+            effort: { type: 'string', enum: [...BOT_EFFORTS] },
           },
           required: ['bot', 'move'],
           additionalProperties: false,
@@ -231,7 +236,7 @@ export function modelTacticsAnswerFormat(
 }
 
 const ANSWER_KEYS: ReadonlySet<string> = new Set(['bots']);
-const MOVE_KEYS: ReadonlySet<string> = new Set(['bot', 'move', 'target']);
+const MOVE_KEYS: ReadonlySet<string> = new Set(['bot', 'move', 'target', 'effort']);
 
 /**
  * Read a model's answer for a field of `seats`: every move it names, or why
@@ -261,7 +266,7 @@ export function readModelTacticsAnswer(text: string, seats: readonly number[]): 
     if (Object.keys(entry).some((key) => !MOVE_KEYS.has(key))) {
       return { ok: false, reason: 'unknown-key' };
     }
-    const { bot, move, target } = entry;
+    const { bot, move, target, effort } = entry;
     if (!isSeat(bot)) return { ok: false, reason: 'bad-bot' };
     if (named.has(bot)) return { ok: false, reason: 'duplicate-bot' };
     named.add(bot);
@@ -272,11 +277,20 @@ export function readModelTacticsAnswer(text: string, seats: readonly number[]): 
     if (target !== undefined && target !== null && target !== 'rider' && !isSeat(target)) {
       return { ok: false, reason: 'bad-target' };
     }
-    moves.push(
-      target === undefined || target === null
-        ? { bot, move: move as BotTactic }
-        : { bot, move: move as BotTactic, target },
-    );
+    // A `null` effort is no effort, as an absent one is.
+    if (
+      effort !== undefined &&
+      effort !== null &&
+      !(typeof effort === 'string' && (BOT_EFFORTS as readonly string[]).includes(effort))
+    ) {
+      return { ok: false, reason: 'bad-effort' };
+    }
+    moves.push({
+      bot,
+      move: move as BotTactic,
+      ...(target === undefined || target === null ? {} : { target }),
+      ...(effort === undefined || effort === null ? {} : { effort: effort as BotEffort }),
+    });
   }
   return { ok: true, moves };
 }

@@ -292,6 +292,14 @@ describe('ADR 0071 D-3.6’s strategy rules, behind the seam', () => {
     expect(ADR_0071_MOVE_STRATEGY(ask({ readToLineMetres: launch + 0.5 }))).toBeUndefined();
   });
 
+  it('never ends a kick a bot is already in, whatever it reads the line as', () => {
+    const kicking = { tactic: 'kick' as const, sinceMs: 50_000, window: 59 };
+    expect(ADR_0071_MOVE_STRATEGY(ask({ tactics: kicking }))).toBe('launch');
+    expect(ADR_0071_MOVE_STRATEGY(ask({ tactics: kicking, move: 'follow', target: 1 }))).toBe(
+      'launch',
+    );
+  });
+
   it('refuses a kick outside the launch, and a spend under the W′ floor', () => {
     expect(ADR_0071_MOVE_STRATEGY(ask({ move: 'kick' }))).toBe('kick-closed');
     const low = BOT_TACTIC_WBAL_FLOOR - 0.01;
@@ -365,6 +373,39 @@ describe('the launch band reads the line as seeded decideTactic does (#2705)', (
     const trueToLine = launch - misread / 2;
     expect(trueToLine).toBeLessThan(launch);
     expect(outcomeAt(seat, atMs, trueToLine)).toBe('applied');
+  });
+});
+
+describe('an effort rides through the tactics memory', () => {
+  it('hands the bot the effort with the move, and none with a move that names none', () => {
+    const bots = IDS.map((id) => bot(id));
+    const withEffort = applyModelMoves(
+      raceAt(60_000, { rider: 0 }),
+      bots,
+      [{ bot: 0, move: 'attack', effort: 'tempo' }],
+      SEED,
+    );
+    expect(withEffort.bots[0]?.tactics.effort).toBe('tempo');
+    const without = applyModelMoves(
+      raceAt(60_000, { rider: 0 }),
+      bots,
+      [{ bot: 0, move: 'attack' }],
+      SEED,
+    );
+    expect(without.bots[0]?.tactics.effort).toBeUndefined();
+  });
+
+  it('keeps an effort through a stored log', () => {
+    const entry: ModelTacticsLogEntry = {
+      askedAtMs: 4_000,
+      arrivedAtMs: 4_100,
+      outcome: 'decision',
+      moves: [{ bot: 0, move: 'attack', effort: 'easy' }],
+    };
+    expect(readModelTacticsLogEntry(JSON.parse(JSON.stringify(entry)))).toEqual(entry);
+    expect(
+      readModelTacticsLogEntry({ ...entry, moves: [{ bot: 0, move: 'attack', effort: 900 }] }),
+    ).toBeUndefined();
   });
 });
 

@@ -575,12 +575,6 @@ export interface RideFacts {
    */
   readonly workoutBlocks?: readonly WorkoutBlockFact[];
   /**
-   * `true` when the rider rode at least the drafted share of this ride's
-   * distance in the bot pacer's or their own ghost's draft — #2451, ADR 0066
-   * D-5.3 and D-5.6. Known only while riding, like {@link workoutFinished};
-   * absent for a ride that was not drafted, and for one brought in from a file.
-   */
-  /**
    * The races with AI bots this ride was ridden in, in the order they ended —
    * #2710, ADR 0071 D-4.4: each one's seed, bot-code version, decision log and
    * the rider's own input at every race tick, so the race replays under the
@@ -592,6 +586,12 @@ export interface RideFacts {
    * in and on the way out, as for {@link races}. Since schema version 22.
    */
   readonly lapRaces?: readonly LapRaceModelRecord[];
+  /**
+   * `true` when the rider rode at least the drafted share of this ride's
+   * distance in the bot pacer's or their own ghost's draft — #2451, ADR 0066
+   * D-5.3 and D-5.6. Known only while riding, like {@link workoutFinished};
+   * absent for a ride that was not drafted, and for one brought in from a file.
+   */
   readonly drafted?: boolean;
   /**
    * When, on the recording's own clock, the rider was in that draft — #2451,

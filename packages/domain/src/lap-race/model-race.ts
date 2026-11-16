@@ -57,12 +57,14 @@
 import { botTacticsMisjudgement, BOT_TACTICS_WINDOW_MS, type BotArchetype } from './archetype';
 import type { ItemRaceState } from './items';
 import {
+  BOT_EFFORTS,
   BOT_TACTICS,
   BOT_TACTIC_ATTACK_MS,
   BOT_TACTIC_FLYER_LAPS,
   BOT_TACTIC_FLYER_WBAL_SHARE,
   BOT_TACTIC_WBAL_FLOOR,
   botLaunchMetres,
+  type BotEffort,
   type BotTactic,
   type TacticMemory,
 } from './tactics';
@@ -145,6 +147,7 @@ export const MODEL_TACTICS_LOG_REASONS: readonly ModelTacticsLogReason[] = [
   'duplicate-bot',
   'bad-move',
   'bad-target',
+  'bad-effort',
   'local_unavailable',
   'tactics_consent_required',
   'tactics_busy',
@@ -247,8 +250,9 @@ export type ModelMoveStrategy = (ask: ModelMoveAsk) => ModelMoveStrategyRefusal 
 /**
  * ADR 0071 D-3.6's strategy rules, the ones a model race rides today:
  *
- * - inside its launch distance, as it reads the line, a bot sprints its own
- *   seeded way: the kick is never the model's to time;
+ * - inside its launch distance, as it reads the line, or already in its kick,
+ *   a bot sprints its own seeded way: the kick is never the model's to time
+ *   or to end;
  * - an `attack` or `chase` under `BOT_TACTIC_WBAL_FLOOR` of its W′ is refused;
  * - a `kick` outside its launch is refused;
  * - a `flyer` before the last `BOT_TACTIC_FLYER_LAPS` laps, or under
@@ -259,6 +263,10 @@ export type ModelMoveStrategy = (ask: ModelMoveAsk) => ModelMoveStrategyRefusal 
  */
 export const ADR_0071_MOVE_STRATEGY: ModelMoveStrategy = (ask) => {
   if (ask.readToLineMetres <= botLaunchMetres(ask.archetype)) return 'launch';
+  // A bot already in its kick holds it: the line it misreads is redrawn every
+  // window, so it can read itself outside its launch a window later, and the
+  // kick is never the model's to end.
+  if (ask.tactics.tactic === 'kick') return 'launch';
   switch (ask.move) {
     case 'kick':
       return 'kick-closed';
@@ -396,6 +404,7 @@ export function applyModelMoves<B extends ModelRaceBot>(
         tactic: move.move,
         sinceMs: kept ? (bot.tactics.sinceMs ?? race.atMs) : race.atMs,
         window,
+        ...(move.effort === undefined ? {} : { effort: move.effort }),
       },
     };
   });
@@ -417,7 +426,7 @@ const ENTRY_KEYS: ReadonlySet<string> = new Set([
   'moves',
   'reason',
 ]);
-const MOVE_KEYS: ReadonlySet<string> = new Set(['bot', 'move', 'target']);
+const MOVE_KEYS: ReadonlySet<string> = new Set(['bot', 'move', 'target', 'effort']);
 
 const isTime = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -427,14 +436,24 @@ const isSeat = (value: unknown): value is number =>
 
 function moveOf(value: unknown): ModelTacticsMove | undefined {
   if (!isRecord(value) || Object.keys(value).some((key) => !MOVE_KEYS.has(key))) return undefined;
-  const { bot, move, target } = value;
+  const { bot, move, target, effort } = value;
   if (!isSeat(bot)) return undefined;
   if (typeof move !== 'string' || !(BOT_TACTICS as readonly string[]).includes(move)) {
     return undefined;
   }
-  if (target === undefined) return { bot, move: move as BotTactic };
-  if (target !== 'rider' && !isSeat(target)) return undefined;
-  return { bot, move: move as BotTactic, target };
+  if (
+    effort !== undefined &&
+    !(typeof effort === 'string' && (BOT_EFFORTS as readonly string[]).includes(effort))
+  ) {
+    return undefined;
+  }
+  if (target !== undefined && target !== 'rider' && !isSeat(target)) return undefined;
+  return {
+    bot,
+    move: move as BotTactic,
+    ...(target === undefined ? {} : { target }),
+    ...(effort === undefined ? {} : { effort: effort as BotEffort }),
+  };
 }
 
 /**

@@ -194,6 +194,13 @@ export interface RaceView {
 /** What a bot's tactics remember between calls of one race: nothing stored, nothing recorded. */
 export interface TacticMemory {
   readonly tactic: BotTactic;
+  /**
+   * The effort a model asked this move be ridden at (ADR 0073 D-2.5, #2710),
+   * or absent: the move's own target. Only `model-race.ts`
+   * §`applyModelMoves` writes it, and `decideTactic` drops it with the
+   * window it was chosen in, so a seeded choice never carries one.
+   */
+  readonly effort?: BotEffort;
   /** When it took up {@link tactic}, ms of race time, or `null` on the line. */
   readonly sinceMs: number | null;
   /** The decision window it last chose in, or `null` before its first choice. */
@@ -321,6 +328,26 @@ export const BOT_TACTIC_CHASE_SURGE = 0.15;
 
 /** A bot on a flyer rides this far over CP: **0.1**. */
 export const BOT_TACTIC_FLYER_SURGE = 0.1;
+
+/**
+ * The effort levels a model may ask a move be ridden at (ADR 0073 D-2.5): a
+ * closed list, never a number. `all-out` is the most the body allows at that
+ * instant, `wbal.ts` §`spendableWatts`' peak; the other three are the fixed
+ * shares of CP in {@link BOT_EFFORT_CP_SHARE}.
+ */
+export const BOT_EFFORTS = ['easy', 'tempo', 'threshold', 'all-out'] as const;
+
+/** One of {@link BOT_EFFORTS}. */
+export type BotEffort = (typeof BOT_EFFORTS)[number];
+
+/**
+ * What `easy`, `tempo` and `threshold` ask, as a share of CP: **0.75**, **0.9**
+ * and **1**. ⚠️ Feel numbers for the owner, in the order of the list. They are
+ * asked and then capped by `spendableWatts` like every target, so an effort
+ * can never take a bot over what its body allows.
+ */
+export const BOT_EFFORT_CP_SHARE: Readonly<Record<Exclude<BotEffort, 'all-out'>, number>> =
+  Object.freeze({ easy: 0.75, tempo: 0.9, threshold: 1 });
 
 /** A recovering bot's target, as a share of CP: **0.85**. */
 export const BOT_TACTIC_RECOVER_CP_SHARE = 0.85;
@@ -517,8 +544,21 @@ function wheelWatts(view: RaceView): number | null {
 }
 
 /** What a state asks for, watts, before the capacity caps it: the wheel's where it holds one. */
-function wanted(tactic: BotTactic, view: RaceView, wheel: number | null): number {
+function wanted(
+  tactic: BotTactic,
+  view: RaceView,
+  wheel: number | null,
+  effort: BotEffort | undefined,
+): number {
   const cp = view.capacity.cpWatts;
+  // ADR 0073 D-2.5: an effort replaces the target only where the bot sets its
+  // own pace: `attack`, `chase`, `flyer`, `kick`, and a `sit-in` or `follow`
+  // with no wheel to hold (the front: decided, #2710, because the bot is then
+  // setting its own pace). On a wheel the wheel sets it, and `recover`'s
+  // target stands.
+  if (effort !== undefined && tactic !== 'recover' && wheel === null) {
+    return effort === 'all-out' ? view.capacity.peakWatts : cp * BOT_EFFORT_CP_SHARE[effort];
+  }
   switch (tactic) {
     case 'sit-in':
       return wheel ?? cp;
@@ -614,7 +654,7 @@ export function decideTactic(
   const targetWatts = spendableWatts(
     view.capacity,
     view.energy,
-    wanted(tactic, view, wheel),
+    wanted(tactic, view, wheel, next.effort),
     0,
     floor,
   );

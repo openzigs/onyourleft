@@ -33,7 +33,7 @@ import {
 } from '@onyourleft/domain';
 
 /** Which prompt this is, for a measurement to name: raised with every change to the words below. */
-export const TACTICS_PROMPT_VERSION = 'tactics-2';
+export const TACTICS_PROMPT_VERSION = 'tactics-3';
 
 /** The most a decision may write, tokens: seven moves with targets are about 150 (spike 0039: 73 typical). */
 export const TACTICS_MOST_TOKENS = 400;
@@ -54,6 +54,7 @@ export const TACTICS_SYSTEM = [
   '- "recover": ease off to rebuild energy, when "wbal" is under 0.5.',
   '- "flyer": a long effort off the front instead of an attack, when "lapsLeft" is 2 or less: the one bot that goes when "attackOpen" is true may go on a flyer if its "wbal" is 0.6 or more. A bot whose "move" is already "flyer" keeps going, whatever "attackOpen" says, while its "wbal" is 0.6 or more.',
   '- "kick": the sprint for the line, only when "toLineM" is under "launchM".',
+  'Each move may also carry an "effort", how hard the bot rides it: "easy", "tempo", "threshold" or "all-out". Leave it out to ride the move as it is. An effort changes nothing on "sit-in" or "follow" behind a wheel, or on "recover". Use "all-out" sparingly, for a decisive attack, and "easy" or "tempo" to save energy.',
   'Styles: a climber goes on climbs, an attacker goes on the flat, a sprinter sits in and waits for the kick, a rouleur rides steadily and chases.',
   'Answer with JSON only, in the schema given.',
 ].join('\n');

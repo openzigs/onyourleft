@@ -65,7 +65,7 @@ import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
-import type { LapRaceModelRecord } from '@onyourleft/domain';
+import type { BotEffort, LapRaceModelRecord } from '@onyourleft/domain';
 
 import { riderMassFor } from '../athlete/mass';
 import { createRideController } from '../ride/controller';
@@ -161,6 +161,8 @@ const modelMode = {
   on: false,
   decided: 0,
   kept: [] as LapRaceModelRecord[],
+  /** The effort every bot is asked to ride its attack at, or none (ADR 0073 D-2.5). */
+  effort: undefined as BotEffort | undefined,
 };
 
 const ATTACKING: ModelTacticsPort = {
@@ -178,7 +180,13 @@ const ATTACKING: ModelTacticsPort = {
     modelMode.decided += 1;
     return Promise.resolve({
       kind: 'answer',
-      body: { bots: input.bots.map((view) => ({ bot: view.bot, move: 'attack' })) },
+      body: {
+        bots: input.bots.map((view) => ({
+          bot: view.bot,
+          move: 'attack',
+          ...(modelMode.effort === undefined ? {} : { effort: modelMode.effort }),
+        })),
+      },
     });
   },
   endTacticsRace: () => Promise.resolve(),
@@ -893,6 +901,23 @@ describe('a solo lap race inside a game ride — #1906', () => {
     expect(model.writes.length).toBeGreaterThan(30);
     expect(model.writes).toStrictEqual(ordinary.writes);
   });
+
+  it.each(['easy', 'tempo', 'threshold', 'all-out'] as const)(
+    'with AI bots told to ride every attack %s, sends the trainer the same writes as an ordinary ride (ADR 0073 D-2.5)',
+    async (effort) => {
+      const ordinary = await plain();
+      modelMode.effort = effort;
+      try {
+        const model = await inModelMode(() => rideOnce(ITEMS_OFF, { blind: true }));
+        expect(modelMode.decided).toBeGreaterThan(10);
+        expect(modelMode.kept[0]?.log.some((e) => e.moves?.[0]?.effort === effort)).toBe(true);
+        expect(model.writes.length).toBeGreaterThan(30);
+        expect(model.writes).toStrictEqual(ordinary.writes);
+      } finally {
+        modelMode.effort = undefined;
+      }
+    },
+  );
 
   it('with AI bots and the draft on, sends the trainer an ordinary ride’s writes at the race’s k, and the model moved the k (ADR 0067 D-3.6, ADR 0071 D-8.2)', async () => {
     const frames = COUNTDOWN_FRAMES + DRAFTED_FRAMES;
