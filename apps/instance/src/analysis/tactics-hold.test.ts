@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { fakeTimers } from './jobs-testing.ts';
 import { createRaceHold, TACTICS_HOLD_CEILING_MS, TACTICS_HOLD_LAPSE_MS } from './tactics-hold.ts';
 
-function held(options: { lapseMs?: number; ceilingMs?: number } = {}) {
+function held(options: { lapseMs?: number; ceilingMs?: number; spentQuietMs?: number } = {}) {
   const timers = fakeTimers();
   const hold = createRaceHold({ now: timers.now, timers: timers.timers, ...options });
   let released = 0;
@@ -82,8 +82,8 @@ describe('the model slot (#2709, ADR 0071 D-6)', () => {
     expect(hold.claim('b')).toBe('held');
   });
 
-  it('keeps a ceiling-ended athlete busy while they keep asking, an end included, until they are quiet a lapse', () => {
-    const { hold, timers } = held({ lapseMs: 1_000, ceilingMs: 5_000 });
+  it('keeps a ceiling-ended athlete busy while they keep asking, an end included, until they are quiet a whole spent-quiet period, not a lapse', () => {
+    const { hold, timers } = held({ lapseMs: 1_000, ceilingMs: 5_000, spentQuietMs: 4_000 });
     hold.claim('a');
     for (let at = 0; at < 5_000; at += 500) {
       timers.advance(500);
@@ -96,8 +96,13 @@ describe('the model slot (#2709, ADR 0071 D-6)', () => {
     timers.advance(999);
     expect(hold.claim('a')).toBe('busy');
     expect(hold.holding()).toBe(false);
-    // Quiet for a whole lapse: a new race may hold it.
+    // Quiet for a lapse is not enough to claim afresh (each busy claim above counts as asking).
     timers.advance(1_000);
+    expect(hold.holding()).toBe(false);
+    timers.advance(2_999);
+    // The busy claim at 999 ms is the last ask: it was quiet 3 999 ms.
+    expect(hold.claim('a')).toBe('busy');
+    timers.advance(4_000);
     expect(hold.claim('a')).toBe('held');
   });
 

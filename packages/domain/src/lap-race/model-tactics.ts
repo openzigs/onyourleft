@@ -72,6 +72,10 @@ export interface ModelTacticsBotView {
   readonly style: BotArchetype;
   /** Its place in the race, from 1. */
   readonly rank: number;
+  /** Who is directly ahead: `"rider"`, another bot's seat, or `null` when it leads (#2708). */
+  readonly ahead: 'rider' | number | null;
+  /** The move of the bot directly ahead, or `null` when that is the rider or nobody (#2708). */
+  readonly aheadMove: BotTactic | null;
   /** Metres to the racer directly ahead, or `null` when it leads. */
   readonly gapAheadM: number | null;
   /** Metres to the racer directly behind, or `null` when it is last. */
@@ -81,6 +85,8 @@ export interface ModelTacticsBotView {
   readonly drafting: boolean;
   /** The move it is riding now. */
   readonly move: BotTactic;
+  /** Whole seconds it has held {@link move}, 0 on the line (#2708). */
+  readonly secondsInMove: number;
   readonly lapsLeft: number;
   /** Metres to the finish line. */
   readonly toLineM: number;
@@ -97,6 +103,10 @@ export interface ModelTacticsInput {
   readonly laps: number;
   /** How many racers are still racing, the rider included. */
   readonly field: number;
+  /** Whole seconds since any bot was last attacking or on a flyer, or since the start (#2708). */
+  readonly quietS: number;
+  /** Whether a new attack or flyer may start: the lull is long enough (#2708). */
+  readonly attackOpen: boolean;
   readonly rider: {
     /** The rider's place, from 1; 0 when the rider is not racing. */
     readonly rank: number;
@@ -188,6 +198,38 @@ export function modelTacticsAnswerSchema(
   };
 }
 
+/**
+ * What the model server's structured output holds the model to:
+ * {@link modelTacticsAnswerSchema} with **no `target`** (#2708). A `follow` or
+ * `chase` acts on the racer directly ahead when it is ridden, seconds after
+ * the ask, and by then that need not be the racer that was ahead when the
+ * model read the race, so the model is not asked to name one. The reader
+ * still accepts a target that arrives anyway.
+ */
+export function modelTacticsAnswerFormat(
+  seats: readonly number[],
+): Readonly<Record<string, unknown>> {
+  return {
+    type: 'object',
+    properties: {
+      bots: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            bot: { type: 'integer', enum: [...seats] },
+            move: { type: 'string', enum: [...BOT_TACTICS] },
+          },
+          required: ['bot', 'move'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['bots'],
+    additionalProperties: false,
+  };
+}
+
 const ANSWER_KEYS: ReadonlySet<string> = new Set(['bots']);
 const MOVE_KEYS: ReadonlySet<string> = new Set(['bot', 'move', 'target']);
 
@@ -243,18 +285,23 @@ const VIEW_KEYS = [
   'bot',
   'style',
   'rank',
+  'ahead',
+  'aheadMove',
   'gapAheadM',
   'gapBehindM',
   'wbal',
   'drafting',
   'move',
+  'secondsInMove',
   'lapsLeft',
   'toLineM',
   'launchM',
   'gradeAheadPct',
   'riderGapM',
 ] as const;
-const INPUT_KEYS = ['laps', 'field', 'rider', 'bots'] as const;
+const INPUT_KEYS = ['laps', 'field', 'quietS', 'attackOpen', 'rider', 'bots'] as const;
+/** The most seconds a race state may say: a day. */
+const MOST_SECONDS = 86_400;
 const RIDER_KEYS = ['rank', 'wPerKg'] as const;
 
 const wholeIn = (value: unknown, least: number, most: number): value is number =>
@@ -290,6 +337,20 @@ function viewProblem(view: unknown, at: string): ModelTacticsInputProblem | unde
       'must be an archetype',
     ],
     ['rank', wholeIn(view.rank, 1, MODEL_TACTICS_MOST_SEATS + 1), 'must be a place in the field'],
+    [
+      'ahead',
+      view.ahead === null ||
+        view.ahead === 'rider' ||
+        wholeIn(view.ahead, 0, MODEL_TACTICS_MOST_SEATS - 1),
+      'must be "rider", a seat, or null',
+    ],
+    [
+      'aheadMove',
+      view.aheadMove === null ||
+        (typeof view.aheadMove === 'string' &&
+          (BOT_TACTICS as readonly string[]).includes(view.aheadMove)),
+      'must be one of the seven moves, or null',
+    ],
     ['gapAheadM', gap(view.gapAheadM), 'must be metres, or null'],
     ['gapBehindM', gap(view.gapBehindM), 'must be metres, or null'],
     ['wbal', numberIn(view.wbal, 0, 1), 'must be a share from 0 to 1'],
@@ -298,6 +359,11 @@ function viewProblem(view: unknown, at: string): ModelTacticsInputProblem | unde
       'move',
       typeof view.move === 'string' && (BOT_TACTICS as readonly string[]).includes(view.move),
       'must be one of the seven moves',
+    ],
+    [
+      'secondsInMove',
+      wholeIn(view.secondsInMove, 0, MOST_SECONDS),
+      'must be a whole number of seconds',
     ],
     ['lapsLeft', wholeIn(view.lapsLeft, 0, MOST_LAPS), 'must be a whole number of laps'],
     ['toLineM', metres(view.toLineM), 'must be metres'],
@@ -332,6 +398,10 @@ export function readModelTacticsInput(value: unknown): ModelTacticsInputRead {
   if (!wholeIn(value.field, 1, MODEL_TACTICS_MOST_SEATS + 1)) {
     return refuse('input.field', 'must be how many are racing');
   }
+  if (!wholeIn(value.quietS, 0, MOST_SECONDS)) {
+    return refuse('input.quietS', 'must be a whole number of seconds');
+  }
+  if (typeof value.attackOpen !== 'boolean') return refuse('input.attackOpen', 'must be a boolean');
   const rider = value.rider;
   if (!isRecord(rider)) return refuse('input.rider', 'must be an object');
   const riderKeys = keyProblem(rider, RIDER_KEYS, 'input.rider');

@@ -161,6 +161,38 @@ describe('a bot-tactics decision, read back as the app reads it (#2709)', () => 
   });
 });
 
+describe('the race state and the answer, as the spike builds and reads them (#2709, #2708)', () => {
+  it('asks the model for no target, and for the tuned prompt’s own fields', async () => {
+    const server = chatServer(() => ATTACK);
+    const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
+    const w = world as IdentityInstance;
+    await consentToTactics(w, riders[0]!.token);
+    expect((await decide(w, riders[0]!.token)).status).toBe(200);
+    const body = server.requests[0]?.body as {
+      format: { properties: { bots: { items: { properties: Record<string, unknown> } } } };
+      messages: { content: string }[];
+    };
+    expect(Object.keys(body.format.properties.bots.items.properties)).toEqual(['bot', 'move']);
+    for (const field of ['quietS', 'attackOpen', 'ahead', 'aheadMove', 'secondsInMove']) {
+      expect(body.messages[1]?.content).toContain(`"${field}"`);
+    }
+    for (const field of ['attackOpen', 'aheadMove', 'secondsInMove']) {
+      expect(body.messages[0]?.content).toContain(`"${field}"`);
+    }
+  });
+
+  it('reads the answer against the seats of the race it was asked about, not the seven', async () => {
+    // ATTACK names seat 3, a seat of a seven-bot race but not of this two-bot one.
+    const server = chatServer(() => ATTACK);
+    const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
+    const w = world as IdentityInstance;
+    await consentToTactics(w, riders[0]!.token);
+    const two = { ...TACTICS_INPUT, bots: TACTICS_INPUT.bots.slice(0, 2) };
+    expect(codeOf(await decide(w, riders[0]!.token, two))).toBe('tactics_invalid');
+    expect((await decide(w, riders[0]!.token)).status).toBe(200);
+  });
+});
+
 describe('over HTTP, to a stub Ollama on loopback (#2709)', () => {
   it('reaches /api/chat at the address the name resolves to, and refuses a name that resolves outside the local ranges', async () => {
     stub = await startOllamaStub({
@@ -386,6 +418,28 @@ describe('the warm-up (#2709, ADR 0071 D-6.5)', () => {
     expect(body.messages[1]?.content).toBe(JSON.stringify(WARM_UP_INPUT));
     // A second start of the same race warms nothing new while none is out, and refreshes the hold.
     expect((await w.call('POST', '/v1/analysis/tactics/start', { token })).status).toBe(202);
+  });
+
+  it('gives up on a model that never answers the warm-up, so a hung server does not keep it out', async () => {
+    let aborted = false;
+    const { riders } = await tacticsWorld(1, {
+      local: OFFERED,
+      warmUpWaitMs: 50,
+      fetch: (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true;
+            reject(new Error('aborted'));
+          });
+        }),
+    });
+    const w = world as IdentityInstance;
+    await consentToTactics(w, riders[0]!.token);
+    expect(
+      (await w.call('POST', '/v1/analysis/tactics/start', { token: riders[0]!.token })).status,
+    ).toBe(202);
+    await w.tactics.idle();
+    expect(aborted).toBe(true);
   });
 
   it('counts a start against the rider’s decisions, so a client in a loop cannot keep the model busy', async () => {

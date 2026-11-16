@@ -30,7 +30,7 @@
  *    from its first claim, so a client that keeps sending requests cannot
  *    hold every rider's write-ups and every other rider's model races
  *    indefinitely. ⚠️ **A hold its ceiling ended is SPENT**: that athlete's
- *    claims are `busy` until they have sent nothing for a whole lapse, and
+ *    claims are `busy` until they have sent nothing for {@link TACTICS_SPENT_QUIET_MS}, and
  *    an {@link RaceHold.end} does not clear it — so a client cannot end and
  *    claim again to start a fresh ceiling while it is still sending. Another
  *    athlete may claim the slot at once.
@@ -42,6 +42,7 @@
  * Every timer is injected, so a test moves the clock by hand.
  */
 
+import { AGENT_RUN_MILLISECONDS } from './agent.ts';
 import { PLATFORM_TIMERS, type JobTimers } from './jobs.ts';
 
 /**
@@ -72,6 +73,16 @@ export const TACTICS_HOLD_LAPSE_MS = 30_000;
  * seeded tactics from there (D-7), and loses nothing else.
  */
 export const TACTICS_HOLD_CEILING_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * How long a spent athlete must have sent nothing before they may claim
+ * again: **10 minutes**, a write-up's own run budget (`agent.ts`
+ * §`AGENT_RUN_MILLISECONDS`). A client that goes quiet for a few seconds at
+ * each ceiling would otherwise claim a fresh 2 hours, and the write-ups queued
+ * behind it would get a gap of about one claim. A whole run budget is the gap
+ * one queued write-up needs to run to its end.
+ */
+export const TACTICS_SPENT_QUIET_MS = AGENT_RUN_MILLISECONDS;
 
 /** What a claim answered: the slot is the caller's now, or somebody else's (or the caller's spent hold). */
 export type HoldClaim = 'held' | 'busy';
@@ -107,6 +118,8 @@ export interface RaceHoldOptions {
   readonly lapseMs?: number;
   /** {@link TACTICS_HOLD_CEILING_MS} unless a test's. */
   readonly ceilingMs?: number;
+  /** {@link TACTICS_SPENT_QUIET_MS} unless a test's. */
+  readonly spentQuietMs?: number;
 }
 
 interface Held {
@@ -120,6 +133,7 @@ export function createRaceHold(options: RaceHoldOptions): RaceHold {
   const timers = options.timers ?? PLATFORM_TIMERS;
   const lapseMs = options.lapseMs ?? TACTICS_HOLD_LAPSE_MS;
   const ceilingMs = options.ceilingMs ?? TACTICS_HOLD_CEILING_MS;
+  const spentQuietMs = options.spentQuietMs ?? TACTICS_SPENT_QUIET_MS;
   const listeners: (() => void)[] = [];
   let current: Held | undefined;
   /** Athletes whose hold its ceiling ended, and when each last asked. */
@@ -133,11 +147,11 @@ export function createRaceHold(options: RaceHoldOptions): RaceHold {
     for (const listener of listeners) listener();
   };
 
-  /** End the hold if its lapse or its ceiling has passed, and forget spent holds a lapse quiet. */
+  /** End the hold if its lapse or its ceiling has passed, and forget spent holds quiet for {@link TACTICS_SPENT_QUIET_MS}. */
   const settle = (): void => {
     const at = now();
     for (const [athleteId, lastAt] of spent) {
-      if (at - lastAt >= lapseMs) spent.delete(athleteId);
+      if (at - lastAt >= spentQuietMs) spent.delete(athleteId);
     }
     if (current === undefined) return;
     if (at - current.startedAt >= ceilingMs) {

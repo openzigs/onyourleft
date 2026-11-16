@@ -2166,7 +2166,7 @@ takes an athlete, and nothing unscreened is streamed or kept.
 
 #### Bot-tactics decisions and the model slot — #2709
 
-[ADR 0071](https://github.com/openzigs/onyourleft/pull/2711) D-3 to D-7. A device racing "AI bots"
+[ADR 0071](adr/0071-model-chosen-lap-race-bot-tactics-during-a-ride.md) D-3 to D-7. A device racing "AI bots"
 asks its instance for one decision at a time: `POST /v1/analysis/tactics/decide` with `{ input }`,
 `@onyourleft/domain` §`ModelTacticsInput` (seats, styles, ranks, gaps, W′ shares, drafting, moves,
 laps and metres to the line, launch distance, grade ahead, the rider's gap, rank and W/kg — no

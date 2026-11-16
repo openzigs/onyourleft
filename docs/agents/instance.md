@@ -181,9 +181,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `/v1/analysis/tactics/*`, sealed-only — a lap
                         race's bot moves from the LOCAL model only, under
                         the rider's consent naming its address (migration
-                        0046), no tools, `think: false`; and the model slot,
-                        while which the job worker claims re-plans only, so
-                        write-ups wait — docs/architecture.md §"Bot-tactics
+                        0046), no tools, `think: false`; and the model slot:
+                        while it is held the job worker claims re-plans
+                        only, so write-ups wait — docs/architecture.md §"Bot-tactics
                         decisions and the model slot — #2709".
                         Since #1251 `src/analysis/hosted-test.ts` is the
                         test question: `POST /v1/analysis/hosted/test`,

@@ -200,6 +200,7 @@ export {
   MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
   MODEL_TACTICS_INPUT_MOST_CHARACTERS,
   MODEL_TACTICS_MOST_SEATS,
+  modelTacticsAnswerFormat,
   modelTacticsAnswerSchema,
   modelTacticsSeats,
   readModelTacticsAnswer,

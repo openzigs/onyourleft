@@ -4,19 +4,21 @@
  * **What the local model is told, and asked, for one bot-tactics decision** —
  * #2709, ADR 0071 D-3 and D-5.7.
  *
- * ⚠️ **The prompt is spike 0039's, untuned**: `apps/web/tools/model-tactics-spike/ollama.ts`
- * §`MODEL_TACTICS_SYSTEM` as it was measured on 2026-11-16, which over-attacks
- * (spike 0039 §5). #2708 tunes it against the seeded harness; this file is
- * where the tuned text lands, and {@link TACTICS_PROMPT_VERSION} is raised with
- * it. Nothing in it names a rider, a place or a model (ADR 0031 D-4).
+ * The prompt is spike 0039's as #2708 tuned it
+ * (`apps/web/tools/model-tactics-spike/ollama.ts` §`MODEL_TACTICS_SYSTEM`), and
+ * {@link TACTICS_PROMPT_VERSION} is raised with every change to its words. It
+ * reads `quietS`, `attackOpen`, `ahead`, `aheadMove` and `secondsInMove` off
+ * the race state, and the answer is asked for **with no target** (#2708): a
+ * `follow` or `chase` goes to whoever is on the wheel ahead when it is ridden.
+ * Nothing in it names a rider, a place or a model (ADR 0031 D-4).
  *
  * The request is Ollama's own `/api/chat` (spike 0039 §2), because it is the
  * one spelling the spike measured of the two rules a tactics call needs:
  *
  * - **Reasoning off**: `think: false` (D-5.7). With it on, 3 of 3 spike calls
  *   spent every output token and returned no decision.
- * - **Held to the schema** by `format`, the answer's JSON Schema
- *   (`@onyourleft/domain` §`modelTacticsAnswerSchema`), and read again on
+ * - **Held to the schema** by `format`, the answer's JSON Schema without a target
+ *   (`@onyourleft/domain` §`modelTacticsAnswerFormat`), and read again on
  *   arrival, field by field (`tactics.ts`).
  *
  * And **no `tools` field** (D-3.3): one call, no agent loop, nothing the model
@@ -25,13 +27,13 @@
  */
 
 import {
-  modelTacticsAnswerSchema,
+  modelTacticsAnswerFormat,
   modelTacticsSeats,
   type ModelTacticsInput,
 } from '@onyourleft/domain';
 
 /** Which prompt this is, for a measurement to name: raised with every change to the words below. */
-export const TACTICS_PROMPT_VERSION = 'tactics-1';
+export const TACTICS_PROMPT_VERSION = 'tactics-2';
 
 /** The most a decision may write, tokens: seven moves with targets are about 150 (spike 0039: 73 typical). */
 export const TACTICS_MOST_TOKENS = 400;
@@ -39,22 +41,20 @@ export const TACTICS_MOST_TOKENS = 400;
 /** How long the model stays loaded after a call: spike 0039's 30 minutes, so a race never reloads it. */
 export const TACTICS_KEEP_ALIVE = '30m';
 
-/** What the model is told, once per call, before the race. Spike 0039's words, untuned (#2708). */
+/** What the model is told, once per call, before the race: spike 0039's #2708-tuned words, which say when each move is open in the input's own field names. */
 export const TACTICS_SYSTEM = [
   'You choose race tactics for the computer-controlled bots in a cycling lap race in a video game.',
-  'Every few seconds you get the race as JSON, and you answer with one move for each bot.',
+  'Every few seconds you get the race as JSON, and you answer with one move for each bot. Each move is ridden for the next few seconds.',
+  'Race like real amateur racers. Most of the time the bots sit in, and a race has only a few attacks, spaced out.',
   'The moves:',
-  '- "sit-in": ride in the group on the wheel ahead, saving energy. The default; most bots sit in most of the time, above all early.',
-  '- "follow": go with a move by the racer directly ahead.',
-  '- "attack": surge off the front for up to 20 seconds. Best in a lull or on a climb; most attacks are caught.',
-  '- "chase": bridge to the racer directly ahead when they are 30 to 200 m up the road.',
-  '- "recover": ease off to rebuild energy.',
-  '- "flyer": a long effort in the last two laps by a bot with energy to spare.',
-  '- "kick": the sprint for the line, only inside the bot\'s launch distance "launchM".',
-  'Each bot\'s energy "wbal" runs from 0 to 1. Attack and chase need 0.3 or more, flyer 0.6 or more. A bot that spends early fades.',
-  'Styles: a climber attacks on climbs ("gradeAheadPct" of 3 or more), an attacker goes early, a sprinter waits for the kick, a rouleur rides steadily.',
-  'Race like people race: vary it, make the rider work, and do not send every bot at once.',
-  'A target is optional and only for follow and chase: "rider" or a bot number, and only the racer directly ahead.',
+  '- "sit-in": ride in the group on the wheel ahead, saving energy. The default for every bot not doing something below.',
+  '- "follow": go with a move. When a bot\'s "aheadMove" is "attack" or "flyer" and its "gapAheadM" is under 50, it follows.',
+  '- "attack": surge off the front. A new attack starts only when "attackOpen" is true, and then only one bot starts it: a climber when its "gradeAheadPct" is 3 or more, otherwise an attacker, with "wbal" 0.7 or more. While "attackOpen" is false, no other bot starts an attack or a flyer. A bot whose "move" is already "attack" keeps attacking, whatever "attackOpen" says, until its "secondsInMove" is 15; then it sits in.',
+  '- "chase": bridge a real gap. Only when "gapAheadM" is 30 to 200. A bot that has chased for 20 s ("secondsInMove") and is still 30 m or more behind gives up and sits in.',
+  '- "recover": ease off to rebuild energy, when "wbal" is under 0.5.',
+  '- "flyer": a long effort off the front instead of an attack, when "lapsLeft" is 2 or less: the one bot that goes when "attackOpen" is true may go on a flyer if its "wbal" is 0.6 or more. A bot whose "move" is already "flyer" keeps going, whatever "attackOpen" says, while its "wbal" is 0.6 or more.',
+  '- "kick": the sprint for the line, only when "toLineM" is under "launchM".',
+  'Styles: a climber goes on climbs, an attacker goes on the flat, a sprinter sits in and waits for the kick, a rouleur rides steadily and chases.',
   'Answer with JSON only, in the schema given.',
 ].join('\n');
 
@@ -67,16 +67,21 @@ export const TACTICS_SYSTEM = [
 export const WARM_UP_INPUT: ModelTacticsInput = {
   laps: 3,
   field: 3,
+  quietS: 0,
+  attackOpen: false,
   rider: { rank: 2, wPerKg: null },
   bots: [0, 1].map((seat) => ({
     bot: seat,
     style: seat === 0 ? 'rouleur' : 'sprinter',
     rank: seat === 0 ? 1 : 3,
+    ahead: seat === 0 ? null : 'rider',
+    aheadMove: null,
     gapAheadM: seat === 0 ? null : 0.5,
     gapBehindM: seat === 0 ? 0.5 : null,
     wbal: 1,
     drafting: seat !== 0,
     move: 'sit-in',
+    secondsInMove: 0,
     lapsLeft: 3,
     toLineM: 1_800,
     launchM: 250,
@@ -99,7 +104,7 @@ export function tacticsRequest(
     model,
     stream: false,
     think: false,
-    format: modelTacticsAnswerSchema(modelTacticsSeats(input)),
+    format: modelTacticsAnswerFormat(modelTacticsSeats(input)),
     keep_alive: TACTICS_KEEP_ALIVE,
     options: { temperature: 0.6, num_predict: mostTokens },
     messages: [

@@ -14,6 +14,7 @@ import {
   MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
   MODEL_TACTICS_INPUT_MOST_CHARACTERS,
   MODEL_TACTICS_MOST_SEATS,
+  modelTacticsAnswerFormat,
   modelTacticsAnswerSchema,
   modelTacticsSeats,
   readModelTacticsAnswer,
@@ -32,11 +33,14 @@ const view = (bot: number, over: Partial<Record<keyof ModelTacticsBotView, unkno
   bot,
   style: 'rouleur',
   rank: bot + 1,
+  ahead: bot === 0 ? null : bot - 1,
+  aheadMove: bot === 0 ? null : 'sit-in',
   gapAheadM: bot === 0 ? null : 2.5,
   gapBehindM: 1.2,
   wbal: 0.8,
   drafting: true,
   move: 'sit-in',
+  secondsInMove: 12,
   lapsLeft: 3,
   toLineM: 1_800,
   launchM: 250,
@@ -48,9 +52,55 @@ const view = (bot: number, over: Partial<Record<keyof ModelTacticsBotView, unkno
 const input = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   laps: 3,
   field: 8,
+  quietS: 40,
+  attackOpen: true,
   rider: { rank: 4, wPerKg: 3.1 },
   bots: SEATS.map((seat) => view(seat)),
   ...over,
+});
+
+describe('the race state the spike builds since #2708 (#2709)', () => {
+  it('reads who is ahead, that bot’s move, the seconds held, the lull and whether an attack is open', () => {
+    const got = readModelTacticsInput(
+      input({
+        quietS: 12,
+        attackOpen: false,
+        bots: [
+          view(0, { ahead: 'rider', aheadMove: null }),
+          view(1, { ahead: 0, aheadMove: 'attack' }),
+        ],
+      }),
+    );
+    expect(got.ok).toBe(true);
+  });
+
+  it('refuses each of the five fields out of its range, naming it', () => {
+    const bot = (over: Record<string, unknown>, field: string) => {
+      const got = readModelTacticsInput(input({ bots: [view(0, over)] }));
+      expect(got.ok ? undefined : got.problem.field).toBe(`input.bots[0].${field}`);
+    };
+    bot({ ahead: 7 }, 'ahead');
+    bot({ ahead: 'Alex' }, 'ahead');
+    bot({ aheadMove: 'erg' }, 'aheadMove');
+    bot({ secondsInMove: -1 }, 'secondsInMove');
+    bot({ secondsInMove: 1.5 }, 'secondsInMove');
+    const top = (over: Record<string, unknown>) => {
+      const got = readModelTacticsInput(input(over));
+      return got.ok ? undefined : got.problem.field;
+    };
+    expect(top({ quietS: -1 })).toBe('input.quietS');
+    expect(top({ attackOpen: 'yes' })).toBe('input.attackOpen');
+  });
+
+  it('asks the model for no target, though a target that arrives is still read', () => {
+    const format = modelTacticsAnswerFormat([0, 2]) as {
+      properties: { bots: { items: { properties: Record<string, unknown> } } };
+      additionalProperties: boolean;
+    };
+    expect(Object.keys(format.properties.bots.items.properties)).toEqual(['bot', 'move']);
+    expect(format.additionalProperties).toBe(false);
+    expect(read({ bots: [{ bot: 1, move: 'follow', target: 'rider' }] }).ok).toBe(true);
+  });
 });
 
 describe('a model tactics answer (#2709, ADR 0071 D-3.2)', () => {
