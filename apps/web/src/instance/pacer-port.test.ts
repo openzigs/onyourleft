@@ -243,6 +243,7 @@ describe('what this device reads back from the instance (#2712)', () => {
     }
     expect(parsePacerReply(502, coded('tactics_invalid'))).toEqual({ kind: 'invalid' });
     expect(parsePacerReply(502, coded('tactics_failed'))).toEqual({ kind: 'failed' });
+    expect(parsePacerReply(429, coded('rate_limited'))).toEqual({ kind: 'failed' });
     expect(parsePacerReply(500, 'oops')).toEqual({ kind: 'failed' });
   });
 

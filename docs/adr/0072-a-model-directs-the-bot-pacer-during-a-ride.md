@@ -8,7 +8,7 @@
 - **Date**: 2026-11-16
 - **Deciders**: **the owner**, whose rulings of 2026-11-14 on #2616 and 2026-11-16 on #2712 are
   quoted in Context. **The author** decided what those leave open, and each such point is marked
-  *the author's choice* where it is made. D-9 lists the questions the author asks the owner to
+  *the author's choice* where it is made. D-10 lists the questions the author asks the owner to
   confirm or overrule
 - **Issue**: [#2712](https://github.com/openzigs/onyourleft/issues/2712), under the epic
   [#2706](https://github.com/openzigs/onyourleft/issues/2706). It applies
@@ -114,7 +114,7 @@ metric trademark and no medical wording.
    instance whether it offers this rider a local model before anything else.
 2. **A solo ride with a pacer only.** Never a room (there is no pacer in rooms, ruling Q18), never a
    lap race (a race rides without the pacer, #1971), never a simulated ride.
-3. **The consent is ADR 0071's, asked at this choice too** (*the author's choice*, D-9 R-3). It names
+3. **The consent is ADR 0071's, asked at this choice too** (*the author's choice*, D-10 R-3). It names
    a place: the rider's instance and its local model address, as the instance says them (ADR 0071
    D-5.2). It is recorded on the instance by the same route and checked on every pacer decision; a
    change of the address withdraws it (D-5.3); the rider can withdraw it at the same switch (D-5.4).
@@ -175,7 +175,7 @@ shown, and screened.
    **no medical wording** (ADR 0048 D-12's nine and a coach's health words: doctor, injury,
    illness, disease, diagnosis, symptom, pain, health); at least one letter. Invisible characters are
    removed before the rules are read. **A line that fails makes the whole answer invalid**: a model
-   that wrote a bad line is not trusted for its direction either (*the author's choice*, D-9 R-5).
+   that wrote a bad line is not trusted for its direction either (*the author's choice*, D-10 R-5).
 3. **Shown on the HUD for 8 s of ride**, labelled *"Your pacer"*, and **spoken only with
    announcements on**: it is the announcer's lowest event (`announce.ts` rank 5i), never an
    always-spoken one, and any other event in the window wins.
@@ -196,7 +196,7 @@ shown, and screened.
    log, and raised by any change that alters the pacer's power for some route, plan and log.
 4. **Stored on the device, with the ride, as `RideFacts.pacerModel`**: an optional ride fact, which
    `packages/store` does not version, rather than ADR 0071 D-4.4's new schema version (*the author's
-   choice*, D-9 R-6). A log that does not read is dropped whole, never the ride. The instance keeps
+   choice*, D-10 R-6). A log that does not read is dropped whole, never the ride. The instance keeps
    no copy (ADR 0036 D-3(c)). A recording that carries two directed game rides keeps the last one's
    log.
 5. **The ride never waits for the model.** One ask is out at a time; frames run at their rate.

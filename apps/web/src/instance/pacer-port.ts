@@ -111,12 +111,16 @@ export function parsePacerStatus(body: unknown): PacerStatus {
   return { kind: 'offered', instance, modelAddress, consented };
 }
 
-/** The codes an instance refuses a decision with before a model is called. */
+/**
+ * The codes an instance refuses a decision with before a model is called.
+ * `rate_limited` is not one: it answers a re-ask while the instance still waits
+ * on the previous one (a cold model load), which one slow answer must not turn
+ * into the pacer being off for the rest of the ride.
+ */
 const REFUSALS: ReadonlySet<unknown> = new Set([
   'local_unavailable',
   'tactics_consent_required',
   'tactics_busy',
-  'rate_limited',
   'validation_failed',
 ]);
 

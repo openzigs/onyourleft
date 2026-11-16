@@ -61,7 +61,8 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { endRideAnswer } from './end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer } from './port';
-import { rollingRoute } from './route-fixtures-testing';
+import type { LapRaceChoice } from './lap-race/choice';
+import { circuitRoute, rollingRoute } from './route-fixtures-testing';
 import type { GameState } from './simulation';
 import { SOLO_DRAFT_STORAGE_KEY } from './solo-draft-preference';
 import { gameTrainerPortOver } from './trainer-port';
@@ -539,5 +540,53 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     expect(directed.release.map((write) => write.bytes)).toEqual(
       plain.release.map((write) => write.bytes),
     );
+  });
+
+  describe('never in a lap race (ADR 0072 D-1.2)', () => {
+    const RACE: LapRaceChoice = { laps: 2, bots: 1, tier: 'brisk', itemsOn: false };
+
+    /** A loop ridden with the AI pacer consented to, raced or not; what the instance was asked. */
+    async function askedOnLoop(race: LapRaceChoice | undefined): Promise<Asked> {
+      const asked: Asked = { inputs: [], starts: 0, ends: 0 };
+      mounted = await mount(
+        <GameView
+          port={tracedPort(
+            { id: 'route-loop', name: 'Loop', profile: circuitRoute(400), attempts: 0 },
+            aiPacerPort(asked),
+          )}
+          renderer={() => Promise.resolve(blankRenderer())}
+          now={() => nowMs}
+          {...(race === undefined ? {} : { lapRace: race })}
+        />,
+      );
+      await settle();
+      await press(toggle('Ride against a pacer'));
+      await press(toggle('Let the AI on your instance steer the pacer'));
+      await press(buttonStarting('Allow the AI pacer'));
+      await press(buttonStarting('Ride '));
+      for (let frame = 0; frame < 60; frame += 1) {
+        const next = pending.shift();
+        if (next === undefined) break;
+        nowMs += FRAME_MS;
+        await act(async () => {
+          next(nowMs);
+          await Promise.resolve();
+        });
+        await settle();
+      }
+      return asked;
+    }
+
+    it('asks the instance on the same loop when it is not raced', async () => {
+      const asked = await askedOnLoop(undefined);
+      expect(asked.starts).toBe(1);
+      expect(asked.inputs.length).toBeGreaterThan(0);
+    });
+
+    it('claims no model slot and sends no pacer state in a lap race', async () => {
+      const asked = await askedOnLoop(RACE);
+      expect(asked.starts).toBe(0);
+      expect(asked.inputs).toEqual([]);
+    });
   });
 });

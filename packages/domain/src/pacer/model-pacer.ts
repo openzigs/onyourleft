@@ -335,7 +335,7 @@ export function pacerSayProblem(say: string): PacerSayProblem | undefined {
   if (say.length > MODEL_PACER_SAY_MOST_CHARACTERS) return 'too-long';
   if (say === '') return undefined;
   if (NOT_A_LINE.test(say)) return 'not-a-line';
-  const visible = say.replace(INVISIBLE, '');
+  const visible = say.replace(INVISIBLE, '').normalize('NFKC');
   if (MARKUP.test(visible)) return 'markup';
   if (NUMBER.test(visible)) return 'number';
   if (TRADEMARK_ABBREVIATION.test(visible) || TRADEMARK_NAME.test(visible)) return 'trademark';

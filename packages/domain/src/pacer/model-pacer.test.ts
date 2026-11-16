@@ -238,6 +238,8 @@ describe('the line of feedback — ADR 0072 D-4', () => {
     ['trademark', 'Watch your IF here.'],
     ['trademark', 'Good normalized power today.'],
     ['trademark', 'Your Training Stress is high.'],
+    ['trademark', 'Your ＴＳＳ is climbing.'],
+    ['trademark', 'Good Ｎormalized power today.'],
     ['health-claim', 'Good for your heart condition.'],
     ['health-claim', 'This is great therapy.'],
     ['health-claim', 'Stop if you feel pain.'],
