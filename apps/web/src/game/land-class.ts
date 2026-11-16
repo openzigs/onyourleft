@@ -92,6 +92,64 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     meadow: 'farmland',
   });
 
+/**
+ * How `park` land is drawn, by the kind that made it park — #2685, the
+ * owner's ruling of 2026-11-15: a golf course is not a cemetery and a pitch is
+ * not a nature reserve. **Not a class**: the precedence order is untouched,
+ * and a look is read only where {@link LandClassMask.classAt} says `park`.
+ *
+ * - `mown`: mown grass with specimen trees, as every park was before.
+ * - `natural`: a nature reserve or national park, natural ground rather than
+ *   mown — meadow where the map draws no wood in it (a wood inside one is a
+ *   `wood` by precedence, and planted as one).
+ * - `golf`: open fairway with trees in stands.
+ * - `cemetery`: short grass and a few trees.
+ * - `playground`: a few trees.
+ * - `pitch`: a flat, even green with no tree on it.
+ *
+ * `scatter.ts` §`landPlanting` is the one reader.
+ */
+export type ParkLook = 'mown' | 'natural' | 'golf' | 'cemetery' | 'playground' | 'pitch';
+
+/**
+ * Every park kind with a look of its own — #2685. ADR 0054 D-5.1: a kind is
+ * added by naming it here, beside its rule. Every other `park` kind of
+ * {@link LAND_CLASS_OF_KIND} — `park`, `garden`, `recreation_ground`,
+ * `grass`, `dog_park`, `zoo` — is `mown`.
+ */
+export const PARK_LOOK_OF_KIND: Readonly<Record<string, Exclude<ParkLook, 'mown'>>> = Object.freeze(
+  {
+    nature_reserve: 'natural',
+    national_park: 'natural',
+    golf_course: 'golf',
+    cemetery: 'cemetery',
+    playground: 'playground',
+    pitch: 'pitch',
+  },
+);
+
+/**
+ * The looks by code, the code being the precedence where park polygons
+ * overlap: the smaller, more particular place wins, so a pitch inside a
+ * recreation ground is a pitch and a park inside a national park is mown.
+ * 0 is a park cell no look polygon reached, which is `mown`.
+ */
+const LOOK_OF_CODE: readonly ParkLook[] = [
+  'mown',
+  'natural',
+  'mown',
+  'golf',
+  'cemetery',
+  'playground',
+  'pitch',
+];
+const LOOK_CODE_MOWN = 2;
+
+/** A park kind's look. Own properties only, for {@link landClassOfKind}'s reason. */
+export function parkLookOfKind(kind: string): ParkLook {
+  return Object.hasOwn(PARK_LOOK_OF_KIND, kind) ? (PARK_LOOK_OF_KIND[kind] as ParkLook) : 'mown';
+}
+
 /** One cell's side, in metres. */
 export const LAND_CLASS_CELL_METRES = 5;
 
@@ -139,6 +197,7 @@ const CLASS_OF_CODE: readonly LandClass[] = [
 ];
 const CODE_OTHER = 1;
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
+const CODE_PARK = CLASS_OF_CODE.indexOf('park');
 
 /**
  * How far the levelling field reaches from mapped built-up land, in metres:
@@ -182,6 +241,11 @@ export interface LandClassMask {
   /** True where the corridor is covered (P-8), whatever the class. */
   covered(x: number, z: number): boolean;
   /**
+   * #2685: how the `park` land at `(x, z)` is drawn — {@link ParkLook}.
+   * `'mown'` wherever the class is not `park`. O(1), no allocation.
+   */
+  parkLookAt(x: number, z: number): ParkLook;
+  /**
    * Metres to the nearest mapped built-up land at each of `count` points —
    * #1547 — `points` holding them as `x, z` pairs and `into` taking one
    * distance a point. Read off a field built once, with the mask, and
@@ -197,7 +261,7 @@ export interface LandClassMask {
    * measures the heap a build.
    */
   builtUpDistances(points: Float64Array, count: number, into: Float64Array): void;
-  /** What the mask holds, for the budget: the classes. */
+  /** What the mask holds, for the budget: the classes, and the park looks (#2685). */
   readonly bytes: number;
   /** What the levelling field holds, in bytes: 0 where no built-up land was mapped. */
   readonly levellingBytes: number;
@@ -207,6 +271,7 @@ export interface LandClassMask {
 export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   classAt: (): LandClass => 'unknown',
   covered: (): boolean => false,
+  parkLookAt: (): ParkLook => 'mown',
   builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
     into.fill(Number.POSITIVE_INFINITY, 0, count);
   },
@@ -429,8 +494,15 @@ export function landClassMask(
   for (const feature of corridor.landUse) {
     if (work <= 0) break;
     const code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
-    work -= paint(chunks, feature, code);
+    work -= paint(chunks, feature, (chunk, _key, cell) => {
+      const held = chunk[cell] as number;
+      // An uncovered cell stays `unknown`: a tile's buffer reaches past it.
+      if (held !== 0 && held < code) chunk[cell] = code;
+    });
   }
+  // 2a. #2685: each park kind's look, onto the cells the classes left `park`.
+  const looks = new Map<number, Uint8Array>();
+  parkLooks(chunks, looks, corridor, maxChunks - chunks.size, work);
   // 3. #1547: how far every cell near built-up land is from it.
   const { levels, bytes: levellingBytes } = levellingField(chunks, maxLevelledChunks);
 
@@ -517,13 +589,79 @@ export function landClassMask(
       into[point] = Math.max(0, near + (far - near) * (fz - cellZ) - LAND_CLASS_CELL_METRES / 2);
     }
   };
+  const parkLookAt = (x: number, z: number): ParkLook => {
+    const column = Math.floor(x / CHUNK_METRES);
+    const row = Math.floor(z / CHUNK_METRES);
+    if (!inRange(column, row)) return 'mown';
+    const look = looks.get(chunkKey(column, row));
+    if (look === undefined) return 'mown';
+    const cellX = Math.min(
+      LAND_CLASS_CHUNK_CELLS - 1,
+      Math.floor((x - column * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
+    );
+    const cellZ = Math.min(
+      LAND_CLASS_CHUNK_CELLS - 1,
+      Math.floor((z - row * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
+    );
+    return LOOK_OF_CODE[look[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number] as ParkLook;
+  };
   return {
     classAt,
     covered: (x, z) => classAt(x, z) !== 'unknown',
+    parkLookAt,
     builtUpDistances,
-    bytes: chunks.size * CHUNK_BYTES,
+    bytes: (chunks.size + looks.size) * CHUNK_BYTES,
     levellingBytes,
   };
+}
+
+/**
+ * #2685: every park polygon's look onto the class chunks' `park` cells, the
+ * higher look code winning ({@link LOOK_OF_CODE}). A look chunk is made only
+ * where a polygon with a look of its own reaches, at most `maxChunks` of them;
+ * a `mown` polygon writes only into chunks already made, so a park inside a
+ * nature reserve is mown and a town of plain parks costs nothing. Spends what
+ * the classes left of their `work`; past it, the rest of the park is `mown`.
+ */
+function parkLooks(
+  chunks: Map<number, Uint8Array>,
+  looks: Map<number, Uint8Array>,
+  corridor: WorldCorridor,
+  maxChunks: number,
+  left: number,
+): void {
+  let work = left;
+  const mown: LandUseFeature[] = [];
+  for (const feature of corridor.landUse) {
+    if (work <= 0) return;
+    if (landClassOfKind(feature.layer, feature.kind) !== 'park') continue;
+    const look = parkLookOfKind(feature.kind);
+    if (look === 'mown') {
+      mown.push(feature);
+      continue;
+    }
+    const code = LOOK_OF_CODE.indexOf(look);
+    work -= paint(chunks, feature, (chunk, key, cell) => {
+      if (chunk[cell] !== CODE_PARK) return;
+      let into = looks.get(key);
+      if (into === undefined) {
+        if (looks.size >= maxChunks) return;
+        into = new Uint8Array(CHUNK_BYTES);
+        looks.set(key, into);
+      }
+      if ((into[cell] as number) < code) into[cell] = code;
+    });
+  }
+  if (looks.size === 0) return;
+  for (const feature of mown) {
+    if (work <= 0) return;
+    work -= paint(chunks, feature, (chunk, key, cell) => {
+      if (chunk[cell] !== CODE_PARK) return;
+      const into = looks.get(key);
+      if (into !== undefined && (into[cell] as number) < LOOK_CODE_MOWN)
+        into[cell] = LOOK_CODE_MOWN;
+    });
+  }
 }
 
 /** The chamfer's step to a side neighbour and to a diagonal one, in metres. */
@@ -728,10 +866,15 @@ function markCovered(chunks: Map<number, Uint8Array>, box: Box, maxChunks: numbe
 }
 
 /**
- * Writes `code` into every covered cell of every existing chunk the polygon covers, where it outranks.
- * Returns the work it cost: edges times the rows of each chunk it rasterised.
+ * Hands `visit` every cell of every existing chunk the polygon covers, with the
+ * chunk and its key. Returns the work it cost: edges times the rows of each
+ * chunk it rasterised.
  */
-function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: number): number {
+function paint(
+  chunks: Map<number, Uint8Array>,
+  feature: LandUseFeature,
+  visit: (chunk: Uint8Array, key: number, cell: number) => void,
+): number {
   const outer = feature.rings[0];
   if (outer === undefined || outer.length < 6) return 0;
   let edges = 0;
@@ -754,7 +897,8 @@ function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: n
       column++
     ) {
       if (!inRange(column, row)) continue;
-      const chunk = chunks.get(chunkKey(column, row));
+      const key = chunkKey(column, row);
+      const chunk = chunks.get(key);
       if (chunk === undefined) continue;
       const grid: GridSpec = {
         originX: column * CHUNK_METRES,
@@ -764,11 +908,7 @@ function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: n
         rows: LAND_CLASS_CHUNK_CELLS,
       };
       cost += edges * LAND_CLASS_CHUNK_CELLS;
-      rasterise(feature, grid, (cell) => {
-        const held = chunk[cell] as number;
-        // An uncovered cell stays `unknown`: a tile's buffer reaches past it.
-        if (held !== 0 && held < code) chunk[cell] = code;
-      });
+      rasterise(feature, grid, (cell) => visit(chunk, key, cell));
     }
   }
   return cost;

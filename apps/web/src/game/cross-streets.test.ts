@@ -555,6 +555,7 @@ describe('what a side road is — #1565', () => {
     const town: LandClassMask = {
       classAt: () => 'built-up',
       covered: () => true,
+      parkLookAt: () => 'mown',
       builtUpDistances: (_points, count, into) => {
         into.fill(0, 0, count);
       },

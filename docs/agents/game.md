@@ -1517,6 +1517,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         The roadside hedge on mapped farmland is low and
                         broken (`settlements.ts` §`roadsidePiece`), rocks
                         small and set back (`scatter.ts` §`STONE_SCALE`).
+                        Since #2685 a park is planted by the kind that made
+                        it park (`land-class.ts` §`ParkLook`, a second
+                        sparse layer, not a class): a golf course's trees
+                        in stands, a few on a cemetery or playground, none
+                        on a pitch, meadow on a nature reserve.
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
