@@ -5538,7 +5538,7 @@ function waterWave(degrees: number, wavenumber: number, speed: number, slope: nu
  * over, and the owner's map screenshots of 2026-11-16 read it as a tiled
  * texture. Five waves spread over 19° to 156° with wavelengths of 1.5 m to
  * 14 m and no two in a simple ratio are only quasi-periodic: the field comes
- * back to within 90 % of itself on under 0.1 % of the shifts within 40 m,
+ * back to within 90 % of itself on under 0.2 % of the shifts within 40 m,
  * where #459's pair did on 3.3 % of them (`water-pattern.test.ts`). The first
  * two are #459's own directions and wavelengths, at about two thirds of their
  * slope, so the water close to the bike moves the way it did; the 14 m swell
@@ -5568,7 +5568,9 @@ export const WATER_RIPPLES: readonly WaterWave[] = [
  *   and in which part of the sky is reflected, so water a few hundred metres
  *   off, where {@link RIPPLE_FADE_RADIANS_PER_PIXEL} has faded every ripple,
  *   shows broad lighter and darker bands rather than one flat colour. At 29 m
- *   and longer they do not alias within the camera's far plane.
+ *   and longer they are still band-limited by `oylRippleWeight` like the
+ *   ripples: at a grazing angle even a 29 m swell changes phase by more than
+ *   a radian a pixel past about 150 m, where fog has not yet hidden it.
  */
 export const WATER_GUSTS: readonly WaterWave[] = [
   waterWave(25, (2 * Math.PI) / 43, 0.07, 0.022),
@@ -5596,7 +5598,8 @@ function waterSlopeGlsl(): string {
   );
   const gust = WATER_GUSTS.map((_, i) => `sin(g${String(i + 1)})`).join(' + ');
   const swell = WATER_GUSTS.map(
-    (_, i) => `gusts[${String(i)}].w * cos(g${String(i + 1)}) * gusts[${String(i)}].xy`,
+    (_, i) =>
+      `gusts[${String(i)}].w * oylRippleWeight(g${String(i + 1)}) * cos(g${String(i + 1)}) * gusts[${String(i)}].xy`,
   ).join('\n    + ');
   const phases = WATER_RIPPLES.map(
     (_, i) =>

@@ -119,7 +119,7 @@ describe('the water does not look flat and tiled — #2701', () => {
         );
         expect(shader, `${name} gust ${String(i)}`).toContain(`sin(${g})`);
         expect(shader, `${name} gust ${String(i)}`).toContain(
-          `gusts[${String(i)}].w * cos(${g}) * gusts[${String(i)}].xy`,
+          `gusts[${String(i)}].w * oylRippleWeight(${g}) * cos(${g}) * gusts[${String(i)}].xy`,
         );
       });
       // The gusts scale the ripples, and the sum is the normal's slope.
@@ -165,7 +165,9 @@ describe('the water does not look flat and tiled — #2701', () => {
       expect(roughest, name).toBeGreaterThan(0.9);
       expect(roughest, name).toBeLessThanOrEqual(1);
       expect(material.fragmentShader, name).toContain(
-        `float rough = mix(${String(WATER_CALM_SHARE)}, 1.0, 0.5 + (`,
+        `float rough = mix(${String(WATER_CALM_SHARE)}, 1.0, 0.5 + (${gusts
+          .map((_, i) => `sin(g${String(i + 1)})`)
+          .join(' + ')}) / ${(2 * gusts.length).toFixed(1)});`,
       );
     }
   });
