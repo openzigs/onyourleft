@@ -36,8 +36,8 @@
  * `nature_reserve` — are boundaries drawn round whole towns: the archive writes
  * a US Forest Service area as `forest` (Protomaps' `Landuse.java`), clipped to
  * each tile, so Big Bear Lake read as one wood and lost every house. Such a
- * cell still reads as its class, `wood` or `park`, so what grows there is
- * unchanged, but it ranks below every other mapped class: a residential block
+ * cell still reads as its class, `wood` or `park`, so where nothing else
+ * overlaps it what grows there is unchanged, but it ranks below every other mapped class: a residential block
  * inside a national forest is built-up, and nothing grows on it.
  * {@link LandClassMask.protectedArea} says which cells they are, and
  * `footprint-buildings.ts` builds a mapped footprint on one (ADR 0054's

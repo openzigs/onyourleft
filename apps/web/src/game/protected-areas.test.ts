@@ -94,6 +94,12 @@ describe('the land class under a protected area’s boundary — #2657', () => {
     }
   });
 
+  it('pins the limit: a forest-kind polygon overlapped by residential reads built-up, however small the wood', () => {
+    // Every landuse=forest polygon ranks below built-up, a mapped managed wood included.
+    expect(forestMask.classAt(...at(500, 100))).toBe('built-up');
+    expect(forestMask.protectedArea(...at(500, 100))).toBe(false);
+  });
+
   it('is false off every covered chunk', () => {
     expect(forestMask.protectedArea(5_000, 5_000)).toBe(false);
     expect(forestMask.protectedArea(Number.NaN, 0)).toBe(false);

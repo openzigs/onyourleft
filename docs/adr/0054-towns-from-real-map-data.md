@@ -537,11 +537,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   as one wood and D-5.2 dropped every footprint in it: the 2026-11-15 tag audit counted 0 houses
   drawn at Big Bear Lake, Ruidoso and Lake Arrowhead. From this date the kinds `forest`,
   `national_park` and `nature_reserve` (`apps/web/src/game/land-class.ts`
-  §`PROTECTED_AREA_KINDS`) are a protected area's boundary: each still reads as its class, so what
-  grows there is unchanged, but it ranks below every other mapped class, so built-up land inside it
-  is built-up and nothing grows on that; and a footprint on one is built. D-5.2's first sentence
+  §`PROTECTED_AREA_KINDS`) are a protected area's boundary: each still reads as its class, so where nothing else overlaps it
+  what grows there is unchanged, but it ranks below every other mapped class, so built-up or
+  farmland inside it takes the cell, and that includes a small mapped `landuse=forest` wood that
+  overlaps a residential block: there the overlap reads built-up, trees are not planted and lots may
+  be placed; and a footprint on one is built. D-5.2's first sentence
   reads, from this date: *a footprint or lot that overlaps forest, wood, water or park is not built,
-  whatever else is true, except where that land is only a protected area's boundary*. Two limits,
+  whatever else is true, except where the forest or park it overlaps is only a protected area's boundary*. Two limits,
   stated rather than hidden: `landuse=forest` is written as `forest` too and the tile cannot tell it
   from the boundary, so a footprint mapped on a managed forest is built; and a `boundary=national_park`
   that Protomaps writes as kind `park` cannot be told from a mapped park and still drops its
