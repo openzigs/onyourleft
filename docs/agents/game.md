@@ -1914,7 +1914,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m
-                        over the road with parapets and an abutment each side;
+                        over the road with parapets and a seat under each end;
                         where one in a tunnel under 80 m long crosses it, a
                         parapet along each edge of the road. ⚠️ **Boxes in
                         `three-renderer.ts` §`BridgeBelt`**, handed in with the
@@ -1923,7 +1923,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         streams' come first. ⚠️ **Since #2699 an overpass is
                         not in the stone**: its deck wears the road's colour,
                         its edge beams (proud of the deck, hanging below it,
-                        rising as the parapet) and abutments a concrete grey,
+                        rising as the parapet) and seats a concrete grey,
                         in the belt's second instanced box
                         (`BridgeBelt.overpassMesh`), one draw call more on a
                         frame with one in view. ⚠️ **Since the owner's "there
@@ -1940,12 +1940,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         followed), then its last heading; stops short of the
                         carriageway and water; and the scenery is kept off it.
                         ⚠️ **Since #2699's third round, slopes, not walls**:
-                        the abutments' backs stand 15 m off the carriageway's
-                        edge, nothing else of it is over a metre up inside
-                        that, and the approach stands on a 1 : 2 embankment in
-                        the ground's own material (`TerrainBelt.embankmentMesh`,
-                        a normal for each face, one draw call more on a frame
-                        with one in view), cut off at the abutments' backs
+                        nothing but the bridge is over a metre up within 15 m
+                        of the carriageway's edge, and the approach stands on a
+                        1 : 2 embankment in the ground's own material
+                        (`TerrainBelt.embankmentMesh`, a normal for each face,
+                        one draw call more on a frame with one in view).
+                        ⚠️ **Since the fourth round, no blocks**: each end of
+                        the deck stands on a seat showing 1.2 m, in a grassy
+                        spill-through bank that comes up under the deck and
+                        wraps round its corners (§`spillThrough`, a height
+                        field in the same mesh); each end reaches as far as
+                        its bank needs to be down to a metre by the verge's
+                        line (about 26 m off the edge on level ground), and an
+                        approach falls no steeper than 1 : 2
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

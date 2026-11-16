@@ -44,23 +44,35 @@
  * the frame's bridges are still cut to `waterways.ts` §`MAXIMUM_BRIDGE_PARTS`
  * boxes, twelve triangles each, whichever of the belt's two draws them.
  *
- * - **An overpass**: a level deck slab along the
- *   street, long enough to cover both abutments however skew it crosses; an
- *   edge beam along each side of the deck, which rises above it as the
- *   parapet; and an abutment each side of the road, parallel to it and
- *   {@link OVERPASS_SETBACK_METRES} off its edge, from under the ground up to
- *   the deck's top. The edge beams' feet are the lowest of it, at
- *   {@link OVERPASS_CLEARANCE_METRES} above the highest of the road it spans.
+ * - **An overpass**: a level deck slab along the street, as far each way as
+ *   §`overpassBoxes` works out; an edge beam along each side of the deck,
+ *   which rises above it as the parapet; and under each end of the deck an
+ *   abutment **seat**, parallel to the road and as long as the deck is wide
+ *   there, from inside its bank up into the slab. The edge beams' feet are the
+ *   lowest of it, at {@link OVERPASS_CLEARANCE_METRES} above the highest of
+ *   the carriageway it spans.
  *
- *   **Why the abutments stand 15 m out — #2699's third round.** The owner:
- *   "nothing taller than about 1 m within 15 m of the main carriageway edge,
- *   except the bridge itself". So the deck spans the verge to
- *   {@link OVERPASS_CLEAR_VERGE_METRES} off the road's edge, where the
- *   abutment's back is, and everything behind it — the approach and its
- *   embankment — is behind that line. Each abutment runs along the road as
- *   far as the embankment behind it spreads, as a wing wall does, so the
- *   embankment, which is cut off at that line, is retained by the concrete
- *   rather than seen end on.
+ *   **Why short seats in grassy banks — #2699's fourth round.** The owner:
+ *   "the abutments are tall plain grey blocks that fill both sides under the
+ *   bridge, and one triangular wing wall stands alone on the grass like a
+ *   fin". The third round stood each abutment from the ground to the deck,
+ *   15 m off the carriageway's edge, and as long as the approach's embankment
+ *   spread, to retain the embankment cut off behind it. Now each end of the
+ *   deck stands on a seat with {@link ABUTMENT_FACE_METRES} of it showing, in
+ *   a **spill-through bank** (§`spillThrough`): grass that comes up under the
+ *   deck to the seat's foot from the route at 1 : {@link EMBANKMENT_RUN}, and
+ *   wraps round the deck's corners to meet the approach's own banks. No
+ *   concrete is anywhere but under the deck, so none stands alone on the
+ *   grass, and none retains a bank: where the approach's banks are cut off at
+ *   the deck's end, the spill-through bank is what meets them.
+ *   That bank is not the bridge, so the owner's "nothing taller than about
+ *   1 m within 15 m of the main carriageway edge" holds of it: each end of the
+ *   deck reaches as far as the bank at its end needs to be down to
+ *   {@link OVERPASS_VERGE_HEIGHT_METRES} by {@link OVERPASS_CLEAR_VERGE_METRES}
+ *   off the carriageway's edge — about 26 m off it on level ground, a span of
+ *   some 60 m, and further where the ground falls away. Slim piers, which the
+ *   owner left optional, are not drawn: the frame's share of the belt is five
+ *   boxes an overpass.
  *   ⚠️ **Nothing of it stands in the carriageway below the clearance**:
  *   `overpasses.test.ts` holds every block's corners clear of the road's
  *   width up to that height.
@@ -69,7 +81,7 @@
  *   a flat brown slab: a deck and its parapets flush, in the stream bridges'
  *   stone, read from below as one block. So the deck now wears the road's own
  *   colour, being a road (`finish: 'road'`), and the beams, the parapets and
- *   the abutments a concrete grey (`'concrete'`), drawn apart from the stone
+ *   the seats a concrete grey (`'concrete'`), drawn apart from the stone
  *   (`three-renderer.ts` §`BridgeBelt`). Each beam stands
  *   {@link OVERPASS_EDGE_PROUD_METRES} proud of the deck's side and hangs
  *   {@link OVERPASS_EDGE_DROP_METRES} below its underside, so a rider under it
@@ -109,8 +121,10 @@
  *   that is this frame (the photographed grass and its patchwork, or the
  *   stylised ground), with a normal of its own for each face, so it is lit as
  *   the slope it is and meets the ground in the ground's look. Anything of it
- *   nearer the route than the abutments' backs is cut off at that line
- *   (§`toeOf`). {@link EMBANKMENT_TRIANGLES_PER_OVERPASS} each and
+ *   nearer the route than the deck's end is cut off at that line (§`toeOf`),
+ *   where since the fourth round the spill-through bank round the deck's
+ *   corner meets it. An approach falls no steeper than its bank
+ *   ({@link APPROACH_STEEPEST}). {@link EMBANKMENT_TRIANGLES_PER_OVERPASS} each and
  *   {@link EMBANKMENT_FRAME_TRIANGLES} a frame; the scenery is kept off it
  *   with the road (`SideRoad.halfWidths` covers its foot).
  * - **An underpass**: a parapet with its coping along each edge of the road
@@ -121,7 +135,7 @@
  *
  * ⚠️ **The deck is at the route's height, not the street's.** A street's
  * height is not in the tile, so a route in a cutting still has the deck five
- * metres over it, its abutments rising from the ground beside the road. The
+ * metres over it, its banks rising from the ground beside the road. The
  * route's own grade is never read or changed: nothing here touches
  * a profile, and what a trainer is sent at an overpass is the route's.
  *
@@ -205,43 +219,113 @@ export const OVERPASS_BEAM_OVERHANG_METRES = 0.02;
 
 /**
  * How far off the main carriageway's edge nothing of an overpass but the
- * bridge itself — its deck, edge beams and abutments — stands more than
+ * bridge itself — its deck, edge beams and seats — stands more than
  * {@link OVERPASS_VERGE_HEIGHT_METRES} above the ground, in metres: **15** —
- * #2699's third round, the owner's "no wall over the verge". The abutments'
- * backs are on it. @see the header
+ * #2699's third round, the owner's "no wall over the verge". Since the fourth
+ * round the deck's ends are as far past it as their banks need. @see the header
  */
 export const OVERPASS_CLEAR_VERGE_METRES = 15;
 
 /**
  * The most anything but the bridge stands above the ground within
  * {@link OVERPASS_CLEAR_VERGE_METRES}: **1 m**, the owner's "about 1 m".
- *
- * @test-facing held by `overpasses.test.ts`, which samples every drawn
- * triangle of the road and its embankment; what keeps it in the product is
- * where the abutments stand and where an embankment is cut off (§`toeOf`)
+ * Since #2699's fourth round each end of the deck reaches as far as its bank
+ * needs to be down to it by that line (§`overpassBoxes`); `overpasses.test.ts`
+ * samples every drawn triangle of the road and its embankment against it.
  */
 export const OVERPASS_VERGE_HEIGHT_METRES = 1;
 
-/** How thick an overpass's abutment is, across the road, in metres: **1**. */
+/** How thick an overpass's abutment seat is, across the road, in metres: **1**. */
 export const ABUTMENT_THICKNESS_METRES = 1;
 
 /**
- * How far off the road's edge an overpass's abutment's face stands, in metres:
- * **14** — its back on {@link OVERPASS_CLEAR_VERGE_METRES}. #2661 drew it 3 m
- * off, which put the approach's embankment over the verge.
+ * How much of an overpass's abutment seat shows, in metres: **1.2** — #2699's
+ * fourth round, the owner's "about 1–1.5 m of exposed face". The spill-through
+ * bank in front of the seat comes up to this far under the deck slab's
+ * underside (§`spillThrough`); the rest of the seat is in the bank.
  */
-export const OVERPASS_SETBACK_METRES = OVERPASS_CLEAR_VERGE_METRES - ABUTMENT_THICKNESS_METRES;
+export const ABUTMENT_FACE_METRES = 1.2;
 
 /**
- * How far under the deck's top an abutment's top is, in metres: **0.02**. It
- * rises to the deck's top, not its underside, since #2699's third round, so
- * that past the deck's sides it retains the embankment behind it; inside the
- * deck it is hidden, and a face a hair under the deck's never fights it.
+ * How far into the deck slab an abutment seat's top reaches, in metres:
+ * **0.02**, so the slab sits on it with no seam and no shared face.
  */
 const ABUTMENT_TUCK_METRES = 0.02;
 
-/** How far below the ground an abutment's foot reaches, in metres: **0.3**. */
-const ABUTMENT_FOOT_METRES = 0.3;
+/** How far under its bank's crest, or the ground, an abutment seat's foot is, in metres: **0.5**. */
+const ABUTMENT_BURY_METRES = 0.5;
+
+/**
+ * How far past the deck's edge beams an abutment seat reaches along the road,
+ * each end, in metres: **0.1** — so the seat's ends never share a plane with
+ * the beams' sides. That is all: a seat is never a wing wall (§`spillThrough`).
+ */
+const ABUTMENT_OVERHANG_METRES = 0.1;
+
+/**
+ * How much further from the route an overpass's deck reaches than the verge
+ * rule needs, in metres: **1** (§`overpassBoxes`).
+ */
+const SPILL_MARGIN_METRES = 1;
+
+/**
+ * The furthest from the route's centreline an overpass's deck reaches, in
+ * metres: **58.5** — the verge and the longest embankment run. Only a skew
+ * crossing over ground that falls far away from the road comes near it.
+ */
+const OVERPASS_MOST_REACH_METRES = ROAD_WIDTH_METRES / 2 + OVERPASS_CLEAR_VERGE_METRES + 40;
+
+/**
+ * How far past the carriageway's edge the deck is level over the highest road
+ * under it, in metres: **1**.
+ */
+const CARRIAGEWAY_MARGIN_METRES = 1;
+
+/** How many times the deck's reach is worked out again against the ground it comes down to. */
+const DECK_REACH_PASSES = 8;
+
+/**
+ * How far inside the verge's line a spill-through bank is drawn from, in
+ * metres: **4**. The deck reaches far enough that its bank is down to a metre
+ * at that line, and a 1 : 2 slope is on the ground two metres further in.
+ */
+const SPILL_INSIDE_VERGE_METRES = 4;
+
+/**
+ * How far under the approach's banks a spill-through bank is beside the deck,
+ * in metres: **0.05** — where both are drawn, the approach's is seen.
+ */
+const SPILL_UNDER_BANK_METRES = 0.05;
+
+/**
+ * How many of the approach's steps from the deck's end a spill-through bank
+ * wraps round: **3**, 12 m. Past them the approach's own banks are the bank.
+ */
+const SPILL_SOURCE_STEPS = 3;
+
+/** How far under the deck slab's underside a bank under the deck stops, in metres: **0.05**. */
+const SPILL_UNDER_DECK_METRES = 0.05;
+
+/** A spill-through bank's cells along the road beyond each side of the deck: **9**. */
+const SPILL_OUTSIDE_CELLS = 9;
+
+/** A spill-through bank's cells along the road under the deck: **6**. */
+const SPILL_UNDER_CELLS = 6;
+
+/** A spill-through bank's cells along the road: beyond each side of the deck, and under it. **24**. */
+const SPILL_ALONG_CELLS = 2 * SPILL_OUTSIDE_CELLS + SPILL_UNDER_CELLS;
+
+/** A spill-through bank's cells across the road in front of its seat: **7**. */
+const SPILL_FRONT_CELLS = 7;
+
+/** A spill-through bank's cells across the road past the deck's end: **6**. */
+const SPILL_BEYOND_CELLS = 6;
+
+/** A spill-through bank's cells across the road: in front of its seat, under it, and past the deck's end. **14**. */
+const SPILL_ACROSS_CELLS = SPILL_FRONT_CELLS + 1 + SPILL_BEYOND_CELLS;
+
+/** The most triangles one spill-through bank is: **672**, two a cell. */
+const SPILL_TRIANGLES_PER_END = 2 * SPILL_ALONG_CELLS * SPILL_ACROSS_CELLS;
 
 /**
  * The longest tunnel way that is an underpass, in metres: **80**. Longer is a
@@ -270,7 +354,7 @@ export const MAX_GRADE_CROSSINGS = 1_000;
  */
 export const OVERPASS_FRAME_PARTS = 48;
 
-/** The boxes one overpass is: its deck, two edge beams and two abutments. */
+/** The boxes one overpass is: its deck, two edge beams and two abutment seats. */
 const OVERPASS_BOXES = 5;
 
 /**
@@ -334,11 +418,26 @@ const APPROACH_BLEND_METRES = 12;
  */
 export const EMBANKMENT_RUN = 2;
 
+/**
+ * The steepest an approach falls from the deck: **1 : 2**, its own bank's
+ * slope — #2699's fourth round. A deck far over falling ground (a skew one on a
+ * hillside) cannot bring its road down to the ground within the view at any
+ * sane grade; steeper than its bank, the bank's spill-through round the deck's
+ * end would stand above the road it carries (§`spillThrough`). There it
+ * falls at this all the way, and fades into the ground at its end as any
+ * approach does.
+ */
+export const APPROACH_STEEPEST = 1 / EMBANKMENT_RUN;
+
 /** How far under the ground an embankment's foot is, in metres: **0.15**. */
 const EMBANKMENT_FOOT_METRES = 0.15;
 
-/** The furthest out from the road's edge an embankment's foot is, in metres: **40**. */
-const EMBANKMENT_MAX_RUN_METRES = 40;
+/**
+ * The furthest out from the road's edge an embankment's foot is, in metres:
+ * **40**. A bank taller than this at 1 : {@link EMBANKMENT_RUN} — a deck far
+ * over falling ground — comes down steeper at its foot.
+ */
+export const EMBANKMENT_MAX_RUN_METRES = 40;
 
 /** An embankment no taller than this at both ends of a step is not drawn there, in metres. */
 const EMBANKMENT_LEAST_METRES = 0.12;
@@ -390,9 +489,12 @@ export const APPROACH_TRIANGLES_PER_OVERPASS = 2 + 2 * 2 * APPROACH_STEPS;
 
 /**
  * The most triangles one overpass's embankment may be — #2699's third round:
- * each approach's every step a quad of bank each side. **320**.
+ * each approach's every step a quad of bank each side, **320**; and since the
+ * fourth round a spill-through bank at each end of the deck, **1 344**.
+ * **1 664**.
  */
-export const EMBANKMENT_TRIANGLES_PER_OVERPASS = 2 * 2 * 2 * APPROACH_STEPS;
+export const EMBANKMENT_TRIANGLES_PER_OVERPASS =
+  2 * 2 * 2 * APPROACH_STEPS + 2 * SPILL_TRIANGLES_PER_END;
 
 /**
  * The most triangles a frame's overpass roads may add to the side roads' mesh
@@ -408,7 +510,7 @@ export const OVERPASS_ROAD_FRAME_TRIANGLES =
 /**
  * The most triangles a frame's embankments may be, in the ground's second
  * mesh (`three-renderer.ts` §`TerrainBelt`) — #2699: one an overpass, as
- * {@link OVERPASS_ROAD_FRAME_TRIANGLES}. **2 880**.
+ * {@link OVERPASS_ROAD_FRAME_TRIANGLES}. **14 976**.
  *
  * @test-facing held by `overpasses.test.ts`, which counts what the belt is
  * handed on a frame of overpasses; nothing in the product applies it at run time
@@ -734,18 +836,50 @@ function levelBox(
   return { x, y, z, axisX, axisY: 0, axisZ, length, width, height, finish };
 }
 
-/** An overpass's boxes, and where its deck's top is: what its road is built on. */
+/** One of a pair by the side of the route: `[0]` its left (`−(dx, dz)` from a crossing), `[1]` its right. */
+type BySide<T> = readonly [T, T];
+
+/** Which of a {@link BySide} pair `side` is. */
+function sideIndex(side: -1 | 1): 0 | 1 {
+  return side < 0 ? 0 : 1;
+}
+
+/** An overpass's boxes, and the bridge's measures: what its road and its banks are built on. */
 interface OverpassBuilt {
   readonly parts: BridgePart[];
   /** The deck's top, local metres. */
   readonly deckTop: number;
-  /** How far the deck runs either way from the crossing, along the street. */
-  readonly halfSpan: number;
-  /** How far from the route's centreline its abutments' backs are: what an embankment is cut off at. */
-  readonly outer: number;
+  /** The deck slab's underside, local metres. */
+  readonly underside: number;
+  /** The crest of the spill-through bank in front of each seat: {@link ABUTMENT_FACE_METRES} under {@link underside}. */
+  readonly seatCrest: number;
+  /** How far the deck runs from the crossing along the street, each way. */
+  readonly halfSpans: BySide<number>;
+  /** Half the deck's width, edge beams and all. */
+  readonly halfWidth: number;
+  /** How far from the route's centreline each end of the deck and its seat's back is: what an embankment is cut off at. */
+  readonly outers: BySide<number>;
+  /** The lowest ground on the verge's line each end's banks come down to. */
+  readonly groundLows: BySide<number>;
+  /** The street against the road: the sine and cosine of the angle it crosses at. */
+  readonly sine: number;
+  readonly cosine: number;
 }
 
-/** An overpass's boxes. @see the header */
+/**
+ * An overpass's boxes. @see the header
+ *
+ * ⚠️ **How far the deck reaches — #2699's fourth round.** The approach's
+ * embankment is as tall as the deck at the deck's end, and its spill-through
+ * bank falls from there towards the route at {@link EMBANKMENT_RUN} : 1. So
+ * each end of the deck is where that bank is down to
+ * {@link OVERPASS_VERGE_HEIGHT_METRES} by the verge's line
+ * ({@link OVERPASS_CLEAR_VERGE_METRES} off the carriageway's edge), over the
+ * lowest ground there, and {@link SPILL_MARGIN_METRES} further — each side
+ * apart, since where the ground falls away one end reaches further than the
+ * other. The further it reaches, the further along the road the ground is
+ * read, so the reach is worked out again against it.
+ */
 function overpassBoxes(
   crossing: GradeCrossing,
   profile: RouteProfile,
@@ -757,12 +891,18 @@ function overpassBoxes(
   const sine = crossing.dx * road.normalX + crossing.dz * road.normalZ;
   const cosine = crossing.dx * road.forwardX + crossing.dz * road.forwardZ;
   const deckWidth = SIDE_ROAD_WIDTHS[crossing.widthClass] + PARAPET_THICKNESS_METRES * 2;
-  // The deck with its edge beams proud of it: what the span and the abutments cover.
+  // The deck with its edge beams proud of it: what the span and the seats cover.
   const overallWidth = deckWidth + OVERPASS_EDGE_PROUD_METRES * 2;
-  const outer = ROAD_HALF_WIDTH_METRES + OVERPASS_SETBACK_METRES + ABUTMENT_THICKNESS_METRES;
-  // Along the road, how far either way the deck's footprint reaches past the crossing.
-  const skew = (outer * Math.abs(cosine)) / sine + overallWidth / 2 / sine;
-  // Level, over the highest of the road it spans.
+  // Along the road, half the deck's footprint at any one distance from the route.
+  const footHalf = overallWidth / 2 / sine;
+  const groundAt = (along: number, lateral: number): number =>
+    terrainHeightAt(profile, origin, seed, distanceOnRoute(profile, along), lateral, land);
+  // Level, over the highest of the carriageway it spans: along the road, as
+  // far either way as the deck's footprint is over it. Since #2699's fourth
+  // round not as far as the deck's ends, which are over the banks: a long
+  // skew deck on a climb would otherwise stand higher the further it reached.
+  const skew =
+    ((ROAD_HALF_WIDTH_METRES + CARRIAGEWAY_MARGIN_METRES) * Math.abs(cosine)) / sine + footHalf;
   let road0 = roadHeight(profile, origin, crossing.along);
   for (const end of [-1, 1]) {
     road0 = Math.max(road0, roadHeight(profile, origin, crossing.along + end * skew));
@@ -771,13 +911,51 @@ function overpassBoxes(
   const clearance = road0 + OVERPASS_CLEARANCE_METRES;
   const underside = clearance + OVERPASS_EDGE_DROP_METRES;
   const deckTop = clearance + OVERPASS_DECK_DEPTH_METRES;
-  // Along the street, long enough to cover both abutments however skew it crosses.
-  const span = 2 * (outer / sine + ((overallWidth / 2) * Math.abs(cosine)) / sine);
+  // The approach's edges at the deck's end: the top of its banks.
+  const crest = deckTop + SIDE_ROAD_LIFT_METRES;
+  const verge = ROAD_HALF_WIDTH_METRES + OVERPASS_CLEAR_VERGE_METRES;
+  // As far along the road from the deck's footprint as a bank from its end could come down.
+  const reach = footHalf + EMBANKMENT_RUN * (crest - roadHeight(profile, origin, crossing.along));
+  const reachOf = (side: -1 | 1): { outer: number; groundLow: number } => {
+    let outer = verge + SPILL_MARGIN_METRES;
+    let groundLow = Number.POSITIVE_INFINITY;
+    for (let pass = 0; pass < DECK_REACH_PASSES; pass += 1) {
+      const near = crossing.along + (side * verge * cosine) / sine;
+      const far = crossing.along + (side * outer * cosine) / sine;
+      const from = Math.min(near, far) - reach;
+      const to = Math.max(near, far) + reach;
+      groundLow = Number.POSITIVE_INFINITY;
+      for (let at = 0; at <= 8; at += 1) {
+        groundLow = Math.min(groundLow, groundAt(from + ((to - from) * at) / 8, side * verge));
+      }
+      const needed =
+        verge +
+        EMBANKMENT_RUN * Math.max(0, crest - groundLow - OVERPASS_VERGE_HEIGHT_METRES) +
+        SPILL_MARGIN_METRES;
+      const next = Math.min(OVERPASS_MOST_REACH_METRES, needed);
+      const settled = Math.abs(next - outer) < 0.01;
+      outer = next;
+      if (settled) break;
+    }
+    return { outer, groundLow };
+  };
+  const left = reachOf(-1);
+  const right = reachOf(1);
+  const outers = [left.outer, right.outer] as const;
+  // Along the street from the crossing, far enough to reach each `outer` however skew it crosses.
+  const halfSpans = outers.map(
+    (outer) => outer / sine + ((overallWidth / 2) * Math.abs(cosine)) / sine,
+  ) as unknown as BySide<number>;
+  const span = halfSpans[0] + halfSpans[1];
+  // The deck's middle, along the street from the crossing.
+  const middle = (halfSpans[1] - halfSpans[0]) / 2;
+  const centreX = crossing.x + crossing.dx * middle;
+  const centreZ = crossing.z + crossing.dz * middle;
   const parts: BridgePart[] = [
     levelBox(
-      crossing.x,
+      centreX,
       (underside + deckTop) / 2,
-      crossing.z,
+      centreZ,
       crossing.dx,
       crossing.dz,
       span,
@@ -795,9 +973,9 @@ function overpassBoxes(
       (deckWidth / 2 - PARAPET_THICKNESS_METRES / 2 + OVERPASS_EDGE_PROUD_METRES / 2) * side;
     parts.push(
       levelBox(
-        crossing.x + acrossX * out,
+        centreX + acrossX * out,
         (clearance + beamTop) / 2,
-        crossing.z + acrossZ * out,
+        centreZ + acrossZ * out,
         crossing.dx,
         crossing.dz,
         span + OVERPASS_BEAM_OVERHANG_METRES * 2,
@@ -807,52 +985,44 @@ function overpassBoxes(
       ),
     );
   }
-  // An abutment each side, parallel to the road, from under the ground to the
-  // deck's top: along the road as far as the embankment behind it spreads.
-  const abutmentTop = deckTop - ABUTMENT_TUCK_METRES;
-  for (const side of [-1, 1]) {
-    const lateral = side * (outer - ABUTMENT_THICKNESS_METRES / 2);
+  // A seat under each end of the deck, parallel to the road, as long as the
+  // deck is wide there: from inside its bank up into the slab, and only
+  // ABUTMENT_FACE_METRES of it above the bank in front of it.
+  const seatTop = underside + ABUTMENT_TUCK_METRES;
+  const seatCrest = underside - ABUTMENT_FACE_METRES;
+  for (const side of [-1, 1] as const) {
+    const lateral = side * (outers[sideIndex(side)] - ABUTMENT_THICKNESS_METRES / 2);
     const along = crossing.along + (lateral * cosine) / sine;
     const here = roadAt(profile, origin, along);
-    const middle = terrainHeightAt(
-      profile,
-      origin,
-      seed,
-      distanceOnRoute(profile, along),
-      lateral,
-      land,
-    );
-    const spread = Math.min(
-      EMBANKMENT_MAX_RUN_METRES,
-      EMBANKMENT_RUN * Math.max(0, abutmentTop - middle),
-    );
-    const length = (overallWidth + 2 * spread) / sine;
-    const grounds = [-0.5, 0, 0.5].map((end) =>
-      terrainHeightAt(
-        profile,
-        origin,
-        seed,
-        distanceOnRoute(profile, along + end * length),
-        lateral,
-        land,
-      ),
-    );
-    const foot = Math.min(...grounds) - ABUTMENT_FOOT_METRES;
+    const length = 2 * footHalf + 2 * ABUTMENT_OVERHANG_METRES;
+    const grounds = [-0.5, 0, 0.5].map((end) => groundAt(along + end * length, lateral));
+    const foot = Math.min(seatCrest, ...grounds) - ABUTMENT_BURY_METRES;
     parts.push(
       levelBox(
         here.x + here.normalX * lateral,
-        (abutmentTop + foot) / 2,
+        (seatTop + foot) / 2,
         here.z + here.normalZ * lateral,
         here.forwardX,
         here.forwardZ,
         length,
         ABUTMENT_THICKNESS_METRES,
-        abutmentTop - foot,
+        seatTop - foot,
         'concrete',
       ),
     );
   }
-  return { parts, deckTop, halfSpan: span / 2, outer };
+  return {
+    parts,
+    deckTop,
+    underside,
+    seatCrest,
+    halfSpans,
+    halfWidth: overallWidth / 2,
+    outers,
+    groundLows: [left.groundLow, right.groundLow],
+    sine,
+    cosine,
+  };
 }
 
 /** `0` at `0`, `1` at `1`, level at both ends: the smoothstep of `share`, clamped. */
@@ -964,8 +1134,9 @@ function groundBeneath(
  * before the ground — #2699's third round: ONE straight line down from the
  * deck's top, at {@link APPROACH_GRADE} or steeper, steep enough to be at the
  * ground under the row where the approach's fade begins (or halfway along
- * a short one). The road stands on the higher of it and the ground, so it never
- * climbs above the deck, and where the ground rises to meet it, it lands there.
+ * a short one), and no steeper than {@link APPROACH_STEEPEST}. The road
+ * stands on the higher of it and the ground, so it never climbs above the
+ * deck, and where the ground rises to meet it, it lands there.
  *
  * ⚠️ **Why one line, and measured where it must land.** The second round's
  * ramp stopped at the first row whose ground came within 6 % of the deck, and
@@ -998,7 +1169,10 @@ function rampOf(
     landing = lower + (groundAt(to) - lower) * share;
     break;
   }
-  const slope = latest > 0 ? Math.max(APPROACH_GRADE, (top - landing) / latest) : APPROACH_GRADE;
+  const slope = Math.min(
+    APPROACH_STEEPEST,
+    latest > 0 ? Math.max(APPROACH_GRADE, (top - landing) / latest) : APPROACH_GRADE,
+  );
   return (past) => top - slope * past;
 }
 
@@ -1040,9 +1214,10 @@ interface EmbankmentToe {
  * `(ox, oz)` — #2699's third round: down at {@link EMBANKMENT_RUN} : 1 to
  * {@link EMBANKMENT_FOOT_METRES} under the ground, moved out to where the
  * slope meets the ground there {@link EMBANKMENT_FOOT_STEPS} times. ⚠️ Cut
- * off where it would come nearer the route than `outer` — the abutments'
- * backs, {@link OVERPASS_CLEAR_VERGE_METRES} off the carriageway's edge — at
- * that line, where the abutment retains it.
+ * off where it would come nearer the route than `outer` — the deck's end on
+ * this side, at least {@link OVERPASS_CLEAR_VERGE_METRES} off the
+ * carriageway's edge — at that line, where since #2699's fourth round the
+ * spill-through bank in front of it meets it (§`spillThrough`).
  */
 function toeOf(
   edge: { readonly x: number; readonly y: number; readonly z: number; readonly ground: GroundRead },
@@ -1121,8 +1296,8 @@ function overpassRoad(
   deck: OverpassBuilt,
 ): OverpassRoad {
   const half = SIDE_ROAD_WIDTHS[crossing.widthClass] / 2;
-  const back = approachStations(crossing, -1, deck.halfSpan, profile, origin, seed);
-  const on = approachStations(crossing, 1, deck.halfSpan, profile, origin, seed);
+  const back = approachStations(crossing, -1, deck.halfSpans[0], profile, origin, seed);
+  const on = approachStations(crossing, 1, deck.halfSpans[1], profile, origin, seed);
   const lengths = [back[back.length - 1]?.past ?? 0, on[on.length - 1]?.past ?? 0] as const;
   const ramps = [
     rampOf(back, lengths[0], deck.deckTop, profile, origin, seed, land),
@@ -1169,7 +1344,9 @@ function overpassRoad(
       const z = station.z - hx * halfHere * sign;
       const read = groundBeneath(profile, origin, seed, land, x, z);
       const ground = read?.height ?? ramp;
-      const standing = Math.max(ramp, ground + APPROACH_GROUND_LIFT_METRES);
+      // At the deck's end, on the deck: never stepped up onto rising ground there.
+      const standing =
+        station.past === 0 ? ramp : Math.max(ramp, ground + APPROACH_GROUND_LIFT_METRES);
       const y = standing + (ground - SIDE_ROAD_SINK_METRES - standing) * fade;
       const at = read ?? { height: y, near: { distance: 0, along: crossing.along, lateral: 0 } };
       return {
@@ -1183,7 +1360,7 @@ function overpassRoad(
           { x, y, z, ground: at },
           hz * sign,
           -hx * sign,
-          deck.outer,
+          deck.outers[station.side],
           profile,
           origin,
           seed,
@@ -1201,22 +1378,21 @@ function overpassRoad(
   }
   const segments: number[] = [];
   const halfWidths: number[] = [];
-  const bank = {
-    positions: [] as number[],
-    normals: [] as number[],
-    colours: [] as number[],
-    fields: [] as number[],
-    indices: [] as number[],
-  };
+  const bank: BankBuilder = { positions: [], normals: [], colours: [], fields: [], indices: [] };
   for (let index = 0; index + 1 < rows.length; index += 1) {
     const a = rows[index] as RoadRow;
     const b = rows[index + 1] as RoadRow;
     indices.push(a.l, b.l, b.r, a.l, b.r, a.r);
     const from = strip[index] as ApproachStation;
     const to = strip[index + 1] as ApproachStation;
-    // The deck's top: over the main road, which nothing scattered stands on anyway.
-    if (from.past === 0 && to.past === 0) continue;
     segments.push(from.x, from.z, to.x, to.z);
+    // The deck's top, which since #2699's fourth round reaches far enough past
+    // the verge that something scattered could stand under it: kept off its
+    // width, and no bank under it.
+    if (from.past === 0 && to.past === 0) {
+      halfWidths.push(deck.halfWidth);
+      continue;
+    }
     // The scenery kept off the embankment's foot as well as the road.
     let reach = 0;
     for (const row of [a, b]) for (const each of row.edges) reach = Math.max(reach, each.toe.run);
@@ -1228,6 +1404,20 @@ function overpassRoad(
       if (Math.max(ea.lift, eb.lift) <= EMBANKMENT_LEAST_METRES) continue;
       embankmentQuad(bank, ea, eb);
     }
+  }
+  // #2699's fourth round: a spill-through bank under each end of the deck,
+  // meeting the approach's banks there. The scenery is kept off it by the
+  // deck's clearance and the approach's, which reach as far as its foot.
+  for (const [index, side] of [
+    [0, -1],
+    [1, 1],
+  ] as const) {
+    const edges = rows
+      .filter((_, at) => (strip[at] as (typeof strip)[number]).side === index)
+      .map((row) => row.edges);
+    // The back approach's rows run towards the deck: from its end outwards.
+    if (index === 0) edges.reverse();
+    spillThrough(bank, crossing, side, edges, deck, profile, origin, seed, land);
   }
   return {
     road: {
@@ -1251,61 +1441,285 @@ function overpassRoad(
   };
 }
 
+/** An embankment as it is built, before it is packed into {@link Embankment}'s arrays. */
+interface BankBuilder {
+  positions: number[];
+  normals: number[];
+  colours: number[];
+  fields: number[];
+  indices: number[];
+}
+
+/** One corner of a bank face: where it is, and the ground's fields there (route distance, signed lateral). */
+type BankCorner = readonly [x: number, y: number, z: number, along: number, lateral: number];
+
 /**
- * One step of one side's bank, from the road's edge at two rows to the
- * embankment's foot under each: two triangles, each with three vertices of
- * its own carrying its face's normal — up and out, never down — and wound to
- * face it, so three draws its front.
+ * One triangle of bank, with three vertices of its own carrying its face's
+ * normal — up and out, never down — and wound to face it, so three draws its
+ * front. A sliver of no area is left out.
  */
-function embankmentQuad(
-  bank: {
-    positions: number[];
-    normals: number[];
-    colours: number[];
-    fields: number[];
-    indices: number[];
-  },
-  a: RoadEdge,
-  b: RoadEdge,
+function bankFace(bank: BankBuilder, a: BankCorner, b: BankCorner, c: BankCorner): void {
+  let p = a;
+  let q = b;
+  const r = c;
+  const ux = q[0] - p[0];
+  const uy = q[1] - p[1];
+  const uz = q[2] - p[2];
+  const vx = r[0] - p[0];
+  const vy = r[1] - p[1];
+  const vz = r[2] - p[2];
+  let nx = uy * vz - uz * vy;
+  let ny = uz * vx - ux * vz;
+  let nz = ux * vy - uy * vx;
+  const length = Math.hypot(nx, ny, nz);
+  // A foot cut back onto the road's edge leaves no face.
+  if (!(length > 1e-6)) return;
+  if (ny < 0) {
+    // Wound the other way, so the face three draws is the upper one.
+    [p, q] = [q, p];
+    nx = -nx;
+    ny = -ny;
+    nz = -nz;
+  }
+  for (const corner of [p, q, r]) {
+    bank.indices.push(bank.positions.length / 3);
+    bank.positions.push(corner[0], corner[1], corner[2]);
+    bank.normals.push(nx / length, ny / length, nz / length);
+    bank.colours.push(EARTH[0], EARTH[1], EARTH[2]);
+    bank.fields.push(corner[3], corner[4]);
+  }
+}
+
+/** One step of one side's bank, from the road's edge at two rows to the embankment's foot under each: two faces. */
+function embankmentQuad(bank: BankBuilder, a: RoadEdge, b: RoadEdge): void {
+  const p: BankCorner = [a.x, a.y, a.z, a.along, a.lateral];
+  const q: BankCorner = [b.x, b.y, b.z, b.along, b.lateral];
+  const r: BankCorner = [b.toe.x, b.toe.y, b.toe.z, b.toe.along, b.toe.lateral];
+  const t: BankCorner = [a.toe.x, a.toe.y, a.toe.z, a.toe.along, a.toe.lateral];
+  bankFace(bank, p, q, r);
+  bankFace(bank, p, r, t);
+}
+
+/** How far `(x, z)` is from the segment `a`–`b` in plan, and how far along it the nearest point is, `0` to `1`. */
+function toSegment(
+  x: number,
+  z: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): { readonly distance: number; readonly share: number } {
+  const sx = bx - ax;
+  const sz = bz - az;
+  const squared = sx * sx + sz * sz;
+  const share =
+    squared > 0 ? Math.min(1, Math.max(0, ((x - ax) * sx + (z - az) * sz) / squared)) : 0;
+  return { distance: Math.hypot(x - ax - sx * share, z - az - sz * share), share };
+}
+
+/**
+ * The spill-through bank at one end of an overpass's deck — #2699's fourth
+ * round, the owner's "the 1:2 grassy bank comes up to meet the deck underside
+ * in front of it": from under the deck's end down towards the route, and round
+ * its corners, to the ground. Ground, not concrete, in the embankment with the
+ * approach's banks (`three-renderer.ts` §`TerrainBelt`).
+ *
+ * A height field over the road's frame, sheared along the road with the
+ * deck: {@link SPILL_ALONG_CELLS} cells along it (a row on each of the deck's
+ * sides), and across it {@link SPILL_FRONT_CELLS} from
+ * {@link SPILL_INSIDE_VERGE_METRES} inside the verge's line to the seat's
+ * front, one under the seat, and {@link SPILL_BEYOND_CELLS} past the deck's
+ * end as far as its banks spread. Beside the deck its height is the higher
+ * of two 1 : {@link EMBANKMENT_RUN} slopes:
+ *
+ * - **from the seat's front**, at `seatCrest` — the bank the seat stands in,
+ *   with {@link ABUTMENT_FACE_METRES} of the seat above it;
+ * - **from the approach's road edges** over its first
+ *   {@link SPILL_SOURCE_STEPS} steps, at their height — the approach's banks
+ *   wrapping round the deck's corners, and the corner a skew deck's end
+ *   leaves.
+ *
+ * Under the deck the second goes on in from the deck's sides, falling at
+ * 1 : 2 — so the seat's face shows in the middle and the bank meets the edge
+ * beams at the sides, with no face of it standing up under them — and it
+ * stops {@link SPILL_UNDER_DECK_METRES} under the slab. Beside the deck it is
+ * {@link SPILL_UNDER_BANK_METRES} under the approach's own banks, which are
+ * the same slopes, so where those are drawn they are the face seen and the
+ * two never fight for a pixel. A cell none of whose corners stands above the
+ * ground is not drawn, and every corner under the ground is
+ * {@link EMBANKMENT_FOOT_METRES} under it. Nothing scattered stands on it: the
+ * deck's clearance and the approach's (`SideRoad.halfWidths`) reach its foot.
+ */
+function spillThrough(
+  bank: BankBuilder,
+  crossing: GradeCrossing,
+  side: -1 | 1,
+  edges: readonly (readonly [RoadEdge, RoadEdge])[],
+  deck: OverpassBuilt,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask,
 ): void {
-  const corners = [
-    [a.x, a.y, a.z, a.along, a.lateral],
-    [b.x, b.y, b.z, b.along, b.lateral],
-    [b.toe.x, b.toe.y, b.toe.z, b.toe.along, b.toe.lateral],
-    [a.toe.x, a.toe.y, a.toe.z, a.toe.along, a.toe.lateral],
-  ] as const;
-  for (const [i, j, k] of [
-    [0, 1, 2],
-    [0, 2, 3],
-  ] as const) {
-    let p = corners[i];
-    let q = corners[j];
-    const r = corners[k];
-    const ux = q[0] - p[0];
-    const uy = q[1] - p[1];
-    const uz = q[2] - p[2];
-    const vx = r[0] - p[0];
-    const vy = r[1] - p[1];
-    const vz = r[2] - p[2];
-    let nx = uy * vz - uz * vy;
-    let ny = uz * vx - ux * vz;
-    let nz = ux * vy - uy * vx;
-    const length = Math.hypot(nx, ny, nz);
-    // A foot cut back onto the road's edge leaves no face.
-    if (!(length > 1e-6)) continue;
-    if (ny < 0) {
-      // Wound the other way, so the face three draws is the upper one.
-      [p, q] = [q, p];
-      nx = -nx;
-      ny = -ny;
-      nz = -nz;
+  const { sine, cosine } = deck;
+  const outer = deck.outers[sideIndex(side)];
+  const seatFront = outer - ABUTMENT_THICKNESS_METRES;
+  const inner = Math.max(
+    ROAD_HALF_WIDTH_METRES + VERGE_METRES,
+    ROAD_HALF_WIDTH_METRES + OVERPASS_CLEAR_VERGE_METRES - SPILL_INSIDE_VERGE_METRES,
+  );
+  if (!(seatFront > inner)) return;
+  const crest = deck.deckTop + SIDE_ROAD_LIFT_METRES;
+  const footHalf = deck.halfWidth / sine;
+  /** Where on the road the deck's footprint is centred, `lateral` metres off it on this side. */
+  const centreAt = (lateral: number): number => crossing.along + (side * lateral * cosine) / sine;
+  // As far as a bank from the deck's corners comes down to the lowest ground
+  // round them, or the approach's banks spread.
+  let low = deck.groundLows[sideIndex(side)];
+  for (const out of [0, EMBANKMENT_MAX_RUN_METRES / 2, EMBANKMENT_MAX_RUN_METRES]) {
+    for (const along of [-1, 0, 1]) {
+      const at = centreAt(outer + out) + along * EMBANKMENT_MAX_RUN_METRES;
+      low = Math.min(
+        low,
+        terrainHeightAt(
+          profile,
+          origin,
+          seed,
+          distanceOnRoute(profile, at),
+          side * (outer + out),
+          land,
+        ),
+      );
     }
-    for (const corner of [p, q, r]) {
-      bank.indices.push(bank.positions.length / 3);
-      bank.positions.push(corner[0], corner[1], corner[2]);
-      bank.normals.push(nx / length, ny / length, nz / length);
-      bank.colours.push(EARTH[0], EARTH[1], EARTH[2]);
-      bank.fields.push(corner[3], corner[4]);
+  }
+  let spread = EMBANKMENT_RUN * (crest - low);
+  // Its corners' banks from the approach's first steps only: past them the
+  // approach's own banks are the bank, and their toes reach no further.
+  const wrapped = edges.slice(0, SPILL_SOURCE_STEPS + 1);
+  for (const row of wrapped) for (const edge of row) spread = Math.max(spread, edge.toe.run);
+  const reach = Math.min(2 * EMBANKMENT_MAX_RUN_METRES, spread) + 1;
+  // Past the deck's end: as far as that, and the corner a skew end leaves.
+  const far = outer + reach + 2 * deck.halfWidth * Math.abs(cosine);
+  const columns: number[] = [];
+  for (let i = 0; i <= SPILL_FRONT_CELLS; i += 1) {
+    columns.push(inner + ((seatFront - inner) * i) / SPILL_FRONT_CELLS);
+  }
+  for (let i = 0; i <= SPILL_BEYOND_CELLS; i += 1) {
+    columns.push(outer + ((far - outer) * i) / SPILL_BEYOND_CELLS);
+  }
+  // The seat's front, along the road: the crest of the bank it stands in.
+  const seatAlong = centreAt(outer - ABUTMENT_THICKNESS_METRES / 2);
+  const seatHalf = footHalf + ABUTMENT_OVERHANG_METRES;
+  const placed = (along: number, lateral: number): { x: number; z: number } => {
+    const frame = roadAt(profile, origin, along);
+    return {
+      x: frame.x + frame.normalX * side * lateral,
+      z: frame.z + frame.normalZ * side * lateral,
+    };
+  };
+  const seatFrom = placed(seatAlong - seatHalf, seatFront);
+  const seatTo = placed(seatAlong + seatHalf, seatFront);
+  /** How far along the deck from the crossing `(x, z)` is, in plan. */
+  const deckFrame = (x: number, z: number): { readonly u: number } => ({
+    u: (x - crossing.x) * crossing.dx + (z - crossing.z) * crossing.dz,
+  });
+  /** The approach's banks round the deck's corner: the highest 1 : 2 slope from its road edges. */
+  const corners = (x: number, z: number): number => {
+    let height = Number.NEGATIVE_INFINITY;
+    for (let row = 0; row + 1 < wrapped.length; row += 1) {
+      for (const edge of [0, 1] as const) {
+        const a = (wrapped[row] as readonly [RoadEdge, RoadEdge])[edge];
+        const b = (wrapped[row + 1] as readonly [RoadEdge, RoadEdge])[edge];
+        const near = toSegment(x, z, a.x, a.z, b.x, b.z);
+        height = Math.max(height, a.y + (b.y - a.y) * near.share - near.distance / EMBANKMENT_RUN);
+      }
+    }
+    return height;
+  };
+  /** The bank at `(x, z)`, `lateral` off the road and `offset` along it from the deck's footprint's middle. */
+  const mound = (x: number, z: number, lateral: number, offset: number): number => {
+    const spill =
+      deck.seatCrest -
+      toSegment(x, z, seatFrom.x, seatFrom.z, seatTo.x, seatTo.z).distance / EMBANKMENT_RUN;
+    const { u } = deckFrame(x, z);
+    // Across the deck, read off the field's own rows, one on each of its sides.
+    const under =
+      u >= -deck.halfSpans[0] - 1e-3 &&
+      u <= deck.halfSpans[1] + 1e-3 &&
+      Math.abs(offset) <= footHalf + 1e-6;
+    if (under) {
+      // Under the deck, the banks round its corners go on under it from its
+      // sides, falling inwards at 1 : 2 — so the seat's face shows in the
+      // middle, and no face of the bank stands up under the edge beams.
+      const sideAlong = centreAt(lateral) + (Math.sign(offset) || 1) * footHalf;
+      const { x: sideX, z: sideZ } = placed(sideAlong, lateral);
+      const inward = (footHalf - Math.abs(offset)) * sine;
+      const height = Math.max(spill, corners(sideX, sideZ) - inward / EMBANKMENT_RUN);
+      return Math.min(height, deck.underside - SPILL_UNDER_DECK_METRES);
+    }
+    // Beside the deck, a hair under the approach's own banks, which are the
+    // same slopes and where they are drawn are the face seen.
+    return Math.max(spill, corners(x, z)) - SPILL_UNDER_BANK_METRES;
+  };
+  // Every corner: where it is, and whether the bank stands above the ground there.
+  const grid: { corner: BankCorner; raised: boolean }[][] = [];
+  // Along: out to `reach` past each of the deck's sides, and a row on each
+  // side, where the bank's slope turns as it goes under the deck. Each column
+  // is centred on the deck there, which on a skew deck is along the road from
+  // its end; so each reaches as much further back towards the deck's end, where
+  // the banks round its corners are.
+  const offsetsAt = (lateral: number): number[] => {
+    const shift = centreAt(outer) - centreAt(lateral);
+    const before = reach + Math.max(0, -shift);
+    const after = reach + Math.max(0, shift);
+    const offsets: number[] = [];
+    for (let j = 0; j < SPILL_OUTSIDE_CELLS; j += 1) {
+      offsets.push(-footHalf - before + (before * j) / SPILL_OUTSIDE_CELLS);
+    }
+    for (let j = 0; j <= SPILL_UNDER_CELLS; j += 1) {
+      offsets.push(-footHalf + (2 * footHalf * j) / SPILL_UNDER_CELLS);
+    }
+    for (let j = SPILL_OUTSIDE_CELLS - 1; j >= 0; j -= 1) {
+      offsets.push(footHalf + after - (after * j) / SPILL_OUTSIDE_CELLS);
+    }
+    return offsets;
+  };
+  for (const lateral of columns) {
+    const column: { corner: BankCorner; raised: boolean }[] = [];
+    const offsets = offsetsAt(lateral);
+    for (const offset of offsets) {
+      const along = centreAt(lateral) + offset;
+      const { x, z } = placed(along, lateral);
+      const routeAlong = distanceOnRoute(profile, along);
+      const ground = terrainHeightAt(profile, origin, seed, routeAlong, side * lateral, land);
+      const height = mound(x, z, lateral, offset);
+      column.push({
+        corner: [
+          x,
+          Math.max(height, ground - EMBANKMENT_FOOT_METRES),
+          z,
+          routeAlong,
+          side * lateral,
+        ],
+        raised: height > ground,
+      });
+    }
+    grid.push(column);
+  }
+  for (let i = 0; i + 1 < grid.length; i += 1) {
+    const near = grid[i] as { corner: BankCorner; raised: boolean }[];
+    const next = grid[i + 1] as { corner: BankCorner; raised: boolean }[];
+    for (let j = 0; j < SPILL_ALONG_CELLS; j += 1) {
+      const cell = [near[j], near[j + 1], next[j + 1], next[j]] as const;
+      if (!cell.some((corner) => corner?.raised === true)) continue;
+      const [a, b, c, d] = cell.map((corner) => (corner as { corner: BankCorner }).corner) as [
+        BankCorner,
+        BankCorner,
+        BankCorner,
+        BankCorner,
+      ];
+      bankFace(bank, a, b, c);
+      bankFace(bank, a, c, d);
     }
   }
 }
@@ -1376,14 +1790,14 @@ interface CrossingBuilt {
 
 /**
  * Every crossing's boxes and road, built on first sight — per land-class
- * mask, since #1547 levels the ground an abutment and an approach stand on
+ * mask, since #1547 levels the ground a seat and an approach stand on
  * under mapped built-up land.
  */
 const built = new WeakMap<LandClassMask, WeakMap<GradeCrossing, CrossingBuilt>>();
 
 /**
  * One crossing, built once per land-class mask: an overpass's deck, edge
- * beams, abutments and road, or an underpass's parapets. @see the header
+ * beams, seats, road and banks, or an underpass's parapets. @see the header
  */
 function crossingBuilt(
   crossing: GradeCrossing,
