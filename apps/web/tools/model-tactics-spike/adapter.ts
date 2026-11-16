@@ -10,29 +10,37 @@
  * each 1 s window and holds it for the rest; within a window it only works out
  * the state's power target from the race view. So the adapter, before the
  * tick that opens a window, hands a bot the memory `decideTactic` would have
- * written had it chosen the model's move itself: that move, this window. The
- * tick then rides it exactly as it rides a seeded choice: the target from the
- * view, the wheel held, `wbal.ts` §`spendableWatts` capping it at the bot's
- * peak, at CP once it is exhausted, and the plan limiting it to what the W′
- * balance pays for. **No shipped module is changed**: the adapter writes the
- * one field of `LapRaceBot` the tactics already round-trip, through its public
- * type.
+ * written had it chosen the move itself. The tick then rides it exactly as it
+ * rides a seeded choice: the target from the view, the wheel held, `wbal.ts`
+ * §`spendableWatts` capping it at the bot's peak, at CP once it is exhausted,
+ * and the plan limiting it to what the W′ balance pays for. **No shipped
+ * module is changed**: the adapter writes the one field of `LapRaceBot` the
+ * tactics already round-trip, through its public type.
  *
- * ## What stays local, and what falls back
+ * ## Two rule sets (#2720)
  *
- * A bot keeps today's seeded choice for the window ({@link MoveOutcome}) when:
+ * {@link ModelRules} names which rules a model's move is ridden under, so that
+ * a log recorded under one replays under the same one.
  *
- * - no decision is in force, or the decision does not name it;
- * - it is inside its launch distance (`botLaunchMetres`): **the sprint launch
- *   stays local**, so the kick is never a model's to time;
- * - its W′ is exhausted, or a spending move (`attack`, `chase`) is asked of it
- *   under `BOT_TACTIC_WBAL_FLOOR`: **the low-W′ overrides stay local**;
- * - the move is not open to it: a `kick` outside its launch, a `flyer` before
- *   the last `BOT_TACTIC_FLYER_LAPS` laps or under its W′ share, an `attack`
- *   it has held for `BOT_TACTIC_ATTACK_MS` already;
- * - a `follow` or `chase` names a target that is not the racer directly ahead
- *   of it: those moves act on the wheel ahead, and today's physics has no
- *   other wheel to carry them to.
+ * **`adr-0073`, the default** (ADR 0073, Proposed, #2720): the strategy rules
+ * are lifted and the body's limits kept. A bot keeps today's seeded choice for
+ * the window only when no decision is in force, the decision does not name it,
+ * or **it is exhausted**: a blown bot rides as the seeded tactics ride it, and
+ * `spendableWatts` holds it to CP either way. Anything else the model names is
+ * ridden: an `attack` or `chase` under the W′ floor (a gamble, and a bot may
+ * blow up), a `flyer` on any lap and at any W′, an `attack` for as long as the
+ * model keeps it, a `kick` wherever the model launches it, and a move other
+ * than the kick inside the launch distance (a launch held late). A `follow`
+ * or `chase` may name any racer, the rider included ({@link aimedAt}).
+ *
+ * **`adr-0071`** (ADR 0071 D-3.6, the rules #2616 and #2708 recorded their
+ * logs under): a bot keeps today's seeded choice when no decision is in
+ * force or the decision does not name it; inside its launch distance; when it
+ * is exhausted, or a spending move (`attack`, `chase`) is asked of it under
+ * `BOT_TACTIC_WBAL_FLOOR`; when the move is not open to it (a `kick` outside
+ * its launch, a `flyer` before the last `BOT_TACTIC_FLYER_LAPS` laps or under
+ * its W′ share, an `attack` held for `BOT_TACTIC_ATTACK_MS` already); and when
+ * a `follow` or `chase` names a racer who is not directly ahead.
  *
  * Spike code: see `decision.ts`.
  */
@@ -44,15 +52,26 @@ import {
   BOT_TACTIC_WBAL_FLOOR,
   BOT_TACTICS_WINDOW_MS,
   botLaunchMetres,
+  type BotTactic,
   type ItemRaceState,
 } from '@onyourleft/domain';
 import type { LapRaceBot } from '@onyourleft/physics';
 
 import type { ModelMove } from './decision';
 
+/** Which rules a model's move is ridden under: ADR 0073's (#2720), or ADR 0071 D-3.6's (#2616, #2708). */
+export type ModelRules = 'adr-0071' | 'adr-0073';
+
+/** The rules a log that names none was recorded under: #2616's and #2708's. */
+export const MODEL_RULES_BEFORE_2720: ModelRules = 'adr-0071';
+
 /** What became of the model's say over one bot for one window. */
 export type MoveOutcome =
   | 'applied'
+  /** `adr-0073`: a `follow` or `chase` of a racer further up the road, ridden as a `chase` to them. */
+  | 'bridging'
+  /** `adr-0073`: a `follow` or `chase` of a racer behind, ridden as `sit-in` until they come by. */
+  | 'marking'
   | 'no-decision'
   | 'not-named'
   | 'launch'
@@ -70,7 +89,7 @@ export interface AppliedMoves {
   readonly outcomes: readonly MoveOutcome[];
 }
 
-/** Whether `move` may be carried out by `bot` now, or why not. */
+/** Under `adr-0071`: whether `move` may be carried out by `bot` now, or why not. */
 function legality(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
@@ -120,6 +139,39 @@ function legality(
   return 'applied';
 }
 
+/**
+ * What a `follow` or `chase` aimed at `move.target` is ridden as under
+ * `adr-0073` (#2720). Today's physics carries both moves to the wheel
+ * directly ahead and no other, so a target elsewhere is reached through the
+ * moves the bot already has:
+ *
+ * - **directly ahead**, or no target, or a target that is the bot itself or
+ *   is no longer racing: the move as named, on the wheel ahead;
+ * - **further up the road**: a `chase`, which rides past the racers between
+ *   until the target is the one directly ahead, and the next window's move
+ *   is ridden on its wheel;
+ * - **behind**: `sit-in`, which rides the wheel ahead at that wheel's pace
+ *   and never waits, so the marked racer comes by as the bunch rides, when a
+ *   `follow` takes its wheel.
+ */
+function aimedAt(
+  race: ItemRaceState,
+  bots: readonly LapRaceBot[],
+  seat: number,
+  move: ModelMove,
+  order: readonly string[],
+): { readonly outcome: MoveOutcome; readonly ridden: BotTactic } {
+  const as = { outcome: 'applied', ridden: move.move } as const;
+  if ((move.move !== 'follow' && move.move !== 'chase') || move.target === undefined) return as;
+  const own = order.indexOf((bots[seat] as LapRaceBot).id);
+  const wanted = move.target === 'rider' ? riderId(race, bots) : bots[move.target]?.id;
+  const at = wanted === undefined ? -1 : order.indexOf(wanted);
+  if (at < 0 || at === own || at === own - 1) return as;
+  return at < own
+    ? { outcome: 'bridging', ridden: 'chase' }
+    : { outcome: 'marking', ridden: 'sit-in' };
+}
+
 /** The rider's id: the one racer that is not a bot. */
 function riderId(race: ItemRaceState, bots: readonly LapRaceBot[]): string | undefined {
   const ids = new Set(bots.map((bot) => bot.id));
@@ -128,13 +180,15 @@ function riderId(race: ItemRaceState, bots: readonly LapRaceBot[]): string | und
 
 /**
  * The bots, before the tick at `race.atMs`, with `moves` applied to each whose
- * tactics window opens on it. `moves` `undefined` is no decision in force:
- * every bot keeps today's seeded tactics, and the bots come back unchanged.
+ * tactics window opens on it, under `rules`. `moves` `undefined` is no
+ * decision in force: every bot keeps today's seeded tactics, and the bots
+ * come back unchanged.
  */
 export function applyModelMoves(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
   moves: readonly ModelMove[] | undefined,
+  rules: ModelRules = 'adr-0073',
 ): AppliedMoves {
   const window = Math.floor(race.atMs / BOT_TACTICS_WINDOW_MS);
   // The racers still racing, the leader first, ties by id: `stepBotRace`'s order.
@@ -151,19 +205,23 @@ export function applyModelMoves(
       return bot;
     }
     const move = moves?.find((each) => each.bot === seat);
-    const outcome =
-      moves === undefined
-        ? 'no-decision'
-        : move === undefined
-          ? 'not-named'
-          : legality(race, bots, seat, move, order);
+    if (move === undefined) {
+      outcomes.push(moves === undefined ? 'no-decision' : 'not-named');
+      return bot;
+    }
+    const { outcome, ridden } =
+      rules === 'adr-0071'
+        ? { outcome: legality(race, bots, seat, move, order), ridden: move.move }
+        : bot.energy.exhausted
+          ? { outcome: 'exhausted' as const, ridden: move.move }
+          : aimedAt(race, bots, seat, move, order);
     outcomes.push(outcome);
-    if (outcome !== 'applied' || move === undefined) return bot;
-    const kept = move.move === bot.tactics.tactic;
+    if (outcome !== 'applied' && outcome !== 'bridging' && outcome !== 'marking') return bot;
+    const kept = ridden === bot.tactics.tactic;
     return {
       ...bot,
       tactics: {
-        tactic: move.move,
+        tactic: ridden,
         sinceMs: kept ? (bot.tactics.sinceMs ?? race.atMs) : race.atMs,
         window,
       },

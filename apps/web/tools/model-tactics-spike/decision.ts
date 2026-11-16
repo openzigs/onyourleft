@@ -90,31 +90,16 @@ const seatSchema = (bots: number): Readonly<Record<string, unknown>> => ({
 /**
  * The answer's JSON Schema, which {@link parseModelDecision} checks every
  * answer against on arrival, because a schema the server enforces is not one
- * the client may trust. Ollama's `format` field holds the model to the
- * narrower {@link modelAnswerFormat}.
+ * the client may trust. Since #2720 it is also what Ollama's `format` field
+ * holds the model to: a `follow` or `chase` may name any racer, so the target
+ * is offered again (#2708 had taken it out, when a move could act only on the
+ * racer directly ahead).
  */
 export function modelDecisionSchema(bots: number): Readonly<Record<string, unknown>> {
   return decisionShape({
     bot: seatSchema(bots),
     move: { type: 'string', enum: [...BOT_TACTICS] },
     target: { anyOf: [{ type: 'string', enum: ['rider'] }, seatSchema(bots)] },
-  });
-}
-
-/**
- * What Ollama's `format` field holds the model to (structured outputs):
- * {@link modelDecisionSchema} with **no `target`** (#2708). A `follow` or
- * `chase` acts on the racer directly ahead when it is ridden, 3 to 5 s after
- * the ask, and by then that need not be the racer that was ahead when the
- * model read the race: spike 0039's model aimed 46 moves, and 157
- * bot-windows fell back as `target-not-ahead`. With no target to write, the
- * move goes to whoever is on the wheel ahead. The parser still reads a target
- * that arrives anyway, and the adapter still checks it.
- */
-export function modelAnswerFormat(bots: number): Readonly<Record<string, unknown>> {
-  return decisionShape({
-    bot: seatSchema(bots),
-    move: { type: 'string', enum: [...BOT_TACTICS] },
   });
 }
 

@@ -12,8 +12,11 @@
  *     node tools/model-tactics-spike/run-live.mjs compare
  *
  * `--run <name>` reads and writes `results/<name>/` instead of `results/`:
- * #2708's tuned prompt is `--run 2708`, beside spike 0039's first run. `race`
- * takes `--seed <n>` to ride one seed, for a quick look while tuning.
+ * #2708's tuned prompt is `--run 2708`, beside spike 0039's first run, and
+ * #2720's prompt under ADR 0073's rules is `--run 2720`. `race` takes
+ * `--seed <n>` to ride one seed, for a quick look while tuning. A race writes
+ * the rules it rode under into each log (`rules`); `compare` replays each log
+ * under its own, and a log that names none under ADR 0071's.
  *
  * Ollama on the instance PC listens on 127.0.0.1 only and has no
  * authentication, so it is never exposed: each call runs `curl.exe` on that
@@ -42,6 +45,7 @@ import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { MODEL_RULES_BEFORE_2720, type ModelRules } from './adapter';
 import { decisionRequest, MODEL_TACTICS_MODEL } from './ollama';
 import { modelInput } from './model-input';
 import { fieldNumbers } from './compare';
@@ -49,6 +53,7 @@ import { parseModelDecision } from './decision';
 import type { LoggedDecision } from './decision-log';
 import {
   fieldTrace,
+  NO_OUTCOMES,
   quietSeconds,
   rideField,
   SPIKE_CIRCUITS,
@@ -162,6 +167,7 @@ async function benchInput(): Promise<ReturnType<typeof modelInput>> {
     ride.race,
     ride.bots,
     SPIKE_CIRCUITS.flat,
+    ride.seed,
     ride.draft,
     200 / 75,
     quietSeconds(run.ticks, ride.race.atMs),
@@ -275,9 +281,10 @@ async function bench(): Promise<void> {
 
 /** A one-line look at a ridden field, for tuning: its shares of each move, and its outcomes. */
 function summary(name: string, run: FieldRun): string {
-  const { tacticShare: t } = fieldNumbers(run, 'rider');
+  const numbers = fieldNumbers(run, 'rider');
+  const t = numbers.tacticShare;
   const share = (value: number): string => `${(value * 100).toFixed(1)}%`;
-  return `${name}: attack ${share(t.attack)} flyer ${share(t.flyer)} follow ${share(t.follow)} chase ${share(t.chase)} sit-in ${share(t['sit-in'])}; ${JSON.stringify(run.outcomes)}\n`;
+  return `${name}: attack ${share(t.attack)} flyer ${share(t.flyer)} follow ${share(t.follow)} chase ${share(t.chase)} sit-in ${share(t['sit-in'])}; lead changes ${String(numbers.leadChanges)}, movers ${String(numbers.movers)}, blown ${String(numbers.blownBots)} (over CP ${String(numbers.blownOverCpTicks)}), on the rider's wheel ${String(numbers.onRiderWheelTicks)} ticks, ${String(numbers.riderTargets)} aimed at the rider; ${JSON.stringify(run.outcomes)}\n`;
 }
 
 async function race(circuit: SpikeCircuit, only: number | undefined): Promise<void> {
@@ -302,6 +309,7 @@ async function race(circuit: SpikeCircuit, only: number | undefined): Promise<vo
           circuit,
           seed,
           seconds: SPIKE_RIDDEN_SECONDS,
+          rules: 'adr-0073' satisfies ModelRules,
           outcomes: run.outcomes,
           traceSha256: traceDigest(run),
           log: run.log,
@@ -328,16 +336,21 @@ async function compare(): Promise<void> {
         await readFile(`${RESULTS}${circuit}-${String(seed)}.json`, 'utf8'),
       ) as {
         readonly log: readonly LoggedDecision[];
-        readonly outcomes: unknown;
+        readonly outcomes: Readonly<Record<string, number>>;
         readonly traceSha256?: string;
+        readonly rules?: ModelRules;
       };
+      const rules = recorded.rules ?? MODEL_RULES_BEFORE_2720;
       const seeded = await rideField(circuit, seed, { kind: 'seeded' });
-      const model = await rideField(circuit, seed, { kind: 'log', log: recorded.log });
+      const model = await rideField(circuit, seed, { kind: 'log', log: recorded.log, rules });
       fields.push({
         circuit,
         seed,
+        rules,
+        // A log written before #2720 has no count for its two new outcomes, which were 0.
         outcomeCountsMatchLive:
-          JSON.stringify(model.outcomes) === JSON.stringify(recorded.outcomes),
+          JSON.stringify(model.outcomes) ===
+          JSON.stringify({ ...NO_OUTCOMES, ...recorded.outcomes }),
         traceMatchesLive:
           recorded.traceSha256 === undefined ? null : traceDigest(model) === recorded.traceSha256,
         outcomes: model.outcomes,

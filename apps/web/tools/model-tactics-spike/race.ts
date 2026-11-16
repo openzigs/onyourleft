@@ -6,8 +6,9 @@
  * tactics from one of three sources:
  *
  * - `seeded`: today's tactics, untouched;
- * - `log`: a decision log replayed (`decision-log.ts`): the seed and the log
- *   are the whole race;
+ * - `log`: a decision log replayed (`decision-log.ts`): the seed, the log and
+ *   the rules it was recorded under (`adapter.ts` §`ModelRules`) are the
+ *   whole race;
  * - `live`: a model asked every 4 s of race time. The race waits for each
  *   answer and books it as arriving its measured latency later in race time,
  *   so the log a live run writes is the log its replay reads.
@@ -35,7 +36,7 @@ import {
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../../src/game/rider';
 import { circuitRoute } from '../../src/game/route-fixtures-testing';
 
-import { applyModelMoves, type MoveOutcome } from './adapter';
+import { applyModelMoves, type ModelRules, type MoveOutcome } from './adapter';
 import { parseModelDecision } from './decision';
 import {
   MODEL_DECISION_EVERY_MS,
@@ -77,9 +78,14 @@ export interface ModelCall {
 /** A live model: asked with the race as the model reads it. */
 export type Decider = (input: ModelInput, requestedAtMs: number) => Promise<ModelCall>;
 
+/** Where a field's tactics come from; a `log` or `live` source rides ADR 0073's rules unless it names others (#2720). */
 export type TacticsSource =
   | { readonly kind: 'seeded' }
-  | { readonly kind: 'log'; readonly log: readonly LoggedDecision[] }
+  | {
+      readonly kind: 'log';
+      readonly log: readonly LoggedDecision[];
+      readonly rules?: ModelRules | undefined;
+    }
   | { readonly kind: 'live'; readonly decide: Decider };
 
 /** One tick of a field, as the comparison reads it. */
@@ -89,6 +95,8 @@ export interface FieldTick {
   readonly at: ReadonlyMap<string, number>;
   readonly tactic: ReadonlyMap<string, BotTactic>;
   readonly wbal: ReadonlyMap<string, number>;
+  /** Whether each bot is exhausted after the tick (#2720). Not in {@link fieldTrace}: it follows from W′. */
+  readonly exhausted: ReadonlyMap<string, boolean>;
   readonly k: ReadonlyMap<string, number>;
   /** Each bot's power on the tick, watts. */
   readonly power: ReadonlyMap<string, number>;
@@ -174,8 +182,11 @@ function deepest(ride: LapRaceRide, along: number): number {
   return most;
 }
 
-const NO_OUTCOMES: Record<MoveOutcome, number> = {
+/** Every outcome, counted 0: what a run starts from, and what a log written before #2720 lacks keys of. */
+export const NO_OUTCOMES: Readonly<Record<MoveOutcome, number>> = {
   applied: 0,
+  bridging: 0,
+  marking: 0,
   'no-decision': 0,
   'not-named': 0,
   launch: 0,
@@ -199,6 +210,7 @@ export async function rideField(
   let along = ride.startAlong;
   const log: LoggedDecision[] = source.kind === 'log' ? [...source.log] : [];
   const outcomes = { ...NO_OUTCOMES };
+  const rules = source.kind === 'log' ? source.rules : undefined;
   let askAtMs = MODEL_DECISION_EVERY_MS;
   const ticks: FieldTick[] = [];
   const count = Math.round(seconds / LAP_RACE_TICK_SECONDS);
@@ -210,6 +222,7 @@ export async function rideField(
           ride.race,
           ride.bots,
           profile,
+          ride.seed,
           ride.draft,
           RIDER_WATTS / RIDER_KILOGRAMS,
           quietSeconds(ticks, atMs),
@@ -234,7 +247,7 @@ export async function rideField(
       askAtMs = nextRequestAtMs(arrivedAtMs);
     }
     if (source.kind !== 'seeded') {
-      const applied = applyModelMoves(ride.race, ride.bots, movesInForce(log, atMs));
+      const applied = applyModelMoves(ride.race, ride.bots, movesInForce(log, atMs), rules);
       for (const outcome of applied.outcomes) outcomes[outcome] += 1;
       ride = { ...ride, bots: applied.bots };
     }
@@ -256,6 +269,7 @@ export async function rideField(
           bot.plan === undefined ? 1 : bot.energy.wbalJoules / bot.plan.capacity.wPrimeJoules,
         ]),
       ),
+      exhausted: new Map(ride.bots.map((bot) => [bot.id, bot.energy.exhausted])),
       k: new Map(Object.entries(k)),
       power: new Map(ride.bots.map((bot) => [bot.id, bot.power])),
       inside: deepest(ride, along),
