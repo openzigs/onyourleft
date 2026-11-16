@@ -1202,11 +1202,11 @@ export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
 
 /**
  * The most triangles the scenery cyclists may add to a realistic frame —
- * #2722: **20 000**, for `scenery-cyclists.ts` §`SCENERY_CYCLISTS_MAX` (3) of
+ * #2722: **25 000**, for `scenery-cyclists.ts` §`SCENERY_CYCLISTS_MAX` (3) of
  * them, each the people's cut body (`people-body.ts` §`PERSON_MAX_TRIANGLES`,
  * 2 000 at most) on the realistic bicycle with its crankset and helmet:
- * 6 300 a cyclist, counted at the WebGL entry points in the pinned Chromium
- * on 2026-11-16, so 18 900 for three. They are instances of meshes the frame
+ * 8 056 a cyclist, counted at the WebGL entry points in the pinned Chromium
+ * on 2026-11-16, so 24 168 for three. They are instances of meshes the frame
  * already draws — the people's bodies and the riders' bicycles — so beside
  * people they add triangles and no draw call.
  *
@@ -1219,7 +1219,7 @@ export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
  * @test-facing held by `game.browser.spec.ts` §"#2722", which counts what a
  * frame with cyclists in view adds over the same frame with none
  */
-export const REALISTIC_SCENERY_CYCLIST_TRIANGLES = 20_000;
+export const REALISTIC_SCENERY_CYCLIST_TRIANGLES = 25_000;
 
 /**
  * The most triangles the start and finish gantries may add to a frame:

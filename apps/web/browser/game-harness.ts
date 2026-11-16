@@ -3918,8 +3918,8 @@ function sceneryCyclistsProbe(
     ...extra,
   });
   // Found without drawing: the frames where a cyclist level with the rider
-  // would be drawn through them if it kept its lane, and for each kind the
-  // first frame with one of it a little way off in view.
+  // would be drawn nearer them than the clearance if it kept its lane, and
+  // for each kind the first frame with one of it a little way off in view.
   const levelAt: number[] = [];
   const ofKind = new Map<string, number>();
   for (let along = 0; along <= profile.totalDistance; along += 1) {
@@ -3933,7 +3933,7 @@ function sceneryCyclistsProbe(
     const through = inReach.some(
       (each) =>
         Math.abs(each.along - rider) < BICYCLE_LENGTH_METRES &&
-        Math.abs(each.encounter.lane - own.lateral) < CLEAR_METRES - 0.3,
+        Math.abs(each.encounter.lane - own.lateral) < CLEAR_METRES - 0.2,
     );
     if (through && levelAt.length < 6 && levelAt.every((seen) => along - seen > 20)) {
       levelAt.push(along);

@@ -3911,7 +3911,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // handlebar and the air between clear of them across it.
     expect(cyclists.wrongSide).toBe(0);
     expect(cyclists.leastLevelGap).toBeGreaterThan(CLEAR_METRES - 0.1);
-    // The control: left in their lanes, some of the same cyclists would be drawn through the rider.
+    // The control: left in their lanes, some of the same cyclists would be drawn nearer the rider than that.
     expect(cyclists.leastLevelGapInLane).toBeLessThan(CLEAR_METRES - 0.1);
     // One body on each bicycle, where it is drawn.
     expect(cyclists.bodyOffBicycle).toBeLessThan(0.001);
