@@ -8842,6 +8842,9 @@
                               "admin_code_minted",
                               "admin_sign_in",
                               "admin_refused",
+                              "admin_passkey_enrolled",
+                              "admin_passkey_revoked",
+                              "admin_passkey_confirmed",
                               "room_ended"
                             ]
                           },

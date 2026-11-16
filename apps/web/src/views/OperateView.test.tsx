@@ -332,6 +332,14 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(operatorActionLabel(action)).toBe(label);
   });
 
+  it.each([
+    ['admin_passkey_enrolled', 'Admin passkey added'],
+    ['admin_passkey_revoked', 'Admin passkey revoked'],
+    ['admin_passkey_confirmed', 'Admin passkey confirmed on the host'],
+  ])('names the admin passkeys’ action %s in words (#2642)', (action, label) => {
+    expect(operatorActionLabel(action)).toBe(label);
+  });
+
   it('names “back up now” in the log as the owner asked for it (#2607)', () => {
     expect(operatorActionLabel('backup_requested')).toBe('Backup asked for');
   });

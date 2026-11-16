@@ -115,6 +115,10 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['admin_code_minted', 'Admin sign-in code made'],
   ['admin_sign_in', 'Signed in to the admin pages'],
   ['admin_refused', 'Admin sign-in attempts refused'],
+  // #2642: the owner's passkeys for the admin pages.
+  ['admin_passkey_enrolled', 'Admin passkey added'],
+  ['admin_passkey_revoked', 'Admin passkey revoked'],
+  ['admin_passkey_confirmed', 'Admin passkey confirmed on the host'],
   // #2612: the Rooms section's.
   ['room_ended', 'Room ended'],
 ]);

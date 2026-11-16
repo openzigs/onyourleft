@@ -37,6 +37,7 @@ import { sql, type Kysely, type Selectable, type Transaction } from 'kysely';
 import type {
   AccountChangeMarkTable,
   AccountChangeTable,
+  AdminPasskeyTable,
   AdminSessionTable,
   ActivityRecordTable,
   AnalysisEventTable,
@@ -978,6 +979,10 @@ export const OPERATOR_ACTIONS = [
   'admin_code_minted',
   'admin_sign_in',
   'admin_refused',
+  // #2642 (ADR 0069 D-1, D-8, Q-C): the owner's passkeys.
+  'admin_passkey_enrolled',
+  'admin_passkey_revoked',
+  'admin_passkey_confirmed',
   'room_ended',
 ] as const;
 
@@ -1068,10 +1073,16 @@ export const OPERATOR_DETAILS: {
   // How a session was opened: `passkey` is #2642's.
   admin_sign_in: { words: ['code', 'passkey'], counts: [] },
   // At most one a minute per kind, carrying how many were refused.
+  // `counter` (#2642): a passkey whose signature counter did not rise — a
+  // cloned authenticator, or a replay — counted apart from other refusals.
   admin_refused: {
-    words: ['code', 'passkey', 'step_up', 'csrf', 'origin', 'rate_limited'],
+    words: ['code', 'passkey', 'step_up', 'counter', 'csrf', 'origin', 'rate_limited'],
     counts: ['refused'],
   },
+  // #2642: the algorithm, never the passkey's id, label or RP ID.
+  admin_passkey_enrolled: { words: ['ed25519', 'es256'], counts: [] },
+  admin_passkey_revoked: { words: [], counts: ['sessions_ended'] },
+  admin_passkey_confirmed: { words: [], counts: [] },
   // #2612: why the owner ended a room, what kind it was and how many riders
   // were in it — never the room's id, a rider or a place.
   room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
@@ -1145,6 +1156,56 @@ export interface AdminSessionRecord {
   readonly lastSeenAt: number;
   /** The absolute end: two hours after `createdAt`. */
   readonly expiresAt: number;
+}
+
+/** One of the owner's admin passkeys, as it is kept (#2642, migration 0045). */
+export interface AdminPasskeyRecord {
+  readonly id: string;
+  /** base64url. */
+  readonly credentialId: string;
+  readonly rpId: string;
+  readonly algorithm: 'ed25519' | 'es256';
+  /** Hex. */
+  readonly publicKey: string;
+  readonly signCount: number;
+  /** base64url. */
+  readonly userHandle: string;
+  /** The `OYL_INSTANCE_OWNER_KEY` held at enrolment: under another key it is not usable. */
+  readonly ownerKey: string;
+  readonly label: string;
+  readonly listener: 'tunnel' | 'loopback';
+  /** Unix seconds. */
+  readonly enrolledAt: number;
+  readonly lastUsedAt: number | null;
+  /** `null` until `operator admin-passkeys confirm`, for one enrolled through the tunnel (ADR 0069 Q-C). */
+  readonly confirmedAt: number | null;
+}
+
+/** A WebAuthn challenge the admin pages issued (#2642, migration 0045). */
+export interface AdminChallengeRecord {
+  readonly challengeSha256: string;
+  readonly purpose: 'sign_in' | 'enrol' | 'step_up';
+  /** `null` for a sign-in's. */
+  readonly sessionSha256: string | null;
+  /** A step-up's action and the SHA-256 of its canonical fields; `null` otherwise. */
+  readonly action: string | null;
+  readonly fieldsSha256: string | null;
+  /** An enrolment's WebAuthn user handle, base64url; `null` otherwise. */
+  readonly userHandle: string | null;
+  /** Unix seconds. */
+  readonly expiresAt: number;
+}
+
+/** What a passkey sign-in asks of the store (#2642). */
+export interface AdminPasskeySignIn {
+  readonly passkeyId: string;
+  /** The counter the passkey held when the assertion was verified, and the one it reported. */
+  readonly signCountWas: number;
+  readonly signCount: number;
+  /** The session to open; its `createdAt` is now. */
+  readonly session: AdminSessionRecord;
+  readonly source: AdminSource;
+  readonly idleSeconds: number;
 }
 
 /** What redeeming an admin code asks of the store (#2641). */
@@ -2348,6 +2409,58 @@ export interface SqlStore {
   /** End an admin session: its row is deleted. `false` when there was none. */
   endAdminSession(tokenSha256: string): Promise<boolean>;
   /**
+   * Hold a WebAuthn challenge the admin pages issued (#2642): every challenge
+   * past its end is forgotten first, and an enrolment's or a step-up's
+   * REPLACES the one its session held, so a session has at most one of each.
+   */
+  issueAdminChallenge(challenge: AdminChallengeRecord, at: number): Promise<void>;
+  /**
+   * Take a challenge, once (#2642): a sign-in's by its SHA-256, an
+   * enrolment's or a step-up's by its session. It is deleted whether or not
+   * it is still live, so a challenge is answered at most once even when the
+   * answer is refused; `undefined` when there was none, or its end had come.
+   */
+  takeAdminChallenge(
+    purpose: AdminChallengeRecord['purpose'],
+    key: { readonly challengeSha256: string } | { readonly sessionSha256: string },
+    at: number,
+  ): Promise<AdminChallengeRecord | undefined>;
+  /** Every admin passkey, oldest first. */
+  listAdminPasskeys(): Promise<readonly AdminPasskeyRecord[]>;
+  /** The admin passkey with this credential id, or `undefined`. */
+  findAdminPasskeyByCredential(credentialId: string): Promise<AdminPasskeyRecord | undefined>;
+  /** Keep a new admin passkey. Its id and credential id are new. */
+  addAdminPasskey(passkey: AdminPasskeyRecord): Promise<void>;
+  /**
+   * Revoke an admin passkey: every session it opened ended, then its row
+   * deleted, in one transaction. Answers whether there was one, and how many
+   * sessions ended.
+   */
+  removeAdminPasskey(
+    id: string,
+  ): Promise<{ readonly removed: boolean; readonly sessionsEnded: number }>;
+  /** Confirm a passkey enrolled through the tunnel (ADR 0069 Q-C). */
+  confirmAdminPasskey(id: string, at: number): Promise<'confirmed' | 'already_confirmed' | 'none'>;
+  /**
+   * Record that a passkey made an assertion: its counter moved to
+   * `signCount` and its last use to `at` — ONLY while its counter is still
+   * `signCountWas`, so two assertions racing on one counter move it once.
+   */
+  recordAdminPasskeyUse(
+    id: string,
+    signCountWas: number,
+    signCount: number,
+    at: number,
+  ): Promise<boolean>;
+  /**
+   * Sign in with a passkey (#2642): in ONE transaction, the passkey's use
+   * recorded as {@link recordAdminPasskeyUse} does (`refused` when its
+   * counter moved meanwhile, and nothing written), every session past its
+   * ends pruned, the session opened and tied to the passkey, and an
+   * `admin_sign_in` entry (`passkey`) appended to the operator log.
+   */
+  openAdminSessionWithPasskey(signIn: AdminPasskeySignIn): Promise<'opened' | 'refused'>;
+  /**
    * One page of the suspended accounts, most recently suspended first (#961):
    * at most `limit` of them after the (suspendedAt, id) position `after`, in
    * that order, or the first when it is `undefined`.
@@ -2855,6 +2968,22 @@ const operatorLogFrom = (row: Selectable<OperatorLogTable>): OperatorLogEntry =>
   action: row.action as OperatorAction,
   detail: row.detail,
   outcome: row.outcome,
+});
+
+const adminPasskeyFrom = (row: Selectable<AdminPasskeyTable>): AdminPasskeyRecord => ({
+  id: row.id,
+  credentialId: row.credential_id,
+  rpId: row.rp_id,
+  algorithm: row.algorithm,
+  publicKey: row.public_key,
+  signCount: row.sign_count,
+  userHandle: row.user_handle,
+  ownerKey: row.owner_key,
+  label: row.label,
+  listener: row.listener,
+  enrolledAt: row.enrolled_at,
+  lastUsedAt: row.last_used_at,
+  confirmedAt: row.confirmed_at,
 });
 
 const adminSessionFrom = (row: Selectable<AdminSessionTable>): AdminSessionRecord => ({
@@ -6496,6 +6625,204 @@ function storeOver(
           .executeTakeFirst();
         return Number(ended.numDeletedRows) > 0;
       }),
+
+    issueAdminChallenge: (challenge, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          await trx.deleteFrom('admin_challenge').where('expires_at', '<=', at).execute();
+          if (challenge.sessionSha256 !== null) {
+            await trx
+              .deleteFrom('admin_challenge')
+              .where('purpose', '=', challenge.purpose)
+              .where('session_sha256', '=', challenge.sessionSha256)
+              .execute();
+          }
+          await trx
+            .insertInto('admin_challenge')
+            .values({
+              challenge_sha256: challenge.challengeSha256,
+              purpose: challenge.purpose,
+              session_sha256: challenge.sessionSha256,
+              action: challenge.action,
+              fields_sha256: challenge.fieldsSha256,
+              user_handle: challenge.userHandle,
+              expires_at: challenge.expiresAt,
+            })
+            .execute();
+        }),
+      ),
+
+    takeAdminChallenge: (purpose, key, at) =>
+      exclusive(async () => {
+        let query = db.deleteFrom('admin_challenge').where('purpose', '=', purpose);
+        query =
+          'challengeSha256' in key
+            ? query
+                .where('challenge_sha256', '=', key.challengeSha256)
+                .where('session_sha256', 'is', null)
+            : query.where('session_sha256', '=', key.sessionSha256);
+        const taken = await query.returningAll().executeTakeFirst();
+        if (taken === undefined || taken.expires_at <= at) return undefined;
+        return {
+          challengeSha256: taken.challenge_sha256,
+          purpose: taken.purpose,
+          sessionSha256: taken.session_sha256,
+          action: taken.action,
+          fieldsSha256: taken.fields_sha256,
+          userHandle: taken.user_handle,
+          expiresAt: taken.expires_at,
+        };
+      }),
+
+    listAdminPasskeys: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('admin_passkey')
+            .selectAll()
+            .orderBy('enrolled_at')
+            .orderBy('id')
+            .execute()
+        ).map(adminPasskeyFrom),
+      ),
+
+    findAdminPasskeyByCredential: (credentialId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('admin_passkey')
+          .selectAll()
+          .where('credential_id', '=', credentialId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : adminPasskeyFrom(row);
+      }),
+
+    addAdminPasskey: (passkey) =>
+      exclusive(async () => {
+        await db
+          .insertInto('admin_passkey')
+          .values({
+            id: passkey.id,
+            credential_id: passkey.credentialId,
+            rp_id: passkey.rpId,
+            algorithm: passkey.algorithm,
+            public_key: passkey.publicKey,
+            sign_count: passkey.signCount,
+            user_handle: passkey.userHandle,
+            owner_key: passkey.ownerKey,
+            label: passkey.label,
+            listener: passkey.listener,
+            enrolled_at: passkey.enrolledAt,
+            last_used_at: passkey.lastUsedAt,
+            confirmed_at: passkey.confirmedAt,
+          })
+          .execute();
+      }),
+
+    removeAdminPasskey: (id) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const ended = await trx
+            .deleteFrom('admin_session')
+            .where('token_sha256', 'in', (row) =>
+              row
+                .selectFrom('admin_passkey_session')
+                .select('token_sha256')
+                .where('passkey_id', '=', id),
+            )
+            .executeTakeFirst();
+          const removed = await trx
+            .deleteFrom('admin_passkey')
+            .where('id', '=', id)
+            .executeTakeFirst();
+          return {
+            removed: Number(removed.numDeletedRows) > 0,
+            sessionsEnded: Number(ended.numDeletedRows),
+          };
+        }),
+      ),
+
+    confirmAdminPasskey: (id, at) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('admin_passkey')
+          .select('confirmed_at')
+          .where('id', '=', id)
+          .executeTakeFirst();
+        if (row === undefined) return 'none' as const;
+        if (row.confirmed_at !== null) return 'already_confirmed' as const;
+        await db
+          .updateTable('admin_passkey')
+          .set({ confirmed_at: at })
+          .where('id', '=', id)
+          .execute();
+        return 'confirmed' as const;
+      }),
+
+    recordAdminPasskeyUse: (id, signCountWas, signCount, at) =>
+      exclusive(async () => {
+        const moved = await db
+          .updateTable('admin_passkey')
+          .set({ sign_count: signCount, last_used_at: at })
+          .where('id', '=', id)
+          .where('sign_count', '=', signCountWas)
+          .executeTakeFirst();
+        return Number(moved.numUpdatedRows) === 1;
+      }),
+
+    openAdminSessionWithPasskey: (signIn) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const at = signIn.session.createdAt;
+          const moved = await trx
+            .updateTable('admin_passkey')
+            .set({ sign_count: signIn.signCount, last_used_at: at })
+            .where('id', '=', signIn.passkeyId)
+            .where('sign_count', '=', signIn.signCountWas)
+            .executeTakeFirst();
+          if (Number(moved.numUpdatedRows) !== 1) return 'refused' as const;
+          await trx
+            .deleteFrom('admin_session')
+            .where((row) =>
+              row.or([
+                row('expires_at', '<=', at),
+                row('last_seen_at', '<=', at - signIn.idleSeconds),
+              ]),
+            )
+            .execute();
+          const session = signIn.session;
+          await trx
+            .insertInto('admin_session')
+            .values({
+              token_sha256: session.tokenSha256,
+              athlete_id: session.athleteId,
+              owner_key: session.ownerKey,
+              listener: session.listener,
+              strength: session.strength,
+              csrf_sha256: session.csrfSha256,
+              created_at: session.createdAt,
+              last_seen_at: session.lastSeenAt,
+              expires_at: session.expiresAt,
+            })
+            .execute();
+          await trx
+            .insertInto('admin_passkey_session')
+            .values({ token_sha256: session.tokenSha256, passkey_id: signIn.passkeyId })
+            .execute();
+          // In the same transaction as the session (ADR 0069 D-8): a sign-in
+          // the log cannot record is not made.
+          await appendOperatorLog(
+            trx,
+            {
+              actor: { source: signIn.source, athleteId: session.athleteId },
+              action: 'admin_sign_in',
+              at,
+            },
+            'done',
+            'passkey',
+          );
+          return 'opened' as const;
+        }),
+      ),
 
     listSuspendedAthletes: (after, limit) =>
       exclusive(async () => {
