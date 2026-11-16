@@ -325,7 +325,11 @@ describe('#2685 the golf courses’ and cemeteries’ ground', () => {
       );
     if (lane === null) throw new Error('no fairway lane');
     const [period, from, to] = [Number(lane[1]), Number(lane[2]), Number(lane[3])];
-    expect([period, from, to]).toEqual([GOLF_FAIRWAY_PERIOD_METRES, 0, GOLF_FAIRWAY_WIDTH_METRES]);
+    // Mid-period, so neither edge sits on the mod's wrap, where it is half anti-aliased.
+    expect(period).toBe(GOLF_FAIRWAY_PERIOD_METRES);
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeLessThan(period);
+    expect(to - from).toBe(GOLF_FAIRWAY_WIDTH_METRES);
     // The lane's share of the course is fairway, the rest rough.
     let fairway = 0;
     const steps = 8_000;
@@ -347,6 +351,11 @@ describe('#2685 the golf courses’ and cemeteries’ ground', () => {
       GOLF_APPROACH_METRES,
       9,
     );
+    // The rough is darker and yellower than the fairway (red-to-blue up, green down).
+    const [fr, fg, fb] = PARK_GROUND_LOOK.fairway;
+    const [rr, rg, rb] = PARK_GROUND_LOOK.rough;
+    expect(rg).toBeLessThan(fg as number);
+    expect((rr as number) / (rb as number)).toBeGreaterThan((fr as number) / (fb as number));
     // And the stripes are further apart than the 1.22 and 0.8 the owner held.
     expect(PARK_GROUND_LOOK.stripePale - PARK_GROUND_LOOK.stripeDeep).toBeGreaterThan(0.42);
   });

@@ -16121,7 +16121,7 @@ export const PARK_GROUND_MIX = ((): string => {
     if (oylGolf > 0.0) {
       float oylPass = abs(fract(oylStripeAt) * 2.0 - 1.0);
       float oylStripe = smoothstep(0.5 - oylStripeAa, 0.5 + oylStripeAa, oylPass);
-      float oylFairway = oylParkBand(mod(oylLaneAt, ${glslFloat(GOLF_FAIRWAY_PERIOD_METRES)}), 0.0, ${glslFloat(GOLF_FAIRWAY_WIDTH_METRES)}, oylLaneAa);
+      float oylFairway = oylParkBand(mod(oylLaneAt, ${glslFloat(GOLF_FAIRWAY_PERIOD_METRES)}), ${glslFloat((GOLF_FAIRWAY_PERIOD_METRES - GOLF_FAIRWAY_WIDTH_METRES) / 2)}, ${glslFloat((GOLF_FAIRWAY_PERIOD_METRES + GOLF_FAIRWAY_WIDTH_METRES) / 2)}, oylLaneAa);
       float oylGreen = 0.0;
       float oylFringe = 0.0;
       float oylSand = oylLook.b;
