@@ -560,7 +560,8 @@ describe('an overpass reads as a bridge from the bike — #2699', () => {
         expect(Math.abs(offset(edge)) - edge.width / 2).toBeLessThan(deck.width / 2);
         expect(edge.bottom).toBeLessThan(deck.bottom - 0.2);
         expect(edge.top).toBeGreaterThan(deck.top + 0.5);
-        expect(edge.length).toBeGreaterThanOrEqual(deck.length - 1e-3);
+        // Past the deck's ends, so no two faces share a plane and fight over it.
+        expect(edge.length).toBeGreaterThanOrEqual(deck.length + 0.03);
       }
 
       // A support each side of the road, from under the ground up to the deck.
@@ -607,6 +608,43 @@ describe('an overpass reads as a bridge from the bike — #2699', () => {
     const material = belt.overpassMesh.material as unknown as { readonly map: unknown };
     expect(material).not.toBe(belt.mesh.material);
     expect(material.map ?? null).toBeNull();
+    // Lit, as the realistic world lights a primitive: not an unlit material.
+    expect((material as { readonly isMeshStandardMaterial?: boolean }).isMeshStandardMaterial).toBe(
+      true,
+    );
+    belt.dispose();
+  });
+
+  it('gives the overpass mesh materials of its own, so neither draw changes program for the other', () => {
+    const belt = new BridgeBelt();
+    for (const world of ['stylised', 'realistic'] as const) {
+      belt.setWorld(world);
+      expect(belt.overpassMesh.material).not.toBe(belt.mesh.material);
+    }
+    belt.dispose();
+  });
+
+  it('puts the overpass mesh back on the lit then flat material after a realistic rung', () => {
+    const belt = new BridgeBelt();
+    belt.setWorld('realistic');
+    const physical = belt.overpassMesh.material;
+    belt.setWorld('stylised');
+    expect(belt.overpassMesh.material).not.toBe(physical);
+    const lit = belt.overpassMesh.material;
+    belt.setShading('flat');
+    expect(belt.overpassMesh.material).not.toBe(lit);
+    belt.dispose();
+  });
+
+  it('uploads the overpass colours again each time the boxes change', () => {
+    const found = crossingsOf([crossing(1_000, 'bridge', { angle: 90 })]);
+    const belt = new BridgeBelt();
+    const before = belt.overpassMesh.instanceColor?.version ?? 0;
+    belt.update(boxesNear(found, 1_000));
+    const once = belt.overpassMesh.instanceColor?.version ?? 0;
+    expect(once).toBeGreaterThan(before);
+    belt.update(boxesNear(found, 1_000));
+    expect(belt.overpassMesh.instanceColor?.version ?? 0).toBeGreaterThan(once);
     belt.dispose();
   });
 });

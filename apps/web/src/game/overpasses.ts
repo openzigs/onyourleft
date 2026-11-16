@@ -138,6 +138,13 @@ export const OVERPASS_EDGE_DROP_METRES = 0.25;
  */
 export const OVERPASS_EDGE_PROUD_METRES = 0.15;
 
+/**
+ * How far each edge beam's end reaches past the deck's. The two overlap where
+ * the beam hangs below and stands above the deck's edge, and ends in the same
+ * plane would draw as two colours fighting for it.
+ */
+export const OVERPASS_BEAM_OVERHANG_METRES = 0.02;
+
 /** How far off the road's edge an overpass's abutment's face stands, in metres: **3**. */
 export const OVERPASS_SETBACK_METRES = 3;
 
@@ -393,7 +400,7 @@ function overpassBoxes(
         crossing.z + acrossZ * out,
         crossing.dx,
         crossing.dz,
-        span,
+        span + OVERPASS_BEAM_OVERHANG_METRES * 2,
         PARAPET_THICKNESS_METRES + OVERPASS_EDGE_PROUD_METRES,
         beamTop - clearance,
         'concrete',

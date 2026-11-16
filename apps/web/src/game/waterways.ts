@@ -783,7 +783,7 @@ export interface BridgePart {
    * What the block is dressed in — #2699. Absent, as every stream bridge's
    * block is: the bridges' stone. Otherwise an overpass's
    * (`overpasses.ts`): `'road'` for its deck, which carries a street and wears
-   * the road's colour, and `'concrete'` for its parapets, copings and
+   * the road's colour, and `'concrete'` for its edge beams and
    * abutments. `three-renderer.ts` §`BridgeBelt` draws the two apart.
    */
   readonly finish?: BridgeFinish;

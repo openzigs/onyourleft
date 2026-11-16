@@ -5988,6 +5988,17 @@ export class BridgeBelt {
   readonly #physical = withAtmosphere(
     constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
   );
+  /**
+   * The overpass mesh's own materials. It carries `instanceColor` and the
+   * stone mesh does not, and three re-selects a program whenever a draw's
+   * material and object disagree on that, so sharing {@link #materials} and
+   * {@link #physical} would cost both draws a program lookup each on a frame
+   * with both kinds of bridge in view.
+   */
+  readonly #overpassMaterials = vertexColouredMaterials();
+  readonly #overpassPhysical = withAtmosphere(
+    constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
+  );
   /** The realistic world's photographed stone, once it has been handed one — #501. */
   #stone: { readonly maps: StoneMaps; readonly material: MeshStandardMaterial } | undefined;
   #stoneMaps: StoneMaps | undefined;
@@ -6016,9 +6027,9 @@ export class BridgeBelt {
     this.#mesh.visible = false;
     const plain = new BoxGeometry(1, 1, 1);
     paintEveryVertex(plain, 0xffffff);
-    this.#overpass = new InstancedMesh(plain, this.#materials.lit, MAXIMUM_BRIDGE_PARTS);
+    this.#overpass = new InstancedMesh(plain, this.#overpassMaterials.lit, MAXIMUM_BRIDGE_PARTS);
     this.#overpass.instanceMatrix.setUsage(DynamicDrawUsage);
-    // The colour buffer from the start, so the program never changes under it.
+    // The colour buffer from the start, so the mesh's program is the same every frame.
     this.#overpass.setColorAt(0, this.#finishes.concrete);
     this.#overpass.instanceColor?.setUsage(DynamicDrawUsage);
     this.#overpass.count = 0;
@@ -6083,11 +6094,11 @@ export class BridgeBelt {
   #mount(): void {
     if (this.#world !== 'realistic') {
       this.#mesh.material = this.#materials[this.#shading];
-      this.#overpass.material = this.#materials[this.#shading];
+      this.#overpass.material = this.#overpassMaterials[this.#shading];
       return;
     }
     // An overpass is lit as the realistic world lights a primitive, never stone.
-    this.#overpass.material = this.#physical;
+    this.#overpass.material = this.#overpassPhysical;
     const maps = this.#stoneMaps;
     if (maps === undefined) {
       this.#mesh.material = this.#physical;
@@ -6146,6 +6157,9 @@ export class BridgeBelt {
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
     this.#physical.dispose();
+    this.#overpassMaterials.lit.dispose();
+    this.#overpassMaterials.flat.dispose();
+    this.#overpassPhysical.dispose();
     this.#stone?.material.dispose();
   }
 }
