@@ -5,6 +5,8 @@
  * `sceneFrame`, the path a ride's frames take to `three-renderer.ts`
  * §`BridgeBelt`: where a crossing is found and where none is, that nothing
  * of an overpass stands in the rider's way, and what a frame may carry.
+ * Since #2699, that the belt draws an overpass as a bridge: read back out of
+ * the instance buffers it hands the GPU.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -31,8 +33,8 @@ import { circuitRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { BridgeBelt } from './three-renderer';
-import { corridorOrigin, drawnRoadFrame, ROAD_WIDTH_METRES } from './terrain';
+import { BridgeBelt, OVERPASS_COLOURS } from './three-renderer';
+import { corridorOrigin, drawnRoadFrame, ROAD_COLOUR, ROAD_WIDTH_METRES } from './terrain';
 import { MAXIMUM_BRIDGE_PARTS, type BridgePart } from './waterways';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -233,7 +235,7 @@ describe('an overpass — #2661', () => {
     it(`stands nothing in the carriageway under its clearance, crossing at ${String(angle)}°`, () => {
       const found = crossingsOf([crossing(1_000, 'bridge', { angle, kind: 'highway' })]);
       const parts = boxesNear(found, 1_000);
-      // A deck, two parapets and two abutments.
+      // A deck, two edge beams with their parapets, and two abutments.
       expect(parts).toHaveLength(5);
       const origin = corridorOrigin(CLIMB);
       let tested = 0;
@@ -257,11 +259,12 @@ describe('an overpass — #2661', () => {
       const deck = parts[0] as BridgePart;
       const there = found[0] as GradeCrossing;
       const underside = deck.y - deck.height / 2;
-      // Its underside the clearance over the highest road it spans, and no more than a metre past it.
-      expect(underside - roadHeight(CLIMB, 1_000)).toBeGreaterThanOrEqual(
-        OVERPASS_CLEARANCE_METRES,
-      );
-      expect(underside - roadHeight(CLIMB, 1_000)).toBeLessThan(OVERPASS_CLEARANCE_METRES + 1.5);
+      // Its lowest — since #2699 its edge beams' feet — the clearance over the
+      // highest road it spans, and no more than a metre and a half past it.
+      const lowest = Math.min(...parts.slice(0, 3).map((part) => part.y - part.height / 2));
+      expect(lowest - roadHeight(CLIMB, 1_000)).toBeGreaterThanOrEqual(OVERPASS_CLEARANCE_METRES);
+      expect(lowest - roadHeight(CLIMB, 1_000)).toBeLessThan(OVERPASS_CLEARANCE_METRES + 1.5);
+      expect(underside).toBeGreaterThan(lowest);
       // Over the middle of the road, over both its edges, and over both abutments' places.
       const sine = Math.sin((angle * Math.PI) / 180);
       const outer = ROAD_HALF + OVERPASS_SETBACK_METRES + ABUTMENT_THICKNESS_METRES;
@@ -430,17 +433,180 @@ describe('what a frame carries — #2661', () => {
     expect(mapped.water.bridges.length).toBeLessThanOrEqual(MAXIMUM_BRIDGE_PARTS);
     const without = sceneFrame(input);
     expect(overhead(without.water.bridges)).toBe(0);
-    // And the belt the view draws them with has every box, the deck where the frame put it.
+    // And the belt the view draws them with has every box — since #2699 an
+    // overpass's in its own mesh — the deck where the frame put it.
     const belt = new BridgeBelt();
     belt.update(mapped.water.bridges);
-    expect(belt.mesh.count).toBe(mapped.water.bridges.length);
-    expect(belt.mesh.visible).toBe(true);
-    const deck = mapped.water.bridges.findIndex(
+    const overpasses = mapped.water.bridges.filter((part) => part.finish !== undefined);
+    expect(overpasses.length).toBeGreaterThanOrEqual(5);
+    expect(belt.mesh.count + belt.overpassMesh.count).toBe(mapped.water.bridges.length);
+    expect(belt.overpassMesh.count).toBe(overpasses.length);
+    expect(belt.overpassMesh.visible).toBe(true);
+    const deck = overpasses.findIndex(
       (part) => part.y - roadHeight(CLIMB, 1_000) > OVERPASS_CLEARANCE_METRES && part.width > 9,
     );
     expect(deck).toBeGreaterThanOrEqual(0);
-    const read = belt.mesh.instanceMatrix.array as Float32Array;
-    expect(read[deck * 16 + 13]).toBeCloseTo(mapped.water.bridges[deck]?.y ?? 0, 4);
+    const read = belt.overpassMesh.instanceMatrix.array as Float32Array;
+    expect(read[deck * 16 + 13]).toBeCloseTo(overpasses[deck]?.y ?? 0, 4);
+    belt.dispose();
+  });
+});
+
+/** A hex colour's channels in the linear space three holds a `Color` in. */
+function linearOf(hex: number): [number, number, number] {
+  const channel = (byte: number): number => {
+    const c = byte / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return [channel((hex >> 16) & 0xff), channel((hex >> 8) & 0xff), channel(hex & 0xff)];
+}
+
+function luminanceOf([r, g, b]: readonly number[]): number {
+  return 0.2126 * (r as number) + 0.7152 * (g as number) + 0.0722 * (b as number);
+}
+
+/** One drawn box, read back out of the instance buffers `BridgeBelt.update` filled. */
+interface DrawnBox {
+  readonly centre: [number, number, number];
+  /** Unit axes: across (level), up and along, the matrix's three columns. */
+  readonly across: [number, number, number];
+  readonly along: [number, number, number];
+  readonly width: number;
+  readonly height: number;
+  readonly length: number;
+  readonly bottom: number;
+  readonly top: number;
+  readonly colour: [number, number, number];
+}
+
+function drawnBoxes(mesh: BridgeBelt['overpassMesh']): DrawnBox[] {
+  const matrices = mesh.instanceMatrix.array as Float32Array;
+  const colours = mesh.instanceColor?.array as Float32Array | undefined;
+  const out: DrawnBox[] = [];
+  for (let index = 0; index < mesh.count; index += 1) {
+    const e = matrices.subarray(index * 16, index * 16 + 16);
+    const column = (c: number): { unit: [number, number, number]; size: number } => {
+      const x = e[c * 4] as number;
+      const y = e[c * 4 + 1] as number;
+      const z = e[c * 4 + 2] as number;
+      const size = Math.hypot(x, y, z);
+      return { unit: [x / size, y / size, z / size], size };
+    };
+    const across = column(0);
+    const up = column(1);
+    const along = column(2);
+    const y = e[13] as number;
+    out.push({
+      centre: [e[12] as number, y, e[14] as number],
+      across: across.unit,
+      along: along.unit,
+      width: across.size,
+      height: up.size,
+      length: along.size,
+      bottom: y - (up.size * up.unit[1]) / 2,
+      top: y + (up.size * up.unit[1]) / 2,
+      colour: [
+        colours?.[index * 3] ?? Number.NaN,
+        colours?.[index * 3 + 1] ?? Number.NaN,
+        colours?.[index * 3 + 2] ?? Number.NaN,
+      ],
+    });
+  }
+  return out;
+}
+
+function sameColour(found: readonly number[], hex: number): boolean {
+  return linearOf(hex).every((channel, at) => Math.abs((found[at] as number) - channel) < 1e-4);
+}
+
+describe('an overpass reads as a bridge from the bike — #2699', () => {
+  for (const angle of [90, 35]) {
+    it(`draws a road-coloured deck with a concrete edge each side and supports to the ground, crossing at ${String(angle)}°`, () => {
+      const found = crossingsOf([crossing(1_000, 'bridge', { angle })]);
+      const belt = new BridgeBelt();
+      belt.update(boxesNear(found, 1_000));
+      // None of it in the stream bridges' stone, which #2687 read as a brown slab.
+      expect(belt.mesh.count).toBe(0);
+      expect(belt.overpassMesh.visible).toBe(true);
+      const boxes = drawnBoxes(belt.overpassMesh);
+      expect(boxes).toHaveLength(5);
+
+      // The deck: the road's own colour, being the road the street runs on.
+      const decks = boxes.filter((box) => sameColour(box.colour, ROAD_COLOUR));
+      expect(decks).toHaveLength(1);
+      const deck = decks[0] as DrawnBox;
+      const concrete = boxes.filter((box) => sameColour(box.colour, OVERPASS_COLOURS.concrete));
+      expect(concrete).toHaveLength(4);
+      // The concrete reads against the deck: at least 3 : 1 in luminance.
+      expect(
+        (luminanceOf(concrete[0]?.colour ?? []) + 0.05) / (luminanceOf(deck.colour) + 0.05),
+      ).toBeGreaterThanOrEqual(3);
+
+      // An edge each side of the deck: along all of it, proud of its side,
+      // hanging below its underside and standing above its top as the parapet.
+      const offset = (box: DrawnBox): number =>
+        (box.centre[0] - deck.centre[0]) * deck.across[0] +
+        (box.centre[2] - deck.centre[2]) * deck.across[2];
+      const parallel = (box: DrawnBox): number =>
+        Math.abs(
+          box.along[0] * deck.along[0] +
+            box.along[1] * deck.along[1] +
+            box.along[2] * deck.along[2],
+        );
+      const edges = concrete.filter((box) => parallel(box) > 0.999);
+      expect(edges.map((box) => Math.sign(offset(box))).sort()).toEqual([-1, 1]);
+      for (const edge of edges) {
+        expect(Math.abs(offset(edge)) + edge.width / 2).toBeGreaterThan(deck.width / 2 + 0.1);
+        expect(Math.abs(offset(edge)) - edge.width / 2).toBeLessThan(deck.width / 2);
+        expect(edge.bottom).toBeLessThan(deck.bottom - 0.2);
+        expect(edge.top).toBeGreaterThan(deck.top + 0.5);
+        expect(edge.length).toBeGreaterThanOrEqual(deck.length - 1e-3);
+      }
+
+      // A support each side of the road, from under the ground up to the deck.
+      const origin = corridorOrigin(CLIMB);
+      const seed = scatterSeed(CLIMB);
+      const supports = concrete.filter((box) => parallel(box) <= 0.999);
+      const sides = new Set<number>();
+      for (const support of supports) {
+        const near = nearestOnDrawnRoad(CLIMB, origin, support.centre[0], support.centre[2], 20);
+        expect(near).toBeDefined();
+        if (near === undefined) continue;
+        sides.add(Math.sign(near.lateral));
+        expect(Math.abs(near.lateral)).toBeGreaterThan(ROAD_HALF);
+        // Into the ground along the whole of its foot, on a climbing road: no gap under either end.
+        for (const end of [-0.5, 0, 0.5]) {
+          const x = support.centre[0] + support.along[0] * support.length * end;
+          const z = support.centre[2] + support.along[2] * support.length * end;
+          const under = nearestOnDrawnRoad(CLIMB, origin, x, z, 20);
+          expect(under, `end ${String(end)}`).toBeDefined();
+          expect(support.bottom, `end ${String(end)}`).toBeLessThan(
+            terrainHeightAt(
+              CLIMB,
+              origin,
+              seed,
+              under?.along ?? 0,
+              under?.lateral ?? 0,
+              NO_LAND_CLASS,
+            ),
+          );
+        }
+        expect(support.top).toBeGreaterThanOrEqual(deck.bottom - 1e-3);
+      }
+      expect([...sides].sort()).toEqual([-1, 1]);
+      belt.dispose();
+    });
+  }
+
+  it('keeps the overpass out of the stone on a realistic rung, and the stream bridges in it', () => {
+    const belt = new BridgeBelt();
+    // Stand-ins, as `terrain-belt.test.ts`'s stone test uses: this file may not import three.
+    const stone = { colour: { name: 'colour' } as never, normal: { name: 'normal' } as never };
+    belt.setWorld('realistic', stone);
+    expect(belt.wearsStone).toBe(true);
+    const material = belt.overpassMesh.material as unknown as { readonly map: unknown };
+    expect(material).not.toBe(belt.mesh.material);
+    expect(material.map ?? null).toBeNull();
     belt.dispose();
   });
 });

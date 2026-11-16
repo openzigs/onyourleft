@@ -1918,9 +1918,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         where one in a tunnel under 80 m long crosses it, a
                         parapet along each edge of the road. ⚠️ **Boxes in
                         `three-renderer.ts` §`BridgeBelt`**, handed in with the
-                        streams' bridges (`scene.ts` §`water`), so no new mesh,
-                        attribute or structure: the belt's 128 boxes bound them
-                        and the streams' come first
+                        streams' bridges (`scene.ts` §`water`), so no new
+                        structure: the belt's 128 boxes bound them and the
+                        streams' come first. ⚠️ **Since #2699 an overpass is
+                        not in the stone**: its deck wears the road's colour,
+                        its edge beams (proud of the deck, hanging below it,
+                        rising as the parapet) and abutments a concrete grey,
+                        in the belt's second instanced box
+                        (`BridgeBelt.overpassMesh`), one draw call more on a
+                        frame with one in view
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

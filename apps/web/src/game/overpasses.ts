@@ -37,20 +37,34 @@
  *
  * Boxes, as #459's stream bridges are (`waterways.ts` §`BridgePart`), handed
  * to the frame's bridges (`scene.ts` §`water`) and drawn by
- * `three-renderer.ts` §`BridgeBelt` in its one draw call and its own stone.
- * ⚠️ **So nothing here adds a mesh, a vertex attribute or a structure, nor
- * a draw call a frame with a stream bridge did not already make**: the belt's
- * buffer is `waterways.ts` §`MAXIMUM_BRIDGE_PARTS` boxes, twelve triangles
- * each, whatever fills it, and a frame's bridges are cut to it.
+ * `three-renderer.ts` §`BridgeBelt`. ⚠️ **Since #2699 an overpass's boxes are
+ * not in the stone**: the belt draws them in a second instanced box of its
+ * own, in the colour each box's `finish` names, so a frame with an overpass
+ * makes one draw call more than it did. Nothing here adds a structure, and
+ * the frame's bridges are still cut to `waterways.ts` §`MAXIMUM_BRIDGE_PARTS`
+ * boxes, twelve triangles each, whichever of the belt's two draws them.
  *
  * - **An overpass**: a level deck slab along the
- *   street, its underside {@link OVERPASS_CLEARANCE_METRES} above the highest
- *   of the road it spans, long enough to cover both abutments however skew it
- *   crosses; a parapet along each edge of the deck; and an abutment each side
- *   of the road, parallel to it and {@link OVERPASS_SETBACK_METRES} off its
- *   edge, from under the ground up to the deck. ⚠️ **Nothing of it stands in
- *   the carriageway below the clearance**: `overpasses.test.ts` holds every
- *   block's corners clear of the road's width up to that height.
+ *   street, long enough to cover both abutments however skew it crosses; an
+ *   edge beam along each side of the deck, which rises above it as the
+ *   parapet; and an abutment each side of the road, parallel to it and
+ *   {@link OVERPASS_SETBACK_METRES} off its edge, from under the ground up to
+ *   the deck. The edge beams' feet are the lowest of it, at
+ *   {@link OVERPASS_CLEARANCE_METRES} above the highest of the road it spans.
+ *   ⚠️ **Nothing of it stands in the carriageway below the clearance**:
+ *   `overpasses.test.ts` holds every block's corners clear of the road's
+ *   width up to that height.
+ *
+ *   **Why edge beams — #2699.** #2687's screenshots showed #2661's overpass as
+ *   a flat brown slab: a deck and its parapets flush, in the stream bridges'
+ *   stone, read from below as one block. So the deck now wears the road's own
+ *   colour, being a road (`finish: 'road'`), and the beams, the parapets and
+ *   the abutments a concrete grey (`'concrete'`), drawn apart from the stone
+ *   (`three-renderer.ts` §`BridgeBelt`). Each beam stands
+ *   {@link OVERPASS_EDGE_PROUD_METRES} proud of the deck's side and hangs
+ *   {@link OVERPASS_EDGE_DROP_METRES} below its underside, so a rider under it
+ *   sees a light edge either side of a dark deck — and that it is still five
+ *   boxes, as #2661 drew, is what keeps the frame's share of the belt.
  * - **An underpass**: a parapet with its coping along each edge of the road
  *   over the street's width and {@link UNDERPASS_MARGIN_METRES} either side,
  *   in pieces that follow the road's height — the stream bridge's own
@@ -91,6 +105,7 @@ import {
   COPING_OVERHANG_METRES,
   PARAPET_HEIGHT_METRES,
   PARAPET_THICKNESS_METRES,
+  type BridgeFinish,
   type BridgePart,
 } from './waterways';
 import type { WorldCorridor } from './world-data/corridor';
@@ -105,8 +120,23 @@ const ROAD_HALF_WIDTH_METRES = ROAD_WIDTH_METRES / 2;
  */
 export const OVERPASS_CLEARANCE_METRES = 5;
 
-/** How deep an overpass's deck slab is, in metres: **1.2**. */
+/**
+ * How deep an overpass is from its edge beams' feet to its deck's top, in
+ * metres: **1.2**. The deck slab is this less {@link OVERPASS_EDGE_DROP_METRES}.
+ */
 export const OVERPASS_DECK_DEPTH_METRES = 1.2;
+
+/**
+ * How far an overpass's edge beam hangs below its deck slab's underside, in
+ * metres: **0.25** — #2699. A lip a rider under the bridge sees each side.
+ */
+export const OVERPASS_EDGE_DROP_METRES = 0.25;
+
+/**
+ * How far an overpass's edge beam stands proud of its deck slab's side, in
+ * metres: **0.15** — #2699. Outward only: its inner face is over the deck.
+ */
+export const OVERPASS_EDGE_PROUD_METRES = 0.15;
 
 /** How far off the road's edge an overpass's abutment's face stands, in metres: **3**. */
 export const OVERPASS_SETBACK_METRES = 3;
@@ -138,7 +168,7 @@ export const MAX_GRADE_CROSSINGS = 1_000;
 
 /**
  * The most boxes a frame's overpasses and underpasses may add: **48**,
- * nearest the rider first — eight overpasses, or two of the widest, most
+ * nearest the rider first — nine overpasses of five boxes, or two of the widest, most
  * skew underpasses. Inside `waterways.ts` §`MAXIMUM_BRIDGE_PARTS`, which the
  * frame's bridges are cut to with the streams' first.
  */
@@ -293,7 +323,7 @@ export function mappedGradeCrossings(
   return crossings;
 }
 
-/** A box `length` along `(axisX, 0, axisZ)`, level. */
+/** A box `length` along `(axisX, 0, axisZ)`, level, in an overpass's `finish`. */
 function levelBox(
   x: number,
   y: number,
@@ -303,8 +333,9 @@ function levelBox(
   length: number,
   width: number,
   height: number,
+  finish: BridgeFinish,
 ): BridgePart {
-  return { x, y, z, axisX, axisY: 0, axisZ, length, width, height };
+  return { x, y, z, axisX, axisY: 0, axisZ, length, width, height, finish };
 }
 
 /** An overpass's boxes. @see the header */
@@ -319,45 +350,53 @@ function overpassBoxes(
   const sine = crossing.dx * road.normalX + crossing.dz * road.normalZ;
   const cosine = crossing.dx * road.forwardX + crossing.dz * road.forwardZ;
   const deckWidth = SIDE_ROAD_WIDTHS[crossing.widthClass] + PARAPET_THICKNESS_METRES * 2;
+  // The deck with its edge beams proud of it: what the span and the abutments cover.
+  const overallWidth = deckWidth + OVERPASS_EDGE_PROUD_METRES * 2;
   const outer = ROAD_HALF_WIDTH_METRES + OVERPASS_SETBACK_METRES + ABUTMENT_THICKNESS_METRES;
   // Along the road, how far either way the deck's footprint reaches past the crossing.
-  const skew = (outer * Math.abs(cosine)) / sine + deckWidth / 2 / sine;
+  const skew = (outer * Math.abs(cosine)) / sine + overallWidth / 2 / sine;
   // Level, over the highest of the road it spans.
   let road0 = roadHeight(profile, origin, crossing.along);
   for (const end of [-1, 1]) {
     road0 = Math.max(road0, roadHeight(profile, origin, crossing.along + end * skew));
   }
-  const underside = road0 + OVERPASS_CLEARANCE_METRES;
-  const deckTop = underside + OVERPASS_DECK_DEPTH_METRES;
+  // The edge beams' feet: the lowest of the overpass.
+  const clearance = road0 + OVERPASS_CLEARANCE_METRES;
+  const underside = clearance + OVERPASS_EDGE_DROP_METRES;
+  const deckTop = clearance + OVERPASS_DECK_DEPTH_METRES;
   // Along the street, long enough to cover both abutments however skew it crosses.
-  const span = 2 * (outer / sine + ((deckWidth / 2) * Math.abs(cosine)) / sine);
+  const span = 2 * (outer / sine + ((overallWidth / 2) * Math.abs(cosine)) / sine);
   const parts: BridgePart[] = [
     levelBox(
       crossing.x,
-      underside + OVERPASS_DECK_DEPTH_METRES / 2,
+      (underside + deckTop) / 2,
       crossing.z,
       crossing.dx,
       crossing.dz,
       span,
       deckWidth,
-      OVERPASS_DECK_DEPTH_METRES,
+      deckTop - underside,
+      'road',
     ),
   ];
-  // A parapet along each edge of the deck.
+  // An edge beam along each side of the deck: proud of it, under it, and the parapet above it.
   const acrossX = crossing.dz;
   const acrossZ = -crossing.dx;
+  const beamTop = deckTop + PARAPET_HEIGHT_METRES;
   for (const side of [-1, 1]) {
-    const out = (deckWidth / 2 - PARAPET_THICKNESS_METRES / 2) * side;
+    const out =
+      (deckWidth / 2 - PARAPET_THICKNESS_METRES / 2 + OVERPASS_EDGE_PROUD_METRES / 2) * side;
     parts.push(
       levelBox(
         crossing.x + acrossX * out,
-        deckTop + PARAPET_HEIGHT_METRES / 2,
+        (clearance + beamTop) / 2,
         crossing.z + acrossZ * out,
         crossing.dx,
         crossing.dz,
         span,
-        PARAPET_THICKNESS_METRES,
-        PARAPET_HEIGHT_METRES,
+        PARAPET_THICKNESS_METRES + OVERPASS_EDGE_PROUD_METRES,
+        beamTop - clearance,
+        'concrete',
       ),
     );
   }
@@ -366,7 +405,7 @@ function overpassBoxes(
     const lateral = side * (outer - ABUTMENT_THICKNESS_METRES / 2);
     const along = crossing.along + (lateral * cosine) / sine;
     const here = roadAt(profile, origin, along);
-    const length = deckWidth / sine;
+    const length = overallWidth / sine;
     const grounds = [-0.5, 0, 0.5].map((end) =>
       terrainHeightAt(
         profile,
@@ -388,6 +427,7 @@ function overpassBoxes(
         length,
         ABUTMENT_THICKNESS_METRES,
         underside - foot,
+        'concrete',
       ),
     );
   }

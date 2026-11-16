@@ -707,6 +707,7 @@ import {
 } from './camera';
 import {
   CENTRE_LINE_LIFT_METRES,
+  ROAD_COLOUR,
   ROAD_SURFACE_GRAIN,
   ROAD_WIDTH_METRES,
   VIEW_AHEAD_METRES,
@@ -733,6 +734,7 @@ import {
 import {
   MAXIMUM_BRIDGE_PARTS,
   waterSurfaceIsCurrent,
+  type BridgeFinish,
   type BridgePart,
   type WaterSurface,
 } from './waterways';
@@ -2117,6 +2119,18 @@ export const BRIDGE_COLOUR = 0x8f8a80;
  */
 export const PAVEMENT_COLOUR = 0xa7a49c;
 
+/**
+ * An overpass's colours — #2699, by each box's `waterways.ts`
+ * §`BridgePart.finish`. The deck carries a street, so it is the road's own
+ * flat colour (`terrain.ts` §`ROAD_COLOUR`), not the bridges' stone. Its
+ * edge beams, parapets and abutments are the pavement's concrete grey,
+ * which is what makes the deck's edges read against it from the bike.
+ */
+export const OVERPASS_COLOURS: Readonly<Record<BridgeFinish, number>> = {
+  road: ROAD_COLOUR,
+  concrete: PAVEMENT_COLOUR,
+};
+
 /** One coloured solid of a piece of street furniture — #1536. */
 interface FurniturePart {
   readonly colour: number;
@@ -2333,8 +2347,11 @@ export const LIT_COLOURS: readonly number[] = [
   ...BICYCLE_COLOURS,
   // #459. The bridges' stone, which is lit like the scenery.
   BRIDGE_COLOUR,
-  // #1535. The stylised pavement, lit like the scenery.
+  // #1535. The stylised pavement, lit like the scenery — and since #2699 an
+  // overpass's concrete, which is that same colour.
   PAVEMENT_COLOUR,
+  // #2699. An overpass's deck: the road's colour, lit, as the road is not.
+  OVERPASS_COLOURS.road,
   // #1536. The street furniture's, every part of every kind, once.
   ...new Set(
     Object.values(FURNITURE_STYLE).flatMap((style) => style.parts.map((part) => part.colour)),
@@ -5950,6 +5967,16 @@ function environmentScaleFor(zenith: LinearColour, target: number): number {
  * The bridges — #459. Every parapet, deck slab and abutment in view is one
  * instance of one box: one draw call however many bridges there are.
  *
+ * ⚠️ **Two boxes since #2699, not one.** A stream bridge's blocks are the
+ * stone box, {@link mesh}. An overpass's (`overpasses.ts`), whose blocks name
+ * a `finish`, are {@link overpassMesh}: a white box, each instance in its
+ * {@link OVERPASS_COLOURS} colour, which the realistic world lights but never
+ * dresses in the stone — #2687's screenshots read the stone deck as a brown
+ * slab. Each holds up to `MAXIMUM_BRIDGE_PARTS`, and a frame's bridges are
+ * cut to that in all (`scene.ts` §`water`), so the triangles a frame may
+ * submit here are what they were; the second box costs a draw call on a
+ * frame with an overpass in view, and none on any other.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class BridgeBelt {
@@ -5967,7 +5994,13 @@ export class BridgeBelt {
   #shading: QualitySettings['shading'] = 'lit';
   #world: QualitySettings['world'] = 'stylised';
   readonly #mesh: InstancedMesh;
+  /** An overpass's blocks — #2699. @see overpassMesh */
+  readonly #overpass: InstancedMesh;
   readonly #matrix = new Matrix4();
+  readonly #finishes: Readonly<Record<BridgeFinish, Color>> = {
+    road: new Color(OVERPASS_COLOURS.road),
+    concrete: new Color(OVERPASS_COLOURS.concrete),
+  };
   readonly #along = new Vector3();
   readonly #across = new Vector3();
   readonly #up = new Vector3();
@@ -5981,15 +6014,31 @@ export class BridgeBelt {
     this.#mesh.count = 0;
     this.#mesh.frustumCulled = false;
     this.#mesh.visible = false;
+    const plain = new BoxGeometry(1, 1, 1);
+    paintEveryVertex(plain, 0xffffff);
+    this.#overpass = new InstancedMesh(plain, this.#materials.lit, MAXIMUM_BRIDGE_PARTS);
+    this.#overpass.instanceMatrix.setUsage(DynamicDrawUsage);
+    // The colour buffer from the start, so the program never changes under it.
+    this.#overpass.setColorAt(0, this.#finishes.concrete);
+    this.#overpass.instanceColor?.setUsage(DynamicDrawUsage);
+    this.#overpass.count = 0;
+    this.#overpass.frustumCulled = false;
+    this.#overpass.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.#mesh);
+    scene.add(this.#overpass);
   }
 
-  /** The one mesh. For `three-renderer.test.ts`. */
+  /** The stream bridges' stone mesh. For `three-renderer.test.ts`. */
   get mesh(): InstancedMesh {
     return this.#mesh;
+  }
+
+  /** The overpasses' mesh — #2699. For `overpasses.test.ts`. */
+  get overpassMesh(): InstancedMesh {
+    return this.#overpass;
   }
 
   /**
@@ -6034,8 +6083,11 @@ export class BridgeBelt {
   #mount(): void {
     if (this.#world !== 'realistic') {
       this.#mesh.material = this.#materials[this.#shading];
+      this.#overpass.material = this.#materials[this.#shading];
       return;
     }
+    // An overpass is lit as the realistic world lights a primitive, never stone.
+    this.#overpass.material = this.#physical;
     const maps = this.#stoneMaps;
     if (maps === undefined) {
       this.#mesh.material = this.#physical;
@@ -6053,9 +6105,11 @@ export class BridgeBelt {
    * `height` up. Allocates nothing.
    */
   update(parts: readonly BridgePart[]): void {
-    const count = Math.min(parts.length, MAXIMUM_BRIDGE_PARTS);
-    for (let index = 0; index < count; index += 1) {
-      const part = parts[index] as BridgePart;
+    let stone = 0;
+    let overpass = 0;
+    for (const part of parts) {
+      const finish = part.finish;
+      if ((finish === undefined ? stone : overpass) >= MAXIMUM_BRIDGE_PARTS) continue;
       this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
       this.#across.crossVectors(this.#vertical, this.#along).normalize();
       this.#up.crossVectors(this.#along, this.#across).normalize();
@@ -6064,16 +6118,31 @@ export class BridgeBelt {
       this.#along.multiplyScalar(part.length);
       this.#matrix.makeBasis(this.#across, this.#up, this.#along);
       this.#matrix.setPosition(part.x, part.y, part.z);
-      this.#mesh.setMatrixAt(index, this.#matrix);
+      if (finish === undefined) {
+        this.#mesh.setMatrixAt(stone, this.#matrix);
+        stone += 1;
+      } else {
+        this.#overpass.setMatrixAt(overpass, this.#matrix);
+        this.#overpass.setColorAt(overpass, this.#finishes[finish]);
+        overpass += 1;
+      }
     }
-    this.#mesh.count = count;
-    this.#mesh.instanceMatrix.needsUpdate = count > 0;
-    this.#mesh.visible = count > 0;
+    this.#mesh.count = stone;
+    this.#mesh.instanceMatrix.needsUpdate = stone > 0;
+    this.#mesh.visible = stone > 0;
+    this.#overpass.count = overpass;
+    this.#overpass.instanceMatrix.needsUpdate = overpass > 0;
+    if (this.#overpass.instanceColor !== null) {
+      this.#overpass.instanceColor.needsUpdate = overpass > 0;
+    }
+    this.#overpass.visible = overpass > 0;
   }
 
   dispose(): void {
     this.#mesh.geometry.dispose();
     this.#mesh.dispose();
+    this.#overpass.geometry.dispose();
+    this.#overpass.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
     this.#physical.dispose();
