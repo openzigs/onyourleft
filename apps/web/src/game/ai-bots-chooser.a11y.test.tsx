@@ -24,6 +24,10 @@
  *   says AI bots are not available right now and asks nothing more (D-6.3).
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -319,5 +323,28 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
     expect(standingsNote()).toBe(AI_BOTS_RACE_TEXT.unavailable);
     expect(home.decided).toEqual([]);
     expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+});
+
+describe('the consent names what the privacy policy says is sent (D-5.2)', () => {
+  /** What the policy says is sent about the rider, in the policy's own words. */
+  const RIDER_SENT = [
+    'your place',
+    'who is just ahead of you',
+    'whether you are drafting',
+    'your watts per kilogram',
+  ];
+
+  it('names each thing sent about the rider, as the policy does', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const policy = readFileSync(join(here, '../../../../docs/privacy-policy.md'), 'utf8').replace(
+      /\s+/g,
+      ' ',
+    );
+    const consent = AI_BOTS_TEXT.consent(INSTANCE, MODEL);
+    for (const words of RIDER_SENT) {
+      expect(policy, `the policy names ${words}`).toContain(words);
+      expect(consent, `the consent names ${words}`).toContain(words);
+    }
   });
 });

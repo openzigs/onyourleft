@@ -294,8 +294,9 @@ export const AI_BOTS_TEXT = {
   consent: (instance: string, modelAddress: string): string =>
     `Every few seconds of the race, this device sends the race as it stands to your instance ` +
     `at ${instance}, and your instance asks its own model at ${modelAddress} for the bots’ ` +
-    `moves. What is sent: each bot’s place, gaps, energy and move, and your place, gaps and ` +
-    `watts per kilogram. No location, no names and no dates. Your instance keeps none of it. ` +
+    `moves. What is sent: each bot’s place, gaps, energy and move, and your place, who is just ` +
+    `ahead of you, your gaps, whether you are drafting, and your watts per kilogram. No ` +
+    `location, no names and no dates. Your instance keeps none of it. ` +
     `While the race runs, write-ups on your instance wait. You can withdraw this at any time.`,
   agree: 'Agree and race AI bots',
   notNow: 'Not now',
