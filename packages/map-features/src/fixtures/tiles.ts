@@ -602,7 +602,95 @@ export function buildingFieldsTile(): Uint8Array {
   ]);
 }
 
-/** The eight named fixtures, for the walks that run over all of them. */
+/**
+ * #2659's water lines, each a straight line across the tile with a name and
+ * an id: every `kind` Protomaps v4 writes on a waterway line (`Water.java`),
+ * one it does not, and one with none. Only {@link WATER_LINE_FIXTURE_KEPT}
+ * survive the decode.
+ */
+export const WATER_LINE_FIXTURE_LINES: readonly {
+  readonly kind: string | undefined;
+  readonly line: readonly (readonly [number, number])[];
+}[] = [
+  {
+    kind: 'river',
+    line: [
+      [200, 300],
+      [3900, 400],
+    ],
+  },
+  {
+    kind: 'stream',
+    line: [
+      [200, 900],
+      [2000, 1000],
+      [3900, 1100],
+    ],
+  },
+  {
+    kind: 'canal',
+    line: [
+      [200, 1600],
+      [3900, 1600],
+    ],
+  },
+  {
+    kind: 'ditch',
+    line: [
+      [200, 2200],
+      [3900, 2200],
+    ],
+  },
+  {
+    kind: 'drain',
+    line: [
+      [200, 2800],
+      [3900, 2800],
+    ],
+  },
+  {
+    kind: 'riverbank',
+    line: [
+      [200, 3300],
+      [3900, 3300],
+    ],
+  },
+  {
+    kind: undefined,
+    line: [
+      [200, 3800],
+      [3900, 3800],
+    ],
+  },
+];
+
+/** The kinds of {@link WATER_LINE_FIXTURE_LINES} the decoder keeps, in order. */
+export const WATER_LINE_FIXTURE_KEPT = ['river', 'stream', 'canal'] as const;
+
+/** {@link WATER_LINE_FIXTURE_LINES} as one `water` layer, beside a lake polygon. */
+export function waterLinesTile(): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'water',
+      features: [
+        {
+          type: 3,
+          tags: { kind: 'lake' },
+          geometry: polygon([outerRing(regularPolygon(3000, 3000, 300, 12))]),
+        },
+        ...WATER_LINE_FIXTURE_LINES.map((each, index) => ({
+          id: POISON.id + index,
+          type: 2,
+          tags: { ...poisonTags, ...(each.kind === undefined ? {} : { kind: each.kind }) },
+          geometry: line([each.line]),
+        })),
+      ],
+    },
+  ]);
+}
+
+/** The nine named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   residentialBlock: residentialBlockTile,
   woodWithHole: woodWithHoleTile,
@@ -612,4 +700,5 @@ export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   streets: streetsTile,
   places: placesTile,
   buildingFields: buildingFieldsTile,
+  waterLines: waterLinesTile,
 };
