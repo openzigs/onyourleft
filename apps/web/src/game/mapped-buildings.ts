@@ -513,7 +513,9 @@ export function selectMappedBuildings(
     const rank = distances[index] as number;
     const far = Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES;
     // #1638: past MAPPED_BUILDING_MAX, a city centre's far boxes and nothing
-    // else. Any other building is passed over, and ranks no rival in.
+    // else. Any other building is passed over. (Where this sits does not change
+    // the result: a rival the skip would leave unranked is taken by the next
+    // city box's `rivalsWithin` or by the final sweep.)
     if (into.count >= MAPPED_BUILDING_MAX && !(far && plan.urban === 'city-centre')) continue;
     // #2094: a landmark taken ahead ranks no rival in, so it brings no hedge
     // nearer than a house the walk has not reached yet. Two costs it does

@@ -169,17 +169,6 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'runs by `urban-runs.test.ts`.',
   },
   {
-    spec: 'realistic.browser.spec.ts',
-    describe: 'the realistic page’s candidate city cap — #1638',
-    seconds: 'one more load of the owner’s page',
-    why:
-      'the owner’s page’s `cityfar` candidate, for validation 0002 AE5’s third row: that ' +
-      'it draws more of a city centre’s far boxes inside the page’s 35 calls. An instrument ' +
-      'of a page that ships in no build, and the cap is off in the product; its rule is held ' +
-      'in the required suite by `mapped-buildings.test.ts` and `realistic-budget.test.ts` ' +
-      '§"#1638".',
-  },
-  {
     spec: 'realistic-mapped.browser.spec.ts',
     describe: 'the realistic page’s mapped-blobs lever — #1657',
     seconds: 'two more loads of the owner’s page',

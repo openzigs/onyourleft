@@ -597,10 +597,10 @@ mapped blobs, 114 s for the decorations' three, and 143 s and 126 s for #1623's 
 | Script | Job | Spec | Describes | Loads | On 40188796060 |
 |---|---|---|---|--:|--:|
 | `test:browser:nightly:shard-1` | `heavy` | every nightly spec but the page's | (#1675) | — | — |
-| `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623, since #1638 its candidate city cap | 7 | 337 s |
+| `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623 | 6 | 337 s |
 | `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts`, since #1626 `realistic-wreath.browser.spec.ts` | #1283, #1294, #1523, #1626 | 7 | 259 s |
 | `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1624 (#1625, #1626), #1689 | 7 | — |
-| `test:browser:nightly:shard-5` | `browser-5` | `realistic-mapped.browser.spec.ts`, since #1815 `realistic-delivery.browser.spec.ts` | #1657, #1636, #1815 | 4 | — |
+| `test:browser:nightly:shard-5` | `browser-5` | `realistic-mapped.browser.spec.ts`, since #1815 `realistic-delivery.browser.spec.ts` | #1657, #1636, #1815, #1971 | 7 | — |
 
 The last column is the sum of those cases on the one-job run, not a run of the shard; #1626's
 loads (one in the town's shard, the wreath's two in the trees') came after it. Split by
@@ -629,10 +629,11 @@ a `test:browser:nightly:shard-6` script and a `browser-6` job copied from `brows
 `spec` in `nightly.ts`, and add the job to `report`'s `needs`. The load count is lexical, so a
 load made through an alias of `ride` or a direct `page.goto` of the page is not counted: call `ride`.
 
-⚠️ **Every realistic shard is at 7 since #1638 (2026-11-15).** Counted lexically that day: shard 5
-was already at 7 (the mapped file's 3, #1815's 2 and #1971's race 2), so #1638's one load, the
-`cityfar` candidate, took shard 2's last; its city-centre run is read on #1636's two loads in shard
-5, which add none. The next lever's describe needs `browser-6`, by the procedure above.
+⚠️ **Shard 5 is at 7 (counted lexically 2026-11-15, for #1638): the mapped file's 3, #1815's 2
+and #1971's race 2.** #1638's `cityfar` candidate has no nightly load for that reason, and none
+anywhere: a per-case timeout is ruled out (#1688), so its city-centre run is read on #1636's two
+loads in shard 5, and the wiring in `realistic/config.test.ts`. The next lever's describe in shard 5
+needs `browser-6`, by the procedure above.
 
 #### Coverage in a job of its own — #1701
 

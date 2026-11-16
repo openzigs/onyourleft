@@ -184,8 +184,12 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
         /cityfar is a whole number from 37 to 144/,
       );
     }
-    expect(() => parseConfig('?cityfar=72')).toThrow(/name the town/);
-    expect(() => parseConfig('?route=village&cityfar=72')).toThrow(/name the town/);
+    expect(() => parseConfig('?cityfar=72')).toThrow(/name town=city/);
+    expect(() => parseConfig('?route=village&cityfar=72')).toThrow(/name town=city/);
+    // A town with no city-centre run has no far box to take: refused, not drawn as the 36.
+    for (const town of ['mixed', 'richmond', 'countryside', 'terrace']) {
+      expect(() => parseConfig(`?town=${town}&cityfar=72`), town).toThrow(/name town=city/);
+    }
   });
 
   it('hands the candidate to the town’s index, which is where it is wired — #1638', () => {
