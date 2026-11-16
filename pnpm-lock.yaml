@@ -56,6 +56,9 @@ importers:
       '@onyourleft/fit':
         specifier: workspace:*
         version: link:../../packages/fit
+      '@onyourleft/operate-text':
+        specifier: workspace:*
+        version: link:../../packages/operate-text
       '@onyourleft/physics':
         specifier: workspace:*
         version: link:../../packages/physics
@@ -136,6 +139,9 @@ importers:
       '@onyourleft/mobile':
         specifier: workspace:*
         version: link:../mobile
+      '@onyourleft/operate-text':
+        specifier: workspace:*
+        version: link:../../packages/operate-text
       '@onyourleft/physics':
         specifier: workspace:*
         version: link:../../packages/physics
@@ -290,6 +296,15 @@ importers:
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.12
+        version: 4.1.12(@types/node@26.6.6)(@vitest/coverage-v8@4.1.12)(jsdom@30.1.2)(vite@8.3.2(@types/node@26.6.6)(jiti@2.7.0))
+
+  packages/operate-text:
+    devDependencies:
       typescript:
         specifier: 6.0.3
         version: 6.0.3

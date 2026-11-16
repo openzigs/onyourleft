@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 
-import { clientAddress } from './client-address.ts';
+import { clientAddress, normalisedAddress } from './client-address.ts';
 import { errorResponse } from './errors.ts';
 import type { Handler } from './handler.ts';
 
@@ -162,6 +162,8 @@ export function listen(
     trustedProxies,
     sweep,
     timers,
+    listener,
+    refusePeers,
   }: {
     readonly host: string;
     readonly port: number;
@@ -177,8 +179,22 @@ export function listen(
     /** Run on every boundary of its period while the listener is up, and stopped by `close`. */
     readonly sweep?: Sweep;
     readonly timers?: SweepTimers;
+    /**
+     * `loopback` for the admin pages' loopback listener (#2643, ADR 0069
+     * D-5): every request it reads is marked so in its `ClientInfo`, by this
+     * adapter and by nothing a request carries.
+     */
+    readonly listener?: 'loopback';
+    /**
+     * Peers whose connection is closed before a byte is read (#2643): the
+     * loopback listener's trusted proxies — `cloudflared`'s own addresses —
+     * so the tunnel container cannot open the loopback listener directly. An
+     * address used only to refuse, never to admit (ADR 0069 D-5).
+     */
+    readonly refusePeers?: readonly string[];
   },
 ): Promise<Listening> {
+  const refused = new Set(refusePeers ?? []);
   const server = createServer((incoming, outgoing) => {
     let request: Request;
     try {
@@ -197,11 +213,17 @@ export function listen(
       clientAddressHeader,
       trustedProxies,
     );
-    handler(request, { address })
+    handler(request, listener === undefined ? { address } : { address, listener })
       .catch(() => errorResponse('internal'))
       .then((response) => send(response, outgoing))
       .catch(() => outgoing.destroy());
   });
+  if (refused.size > 0) {
+    server.on('connection', (socket) => {
+      const peer = socket.remoteAddress;
+      if (peer !== undefined && refused.has(normalisedAddress(peer))) socket.destroy();
+    });
+  }
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {

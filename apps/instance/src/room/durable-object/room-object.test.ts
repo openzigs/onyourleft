@@ -71,6 +71,20 @@ describe('sockets — the Hibernation API and the attachment', () => {
     expect(await harness.room.fetch(START)).toMatchObject({ status: 200 });
   });
 
+  it('serves no admin pages: the Durable Object has no operator CLI to mint a code (#2641, ADR 0069 D-2)', async () => {
+    const harness = new FakeRoomHarness(conformanceSettings(), admitConformance, false);
+    for (const request of [
+      { ...START, method: 'GET', url: 'https://room.test/admin/sign-in' },
+      { ...START, url: 'https://room.test/admin/sign-in' },
+      { ...START, url: 'https://room.test/admin/sign-out' },
+    ]) {
+      expect(await harness.room.fetch(request), request.url).toEqual({
+        status: 404,
+        text: 'not found',
+      });
+    }
+  });
+
   it('drops a binary frame, and closes a socket it has no connection for', async () => {
     const harness = new FakeRoomHarness(conformanceSettings(), admitConformance, false);
     const socket = await hello(harness, 'ann');

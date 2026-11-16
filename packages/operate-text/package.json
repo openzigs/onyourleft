@@ -1,0 +1,21 @@
+{
+  "name": "@onyourleft/operate-text",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "The Operate sections' wording and pure view models: the sentences, the closed-word tables and the functions that turn an Operate route's JSON into rows of label and value, read by the app's Operate panels and the instance's admin pages alike (ADR 0069 D-7). No dependencies, no platform API, nothing that renders.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "4.1.12"
+  }
+}

@@ -36,7 +36,11 @@ import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 interface OperatorLogWriter {
   recordOperatorAction(
     entry: {
-      actor: { source: 'app'; athleteId: string } | { source: 'cli' };
+      actor:
+        | { source: 'app'; athleteId: string }
+        | { source: 'cli' }
+        // #2641: the instance's own admin pages, by listener.
+        | { source: 'admin_tunnel' | 'admin_loopback'; athleteId: string | null };
       action: string;
       at: number;
     },
@@ -78,10 +82,38 @@ interface BackupWriter {
   >;
 }
 
+/** A room a room worker holds (`apps/instance` §`LiveRoom`, #2612). */
+export interface LiveRoomHeld {
+  readonly roomId: string;
+  readonly phase: 'lobby' | 'countdown' | 'running' | 'finished' | 'closed';
+  readonly athleteIds: readonly string[];
+}
+
+/** What the instance's Rooms reads from its room workers and ends through (#2612). */
+interface RoomRouterStandIn {
+  live(): Promise<readonly LiveRoomHeld[]>;
+  end(roomId: string, commit: () => Promise<boolean>): Promise<boolean>;
+}
+
 export interface OperateInstance {
-  readonly instance: { handler(request: Request): Promise<Response> };
+  readonly instance: {
+    handler(request: Request): Promise<Response>;
+    /** The handler's own log sink (#2614). */
+    readonly log: (line: string) => void;
+    /** Every line the handler's sink got. */
+    readonly lines: readonly string[];
+  };
+  /** The instance's riders' rooms, made here as `POST /v1/rooms` makes them (#2612). */
+  readonly rooms: {
+    create(
+      caller: { readonly athleteId: string },
+      body: Readonly<Record<string, unknown>>,
+    ): Promise<{ readonly ok: boolean; readonly value?: { readonly roomId: string } }>;
+  };
   readonly clock: { ms: number };
-  readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
+  readonly instanceKeys: {
+    show(): Promise<{ readonly card: string; readonly fingerprint: string }>;
+  };
   /** A handler answering, as this instance, one sealed inner route. */
   answeringAs(path: string, answer: () => Response): (request: Request) => Promise<Response>;
   freshRead<T>(read: (store: OperatorLogWriter & BackupWriter) => Promise<T>): Promise<T>;
@@ -95,7 +127,26 @@ interface IdentityTesting {
     moderators: { owner: string; deputy?: string };
     keyless?: boolean;
     withoutOperate?: boolean;
+    operateRooms?: RoomRouterStandIn;
   }): Promise<OperateInstance>;
+}
+
+/** The instance's log module (#2614), by a computed path for the same reason. */
+const INSTANCE_LOG = join(dirname(fileURLToPath(import.meta.url)), '../../../instance/src/log.ts');
+
+/**
+ * Write a line through the instance's own sink as the instance writes one
+ * (`logEvent`, so through its one redaction) — #2614's problem lines.
+ */
+export async function writeInstanceLine(
+  world: OperateInstance,
+  event: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  const log = (await import(/* @vite-ignore */ INSTANCE_LOG)) as {
+    logEvent(sink: (line: string) => void, event: string, detail: Record<string, unknown>): void;
+  };
+  log.logEvent(world.instance.log, event, detail);
 }
 
 /** A path, not a URL: under jsdom a URL resolved here is `http:`, which the loader refuses. */
@@ -137,6 +188,8 @@ export interface OperateDevice {
   connect(): Promise<void>;
   /** This device's own id on the instance, once connected. */
   athleteId(): string;
+  /** The fingerprint this device pinned the instance's identity key at (#2613), once connected. */
+  pin(): string | undefined;
 }
 
 /** A device with its own store and key, not yet connected. */
@@ -173,6 +226,7 @@ export async function anOperateDevice(
       if (outcome.kind !== 'connected') throw new Error(`connect: ${JSON.stringify(outcome)}`);
     },
     athleteId: () => readInstanceAccount(storage)?.instanceAthleteId ?? '',
+    pin: () => readInstanceAccount(storage)?.pin,
   };
 }
 
@@ -188,6 +242,8 @@ export interface OperateWorld {
   readonly approveRider: () => Promise<void>;
   /** One more device connected as a new rider, whose account waits for approval (#2605). */
   readonly anotherRider: (name: string) => Promise<OperateDevice>;
+  /** What the room workers hold (#2612): a test adds rooms here; an end takes one out. */
+  readonly liveRooms: LiveRoomHeld[];
 }
 
 /** An approval-required instance whose owner, deputy and one rider are each a device here. */
@@ -209,10 +265,22 @@ export async function operatedWorld(
   const owner = await anOperateDevice(send, 'Owner', card);
   const deputy = await anOperateDevice(send, 'Deputy', card);
   const rider = await anOperateDevice(send, 'Rider', card);
+  // #2612: the room workers, as a list; an end runs its commit as the router does.
+  const liveRooms: LiveRoomHeld[] = [];
+  const operateRooms: RoomRouterStandIn = {
+    live: () => Promise.resolve([...liveRooms]),
+    end: async (roomId, commit) => {
+      if (!(await commit())) return false;
+      const at = liveRooms.findIndex((room) => room.roomId === roomId);
+      if (at !== -1) liveRooms.splice(at, 1);
+      return true;
+    },
+  };
   const world = await testing.startIdentityInstance({
     registration: 'approval',
     moderators: { owner: owner.publicKey, deputy: deputy.publicKey },
     ...(options.withoutOperate === true ? { withoutOperate: true } : {}),
+    operateRooms,
   });
   started.world = world;
   worlds.push(world);
@@ -227,6 +295,7 @@ export async function operatedWorld(
     owner,
     deputy,
     rider,
+    liveRooms,
     approveRider: async () => {
       const decided = await createModerationPort(owner.dependencies).decideRegistration(
         rider.athleteId(),
@@ -351,4 +420,31 @@ export function countingSealed(
     return Response.json({ error: { code: 'not_found' } }, { status: 404 });
   });
   return { send: (url, init) => counting(new Request(url, init)), count: () => count };
+}
+
+/**
+ * A rider's room made on `world` as `POST /v1/rooms` makes one (#2612), by the
+ * athlete `athleteId`, a second after the last on the world's clock so the
+ * list's newest-first order is the order they were made in. Its id.
+ */
+export async function roomMadeBy(
+  world: OperateInstance,
+  athleteId: string,
+  kind: 'group' | 'race',
+): Promise<string> {
+  world.clock.ms += 1000;
+  const made = await world.rooms.create(
+    { athleteId },
+    {
+      kind,
+      ridingPosition: 'hoods',
+      loop: false,
+      lengthMetres: 1000,
+      grades: [[0, 1]],
+      // The instance relays a route by its hash and never parses it.
+      gpx: `<gpx version="1.1"><!-- ${kind} ${String(world.clock.ms)} --></gpx>`,
+    },
+  );
+  if (!made.ok || made.value === undefined) throw new Error('no room made');
+  return made.value.roomId;
 }

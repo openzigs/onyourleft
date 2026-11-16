@@ -896,6 +896,31 @@ export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_T
 export const MAPPED_BUILDING_MAX = 36;
 
 /**
+ * A city centre's far-level cap — #1638, ADR 0054 D-5.6: **off**
+ * (`undefined`), so every ride draws at most {@link MAPPED_BUILDING_MAX}
+ * mapped buildings, as before #1638.
+ *
+ * When it holds a number, a refill draws up to that many, and every building
+ * past {@link MAPPED_BUILDING_MAX} is one that stands beside a `city-centre`
+ * stretch of route (`urban-class.ts`) AND is drawn at its far level, beyond
+ * {@link MAPPED_BUILDING_NEAR_METRES} (`mapped-buildings.ts`
+ * §`selectMappedBuildings`). A near building, and every building outside a
+ * city centre, stays inside the 36. {@link MAPPED_BUILDING_TRIANGLES},
+ * {@link MAPPED_BUILDING_DRAW_CALLS} and {@link REALISTIC_GROUND_BLOBS} hold:
+ * the extra far boxes share the one triangle term and the six surfaces, and
+ * carry no ground blob.
+ *
+ * ⚠️ **No number is chosen here in advance.** D-5.6 lets the cap rise only
+ * to a number measured with Part AH on the tablet against #1523's after-row,
+ * recorded here with that measurement. The owner's page takes a candidate
+ * from its URL (`browser/realistic/config.ts` §`cityfar`) so one build can
+ * take the before row, the after row and a row at the candidate (validation
+ * 0002, AE5). Until those rows are posted on #1638 and the owner rules, this
+ * stays off.
+ */
+export const MAPPED_BUILDING_MAX_CITY_FAR: number | undefined = undefined;
+
+/**
  * How many ground blobs a realistic frame may draw — #620: **98**, one under
  * every item the realistic world draws as a MESH, every structure it may
  * carry and, since #1657, every mapped building it draws. `three-renderer.ts`

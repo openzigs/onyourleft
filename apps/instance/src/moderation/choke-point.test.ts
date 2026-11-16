@@ -46,6 +46,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { scriptedEngine } from '../analysis/jobs-testing.ts';
 import type { Reach, Route } from '../route-kit.ts';
+import { fakeRoomRouter } from '../operate/rooms-testing.ts';
+import { madeRoom } from '../rooms/rooms-testing.ts';
+import { roomShortCode } from '../operate/operate.ts';
 import { ROUTES } from '../routes.ts';
 import { codeOf as sealedCodeOf, sealedCall } from '../sealed/sealed-testing.ts';
 import {
@@ -238,7 +241,9 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   confirmed: 'the CALLER’s own 18+ self-declaration (ruling Q5)',
   token: 'a token mailed to the CALLER’s own recovery address',
   reason:
-    'free text a reporter or a moderator writes, or a flag’s reason from a closed list (#69); never an id the route acts on',
+    'free text a reporter or a moderator writes, or a flag’s or an ended room’s reason from a closed list (#69, #2612); never an id the route acts on',
+  confirm:
+    'what the owner types to confirm an Operate action: the short code of the room ended (#2612; the room is the path’s), or `rotate` for the encryption key (#2613); it names no athlete',
   reportId: 'a report, read and decided only on the moderators’ routes',
   statement:
     'the CALLER’s own signed erasure statement, or the statement of reasons a moderator writes with a restriction (#910)',
@@ -260,6 +265,8 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   key: 'the CALLER’s own hosted model key',
   reasoningTokens: 'a setting of the CALLER’s own hosted model',
   endpoint: 'the hosted model endpoint the caller consents to',
+  instance: 'the instance the caller’s bot-tactics consent names: this one (#2709)',
+  modelAddress: 'the local model address the caller’s bot-tactics consent names (#2709)',
   picture: 'the CALLER’s own side-camera picture',
   kind: 'a room’s kind: a group ride or a race',
   ridingPosition: 'a room’s riding position setting',
@@ -401,9 +408,13 @@ describe('every path a blocked athlete could use is refused, as though nobody we
   let suspended: Rider;
   let unrelated: Rider;
 
+  /** #2612: a room the owner's control ends, made by the viewer. */
+  let room: string;
+
   beforeAll(async () => {
-    world = await startModerationWorld();
+    world = await startModerationWorld({ operateRooms: fakeRoomRouter() });
     viewer = await world.rider('Viewer');
+    room = (await madeRoom(world, viewer.token)).roomId;
     blocksViewer = await world.rider('Blocks the viewer');
     blockedByViewer = await world.rider('Blocked by the viewer');
     suspended = await world.rider('Suspended');
@@ -484,14 +495,20 @@ describe('every path a blocked athlete could use is refused, as though nobody we
   it.each(OWNER_ROUTES.map((route) => [route.operationId, route] as const))(
     '%s answers an ordinary rider AND the deputy as though there were no such route (#2602)',
     async (_operation, route) => {
-      const path = route.path.replace(/\{[A-Za-z]+\}/g, unrelated.athleteId);
+      // #2612: ending a room is asked of a room that is there, by its code.
+      const ending = route.operationId === 'endOperateRoom';
+      const path = route.path.replace(/\{[A-Za-z]+\}/g, ending ? room : unrelated.athleteId);
       // #2610: the tool check refuses a body that names no model, so the control names one.
       const body =
         route.method === 'GET'
           ? undefined
           : route.operationId === 'checkOperateAnalysisModel'
             ? { model: 'some-model' }
-            : {};
+            : ending
+              ? { reason: 'other', confirm: roomShortCode(room) }
+              : route.operationId === 'rotateOperateKey'
+                ? { confirm: 'rotate' }
+                : {};
       const nowhere = await world.as(viewer, 'GET', '/v1/no-such-route');
       for (const caller of [viewer, world.deputy]) {
         const answer = await world.as(caller, route.method, path, body);
@@ -696,6 +713,58 @@ describe('the owner’s routes are the owner’s alone, checked in ONE place (#2
       expect(route.admitsPending, route.operationId).toBeUndefined();
       expect(route.admitsSuspended, route.operationId).toBeUndefined();
     }
+  });
+
+  /**
+   * GET routes the admin pages may NOT read, each with why (ADR 0069 D-2): a
+   * read whose worth is that the edge cannot write it.
+   */
+  const NEVER_READ: ReadonlyMap<string, string> = new Map([
+    [
+      'getOperateKeys',
+      'the card and fingerprint never go through the tunnel (ADR 0047 D-6); #2650 formats its own on loopback',
+    ],
+  ]);
+
+  /**
+   * The changes the admin pages may make, each with the page that makes it
+   * behind #2642's fresh passkey (ADR 0069 D-2). Every other change stays
+   * `never` until its page's sub-issue adds it here.
+   */
+  const CHANGES: ReadonlyMap<string, string> = new Map([
+    ['setOperateAnalysis', '#2648: the AI backend page saves the model, address and offers'],
+    ['clearOperateAnalysis', '#2648: the AI backend page returns the settings to .env'],
+    ['checkOperateAnalysisModel', '#2648: the AI backend page checks a model calls tools'],
+  ]);
+
+  it('says on every owner route whether the admin pages reach it, on no other route, and lets them read, and change only what a page makes (#2641, #2648, ADR 0069 D-2)', () => {
+    for (const route of OWNER_ROUTES) {
+      expect(['read', 'change', 'never'], route.operationId).toContain(route.admin);
+      // A read is a GET; a change is a POST or a DELETE a page makes behind a step-up.
+      expect(route.admin, route.operationId).toBe(
+        route.method === 'GET'
+          ? NEVER_READ.has(route.operationId)
+            ? 'never'
+            : 'read'
+          : CHANGES.has(route.operationId)
+            ? 'change'
+            : 'never',
+      );
+    }
+    for (const operationId of [...NEVER_READ.keys(), ...CHANGES.keys()]) {
+      expect(OWNER_ROUTES.map((route) => route.operationId)).toContain(operationId);
+    }
+    for (const operationId of CHANGES.keys()) {
+      expect(OWNER_ROUTES.find((route) => route.operationId === operationId)?.method).not.toBe(
+        'GET',
+      );
+    }
+    // ADR 0069 D-9's three moderation routes are #2646's to mark; none is yet.
+    expect(
+      ROUTES.filter((route) => route.reaches !== 'owner' && route.admin !== undefined).map(
+        (route) => route.operationId,
+      ),
+    ).toEqual([]);
   });
 
   /** A route that says it is the owner's and checks nothing itself. */

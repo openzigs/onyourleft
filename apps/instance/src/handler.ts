@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import {
+  ADMIN_FORM_LIMIT_BYTES,
+  adminInternalError,
+  isAdminPath,
+  type Admin,
+} from './admin/admin.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
+import type { Tactics } from './analysis/tactics.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
-import type { ClientInfo, InstanceProbes, SidePose } from './route-kit.ts';
+import type { AdminChannel, ClientInfo, InstanceProbes, SidePose } from './route-kit.ts';
 import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import { OPERATE_NEEDS_KEYS, type Operate } from './operate/operate.ts';
@@ -83,12 +90,24 @@ import { SEALED_PATH } from '@onyourleft/domain';
  *   as any other method there is.
  *
  * ⚠️ **`*` and not a list of origins, and that is safe here because nothing
- * rides on ambient authority**: the instance sets no cookie and reads none,
- * and a session is a bearer token the app puts in `Authorization` itself, so a
- * page on another origin that calls the instance holds exactly what it could
- * send with `curl`. `Access-Control-Allow-Credentials` is therefore never
- * sent, and must not be — with it, `*` is refused by browsers, and a list of
- * origins that did carry credentials would be a different threat model.
+ * the API answers rides on ambient authority**: a session is a bearer token
+ * the app puts in `Authorization` itself, so a page on another origin that
+ * calls the instance holds exactly what it could send with `curl`.
+ * `Access-Control-Allow-Credentials` is therefore never sent, and must not be
+ * — with it, `*` is refused by browsers, and a list of origins that did carry
+ * credentials would be a different threat model.
+ *
+ * ⚠️ **Since #2641 the instance sets and reads ONE cookie, and only under
+ * `/admin`** (ADR 0069 D-4): the owner's admin session, `__Host-oyl-admin`,
+ * set and read by `admin/admin.ts` alone and never by a route of the table.
+ * An `/admin` request is answered by that layer BEFORE the table is matched,
+ * with `admin/headers.ts` §`ADMIN_HEADERS` — no `Access-Control-Allow-Origin`
+ * and no other CORS header — and never passes through {@link ALWAYS}. So `*`
+ * stays safe on every other path: no `/v1/*` route, `/health`, `/report` or
+ * any other reads the cookie, and a request carrying it is answered byte for
+ * byte as one without it (`admin/admin-api.test.ts`). The admin layer reaches
+ * a route only in-process, through `dispatchAsOwner`: a plaintext
+ * `/v1/operate/*` request is `sealed_required` with or without the cookie.
  *
  * **A preflight reaches nobody** (#891's choke point, step 4): it calls no
  * route and reads no store, and its answer depends on the PATH's shape alone
@@ -150,6 +169,11 @@ export interface HandlerOptions {
    */
   readonly hostedSettings?: HostedSettings;
   /**
+   * Model-chosen lap-race bot tactics (#2709, ADR 0071). Absent, every route
+   * that needs them answers `unavailable`.
+   */
+  readonly tactics?: Tactics;
+  /**
    * The side camera's pictures (#1106). Absent, the route that needs them
    * answers `unavailable`.
    */
@@ -174,6 +198,12 @@ export interface HandlerOptions {
    * the HPKE port. Absent, `POST /v1/sealed` answers `unavailable`.
    */
   readonly sealed?: Sealed;
+  /**
+   * The instance's own admin pages (#2641, ADR 0069): mounted only when the
+   * operator set `OYL_INSTANCE_ADMIN_PAGES=on`. Absent, `/admin` is
+   * `not_found`, as any path with no route is.
+   */
+  readonly admin?: Admin;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -229,6 +259,9 @@ const PREFLIGHT_HEADERS = 'authorization, content-type';
 
 /** How long a browser may keep a preflight's answer, in seconds. */
 const PREFLIGHT_MAX_AGE_SECONDS = 600;
+
+/** What the log and `/metrics` name every `/admin` request by: the pattern, never the path. */
+const ADMIN_ROUTE = '/admin';
 
 /** Past the limit: the request is refused rather than read further. */
 const TOO_LARGE = Symbol('too large');
@@ -329,6 +362,7 @@ export function createHandler(options: HandlerOptions): Handler {
     body: Uint8Array | null,
     client: ClientInfo,
     sealedRequest: boolean,
+    asOwner?: { readonly caller: Caller; readonly channel: AdminChannel },
   ): Promise<Response> {
     const identity = options.identity;
     // #2602 (ADR 0047 D-7, D-13): the owner's area is never served in
@@ -348,6 +382,9 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.hostedSettings === true && options.hostedSettings === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.tactics === true && options.tactics === undefined) {
+      return errorResponse('unavailable');
+    }
     if (matched.sidePose === true && options.sidePose === undefined) {
       return errorResponse('unavailable');
     }
@@ -359,7 +396,11 @@ export function createHandler(options: HandlerOptions): Handler {
     }
     let caller: Caller | undefined;
     if (matched.auth === 'session') {
-      caller = await identity?.authenticate(request.headers.get('authorization'));
+      // The admin seam's caller is the owner the admin layer signed in: no
+      // bearer token is minted or looked up (ADR 0069 D-2). Every check
+      // below runs on it as on any other.
+      caller =
+        asOwner?.caller ?? (await identity?.authenticate(request.headers.get('authorization')));
       if (caller === undefined) {
         return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
       }
@@ -404,6 +445,7 @@ export function createHandler(options: HandlerOptions): Handler {
       rooms: options.rooms,
       analysis: options.analysis,
       hostedSettings: options.hostedSettings,
+      tactics: options.tactics,
       sidePose: options.sidePose,
       segments: options.segments,
       operate: options.operate,
@@ -411,6 +453,7 @@ export function createHandler(options: HandlerOptions): Handler {
       probes: options.probes,
       sealed: options.sealed,
       sealedRequest,
+      ...(asOwner === undefined ? {} : { adminChannel: asOwner.channel }),
       dispatch: dispatchInner,
     });
   }
@@ -440,7 +483,91 @@ export function createHandler(options: HandlerOptions): Handler {
     return answer(found.candidate, found.params, request, url, body, client, true);
   }
 
+  /**
+   * The admin seam (#2641, ADR 0069 D-2): a route of the table called
+   * in-process AS THE OWNER, for a fixed `(method, path)` the admin layer
+   * names — never one from the browser. A `GET` reaches only a route marked
+   * `admin: 'read'`, and since #2648 a `POST` or `DELETE` only one marked
+   * `'change'`; any other is `not_found` before it is called. One that is
+   * runs through {@link answer}, so its `reaches` check, its validation and
+   * its log write run unchanged — the log's source the channel's, read from
+   * the marker this sets (ADR 0069 D-8). `body` is the JSON the admin layer
+   * built from a form it checked.
+   */
+  async function dispatchAsOwner(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    owner: Caller,
+    client: ClientInfo,
+    body?: Readonly<Record<string, unknown>>,
+  ): Promise<Response> {
+    // The origin the Node listener builds every request URL on, never a host anybody typed.
+    const url = new URL(`http://instance.invalid${path}`);
+    const admits = method === 'GET' ? 'read' : 'change';
+    const bytes = body === undefined ? null : new TextEncoder().encode(JSON.stringify(body));
+    for (const candidate of innerRoutes) {
+      const params = matchPath(candidate.path, url.pathname);
+      if (params === undefined || candidate.method !== method) continue;
+      if (candidate.admin !== admits) break;
+      if (bytes !== null && bytes.byteLength > options.config.bodyLimitBytes) {
+        return errorResponse('payload_too_large');
+      }
+      return answer(
+        candidate,
+        params,
+        new Request(url, {
+          method,
+          ...(bytes === null
+            ? {}
+            : { headers: { 'content-type': 'application/json' }, body: bytes }),
+        }),
+        url,
+        bytes,
+        client,
+        false,
+        // The listener is the adapter's word (`ClientInfo.listener`, ADR 0069 D-5).
+        { caller: owner, channel: client.listener === 'loopback' ? 'loopback' : 'tunnel' },
+      );
+    }
+    return errorResponse('not_found');
+  }
+
+  /**
+   * An `/admin` request (#2641): answered by the admin layer BEFORE the table
+   * is matched, and sent with the admin headers alone — never {@link ALWAYS}'s
+   * CORS `*`. Logged and counted by the pattern, never the path.
+   */
+  async function answerAdmin(
+    admin: Admin,
+    request: Request,
+    client: ClientInfo,
+  ): Promise<Response> {
+    const started = now();
+    let response: Response;
+    try {
+      const body =
+        request.method === 'POST' ? await boundedBody(request, ADMIN_FORM_LIMIT_BYTES) : null;
+      response = await admin.handle(request, body === TOO_LARGE ? 'too-large' : body, client, {
+        dispatch: dispatchAsOwner,
+      });
+    } catch (error) {
+      logUnhandled(options.log, ADMIN_ROUTE, error);
+      response = adminInternalError();
+    }
+    logRequest(options.log, {
+      method: request.method,
+      route: ADMIN_ROUTE,
+      status: response.status,
+      ms: now() - started,
+    });
+    options.observe?.(ADMIN_ROUTE, response.status, undefined);
+    return response;
+  }
+
   return async (request, client = { address: null }) => {
+    if (options.admin !== undefined && isAdminPath(new URL(request.url).pathname)) {
+      return answerAdmin(options.admin, request, client);
+    }
     const started = now();
     let route: Route | undefined;
     let response: Response;

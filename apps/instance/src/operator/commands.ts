@@ -34,6 +34,7 @@ import {
   NO_KEYS_SENTENCE,
   type InstanceKeys,
 } from '../keys/instance-keys.ts';
+import { ADMIN_CODE_LIFETIME_SECONDS, newAdminCode } from '../admin/code.ts';
 import { clearAnalysisSettings, saveAnalysisSettings } from '../analysis/settings.ts';
 import { randomHex } from '../auth/crypto.ts';
 import { recoveryCodeSha256 } from '../auth/identity.ts';
@@ -1300,6 +1301,144 @@ export async function modelKeyClear(paths: DataPaths) {
       (held) => (held ? 'cleared' : 'none_held'),
     );
     return { command: 'model-key clear', cleared };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `admin-code` (#2641, ADR 0069 D-1): a one-time code for the instance's own
+ * admin pages, printed ONCE and stored only as its SHA-256. It lives ten
+ * minutes, opens one session for the athlete holding
+ * `OYL_INSTANCE_OWNER_KEY`, and minting it voids every unused code, so at
+ * most one is live. The code and its `admin_code_minted` entry are written in
+ * one transaction; the entry names no code (`voided_unused` when a live one
+ * was voided). Whoever can run this on the host already holds more than the
+ * code gives.
+ */
+export async function adminCode(paths: DataPaths, now?: () => Date) {
+  const store = openServingStore(paths.database);
+  try {
+    const { code, sha256 } = await newAdminCode();
+    const mintedAt = secondsOf(now);
+    const expiresAt = mintedAt + ADMIN_CODE_LIFETIME_SECONDS;
+    const { voided } = await asOperatorAction(
+      store,
+      'admin_code_minted',
+      (inside) =>
+        inside.mintAdminCode({ codeSha256: sha256, mintedAt, expiresAt, mintedBy: 'cli' }),
+      (minted) => (minted.voided > 0 ? 'voided_unused' : null),
+      now,
+    );
+    return {
+      command: 'admin-code',
+      code,
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+      voidedUnused: voided > 0,
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/** A passkey id as the admin pages write it: 16 lowercase hex. */
+const PASSKEY_ID = /^[0-9a-f]{16}$/;
+
+/**
+ * `admin-passkeys list` (#2642, ADR 0069 D-1): the owner's admin passkeys —
+ * id, name, RP ID, algorithm, listener, and when each was added, last used
+ * and confirmed. Never a key or a credential id. Reads only, so it writes no
+ * log entry.
+ */
+export async function adminPasskeysList(paths: DataPaths) {
+  const store = openServingStore(paths.database);
+  try {
+    const iso = (seconds: number | null): string | null =>
+      seconds === null ? null : new Date(seconds * 1000).toISOString();
+    return {
+      command: 'admin-passkeys list',
+      passkeys: (await store.listAdminPasskeys()).map((passkey) => ({
+        id: passkey.id,
+        label: passkey.label,
+        rpId: passkey.rpId,
+        algorithm: passkey.algorithm,
+        listener: passkey.listener,
+        enrolledAt: iso(passkey.enrolledAt),
+        lastUsedAt: iso(passkey.lastUsedAt),
+        confirmedAt: iso(passkey.confirmedAt),
+      })),
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `admin-passkeys revoke <id>` (#2642, ADR 0069 D-1): the passkey gone, and
+ * every admin session it opened ended, with its `admin_passkey_revoked`
+ * entry (`sessions_ended=N`) in the same transaction. On the host it needs
+ * nothing but the shell, which is how the owner gets rid of a passkey they
+ * cannot use any more.
+ */
+export async function adminPasskeysRevoke(paths: DataPaths, id: string, now?: () => Date) {
+  if (!PASSKEY_ID.test(id)) {
+    throw new CommandError(
+      'admin-passkeys revoke takes a passkey id, as admin-passkeys list shows it. Nothing was revoked.',
+    );
+  }
+  const store = openServingStore(paths.database);
+  try {
+    const { sessionsEnded } = await asOperatorAction(
+      store,
+      'admin_passkey_revoked',
+      async (inside) => {
+        const removed = await inside.removeAdminPasskey(id);
+        return removed.removed
+          ? removed
+          : new Refused('There is no admin passkey with that id. Nothing was revoked.');
+      },
+      (removed) => `sessions_ended=${String(Math.min(removed.sessionsEnded, 999_999_999))}`,
+      now,
+    );
+    return { command: 'admin-passkeys revoke', id, sessionsEnded };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `admin-passkeys confirm <id>` (#2642, the owner's answer to ADR 0069
+ * Q-C): a passkey enrolled through the tunnel may make changes from now on.
+ * Until this is run it reads and changes nothing, so a passkey an edge
+ * substituted at enrolment is no use to it for changes: it cannot run this.
+ * Logged `admin_passkey_confirmed`.
+ */
+export async function adminPasskeysConfirm(paths: DataPaths, id: string, now?: () => Date) {
+  if (!PASSKEY_ID.test(id)) {
+    throw new CommandError(
+      'admin-passkeys confirm takes a passkey id, as admin-passkeys list shows it. Nothing was confirmed.',
+    );
+  }
+  const store = openServingStore(paths.database);
+  try {
+    const at = secondsOf(now);
+    await asOperatorAction(
+      store,
+      'admin_passkey_confirmed',
+      async (inside) => {
+        const confirmed = await inside.confirmAdminPasskey(id, at);
+        if (confirmed === 'none') {
+          return new Refused('There is no admin passkey with that id. Nothing was confirmed.');
+        }
+        if (confirmed === 'already_confirmed') {
+          return new Refused('That admin passkey is confirmed already. Nothing was changed.');
+        }
+        return confirmed;
+      },
+      () => null,
+      now,
+    );
+    return { command: 'admin-passkeys confirm', id, confirmed: true };
   } finally {
     await store.close();
   }
