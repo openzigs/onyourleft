@@ -1713,10 +1713,20 @@ describe('an overpass’s approach slopes down to the ground, and nothing walls 
     const origin = corridorOrigin(CLIMB);
     const seatHalf = Math.max(...abutments.map((abutment) => abutment.length / 2));
     const deckTop = deck.y + deck.height / 2;
-    const raised = [...triangles, ...banks].flatMap((triangle) =>
-      pointsOnTriangle({ corners: triangle.corners, colour: TARMAC }).filter(
-        ([x, y, z]) => !underDeck(deck, x, z) && y - groundAt(x, z) > OVERPASS_VERGE_HEIGHT_METRES,
-      ),
+    // The highest point of the road and the banks in each metre square off the
+    // deck: they tile it many times over, and each ground reading scans the
+    // route, which under coverage timed this case out (#2471's nightly).
+    const squares = new Map<string, [number, number, number]>();
+    for (const triangle of [...triangles, ...banks]) {
+      for (const [x, y, z] of pointsOnTriangle({ corners: triangle.corners, colour: TARMAC })) {
+        if (underDeck(deck, x, z)) continue;
+        const key = `${String(Math.round(x))},${String(Math.round(z))}`;
+        const held = squares.get(key);
+        if (held === undefined || y > held[1]) squares.set(key, [x, y, z]);
+      }
+    }
+    const raised = [...squares.values()].filter(
+      ([x, y, z]) => y - groundAt(x, z) > OVERPASS_VERGE_HEIGHT_METRES,
     );
     expect(raised.length).toBeGreaterThan(0);
     for (const [x, , z] of raised) {
