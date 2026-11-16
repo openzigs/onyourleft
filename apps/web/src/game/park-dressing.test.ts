@@ -468,6 +468,19 @@ describe('#2685 through sceneFrame', () => {
     expect(dressing.pieces.some((piece) => Math.abs(piece.y) > 0.01)).toBe(true);
   });
 
+  it('hands the belt the same pieces while nothing under them changed, so it does not re-upload every frame', () => {
+    const first = (frameAt(1_150).parkDressing as ParkDressingInView).pieces;
+    const second = (frameAt(1_150).parkDressing as ParkDressingInView).pieces;
+    expect(first.length).toBeGreaterThan(100);
+    expect(second).toBe(first);
+  });
+
+  it('hands over new pieces once the ride has moved to another view', () => {
+    const first = (frameAt(1_150).parkDressing as ParkDressingInView).pieces;
+    const later = frameAt(1_400).parkDressing?.pieces;
+    expect(later).not.toBe(first);
+  });
+
   it('carries none with the lever off, or with no corridor', () => {
     expect(frameAt(1_150, { parkDressingOff: true }).parkDressing).toBeUndefined();
     expect(

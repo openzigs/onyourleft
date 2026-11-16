@@ -677,9 +677,36 @@ function parkDressing(
     camera.x,
     camera.z,
   );
-  return view.pieces.length === 0
-    ? view
-    : { pieces: standingOnGround(view.pieces, ground), ground: view.ground };
+  if (view.pieces.length === 0) return view;
+  const stood = standingOnGround(view.pieces, ground);
+  // `standingOnGround` hands back a new array every call; the belt re-composes
+  // and re-uploads its matrices whenever the array it is given changes. So keep
+  // returning the last frame's pieces while the same view stands at the same
+  // heights — the common case — and only a real change reaches the belt.
+  const held = lastStood;
+  if (held !== undefined && held.source === view.pieces && sameStanding(held.pieces, stood)) {
+    return { pieces: held.pieces, ground: view.ground };
+  }
+  lastStood = { source: view.pieces, pieces: stood };
+  return { pieces: stood, ground: view.ground };
+}
+
+/** The last frame's park pieces, stood on the ground. @see parkDressing */
+let lastStood:
+  | { readonly source: ParkDressingInView['pieces']; readonly pieces: ParkDressingInView['pieces'] }
+  | undefined;
+
+function sameStanding(
+  before: ParkDressingInView['pieces'],
+  after: ParkDressingInView['pieces'],
+): boolean {
+  if (before.length !== after.length) return false;
+  for (let index = 0; index < after.length; index += 1) {
+    const a = before[index]!;
+    const b = after[index]!;
+    if (a.x !== b.x || a.y !== b.y || a.z !== b.z) return false;
+  }
+  return true;
 }
 
 /** The streams, lakes and bridges in view. @see SceneFrame.water */

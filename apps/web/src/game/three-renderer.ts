@@ -16003,7 +16003,7 @@ function glslLinear(packed: number): string {
 }
 
 /**
- * The mown stripes' period on a golf course, in metres: **14**, a 7 m pass of
+ * The mown stripes' period on a golf course, in metres: **18**, a 9 m pass of
  * the mower each way — #2685, this repository's own; turned 30° off the grid
  * so it does not run with a road that does.
  */
@@ -16094,6 +16094,9 @@ export const PARK_GROUND_MIX = ((): string => {
         vec4 oylB = oylBunkers[i];
         if (oylB.z <= 0.0) continue;
         vec2 oylO = oylAt - oylB.xy;
+        // The edge never passes 1.32 r (+ the 0.3 m blend): skip the trig outside it.
+        float oylReach = oylB.z * 1.32 + 0.3;
+        if (dot(oylO, oylO) > oylReach * oylReach) continue;
         float oylTurn = atan(oylO.y, oylO.x);
         float oylEdge = oylB.z * (1.0 + 0.22 * sin(3.0 * oylTurn + oylB.w) + 0.1 * sin(5.0 * oylTurn + 2.0 * oylB.w));
         oylSand = max(oylSand, 1.0 - smoothstep(oylEdge - 0.3, oylEdge + 0.3, length(oylO)));
