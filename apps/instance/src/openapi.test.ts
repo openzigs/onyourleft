@@ -35,6 +35,7 @@ import { jobBody } from './analysis/jobs-testing.ts';
 import { replanBody } from './analysis/replan-testing.ts';
 import type { AnalysisEngine } from './analysis/jobs.ts';
 import type { ScreenedWriteUp } from '@onyourleft/analysis';
+import { logEvent } from './log.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { roomShortCode } from './operate/operate.ts';
 import { fakeRoomRouter } from './operate/rooms-testing.ts';
@@ -593,6 +594,11 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     send(world, 'POST', '/v1/operate/keys/rotate', await moderatorToken(world), {
       confirm: 'rotate',
     }),
+  // #2614: a problem line written through the handler's own sink, so a row has every field.
+  getOperateLogs: async (world) => {
+    logEvent(world.instance.log, 'room-worker-died', { worker: 0, code: 1, roomsLost: 2 });
+    return send(world, 'GET', '/v1/operate/logs', await moderatorToken(world));
+  },
   // #2609: the operator's analysis settings, read, saved and cleared.
   getOperateAnalysis: async (world) =>
     send(world, 'GET', '/v1/operate/analysis', await moderatorToken(world)),

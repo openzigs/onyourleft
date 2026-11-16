@@ -65,6 +65,7 @@ import type {
   OperateKeys,
   OperatePort,
   OperateRoom,
+  OperateProblem,
   OperateStanding,
   OperateStatus,
   OperatorLogEntry,
@@ -912,6 +913,8 @@ export interface ScriptedOperate {
     keys: OperateKeys | null;
     /** `true` to answer a rotation `busy`, as while the instance's own key maintenance runs. */
     keysBusy: boolean;
+    /** The instance's recent problem lines (#2614), newest first, or `null` for unreadable. */
+    problems: OperateProblem[] | null;
   };
 }
 
@@ -958,6 +961,40 @@ export const SCRIPTED_KEYS: OperateKeys = {
   },
   olderHeld: 1,
 };
+
+/** A problem line as the instance's redaction writes it (#2614). */
+function problemLine(at: string, fields: Record<string, string | number | null>): OperateProblem {
+  return { at, line: JSON.stringify(fields), fields };
+}
+
+/**
+ * Three problem lines (#2614), newest first: a request answered 503, a room
+ * worker that died with its rooms, and a failed analysis job.
+ */
+export const SCRIPTED_PROBLEMS: readonly OperateProblem[] = [
+  problemLine('2026-11-14T20:45:00.000Z', {
+    event: 'request',
+    method: 'GET',
+    route: '/v1/rooms/{roomId}/route',
+    status: 503,
+    ms: 12,
+  }),
+  problemLine('2026-11-14T20:30:00.000Z', {
+    event: 'room-worker-died',
+    worker: 1,
+    code: null,
+    signal: 'SIGKILL',
+    roomsLost: 2,
+  }),
+  problemLine('2026-11-14T19:10:00.000Z', {
+    event: 'analysis-job',
+    state: 'failed',
+    code: 'model-unreachable',
+  }),
+];
+
+/** When the scripted instance last started (#2614). */
+export const SCRIPTED_STARTED_AT = '2026-11-14T08:00:00.000Z';
 
 /** The operator's analysis settings (#2609): `.env`'s server, no model picked, both sources offered. */
 export const SCRIPTED_ANALYSIS: OperateAnalysis = {
@@ -1174,6 +1211,7 @@ export function scriptedOperate(
     readonly backups?: readonly OperateBackup[] | null;
     readonly rooms?: readonly OperateRoom[] | null;
     readonly keys?: OperateKeys | null;
+    readonly problems?: readonly OperateProblem[] | null;
   } = {},
 ): ScriptedOperate {
   const calls: string[] = [];
@@ -1196,6 +1234,7 @@ export function scriptedOperate(
     endIsLost: false,
     keys: options.keys === undefined ? SCRIPTED_KEYS : options.keys,
     keysBusy: false,
+    problems: options.problems === null ? null : [...(options.problems ?? SCRIPTED_PROBLEMS)],
   };
   /** What a read answers: the held value, or the standing's refusal, or unreadable. */
   const owned = <T>(value: T | null): Promise<T | { kind: Exclude<OperateStanding, 'owner'> }> =>
@@ -1325,6 +1364,16 @@ export function scriptedOperate(
         olderHeld: held.keys.olderHeld + 1,
       };
       return Promise.resolve({ kind: 'rotated', serial });
+    },
+    problems: () => {
+      calls.push('problems');
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      if (held.problems === null) return Promise.resolve({ kind: 'unreachable' });
+      return Promise.resolve({
+        kind: 'problems',
+        since: SCRIPTED_STARTED_AT,
+        lines: [...held.problems],
+      });
     },
     backUpNow: () => {
       calls.push('back up now');

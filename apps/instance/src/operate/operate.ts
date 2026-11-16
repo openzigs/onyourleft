@@ -55,6 +55,14 @@
  * made. Devices pick the new key up from `GET /v1/instance/keys` by
  * themselves, and nobody pins again. `--drop-old`, `rotate-identity` and
  * `reset` make devices pin again, or answer a leak: they stay on the CLI.
+ *
+ * ## Recent problems: the log's own redacted lines, in memory
+ *
+ * The owner reads the instance's last problem lines (#2614) — exactly the
+ * lines standard output got, after `log.ts` §`redacted` — from the ring the
+ * instance's sink keeps (`log.ts` §`keepProblems`). Memory only: a restart
+ * empties it, and nothing of it is in the database or a backup. Reading it
+ * changes nothing and logs nothing.
  */
 
 import {
@@ -78,6 +86,7 @@ import { analysisModelNameProblem, type AnalysisModelOffCode } from '../config.t
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { RoomPhase } from '../room/core/room.ts';
 import type { Rooms } from '../rooms/rooms.ts';
+import type { RecentProblem, RecentProblems } from '../log.ts';
 import type { Resolver } from '../history/address.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import type {
@@ -389,6 +398,12 @@ export interface Operate {
     athleteId: string,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<KeyRotation>>;
+  /**
+   * The instance's recent problem lines, newest first, and when this process
+   * started (#2614). Writes nothing, logs nothing. `unavailable` where the
+   * instance keeps none.
+   */
+  problems(): OperateResult<{ readonly lines: readonly RecentProblem[]; readonly since: number }>;
 }
 
 /** What `unavailable` says on an instance with no keys. Names the variable, never a value. */
@@ -413,10 +428,13 @@ export function createOperate(options: {
   readonly rooms?: OperateRoomSources;
   /** The instance's keys (#2613); absent, the Keys routes answer `unavailable`. */
   readonly keys?: OperateKeySources;
+  /** The problem lines the instance's own sink keeps (#2614); absent, none are kept. */
+  readonly problems?: RecentProblems;
 }): Operate {
   const { store, status, analysis } = options;
   const roomSources = options.rooms;
   const keySources = options.keys;
+  const recent = options.problems;
   const seconds = (): number => Math.floor(status.now() / 1000);
   // #2610: ONE check for the instance, so a second while one is out is `busy`.
   const toolCheck = createToolCheck({
@@ -632,6 +650,10 @@ export function createOperate(options: {
         },
       );
       return { ok: true, value };
+    },
+    problems() {
+      if (recent === undefined) return { ok: false, code: 'unavailable' };
+      return { ok: true, value: { lines: recent.list(), since: status.startedAt } };
     },
     analysisSettings: analysisView,
     async localModels() {
