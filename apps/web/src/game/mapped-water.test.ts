@@ -246,6 +246,34 @@ describe('a mapped lake beside the road is drawn — #2658', () => {
   });
 });
 
+describe('a lake keeps to the map’s shore where it moves — #2658', () => {
+  it('ends a lake where the shore moves out, and draws no water over the land beside it', () => {
+    const origin = corridorOrigin(LEVEL);
+    // A cove, then a town between the road and the sea: water 25 to 200 m out
+    // from 800 to 1 400 m, then 85 to 200 m from 1 400 to 2 400 m, with
+    // residential land at 20 to 84 m beside that second part.
+    const mask = landClassMask(
+      corridorOf(LEVEL, [
+        landBeside(LEVEL, origin, 'water', 'bay', 800, 1_400, 25, 200),
+        landBeside(LEVEL, origin, 'water', 'bay', 1_400, 2_400, 85, 200),
+        landBeside(LEVEL, origin, 'landuse', 'residential', 1_400, 2_400, 20, 84),
+      ]),
+    );
+    const seed = scatterSeed(LEVEL);
+    const lakes = lakesOf(LEVEL, mask);
+    expect(lakes.length).toBeGreaterThanOrEqual(2);
+    const bed = -LAKE_BELOW_ROAD_METRES - LAKE_DEPTH_METRES;
+    // Through the town part, 40 to 60 m out: dry land, not the lake bed.
+    for (const lateral of [40, 50, 60]) {
+      for (const along of [1_700, 1_900, 2_100]) {
+        expect(terrainHeightAt(LEVEL, origin, seed, along, lateral, mask)).toBeGreaterThan(bed + 1);
+      }
+    }
+    // And the water the map does have there is still drawn.
+    expect(terrainHeightAt(LEVEL, origin, seed, 1_900, 140, mask)).toBeCloseTo(bed, 1);
+  });
+});
+
 describe('every reader of the water sees the map’s lake — #2658', () => {
   const origin = corridorOrigin(LEVEL);
   const seed = scatterSeed(LEVEL);

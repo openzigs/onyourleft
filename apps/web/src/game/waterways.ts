@@ -309,6 +309,15 @@ export const MAPPED_LAKE_MIN_WIDTH_METRES = 20;
 export const MAPPED_LAKE_RISE_METRES = 6;
 
 /**
+ * #2658: how far a mapped lake's near or far shore may wander along its run,
+ * in metres: **20**. A lake's shores are its run's medians, so a shore that
+ * moves further (a cove, a harbour, a town between the road and the sea)
+ * would draw water over dry land or dry ground over water. Past this the run
+ * ends and the next begins with its own shores.
+ */
+export const MAPPED_LAKE_SHORE_DRIFT_METRES = 20;
+
+/**
  * #2658: how far above its water a mapped wetland's ground stands, in
  * metres: **0.25** — well inside `landform.ts` §`WET_MARGIN_METRES`, so the
  * whole of it wears the wet margin's tint: level, bare and dark, a marsh
@@ -546,6 +555,11 @@ interface MappedRun {
   readonly fars: number[];
 }
 
+/** Whether adding `value` to values spanning `low` to `high` would span more than the drift. */
+function drifts(low: number, high: number, value: number): boolean {
+  return Math.max(high, value) - Math.min(low, value) > MAPPED_LAKE_SHORE_DRIFT_METRES;
+}
+
 /**
  * The lakes the map puts beside the road — #2658. On each side, every run of
  * {@link mappedWaterAt} at least {@link LAKE_MIN_LENGTH_METRES} long, broken
@@ -603,6 +617,8 @@ function mappedLakes(
         run !== undefined &&
         (water === undefined ||
           water.wetland !== run.wetland ||
+          drifts(Math.min(...run.nears), Math.max(...run.nears), water.near) ||
+          drifts(Math.min(...run.fars), Math.max(...run.fars), water.far) ||
           Math.max(run.top, elevation) - Math.min(run.floor, elevation) > MAPPED_LAKE_RISE_METRES)
       ) {
         finish();
