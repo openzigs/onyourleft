@@ -229,3 +229,34 @@ export {
   spendableWatts,
   stepWbal,
 } from './wbal';
+
+// A lap race whose bots' moves a model picks (#2710, ADR 0071 D-3.6, D-4, D-7):
+// the decision log, the moves in force, the adapter and its one strategy seam.
+export type {
+  AppliedModelMoves,
+  ModelMoveAsk,
+  ModelMoveOutcome,
+  ModelMoveStrategy,
+  ModelMoveStrategyRefusal,
+  LapRaceModelRecord,
+  ModelRaceBot,
+  ModelTacticsLogEntry,
+  ModelTacticsLogOutcome,
+  ModelTacticsLogReason,
+} from './model-race';
+export {
+  ADR_0071_MOVE_STRATEGY,
+  applyModelMoves,
+  LAP_RACE_BOT_CODE_VERSION,
+  LAP_RACE_MODEL_MOST_TICKS,
+  MODEL_TACTICS_ASK_EVERY_MS,
+  MODEL_TACTICS_HOLD_MS,
+  MODEL_TACTICS_LATE_MS,
+  MODEL_TACTICS_LOG_OUTCOMES,
+  MODEL_TACTICS_LOG_REASONS,
+  modelMovesInForce,
+  modelTacticsAppliedAtMs,
+  modelTacticsNextAskAtMs,
+  readLapRaceModelRecord,
+  readModelTacticsLogEntry,
+} from './model-race';

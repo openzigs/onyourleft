@@ -2195,6 +2195,38 @@ cannot start a fresh ceiling. `tactics-jobs.test.ts` holds a write-up through a 
 back `succeeded`; `tactics.test.ts` reads every refusal back through the routes and asserts the
 model server was sent nothing.
 
+#### AI bots on the device — #2710
+
+ADR 0071 D-1, D-3.6, D-4 and D-7, the app's half. The lap race's setup offers *AI bots* only while
+the rider's instance says it offers its local model (`GET /v1/analysis/tactics`), and asks the
+consent there, naming the instance and the model's address (`StageChooser.tsx` §`AiBotsControl`).
+A race chosen with them and a consent recorded keeps a `LapRaceModel` (`game/lap-race/model-race.ts`):
+every 4 s of race time, between frames and one call at a time, the race state
+(`modelTacticsInputOf`, checked first by the instance's own reader) goes out through
+`game/lap-race/model-tactics-port.ts`, over the sealed session and the one instance module. The
+reply is logged at the race time it comes back and checked again on the device
+(`readModelTacticsAnswer`); a decision applies from the next tactics window and lapses after 5 s.
+Late (over 5 s of race time, or still out that long), invalid, refused, failed or unreachable, it
+applies nothing and the bots ride their seeded choice. A refused start means AI bots are not
+available for that race, which the standings say. The race never waits.
+
+The moves are ridden by `@onyourleft/domain` §`applyModelMoves` (`lap-race/model-race.ts`): before
+the tick that opens a window it hands a bot the tactics memory `decideTactic` would have written,
+and the tick rides it through the bot's own capacity. **The body's limits sit outside the strategy
+seam** (an exhausted bot keeps its seeded choice; `spendableWatts` caps every target), and **ADR
+0071 D-3.6's strategy rules sit behind one**, `ModelMoveStrategy`, so ADR 0073 (#2720) can hand in
+looser ones. The launch band reads the line as the bot misreads it, as seeded `decideTactic` does
+(#2705).
+
+The record (`LapRaceModelRecord`: seed, `LAP_RACE_BOT_CODE_VERSION`, the log, and the rider's
+effort distance, W/kg, lane and item use at every tick) is kept with the ride as
+`RideFacts.lapRaces`, at store schema version 22 (`migrations.ts` §`ACTIVITY_LAP_RACES`, whose
+`down` drops it); it is held by the recorder in memory, not in the checkpoint, so a ride recovered
+after a crash is saved without it. No sync rule sends it. `model-race-replay.test.ts` replays
+committed races from seed and log to the bit, and holds their outcomes in `model-race-golden.json`
+keyed by version, append-only. `lap-race-wiring.test.tsx` rides AI bots told to attack in every
+window and holds the trainer's writes to an ordinary ride's, draft off and on.
+
 ### A room, from the client: `apps/web/src/net/`
 
 [#782](https://github.com/openzigs/onyourleft/issues/782) and

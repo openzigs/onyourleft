@@ -9680,6 +9680,13 @@ select.oyl-input {
   color: var(--oyl-color-hud-ink-muted);
 }
 
+/* #2710: whether a solo race's AI bots are racing, under the summary, in its ink. */
+.oyl-hud__standings-note {
+  margin: 0 0 var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink-muted);
+}
+
 .oyl-hud__standings-list {
   list-style: none;
   margin: 0;

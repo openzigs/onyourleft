@@ -7,7 +7,7 @@
  * its W′ share, whether it is drafting, its move and how long it has held it,
  * its laps and metres to the line, the grade ahead, the rider's gap; and the
  * rider's rank and W/kg. (#2708 added the racer ahead, its move and the
- * seconds held, so a `follow` or `chase` can name the one racer it may.) **Every field is a number, a move or an archetype read off
+ * seconds held, so the model can see a move to go with; it names no target.) **Every field is a number, a move or an archetype read off
  * the race on effort distance: no coordinate, no place name, no route name
  * and no rider name is ever read**, so nothing in it can say where a rider
  * lives (CLAUDE.md §6, location data). `model-input.test.ts` rides a circuit
@@ -50,7 +50,8 @@ export interface ModelBotView {
   readonly rank: number;
   /**
    * Who is directly ahead (#2708): `"rider"`, another bot's seat, or `null`
-   * when it leads. The only racer a `follow` or `chase` may name.
+   * when it leads. Since #2708 the model is asked for no target: a `follow` or
+   * `chase` goes to whoever is on the wheel ahead when it is ridden (#2715).
    */
   readonly ahead: 'rider' | number | null;
   /** The move of the bot directly ahead, or `null` when that is the rider or nobody (#2708). */

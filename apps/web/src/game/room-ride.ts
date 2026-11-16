@@ -184,6 +184,8 @@ export interface RaceStandingsView {
   /** The rider's own place, and how many are in the race — "4th of 12". */
   readonly place: number | undefined;
   readonly of: number;
+  /** A line under the summary: whether a solo race's AI bots are racing (#2710). */
+  readonly note?: string | undefined;
 }
 
 /** What the list says, ⚠️ draft wording for the owner. */
