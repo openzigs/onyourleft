@@ -41,6 +41,7 @@ import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { ModelTacticsReply } from './lap-race/model-race';
 import type { ModelTacticsPort, TacticsStatus } from './lap-race/model-tactics-port';
 import { AI_BOTS_RACE_TEXT } from './lap-race/ride-race';
+import { RACE_NOTICE_LABEL } from './room-ride';
 import type { GameRenderer } from './port';
 import { circuitRoute } from './route-fixtures-testing';
 import { AI_BOTS_TEXT, LAP_RACE_CHOICE_TEXT } from './StageChooser';
@@ -224,6 +225,19 @@ function standingsNote(): string | undefined {
   return document.querySelector('.oyl-hud__standings-note')?.textContent ?? undefined;
 }
 
+/**
+ * The HUD notice that carries the same line where the standings are not drawn
+ * (#2710: 1024×600 and every phone, ADR 0051 D-7), in the race notice's word.
+ */
+function aiBotsNotice(): string | undefined {
+  return (
+    [...document.querySelectorAll('.oyl-hud__notices .oyl-status')]
+      // The words, without the tone's aria-hidden glyph before them.
+      .map((each) => each.lastElementChild?.textContent ?? '')
+      .find((text) => text.includes('AI bots'))
+  );
+}
+
 /** Ride past the countdown and some seconds of race, then *End ride* and discard. */
 async function rideAndEnd(): Promise<void> {
   await activateWithKeyboard(button('Ride ') as HTMLElement);
@@ -256,6 +270,7 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
     expect(switchNamed(AI_BOTS_TEXT.label)).toBeUndefined();
     await rideAndEnd();
     expect(standingsNote()).toBeUndefined();
+    expect(aiBotsNotice()).toBeUndefined();
     expect(none.calls).toEqual(['status']);
   });
 
@@ -297,6 +312,7 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
     await activateWithKeyboard(switchNamed(AI_BOTS_TEXT.label) as HTMLElement);
     await rideAndEnd();
     expect(standingsNote()).toBeUndefined();
+    expect(aiBotsNotice()).toBeUndefined();
     expect(home.calls.filter((call) => call !== 'status')).toEqual([]);
   });
 
@@ -306,6 +322,12 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
     await chooseAiBots();
     expect(document.body.textContent).toContain(AI_BOTS_TEXT.consented(INSTANCE, MODEL));
     await rideAndEnd();
+    expect(standingsNote()).toBe(AI_BOTS_RACE_TEXT.racing);
+    // Through the countdown and into the race, the notice says it too; past
+    // STANDING_NOTICE_SECONDS of ride it is gone, and the standings keep it.
+    expect(aiBotsNotice()).toBe(`${RACE_NOTICE_LABEL}: ${AI_BOTS_RACE_TEXT.racing}`);
+    await pump(10);
+    expect(aiBotsNotice()).toBeUndefined();
     expect(standingsNote()).toBe(AI_BOTS_RACE_TEXT.racing);
     expect(home.calls).toContain('start');
     expect(home.decided.length).toBeGreaterThan(2);
@@ -321,6 +343,7 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
     await chooseAiBots();
     await rideAndEnd();
     expect(standingsNote()).toBe(AI_BOTS_RACE_TEXT.unavailable);
+    expect(aiBotsNotice()).toBe(`${RACE_NOTICE_LABEL}: ${AI_BOTS_RACE_TEXT.unavailable}`);
     expect(home.decided).toEqual([]);
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });

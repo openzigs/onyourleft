@@ -1479,6 +1479,20 @@ function GameScreen({
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
   /**
+   * What the HUD's notice cell says of a solo race's AI bots, and the ride
+   * time it says it from — #2710, `lap-race/ride-race.ts`
+   * §`lapRaceModelNote`: that they race, or, once the instance refused the
+   * race's start, that they are not available (ADR 0071 D-6.3). On the world
+   * notice's rule, for STANDING_NOTICE_SECONDS of ride (a held countdown is
+   * not ride, so it stands through the countdown and that long after it),
+   * because the standings that carry the same line for the whole race are
+   * drawn on a tablet only (ADR 0051 D-7): at 1024×600, and on every phone,
+   * this is the line's one visible place. `undefined` on every other ride.
+   */
+  const [aiBotsNotice, setAiBotsNotice] = useState<
+    { readonly text: string; readonly from: number } | undefined
+  >(undefined);
+  /**
    * Whether the HUD says the round is waiting for the town — #2392, the
    * owner's ruling of 2026-11-09: from the press of a realistic Delivery ride
    * until its round begins (@see deliveryWaitingRef). `false` on every other ride.
@@ -2965,11 +2979,22 @@ function GameScreen({
       // it (D-6.5). Refused, AI bots are not available for this race, and it
       // rides seeded (D-6.3). The race does not wait for the answer.
       const modelRace = lapRaceRef.current?.model;
+      const aiBotsLine =
+        lapRaceRef.current === undefined ? undefined : lapRaceModelNote(lapRaceRef.current);
+      setAiBotsNotice(
+        aiBotsLine === undefined ? undefined : { text: aiBotsLine, from: simulation.state.elapsed },
+      );
       if (modelRace !== undefined) {
         void tacticsRef.current?.startTacticsRace().then((reply) => {
           const now = lapRaceRef.current;
-          if (now?.model?.rider === modelRace.rider)
-            lapRaceRef.current = startedLapRaceRide(now, reply);
+          if (now?.model?.rider !== modelRace.rider) return;
+          const started = startedLapRaceRide(now, reply);
+          lapRaceRef.current = started;
+          // #2710: refused, the notice says so from now, for its own span.
+          const line = lapRaceModelNote(started);
+          if (line !== undefined && line !== aiBotsLine) {
+            setAiBotsNotice({ text: line, from: simulationRef.current?.state.elapsed ?? 0 });
+          }
         });
       }
       setState(simulation.state);
@@ -5145,6 +5170,16 @@ function GameScreen({
           (state?.elapsed ?? 0) - worldNotice.from >= STANDING_NOTICE_SECONDS ? undefined : (
             <StatusMessage key="world" tone="info" label="Standard world">
               {worldNotice.text}
+            </StatusMessage>
+          ),
+          // #2710: a solo race's AI bots, in the race notice's word, for
+          // STANDING_NOTICE_SECONDS of ride: @see aiBotsNotice. Not `live`:
+          // the standings carry the same line for a screen reader on request,
+          // as ADR 0051 D-7 has them.
+          aiBotsNotice === undefined ||
+          (state?.elapsed ?? 0) - aiBotsNotice.from >= STANDING_NOTICE_SECONDS ? undefined : (
+            <StatusMessage key="ai-bots" tone="info" label={RACE_NOTICE_LABEL}>
+              {aiBotsNotice.text}
             </StatusMessage>
           ),
           // #1818: a Delivery round asked for, and none ridden. The world
