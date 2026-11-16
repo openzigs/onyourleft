@@ -245,6 +245,14 @@ export const APPROACH_STEP_METRES = 4;
 export const APPROACH_FADE_METRES = 40;
 
 /**
+ * How far from the route an approach may run, metres — the ground the reduced
+ * rungs draw ends at 90 m (`quality.ts` §`terrainBands`, the floor rung), so a
+ * road further out hangs over no ground. Its fade ends here: it is cut off
+ * rather than run on.
+ */
+export const APPROACH_REACH_METRES = 90;
+
+/**
  * How far above the ground an approach stands where it has come down to it,
  * in metres: **0.08**. More than a side road's 0.03, because its rows are 4 m
  * apart rather than 2 and the ground between two of them may rise a little
@@ -273,6 +281,13 @@ const APPROACH_JOIN_METRES = 1;
 
 /** The most ways one approach is followed through: **16**. */
 const APPROACH_MAX_WAYS = 16;
+
+/**
+ * The most ways listed for one metre of ground — a crafted tile can put a
+ * hundred thousand ends at one point, and every hop of every walk rescans the
+ * ways there.
+ */
+const APPROACH_MAX_ENDS_PER_JOIN = 8;
 
 /** The most an approach turns where one way meets the next and is still followed: **60°**. */
 const APPROACH_TURN_COSINE = Math.cos(Math.PI / 3);
@@ -398,7 +413,7 @@ function joinsOf(streets: readonly StreetFeature[]): Joins {
       const known = joins.get(key);
       // A way with both ends in one cell is listed twice there, which costs a second look and no more.
       if (known === undefined) joins.set(key, [street]);
-      else known.push(street);
+      else if (known.length < APPROACH_MAX_ENDS_PER_JOIN) known.push(street);
     }
   }
   return joins;
@@ -776,7 +791,7 @@ function approachStations(
     }
     if (past > 0) {
       const near = nearestOnDrawnRoad(profile, origin, x, z, APPROACH_GROUND_REACH_METRES);
-      if (near === undefined) break;
+      if (near === undefined || near.distance > APPROACH_REACH_METRES) break;
       if (near.distance < ROAD_HALF_WIDTH_METRES + VERGE_METRES + half) break;
       if (inWater(ways, profile, near.along, near.lateral)) break;
     }
@@ -1113,12 +1128,12 @@ export function gradeCrossingsAt(
   const total: number = profile.totalDistance;
   const firstLap = profile.loop && total > 0 ? Math.floor(from / total) : 0;
   const lastLap = profile.loop && total > 0 ? Math.floor(to / total) : 0;
-  const found: { crossing: GradeCrossing; gap: number }[] = [];
+  const found: { crossing: GradeCrossing; at: number; gap: number }[] = [];
   for (const crossing of crossings) {
     for (let lap = firstLap; lap <= lastLap; lap += 1) {
       const at = crossing.along + lap * total;
       if (at >= from && at < to) {
-        found.push({ crossing, gap: Math.abs(at - riderMetres) });
+        found.push({ crossing, at, gap: Math.abs(at - riderMetres) });
         break;
       }
     }
@@ -1126,12 +1141,17 @@ export function gradeCrossingsAt(
   found.sort((a, b) => a.gap - b.gap);
   const most = Math.min(room, OVERPASS_FRAME_PARTS);
   const parts: BridgePart[] = [];
-  const roads: SideRoad[] = [];
-  for (const { crossing } of found) {
+  const roads: { road: SideRoad; at: number }[] = [];
+  for (const { crossing, at } of found) {
     const drawn = crossingBuilt(crossing, profile, origin, seed, land);
     if (parts.length + drawn.parts.length > most) break;
     parts.push(...drawn.parts);
-    if (drawn.road !== undefined) roads.push(drawn.road);
+    if (drawn.road !== undefined) roads.push({ road: drawn.road, at });
   }
-  return parts.length === 0 ? NO_CROSSINGS_IN_VIEW : { parts, roads };
+  // Along the odometer, not nearest first: the belt rebuilds when the order of
+  // its roads changes, and nearest-first flips as the rider passes a midpoint.
+  roads.sort((a, b) => a.at - b.at);
+  return parts.length === 0
+    ? NO_CROSSINGS_IN_VIEW
+    : { parts, roads: roads.map((entry) => entry.road) };
 }

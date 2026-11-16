@@ -23,6 +23,7 @@ import {
   ABUTMENT_THICKNESS_METRES,
   APPROACH_FADE_METRES,
   APPROACH_METRES,
+  APPROACH_REACH_METRES,
   APPROACH_TRIANGLES_PER_OVERPASS,
   APPROACH_WALL_COLOUR,
   gradeCrossingsAt,
@@ -36,13 +37,13 @@ import {
   type GradeCrossing,
 } from './overpasses';
 import { nearestOnDrawnRoad } from './road-grid';
-import { circuitRoute, northRoute } from './route-fixtures-testing';
+import { circuitRoute, northRoute, valleyRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { BridgeBelt, OVERPASS_COLOURS, PavementBelt, SideRoadBelt } from './three-renderer';
 import { corridorOrigin, drawnRoadFrame, ROAD_COLOUR, ROAD_WIDTH_METRES } from './terrain';
-import { MAXIMUM_BRIDGE_PARTS, type BridgePart } from './waterways';
+import { MAXIMUM_BRIDGE_PARTS, waterways, type BridgePart } from './waterways';
 import type { WorldCorridor } from './world-data/corridor';
 
 /** Four kilometres of road due north, climbing 8 % — so a skew deck spans road of different heights. */
@@ -675,13 +676,13 @@ function aMaterial(): ConstructorParameters<typeof SideRoadBelt>[0] {
   >[0];
 }
 
-/** The bend in {@link carriedStreet}'s mapped street, 80 m out on each side. */
+/** The bend in {@link carriedStreet}'s mapped street, 40 m out on each side. */
 const BEND_RADIANS = (25 * Math.PI) / 180;
 
 /**
  * A street carried over the road at `along`, `angle` degrees from its
  * heading, as a map has it: a bridge way 25 m each side of the road, and a
- * ground way on from each end of it, bending 25° 80 m out — the one on the
+ * ground way on from each end of it, bending 25° 40 m out — the one on the
  * road's right drawn outwards, the one on its left drawn inwards.
  */
 function carriedStreet(along: number, angle: number) {
@@ -698,15 +699,15 @@ function carriedStreet(along: number, angle: number) {
   const straight = (u: number): [number, number] => [here.x + dx * u, here.z + dz * u];
   /** Along the mapped street, `u` metres from the crossing on `side`. */
   const mapped = (side: -1 | 1, u: number): [number, number] => {
-    if (u <= 80) return straight(side * u);
-    const [bx, bz] = straight(side * 80);
+    if (u <= 40) return straight(side * u);
+    const [bx, bz] = straight(side * 40);
     return side > 0
-      ? [bx + rx * (u - 80), bz + rz * (u - 80)]
-      : [bx + lx * (u - 80), bz + lz * (u - 80)];
+      ? [bx + rx * (u - 40), bz + rz * (u - 40)]
+      : [bx + lx * (u - 40), bz + lz * (u - 40)];
   };
   /** The mapped street's heading there, outwards. */
   const heading = (side: -1 | 1, u: number): [number, number] =>
-    u <= 80 ? [dx * side, dz * side] : side > 0 ? [rx, rz] : [lx, lz];
+    u <= 40 ? [dx * side, dz * side] : side > 0 ? [rx, rz] : [lx, lz];
   const street = (grade: StreetGrade, points: [number, number][]): StreetFeature => ({
     kind: 'major_road',
     kindDetail: '',
@@ -720,8 +721,8 @@ function carriedStreet(along: number, angle: number) {
     heading,
     streets: [
       street('bridge', [straight(-25), straight(25)]),
-      street('ground', [straight(25), straight(80), mapped(1, 230)]),
-      street('ground', [mapped(-1, 230), straight(-80), straight(-25)]),
+      street('ground', [straight(25), straight(40), mapped(1, 230)]),
+      street('ground', [mapped(-1, 230), straight(-40), straight(-25)]),
     ],
   };
 }
@@ -860,6 +861,31 @@ function carriedRoad(
   };
 }
 
+/**
+ * How far past the deck's end an approach along `street` on `side` runs, as
+ * its stations step: to {@link APPROACH_METRES}, or to where the street leaves
+ * {@link APPROACH_REACH_METRES} of the route.
+ */
+function approachLengthOf(
+  street: ReturnType<typeof carriedStreet>,
+  side: -1 | 1,
+  halfSpan: number,
+  line: 'mapped' | 'straight' = 'mapped',
+): number {
+  const origin = corridorOrigin(CLIMB);
+  let past = 0;
+  while (past + 4 <= APPROACH_METRES) {
+    const [x, z] =
+      line === 'mapped'
+        ? street.mapped(side, halfSpan + past + 4)
+        : street.straight(side * (halfSpan + past + 4));
+    const near = nearestOnDrawnRoad(CLIMB, origin, x, z, 1_000);
+    if (near === undefined || near.distance > APPROACH_REACH_METRES) break;
+    past += 4;
+  }
+  return past;
+}
+
 describe('an overpass carries its road off both ends of the deck — #2699', () => {
   for (const angle of [90, 35]) {
     it(`draws the road over the deck and down to the ground along the mapped street, crossing at ${String(angle)}°`, () => {
@@ -895,7 +921,9 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
         // Along the mapped street, never under the ground before its fade and
         // never above the deck, and down to the ground somewhere on the way.
         let reached = false;
-        for (let past = 4; past <= APPROACH_METRES - APPROACH_FADE_METRES; past += 4) {
+        const length = approachLengthOf(street, side, halfSpan);
+        expect(length, label).toBeGreaterThan(APPROACH_FADE_METRES);
+        for (let past = 4; past <= length - APPROACH_FADE_METRES; past += 4) {
           const [x, z] = street.mapped(side, halfSpan + past);
           const surface = surfaceAt(triangles, x, z);
           const where = `${label} at ${String(past)} m`;
@@ -924,7 +952,7 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
           if ((surface ?? 0) - highest < 0.15) reached = true;
         }
         const debug: string[] = [];
-        for (let past = 0; past <= APPROACH_METRES; past += 10) {
+        for (let past = 0; past <= length; past += 10) {
           const [x, z] = street.mapped(side, halfSpan + past);
           debug.push(
             `${String(past)}:${(surfaceAt(triangles, x, z) ?? NaN).toFixed(2)}/${groundAt(x, z).toFixed(2)}`,
@@ -951,8 +979,9 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
       }
 
       // The mapped street's bend is followed each side, not the deck's line past it.
-      const bent = halfSpan + APPROACH_METRES - APPROACH_FADE_METRES + 10;
       for (const side of [-1, 1] as const) {
+        const bent =
+          halfSpan + approachLengthOf(street, side, halfSpan) - APPROACH_FADE_METRES + 10;
         const [bx, bz] = street.mapped(side, bent);
         expect(surfaceAt(triangles, bx, bz), `side ${String(side)}`).toBeDefined();
         const [sx, sz] = street.straight(side * bent);
@@ -973,14 +1002,20 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
     const full = SIDE_ROAD_WIDTHS.major / 2;
     for (const side of [-1, 1] as const) {
       const label = `side ${String(side)}`;
-      const far = halfSpan + APPROACH_METRES - APPROACH_FADE_METRES;
+      const length = approachLengthOf(street, side, halfSpan, 'straight');
+      const far = halfSpan + length - APPROACH_FADE_METRES;
       // Along the deck's line, not the unread way's bend.
       const [x, z] = street.straight(side * far);
       expect(surfaceAt(triangles, x, z), label).toBeDefined();
-      const [bx, bz] = street.mapped(side, far);
-      expect(surfaceAt(triangles, bx, bz), label).toBeUndefined();
+      // The unread way's bend is out past the road's edge by then: push the
+      // mapped street's point out along its offset from the deck's line, past it.
+      const [mx, mz] = street.mapped(side, far);
+      const offset = Math.hypot(mx - x, mz - z);
+      expect(offset, label).toBeGreaterThan(1);
+      const push = (full + 1.5) / offset;
+      expect(surfaceAt(triangles, x + (mx - x) * push, z + (mz - z) * push), label).toBeUndefined();
       // Into the ground at its far end, not stopping square.
-      const [ex, ez] = street.straight(side * (halfSpan + APPROACH_METRES - 1));
+      const [ex, ez] = street.straight(side * (halfSpan + length - 1));
       const end = surfaceAt(triangles, ex, ez);
       expect(end, label).toBeDefined();
       expect(end ?? 0, label).toBeLessThan(groundAt(ex, ez));
@@ -991,7 +1026,7 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
         return surfaceAt(triangles, cx + hz * full * 0.6, cz - hx * full * 0.6);
       };
       expect(offEdge(far - 20), label).toBeDefined();
-      expect(offEdge(halfSpan + APPROACH_METRES - 1), label).toBeUndefined();
+      expect(offEdge(halfSpan + length - 1), label).toBeUndefined();
     }
   });
 
@@ -1038,7 +1073,7 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
     }
     expect(checked).toBeGreaterThan(0);
     // And it did follow the street out before it turned.
-    const [ox, oz] = street.mapped(1, 50);
+    const [ox, oz] = street.straight(50);
     expect(surfaceAt(triangles, ox, oz)).toBeDefined();
   });
 
@@ -1111,5 +1146,117 @@ describe('an overpass carries its road off both ends of the deck — #2699', () 
     );
     expect(under.parts.length).toBeGreaterThan(0);
     expect(under.roads).toEqual([]);
+  });
+});
+
+describe('an overpass approach stops where it must — #2699', () => {
+  it('ends within the ground the reduced rungs draw, not out over nothing', () => {
+    const street = carriedStreet(1_000, 90);
+    const { triangles } = carriedRoad(street.streets, 1_000);
+    const origin = corridorOrigin(CLIMB);
+    let furthest = 0;
+    for (const triangle of triangles) {
+      for (const [x, , z] of pointsOnTriangle(triangle)) {
+        const near = nearestOnDrawnRoad(CLIMB, origin, x, z, 1_000);
+        if (near !== undefined) furthest = Math.max(furthest, near.distance);
+      }
+    }
+    expect(furthest).toBeGreaterThan(APPROACH_REACH_METRES / 2);
+    // A road's own width past the last station's centre.
+    expect(furthest).toBeLessThanOrEqual(APPROACH_REACH_METRES + SIDE_ROAD_WIDTHS.major);
+  });
+
+  it('stops short of water, as a side road does', () => {
+    const valley = valleyRoute();
+    expect(waterways(valley, scatterSeed(valley)).crossings.length).toBeGreaterThan(0);
+    const roadsAt = (along: number) => {
+      const found = crossingsOf([crossing(along, 'bridge', { profile: valley })], valley);
+      return gradeCrossingsAt(
+        valley,
+        corridorOrigin(valley),
+        scatterSeed(valley),
+        along - 100,
+        along + 100,
+        along,
+        found,
+        NO_LAND_CLASS,
+      ).roads;
+    };
+    const trianglesOf = (roads: readonly SideRoad[]): number =>
+      roads.reduce((sum, road) => sum + road.mesh.indices.length / 3, 0);
+    // The stream crosses at the valley's floor, 1 000 m: an overpass over its channel
+    // has water at once beside it; one well clear of it has a whole approach.
+    const clear = trianglesOf(roadsAt(1_500));
+    expect(clear).toBeGreaterThan(100);
+    expect(trianglesOf(roadsAt(1_005))).toBeLessThan(clear / 4);
+  });
+
+  it('follows the ends the map joins, to a bounded number of ways at one point', () => {
+    const street = carriedStreet(1_000, 90);
+    const [bx, bz] = street.straight(25);
+    const [cx, cz] = street.straight(-25);
+    const decoy = (x: number, z: number): StreetFeature => ({
+      kind: 'major_road',
+      kindDetail: '',
+      grade: 'ground',
+      // Short, and at right angles to the street: never the way on.
+      line: Float32Array.from([x, z, x + street.here.normalX * 5, z + street.here.normalZ * 5]),
+    });
+    const crowd: StreetFeature[] = [];
+    for (let i = 0; i < 12; i += 1) crowd.push(decoy(bx, bz), decoy(cx, cz));
+    const bent = (streets: readonly StreetFeature[]): boolean[] => {
+      const { triangles, halfSpan } = carriedRoad(streets, 1_000);
+      return ([-1, 1] as const).map((side) => {
+        const u = halfSpan + approachLengthOf(street, side, halfSpan) - APPROACH_FADE_METRES + 10;
+        const [x, z] = street.mapped(side, u);
+        return surfaceAt(triangles, x, z) !== undefined;
+      });
+    };
+    expect(bent(street.streets)).toEqual([true, true]);
+    // Twelve ways at the join push the way on past the cap: the approach runs straight on instead.
+    expect(bent([...crowd, ...street.streets])).toEqual([false, false]);
+  });
+});
+
+describe('what a frame holds of overpass roads and boxes — #2699', () => {
+  it('keeps a frame’s roads in the order of the road, not of the rider’s distance', () => {
+    const streets = [crossing(800, 'bridge'), crossing(1_200, 'bridge')];
+    const found = crossingsOf(streets);
+    const roadsFor = (rider: number) =>
+      gradeCrossingsAt(
+        CLIMB,
+        corridorOrigin(CLIMB),
+        scatterSeed(CLIMB),
+        600,
+        1_400,
+        rider,
+        found,
+        NO_LAND_CLASS,
+      );
+    const before = roadsFor(990);
+    const after = roadsFor(1_010);
+    expect(before.roads).toHaveLength(2);
+    // The boxes stay nearest first: 800 m's before, 1 200 m's after.
+    expect(before.parts[0]?.z).not.toBe(after.parts[0]?.z);
+    expect(after.roads[0]).toBe(before.roads[0]);
+    expect(after.roads[1]).toBe(before.roads[1]);
+  });
+
+  it('draws whole crossings only, in the room it is given', () => {
+    const streets: StreetFeature[] = [];
+    for (let along = 600; along < 1_400; along += 20) streets.push(crossing(along, 'bridge'));
+    const inView = gradeCrossingsAt(
+      CLIMB,
+      corridorOrigin(CLIMB),
+      scatterSeed(CLIMB),
+      600,
+      1_400,
+      1_000,
+      crossingsOf(streets),
+      NO_LAND_CLASS,
+      12,
+    );
+    expect(inView.parts).toHaveLength(10);
+    expect(inView.roads).toHaveLength(2);
   });
 });
