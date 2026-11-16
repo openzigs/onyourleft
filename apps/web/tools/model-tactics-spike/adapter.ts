@@ -150,8 +150,9 @@ function legality(
  * - **further up the road**: a `chase`, which rides past the racers between
  *   until the target is the one directly ahead, and the next window's move
  *   is ridden on its wheel;
- * - **behind**: `sit-in`, which waits in place for the marked racer to come
- *   by, when a `follow` takes its wheel.
+ * - **behind**: `sit-in`, which rides the wheel ahead at that wheel's pace
+ *   and never waits, so the marked racer comes by as the bunch rides, when a
+ *   `follow` takes its wheel.
  */
 function aimedAt(
   race: ItemRaceState,

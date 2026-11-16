@@ -48,6 +48,18 @@ it means: the limits of the body stay, the rules of strategy go. It names both l
 D-3 take word for word, and asks for this ADR, Proposed, with the owner's approval before the build
 merges.
 
+The owner's **second ruling on #2720, 2026-11-16** (later the same day), which widens the issue's
+body and says to read it before writing this ADR: *"And not be [con]strained by the game rules."*
+It sets **the only fixed limits** as the body (the bot's CP, W′, peak and exhaustion, that is
+`spendableWatts`), the bike physics, no model output reaching the trainer and no tools for the
+model; **every other seeded tactics rule is the model's choice in a model race**: every refusal in
+ADR 0071 D-3.6 except exhaustion, move durations and hold limits, which moves are open when, the
+sprint launch distance and the `attackOpen` gate. D-2 and D-3 are that list. It asks two more
+things: that **the seeded skill stays** (a naive bot still misjudges the distance, and what it does
+with that reading is the model's choice: D-3.5), and that **an effort level be considered**: the
+model picking a share of what `spendableWatts` allows (tempo, threshold, all-out) instead of only a
+named move. That last one is **decided in D-2.5** and put to the owner as R-6.
+
 ### What ADR 0071 D-3.6 says, and why it is now too tight
 
 ADR 0071 D-3.6 rides every model move **through the seeded race's own rules**: a bot keeps its
@@ -59,8 +71,8 @@ copied so that a model could ask for nothing a seeded bot could not do.
 
 Under them, and under #2708's prompt, which added a code-computed `attackOpen` gate and one bot at
 a time, the tuned model race was **quiet** (spike 0039 §10.6): on the flat the lead changed hands 0
-or 1 times in 150 s against 21 or 22 seeded, no flyer was ridden, one bot made every attack, and a
-bot never sat on the rider's wheel, because nothing in the input said what the rider was doing.
+or 1 times in 150 s against 21 or 22 seeded, no flyer was ridden, one bot made every attack, and on the flat a
+bot never sat on the rider's wheel (on the hills, once, for 24 bot-ticks: spike 0039 §11.2), because nothing in the input said what the rider was doing.
 Half of those limits are not the body's. The W′ floor, the flyer's laps, the attack's longest hold,
 the wheel directly ahead and the fixed launch are how the *seeded* bots were taught to race; a
 model choosing strategy does not need them taught, and the owner has said it should not be held to
@@ -96,6 +108,25 @@ unchanged. A rider with no instance or no consent loses nothing (ADR 0036 D-3(a)
    D-3.6). `lap-race-cannot-reach-trainer.test.ts` stays unmodified, and `lap-race-wiring.test.tsx`'s
    model-mode cases now ride under these rules (D-6).
 
+5. **No effort level, in this ADR: the schema's moves stay the whole of what the model chooses.**
+   *The author's choice*, on the owner's ask to consider one (Context). A share of
+   `spendableWatts` as a field would be a second power path beside the move's own target, and ADR
+   0071 D-3.1 forbids a power field; adding one means superseding D-3.1 in part. **This ADR does
+   not, and D-3.1 stands unchanged.** The reasons:
+   - **The freedom the owner asked for is already there without it.** The moves already span the
+     effort range, from `sit-in` and `recover` at the wheel's pace to `attack`, `flyer` and `kick`
+     at the bot's cap, and D-3 lifts every rule that kept the model from naming them when it
+     likes, for as long as W′ allows.
+   - **It is unmeasured.** Spike 0039 §11 measured the lifted rules and not a share, and a share
+     is a second number for a 12-billion-parameter model to get right in each window, in a call
+     that already runs slow (D-7).
+   - **It would stay safe, and that is why it can wait.** Were it added, the cap would be the
+     body's (`spendableWatts` at the bot's peak, or at CP once exhausted, D-2.1 and D-2.2) and the
+     trainer unreachable (D-2.4), so it would be a pacing choice and not a power override. It
+     needs its own measurement and its own superseding ADR of D-3.1, not a rider on this one.
+
+   The owner may overrule this at R-6.
+
 ### D-3 — Lifted, because they are strategy rules
 
 1. **The W′-floor refusal of `attack` and `chase`**: a bot may gamble and blow up. D-2.2 is what
@@ -112,8 +143,9 @@ unchanged. A rider with no instance or no consent loses nothing (ADR 0036 D-3(a)
      as named, on the wheel ahead;
    - **further up the road**: ridden as a **`chase`**, which rides past the racers between until the
      target is the one directly ahead, when the next window's `follow` takes its wheel (*bridging*);
-   - **behind**: ridden as **`sit-in`**, which waits in place for the marked racer to come by, when
-     a `follow` takes its wheel (*marking*).
+   - **behind**: ridden as **`sit-in`**, which rides the wheel ahead at that wheel's pace and
+     never waits, so the marked racer comes by as the bunch rides, when a `follow` takes its wheel
+     (*marking*).
 5. **The fixed sprint launch distance**: the model may launch long or late. A `kick` is ridden
    wherever the model names it, and inside the launch distance a move other than the kick is ridden
    too. **The misread distance still governs what a bot thinks is left**: the input's `toLineM` is
@@ -202,7 +234,8 @@ D-8.7).
 | **R-2** | An exhausted bot keeps its seeded choice (it recovers) whatever the model names, rather than ride the model's move held to CP | **Yes**: a blown rider does not choose to keep going | D-2.2 |
 | **R-3** | A `follow` or `chase` of a racer up the road is ridden as a chase until they are the wheel ahead; of a racer behind, as sitting in until they come by | **Yes**: it needs no new power path | D-3.4 |
 | **R-4** | Racing styles dealt every-style-once from the seed, apart from the bot's archetype | **Yes**: it guarantees five kinds of racer in a field of seven | D-5.1 |
-| **R-5** | A `kick` is open anywhere, with no gate; the model reads the line as the bot misreads it | **Yes**: a launch a lap out is a gamble the body punishes | D-3.5 |
+| **R-5** | A `kick` is open anywhere, with no gate; the model reads the line as the bot misreads it. Inside the launch distance the model's move is ridden, so a race may end with no sprint if the model never names a `kick` (it named none in 1 296 moves): a seeded kick takes over only when a decision lapses | **Yes**, with #2710 measuring a full-distance race for a sprint (What would make this ADR wrong); the alternative is a seeded kick inside the launch whenever the model names no `kick` there, which puts a rule back | D-3.5 |
+| **R-6** | No effort level: the model chooses moves only, and ADR 0071 D-3.1 (no power field) stands untouched. Or, if the owner wants a share of `spendableWatts` as a field, a superseding ADR of D-3.1 in part, measured first | **Decline for now**: the moves already span the range, a share is unmeasured, and it stays safe whenever it is added | D-2.5 |
 
 ## Consequences
 
@@ -233,7 +266,7 @@ D-8.7).
 
 | Issue | Constraint |
 |---|---|
-| #2710 | Once this is Accepted: the adapter's D-2 and D-3 rules, D-4's seeded fallbacks, D-5's input and the prompt, and a bot-code version raised for them (D-6); the model-mode trainer cases under these rules; `lap-race-cannot-reach-trainer.test.ts` unmodified |
+| #2710 | Once this is Accepted: the adapter's D-2 and D-3 rules, D-4's seeded fallbacks, D-5's input and the prompt, and a bot-code version raised for them (D-6); the model-mode trainer cases under these rules; `lap-race-cannot-reach-trainer.test.ts` unmodified; a full-distance measurement that a model race reaches a sprint (What would make this ADR wrong) |
 | #2715 | Its race-feel items are folded in here and measured in spike 0039 §11; its tool items stay its own |
 
 ### Reversing any of these
@@ -252,6 +285,12 @@ model race, or taking away a body's limit (D-2), needs one.
 - **A blown bot rides over CP** under a model's move: then D-2.2 has failed, and the adapter is
   wrong, not the rule.
 - **A model answer reaches a trainer write**: ADR 0071 D-8.1 has failed.
+- **A full-distance model race ends with no sprint.** The model asked for `kick` 0 times in 1 296
+  named moves (spike 0039 §11.2), and inside the launch distance its move is ridden, so the seeded
+  kick takes over only where a decision lapses. Spike 0039's harness ends before the last 300 m, so
+  it never saw a kick. If #2710's full-distance measurement shows a field reaching the line with no
+  kick, D-3.5 has failed in effect, and the fix is the prompt, or the seeded kick put back inside
+  the launch by a superseding ADR (R-5).
 - **The freedom makes the race worse on the tablet**: if the owner finds the model races less like a
   race than ADR 0071's, the rule to restore is the one that would have prevented it, by a
   superseding ADR.

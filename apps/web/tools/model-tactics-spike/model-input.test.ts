@@ -10,7 +10,11 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { BOT_TACTICS_MISJUDGE_LINE_METRES, type BotTactic } from '@onyourleft/domain';
+import {
+  BOT_TACTICS_MISJUDGE_LINE_METRES,
+  botTacticsMisjudgement,
+  type BotTactic,
+} from '@onyourleft/domain';
 
 import type { LapRaceRide } from '../../src/game/lap-race/ride-race';
 
@@ -105,6 +109,16 @@ describe('what the model reads of the race (#2616)', () => {
         true,
       );
     }
+    // Pinned, so a change to the salt (a deal that no longer draws apart) is seen.
+    expect(modelRacingStyles(1, 7)).toEqual([
+      'opportunist',
+      'breakaway',
+      'climber',
+      'breakaway',
+      'sprinter',
+      'rouleur',
+      'sprinter',
+    ]);
     // The seed shuffles it: not every seed deals the same field.
     const deals = new Set([1, 2, 3, 4, 5, 6].map((seed) => modelRacingStyles(seed, 7).join()));
     expect(deals.size).toBeGreaterThan(3);
@@ -117,6 +131,14 @@ describe('what the model reads of the race (#2616)', () => {
         ?.racer.effortDistance as number;
       const off = bot.toLineM - (laps * lapLengthMetres - effort);
       expect(Math.abs(off)).toBeLessThanOrEqual(BOT_TACTICS_MISJUDGE_LINE_METRES + 0.5);
+      // The very read `decideTactic` launches on, with its sign (D-3.5).
+      const read = botTacticsMisjudgement(
+        ride.seed,
+        bot.bot,
+        (ride.bots[bot.bot] as (typeof ride.bots)[number]).strategy.skill,
+        ride.race.atMs,
+      ).lineMetres;
+      expect(Math.abs(off - read)).toBeLessThanOrEqual(1);
       const energy = ride.bots[bot.bot]?.energy;
       expect(bot.blown).toBe(energy?.exhausted);
       return off;
@@ -137,6 +159,20 @@ describe('what the model reads of the race (#2616)', () => {
       0,
     );
     expect(blown.bots.every((bot) => bot.blown && bot.wbal === 0)).toBe(true);
+    // Blown is the body's `exhausted` flag, not an empty W′: a bot refilling is still blown,
+    // and one that has just touched zero but is not flagged is not.
+    const as = (energy: { wbalJoules: number; exhausted: boolean }): ModelInput =>
+      modelInput(
+        ride.race,
+        ride.bots.map((bot) => ({ ...bot, energy })),
+        SPIKE_CIRCUITS.hilly,
+        ride.seed,
+        ride.draft,
+        200 / 75,
+        0,
+      );
+    expect(as({ wbalJoules: 1_000, exhausted: true }).bots.every((bot) => bot.blown)).toBe(true);
+    expect(as({ wbalJoules: 0, exhausted: false }).bots.some((bot) => bot.blown)).toBe(false);
   });
 
   it('reads the rider’s state: rank, who is ahead of them, their gaps and whether they draft (#2720)', () => {
