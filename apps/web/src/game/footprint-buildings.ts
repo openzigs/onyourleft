@@ -1298,7 +1298,7 @@ const RESIDENTIAL_KINDS = new Set(['residential']);
  * land industrial, and every other built-up kind (commercial, a school, a
  * hospital) commercial. #1946: the archive emits no `neighbourhood` or `retail`
  * (#1630, spike 0031), so neither is named. ⚠️ A footprint on land the map classes as
- * neither — `other`, or `unknown` where no tile was read — is residential:
+ * neither — `other`, `bare` (an aerodrome, say), or `unknown` where no tile was read — is residential:
  * most buildings are houses, and a mapped house on unmapped land is still one.
  */
 export function footprintUse(landClass: LandClass, kind: string | undefined): FootprintUse {
