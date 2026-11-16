@@ -1,6 +1,6 @@
 # ADR 0071: Model-chosen lap-race bot tactics during a ride — superseding in part ADR 0067 D-6.2 and ADR 0046 D-7 and D-9
 
-- **Status**: **Proposed, 2026-11-16.** It becomes **Accepted** only when the owner approves it, in
+- **Status**: **Accepted**, 2026-11-16, by the owner on #2711, with the D-11 answers recorded there. Proposed the same day. It becomes **Accepted** only when the owner approves it, in
   words, on its pull request; that approval is recorded in D-11 as **Owner ruling, YYYY-MM-DD:**
   with the owner's words. Until then every other sub-issue of the epic
   [#2706](https://github.com/openzigs/onyourleft/issues/2706) that builds on it (#2709, #2710) stays
@@ -337,8 +337,22 @@ The owner approves this ADR as a whole (R-1), and confirms or overrules each cho
 
 ### D-11 — The owner's answers
 
-None yet. The owner's approval, and an answer to each of R-1 to R-8, is recorded here as
-**Owner ruling, YYYY-MM-DD:** with the owner's words, before this pull request merges.
+**Owner ruling, 2026-11-16:** asked *"Do you approve ADR 0071 with all eight as recommended?"*,
+with each of R-1 to R-8 put in plain words, the owner answered *"Yes"*. So:
+
+- **R-1:** ADR 0071 is approved.
+- **R-2:** write-ups wait while a model race runs. The wait is not counted against their budget, and
+  a write-up already running is not cancelled.
+- **R-3:** the consent names the rider's instance and its local model address. A change of address
+  withdraws it, and a withdrawal takes effect at the next request.
+- **R-4:** the operator's switch for other riders gates model races.
+- **R-5:** one model race at a time per instance. A second race gets seeded bots and a sentence
+  saying why.
+- **R-6:** a re-plan is not held by a model race.
+- **R-7:** the stored log keeps the answers and their arrival times, with the rider's per-tick
+  input, and not the model input sent.
+- **R-8:** ADR 0067 D-0's setting aside of the patent check reaches strategy a model chooses, as a
+  risk decision.
 
 ## Consequences
 
