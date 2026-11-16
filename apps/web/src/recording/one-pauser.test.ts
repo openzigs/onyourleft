@@ -141,8 +141,11 @@ const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: n
   // The controller's own pause() delegating to the recorder, and `tick`
   // pausing the WORKOUT when the phase already says paused.
   [join('ride', 'controller.ts')]: { pause: 2, resume: 2 },
-  // The workout session delegating to its player.
-  [join('workout', 'session.ts')]: { pause: 1, resume: 1 },
+  // The workout session delegating to its player — and since #2669 its
+  // `carryOn` resuming the player too, after a trainer reconnected. That is
+  // the WORKOUT, not the ride, called only from `ride/controller.ts`
+  // §`carryOnWorkout` on a cadence reading; nothing presence reaches it.
+  [join('workout', 'session.ts')]: { pause: 1, resume: 2 },
   // The rider's Pause and Resume buttons — the ONLY callers of the ride's.
   [join('views', 'RideView.tsx')]: { pause: 1, resume: 1 },
 };

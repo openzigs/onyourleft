@@ -43,7 +43,8 @@ import { athleteId, recordingSessionId, workoutId } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
 import type { RideController } from './controller';
-import { RECONNECT_BACKOFF_SECONDS } from './controller';
+import { CARRY_ON_NOTICE_SECONDS, RECONNECT_BACKOFF_SECONDS } from './controller';
+import { CARRY_ON_RAMP_SECONDS } from '../workout/session';
 import {
   createRememberedSensors,
   transportSeed,
@@ -62,6 +63,14 @@ const FEATURES = new DataView(Uint8Array.from([0x82, 0, 0, 0, 0x08, 0x20, 0, 0])
 const TWO_HUNDRED_WATTS = new DataView(
   Uint8Array.from([0x40, 0x00, 0xe8, 0x03, 0xc8, 0x00]).buffer,
 );
+/** Indoor Bike Data: speed 10.00 km/h, cadence 90 rpm and 150 W (flags bits 2 and 6). */
+const PEDALLING = new DataView(
+  Uint8Array.from([0x44, 0x00, 0xe8, 0x03, 0xb4, 0x00, 0x96, 0x00]).buffer,
+);
+/** Indoor Bike Data: the same fields with the cranks still — 0 rpm, 0 W. */
+const CRANKS_STILL = new DataView(
+  Uint8Array.from([0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).buffer,
+);
 
 /** The device's own storage, shared by every "session" of one test. */
 function deviceStorage(): RememberedSensorStorage {
@@ -78,7 +87,12 @@ function deviceStorage(): RememberedSensorStorage {
  * Success, as a trainer that grants control does — so a test can take control
  * and set a target before the link drops, and read what comes after.
  */
-function answeringTrainer(stack: ScriptedStack): ScriptedPort {
+function answeringTrainer(
+  stack: ScriptedStack,
+  /** Answer the Nth Request Control (`0x00`), and only that one, with Control Not Permitted. */
+  refuseControlAt?: number,
+): ScriptedPort {
+  let controlRequests = 0;
   const port = scriptedPort({
     reads: {
       [`${FITNESS_MACHINE_SERVICE}|${SUPPORTED_POWER_RANGE}`]: POWER_RANGE,
@@ -97,11 +111,15 @@ function answeringTrainer(stack: ScriptedStack): ScriptedPort {
       await recorded(id, service, characteristic, value);
       if (characteristic === FITNESS_MACHINE_CONTROL_POINT) {
         const opCode = value.getUint8(0);
+        if (opCode === 0x00) {
+          controlRequests += 1;
+        }
+        const refused = opCode === 0x00 && controlRequests === refuseControlAt;
         queueMicrotask(() => {
           port.notify(
             FITNESS_MACHINE_SERVICE,
             FITNESS_MACHINE_CONTROL_POINT,
-            new DataView(Uint8Array.from([0x80, opCode, 0x01]).buffer),
+            new DataView(Uint8Array.from([0x80, opCode, refused ? 0x05 : 0x01]).buffer),
           );
         });
       }
@@ -115,9 +133,10 @@ function openApp(
   stack: ScriptedStack = {},
   /** Hold ONE device's connect until this settles; every other answers at once. */
   hold?: { readonly id: string; readonly until: Promise<void> },
+  refuseControlAt?: number,
 ) {
   let clock = unixSeconds(1_757_000_000);
-  const plugin = answeringTrainer(stack);
+  const plugin = answeringTrainer(stack, refuseControlAt);
   if (hold !== undefined) {
     const connect = plugin.connect.bind(plugin);
     plugin.connect = async (id, disconnected) => {
@@ -399,46 +418,6 @@ describe('#2669 — a link that drops mid-ride comes back by itself', () => {
     app.controller.dispose();
   });
 
-  it('ends a workout that was riding on the dropped trainer, writing nothing, and keeps the ride recording', async () => {
-    const app = openApp(deviceStorage(), { chooses: KICKR });
-    await pairTrainer(app);
-    await app.controller.requestTrainerControl();
-    await settle();
-    await app.controller.start();
-    const started = app.controller.startWorkout(
-      {
-        id: workoutId('w1'),
-        createdBy: athleteId('shell'),
-        name: 'Long',
-        workout: {
-          name: 'Long',
-          blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) }],
-        },
-        createdAt: unixSeconds(1),
-        updatedAt: unixSeconds(1),
-      },
-      watts(250),
-    );
-    expect(started).toBe(true);
-    await app.advance(1);
-    // The control: the workout's own target reached the machine.
-    expect(controlPointOpcodes(app.plugin)).toContain(0x05);
-    const before = app.plugin.writes.length;
-
-    app.plugin.dropLink();
-    await settle();
-    await app.advance(RECONNECT_BACKOFF_SECONDS[0] ?? 0);
-    for (let tick = 0; tick < 5; tick += 1) {
-      await app.advance(1);
-    }
-
-    expect(app.controller.getSnapshot().sensors[0]?.state).toBe('connected');
-    expect(app.controller.getSnapshot().workout).toBeUndefined();
-    expect(app.controller.getSnapshot().phase).toBe('recording');
-    expect(controlPointOpcodes(app.plugin, before)).toEqual([]);
-    app.controller.dispose();
-  });
-
   it('runs one try at a time, and a try outlived by Forget and Pair leaves the new pairing alone', async () => {
     const app = openApp(deviceStorage(), { chooses: KICKR });
     await pairTrainer(app);
@@ -500,6 +479,202 @@ describe('#2669 — a link that drops mid-ride comes back by itself', () => {
     expect(app.controller.getSnapshot().sensors).toEqual([]);
     expect(app.plugin.calls.filter((call) => call.startsWith('connect:')).length).toBe(connects);
     expect(createRememberedSensors(device).list()).toEqual([]);
+    app.controller.dispose();
+  });
+});
+
+/** A 600 s block at 0.8 of 250 W: the workout's own target is 200 W. */
+const LONG_WORKOUT = {
+  id: workoutId('w1'),
+  createdBy: athleteId('shell'),
+  name: 'Long',
+  workout: {
+    name: 'Long',
+    blocks: [{ kind: 'steady' as const, seconds: seconds(600), target: thresholdShare(0.8) }],
+  },
+  createdAt: unixSeconds(1),
+  updatedAt: unixSeconds(1),
+};
+
+/** `0x05` Set Target Power writes since `from`, in watts (sint16 LE, 1 W). */
+function targetsWritten(plugin: ScriptedPort, from = 0): number[] {
+  return plugin.writes
+    .slice(from)
+    .filter(
+      (write) =>
+        write.characteristic === FITNESS_MACHINE_CONTROL_POINT && write.value.getUint8(0) === 0x05,
+    )
+    .map((write) => write.value.getInt16(1, true));
+}
+
+/**
+ * Pair, take control, start the ride and the workout, ride a second of it (its
+ * 200 W reaches the machine), then drop the link and let the first try bring
+ * the trainer back. Returns the write count at the drop.
+ */
+async function workoutAcrossADrop(app: ReturnType<typeof openApp>): Promise<number> {
+  await pairTrainer(app);
+  await app.controller.requestTrainerControl();
+  await settle();
+  await app.controller.start();
+  expect(app.controller.startWorkout(LONG_WORKOUT, watts(250))).toBe(true);
+  app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, PEDALLING);
+  await app.advance(1);
+  // The control: the workout's own target reached the machine before the drop.
+  expect(targetsWritten(app.plugin)).toEqual([200]);
+  const before = app.plugin.writes.length;
+
+  app.plugin.dropLink();
+  await settle();
+  expect(app.controller.getSnapshot().workout).toMatchObject({
+    status: 'paused',
+    carryOn: 'reconnecting',
+  });
+  await app.advance(RECONNECT_BACKOFF_SECONDS[0] ?? 0);
+  expect(app.controller.getSnapshot().sensors[0]?.state).toBe('connected');
+  return before;
+}
+
+describe('#2669 — a workout carries on once its trainer is back and the rider pedals', () => {
+  it('writes nothing before pedalling, then takes control, ramps up, and holds the block’s target', async () => {
+    const app = openApp(deviceStorage(), { chooses: KICKR });
+    const before = await workoutAcrossADrop(app);
+    const elapsed = app.controller.getSnapshot().workout?.elapsedSeconds;
+
+    // Back, and the rider not pedalling yet: ticks, and a reading with the
+    // cranks still, reach the machine with nothing at all — control included.
+    for (let tick = 0; tick < 5; tick += 1) {
+      await app.advance(1);
+    }
+    app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, CRANKS_STILL);
+    await settle();
+    expect(controlPointOpcodes(app.plugin, before)).toEqual([]);
+    expect(app.controller.getSnapshot().workout).toMatchObject({
+      status: 'paused',
+      carryOn: 'pedal',
+      elapsedSeconds: elapsed,
+    });
+
+    // The rider pedals: control is asked for, and the workout carries on from
+    // the same place.
+    app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, PEDALLING);
+    await settle();
+    expect(controlPointOpcodes(app.plugin, before)).toEqual([0x00]);
+    expect(app.controller.getSnapshot().workout).toMatchObject({
+      status: 'running',
+      carryOn: 'resumed',
+      elapsedSeconds: elapsed,
+    });
+
+    // One write a tick: a ramp from the trainer's floor (0 W here), never a
+    // step, reaching the block's 200 W only once the ramp has run its length.
+    const byTick: number[][] = [];
+    for (let tick = 0; tick <= CARRY_ON_RAMP_SECONDS + 2; tick += 1) {
+      const from = app.plugin.writes.length;
+      app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, PEDALLING);
+      await app.advance(1);
+      byTick.push(targetsWritten(app.plugin, from));
+    }
+    const ramp = targetsWritten(app.plugin, before);
+    expect(ramp[0]).toBe(0);
+    for (let step = 1; step < ramp.length; step += 1) {
+      expect(ramp[step]).toBeGreaterThan(ramp[step - 1] ?? Infinity);
+    }
+    expect(ramp.at(-1)).toBe(200);
+    expect(ramp.filter((target) => target < 200)).toHaveLength(CARRY_ON_RAMP_SECONDS);
+    expect(byTick.slice(-2).flat()).toEqual([]);
+    expect(app.controller.getSnapshot().workout?.holdingWatts).toBe(200);
+    expect(app.controller.getSnapshot().workout?.elapsedSeconds).toBeGreaterThan(elapsed ?? 0);
+    expect(app.controller.getSnapshot().phase).toBe('recording');
+
+    // The notice goes after a while; the workout does not.
+    await app.advance(CARRY_ON_NOTICE_SECONDS);
+    expect(app.controller.getSnapshot().workout?.carryOn).toBeUndefined();
+    expect(app.controller.getSnapshot().workout?.name).toBe('Long');
+    app.controller.dispose();
+  });
+
+  it('keeps the workout where it was while the trainer is away, and lets the rider end it, writing nothing', async () => {
+    // Every connect after the drop is refused, so the trainer stays away.
+    const app = openApp(deviceStorage(), { chooses: KICKR });
+    await pairTrainer(app);
+    await app.controller.requestTrainerControl();
+    await settle();
+    await app.controller.start();
+    expect(app.controller.startWorkout(LONG_WORKOUT, watts(250))).toBe(true);
+    await app.advance(1);
+    const before = app.plugin.writes.length;
+    app.plugin.connect = async () => Promise.reject(new Error('Connection timeout.'));
+
+    app.plugin.dropLink();
+    await settle();
+    const elapsed = app.controller.getSnapshot().workout?.elapsedSeconds;
+    for (let tick = 0; tick < 20; tick += 1) {
+      await app.advance(1);
+    }
+    expect(app.controller.getSnapshot().workout).toMatchObject({
+      status: 'paused',
+      carryOn: 'reconnecting',
+      elapsedSeconds: elapsed,
+    });
+
+    app.controller.endWorkout();
+    await settle();
+    expect(app.controller.getSnapshot().workout).toBeUndefined();
+    expect(controlPointOpcodes(app.plugin, before)).toEqual([]);
+    // Nothing was released, so nothing says a release did not land.
+    expect(app.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
+    app.controller.dispose();
+  });
+
+  it('waits, writing no target, when the trainer refuses control back, and carries on once the rider takes it', async () => {
+    // The second Request Control (the carry-on's) is refused; the third, the
+    // rider's own press, is granted.
+    const app = openApp(deviceStorage(), { chooses: KICKR }, undefined, 2);
+    const before = await workoutAcrossADrop(app);
+
+    app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, PEDALLING);
+    await settle();
+    expect(app.controller.getSnapshot().workout?.carryOn).toBe('refused');
+    // Pedalling on does not ask again.
+    for (let tick = 0; tick < 3; tick += 1) {
+      app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, PEDALLING);
+      await app.advance(1);
+    }
+    expect(controlPointOpcodes(app.plugin, before)).toEqual([0x00]);
+    expect(app.controller.getSnapshot().workout?.status).toBe('paused');
+
+    expect(targetsWritten(app.plugin, before)).toEqual([]);
+
+    // The rider takes control by hand: still no target until they pedal…
+    await app.controller.requestTrainerControl();
+    await settle();
+    expect(controlPointOpcodes(app.plugin, before)).toEqual([0x00, 0x00]);
+    expect(app.controller.getSnapshot().workout?.carryOn).toBe('refused');
+    // …and then the workout carries on, from the floor, asking nothing more.
+    app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, PEDALLING);
+    await settle();
+    await app.advance(1);
+    expect(app.controller.getSnapshot().workout).toMatchObject({
+      status: 'running',
+      carryOn: 'resumed',
+    });
+    expect(controlPointOpcodes(app.plugin, before)).toEqual([0x00, 0x00, 0x05]);
+    expect(targetsWritten(app.plugin, before)).toEqual([0]);
+    app.controller.dispose();
+  });
+
+  it('does not carry on while the rider has paused the ride', async () => {
+    const app = openApp(deviceStorage(), { chooses: KICKR });
+    const before = await workoutAcrossADrop(app);
+    await app.controller.pause();
+    await settle();
+
+    app.plugin.notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, PEDALLING);
+    await app.advance(1);
+
+    expect(controlPointOpcodes(app.plugin, before)).toEqual([]);
+    expect(app.controller.getSnapshot().workout?.carryOn).toBe('pedal');
     app.controller.dispose();
   });
 });
