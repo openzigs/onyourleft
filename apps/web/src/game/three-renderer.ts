@@ -25414,8 +25414,12 @@ class ThreeGameView implements GameView {
    *
    * ⚠️ **It warms the CURRENT rung only.** A step down later — `surfaceDetail`
    * goes, and on the map rung `shadowMap.enabled` goes with it — still builds
-   * programs on the frame it happens, once a ride, as before #547; and the
-   * realistic world's are built when it is drawn.
+   * programs on the frame it happens, once a ride, as before #547. ⚠️ **The
+   * realistic world arriving is not a step down**: since #2663 `GameView`
+   * prepares the view AGAIN once it is handed the realistic rung, with the
+   * next frame, and draws nothing until that settles. Drawn at once, the
+   * swap's first frame took about 6 s in the pinned Chromium against about
+   * 50 ms prepared (`game.browser.spec.ts` §"#2663").
    */
   async prepare(frame: SceneFrame): Promise<void> {
     const renderer = this.#renderer;

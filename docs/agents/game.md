@@ -472,6 +472,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         paid in `three-renderer.ts` §`prepare`, which draws the
                         first frame into one pixel before any is shown. Part
                         T5 (20 minutes with the map on) is still owed.
+                        ⚠️ **Since #2663 the realistic world's arrival is
+                        prepared too**: `GameView` prepares the view again
+                        when it hands it the realistic rung and draws nothing
+                        until that settles, because drawn at once the swap's
+                        first frame built every realistic program in a lap
+                        race's countdown (`realistic-arrival-wiring.test.tsx`).
                         ⚠️ **Since #620 its sun projection is SHARED**:
                         `sunThrowPerMetre` is the one place `world.ts`'s sun
                         becomes a shadow on the ground, and the scenery's

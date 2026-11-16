@@ -1679,6 +1679,12 @@ function GameScreen({
   const preparedViewRef = useRef<RendererView | undefined>(undefined);
   /** The view whose `prepare` is in flight, so it is asked once. @see preparedViewRef */
   const preparingViewRef = useRef<RendererView | undefined>(undefined);
+  /**
+   * Which `prepare` may mark its view ready — #2663. Moved on by every ask and
+   * by the realistic world's arrival, so a warm-up the arrival overtook
+   * settles into nothing: only the one asked AFTER the swap readies the view.
+   */
+  const prepareRoundRef = useRef(0);
   const ghostRef = useRef<GhostTrack | undefined>(undefined);
   /**
    * Whose ghost {@link ghostRef} is, when it is another rider's — #331: their
@@ -3066,6 +3072,20 @@ function GameScreen({
                   // #2289: the next frames upload the world; they are not counted.
                   qualityRef.current = realisticWorldArrived(qualityRef.current);
                   view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
+                  // #2663: and the view is PREPARED again before it draws the
+                  // world it now holds, as it was for the ride's first frame
+                  // (#547). Drawn at once, its programs linked and its
+                  // textures uploaded inside one shown frame — read off the
+                  // code, not a tablet trace, as the 1.5–3 s stall logged
+                  // around a lap race's start: a race counts down ten seconds
+                  // from the press, while this load is still arriving. The
+                  // loop asks the next frame's `prepare` and draws nothing
+                  // until it settles; the canvas keeps the last stylised
+                  // frame meanwhile, and the HUD, the simulation and the
+                  // trainer run on.
+                  prepareRoundRef.current += 1;
+                  preparedViewRef.current = undefined;
+                  preparingViewRef.current = undefined;
                   // #2392: the town is here, so the round begins from where the rider is.
                   beginWaitingRound(deliveryWaitingRef);
                   return;
@@ -4006,8 +4026,13 @@ function GameScreen({
           }
         } else {
           preparingViewRef.current = view;
+          // The arrival's own bump (above) carries the guarantee that a warm-up it
+          // overtook readies nothing; this one is defence in depth.
+          prepareRoundRef.current += 1;
+          const round = prepareRoundRef.current;
           void view.prepare(frame).then(() => {
-            preparedViewRef.current = view;
+            // #2663: a warm-up the world's arrival overtook readies nothing.
+            if (prepareRoundRef.current === round) preparedViewRef.current = view;
           });
         }
       }

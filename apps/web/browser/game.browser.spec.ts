@@ -3736,6 +3736,55 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     );
   });
 
+  /**
+   * **No stall when the realistic world arrives mid-ride — #2663.** The
+   * tablet logged one frame of 1.5–3 s around a lap race's start, whose
+   * countdown is when a realistic ride's set lands. `game-harness.ts`
+   * §`worldArrivalProbe` hands two fresh stylised views the realistic rung,
+   * as `GameView` does on arrival, and draws the next frames: at once — the
+   * control, as before #2663, which must build programs inside them and pay
+   * for it in its first frame — and after `prepare`, as `GameView` does now,
+   * which must build none and keep under half the control's first-frame
+   * excess (`ride-start.ts` §`prepareTookTheStall`, #547's rule).
+   *
+   * ⚠️ That `GameView` takes the prepared order is
+   * `realistic-arrival-wiring.test.tsx`'s, required; this is what the order
+   * buys, on SwiftShader, which is not the tablet.
+   */
+  test('builds no GPU program in the first frames after the realistic world arrives mid-ride — #2663', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { worldArrival: arrival } = await realistic(harnessRun);
+    expect(arrival.measured).toBe(true);
+    // The control reproduces the stall's cause: the swap's first frames build programs.
+    expect(arrival.unpreparedLinks).toBeGreaterThan(0);
+    // And `prepare` is where they went.
+    expect(arrival.linksInPrepare).toBeGreaterThanOrEqual(arrival.unpreparedLinks);
+    expect(arrival.preparedLinks).toBe(0);
+    expect(arrival.preparedFrameMs).toHaveLength(arrival.unpreparedFrameMs.length);
+    const preparedExcess = firstFrameExcess(arrival.preparedFrameMs);
+    const controlExcess = firstFrameExcess(arrival.unpreparedFrameMs);
+    expect(
+      prepareTookTheStall(arrival.preparedFrameMs, arrival.unpreparedFrameMs),
+      `prepared first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`,
+    ).toBe(true);
+    const list = (values: readonly number[]) => values.map((each) => each.toFixed(1)).join(' / ');
+    const measured =
+      `drawn at once: ${String(arrival.unpreparedLinks)} programs linked in the first ` +
+      `${String(arrival.unpreparedFrameMs.length)} frames, longest ` +
+      `${Math.max(...arrival.unpreparedFrameMs).toFixed(1)} ms, ms ${list(arrival.unpreparedFrameMs)}; ` +
+      `prepared first (${arrival.prepareMs.toFixed(1)} ms, ${String(arrival.linksInPrepare)} programs, ` +
+      `KHR_parallel_shader_compile ${arrival.parallelCompile ? 'offered' : 'absent'}): ` +
+      `${String(arrival.preparedLinks)} linked in those frames, longest ` +
+      `${Math.max(...arrival.preparedFrameMs).toFixed(1)} ms, ms ${list(arrival.preparedFrameMs)}; ` +
+      `first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`;
+    testInfo.annotations.push({
+      type: 'the realistic world arriving mid-ride',
+      description: measured,
+    });
+    console.log(`the realistic world arriving mid-ride — ${measured}`);
+  });
+
   test('is drawn only when it is loaded, and otherwise falls back and says so — D-7', async ({
     harnessRun,
   }) => {
