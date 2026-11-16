@@ -256,3 +256,15 @@ describe('the one script is linked only on the pages with a passkey ceremony, an
     expect(script.headers.get('content-security-policy')).toContain("script-src 'self'");
   });
 });
+
+describe('a session lands on Status (#2645)', () => {
+  it('/admin and /admin/sign-in, with a session, send the browser to /admin/status', async () => {
+    const made = await world();
+    const token = await signedIn(made);
+    for (const path of ['/admin', '/admin/sign-in']) {
+      const answer = await made.instance.handler(adminRequest('GET', path, { cookie: token }));
+      expect(answer.status, path).toBe(303);
+      expect(answer.headers.get('location'), path).toBe('/admin/status');
+    }
+  });
+});
