@@ -539,6 +539,39 @@ describe('the strategy is the model’s, through the shipped race (ADR 0073 D-3)
   });
 });
 
+describe('a sprint instinct behind the model’s moves, through the shipped race (ADR 0074)', () => {
+  it('launches every bot’s kick inside its launch, and holds it to the line, though the model only ever says sit in', () => {
+    const named: number[] = [];
+    const sitIn: Instance = (input, askedAtMs) => {
+      named.push(askedAtMs);
+      return {
+        reply: {
+          kind: 'answer',
+          body: { bots: input.bots.map((view) => ({ bot: view.bot, move: 'sit-in' })) },
+        },
+        afterMs: 1_000,
+      };
+    };
+    // Long enough for the whole field to finish three laps of the circuit.
+    const done = ride(startRace(true), 400, sitIn);
+    const racers = done.ride.race.racers.filter((entry) => entry.racer.id !== 'rider');
+    expect(racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
+    // Non-vacuity: the model was answering, every bot named, up to the end.
+    const finishedAtMs = Math.max(...racers.map((entry) => entry.racer.finishedAtMs ?? 0));
+    expect(named.filter((atMs) => atMs > finishedAtMs - 30_000).length).toBeGreaterThan(5);
+    done.ride.bots.forEach((_, seat) => {
+      const frames = done.tactics.map((frame) => frame[seat]);
+      const from = frames.indexOf('kick');
+      expect(from, `bot ${String(seat)} kicks`).toBeGreaterThanOrEqual(0);
+      // From its launch to the line, and after: never back to sitting in.
+      expect(
+        frames.slice(from).every((tactic) => tactic === 'kick'),
+        `bot ${String(seat)} holds`,
+      ).toBe(true);
+    });
+  });
+});
+
 describe('the body’s limits hold under any strategy (ADR 0073 D-2)', () => {
   it('never lets a blown bot over CP, nor any bot over its peak, every bot told to go all-out', () => {
     let race = startRace(true);
@@ -587,7 +620,7 @@ describe('what is kept with the ride (D-4.4)', () => {
     }));
     const fact = lapRaceRideFact(model.ride);
     expect(fact?.seed).toBe(SEED);
-    expect(fact?.version).toBe(2);
+    expect(fact?.version).toBe(3);
     expect(fact?.log).toEqual(model.ride.model?.log);
     const ticks = Math.round(30 / LAP_RACE_TICK_SECONDS);
     expect(fact?.rider.effortDistances).toHaveLength(ticks);

@@ -3,8 +3,8 @@
 /**
  * **A lap race whose bots' moves a language model picks: the decision log,
  * when a logged decision is in force, and how a move is ridden** — #2710,
- * ADR 0071 D-4 and D-7, and ADR 0073 D-2 to D-4, which supersedes ADR 0071
- * D-3.6 for a model race.
+ * ADR 0071 D-4 and D-7, ADR 0073 D-2 to D-4, which supersedes ADR 0071 D-3.6
+ * for a model race, and ADR 0074, which puts a sprint backstop behind it.
  *
  * Written fresh for #2710 (ADR 0071 D-8.7): the spike's AGPL copies under
  * `apps/web/tools/model-tactics-spike/` are not moved.
@@ -41,15 +41,15 @@
  *   choice (it cannot surge), and its power is `spendableWatts`' whatever the
  *   move. These are checked here, outside the seam.
  * - **Strategy rules**, behind ONE seam, {@link ModelMoveStrategy}.
- *   {@link ADR_0073_MOVE_STRATEGY}, the owner's ruling of 2026-11-16 (ADR
- *   0073, accepted), is what a model race rides since bot-code version 2: it
- *   refuses nothing, and only carries a `follow` or `chase` of a racer who is
- *   not directly ahead through the moves a bot has (D-3.4). A W′-floor gamble,
- *   a flyer on any lap, an attack held as long as the model names it, a kick
- *   anywhere, and any move inside the launch, a kick ended by the model
- *   included, are all ridden. {@link ADR_0071_MOVE_STRATEGY} is ADR 0071
- *   D-3.6's rules, which version 1 rode; it is kept behind the seam as the
- *   rules a superseding ADR would hand back, and no race uses it.
+ *   {@link ADR_0074_MOVE_STRATEGY} is what a model race rides since bot-code
+ *   version 3: ADR 0073's freedom with ADR 0074's sprint-instinct backstop, so
+ *   a bot the model has not sent on its kick by its launch distance launches
+ *   its own, and every race gets a finish. {@link ADR_0073_MOVE_STRATEGY}
+ *   (version 2) refuses nothing, and only carries a `follow` or `chase` of a
+ *   racer who is not directly ahead through the moves a bot has (D-3.4).
+ *   {@link ADR_0071_MOVE_STRATEGY} is ADR 0071 D-3.6's rules, which version 1
+ *   rode. Both are kept behind the seam as the rules a superseding ADR would
+ *   hand back, and no race uses either.
  *
  * ## The line as the bot misreads it (#2705, ADR 0073 D-3.5)
  *
@@ -60,7 +60,12 @@
  * times is timed on what the bot believes is left.
  */
 
-import { botTacticsMisjudgement, BOT_TACTICS_WINDOW_MS, type BotArchetype } from './archetype';
+import {
+  botTacticsMisjudgement,
+  BOT_TACTICS_MISJUDGE_LINE_METRES,
+  BOT_TACTICS_WINDOW_MS,
+  type BotArchetype,
+} from './archetype';
 import type { ItemRaceState } from './items';
 import {
   BOT_EFFORTS,
@@ -80,16 +85,16 @@ import type { BotEnergy } from './wbal';
 import type { ModelTacticsInvalid, ModelTacticsMove, ModelTacticsTarget } from './model-tactics';
 
 /**
- * **The bot-code version: 2** (ADR 0071 D-4.3, ADR 0073 D-6). Version 1 rode
- * ADR 0071 D-3.6's strategy rules; version 2 rides ADR 0073's, with D-5's
- * input. Raised by any change that
+ * **The bot-code version: 3** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074).
+ * Version 1 rode ADR 0071 D-3.6's strategy rules; version 2 ADR 0073's, with
+ * D-5's input; version 3 ADR 0073's with ADR 0074's sprint backstop. Raised by any change that
  * alters any bot's output for some seed and log — a tactic, a plan, the W′
  * model, the adapter, a seam's rule, a physics step. Stored beside the seed and
  * the log; a log recorded under another version is not replayed.
  * `apps/web` §`model-race-replay.test.ts` holds committed seeds and logs to
  * their outcomes, keyed by this number.
  */
-export const LAP_RACE_BOT_CODE_VERSION = 2;
+export const LAP_RACE_BOT_CODE_VERSION = 3;
 
 /** How often the model is asked, ms of race time: every **4 s**, spike 0039's draft (D-7). */
 export const MODEL_TACTICS_ASK_EVERY_MS = 4_000;
@@ -233,6 +238,8 @@ export interface ModelMoveAsk {
    * (#2705). What a naive bot misjudges is part of who it is.
    */
   readonly readToLineMetres: number;
+  /** Metres to the line as it truly is: what ADR 0074's hold of a kick in progress reads. */
+  readonly toLineMetres: number;
   /** Laps left, the one it is on counted whole. */
   readonly lapsLeft: number;
   /** Its actual W′ balance as a share of its W′, 0 to 1. */
@@ -252,10 +259,12 @@ export interface ModelMoveAsk {
 /**
  * A move ridden as another the bot has (ADR 0073 D-3.4): `bridging`, a
  * `follow` or `chase` of a racer up the road ridden as a `chase` to them;
- * `marking`, of a racer behind, ridden as `sit-in` until they come by.
+ * `marking`, of a racer behind, ridden as `sit-in` until they come by;
+ * `backstop`, any move but a kick ridden as the bot's own `kick` (ADR 0074),
+ * at the kick's own target and never at the model's effort.
  */
 export interface ModelMoveRide {
-  readonly outcome: 'bridging' | 'marking';
+  readonly outcome: 'bridging' | 'marking' | 'backstop';
   readonly ride: BotTactic;
 }
 
@@ -301,8 +310,40 @@ export const ADR_0073_MOVE_STRATEGY: ModelMoveStrategy = (ask) => {
 };
 
 /**
+ * **ADR 0074's strategy: ADR 0073's, with a sprint instinct behind it**
+ * (accepted 2026-11-16 by the owner on #2724). What a model race rides since
+ * bot-code version 3. A `kick` is ridden wherever the model names it, as under
+ * ADR 0073. Otherwise:
+ *
+ * - **inside its launch distance, as it reads the line** (the misread line
+ *   seeded `decideTactic` launches on), a bot the model has not sent on its
+ *   kick rides its own kick, the one seeded `decideTactic` launches there:
+ *   `backstop`;
+ * - **a kick in progress holds to the line** once the bot is within its launch
+ *   distance and the largest misread
+ *   (`archetype.ts` §`BOT_TACTICS_MISJUDGE_LINE_METRES`) of the true line, so a
+ *   misread redrawn a window later cannot end it, nor the model: `backstop`.
+ *   *The author's choice*, so that every race gets a finish; a kick the model
+ *   launches further out is still the model's to end;
+ * - everything else is {@link ADR_0073_MOVE_STRATEGY}'s.
+ */
+export const ADR_0074_MOVE_STRATEGY: ModelMoveStrategy = (ask) => {
+  if (ask.move !== 'kick') {
+    const launch = botLaunchMetres(ask.archetype);
+    const inLaunch = ask.readToLineMetres <= launch;
+    const holding =
+      ask.tactics.tactic === 'kick' &&
+      ask.toLineMetres <= launch + BOT_TACTICS_MISJUDGE_LINE_METRES;
+    if (inLaunch || holding) return BACKSTOP;
+  }
+  return ADR_0073_MOVE_STRATEGY(ask);
+};
+
+const BACKSTOP: ModelMoveRide = Object.freeze({ outcome: 'backstop', ride: 'kick' });
+
+/**
  * ADR 0071 D-3.6's strategy rules, the ones bot-code version 1 rode. No race
- * uses them since version 2 ({@link ADR_0073_MOVE_STRATEGY}):
+ * uses them since version 2:
  *
  * - inside its launch distance, as it reads the line, or already in its kick,
  *   a bot sprints its own seeded way: the kick is never the model's to time
@@ -419,14 +460,14 @@ function placeOf(
  * `bots` itself and allocates nothing (ADR 0067 D-6.4).
  *
  * @param seed - the race's own seed, which the misread line is drawn from.
- * @param strategy - the strategy rules (see the file comment); ADR 0073's unless given.
+ * @param strategy - the strategy rules (see the file comment); ADR 0074's unless given.
  */
 export function applyModelMoves<B extends ModelRaceBot>(
   race: ItemRaceState,
   bots: readonly B[],
   moves: readonly ModelTacticsMove[] | undefined,
   seed: number,
-  strategy: ModelMoveStrategy = ADR_0073_MOVE_STRATEGY,
+  strategy: ModelMoveStrategy = ADR_0074_MOVE_STRATEGY,
 ): AppliedModelMoves<B> {
   const window = Math.floor(race.atMs / BOT_TACTICS_WINDOW_MS);
   // Nothing to decide on a tick inside every bot's window: the common tick.
@@ -458,12 +499,14 @@ export function applyModelMoves<B extends ModelRaceBot>(
     else if (bot.energy.exhausted) outcome = 'exhausted';
     else {
       const misread = botTacticsMisjudgement(seed, seat, bot.strategy.skill, race.atMs).lineMetres;
+      const toLineMetres = laps * lapLengthMetres - own;
       const ruling = strategy({
         move: move.move,
         target: move.target,
         atMs: race.atMs,
         archetype: plan.archetype,
-        readToLineMetres: laps * lapLengthMetres - own + misread,
+        readToLineMetres: toLineMetres + misread,
+        toLineMetres,
         lapsLeft: Math.max(0, laps - Math.floor(own / lapLengthMetres)),
         wbalShare: bot.energy.wbalJoules / plan.capacity.wPrimeJoules,
         tactics: bot.tactics,
@@ -479,12 +522,17 @@ export function applyModelMoves<B extends ModelRaceBot>(
     }
     outcomes.push(outcome);
     if (
-      (outcome !== 'applied' && outcome !== 'bridging' && outcome !== 'marking') ||
+      (outcome !== 'applied' &&
+        outcome !== 'bridging' &&
+        outcome !== 'marking' &&
+        outcome !== 'backstop') ||
       move === undefined ||
       ridden === undefined
     ) {
       return bot;
     }
+    // The bot's own kick, at the kick's own target: never the model's effort.
+    const asked = outcome === 'backstop' ? undefined : move.effort;
     changed = true;
     const kept = ridden === bot.tactics.tactic;
     return {
@@ -493,7 +541,7 @@ export function applyModelMoves<B extends ModelRaceBot>(
         tactic: ridden,
         sinceMs: kept ? (bot.tactics.sinceMs ?? race.atMs) : race.atMs,
         window,
-        ...(move.effort === undefined ? {} : { effort: move.effort }),
+        ...(asked === undefined ? {} : { effort: asked }),
       },
     };
   });

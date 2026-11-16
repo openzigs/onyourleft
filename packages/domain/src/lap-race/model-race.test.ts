@@ -11,12 +11,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { botTacticsMisjudgement, BOT_TACTICS_WINDOW_MS } from './archetype';
+import {
+  botTacticsMisjudgement,
+  BOT_TACTICS_MISJUDGE_LINE_METRES,
+  BOT_TACTICS_WINDOW_MS,
+} from './archetype';
 import { createItemRace } from './item-race';
 import type { ItemRaceState } from './items';
 import {
   ADR_0071_MOVE_STRATEGY,
   ADR_0073_MOVE_STRATEGY,
+  ADR_0074_MOVE_STRATEGY,
   applyModelMoves,
   MODEL_TACTICS_HOLD_MS,
   modelMovesInForce,
@@ -205,7 +210,13 @@ describe('the body’s limits sit outside the strategy seam (ADR 0073 D-2)', () 
   it('keeps an exhausted bot on its seeded choice, whatever the strategy allows, an effort included', () => {
     const tired = bot('bot-1', { energy: { wbalJoules: 0, exhausted: true } });
     const race = raceAt(12_000, MID);
-    for (const strategy of [undefined, ADR_0073_MOVE_STRATEGY, ADR_0071_MOVE_STRATEGY, ANYTHING]) {
+    for (const strategy of [
+      undefined,
+      ADR_0074_MOVE_STRATEGY,
+      ADR_0073_MOVE_STRATEGY,
+      ADR_0071_MOVE_STRATEGY,
+      ANYTHING,
+    ]) {
       const applied = applyModelMoves(
         race,
         [tired, bot('bot-2'), bot('bot-3')],
@@ -256,6 +267,7 @@ describe('the body’s limits sit outside the strategy seam (ADR 0073 D-2)', () 
       atMs: 12_000,
       archetype: PLAN.archetype,
       readToLineMetres: LAP * LAPS - 820 + misread,
+      toLineMetres: LAP * LAPS - 820,
       lapsLeft: 3,
       wbalShare: 0.5,
       tactics,
@@ -275,6 +287,7 @@ function ask(over: Partial<ModelMoveAsk> = {}): ModelMoveAsk {
     atMs: 60_000,
     archetype: 'rouleur',
     readToLineMetres: 1_500,
+    toLineMetres: 1_500,
     lapsLeft: 2,
     wbalShare: 0.9,
     tactics: { tactic: 'sit-in', sinceMs: 50_000, window: 59 },
@@ -284,19 +297,20 @@ function ask(over: Partial<ModelMoveAsk> = {}): ModelMoveAsk {
   };
 }
 
-/** One bot's move ridden under the race's own strategy, ADR 0073's: its outcome, and the memory it rides. */
+/** One bot's move ridden under `strategy`, the race's own unless given: its outcome, and the memory it rides. */
 function ridden(
   move: ModelTacticsMove,
   over: Partial<ModelRaceBot> = {},
   at: Readonly<Record<string, number>> = MID,
   atMs = 12_000,
+  strategy?: ModelMoveStrategy,
 ): { outcome: string | undefined; tactics: ModelRaceBot['tactics'] | undefined } {
   const bots = IDS.map((id, seat) => (seat === move.bot ? bot(id, over) : bot(id)));
-  const applied = applyModelMoves(raceAt(atMs, at), bots, [move], SEED);
+  const applied = applyModelMoves(raceAt(atMs, at), bots, [move], SEED, strategy);
   return { outcome: applied.outcomes[move.bot], tactics: applied.bots[move.bot]?.tactics };
 }
 
-describe('ADR 0073 D-3: every strategy rule lifted, the race’s own strategy', () => {
+describe('ADR 0073 D-3: every strategy rule lifted, under ADR 0074’s backstop', () => {
   const low = {
     wbalJoules: PLAN.capacity.wPrimeJoules * (BOT_TACTIC_WBAL_FLOOR - 0.05),
     exhausted: false,
@@ -376,15 +390,18 @@ describe('ADR 0073 D-3: every strategy rule lifted, the race’s own strategy', 
     expect(applied.bots[2]?.tactics.tactic).toBe('follow');
   });
 
-  it('rides a kick anywhere, any move inside the launch, and the model ending a kick (D-3.5)', () => {
+  it('rides, under ADR 0073’s own strategy, a kick anywhere, any move inside the launch, and the model ending a kick (D-3.5)', () => {
+    const adr0073 = ADR_0073_MOVE_STRATEGY;
     // A lap and more out: a kick launched long.
-    expect(ridden({ bot: 0, move: 'kick' }).tactics?.tactic).toBe('kick');
+    expect(ridden({ bot: 0, move: 'kick' }, {}, MID, 12_000, adr0073).tactics?.tactic).toBe('kick');
     // Ten metres out, deep inside every launch: a launch held late.
     const close = { rider: 2_995, 'bot-1': 2_990, 'bot-2': 0, 'bot-3': 0 };
-    expect(ridden({ bot: 0, move: 'sit-in' }, {}, close).outcome).toBe('applied');
+    expect(ridden({ bot: 0, move: 'sit-in' }, {}, close, 12_000, adr0073).outcome).toBe('applied');
     // In its kick, and told to sit up: the model ends it.
     const kicking = { tactics: { tactic: 'kick' as const, sinceMs: 11_000, window: 11 } };
-    expect(ridden({ bot: 0, move: 'sit-in' }, kicking, close).tactics?.tactic).toBe('sit-in');
+    expect(
+      ridden({ bot: 0, move: 'sit-in' }, kicking, close, 12_000, adr0073).tactics?.tactic,
+    ).toBe('sit-in');
   });
 
   it('refuses nothing, by itself', () => {
@@ -401,6 +418,114 @@ describe('ADR 0073 D-3: every strategy rule lifted, the race’s own strategy', 
         ADR_0073_MOVE_STRATEGY(ask({ move, wbalShare: 0, readToLineMetres: 0, lapsLeft: 9 })),
       ).toBeUndefined();
     }
+  });
+});
+
+describe('ADR 0074: a sprint instinct behind the model’s moves, the race’s own strategy', () => {
+  const close = { rider: 2_995, 'bot-1': 2_990, 'bot-2': 0, 'bot-3': 0 };
+
+  it('launches the kick of a bot the model has not sent on it, inside its launch', () => {
+    for (const move of ['sit-in', 'follow', 'attack', 'recover', 'flyer'] as const) {
+      expect(ridden({ bot: 0, move }, {}, close)).toEqual({
+        outcome: 'backstop',
+        tactics: { tactic: 'kick', sinceMs: 12_000, window: 12 },
+      });
+    }
+  });
+
+  it('rides the backstop kick at the kick’s own target, never the effort the model gave another move', () => {
+    const held = ridden({ bot: 0, move: 'sit-in', effort: 'easy' }, {}, close);
+    expect(held.outcome).toBe('backstop');
+    expect(held.tactics?.effort).toBeUndefined();
+    // A move the model chose keeps its effort.
+    expect(ridden({ bot: 0, move: 'kick', effort: 'easy' }, {}, close).tactics?.effort).toBe(
+      'easy',
+    );
+  });
+
+  it('reads the launch on the misread line, as seeded decideTactic does', () => {
+    const launch = botLaunchMetres('rouleur');
+    expect(ADR_0074_MOVE_STRATEGY(ask({ move: 'sit-in', readToLineMetres: launch }))).toEqual({
+      outcome: 'backstop',
+      ride: 'kick',
+    });
+    expect(
+      ADR_0074_MOVE_STRATEGY(
+        ask({ move: 'sit-in', readToLineMetres: launch + 0.5, toLineMetres: launch - 10 }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('holds a kick in progress to the line, whatever the model names and the bot misreads', () => {
+    const launch = botLaunchMetres('rouleur');
+    const kicking = { tactic: 'kick' as const, sinceMs: 50_000, window: 59 };
+    const band = launch + BOT_TACTICS_MISJUDGE_LINE_METRES;
+    // Misread back outside its launch a window later: still held.
+    const outside = { tactics: kicking, readToLineMetres: launch + 30, toLineMetres: band };
+    for (const move of ['sit-in', 'follow', 'recover'] as const) {
+      expect(ADR_0074_MOVE_STRATEGY(ask({ ...outside, move }))).toEqual({
+        outcome: 'backstop',
+        ride: 'kick',
+      });
+    }
+    // Held in the bot's memory, its start kept.
+    const kickingBot = { tactics: { tactic: 'kick' as const, sinceMs: 11_000, window: 11 } };
+    expect(ridden({ bot: 0, move: 'sit-in' }, kickingBot, close).tactics).toEqual({
+      tactic: 'kick',
+      sinceMs: 11_000,
+      window: 12,
+    });
+    // Further out than any misread reaches: the model's own kick, still the model's to end.
+    expect(
+      ADR_0074_MOVE_STRATEGY(
+        ask({ tactics: kicking, readToLineMetres: band + 1, toLineMetres: band + 1 }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('still rides a kick the model names, earlier or inside the launch', () => {
+    // A lap and more out: launched long.
+    expect(ridden({ bot: 0, move: 'kick' })).toEqual({
+      outcome: 'applied',
+      tactics: { tactic: 'kick', sinceMs: 12_000, window: 12 },
+    });
+    expect(ridden({ bot: 0, move: 'kick', effort: 'threshold' }, {}, close).outcome).toBe(
+      'applied',
+    );
+  });
+
+  it('lets the exhausted rule win over the backstop and the model’s kick alike', () => {
+    const tired = { energy: { wbalJoules: 0, exhausted: true } };
+    for (const move of ['kick', 'sit-in'] as const) {
+      expect(ridden({ bot: 0, move }, tired, close).outcome).toBe('exhausted');
+    }
+  });
+
+  it('leaves the rest to ADR 0073’s strategy outside the launch', () => {
+    expect(ridden({ bot: 2, move: 'follow', target: 'rider' }).outcome).toBe('bridging');
+    expect(ADR_0074_MOVE_STRATEGY(ask({ move: 'flyer', lapsLeft: 9, wbalShare: 0 }))).toBe(
+      undefined,
+    );
+  });
+});
+
+describe('when a ridden move began (`kept`)', () => {
+  it('keeps the start of a chase that a bridge rides on as a chase', () => {
+    // Bot 2 is chasing; the model names a follow of the rider up the road: ridden as a chase.
+    const chasing = { tactics: { tactic: 'chase' as const, sinceMs: 9_000, window: 11 } };
+    expect(ridden({ bot: 2, move: 'follow', target: 'rider' }, chasing)).toEqual({
+      outcome: 'bridging',
+      tactics: { tactic: 'chase', sinceMs: 9_000, window: 12 },
+    });
+  });
+
+  it('restarts the clock when the move ridden is not the one the bot was in, though the model named it', () => {
+    // Bot 2 is following; the model names a follow of the rider up the road: ridden as a chase.
+    const following = { tactics: { tactic: 'follow' as const, sinceMs: 9_000, window: 11 } };
+    expect(ridden({ bot: 2, move: 'follow', target: 'rider' }, following)).toEqual({
+      outcome: 'bridging',
+      tactics: { tactic: 'chase', sinceMs: 12_000, window: 12 },
+    });
   });
 });
 
