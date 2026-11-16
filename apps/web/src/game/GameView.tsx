@@ -3837,6 +3837,17 @@ function GameScreen({
           structureItems: structureItemsRef.current,
           // #1541: the people the rung draws — none but on the realistic top rung.
           people: peopleRef.current,
+          // #2722: other cyclists on the road, on a free ride or a workout
+          // only — never in a room, a lap race, a Delivery round, or beside
+          // the pacer or a ghost — and, through `people`, only where the rung
+          // draws people. Scenery only: no simulation or trainer reads them.
+          sceneryCyclists:
+            roomRef.current === undefined &&
+            racing === undefined &&
+            roomRacing === undefined &&
+            deliveryRef.current === undefined &&
+            drawn.botDistance === undefined &&
+            ghostRef.current === undefined,
           // #349: how far the cranks have turned. `port.ts`
           // §`RiderMarker.crankAngle` records that an optional field nobody
           // supplies is a hole this repository's gates cannot see, which is

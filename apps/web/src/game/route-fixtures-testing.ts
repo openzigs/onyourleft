@@ -837,3 +837,26 @@ function simplified(
   const right = simplified(points.slice(at), tolerance);
   return [...left.slice(0, -1), ...right];
 }
+
+/**
+ * A road that winds north for `length` metres, swinging `swing` metres east
+ * and west every 400 m — #2722: bends of about 70 m radius at the default
+ * 60 m, so the rider's line crosses the road to each apex and comes near the
+ * lanes the scenery cyclists ride on both sides of it. Level.
+ */
+export function windingRoute(length: number, swing = 60): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  for (let north = 0; north <= length; north += 10) {
+    const east = swing * Math.sin((2 * Math.PI * north) / 400);
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(10),
+    });
+  }
+  return routeProfile(points);
+}

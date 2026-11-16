@@ -475,6 +475,8 @@ import {
   ANIMATION_ROWS,
   PERSON_MAX_TRIANGLES,
   PersonRegion,
+  RIDE_GAIT_INDEX,
+  RIDE_PHASES,
   animationRow,
   clusterDecimate,
   dressed,
@@ -489,6 +491,7 @@ import {
   type PeopleInView,
   type Person,
 } from './people';
+import { SCENERY_CYCLISTS_MAX, type SceneryCyclist } from './scenery-cyclists';
 import {
   isRealisticVegetation,
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
@@ -16098,6 +16101,19 @@ export class RealisticRiderBelt {
   /** #2494's scratch: a grip where the turned bars hold it, and its hand's tip. */
   readonly #steeredGrip = { x: 0, y: 0, z: 0 };
   readonly #handTip = { x: 0, y: 0, z: 0 };
+  /**
+   * #2722: where a scenery cyclist's helmet sits in its bicycle's frame, as
+   * {@link ridingPose} seats the body — read off the pose, never typed.
+   */
+  readonly #cyclistHelmet = new Matrix4();
+  /** #2722's scratch: a scenery cyclist's bicycle in the world. */
+  readonly #cyclistAt = new Matrix4();
+  readonly #cyclistPosition = new Vector3();
+  readonly #cyclistTurn = new Quaternion();
+  readonly #cyclistTint = new Color();
+  readonly #white = new Color(0xffffff);
+  /** #2722: which instances the last frame's scenery cyclists are. @see cyclistSlots */
+  #cyclistSlots = { first: 0, count: 0 };
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
@@ -16108,7 +16124,10 @@ export class RealisticRiderBelt {
     const helmetSource = helmetOf(body);
     // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
     const riders = 3 + REALISTIC_REMOTE_RIDERS;
-    const bicycle = realisticBicycleMeshes(maps, riders);
+    // #2722: and the scenery cyclists' bicycles and helmets, instances of the
+    // same meshes — no draw call of their own. Their bodies are the people's.
+    const instances = riders + SCENERY_CYCLISTS_MAX;
+    const bicycle = realisticBicycleMeshes(maps, instances);
     this.#frame = bicycle.frame;
     this.#rubber = bicycle.rubber;
     this.#metal = bicycle.metal;
@@ -16117,7 +16136,7 @@ export class RealisticRiderBelt {
     const frameMaterial = bicycle.frame.material as MeshStandardMaterial;
     const rubberMaterial = bicycle.rubber.material as MeshStandardMaterial;
     const metalMaterial = bicycle.metal.material as MeshStandardMaterial;
-    this.#helmets = tintable(helmetSource.geometry.clone(), helmetMaterial, riders);
+    this.#helmets = tintable(helmetSource.geometry.clone(), helmetMaterial, instances);
     this.#materials = [frameMaterial, rubberMaterial, metalMaterial, helmetMaterial];
     for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
       this.#group.add(mesh);
@@ -16231,6 +16250,16 @@ export class RealisticRiderBelt {
     return this.#helmets;
   }
 
+  /** The bicycles' frames' one instanced mesh — #2722's read-back. */
+  get frames(): InstancedMesh {
+    return this.#frame;
+  }
+
+  /** Which of the bicycles' instances the last frame's scenery cyclists are — #2722. */
+  get cyclistSlots(): { readonly first: number; readonly count: number } {
+    return this.#cyclistSlots;
+  }
+
   /**
    * The rider and bicycle seen from the side, with the cranks level — #626's
    * silhouette, made from THIS belt's own body, posed by this belt's own
@@ -16324,8 +16353,12 @@ export class RealisticRiderBelt {
     rubber.needsUpdate = true;
   }
 
-  /** This frame's riders, posed from their own crank angles. @see RiderBelt.place */
-  place(markers: readonly RiderMarker[]): void {
+  /**
+   * This frame's riders, posed from their own crank angles, and since #2722
+   * the scenery cyclists' bicycles and helmets after them, in the same
+   * instanced meshes. @see RiderBelt.place
+   */
+  place(markers: readonly RiderMarker[], cyclists: readonly SceneryCyclist[] = []): void {
     if (!this.#shown) return;
     let slot = 0;
     for (const marker of markers) {
@@ -16337,12 +16370,80 @@ export class RealisticRiderBelt {
     for (let rest = slot; rest < this.#riders.length; rest += 1) {
       (this.#riders[rest] as RealisticRiderSlot).root.visible = false;
     }
+    const first = slot;
+    for (const cyclist of cyclists.slice(0, SCENERY_CYCLISTS_MAX)) {
+      this.#placeCyclist(slot, cyclist);
+      slot += 1;
+    }
+    this.#cyclistSlots = { first, count: slot - first };
     for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
       mesh.count = slot;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
     }
     this.#group.visible = slot > 0;
+  }
+
+  /**
+   * The body seated on the bicycle at the origin, facing `+z`, at a crank
+   * angle — #2722: slot 0 posed by this belt's own `#pose` exactly as a
+   * rider with no pedal-stroke motion is, its skeleton's world matrices
+   * current, for `PeopleBelt` to bake a scenery cyclist's ride from. It also
+   * reads where the helmet then sits on the head, for {@link place}. Run
+   * while the realistic world is built, before a frame is placed, as
+   * {@link silhouette} is; it leaves slot 0 hidden.
+   */
+  ridingPose(crankAngle: number): SkinnedMesh {
+    const seated: RiderMarker = {
+      kind: 'rider',
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      lean: 0,
+      bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
+      crankAngle,
+    };
+    this.#placeOne(0, seated);
+    const rider = this.#riders[0] as RealisticRiderSlot;
+    rider.root.updateMatrixWorld(true);
+    this.#helmets.getMatrixAt(0, this.#cyclistHelmet);
+    rider.root.visible = false;
+    return rider.body;
+  }
+
+  /**
+   * One scenery cyclist's bicycle, crankset and helmet, in instance `slot` —
+   * #2722: turned to its heading and rolled by its lean about the line
+   * between its tyres, as a rider's root is; the frame and the helmet in its
+   * own colours, the rest of the bicycle untinted.
+   */
+  #placeCyclist(slot: number, cyclist: SceneryCyclist): void {
+    const world = cyclistMatrix(
+      cyclist,
+      this.#cyclistAt,
+      this.#cyclistPosition,
+      this.#cyclistTurn,
+      this.#roll,
+    );
+    for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
+      mesh.setMatrixAt(slot, world);
+      mesh.setColorAt(
+        slot,
+        mesh === this.#frame ? this.#cyclistTint.setHex(cyclist.look.frame) : this.#white,
+      );
+      steerInstance(mesh, slot, 0);
+    }
+    this.#a.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
+    this.#turn.setFromAxisAngle(this.#acrossTheBicycle, cyclist.crankAngle);
+    this.#local.compose(this.#a, this.#turn, this.#unit);
+    this.#cranks.setMatrixAt(slot, this.#matrix.multiplyMatrices(world, this.#local));
+    this.#cranks.setColorAt(slot, this.#white);
+    this.#helmets.setMatrixAt(slot, this.#matrix.multiplyMatrices(world, this.#cyclistHelmet));
+    this.#helmets.setColorAt(slot, this.#cyclistTint.setHex(cyclist.look.helmet));
   }
 
   dispose(): void {
@@ -16997,6 +17098,31 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
     : new RealisticRiderBelt(world.body, world.bicycle, world.rider);
 }
 
+/** #2722: the vertical, a bicycle's own long axis, and no scale, for {@link cyclistMatrix}. */
+const CYCLIST_UP = new Vector3(0, 1, 0);
+const CYCLIST_ALONG = new Vector3(0, 0, 1);
+const CYCLIST_SCALE = new Vector3(1, 1, 1);
+
+/**
+ * A scenery cyclist's bicycle in the world — #2722: at its place, turned to
+ * its heading about the vertical and rolled by its lean about its own `+z`,
+ * exactly as `RealisticRiderBelt` turns and rolls a rider's root, so the body
+ * `PeopleBelt` draws with the same matrix sits on the bicycle drawn with it.
+ * Written into `into`; the other three are scratch.
+ */
+function cyclistMatrix(
+  cyclist: SceneryCyclist,
+  into: Matrix4,
+  position: Vector3,
+  turn: Quaternion,
+  roll: Quaternion,
+): Matrix4 {
+  position.set(cyclist.x, cyclist.y, cyclist.z);
+  turn.setFromAxisAngle(CYCLIST_UP, Math.atan2(cyclist.headingX, cyclist.headingZ));
+  turn.multiply(roll.setFromAxisAngle(CYCLIST_ALONG, cyclist.lean));
+  return into.compose(position, turn, CYCLIST_SCALE);
+}
+
 /**
  * The people — #1541 (`people.ts` places them, `gait.ts` moves them,
  * `people-body.ts` cuts and dresses their body). Two draw calls, whatever is
@@ -17031,6 +17157,17 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
  *
  * Both materials are constructed here and breathe the realistic air (ADR
  * 0026 D-11, #622). Neither casts a shadow.
+ *
+ * ## And the scenery cyclists' bodies — #2722
+ *
+ * A scenery cyclist (`scenery-cyclists.ts`) is this same cut body, seated on
+ * the realistic bicycle: `RealisticRiderBelt` §`ridingPose` poses it by the
+ * realistic rider's own joints at `people-body.ts` §`RIDE_PHASES` phases of a
+ * crank's turn, and each phase is baked into the same texture, after the
+ * gaits', in metres of the bicycle's own frame. A cyclist is one more
+ * instance of the bodies' draw, at its bicycle's matrix, its phase its crank
+ * angle's, in its kit's colours — so the bodies' one call draws them too, and
+ * they go when the people are switched off.
  */
 export class PeopleBelt {
   readonly #group = new Group();
@@ -17059,22 +17196,32 @@ export class PeopleBelt {
   readonly #turn = new Quaternion();
   readonly #scale = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
+  readonly #roll = new Quaternion();
+  /** #2722: which bodies the last frame's scenery cyclists are. @see cyclistBodies */
+  #cyclistBodies = { first: 0, count: 0 };
   #shown = true;
   #switchedOn = true;
 
-  constructor(body: Object3D) {
-    const baked = bakedPeople(body);
+  /**
+   * @param ride #2722: the body seated on the bicycle at a crank angle, its
+   * skeleton posed — `RealisticRiderBelt` §`ridingPose` — for the cyclists'
+   * phases of the texture.
+   */
+  constructor(body: Object3D, ride: (crankAngle: number) => SkinnedMesh) {
+    const baked = bakedPeople(body, ride);
     this.triangles = baked.geometry.index === null ? 0 : baked.geometry.index.count / 3;
     this.standOff = baked.standOff;
     this.#animation = baked.animation;
-    this.#bodyLooks = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
-    this.#bodyMotion = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
+    // #2722: room for the scenery cyclists' bodies after the people's.
+    const bodies = PEOPLE_NEAR_MAX + SCENERY_CYCLISTS_MAX;
+    this.#bodyLooks = new InstancedBufferAttribute(new Float32Array(bodies * 4), 4);
+    this.#bodyMotion = new InstancedBufferAttribute(new Float32Array(bodies * 4), 4);
     this.#bodyLooks.setUsage(DynamicDrawUsage);
     this.#bodyMotion.setUsage(DynamicDrawUsage);
     baked.geometry.setAttribute('oylLook', this.#bodyLooks);
     baked.geometry.setAttribute('oylMotion', this.#bodyMotion);
     const bodyMaterial = peopleBodyMaterial(this.#animation, baked.vertices);
-    this.#bodies = new InstancedMesh(baked.geometry, bodyMaterial, PEOPLE_NEAR_MAX);
+    this.#bodies = new InstancedMesh(baked.geometry, bodyMaterial, bodies);
     this.#bodies.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#bodies.count = 0;
     this.#bodies.frustumCulled = false;
@@ -17113,6 +17260,11 @@ export class PeopleBelt {
     return this.#impostors;
   }
 
+  /** Which of the bodies the last frame's scenery cyclists are — #2722's read-back. */
+  get cyclistBodies(): { readonly first: number; readonly count: number } {
+    return this.#cyclistBodies;
+  }
+
   /** Every material the people wear. For the D-11 assertion. */
   get materials(): readonly Material[] {
     return this.#materials;
@@ -17137,9 +17289,18 @@ export class PeopleBelt {
     this.#switchedOn = on;
   }
 
-  /** This frame's people. */
-  update(people: PeopleInView | undefined): void {
-    const drawn = this.#shown && this.#switchedOn ? (people ?? NO_PEOPLE) : NO_PEOPLE;
+  /**
+   * Whether this belt draws anybody — #2722: the scenery cyclists' bicycles
+   * are drawn exactly when their bodies are, so they go with the people.
+   */
+  get drawing(): boolean {
+    return this.#shown && this.#switchedOn;
+  }
+
+  /** This frame's people, and since #2722 the scenery cyclists' bodies after them. */
+  update(people: PeopleInView | undefined, cyclists: readonly SceneryCyclist[] = []): void {
+    const drawn = this.drawing ? (people ?? NO_PEOPLE) : NO_PEOPLE;
+    const riding = this.drawing ? cyclists.slice(0, SCENERY_CYCLISTS_MAX) : [];
     drawn.near.forEach((person, index) => {
       this.#place(this.#bodies, index, person, true);
       this.#bodyLooks.setXYZW(
@@ -17163,7 +17324,20 @@ export class PeopleBelt {
       const pose = gaitPose(person.gait, person.phase);
       this.#farMotion.setXYZW(index, person.yaw, pose.left.hip, pose.right.hip, person.look.hair);
     });
-    this.#bodies.count = drawn.near.length;
+    riding.forEach((cyclist, at) => {
+      const index = drawn.near.length + at;
+      this.#bodies.setMatrixAt(
+        index,
+        cyclistMatrix(cyclist, this.#matrix, this.#position, this.#turn, this.#roll),
+      );
+      const look = cyclist.look;
+      this.#bodyLooks.setXYZW(index, look.skin, look.jersey, look.shorts, look.shoes);
+      const turn = cyclist.crankAngle / (2 * Math.PI);
+      this.#bodyMotion.setXYZW(index, RIDE_GAIT_INDEX, turn - Math.floor(turn), look.hair, 0);
+    });
+    const bodies = drawn.near.length + riding.length;
+    this.#cyclistBodies = { first: drawn.near.length, count: riding.length };
+    this.#bodies.count = bodies;
     this.#impostors.count = drawn.far.length;
     for (const attribute of [
       this.#bodies.instanceMatrix,
@@ -17175,7 +17349,7 @@ export class PeopleBelt {
     ]) {
       attribute.needsUpdate = true;
     }
-    this.#bodies.visible = drawn.near.length > 0;
+    this.#bodies.visible = bodies > 0;
     this.#impostors.visible = drawn.far.length > 0;
   }
 
@@ -17222,9 +17396,10 @@ function turnBoneInWorld(bone: Bone, axis: Vector3, angle: number): void {
 
 /**
  * The rider's body cut to a person's, dressed by region, and posed at every
- * phase of both gaits into the animation texture — #1541. @see PeopleBelt
+ * phase of both gaits into the animation texture — #1541 — and since #2722
+ * seated by `ride` at every phase of a crank's turn after them. @see PeopleBelt
  */
-function bakedPeople(body: Object3D): BakedPeople {
+function bakedPeople(body: Object3D, ride: (crankAngle: number) => SkinnedMesh): BakedPeople {
   const holder = cloneSkinned(body);
   let skinned: SkinnedMesh | undefined;
   holder.traverse((node) => {
@@ -17466,6 +17641,36 @@ function bakedPeople(body: Object3D): BakedPeople {
       }
     }
   });
+  // #2722: the cyclists' phases — the same clothed vertices, each skinned by
+  // the seated rider's skeleton and put in the bicycle's frame, in metres. No
+  // floor: the bicycle's origin is on the road, where the tyres stand.
+  for (let phase = 0; phase < RIDE_PHASES; phase += 1) {
+    const seated = ride((2 * Math.PI * phase) / RIDE_PHASES);
+    for (let vertex = 0; vertex < kept; vertex += 1) {
+      scratch.set(
+        clothed[vertex * 3] as number,
+        clothed[vertex * 3 + 1] as number,
+        clothed[vertex * 3 + 2],
+      );
+      seated.applyBoneTransform(cut.kept[vertex] as number, scratch);
+      scratch.applyMatrix4(seated.matrixWorld);
+      posed[vertex * 3] = scratch.x;
+      posed[vertex * 3 + 1] = scratch.y;
+      posed[vertex * 3 + 2] = scratch.z;
+    }
+    const normals = vertexNormals(posed, cut.indices);
+    const row = animationRow(RIDE_GAIT_INDEX, phase);
+    for (let vertex = 0; vertex < kept; vertex += 1) {
+      const at = (row * width + vertex) * 4;
+      const normalAt = ((row + ANIMATION_ROWS / 2) * width + vertex) * 4;
+      for (let axis = 0; axis < 3; axis += 1) {
+        data[at + axis] = DataUtils.toHalfFloat(posed[vertex * 3 + axis] as number);
+        data[normalAt + axis] = DataUtils.toHalfFloat(normals[vertex * 3 + axis] as number);
+      }
+      data[at + 3] = DataUtils.toHalfFloat(1);
+      data[normalAt + 3] = DataUtils.toHalfFloat(0);
+    }
+  }
   const animation = new DataTexture(data, width, height, RGBAFormat, HalfFloatType);
   animation.minFilter = NearestFilter;
   animation.magFilter = NearestFilter;
@@ -17515,12 +17720,15 @@ ${PEOPLE_UNPACK}`,
         ),
         '#include <beginnormal_vertex>',
         /* glsl */ `
-float oylAt = oylMotion.y * ${glslFloat(GAIT_PHASES)};
+int oylGait = int(oylMotion.x + 0.5);
+// #2722: a scenery cyclist's ride is baked at fewer phases than a gait.
+int oylPhases = oylGait == ${String(RIDE_GAIT_INDEX)} ? ${String(RIDE_PHASES)} : ${String(GAIT_PHASES)};
+float oylAt = oylMotion.y * float(oylPhases);
 float oylLow = floor(oylAt);
 float oylBlend = oylAt - oylLow;
-int oylBase = int(oylMotion.x + 0.5) * ${String(GAIT_PHASES)};
-int oylRowA = oylBase + int(oylLow) % ${String(GAIT_PHASES)};
-int oylRowB = oylBase + (int(oylLow) + 1) % ${String(GAIT_PHASES)};
+int oylBase = oylGait * ${String(GAIT_PHASES)};
+int oylRowA = oylBase + int(oylLow) % oylPhases;
+int oylRowB = oylBase + (int(oylLow) + 1) % oylPhases;
 int oylColumn = int(oylVertex + 0.5);
 vec3 objectNormal = normalize(mix(
   texelFetch(oylAnimation, ivec2(oylColumn, oylRowA + ${String(ANIMATION_ROWS / 2)}), 0).xyz,
@@ -17692,6 +17900,53 @@ float oylCapsule(vec2 p, vec2 a, vec2 b, float r) {
  */
 export function peopleShownOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.peopleShown(on);
+}
+
+/** A point a view drew something at. */
+interface DrawnPoint3 {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/**
+ * The scenery cyclists a view drew in its last frame — #2722, read back off
+ * its meshes, never off the frame: each one's bicycle (the realistic frames'
+ * instances after the riders'), its body (the people's bodies' instances
+ * after the people's), and the rider's own bicycle (the first instance).
+ * Empty where the realistic world drew none; `undefined` with no realistic world.
+ *
+ * @test-facing the browser gate's read-back, by `game-harness.ts`
+ */
+export function sceneryCyclistsDrawnOf(view: GameView):
+  | {
+      readonly bicycles: readonly DrawnPoint3[];
+      readonly bodies: readonly DrawnPoint3[];
+      readonly rider: DrawnPoint3 | undefined;
+    }
+  | undefined {
+  if (!(view instanceof ThreeGameView)) return undefined;
+  const riders = view.realisticRiders;
+  const people = view.people;
+  if (riders === undefined || people === undefined) return undefined;
+  const at = (mesh: InstancedMesh, index: number): DrawnPoint3 => {
+    const matrix = new Matrix4();
+    mesh.getMatrixAt(index, matrix);
+    const place = new Vector3().setFromMatrixPosition(matrix);
+    return { x: place.x, y: place.y, z: place.z };
+  };
+  const frames = riders.frames;
+  const bikes = riders.cyclistSlots;
+  const bodies = people.cyclistBodies;
+  const drawn = (mesh: InstancedMesh, slots: { first: number; count: number }): DrawnPoint3[] =>
+    mesh.visible && mesh.count >= slots.first + slots.count
+      ? [...Array(slots.count).keys()].map((index) => at(mesh, slots.first + index))
+      : [];
+  return {
+    bicycles: drawn(frames, bikes),
+    bodies: drawn(people.bodies, bodies),
+    rider: frames.visible && frames.count > 0 && bikes.first > 0 ? at(frames, 0) : undefined,
+  };
 }
 
 /**
@@ -23089,7 +23344,8 @@ class RealisticDrawing {
       world.litter,
     );
     this.lampModelled = world.roadside !== undefined;
-    this.people = new PeopleBelt(world.body);
+    // #2722: the scenery cyclists' bodies seated by the riders' own pose.
+    this.people = new PeopleBelt(world.body, (crankAngle) => this.riders.ridingPose(crankAngle));
     this.decorations = new DecorationBelt('realistic');
     this.villageHouses = new VillageHouseBelt(world.houses);
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
@@ -25001,7 +25257,10 @@ class ThreeGameView implements GameView {
       realisticFrame && this.#remoteControl !== 'no-realistic-rule'
         ? realisticRemoteSplit(frame.markers)
         : undefined;
-    this.#realistic?.riders.place(split?.realistic ?? frame.markers);
+    // #2722: and the scenery cyclists' bicycles after them — exactly while
+    // their bodies are drawn, which is while the people are.
+    const cyclists = this.#realistic?.people.drawing === true ? (frame.cyclists ?? []) : [];
+    this.#realistic?.riders.place(split?.realistic ?? frame.markers, cyclists);
     // #679: the gantries at the lines in reach, and none anywhere else —
     // and since #966 in both worlds, each drawing its own, with the wordmark
     // on the start gate and the billboards. The hidden world's draw nothing.
@@ -25022,7 +25281,7 @@ class ThreeGameView implements GameView {
     this.#decorations.update(frame.streets, frame.camera, holiday, this.#decorationKinds);
     // #1541: and who walks them, in the realistic world only.
     // #1835: and none the near plane would cut, at a frame wide enough to.
-    this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near));
+    this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near), cyclists);
     // #1814: and a Delivery round's pieces, on a frame that carries one;
     // #2453: its far markers enlarged by their distance from the eye.
     this.#updateDelivery(frame.delivery, rig.eye, frame.water.seconds);
@@ -25536,6 +25795,11 @@ class ThreeGameView implements GameView {
   /** @see peopleDrawnOf — the realistic world's, whether or not it is the one drawn. */
   get people(): PeopleBelt | undefined {
     return this.#realistic?.people;
+  }
+
+  /** @see sceneryCyclistsDrawnOf — the realistic world's riders, whether or not it is the one drawn. */
+  get realisticRiders(): RealisticRiderBelt | undefined {
+    return this.#realistic?.riders;
   }
 
   /** @see peopleBodyFragmentsOf */

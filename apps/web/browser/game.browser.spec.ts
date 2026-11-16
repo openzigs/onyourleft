@@ -69,11 +69,13 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
+import { CLEAR_METRES, SCENERY_CYCLISTS_MAX } from '../src/game/scenery-cyclists';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_SCENERY_CYCLIST_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
   STYLISED_SCENE_DRAW_CALLS,
@@ -3886,6 +3888,46 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // The owner's look of PR #1615: a flat body lights every triangle as a
     // facet, whatever normals the animation texture holds.
     expect(people.bodyFragmentsFlat).toBe(0);
+  });
+
+  test('#2722 scenery cyclists: drawn on their own side, never through the rider, none in a race, beside the pacer or with the people off, in no call of their own beside people', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { sceneryCyclists: cyclists } = await realistic(harnessRun);
+    const measured =
+      `${String(cyclists.drawn)} drawn (${cyclists.kinds.join(', ')}), ${String(cyclists.wrongSide)} on the wrong side; ` +
+      `${String(cyclists.level)} level with the rider, nearest ${cyclists.leastLevelGap.toFixed(2)} m across the road, ` +
+      `${cyclists.leastLevelGapInLane.toFixed(2)} m left in their lanes; body off its bicycle ${cyclists.bodyOffBicycle.toFixed(3)} m; ` +
+      `${String(cyclists.drawnInRaceModes)} in race modes, ${String(cyclists.drawnPeopleOff)} with the people off; ` +
+      `${String(cyclists.drawCalls)} draw calls added beside people, ${String(cyclists.drawCallsAlone)} with nobody on the pavements; ` +
+      `${String(cyclists.triangles)} triangles a cyclist; ${String(cyclists.pixels)} pixels changed`;
+    testInfo.annotations.push({ type: 'scenery cyclists', description: measured });
+    console.log(`scenery cyclists — ${measured}`);
+    // Somebody was drawn, of every kind, and some of them level with the rider.
+    expect(cyclists.drawn).toBeGreaterThan(0);
+    expect(cyclists.kinds).toEqual(['faster', 'oncoming', 'slower']);
+    expect(cyclists.level).toBeGreaterThan(0);
+    // Each on its own side of the drawn road, and level with the rider a
+    // handlebar and the air between clear of them across it.
+    expect(cyclists.wrongSide).toBe(0);
+    expect(cyclists.leastLevelGap).toBeGreaterThan(CLEAR_METRES - 0.1);
+    // The control: left in their lanes, some of the same cyclists would be drawn through the rider.
+    expect(cyclists.leastLevelGapInLane).toBeLessThan(CLEAR_METRES - 0.1);
+    // One body on each bicycle, where it is drawn.
+    expect(cyclists.bodyOffBicycle).toBeLessThan(0.001);
+    // None in a race, beside the pacer, or with the people switched off.
+    expect(cyclists.drawnInRaceModes).toBe(0);
+    expect(cyclists.drawnPeopleOff).toBe(0);
+    // Instances of meshes already drawn: beside people, no call of their own;
+    // with nobody on the pavements, the people's bodies' one call, which the
+    // frame then makes for them alone. And what is drawn is there.
+    expect(cyclists.drawCalls).toBe(0);
+    expect(cyclists.drawCallsAlone).toBe(1);
+    expect(cyclists.triangles).toBeGreaterThan(0);
+    expect(SCENERY_CYCLISTS_MAX * cyclists.triangles).toBeLessThanOrEqual(
+      REALISTIC_SCENERY_CYCLIST_TRIANGLES,
+    );
+    expect(cyclists.pixels).toBeGreaterThan(10);
   });
 
   test('#1547 a town on the flat: the drawn ground under a mapped block’s centre footprint is within 1 m, and over 5 m without the levelling', async ({

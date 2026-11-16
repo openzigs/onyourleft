@@ -42,6 +42,7 @@ import type { KitColour } from '@onyourleft/store';
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { MappedBuildingsInView } from './mapped-buildings';
 import type { PeopleInView } from './people';
+import type { SceneryCyclist } from './scenery-cyclists';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
@@ -474,6 +475,16 @@ export interface SceneFrame {
    * the realistic world only. Absent, or empty, where the rung draws nobody.
    */
   readonly people?: PeopleInView | undefined;
+  /**
+   * The other cyclists on the road — #2722 (`scenery-cyclists.ts`): oncoming
+   * riders, slower riders the rider catches and faster ones who overtake,
+   * each in their lane and never through the rider. Scenery only: they are
+   * not {@link markers}, so nothing that reads the riders — a draft, a race,
+   * the name tags — sees one. Drawn in the realistic world only, at the rung
+   * that draws {@link people}, and switched off with them; placed only on a
+   * free ride or a workout. Absent, or empty, everywhere else.
+   */
+  readonly cyclists?: readonly SceneryCyclist[] | undefined;
   /**
    * The cross streets in view — #1565 (`cross-streets.ts`): a side road a
    * short way off the route at each junction, mapped where the corridor has
