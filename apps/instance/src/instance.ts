@@ -56,7 +56,11 @@ import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
-import { createOperate, type OperateAnalysisSources } from './operate/operate.ts';
+import {
+  createOperate,
+  type OperateAnalysisSources,
+  type OperateRoomSources,
+} from './operate/operate.ts';
 import { statusSources, type DiskProbe } from './operate/status.ts';
 import { createSegments, type Segments } from './segments/segments.ts';
 import { createSync, type Sync } from './sync/sync.ts';
@@ -301,6 +305,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       ? Promise.resolve(undefined)
       : importSecretKey(server.secretKey).catch(() => undefined);
   let rooms: Rooms | undefined;
+  /** What the owner's Rooms reads and ends with (#2612), once there are rooms. */
+  let operateRooms: OperateRoomSources | undefined;
   let voice: RoomVoice | undefined;
   let voiceModeration: VoiceModeration | undefined;
   let voiceReady: Promise<void> = Promise.resolve();
@@ -695,6 +701,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         },
         ...(roomsVoice === undefined ? {} : { voice: roomsVoice }),
       });
+      // #2612: the owner's Rooms, from the workers, ended through the router.
+      operateRooms = {
+        live: () => router.roomSummaries(),
+        end: (roomId, commit) => router.endRoom(roomId, commit),
+        rooms,
+        nameFor,
+      };
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
       // the boundary it ends on, whether or not anybody asks again (#892).
@@ -972,6 +985,20 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
                 disk: NODE_DISK_PROBE,
               }),
               analysis: operateAnalysis,
+              ...(operateRooms === undefined ? {} : { rooms: operateRooms }),
+              // #2613: the keys shown, and the routine rotation made over the
+              // operator log's transaction with the same secret and origin.
+              keys: {
+                keys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: server.secretKey,
+                    origin: server.origin,
+                    now: () => Math.floor(now() / 1000),
+                    log,
+                  }),
+              },
               problems,
             }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),

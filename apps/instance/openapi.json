@@ -8581,6 +8581,206 @@
         }
       }
     },
+    "/v1/operate/keys": {
+      "get": {
+        "operationId": "getOperateKeys",
+        "summary": "The instance’s keys (#2613), public material only — what `instance-key show` prints: their state (`ready`, or `no-secret`, `no-origin`, `no-keys`, `unreadable`, `busy`), the identity key’s full SHA-256 fingerprint (52 base32 characters, as a rider’s device shows it), the instance card (`oyl-instance:<origin>#<52 characters>`, whole), the current encryption key’s serial, when it was made and when the instance rotates it by itself (30 days on), and how many superseded encryption keys are still held (each for 7 days after its successor). **Never** a private half, nor anything derived from `OYL_INSTANCE_SECRET_KEY`. Changes nothing, so it logs nothing. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "no-secret",
+                        "no-origin",
+                        "no-keys",
+                        "unreadable",
+                        "busy"
+                      ]
+                    },
+                    "fingerprint": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "card": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "current": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "serial": {
+                          "type": "integer"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "rotatesAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "serial",
+                        "createdAt",
+                        "rotatesAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "olderHeld": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "fingerprint",
+                    "card",
+                    "current",
+                    "olderHeld"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/operate/keys/rotate": {
+      "post": {
+        "operationId": "rotateOperateKey",
+        "summary": "Rotate the encryption key (#2613), with `{ confirm: 'rotate' }` — else `validation_failed` and nothing is written: what `instance-key rotate` does, with no `--drop-old` and no `--serial-above`. The old key keeps opening requests for 7 days, devices pick the new one up from `GET /v1/instance/keys` by themselves, and nobody pins again. It takes the key lease: while the instance’s own maintenance pass holds it the answer is `busy` and nothing is written. Logged `instance_key_rotate` (`refused` with `busy`) in the same transaction as the rotation. `rotate --drop-old`, `rotate-identity` and `reset` stay on the CLI. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirm": {
+                    "type": "string",
+                    "enum": [
+                      "rotate"
+                    ]
+                  }
+                },
+                "required": [
+                  "confirm"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "rotated",
+                        "busy"
+                      ]
+                    },
+                    "serial": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "outcome",
+                    "serial"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/operate/log": {
       "get": {
         "operationId": "getOperatorLog",
@@ -8641,7 +8841,8 @@
                               "analysis_model_checked",
                               "admin_code_minted",
                               "admin_sign_in",
-                              "admin_refused"
+                              "admin_refused",
+                              "room_ended"
                             ]
                           },
                           "detail": {
@@ -8765,6 +8966,231 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/operate/rooms": {
+      "get": {
+        "operationId": "getOperateRooms",
+        "summary": "Every open rider’s room (#2612), newest first: its id and short code, whether it is a group ride, a race or a lap race, private or public, its phase (`lobby`, `countdown`, `riding`, `finished`), when it was made, its host’s display name, and the display name of each rider in it — read from the room worker holding it — with a count. A name the owner may not see is `null`, “a rider”. **Never** a rider’s place, distance, speed, power, heart rate or Discord id. Changes nothing, so it logs nothing. `unavailable` where the instance has no room router. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rooms": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "roomId": {
+                            "type": "string"
+                          },
+                          "shortCode": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "group",
+                              "race",
+                              "lap-race"
+                            ]
+                          },
+                          "visibility": {
+                            "type": "string",
+                            "enum": [
+                              "private",
+                              "public"
+                            ]
+                          },
+                          "phase": {
+                            "type": "string",
+                            "enum": [
+                              "lobby",
+                              "countdown",
+                              "riding",
+                              "finished"
+                            ]
+                          },
+                          "openedAt": {
+                            "type": "string"
+                          },
+                          "host": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "riders": {
+                            "type": "array",
+                            "items": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "riderCount": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "roomId",
+                          "shortCode",
+                          "kind",
+                          "visibility",
+                          "phase",
+                          "openedAt",
+                          "host",
+                          "riders",
+                          "riderCount"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "rooms"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/operate/rooms/{roomId}/end": {
+      "post": {
+        "operationId": "endOperateRoom",
+        "summary": "End a rider’s room (#2612): `confirm` must be the room’s short code and `reason` one of `abuse`, `stuck`, `maintenance`, `other`, or it is `validation_failed` and nothing changes. The room is over, as a finished one is: its route deleted, every socket in it sent `refuse room-closed` and closed `4005`, a rejoin refused, its voice channel deleted, and every result already final kept. A rider in it rides on alone; nothing is sent to anybody’s trainer. Logged `room_ended` with the reason, its kind and how many riders were in it, in the same transaction as the close. `not_found` for a room that is not an open rider’s room. `unavailable` where the instance has no room router. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "abuse",
+                      "stuck",
+                      "maintenance",
+                      "other"
+                    ]
+                  },
+                  "confirm": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "confirm"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "endedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "endedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"

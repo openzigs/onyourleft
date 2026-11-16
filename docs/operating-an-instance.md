@@ -1005,8 +1005,8 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   restore is expected, not a sign of tampering; the snapshot directory you restored from dates it.
 - **Where it is in the app** ([#2603](https://github.com/openzigs/onyourleft/issues/2603)). Signed in
   as the owner, the Instance screen shows **Operate this instance**, which opens
-  `#/settings/instance/operate`: the operator log, newest first, a page at a time, and the list of
-  sections still to come. The deputy and every other rider see no such button, and anybody who opens
+  `#/settings/instance/operate`: the sections below, then the operator log, newest first, a page at
+  a time. The deputy and every other rider see no such button, and anybody who opens
   the address is told only that their account is not the owner. A device that cannot seal — no
   instance card, or a copy of the app loaded from a website — is told so and asks nothing.
 - **Status** ([#2604](https://github.com/openzigs/onyourleft/issues/2604)). The first section of
@@ -1079,6 +1079,43 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   it calls tools** and **Save this model** (offered only after that model's check said `tools-ok`),
   whether your own hosted key is held — set, replaced or removed on the Instance screen, never here —
   the jobs, and **Return to .env**. No model is recommended or picked for you.
+- **Rooms** ([#2612](https://github.com/openzigs/onyourleft/issues/2612)). `GET /v1/operate/rooms`
+  lists every open rider's room, newest first — the rooms Status counts: whether it is a group ride,
+  a race or a lap race, private or public, its phase (waiting to start, counting down, under way,
+  finished), when it was made, its host's display name and the display name of each rider in it,
+  with a count. What is in a room comes from the room worker holding it, asked over its IPC; a room
+  no worker holds has nobody in it. **Only names**: never a rider's place, distance, speed, power,
+  heart rate, Discord id or account id. A name you may not see — a rider who blocked you, say — is
+  shown as "a rider". `POST /v1/operate/rooms/{roomId}/end` ends one, with `reason` (`abuse`,
+  `stuck`, `maintenance` or `other`) and `confirm`, the room's **short code**: the first six
+  characters of its id, shown beside it. In the app, **End room** cannot be pressed until you have
+  typed that code, and the route itself refuses a request without it, so nothing changes and nothing
+  is logged. Ending a room is the same close as a room that is over by itself: its route is deleted
+  (unless another open room rides the same bytes), every socket in it is sent `refuse room-closed`
+  and closed `4005` (§"Room close codes"), a rejoin is refused, and its Discord voice channel is
+  deleted. **Every result already final is kept**, as `docker compose stop` keeps them (§"Shutting
+  down, sleeping and rebooting"); a race ended before it was decided has no published result, like
+  one a restart interrupted. **No rider's trainer is touched**: a rider in an ERG workout inside the
+  room goes on riding on their own, and their device goes on recording. The close and its
+  `room_ended` entry (the reason, the kind and how many riders were in it) are written in one
+  transaction. Rooms an operator opened with `room-open` are not listed. On an instance with no room
+  router — the Durable Object adapter, not deployed — both routes answer `unavailable`.
+- **Instance keys** ([#2613](https://github.com/openzigs/onyourleft/issues/2613)).
+  `GET /v1/operate/keys` shows what `instance-key show` prints, public material only: the keys' state,
+  the identity key's **full** fingerprint, the **instance card** whole (as text and as a QR code, so
+  you can hand it to a rider), the current encryption key's serial, when it was made and when the
+  instance rotates it by itself (30 days on), and how many older encryption keys are still held (each
+  for 7 days after the next was made). Neither private half, nor anything derived from
+  `OYL_INSTANCE_SECRET_KEY`, is ever in it. **Rotate the encryption key** (`POST
+  /v1/operate/keys/rotate` with `{ "confirm": "rotate" }`, typed in the app) does what `instance-key
+  rotate` does, with no `--drop-old` and no `--serial-above`: the old key goes on opening requests for
+  its 7 days, devices pick the new one up from `GET /v1/instance/keys` by themselves, and nobody pins
+  the card again. It takes the same key lease as the instance's own maintenance pass, so while that
+  pass holds it the answer is `busy` and nothing is written. It is logged `instance_key_rotate`
+  (`refused` with `busy`) in the same transaction as the rotation. `rotate --drop-old`,
+  `rotate-identity` and `reset` each make every device pin again, or answer a leak, so they **stay on
+  the CLI** (§"The instance's keys"). The section names them as commands and has no button for them.
+  The instance's own admin pages never read this route through the tunnel (ADR 0069 D-2).
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:

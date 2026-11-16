@@ -30,7 +30,13 @@ afterEach(() => {
   mounted = undefined;
 });
 
-function Harness({ onConfirm }: { readonly onConfirm: () => void | Promise<void> }): JSX.Element {
+function Harness({
+  onConfirm,
+  confirmUnavailable,
+}: {
+  readonly onConfirm: () => void | Promise<void>;
+  readonly confirmUnavailable?: boolean;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -50,6 +56,7 @@ function Harness({ onConfirm }: { readonly onConfirm: () => void | Promise<void>
         confirmLabel="Delete the ride"
         cancelLabel="Keep the ride"
         onConfirm={onConfirm}
+        {...(confirmUnavailable === undefined ? {} : { confirmUnavailable })}
       >
         <p>Deleting a ride cannot be undone.</p>
       </ConfirmDialog>
@@ -221,5 +228,20 @@ describe('ConfirmDialog — #950', () => {
       await settle();
       expect(dialog()?.querySelector('[role="alert"]')).toBeNull();
     });
+  });
+
+  it('confirms nothing while its confirmation cannot act — #2612’s typed code — and stays open', async () => {
+    const onConfirm = vi.fn();
+    mounted = await mount(<Harness onConfirm={onConfirm} confirmUnavailable />);
+    await activateWithKeyboard(button('Delete it'));
+    await settle();
+    const confirm = button('Delete the ride');
+    // In the tab order, and said to be unavailable.
+    expect(confirm.disabled).toBe(false);
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
+    await activateWithKeyboard(confirm);
+    await settle();
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(dialog()).not.toBeNull();
   });
 });

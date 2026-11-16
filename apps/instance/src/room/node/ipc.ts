@@ -10,7 +10,13 @@ import type { ItemEvent } from '@onyourleft/protocol';
 
 import type { Admission, RoomPhase } from '../core/room.ts';
 import type { RoomPlan } from '../room-plan.ts';
-import type { HostMetrics, RoomFlagRaised, RoomResult, RoomSeat } from './room-host.ts';
+import type {
+  HostedRoomSummary,
+  HostMetrics,
+  RoomFlagRaised,
+  RoomResult,
+  RoomSeat,
+} from './room-host.ts';
 
 /** What a worker is started with, as its one command-line argument (JSON). */
 export interface WorkerSettings {
@@ -76,6 +82,10 @@ export type ToWorker =
       readonly roomId: string;
       readonly riderId: number;
     }
+  /** What rooms this worker holds, for the owner's Operate area (#2612): ids, phases, athletes. */
+  | { readonly type: 'rooms'; readonly id: number }
+  /** The owner ended a room (#2612): every socket in it closed `4005 room-closed`, and the room let go. */
+  | { readonly type: 'end'; readonly id: number; readonly roomId: string }
   | { readonly type: 'shutdown' };
 
 export type FromWorker =
@@ -115,5 +125,7 @@ export type FromWorker =
   | { readonly type: 'started'; readonly id: number; readonly ok: boolean }
   | { readonly type: 'removed'; readonly id: number; readonly ok: boolean }
   | { readonly type: 'seated'; readonly id: number; readonly seat: RoomSeat | null }
+  | { readonly type: 'rooms'; readonly id: number; readonly rooms: readonly HostedRoomSummary[] }
+  | { readonly type: 'ended'; readonly id: number; readonly ok: boolean }
   | { readonly type: 'flag'; readonly roomId: string; readonly flag: RoomFlagRaised }
   | { readonly type: 'stopped' };

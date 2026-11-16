@@ -943,6 +943,14 @@ export const ANALYSIS_SETTING_FIELD_WORDS = [
 ] as const;
 
 /**
+ * Why the owner ended a room from Operate (#2612): a closed list, so the
+ * reason is a word in the operator log and never free text.
+ */
+export const ROOM_END_REASONS = ['abuse', 'stuck', 'maintenance', 'other'] as const;
+
+export type RoomEndReason = (typeof ROOM_END_REASONS)[number];
+
+/**
  * The operator's actions (#2602): the CLOSED list `operator_log.action` is
  * written from. #2602 adds the operator CLI's commands that change state (the
  * owner's ruling of 2026-11-14 on #2601); each Operate sub-issue adds its own.
@@ -970,6 +978,7 @@ export const OPERATOR_ACTIONS = [
   'admin_code_minted',
   'admin_sign_in',
   'admin_refused',
+  'room_ended',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1021,7 +1030,8 @@ export const OPERATOR_DETAILS: {
   model_key_set: { words: [], counts: [] },
   model_key_clear: { words: ['cleared', 'none_held'], counts: [] },
   instance_key_init: { words: [], counts: [] },
-  instance_key_rotate: { words: [], counts: [] },
+  // #2613: a rotation from the app refused while the key lease is held.
+  instance_key_rotate: { words: ['busy'], counts: [] },
   instance_key_rotate_identity: { words: [], counts: [] },
   instance_key_reset: { words: [], counts: [] },
   load_accounts_add: { words: [], counts: ['added'] },
@@ -1062,6 +1072,9 @@ export const OPERATOR_DETAILS: {
     words: ['code', 'passkey', 'step_up', 'csrf', 'origin', 'rate_limited'],
     counts: ['refused'],
   },
+  // #2612: why the owner ended a room, what kind it was and how many riders
+  // were in it — never the room's id, a rider or a place.
+  room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */

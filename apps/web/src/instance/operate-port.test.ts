@@ -27,6 +27,7 @@ import {
   instanceSeconds,
   keylessOwner,
   operatedWorld,
+  roomMadeBy,
   writeBackups,
   writeInstanceLine,
   writeOperatorEntries,
@@ -460,17 +461,21 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
   it('has no way to restore: the port asks for backups and nothing else that changes one', async () => {
     const { owner } = await operatedWorld();
     const methods = Object.keys(createOperatePort(owner.dependencies)).sort();
-    // #2611's are the AI backend's and #2614's reads the log: none of them touches a backup.
+    // #2611's are the AI backend's, #2612's the rooms', #2613's the keys' and #2614's reads the log: none of them touches a backup.
     expect(methods).toEqual([
       'analysis',
       'backUpNow',
       'backups',
       'checkModel',
       'clearAnalysis',
+      'endRoom',
       'jobs',
+      'keys',
       'localModels',
       'log',
       'problems',
+      'rooms',
+      'rotateKey',
       'setAnalysis',
       'standing',
       'status',
@@ -757,6 +762,184 @@ describe('the AI backend’s reads and writes — #2609, #2610, #2611', () => {
     );
     expect(JSON.stringify(settings)).not.toContain('MARKER');
     expect(JSON.stringify(settings)).toContain('http://ollama:11434/v1');
+  });
+});
+
+describe('the open rooms, and ending one — #2612', () => {
+  /** A room as the instance writes one, every field well-formed. */
+  const ROOM = {
+    roomId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    shortCode: 'a1b2c3',
+    kind: 'race',
+    visibility: 'private',
+    phase: 'riding',
+    openedAt: '2026-11-14T19:30:00.000Z',
+    host: 'Ann',
+    riders: ['Ann', null],
+    riderCount: 2,
+  };
+
+  async function roomsAnswered(answer: () => Response): Promise<unknown> {
+    const { owner, world } = await operatedWorld();
+    return createOperatePort({
+      ...owner.dependencies,
+      send: (url, init) => world.answeringAs('/v1/operate/rooms', answer)(new Request(url, init)),
+    }).rooms();
+  }
+
+  it('carries the room’s own fields and nothing else the instance sent beside them', async () => {
+    const read = await roomsAnswered(() =>
+      Response.json({ rooms: [{ ...ROOM, distanceMetres: 1234.5, powerWatts: 317 }] }),
+    );
+    expect(read).toEqual({
+      kind: 'rooms',
+      rooms: [
+        {
+          roomId: ROOM.roomId,
+          shortCode: 'a1b2c3',
+          kind: 'race',
+          visibility: 'private',
+          phase: 'riding',
+          openedAt: ROOM.openedAt,
+          host: 'Ann',
+          riders: ['Ann', null],
+        },
+      ],
+    });
+  });
+
+  it.each([
+    ['a count that is not its riders’', { riderCount: 3 }],
+    ['a name longer than any the instance takes', { riders: ['x'.repeat(65), null] }],
+    ['a rider who is a number', { riders: [42, null] }],
+    ['a phase it does not know', { phase: 'paused' }],
+    ['a short code that is not one', { shortCode: 'A1 B2' }],
+    ['an id that is a path', { roomId: '../a1b2' }],
+  ] as const)('shows no rooms when a room holds %s', async (_name, change) => {
+    const body = (rooms: unknown[]) => () => Response.json({ rooms });
+    // The control: the same answer, well-formed, is the rooms.
+    expect(await roomsAnswered(body([ROOM]))).toMatchObject({ kind: 'rooms' });
+    expect(await roomsAnswered(body([ROOM, { ...ROOM, ...change }]))).toEqual({
+      kind: 'unreachable',
+    });
+  });
+
+  it('sends no end for a room id the instance could not have written, or a reason it does not take', async () => {
+    const { owner, sent } = await operatedWorld();
+    const port = createOperatePort(owner.dependencies);
+    const before = sent.length;
+    expect(await port.endRoom('../etc', 'other', 'abc')).toEqual({ kind: 'not-ended' });
+    expect(await port.endRoom(ROOM.roomId, 'because' as 'other', 'a1b2c3')).toEqual({
+      kind: 'not-ended',
+    });
+    expect(sent.length).toBe(before);
+  });
+
+  it('is told an end the owner’s own instance refused, for a wrong code, as not ended', async () => {
+    const { owner, rider, approveRider, world } = await operatedWorld();
+    await approveRider();
+    const room = await roomMadeBy(world, rider.athleteId(), 'race');
+    const port = createOperatePort(owner.dependencies);
+    expect(await port.endRoom(room, 'other', 'zzzzzz')).toEqual({ kind: 'not-ended' });
+    const read = await port.rooms();
+    expect(read.kind === 'rooms' ? read.rooms.map((each) => each.roomId) : read).toEqual([room]);
+    expect(await port.endRoom(room, 'other', room.slice(0, 6))).toMatchObject({ kind: 'ended' });
+    expect(await port.rooms()).toEqual({ kind: 'rooms', rooms: [] });
+  });
+});
+
+describe('the instance’s keys, and the routine rotation — #2613', () => {
+  it('reads the owner the card and fingerprint whole, as the instance shows them', async () => {
+    const { owner, world } = await operatedWorld();
+    const shown = await world.instanceKeys.show();
+    const read = await createOperatePort(owner.dependencies).keys();
+    expect(read).toMatchObject({
+      kind: 'keys',
+      state: 'ready',
+      card: shown.card,
+      // The form a rider's device shows: the card's own last 52 characters.
+      fingerprint: shown.card.slice(-52),
+      olderHeld: 0,
+    });
+  });
+
+  it('rotates, reads the new key back, and the device goes on sealing with its pin unchanged', async () => {
+    const { owner, world } = await operatedWorld();
+    const port = createOperatePort(owner.dependencies);
+    const pinned = owner.pin();
+    expect(pinned).toBeDefined();
+    const before = await port.keys();
+    const rotated = await port.rotateKey('rotate');
+    if (rotated.kind !== 'rotated' || before.kind !== 'keys') {
+      throw new Error(`not rotated: ${JSON.stringify(rotated)}`);
+    }
+    expect(rotated.serial).toBeGreaterThan(before.current?.serial ?? 0);
+    // A new sealed request from the same session is answered, and the pin did not move.
+    const after = await port.keys();
+    expect(after).toMatchObject({
+      kind: 'keys',
+      current: { serial: rotated.serial },
+      olderHeld: 1,
+      card: before.card,
+    });
+    expect(await port.standing()).toBe('owner');
+    expect(owner.pin()).toBe(pinned);
+    // What every device reads names the new key.
+    const served = (await (
+      await world.instance.handler(new Request('https://ride.example/v1/instance/keys'))
+    ).json()) as { statements: { statement: { serial: number } }[] };
+    expect(served.statements[0]?.statement.serial).toBe(rotated.serial);
+  });
+
+  it('sends nothing for a word that is not rotate, and the deputy is told it is not the owner', async () => {
+    const { owner, deputy, sent } = await operatedWorld();
+    const before = sent.length;
+    expect(await createOperatePort(owner.dependencies).rotateKey('Rotate')).toEqual({
+      kind: 'not-rotated',
+    });
+    expect(sent.length).toBe(before);
+    const port = createOperatePort(deputy.dependencies);
+    expect(await port.keys()).toEqual({ kind: 'not-owner' });
+    expect(await port.rotateKey('rotate')).toEqual({ kind: 'not-owner' });
+  });
+
+  /** The keys as the instance writes them, every field well-formed. */
+  const KEYS = {
+    state: 'ready',
+    fingerprint: 'A'.repeat(52),
+    card: `oyl-instance:https://ride.example#${'A'.repeat(52)}`,
+    current: {
+      serial: 7,
+      createdAt: '2026-11-14T08:00:00.000Z',
+      rotatesAt: '2026-12-14T08:00:00.000Z',
+    },
+    olderHeld: 0,
+  };
+
+  async function keysAnswered(answer: () => Response): Promise<unknown> {
+    const { owner, world } = await operatedWorld();
+    return createOperatePort({
+      ...owner.dependencies,
+      send: (url, init) => world.answeringAs('/v1/operate/keys', answer)(new Request(url, init)),
+    }).keys();
+  }
+
+  it('carries the keys’ own fields and nothing else the instance sent beside them', async () => {
+    const read = await keysAnswered(() => Response.json({ ...KEYS, privateKey: 'b'.repeat(64) }));
+    expect(read).toEqual({ kind: 'keys', ...KEYS });
+  });
+
+  it.each([
+    ['a card cut short', { card: `oyl-instance:https://ride.example#${'A'.repeat(51)}` }],
+    ['a card with something after it', { card: `${KEYS.card} extra` }],
+    ['a fingerprint in hex, which no device shows', { fingerprint: 'a'.repeat(64) }],
+    ['a state it does not know', { state: 'leaked' }],
+    ['a serial that is not whole', { current: { ...KEYS.current, serial: 1.5 } }],
+  ] as const)('shows no keys when the answer holds %s', async (_name, change) => {
+    expect(await keysAnswered(() => Response.json(KEYS))).toMatchObject({ kind: 'keys' });
+    expect(await keysAnswered(() => Response.json({ ...KEYS, ...change }))).toEqual({
+      kind: 'unreachable',
+    });
   });
 });
 
