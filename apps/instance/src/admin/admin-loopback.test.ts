@@ -104,7 +104,7 @@ describe('the loopback listener’s own origin, Host and cookie (#2643, ADR 0069
       strength: 'code',
     });
     const landing = await world.instance.handler(
-      adminRequest('GET', '/admin', { loopback: PORT, cookie: token }),
+      adminRequest('GET', '/admin/status', { loopback: PORT, cookie: token }),
       ON_LOOPBACK,
     );
     expect(landing.status).toBe(200);

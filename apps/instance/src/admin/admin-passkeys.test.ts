@@ -169,9 +169,9 @@ describe('enrolment from a code session, and sign-in with the passkey across a r
       });
       restarted.push(after);
       const token = await passkeySignIn(after.handler, authenticator);
-      const landing = await after.handler(adminRequest('GET', '/admin', { cookie: token }));
+      const landing = await after.handler(adminRequest('GET', '/admin/status', { cookie: token }));
       expect(landing.status).toBe(200);
-      expect(await landing.text()).toContain('signed in as the instance’s owner, with a passkey');
+      expect(await landing.text()).toContain('Signed in as the instance’s owner with a passkey');
       expect(await sessionRow(world, token)).toMatchObject({
         athleteId: world.owner.athleteId,
         strength: 'passkey',
@@ -254,7 +254,7 @@ describe('enrolment from a code session, and sign-in with the passkey across a r
       await enrolled(world, await softwareAuthenticator('es256'), false);
     expect(await passkeysOf(world)).toHaveLength(10);
     const full = await codeSession(world);
-    const fullCsrf = await csrfOn(handler, full, '/admin');
+    const fullCsrf = await csrfOn(handler, full, '/admin/status');
     const page = await (
       await handler(adminRequest('GET', '/admin/passkeys', { cookie: full }))
     ).text();
@@ -760,8 +760,11 @@ describe('the operator CLI’s admin-passkeys (#2642)', () => {
     const report = await adminPasskeysRevoke(paths(world), passkey.id);
     expect(report).toEqual({ command: 'admin-passkeys revoke', id: passkey.id, sessionsEnded: 1 });
     // The next request of the session it opened is refused.
-    const next = await world.instance.handler(adminRequest('GET', '/admin', { cookie: live }));
+    const next = await world.instance.handler(
+      adminRequest('GET', '/admin/status', { cookie: live }),
+    );
     expect(next.status).toBe(303);
+    expect(next.headers.get('location')).toBe('/admin/sign-in');
     expect(await passkeysOf(world)).toEqual([]);
     await expect(adminPasskeysRevoke(paths(world), passkey.id)).rejects.toThrow(/no admin passkey/);
     await expect(adminPasskeysRevoke(paths(world), 'not-an-id')).rejects.toThrow(
@@ -1117,7 +1120,8 @@ describe('no secret and no coordinate in anything the passkey pages say (#2642, 
     await adminPasskeysConfirm(paths(world), passkey?.id as string);
     const token = await passkeySignIn(handler, one);
     await keep(await handler(adminRequest('GET', '/admin/passkeys', { cookie: token })));
-    await keep(await handler(adminRequest('GET', '/admin', { cookie: token })));
+    await keep(await handler(adminRequest('GET', '/admin/status', { cookie: token })));
+    await keep(await handler(adminRequest('GET', '/admin/log', { cookie: token })));
     await keep(
       await handler(
         adminRequest('POST', '/admin/sign-in/passkey', {

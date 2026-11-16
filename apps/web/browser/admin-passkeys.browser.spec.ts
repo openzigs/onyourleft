@@ -110,10 +110,12 @@ test.describe('the admin passkeys, through Chromium’s virtual authenticator (#
 
     await instance.restart();
     await passkeySignIn(page);
-    await expect(page).toHaveURL(`${instance.origin}/admin`);
+    // A sign-in lands on Status (#2645), in the shell, which says how the session was opened.
+    await expect(page).toHaveURL(`${instance.origin}/admin/status`);
     await page.goto(`${instance.origin}/admin`);
+    await expect(page).toHaveURL(`${instance.origin}/admin/status`);
     await expect(
-      page.getByText('You are signed in as the instance’s owner, with a passkey.'),
+      page.getByText('Signed in as the instance’s owner with a passkey, through the tunnel.'),
     ).toBeVisible();
     expect(await instance.sessions()).toBe(1);
   });
@@ -180,6 +182,6 @@ test.describe('the admin passkeys, through Chromium’s virtual authenticator (#
     // The control's control: unrewritten, the same passkey signs in.
     await page.unroute(`${instance.origin}/admin/sign-in/passkey`);
     await passkeySignIn(page);
-    await expect(page).toHaveURL(`${instance.origin}/admin`);
+    await expect(page).toHaveURL(`${instance.origin}/admin/status`);
   });
 });

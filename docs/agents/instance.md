@@ -237,6 +237,14 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         and log source are its own. ⚠️ It grants nothing
                         the tunnel does not: Docker Desktop lets the tunnel
                         container reach it.
+                        Since #2645 the pages: the shell (`admin/pages.ts`),
+                        Status and the operator log, each the route's answer
+                        through that seam and never a store read, answered
+                        from `admin/admin-routes.ts` — which
+                        `admin/pages.test.ts` (headers, CSRF, no session) and
+                        the web a11y gate both read, so a new page is held to
+                        them by being added. Status' words are
+                        `packages/operate-text`'s, which the image now copies.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

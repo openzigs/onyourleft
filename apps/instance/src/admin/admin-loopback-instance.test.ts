@@ -229,19 +229,22 @@ describe('the loopback listener serves /admin and nothing else (#2643)', () => {
     } finally {
       await passkeys.close();
     }
-    const landing = await send(portOf(instance), 'GET', '/admin', {
+    const landing = await send(portOf(instance), 'GET', '/admin/status', {
       ...forged,
       cookie: `${ADMIN_COOKIE}=${token}`,
     });
-    const csrf = /name="csrf" value="([0-9a-f]{64})"/.exec(landing.body)?.[1] as string;
+    // The session's real token, so the revoke is refused for being a code session's, not for a missing token.
+    const csrf = /name="csrf" value="([0-9a-f]{64})"/.exec(landing.body)?.[1];
+    expect(csrf).toBeDefined();
     const revoked = await send(
       portOf(instance),
       'POST',
       '/admin/passkeys/0123456789abcdef/revoke',
       { ...forged, cookie: `${ADMIN_COOKIE}=${token}` },
-      `csrf=${csrf}&id=0123456789abcdef`,
+      `csrf=${String(csrf)}&id=0123456789abcdef`,
     );
     expect(revoked.status).toBe(403);
+    expect(revoked.body).toContain('Revoking a passkey needs a passkey sign-in');
     const after = await openSqlStore(path);
     try {
       expect((await after.listAdminPasskeys()).map((each) => each.id)).toEqual([

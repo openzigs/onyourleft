@@ -1146,8 +1146,17 @@ so the instance gains no new login. The server half is [#2602](https://github.co
 The instance can also serve **admin pages of its own**, at `/admin`, for an owner who wants to run
 it from a browser without the app ([ADR 0069](adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md),
 [#2639](https://github.com/openzigs/onyourleft/issues/2639)). What exists so far is the sign-in and
-the session ([#2641](https://github.com/openzigs/onyourleft/issues/2641)); the pages for each area,
-passkeys and a listener on the server machine itself follow.
+the session ([#2641](https://github.com/openzigs/onyourleft/issues/2641)), the owner's passkeys
+([#2642](https://github.com/openzigs/onyourleft/issues/2642)), a listener on the server machine
+([#2643](https://github.com/openzigs/onyourleft/issues/2643)), and two read-only pages
+([#2645](https://github.com/openzigs/onyourleft/issues/2645)): **Status** (`/admin/status`, where a
+sign-in lands) and the **operator log** (`/admin/log`, 50 entries a page, newest first, *Older
+entries* for the next). Each shows what the app's Operate area shows, in the same words: the page
+asks the instance's own Operate route as the owner, and draws its answer. A log entry that is not
+in the log's own closed words is not drawn, and its row says so. The compare-with-main link is a
+link you open; the instance asks GitHub nothing. The pages for the other areas follow. Every page
+has the instance's name, how you signed in and through which listener, the section links and
+**Sign out**, and reads with no script; only a passkey ceremony needs the page's one script.
 
 - **Off unless you turn them on.** Set `OYL_INSTANCE_ADMIN_PAGES=on` in the `.env` beside
   `compose.yaml` and run `docker compose up -d instance`. Off, `/admin` answers as any address with
@@ -1169,8 +1178,8 @@ passkeys and a listener on the server machine itself follow.
   lifetime of its own, so it goes when the browser closes. The instance ends it after **15 minutes
   without use** and **2 hours after sign-in** whatever its use, and on **Sign out**. It keeps only
   the token's SHA-256. A session opened with a code can read every page and **add one passkey**,
-  and nothing else; the pages that read come with
-  [#2645](https://github.com/openzigs/onyourleft/issues/2645).
+  and nothing else; the pages that read are Status and the operator log
+  ([#2645](https://github.com/openzigs/onyourleft/issues/2645)) so far.
 - **Passkeys** ([#2642](https://github.com/openzigs/onyourleft/issues/2642), ADR 0069 D-1). Signed
   in with a code, open **Passkeys** and **Add a passkey**: the browser asks your authenticator (a
   phone, a security key, the computer's own) to make one, with user verification, Ed25519 or ES256

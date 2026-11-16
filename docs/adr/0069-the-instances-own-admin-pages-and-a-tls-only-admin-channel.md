@@ -709,6 +709,14 @@ the pull request decides it.
 
 Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
+- **2026-11-15** — **D-2's "never forwards a method, a path or a query from the browser" has one
+  admitted exception: the operator log's `cursor`.** The log page (#2645) forwards the browser's
+  `cursor` query value to `GET /v1/operate/log`, and only after the admin layer has checked its
+  shape (`^[A-Za-z0-9_-]{1,128}$`); the route then refuses any cursor this instance did not write.
+  It is the same kind of exception as D-2's validated path parameter: the method and the path stay
+  fixed, and the one value forwarded is checked before it reaches the seam. A later paginated page
+  follows the same rule: one named query parameter, shape-checked in the admin layer, never a
+  query string passed through.
 - **2026-11-15** — What #2643 built differs from D-5 and D-11 Q-C. **Owner ruling, 2026-11-15:**
   the owner accepted (1) and (2) below: "So most items will be available through the tunnel but
   not adding of the passkey. If that is what you are saying I am good with that." (1) Q-C is not

@@ -245,6 +245,19 @@ describe('each rule rejects the failure it is for', () => {
 });
 
 describe('the rules that are easy to get right for the wrong reason', () => {
+  it('does not take a hidden input for a control (#2645), and still fires on an unnamed visible one', () => {
+    const withField = (field: string): string =>
+      CLEAN_BODY.replace(
+        '<button type="button">Start a ride</button>',
+        `${field}\n<button type="button">Start a ride</button>`,
+      );
+    expect(rulesFiredBy(withField('<input type="hidden" name="csrf" value="x" />'))).toEqual([]);
+    expect(rulesFiredBy(withField('<input type="HIDDEN" name="csrf" value="x" />'))).toEqual([]);
+    expect(rulesFiredBy(withField('<input type="text" name="csrf" value="x" />'))).toContain(
+      'control-has-accessible-name',
+    );
+  });
+
   it('does not fire control-has-accessible-name on a label that wraps its input', () => {
     expect(
       rulesFiredBy(

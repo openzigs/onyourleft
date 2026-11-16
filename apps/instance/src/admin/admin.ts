@@ -2,8 +2,10 @@
 
 /**
  * **The instance's own admin pages: the sign-in, the session and the
- * owner's passkeys** (#2641, #2642, ADR 0069 D-1, D-2, D-4, D-8). The Operate
- * pages themselves are #2645's and after.
+ * owner's passkeys** (#2641, #2642, ADR 0069 D-1, D-2, D-4, D-8), and since
+ * #2645 the pages: the shell, Status and the operator log (`pages.ts`),
+ * answered from the admin route table (`admin-routes.ts`). The loopback
+ * listener is #2643's.
  *
  * Mounted only when the operator sets `OYL_INSTANCE_ADMIN_PAGES=on`
  * (`instance.ts`); otherwise `/admin` is `not_found`, as any path with no
@@ -102,6 +104,17 @@
  * instance stops, so a flood cannot grow the append-only log without bound,
  * and a crash loses at most a minute's counts.
  *
+ * ## The pages read the routes, never the store (#2645, ADR 0069 D-2)
+ *
+ * Status is `GET /v1/operate/status` and the log `GET /v1/operate/log`, each
+ * called through {@link AdminSeam} as the owner: what a page shows is the
+ * route's answer. The log's one query, `cursor`, is the route's own cursor
+ * handed back: it is held to the shape the route writes
+ * ({@link LOG_CURSOR}) before it is put into the path the seam is called
+ * with, and the route checks it again. No other part of the browser's request
+ * reaches the seam. The Passkeys page is the one page drawn from the store:
+ * the passkeys are the admin layer's own (#2642), no route's.
+ *
  * Nothing here renders a token, a code, a key or a coordinate.
  */
 
@@ -113,7 +126,9 @@ import {
   sweepPeriodMs,
   type RateLimit,
 } from '../auth/rate-limit.ts';
-import { escapeHtml, STYLE } from '../html.ts';
+import type { OperateStatusAnswer } from '@onyourleft/operate-text';
+
+import { escapeHtml } from '../html.ts';
 import type { ModeratorRole } from '../moderation/moderation.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
@@ -123,8 +138,22 @@ import type {
   OperatorChange,
   SqlStore,
 } from '../store/sql-store.ts';
+import { ADMIN_LANDING, ADMIN_ROUTES } from './admin-routes.ts';
 import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
+import {
+  adminPage,
+  logBody,
+  passkeysBody,
+  shellPage,
+  signInPage,
+  statusBody,
+  type LogEntryAnswer,
+  type LogView,
+  type PasskeyView,
+  type ShellView,
+  type SignInNotice,
+} from './pages.ts';
 import { PASSKEY_SCRIPT } from './passkey-script.ts';
 import {
   ADMIN_CHALLENGE_SECONDS,
@@ -134,6 +163,7 @@ import {
   isAdminChange,
   type AdminChange,
 } from './step-up.ts';
+import { ADMIN_STYLE } from './style.ts';
 import {
   challengeOf,
   COSE_ALGORITHMS,
@@ -213,6 +243,7 @@ export type AdminRefusal =
  * is not `read` or `change` is `not_found` there before it is called.
  */
 export interface AdminSeam {
+  /** `path` may carry a query the admin layer built and checked; the handler matches its pathname. */
   dispatch(method: 'GET', path: string, owner: Caller, client: ClientInfo): Promise<Response>;
 }
 
@@ -266,28 +297,6 @@ export function isAdminPath(pathname: string): boolean {
   return pathname === '/admin' || pathname.startsWith('/admin/');
 }
 
-/** The one script, linked on the pages with a passkey ceremony; never inline. */
-const SCRIPT_TAG = '<script src="/admin/passkey.js" defer></script>\n';
-
-/** The admin frame: the stylesheet linked, never inline. `body` is markup the caller escaped. */
-function page(title: string, body: string, script = false): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/admin/admin.css">
-${script ? SCRIPT_TAG : ''}</head>
-<body>
-<main>
-${body}
-</main>
-</body>
-</html>
-`;
-}
-
 const HTML = { 'content-type': 'text/html; charset=utf-8' } as const;
 
 function htmlAnswer(
@@ -295,9 +304,8 @@ function htmlAnswer(
   body: string,
   status: number,
   extra: Readonly<Record<string, string>> = {},
-  script = false,
 ): Response {
-  return adminResponse(page(title, body, script), status, { ...HTML, ...extra });
+  return adminResponse(adminPage(title, body), status, { ...HTML, ...extra });
 }
 
 /** A ceremony's options, or its refusal, for the page's own script. */
@@ -328,6 +336,13 @@ const UNAVAILABLE: Readonly<Record<Unavailable, string>> = {
   'no-owner':
     'No account holds the device key OYL_INSTANCE_OWNER_KEY names. Sign in to this instance once from the app on that device, then come back.',
 };
+
+/** What a signed-in page calls the seam with. */
+interface PageCall {
+  readonly caller: Caller;
+  readonly client: ClientInfo;
+  readonly seam: AdminSeam;
+}
 
 /** The owner, as the seam calls a route for them. */
 interface Owner {
@@ -413,32 +428,24 @@ function labelFrom(form: URLSearchParams): string | undefined {
     : label;
 }
 
-/** A moment, in UTC: the same on every screen. */
-const when = (seconds: number): string =>
-  `${new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-
 /** A passkey id as {@link randomHex} writes 8 bytes. */
 const PASSKEY_ID = /^[0-9a-f]{16}$/;
 const REVOKE_PATH = /^\/admin\/passkeys\/([^/]+)\/revoke$/;
 
-/** The paths the admin layer answers, and the methods each takes. */
-const METHODS: Readonly<Record<string, readonly string[]>> = {
-  '/admin': ['GET'],
-  '/admin/sign-in': ['GET', 'POST'],
-  '/admin/sign-in/passkey-options': ['POST'],
-  '/admin/sign-in/passkey': ['POST'],
-  '/admin/sign-out': ['POST'],
-  '/admin/passkeys': ['GET'],
-  '/admin/passkeys/options': ['POST'],
-  '/admin/passkeys/add': ['POST'],
-  '/admin/passkeys/{id}/revoke': ['POST'],
-  '/admin/step-up': ['POST'],
-  '/admin/admin.css': ['GET'],
-  '/admin/passkey.js': ['GET'],
-};
+/** The paths the admin layer answers, and the methods each takes: the admin route table's. */
+const METHODS: ReadonlyMap<string, readonly string[]> = new Map(
+  ADMIN_ROUTES.map((route) => [route.path, route.methods]),
+);
 
-/** What the sign-in page says above its forms. */
-type SignInNotice = 'code-refused' | 'passkey-refused' | 'enrolled' | null;
+/** A page of the operator log, as the app's Operate area reads one. */
+export const LOG_PAGE_SIZE = 50;
+
+/**
+ * A cursor as the log route writes one (`pagination.ts` §`encodeCursor`:
+ * base64url, unpadded) and no longer than any it could write. Anything else
+ * is refused here, before the seam is called.
+ */
+const LOG_CURSOR = /^[A-Za-z0-9_-]{1,128}$/;
 
 export function createAdmin(options: AdminOptions): Admin {
   const { store } = options;
@@ -474,6 +481,95 @@ export function createAdmin(options: AdminOptions): Admin {
             ? 'pending'
             : 'active',
     };
+  }
+
+  /** The route's JSON when it answered 200, or `undefined`. */
+  async function read(
+    seam: AdminSeam,
+    path: string,
+    caller: Caller,
+    client: ClientInfo,
+  ): Promise<unknown> {
+    return (await readWithStatus(seam, path, caller, client)).body;
+  }
+
+  /** {@link read}, with the status the route answered, for a page that tells one refusal from another. */
+  async function readWithStatus(
+    seam: AdminSeam,
+    path: string,
+    caller: Caller,
+    client: ClientInfo,
+  ): Promise<{ readonly status: number; readonly body: unknown }> {
+    const answer = await seam.dispatch('GET', path, caller, client);
+    if (answer.status !== 200) return { status: answer.status, body: undefined };
+    try {
+      return { status: 200, body: await answer.json() };
+    } catch {
+      return { status: 200, body: undefined };
+    }
+  }
+
+  /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
+  async function statusPage(view: PageCall, shell: ShellView): Promise<string> {
+    const answer = await read(view.seam, '/v1/operate/status', view.caller, view.client);
+    const status =
+      typeof answer === 'object' && answer !== null ? (answer as OperateStatusAnswer) : undefined;
+    let body: string;
+    try {
+      body = statusBody(status, options.now());
+    } catch {
+      // An answer not in the route's shape is as good as none.
+      body = statusBody(undefined, options.now());
+    }
+    return shellPage(shell, 'Status', body);
+  }
+
+  /** The operator log: one page of `GET /v1/operate/log`, newest first, older by the route's cursor. */
+  async function logPage(view: PageCall, shell: ShellView, cursor: string | null): Promise<string> {
+    let shown: LogView;
+    if (cursor !== null && !LOG_CURSOR.test(cursor)) {
+      shown = { kind: 'bad-cursor' };
+    } else {
+      const query = new URLSearchParams({ limit: String(LOG_PAGE_SIZE) });
+      if (cursor !== null) query.set('cursor', cursor);
+      const { status, body: answer } = await readWithStatus(
+        view.seam,
+        `/v1/operate/log?${query.toString()}`,
+        view.caller,
+        view.client,
+      );
+      const page = answer as { entries?: unknown; cursor?: unknown } | undefined;
+      shown =
+        typeof page === 'object' &&
+        page !== null &&
+        Array.isArray(page.entries) &&
+        (page.cursor === null || typeof page.cursor === 'string')
+          ? {
+              kind: 'page',
+              entries: page.entries.map((entry): LogEntryAnswer => {
+                const row = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<
+                  string,
+                  unknown
+                >;
+                return {
+                  id: row.id,
+                  at: row.at,
+                  source: row.source,
+                  action: row.action,
+                  detail: row.detail,
+                  outcome: row.outcome,
+                };
+              }),
+              older: page.cursor,
+              newest: cursor === null,
+            }
+          : // Only the route's own refusal (400, validation_failed) says the cursor is not ours;
+            // any other failed read is an unreadable log, whichever page was asked for.
+            cursor !== null && status === 400
+            ? { kind: 'bad-cursor' }
+            : { kind: 'unreadable' };
+    }
+    return shellPage(shell, 'Operator log', logBody(shown));
   }
 
   /**
@@ -596,37 +692,8 @@ export function createAdmin(options: AdminOptions): Admin {
         { 'retry-after': '60' },
       );
 
-    function signInPage(notice: SignInNotice, status: number): Response {
-      const codeProblem = notice === 'code-refused';
-      const described = codeProblem ? ' aria-describedby="code-problem"' : '';
-      const top =
-        notice === 'enrolled'
-          ? '<p class="notice" role="status">Your passkey was added, and the one-time code’s session has ended. Sign in with the passkey now. A new passkey can read every page and changes nothing until you confirm it on the server machine: <code>operator admin-passkeys confirm &lt;id&gt;</code>, with the id <code>operator admin-passkeys list</code> shows.</p>\n'
-          : notice === 'passkey-refused'
-            ? '<p class="problem" role="alert">That passkey was not accepted, so you are not signed in. Try again, or sign in with a one-time code.</p>\n'
-            : '';
-      return htmlAnswer(
-        'Sign in',
-        `<h1>Sign in to the admin pages of ${escapeHtml(title)}</h1>
-${top}<p>Only the instance’s owner can sign in.</p>
-<h2>With a passkey</h2>
-<form method="post" action="/admin/sign-in/passkey" data-passkey="sign-in" data-passkey-supported hidden>
-<button type="submit">Sign in with a passkey</button>
-<p data-passkey-status role="status"></p>
-</form>
-<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. Sign in with a one-time code instead.</p>
-<h2>With a one-time code</h2>
-<p>On the server machine, run <code>node src/operator/cli.ts admin-code</code> (in the home deployment, <code>docker compose exec instance node src/operator/cli.ts admin-code</code>) and type the code it prints. A code works once, for 10 minutes. A code session can read every page and add one passkey; it changes nothing else.</p>
-<form method="post" action="/admin/sign-in">
-<label for="code">One-time code</label>
-${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted. A code works once, for 10 minutes: mint a new one on the server machine.</p>\n' : ''}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${described}>
-<button type="submit">Sign in</button>
-</form>`,
-        status,
-        {},
-        true,
-      );
-    }
+    const signInAnswer = (notice: SignInNotice, status: number): Response =>
+      adminResponse(signInPage(options.name, notice), status, HTML);
 
     const refusedForm = (): Response =>
       htmlAnswer(
@@ -667,47 +734,42 @@ ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted
       return session;
     }
 
-    async function landing(
+    /** The shell's view of this session, for the page at `path`. */
+    async function shellOf(path: string, session: Session): Promise<ShellView> {
+      return {
+        name: options.name,
+        path,
+        strength: session.record.strength,
+        listener: session.record.listener,
+        csrf: await csrfOf(session.token),
+      };
+    }
+
+    /** The owner as the seam calls a route for them, in this session. */
+    const callerOf = (owner: Owner, session: Session): Caller => ({
+      athleteId: owner.athleteId,
+      deviceKey: owner.ownerKey,
+      tokenSha256: session.record.tokenSha256,
+      standing: owner.standing,
+    });
+
+    async function signedInPage(
+      path: string,
+      url: URL,
       owner: Owner,
       session: Session,
       client: ClientInfo,
       seam: AdminSeam,
     ): Promise<Response> {
-      // ADR 0069 D-2's seam, round trip: the version from GET /v1/operate/status.
-      const status = await seam.dispatch(
-        'GET',
-        '/v1/operate/status',
-        {
-          athleteId: owner.athleteId,
-          deviceKey: owner.ownerKey,
-          tokenSha256: session.record.tokenSha256,
-          standing: owner.standing,
-        },
-        client,
-      );
-      let version: string | undefined;
-      if (status.status === 200) {
-        const read = (await status.json()) as { version?: unknown };
-        if (typeof read.version === 'string') version = read.version;
+      if (path === '/admin/passkeys') return passkeysPage(owner, session);
+      const shell = await shellOf(path, session);
+      const view = { caller: callerOf(owner, session), client, seam };
+      if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/log') {
+        return adminResponse(await logPage(view, shell, url.searchParams.get('cursor')), 200, HTML);
       }
-      const csrf = await csrfOf(session.token);
-      const how =
-        session.record.strength === 'passkey'
-          ? 'with a passkey'
-          : 'with a one-time code, which can read every page and add one passkey';
-      return htmlAnswer(
-        'Admin',
-        `<h1>Admin pages of ${escapeHtml(title)}</h1>
-<p>You are signed in as the instance’s owner, ${how}.</p>
-<p>${version === undefined ? 'The instance’s status could not be read.' : `Version ${escapeHtml(version)}, read from the instance’s status.`}</p>
-<p><a href="/admin/passkeys">Passkeys</a></p>
-<p class="hint">This session ends after 15 minutes without use, and 2 hours after you signed in.</p>
-<form method="post" action="/admin/sign-out">
-<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
-<button type="submit">Sign out</button>
-</form>`,
-        200,
-      );
+      // A page in the route table with no renderer here is a defect, not a page.
+      throw new Error('an admin page with no renderer');
     }
 
     async function signIn(
@@ -743,7 +805,7 @@ ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted
             });
       if (opened === 'refused') {
         refuse('code');
-        return signInPage('code-refused', 400);
+        return signInAnswer('code-refused', 400);
       }
       return signedIn(request, token);
     }
@@ -772,7 +834,7 @@ ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted
       // A session this browser held before is never carried on (no fixation).
       const before = await presented(request);
       if (before !== undefined) await store.endAdminSession(before.sha);
-      return seeOther('/admin', { 'set-cookie': cookieFor(token) });
+      return seeOther(ADMIN_LANDING, { 'set-cookie': cookieFor(token) });
     }
 
     /** A new challenge: what the browser signs, and the SHA-256 the store keeps. */
@@ -919,12 +981,12 @@ ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted
             );
       if (assertion === undefined || challenge === undefined || issued === undefined) {
         refuse('passkey');
-        return signInPage('passkey-refused', 400);
+        return signInAnswer('passkey-refused', 400);
       }
       const proved = await verified(assertion, challenge, owner, false);
       if (typeof proved === 'string') {
         refuse(proved);
-        return signInPage('passkey-refused', 400);
+        return signInAnswer('passkey-refused', 400);
       }
       const token = randomToken(32);
       const opened = await store.openAdminSessionWithPasskey({
@@ -937,7 +999,7 @@ ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted
       });
       if (opened === 'refused') {
         refuse('counter');
-        return signInPage('passkey-refused', 400);
+        return signInAnswer('passkey-refused', 400);
       }
       return signedIn(request, token);
     }
@@ -955,67 +1017,31 @@ ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted
 
     async function passkeysPage(owner: Owner, session: Session): Promise<Response> {
       const { rpId } = relyingParty();
-      const passkeys = await store.listAdminPasskeys();
-      const csrf = escapeHtml(await csrfOf(session.token));
-      const byPasskey = session.record.strength === 'passkey';
-      const items = passkeys.map((passkey) => {
-        const label = escapeHtml(passkey.label);
-        const standing =
+      const passkeys = (await store.listAdminPasskeys()).map((passkey): PasskeyView => ({
+        id: passkey.id,
+        label: passkey.label,
+        enrolledAt: passkey.enrolledAt,
+        lastUsedAt: passkey.lastUsedAt,
+        rpId: passkey.rpId,
+        standing:
           passkey.ownerKey !== owner.ownerKey
-            ? 'Not usable: it was added under another owner key than OYL_INSTANCE_OWNER_KEY names now. Revoke it.'
+            ? 'other-owner'
             : passkey.rpId !== rpId
-              ? `Not usable at this address: it was added for ${escapeHtml(passkey.rpId)}. Revoke it, and add one here.`
+              ? 'other-host'
               : passkey.confirmedAt === null
-                ? `Can read, and change nothing until it is confirmed on the server machine: <code>operator admin-passkeys confirm ${escapeHtml(passkey.id)}</code>.`
-                : 'Can read and make changes, with a fresh check each time.';
-        const revoke = byPasskey
-          ? `<form method="post" action="/admin/passkeys/${escapeHtml(passkey.id)}/revoke" data-step-up="passkey_revoke">
-<input type="hidden" name="csrf" value="${csrf}">
-<input type="hidden" name="id" value="${escapeHtml(passkey.id)}">
-<button type="submit">Revoke ${label}</button>
-<p data-passkey-status role="status"></p>
-</form>`
-          : '';
-        return `<li>
-<h3>${label}</h3>
-<dl>
-<dt>Id</dt><dd><code>${escapeHtml(passkey.id)}</code></dd>
-<dt>Added</dt><dd>${when(passkey.enrolledAt)}</dd>
-<dt>Last used</dt><dd>${passkey.lastUsedAt === null ? 'Never' : when(passkey.lastUsedAt)}</dd>
-<dt>For</dt><dd>${escapeHtml(passkey.rpId)}</dd>
-</dl>
-<p>${standing}</p>
-${revoke}
-</li>`;
+                ? 'unconfirmed'
+                : 'confirmed',
+      }));
+      const shell = await shellOf('/admin/passkeys', session);
+      const body = passkeysBody({
+        passkeys,
+        rpId,
+        strength: session.record.strength,
+        csrf: shell.csrf,
+        max: MAX_ADMIN_PASSKEYS,
+        labelLimit: PASSKEY_LABEL_LIMIT,
       });
-      const list =
-        items.length === 0
-          ? '<p>There are no passkeys yet.</p>'
-          : `<ul class="passkeys">\n${items.join('\n')}\n</ul>`;
-      const add = byPasskey
-        ? '<p>To add another passkey, sign in with a one-time code from the server machine: a code session can add one.</p>'
-        : passkeys.length >= MAX_ADMIN_PASSKEYS
-          ? `<p>You hold ${String(MAX_ADMIN_PASSKEYS)} passkeys, the most there may be. Revoke one before adding another.</p>`
-          : `<h2>Add a passkey</h2>
-<p>This adds one passkey for ${escapeHtml(rpId)}, then signs you out so you can sign in with it. Revoking a passkey needs a passkey sign-in.</p>
-<form method="post" action="/admin/passkeys/add" data-passkey="enrol" data-passkey-supported hidden>
-<input type="hidden" name="csrf" value="${csrf}">
-<label for="label">A name for this passkey</label>
-<input type="text" id="label" name="label" maxlength="${String(PASSKEY_LABEL_LIMIT)}" autocomplete="off" required>
-<button type="submit">Add a passkey</button>
-<p data-passkey-status role="status"></p>
-</form>
-<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. You can keep using the admin pages with a one-time code, which reads every page and changes nothing.</p>`;
-      return htmlAnswer(
-        'Passkeys',
-        `<h1>Passkeys</h1>
-<p><a href="/admin">Back to the admin pages</a></p>
-${list}
-${add}`,
-        200,
-        {},
-        true,
-      );
+      return adminResponse(shellPage(shell, 'Passkeys', body, true), 200, HTML);
     }
 
     async function enrolOptions(
@@ -1327,10 +1353,11 @@ ${add}`,
           421,
         );
       }
-      const path = new URL(request.url).pathname;
+      const url = new URL(request.url);
+      const path = url.pathname;
       const revokeId = REVOKE_PATH.exec(path)?.[1];
       const route = revokeId === undefined ? path : '/admin/passkeys/{id}/revoke';
-      const methods = METHODS[route];
+      const methods = METHODS.get(route);
       if (methods === undefined) {
         return htmlAnswer(
           'Not found',
@@ -1347,7 +1374,7 @@ ${add}`,
         );
       }
       if (route === '/admin/admin.css') {
-        return adminResponse(STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
+        return adminResponse(ADMIN_STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
       }
       if (route === '/admin/passkey.js') {
         return adminResponse(PASSKEY_SCRIPT, 200, {
@@ -1396,13 +1423,14 @@ ${add}`,
       }
       const session = await sessionOf(request, owner);
       if (path === '/admin/sign-in') {
-        if (session !== undefined) return seeOther('/admin');
-        const enrolled = new URL(request.url).searchParams.has('enrolled');
-        return signInPage(enrolled ? 'enrolled' : null, 200);
+        if (session !== undefined) return seeOther(ADMIN_LANDING);
+        const enrolled = url.searchParams.has('enrolled');
+        return signInAnswer(enrolled ? 'enrolled' : null, 200);
       }
+      // Every other GET is a signed-in page: nothing of the instance's state without a session.
       if (session === undefined) return seeOther('/admin/sign-in');
-      if (path === '/admin/passkeys') return passkeysPage(owner, session);
-      return landing(owner, session, client, seam);
+      if (path === '/admin') return seeOther(ADMIN_LANDING);
+      return signedInPage(path, url, owner, session, client, seam);
     };
   }
 
