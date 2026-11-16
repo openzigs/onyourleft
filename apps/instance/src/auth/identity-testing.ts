@@ -66,7 +66,7 @@ import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts'
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
 import { instanceHpkePrimitives } from './crypto.ts';
-import { createOperate } from '../operate/operate.ts';
+import { createOperate, type OperateRoomSources } from '../operate/operate.ts';
 import { diskSpace, keysState, tunnelReadiness, type StatusSources } from '../operate/status.ts';
 import { createSealed, sha256, type Sealed } from '../sealed/sealed.ts';
 import { sealFor } from '../sealed/sealed-testing.ts';
@@ -320,6 +320,13 @@ export async function startIdentityInstance(
     /** A handler handed no Operate area (#2602), for the `unavailable` it answers then. */
     withoutOperate?: boolean;
     /**
+     * What the owner's Rooms reads from the room workers and ends through
+     * (#2612), as `instance.ts` hands it the router; the world's own rooms
+     * and names are used beside it. Absent, the Rooms routes answer
+     * `unavailable`, as on an adapter with no router.
+     */
+    operateRooms?: Pick<OperateRoomSources, 'live' | 'end'>;
+    /**
      * Where a name resolves to, for the Operate area's analysis settings
      * (#2609): a save checks it. Absent, a name looked up is a failed lookup.
      */
@@ -370,6 +377,7 @@ export async function startIdentityInstance(
     observe,
     voice,
     withoutOperate,
+    operateRooms,
     operateStatus,
     resolve,
     admin: adminOptions,
@@ -601,6 +609,7 @@ export async function startIdentityInstance(
                     now: () => Math.floor(clock.ms / 1000),
                   }),
               },
+              ...(operateRooms === undefined ? {} : { rooms: { ...operateRooms, rooms, nameFor } }),
             }),
           }),
       history,

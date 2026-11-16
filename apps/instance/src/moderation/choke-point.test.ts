@@ -46,6 +46,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { scriptedEngine } from '../analysis/jobs-testing.ts';
 import type { Reach, Route } from '../route-kit.ts';
+import { fakeRoomRouter } from '../operate/rooms-testing.ts';
+import { madeRoom } from '../rooms/rooms-testing.ts';
+import { roomShortCode } from '../operate/operate.ts';
 import { ROUTES } from '../routes.ts';
 import { codeOf as sealedCodeOf, sealedCall } from '../sealed/sealed-testing.ts';
 import {
@@ -205,8 +208,6 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
  * not say "athlete". Until #899 the body was matched by `/athlete/i` alone.
  */
 const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
-  confirm:
-    'the word the owner types to confirm an Operate action — `rotate` for the encryption key (#2613); it names no athlete',
   // #2609: the operator's analysis settings, on the owner's route alone.
   localUrl: 'the base URL of the instance’s local model server, which the operator sets',
   localModel: 'the name of the model on the instance’s local server, which the operator sets',
@@ -240,7 +241,9 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   confirmed: 'the CALLER’s own 18+ self-declaration (ruling Q5)',
   token: 'a token mailed to the CALLER’s own recovery address',
   reason:
-    'free text a reporter or a moderator writes, or a flag’s reason from a closed list (#69); never an id the route acts on',
+    'free text a reporter or a moderator writes, or a flag’s or an ended room’s reason from a closed list (#69, #2612); never an id the route acts on',
+  confirm:
+    'what the owner types to confirm an Operate action: the short code of the room ended (#2612; the room is the path’s), or `rotate` for the encryption key (#2613); it names no athlete',
   reportId: 'a report, read and decided only on the moderators’ routes',
   statement:
     'the CALLER’s own signed erasure statement, or the statement of reasons a moderator writes with a restriction (#910)',
@@ -403,9 +406,13 @@ describe('every path a blocked athlete could use is refused, as though nobody we
   let suspended: Rider;
   let unrelated: Rider;
 
+  /** #2612: a room the owner's control ends, made by the viewer. */
+  let room: string;
+
   beforeAll(async () => {
-    world = await startModerationWorld();
+    world = await startModerationWorld({ operateRooms: fakeRoomRouter() });
     viewer = await world.rider('Viewer');
+    room = (await madeRoom(world, viewer.token)).roomId;
     blocksViewer = await world.rider('Blocks the viewer');
     blockedByViewer = await world.rider('Blocked by the viewer');
     suspended = await world.rider('Suspended');
@@ -486,16 +493,20 @@ describe('every path a blocked athlete could use is refused, as though nobody we
   it.each(OWNER_ROUTES.map((route) => [route.operationId, route] as const))(
     '%s answers an ordinary rider AND the deputy as though there were no such route (#2602)',
     async (_operation, route) => {
-      const path = route.path.replace(/\{[A-Za-z]+\}/g, unrelated.athleteId);
+      // #2612: ending a room is asked of a room that is there, by its code.
+      const ending = route.operationId === 'endOperateRoom';
+      const path = route.path.replace(/\{[A-Za-z]+\}/g, ending ? room : unrelated.athleteId);
       // #2610: the tool check refuses a body that names no model, so the control names one.
       const body =
         route.method === 'GET'
           ? undefined
           : route.operationId === 'checkOperateAnalysisModel'
             ? { model: 'some-model' }
-            : route.operationId === 'rotateOperateKey'
-              ? { confirm: 'rotate' }
-              : {};
+            : ending
+              ? { reason: 'other', confirm: roomShortCode(room) }
+              : route.operationId === 'rotateOperateKey'
+                ? { confirm: 'rotate' }
+                : {};
       const nowhere = await world.as(viewer, 'GET', '/v1/no-such-route');
       for (const caller of [viewer, world.deputy]) {
         const answer = await world.as(caller, route.method, path, body);

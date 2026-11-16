@@ -30,6 +30,19 @@
  * up. A record names a snapshot's directory and never the folder it is in.
  * Restore stays on the CLI.
  *
+ * ## Rooms: from the workers, and ended by the one close
+ *
+ * The open rooms (#2612) are the riders' rooms the store holds open — what
+ * Status counts — each with what the room worker holding it says of it: its
+ * phase, and the athletes in it, shown by the display name the owner may see
+ * of each (#83's choke point). **Never** a rider's place, distance, speed,
+ * power, heart rate or Discord id: the worker sends none of them
+ * (`room/node/room-host.ts` §`HostedRoomSummary`). Ending one takes the
+ * room's short code as its confirmation, and is the ONE close a room is over
+ * by (`rooms/rooms.ts` §`end`), written with its `room_ended` entry in one
+ * transaction while the router places no socket in it; then the worker
+ * closes every socket `4005 room-closed`. Nothing here reaches a trainer.
+ *
  * ## Keys: the card, and the routine rotation
  *
  * The owner is shown the instance's card and its identity key's fingerprint
@@ -63,6 +76,8 @@ import {
 import type { ModelConnection } from '../analysis/model-turn.ts';
 import { analysisModelNameProblem, type AnalysisModelOffCode } from '../config.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import type { RoomPhase } from '../room/core/room.ts';
+import type { Rooms } from '../rooms/rooms.ts';
 import type { Resolver } from '../history/address.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import type {
@@ -74,6 +89,7 @@ import type {
   OperatorLogEntry,
   SqlStore,
 } from '../store/sql-store.ts';
+import { ROOM_END_REASONS } from '../store/sql-store.ts';
 import {
   ENCRYPTION_KEY_LIFE_SECONDS,
   InstanceKeysUnavailable,
@@ -178,6 +194,72 @@ export interface JobsView {
   readonly recent: readonly OperateJobView[];
 }
 
+/** How many characters of a room's id its short code is (#2612): what the owner types to end it. */
+export const ROOM_SHORT_CODE_LENGTH = 6;
+
+/** A room's short code (#2612): the first {@link ROOM_SHORT_CODE_LENGTH} characters of its id. */
+export function roomShortCode(roomId: string): string {
+  return roomId.slice(0, ROOM_SHORT_CODE_LENGTH).toLowerCase();
+}
+
+/** Where a room is, as the owner is shown it (#2612). */
+export type OperateRoomPhase = 'lobby' | 'countdown' | 'riding' | 'finished';
+
+/**
+ * One open room as the owner is shown it (#2612). **Never** a rider's place,
+ * distance, speed, power, heart rate, Discord id or athlete id.
+ */
+export interface OperateRoomView {
+  readonly roomId: string;
+  /** What the owner types to end it: {@link roomShortCode}. */
+  readonly shortCode: string;
+  readonly kind: 'group' | 'race' | 'lap-race';
+  readonly visibility: 'private' | 'public';
+  readonly phase: OperateRoomPhase;
+  /** When it was made, Unix seconds. */
+  readonly openedAt: number;
+  /** The display name of the rider who made it, as the owner may see it; `null` for "a rider". */
+  readonly host: string | null;
+  /** The display name of each rider in it, `null` for "a rider"; empty when no worker holds it. */
+  readonly riders: readonly (string | null)[];
+}
+
+/** A room a live room worker holds (#2612): `room/node/router.ts` §`roomSummaries`. */
+export interface LiveRoom {
+  readonly roomId: string;
+  readonly phase: RoomPhase;
+  readonly athleteIds: readonly string[];
+}
+
+/**
+ * What the owner's Rooms reads and ends with beyond the store (#2612): the
+ * room router and the rooms. Absent — the Durable Object adapter, which has
+ * no router — both Rooms routes answer `unavailable`.
+ */
+export interface OperateRoomSources {
+  /** Every room each live worker holds. */
+  readonly live: () => Promise<readonly LiveRoom[]>;
+  /**
+   * Ends `roomId` on the worker holding it, `commit` run while no socket is
+   * placed in it: `RoomRouter.endRoom`.
+   */
+  readonly end: (roomId: string, commit: () => Promise<boolean>) => Promise<boolean>;
+  readonly rooms: Pick<Rooms, 'end'>;
+  /** The display name `viewerId` may see of `subjectId`, or `undefined` (#83's choke point). */
+  readonly nameFor: (viewerId: string, subjectId: string) => Promise<string | undefined>;
+}
+
+const PHASE_SHOWN: Readonly<Record<RoomPhase, OperateRoomPhase>> = {
+  lobby: 'lobby',
+  countdown: 'countdown',
+  running: 'riding',
+  finished: 'finished',
+  closed: 'finished',
+};
+
+/** The fields `POST /v1/operate/rooms/{roomId}/end` takes, and no other. */
+const END_FIELDS = new Set(['reason', 'confirm']);
+
 /**
  * The instance's keys as the owner reads them (#2613): public material only.
  * Never a private half, nor anything derived from `OYL_INSTANCE_SECRET_KEY`.
@@ -278,6 +360,23 @@ export interface Operate {
   ): Promise<OperateResult<{ readonly outcome: ToolCheckOutcome }>>;
   /** The analysis queue and the newest jobs, for the owner `athleteId` (#2610). Writes nothing. */
   jobs(athleteId: string): Promise<JobsView>;
+  /**
+   * Every open rider's room, newest first, as the owner `athleteId` is shown
+   * it (#2612). Writes nothing. `unavailable` with no room router.
+   */
+  rooms(athleteId: string): Promise<OperateResult<readonly OperateRoomView[]>>;
+  /**
+   * End `roomId` as the owner `athleteId` (#2612): `body.reason` one of
+   * `ROOM_END_REASONS`, and `body.confirm` the room's short code — else
+   * `validation_failed`, with nothing changed and nothing logged. `not_found`
+   * for a room that is not an open rider's room. Closed and logged
+   * `room_ended` in one transaction, then every socket in it closed.
+   */
+  endRoom(
+    athleteId: string,
+    roomId: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<OperateResult<{ readonly endedAt: number }>>;
   /** The card, the fingerprint and the encryption keys (#2613). Writes nothing. `unavailable` with no keys source. */
   keys(): Promise<OperateResult<KeysView>>;
   /**
@@ -310,10 +409,13 @@ export function createOperate(options: {
   readonly status: StatusSources;
   /** What the analysis settings are read and written with (#2609). */
   readonly analysis: OperateAnalysisSources;
+  /** The room router and the rooms (#2612); absent where there is no router. */
+  readonly rooms?: OperateRoomSources;
   /** The instance's keys (#2613); absent, the Keys routes answer `unavailable`. */
   readonly keys?: OperateKeySources;
 }): Operate {
   const { store, status, analysis } = options;
+  const roomSources = options.rooms;
   const keySources = options.keys;
   const seconds = (): number => Math.floor(status.now() / 1000);
   // #2610: ONE check for the instance, so a second while one is out is `busy`.
@@ -368,7 +470,107 @@ export function createOperate(options: {
     );
   }
 
+  /** A display name the owner may see, or `null` for "a rider". */
+  async function shownName(
+    sources: OperateRoomSources,
+    ownerId: string,
+    athleteId: string,
+  ): Promise<string | null> {
+    return (await sources.nameFor(ownerId, athleteId)) ?? null;
+  }
+
   return {
+    async rooms(athleteId) {
+      if (roomSources === undefined) return { ok: false, code: 'unavailable' };
+      const [open, live] = await Promise.all([store.listOpenPrivateRooms(), roomSources.live()]);
+      const held = new Map(live.map((room) => [room.roomId, room]));
+      const shown: OperateRoomView[] = [];
+      for (const each of open) {
+        const room = await store.getRoom(each.roomId);
+        const course = await store.getRoomCourse(each.roomId);
+        if (room === undefined) continue;
+        const creator = await store.getRoomCreator(each.roomId);
+        const holding = held.get(each.roomId);
+        const riders: (string | null)[] = [];
+        for (const rider of holding?.athleteIds ?? []) {
+          riders.push(await shownName(roomSources, athleteId, rider));
+        }
+        shown.push({
+          roomId: each.roomId,
+          shortCode: roomShortCode(each.roomId),
+          kind: course?.lapRace !== undefined ? 'lap-race' : room.kind,
+          visibility: room.visibility,
+          // No worker holds it: nobody is in it — a lobby nobody opened yet,
+          // or a race a restart interrupted, which is never opened again.
+          phase:
+            holding !== undefined
+              ? PHASE_SHOWN[holding.phase]
+              : each.raceStarted
+                ? 'finished'
+                : 'lobby',
+          openedAt: each.createdAt,
+          host: creator === undefined ? null : await shownName(roomSources, athleteId, creator),
+          riders,
+        });
+      }
+      shown.sort((a, b) => b.openedAt - a.openedAt || a.roomId.localeCompare(b.roomId));
+      return { ok: true, value: shown };
+    },
+    async endRoom(athleteId, roomId, body) {
+      if (roomSources === undefined) return { ok: false, code: 'unavailable' };
+      const fields: FieldProblem[] = [];
+      for (const name of Object.keys(body)) {
+        if (!END_FIELDS.has(name))
+          fields.push({ field: name, problem: 'is not a field of this request' });
+      }
+      const reason = body.reason;
+      if (typeof reason !== 'string' || !(ROOM_END_REASONS as readonly string[]).includes(reason)) {
+        fields.push({ field: 'reason', problem: `must be one of ${ROOM_END_REASONS.join(', ')}` });
+      }
+      const confirm = body.confirm;
+      if (typeof confirm !== 'string') {
+        fields.push({ field: 'confirm', problem: 'must be the room’s short code' });
+      }
+      if (fields.length > 0 || typeof confirm !== 'string' || typeof reason !== 'string') {
+        return { ok: false, code: 'validation_failed', fields };
+      }
+      const made = await store.getPrivateRoom(roomId);
+      const room = await store.getRoom(roomId);
+      if (made === undefined || made.closedAt !== null || room === undefined) {
+        return { ok: false, code: 'not_found' };
+      }
+      // Only once the room is known: a code is checked against a room that is there.
+      if (confirm.trim().toLowerCase() !== roomShortCode(roomId)) {
+        return {
+          ok: false,
+          code: 'validation_failed',
+          fields: [{ field: 'confirm', problem: 'must be the room’s short code' }],
+        };
+      }
+      const course = await store.getRoomCourse(roomId);
+      const kind = course?.lapRace !== undefined ? 'lap_race' : room.kind;
+      const riders =
+        (await roomSources.live()).find((each) => each.roomId === roomId)?.athleteIds.length ?? 0;
+      const at = seconds();
+      const sources = roomSources;
+      const ended = await sources.end(roomId, () =>
+        sources.rooms.end(roomId, async (close) => {
+          const { value } = await store.recordOperatorAction(
+            { actor: { source: 'app', athleteId }, action: 'room_ended', at },
+            async (inside) => {
+              const closed = await close(inside);
+              return {
+                outcome: closed ? 'done' : 'refused',
+                detail: `${reason},${kind},riders=${String(riders)}`,
+                value: closed,
+              };
+            },
+          );
+          return value;
+        }),
+      );
+      return ended ? { ok: true, value: { endedAt: at } } : { ok: false, code: 'not_found' };
+    },
     async keys() {
       if (keySources === undefined) return { ok: false, code: 'unavailable' };
       // One read: a second one could meet keys changed from the CLI in between.
