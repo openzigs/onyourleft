@@ -50,6 +50,21 @@ export {
   type OperateRoomPhase,
 } from './rooms';
 export {
+  currentKeyText,
+  KEYS_CARD_PICTURE_LABEL,
+  KEYS_CARD_TEXT,
+  KEYS_CLI_COMMANDS,
+  KEYS_CLI_TEXT,
+  KEYS_FINGERPRINT_TEXT,
+  KEYS_UNREADABLE_TEXT,
+  olderHeldText,
+  ROTATE_BUSY_TEXT,
+  ROTATE_CONFIRM_WORD,
+  ROTATE_KEY_TEXT,
+  ROTATE_NOT_DONE_TEXT,
+  ROTATE_TYPE_TEXT,
+} from './keys';
+export {
   COMPARE_WITH_MAIN_LABEL,
   compareWithMainUrl,
   DISK_HOLDS_TEXT,

@@ -417,6 +417,8 @@ const roomSchema: Schema = {
   additionalProperties: false,
 };
 
+const KEYS_STATES = ['ready', 'no-secret', 'no-origin', 'no-keys', 'unreadable', 'busy'] as const;
+
 export const OPERATE_ROUTES: readonly Route[] = [
   {
     method: 'GET',
@@ -506,6 +508,117 @@ export const OPERATE_ROUTES: readonly Route[] = [
         );
       }
       return json({ endedAt: isoOf(ended.value.endedAt) });
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/operate/keys',
+    sealed: 'only',
+    operationId: 'getOperateKeys',
+    reaches: 'owner',
+    // ADR 0069 D-2: the card and the fingerprint are worth something only
+    // because the edge cannot write them (ADR 0047 D-6): never through the
+    // tunnel's admin pages. #2650's loopback page formats its own.
+    admin: 'never',
+    summary: `The instance’s keys (#2613), public material only — what \`instance-key show\` prints: their state (\`ready\`, or \`no-secret\`, \`no-origin\`, \`no-keys\`, \`unreadable\`, \`busy\`), the identity key’s full SHA-256 fingerprint (52 base32 characters, as a rider’s device shows it), the instance card (\`oyl-instance:<origin>#<52 characters>\`, whole), the current encryption key’s serial, when it was made and when the instance rotates it by itself (30 days on), and how many superseded encryption keys are still held (each for 7 days after its successor). **Never** a private half, nor anything derived from \`OYL_INSTANCE_SECRET_KEY\`. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          state: { type: 'string', enum: KEYS_STATES },
+          /** 64 lower-case hex; `null` unless \`ready\`. */
+          fingerprint: { type: ['string', 'null'] },
+          /** The whole card; `null` unless \`ready\`. */
+          card: { type: ['string', 'null'] },
+          current: {
+            type: ['object', 'null'],
+            properties: {
+              serial: count,
+              /** ISO 8601, UTC. */
+              createdAt: { type: 'string' },
+              /** When the instance rotates it by itself, ISO 8601, UTC. */
+              rotatesAt: { type: 'string' },
+            },
+            required: ['serial', 'createdAt', 'rotatesAt'],
+            additionalProperties: false,
+          },
+          olderHeld: count,
+        },
+        required: ['state', 'fingerprint', 'card', 'current', 'olderHeld'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const read = await operateOf(context).keys();
+      if (!read.ok) return errorResponse(read.code);
+      const view = read.value;
+      return json({
+        state: view.state,
+        fingerprint: view.fingerprint,
+        card: view.card,
+        current:
+          view.current === null
+            ? null
+            : {
+                serial: view.current.serial,
+                createdAt: isoOf(view.current.createdAt),
+                rotatesAt: isoOf(view.current.rotatesAt),
+              },
+        olderHeld: view.olderHeld,
+      });
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/operate/keys/rotate',
+    sealed: 'only',
+    operationId: 'rotateOperateKey',
+    reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
+    summary: `Rotate the encryption key (#2613), with \`{ confirm: 'rotate' }\` — else \`validation_failed\` and nothing is written: what \`instance-key rotate\` does, with no \`--drop-old\` and no \`--serial-above\`. The old key keeps opening requests for 7 days, devices pick the new one up from \`GET /v1/instance/keys\` by themselves, and nobody pins again. It takes the key lease: while the instance’s own maintenance pass holds it the answer is \`busy\` and nothing is written. Logged \`instance_key_rotate\` (\`refused\` with \`busy\`) in the same transaction as the rotation. \`rotate --drop-old\`, \`rotate-identity\` and \`reset\` stay on the CLI. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    request: {
+      type: 'object',
+      properties: { confirm: { type: 'string', enum: ['rotate'] } },
+      required: ['confirm'],
+      additionalProperties: false,
+    },
+    errors: ['unauthenticated', 'validation_failed', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          outcome: { type: 'string', enum: ['rotated', 'busy'] },
+          /** The new key's serial; `null` when \`busy\`. */
+          serial: { type: ['integer', 'null'] },
+        },
+        required: ['outcome', 'serial'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const rotated = await operateOf(context).rotateKey(ownerOf(context), context.json);
+      if (!rotated.ok) {
+        return errorResponse(
+          rotated.code,
+          rotated.fields === undefined ? {} : { fields: rotated.fields },
+        );
+      }
+      return json(
+        rotated.value.outcome === 'rotated'
+          ? { outcome: 'rotated', serial: rotated.value.serial }
+          : { outcome: 'busy', serial: null },
+      );
     },
   },
   {

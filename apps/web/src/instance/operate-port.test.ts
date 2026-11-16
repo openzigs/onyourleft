@@ -460,7 +460,7 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
   it('has no way to restore: the port asks for backups and nothing else that changes one', async () => {
     const { owner } = await operatedWorld();
     const methods = Object.keys(createOperatePort(owner.dependencies)).sort();
-    // #2611's are the AI backend's and #2612's the rooms': none of them touches a backup.
+    // #2611's are the AI backend's, #2612's the rooms' and #2613's the keys': none of them touches a backup.
     expect(methods).toEqual([
       'analysis',
       'backUpNow',
@@ -469,9 +469,11 @@ describe('the backups, and “back up now” — #2606, #2607', () => {
       'clearAnalysis',
       'endRoom',
       'jobs',
+      'keys',
       'localModels',
       'log',
       'rooms',
+      'rotateKey',
       'setAnalysis',
       'standing',
       'status',
@@ -841,5 +843,100 @@ describe('the open rooms, and ending one — #2612', () => {
     expect(read.kind === 'rooms' ? read.rooms.map((each) => each.roomId) : read).toEqual([room]);
     expect(await port.endRoom(room, 'other', room.slice(0, 6))).toMatchObject({ kind: 'ended' });
     expect(await port.rooms()).toEqual({ kind: 'rooms', rooms: [] });
+  });
+});
+
+describe('the instance’s keys, and the routine rotation — #2613', () => {
+  it('reads the owner the card and fingerprint whole, as the instance shows them', async () => {
+    const { owner, world } = await operatedWorld();
+    const shown = await world.instanceKeys.show();
+    const read = await createOperatePort(owner.dependencies).keys();
+    expect(read).toMatchObject({
+      kind: 'keys',
+      state: 'ready',
+      card: shown.card,
+      // The form a rider's device shows: the card's own last 52 characters.
+      fingerprint: shown.card.slice(-52),
+      olderHeld: 0,
+    });
+  });
+
+  it('rotates, reads the new key back, and the device goes on sealing with its pin unchanged', async () => {
+    const { owner, world } = await operatedWorld();
+    const port = createOperatePort(owner.dependencies);
+    const pinned = owner.pin();
+    expect(pinned).toBeDefined();
+    const before = await port.keys();
+    const rotated = await port.rotateKey('rotate');
+    if (rotated.kind !== 'rotated' || before.kind !== 'keys') {
+      throw new Error(`not rotated: ${JSON.stringify(rotated)}`);
+    }
+    expect(rotated.serial).toBeGreaterThan(before.current?.serial ?? 0);
+    // A new sealed request from the same session is answered, and the pin did not move.
+    const after = await port.keys();
+    expect(after).toMatchObject({
+      kind: 'keys',
+      current: { serial: rotated.serial },
+      olderHeld: 1,
+      card: before.card,
+    });
+    expect(await port.standing()).toBe('owner');
+    expect(owner.pin()).toBe(pinned);
+    // What every device reads names the new key.
+    const served = (await (
+      await world.instance.handler(new Request('https://ride.example/v1/instance/keys'))
+    ).json()) as { statements: { statement: { serial: number } }[] };
+    expect(served.statements[0]?.statement.serial).toBe(rotated.serial);
+  });
+
+  it('sends nothing for a word that is not rotate, and the deputy is told it is not the owner', async () => {
+    const { owner, deputy, sent } = await operatedWorld();
+    const before = sent.length;
+    expect(await createOperatePort(owner.dependencies).rotateKey('Rotate')).toEqual({
+      kind: 'not-rotated',
+    });
+    expect(sent.length).toBe(before);
+    const port = createOperatePort(deputy.dependencies);
+    expect(await port.keys()).toEqual({ kind: 'not-owner' });
+    expect(await port.rotateKey('rotate')).toEqual({ kind: 'not-owner' });
+  });
+
+  /** The keys as the instance writes them, every field well-formed. */
+  const KEYS = {
+    state: 'ready',
+    fingerprint: 'A'.repeat(52),
+    card: `oyl-instance:https://ride.example#${'A'.repeat(52)}`,
+    current: {
+      serial: 7,
+      createdAt: '2026-11-14T08:00:00.000Z',
+      rotatesAt: '2026-12-14T08:00:00.000Z',
+    },
+    olderHeld: 0,
+  };
+
+  async function keysAnswered(answer: () => Response): Promise<unknown> {
+    const { owner, world } = await operatedWorld();
+    return createOperatePort({
+      ...owner.dependencies,
+      send: (url, init) => world.answeringAs('/v1/operate/keys', answer)(new Request(url, init)),
+    }).keys();
+  }
+
+  it('carries the keys’ own fields and nothing else the instance sent beside them', async () => {
+    const read = await keysAnswered(() => Response.json({ ...KEYS, privateKey: 'b'.repeat(64) }));
+    expect(read).toEqual({ kind: 'keys', ...KEYS });
+  });
+
+  it.each([
+    ['a card cut short', { card: `oyl-instance:https://ride.example#${'A'.repeat(51)}` }],
+    ['a card with something after it', { card: `${KEYS.card} extra` }],
+    ['a fingerprint in hex, which no device shows', { fingerprint: 'a'.repeat(64) }],
+    ['a state it does not know', { state: 'leaked' }],
+    ['a serial that is not whole', { current: { ...KEYS.current, serial: 1.5 } }],
+  ] as const)('shows no keys when the answer holds %s', async (_name, change) => {
+    expect(await keysAnswered(() => Response.json(KEYS))).toMatchObject({ kind: 'keys' });
+    expect(await keysAnswered(() => Response.json({ ...KEYS, ...change }))).toEqual({
+      kind: 'unreachable',
+    });
   });
 });

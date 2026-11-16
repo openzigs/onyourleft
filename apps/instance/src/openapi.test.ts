@@ -583,6 +583,16 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       { reason: 'other', confirm: roomShortCode(room.roomId) },
     );
   },
+  // #2613: the keys, read after a rotation so an older key is held too.
+  getOperateKeys: async (world) => {
+    const token = await moderatorToken(world);
+    await send(world, 'POST', '/v1/operate/keys/rotate', token, { confirm: 'rotate' });
+    return send(world, 'GET', '/v1/operate/keys', token);
+  },
+  rotateOperateKey: async (world) =>
+    send(world, 'POST', '/v1/operate/keys/rotate', await moderatorToken(world), {
+      confirm: 'rotate',
+    }),
   // #2609: the operator's analysis settings, read, saved and cleared.
   getOperateAnalysis: async (world) =>
     send(world, 'GET', '/v1/operate/analysis', await moderatorToken(world)),
