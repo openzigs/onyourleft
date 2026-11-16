@@ -1911,6 +1911,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
                         is broken at its crossroads with dropped kerbs
+    src/game/overpasses.ts
+                        overpasses and underpasses (#2661) — where a mapped
+                        street on a bridge crosses the route, a level deck 5 m
+                        over the road with parapets and an abutment each side;
+                        where one in a tunnel under 80 m long crosses it, a
+                        parapet along each edge of the road. ⚠️ **Boxes in
+                        `three-renderer.ts` §`BridgeBelt`**, handed in with the
+                        streams' bridges (`scene.ts` §`water`), so no new mesh,
+                        attribute or structure: the belt's 128 boxes bound them
+                        and the streams' come first
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that
