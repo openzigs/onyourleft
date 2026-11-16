@@ -245,6 +245,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         the web a11y gate both read, so a new page is held to
                         them by being added. Status' words are
                         `packages/operate-text`'s, which the image now copies.
+                        Since #2648 the AI backend page CHANGES things: a
+                        `POST`/`DELETE` through the seam reaches only a route
+                        marked `admin: 'change'` (the three analysis
+                        changes), after a step-up, and the seam sets
+                        `RouteContext.adminChannel`, from which the route
+                        logs `admin_tunnel` or `admin_loopback`, never `app`.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

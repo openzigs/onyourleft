@@ -126,7 +126,15 @@ import {
   sweepPeriodMs,
   type RateLimit,
 } from '../auth/rate-limit.ts';
-import type { OperateStatusAnswer } from '@onyourleft/operate-text';
+import {
+  analysisHolds,
+  type OperateAnalysisAnswer,
+  type OperateAnalysisChange,
+  type OperateJobsAnswer,
+  type OperateLocalModelsAnswer,
+  type OperateStatusAnswer,
+  type OperateToolCheckOutcome,
+} from '@onyourleft/operate-text';
 
 import { escapeHtml } from '../html.ts';
 import type { ModeratorRole } from '../moderation/moderation.ts';
@@ -143,11 +151,15 @@ import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
 import {
   adminPage,
+  analysisBody,
+  isSaveProblem,
   logBody,
   passkeysBody,
   shellPage,
   signInPage,
   statusBody,
+  type AnalysisNotice,
+  type AnalysisOffer,
   type LogEntryAnswer,
   type LogView,
   type PasskeyView,
@@ -239,12 +251,23 @@ export type AdminRefusal =
 /**
  * The seam ADR 0069 D-2 decides: a route of the table called IN-PROCESS, as
  * the owner, through every check the route declares — never a method, path
- * or query from the browser. `handler.ts` builds it; a route whose `admin`
- * is not `read` or `change` is `not_found` there before it is called.
+ * or query from the browser. `handler.ts` builds it; a `GET` reaches only a
+ * route marked `admin: 'read'`, a `POST` or `DELETE` only one marked
+ * `'change'` (#2648), and any other is `not_found` there before it is called.
  */
 export interface AdminSeam {
-  /** `path` may carry a query the admin layer built and checked; the handler matches its pathname. */
-  dispatch(method: 'GET', path: string, owner: Caller, client: ClientInfo): Promise<Response>;
+  /**
+   * `path` may carry a query the admin layer built and checked; the handler
+   * matches its pathname. `body` is the JSON a change sends, built here from
+   * a form this layer checked — never the browser's own.
+   */
+  dispatch(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    owner: Caller,
+    client: ClientInfo,
+    body?: Readonly<Record<string, unknown>>,
+  ): Promise<Response>;
 }
 
 export interface AdminOptions {
@@ -447,6 +470,119 @@ export const LOG_PAGE_SIZE = 50;
  */
 const LOG_CURSOR = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** The AI backend page's change behind each of its form targets (#2648). */
+const ANALYSIS_ACTIONS: ReadonlyMap<string, AnalysisAction> = new Map([
+  ['/admin/analysis/offer', 'analysis_offer'],
+  ['/admin/analysis/check', 'analysis_check'],
+  ['/admin/analysis/model', 'analysis_model'],
+  ['/admin/analysis/address', 'analysis_address'],
+  ['/admin/analysis/clear', 'analysis_clear'],
+]);
+
+type AnalysisAction = Extract<AdminChange, `analysis_${string}`>;
+
+/** The analysis settings' route: the AI backend page reads and changes them there. */
+const ANALYSIS_ROUTE = '/v1/operate/analysis';
+
+/** Which settings field each switch is, as `POST /v1/operate/analysis` takes it. */
+const OFFER_FIELD: Readonly<Record<AnalysisOffer, 'offerLocal' | 'othersLocal' | 'offerHosted'>> = {
+  local: 'offerLocal',
+  others: 'othersLocal',
+  hosted: 'offerHosted',
+};
+
+/** One change's route call (ADR 0069 D-2): a fixed method and path, and a body built here. */
+interface AnalysisCall {
+  readonly method: 'POST' | 'DELETE';
+  readonly path: string;
+  readonly body?: Readonly<Record<string, unknown>>;
+  /** What the settings read back after it must hold, for a save. */
+  readonly holds?: OperateAnalysisChange;
+  /** What the settings read back after it must show, where `holds` has no field for it. */
+  readonly readBack?: (after: OperateAnalysisAnswer) => boolean;
+}
+
+/**
+ * The route call a checked form's fields map to, or `undefined` for a form
+ * that names no change: a switch and `on`/`off` from the closed lists, and
+ * a model or an address as the owner typed or picked it — the route checks
+ * those (the local-address rule, ADR 0040 D-6, among them).
+ */
+function analysisCall(
+  action: AnalysisAction,
+  fields: Readonly<Record<string, string>>,
+): AnalysisCall | undefined {
+  switch (action) {
+    case 'analysis_offer': {
+      const { offer, on } = fields;
+      if (offer === undefined || !Object.hasOwn(OFFER_FIELD, offer)) return undefined;
+      if (on !== 'on' && on !== 'off') return undefined;
+      const change = { [OFFER_FIELD[offer as AnalysisOffer]]: on === 'on' };
+      return { method: 'POST', path: ANALYSIS_ROUTE, body: change, holds: change };
+    }
+    case 'analysis_check':
+      return { method: 'POST', path: `${ANALYSIS_ROUTE}/check`, body: { model: fields.model } };
+    case 'analysis_model':
+      return {
+        method: 'POST',
+        path: ANALYSIS_ROUTE,
+        body: { localModel: fields.localModel },
+        holds: { localModel: fields.localModel?.trim() ?? null },
+      };
+    case 'analysis_address':
+      return {
+        method: 'POST',
+        path: ANALYSIS_ROUTE,
+        body: { localUrl: fields.localUrl },
+        // The address is the app's own now, and there is one (the route may write it in its own form).
+        readBack: (after) => after.local.setIn === 'app' && after.local.url !== null,
+      };
+    case 'analysis_clear':
+      return {
+        method: 'DELETE',
+        path: ANALYSIS_ROUTE,
+        // Nothing is held in the app any more: the address, model and reasoning are the .env's.
+        readBack: (after) => after.local.setIn !== 'app',
+      };
+  }
+}
+
+/** The first field problem a route's `validation_failed` names, when it is one of the routes' own codes. */
+async function problemOf(answer: Response): Promise<string | null> {
+  try {
+    const body = (await answer.json()) as { error?: { fields?: { problem?: unknown }[] } };
+    const problem = body.error?.fields?.[0]?.problem;
+    return isSaveProblem(problem) ? problem : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A tool check's outcome as the route answered it, or `null`. */
+async function outcomeOf(answer: Response): Promise<OperateToolCheckOutcome | null> {
+  if (answer.status !== 200) return null;
+  try {
+    const outcome = ((await answer.json()) as { outcome?: unknown }).outcome;
+    return typeof outcome === 'string' && TOOL_CHECK_WORDS.includes(outcome)
+      ? (outcome as OperateToolCheckOutcome)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const TOOL_CHECK_WORDS: readonly string[] = [
+  'tools-ok',
+  'no-tool-call',
+  'does-not-support-tools',
+  'server-error',
+  'not-local',
+  'out-of-time',
+  'stopped',
+  'no-address',
+  'busy',
+];
+
 export function createAdmin(options: AdminOptions): Admin {
   const { store } = options;
   const limits = { ...DEFAULT_ADMIN_LIMITS, ...options.limits };
@@ -507,6 +643,43 @@ export function createAdmin(options: AdminOptions): Admin {
     } catch {
       return { status: 200, body: undefined };
     }
+  }
+
+  /**
+   * The AI backend (#2648): `GET /v1/operate/analysis`, its models and its
+   * jobs, drawn in the app panel's words. `noticeFor` says what the change
+   * just made says, given the settings read back after it.
+   */
+  async function analysisPage(
+    view: PageCall,
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    noticeFor: (after: OperateAnalysisAnswer | undefined) => AnalysisNotice | null,
+  ): Promise<string> {
+    const objectOr = <T>(answer: unknown): T | undefined =>
+      typeof answer === 'object' && answer !== null ? (answer as T) : undefined;
+    const [analysis, models, jobs] = await Promise.all([
+      read(view.seam, ANALYSIS_ROUTE, view.caller, view.client),
+      read(view.seam, `${ANALYSIS_ROUTE}/models`, view.caller, view.client),
+      read(view.seam, `${ANALYSIS_ROUTE}/jobs`, view.caller, view.client),
+    ]);
+    const settings = objectOr<OperateAnalysisAnswer>(analysis);
+    const drawn = {
+      analysis: settings,
+      models: objectOr<OperateLocalModelsAnswer>(models),
+      jobs: objectOr<OperateJobsAnswer>(jobs),
+      strength,
+      csrf: shell.csrf,
+      notice: noticeFor(settings),
+    };
+    let body: string;
+    try {
+      body = analysisBody(drawn);
+    } catch {
+      // An answer not in the route's shape is as good as none.
+      body = analysisBody({ ...drawn, analysis: undefined, models: undefined, jobs: undefined });
+    }
+    return shellPage(shell, 'AI backend', body, true);
   }
 
   /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
@@ -702,10 +875,17 @@ export function createAdmin(options: AdminOptions): Admin {
         403,
       );
 
-    const nothingChanged = (status: number, why: string): Response =>
+    const nothingChanged = (
+      status: number,
+      why: string,
+      back: { readonly path: string; readonly what: string } = {
+        path: '/admin/passkeys',
+        what: 'the passkeys',
+      },
+    ): Response =>
       htmlAnswer(
         'Nothing changed',
-        `<h1>Nothing was changed</h1>\n<p>${escapeHtml(why)}</p>\n<p><a href="/admin/passkeys">Go back to the passkeys</a>.</p>`,
+        `<h1>Nothing was changed</h1>\n<p>${escapeHtml(why)}</p>\n<p><a href="${back.path}">Go back to ${back.what}</a>.</p>`,
         status,
       );
 
@@ -765,6 +945,13 @@ export function createAdmin(options: AdminOptions): Admin {
       const shell = await shellOf(path, session);
       const view = { caller: callerOf(owner, session), client, seam };
       if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/analysis') {
+        return adminResponse(
+          await analysisPage(view, shell, session.record.strength, () => null),
+          200,
+          HTML,
+        );
+      }
       if (path === '/admin/log') {
         return adminResponse(await logPage(view, shell, url.searchParams.get('cursor')), 200, HTML);
       }
@@ -1344,6 +1531,95 @@ export function createAdmin(options: AdminOptions): Admin {
       return seeOther('/admin/passkeys');
     }
 
+    /**
+     * One change of the AI backend page (#2648, ADR 0069 D-2, D-4): from this
+     * origin's page, in a live PASSKEY session carrying its token, with a
+     * fresh step-up for exactly this change and these fields — then ONE call
+     * of the route, in-process as the owner, whose own checks and operator
+     * log entry (in its own transaction, under this listener's source) are
+     * the change's. The answer is the page drawn again from the routes'
+     * reads AFTER the call, never from the form.
+     */
+    async function analysisChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+      action: AnalysisAction,
+    ): Promise<Response> {
+      const back = { path: '/admin/analysis', what: 'the AI backend' };
+      const form = formOf(body);
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'passkey') {
+        refuse('step_up');
+        return nothingChanged(
+          403,
+          'A change needs a passkey sign-in: a one-time code’s session changes nothing.',
+          back,
+        );
+      }
+      const fields = boundFields(ADMIN_CHANGES[action].fields, form);
+      const call = fields === undefined ? undefined : analysisCall(action, fields);
+      if (fields === undefined || call === undefined) {
+        refuse('step_up');
+        return nothingChanged(400, 'That form did not name one change.', back);
+      }
+      const stepped = await steppedUp(owner, session, action, fields, form);
+      if (stepped === undefined) {
+        return nothingChanged(
+          403,
+          'The passkey check did not pass: a change needs a fresh check by a confirmed passkey, made for this change.',
+          back,
+        );
+      }
+      // The counter moves before the change, so the same assertion cannot make a second.
+      const at = seconds();
+      if (
+        !(await store.recordAdminPasskeyUse(
+          stepped.passkey.id,
+          stepped.passkey.signCount,
+          stepped.signCount,
+          at,
+        ))
+      ) {
+        refuse('counter');
+        return nothingChanged(409, 'That passkey was just used elsewhere. Try again.', back);
+      }
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch(call.method, call.path, caller, client, call.body);
+      const done = answer.status === 200;
+      const problem = done || action !== 'analysis_address' ? null : await problemOf(answer);
+      const outcome = action === 'analysis_check' ? await outcomeOf(answer) : null;
+      const shell = await shellOf('/admin/analysis', session);
+      const page = await analysisPage(
+        { caller, client, seam },
+        shell,
+        session.record.strength,
+        (after): AnalysisNotice => {
+          const holds =
+            done &&
+            after !== undefined &&
+            (call.holds === undefined || analysisHolds(after, call.holds)) &&
+            (call.readBack === undefined || call.readBack(after));
+          switch (action) {
+            case 'analysis_offer':
+              return { about: 'offers', ok: holds };
+            case 'analysis_check':
+              return { about: 'check', model: fields.model ?? '', outcome };
+            case 'analysis_model':
+              return { about: 'model', ok: holds };
+            case 'analysis_address':
+              return { about: 'address', ok: holds, problem };
+            case 'analysis_clear':
+              return { about: 'return', ok: holds };
+          }
+        },
+      );
+      return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
+    }
+
     return async (request, body, client, seam) => {
       // Against DNS rebinding: the page is this listener's, or it is not served.
       if (request.headers.get('host') !== place.host) {
@@ -1402,6 +1678,10 @@ export function createAdmin(options: AdminOptions): Admin {
         );
       }
       if (request.method === 'POST') {
+        const analysisAction = ANALYSIS_ACTIONS.get(route);
+        if (analysisAction !== undefined) {
+          return analysisChange(request, body, owner, client, seam, analysisAction);
+        }
         switch (route) {
           case '/admin/sign-in':
             return signIn(request, body, owner, client);

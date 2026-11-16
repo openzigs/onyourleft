@@ -42,6 +42,8 @@ export interface AdminBrowserInstance {
   passkeys(): Promise<readonly { readonly id: string; readonly algorithm: string }[]>;
   /** How many admin sessions the file holds, read on a store of its own. */
   sessions(): Promise<number>;
+  /** Whether the analysis settings row lets other riders use the local model (#2648), read on a store of its own. */
+  othersLocal(): Promise<boolean | null | undefined>;
   /** Stop, and start a new instance over the same file at the same origin. */
   restart(): Promise<void>;
   close(): Promise<void>;
@@ -97,6 +99,7 @@ export async function startAdminInstance(): Promise<AdminBrowserInstance> {
       reading(async (opened) =>
         (await opened.listAdminPasskeys()).map(({ id, algorithm }) => ({ id, algorithm })),
       ),
+    othersLocal: () => reading(async (opened) => (await opened.getAnalysisSetting())?.othersLocal),
     sessions: () => {
       const database = openDatabase(path);
       try {

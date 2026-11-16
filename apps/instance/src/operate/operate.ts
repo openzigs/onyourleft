@@ -90,6 +90,7 @@ import type { RecentProblem, RecentProblems } from '../log.ts';
 import type { Resolver } from '../history/address.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import type {
+  AdminSource,
   AnalysisJobStatus,
   BackupRecord,
   BackupRequestOutcome,
@@ -333,6 +334,15 @@ export interface OperateAnalysisSources {
   readonly localModel: (target: ToolCheckTarget) => ModelConnection;
 }
 
+/**
+ * The owner as an Operate change is logged under (ADR 0069 D-8): from the
+ * app, or since #2648 from the instance's own admin pages on one listener.
+ */
+export interface OperateOwner {
+  readonly source: 'app' | AdminSource;
+  readonly athleteId: string;
+}
+
 export interface Operate {
   /** The instance's own state, read-only (#2604). Writes nothing, logs nothing. */
   status(): Promise<InstanceStatus>;
@@ -349,22 +359,22 @@ export interface Operate {
   requestBackup(athleteId: string): Promise<OperateResult<{ readonly requestedAt: number }>>;
   /** The analysis settings (#2609), for the owner `athleteId`. Writes nothing. */
   analysisSettings(athleteId: string): Promise<AnalysisSettingsView>;
-  /** Save the fields `body` names, checked first; logged either way. */
+  /** Save the fields `body` names, checked first; logged either way, under `owner`'s source. */
   setAnalysisSettings(
-    athleteId: string,
+    owner: OperateOwner,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<AnalysisSettingsView>>;
-  /** Back to `.env` for every field, logged. */
-  clearAnalysisSettings(athleteId: string): Promise<AnalysisSettingsView>;
+  /** Back to `.env` for every field, logged under `owner`'s source. */
+  clearAnalysisSettings(owner: OperateOwner): Promise<AnalysisSettingsView>;
   /** What the configured local server offers (#2610). Writes nothing, logs nothing. */
   localModels(): Promise<LocalServerRead>;
   /**
    * Whether the model `body.model` on the configured local server calls
-   * tools (#2610), as the owner `athleteId`: logged `analysis_model_checked`
-   * with the outcome. `validation_failed` for a body that names no model.
+   * tools (#2610), as `owner`: logged `analysis_model_checked` with the
+   * outcome. `validation_failed` for a body that names no model.
    */
   checkModel(
-    athleteId: string,
+    owner: OperateOwner,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<{ readonly outcome: ToolCheckOutcome }>>;
   /** The analysis queue and the newest jobs, for the owner `athleteId` (#2610). Writes nothing. */
@@ -667,7 +677,7 @@ export function createOperate(options: {
       }
       return readLocalServer(server.baseUrl, { resolve: analysis.resolve });
     },
-    async checkModel(athleteId, body) {
+    async checkModel(owner, body) {
       const fields: FieldProblem[] = [];
       for (const name of Object.keys(body)) {
         if (name !== 'model')
@@ -698,7 +708,7 @@ export function createOperate(options: {
       const sent = outcome !== 'busy' && outcome !== 'no-address' && outcome !== 'not-local';
       await store.recordOperatorAction(
         {
-          actor: { source: 'app', athleteId },
+          actor: owner,
           action: 'analysis_model_checked',
           at: Math.floor(analysis.now() / 1000),
         },
@@ -726,19 +736,19 @@ export function createOperate(options: {
         })),
       };
     },
-    async setAnalysisSettings(athleteId, body) {
-      const saved = await saveAnalysisSettings(store, { source: 'app', athleteId }, body, {
+    async setAnalysisSettings(owner, body) {
+      const saved = await saveAnalysisSettings(store, owner, body, {
         resolve: analysis.resolve,
         now: analysis.now,
       });
       if (!saved.ok) return { ok: false, code: 'validation_failed', fields: saved.fields };
       await told();
-      return { ok: true, value: await analysisView(athleteId) };
+      return { ok: true, value: await analysisView(owner.athleteId) };
     },
-    async clearAnalysisSettings(athleteId) {
-      await clearAnalysisSettings(store, { source: 'app', athleteId }, analysis.now);
+    async clearAnalysisSettings(owner) {
+      await clearAnalysisSettings(store, owner, analysis.now);
       await told();
-      return analysisView(athleteId);
+      return analysisView(owner.athleteId);
     },
     async status() {
       const [counts, disk, tunnel, keys, backup] = await Promise.all([

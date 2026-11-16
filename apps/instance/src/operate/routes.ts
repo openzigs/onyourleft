@@ -17,7 +17,7 @@ import { RECENT_PROBLEMS_KEPT } from '../log.ts';
 import type { Readiness } from '../readiness.ts';
 import { OPERATOR_ACTIONS, ROOM_END_REASONS } from '../store/sql-store.ts';
 import { json, type Route, type RouteContext, type Schema } from '../route-kit.ts';
-import type { Operate } from './operate.ts';
+import type { Operate, OperateOwner } from './operate.ts';
 
 function operateOf(context: RouteContext): Operate {
   // The handler answers `unavailable` before calling a route that declares
@@ -118,6 +118,23 @@ const analysisSchema: Schema = {
 function ownerOf(context: RouteContext): string {
   if (context.caller === undefined) throw new Error('operate route called without a caller');
   return context.caller.athleteId;
+}
+
+/**
+ * The owner as the operator log names them (ADR 0069 D-8): from the app, or
+ * from the admin pages on the listener the admin seam's marker names — the
+ * marker is set by that seam alone, never by a request.
+ */
+function ownerActor(context: RouteContext): OperateOwner {
+  const athleteId = ownerOf(context);
+  switch (context.adminChannel) {
+    case undefined:
+      return { source: 'app', athleteId };
+    case 'tunnel':
+      return { source: 'admin_tunnel', athleteId };
+    case 'loopback':
+      return { source: 'admin_loopback', athleteId };
+  }
 }
 
 const ANALYSIS_SUMMARY_TAIL =
@@ -695,9 +712,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'setOperateAnalysis',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: a change the admin AI backend page makes (#2648), after
+    // #2642's fresh passkey, logged with the channel's own source.
+    admin: 'change',
     summary: `Save the operator’s analysis settings (#2609): every field is optional, a field left out is unchanged, and \`null\` returns it to its fallback — a model field to its \`.env\` line, a source to offered, the switch to off. They apply from the next job, with no restart; a job already running keeps its own. \`localUrl\` is held to the rule \`.env\`’s address is, and a name must resolve, now, to local addresses only; a field that fails is \`validation_failed\` with its code (\`not-a-url\`, \`not-base-url\`, \`not-local\`, \`tls-by-name\`, \`unresolved\`, \`bad-model\`, \`bad-reasoning\`) as the problem, and nothing is saved. Logged \`analysis_settings_set\` in the operator log, naming the fields changed and never a value. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -718,7 +735,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     errors: ['unauthenticated', 'validation_failed'],
     response: { contentType: 'application/json', schema: analysisSchema },
     handle: async (context) => {
-      const saved = await operateOf(context).setAnalysisSettings(ownerOf(context), context.json);
+      const saved = await operateOf(context).setAnalysisSettings(ownerActor(context), context.json);
       if (!saved.ok) {
         return errorResponse(
           saved.code,
@@ -734,9 +751,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'clearOperateAnalysis',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: a change the admin AI backend page makes (#2648), after
+    // #2642's fresh passkey, logged with the channel's own source.
+    admin: 'change',
     summary: `Clear the operator’s analysis settings (#2609): every field falls back — the local model to \`.env\`, both sources to offered, the switch for other riders to off — from the next job. Logged \`analysis_settings_cleared\`. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -744,7 +761,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     errors: ['unauthenticated'],
     response: { contentType: 'application/json', schema: analysisSchema },
     handle: async (context) =>
-      json(await operateOf(context).clearAnalysisSettings(ownerOf(context))),
+      json(await operateOf(context).clearAnalysisSettings(ownerActor(context))),
   },
   {
     method: 'GET',
@@ -767,9 +784,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'checkOperateAnalysisModel',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: a change the admin AI backend page makes (#2648), after
+    // #2642's fresh passkey, logged with the channel's own source.
+    admin: 'change',
     summary: `Check that a model on the configured local server calls tools (#2610, ADR 0046 D-7), before it is saved: the instance sends it a fixed instruction and one fixed, harmless tool — no ride, no rider’s text, no history — and the outcome is \`tools-ok\` only if it called the tool and then answered; else \`no-tool-call\`, \`does-not-support-tools\`, \`server-error\`, \`not-local\`, \`out-of-time\`, \`stopped\` (the instance stopped), \`no-address\` or \`busy\` (another check is out: one at a time). ⚠️ **Asking the server for a model loads it, which may unload the model a rider’s job is using.** Only the local source: a hosted service has its own test (\`POST /v1/analysis/hosted/test\`). Logged \`analysis_model_checked\` with the outcome, never the model’s name. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -791,7 +808,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
       },
     },
     handle: async (context) => {
-      const checked = await operateOf(context).checkModel(ownerOf(context), context.json);
+      const checked = await operateOf(context).checkModel(ownerActor(context), context.json);
       if (!checked.ok) {
         return errorResponse(
           checked.code,

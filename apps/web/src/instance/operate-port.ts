@@ -952,8 +952,14 @@ export const TOOL_CHECK_WAIT_MILLISECONDS = MAXIMUM_SEALED_CALL_MILLISECONDS;
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 /** A base URL: `http:` or `https:`, short, and nothing a screen would run. */
 const BASE_URL = /^https?:\/\/[^\s<>"']{1,500}$/;
-/** A base URL with any `user:password@` taken out: the screen never draws a secret. */
-function withoutUserinfo(url: string): string {
+/**
+ * A base URL with any `user:password@` taken out: the screen never draws a secret.
+ * The same rule as `@onyourleft/operate-text`'s `withoutUserinfo`, kept as this
+ * directory's own copy under another name because this directory reaches no
+ * other package (see above), and `operate-text-moved.test.ts` forbids a second
+ * declaration of a package export's name under `apps/web/src`.
+ */
+function stripAddressUserinfo(url: string): string {
   return url.replace(/^(https?:\/\/)[^/?#]*@/, '$1');
 }
 /** An origin, as `hosted-key.ts` §`hostedOriginOf` writes one. */
@@ -989,7 +995,7 @@ function analysisFrom(answer: InstanceAnswer): OperateAnalysis | undefined {
   return {
     kind: 'analysis',
     local: {
-      url: local.url === null ? null : withoutUserinfo(local.url),
+      url: local.url === null ? null : stripAddressUserinfo(local.url),
       model: local.model,
       reasoningTokens: local.reasoningTokens,
       offered: local.offered,

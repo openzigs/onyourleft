@@ -724,16 +724,38 @@ describe('the owner’s routes are the owner’s alone, checked in ONE place (#2
     ],
   ]);
 
-  it('says on every owner route whether the admin pages reach it, on no other route, and lets them read only (#2641, ADR 0069 D-2)', () => {
+  /**
+   * The changes the admin pages may make, each with the page that makes it
+   * behind #2642's fresh passkey (ADR 0069 D-2). Every other change stays
+   * `never` until its page's sub-issue adds it here.
+   */
+  const CHANGES: ReadonlyMap<string, string> = new Map([
+    ['setOperateAnalysis', '#2648: the AI backend page saves the model, address and offers'],
+    ['clearOperateAnalysis', '#2648: the AI backend page returns the settings to .env'],
+    ['checkOperateAnalysisModel', '#2648: the AI backend page checks a model calls tools'],
+  ]);
+
+  it('says on every owner route whether the admin pages reach it, on no other route, and lets them read, and change only what a page makes (#2641, #2648, ADR 0069 D-2)', () => {
     for (const route of OWNER_ROUTES) {
       expect(['read', 'change', 'never'], route.operationId).toContain(route.admin);
-      // A read is a GET; until #2642's step-up, every change stays `never`.
+      // A read is a GET; a change is a POST or a DELETE a page makes behind a step-up.
       expect(route.admin, route.operationId).toBe(
-        route.method === 'GET' && !NEVER_READ.has(route.operationId) ? 'read' : 'never',
+        route.method === 'GET'
+          ? NEVER_READ.has(route.operationId)
+            ? 'never'
+            : 'read'
+          : CHANGES.has(route.operationId)
+            ? 'change'
+            : 'never',
       );
     }
-    for (const operationId of NEVER_READ.keys()) {
+    for (const operationId of [...NEVER_READ.keys(), ...CHANGES.keys()]) {
       expect(OWNER_ROUTES.map((route) => route.operationId)).toContain(operationId);
+    }
+    for (const operationId of CHANGES.keys()) {
+      expect(OWNER_ROUTES.find((route) => route.operationId === operationId)?.method).not.toBe(
+        'GET',
+      );
     }
     // ADR 0069 D-9's three moderation routes are #2646's to mark; none is yet.
     expect(

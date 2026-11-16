@@ -28,6 +28,7 @@ interface AdminBrowserInstance {
   confirm(id: string): Promise<void>;
   passkeys(): Promise<readonly { readonly id: string; readonly algorithm: string }[]>;
   sessions(): Promise<number>;
+  othersLocal(): Promise<boolean | null | undefined>;
   restart(): Promise<void>;
   close(): Promise<void>;
 }
@@ -183,5 +184,43 @@ test.describe('the admin passkeys, through Chromium’s virtual authenticator (#
     await page.unroute(`${instance.origin}/admin/sign-in/passkey`);
     await passkeySignIn(page);
     await expect(page).toHaveURL(`${instance.origin}/admin/status`);
+  });
+
+  test('a change on the AI backend page asks the passkey again, through the page’s one script, and is read back (#2648)', async ({
+    page,
+  }) => {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('WebAuthn.enable');
+    const authenticatorId = await virtualAuthenticator(cdp);
+    await enrol(page, cdp, authenticatorId);
+    const [kept] = await instance.passkeys();
+    await instance.confirm(kept?.id as string);
+    await passkeySignIn(page);
+    await expect(page).toHaveURL(`${instance.origin}/admin/status`);
+    await page.getByRole('link', { name: 'AI backend' }).click();
+    expect(await instance.othersLocal()).toBeUndefined();
+    const before = (
+      (await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials[0] as {
+        signCount: number;
+      }
+    ).signCount;
+    // By keyboard: the switch's own button, focused and pressed.
+    const others = page.getByRole('form', {
+      name: 'Riders other than you may use the model on this instance',
+    });
+    await others.getByRole('button', { name: 'Turn on' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('Saved. This is what the instance now offers.')).toBeVisible();
+    await expect(
+      page.getByText('Riders other than you may use the model on this instance: on.'),
+    ).toBeVisible();
+    // Read back through the store, and the authenticator was asked once more.
+    expect(await instance.othersLocal()).toBe(true);
+    const after = (
+      (await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials[0] as {
+        signCount: number;
+      }
+    ).signCount;
+    expect(after).toBeGreaterThan(before);
   });
 });
