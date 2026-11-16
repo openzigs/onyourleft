@@ -2,10 +2,13 @@
   {
     "circuit": "flat",
     "seed": 1,
+    "rules": "adr-0071",
     "outcomeCountsMatchLive": true,
     "traceMatchesLive": null,
     "outcomes": {
       "applied": 980,
+      "bridging": 0,
+      "marking": 0,
       "no-decision": 42,
       "not-named": 0,
       "launch": 0,
@@ -35,7 +38,13 @@
       "riderPlaceAtEnd": 8,
       "firstMoveS": 78.05,
       "mostMovingAtOnce": 3,
-      "chaseStartGapsM": [29.7]
+      "chaseStartGapsM": [29.7],
+      "movers": 3,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 0,
+      "riderTargets": 0
     },
     "model": {
       "tacticShare": {
@@ -56,16 +65,25 @@
       "riderPlaceAtEnd": 8,
       "firstMoveS": 7.05,
       "mostMovingAtOnce": 2,
-      "chaseStartGapsM": [32, 26.8]
+      "chaseStartGapsM": [32, 26.8],
+      "movers": 3,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 80,
+      "riderTargets": 6
     }
   },
   {
     "circuit": "flat",
     "seed": 2,
+    "rules": "adr-0071",
     "outcomeCountsMatchLive": true,
     "traceMatchesLive": null,
     "outcomes": {
       "applied": 949,
+      "bridging": 0,
+      "marking": 0,
       "no-decision": 56,
       "not-named": 0,
       "launch": 0,
@@ -95,7 +113,13 @@
       "riderPlaceAtEnd": 8,
       "firstMoveS": 79.05,
       "mostMovingAtOnce": 3,
-      "chaseStartGapsM": []
+      "chaseStartGapsM": [],
+      "movers": 3,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 15,
+      "riderTargets": 0
     },
     "model": {
       "tacticShare": {
@@ -116,16 +140,25 @@
       "riderPlaceAtEnd": 8,
       "firstMoveS": 7.05,
       "mostMovingAtOnce": 2,
-      "chaseStartGapsM": [31.4, 26.4]
+      "chaseStartGapsM": [31.4, 26.4],
+      "movers": 3,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 0,
+      "riderTargets": 8
     }
   },
   {
     "circuit": "flat",
     "seed": 3,
+    "rules": "adr-0071",
     "outcomeCountsMatchLive": true,
     "traceMatchesLive": null,
     "outcomes": {
       "applied": 930,
+      "bridging": 0,
+      "marking": 0,
       "no-decision": 84,
       "not-named": 0,
       "launch": 0,
@@ -155,7 +188,13 @@
       "riderPlaceAtEnd": 8,
       "firstMoveS": 79.05,
       "mostMovingAtOnce": 3,
-      "chaseStartGapsM": []
+      "chaseStartGapsM": [],
+      "movers": 3,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 31,
+      "riderTargets": 0
     },
     "model": {
       "tacticShare": {
@@ -176,16 +215,25 @@
       "riderPlaceAtEnd": 8,
       "firstMoveS": 7.05,
       "mostMovingAtOnce": 3,
-      "chaseStartGapsM": [31.2, 26.2]
+      "chaseStartGapsM": [31.2, 26.2],
+      "movers": 3,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 0,
+      "riderTargets": 8
     }
   },
   {
     "circuit": "hilly",
     "seed": 1,
+    "rules": "adr-0071",
     "outcomeCountsMatchLive": true,
     "traceMatchesLive": null,
     "outcomes": {
       "applied": 961,
+      "bridging": 0,
+      "marking": 0,
       "no-decision": 42,
       "not-named": 0,
       "launch": 0,
@@ -215,7 +263,13 @@
       "riderPlaceAtEnd": 5,
       "firstMoveS": 0.05,
       "mostMovingAtOnce": 3,
-      "chaseStartGapsM": [31.1, 30.9, 104.3, 104.5, 62.2]
+      "chaseStartGapsM": [31.1, 30.9, 104.3, 104.5, 62.2],
+      "movers": 4,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 7,
+      "riderTargets": 0
     },
     "model": {
       "tacticShare": {
@@ -236,16 +290,25 @@
       "riderPlaceAtEnd": 5,
       "firstMoveS": 0.05,
       "mostMovingAtOnce": 4,
-      "chaseStartGapsM": []
+      "chaseStartGapsM": [],
+      "movers": 5,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 0,
+      "riderTargets": 6
     }
   },
   {
     "circuit": "hilly",
     "seed": 2,
+    "rules": "adr-0071",
     "outcomeCountsMatchLive": true,
     "traceMatchesLive": null,
     "outcomes": {
       "applied": 966,
+      "bridging": 0,
+      "marking": 0,
       "no-decision": 42,
       "not-named": 0,
       "launch": 0,
@@ -275,7 +338,13 @@
       "riderPlaceAtEnd": 5,
       "firstMoveS": 0.05,
       "mostMovingAtOnce": 3,
-      "chaseStartGapsM": [95.1, 30.8, 33.1, 69.3]
+      "chaseStartGapsM": [95.1, 30.8, 33.1, 69.3],
+      "movers": 5,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 0,
+      "riderTargets": 0
     },
     "model": {
       "tacticShare": {
@@ -296,16 +365,25 @@
       "riderPlaceAtEnd": 6,
       "firstMoveS": 0.05,
       "mostMovingAtOnce": 5,
-      "chaseStartGapsM": []
+      "chaseStartGapsM": [],
+      "movers": 6,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 0,
+      "riderTargets": 6
     }
   },
   {
     "circuit": "hilly",
     "seed": 3,
+    "rules": "adr-0071",
     "outcomeCountsMatchLive": true,
     "traceMatchesLive": null,
     "outcomes": {
       "applied": 930,
+      "bridging": 0,
+      "marking": 0,
       "no-decision": 70,
       "not-named": 0,
       "launch": 0,
@@ -335,7 +413,13 @@
       "riderPlaceAtEnd": 6,
       "firstMoveS": 0.05,
       "mostMovingAtOnce": 4,
-      "chaseStartGapsM": [86.6, 36.9, 29.7, 30.4, 29.2]
+      "chaseStartGapsM": [86.6, 36.9, 29.7, 30.4, 29.2],
+      "movers": 5,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 0,
+      "riderTargets": 0
     },
     "model": {
       "tacticShare": {
@@ -356,7 +440,13 @@
       "riderPlaceAtEnd": 6,
       "firstMoveS": 0.05,
       "mostMovingAtOnce": 4,
-      "chaseStartGapsM": [86.6, 34.8, 75.8, 69.6, 45.8, 47, 111.4]
+      "chaseStartGapsM": [86.6, 34.8, 75.8, 69.6, 45.8, 47, 111.4],
+      "movers": 5,
+      "blownBots": 0,
+      "blownOverCpTicks": 0,
+      "fadePlacesLost": [],
+      "onRiderWheelTicks": 4,
+      "riderTargets": 6
     }
   }
 ]

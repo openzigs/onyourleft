@@ -36,16 +36,30 @@ function field(): FieldRun {
         ['a', at === 400 ? 0.4 : 0.9],
         ['b', 1],
       ]),
+      exhausted: new Map([
+        ['a', false],
+        ['b', false],
+      ]),
       k: new Map([
         ['a', 0.5],
         ['b', 1],
         ['rider', 1],
       ]),
-      power: new Map(),
+      power: new Map([
+        ['a', 300],
+        ['b', 250],
+      ]),
       inside: 0,
     };
   });
-  return { ticks, log: [], outcomes: {} as FieldRun['outcomes'], last: {} as FieldRun['last'] };
+  // Each bot's CP: `a` 280 W, `b` 260 W.
+  const last = {
+    bots: [
+      { id: 'a', plan: { capacity: { cpWatts: 280 } } },
+      { id: 'b', plan: { capacity: { cpWatts: 260 } } },
+    ],
+  } as unknown as FieldRun['last'];
+  return { ticks, log: [], outcomes: {} as FieldRun['outcomes'], last };
 }
 
 describe('the comparison’s numbers (#2616)', () => {
@@ -68,6 +82,79 @@ describe('the comparison’s numbers (#2616)', () => {
     expect(numbers.firstMoveS).toBe(5.05);
     expect(numbers.mostMovingAtOnce).toBe(1);
     expect(numbers.chaseStartGapsM).toEqual([]);
+    // #2720: one mover, nobody blown, and nobody on the rider's wheel.
+    expect(numbers.movers).toBe(1);
+    expect(numbers.blownBots).toBe(0);
+    expect(numbers.blownOverCpTicks).toBe(0);
+    expect(numbers.fadePlacesLost).toEqual([]);
+    expect(numbers.onRiderWheelTicks).toBe(0);
+    expect(numbers.riderTargets).toBe(0);
+  });
+
+  it('reads who blew, whether a blown bot rode over CP, the places each lost, and the rider marked (#2720)', () => {
+    const run = field();
+    const ticks = run.ticks.map((tick, at) => {
+      // `a` is blown, at 0.1 of its W′, from tick 300 to 349 and again from
+      // tick 680; on ticks 300 to 309 it still rides 300 W, over its 280 W CP. From tick 300
+      // the rider rides 12 m up the road, past `b`, so `a` lost one place
+      // 30 s after it blew; its second blow is read at the end, 20 ticks
+      // on, when it has lost none. `b` follows on ticks 500 to 519 with the
+      // rider directly ahead.
+      const blown = (at >= 300 && at < 350) || at >= 680;
+      return {
+        ...tick,
+        at: new Map(
+          [...tick.at].map(([id, place]) => [id, id === 'rider' && at >= 400 ? 12 : place]),
+        ),
+        exhausted: new Map([
+          ['a', blown],
+          ['b', false],
+        ]),
+        wbal: new Map([
+          ['a', blown ? 0.1 : 0.9],
+          ['b', 1],
+        ]),
+        power: new Map([
+          ['a', blown && at < 310 ? 300 : 200],
+          ['b', 250],
+        ]),
+        tactic: new Map<string, BotTactic>([
+          ['a', tick.tactic.get('a') as BotTactic],
+          ['b', at >= 500 && at < 520 ? 'follow' : 'sit-in'],
+        ]),
+      };
+    });
+    const log: FieldRun['log'] = [
+      {
+        requestedAtMs: 4_000,
+        arrivedAtMs: 6_000,
+        outcome: 'decision',
+        moves: [
+          { bot: 0, move: 'follow', target: 'rider' },
+          { bot: 1, move: 'chase', target: 'rider' },
+        ],
+      },
+      // A target on a move that takes none, and a decision never applied, are not counted.
+      {
+        requestedAtMs: 8_000,
+        arrivedAtMs: 10_000,
+        outcome: 'decision',
+        moves: [{ bot: 0, move: 'attack', target: 'rider' }],
+      },
+      {
+        requestedAtMs: 12_000,
+        arrivedAtMs: 18_000,
+        outcome: 'late',
+        moves: [{ bot: 0, move: 'follow', target: 'rider' }],
+      },
+    ];
+    const numbers = fieldNumbers({ ...run, ticks, log }, 'rider');
+    expect(numbers.blownBots).toBe(1);
+    // The tick that blew it is not counted: it went into that one fresh.
+    expect(numbers.blownOverCpTicks).toBe(9);
+    expect(numbers.fadePlacesLost).toEqual([1, 0]);
+    expect(numbers.onRiderWheelTicks).toBe(20);
+    expect(numbers.riderTargets).toBe(2);
   });
 
   it('reads when the first move went, how many went at once, and the gap each chase began at (#2708)', () => {
