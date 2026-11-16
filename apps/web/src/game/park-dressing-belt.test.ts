@@ -354,7 +354,7 @@ describe('#2685 the golf courses’ and cemeteries’ ground', () => {
     // The rough is darker and yellower than the fairway (red-to-blue up, green down).
     const [fr, fg, fb] = PARK_GROUND_LOOK.fairway;
     const [rr, rg, rb] = PARK_GROUND_LOOK.rough;
-    expect(rg).toBeLessThan(fg as number);
+    expect(rg).toBeLessThan(fg);
     expect((rr as number) / (rb as number)).toBeGreaterThan((fr as number) / (fb as number));
     // And the stripes are further apart than the 1.22 and 0.8 the owner held.
     expect(PARK_GROUND_LOOK.stripePale - PARK_GROUND_LOOK.stripeDeep).toBeGreaterThan(0.42);
