@@ -1185,11 +1185,9 @@ function fillCell(
           : landPlanting(plantings, land, cover, x, z, band, seed);
       const kept = planting?.density ?? density;
       // #2685: a nature reserve is natural ground, stones and all.
+      const natural = cover === 'park' && land.parkLookAt(x, z) === 'natural';
       const stones =
-        countryside.clutter &&
-        (cover === 'farmland' ||
-          cover === 'wood' ||
-          (cover === 'park' && land.parkLookAt(x, z) === 'natural'))
+        countryside.clutter && (cover === 'farmland' || cover === 'wood' || natural)
           ? plain * CLUTTER_SHARE
           : 0;
       if (keep >= kept + stones) {
@@ -1208,7 +1206,7 @@ function fillCell(
       const stone =
         countryside['small-stones'] &&
         kind === 'rock' &&
-        (cover === 'farmland' || cover === 'wood');
+        (cover === 'farmland' || cover === 'wood' || natural);
       if (stone && band < STONE_FIRST_BAND) {
         continue;
       }

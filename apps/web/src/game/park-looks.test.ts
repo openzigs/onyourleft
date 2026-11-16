@@ -192,6 +192,41 @@ describe('#2685 the look of a park, read off the mask', () => {
     expect(roomy.parkLookAt(150, 150)).toBe('cemetery');
   });
 
+  it('spends the look pass on its own work budget, so a later course reads mown', () => {
+    const covered: Box = { minX: 0, maxX: 630, minZ: 0, maxZ: 300 };
+    const first: Box = { minX: 0, maxX: 300, minZ: 0, maxZ: 300 };
+    const second: Box = { minX: 340, maxX: 620, minZ: 0, maxZ: 300 };
+    const courses = [rectangle('golf_course', first), rectangle('golf_course', second)];
+    // One polygon in one chunk costs 4 edges * 64 cells = 256: two for the
+    // class pass, then room for one look only.
+    const short = landClassMask(corridorOf(courses, covered), undefined, 3 * 256);
+    expect(short.parkLookAt(150, 150)).toBe('golf');
+    expect(short.parkLookAt(480, 150)).toBe('mown');
+    expect(short.classAt(480, 150)).toBe('park');
+    // Control: one more polygon's worth and the second course is a course.
+    const roomy = landClassMask(corridorOf(courses, covered), undefined, 4 * 256);
+    expect(roomy.parkLookAt(480, 150)).toBe('golf');
+  });
+
+  it('spends the mown pass on the same budget', () => {
+    const covered: Box = { minX: 0, maxX: 630, minZ: 0, maxZ: 300 };
+    const reserve: Box = { minX: 0, maxX: 620, minZ: 0, maxZ: 300 };
+    const inFirst: Box = { minX: 50, maxX: 250, minZ: 50, maxZ: 250 };
+    const inSecond: Box = { minX: 390, maxX: 590, minZ: 50, maxZ: 250 };
+    const fixture = [
+      rectangle('nature_reserve', reserve),
+      rectangle('park', inFirst),
+      rectangle('park', inSecond),
+    ];
+    // Class pass 512 + 256 + 256, the reserve's look 512, then one mown park.
+    const short = landClassMask(corridorOf(fixture, covered), undefined, 1_792);
+    expect(short.parkLookAt(150, 150)).toBe('mown');
+    expect(short.parkLookAt(490, 150)).toBe('natural');
+    // Control: one more polygon's worth and the second park is mown too.
+    const roomy = landClassMask(corridorOf(fixture, covered), undefined, 2_048);
+    expect(roomy.parkLookAt(490, 150)).toBe('mown');
+  });
+
   it('reads mown outside every chunk, and for a NaN', () => {
     const land = mask(rectangle('golf_course', MIDDLE));
     expect(land.parkLookAt(0, 3_000)).toBe('golf');
@@ -248,6 +283,22 @@ describe('#2685 a park planted by its look', () => {
       expect(trees(items), kind).toBeGreaterThan(0);
       expect(trees(items), kind).toBeLessThan(trees(MOWN) / 2);
       expect(rocks(items), kind).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps a nature reserve’s rocks small and off the roadside, as farmland’s are', () => {
+    // 12.5 m: the nearest a stone stands, from the road's centreline.
+    const nearest = 12.5;
+    const farm = scenery(mask(rectangle('farmland', MIDDLE))).filter((i) => i.kind === 'rock');
+    expect(farm.length).toBeGreaterThan(0);
+    const largest = Math.max(...farm.map((i) => i.scale));
+    for (const kind of ['nature_reserve', 'national_park']) {
+      const stones = ofKind(kind).filter((item) => item.kind === 'rock');
+      expect(stones.length, kind).toBeGreaterThan(0);
+      for (const stone of stones) {
+        expect(Math.abs(stone.x), kind).toBeGreaterThanOrEqual(nearest - 1e-6);
+        expect(stone.scale, kind).toBeLessThanOrEqual(largest);
+      }
     }
   });
 
