@@ -325,6 +325,14 @@ export const MAPPED_LAKE_SHORE_DRIFT_METRES = 20;
  */
 export const WETLAND_GROUND_ABOVE_WATER_METRES = 0.25;
 
+/**
+ * How far past each of its shores a lake's surface is drawn, in metres: **2**,
+ * under the bank, so the water meets the ground rather than stopping short of
+ * it. Since #2728 {@link onOpenWater} reads it too, so what stands nothing on
+ * the water is the water drawn.
+ */
+export const LAKE_SURFACE_PAST_SHORE_METRES = 2;
+
 /** How far below the lowest road beside it a lake's surface lies, in metres: **0.8**. */
 export const LAKE_BELOW_ROAD_METRES = 0.8;
 
@@ -839,6 +847,51 @@ export function inWater(
   return false;
 }
 
+/**
+ * Whether a point beside the route is over open water the scene draws — #2728:
+ * a lake between its shores and {@link LAKE_SURFACE_PAST_SHORE_METRES} past
+ * each, as {@link waterSurface} draws it, or a stream's surface strip
+ * ({@link STREAM_SURFACE_HALF_WIDTH_METRES} along the road either side of its
+ * crossing, out to {@link STREAM_REACH_METRES}). Not a bank, which
+ * {@link inWater} adds, and not a wetland, which has no open water.
+ *
+ * ⚠️ **The drawn water, not the map's.** A mapped lake is drawn between its
+ * run's median shores ({@link mappedLakes}), which may lie up to
+ * {@link MAPPED_LAKE_SHORE_DRIFT_METRES} past the map's own shore, so the
+ * mask can say land where the scene draws water. A house or a person stood
+ * there by the mask alone stood in the drawn sea: the owner's "houses
+ * floating in inlets". `footprint-buildings.ts` drops a footprint over it and
+ * `scene.ts` §`people` draws nobody on it.
+ */
+export function onOpenWater(
+  ways: Waterways,
+  profile: RouteProfile,
+  wrapped: number,
+  signedLateral: number,
+): boolean {
+  const lateral = Math.abs(signedLateral);
+  for (const crossing of ways.crossings) {
+    const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
+    if (u <= STREAM_SURFACE_HALF_WIDTH_METRES && lateral <= STREAM_REACH_METRES) {
+      return true;
+    }
+  }
+  for (const lake of ways.lakes) {
+    if (lake.wetland === true || Math.sign(signedLateral) !== lake.side) {
+      continue;
+    }
+    const shore = lakeShore(lake, profile, wrapped);
+    if (
+      shore !== undefined &&
+      lateral >= shore.near - LAKE_SURFACE_PAST_SHORE_METRES &&
+      lateral <= shore.far + LAKE_SURFACE_PAST_SHORE_METRES
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The water surfaces in one frame, ready to become a vertex buffer. */
 export interface WaterSurface {
   /** Three floats a vertex. */
@@ -1003,16 +1056,16 @@ export function waterSurface(
           base = vertexCount;
           continue;
         }
-        // Two metres past each shore, under the bank, so the water meets the
-        // ground rather than stopping short of it; the bank hides the rest.
+        // Past each shore, under the bank, so the water meets the ground
+        // rather than stopping short of it; the bank hides the rest.
         station(
           point.x,
           y,
           point.z,
           (normals[row * 2] as number) * lake.side,
           (normals[row * 2 + 1] as number) * lake.side,
-          shoreAt.near - 2,
-          shoreAt.far + 2,
+          shoreAt.near - LAKE_SURFACE_PAST_SHORE_METRES,
+          shoreAt.far + LAKE_SURFACE_PAST_SHORE_METRES,
         );
       }
       strip(base);

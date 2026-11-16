@@ -102,13 +102,34 @@ export const LAND_CLASS_CHUNK_CELLS = 64;
 export const LAND_CLASS_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
- * The most edge-by-row steps the polygon pass may take, so a hostile or very
- * dense archive cannot freeze the press: a polygon's cost is its vertices times
- * the rows it crosses on each existing chunk. Past it the rest of the polygons
- * are not painted and their cells keep the class they hold (`other`), the same
- * answer as a tile with no land-use data.
+ * The edge-by-row steps the polygon pass may take **for each covered tile**,
+ * so a hostile or very dense archive cannot freeze the press: a polygon's cost
+ * is its vertices times the rows it crosses on each existing chunk. The pass's
+ * budget is this times the corridor's covered tiles ({@link landClassWork}).
+ * Past it the rest of the polygons are not painted and their cells keep the
+ * class they hold (`other`), the same answer as a tile with no land-use data.
+ *
+ * ⚠️ **Per tile since #2728, and a fixed 20 000 000 a corridor before it.** A
+ * coast's tiles are dense — the sea, its marshes and inlets, the beaches —
+ * and the polygons are painted in route order, so a long coastal ride spent
+ * the whole budget part way along and every polygon after it went unpainted:
+ * the sea beside the road read as `other`, and was drawn as grass. Measured
+ * on 2026-11-16 through `corridor-source.ts` from the published archive, on a
+ * public ~90 km corridor up the New Hampshire and Maine coast (Salisbury Beach
+ * to Old Orchard Beach, 179 covered tiles): 40.3 million steps, about 225 000
+ * a tile, the densest stretch (Hampton Beach, 17 tiles) 237 000 a tile. Half
+ * the corridor's water was lost, everything past about 45 km. Unbudgeted, the
+ * whole mask built in 218 ms in Node. **1 000 000** a tile is four times the
+ * densest stretch measured, and a 600-tile corridor's whole budget
+ * (`world-data/corridor.ts` §`CORRIDOR_MAX_TILES`) is 600 million steps:
+ * bounded, as it was, but by the corridor's own length.
  */
-export const LAND_CLASS_MAX_WORK = 20_000_000;
+export const LAND_CLASS_WORK_PER_TILE = 1_000_000;
+
+/** The polygon pass's whole budget for `corridor`: {@link LAND_CLASS_WORK_PER_TILE} a covered tile. */
+export function landClassWork(corridor: WorldCorridor): number {
+  return LAND_CLASS_WORK_PER_TILE * Math.max(1, corridor.coveredBoxes.length);
+}
 
 const CHUNK_METRES = LAND_CLASS_CELL_METRES * LAND_CLASS_CHUNK_CELLS;
 const CHUNK_BYTES = LAND_CLASS_CHUNK_CELLS * LAND_CLASS_CHUNK_CELLS;
@@ -440,7 +461,7 @@ function cellSpan(min: number, max: number, edge: number): readonly [number, num
 export function landClassMask(
   corridor: WorldCorridor,
   maxBytes: number = LAND_CLASS_MAX_BYTES,
-  maxWork: number = LAND_CLASS_MAX_WORK,
+  maxWork: number = landClassWork(corridor),
   maxLevelledChunks: number = LEVELLING_MAX_CHUNKS,
 ): LandClassMask {
   const chunks = new Map<number, Uint8Array>();
