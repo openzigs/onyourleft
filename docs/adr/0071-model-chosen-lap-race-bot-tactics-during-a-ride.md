@@ -85,8 +85,8 @@ restates on the instance, gains no entry: ADR 0046 D-7 is the rule on the instan
 
 ### What exists today (read at `main` `0c910f89`, 2026-11-16)
 
-- **The seeded tactics.** `packages/domain/src/lap-race/archetype.ts` §`decideTactic` picks each
-  bot's move once per `BOT_TACTICS_WINDOW_MS` (1 000 ms) of race time, keyed by the window, from
+- **The seeded tactics.** `packages/domain/src/lap-race/tactics.ts` §`decideTactic` picks each
+  bot's move once per `BOT_TACTICS_WINDOW_MS` (in `archetype.ts`) (1 000 ms) of race time, keyed by the window, from
   the seed. `plan.ts` rides the move, capped by `wbal.ts` §`spendableWatts` at the bot's peak.
 - **The spike** (`apps/web/tools/model-tactics-spike/`, imported by nothing the app ships,
   `spike-boundary.test.ts`): the decision schema (`decision.ts`), the adapter (`adapter.ts`), the
@@ -123,9 +123,10 @@ repository names and recommends no model (ADR 0046's 2026-11-14 entry, point 8).
 
 ### D-1 — What a model race is
 
-1. **An opt-in race option, "AI bots"**, on the lap race's setup. It is offered only when the
-   rider's instance offers it and the rider's consent (D-5) is recorded; otherwise the race is
-   today's seeded race and the option is not shown. The wording is #2710's, approved by the owner
+1. **An opt-in race option, "AI bots"**, on the lap race's setup. It is offered whenever the
+   rider's instance offers a local model; choosing it asks for the rider's consent (D-5) when none
+   is recorded, and the race is today's seeded race unless consent is given. There is one place
+   consent is asked: at that choice, on the first model race and again after a withdrawal (D-5.3). The wording is #2710's, approved by the owner
    with its screenshots.
 2. **A solo lap race only.** Bots in rooms stay out (ADR 0067 D-5, ADR 0060 D-8).
 3. **The model picks each bot's move; nothing else.** The physics, W′ balance, fixed capacity,
@@ -178,8 +179,11 @@ repository names and recommends no model (ADR 0046's 2026-11-14 entry, point 8).
 
 This supersedes ADR 0067 **D-6.2** for a model race only.
 
-1. **A model race's bots are pure functions of the seed, the decision log and the bot-code
-   version.** Still no wall clock and no `Math.random`; draws still go through
+1. **A model race's bots are pure functions of the seed, the decision log, the bot-code version
+   and the rider's per-tick input.** Bots read the rider (ADR 0067 D-0: gaps, rank and the rider's
+   watts per kilogram), so a replay needs the rider's power and position at every race tick; the
+   1 Hz ride recording does not hold them (spike 0039's replay holds only because it rides a
+   constant wattage). Still no wall clock and no `Math.random`; draws still go through
    `packages/domain/src/lap-race/random.ts` with their named salts. The same seed, log and version
    replay byte for byte. A seeded race is a model race with an empty log, and replays exactly as
    D-6.2 says today.
@@ -190,14 +194,17 @@ This supersedes ADR 0067 **D-6.2** for a model race only.
    replaces it or for a fixed lapse at most.
 3. **The bot-code version** is a named, exported constant in `packages/domain`'s lap-race module,
    stored beside the seed and the log. It is raised by any change that alters any bot's output for
-   some seed and log. *The author's choice*, for #2710 to build: a test replays a committed seed and
-   log under the current version and holds its outcome, so a change that alters bot output without
-   raising the version goes red. A stored log recorded under another version is **not** replayed:
-   the race's stored result stands as recorded.
-4. **What is stored, and where.** The seed, the log and the version are stored **on the device,
-   with the ride**, at a new store schema version with a tested `down`. The log keeps the answers
-   and times only, **not the input sent** (*the author's choice*, D-10 R-7): the input is derived
-   from the race, which the seed and log already reproduce. The instance keeps no copy (D-7).
+   some seed and log. *The author's choice*, for #2710 to build: a test replays committed seeds and
+   logs and holds their outcomes, with the golden outcomes **keyed by version and append-only**, so
+   a change that alters bot output without raising the version goes red and cannot be cleared by
+   editing the golden outcome in place. A stored log recorded under another version is **not**
+   replayed: no race result is stored (Context), so a report of that race is read from the ride
+   recording, not reproduced.
+4. **What is stored, and where.** The seed, the log, the version and **the rider's per-tick input
+   (D-4.1)** are stored **on the device, with the ride**, at a new store schema version with a
+   tested `down`. The log keeps the answers and times only, **not the model input sent** (*the
+   author's choice*, D-10 R-7): that input is derived from the race, which holds only because the
+   rider's per-tick input is stored beside the seed and log. The instance keeps no copy (D-7).
 5. **The race never waits for the model.** Ticks run at the race's rate whatever the model does;
    a call in flight changes nothing until its answer arrives and is logged.
 
@@ -212,7 +219,7 @@ This supersedes ADR 0067 **D-6.2** for a model race only.
    author's reading*, for D-10 R-3: the endpoint named is the rider's instance and the local model
    address it is configured with, so the rider agrees to a place. The consent is recorded on the
    instance and checked on every tactics request; the app offers the option from what the instance
-   last answered (ADR 0046's 2026-10-12 entry, point 3).
+   last answered (point 3 of ADR 0046's second 2026-10-12 entry, #1251, the hosted source).
 3. **Changing the local model's address withdraws every rider's consent to model races**, as a
    change of endpoint withdraws a hosted consent (Q10). The next race asks again.
 4. **The rider can withdraw it** in the app at any time. Withdrawal is recorded on the instance and
@@ -245,8 +252,9 @@ assumed. So:
    answered "busy", and that race is seeded; the app says AI bots are not available right now
    (*the author's choice*, D-10 R-5).
 4. **The hold ends** when the app says the race has ended, or when no tactics request has arrived
-   for a fixed lapse, whichever is first, so a closed app cannot hold write-ups for ever. #2709
-   states the lapse.
+   for a fixed lapse, whichever is first, so a closed app cannot hold write-ups for ever. A **fixed ceiling on the whole hold** also ends it,
+   so a client that keeps sending requests cannot hold every rider's write-ups and other riders'
+   model races indefinitely. #2709 states the lapse and the ceiling.
 5. **Warm-up.** A call at race start loads the model, so the first decision is not about 11 s late
    (#2709). It is a model call of the same shape, with nothing of the rider's in it.
 6. **A re-plan is not held** (ADR 0048). It runs during a ride and has its own budget and fallback
@@ -290,7 +298,9 @@ spike's draft; #2709 and #2710 state theirs, with a measurement where they chang
    `no-network.test.ts` still admits exactly one module, and tactics go through it.
 6. **No platform model on a phone or tablet** (ADR 0046 D-13). The model runs on the instance.
 7. **Licence (CLAUDE.md §3).** The schema, adapter, log and replay are pure and belong in
-   `packages/domain` (Apache-2.0); the route in `apps/instance` and the wiring and setup in
+   `packages/domain` (Apache-2.0). The spike's copies under `apps/web/tools/model-tactics-spike` are
+   AGPL-3.0-or-later and are **not moved**: #2710 writes these modules fresh, as moving them would be
+   a relicence (ADR 0046 D-4 did that only on the copyright holder's consent); the route in `apps/instance` and the wiring and setup in
    `apps/web` (AGPL-3.0-or-later). No new dependency is expected; one would go through the licence
    gates.
 
@@ -315,7 +325,7 @@ The owner approves this ADR as a whole (R-1), and confirms or overrules each cho
 | **R-4** | The operator's switch for other riders gates model races, as it gates the local model's write-ups | **Yes** | D-5.5 |
 | **R-5** | One model race at a time per instance; a second gets seeded bots and a sentence | **Yes** | D-6.3 |
 | **R-6** | A re-plan is not held by a model race | **Yes** | D-6.6 |
-| **R-7** | The stored log keeps answers and times, not the input sent | **Yes** | D-4.4 |
+| **R-7** | The stored log keeps answers and times, not the model input sent; the model input is rederived from the seed, log and the stored rider per-tick input | **Yes** | D-4.4 |
 | **R-8** | ADR 0067 D-0's setting aside of the patent check reaches strategy a model chooses | **Yes**, as a risk decision and not an opinion | D-9 |
 
 ### D-11 — The owner's answers
@@ -329,7 +339,7 @@ None yet. The owner's approval, and an answer to each of R-1 to R-8, is recorded
 
 - **A race the owner can ride against bots a model steers** (#2710, ridden in #2706's sub-issue 5),
   with every guarantee the seeded race has on the trainer, capacity and determinism.
-- **A reproducible model race**: seed, log and version are the whole race, so a report of a strange
+- **A reproducible model race**: seed, log, version and the rider's per-tick input are the whole race, so a report of a strange
   race can be replayed exactly under the version it was ridden with.
 
 ### What this costs, stated plainly
@@ -375,7 +385,7 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
 - **A held write-up never completes**, or the hold outlives the race: then D-6's hold is broken, and
   the lapse is the fix to measure.
 - **Replay diverges under one version**: then something reads a clock or a draw outside the seed and
-  log, and D-4.1 has failed.
+  log and the rider's stored input, and D-4.1 has failed.
 - **The fallback is the race**: if, on the owner's PC under ordinary load, most windows fall back,
   the rider is racing seeded bots under another name, and the option should say so or not be
   offered.
