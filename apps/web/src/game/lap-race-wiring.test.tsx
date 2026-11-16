@@ -65,6 +65,8 @@ import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
+import type { ModelMove } from '../../tools/model-tactics-spike/decision';
+
 import { riderMassFor } from '../athlete/mass';
 import { createRideController } from '../ride/controller';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
@@ -144,6 +146,42 @@ vi.mock('./simulation', async (importOriginal) => {
   }
   return { ...actual, GameSimulation: TracedSimulation };
 });
+
+/**
+ * #2616's spike, **model mode**: while `moves` is set, the field is handed
+ * those moves before every tick, through the spike's adapter
+ * (`tools/model-tactics-spike/adapter.ts`), as a model's decision in force
+ * would be. The real `stepBotRace` then rides them. Unset, the real one alone.
+ */
+const modelMode = vi.hoisted(() => ({
+  moves: undefined as readonly ModelMove[] | undefined,
+  applied: 0,
+}));
+vi.mock('@onyourleft/physics', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@onyourleft/physics')>();
+  const { applyModelMoves } = await import('../../tools/model-tactics-spike/adapter');
+  return {
+    ...actual,
+    stepBotRace: (...args: Parameters<typeof actual.stepBotRace>) => {
+      const [race, bots, step] = args;
+      if (modelMode.moves === undefined) return actual.stepBotRace(race, bots, step);
+      const applied = applyModelMoves(race, bots, modelMode.moves);
+      modelMode.applied += applied.outcomes.filter((outcome) => outcome === 'applied').length;
+      return actual.stepBotRace(race, applied.bots, step);
+    },
+  };
+});
+
+/** Ride `ride` in model mode, every bot told to attack in every window: the most a model could ask. */
+async function inModelMode<T>(ride: () => Promise<T>): Promise<T> {
+  modelMode.moves = Array.from({ length: 7 }, (_, bot) => ({ bot, move: 'attack' as const }));
+  modelMode.applied = 0;
+  try {
+    return await ride();
+  } finally {
+    modelMode.moves = undefined;
+  }
+}
 
 /** What each drawn frame's input said of the rider and the race, in order. */
 interface DrawnInput {
@@ -816,6 +854,34 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // Every grade written, and its time, is an ordinary ride's at that `k`.
     expect(off.writes).toStrictEqual(replay.writes);
     expect(on.writes).toStrictEqual(replay.writes);
+  });
+
+  it('in #2616’s model mode, every bot told to attack, sends the trainer the same writes as an ordinary ride (D-2.1)', async () => {
+    const ordinary = await plain();
+    // Blind, as #2524 rides a case that reads no frame.
+    const model = await inModelMode(() => rideOnce(ITEMS_OFF, { blind: true }));
+    // Non-vacuity: the model's moves were ridden, window after window.
+    expect(modelMode.applied).toBeGreaterThan(100);
+    expect(model.writes.length).toBeGreaterThan(30);
+    expect(model.writes).toStrictEqual(ordinary.writes);
+  });
+
+  it('in #2616’s model mode with the draft on, sends the trainer an ordinary ride’s writes at the race’s k, and the model moved the k (ADR 0067 D-3.6)', async () => {
+    const frames = COUNTDOWN_FRAMES + DRAFTED_FRAMES;
+    const seeded = await rideOnce(ITEMS_OFF, { drafted: true, frames, blind: true });
+    const model = await inModelMode(() =>
+      rideOnce(ITEMS_OFF, { drafted: true, frames, blind: true }),
+    );
+    expect(modelMode.applied).toBeGreaterThan(100);
+    // Non-vacuity: the model's moves changed the draft the rider rode at,
+    // which is the one way a bot reaches the rider's ride at all.
+    expect(model.trace).not.toStrictEqual(seeded.trace);
+    expect(model.trace.some((k) => k < 1)).toBe(true);
+    const aligned = [...Array<number>(COUNTDOWN_FRAMES - 1).fill(1), ...model.trace];
+    const replay = await rideOnce(undefined, { replay: aligned, frames, blind: true });
+    expect(replay.trace).toStrictEqual(aligned);
+    expect(model.writes.length).toBeGreaterThan(30);
+    expect(model.writes).toStrictEqual(replay.writes);
   });
 
   it('runs a whole race with every network primitive refused, and reaches none (D-7.3)', async () => {
