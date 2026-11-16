@@ -15,6 +15,9 @@ import { hrefFor, routeById } from '../shell/routes';
 import { OperateAccountsPanel } from './OperateAccountsPanel';
 import { OperateBackupsPanel } from './OperateBackupsPanel';
 import { OperateAnalysisPanel } from './OperateAnalysisPanel';
+import { OperateRoomsPanel } from './OperateRoomsPanel';
+import { OperateKeysPanel } from './OperateKeysPanel';
+import { OperateProblemsPanel } from './OperateProblemsPanel';
 import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
@@ -23,9 +26,11 @@ import { OperateStatusPanel } from './OperateStatusPanel';
  * (#2604, `OperateStatusPanel.tsx`), its Accounts (#2605,
  * `OperateAccountsPanel.tsx`, read from the same status), its Backups (#2607,
  * `OperateBackupsPanel.tsx`, which reads its own list and asks for a backup),
- * its AI backend (#2611, `OperateAnalysisPanel.tsx`) and the operator log
- * (#2602); the
- * sections later sub-issues fill are listed, not yet drawn.
+ * its AI backend (#2611, `OperateAnalysisPanel.tsx`), its open rooms (#2612,
+ * `OperateRoomsPanel.tsx`, which reads its own list and ends a room), its keys
+ * (#2613, `OperateKeysPanel.tsx`, which reads its own and rotates the
+ * encryption key), its recent problems (#2614, `OperateProblemsPanel.tsx`,
+ * the log's own redacted lines) and the operator log (#2602).
  *
  * ## Shown to the owner only
  *
@@ -52,13 +57,6 @@ import { OperateStatusPanel } from './OperateStatusPanel';
 export const OPERATE_PURPOSE =
   'This is where you run your instance from the app. Only the instance’s owner sees it: the ' +
   'instance refuses everyone else, the deputy moderator included.';
-
-/** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
-export const OPERATE_SECTIONS_TO_COME: readonly string[] = [
-  'Rooms',
-  'Instance keys',
-  'Recent errors',
-];
 
 export const OPERATE_NO_PORT =
   'This app cannot reach an instance’s Operate area here, because this browser has no local ' +
@@ -111,6 +109,16 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['analysis_settings_set', 'AI settings changed'],
   ['analysis_settings_cleared', 'AI settings returned to .env'],
   ['analysis_model_checked', 'Model checked for tool calling'],
+  // #2641: the instance's own admin pages.
+  ['admin_code_minted', 'Admin sign-in code made'],
+  ['admin_sign_in', 'Signed in to the admin pages'],
+  ['admin_refused', 'Admin sign-in attempts refused'],
+  // #2642: the owner's passkeys for the admin pages.
+  ['admin_passkey_enrolled', 'Admin passkey added'],
+  ['admin_passkey_revoked', 'Admin passkey revoked'],
+  ['admin_passkey_confirmed', 'Admin passkey confirmed on the host'],
+  // #2612: the Rooms section's.
+  ['room_ended', 'Room ended'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */
@@ -121,6 +129,9 @@ export function operatorActionLabel(action: string): string {
 const SOURCE_TEXT = {
   app: 'from the app',
   cli: 'from the command line on the host',
+  // #2641 (ADR 0069 D-8): the instance's own admin pages, by listener.
+  admin_tunnel: 'from the admin pages, through the tunnel',
+  admin_loopback: 'from the admin pages, on the server machine',
 } as const;
 
 /** A moment, in UTC, so the screen says the same thing wherever it is read. */
@@ -333,20 +344,14 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       <OperateAccountsPanel status={shown.status} />
       <OperateBackupsPanel port={port} />
       <OperateAnalysisPanel port={port} />
+      <OperateRoomsPanel port={port} />
+      <OperateKeysPanel port={port} />
+      <OperateProblemsPanel port={port} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}
         onMore={async (cursor) => more(cursor)}
       />
-      <section className="oyl-panel" aria-labelledby="oyl-operate-to-come">
-        <h2 id="oyl-operate-to-come">Still to come</h2>
-        <p>These sections will be added here:</p>
-        <ul>
-          {OPERATE_SECTIONS_TO_COME.map((section) => (
-            <li key={section}>{section}</li>
-          ))}
-        </ul>
-      </section>
     </div>
   );
 }

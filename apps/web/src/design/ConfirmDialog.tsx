@@ -76,6 +76,12 @@ export interface ConfirmDialogProps {
    * it did.
    */
   readonly onClosed?: () => boolean;
+  /**
+   * The confirmation cannot act yet — a typed confirmation that does not match
+   * (#2612's *End room*). The button stays in the tab order, `aria-disabled`,
+   * and a press does nothing: the dialog's own text says what is missing.
+   */
+  readonly confirmUnavailable?: boolean;
 }
 
 export function ConfirmDialog({
@@ -88,6 +94,7 @@ export function ConfirmDialog({
   onConfirm,
   failureText = CONFIRM_FAILED_TEXT,
   onClosed,
+  confirmUnavailable = false,
 }: ConfirmDialogProps): JSX.Element {
   /** An asynchronous confirmation under way: neither answer acts, and Escape does nothing. */
   const [pending, setPending] = useState(false);
@@ -109,7 +116,7 @@ export function ConfirmDialog({
     onOpenChange(next);
   };
   const confirm = (): void => {
-    if (pending) {
+    if (pending || confirmUnavailable) {
       return;
     }
     const result = onConfirm();
@@ -212,7 +219,11 @@ export function ConfirmDialog({
               <AlertDialog.Cancel asChild>
                 <Button unavailable={pending}>{cancelLabel}</Button>
               </AlertDialog.Cancel>
-              <Button variant="danger" unavailable={pending} onClick={confirm}>
+              <Button
+                variant="danger"
+                unavailable={pending || confirmUnavailable}
+                onClick={confirm}
+              >
                 {confirmLabel}
               </Button>
             </div>

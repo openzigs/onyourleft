@@ -397,3 +397,109 @@ describe('results — handed on as each becomes final, not at the end', () => {
     expect(finished).toEqual(['conformance']);
   });
 });
+
+describe('the owner’s view of a room, and ending it — #2612', () => {
+  /** A 400 m race two riders are riding, a few seconds in: each has a place and a power. */
+  async function aRaceUnderWay() {
+    let nowMs = 0;
+    const closed: { roomId: string; phase: string }[] = [];
+    const { host, url } = await hosted(
+      roomSettings({
+        kind: 'race',
+        ridingPosition: 'hoods',
+        course: { ...FLAT_COURSE, lengthMetres: 400 },
+        countdownMs: 0,
+      }),
+      {
+        now: () => nowMs,
+        driven: true,
+        onRoomClosed: (roomId, phase) => closed.push({ roomId, phase }),
+      },
+    );
+    const ann = client(url);
+    const bob = client(url);
+    await Promise.all([ann.open, bob.open]);
+    ann.socket.send(helloText('ticket-ann'));
+    bob.socket.send(helloText('ticket-bob'));
+    await until(() => host.view('conformance')?.seats.length === 2, 'both seated', WAIT_MS);
+    host.start('conformance');
+    for (let second = 1; second <= 4; second += 1) {
+      nowMs = second * 1000 - 500;
+      ann.socket.send(reportText(second, nowMs, POWER_WATTS));
+      bob.socket.send(reportText(second, nowMs, POWER_WATTS));
+      await new Promise((done) => setTimeout(done, 5));
+      nowMs = second * 1000;
+      host.tick('conformance');
+    }
+    return { host, ann, bob, closed };
+  }
+
+  /** A power nothing else in a summary could be by accident. */
+  const POWER_WATTS = 317;
+
+  it('names the room, its phase and the athletes in it, and none of a seat’s place, speed or power', async () => {
+    const { host } = await aRaceUnderWay();
+    const view = host.view('conformance');
+    const ann = view?.seats.find((seat) => seat.athleteId === 'ann');
+    // The planted state is there to leak: a place along the road and a power.
+    expect(ann?.distanceMetres).toBeGreaterThan(1);
+    expect(ann?.wattsPerKilogram).toBeGreaterThan(0);
+    const summaries = host.summaries();
+    expect(summaries).toEqual([
+      { roomId: 'conformance', phase: 'running', athleteIds: ['ann', 'bob'] },
+    ]);
+    const text = JSON.stringify(summaries);
+    for (const planted of [
+      ann?.distanceMetres,
+      ann?.speedMetresPerSecond,
+      ann?.wattsPerKilogram,
+      POWER_WATTS,
+    ]) {
+      expect(text).not.toContain(String(planted));
+    }
+  });
+
+  it('closes every socket in it 4005 room-closed, says why first, stops its tick and lets it go once', async () => {
+    const { host, ann, bob, closed } = await aRaceUnderWay();
+    const told: string[] = [];
+    ann.socket.on('message', (data) => told.push((data as Buffer).toString('utf8')));
+    expect(host.end('conformance')).toBe(true);
+    await until(() => ann.closed !== undefined && bob.closed !== undefined, 'both closed', WAIT_MS);
+    expect(ann.closed?.code).toBe(4005);
+    expect(bob.closed?.code).toBe(4005);
+    expect(told.map((text) => JSON.parse(text) as unknown)).toContainEqual({
+      type: 'refuse',
+      reason: 'room-closed',
+    });
+    // Let go at once, in the phase it was in, and never again on the sockets' close.
+    expect(closed).toEqual([{ roomId: 'conformance', phase: 'running' }]);
+    expect(host.view('conformance')).toBeUndefined();
+    expect(host.summaries()).toEqual([]);
+    host.tick('conformance');
+    expect(closed).toHaveLength(1);
+    // A room it does not hold.
+    expect(host.end('conformance')).toBe(false);
+  });
+
+  it('lets a lobby it ended go once, not again as its last socket closes', async () => {
+    const closed: string[] = [];
+    const { host, url } = await hosted(
+      roomSettings({
+        kind: 'race',
+        ridingPosition: 'hoods',
+        course: { ...FLAT_COURSE, lengthMetres: 400 },
+        countdownMs: 10_000,
+      }),
+      { driven: true, onRoomClosed: (_roomId, phase) => closed.push(phase) },
+    );
+    const ann = client(url);
+    await ann.open;
+    ann.socket.send(helloText('ticket-ann'));
+    await until(() => host.view('conformance')?.seats.length === 1, 'seated', WAIT_MS);
+    expect(host.end('conformance')).toBe(true);
+    await until(() => ann.closed !== undefined, 'closed', WAIT_MS);
+    // The socket's own close has been handled by the time the client sees it go.
+    await new Promise((done) => setTimeout(done, 20));
+    expect(closed).toEqual(['lobby']);
+  });
+});

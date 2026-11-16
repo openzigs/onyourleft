@@ -65,6 +65,22 @@ cd onyourleft
    change the rule. It also blocks a phone hotspot, which matters in
    [Measuring the tunnel](#measuring-the-tunnel).
 
+   **Once other riders use the instance**, the whole-host rule has to go, but the admin pages
+   ([#2643](https://github.com/openzigs/onyourleft/issues/2643), ADR 0069 D-5) can keep it. Use
+   this rule in its place, again with action **Block**:
+   `(http.host eq "rides.example.org" and starts_with(http.request.uri.path, "/admin") and not ip.src in {<your home IP>})`.
+   Riders reach the API from anywhere, and `/admin` answers only at home. ⚠️ **The instance cannot
+   see this rule and does not rely on it.** The rule runs at Cloudflare's edge, so it is no defence
+   against the edge itself (ADR 0069 D-3). The admin pages still need their own sign-in, a passkey
+   for every change, and their own checks behind it.
+
+   **If your home address changes**, the admin pages through the tunnel are blocked until you
+   update the rule. The pages on the server machine (`http://localhost:8788`, in
+   [docs/operating-an-instance.md](../operating-an-instance.md), "Admin pages on the server
+   machine") and every passkey keep working. Optionally, `OYL_INSTANCE_ADMIN_ADDRESSES` in `.env`
+   makes the instance itself refuse a tunnel sign-in from any other address. It is off by default,
+   because with it on a changed address locks you out twice, at the rule and at the instance.
+
 ⚠️ **The token is a secret.** It goes in `.env` in step 4 and nowhere else — not a commit, not a
 chat, not a screenshot. Anybody holding it can serve your hostname.
 

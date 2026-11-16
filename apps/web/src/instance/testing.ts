@@ -62,7 +62,10 @@ import type {
   OperateJobs,
   OperateBackup,
   OperateBackUpNow,
+  OperateKeys,
   OperatePort,
+  OperateRoom,
+  OperateProblem,
   OperateStanding,
   OperateStatus,
   OperatorLogEntry,
@@ -899,8 +902,99 @@ export interface ScriptedOperate {
     backUpNow: OperateBackUpNow;
     /** Answer `requested` and leave nothing waiting: an instance that took it and never serves it. */
     servesAtOnce: boolean;
+    /** The open rooms (#2612), newest first, or `null` to answer them as unreadable. */
+    rooms: OperateRoom[] | null;
+    /**
+     * `true` to answer an end as the instance does and then NOT end it: the
+     * list read after still shows the room, as an instance whose close was lost.
+     */
+    endIsLost: boolean;
+    /** The instance's keys (#2613), or `null` to answer them as unreadable. */
+    keys: OperateKeys | null;
+    /** `true` to answer a rotation `busy`, as while the instance's own key maintenance runs. */
+    keysBusy: boolean;
+    /** The instance's recent problem lines (#2614), newest first, or `null` for unreadable. */
+    problems: OperateProblem[] | null;
   };
 }
+
+/**
+ * Two open rooms (#2612), newest first: a race under way with a rider the
+ * owner may not see by name, and a group ride nobody has opened yet.
+ */
+export const SCRIPTED_ROOMS: readonly OperateRoom[] = [
+  {
+    roomId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    shortCode: 'a1b2c3',
+    kind: 'race',
+    visibility: 'private',
+    phase: 'riding',
+    openedAt: '2026-11-14T19:30:00.000Z',
+    host: 'Ann',
+    riders: ['Ann', 'Bea', null],
+  },
+  {
+    roomId: '0f1e2d3c4b5a69788796a5b4c3d2e1f0',
+    shortCode: '0f1e2d',
+    kind: 'group',
+    visibility: 'public',
+    phase: 'lobby',
+    openedAt: '2026-11-14T18:00:00.000Z',
+    host: 'Cal',
+    riders: [],
+  },
+];
+
+/**
+ * The instance's keys (#2613): a card as long as an `https:` origin of a
+ * real length makes one, its fingerprint, and a key due to rotate in a week.
+ */
+export const SCRIPTED_KEYS: OperateKeys = {
+  kind: 'keys',
+  state: 'ready',
+  fingerprint: 'AH4FOKN2ZGRQXRVJ4EHL6FAGWH35X5PDDFXXQMAETY5ZPNNKYU5Q',
+  card: 'oyl-instance:https://ride.example.org#AH4FOKN2ZGRQXRVJ4EHL6FAGWH35X5PDDFXXQMAETY5ZPNNKYU5Q',
+  current: {
+    serial: 1_790_000_000,
+    createdAt: '2026-10-22T08:00:00.000Z',
+    rotatesAt: '2026-11-21T08:00:00.000Z',
+  },
+  olderHeld: 1,
+};
+
+/** A problem line as the instance's redaction writes it (#2614). */
+function problemLine(at: string, fields: Record<string, string | number | null>): OperateProblem {
+  return { at, line: JSON.stringify(fields), fields };
+}
+
+/**
+ * Three problem lines (#2614), newest first: a request answered 503, a room
+ * worker that died with its rooms, and a failed analysis job.
+ */
+export const SCRIPTED_PROBLEMS: readonly OperateProblem[] = [
+  problemLine('2026-11-14T20:45:00.000Z', {
+    event: 'request',
+    method: 'GET',
+    route: '/v1/rooms/{roomId}/route',
+    status: 503,
+    ms: 12,
+  }),
+  problemLine('2026-11-14T20:30:00.000Z', {
+    event: 'room-worker-died',
+    worker: 1,
+    code: null,
+    signal: 'SIGKILL',
+    roomsLost: 2,
+  }),
+  problemLine('2026-11-14T19:10:00.000Z', {
+    event: 'analysis-job',
+    state: 'failed',
+    code: 'model-unreachable',
+  }),
+];
+
+/** When the scripted instance last started (#2614). */
+export const SCRIPTED_STARTED_AT = '2026-11-14T08:00:00.000Z';
 
 /** The operator's analysis settings (#2609): `.env`'s server, no model picked, both sources offered. */
 export const SCRIPTED_ANALYSIS: OperateAnalysis = {
@@ -1115,6 +1209,9 @@ export function scriptedOperate(
     readonly checks?: Record<string, ToolCheckOutcome>;
     readonly jobs?: OperateJobs | null;
     readonly backups?: readonly OperateBackup[] | null;
+    readonly rooms?: readonly OperateRoom[] | null;
+    readonly keys?: OperateKeys | null;
+    readonly problems?: readonly OperateProblem[] | null;
   } = {},
 ): ScriptedOperate {
   const calls: string[] = [];
@@ -1133,6 +1230,11 @@ export function scriptedOperate(
     pendingSince: null,
     backUpNow: { kind: 'requested', requestedAt: '2026-11-14T21:00:00.000Z' },
     servesAtOnce: false,
+    rooms: options.rooms === null ? null : [...(options.rooms ?? SCRIPTED_ROOMS)],
+    endIsLost: false,
+    keys: options.keys === undefined ? SCRIPTED_KEYS : options.keys,
+    keysBusy: false,
+    problems: options.problems === null ? null : [...(options.problems ?? SCRIPTED_PROBLEMS)],
   };
   /** What a read answers: the held value, or the standing's refusal, or unreadable. */
   const owned = <T>(value: T | null): Promise<T | { kind: Exclude<OperateStanding, 'owner'> }> =>
@@ -1224,6 +1326,53 @@ export function scriptedOperate(
         kind: 'backups',
         records: [...held.backups],
         pendingSince: held.pendingSince,
+      });
+    },
+    rooms: () => {
+      calls.push('rooms');
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      if (held.rooms === null) return Promise.resolve({ kind: 'unreachable' });
+      return Promise.resolve({ kind: 'rooms', rooms: [...held.rooms] });
+    },
+    endRoom: (roomId, reason, confirm) => {
+      calls.push(`end room ${roomId} ${reason} ${confirm}`);
+      if (held.standing !== 'owner') return Promise.resolve({ kind: 'not-ended' });
+      const room = held.rooms?.find((each) => each.roomId === roomId);
+      // As the instance: the code is the room's own, typed in any case and with spaces.
+      if (room === undefined || confirm.trim().toLowerCase() !== room.shortCode) {
+        return Promise.resolve({ kind: 'not-ended' });
+      }
+      if (!held.endIsLost) held.rooms = (held.rooms ?? []).filter((each) => each !== room);
+      return Promise.resolve({ kind: 'ended', endedAt: '2026-11-14T21:00:00.000Z' });
+    },
+    keys: () => {
+      calls.push('keys');
+      return owned(held.keys);
+    },
+    rotateKey: (confirm) => {
+      calls.push(`rotate key ${confirm}`);
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      if (confirm !== 'rotate') return Promise.resolve({ kind: 'not-rotated' });
+      if (held.keysBusy || held.keys === null || held.keys.current === null) {
+        return Promise.resolve({ kind: 'busy' });
+      }
+      // As the instance: a new current key, and the old one held for its seven days.
+      const serial = held.keys.current.serial + 1;
+      held.keys = {
+        ...held.keys,
+        current: { ...held.keys.current, serial },
+        olderHeld: held.keys.olderHeld + 1,
+      };
+      return Promise.resolve({ kind: 'rotated', serial });
+    },
+    problems: () => {
+      calls.push('problems');
+      if (held.standing !== 'owner') return Promise.resolve({ kind: held.standing });
+      if (held.problems === null) return Promise.resolve({ kind: 'unreachable' });
+      return Promise.resolve({
+        kind: 'problems',
+        since: SCRIPTED_STARTED_AT,
+        lines: [...held.problems],
       });
     },
     backUpNow: () => {
