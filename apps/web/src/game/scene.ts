@@ -26,6 +26,7 @@ import type { UnitSystem } from '@onyourleft/store';
 import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
 import {
+  distanceOnRoute,
   ghostDistanceAt,
   ghostHasFinished,
   gradeAt,
@@ -450,7 +451,8 @@ export interface SceneInput {
  *
  * ⚠️ **Its distance is the DRAWN one** (ADR 0060 D-3.3: `effortDistance +
  * raceOffset`), as an odometer on this ride's road; what it rode is never
- * read here.
+ * read here. A race runs on a loop, and a bot a lap or more from the rider is
+ * drawn on the lap of the road the frame built (#2516, `onTheCorridorsLap`).
  */
 export interface RaceBotInput {
   readonly distanceMetres: number;
@@ -1483,14 +1485,18 @@ function ridersOnTheRoad(
     });
   }
   // #1902: a lap race's bots, on the corridor this frame built, for the
-  // remote riders' reason.
+  // remote riders' reason. #2516: each on the lap of the corridor it stands
+  // on, so a bot a lap down or a lap up is drawn where it is on the road.
   for (const bot of input.raceBots ?? []) {
     if (first === undefined || last === undefined) break;
-    if (bot.distanceMetres < first.along || bot.distanceMetres > last.along) continue;
+    const distance = onTheCorridorsLap(input.profile, bot.distanceMetres, first.along);
+    if (distance < first.along || distance > last.along) continue;
     riders.push({
       kind: 'bot',
-      distance: bot.distanceMetres,
-      odometer: bot.distanceMetres,
+      distance,
+      // #2427 orders the drawn riders by odometer: the one on the corridor's
+      // lap (#2516), so a lapped bot is ordered where it is drawn, not a lap off.
+      odometer: distance,
       speed: bot.speedMetresPerSecond,
       ownSpeed: bot.speedMetresPerSecond,
       crankAngle: pedalling(bot.distanceMetres),
@@ -1566,6 +1572,26 @@ function ridersOnTheRoad(
       lateral,
     };
   });
+}
+
+/**
+ * A race bot's drawn odometer moved by whole laps onto the lap that starts at
+ * `from`, the corridor's first point — #2516. On a loop a race position is an
+ * odometer on the rider's road, so a bot a lap down (or up) is a lap of
+ * odometer from the rider while it stands on the same stretch of road: with
+ * no move it is never on the corridor, and the rider lapping the field rode
+ * up to an empty road. On a loop longer than the corridor a bot stands on it
+ * once at most; on a shorter one it is drawn once, at its first place on it.
+ *
+ * Its cranks still turn from its own odometer (`ridersOnTheRoad`), so a move
+ * by a lap never jumps them. Unmoved on a road that is not a loop, and when
+ * already on that lap, so the number is the one it was handed.
+ */
+function onTheCorridorsLap(profile: RouteProfile, distance: number, from: number): number {
+  const lap: number = profile.totalDistance;
+  if (!profile.loop || !(lap > 0) || !Number.isFinite(distance)) return distance;
+  const laps = Math.floor((distance - from) / lap);
+  return laps === 0 ? distance : distance - laps * lap;
 }
 
 /**
@@ -1667,7 +1693,11 @@ function ridingOf(rider: Rider, profile: RouteProfile): RidingInputs {
   return {
     cadence: rider.cadence,
     power: rider.power,
-    grade: rider.grade ?? gradeAt(profile, metres(rider.distance)),
+    // #2516: wrapped first, as `gradeAt` wraps it anyway, so a negative drawn
+    // distance on a loop never throws out of the frame (`metres` refuses one).
+    // `lapRaceDrawing` holds its bots at nought or more since #2544, so a race
+    // no longer hands one in; this keeps the frame safe for any that does.
+    grade: rider.grade ?? gradeAt(profile, metres(distanceOnRoute(profile, rider.distance))),
     speed: rider.ownSpeed,
   };
 }

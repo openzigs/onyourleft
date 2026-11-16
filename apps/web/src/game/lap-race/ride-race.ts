@@ -508,6 +508,8 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       LAP_RACE_RIDER_ID,
       pack,
       LAP_RACE_TICK_SECONDS,
+      // #2516: a bot a lap apart is drawn beside the rider, so it is kept clear there.
+      race.course.lapLengthMetres,
     );
     owed = oweRaceTick(
       owed,
