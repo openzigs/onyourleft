@@ -14,7 +14,9 @@
 import {
   aiNowLines,
   CHECK_TEXT,
+  MODEL_SAVE_FAILED_TEXT,
   MODEL_SAVED_TEXT,
+  OFFER_FAILED_TEXT,
   OFFER_SAVED_TEXT,
   ownKeyText,
   RETURNED_TEXT,
@@ -411,6 +413,44 @@ const CHANGES = [
   ['/admin/analysis/clear', 'analysis_clear', {}],
 ] as const;
 
+describe('a change the route answered and the read-back does not hold is said to have failed (#2648)', () => {
+  it('says the switch and the model were not taken when the settings read back after them do not show them', async () => {
+    // A route that answers 200 and keeps nothing: the write that reports success while the read cannot see it.
+    const forgetful: readonly Route[] = ROUTES.map((route) =>
+      route.path === '/v1/operate/analysis' && route.method === 'POST'
+        ? {
+            ...route,
+            handle: async (context) => {
+              const read = ROUTES.find(
+                (each) => each.path === '/v1/operate/analysis' && each.method === 'GET',
+              );
+              return (read as Route).handle(context);
+            },
+          }
+        : route,
+    );
+    const made = await startModerationWorld({ admin: {}, routes: forgetful });
+    worlds.push(made);
+    const browser = tunnel(made);
+    const session = await passkeySession(made);
+    const offer = await changeOn(browser, session, '/admin/analysis/offer', 'analysis_offer', {
+      offer: 'others',
+      on: 'on',
+    });
+    expect(offer.status).toBe(200);
+    const offerPage = await offer.text();
+    expect(offerPage).toContain(escapeHtml(OFFER_FAILED_TEXT));
+    expect(offerPage).not.toContain(escapeHtml(OFFER_SAVED_TEXT));
+    const model = await changeOn(browser, session, '/admin/analysis/model', 'analysis_model', {
+      localModel: 'alpha:14b',
+    });
+    const modelPage = await model.text();
+    expect(modelPage).toContain(escapeHtml(MODEL_SAVE_FAILED_TEXT));
+    expect(modelPage).not.toContain(escapeHtml(MODEL_SAVED_TEXT));
+    expect((await settings(made)).local).toMatchObject({ othersMayUse: false, model: null });
+  });
+});
+
 describe('no change without a fresh passkey check made for it (#2648, ADR 0069 D-4)', () => {
   it('through the tunnel: no assertion, a code session, a step-up for another value, and a step-up used twice change nothing, read back', async () => {
     const made = await world();
@@ -436,6 +476,7 @@ describe('no change without a fresh passkey check made for it (#2648, ADR 0069 D
       form: { csrf: await csrfOf(code), localModel: 'alpha:14b' },
     });
     expect(fromCode.status).toBe(403);
+    expect(await fromCode.text()).toContain('A change needs a passkey sign-in');
 
     // A step-up for one model, posted with another.
     const other = await steppedUpForm(browser, session, 'analysis_model', {
