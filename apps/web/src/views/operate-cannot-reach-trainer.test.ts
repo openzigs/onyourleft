@@ -30,6 +30,7 @@ const OPERATE_MODULES = [
   'apps/web/src/views/OperateBackupsPanel.tsx',
   'apps/web/src/views/OperateRoomsPanel.tsx',
   'apps/web/src/views/OperateKeysPanel.tsx',
+  'apps/web/src/views/OperateProblemsPanel.tsx',
   'apps/web/src/instance/operate-port.ts',
 ] as const;
 

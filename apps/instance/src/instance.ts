@@ -42,7 +42,7 @@ import { createSidePose } from './camera/side-pose.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
-import { logEvent, logUnhandled, type LogSink } from './log.ts';
+import { createRecentProblems, keepProblems, logEvent, logUnhandled, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { errorResponse } from './errors.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
@@ -279,6 +279,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   const now = options.now ?? (() => Date.now());
   // #2604: what the owner's Status counts its uptime from.
   const startedAt = now();
+  // #2614: this process's problem lines, kept in memory for the owner's
+  // Operate area from the first line it writes — and gone when it stops.
+  const problems = createRecentProblems(now);
+  keepProblems(log, problems);
   const path = server.databasePath;
   await mkdir(dirname(path), { recursive: true });
 
@@ -1023,6 +1027,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
                     log,
                   }),
               },
+              problems,
             }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),

@@ -27,7 +27,6 @@ import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mo
 import {
   OPERATE_NO_PORT,
   OPERATE_PURPOSE,
-  OPERATE_SECTIONS_TO_COME,
   OPERATE_STANDING_TEXT,
   OPERATOR_LOG_MORE_UNREADABLE_TEXT,
   OPERATOR_LOG_UNREADABLE_TEXT,
@@ -138,19 +137,16 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 7)).toEqual([
+    expect(headings).toEqual([
       'Status',
       'Accounts',
       'Backups',
       'AI backend',
       'Rooms',
       'Instance keys',
+      'Recent problems',
       'Operator log',
     ]);
-    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
-    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Rooms');
-    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Instance keys');
-    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Backups');
   });
 
   it.each(['deputy', 'rider'] as const)(
@@ -268,11 +264,10 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(showOlder()).toBeUndefined();
   });
 
-  it('says what each part of the area is for, and lists the sections still to come', async () => {
+  it('says what the area is for', async () => {
     mounted = await mount(<OperateView port={scriptedOperate().port} />);
     await settle();
     expect(text()).toContain(OPERATE_PURPOSE);
-    for (const section of OPERATE_SECTIONS_TO_COME) expect(text()).toContain(section);
   });
 
   it('shows an action a newer instance added by its own name', async () => {

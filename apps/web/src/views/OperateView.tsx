@@ -17,6 +17,7 @@ import { OperateBackupsPanel } from './OperateBackupsPanel';
 import { OperateAnalysisPanel } from './OperateAnalysisPanel';
 import { OperateRoomsPanel } from './OperateRoomsPanel';
 import { OperateKeysPanel } from './OperateKeysPanel';
+import { OperateProblemsPanel } from './OperateProblemsPanel';
 import { OperateStatusPanel } from './OperateStatusPanel';
 
 /**
@@ -28,8 +29,8 @@ import { OperateStatusPanel } from './OperateStatusPanel';
  * its AI backend (#2611, `OperateAnalysisPanel.tsx`), its open rooms (#2612,
  * `OperateRoomsPanel.tsx`, which reads its own list and ends a room), its keys
  * (#2613, `OperateKeysPanel.tsx`, which reads its own and rotates the
- * encryption key) and the operator log (#2602); the
- * sections later sub-issues fill are listed, not yet drawn.
+ * encryption key), its recent problems (#2614, `OperateProblemsPanel.tsx`,
+ * the log's own redacted lines) and the operator log (#2602).
  *
  * ## Shown to the owner only
  *
@@ -56,9 +57,6 @@ import { OperateStatusPanel } from './OperateStatusPanel';
 export const OPERATE_PURPOSE =
   'This is where you run your instance from the app. Only the instance’s owner sees it: the ' +
   'instance refuses everyone else, the deputy moderator included.';
-
-/** The sections later work fills (#2604–#2614), named so the owner knows what is coming. */
-export const OPERATE_SECTIONS_TO_COME: readonly string[] = ['Recent errors'];
 
 export const OPERATE_NO_PORT =
   'This app cannot reach an instance’s Operate area here, because this browser has no local ' +
@@ -348,20 +346,12 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
       <OperateAnalysisPanel port={port} />
       <OperateRoomsPanel port={port} />
       <OperateKeysPanel port={port} />
+      <OperateProblemsPanel port={port} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}
         onMore={async (cursor) => more(cursor)}
       />
-      <section className="oyl-panel" aria-labelledby="oyl-operate-to-come">
-        <h2 id="oyl-operate-to-come">Still to come</h2>
-        <p>These sections will be added here:</p>
-        <ul>
-          {OPERATE_SECTIONS_TO_COME.map((section) => (
-            <li key={section}>{section}</li>
-          ))}
-        </ul>
-      </section>
     </div>
   );
 }

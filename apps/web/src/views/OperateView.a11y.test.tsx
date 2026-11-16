@@ -70,8 +70,8 @@ describe('the Operate area — #2603', () => {
       'AI backend',
       'Rooms',
       'Instance keys',
+      'Recent problems',
       'Operator log',
-      'Still to come',
     ]);
     // #2604: Status's one control, Compare with main, is a target too.
     for (const each of controls()) expect(each.classList.contains('oyl-button')).toBe(true);

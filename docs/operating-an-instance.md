@@ -55,6 +55,19 @@ signature, a latitude, a display name, an object — is replaced by `[redacted]`
 by the route PATTERN it matched, never its path, query, headers or body; an exception by its name,
 never its message (ADR 0004 decision D).
 
+**The last 200 problem lines are also kept in memory** ([#2614](https://github.com/openzigs/onyourleft/issues/2614)),
+for the owner's Operate area (`GET /v1/operate/logs`, the app's **Recent problems**): exactly the
+line standard output got, after that one redaction, so it never holds what standard output did not.
+A line is a problem when it is one of a closed list (`log.ts` §`isProblem`): a request answered
+`5xx`, an `unhandled` exception, `room-worker-died`, `room-write-failed`, `rooms-sweep-failed`,
+`history-index-failed`, `voice-failed`, `refusing`, an `analysis-job` that `failed`, the
+`analysis-model`, `picture-model` or `history-index` `off`, `instance-keys` not `ready`, a
+`hosted-model-key` that is `no-secret` or `unreadable`, `voice` off for a reason other than
+`not-set`, and a `room-socket-closed` for `room-lost`. Every other line, a `200` request included, is
+not kept. They are **gone when the instance restarts**, and are never written to the database or a
+backup. Only the main process's lines are kept: a room worker writes its own to standard output, and
+`room-worker-died` is the main process's. Reading them is not an operator action and logs nothing.
+
 ## Sizing
 
 From [spike 0013](spikes/0013-race-rooms-on-a-small-linux-box.md) and
@@ -992,8 +1005,8 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   restore is expected, not a sign of tampering; the snapshot directory you restored from dates it.
 - **Where it is in the app** ([#2603](https://github.com/openzigs/onyourleft/issues/2603)). Signed in
   as the owner, the Instance screen shows **Operate this instance**, which opens
-  `#/settings/instance/operate`: the operator log, newest first, a page at a time, and the list of
-  sections still to come. The deputy and every other rider see no such button, and anybody who opens
+  `#/settings/instance/operate`: the sections below, then the operator log, newest first, a page at
+  a time. The deputy and every other rider see no such button, and anybody who opens
   the address is told only that their account is not the owner. A device that cannot seal — no
   instance card, or a copy of the app loaded from a website — is told so and asks nothing.
 - **Status** ([#2604](https://github.com/openzigs/onyourleft/issues/2604)). The first section of

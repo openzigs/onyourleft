@@ -66,6 +66,7 @@ import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts'
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
 import { instanceHpkePrimitives } from './crypto.ts';
+import { createRecentProblems } from '../log.ts';
 import { createOperate, type OperateRoomSources } from '../operate/operate.ts';
 import { diskSpace, keysState, tunnelReadiness, type StatusSources } from '../operate/status.ts';
 import { createSealed, sha256, type Sealed } from '../sealed/sealed.ts';
@@ -388,6 +389,8 @@ export async function startIdentityInstance(
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
+  /** The problem lines the handler's sink keeps (#2614), stamped by the world's clock. */
+  const problems = createRecentProblems(() => clock.ms);
   const identityFor = (origin: string): Identity =>
     createIdentity({
       // The identity tests predate registration modes (#775) and register
@@ -565,6 +568,8 @@ export async function startIdentityInstance(
   };
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
+      // #2614: the handler's problem lines, kept as `instance.ts` keeps them.
+      problems,
       ...(adminOptions === undefined ? {} : { admin: adminFor(identity) as Admin }),
       sidePose,
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
@@ -594,6 +599,7 @@ export async function startIdentityInstance(
                 ...operateStatus,
               },
               // #2609: as `instance.ts` builds them, over the world's store and clock.
+              problems,
               analysis: {
                 environment: testConfig(listenerConfig),
                 resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),

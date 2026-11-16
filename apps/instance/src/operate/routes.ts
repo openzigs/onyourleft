@@ -13,6 +13,7 @@
 import { TOOL_CHECK_OUTCOMES } from '../analysis/tool-check.ts';
 import { REGISTRATION_MODES, REPOSITORY, type Config } from '../config.ts';
 import { errorResponse } from '../errors.ts';
+import { RECENT_PROBLEMS_KEPT } from '../log.ts';
 import type { Readiness } from '../readiness.ts';
 import { OPERATOR_ACTIONS, ROOM_END_REASONS } from '../store/sql-store.ts';
 import { json, type Route, type RouteContext, type Schema } from '../route-kit.ts';
@@ -618,6 +619,56 @@ export const OPERATE_ROUTES: readonly Route[] = [
         rotated.value.outcome === 'rotated'
           ? { outcome: 'rotated', serial: rotated.value.serial }
           : { outcome: 'busy', serial: null },
+      );
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/operate/logs',
+    sealed: 'only',
+    operationId: 'getOperateLogs',
+    reaches: 'owner',
+    // ADR 0069 D-2: a read of redacted lines; #2651's page renders it.
+    admin: 'read',
+    summary: `The instance’s recent problems (#2614): its last ${String(RECENT_PROBLEMS_KEPT)} problem lines — a request answered 5xx, an exception no route handled, a room worker that died, a failed analysis job, a model or the keys off or unreadable, a failed voice request, a room socket closed for a server-side reason, and the rest of \`log.ts\` §\`isProblem\`’s closed list — newest first, each exactly as standard output got it, after the log’s one redaction: never a token, a key, a name or a coordinate. Held in memory only, so a restart empties it; \`since\` is when this process started. The main process’s lines only. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          /** When this process started, ISO 8601, UTC: the lines are all since then. */
+          since: { type: 'string' },
+          lines: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                /** When it was written, ISO 8601, UTC. */
+                at: { type: 'string' },
+                /** The JSON line exactly as standard output got it. */
+                line: { type: 'string' },
+              },
+              required: ['at', 'line'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['since', 'lines'],
+        additionalProperties: false,
+      },
+    },
+    handle: (context) => {
+      const read = operateOf(context).problems();
+      if (!read.ok) return Promise.resolve(errorResponse(read.code));
+      return Promise.resolve(
+        json({
+          since: isoOfMs(read.value.since),
+          lines: read.value.lines.map((each) => ({ at: isoOfMs(each.at), line: each.line })),
+        }),
       );
     },
   },

@@ -96,7 +96,13 @@ interface RoomRouterStandIn {
 }
 
 export interface OperateInstance {
-  readonly instance: { handler(request: Request): Promise<Response> };
+  readonly instance: {
+    handler(request: Request): Promise<Response>;
+    /** The handler's own log sink (#2614). */
+    readonly log: (line: string) => void;
+    /** Every line the handler's sink got. */
+    readonly lines: readonly string[];
+  };
   /** The instance's riders' rooms, made here as `POST /v1/rooms` makes them (#2612). */
   readonly rooms: {
     create(
@@ -123,6 +129,24 @@ interface IdentityTesting {
     withoutOperate?: boolean;
     operateRooms?: RoomRouterStandIn;
   }): Promise<OperateInstance>;
+}
+
+/** The instance's log module (#2614), by a computed path for the same reason. */
+const INSTANCE_LOG = join(dirname(fileURLToPath(import.meta.url)), '../../../instance/src/log.ts');
+
+/**
+ * Write a line through the instance's own sink as the instance writes one
+ * (`logEvent`, so through its one redaction) — #2614's problem lines.
+ */
+export async function writeInstanceLine(
+  world: OperateInstance,
+  event: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  const log = (await import(/* @vite-ignore */ INSTANCE_LOG)) as {
+    logEvent(sink: (line: string) => void, event: string, detail: Record<string, unknown>): void;
+  };
+  log.logEvent(world.instance.log, event, detail);
 }
 
 /** A path, not a URL: under jsdom a URL resolved here is `http:`, which the loader refuses. */
