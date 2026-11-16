@@ -5502,12 +5502,125 @@ void main() {
 export const RIPPLE_FADE_RADIANS_PER_PIXEL: readonly [number, number] = [0.5, 1.5];
 
 /**
+ * One travelling wave on the water — #2701. A height of `amplitude · sin(k·p +
+ * speed · t)` metres, where `k` is the wave vector `(kx, kz)` in radians a
+ * metre; its slope, which is all the shader needs, is `amplitude · cos(…) · k`.
+ */
+export interface WaterWave {
+  /** The wave vector's x component, radians a metre. */
+  readonly kx: number;
+  /** The wave vector's z component, radians a metre. */
+  readonly kz: number;
+  /** How fast its phase turns, radians a second; the sign is which way it travels. */
+  readonly speed: number;
+  /** Its height, metres. */
+  readonly amplitude: number;
+}
+
+/** A wave `wavenumber` radians a metre, travelling toward `degrees` from +x toward +z. */
+function waterWave(degrees: number, wavenumber: number, speed: number, slope: number): WaterWave {
+  const radians = (degrees * Math.PI) / 180;
+  return {
+    kx: Math.cos(radians) * wavenumber,
+    kz: Math.sin(radians) * wavenumber,
+    speed,
+    amplitude: slope / wavenumber,
+  };
+}
+
+/**
+ * The ripples — #2701: five travelling waves, each band-limited by
+ * {@link RIPPLE_FADE_RADIANS_PER_PIXEL}, as the shader's `ripples` uniform.
+ *
+ * ⚠️ **Why five, and not #459's two.** Any two plane waves add up to a field
+ * that is exactly periodic on a lattice: #459's pair repeated itself every
+ * 7.4 m, so a lake 100 m across showed the same diamond tile a dozen times
+ * over, and the owner's map screenshots of 2026-11-16 read it as a tiled
+ * texture. Five waves spread over 19° to 156° with wavelengths of 1.5 m to
+ * 14 m and no two in a simple ratio are only quasi-periodic: the field comes
+ * back to within 90 % of itself on under 0.1 % of the shifts within 40 m,
+ * where #459's pair did on 3.3 % of them (`water-pattern.test.ts`). The first
+ * two are #459's own directions and wavelengths, at about two thirds of their
+ * slope, so the water close to the bike moves the way it did; the 14 m swell
+ * is the longest, and the last to fade with distance, so water too far off
+ * for any ripple still carries one. Every figure is this repository's own,
+ * chosen by searching for a set that does not repeat within 40 m.
+ */
+export const WATER_RIPPLES: readonly WaterWave[] = [
+  waterWave(34, 1.7, 1.3, 0.04),
+  waterWave(118, 2.9, -1.9, 0.036),
+  waterWave(156, 0.92, 0.95, 0.034),
+  waterWave(70, 4.31, -2.6, 0.026),
+  waterWave(19, 0.45, 0.55, 0.03),
+];
+
+/**
+ * The gusts — #2701: three long waves, 29 m to 61 m, as the shader's `gusts`
+ * uniform. Their sum does two things.
+ *
+ * - **Calm and rough patches.** It scales every ripple's slope between
+ *   {@link WATER_CALM_SHARE} and 1, so a lake has darker, choppier stretches
+ *   and glassier ones drifting across it — scale variation that no shift of
+ *   the ripples alone reproduces.
+ * - **Shading where no ripple is left.** It is itself a low swell, a slope of
+ *   about 0.02 each, which tilts the surface by a degree or so. Seen from the
+ *   bike at a grazing angle, a degree is a large change in the Fresnel term
+ *   and in which part of the sky is reflected, so water a few hundred metres
+ *   off, where {@link RIPPLE_FADE_RADIANS_PER_PIXEL} has faded every ripple,
+ *   shows broad lighter and darker bands rather than one flat colour. At 29 m
+ *   and longer they do not alias within the camera's far plane.
+ */
+export const WATER_GUSTS: readonly WaterWave[] = [
+  waterWave(25, (2 * Math.PI) / 43, 0.07, 0.022),
+  waterWave(112, (2 * Math.PI) / 61, -0.05, 0.02),
+  waterWave(67, (2 * Math.PI) / 29, 0.04, 0.018),
+];
+
+/** The ripples' slope in the calmest patch, as a share of their own: **0.4**. @see WATER_GUSTS */
+export const WATER_CALM_SHARE = 0.4;
+
+/** A wave set as the `vec4`s the shader reads: `(kx, kz, speed, amplitude)`. */
+function waveUniform(waves: readonly WaterWave[]): Vector4[] {
+  return waves.map((wave) => new Vector4(wave.kx, wave.kz, wave.speed, wave.amplitude));
+}
+
+/**
+ * The GLSL that sums the gusts and the ripples into `slope` — #2701, unrolled
+ * so that every array index is a constant and no derivative is taken inside a
+ * loop. The ripples are named `a1`…`a5`, as #459's two were.
+ */
+function waterSlopeGlsl(): string {
+  const gusts = WATER_GUSTS.map(
+    (_, i) =>
+      `  float g${String(i + 1)} = dot(p, gusts[${String(i)}].xy) + time * gusts[${String(i)}].z;`,
+  );
+  const gust = WATER_GUSTS.map((_, i) => `sin(g${String(i + 1)})`).join(' + ');
+  const swell = WATER_GUSTS.map(
+    (_, i) => `gusts[${String(i)}].w * cos(g${String(i + 1)}) * gusts[${String(i)}].xy`,
+  ).join('\n    + ');
+  const phases = WATER_RIPPLES.map(
+    (_, i) =>
+      `  float a${String(i + 1)} = dot(p, ripples[${String(i)}].xy) + time * ripples[${String(i)}].z;`,
+  );
+  const ripples = WATER_RIPPLES.map(
+    (_, i) =>
+      `ripples[${String(i)}].w * oylRippleWeight(a${String(i + 1)}) * cos(a${String(i + 1)}) * ripples[${String(i)}].xy`,
+  ).join('\n    + ');
+  return `${gusts.join('\n')}
+  float rough = mix(${glslFloat(WATER_CALM_SHARE)}, 1.0, 0.5 + (${gust}) / ${glslFloat(2 * WATER_GUSTS.length)});
+${phases.join('\n')}
+  vec2 slope = rough * (${ripples})
+    + ${swell};`;
+}
+
+/**
  * The water shader's fragment half: the sky reflected with a Fresnel term,
  * ripples as an analytic normal that scrolls with the ride's clock, and the
  * edges tinted shallow by the geometry's own shore weight.
  *
- * ⚠️ **No texture, and no second pass.** The ripple normal is two travelling
- * waves differentiated by hand, so there is no normal map to fetch — #366's
+ * ⚠️ **No texture, and no second pass.** The ripple normal is travelling
+ * waves differentiated by hand — {@link WATER_RIPPLES} scaled by
+ * {@link WATER_GUSTS}, since #2701 — so there is no normal map to fetch — #366's
  * "no texture reaches the GPU" holds — and the reflection is the sky's own two
  * colours along the reflected ray, so there is no planar reflection render.
  * The fog and colour-space chunks are three's, in the order its own
@@ -5520,6 +5633,8 @@ uniform vec3 deepColour;
 uniform vec3 shallowColour;
 uniform float time;
 uniform float rippleFilter;
+uniform vec4 ripples[${String(WATER_RIPPLES.length)}];
+uniform vec4 gusts[${String(WATER_GUSTS.length)}];
 varying vec3 vWorld;
 varying float vShore;
 #include <fog_pars_fragment>
@@ -5529,12 +5644,7 @@ float oylRippleWeight(float phase) {
 }
 void main() {
   vec2 p = vWorld.xz;
-  vec2 d1 = vec2(0.83, 0.56);
-  vec2 d2 = vec2(-0.47, 0.88);
-  float a1 = dot(p, d1) * 1.7 + time * 1.3;
-  float a2 = dot(p, d2) * 2.9 - time * 1.9;
-  vec2 slope = 0.06 * oylRippleWeight(a1) * cos(a1) * d1
-    + 0.058 * oylRippleWeight(a2) * cos(a2) * d2;
+${waterSlopeGlsl()}
   vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
   vec3 v = normalize(cameraPosition - vWorld);
   float facing = clamp(dot(n, v), 0.0, 1.0);
@@ -5686,6 +5796,8 @@ export class WaterBelt {
         shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
         time: { value: 0 },
         rippleFilter: { value: 1 },
+        ripples: { value: waveUniform(WATER_RIPPLES) },
+        gusts: { value: waveUniform(WATER_GUSTS) },
       },
     ]),
   });
@@ -5919,6 +6031,8 @@ function reflectingWaterMaterial(environment: Texture): ShaderMaterial {
           shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
           time: { value: 0 },
           rippleFilter: { value: 1 },
+          ripples: { value: waveUniform(WATER_RIPPLES) },
+          gusts: { value: waveUniform(WATER_GUSTS) },
           envMap: { value: null },
           envMapRotation: { value: new Matrix3() },
           environmentScale: { value: 0 },
