@@ -207,11 +207,14 @@ export interface Encounter {
 /**
  * Bright kit, as a group ride's is — sRGB. None is the house kit's teal
  * (`bicycle.ts` §`HOUSE_KIT`) or the pacer's blue, so no cyclist is ever read
- * as the rider or the pacer.
+ * as the rider or the pacer. ⚠️ **No teal or green-teal, at any lightness**:
+ * the owner approved #2722 once `0x2a9d8f` was taken out, because it read as
+ * the rider's own kit. `scenery-cyclists.test.ts` §"no scenery cyclist wears
+ * the house kit" holds this list and {@link HELMETS} to a CIELAB distance from it.
  */
 export const JERSEYS: readonly number[] = [
-  0xd62828, 0xf77f00, 0xfcbf49, 0x2a9d8f, 0x6a4c93, 0xe9ecef, 0x1d3557, 0xff6b9a, 0x80b918,
-  0x212529, 0xc1121f, 0x00a6fb,
+  0xd62828, 0xf77f00, 0xfcbf49, 0x6a4c93, 0xe9ecef, 0x1d3557, 0xff6b9a, 0x80b918, 0x212529,
+  0xc1121f, 0x00a6fb,
 ];
 
 /** Shorts and bib tights, sRGB: nearly always black, now and then navy or grey. */

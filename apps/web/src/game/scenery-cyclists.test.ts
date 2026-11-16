@@ -24,7 +24,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { BICYCLE_LENGTH_METRES } from './bicycle';
+import { BICYCLE_LENGTH_METRES, HOUSE_KIT } from './bicycle';
 import { forbiddenInTheTree, plantedOver, seamViolations } from './cannot-reach-trainer-testing';
 import { PEOPLE_NEAR_MAX } from './people';
 import { windingRoute } from './route-fixtures-testing';
@@ -40,6 +40,8 @@ import {
   CYCLIST_CELL_METRES,
   CYCLIST_DRAW_METRES,
   CYCLISTS_PER_CELL,
+  HELMETS,
+  JERSEYS,
   LANES,
   OWN_HALF_METRES,
   ROAD_EDGE_METRES,
@@ -381,5 +383,63 @@ describe('scenery cyclists are scenery only — #2722', () => {
     walk(src, '');
     expect(game.startsWith(src)).toBe(true);
     expect(importers.sort()).toEqual(['game/port.ts', 'game/scene.ts', 'game/three-renderer.ts']);
+  });
+});
+
+/** An sRGB `0xrrggbb` in CIELAB (D65), as `[L*, a*, b*]`. */
+function cielab(hex: number): readonly [number, number, number] {
+  const linear = (channel: number): number => {
+    const c = channel / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const r = linear((hex >> 16) & 0xff);
+  const g = linear((hex >> 8) & 0xff);
+  const b = linear(hex & 0xff);
+  const f = (t: number): number => (t > 216 / 24389 ? Math.cbrt(t) : ((24389 / 27) * t + 16) / 116);
+  const x = f((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047);
+  const y = f(0.2126 * r + 0.7152 * g + 0.0722 * b);
+  const z = f((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+}
+
+/**
+ * The chromatic part of CIE76 ΔE*ab: √(Δa*² + Δb*²), which is √(ΔE*ab² − ΔL*²),
+ * the hue-and-chroma distance with the lightness difference left out.
+ */
+function chromaticDistance(one: number, other: number): number {
+  const [, a1, b1] = cielab(one);
+  const [, a2, b2] = cielab(other);
+  return Math.hypot(a1 - a2, b1 - b2);
+}
+
+/**
+ * ⚠️ **15 units of chromatic ΔE*ab, and why lightness is left out.** The
+ * renderer shades every body by sun, slope and shadow, so one jersey is drawn
+ * across a wide range of L*; what survives the shading, and what reads a kit
+ * as the rider's teal, is its hue and chroma. A full ΔE*ab would also count the
+ * house kit's dark L* (about 35) and so sit a teal `0x2a9d8f` (ΔE*ab 26) nearer
+ * the kit than a plain near-black (31) — the wrong way round for this question.
+ * 15 is about six just-noticeable differences (ΔE*ab ≈ 2.3): it fails a teal
+ * like `0x2a9d8f` (10.4 from the jersey) and a green-teal like `0x2d6a4f`
+ * (12.0), and passes the neutrals, which sit at the kit's own chroma, about 19
+ * to 24 away. Held against both halves of the kit, the jersey and the `limb`
+ * the rider's helmet is drawn in.
+ */
+const HOUSE_KIT_MIN_CHROMATIC_DISTANCE = 15;
+
+describe('no scenery cyclist wears the house kit — #2722', () => {
+  it('holds every jersey and helmet 15 chromatic ΔE*ab from the rider’s house kit', () => {
+    const near: string[] = [];
+    for (const colour of [...JERSEYS, ...HELMETS]) {
+      for (const kit of [HOUSE_KIT.jersey, HOUSE_KIT.limb]) {
+        const distance = chromaticDistance(colour, kit);
+        if (distance < HOUSE_KIT_MIN_CHROMATIC_DISTANCE) {
+          near.push(
+            `${colour.toString(16).padStart(6, '0')} is ${distance.toFixed(1)} from ${kit.toString(16).padStart(6, '0')}`,
+          );
+        }
+      }
+    }
+    expect(near).toEqual([]);
   });
 });
