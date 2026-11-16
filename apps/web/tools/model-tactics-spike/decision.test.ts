@@ -10,12 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BOT_TACTICS } from '@onyourleft/domain';
 
-import {
-  MODEL_ANSWER_MOST_CHARACTERS,
-  modelAnswerFormat,
-  modelDecisionSchema,
-  parseModelDecision,
-} from './decision';
+import { MODEL_ANSWER_MOST_CHARACTERS, modelDecisionSchema, parseModelDecision } from './decision';
 
 const read = (value: unknown, bots = 7): ReturnType<typeof parseModelDecision> =>
   parseModelDecision(typeof value === 'string' ? value : JSON.stringify(value), bots);
@@ -120,20 +115,14 @@ describe('a model decision (#2616)', () => {
     expect((items['properties'] as { bot: { maximum: number } }).bot.maximum).toBe(6);
   });
 
-  it('holds the model to the same shape with no target, and still reads a target that arrives (#2708)', () => {
-    const format = modelAnswerFormat(7);
-    const items = (format['properties'] as { bots: { items: Record<string, unknown> } }).bots.items;
-    expect(Object.keys(items['properties'] as object)).toEqual(['bot', 'move']);
-    expect(items['additionalProperties']).toBe(false);
-    expect(format['additionalProperties']).toBe(false);
-    const schemaItems = (
-      modelDecisionSchema(7)['properties'] as { bots: { items: Record<string, unknown> } }
-    ).bots.items;
-    const properties = schemaItems['properties'] as Record<string, unknown>;
-    expect(items['properties']).toEqual({ bot: properties['bot'], move: properties['move'] });
-    expect(read({ bots: [{ bot: 3, move: 'chase', target: 2 }] })).toEqual({
+  it('reads a target on a follow or a chase: the rider, or any seat (#2720)', () => {
+    expect(read({ bots: [{ bot: 3, move: 'chase', target: 0 }] })).toEqual({
       ok: true,
-      moves: [{ bot: 3, move: 'chase', target: 2 }],
+      moves: [{ bot: 3, move: 'chase', target: 0 }],
+    });
+    expect(read({ bots: [{ bot: 3, move: 'follow', target: 'rider' }] })).toEqual({
+      ok: true,
+      moves: [{ bot: 3, move: 'follow', target: 'rider' }],
     });
   });
 });

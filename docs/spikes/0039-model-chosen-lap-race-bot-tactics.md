@@ -11,7 +11,8 @@
 - **Status of this document**: a **spike write-up**. It decides nothing, and it amends no ADR. §8
   lists the amendments a build would need.
 - **Addendum**: §10, dated 2026-11-16 (#2708), re-measures with a tuned prompt and corrects four
-  statements in §1, §4 and §8 (#2705). The body above is left as it was measured.
+  statements in §1, §4 and §8 (#2705). §11, dated 2026-11-16 (#2720), measures the looser rules
+  of ADR 0073 (Proposed) with a new prompt and input. The body above is left as it was measured.
 
 > ## ⚠️ What this does NOT do
 >
@@ -386,3 +387,133 @@ columns for the first run, recomputed with no network.
 - **Part of the timing is in the input, not the model.** `attackOpen` is computed, so the model
   chooses who goes and how long, but the lull is set by code. A build could equally keep the lull
   in code and ask the model only who goes.
+
+## 11. Addendum, 2026-11-16: more strategy freedom inside the body's limits (#2720)
+
+Measured on the same machine as §2 on the same day, with the same Ollama 0.40.16 and
+`gemma4:12b`, `think:false`. Ollama's settings on the PC were not changed, and **no bench was
+run**, so nothing unloaded the model the instance uses for write-ups. This run's files are in
+`results/2720/`, and `replay.test.ts` replays them beside §5's and §10's.
+
+### 11.1 What changed
+
+- **The rules** ([ADR 0073](../adr/0073-ai-bots-race-with-strategy-freedom-inside-the-bodys-limits.md),
+  Proposed). `adapter.ts` now takes the rules as an argument, `adr-0073` by default. Under them an
+  `attack` or `chase` is ridden under the W′ floor, a `flyer` on any lap and at any W′, an `attack`
+  for as long as the model names it, and a `kick` wherever the model names it, as is a move other
+  than the kick inside the launch distance. A `follow` or `chase` may name any racer. One directly
+  ahead is ridden on its wheel. One further up the road is ridden as a `chase` until it is the
+  wheel ahead (*bridging*). One behind is ridden as `sit-in` until it comes by (*marking*). **Only
+  an exhausted bot keeps its seeded choice**, and `spendableWatts` caps every move at the peak, and
+  at CP once a bot is exhausted, as before. Each log written now says `"rules": "adr-0073"`. A log
+  that names no rules, §5's and §10's, replays under `adr-0071`, ADR 0071 D-3.6's rules, which is
+  what they were recorded under.
+- **The input** (`model-input.ts`). Each bot gets a `style`, dealt from the race's seed:
+  `breakaway`, `sprinter`, `climber`, `rouleur` or `opportunist`. Every style is dealt once before
+  any is dealt twice, so a field of seven holds all five. The input also gets `legs` (the
+  archetype, which was `style` before) and `blown`. Its `toLineM` is now **the line as the bot
+  misreads it** (`botTacticsMisjudgement`'s `lineMetres` for the window). The `rider` block gains
+  `ahead`, `gapAheadM`, `gapBehindM` and `drafting`. **`attackOpen` is gone**; `quietS` stays, as
+  information. The location test still passes.
+- **The answer format** (`ollama.ts`) is `decision.ts` §`modelDecisionSchema` again, with the
+  target, because a target can now be ridden. `modelAnswerFormat` is removed.
+- **The prompt** (`ollama.ts` §`MODEL_TACTICS_SYSTEM`) replaces §10's conditions with guidance.
+  It describes the moves, what each style does, and the rider. It asks for moves by different bots
+  at different times, and for a race that answers what just happened. It says plainly that every
+  effort above sitting in spends W′, that W′ refills only while a bot rides easy, and that a blown
+  bot rides no harder than steady.
+- **The comparison** (`compare.ts`) adds `movers` (bots that attacked or rode a flyer),
+  `blownBots`, `blownOverCpTicks` (bot-ticks over CP by a bot exhausted going into the tick),
+  `fadePlacesLost` (places lost 30 s after each blow, or by the end), `onRiderWheelTicks` (a bot in
+  `follow` with the rider directly ahead) and `riderTargets` (logged `follow` and `chase` moves aimed
+  at the rider). `compare` recomputed §5's and §10's tables with these columns. Their earlier
+  columns came out unchanged, and **§10's six logs still replay to their live traces bit for bit
+  under `adr-0071`** (`traceMatchesLive: true`).
+- **How the tuning went.** There were four single-seed rounds before the full run, not committed.
+  The first two prompts put the same two `breakaway` bots on a flyer from 4 s to the end of the
+  race and changed nothing else. A sentence on how long a move lasts and how the others answer it
+  spread the moves out. A sentence naming which styles attack, and which chase a move that has been
+  away, brought attacks and chases on the hills. The first call of the first round was a cold load
+  (14.8 s, late). The model was resident for the full run.
+
+### 11.2 The harness comparison (seeded / #2708 / #2720)
+
+`results/2720/comparison.json` holds the full numbers. The #2708 column is
+`results/2708/comparison.json`, recomputed with the new columns.
+
+| Field | attack % | flyer % | follow + chase % | sit-in % | lead changes | bots that moved | on the rider's wheel, bot-ticks | lowest W′ |
+|---|---|---|---|---|---|---|---|---|
+| flat 1 | 0.0 / 4.6 / 0.0 | 20.6 / 0.6 / 11.4 | 11.7 / 2.8 / 3.6 | 67.7 / 92.1 / 85.0 | 22 / 1 / 7 | 3 / 3 / 4 | 0 / 0 / 218 | 0.931 / 0.846 / 0.935 |
+| flat 2 | 0.0 / 4.1 / 0.0 | 20.3 / 0.0 / 20.0 | 2.1 / 0.0 / 9.1 | 77.6 / 95.9 / 70.9 | 21 / 0 / 13 | 3 / 1 / 4 | 15 / 0 / 7 | 0.948 / 0.872 / 0.909 |
+| flat 3 | 0.0 / 4.1 / 0.0 | 20.3 / 0.0 / 10.6 | 1.4 / 2.7 / 0.6 | 78.3 / 93.2 / 88.9 | 22 / 0 / 4 | 3 / 1 / 5 | 31 / 0 / 0 | 0.948 / 0.872 / 0.922 |
+| hilly 1 | 3.8 / 7.1 / 3.9 | 16.7 / 0.2 / 36.0 | 25.7 / 4.0 / 12.5 | 53.8 / 85.6 / 47.6 | 14 / 3 / 8 | 4 / 4 / 5 | 7 / 0 / 0 | 0.448 / 0.431 / 0.338 |
+| hilly 2 | 4.2 / 9.1 / 4.6 | 15.7 / 0.3 / 23.1 | 21.7 / 3.4 / 13.8 | 58.4 / 85.6 / 58.5 | 10 / 8 / 27 | 5 / 5 / 6 | 0 / 0 / 55 | 0.487 / 0.498 / 0.503 |
+| hilly 3 | 4.6 / 9.7 / 8.5 | 10.3 / 0.0 / 21.8 | 33.0 / 6.9 / 7.1 | 52.2 / 81.8 / 62.6 | 2 / 0 / 17 | 5 / 3 / 6 | 0 / 24 / 0 | 0.487 / 0.489 / 0.379 |
+
+"Bots that moved" counts every bot that attacked or rode a flyer, in a window the model chose or
+in one that fell back to the seeded tactics.
+
+#2720 asked for five things. Against each:
+
+- **Bots that over-spend fade, and W′-exhausted bots are never above CP: the second held; the
+  first was not seen live.** No bot was exhausted in any live field, and the lowest W′ any bot read
+  was 0.338, so the model never over-spent hard enough to show a fade. `blownOverCpTicks` was 0
+  everywhere, but trivially. The body's limit is shown in the harness instead (`adapter.test.ts`):
+  with every bot told to kick in every window, more than one bot blows, and none rides over CP from
+  the tick after; with one climber told to kick from the gun, it blows in the lead at 129.7 s, rides
+  no harder than CP from then on, and has lost three places by 150 s. The same bot ridden seeded
+  never blows. So the body stops a bot that the model keeps pushing, but this prompt did not ask
+  for that push.
+- **The lead changes hands: yes, on the flat.** It changed 4 to 13 times on the flat, against 0 or
+  1 under #2708 and 21 or 22 seeded. On the hills it changed 8 to 27 times, against 0 to 8 under
+  #2708 and 2 to 14 seeded.
+- **More than one bot makes moves: yes.** Between 4 and 6 bots moved in every field, and 3 to 5
+  were moving at once at the most. Under #2708, 1 bot moved on two of the three flat fields.
+- **Bots mark the rider: in three fields of six.** A bot sat on the rider's wheel for 218, 7 and
+  55 bot-ticks (10.9 s, 0.35 s and 2.75 s) in flat 1, flat 2 and hilly 2, and for none in the
+  other three. 20 logged moves aimed a `follow` or `chase` at the rider. Over all six fields, 118
+  bot-windows bridged to a racer further up the road and 59 marked one behind.
+- **Latency and validity: valid and on time, but slower, and with more fallback.** See §11.3.
+
+Other things the numbers show:
+
+- **No attack on the flat.** The model went on flyers there (10.6 % to 20.0 % of bot-time) and
+  attacked only on the hills (3.9 % to 8.5 %). Hilly 1's flyers took 36.0 % of bot-time, more
+  than double the seeded field's.
+- **Moves got away.** On the hills, 11 to 37 moves got 5 m clear, against 3 to 9 seeded and 3 to 5
+  under #2708.
+- **What the model asked for**, over 1 296 named moves: `sit-in` 881, `flyer` 300, `follow` 67 (18
+  of them at the rider), `attack` 29, `chase` 19 (2 at the rider), `kick` and `recover` 0. 543 moves
+  carried a target the move does not take (a `sit-in`, `flyer` or `attack`), which the adapter
+  ignores.
+
+### 11.3 Latency and validity, 186 race calls
+
+| Measurement | Calls | Median | 90th pct | Highest | Notes |
+|---|---:|---:|---:|---:|---|
+| **Live races, #2720's prompt** | 186 | **3 559 ms** | **4 076 ms** | **4 376 ms** | **186 of 186 valid**, none late; prompt 1 646–1 716 tokens, output 17–105 (mean 85.3); 37 over 4 s |
+
+- **Slower than §10.4** (median 2 714 ms), because the prompt is about 400 tokens longer and the
+  answers carry targets. The highest, 4.38 s, leaves 0.62 s under the 5 s late limit, against
+  0.80 s in §10.4.
+- **Fewer calls, and three times the fallback.** An answer that takes over 4 s pushes the next ask
+  to the next 4 s mark after it (`decision-log.ts` §`nextRequestAtMs`), so 37 calls left an 8 s gap
+  that the 5 s hold does not cover. The fields made 25 to 35 calls each, against 36 or 37 in §10.
+  **875 of 6 258 bot-windows (14.0 %) fell back as `no-decision`**, against 308 (4.9 %) in §10.3.
+  Hilly 2 had the most: 238 of its windows. A build that keeps this prompt should ask on arrival
+  instead of at the next mark, or shorten the prompt. ADR 0071 D-7 says #2710 states its figures.
+- The SSH leg (`wallMs`, not counted): median 4.74 s, 90th percentile 5.29 s, highest 5.57 s.
+
+### 11.4 What this still does not do
+
+- **The owner has not ridden it.** These are the harness's numbers. ADR 0073 asks the owner to
+  approve the rules before #2710 adopts them.
+- **No live over-spend.** The model never took a bot under 0.3 of its W′, so "a bot may gamble and
+  blow up" is measured only where the harness tells it to. Whether to say more about gambling in
+  the prompt is the next lever, and the owner's call.
+- **The flat has no attacks**, and the model reaches for the flyer, which at 10 % over CP spends
+  little W′. A flat field still changes its lead about half as often as the seeded one does.
+- **Marking is approximate.** A bridge is a chase past the racers between, and a mark behind is a
+  sit-in, so a bot marking someone behind it rides at the bunch's pace, not slower (ADR 0073 D-3.4).
+- **150 s ends before the finish**, as in §5 and §10, so no field reached a kick, and the lifted
+  launch is not measured live.
