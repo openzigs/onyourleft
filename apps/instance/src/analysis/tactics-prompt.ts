@@ -8,11 +8,13 @@
  * (`apps/web/tools/model-tactics-spike/ollama.ts` §`MODEL_TACTICS_SYSTEM`):
  * **guidance, not rules**. The strategy is the model's, so it says what each
  * move and racing style is for and, plainly, what spending W′ costs, and it
- * gives no condition a move must meet and no attack gate (D-5.3, D-5.4). Two
- * sentences are #2710's own: the effort (D-2.5) and the finish (ADR 0073 R-5,
- * measured on the owner's PC). {@link TACTICS_PROMPT_VERSION} is raised with
- * every change to its words. The answer is asked for **with a target again**
- * (D-3.4: a `follow` or `chase` may name any racer) and an optional effort.
+ * gives no condition a move must meet and no attack gate (D-5.3, D-5.4). One
+ * sentence is #2710's own: the effort (D-2.5). #2710 measured four sentences
+ * about the finish (ADR 0073 R-5) and kept none: gemma4:12b answered each
+ * bot's current `move` back whatever they said.
+ * {@link TACTICS_PROMPT_VERSION} is raised with every change to its words.
+ * The answer is asked for **with a target again** (D-3.4: a `follow` or
+ * `chase` may name any racer) and an optional effort.
  * Nothing in it names a rider, a place or a model (ADR 0031 D-4).
  *
  * The request is Ollama's own `/api/chat` (spike 0039 §2), because it is the
@@ -46,8 +48,8 @@ export const TACTICS_KEEP_ALIVE = '30m';
 
 /**
  * What the model is told, once per call, before the race: spike 0039's #2720
- * words under ADR 0073 (guidance, not rules), with #2710's sentences on the
- * effort and on the finish.
+ * words under ADR 0073 (guidance, not rules), with #2710's sentence on the
+ * effort.
  */
 export const TACTICS_SYSTEM = [
   'You choose race tactics for the computer-controlled bots in a cycling lap race in a video game.',
