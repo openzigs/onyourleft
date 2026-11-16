@@ -3,7 +3,8 @@
 /**
  * **The admin pages' markup** (#2645, ADR 0069 D-6): the frame, the shell
  * every signed-in page is drawn in, the sign-in page, Status, the operator
- * log, and the owner's passkeys (#2642's page, drawn in the shell). Pure: data in, HTML out — nothing here reads a store, a clock or the
+ * log, the owner's passkeys (#2642's page, drawn in the shell), and since
+ * #2648 the AI backend, in operate-text's words as the app's panel is. Pure: data in, HTML out — nothing here reads a store, a clock or the
  * network, so `apps/web/src/a11y/admin-pages.a11y.test.ts` audits exactly
  * what `admin.ts` serves by calling these, and the app's Status panel and
  * this Status page can be drawn from one fixture and compared.
@@ -34,6 +35,51 @@
  */
 
 import {
+  AI_JOBS_HEADING,
+  AI_LINE,
+  AI_NOW_HEADING,
+  AI_OFFERS_HEADING,
+  AI_OWN_KEY_HEADING,
+  AI_PICK_HEADING,
+  AI_PURPOSE,
+  AI_RETURN_HEADING,
+  AI_UNREADABLE_TEXT,
+  aiNowLines,
+  CHECK_BUTTON,
+  CHECK_TEXT,
+  CHECK_UNREADABLE_TEXT,
+  HOSTED_OFFER_SENTENCE,
+  jobCountLines,
+  jobLine,
+  JOBS_UNREADABLE_TEXT,
+  MODEL_LOAD_WARNING,
+  MODEL_SAVE_FAILED_TEXT,
+  MODEL_SAVED_TEXT,
+  modelLine,
+  MODELS_LEGEND,
+  MODELS_UNREADABLE_TEXT,
+  NO_JOBS_TEXT,
+  NO_MODELS_TEXT,
+  OFFER_FAILED_TEXT,
+  OFFER_HOSTED_LABEL,
+  OFFER_LOCAL_LABEL,
+  OFFER_OTHERS_LABEL,
+  OFFER_SAVED_TEXT,
+  ownKeyText,
+  READ_AGAIN_BUTTON,
+  RETURN_BUTTON,
+  RETURN_FAILED_TEXT,
+  RETURN_SENTENCE,
+  RETURNED_TEXT,
+  SAVE_BUTTON,
+  SAVE_NEEDS_CHECK,
+  SERVER_STATE_TEXT,
+  type OperateAnalysisAnswer,
+  type OperateJobsAnswer,
+  type OperateLine,
+  type OperateLocalModel,
+  type OperateLocalModelsAnswer,
+  type OperateToolCheckOutcome,
   COMPARE_WITH_MAIN_LABEL,
   compareWithMainUrl,
   DOCKER_DESKTOP_DISK_TEXT,
@@ -454,4 +500,318 @@ export function logBody(view: LogView): string {
 ${view.entries.map(entryLine).join('\n')}
 </ol>
 ${links.length === 0 ? '<p>These are the oldest entries.</p>' : `<p>${links.join(' · ')}</p>`}`;
+}
+
+/** The change a form on the AI backend page makes, and the route it is dispatched to. */
+export type AnalysisOffer = 'local' | 'others' | 'hosted';
+
+/** What the last change on the AI backend page said, drawn under the part it changed. */
+export type AnalysisNotice =
+  | { readonly about: 'offers'; readonly ok: boolean }
+  /** `outcome` is `null` when the check's answer did not come back. */
+  | {
+      readonly about: 'check';
+      readonly model: string;
+      readonly outcome: OperateToolCheckOutcome | null;
+    }
+  | { readonly about: 'model'; readonly ok: boolean }
+  /** `problem` is the route's code for the address, when it named one of its own. */
+  | { readonly about: 'address'; readonly ok: boolean; readonly problem: string | null }
+  | { readonly about: 'return'; readonly ok: boolean };
+
+/** What the AI backend page draws: the three reads, the session, and the last change's notice. */
+export interface AnalysisView {
+  readonly analysis: OperateAnalysisAnswer | undefined;
+  readonly models: OperateLocalModelsAnswer | undefined;
+  readonly jobs: OperateJobsAnswer | undefined;
+  /** A code session reads; a passkey session is drawn the forms, each behind a step-up. */
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: AnalysisNotice | null;
+}
+
+/** Said in a code session in place of the forms (ADR 0069 Q-A). */
+export const ANALYSIS_READS_ONLY_TEXT =
+  'A one-time code’s session reads this page and changes nothing. Sign in with a passkey to make a change: each one asks your passkey again.';
+
+/** Where the owner's own hosted key is set: never here (ADR 0047 D-13, ADR 0069 D-2). */
+export const ANALYSIS_KEY_ELSEWHERE_TEXT =
+  'A hosted key is never typed on these pages. Set, replace or remove yours in the app, on its “A hosted model service, on your own key” panel, or on the host with operator model-key set.';
+
+export const ANALYSIS_ADDRESS_HEADING = 'Local server address';
+export const ANALYSIS_ADDRESS_BUTTON = 'Save this address';
+
+/** Beside the address field: what the instance holds it to (ADR 0040 D-6). */
+export const ANALYSIS_ADDRESS_HINT =
+  'The server’s base address, on this machine or its private network: the instance refuses any other, and checks a name again before every request to it.';
+
+export const ANALYSIS_ADDRESS_SAVED_TEXT =
+  'Saved. The instance now asks the server at the address above.';
+export const ANALYSIS_ADDRESS_REFUSED_TEXT =
+  'The instance did not take that address, so nothing was changed.';
+
+/** The switches, in the order the app draws them, and their words. */
+const OFFERS: readonly { readonly offer: AnalysisOffer; readonly label: string }[] = [
+  { offer: 'local', label: OFFER_LOCAL_LABEL },
+  { offer: 'others', label: OFFER_OTHERS_LABEL },
+  { offer: 'hosted', label: OFFER_HOSTED_LABEL },
+];
+
+/** The codes the analysis routes refuse an address or a model with (`analysis/settings.ts`). */
+const SAVE_PROBLEMS: readonly string[] = [
+  'not-set',
+  'not-a-url',
+  'not-base-url',
+  'not-local',
+  'tls-by-name',
+  'no-model',
+  'bad-model',
+  'bad-reasoning',
+  'unresolved',
+];
+
+/** Whether `problem` is one of the routes' own codes for a refused field. */
+export function isSaveProblem(problem: unknown): problem is string {
+  return typeof problem === 'string' && SAVE_PROBLEMS.includes(problem);
+}
+
+/** One shared line, its machine names as code. */
+function lineHtml(line: OperateLine): string {
+  return line
+    .map((part) =>
+      typeof part === 'string' ? escapeHtml(part) : `<code>${escapeHtml(part.code)}</code>`,
+    )
+    .join('');
+}
+
+const noticeHtml = (ok: boolean, done: string, failed: string): string =>
+  ok
+    ? `<p class="notice" role="status">${escapeHtml(done)}</p>\n`
+    : `<p class="problem" role="alert">${escapeHtml(failed)}</p>\n`;
+
+/** A form that makes one change behind a fresh step-up: the session's token, its fields, its button. */
+function stepUpForm(
+  action: string,
+  change: string,
+  csrf: string,
+  label: string,
+  inside: string,
+  button: string,
+): string {
+  return `<form method="post" action="${action}" data-step-up="${change}" aria-label="${escapeHtml(label)}">
+<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
+${inside}<button type="submit">${escapeHtml(button)}</button>
+<p data-passkey-status role="status"></p>
+</form>`;
+}
+
+function offersPart(view: AnalysisView, analysis: OperateAnalysisAnswer): string {
+  const state: Readonly<Record<AnalysisOffer, boolean>> = {
+    local: analysis.local.offered,
+    others: analysis.local.othersMayUse,
+    hosted: analysis.hosted.offered,
+  };
+  const items = OFFERS.map(({ offer, label }) => {
+    const on = state[offer];
+    const line = `<p><strong>${escapeHtml(label)}</strong>: ${on ? 'on' : 'off'}.</p>`;
+    if (view.strength !== 'passkey') return `<li>${line}</li>`;
+    const form = stepUpForm(
+      '/admin/analysis/offer',
+      'analysis_offer',
+      view.csrf,
+      label,
+      `<input type="hidden" name="offer" value="${offer}">\n<input type="hidden" name="on" value="${on ? 'off' : 'on'}">\n`,
+      on ? 'Turn off' : 'Turn on',
+    );
+    return `<li>${line}\n${form}</li>`;
+  });
+  const notice =
+    view.notice?.about === 'offers'
+      ? noticeHtml(view.notice.ok, OFFER_SAVED_TEXT, OFFER_FAILED_TEXT)
+      : '';
+  return `<h2>${escapeHtml(AI_OFFERS_HEADING)}</h2>
+<ul class="offers">
+${items.join('\n')}
+</ul>
+<p>${escapeHtml(HOSTED_OFFER_SENTENCE)}</p>
+${notice}`;
+}
+
+/** The models, as a list or the check's form; or why there is no list. */
+function modelList(view: AnalysisView, models: OperateLocalModelsAnswer | undefined): string {
+  if (models === undefined) {
+    return `<p class="problem">${escapeHtml(MODELS_UNREADABLE_TEXT)}</p>\n`;
+  }
+  if (models.state !== 'ollama' && models.state !== 'openai-compatible') {
+    return `<p class="warning">${escapeHtml(SERVER_STATE_TEXT[models.state])}</p>\n`;
+  }
+  const namesOnly =
+    models.state === 'openai-compatible'
+      ? `<p>${escapeHtml(SERVER_STATE_TEXT['openai-compatible'])}</p>\n`
+      : '';
+  if (models.models.length === 0) return `${namesOnly}<p>${escapeHtml(NO_MODELS_TEXT)}</p>\n`;
+  const checked = view.notice?.about === 'check' ? view.notice.model : undefined;
+  const modelText = (model: OperateLocalModel): string =>
+    `<code>${escapeHtml(model.name)}</code>: ${escapeHtml(modelLine(model))}`;
+  if (view.strength !== 'passkey') {
+    return `${namesOnly}<p>${escapeHtml(MODELS_LEGEND)}:</p>
+<ul class="models">
+${models.models.map((model) => `<li>${modelText(model)}</li>`).join('\n')}
+</ul>
+`;
+  }
+  const radios = models.models.map((model, index) => {
+    const id = `model-${String(index)}`;
+    const picked = checked === model.name ? ' checked' : '';
+    // One radio of the group required makes the group required: no check with none picked.
+    const required = index === 0 ? ' required' : '';
+    return `<li><input type="radio" id="${id}" name="model" value="${escapeHtml(model.name)}"${required}${picked}> <label for="${id}">${modelText(model)}</label></li>`;
+  });
+  return `${namesOnly}${stepUpForm(
+    '/admin/analysis/check',
+    'analysis_check',
+    view.csrf,
+    CHECK_BUTTON,
+    `<fieldset>
+<legend>${escapeHtml(MODELS_LEGEND)}</legend>
+<ul class="models">
+${radios.join('\n')}
+</ul>
+</fieldset>
+`,
+    CHECK_BUTTON,
+  )}
+`;
+}
+
+/**
+ * *Pick a local model*: the list, and under it how the last check went —
+ * and *Save this model* for the model it checked, only when it called tools
+ * (ADR 0046 D-7), as the app offers Save only after this session's check.
+ */
+function modelsPart(view: AnalysisView): string {
+  const checked = view.notice?.about === 'check' ? view.notice : undefined;
+  let outcome = '';
+  let save = `<p class="hint">${escapeHtml(SAVE_NEEDS_CHECK)}</p>\n`;
+  if (checked !== undefined) {
+    outcome =
+      checked.outcome === null
+        ? `<p class="problem" role="alert">${escapeHtml(CHECK_UNREADABLE_TEXT)}</p>\n`
+        : noticeOf(checked.outcome === 'tools-ok', CHECK_TEXT[checked.outcome]);
+    if (checked.outcome === 'tools-ok' && view.strength === 'passkey') {
+      save = `<p>Checked: <code>${escapeHtml(checked.model)}</code></p>
+${stepUpForm(
+  '/admin/analysis/model',
+  'analysis_model',
+  view.csrf,
+  SAVE_BUTTON,
+  `<input type="hidden" name="localModel" value="${escapeHtml(checked.model)}">\n`,
+  SAVE_BUTTON,
+)}
+`;
+    }
+  }
+  const saved =
+    view.notice?.about === 'model'
+      ? noticeOf(view.notice.ok, view.notice.ok ? MODEL_SAVED_TEXT : MODEL_SAVE_FAILED_TEXT)
+      : '';
+  return `<h2>${escapeHtml(AI_PICK_HEADING)}</h2>
+<p>${escapeHtml(MODEL_LOAD_WARNING)}</p>
+${modelList(view, view.models)}${outcome}${save}${saved}<p><a href="/admin/analysis">${escapeHtml(READ_AGAIN_BUTTON)}</a></p>
+`;
+}
+
+/** A notice that is either good news or a problem, by `ok`, in one sentence. */
+function noticeOf(ok: boolean, text: string): string {
+  return noticeHtml(ok, text, text);
+}
+
+function addressPart(view: AnalysisView, analysis: OperateAnalysisAnswer): string {
+  if (view.strength !== 'passkey') return '';
+  const notice =
+    view.notice?.about === 'address'
+      ? view.notice.ok
+        ? noticeOf(true, ANALYSIS_ADDRESS_SAVED_TEXT)
+        : `<p class="problem" role="alert">${escapeHtml(ANALYSIS_ADDRESS_REFUSED_TEXT)}${
+            view.notice.problem === null
+              ? ''
+              : ` The instance’s reason: <code>${escapeHtml(view.notice.problem)}</code>.`
+          }</p>\n`
+      : '';
+  const value = analysis.local.url === null ? '' : ` value="${escapeHtml(analysis.local.url)}"`;
+  return `<h2>${escapeHtml(ANALYSIS_ADDRESS_HEADING)}</h2>
+${stepUpForm(
+  '/admin/analysis/address',
+  'analysis_address',
+  view.csrf,
+  ANALYSIS_ADDRESS_HEADING,
+  `<label for="localUrl">${escapeHtml(ANALYSIS_ADDRESS_HEADING)}</label>
+<input type="url" id="localUrl" name="localUrl"${value} autocomplete="off" spellcheck="false" required aria-describedby="localUrl-hint">
+<p class="hint" id="localUrl-hint">${escapeHtml(ANALYSIS_ADDRESS_HINT)}</p>
+`,
+  ANALYSIS_ADDRESS_BUTTON,
+)}
+${notice}`;
+}
+
+function jobsPart(jobs: OperateJobsAnswer | undefined): string {
+  const heading = `<h2>${escapeHtml(AI_JOBS_HEADING)}</h2>\n`;
+  if (jobs === undefined) {
+    return `${heading}<p class="problem">${escapeHtml(JOBS_UNREADABLE_TEXT)}</p>\n`;
+  }
+  const counts = jobCountLines(jobs)
+    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .join('\n');
+  const recent =
+    jobs.recent.length === 0
+      ? `<p>${escapeHtml(NO_JOBS_TEXT)}</p>`
+      : `<ol class="log jobs">\n${jobs.recent.map((job) => `<li>${escapeHtml(jobLine(job))}</li>`).join('\n')}\n</ol>`;
+  return `${heading}<ul class="counts">
+${counts}
+</ul>
+${recent}
+`;
+}
+
+function returnPart(view: AnalysisView): string {
+  const notice =
+    view.notice?.about === 'return'
+      ? noticeHtml(view.notice.ok, RETURNED_TEXT, RETURN_FAILED_TEXT)
+      : '';
+  const form =
+    view.strength === 'passkey'
+      ? `${stepUpForm('/admin/analysis/clear', 'analysis_clear', view.csrf, RETURN_BUTTON, '', RETURN_BUTTON)}\n`
+      : '';
+  return `<h2>${escapeHtml(AI_RETURN_HEADING)}</h2>
+<p>${escapeHtml(RETURN_SENTENCE)}</p>
+${form}${notice}`;
+}
+
+/**
+ * The AI backend page's body (#2648): what the three analysis reads
+ * answered, in the app panel's order and words (`@onyourleft/operate-text`),
+ * and — in a passkey session — one form per change, each behind a fresh
+ * step-up. There is no field for a hosted key, and none is ever drawn.
+ */
+export function analysisBody(view: AnalysisView): string {
+  const top = `<p>${escapeHtml(AI_LINE)}</p>
+<p class="hint">${escapeHtml(AI_PURPOSE)}</p>
+${view.strength === 'passkey' ? '' : `<p>${escapeHtml(ANALYSIS_READS_ONLY_TEXT)}</p>\n`}`;
+  const { analysis } = view;
+  if (analysis === undefined) {
+    return `${top}<p class="problem">${escapeHtml(AI_UNREADABLE_TEXT)}</p>`;
+  }
+  const now = aiNowLines(analysis, view.models?.version ?? null)
+    .map((line) => `<li>${lineHtml(line)}</li>`)
+    .join('\n');
+  return `${top}${offersPart(view, analysis)}<h2>${escapeHtml(AI_NOW_HEADING)}</h2>
+<ul class="now">
+${now}
+</ul>
+${modelsPart(view)}${addressPart(view, analysis)}<h2>${escapeHtml(AI_OWN_KEY_HEADING)}</h2>
+<ul class="own-key">
+<li>${escapeHtml(ownKeyText(analysis))}</li>
+</ul>
+<p>${escapeHtml(ANALYSIS_KEY_ELSEWHERE_TEXT)}</p>
+${jobsPart(view.jobs)}${returnPart(view)}`;
 }

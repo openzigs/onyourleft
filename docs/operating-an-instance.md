@@ -1151,8 +1151,15 @@ the session ([#2641](https://github.com/openzigs/onyourleft/issues/2641)), the o
 ([#2643](https://github.com/openzigs/onyourleft/issues/2643)), and two read-only pages
 ([#2645](https://github.com/openzigs/onyourleft/issues/2645)): **Status** (`/admin/status`, where a
 sign-in lands) and the **operator log** (`/admin/log`, 50 entries a page, newest first, *Older
-entries* for the next). Each shows what the app's Operate area shows, in the same words: the page
-asks the instance's own Operate route as the owner, and draws its answer. A log entry that is not
+entries* for the next); and since
+[#2648](https://github.com/openzigs/onyourleft/issues/2648) the **AI backend** (`/admin/analysis`): the local model, where it is set and
+whether it is on, the switches for what the instance offers riders, the models on the local server
+with *Check it calls tools*, the queue, and *Return to .env*. Each shows what the app's Operate area
+shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
+answer. On the AI backend page a passkey session can also change the settings, and **every change
+asks your passkey again** for that one change: the route's own checks run, its local-address rule
+included, and the operator log names the admin pages and the listener. There is **no field for a
+hosted key** on any admin page: set yours in the app or with `operator model-key set`. A log entry that is not
 in the log's own closed words is not drawn, and its row says so. The compare-with-main link is a
 link you open; the instance asks GitHub nothing. The pages for the other areas follow. Every page
 has the instance's name, how you signed in and through which listener, the section links and

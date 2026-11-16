@@ -29,7 +29,12 @@ import type { OperateStatusAnswer } from '@onyourleft/operate-text';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../design/contrast';
-import { SCRIPTED_STATUS } from '../instance/testing';
+import {
+  SCRIPTED_ANALYSIS,
+  SCRIPTED_JOBS,
+  SCRIPTED_MODELS,
+  SCRIPTED_STATUS,
+} from '../instance/testing';
 import { auditAccessibility, formatViolations, tabbableElements } from './audit';
 
 interface ShellView {
@@ -87,6 +92,21 @@ interface AdminPages {
   passkeysBody(view: PasskeysView): string;
   statusBody(status: OperateStatusAnswer | undefined, now: number): string;
   logBody(view: LogView): string;
+  analysisBody(view: AnalysisView): string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`AnalysisView`, its reads as the routes answer them. */
+interface AnalysisView {
+  readonly analysis: unknown;
+  readonly models: unknown;
+  readonly jobs: unknown;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice:
+    | { readonly about: 'offers' | 'model' | 'return'; readonly ok: boolean }
+    | { readonly about: 'check'; readonly model: string; readonly outcome: string | null }
+    | { readonly about: 'address'; readonly ok: boolean; readonly problem: string | null }
+    | null;
 }
 
 /** `apps/instance` §`admin/admin-routes.ts`, as far as it is used here. */
@@ -224,7 +244,34 @@ const passkeysPage = (
   );
 
 /** The pages with a passkey ceremony, which link the one script (and only it). */
-const SCRIPTED = new Set(['/admin/sign-in', '/admin/passkeys']);
+const SCRIPTED = new Set(['/admin/sign-in', '/admin/passkeys', '/admin/analysis']);
+
+/** The AI backend page (#2648), in a session of `strength`, over the scripted reads. */
+const analysisPage = (
+  strength: ShellView['strength'],
+  over: Partial<AnalysisView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/analysis', name, strength),
+    'AI backend',
+    pages.analysisBody({
+      analysis: SCRIPTED_ANALYSIS,
+      models: SCRIPTED_MODELS,
+      jobs: SCRIPTED_JOBS,
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      ...over,
+    }),
+    true,
+  );
+
+/** A model whose name would break the markup if it were not escaped. */
+const AWKWARD_MODELS = {
+  ...SCRIPTED_MODELS,
+  models: [{ ...SCRIPTED_MODELS.models[0]!, name: 'alpha:"14b" <x> & y' }],
+};
 
 /**
  * Every admin page, by its route, in every state it is drawn in. A page
@@ -271,6 +318,58 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     [
       'unreadable',
       () => pages.shellPage(shell('/admin/status'), 'Status', pages.statusBody(undefined, NOW)),
+    ],
+  ],
+  '/admin/analysis': [
+    ['a code session: reads only', () => analysisPage('code')],
+    ['a passkey session: every form', () => analysisPage('passkey')],
+    [
+      'a model checked and calling tools, an awkward name',
+      () =>
+        analysisPage(
+          'passkey',
+          {
+            models: AWKWARD_MODELS,
+            notice: { about: 'check', model: 'alpha:"14b" <x> & y', outcome: 'tools-ok' },
+          },
+          AWKWARD_NAME,
+        ),
+    ],
+    [
+      'a check that failed',
+      () =>
+        analysisPage('passkey', {
+          notice: { about: 'check', model: 'beta:32b', outcome: 'no-tool-call' },
+        }),
+    ],
+    [
+      'an address refused',
+      () =>
+        analysisPage('passkey', {
+          notice: { about: 'address', ok: false, problem: 'not-local' },
+        }),
+    ],
+    [
+      'switches saved, the server unreachable, no jobs',
+      () =>
+        analysisPage('passkey', {
+          notice: { about: 'offers', ok: true },
+          models: { state: 'unreachable', version: null, models: [] },
+          jobs: { ...SCRIPTED_JOBS, recent: [] },
+        }),
+    ],
+    [
+      'nothing readable',
+      () => analysisPage('passkey', { analysis: undefined, models: undefined, jobs: undefined }),
+    ],
+    [
+      'the models and jobs unreadable, returned to .env',
+      () =>
+        analysisPage('passkey', {
+          models: undefined,
+          jobs: undefined,
+          notice: { about: 'return', ok: true },
+        }),
     ],
   ],
   '/admin/log': [

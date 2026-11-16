@@ -30,6 +30,12 @@ export const ADMIN_CHALLENGE_SECONDS = 2 * 60;
  */
 export const ADMIN_CHANGES = {
   passkey_revoke: { fields: ['id'] },
+  // #2648: the AI backend page's five changes, each one route call.
+  analysis_offer: { fields: ['offer', 'on'] },
+  analysis_check: { fields: ['model'] },
+  analysis_model: { fields: ['localModel'] },
+  analysis_address: { fields: ['localUrl'] },
+  analysis_clear: { fields: [] },
 } as const satisfies Readonly<Record<string, { readonly fields: readonly string[] }>>;
 
 export type AdminChange = keyof typeof ADMIN_CHANGES;
