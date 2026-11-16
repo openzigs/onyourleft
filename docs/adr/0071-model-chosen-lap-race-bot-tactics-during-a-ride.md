@@ -70,7 +70,11 @@ first."* The issue names what this ADR must decide and record: the three superse
 ADR 0060 D-2.1, D-2.2 and ADR 0067 D-3.6 are unchanged and stay tested in model mode; that the
 decision schema has no power field and the model gets no tools; that the fallback is seeded tactics
 on any late, invalid or missing answer; and that the pacer stays out until
-[#1234](https://github.com/openzigs/onyourleft/issues/1234)'s counsel opinion. The epic puts hosted
+[#1234](https://github.com/openzigs/onyourleft/issues/1234)'s counsel opinion. That last point was
+overtaken on 2026-11-16, after the issue was written: **Owner ruling, 2026-11-16:** *"We are fine
+with the patent. Put it in."* The owner accepted the patent risk of a model-driven pacer and put it
+in epic #2706 as its own issue, #2712, under its own ADR (0072). This ADR still covers the bots
+only (D-2). The epic puts hosted
 models out of scope *"not without the owner's key and a separate ruling"*.
 
 ### Why an ADR, and why a new one
@@ -141,10 +145,12 @@ repository names and recommends no model (ADR 0046's 2026-11-14 entry, point 8).
   D-7's *"nothing runs during a ride"* is superseded for this use, beside the re-plan its
   2026-10-09 entry admitted, and stands for every other job type.
 - **Never for the pacer**, the rider's own ghost, a cross-rider ghost, a room, or any announcement
-  or HUD text. ADR 0066 is unchanged. A model-driven pacer needs a superseding ADR for ADR 0066's
-  patent-resting decisions, **after** the counsel opinion on US 2026/0249137
-  ([#1234](https://github.com/openzigs/onyourleft/issues/1234), due about 2027-01-15) is read. The
-  waiver of the pacer's limits for spike 0039 does not carry into any build.
+  or HUD text. ADR 0066 is unchanged by this ADR. The model-driven pacer is decided separately by
+  ADR 0072 ([#2712](https://github.com/openzigs/onyourleft/issues/2712)), which supersedes ADR
+  0066's patent-resting decisions. The owner accepted that patent risk on 2026-11-16 (*"We are fine
+  with the patent. Put it in."*), so the pacer no longer waits for the counsel opinion on US
+  2026/0249137 ([#1234](https://github.com/openzigs/onyourleft/issues/1234)). Nothing in this ADR
+  admits the pacer: until ADR 0072 is accepted, D-2 keeps it out.
 
 ### D-3 — The decision: a closed list, no power, no tools
 
@@ -311,7 +317,8 @@ was searched for it. The owner set the patent check aside **for racing strategy*
 (ADR 0067 D-0). *The author's reading*, for D-10 R-8: a bot's strategy chosen by a model is still
 racing strategy, so D-0 reaches it; the drafting risk is ADR 0067 D-3.8's, unchanged. The documents
 ADR 0048 D-13 reads (US 2026/0249137 among them) concern workouts changed for the rider, which a
-bot's move is not, and the pacer, which is nearest to them, stays out (D-2).
+bot's move is not, and the pacer, which is nearest to them, stays out of this ADR (D-2); the owner
+accepted the pacer's patent risk on 2026-11-16, and ADR 0072 decides it.
 
 ### D-10 — Questions for the owner
 
