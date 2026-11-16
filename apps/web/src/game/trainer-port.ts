@@ -78,7 +78,7 @@
  * drives the second one only, and the first belongs to the workout session.
  */
 
-import type { TimeInZones, Watts, WorkoutRescue } from '@onyourleft/domain';
+import type { PacerDecisionRecord, TimeInZones, Watts, WorkoutRescue } from '@onyourleft/domain';
 import type { RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
@@ -371,6 +371,16 @@ export interface GameTrainerPort {
    */
   soloDraftStepped?(draft: SoloDraftState): void;
   /**
+   * The AI pacer logged one ask — #2712, ADR 0072 D-5: kept by the ride
+   * controller (`notePacerDecision`) so the saved ride carries the pacer's
+   * decision log. ⚠️ Not about the trainer, which no pacer decision reaches
+   * (D-6): a closed-list record of the pacer's plan and intent and the times,
+   * on this port for {@link gameRideEnded}'s reason, and named so nothing
+   * else in production calls a method of that name. Optional, as
+   * {@link soloDraftStepped} is; `gameTrainerPortOver` always supplies it.
+   */
+  pacerDecided?(record: PacerDecisionRecord): void;
+  /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
    * ride controller's `recordForRoom`). Answers whether a recording is
@@ -631,6 +641,8 @@ interface GameTrainerSource {
   noteGameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
   /** #2451. @see GameTrainerPort.soloDraftStepped. Optional for a source with no recording. */
   noteSoloDraft?(reading: SoloDraftState): void;
+  /** #2712. @see GameTrainerPort.pacerDecided. Optional for a source with no recording. */
+  notePacerDecision?(record: PacerDecisionRecord): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -793,6 +805,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     soloDraftStepped: (draft) => {
       controller?.noteSoloDraft?.(draft);
+    },
+    pacerDecided: (record) => {
+      controller?.notePacerDecision?.(record);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
     // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide

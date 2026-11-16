@@ -67,6 +67,7 @@ import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
+import { ModelPacer, modelPacerInput } from './model-pacer';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
   ARRIVING_REALISTIC_QUALITY,
@@ -111,6 +112,7 @@ import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { drawnLine } from './drawn-line';
 import { dampedHeading, turnedPose, type GroundHeading } from './camera';
+import type { PacerPort, PacerStatus } from '../instance/pacer-port';
 import type { RoomConnection, RoomPort } from '../net/room-port';
 import type { RoomRace, RoomReportReason } from '../net/room-session';
 import type { EnteredRoom, RoomsPort } from '../net/rooms-port';
@@ -413,6 +415,16 @@ export interface GamePort {
    * drawn. A rider with no instance loses this and nothing else.
    */
   riderGhostOffered?(): boolean;
+  /**
+   * The AI pacer — #2712, ADR 0072: a model on this device's instance picks
+   * the pacer's plan and intent every few seconds and writes a line of
+   * feedback (`instance/pacer-port.ts`). Absent, or not `offered()`, the
+   * choice is never drawn and nothing is sent: a rider with no instance
+   * loses this and nothing else. ⚠️ An optional member threaded through JSX,
+   * so a `main.tsx` that stopped supplying it is GREEN in `check:wiring`;
+   * `game/model-pacer-wiring.test.tsx` is what goes red.
+   */
+  aiPacer?: PacerPort;
   /**
    * The rider's OWN threshold power, or `undefined` when they have set none —
    * #2077: the zone indicator is drawn from it and from nothing substituted
@@ -1246,6 +1258,30 @@ function GameScreen({
     if (value) setWithGhost(false);
   }, []);
   const [withPacer, setWithPacer] = useState(false);
+  /**
+   * The AI pacer — #2712: whether the rider switched it on (per ride, like
+   * the pacer), and what the instance last said of it for this rider. Read
+   * by {@link begin} through the ref, at the press.
+   */
+  const [withAiPacer, setWithAiPacer] = useState(false);
+  const [aiPacerStatus, setAiPacerStatus] = useState<PacerStatus | 'asking' | undefined>();
+  const aiPacerRef = useRef<{ readonly wanted: boolean; readonly status: typeof aiPacerStatus }>({
+    wanted: false,
+    status: undefined,
+  });
+  aiPacerRef.current = { wanted: withAiPacer, status: aiPacerStatus };
+  /** The AI pacer of the ride on the stage, or `undefined`. @see model-pacer.ts */
+  const modelPacerRef = useRef<
+    | {
+        readonly director: ModelPacer;
+        readonly plan: BotPacerPlan;
+        readonly riderMassKilograms: number;
+      }
+    | undefined
+  >(undefined);
+  /** Its line on the screen now, or `undefined`. */
+  const [pacerSay, setPacerSay] = useState<string | undefined>();
+  const pacerSayRef = useRef<string | undefined>(undefined);
   // #2292: a course chosen on a game's course picker (the Games tab) opens
   // this setup with that game's switch on (`shell/routes.ts`
   // §`hrefForGamePlay`). Read once, on mount, as the route is; the switch is
@@ -1785,6 +1821,35 @@ function GameScreen({
    * cleanup once on mount and mounts again.
    */
   const unmountedRef = useRef(false);
+  const chooseAiPacer = useCallback(
+    (value: boolean) => {
+      setWithAiPacer(value);
+      const offer = props.port?.aiPacer;
+      if (!value || offer === undefined) return;
+      setAiPacerStatus('asking');
+      void offer.pacerStatus().then((status) => {
+        if (!unmountedRef.current) setAiPacerStatus(status);
+      });
+    },
+    [props.port],
+  );
+  const withdrawAiPacer = useCallback(() => {
+    const offer = props.port?.aiPacer;
+    if (offer === undefined) return;
+    setAiPacerStatus('asking');
+    void offer.withdrawPacerConsent().then((after) => {
+      if (!unmountedRef.current) setAiPacerStatus(after);
+    });
+  }, [props.port]);
+  const consentToAiPacer = useCallback(() => {
+    const offer = props.port?.aiPacer;
+    const status = aiPacerRef.current.status;
+    if (offer === undefined || typeof status !== 'object' || status.kind !== 'offered') return;
+    setAiPacerStatus('asking');
+    void offer.consentToPacer(status).then((after) => {
+      if (!unmountedRef.current) setAiPacerStatus(after);
+    });
+  }, [props.port]);
   /**
    * The gradient control loop, while one is running — #362.
    *
@@ -2128,6 +2193,12 @@ function GameScreen({
     // ride just as surely as one who pressed the button — validation 0002 L7.
     gradientRef.current?.stop();
     gradientRef.current = undefined;
+    // #2712: the AI pacer's ride ends with the ride: no more asks, and the
+    // instance's model slot let go, so write-ups held for it start.
+    modelPacerRef.current?.director.end();
+    modelPacerRef.current = undefined;
+    pacerSayRef.current = undefined;
+    setPacerSay(undefined);
     // #1042: a ride that was on the stage has ended, by *End ride* or by
     // leaving, and the recording under it (if any) keeps how its race against
     // the rider's best ended — the LATCHED answer, never the live gap — for the
@@ -2590,6 +2661,32 @@ function GameScreen({
         ),
       });
       simulationRef.current = simulation;
+      // #2712, ADR 0072: the AI pacer, on a solo ride with a pacer whose
+      // rider switched it on and consented — never in a room, a race or a
+      // simulated ride. Every ask is logged with the recording under the ride.
+      modelPacerRef.current?.director.end();
+      modelPacerRef.current = undefined;
+      const aiPacer = aiPacerRef.current;
+      const offer = port?.aiPacer;
+      if (
+        offer !== undefined &&
+        aiPacer.wanted &&
+        typeof aiPacer.status === 'object' &&
+        aiPacer.status.kind === 'offered' &&
+        aiPacer.status.consented &&
+        pacer !== undefined &&
+        raceChoice === undefined &&
+        roomId === undefined &&
+        simulated === undefined
+      ) {
+        modelPacerRef.current = {
+          director: new ModelPacer(offer, (record) => {
+            trainerPortRef.current?.pacerDecided?.(record);
+          }),
+          plan: pacer,
+          riderMassKilograms: riderMassFor(props.riderMass).mass,
+        };
+      }
       // #2078: a new ride, a new ring — its clock starts again from nought —
       // and the graph drawn empty from the first frame, so the route panel is
       // the height it will be and nothing moves when the first second lands.
@@ -3272,6 +3369,33 @@ function GameScreen({
       if (simulation.state.soloDraft !== undefined) {
         trainerPortRef.current?.soloDraftStepped?.(simulation.state.soloDraft);
       }
+      // #2712, ADR 0072: the AI pacer — asks on the ride's own clock, never
+      // waits, and puts each applied answer in force on the simulation from
+      // the seconds ridden it arrived at. It moves the pacer and nothing
+      // else: nothing here reaches the gradient below or any trainer write.
+      const directed = modelPacerRef.current;
+      let pacerArrived: string | undefined;
+      if (directed !== undefined) {
+        const said = directed.director.frame({
+          riddenSeconds: simulation.state.ridden,
+          input: (inForce) =>
+            modelPacerInput({
+              state: simulation.state,
+              plan: directed.plan,
+              profile: chosen.profile,
+              riderMassKilograms: directed.riderMassKilograms,
+              inForce,
+            }),
+          direct: (direction, from) => {
+            simulation.directPacer(direction, from);
+          },
+        });
+        pacerArrived = said.arrived;
+        if (said.showing !== pacerSayRef.current) {
+          pacerSayRef.current = said.showing;
+          setPacerSay(said.showing);
+        }
+      }
       // #2078: the last ten minutes of power and heart rate, one sample a
       // second of the RIDE's clock (`recent-trace.ts`): a frame that crosses
       // no whole second writes nothing, so the graph changes at most once a
@@ -3574,6 +3698,9 @@ function GameScreen({
       if (raceAnnounced !== undefined) {
         events.push(...lapRaceSaid(raceAnnounced, sayAt));
       }
+      // #2712, ADR 0072 D-4: the AI pacer's line, screened twice, said only
+      // with announcements on (`announce.ts` rank 5i).
+      if (pacerArrived !== undefined) events.push({ kind: 'pacer-say', text: pacerArrived });
       // #2546: no power on its cadence while the rider is held on a race's
       // line, in a room's lobby or a countdown, as on `main` where this clock
       // stood still there: a reading would also close the window "Go." needs.
@@ -4318,6 +4445,19 @@ function GameScreen({
           riderGhostProblem={riderGhostProblem}
           withPacer={withPacer}
           onPacer={setWithPacer}
+          // #2712: the AI pacer, offered only where this device's instance can
+          // be sealed to; absent, never drawn and nothing sent.
+          aiPacer={
+            port?.aiPacer?.offered() === true
+              ? {
+                  on: withAiPacer,
+                  onChange: chooseAiPacer,
+                  status: aiPacerStatus,
+                  onConsent: consentToAiPacer,
+                  onWithdraw: withdrawAiPacer,
+                }
+              : undefined
+          }
           intensity={intensity}
           onIntensity={setIntensity}
           choice={pacerChoice(withPacer, intensity)}
@@ -5044,6 +5184,15 @@ function GameScreen({
               {TOWN_LOADING_TEXT}
             </StatusMessage>
           ) : undefined,
+          // #2712, ADR 0072 D-4: the AI pacer's line of feedback, screened on
+          // the instance and again on this device, for MODEL_PACER_SAY_SHOWN_S
+          // of ride and then gone. Not `live`: the HUD's one region says it,
+          // with announcements on (`announce.ts` rank 5i).
+          pacerSay === undefined ? undefined : (
+            <StatusMessage key="pacer-say" tone="info" label={PACER_SAY_LABEL}>
+              {pacerSay}
+            </StatusMessage>
+          ),
         ]}
         // #1312: the lap that has just ended — its time and averages, and how
         // it compares, in words (`hud/lap-text.ts`). For LAP_NOTICE_SECONDS of
@@ -5064,6 +5213,9 @@ function GameScreen({
     </section>
   );
 }
+
+/** The label of the AI pacer's line on the HUD — #2712. */
+const PACER_SAY_LABEL = 'Your pacer';
 
 /** The simulation's start for a simulated ride, or nothing: the start line. */
 function startOf(

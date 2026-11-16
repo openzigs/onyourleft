@@ -12,6 +12,17 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0072 is [ADR 0072](../adr/0072-a-model-directs-the-bot-pacer-during-a-ride.md)**,
+  taken by [#2712](https://github.com/openzigs/onyourleft/issues/2712) on 2026-11-16 for a model
+  directing the bot pacer during a ride, on the owner's ruling of that day (*"We are fine with the
+  patent. Put it in."*). It is **Proposed** until the owner approves it on its pull request. It
+  supersedes, for an AI-pacer ride, #92 criterion 6, ADR 0066 D-1.1's second half, ADR 0071 D-2 and
+  D-1.1's "one place", and ADR 0046 D-7, as an ADR rather than amendments, because ADR 0013 D-3 sends
+  a reversed decision to a new ADR; ADR 0066, ADR 0071 and ADR 0046 each gained one dated
+  `## Amendments` entry pointing here. #2712's lane note claimed it. **0073 is claimed by
+  [#2720](https://github.com/openzigs/onyourleft/issues/2720)** (AI bots' strategy freedom), 0070 by
+  #2684, and **0057 and 0058 stay claimed** by #1748 and #1752. **The next free number is 0074.** A
+  reviewer who remembers this file offering 0072 is reading the old file.
   ⚠️ **0071 is [ADR 0071](../adr/0071-model-chosen-lap-race-bot-tactics-during-a-ride.md)**,
   taken by [#2707](https://github.com/openzigs/onyourleft/issues/2707) on 2026-11-16 for
   model-chosen lap-race bot tactics during a ride, on the owner's ruling of that day on the epic
@@ -23,7 +34,7 @@ It has the same authority as the root file. Where the text below says "this file
   **0070 is claimed by [#2684](https://github.com/openzigs/onyourleft/issues/2684)**, whose open
   pull request [#2694](https://github.com/openzigs/onyourleft/pull/2694) writes ADR 0070 (houses on
   inferred built-up land in a suburb mapped only by its streets). **0057 and 0058 stay claimed** by
-  #1748 and #1752. **The next free number is 0072.** A reviewer who remembers this file offering
+  #1748 and #1752. The next free number was then 0072. A reviewer who remembers this file offering
   0070 or 0071 is reading the old file.
   ⚠️ **0069 is [ADR 0069](../adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md)**,
   taken by [#2640](https://github.com/openzigs/onyourleft/issues/2640) on 2026-11-15 for the

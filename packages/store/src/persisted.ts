@@ -38,6 +38,7 @@ import {
   geographicPosition,
   altitudeMetres,
   UnitError,
+  readPacerDecisionRecord,
   readReplanRecord,
   readWorkoutGoals,
   validateWorkout,
@@ -47,6 +48,7 @@ import {
 import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analysis';
 import type {
   GeographicPosition,
+  PacerDecisionRecord,
   ReplanRecord,
   RouteProfile,
   Workout,
@@ -69,6 +71,7 @@ import type {
   ActivityCaloriesBasis,
   ActivityRecord,
   DraftSpan,
+  PacerModelFact,
   RideFacts,
   RoomRaceFact,
   AthleteRecord,
@@ -184,6 +187,8 @@ export interface PersistedRideFacts {
   drafted?: boolean;
   /** @see RideFacts.draftSpans — #2451. Re-read whole on the way in and out: @see draftSpansOf */
   draftSpans?: unknown[];
+  /** @see RideFacts.pacerModel — #2712. Re-read whole on the way in and out: @see pacerModelOf */
+  pacerModel?: { version: unknown; decisions: unknown[] };
 }
 
 /**
@@ -666,7 +671,40 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   if (facts.drafted !== undefined) row.drafted = facts.drafted;
   const spans = draftSpansOf(facts.draftSpans);
   if (spans !== undefined) row.draftSpans = spans.map(({ from, to }) => ({ from, to }));
+  // #2712: the AI pacer's log, through its reader on the way in too.
+  const pacer = pacerModelOf(facts.pacerModel);
+  if (pacer !== undefined) {
+    row.pacerModel = {
+      version: pacer.version,
+      decisions: pacer.decisions.map((each) => ({ ...each })),
+    };
+  }
   return row;
+}
+
+/**
+ * A ride's AI-pacer log (#2712), or `undefined` when there is none or it
+ * does not read — dropped WHOLE, never the ride: a version that is not a
+ * whole number of at least 1, or any decision that is not exactly one of
+ * `@onyourleft/domain` §`PacerDecisionRecord`'s shapes, or decisions out of
+ * the order they were asked in. A decision missing from the middle would
+ * replay a different pacer.
+ */
+export function pacerModelOf(value: unknown): PacerModelFact | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { version, decisions } = value as { version?: unknown; decisions?: unknown };
+  if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1)
+    return undefined;
+  if (!Array.isArray(decisions) || decisions.length === 0) return undefined;
+  const read: PacerDecisionRecord[] = [];
+  for (const each of decisions as unknown[]) {
+    const record = readPacerDecisionRecord(each);
+    if (record === undefined) return undefined;
+    const before = read.at(-1);
+    if (before !== undefined && record.askedAtS < before.askedAtS) return undefined;
+    read.push(record);
+  }
+  return { version, decisions: read };
 }
 
 /**
@@ -850,6 +888,8 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   const workoutBlocks = workoutBlockFactsOf(facts.workoutBlocks);
   // #2451: never a throw either. @see draftSpansOf
   const draftSpans = draftSpansOf(facts.draftSpans);
+  // #2712: never a throw either. @see pacerModelOf
+  const pacerModel = pacerModelOf(facts.pacerModel);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -900,6 +940,7 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
       ? {}
       : { drafted: decodedBoolean('activity.rideFacts.drafted', facts.drafted) }),
     ...(draftSpans === undefined ? {} : { draftSpans }),
+    ...(pacerModel === undefined ? {} : { pacerModel }),
   };
 }
 

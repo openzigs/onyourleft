@@ -411,3 +411,18 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
 - **The fallback is the race**: if, on the owner's PC under ordinary load, most windows fall back,
   the rider is racing seeded bots under another name, and the option should say so or not be
   offered.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-16** — **Once [ADR 0072](0072-a-model-directs-the-bot-pacer-during-a-ride.md) is
+  Accepted, D-2's *"Never for the pacer"* is superseded by it**, as D-2 itself says only ADR 0072
+  can do: a model on the instance may direct the bot pacer during a solo ride the rider chose to
+  ride with an AI pacer, under this ADR's D-5 and D-6 as ADR 0072 D-8 applies them (the same local
+  model, gates, slot and hold). **D-1.1's *"There is one place consent is asked"*** is superseded in
+  part: the same consent, naming the same place, is asked at the AI pacer's choice too, and either
+  choice records it (ADR 0072 D-1.3). D-2 stands for the rider's own ghost, a cross-rider ghost, a
+  room and every announcement and HUD text but the AI pacer's own screened line. Everything else in
+  this ADR is unchanged. This entry only points there. (#2712)
+

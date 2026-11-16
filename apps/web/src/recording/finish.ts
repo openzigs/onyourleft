@@ -73,6 +73,7 @@ import type {
   LapId,
   NewActivity,
   NewFinishedRide,
+  PacerModelFact,
   RecordedCourseLap,
   RecordedWorkoutBlock,
   RecordingSessionId,
@@ -167,6 +168,12 @@ export interface RideToSaveInput {
    * with no draft, and for one recovered after a crash.
    */
   readonly draft?: Pick<RideFacts, 'drafted' | 'draftSpans'> | undefined;
+  /**
+   * The AI pacer's decision log of this ride — #2712, ADR 0072 D-5: known
+   * only while riding, like {@link draft}. Absent for a ride with no AI
+   * pacer, and for one recovered after a crash.
+   */
+  readonly pacerModel?: PacerModelFact | undefined;
 }
 
 /**
@@ -255,6 +262,8 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
       ...(input.draft?.draftSpans === undefined || input.draft.draftSpans.length === 0
         ? {}
         : { draftSpans: input.draft.draftSpans }),
+      // #2712: known only to the ride that rode it, like the draft above.
+      ...(input.pacerModel === undefined ? {} : { pacerModel: input.pacerModel }),
     },
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

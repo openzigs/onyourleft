@@ -34,6 +34,7 @@ import type {
   Kilocalories,
   Kilograms,
   Metres,
+  PacerDecisionRecord,
   ReplanRecord,
   RevolutionsPerMinute,
   Seconds,
@@ -590,6 +591,30 @@ export interface RideFacts {
    * {@link workoutBlocks} is. @see DraftSpan
    */
   readonly draftSpans?: readonly DraftSpan[];
+  /**
+   * The AI pacer's decision log for this ride — #2712, ADR 0072 D-5: every
+   * ask, oldest first, with the seconds ridden it was asked and answered at
+   * and what became of it, and the pacer-code version it was ridden under
+   * (`@onyourleft/domain` §`MODEL_PACER_CODE_VERSION`). With the route and
+   * the pacer's W/kg it is the whole of what the pacer did: the pacer
+   * replays from it (§`pacerDirectionAt`). Known only while riding, like
+   * {@link workoutFinished}; absent for a ride with no AI pacer.
+   *
+   * It holds a plan and an intent from two closed lists and no text: **the
+   * lines of feedback the rider was shown are not kept.** The instance keeps
+   * no copy (ADR 0036 D-3 (c)).
+   *
+   * ⚠️ **A log that does not read is dropped whole, never the ride**, as
+   * {@link draftSpans} is: a decision missing from the middle would replay a
+   * different pacer.
+   */
+  readonly pacerModel?: PacerModelFact;
+}
+
+/** @see RideFacts.pacerModel */
+export interface PacerModelFact {
+  readonly version: number;
+  readonly decisions: readonly PacerDecisionRecord[];
 }
 
 /**

@@ -29,6 +29,7 @@ import {
   kilograms,
   metres,
   metresPerSecond,
+  MODEL_PACER_CODE_VERSION,
   powerZones,
   routeProfile,
   revolutionsPerMinute,
@@ -10639,6 +10640,59 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
     expect(after?.rideFacts?.drafted).toBeUndefined();
     expect(after?.rideFacts?.draftSpans).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('saves the AI pacer’s decision log with the ride, read back from the store — #2712, ADR 0072 D-5', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // A decision logged before the recording began is not kept.
+    rig.controller.notePacerDecision({ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' });
+    await rig.controller.start();
+    await ride(rig, 2);
+    const applied = {
+      askedAtS: 5,
+      arrivedAtS: 6.5,
+      outcome: 'applied',
+      plan: 'climber',
+      intent: 'lift',
+    } as const;
+    rig.controller.notePacerDecision(applied);
+    rig.controller.notePacerDecision({ askedAtS: 10, arrivedAtS: 16, outcome: 'late' });
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    expect(read?.rideFacts?.pacerModel).toStrictEqual({
+      version: MODEL_PACER_CODE_VERSION,
+      decisions: [applied, { askedAtS: 10, arrivedAtS: 16, outcome: 'late' }],
+    });
+
+    // A second game ride in one recording: its log replaces the first's.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 1);
+    rig.controller.notePacerDecision({ askedAtS: 20, arrivedAtS: 21, outcome: 'invalid' });
+    rig.controller.notePacerDecision({ askedAtS: 0, arrivedAtS: 1, outcome: 'refused' });
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const next = rig.controller.getSnapshot().savedRide?.activityId;
+    const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
+    expect(after?.rideFacts?.pacerModel?.decisions).toStrictEqual([
+      { askedAtS: 0, arrivedAtS: 1, outcome: 'refused' },
+    ]);
+
+    // And a ride with no AI pacer carries none.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const plain = rig.controller.getSnapshot().savedRide?.activityId;
+    const none = await harness.read(async (store) => store.getActivity(ATHLETE_A, plain!));
+    expect(none?.rideFacts?.pacerModel).toBeUndefined();
     rig.controller.dispose();
   });
 
