@@ -673,7 +673,10 @@ describe('every /admin response carries the admin headers exactly (#2641, ADR 00
     const world = await adminWorld();
     const page = await (await world.instance.handler(adminRequest('GET', '/admin/sign-in'))).text();
     expect(page).toContain('<link rel="stylesheet" href="/admin/admin.css">');
-    expect(page).not.toMatch(/<style|<script|\sstyle=|\son[a-z]+=/i);
+    // The one script is the instance's own file (#2642), linked; nothing inline.
+    const script = '<script src="/admin/passkey.js" defer></script>';
+    expect(page.split(script)).toHaveLength(2);
+    expect(page.replace(script, '')).not.toMatch(/<style|<script|\sstyle=|\son[a-z]+=/i);
     // A labelled field, a heading and a language: a form usable by keyboard and screen reader.
     expect(page).toContain('<html lang="en">');
     expect(page).toContain('<label for="code">One-time code</label>');

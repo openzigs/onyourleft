@@ -138,14 +138,18 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 5)).toEqual([
+    expect(headings.slice(0, 7)).toEqual([
       'Status',
       'Accounts',
       'Backups',
       'AI backend',
+      'Rooms',
+      'Instance keys',
       'Operator log',
     ]);
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
+    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Rooms');
+    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Instance keys');
     expect(OPERATE_SECTIONS_TO_COME).not.toContain('Backups');
   });
 
@@ -325,6 +329,14 @@ describe('the Operate area over a scripted instance — #2603', () => {
     ['analysis_settings_cleared', 'AI settings returned to .env'],
     ['analysis_model_checked', 'Model checked for tool calling'],
   ])('names the AI backend’s action %s in words (#2611)', (action, label) => {
+    expect(operatorActionLabel(action)).toBe(label);
+  });
+
+  it.each([
+    ['admin_passkey_enrolled', 'Admin passkey added'],
+    ['admin_passkey_revoked', 'Admin passkey revoked'],
+    ['admin_passkey_confirmed', 'Admin passkey confirmed on the host'],
+  ])('names the admin passkeys’ action %s in words (#2642)', (action, label) => {
     expect(operatorActionLabel(action)).toBe(label);
   });
 

@@ -167,6 +167,19 @@ export interface RoomFlagRaised {
   readonly tick: number;
 }
 
+/**
+ * One room this host holds, as the owner's Operate area is told of it
+ * (#2612): its id, where it is, and the athletes in it — those connected, or
+ * dropped inside their rejoin window, or across a race's line. **Never** a
+ * rider's distance, speed, power, flags or result: the summary is built from
+ * those three fields alone, so nothing else of a seat can cross the IPC.
+ */
+export interface HostedRoomSummary {
+  readonly roomId: string;
+  readonly phase: RoomPhase;
+  readonly athleteIds: readonly string[];
+}
+
 /** Which seat a room's rider is, and the room's tick now (#789): what a report from the room names. */
 export interface RoomSeat {
   readonly athleteId: string;
@@ -250,6 +263,8 @@ interface HostedRoom {
   raceFinished: boolean;
   /** How many sockets this room has closed, by close reason (#1400). */
   readonly closes: Map<string, number>;
+  /** The owner ended it (#2612): it never ticks again, and is let go already. */
+  ended: boolean;
 }
 
 export interface HostMetrics {
@@ -436,6 +451,57 @@ export class RoomHost {
       : { athleteId: seat.athleteId, tick: view.tick };
   }
 
+  /**
+   * Every room this host holds, for the owner's Operate area (#2612): its id,
+   * its phase, and who is in it ({@link HostedRoomSummary}). Reads nothing a
+   * rider sent but the seat they hold.
+   */
+  summaries(): HostedRoomSummary[] {
+    return [...this.#rooms.values()].map((hosted) => {
+      const view = hosted.room.view();
+      return {
+        roomId: hosted.roomId,
+        phase: view.phase,
+        athleteIds: view.seats.filter((seat) => seat.state !== 'dnf').map((seat) => seat.athleteId),
+      };
+    });
+  }
+
+  /**
+   * The owner ended `roomId` (#2612): every socket in it is sent `refuse
+   * room-closed` and closed `4005 room-closed` (`close-codes.ts`), the room
+   * stops ticking, and it is let go at once — {@link HostOptions.onRoomClosed}
+   * with the phase it was in. Every result already final was handed on when it
+   * became final, as {@link stop} keeps them; a race rider still on the road
+   * has none, as after a shutdown. A later socket for it is the router's to
+   * refuse: the instance's record says the room is over. `false` when this
+   * host does not hold it.
+   *
+   * ⚠️ It sends nothing to any rider's trainer, and cannot: a room has no way
+   * to (`core/room.ts`). A rider in a workout rides on, on their own.
+   */
+  end(roomId: string): boolean {
+    const hosted = this.#rooms.get(roomId);
+    if (hosted === undefined) return false;
+    hosted.ended = true;
+    this.#stopTimer(hosted);
+    const frame = REFUSAL_CLOSE['room-closed'];
+    for (const connection of hosted.connections.values()) {
+      if (connection.gone) continue;
+      connection.closedByRoom = true;
+      connection.gone = true;
+      connection.sent += 2;
+      connection.socket.send(encodeMessage({ type: 'refuse', reason: 'room-closed' }));
+      connection.socket.close(frame.code, frame.reason);
+      this.#count(frame.reason);
+      this.#protocolClose(hosted, frame.reason);
+    }
+    const phase = hosted.room.view().phase;
+    this.#rooms.delete(roomId);
+    this.#options.onRoomClosed?.(roomId, phase);
+    return true;
+  }
+
   /** One tick of `roomId` now — what the timer does, and what a driven test does itself. */
   tick(roomId: string): void {
     const hosted = this.#rooms.get(roomId);
@@ -532,6 +598,7 @@ export class RoomHost {
       raceStarted: false,
       raceFinished: false,
       closes: new Map(),
+      ended: false,
     };
     this.#rooms.set(roomId, hosted);
     return hosted;
@@ -668,7 +735,14 @@ export class RoomHost {
   }
 
   #scheduleTick(hosted: HostedRoom): void {
-    if (this.#options.driven === true || hosted.timer !== undefined || this.#stopping) return;
+    if (
+      this.#options.driven === true ||
+      hosted.timer !== undefined ||
+      this.#stopping ||
+      hosted.ended
+    ) {
+      return;
+    }
     const now = this.#options.now();
     const { frameIntervalMs } = hosted.settings;
     let at = (hosted.nextTickAtMs ?? now) + frameIntervalMs;
@@ -708,7 +782,8 @@ export class RoomHost {
   }
 
   #closeIfDone(hosted: HostedRoom): void {
-    if (hosted.connections.size > 0) return;
+    // An ended room was let go when it ended (#2612): it is not let go twice.
+    if (hosted.ended || hosted.connections.size > 0) return;
     const phase = hosted.room.view().phase;
     // A room nobody is in and nothing is ticking for is let go: a closed ride,
     // a finished race, or a lobby everybody left. A race still running keeps

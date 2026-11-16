@@ -23,14 +23,22 @@ export type AdminRouteKind =
   | 'page'
   /** The sign-in page and its form: the one page with no session. */
   | 'sign-in'
+  /**
+   * A passkey sign-in ceremony's `POST` (#2642): no session, so no token to
+   * carry; held to the `Origin` as the sign-in form is.
+   */
+  | 'sign-in-action'
   /** A `GET` answered only with a redirect. */
   | 'redirect'
   /** The stylesheet. */
   | 'stylesheet'
-  /** A form's target, `POST` only. */
+  /** The one script, `/admin/passkey.js` (#2642), linked on the pages with a passkey ceremony. */
+  | 'script'
+  /** A signed-in form's or ceremony's target, `POST` only, carrying the session's token. */
   | 'action';
 
 export interface AdminRoute {
+  /** The path; `{id}` stands for a passkey's id, as `admin.ts` matches it. */
   readonly path: string;
   readonly methods: readonly ('GET' | 'POST')[];
   readonly kind: AdminRouteKind;
@@ -59,10 +67,18 @@ export type AdminSection = (typeof ADMIN_SECTIONS)[number];
 export const ADMIN_ROUTES: readonly AdminRoute[] = [
   { path: '/admin', methods: ['GET'], kind: 'redirect' },
   { path: '/admin/sign-in', methods: ['GET', 'POST'], kind: 'sign-in' },
+  { path: '/admin/sign-in/passkey-options', methods: ['POST'], kind: 'sign-in-action' },
+  { path: '/admin/sign-in/passkey', methods: ['POST'], kind: 'sign-in-action' },
   { path: '/admin/sign-out', methods: ['POST'], kind: 'action' },
   { path: '/admin/admin.css', methods: ['GET'], kind: 'stylesheet' },
+  { path: '/admin/passkey.js', methods: ['GET'], kind: 'script' },
   { path: '/admin/status', methods: ['GET'], kind: 'page', section: 'Status' },
   { path: '/admin/log', methods: ['GET'], kind: 'page', section: 'Log' },
+  { path: '/admin/passkeys', methods: ['GET'], kind: 'page', section: 'Passkeys' },
+  { path: '/admin/passkeys/options', methods: ['POST'], kind: 'action' },
+  { path: '/admin/passkeys/add', methods: ['POST'], kind: 'action' },
+  { path: '/admin/passkeys/{id}/revoke', methods: ['POST'], kind: 'action' },
+  { path: '/admin/step-up', methods: ['POST'], kind: 'action' },
 ];
 
 /** The page a sign-in lands on, and `/admin` sends a signed-in browser to. */

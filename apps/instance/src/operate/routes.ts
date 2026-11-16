@@ -14,7 +14,7 @@ import { TOOL_CHECK_OUTCOMES } from '../analysis/tool-check.ts';
 import { REGISTRATION_MODES, REPOSITORY, type Config } from '../config.ts';
 import { errorResponse } from '../errors.ts';
 import type { Readiness } from '../readiness.ts';
-import { OPERATOR_ACTIONS } from '../store/sql-store.ts';
+import { OPERATOR_ACTIONS, ROOM_END_REASONS } from '../store/sql-store.ts';
 import { json, type Route, type RouteContext, type Schema } from '../route-kit.ts';
 import type { Operate } from './operate.ts';
 
@@ -385,7 +385,242 @@ const jobsSchema: Schema = {
 
 const isoOfMs = (milliseconds: number): string => new Date(milliseconds).toISOString();
 
+/** One open room as the owner is shown it (#2612): never a rider's place, power or id. */
+const roomSchema: Schema = {
+  type: 'object',
+  properties: {
+    roomId: { type: 'string' },
+    /** The first six characters of its id: what the owner types to end it. */
+    shortCode: { type: 'string' },
+    kind: { type: 'string', enum: ['group', 'race', 'lap-race'] },
+    visibility: { type: 'string', enum: ['private', 'public'] },
+    phase: { type: 'string', enum: ['lobby', 'countdown', 'riding', 'finished'] },
+    /** When it was made, ISO 8601, UTC. */
+    openedAt: { type: 'string' },
+    /** The display name of the rider who made it, as the owner may see it; `null` for “a rider”. */
+    host: { type: ['string', 'null'] },
+    /** The display name of each rider in it, `null` for “a rider”. */
+    riders: { type: 'array', items: { type: ['string', 'null'] } },
+    riderCount: count,
+  },
+  required: [
+    'roomId',
+    'shortCode',
+    'kind',
+    'visibility',
+    'phase',
+    'openedAt',
+    'host',
+    'riders',
+    'riderCount',
+  ],
+  additionalProperties: false,
+};
+
+const KEYS_STATES = ['ready', 'no-secret', 'no-origin', 'no-keys', 'unreadable', 'busy'] as const;
+
 export const OPERATE_ROUTES: readonly Route[] = [
+  {
+    method: 'GET',
+    path: '/v1/operate/rooms',
+    sealed: 'only',
+    operationId: 'getOperateRooms',
+    reaches: 'owner',
+    // ADR 0069 D-2: a read; #2649's admin Rooms page renders it.
+    admin: 'read',
+    summary: `Every open rider’s room (#2612), newest first: its id and short code, whether it is a group ride, a race or a lap race, private or public, its phase (\`lobby\`, \`countdown\`, \`riding\`, \`finished\`), when it was made, its host’s display name, and the display name of each rider in it — read from the room worker holding it — with a count. A name the owner may not see is \`null\`, “a rider”. **Never** a rider’s place, distance, speed, power, heart rate or Discord id. Changes nothing, so it logs nothing. \`unavailable\` where the instance has no room router. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: { rooms: { type: 'array', items: roomSchema } },
+        required: ['rooms'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const read = await operateOf(context).rooms(ownerOf(context));
+      if (!read.ok) return errorResponse(read.code);
+      return json({
+        rooms: read.value.map((room) => ({
+          roomId: room.roomId,
+          shortCode: room.shortCode,
+          kind: room.kind,
+          visibility: room.visibility,
+          phase: room.phase,
+          openedAt: isoOf(room.openedAt),
+          host: room.host,
+          riders: room.riders,
+          riderCount: room.riders.length,
+        })),
+      });
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/operate/rooms/{roomId}/end',
+    sealed: 'only',
+    operationId: 'endOperateRoom',
+    reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
+    summary: `End a rider’s room (#2612): \`confirm\` must be the room’s short code and \`reason\` one of ${ROOM_END_REASONS.map((reason) => `\`${reason}\``).join(', ')}, or it is \`validation_failed\` and nothing changes. The room is over, as a finished one is: its route deleted, every socket in it sent \`refuse room-closed\` and closed \`4005\`, a rejoin refused, its voice channel deleted, and every result already final kept. A rider in it rides on alone; nothing is sent to anybody’s trainer. Logged \`room_ended\` with the reason, its kind and how many riders were in it, in the same transaction as the close. \`not_found\` for a room that is not an open rider’s room. \`unavailable\` where the instance has no room router. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    request: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', enum: ROOM_END_REASONS },
+        confirm: { type: 'string' },
+      },
+      required: ['reason', 'confirm'],
+      additionalProperties: false,
+    },
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          /** When it ended, ISO 8601, UTC. */
+          endedAt: { type: 'string' },
+        },
+        required: ['endedAt'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const ended = await operateOf(context).endRoom(
+        ownerOf(context),
+        context.params.roomId ?? '',
+        context.json,
+      );
+      if (!ended.ok) {
+        return errorResponse(
+          ended.code,
+          ended.fields === undefined ? {} : { fields: ended.fields },
+        );
+      }
+      return json({ endedAt: isoOf(ended.value.endedAt) });
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/operate/keys',
+    sealed: 'only',
+    operationId: 'getOperateKeys',
+    reaches: 'owner',
+    // ADR 0069 D-2: the card and the fingerprint are worth something only
+    // because the edge cannot write them (ADR 0047 D-6): never through the
+    // tunnel's admin pages. #2650's loopback page formats its own.
+    admin: 'never',
+    summary: `The instance’s keys (#2613), public material only — what \`instance-key show\` prints: their state (\`ready\`, or \`no-secret\`, \`no-origin\`, \`no-keys\`, \`unreadable\`, \`busy\`), the identity key’s full SHA-256 fingerprint (52 base32 characters, as a rider’s device shows it), the instance card (\`oyl-instance:<origin>#<52 characters>\`, whole), the current encryption key’s serial, when it was made and when the instance rotates it by itself (30 days on), and how many superseded encryption keys are still held (each for 7 days after its successor). **Never** a private half, nor anything derived from \`OYL_INSTANCE_SECRET_KEY\`. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          state: { type: 'string', enum: KEYS_STATES },
+          /** 64 lower-case hex; `null` unless \`ready\`. */
+          fingerprint: { type: ['string', 'null'] },
+          /** The whole card; `null` unless \`ready\`. */
+          card: { type: ['string', 'null'] },
+          current: {
+            type: ['object', 'null'],
+            properties: {
+              serial: count,
+              /** ISO 8601, UTC. */
+              createdAt: { type: 'string' },
+              /** When the instance rotates it by itself, ISO 8601, UTC. */
+              rotatesAt: { type: 'string' },
+            },
+            required: ['serial', 'createdAt', 'rotatesAt'],
+            additionalProperties: false,
+          },
+          olderHeld: count,
+        },
+        required: ['state', 'fingerprint', 'card', 'current', 'olderHeld'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const read = await operateOf(context).keys();
+      if (!read.ok) return errorResponse(read.code);
+      const view = read.value;
+      return json({
+        state: view.state,
+        fingerprint: view.fingerprint,
+        card: view.card,
+        current:
+          view.current === null
+            ? null
+            : {
+                serial: view.current.serial,
+                createdAt: isoOf(view.current.createdAt),
+                rotatesAt: isoOf(view.current.rotatesAt),
+              },
+        olderHeld: view.olderHeld,
+      });
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/operate/keys/rotate',
+    sealed: 'only',
+    operationId: 'rotateOperateKey',
+    reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
+    summary: `Rotate the encryption key (#2613), with \`{ confirm: 'rotate' }\` — else \`validation_failed\` and nothing is written: what \`instance-key rotate\` does, with no \`--drop-old\` and no \`--serial-above\`. The old key keeps opening requests for 7 days, devices pick the new one up from \`GET /v1/instance/keys\` by themselves, and nobody pins again. It takes the key lease: while the instance’s own maintenance pass holds it the answer is \`busy\` and nothing is written. Logged \`instance_key_rotate\` (\`refused\` with \`busy\`) in the same transaction as the rotation. \`rotate --drop-old\`, \`rotate-identity\` and \`reset\` stay on the CLI. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    request: {
+      type: 'object',
+      properties: { confirm: { type: 'string', enum: ['rotate'] } },
+      required: ['confirm'],
+      additionalProperties: false,
+    },
+    errors: ['unauthenticated', 'validation_failed', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          outcome: { type: 'string', enum: ['rotated', 'busy'] },
+          /** The new key's serial; `null` when \`busy\`. */
+          serial: { type: ['integer', 'null'] },
+        },
+        required: ['outcome', 'serial'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const rotated = await operateOf(context).rotateKey(ownerOf(context), context.json);
+      if (!rotated.ok) {
+        return errorResponse(
+          rotated.code,
+          rotated.fields === undefined ? {} : { fields: rotated.fields },
+        );
+      }
+      return json(
+        rotated.value.outcome === 'rotated'
+          ? { outcome: 'rotated', serial: rotated.value.serial }
+          : { outcome: 'busy', serial: null },
+      );
+    },
+  },
   {
     method: 'GET',
     path: '/v1/operate/analysis',

@@ -4,7 +4,7 @@ import { lookup } from 'node:dns/promises';
 import { mkdir, stat, statfs } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { createAdmin, type Admin } from './admin/admin.ts';
+import { createAdmin, isAdminPath, type Admin } from './admin/admin.ts';
 import { createIdentity, type Identity } from './auth/identity.ts';
 import { sweepPeriodMs } from './auth/rate-limit.ts';
 import { createDiskBlobStore } from './blob/disk-blob-store.ts';
@@ -44,6 +44,7 @@ import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
 import { logEvent, logUnhandled, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
+import { errorResponse } from './errors.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
 import { assessReadiness, type MigrationState } from './readiness.ts';
 import type { InstanceProbes, SidePose } from './route-kit.ts';
@@ -56,7 +57,11 @@ import { createSealed } from './sealed/sealed.ts';
 import type { ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
-import { createOperate, type OperateAnalysisSources } from './operate/operate.ts';
+import {
+  createOperate,
+  type OperateAnalysisSources,
+  type OperateRoomSources,
+} from './operate/operate.ts';
 import { statusSources, type DiskProbe } from './operate/status.ts';
 import { createSegments, type Segments } from './segments/segments.ts';
 import { createSync, type Sync } from './sync/sync.ts';
@@ -166,6 +171,8 @@ export interface InstanceOptions {
 export interface StartedInstance {
   readonly url: string;
   readonly listening: Listening;
+  /** The admin pages' loopback listener (#2643), when `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` is set. */
+  readonly adminLoopback: Listening | undefined;
   readonly router: RoomRouter;
   /** Resolves once the store is open and rooms may be admitted. */
   readonly opened: Promise<void>;
@@ -297,6 +304,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       ? Promise.resolve(undefined)
       : importSecretKey(server.secretKey).catch(() => undefined);
   let rooms: Rooms | undefined;
+  /** What the owner's Rooms reads and ends with (#2612), once there are rooms. */
+  let operateRooms: OperateRoomSources | undefined;
   let voice: RoomVoice | undefined;
   let voiceModeration: VoiceModeration | undefined;
   let voiceReady: Promise<void> = Promise.resolve();
@@ -479,6 +488,27 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     clientAddressHeader: options.config.clientAddressHeader,
     trustedProxies: options.config.trustedProxies,
   });
+  // #2643 (ADR 0069 D-5): the admin pages' loopback listener, when the
+  // operator set its port. It answers `/admin` and nothing else, marks every
+  // request it reads `loopback` itself, believes no client-address header,
+  // and closes a connection from a trusted proxy — cloudflared — unread.
+  const adminLoopback =
+    server.adminPages && server.adminLoopbackPort !== undefined
+      ? await listen(
+          (request, client) =>
+            isAdminPath(new URL(request.url).pathname)
+              ? handler(request, client)
+              : Promise.resolve(errorResponse('not_found')),
+          {
+            host: options.config.host,
+            port: server.adminLoopbackPort,
+            clientAddressHeader: null,
+            trustedProxies: [],
+            listener: 'loopback',
+            refusePeers: options.config.trustedProxies,
+          },
+        )
+      : undefined;
   listening.server.on('upgrade', (request, socket, head) => {
     if (!router.upgrade(request, socket, head)) socket.destroy();
   });
@@ -691,6 +721,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         },
         ...(roomsVoice === undefined ? {} : { voice: roomsVoice }),
       });
+      // #2612: the owner's Rooms, from the workers, ended through the router.
+      operateRooms = {
+        live: () => router.roomSummaries(),
+        end: (roomId, commit) => router.endRoom(roomId, commit),
+        rooms,
+        nameFor,
+      };
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
       // the boundary it ends on, whether or not anybody asks again (#892).
@@ -920,6 +957,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           accounts === undefined ? undefined : (athleteId) => accounts.moderation.roleOf(athleteId),
         now,
         name: options.config.name,
+        ...(server.adminLoopbackPort === undefined
+          ? {}
+          : { loopbackPort: server.adminLoopbackPort }),
+        addresses: server.adminAddresses,
       });
       admin = pages;
       // Each minute: the coalesced refusals written, and the sign-in limits'
@@ -968,6 +1009,20 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
                 disk: NODE_DISK_PROBE,
               }),
               analysis: operateAnalysis,
+              ...(operateRooms === undefined ? {} : { rooms: operateRooms }),
+              // #2613: the keys shown, and the routine rotation made over the
+              // operator log's transaction with the same secret and origin.
+              keys: {
+                keys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: server.secretKey,
+                    origin: server.origin,
+                    now: () => Math.floor(now() / 1000),
+                    log,
+                  }),
+              },
             }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
@@ -1033,6 +1088,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   return {
     url: listening.url,
     listening,
+    adminLoopback,
     router,
     opened,
     heldRateLimitKeys: () =>
@@ -1060,6 +1116,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       await analysisJobs?.stop();
       await router.stop();
       await listening.close();
+      await adminLoopback?.close();
       await history?.idle();
       // #2641: the refusals counted since the last minute, before the store goes.
       await admin?.flushRefusals();

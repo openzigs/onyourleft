@@ -36,6 +36,8 @@ import { replanBody } from './analysis/replan-testing.ts';
 import type { AnalysisEngine } from './analysis/jobs.ts';
 import type { ScreenedWriteUp } from '@onyourleft/analysis';
 import { openApiDocument, openApiText } from './openapi.ts';
+import { roomShortCode } from './operate/operate.ts';
+import { fakeRoomRouter } from './operate/rooms-testing.ts';
 import { assessReadiness } from './readiness.ts';
 import { ROUTES, type Schema } from './routes.ts';
 
@@ -162,6 +164,9 @@ function send(
 
 /** The owner's device, named to the world as a moderator (#83). */
 let moderator: TestDevice;
+
+/** #2612: the room workers the owner's Rooms reads, as a list. */
+const liveRooms = fakeRoomRouter();
 
 async function moderatorToken(world: IdentityInstance): Promise<string> {
   return (await world.signIn(moderator)).body.sessionToken as string;
@@ -556,6 +561,38 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   requestOperateBackup: async (world) =>
     send(world, 'POST', '/v1/operate/backups', await moderatorToken(world)),
+  // #2612: a room a worker holds with a rider in it, so a row has every field.
+  getOperateRooms: async (world) => {
+    const rider = await signedIn(world);
+    const athleteId = (
+      (await world.call('GET', '/v1/auth/session', { token: rider.token })).body as {
+        athleteId: string;
+      }
+    ).athleteId;
+    const room = await madeRoom(world, rider.token);
+    liveRooms.held.push({ roomId: room.roomId, phase: 'running', athleteIds: [athleteId] });
+    return send(world, 'GET', '/v1/operate/rooms', await moderatorToken(world));
+  },
+  endOperateRoom: async (world) => {
+    const room = await madeRoom(world, (await signedIn(world)).token);
+    return send(
+      world,
+      'POST',
+      `/v1/operate/rooms/${room.roomId}/end`,
+      await moderatorToken(world),
+      { reason: 'other', confirm: roomShortCode(room.roomId) },
+    );
+  },
+  // #2613: the keys, read after a rotation so an older key is held too.
+  getOperateKeys: async (world) => {
+    const token = await moderatorToken(world);
+    await send(world, 'POST', '/v1/operate/keys/rotate', token, { confirm: 'rotate' });
+    return send(world, 'GET', '/v1/operate/keys', token);
+  },
+  rotateOperateKey: async (world) =>
+    send(world, 'POST', '/v1/operate/keys/rotate', await moderatorToken(world), {
+      confirm: 'rotate',
+    }),
   // #2609: the operator's analysis settings, read, saved and cleared.
   getOperateAnalysis: async (world) =>
     send(world, 'GET', '/v1/operate/analysis', await moderatorToken(world)),
@@ -944,6 +981,7 @@ describe('every route answers with the shape its entry declares', () => {
     world = await startIdentityInstance({
       emailRecovery: true,
       probes,
+      operateRooms: liveRooms,
       moderators: { owner: moderator.publicKey },
       // #788: public rooms on, so their routes answer their success.
       ...PUBLIC_ROOMS_ON,

@@ -77,6 +77,13 @@ export interface SidePose {
 export interface ClientInfo {
   /** The peer's address, for rate limits only — never logged. `null` when unknown. */
   readonly address: string | null;
+  /**
+   * `loopback` when the request came in on the admin pages' loopback
+   * listener (#2643, ADR 0069 D-5), set by the ADAPTER that owns that
+   * listener and by nothing else — never by a header or a peer address.
+   * Absent: the main listener.
+   */
+  readonly listener?: 'loopback';
 }
 
 /**

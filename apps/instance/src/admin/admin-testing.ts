@@ -24,7 +24,8 @@ import type { ClientInfo } from '../route-kit.ts';
 import { createSealed } from '../sealed/sealed.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
-import { ADMIN_COOKIE, createAdmin, type Admin } from './admin.ts';
+import { ADMIN_COOKIE, createAdmin, LOOPBACK_COOKIE, type Admin } from './admin.ts';
+import type { Bend, SoftwareAuthenticator } from './webauthn-testing.ts';
 
 /** The tunnel's hostname, as a browser names it in `Host`. */
 export const TEST_HOST = new URL(TEST_ORIGIN).host;
@@ -42,6 +43,11 @@ export interface AdminRequestOptions {
   readonly host?: string;
   /** Any other header. */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * The loopback listener's port (#2643): the request is a browser's on
+   * `http://localhost:<port>` — its `Host`, its `Origin` and its cookie's name.
+   */
+  readonly loopback?: number;
 }
 
 /** A request for `path` on the instance, as a browser on its admin page sends it. */
@@ -51,9 +57,15 @@ export function adminRequest(
   options: AdminRequestOptions = {},
 ): Request {
   const headers = new Headers(options.headers);
-  headers.set('host', options.host ?? TEST_HOST);
-  if (options.cookie !== undefined) headers.set('cookie', `${ADMIN_COOKIE}=${options.cookie}`);
-  const origin = options.origin === undefined ? TEST_ORIGIN : options.origin;
+  const local =
+    options.loopback === undefined ? undefined : `localhost:${String(options.loopback)}`;
+  headers.set('host', options.host ?? local ?? TEST_HOST);
+  if (options.cookie !== undefined) {
+    const name = local === undefined ? ADMIN_COOKIE : LOOPBACK_COOKIE;
+    headers.set('cookie', `${name}=${options.cookie}`);
+  }
+  const ours = local === undefined ? TEST_ORIGIN : `http://${local}`;
+  const origin = options.origin === undefined ? ours : options.origin;
   const site = options.site === undefined ? 'same-origin' : options.site;
   if (method === 'POST') {
     if (origin !== null) headers.set('origin', origin);
@@ -70,9 +82,9 @@ export function adminRequest(
 }
 
 /** The session token a sign-in's `Set-Cookie` carries, or `undefined`. */
-export function cookieOf(response: Response): string | undefined {
+export function cookieOf(response: Response, name: string = ADMIN_COOKIE): string | undefined {
   const set = response.headers.get('set-cookie');
-  const value = set === null ? undefined : new RegExp(`^${ADMIN_COOKIE}=([^;]*)`).exec(set)?.[1];
+  const value = set === null ? undefined : new RegExp(`^${name}=([^;]*)`).exec(set)?.[1];
   return value === undefined || value === '' ? undefined : value;
 }
 
@@ -97,6 +109,148 @@ export async function csrfFrom(handler: Handler, token: string): Promise<string>
   const value = /name="csrf" value="([0-9a-f]{64})"/.exec(page)?.[1];
   if (value === undefined) throw new Error('the Status page carried no CSRF token');
   return value;
+}
+
+/** The synchronizer token a signed-in page carries: the passkeys page's, by default. */
+export async function csrfOn(
+  handler: Handler,
+  token: string,
+  path = '/admin/passkeys',
+): Promise<string> {
+  const page = await (await handler(adminRequest('GET', path, { cookie: token }))).text();
+  const value = /name="csrf" value="([0-9a-f]{64})"/.exec(page)?.[1];
+  if (value === undefined) throw new Error(`${path} carried no CSRF token`);
+  return value;
+}
+
+/** A ceremony's options, as the page's script reads them. */
+export interface CeremonyOptions {
+  readonly challenge: string;
+  readonly rpId: string;
+  readonly allowCredentials?: readonly string[];
+  readonly excludeCredentials?: readonly string[];
+  readonly userHandle?: string;
+}
+
+/** A JSON answer from the admin layer: its status and body. */
+async function json(answer: Response): Promise<{ status: number; body: CeremonyOptions }> {
+  return { status: answer.status, body: (await answer.json()) as CeremonyOptions };
+}
+
+/**
+ * Enrol `authenticator` from the code session `token` through the real pages,
+ * as the page's script does: the options, the authenticator's response, the
+ * form. Answers the form's answer; `bend` changes the response.
+ */
+export async function enrolWith(
+  handler: Handler,
+  token: string,
+  authenticator: SoftwareAuthenticator,
+  options: { readonly label?: string; readonly bend?: Bend; readonly origin?: string } = {},
+): Promise<Response> {
+  const csrf = await csrfOn(handler, token);
+  const asked = await json(
+    await handler(
+      adminRequest('POST', '/admin/passkeys/options', { cookie: token, form: { csrf } }),
+    ),
+  );
+  expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+  const made = await authenticator.register(
+    {
+      rpId: asked.body.rpId,
+      origin: options.origin ?? TEST_ORIGIN,
+      challenge: asked.body.challenge,
+    },
+    options.bend,
+  );
+  return handler(
+    adminRequest('POST', '/admin/passkeys/add', {
+      cookie: token,
+      form: {
+        csrf,
+        label: options.label ?? `Passkey ${authenticator.algorithm}`,
+        clientDataJSON: made.clientDataJSON,
+        attestationObject: made.attestationObject,
+      },
+    }),
+  );
+}
+
+/** The form fields a passkey sign-in posts, for a fresh challenge the instance issued. */
+export async function passkeySignInForm(
+  handler: Handler,
+  authenticator: SoftwareAuthenticator,
+  options: { readonly bend?: Bend; readonly origin?: string; readonly client?: ClientInfo } = {},
+): Promise<Record<string, string>> {
+  const asked = await json(
+    await handler(
+      adminRequest('POST', '/admin/sign-in/passkey-options', { form: {} }),
+      options.client,
+    ),
+  );
+  expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+  const made = await authenticator.assert(
+    {
+      rpId: asked.body.rpId,
+      origin: options.origin ?? TEST_ORIGIN,
+      challenge: asked.body.challenge,
+    },
+    options.bend,
+  );
+  return {
+    credential: made.credentialId,
+    clientDataJSON: made.clientDataJSON,
+    authenticatorData: made.authenticatorData,
+    signature: made.signature,
+  };
+}
+
+/** Sign in with `authenticator` through the real pages; answers the cookie's token. */
+export async function passkeySignIn(
+  handler: Handler,
+  authenticator: SoftwareAuthenticator,
+  client: ClientInfo = { address: '203.0.113.7' },
+): Promise<string> {
+  const form = await passkeySignInForm(handler, authenticator, { client });
+  const answer = await handler(adminRequest('POST', '/admin/sign-in/passkey', { form }), client);
+  expect(answer.status, await answer.clone().text()).toBe(303);
+  const token = cookieOf(answer);
+  if (token === undefined) throw new Error('the passkey sign-in set no cookie');
+  return token;
+}
+
+/**
+ * A step-up for `action` over `fields` from the session `token`, as the
+ * page's script asks for one: the challenge, then `authenticator`'s
+ * assertion over it. Answers the form fields to post with the change.
+ */
+export async function stepUpWith(
+  handler: Handler,
+  token: string,
+  authenticator: SoftwareAuthenticator,
+  action: string,
+  fields: Readonly<Record<string, string>>,
+): Promise<Record<string, string>> {
+  const csrf = await csrfOn(handler, token);
+  const asked = await json(
+    await handler(
+      adminRequest('POST', '/admin/step-up', { cookie: token, form: { csrf, action, ...fields } }),
+    ),
+  );
+  expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+  const made = await authenticator.assert({
+    rpId: asked.body.rpId,
+    origin: TEST_ORIGIN,
+    challenge: asked.body.challenge,
+  });
+  return {
+    csrf,
+    ...fields,
+    credential: made.credentialId,
+    clientDataJSON: made.clientDataJSON,
+    authenticatorData: made.authenticatorData,
+    signature: made.signature,
+  };
 }
 
 export interface HandlerOver {

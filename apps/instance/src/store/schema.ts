@@ -466,6 +466,54 @@ export interface AdminSessionTable {
 }
 
 /**
+ * One of the owner's passkeys for the admin pages (#2642, migration 0045,
+ * ADR 0069 D-1). It names no athlete: it is whoever holds
+ * `OYL_INSTANCE_OWNER_KEY`'s.
+ */
+export interface AdminPasskeyTable {
+  readonly id: string;
+  /** base64url, unique. */
+  readonly credential_id: string;
+  readonly rp_id: string;
+  readonly algorithm: 'ed25519' | 'es256';
+  /** Ed25519's 32 bytes, or P-256's uncompressed point, as lowercase hex. */
+  readonly public_key: string;
+  readonly sign_count: number;
+  /** base64url: the WebAuthn user handle it was enrolled under. */
+  readonly user_handle: string;
+  /** The `OYL_INSTANCE_OWNER_KEY` held at enrolment: no other owner's passkey. */
+  readonly owner_key: string;
+  readonly label: string;
+  readonly listener: 'tunnel' | 'loopback';
+  /** Unix seconds. */
+  readonly enrolled_at: number;
+  readonly last_used_at: number | null;
+  /** `NULL` until `operator admin-passkeys confirm`, for one enrolled through the tunnel. */
+  readonly confirmed_at: number | null;
+}
+
+/** Which passkey opened which admin session (#2642, migration 0045). */
+export interface AdminPasskeySessionTable {
+  readonly token_sha256: string;
+  readonly passkey_id: string;
+}
+
+/** A WebAuthn challenge issued and not yet answered (#2642, migration 0045, ADR 0069 D-4). */
+export interface AdminChallengeTable {
+  readonly challenge_sha256: string;
+  readonly purpose: 'sign_in' | 'enrol' | 'step_up';
+  /** `NULL` for a sign-in's; the session's otherwise. */
+  readonly session_sha256: string | null;
+  /** A step-up's action, and the SHA-256 of its canonical fields; `NULL` otherwise. */
+  readonly action: string | null;
+  readonly fields_sha256: string | null;
+  /** An enrolment's WebAuthn user handle, base64url; `NULL` otherwise. */
+  readonly user_handle: string | null;
+  /** Unix seconds. */
+  readonly expires_at: number;
+}
+
+/**
  * One run of the operator's `backup` or `backup-loop` (#2606, migration 0042):
  * what it made, or that it failed, by name. Deleted 30 days after its run.
  */
@@ -886,6 +934,9 @@ export interface InstanceDatabase {
   readonly operator_log: OperatorLogTable;
   readonly admin_code: AdminCodeTable;
   readonly admin_session: AdminSessionTable;
+  readonly admin_passkey: AdminPasskeyTable;
+  readonly admin_passkey_session: AdminPasskeySessionTable;
+  readonly admin_challenge: AdminChallengeTable;
   readonly backup_record: BackupRecordTable;
   readonly backup_request: BackupRequestTable;
   readonly backup_lease: BackupLeaseTable;

@@ -66,7 +66,7 @@ import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts'
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
 import { instanceHpkePrimitives } from './crypto.ts';
-import { createOperate } from '../operate/operate.ts';
+import { createOperate, type OperateRoomSources } from '../operate/operate.ts';
 import { diskSpace, keysState, tunnelReadiness, type StatusSources } from '../operate/status.ts';
 import { createSealed, sha256, type Sealed } from '../sealed/sealed.ts';
 import { sealFor } from '../sealed/sealed-testing.ts';
@@ -320,6 +320,13 @@ export async function startIdentityInstance(
     /** A handler handed no Operate area (#2602), for the `unavailable` it answers then. */
     withoutOperate?: boolean;
     /**
+     * What the owner's Rooms reads from the room workers and ends through
+     * (#2612), as `instance.ts` hands it the router; the world's own rooms
+     * and names are used beside it. Absent, the Rooms routes answer
+     * `unavailable`, as on an adapter with no router.
+     */
+    operateRooms?: Pick<OperateRoomSources, 'live' | 'end'>;
+    /**
      * Where a name resolves to, for the Operate area's analysis settings
      * (#2609): a save checks it. Absent, a name looked up is a failed lookup.
      */
@@ -339,6 +346,10 @@ export async function startIdentityInstance(
       readonly limits?: AdminLimits;
       /** What the admin layer sees in place of the real store — a spy on its lookups. */
       readonly storeSeenBy?: (store: SqlStore) => SqlStore;
+      /** The loopback listener's port (#2643): its origin is `http://localhost:<port>`. */
+      readonly loopbackPort?: number;
+      /** `OYL_INSTANCE_ADMIN_ADDRESSES` (#2643). */
+      readonly addresses?: readonly string[];
     };
   } = {},
 ): Promise<IdentityInstance> {
@@ -370,6 +381,7 @@ export async function startIdentityInstance(
     observe,
     voice,
     withoutOperate,
+    operateRooms,
     operateStatus,
     resolve,
     admin: adminOptions,
@@ -464,7 +476,10 @@ export async function startIdentityInstance(
     },
     ...(voice === undefined ? {} : { voice }),
   });
+  /** The origin the keys state (#2613): Operate's rotation makes them over the log's transaction with it. */
+  const keyOrigin: { value?: string } = {};
   const keysFor = async (origin: string): Promise<InstanceKeys> => {
+    keyOrigin.value = origin;
     const keys = createInstanceKeys({
       store,
       secret: keyless === true ? undefined : secretBytes(7),
@@ -541,6 +556,10 @@ export async function startIdentityInstance(
       now: () => clock.ms,
       name: config?.name ?? null,
       ...(adminOptions.limits === undefined ? {} : { limits: adminOptions.limits }),
+      ...(adminOptions.loopbackPort === undefined
+        ? {}
+        : { loopbackPort: adminOptions.loopbackPort }),
+      ...(adminOptions.addresses === undefined ? {} : { addresses: adminOptions.addresses }),
     });
     return madeAdmin.value;
   };
@@ -587,6 +606,18 @@ export async function startIdentityInstance(
                     resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
                   }),
               },
+              // #2613: the world's keys, and the same keys over the log's transaction.
+              keys: {
+                keys: instanceKeys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: keyless === true ? undefined : secretBytes(7),
+                    origin: keyOrigin.value ?? TEST_ORIGIN,
+                    now: () => Math.floor(clock.ms / 1000),
+                  }),
+              },
+              ...(operateRooms === undefined ? {} : { rooms: { ...operateRooms, rooms, nameFor } }),
             }),
           }),
       history,

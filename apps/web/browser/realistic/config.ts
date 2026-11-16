@@ -30,6 +30,7 @@
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame); since #1996 `out-and-back`, `route-fixtures-testing.ts` §`outAndBackRoute`, a road ridden out and back again, turning at half its length (`at=1475` holds the turning point 30 m ahead, `at=1512` just past it). Refused beside `town`, which is a road of its own | `village`, `out-and-back`; default none |
  * | `delivery` | #1815: a Delivery round's worst case on every frame, for the two village ceilings (`realistic-budget.ts` §`DELIVERY_VILLAGE_DRAW_CALLS`): this many parcels, house markers and obstacles each, placed on the road ahead of the rider (`realistic/delivery.ts`) and drawn by the product's own belt. Pair it with `route=village` and the frozen frame's query; absent, the frame carries no round, as an ordinary ride's does. More than the belt's 32 is REFUSED, because it would draw 32 under the name of more | `1` to `32`; default none |
  * | `race` | #1972: a lap race's worst case on every frame, for #1903's tablet reading (`realistic-budget.ts` §`LAP_RACE_SCENE_DRAW_CALLS`): the rider and seven bots, five of the eight hit, every pick-up point of a three-lap race of 40 m laps and ten puddles (`realistic/lap-race.ts`), drawn by the product's own belt. With `world=stylised`, in the scenery-free STYLISED frame, and REFUSED beside `route`; since #1971 in the realistic world too, on the route's own frame with its scenery (`route=village` is #1689's hold), held to §`LAP_RACE_VILLAGE_DRAW_CALLS`. REFUSED beside `delivery` and `town` in both | `worst`; default none |
+ * | `cityfar` | #1638: a CANDIDATE for a city centre's far-level cap (`realistic-budget.ts` §`MAPPED_BUILDING_MAX_CITY_FAR`, off in the product): a refill draws up to this many mapped buildings, every one past `MAPPED_BUILDING_MAX`'s 36 a `city-centre` building at its far level, for validation 0002 AE5's third row. A candidate to measure, never the cap: the cap is the number the tablet's rows support, which the owner rules on #1638. REFUSED unless `town=city`, the one town with a city-centre run | a whole number from 37 to 144 (`CITY_FAR_MOST`); default none, the product's cap |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -52,6 +53,7 @@ import {
   type Season,
 } from '../../src/game/season';
 import type { NearTreeFade } from '../../src/game/near-tree-fade';
+import { MAPPED_BUILDING_MAX } from '../../src/game/realistic-budget';
 import type { DepthPrepassMode, RealisticSurfaces } from '../../src/game/three-renderer';
 
 import { PLACES, type Facing, type Place } from '../../src/demo/synthetic-road';
@@ -596,6 +598,13 @@ export interface RealisticPageConfig {
    * `rain-dusk`, both. `undefined` is clear daylight. @see realistic/delivery.ts
    */
   readonly weather: 'rain' | 'dusk' | 'rain-dusk' | undefined;
+  /**
+   * #1638: a candidate city centre's far-level cap, handed to
+   * `mapped-buildings.ts` §`mappedBuildingsOf` with the town's plans.
+   * `undefined` is the product's own (`realistic-budget.ts`
+   * §`MAPPED_BUILDING_MAX_CITY_FAR`), which is off.
+   */
+  readonly cityFar: number | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -618,6 +627,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   delivery: undefined,
   race: undefined,
   weather: undefined,
+  cityFar: undefined,
 };
 
 const KNOWN = new Set([
@@ -639,6 +649,7 @@ const KNOWN = new Set([
   'delivery',
   'weather',
   'race',
+  'cityfar',
 ]);
 
 /**
@@ -1085,7 +1096,37 @@ export function parseConfig(search: string): RealisticPageConfig {
     weather: params.has('weather')
       ? oneOf('weather', ['rain', 'dusk', 'rain-dusk'] as const, 'rain')
       : undefined,
+    cityFar: params.has('cityfar') ? cityFarFrom(params) : undefined,
   };
+}
+
+/**
+ * The largest candidate `?cityfar=` takes — #1638: **144**, four times
+ * `MAPPED_BUILDING_MAX`. The page's range and not a cap: it bounds what a URL
+ * makes the belt allocate (`mapped-buildings.ts` §`MappedSelection`), and a
+ * reading that wants more is a change to this number in a pull request.
+ */
+export const CITY_FAR_MOST = 4 * MAPPED_BUILDING_MAX;
+
+/**
+ * `?cityfar=72` — #1638. A whole number above `MAPPED_BUILDING_MAX` and at
+ * most {@link CITY_FAR_MOST}, beside `town=city`; anything else REFUSED: at or
+ * under 36 it adds nothing, and on a road with no town, or a town with no
+ * city-centre run, there is no far box to take, so either would measure
+ * today's world under a candidate's name.
+ */
+function cityFarFrom(params: URLSearchParams): number {
+  const value = params.get('cityfar') ?? '';
+  const cap = Number(value);
+  if (!Number.isInteger(cap) || cap <= MAPPED_BUILDING_MAX || cap > CITY_FAR_MOST) {
+    throw new Error(
+      `realistic: cityfar is a whole number from ${String(MAPPED_BUILDING_MAX + 1)} to ${String(CITY_FAR_MOST)}, not "${value}"`,
+    );
+  }
+  if (params.get('town') !== 'city') {
+    throw new Error('realistic: cityfar is a cap on a city centre’s far boxes; name town=city');
+  }
+  return cap;
 }
 
 /**
@@ -1236,6 +1277,7 @@ export function configQuery(config: RealisticPageConfig): string {
   if (config.delivery !== undefined) params.set('delivery', String(config.delivery));
   if (config.race !== undefined) params.set('race', config.race);
   if (config.weather !== undefined) params.set('weather', config.weather);
+  if (config.cityFar !== undefined) params.set('cityfar', String(config.cityFar));
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

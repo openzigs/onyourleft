@@ -60,6 +60,9 @@ const sessionRow = async (made: ModerationWorld, token: string) => {
   return made.freshRead((store) => store.findAdminSession(sha));
 };
 
+/** A route's path as a browser sends it: a passkey's `{id}` filled in with one of the right shape. */
+const sent = (path: string): string => path.replace('{id}', '0123456789abcdef');
+
 const GETS = ADMIN_ROUTES.filter((route) => route.methods.includes('GET'));
 const POSTS = ADMIN_ROUTES.filter((route) => route.methods.includes('POST'));
 /** Every GET that shows the instance's state: everything but the sign-in page and the stylesheet. */
@@ -89,8 +92,22 @@ function heldToAdminHeaders(answer: Response, what: string): void {
 
 describe('the admin route table (#2645)', () => {
   it('holds the shell’s pages, the sign-in, the stylesheet and the sign-out — and nothing a test here would miss', () => {
-    expect(SIGNED_IN.map((route) => route.path)).toEqual(['/admin', '/admin/status', '/admin/log']);
-    expect(POSTS.map((route) => route.path)).toEqual(['/admin/sign-in', '/admin/sign-out']);
+    expect(SIGNED_IN.map((route) => route.path)).toEqual([
+      '/admin',
+      '/admin/status',
+      '/admin/log',
+      '/admin/passkeys',
+    ]);
+    expect(POSTS.map((route) => route.path)).toEqual([
+      '/admin/sign-in',
+      '/admin/sign-in/passkey-options',
+      '/admin/sign-in/passkey',
+      '/admin/sign-out',
+      '/admin/passkeys/options',
+      '/admin/passkeys/add',
+      '/admin/passkeys/{id}/revoke',
+      '/admin/step-up',
+    ]);
     for (const route of ADMIN_ROUTES)
       expect(route.path === '/admin' || route.path.startsWith('/admin/')).toBe(true);
   });
@@ -102,19 +119,19 @@ describe('every /admin route carries the admin headers, signed in or not (#2645,
     const handler = made.instance.handler;
     const token = await signedIn(made);
     const csrf = await csrfFrom(handler, token);
-    const sent: (readonly [string, Response])[] = [];
+    const answers: (readonly [string, Response])[] = [];
     for (const route of GETS) {
       for (const options of [{}, { cookie: token }] as AdminRequestOptions[]) {
         const what = `GET ${route.path}${options.cookie === undefined ? '' : ' (session)'}`;
-        sent.push([what, await handler(adminRequest('GET', route.path, options))]);
+        answers.push([what, await handler(adminRequest('GET', route.path, options))]);
       }
     }
     for (const route of POSTS) {
       // Refusals only, so the session lives through the loop: a foreign Origin, and no token.
-      sent.push([
+      answers.push([
         `POST ${route.path} (foreign Origin)`,
         await handler(
-          adminRequest('POST', route.path, {
+          adminRequest('POST', sent(route.path), {
             cookie: token,
             form: { csrf, code: 'x' },
             origin: 'https://evil.example',
@@ -123,11 +140,11 @@ describe('every /admin route carries the admin headers, signed in or not (#2645,
         ),
       ]);
     }
-    expect(sent.length).toBe(GETS.length * 2 + POSTS.length);
-    for (const [what, answer] of sent) heldToAdminHeaders(answer, what);
+    expect(answers.length).toBe(GETS.length * 2 + POSTS.length);
+    for (const [what, answer] of answers) heldToAdminHeaders(answer, what);
     // Each signed-in page was served, as a page, to the session.
     for (const route of SIGNED_IN.filter((each) => each.kind === 'page')) {
-      const answer = sent.find(([what]) => what === `GET ${route.path} (session)`)?.[1];
+      const answer = answers.find(([what]) => what === `GET ${route.path} (session)`)?.[1];
       expect(answer?.status, route.path).toBe(200);
       expect(answer?.headers.get('content-type'), route.path).toBe('text/html; charset=utf-8');
     }
@@ -154,7 +171,7 @@ describe('with no session, every signed-in page goes to sign-in and draws nothin
 });
 
 describe('every POST is refused without the session’s token or from a foreign Origin (#2645, ADR 0069 D-4)', () => {
-  /** The refusals every `POST` but the sign-in gets: it has no session to hold a token. */
+  /** The refusals every `POST` but a sign-in's gets: a sign-in has no session to hold a token. */
   const REFUSALS: readonly (readonly [string, (csrf: string) => AdminRequestOptions])[] = [
     ['no token', () => ({ form: {} })],
     ['a wrong token', () => ({ form: { csrf: '0'.repeat(64) } })],
@@ -164,7 +181,10 @@ describe('every POST is refused without the session’s token or from a foreign 
   ];
   const CASES = POSTS.flatMap((route) =>
     REFUSALS.filter(
-      ([name]) => route.kind !== 'sign-in' || name.includes('Origin') || name.includes('Sec-Fetch'),
+      ([name]) =>
+        (route.kind !== 'sign-in' && route.kind !== 'sign-in-action') ||
+        name.includes('Origin') ||
+        name.includes('Sec-Fetch'),
     ).map(([name, shape]) => [route.path, name, shape] as const),
   );
 
@@ -175,7 +195,7 @@ describe('every POST is refused without the session’s token or from a foreign 
     const csrf = await csrfFrom(handler, token);
     const before = await ownersLog(made);
     const refused = await handler(
-      adminRequest('POST', path, {
+      adminRequest('POST', sent(path), {
         cookie: token,
         ...shape(csrf),
         form: { code: 'x', ...shape(csrf).form },
@@ -210,4 +230,29 @@ describe('the owner is asked again on every page (#2645, ADR 0069 D-1)', () => {
       expect(await ownersLog(made)).toEqual(before);
     },
   );
+});
+
+describe('the one script is linked only on the pages with a passkey ceremony, and never inline (#2642, #2645)', () => {
+  it('the sign-in page and Passkeys link /admin/passkey.js; Status and the log link nothing', async () => {
+    const made = await world();
+    const handler = made.instance.handler;
+    const token = await signedIn(made);
+    const scripts = async (path: string, cookie?: string): Promise<string[]> => {
+      const answer = await handler(
+        adminRequest('GET', path, cookie === undefined ? {} : { cookie }),
+      );
+      expect(answer.status, path).toBe(200);
+      const html = await answer.text();
+      // No script element with a body, and no handler attribute.
+      expect(html, path).not.toMatch(/<script[^>]*>[^<]|\son[a-z]+=/i);
+      return [...html.matchAll(/<script([^>]*)>/gi)].map(([, attributes]) => attributes ?? '');
+    };
+    expect(await scripts('/admin/sign-in')).toEqual([' src="/admin/passkey.js" defer']);
+    expect(await scripts('/admin/passkeys', token)).toEqual([' src="/admin/passkey.js" defer']);
+    expect(await scripts('/admin/status', token)).toEqual([]);
+    expect(await scripts('/admin/log', token)).toEqual([]);
+    const script = await handler(adminRequest('GET', '/admin/passkey.js'));
+    expect(script.headers.get('content-type')).toBe('text/javascript; charset=utf-8');
+    expect(script.headers.get('content-security-policy')).toContain("script-src 'self'");
+  });
 });

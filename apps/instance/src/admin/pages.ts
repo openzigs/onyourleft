@@ -2,16 +2,18 @@
 
 /**
  * **The admin pages' markup** (#2645, ADR 0069 D-6): the frame, the shell
- * every signed-in page is drawn in, the sign-in page, Status and the operator
- * log. Pure: data in, HTML out — nothing here reads a store, a clock or the
+ * every signed-in page is drawn in, the sign-in page, Status, the operator
+ * log, and the owner's passkeys (#2642's page, drawn in the shell). Pure: data in, HTML out — nothing here reads a store, a clock or the
  * network, so `apps/web/src/a11y/admin-pages.a11y.test.ts` audits exactly
  * what `admin.ts` serves by calling these, and the app's Status panel and
  * this Status page can be drawn from one fixture and compared.
  *
  * - Everything put into a page goes through `html.ts` §`escapeHtml`, the
  *   instance's name included.
- * - No inline style and no script: the stylesheet is `/admin/admin.css`
- *   (`style.ts`), and every page works with no script at all.
+ * - No inline style and no inline script: the stylesheet is `/admin/admin.css`
+ *   (`style.ts`), and every page reads with no script at all. The one script,
+ *   `/admin/passkey.js` (`passkey-script.ts`), is LINKED on the two pages with
+ *   a passkey ceremony — the sign-in and Passkeys — and on no other.
  * - A skip link, one `h1`, and the banner, navigation and main landmarks.
  * - **Status' words are `@onyourleft/operate-text`'s alone** (ADR 0069 D-7):
  *   {@link statusBody} draws {@link statusRows}, as the app's
@@ -54,8 +56,14 @@ import {
 } from '../store/sql-store.ts';
 import { sectionLinks } from './admin-routes.ts';
 
-/** The frame: the stylesheet linked, never inline. `body` is markup the caller escaped. */
-export function adminPage(title: string, body: string, before = ''): string {
+/** The one script, linked on the pages with a passkey ceremony; never inline. */
+export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></script>\n';
+
+/**
+ * The frame: the stylesheet linked, never inline, and with `script` the
+ * passkey script linked too. `body` and `before` are markup the caller escaped.
+ */
+export function adminPage(title: string, body: string, before = '', script = false): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -63,7 +71,7 @@ export function adminPage(title: string, body: string, before = ''): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="/admin/admin.css">
-</head>
+${script ? PASSKEY_SCRIPT_TAG : ''}</head>
 <body>
 ${before}<main id="main">
 ${body}
@@ -92,6 +100,12 @@ const STRENGTH_TEXT: Readonly<Record<ShellView['strength'], string>> = {
   passkey: 'a passkey',
 };
 
+/** What a code session may do, said beside how it was opened (ADR 0069 Q-A). */
+const STRENGTH_LIMIT: Readonly<Record<ShellView['strength'], string>> = {
+  code: ' A one-time code’s session can read every page and add one passkey, and changes nothing else.',
+  passkey: '',
+};
+
 const LISTENER_TEXT: Readonly<Record<ShellView['listener'], string>> = {
   tunnel: 'through the tunnel',
   loopback: 'on the server machine',
@@ -102,9 +116,10 @@ const instanceName = (name: string | null): string => (name === null ? 'This ins
 /**
  * A signed-in page: a skip link, the banner (the instance's name, how the
  * session was opened and on which listener, the section links and Sign out),
- * and `main` with the page's one `h1`. `body` is markup the caller escaped.
+ * and `main` with the page's one `h1`. `body` is markup the caller escaped;
+ * `script` links the passkey script, for a page with a passkey ceremony.
  */
-export function shellPage(view: ShellView, heading: string, body: string): string {
+export function shellPage(view: ShellView, heading: string, body: string, script = false): string {
   const links = sectionLinks()
     .map(({ section, path }) => {
       const current = path === view.path ? ' aria-current="page"' : '';
@@ -114,13 +129,13 @@ export function shellPage(view: ShellView, heading: string, body: string): strin
   const banner = `<a class="skip" href="#main">Skip to the page</a>
 <header class="shell">
 <p class="name">${escapeHtml(instanceName(view.name))}</p>
-<p>Signed in as the instance’s owner with ${STRENGTH_TEXT[view.strength]}, ${LISTENER_TEXT[view.listener]}.</p>
+<p>Signed in as the instance’s owner with ${STRENGTH_TEXT[view.strength]}, ${LISTENER_TEXT[view.listener]}.${STRENGTH_LIMIT[view.strength]}</p>
 <nav class="sections" aria-label="Admin sections">
 <ul>
 ${links}
 </ul>
 </nav>
-<form method="post" action="/admin/sign-out">
+<form method="post" action="/admin/sign-out" aria-label="Sign out">
 <input type="hidden" name="csrf" value="${escapeHtml(view.csrf)}">
 <button type="submit">Sign out</button>
 </form>
@@ -132,23 +147,149 @@ ${links}
 ${body}
 <p class="hint">This session ends after 15 minutes without use, and 2 hours after you signed in.</p>`,
     banner,
+    script,
   );
 }
 
-/** The sign-in page, with or without the sentence that a code was not accepted. */
-export function signInPage(name: string | null, problem: boolean): string {
-  const described = problem ? ' aria-describedby="code-problem"' : '';
+/** What the sign-in page says above its forms. */
+export type SignInNotice = 'code-refused' | 'passkey-refused' | 'enrolled' | null;
+
+/**
+ * The sign-in page (#2641, #2642): with a passkey, and with a one-time code,
+ * and the notice a refusal or an enrolment left. The passkey form is drawn
+ * `hidden` and shown by the linked script where the browser can use one.
+ */
+export function signInPage(name: string | null, notice: SignInNotice): string {
+  const codeProblem = notice === 'code-refused';
+  const described = codeProblem ? ' aria-describedby="code-problem"' : '';
   const title = name === null ? 'this instance' : name;
+  const top =
+    notice === 'enrolled'
+      ? '<p class="notice" role="status">Your passkey was added, and the one-time code’s session has ended. Sign in with the passkey now. A new passkey can read every page and changes nothing until you confirm it on the server machine: <code>operator admin-passkeys confirm &lt;id&gt;</code>, with the id <code>operator admin-passkeys list</code> shows.</p>\n'
+      : notice === 'passkey-refused'
+        ? '<p class="problem" role="alert">That passkey was not accepted, so you are not signed in. Try again, or sign in with a one-time code.</p>\n'
+        : '';
   return adminPage(
     'Sign in',
     `<h1>Sign in to the admin pages of ${escapeHtml(title)}</h1>
-<p>Only the instance’s owner can sign in. On the server machine, run <code>node src/operator/cli.ts admin-code</code> (in the home deployment, <code>docker compose exec instance node src/operator/cli.ts admin-code</code>) and type the code it prints. A code works once, for 10 minutes.</p>
+${top}<p>Only the instance’s owner can sign in.</p>
+<h2>With a passkey</h2>
+<form method="post" action="/admin/sign-in/passkey" data-passkey="sign-in" data-passkey-supported hidden>
+<button type="submit">Sign in with a passkey</button>
+<p data-passkey-status role="status"></p>
+</form>
+<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. Sign in with a one-time code instead.</p>
+<h2>With a one-time code</h2>
+<p>On the server machine, run <code>node src/operator/cli.ts admin-code</code> (in the home deployment, <code>docker compose exec instance node src/operator/cli.ts admin-code</code>) and type the code it prints. A code works once, for 10 minutes. A code session can read every page and add one passkey; it changes nothing else.</p>
 <form method="post" action="/admin/sign-in">
 <label for="code">One-time code</label>
-${problem ? '<p class="problem" id="code-problem">That code was not accepted. A code works once, for 10 minutes: mint a new one on the server machine.</p>\n' : ''}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${described}>
+${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted. A code works once, for 10 minutes: mint a new one on the server machine.</p>\n' : ''}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${described}>
 <button type="submit">Sign in</button>
 </form>`,
+    '',
+    true,
   );
+}
+
+/** One of the owner's passkeys as the Passkeys page lists it. */
+export interface PasskeyView {
+  readonly id: string;
+  readonly label: string;
+  /** Unix seconds. */
+  readonly enrolledAt: number;
+  /** Unix seconds, or `null`: never. */
+  readonly lastUsedAt: number | null;
+  readonly rpId: string;
+  /**
+   * What it may do here: added under another owner key, added for another
+   * RP ID, unconfirmed (reads only), or confirmed (reads and changes).
+   */
+  readonly standing: 'other-owner' | 'other-host' | 'unconfirmed' | 'confirmed';
+}
+
+/** What the Passkeys page draws. */
+export interface PasskeysView {
+  readonly passkeys: readonly PasskeyView[];
+  /** This listener's RP ID. */
+  readonly rpId: string;
+  /** How the session was opened: a code session enrols, a passkey session revokes. */
+  readonly strength: 'code' | 'passkey';
+  /** The session's synchronizer token, for each form. */
+  readonly csrf: string;
+  /** The most passkeys there may be. */
+  readonly max: number;
+  /** The longest name a passkey may have, in characters. */
+  readonly labelLimit: number;
+}
+
+/** A moment, in UTC: the same on every screen. */
+const when = (seconds: number): string =>
+  `${new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+
+function standingText(passkey: PasskeyView): string {
+  switch (passkey.standing) {
+    case 'other-owner':
+      return 'Not usable: it was added under another owner key than OYL_INSTANCE_OWNER_KEY names now. Revoke it.';
+    case 'other-host':
+      return `Not usable at this address: it was added for ${escapeHtml(passkey.rpId)}. Revoke it, and add one here.`;
+    case 'unconfirmed':
+      return `Can read, and change nothing until it is confirmed on the server machine: <code>operator admin-passkeys confirm ${escapeHtml(passkey.id)}</code>.`;
+    case 'confirmed':
+      return 'Can read and make changes, with a fresh check each time.';
+  }
+}
+
+/**
+ * The Passkeys page's body (#2642): each passkey, with a Revoke form in a
+ * passkey session, and the Add form in a code session with room for one more.
+ */
+export function passkeysBody(view: PasskeysView): string {
+  const csrf = escapeHtml(view.csrf);
+  const byPasskey = view.strength === 'passkey';
+  const items = view.passkeys.map((passkey) => {
+    const label = escapeHtml(passkey.label);
+    const revoke = byPasskey
+      ? `<form method="post" action="/admin/passkeys/${escapeHtml(passkey.id)}/revoke" data-step-up="passkey_revoke" aria-label="Revoke ${label}">
+<input type="hidden" name="csrf" value="${csrf}">
+<input type="hidden" name="id" value="${escapeHtml(passkey.id)}">
+<button type="submit">Revoke ${label}</button>
+<p data-passkey-status role="status"></p>
+</form>`
+      : '';
+    return `<li>
+<h3>${label}</h3>
+<dl class="facts">
+<div><dt>Id</dt><dd><code>${escapeHtml(passkey.id)}</code></dd></div>
+<div><dt>Added</dt><dd>${when(passkey.enrolledAt)}</dd></div>
+<div><dt>Last used</dt><dd>${passkey.lastUsedAt === null ? 'Never' : when(passkey.lastUsedAt)}</dd></div>
+<div><dt>For</dt><dd>${escapeHtml(passkey.rpId)}</dd></div>
+</dl>
+<p>${standingText(passkey)}</p>
+${revoke}
+</li>`;
+  });
+  const list =
+    items.length === 0
+      ? '<p>There are no passkeys yet.</p>'
+      : `<ul class="passkeys">\n${items.join('\n')}\n</ul>`;
+  const add = byPasskey
+    ? '<p>To add another passkey, sign in with a one-time code from the server machine: a code session can add one.</p>'
+    : view.passkeys.length >= view.max
+      ? `<p>You hold ${String(view.max)} passkeys, the most there may be. Revoke one before adding another.</p>`
+      : `<h2>Add a passkey</h2>
+<p>This adds one passkey for ${escapeHtml(view.rpId)}, then signs you out so you can sign in with it. Revoking a passkey needs a passkey sign-in.</p>
+<form method="post" action="/admin/passkeys/add" data-passkey="enrol" data-passkey-supported hidden aria-label="Add a passkey">
+<input type="hidden" name="csrf" value="${csrf}">
+<label for="label">A name for this passkey</label>
+<input type="text" id="label" name="label" maxlength="${String(view.labelLimit)}" autocomplete="off" required>
+<button type="submit">Add a passkey</button>
+<p data-passkey-status role="status"></p>
+</form>
+<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. You can keep using the admin pages with a one-time code, which reads every page and changes nothing.</p>`;
+  // Each passkey's name is an h3 under this, so the headings go 1, 2, 3 (WCAG 1.3.1).
+  return `<h2>Your passkeys</h2>
+${list}
+${add}`;
 }
 
 function fact(row: OperateRow): string {
@@ -235,6 +376,10 @@ const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   admin_code_minted: 'Admin sign-in code made',
   admin_sign_in: 'Signed in to the admin pages',
   admin_refused: 'Admin sign-in attempts refused',
+  admin_passkey_enrolled: 'Admin passkey added',
+  admin_passkey_revoked: 'Admin passkey revoked',
+  admin_passkey_confirmed: 'Admin passkey confirmed on the host',
+  room_ended: 'Room ended',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */

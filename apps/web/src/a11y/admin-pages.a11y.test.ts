@@ -59,10 +59,32 @@ type LogView =
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'bad-cursor' };
 
+interface PasskeyView {
+  readonly id: string;
+  readonly label: string;
+  readonly enrolledAt: number;
+  readonly lastUsedAt: number | null;
+  readonly rpId: string;
+  readonly standing: 'other-owner' | 'other-host' | 'unconfirmed' | 'confirmed';
+}
+
+interface PasskeysView {
+  readonly passkeys: readonly PasskeyView[];
+  readonly rpId: string;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly max: number;
+  readonly labelLimit: number;
+}
+
 /** `apps/instance` §`admin/pages.ts`, as far as it is used here. */
 interface AdminPages {
-  shellPage(view: ShellView, heading: string, body: string): string;
-  signInPage(name: string | null, problem: boolean): string;
+  shellPage(view: ShellView, heading: string, body: string, script?: boolean): string;
+  signInPage(
+    name: string | null,
+    notice: 'code-refused' | 'passkey-refused' | 'enrolled' | null,
+  ): string;
+  passkeysBody(view: PasskeysView): string;
   statusBody(status: OperateStatusAnswer | undefined, now: number): string;
   logBody(view: LogView): string;
 }
@@ -71,7 +93,8 @@ interface AdminPages {
 interface AdminRoutes {
   readonly ADMIN_ROUTES: readonly {
     readonly path: string;
-    readonly kind: 'page' | 'sign-in' | 'redirect' | 'stylesheet' | 'action';
+    readonly kind:
+      'page' | 'sign-in' | 'sign-in-action' | 'redirect' | 'stylesheet' | 'script' | 'action';
   }[];
 }
 
@@ -105,10 +128,14 @@ const NOW = Date.parse('2026-11-14T21:00:00.000Z');
 /** A name that would break the markup if it were not escaped. */
 const AWKWARD_NAME = 'Ride <Club> & "friends"';
 
-const shell = (path: string, name: string | null = null): ShellView => ({
+const shell = (
+  path: string,
+  name: string | null = null,
+  strength: ShellView['strength'] = 'code',
+): ShellView => ({
   name,
   path,
-  strength: 'code',
+  strength,
   listener: 'tunnel',
   csrf: 'a'.repeat(64),
 });
@@ -141,14 +168,90 @@ const ENTRIES: readonly LogEntryAnswer[] = [
   },
 ];
 
+/** The owner's passkeys in every standing the Passkeys page draws, one with an awkward name. */
+const PASSKEYS: readonly PasskeyView[] = [
+  {
+    id: '0123456789abcdef',
+    label: 'Gate <laptop> & "phone"',
+    enrolledAt: 1_763_100_000,
+    lastUsedAt: 1_763_110_000,
+    rpId: 'instance.example',
+    standing: 'confirmed',
+  },
+  {
+    id: '1123456789abcdef',
+    label: 'Security key',
+    enrolledAt: 1_763_100_000,
+    lastUsedAt: null,
+    rpId: 'instance.example',
+    standing: 'unconfirmed',
+  },
+  {
+    id: '2123456789abcdef',
+    label: 'Old host',
+    enrolledAt: 1_763_000_000,
+    lastUsedAt: null,
+    rpId: 'old.example',
+    standing: 'other-host',
+  },
+  {
+    id: '3123456789abcdef',
+    label: 'Old owner',
+    enrolledAt: 1_763_000_000,
+    lastUsedAt: null,
+    rpId: 'instance.example',
+    standing: 'other-owner',
+  },
+];
+
+const passkeysPage = (
+  strength: ShellView['strength'],
+  passkeys: readonly PasskeyView[],
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/passkeys', name, strength),
+    'Passkeys',
+    pages.passkeysBody({
+      passkeys,
+      rpId: 'instance.example',
+      strength,
+      csrf: 'a'.repeat(64),
+      max: 10,
+      labelLimit: 60,
+    }),
+    true,
+  );
+
+/** The pages with a passkey ceremony, which link the one script (and only it). */
+const SCRIPTED = new Set(['/admin/sign-in', '/admin/passkeys']);
+
 /**
  * Every admin page, by its route, in every state it is drawn in. A page
  * sub-issue adds its route here; the derived test below fails until it does.
  */
 const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[]>> = {
   '/admin/sign-in': [
-    ['the form', () => pages.signInPage(null, false)],
-    ['a code refused, an awkward name', () => pages.signInPage(AWKWARD_NAME, true)],
+    ['the form', () => pages.signInPage(null, null)],
+    ['a code refused, an awkward name', () => pages.signInPage(AWKWARD_NAME, 'code-refused')],
+    ['a passkey refused', () => pages.signInPage(null, 'passkey-refused')],
+    ['a passkey just added', () => pages.signInPage(null, 'enrolled')],
+  ],
+  '/admin/passkeys': [
+    ['a code session, none yet', () => passkeysPage('code', [])],
+    ['a code session, every standing', () => passkeysPage('code', PASSKEYS, AWKWARD_NAME)],
+    [
+      'a code session, full',
+      () =>
+        passkeysPage(
+          'code',
+          Array.from({ length: 10 }, (_, index) => ({
+            ...PASSKEYS[1]!,
+            id: `${String(index)}`.padStart(16, '0'),
+          })),
+        ),
+    ],
+    ['a passkey session, every standing', () => passkeysPage('passkey', PASSKEYS)],
   ],
   '/admin/status': [
     [
@@ -228,13 +331,19 @@ describe.each(Object.entries(PAGES))('the admin page %s (#2645)', (path, states)
     expect(violations, formatViolations(violations)).toEqual([]);
   });
 
-  it.each(states)('%s: one h1, a main, and no script or inline style', (_state, render) => {
+  it.each(states)('%s: one h1, a main, no inline script or style', (_state, render) => {
     const html = render();
     const doc = parse(html);
     expect(doc.querySelectorAll('h1')).toHaveLength(1);
     expect(doc.querySelectorAll('main')).toHaveLength(1);
     expect(doc.documentElement.lang).toBe('en');
-    expect(html).not.toMatch(/<style|<script|\sstyle=|\son[a-z]+=/i);
+    expect(html).not.toMatch(/<style|\sstyle=|\son[a-z]+=/i);
+    // The one script, linked on a page with a passkey ceremony and empty; no other.
+    const scripts = [...doc.querySelectorAll('script')].map((each) => [
+      each.getAttribute('src'),
+      each.textContent,
+    ]);
+    expect(scripts).toEqual(SCRIPTED.has(path) ? [['/admin/passkey.js', '']] : []);
     expect(doc.querySelector('link[rel=stylesheet]')?.getAttribute('href')).toBe(
       '/admin/admin.css',
     );

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * **The instance's own admin pages: the sign-in and the session** (#2641,
- * ADR 0069 D-1, D-2, D-4, D-8), and since #2645 the pages: the shell, Status
- * and the operator log (`pages.ts`), answered from the admin route table
- * (`admin-routes.ts`). Passkeys are #2642's; the loopback listener #2643's.
+ * **The instance's own admin pages: the sign-in, the session and the
+ * owner's passkeys** (#2641, #2642, ADR 0069 D-1, D-2, D-4, D-8), and since
+ * #2645 the pages: the shell, Status and the operator log (`pages.ts`),
+ * answered from the admin route table (`admin-routes.ts`). The loopback
+ * listener is #2643's.
  *
  * Mounted only when the operator sets `OYL_INSTANCE_ADMIN_PAGES=on`
  * (`instance.ts`); otherwise `/admin` is `not_found`, as any path with no
@@ -16,12 +17,12 @@
  * ## Who may sign in
  *
  * Only **the athlete holding `OYL_INSTANCE_OWNER_KEY`**, and there is no
- * name to type: a good one-time code opens a session for that athlete. The
- * deputy has no admin sign-in at all (ADR 0046 D-9 Q9). Every request asks
- * again: a session whose stored owner key is not the current
- * `OYL_INSTANCE_OWNER_KEY`, or whose athlete no longer holds it
- * (`moderation.roleOf`), is ENDED — its row deleted — and the browser is sent
- * to sign in. With no `OYL_INSTANCE_ORIGIN` (no accounts), no
+ * name to type: a good one-time code, or an assertion by one of the owner's
+ * passkeys, opens a session for that athlete. The deputy has no admin sign-in
+ * at all (ADR 0046 D-9 Q9). Every request asks again: a session whose stored
+ * owner key is not the current `OYL_INSTANCE_OWNER_KEY`, or whose athlete no
+ * longer holds it (`moderation.roleOf`), is ENDED — its row deleted — and the
+ * browser is sent to sign in. With no `OYL_INSTANCE_ORIGIN` (no accounts), no
  * `OYL_INSTANCE_SECRET_KEY` (as every Operate route), no
  * `OYL_INSTANCE_OWNER_KEY`, or no account holding it, the pages say they are
  * unavailable and why, naming the variable and never its value.
@@ -32,37 +33,76 @@
  * with no `Max-Age`, carrying 32 random bytes; the store keeps only its
  * SHA-256 (`admin_session`). **15 minutes idle and 2 hours absolute,
  * enforced here from the row**, never by the cookie. A new token at every
- * sign-in, and a cookie already held is never adopted. A code session can
- * read; it changes nothing (ADR 0069 D-1, the owner's Q-A answer), and
- * this issue adds no change for it to make.
+ * sign-in, and a cookie already held is never adopted.
+ *
+ * ## Passkeys (#2642, ADR 0069 D-1, and the owner's answers to Q-A and Q-C)
+ *
+ * - **A code session can read every page and enrol ONE passkey**, and
+ *   nothing else, on either listener (Q-A: no). Enrolling ends it, and the
+ *   owner signs in with the new passkey, which proves it works.
+ * - **The RP ID is the host of `OYL_INSTANCE_ORIGIN`** and the origin is
+ *   checked exactly; a passkey whose stored RP ID is another host stays
+ *   listed, marked not usable here, until it is revoked. `userVerification:
+ *   'required'`, `attestation: 'none'`, Ed25519 and ES256 only, at most ten.
+ *   The verifier is `webauthn.ts`, by hand against WebCrypto (D-6).
+ * - **A passkey is bound to the `OYL_INSTANCE_OWNER_KEY` it was enrolled
+ *   under**: once the operator names another key, it signs nobody in until
+ *   it is revoked, as a session of the old key ends (the epic's owner-only
+ *   constraint, read for passkeys).
+ * - **A passkey enrolled through the tunnel reads, and changes nothing,
+ *   until `operator admin-passkeys confirm <id>` is run on the host** (Q-C,
+ *   limit 2): an edge that substituted its own credential at enrolment
+ *   cannot confirm it.
+ * - **Every change needs a fresh step-up** (D-4, `step-up.ts`): an assertion
+ *   by a CONFIRMED passkey, in the same `POST`, over a challenge the instance
+ *   issued for this session, for that action and the SHA-256 of its fields,
+ *   single use, two minutes. Revoking a passkey is the one change this issue
+ *   adds; it ends every session that passkey opened.
+ *
+ * ## Two listeners (#2643, ADR 0069 D-4, D-5)
+ *
+ * The main one, through the tunnel: origin `OYL_INSTANCE_ORIGIN`, cookie
+ * `__Host-oyl-admin`, RP ID its host, log source `admin_tunnel`. And, when
+ * `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` is set, the loopback one: origin
+ * `http://localhost:<port>`, cookie {@link LOOPBACK_COOKIE}, RP ID
+ * `localhost`, source `admin_loopback`. Which one a request came in on is
+ * `ClientInfo.listener`, written by the adapter that owns the listener and
+ * never by a header or a peer address; a session or a passkey of one is
+ * nothing on the other. ⚠️ The loopback listener grants NOTHING the tunnel
+ * does not — a passkey enrolled there needs the host's confirm too — because
+ * on Docker Desktop the tunnel container can reach it
+ * (docs/operating-an-instance.md, "Admin pages on the server machine").
+ * The optional `OYL_INSTANCE_ADMIN_ADDRESSES` refuses a TUNNEL sign-in from
+ * any address it does not list, before the code is looked at.
  *
  * ## CSRF: three layers (ADR 0069 D-4)
  *
  * `SameSite=Strict`; a synchronizer token in every form of a session, refused
  * when absent or another session's; and every `POST` refused unless its
  * `Origin` is exactly `OYL_INSTANCE_ORIGIN` and its `Sec-Fetch-Site`, when
- * sent, is `same-origin`. The token is the SHA-256 of `oyl-admin-csrf:` and
+ * sent, is `same-origin` (the loopback listener's own origin there). The token is the SHA-256 of `oyl-admin-csrf:` and
  * the session's token — 256 bits nobody without the cookie can compute — so
  * the page can render it while the store keeps only ITS SHA-256 too. A
  * refused `POST` changes nothing. A `GET` changes nothing but the session's
  * own last-seen time.
  *
  * ⚠️ **`Host` is checked on every request** (DNS rebinding): it must be the
- * host of `OYL_INSTANCE_ORIGIN`, and any other is told which address to open,
+ * host of `OYL_INSTANCE_ORIGIN` — `localhost:<port>` on the loopback
+ * listener — and any other is told which address to open,
  * with no form and no session read.
  *
  * ## Rate limits and the log
  *
- * Sign-in attempts: at most 10 a minute per client address (the address the
- * Node listener read through `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` from a
- * trusted proxy) and 30 a minute in all (ADR 0069 D-4, which sets these over
- * the issue's 5 a minute and 20 an hour), counted before any code is looked
- * up. Every sign-in is an `admin_sign_in` entry in the operator log, in the
- * same transaction as the code and the session. Refusals are counted in
- * memory, by kind, and {@link Admin.flushRefusals} writes at most one
- * `admin_refused` entry per kind with the count: `instance.ts` runs it every
- * minute and as the instance stops, so a flood cannot grow the append-only
- * log without bound, and a crash loses at most a minute's counts.
+ * Sign-in attempts — a code redeemed, a passkey sign-in begun or finished:
+ * at most 10 a minute per client address and 30 a minute in all (ADR 0069
+ * D-4); step-up challenges at most 30 a minute per session. Every sign-in is
+ * an `admin_sign_in` entry, every enrolment an `admin_passkey_enrolled` and
+ * every revocation an `admin_passkey_revoked`, each in the same transaction
+ * as its change. Refusals are counted in memory, by kind, and
+ * {@link Admin.flushRefusals} writes at most one `admin_refused` entry per
+ * kind with the count: `instance.ts` runs it every minute and as the
+ * instance stops, so a flood cannot grow the append-only log without bound,
+ * and a crash loses at most a minute's counts.
  *
  * ## The pages read the routes, never the store (#2645, ADR 0069 D-2)
  *
@@ -72,12 +112,13 @@
  * handed back: it is held to the shape the route writes
  * ({@link LOG_CURSOR}) before it is put into the path the seam is called
  * with, and the route checks it again. No other part of the browser's request
- * reaches the seam.
+ * reaches the seam. The Passkeys page is the one page drawn from the store:
+ * the passkeys are the admin layer's own (#2642), no route's.
  *
  * Nothing here renders a token, a code, a key or a coordinate.
  */
 
-import { randomToken, sha256Hex } from '../auth/crypto.ts';
+import { randomHex, randomToken, sha256Hex } from '../auth/crypto.ts';
 import type { Caller } from '../auth/identity.ts';
 import {
   addressKey,
@@ -90,24 +131,72 @@ import type { OperateStatusAnswer } from '@onyourleft/operate-text';
 import { escapeHtml } from '../html.ts';
 import type { ModeratorRole } from '../moderation/moderation.ts';
 import type { ClientInfo } from '../route-kit.ts';
-import type { AdminSessionRecord, SqlStore } from '../store/sql-store.ts';
+import type {
+  AdminPasskeyRecord,
+  AdminSessionRecord,
+  AdminSource,
+  OperatorChange,
+  SqlStore,
+} from '../store/sql-store.ts';
 import { ADMIN_LANDING, ADMIN_ROUTES } from './admin-routes.ts';
 import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
 import {
   adminPage,
   logBody,
+  passkeysBody,
   shellPage,
   signInPage,
   statusBody,
   type LogEntryAnswer,
   type LogView,
+  type PasskeyView,
   type ShellView,
+  type SignInNotice,
 } from './pages.ts';
+import { PASSKEY_SCRIPT } from './passkey-script.ts';
+import {
+  ADMIN_CHALLENGE_SECONDS,
+  ADMIN_CHANGES,
+  bindingOf,
+  boundFields,
+  isAdminChange,
+  type AdminChange,
+} from './step-up.ts';
 import { ADMIN_STYLE } from './style.ts';
+import {
+  challengeOf,
+  COSE_ALGORITHMS,
+  fromBase64Url,
+  MAX_CREDENTIAL_ID_BYTES,
+  verifyAssertion,
+  verifyRegistration,
+  WebAuthnRefused,
+  type AssertionResponse,
+} from './webauthn.ts';
 
 /** The session cookie's name on the tunnel listener (ADR 0069 D-4). */
 export const ADMIN_COOKIE = '__Host-oyl-admin';
+
+/**
+ * The session cookie's name on the loopback listener (#2643, ADR 0069 D-4):
+ * no `__Host-` prefix and no `Secure`, because WebKit 26.6 keeps neither on
+ * `http://localhost` — measured with `tools/admin-cookie-probe.ts`; Chromium
+ * 153, Chrome 157 and Firefox 155 keep both. The server checks the token,
+ * never the name.
+ */
+export const LOOPBACK_COOKIE = 'oyl-admin-loopback';
+
+/** Which listener a request came in on: the main one (through the tunnel), or the loopback one. */
+export type AdminListener = 'tunnel' | 'loopback';
+
+/** One listener's admin pages. */
+type AdminSeamHandler = (
+  request: Request,
+  body: Uint8Array | null | 'too-large',
+  client: ClientInfo,
+  seam: AdminSeam,
+) => Promise<Response>;
 
 /** A session not used for this long is over, in seconds. */
 export const ADMIN_IDLE_SECONDS = 15 * 60;
@@ -115,23 +204,37 @@ export const ADMIN_IDLE_SECONDS = 15 * 60;
 /** A session is over this long after it was opened, however it was used, in seconds. */
 export const ADMIN_LIFETIME_SECONDS = 2 * 60 * 60;
 
-/** The largest form an `/admin` `POST` may send, in bytes: a code or a token, and nothing more. */
+/**
+ * The largest form an `/admin` `POST` may send, in bytes: a code or a token,
+ * or a passkey ceremony's response: a credential id of the longest WebAuthn
+ * allows, its key and its client data come to about 2.2 KiB as base64url.
+ */
 export const ADMIN_FORM_LIMIT_BYTES = 4096;
+
+/** The most passkeys the owner may hold (ADR 0069 D-1). */
+export const MAX_ADMIN_PASSKEYS = 10;
+
+/** The longest name the owner may give a passkey, in characters. */
+export const PASSKEY_LABEL_LIMIT = 60;
 
 export interface AdminLimits {
   /** Sign-in attempts per client address. */
   readonly perAddress: RateLimit;
   /** Sign-in attempts from everybody together. */
   readonly overall: RateLimit;
+  /** Step-up challenges per session (#2642); 30 a minute unless a test sets its own. */
+  readonly stepUpPerSession?: RateLimit;
 }
 
-export const DEFAULT_ADMIN_LIMITS: AdminLimits = {
+export const DEFAULT_ADMIN_LIMITS: Required<AdminLimits> = {
   perAddress: { limit: 10, windowMs: 60_000 },
   overall: { limit: 30, windowMs: 60_000 },
+  stepUpPerSession: { limit: 30, windowMs: 60_000 },
 };
 
 /** What a refusal is counted as, in its `admin_refused` entry. */
-export type AdminRefusal = 'code' | 'csrf' | 'origin' | 'rate_limited';
+export type AdminRefusal =
+  'address' | 'code' | 'passkey' | 'step_up' | 'counter' | 'csrf' | 'origin' | 'rate_limited';
 
 /**
  * The seam ADR 0069 D-2 decides: a route of the table called IN-PROCESS, as
@@ -159,6 +262,19 @@ export interface AdminOptions {
   /** What the operator calls the instance, or `null`. */
   readonly name: string | null;
   readonly limits?: AdminLimits;
+  /**
+   * `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` (#2643, ADR 0069 D-5): the port the
+   * loopback listener is on, and so its origin `http://localhost:<port>` —
+   * or `undefined`, and there is none.
+   */
+  readonly loopbackPort?: number;
+  /**
+   * `OYL_INSTANCE_ADMIN_ADDRESSES` (#2643, ADR 0069 D-5): the only client
+   * addresses a TUNNEL sign-in is taken from, read through the trusted
+   * proxies; empty or absent, any. Defence in depth for a widened WAF rule,
+   * not against the edge.
+   */
+  readonly addresses?: readonly string[];
 }
 
 export interface Admin {
@@ -191,6 +307,10 @@ function htmlAnswer(
 ): Response {
   return adminResponse(adminPage(title, body), status, { ...HTML, ...extra });
 }
+
+/** A ceremony's options, or its refusal, for the page's own script. */
+const jsonAnswer = (value: unknown, status: number): Response =>
+  adminResponse(JSON.stringify(value), status, { 'content-type': 'application/json' });
 
 const seeOther = (location: string, extra: Readonly<Record<string, string>> = {}): Response =>
   adminResponse(null, 303, { location, ...extra });
@@ -257,14 +377,60 @@ function sameText(a: string, b: string): boolean {
 /** The session's synchronizer token, from its cookie's token (see the header). */
 const csrfOf = (token: string): Promise<string> => sha256Hex(`oyl-admin-csrf:${token}`);
 
-const cookieFor = (token: string): string =>
-  `${ADMIN_COOKIE}=${token}; Secure; HttpOnly; SameSite=Strict; Path=/`;
-const CLEARED_COOKIE = `${ADMIN_COOKIE}=; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
-
 /** The form fields of a `POST`, or none. */
 function formOf(body: Uint8Array | null): URLSearchParams {
   return new URLSearchParams(body === null ? '' : new TextDecoder().decode(body));
 }
+
+/** A field sent once, or `undefined`. */
+function single(form: URLSearchParams, name: string): string | undefined {
+  const values = form.getAll(name);
+  return values.length === 1 ? values[0] : undefined;
+}
+
+/** The base64url of the longest credential id. */
+const MAX_CREDENTIAL_ID_TEXT = Math.ceil((MAX_CREDENTIAL_ID_BYTES * 4) / 3);
+
+/** An assertion as the page's script submits it, decoded; `undefined` when it is not one. */
+function assertionFrom(
+  form: URLSearchParams,
+): { readonly credentialId: string; readonly response: AssertionResponse } | undefined {
+  const credentialId = single(form, 'credential');
+  const parts = ['clientDataJSON', 'authenticatorData', 'signature'].map((name) => {
+    const text = single(form, name);
+    return text === undefined ? undefined : fromBase64Url(text);
+  });
+  const [clientDataJSON, authenticatorData, signature] = parts;
+  if (
+    credentialId === undefined ||
+    credentialId.length === 0 ||
+    credentialId.length > MAX_CREDENTIAL_ID_TEXT ||
+    fromBase64Url(credentialId) === undefined ||
+    clientDataJSON === undefined ||
+    authenticatorData === undefined ||
+    signature === undefined
+  ) {
+    return undefined;
+  }
+  return { credentialId, response: { clientDataJSON, authenticatorData, signature } };
+}
+
+/** A passkey's name as the owner typed it: trimmed, 1 to 60 characters, no control character. */
+function labelFrom(form: URLSearchParams): string | undefined {
+  const label = single(form, 'label')?.trim();
+  if (label === undefined || label.length === 0 || [...label].length > PASSKEY_LABEL_LIMIT) {
+    return undefined;
+  }
+  // C0, DEL, C1 (the 8-bit CSI among them) and the bidi controls: the CLI prints a label on the host's terminal.
+  // eslint-disable-next-line no-control-regex -- the control characters are what is refused
+  return /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(label)
+    ? undefined
+    : label;
+}
+
+/** A passkey id as {@link randomHex} writes 8 bytes. */
+const PASSKEY_ID = /^[0-9a-f]{16}$/;
+const REVOKE_PATH = /^\/admin\/passkeys\/([^/]+)\/revoke$/;
 
 /** The paths the admin layer answers, and the methods each takes: the admin route table's. */
 const METHODS: ReadonlyMap<string, readonly string[]> = new Map(
@@ -283,15 +449,16 @@ const LOG_CURSOR = /^[A-Za-z0-9_-]{1,128}$/;
 
 export function createAdmin(options: AdminOptions): Admin {
   const { store } = options;
-  const limits = options.limits ?? DEFAULT_ADMIN_LIMITS;
+  const limits = { ...DEFAULT_ADMIN_LIMITS, ...options.limits };
   const perAddress = createRateLimiter(limits.perAddress, options.now);
   const overall = createRateLimiter(limits.overall, options.now);
+  const stepUps = createRateLimiter(limits.stepUpPerSession, options.now);
   const seconds = (): number => Math.floor(options.now() / 1000);
   const expected = options.origin === null ? null : new URL(options.origin);
-  const refused = new Map<AdminRefusal, number>();
-  const refuse = (kind: AdminRefusal): void => {
-    refused.set(kind, (refused.get(kind) ?? 0) + 1);
-  };
+  /** Refusals since the last flush, by listener's source and kind. */
+  const refused = new Map<`${AdminSource}:${AdminRefusal}`, number>();
+  const title = options.name === null ? 'this instance' : options.name;
+  const allowed = new Set((options.addresses ?? []).map((address) => addressKey(address)));
 
   async function ownerNow(): Promise<Owner | Unavailable> {
     if (expected === null || options.roleOf === undefined) return 'origin';
@@ -315,66 +482,6 @@ export function createAdmin(options: AdminOptions): Admin {
             : 'active',
     };
   }
-
-  /** The presented cookie's token and its hash, when it is the shape of one. */
-  async function presented(request: Request): Promise<{ token: string; sha: string } | undefined> {
-    const token = cookieValue(request.headers.get('cookie'), ADMIN_COOKIE);
-    if (token === undefined || !TOKEN.test(token)) return undefined;
-    return { token, sha: await sha256Hex(token) };
-  }
-
-  /**
-   * The live session the request carries, its idle clock restarted; or
-   * `undefined`, and a session that is over — idle, too old, or no longer
-   * the current owner's — is ended on the way.
-   */
-  async function sessionOf(
-    request: Request,
-    owner: Owner,
-  ): Promise<{ readonly record: AdminSessionRecord; readonly token: string } | undefined> {
-    const cookie = await presented(request);
-    if (cookie === undefined) return undefined;
-    const record = await store.findAdminSession(cookie.sha);
-    if (record === undefined) return undefined;
-    const at = seconds();
-    const live =
-      record.expiresAt > at &&
-      record.lastSeenAt + ADMIN_IDLE_SECONDS > at &&
-      record.listener === 'tunnel' &&
-      record.ownerKey === owner.ownerKey &&
-      record.athleteId === owner.athleteId;
-    if (!live) {
-      await store.endAdminSession(cookie.sha);
-      return undefined;
-    }
-    await store.touchAdminSession(cookie.sha, at);
-    return { record, token: cookie.token };
-  }
-
-  /** Layer 3: the request came from this origin's own page. */
-  function fromOurPage(request: Request): boolean {
-    if (expected === null || request.headers.get('origin') !== expected.origin) return false;
-    const site = request.headers.get('sec-fetch-site');
-    return site === null || site === 'same-origin';
-  }
-
-  const signInAnswer = (problem: boolean, status: number): Response =>
-    adminResponse(signInPage(options.name, problem), status, HTML);
-
-  const refusedForm = (): Response =>
-    htmlAnswer(
-      'Not accepted',
-      '<h1>That form was not accepted</h1>\n<p>It did not come from this instance’s own admin page, so nothing was changed. <a href="/admin">Go back to the admin pages</a> and try again.</p>',
-      403,
-    );
-
-  /** The owner as the seam calls a route for them, in this session. */
-  const callerOf = (owner: Owner, session: AdminSessionRecord): Caller => ({
-    athleteId: owner.athleteId,
-    deviceKey: owner.ownerKey,
-    tokenSha256: session.tokenSha256,
-    standing: owner.standing,
-  });
 
   /** The route's JSON when it answered 200, or `undefined`. */
   async function read(
@@ -465,123 +572,792 @@ export function createAdmin(options: AdminOptions): Admin {
     return shellPage(shell, 'Operator log', logBody(shown));
   }
 
-  async function signedInPage(
-    path: string,
-    url: URL,
-    owner: Owner,
-    session: { readonly record: AdminSessionRecord; readonly token: string },
-    client: ClientInfo,
-    seam: AdminSeam,
-  ): Promise<Response> {
-    const shell = {
-      name: options.name,
-      path,
-      strength: session.record.strength,
-      listener: session.record.listener,
-      csrf: await csrfOf(session.token),
+  /**
+   * The admin pages as one listener serves them (#2643, ADR 0069 D-4, D-5):
+   * its origin, `Host`, RP ID, cookie and operator log source. A session or
+   * a passkey of one listener is nothing on the other. `origin` is the
+   * tunnel's `OYL_INSTANCE_ORIGIN`, set: {@link Admin.handle} says the pages
+   * are unavailable without it before it gets here.
+   */
+  function placeFor(listener: AdminListener, origin: URL): AdminSeamHandler {
+    const loopbackPort = options.loopbackPort;
+    if (listener === 'loopback' && loopbackPort === undefined) {
+      // The adapter marks a request loopback only when it owns that listener,
+      // which exists only with a port; never mix the tunnel's origin in.
+      throw new Error('a loopback admin request arrived with no loopback port configured');
+    }
+    const place =
+      listener === 'loopback'
+        ? {
+            origin: `http://localhost:${String(loopbackPort)}`,
+            host: `localhost:${String(loopbackPort)}`,
+            rpId: 'localhost',
+          }
+        : { origin: origin.origin, host: origin.host, rpId: origin.hostname };
+    const source: AdminSource = listener === 'loopback' ? 'admin_loopback' : 'admin_tunnel';
+    const cookieName = listener === 'loopback' ? LOOPBACK_COOKIE : ADMIN_COOKIE;
+    // The tunnel's is `__Host-` and `Secure`; the loopback's neither, because
+    // WebKit keeps neither on `http://localhost` (#2643's probe).
+    const attributes =
+      listener === 'loopback'
+        ? 'HttpOnly; SameSite=Strict; Path=/'
+        : 'Secure; HttpOnly; SameSite=Strict; Path=/';
+    const cookieFor = (token: string): string => `${cookieName}=${token}; ${attributes}`;
+    const CLEARED_COOKIE = `${cookieName}=; ${attributes}; Max-Age=0`;
+    const refuse = (kind: AdminRefusal): void => {
+      const key = `${source}:${kind}` as const;
+      refused.set(key, (refused.get(key) ?? 0) + 1);
     };
-    const view = { caller: callerOf(owner, session.record), client, seam };
-    if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
-    if (path === '/admin/log') {
-      return adminResponse(await logPage(view, shell, url.searchParams.get('cursor')), 200, HTML);
-    }
-    // A page in the route table with no renderer here is a defect, not a page.
-    throw new Error('an admin page with no renderer');
-  }
 
-  async function signIn(
-    request: Request,
-    body: Uint8Array | null,
-    owner: Owner,
-    client: ClientInfo,
-  ): Promise<Response> {
-    if (!fromOurPage(request)) {
-      refuse('origin');
-      return refusedForm();
+    /** The presented cookie's token and its hash, when it is the shape of one. */
+    async function presented(
+      request: Request,
+    ): Promise<{ token: string; sha: string } | undefined> {
+      const token = cookieValue(request.headers.get('cookie'), cookieName);
+      if (token === undefined || !TOKEN.test(token)) return undefined;
+      return { token, sha: await sha256Hex(token) };
     }
-    // Counted before any code is looked at, so a flood never reaches the store.
-    const addressAllowed = perAddress.allow(addressKey(client.address ?? 'unknown'));
-    if (!addressAllowed || !overall.allow('all')) {
-      refuse('rate_limited');
-      return htmlAnswer(
+
+    interface Session {
+      readonly record: AdminSessionRecord;
+      readonly token: string;
+    }
+
+    /**
+     * The live session the request carries, its idle clock restarted; or
+     * `undefined`, and a session that is over — idle, too old, or no longer
+     * the current owner's — is ended on the way.
+     */
+    async function sessionOf(request: Request, owner: Owner): Promise<Session | undefined> {
+      const cookie = await presented(request);
+      if (cookie === undefined) return undefined;
+      const record = await store.findAdminSession(cookie.sha);
+      if (record === undefined) return undefined;
+      const at = seconds();
+      const live =
+        record.expiresAt > at &&
+        record.lastSeenAt + ADMIN_IDLE_SECONDS > at &&
+        record.listener === listener &&
+        record.ownerKey === owner.ownerKey &&
+        record.athleteId === owner.athleteId;
+      if (!live) {
+        await store.endAdminSession(cookie.sha);
+        return undefined;
+      }
+      await store.touchAdminSession(cookie.sha, at);
+      return { record, token: cookie.token };
+    }
+
+    /** Layer 3: the request came from this origin's own page. */
+    function fromOurPage(request: Request): boolean {
+      if (request.headers.get('origin') !== place.origin) return false;
+      const site = request.headers.get('sec-fetch-site');
+      return site === null || site === 'same-origin';
+    }
+
+    /** The WebAuthn RP ID and origin of this listener (ADR 0069 D-1). */
+    function relyingParty(): { readonly rpId: string; readonly origin: string } {
+      return { rpId: place.rpId, origin: place.origin };
+    }
+
+    /** A sign-in attempt counted, per address and in all, BEFORE anything is looked up. */
+    function attemptAllowed(client: ClientInfo): boolean {
+      const addressAllowed = perAddress.allow(addressKey(client.address ?? 'unknown'));
+      return addressAllowed && overall.allow('all');
+    }
+
+    /**
+     * The optional allowlist (ADR 0069 D-5): a TUNNEL sign-in only from an
+     * address `OYL_INSTANCE_ADMIN_ADDRESSES` names, read through the trusted
+     * proxies; the loopback listener is not asked. Checked before any code or
+     * passkey is looked at.
+     */
+    function addressListed(client: ClientInfo): boolean {
+      if (listener === 'loopback' || allowed.size === 0) return true;
+      return client.address !== null && allowed.has(addressKey(client.address));
+    }
+
+    const notListed = (): Response =>
+      htmlAnswer(
+        'Not from here',
+        '<h1>Not signed in</h1>\n<p>This instance takes an admin sign-in through the tunnel only from the addresses its operator listed. Sign in on the server machine instead.</p>',
+        403,
+      );
+
+    const tooMany = (): Response =>
+      htmlAnswer(
         'Too many attempts',
         '<h1>Too many sign-in attempts</h1>\n<p>Wait a minute, then <a href="/admin/sign-in">try again</a>.</p>',
         429,
         { 'retry-after': '60' },
       );
-    }
-    const codeSha256 = await adminCodeSha256(formOf(body).get('code') ?? '');
-    const at = seconds();
-    const token = randomToken(32);
-    const opened =
-      codeSha256 === undefined
-        ? 'refused'
-        : await store.openAdminSessionWithCode({
-            codeSha256,
-            source: 'admin_tunnel',
-            idleSeconds: ADMIN_IDLE_SECONDS,
-            session: {
-              tokenSha256: await sha256Hex(token),
-              athleteId: owner.athleteId,
-              ownerKey: owner.ownerKey,
-              listener: 'tunnel',
-              strength: 'code',
-              csrfSha256: await sha256Hex(await csrfOf(token)),
-              createdAt: at,
-              lastSeenAt: at,
-              expiresAt: at + ADMIN_LIFETIME_SECONDS,
-            },
-          });
-    if (opened === 'refused') {
-      refuse('code');
-      return signInAnswer(true, 400);
-    }
-    // A session this browser held before is never carried on (no fixation).
-    const before = await presented(request);
-    if (before !== undefined) await store.endAdminSession(before.sha);
-    return seeOther(ADMIN_LANDING, { 'set-cookie': cookieFor(token) });
-  }
 
-  async function signOut(
-    request: Request,
-    body: Uint8Array | null,
-    owner: Owner,
-  ): Promise<Response> {
-    if (!fromOurPage(request)) {
-      refuse('origin');
-      return refusedForm();
-    }
-    const session = await sessionOf(request, owner);
-    if (session === undefined) return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
-    const sent = formOf(body).get('csrf');
-    if (sent === null || !sameText(await sha256Hex(sent), session.record.csrfSha256)) {
-      refuse('csrf');
-      return refusedForm();
-    }
-    await store.endAdminSession(session.record.tokenSha256);
-    return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
-  }
+    const signInAnswer = (notice: SignInNotice, status: number): Response =>
+      adminResponse(signInPage(options.name, notice), status, HTML);
 
-  return {
-    async handle(request, body, client, seam) {
-      if (expected === null) {
-        return htmlAnswer(
-          'Unavailable',
-          `<h1>The admin pages are unavailable</h1>\n<p>${escapeHtml(UNAVAILABLE.origin)}</p>`,
-          503,
+    const refusedForm = (): Response =>
+      htmlAnswer(
+        'Not accepted',
+        '<h1>That form was not accepted</h1>\n<p>It did not come from this instance’s own admin page, so nothing was changed. <a href="/admin">Go back to the admin pages</a> and try again.</p>',
+        403,
+      );
+
+    const nothingChanged = (status: number, why: string): Response =>
+      htmlAnswer(
+        'Nothing changed',
+        `<h1>Nothing was changed</h1>\n<p>${escapeHtml(why)}</p>\n<p><a href="/admin/passkeys">Go back to the passkeys</a>.</p>`,
+        status,
+      );
+
+    /**
+     * A `POST` of a signed-in page: from this origin's page, in a live session,
+     * carrying that session's CSRF token — or the answer that refuses it, having
+     * changed nothing.
+     */
+    async function signedInPost(
+      request: Request,
+      form: URLSearchParams,
+      owner: Owner,
+    ): Promise<Session | Response> {
+      if (!fromOurPage(request)) {
+        refuse('origin');
+        return refusedForm();
+      }
+      const session = await sessionOf(request, owner);
+      if (session === undefined)
+        return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
+      const sent = single(form, 'csrf');
+      if (sent === undefined || !sameText(await sha256Hex(sent), session.record.csrfSha256)) {
+        refuse('csrf');
+        return refusedForm();
+      }
+      return session;
+    }
+
+    /** The shell's view of this session, for the page at `path`. */
+    async function shellOf(path: string, session: Session): Promise<ShellView> {
+      return {
+        name: options.name,
+        path,
+        strength: session.record.strength,
+        listener: session.record.listener,
+        csrf: await csrfOf(session.token),
+      };
+    }
+
+    /** The owner as the seam calls a route for them, in this session. */
+    const callerOf = (owner: Owner, session: Session): Caller => ({
+      athleteId: owner.athleteId,
+      deviceKey: owner.ownerKey,
+      tokenSha256: session.record.tokenSha256,
+      standing: owner.standing,
+    });
+
+    async function signedInPage(
+      path: string,
+      url: URL,
+      owner: Owner,
+      session: Session,
+      client: ClientInfo,
+      seam: AdminSeam,
+    ): Promise<Response> {
+      if (path === '/admin/passkeys') return passkeysPage(owner, session);
+      const shell = await shellOf(path, session);
+      const view = { caller: callerOf(owner, session), client, seam };
+      if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/log') {
+        return adminResponse(await logPage(view, shell, url.searchParams.get('cursor')), 200, HTML);
+      }
+      // A page in the route table with no renderer here is a defect, not a page.
+      throw new Error('an admin page with no renderer');
+    }
+
+    async function signIn(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+    ): Promise<Response> {
+      if (!fromOurPage(request)) {
+        refuse('origin');
+        return refusedForm();
+      }
+      if (!addressListed(client)) {
+        refuse('address');
+        return notListed();
+      }
+      // Counted before any code is looked at, so a flood never reaches the store.
+      if (!attemptAllowed(client)) {
+        refuse('rate_limited');
+        return tooMany();
+      }
+      const codeSha256 = await adminCodeSha256(formOf(body).get('code') ?? '');
+      const at = seconds();
+      const token = randomToken(32);
+      const opened =
+        codeSha256 === undefined
+          ? 'refused'
+          : await store.openAdminSessionWithCode({
+              codeSha256,
+              source,
+              idleSeconds: ADMIN_IDLE_SECONDS,
+              session: await newSession(owner, token, 'code', at),
+            });
+      if (opened === 'refused') {
+        refuse('code');
+        return signInAnswer('code-refused', 400);
+      }
+      return signedIn(request, token);
+    }
+
+    async function newSession(
+      owner: Owner,
+      token: string,
+      strength: AdminSessionRecord['strength'],
+      at: number,
+    ): Promise<AdminSessionRecord> {
+      return {
+        tokenSha256: await sha256Hex(token),
+        athleteId: owner.athleteId,
+        ownerKey: owner.ownerKey,
+        listener,
+        strength,
+        csrfSha256: await sha256Hex(await csrfOf(token)),
+        createdAt: at,
+        lastSeenAt: at,
+        expiresAt: at + ADMIN_LIFETIME_SECONDS,
+      };
+    }
+
+    /** The browser sent to the landing page with its new cookie; a session it held before is ended. */
+    async function signedIn(request: Request, token: string): Promise<Response> {
+      // A session this browser held before is never carried on (no fixation).
+      const before = await presented(request);
+      if (before !== undefined) await store.endAdminSession(before.sha);
+      return seeOther(ADMIN_LANDING, { 'set-cookie': cookieFor(token) });
+    }
+
+    /** A new challenge: what the browser signs, and the SHA-256 the store keeps. */
+    async function newChallenge(): Promise<{ readonly challenge: string; readonly sha: string }> {
+      const challenge = randomToken(32);
+      return { challenge, sha: await sha256Hex(challenge) };
+    }
+
+    /**
+     * Whether `passkey` may make an assertion here: enrolled for this RP ID by
+     * the owner key that is the owner now, and for a change, confirmed.
+     */
+    function usableHere(passkey: AdminPasskeyRecord, owner: Owner, forChange: boolean): boolean {
+      return (
+        passkey.rpId === relyingParty().rpId &&
+        passkey.ownerKey === owner.ownerKey &&
+        (!forChange || passkey.confirmedAt !== null)
+      );
+    }
+
+    /** The passkeys an assertion may be made with here. */
+    async function usable(
+      owner: Owner,
+      forChange: boolean,
+    ): Promise<readonly AdminPasskeyRecord[]> {
+      return (await store.listAdminPasskeys()).filter((passkey) =>
+        usableHere(passkey, owner, forChange),
+      );
+    }
+
+    async function passkeySignInOptions(
+      request: Request,
+      owner: Owner,
+      client: ClientInfo,
+    ): Promise<Response> {
+      if (!fromOurPage(request)) {
+        refuse('origin');
+        return jsonAnswer({ error: 'refused' }, 403);
+      }
+      if (!addressListed(client)) {
+        refuse('address');
+        return jsonAnswer({ error: 'address' }, 403);
+      }
+      if (!attemptAllowed(client)) {
+        refuse('rate_limited');
+        return jsonAnswer({ error: 'rate_limited' }, 429);
+      }
+      const at = seconds();
+      const { challenge, sha } = await newChallenge();
+      await store.issueAdminChallenge(
+        {
+          challengeSha256: sha,
+          purpose: 'sign_in',
+          sessionSha256: null,
+          action: null,
+          fieldsSha256: null,
+          userHandle: null,
+          expiresAt: at + ADMIN_CHALLENGE_SECONDS,
+        },
+        at,
+      );
+      return jsonAnswer(
+        {
+          challenge,
+          rpId: relyingParty().rpId,
+          allowCredentials: (await usable(owner, false)).map((passkey) => passkey.credentialId),
+          timeout: ADMIN_CHALLENGE_SECONDS * 1000,
+        },
+        200,
+      );
+    }
+
+    /**
+     * An assertion verified against the passkey it names, for `challenge`
+     * (base64url) — or the refusal's kind. Every check is the verifier's; this
+     * finds the passkey, here, at this RP ID.
+     */
+    async function verified(
+      assertion: { readonly credentialId: string; readonly response: AssertionResponse },
+      challenge: string,
+      owner: Owner,
+      forChange: boolean,
+    ): Promise<
+      { readonly passkey: AdminPasskeyRecord; readonly signCount: number } | AdminRefusal
+    > {
+      const party = relyingParty();
+      const passkey = await store.findAdminPasskeyByCredential(assertion.credentialId);
+      if (passkey === undefined || !usableHere(passkey, owner, false)) return 'passkey';
+      // ADR 0069 Q-C: a tunnel passkey changes nothing until the host confirmed it.
+      if (forChange && !usableHere(passkey, owner, true)) return 'step_up';
+      try {
+        const { signCount } = await verifyAssertion(assertion.response, passkey, {
+          ...party,
+          challenge,
+        });
+        return { passkey, signCount };
+      } catch (error) {
+        if (error instanceof WebAuthnRefused)
+          return error.reason === 'counter' ? 'counter' : 'passkey';
+        throw error;
+      }
+    }
+
+    /** The challenge a response names, or `undefined` when it names none. */
+    function namedChallenge(clientDataJSON: Uint8Array): string | undefined {
+      try {
+        return challengeOf(clientDataJSON);
+      } catch (error) {
+        if (error instanceof WebAuthnRefused) return undefined;
+        throw error;
+      }
+    }
+
+    async function passkeySignIn(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+    ): Promise<Response> {
+      if (!fromOurPage(request)) {
+        refuse('origin');
+        return refusedForm();
+      }
+      if (!addressListed(client)) {
+        refuse('address');
+        return notListed();
+      }
+      if (!attemptAllowed(client)) {
+        refuse('rate_limited');
+        return tooMany();
+      }
+      const at = seconds();
+      const assertion = assertionFrom(formOf(body));
+      const challenge =
+        assertion === undefined ? undefined : namedChallenge(assertion.response.clientDataJSON);
+      // Taken, once, whatever the rest of the answer is (past the session and label checks).
+      const issued =
+        challenge === undefined
+          ? undefined
+          : await store.takeAdminChallenge(
+              'sign_in',
+              { challengeSha256: await sha256Hex(challenge) },
+              at,
+            );
+      if (assertion === undefined || challenge === undefined || issued === undefined) {
+        refuse('passkey');
+        return signInAnswer('passkey-refused', 400);
+      }
+      const proved = await verified(assertion, challenge, owner, false);
+      if (typeof proved === 'string') {
+        refuse(proved);
+        return signInAnswer('passkey-refused', 400);
+      }
+      const token = randomToken(32);
+      const opened = await store.openAdminSessionWithPasskey({
+        passkeyId: proved.passkey.id,
+        signCountWas: proved.passkey.signCount,
+        signCount: proved.signCount,
+        source,
+        idleSeconds: ADMIN_IDLE_SECONDS,
+        session: await newSession(owner, token, 'passkey', at),
+      });
+      if (opened === 'refused') {
+        refuse('counter');
+        return signInAnswer('passkey-refused', 400);
+      }
+      return signedIn(request, token);
+    }
+
+    async function signOut(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+    ): Promise<Response> {
+      const session = await signedInPost(request, formOf(body), owner);
+      if (session instanceof Response) return session;
+      await store.endAdminSession(session.record.tokenSha256);
+      return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
+    }
+
+    async function passkeysPage(owner: Owner, session: Session): Promise<Response> {
+      const { rpId } = relyingParty();
+      const passkeys = (await store.listAdminPasskeys()).map((passkey): PasskeyView => ({
+        id: passkey.id,
+        label: passkey.label,
+        enrolledAt: passkey.enrolledAt,
+        lastUsedAt: passkey.lastUsedAt,
+        rpId: passkey.rpId,
+        standing:
+          passkey.ownerKey !== owner.ownerKey
+            ? 'other-owner'
+            : passkey.rpId !== rpId
+              ? 'other-host'
+              : passkey.confirmedAt === null
+                ? 'unconfirmed'
+                : 'confirmed',
+      }));
+      const shell = await shellOf('/admin/passkeys', session);
+      const body = passkeysBody({
+        passkeys,
+        rpId,
+        strength: session.record.strength,
+        csrf: shell.csrf,
+        max: MAX_ADMIN_PASSKEYS,
+        labelLimit: PASSKEY_LABEL_LIMIT,
+      });
+      return adminResponse(shellPage(shell, 'Passkeys', body, true), 200, HTML);
+    }
+
+    async function enrolOptions(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+    ): Promise<Response> {
+      const session = await signedInPost(request, formOf(body), owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'code') {
+        refuse('passkey');
+        return jsonAnswer({ error: 'not_a_code_session' }, 403);
+      }
+      const held = await store.listAdminPasskeys();
+      if (held.length >= MAX_ADMIN_PASSKEYS) return jsonAnswer({ error: 'full' }, 409);
+      const at = seconds();
+      const { challenge, sha } = await newChallenge();
+      // One random handle for the instance's owner, never an athlete id (ADR 0069 D-1).
+      const userHandle = held[0]?.userHandle ?? randomToken(16);
+      await store.issueAdminChallenge(
+        {
+          challengeSha256: sha,
+          purpose: 'enrol',
+          sessionSha256: session.record.tokenSha256,
+          action: null,
+          fieldsSha256: null,
+          userHandle,
+          expiresAt: at + ADMIN_CHALLENGE_SECONDS,
+        },
+        at,
+      );
+      const { rpId } = relyingParty();
+      return jsonAnswer(
+        {
+          challenge,
+          rpId,
+          rpName: title,
+          userHandle,
+          algorithms: [COSE_ALGORITHMS.ed25519, COSE_ALGORITHMS.es256],
+          excludeCredentials: held
+            .filter((passkey) => passkey.rpId === rpId)
+            .map((passkey) => passkey.credentialId),
+          timeout: ADMIN_CHALLENGE_SECONDS * 1000,
+        },
+        200,
+      );
+    }
+
+    async function enrol(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+    ): Promise<Response> {
+      const form = formOf(body);
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'code') {
+        refuse('passkey');
+        return nothingChanged(403, 'A passkey is added from a one-time code’s session.');
+      }
+      const label = labelFrom(form);
+      if (label === undefined) {
+        return nothingChanged(400, 'A passkey’s name is 1 to 60 characters.');
+      }
+      const at = seconds();
+      // Taken, once, whatever the rest of the answer is (past the session and label checks).
+      const issued = await store.takeAdminChallenge(
+        'enrol',
+        { sessionSha256: session.record.tokenSha256 },
+        at,
+      );
+      const clientDataJSON = fromBase64Url(single(form, 'clientDataJSON') ?? '');
+      const attestationObject = fromBase64Url(single(form, 'attestationObject') ?? '');
+      const challenge = clientDataJSON === undefined ? undefined : namedChallenge(clientDataJSON);
+      if (
+        issued === undefined ||
+        issued.userHandle === null ||
+        clientDataJSON === undefined ||
+        attestationObject === undefined ||
+        challenge === undefined ||
+        (await sha256Hex(challenge)) !== issued.challengeSha256
+      ) {
+        refuse('passkey');
+        return nothingChanged(
+          400,
+          'The passkey was not added: the browser’s answer was not accepted.',
         );
       }
-      // Against DNS rebinding: the page is this origin's, or it is not served.
-      if (request.headers.get('host') !== expected.host) {
+      let registration: Awaited<ReturnType<typeof verifyRegistration>>;
+      try {
+        registration = await verifyRegistration(
+          { clientDataJSON, attestationObject },
+          { ...relyingParty(), challenge },
+        );
+      } catch (error) {
+        if (!(error instanceof WebAuthnRefused)) throw error;
+        refuse('passkey');
+        return nothingChanged(
+          400,
+          'The passkey was not added: the browser’s answer was not accepted.',
+        );
+      }
+      const userHandle = issued.userHandle;
+      const { value } = await store.recordOperatorAction(
+        {
+          actor: { source, athleteId: owner.athleteId },
+          action: 'admin_passkey_enrolled',
+          at,
+        },
+        async (inside): Promise<OperatorChange<'enrolled' | 'refused'>> => {
+          const held = await inside.listAdminPasskeys();
+          const live = await inside.findAdminSession(session.record.tokenSha256);
+          if (
+            held.length >= MAX_ADMIN_PASSKEYS ||
+            held.some((passkey) => passkey.credentialId === registration.credentialId) ||
+            live === undefined
+          ) {
+            return { outcome: 'refused', detail: null, value: 'refused' };
+          }
+          await inside.addAdminPasskey({
+            id: randomHex(8),
+            credentialId: registration.credentialId,
+            rpId: relyingParty().rpId,
+            algorithm: registration.algorithm,
+            publicKey: registration.publicKey,
+            signCount: registration.signCount,
+            userHandle,
+            ownerKey: owner.ownerKey,
+            label,
+            listener,
+            enrolledAt: at,
+            lastUsedAt: null,
+            // ADR 0069 Q-C: through the tunnel, unconfirmed until the host confirms it.
+            confirmedAt: null,
+          });
+          // A code session enrols once, and ends (ADR 0069 D-1).
+          await inside.endAdminSession(session.record.tokenSha256);
+          return { outcome: 'done', detail: registration.algorithm, value: 'enrolled' };
+        },
+      );
+      if (value === 'refused') {
+        return nothingChanged(
+          409,
+          'The passkey was not added: it is held already, or there are ten.',
+        );
+      }
+      return seeOther('/admin/sign-in?enrolled', { 'set-cookie': CLEARED_COOKIE });
+    }
+
+    async function stepUpOptions(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+    ): Promise<Response> {
+      const form = formOf(body);
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      // A code session changes nothing (ADR 0069 Q-A), so it is issued no step-up.
+      if (session.record.strength !== 'passkey') {
+        refuse('step_up');
+        return jsonAnswer({ error: 'not_a_passkey_session' }, 403);
+      }
+      if (!stepUps.allow(session.record.tokenSha256)) {
+        refuse('rate_limited');
+        return jsonAnswer({ error: 'rate_limited' }, 429);
+      }
+      const action = single(form, 'action');
+      const fields =
+        action === undefined || !isAdminChange(action)
+          ? undefined
+          : boundFields(ADMIN_CHANGES[action].fields, form);
+      if (action === undefined || fields === undefined) {
+        refuse('step_up');
+        return jsonAnswer({ error: 'not_a_change' }, 400);
+      }
+      const at = seconds();
+      const { challenge, sha } = await newChallenge();
+      await store.issueAdminChallenge(
+        {
+          challengeSha256: sha,
+          purpose: 'step_up',
+          sessionSha256: session.record.tokenSha256,
+          action,
+          fieldsSha256: await bindingOf(action, fields),
+          userHandle: null,
+          expiresAt: at + ADMIN_CHALLENGE_SECONDS,
+        },
+        at,
+      );
+      return jsonAnswer(
+        {
+          challenge,
+          rpId: relyingParty().rpId,
+          allowCredentials: (await usable(owner, true)).map((passkey) => passkey.credentialId),
+          timeout: ADMIN_CHALLENGE_SECONDS * 1000,
+        },
+        200,
+      );
+    }
+
+    /**
+     * The step-up a change's `POST` carries, verified (ADR 0069 D-4): the
+     * session's pending challenge TAKEN — so it answers once, whatever the
+     * outcome — and held to this action and these fields, then the assertion
+     * verified by a confirmed passkey here. Answers the passkey and its new
+     * counter, or `undefined` with the refusal counted.
+     */
+    async function steppedUp(
+      owner: Owner,
+      session: Session,
+      action: AdminChange,
+      fields: Readonly<Record<string, string>>,
+      form: URLSearchParams,
+    ): Promise<{ readonly passkey: AdminPasskeyRecord; readonly signCount: number } | undefined> {
+      const pending = await store.takeAdminChallenge(
+        'step_up',
+        { sessionSha256: session.record.tokenSha256 },
+        seconds(),
+      );
+      const assertion = assertionFrom(form);
+      const challenge =
+        assertion === undefined ? undefined : namedChallenge(assertion.response.clientDataJSON);
+      if (
+        pending === undefined ||
+        assertion === undefined ||
+        challenge === undefined ||
+        (await sha256Hex(challenge)) !== pending.challengeSha256 ||
+        pending.action !== action ||
+        pending.fieldsSha256 !== (await bindingOf(action, fields))
+      ) {
+        refuse('step_up');
+        return undefined;
+      }
+      const proved = await verified(assertion, challenge, owner, true);
+      if (typeof proved === 'string') {
+        refuse(proved === 'counter' ? 'counter' : 'step_up');
+        return undefined;
+      }
+      return proved;
+    }
+
+    async function revoke(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      pathId: string,
+    ): Promise<Response> {
+      const form = formOf(body);
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'passkey') {
+        refuse('step_up');
+        return nothingChanged(
+          403,
+          'Revoking a passkey needs a passkey sign-in: a one-time code’s session changes nothing.',
+        );
+      }
+      const fields = boundFields(ADMIN_CHANGES.passkey_revoke.fields, form);
+      if (fields === undefined || fields.id !== pathId || !PASSKEY_ID.test(pathId)) {
+        refuse('step_up');
+        return nothingChanged(400, 'That form did not name one passkey.');
+      }
+      const stepped = await steppedUp(owner, session, 'passkey_revoke', fields, form);
+      if (stepped === undefined) {
+        return nothingChanged(
+          403,
+          'The passkey check did not pass: a change needs a fresh check by a confirmed passkey, made for this change.',
+        );
+      }
+      const at = seconds();
+      const { value } = await store.recordOperatorAction(
+        {
+          actor: { source, athleteId: owner.athleteId },
+          action: 'admin_passkey_revoked',
+          at,
+        },
+        async (inside): Promise<OperatorChange<boolean>> => {
+          const used = await inside.recordAdminPasskeyUse(
+            stepped.passkey.id,
+            stepped.passkey.signCount,
+            stepped.signCount,
+            at,
+          );
+          if (!used) return { outcome: 'refused', detail: null, value: false };
+          const removed = await inside.removeAdminPasskey(pathId);
+          if (!removed.removed) return { outcome: 'refused', detail: null, value: false };
+          return {
+            outcome: 'done',
+            detail: `sessions_ended=${String(Math.min(removed.sessionsEnded, 999_999_999))}`,
+            value: true,
+          };
+        },
+      );
+      if (!value)
+        return nothingChanged(409, 'There is no such passkey, or it was just used elsewhere.');
+      // The passkey this session was opened with ends it.
+      if ((await store.findAdminSession(session.record.tokenSha256)) === undefined) {
+        return seeOther('/admin/sign-in', { 'set-cookie': CLEARED_COOKIE });
+      }
+      return seeOther('/admin/passkeys');
+    }
+
+    return async (request, body, client, seam) => {
+      // Against DNS rebinding: the page is this listener's, or it is not served.
+      if (request.headers.get('host') !== place.host) {
         return htmlAnswer(
           'Wrong address',
-          `<h1>Open the admin pages at their own address</h1>\n<p>They are served at <a href="${escapeHtml(expected.origin)}/admin">${escapeHtml(expected.origin)}/admin</a> only.</p>`,
+          `<h1>Open the admin pages at their own address</h1>\n<p>They are served at <a href="${escapeHtml(place.origin)}/admin">${escapeHtml(place.origin)}/admin</a> only.</p>`,
           421,
         );
       }
       const url = new URL(request.url);
       const path = url.pathname;
-      const methods = METHODS.get(path);
+      const revokeId = REVOKE_PATH.exec(path)?.[1];
+      const route = revokeId === undefined ? path : '/admin/passkeys/{id}/revoke';
+      const methods = METHODS.get(route);
       if (methods === undefined) {
         return htmlAnswer(
           'Not found',
@@ -597,8 +1373,13 @@ export function createAdmin(options: AdminOptions): Admin {
           { allow: methods.join(', ') },
         );
       }
-      if (path === '/admin/admin.css') {
+      if (route === '/admin/admin.css') {
         return adminResponse(ADMIN_STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
+      }
+      if (route === '/admin/passkey.js') {
+        return adminResponse(PASSKEY_SCRIPT, 200, {
+          'content-type': 'text/javascript; charset=utf-8',
+        });
       }
       if (body === 'too-large') {
         return htmlAnswer(
@@ -621,28 +1402,71 @@ export function createAdmin(options: AdminOptions): Admin {
         );
       }
       if (request.method === 'POST') {
-        return path === '/admin/sign-in'
-          ? signIn(request, body, owner, client)
-          : signOut(request, body, owner);
+        switch (route) {
+          case '/admin/sign-in':
+            return signIn(request, body, owner, client);
+          case '/admin/sign-in/passkey-options':
+            return passkeySignInOptions(request, owner, client);
+          case '/admin/sign-in/passkey':
+            return passkeySignIn(request, body, owner, client);
+          case '/admin/passkeys/options':
+            return enrolOptions(request, body, owner);
+          case '/admin/passkeys/add':
+            return enrol(request, body, owner);
+          case '/admin/step-up':
+            return stepUpOptions(request, body, owner);
+          case '/admin/passkeys/{id}/revoke':
+            return revoke(request, body, owner, revokeId as string);
+          default:
+            return signOut(request, body, owner);
+        }
       }
       const session = await sessionOf(request, owner);
       if (path === '/admin/sign-in') {
-        return session === undefined ? signInAnswer(false, 200) : seeOther(ADMIN_LANDING);
+        if (session !== undefined) return seeOther(ADMIN_LANDING);
+        const enrolled = url.searchParams.has('enrolled');
+        return signInAnswer(enrolled ? 'enrolled' : null, 200);
       }
       // Every other GET is a signed-in page: nothing of the instance's state without a session.
       if (session === undefined) return seeOther('/admin/sign-in');
       if (path === '/admin') return seeOther(ADMIN_LANDING);
       return signedInPage(path, url, owner, session, client, seam);
+    };
+  }
+
+  const tunnel = expected === null ? undefined : placeFor('tunnel', expected);
+  const loopback =
+    expected === null || options.loopbackPort === undefined
+      ? undefined
+      : placeFor('loopback', expected);
+
+  return {
+    async handle(request, body, client, seam) {
+      if (expected === null) {
+        return htmlAnswer(
+          'Unavailable',
+          `<h1>The admin pages are unavailable</h1>\n<p>${escapeHtml(UNAVAILABLE.origin)}</p>`,
+          503,
+        );
+      }
+      // The listener is the ADAPTER's word (`ClientInfo.listener`), never a
+      // header's or a peer address's (ADR 0069 D-5).
+      const place = client.listener === 'loopback' ? loopback : tunnel;
+      if (place === undefined) {
+        return htmlAnswer('Not found', '<h1>Not found</h1>', 404);
+      }
+      return place(request, body, client, seam);
     },
 
     async flushRefusals() {
       const held = [...refused];
       refused.clear();
-      for (const [kind, count] of held) {
+      for (const [key, count] of held) {
+        const [source, kind] = key.split(':') as [AdminSource, AdminRefusal];
         try {
           await store.recordOperatorAction(
             {
-              actor: { source: 'admin_tunnel', athleteId: null },
+              actor: { source, athleteId: null },
               action: 'admin_refused',
               at: seconds(),
             },
@@ -661,7 +1485,12 @@ export function createAdmin(options: AdminOptions): Admin {
     sweepRateLimits() {
       perAddress.sweep();
       overall.sweep();
+      stepUps.sweep();
     },
-    rateLimitSweepPeriodMs: sweepPeriodMs([limits.perAddress, limits.overall]),
+    rateLimitSweepPeriodMs: sweepPeriodMs([
+      limits.perAddress,
+      limits.overall,
+      limits.stepUpPerSession,
+    ]),
   };
 }
