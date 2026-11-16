@@ -1200,6 +1200,73 @@ passkeys and a listener on the server machine itself follow.
 - ⚠️ **Through the tunnel, Cloudflare's edge sees these pages in full**, the cookie and every code
   you type there included (ADR 0069 D-3). Use the app's sealed Operate area when that matters.
 
+### Admin pages on the server machine
+
+[#2643](https://github.com/openzigs/onyourleft/issues/2643), ADR 0069 D-5.
+
+- **Turning it on.** Set `OYL_INSTANCE_ADMIN_LOOPBACK_PORT=8788` (with `OYL_INSTANCE_ADMIN_PAGES=on`).
+  A second listener then serves `/admin`, and nothing else, at `http://localhost:8788`. Every other
+  path there is `not_found`. The home compose file publishes it as `127.0.0.1:8788:8788`, on the
+  host's loopback only and on the same port on both sides: the instance checks that `Host` is
+  `localhost:<the port it listens on>`, so a remapped port would be refused. Open it as
+  **`localhost`**, not `127.0.0.1`. An IP address cannot be a passkey's RP ID, and the page answers
+  only to `localhost`. With the variable empty, the instance listens on no second port. ⚠️ The
+  compose file's `ports:` line still publishes `127.0.0.1:8788` then, and Docker binds that host
+  port anyway: a clash with another program fails `compose up`, and a connection to it is accepted
+  and then reset rather than refused. Free the port or set the variable to another free one.
+- **Trusted proxies.** The listener refuses any peer named in `OYL_INSTANCE_TRUSTED_PROXIES`. If
+  `cloudflared` runs on the same machine as the instance (not in a container), it arrives from
+  `127.0.0.1` like your browser, so do not list `127.0.0.1` there: your own connections would be
+  reset.
+- **Allowlist.** `OYL_INSTANCE_ADMIN_ADDRESSES` limits tunnel sign-ins to the addresses it names.
+  An IPv6 entry is matched by its /64, as the rate limits do, so it admits the whole /64.
+- **Not settled.** The owner has not yet ruled on the departures from ADR 0069 recorded in its
+  2026-11-15 amendment (a loopback passkey here needs `admin-passkeys confirm`, and the tunnel
+  container can reach this listener on Docker Desktop), nor approved screenshots at the server
+  machine and through the tunnel. Treat this section as provisional until that ruling.
+- **Not measured.** Microsoft Edge, and the dedicated `*.localhost` host name (deferred again).
+- **What it changes.** The listener marks its own requests as loopback; no header and no peer
+  address can do that, so a request on the main listener is a tunnel request whatever it carries.
+  It has its own origin (`http://localhost:8788`), its own session cookie (`oyl-admin-loopback`),
+  its own passkeys (RP ID `localhost`) and its own operator log source (`admin_loopback`). A
+  session or passkey from the tunnel is nothing here, and the reverse, so you add a passkey for
+  each place you use. Sign-in works as it does through the tunnel, and every change still needs a
+  passkey check: a code session here can read every page and add one passkey, and nothing else.
+- **The cookie, measured.** On 2026-11-15, with `apps/instance/tools/admin-cookie-probe.ts` on
+  `http://localhost`, these browsers kept a `__Host-` cookie with `Secure`:
+  - Chromium 153.0.8010.12 (Playwright): kept;
+  - Google Chrome 157.0.8103.51: kept;
+  - Firefox 155.0 (Playwright): kept;
+  - WebKit 26.6 (Playwright), Safari's engine: **kept neither `__Host-` nor any `Secure` cookie**,
+    and kept a plain one.
+
+  The loopback cookie is therefore `oyl-admin-loopback`, with `HttpOnly; SameSite=Strict; Path=/`
+  and **no** prefix and no `Secure`. The tunnel's stays `__Host-oyl-admin`. The server checks the
+  token, never the name.
+
+  **Microsoft Edge was not measured**, because it was not installed on the machine the probe ran
+  on. It is Chromium, so it is expected to behave as Chrome does. Run the probe in it with `node
+  apps/instance/tools/admin-cookie-probe.ts`, open `http://localhost:8788/set`, and add its line
+  here.
+- ⚠️ **Other software on this machine.** Any page or program on the machine can reach
+  `localhost:8788`, and a `localhost` cookie is sent to every port (ADR 0069 D-3). Every `POST`
+  must come from exactly `http://localhost:8788`, so a page on another port is refused. A program
+  that copies the cookie can still read pages.
+- ⚠️ **On Docker Desktop, the tunnel container can reach this listener.** This was measured on
+  2026-11-15 with Docker 29.5.3 on macOS. A container on any compose network reaches a port
+  published on `127.0.0.1` through `host.docker.internal`, and arrives from Docker's own gateway
+  address, which is the address the host's own browser arrives from. A container also reaches the
+  instance's address on a network it does not share. The listener refuses a connection from
+  cloudflared's fixed addresses (`OYL_INSTANCE_TRUSTED_PROXIES`), which closes the direct path. It
+  **cannot** tell cloudflared from your browser on the `host.docker.internal` path. So an edge that
+  rewrote the tunnel's ingress could reach the loopback pages.
+  - ADR 0069 names this as a condition that makes the ADR wrong ("Docker networking that cannot
+    keep the tunnel container off the second listener"). Until the owner rules on it, **this
+    listener grants nothing the tunnel does not**. In particular, a passkey added here also needs
+    `admin-passkeys confirm` on the host before it can make a change, though the owner's Q-C
+    answer would have spared it that.
+  - Not measured on Linux Docker Engine.
+
 ## Moderation and the operator's duties
 
 Running an instance for other people is a set of duties as well as a box:

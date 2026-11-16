@@ -24,7 +24,7 @@ import type { ClientInfo } from '../route-kit.ts';
 import { createSealed } from '../sealed/sealed.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
-import { ADMIN_COOKIE, createAdmin, type Admin } from './admin.ts';
+import { ADMIN_COOKIE, createAdmin, LOOPBACK_COOKIE, type Admin } from './admin.ts';
 import type { Bend, SoftwareAuthenticator } from './webauthn-testing.ts';
 
 /** The tunnel's hostname, as a browser names it in `Host`. */
@@ -43,6 +43,11 @@ export interface AdminRequestOptions {
   readonly host?: string;
   /** Any other header. */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * The loopback listener's port (#2643): the request is a browser's on
+   * `http://localhost:<port>` — its `Host`, its `Origin` and its cookie's name.
+   */
+  readonly loopback?: number;
 }
 
 /** A request for `path` on the instance, as a browser on its admin page sends it. */
@@ -52,9 +57,15 @@ export function adminRequest(
   options: AdminRequestOptions = {},
 ): Request {
   const headers = new Headers(options.headers);
-  headers.set('host', options.host ?? TEST_HOST);
-  if (options.cookie !== undefined) headers.set('cookie', `${ADMIN_COOKIE}=${options.cookie}`);
-  const origin = options.origin === undefined ? TEST_ORIGIN : options.origin;
+  const local =
+    options.loopback === undefined ? undefined : `localhost:${String(options.loopback)}`;
+  headers.set('host', options.host ?? local ?? TEST_HOST);
+  if (options.cookie !== undefined) {
+    const name = local === undefined ? ADMIN_COOKIE : LOOPBACK_COOKIE;
+    headers.set('cookie', `${name}=${options.cookie}`);
+  }
+  const ours = local === undefined ? TEST_ORIGIN : `http://${local}`;
+  const origin = options.origin === undefined ? ours : options.origin;
   const site = options.site === undefined ? 'same-origin' : options.site;
   if (method === 'POST') {
     if (origin !== null) headers.set('origin', origin);
@@ -71,9 +82,9 @@ export function adminRequest(
 }
 
 /** The session token a sign-in's `Set-Cookie` carries, or `undefined`. */
-export function cookieOf(response: Response): string | undefined {
+export function cookieOf(response: Response, name: string = ADMIN_COOKIE): string | undefined {
   const set = response.headers.get('set-cookie');
-  const value = set === null ? undefined : new RegExp(`^${ADMIN_COOKIE}=([^;]*)`).exec(set)?.[1];
+  const value = set === null ? undefined : new RegExp(`^${name}=([^;]*)`).exec(set)?.[1];
   return value === undefined || value === '' ? undefined : value;
 }
 

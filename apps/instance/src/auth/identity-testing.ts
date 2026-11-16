@@ -346,6 +346,10 @@ export async function startIdentityInstance(
       readonly limits?: AdminLimits;
       /** What the admin layer sees in place of the real store — a spy on its lookups. */
       readonly storeSeenBy?: (store: SqlStore) => SqlStore;
+      /** The loopback listener's port (#2643): its origin is `http://localhost:<port>`. */
+      readonly loopbackPort?: number;
+      /** `OYL_INSTANCE_ADMIN_ADDRESSES` (#2643). */
+      readonly addresses?: readonly string[];
     };
   } = {},
 ): Promise<IdentityInstance> {
@@ -552,6 +556,10 @@ export async function startIdentityInstance(
       now: () => clock.ms,
       name: config?.name ?? null,
       ...(adminOptions.limits === undefined ? {} : { limits: adminOptions.limits }),
+      ...(adminOptions.loopbackPort === undefined
+        ? {}
+        : { loopbackPort: adminOptions.loopbackPort }),
+      ...(adminOptions.addresses === undefined ? {} : { addresses: adminOptions.addresses }),
     });
     return madeAdmin.value;
   };

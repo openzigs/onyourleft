@@ -230,6 +230,13 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         enrols one; every change needs a step-up bound to
                         its action and fields (`admin/step-up.ts`) by a
                         passkey `operator admin-passkeys confirm` confirmed.
+                        Since #2643 a second Node listener on
+                        `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` serves `/admin`
+                        alone, marking `ClientInfo.listener: 'loopback'`
+                        itself (never a header); its origin, cookie, RP ID
+                        and log source are its own. ⚠️ It grants nothing
+                        the tunnel does not: Docker Desktop lets the tunnel
+                        container reach it.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
