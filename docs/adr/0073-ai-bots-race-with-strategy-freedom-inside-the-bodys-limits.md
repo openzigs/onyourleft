@@ -1,10 +1,10 @@
-# ADR 0073: AI bots race with strategy freedom inside the body's limits — superseding in part ADR 0071 D-3.6
+# ADR 0073: AI bots race with strategy freedom inside the body's limits — superseding in part ADR 0071 D-3.6 and D-3.1
 
-- **Status**: **Proposed**, 2026-11-16. **The owner approves it before the build that adopts it
-  (#2710) merges**; until then ADR 0071 D-3.6 stands as written, and the build rides it. The owner's
-  rulings of 2026-11-16 that it rests on were never open: Context quotes them and nothing here
-  re-argues them. **Nothing shipped is built by this ADR**: the spike's adapter, input and prompt
-  under `apps/web/tools/model-tactics-spike/` carry it out for measurement, and #2710 builds it
+- **Status**: **Accepted**, 2026-11-16, by the owner on #2721, with the answers recorded in D-10.
+  Proposed the same day. The owner approved R-1 to R-5 as recommended and overruled R-6: the model
+  may choose an effort level (D-2.5). **Nothing shipped is built by this ADR**: the spike's
+  adapter, input and prompt under `apps/web/tools/model-tactics-spike/` carry out D-3 for
+  measurement, and #2710 builds it, the effort level included
 - **Date**: 2026-11-16
 - **Deciders**: **the owner**, whose rulings of 2026-11-16 asked that the bots race with strategy and
   have more freedom in it, and whose issue #2720 names what is kept and what is lifted. **The
@@ -27,7 +27,10 @@
   limits kept (D-2). It is a new ADR and not an amendment because it reverses a decision, and
   [ADR 0013](0013-adr-amendments.md) D-3 sends a reversed decision to a new ADR. ADR 0071 gains one
   dated `## Amendments` entry pointing here; its body is not edited
-- **Leaves standing, by name**: ADR 0071 D-1, D-2, D-3.1 to D-3.5, D-4 to D-9 and D-11, the
+- **Also supersedes in part ADR 0071 D-3.1** (the owner's answer to R-6): a model race's answer may
+  carry an effort level from a closed list (D-2.5). It is not a number of watts, and D-3.1 stands
+  for every other field
+- **Leaves standing, by name**: ADR 0071 D-1, D-2, D-3.2 to D-3.5, D-4 to D-9 and D-11, the
   fallback (D-7) above all; [ADR 0060](0060-the-lap-race-effort-distance-and-a-bounded-race-offset.md)
   **D-2.1** and **D-2.2** and [ADR 0067](0067-lap-race-bots-race-with-a-strategy-that-reads-the-race.md)
   **D-3.6**, unchanged and tested in model mode; ADR 0067 D-1 (capacity fixed at the start) and the
@@ -102,30 +105,32 @@ unchanged. A rider with no instance or no consent loses nothing (ADR 0036 D-3(a)
    blown bot rides as the seeded tactics ride a blown bot (it recovers) until its W′ is back over
    the re-entry share. `spendableWatts` would hold it to CP either way; keeping it out of the
    model's hands also stops a model holding a blown bot at CP, where it never refills (D-9 R-2).
-3. **The schema has no power field and the model gets no tools** (ADR 0071 D-3.1 to D-3.3,
-   unchanged).
+3. **The schema has no watts field and the model gets no tools** (ADR 0071 D-3.2 and D-3.3,
+   unchanged; D-3.1 is superseded in part only by D-2.5's closed effort list).
 4. **No model output reaches the trainer** (ADR 0071 D-8.1; ADR 0060 D-2.1 and D-2.2; ADR 0067
    D-3.6). `lap-race-cannot-reach-trainer.test.ts` stays unmodified, and `lap-race-wiring.test.tsx`'s
    model-mode cases now ride under these rules (D-6).
 
-5. **No effort level, in this ADR: the schema's moves stay the whole of what the model chooses.**
-   *The author's choice*, on the owner's ask to consider one (Context). A share of
-   `spendableWatts` as a field would be a second power path beside the move's own target, and ADR
-   0071 D-3.1 forbids a power field; adding one means superseding D-3.1 in part. **This ADR does
-   not, and D-3.1 stands unchanged.** The reasons:
-   - **The freedom the owner asked for is already there without it.** The moves already span the
-     effort range, from `sit-in` and `recover` at the wheel's pace to `attack`, `flyer` and `kick`
-     at the bot's cap, and D-3 lifts every rule that kept the model from naming them when it
-     likes, for as long as W′ allows.
-   - **It is unmeasured.** Spike 0039 §11 measured the lifted rules and not a share, and a share
-     is a second number for a 12-billion-parameter model to get right in each window, in a call
-     that already runs slow (D-7).
-   - **It would stay safe, and that is why it can wait.** Were it added, the cap would be the
-     body's (`spendableWatts` at the bot's peak, or at CP once exhausted, D-2.1 and D-2.2) and the
-     trainer unreachable (D-2.4), so it would be a pacing choice and not a power override. It
-     needs its own measurement and its own superseding ADR of D-3.1, not a rider on this one.
-
-   The owner may overrule this at R-6.
+5. **The model may choose an effort level** (the owner's answer to R-6: *"ai can choose"*).
+   This supersedes ADR 0071 D-3.1 in part.
+   - **The field**: each seat's answer may carry an optional `effort`, one of a **closed list**:
+     `easy`, `tempo`, `threshold`, `all-out`. It is never a number, so the parser checks it like
+     `move`, and an unknown value makes the answer invalid (ADR 0071 D-3.4).
+   - **What it does**: it sets where in the bot's own range the move is ridden. `all-out` is the
+     move's target held to `spendableWatts`; `easy`, `tempo` and `threshold` are fixed shares of
+     the bot's CP, chosen by #2710 and recorded there with their measurement. With no `effort`, the
+     move rides at its seeded target, as today.
+   - **The body is still the cap**: whatever the effort, the target is capped by `spendableWatts`
+     at the bot's peak, or at CP once exhausted (D-2.1, D-2.2). An exhausted bot still keeps its
+     seeded choice (D-2.2). So an effort level is a pacing choice and never a power override: the
+     model cannot make a bot stronger than its capacity, which is fixed at the start (ADR 0067 D-1).
+   - **The trainer stays unreachable** (D-2.4). A bot's effort is the virtual rider's power. The
+     equality of trainer writes with model mode on and off (ADR 0060 D-2.1; ADR 0067 D-3.6) is
+     tested with every effort level, in #2710.
+   - **Measured before it ships**: #2710 measures validity, latency and the fallback share with the
+     field in the answer format, on the owner's PC, against D-7's figures. If the second choice
+     slows the call past ADR 0071 D-7's cadence, #2710 says so to the owner rather than dropping
+     the field.
 
 ### D-3 — Lifted, because they are strategy rules
 
@@ -235,7 +240,18 @@ D-8.7).
 | **R-3** | A `follow` or `chase` of a racer up the road is ridden as a chase until they are the wheel ahead; of a racer behind, as sitting in until they come by | **Yes**: it needs no new power path | D-3.4 |
 | **R-4** | Racing styles dealt every-style-once from the seed, apart from the bot's archetype | **Yes**: it guarantees five kinds of racer in a field of seven | D-5.1 |
 | **R-5** | A `kick` is open anywhere, with no gate; the model reads the line as the bot misreads it. Inside the launch distance the model's move is ridden, so a race may end with no sprint if the model never names a `kick` (it named none in 1 296 moves): a seeded kick takes over only when a decision lapses | **Yes**, with #2710 measuring a full-distance race for a sprint (What would make this ADR wrong); the alternative is a seeded kick inside the launch whenever the model names no `kick` there, which puts a rule back | D-3.5 |
-| **R-6** | No effort level: the model chooses moves only, and ADR 0071 D-3.1 (no power field) stands untouched. Or, if the owner wants a share of `spendableWatts` as a field, a superseding ADR of D-3.1 in part, measured first | **Decline for now**: the moves already span the range, a share is unmeasured, and it stays safe whenever it is added | D-2.5 |
+| **R-6** | No effort level: the model chooses moves only, and ADR 0071 D-3.1 (no power field) stands untouched. Or, if the owner wants a share of `spendableWatts` as a field, a superseding ADR of D-3.1 in part, measured first | **Decline for now**: the moves already span the range, a share is unmeasured, and it stays safe whenever it is added. **Overruled by the owner (D-10)** | D-2.5 |
+
+### D-10 — The owner's answers
+
+**Owner ruling, 2026-11-16:** asked R-1 to R-6 in plain words, the owner answered *"I approve 1-5 ,
+6 ai can choose"*. So:
+
+- **R-1 to R-5**: approved as recommended. ADR 0073 is accepted. An exhausted bot keeps its
+  seeded choice; following or chasing a racer up the road is ridden as a chase, and one behind as
+  sitting in; the styles are dealt every-style-once from the seed; and a `kick` is open anywhere,
+  with #2710 measuring a full-distance race for a real finish.
+- **R-6**: overruled. The model may choose an effort level, as D-2.5 now decides.
 
 ## Consequences
 
