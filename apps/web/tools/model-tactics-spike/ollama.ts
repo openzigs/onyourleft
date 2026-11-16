@@ -7,8 +7,8 @@
  *   nothing: it reads the race and writes moves (`model-input.test.ts`).
  * - **Thinking off**, `think: false`, which Ollama 0.40.16 honours for
  *   gemma4 (the write-up's measurement 1 says how that was confirmed).
- * - **Held to the schema** by `format`, which since #2708 offers no target
- *   (`decision.ts` §`modelAnswerFormat`), and checked again on arrival.
+ * - **Held to the schema** by `format` (`decision.ts` §`modelDecisionSchema`,
+ *   with its target again since #2720), and checked again on arrival.
  * - A fixed `seed` per call, so a rerun asks the same question the same way.
  *
  * In a build the call is the instance's, never the tablet's: the instance has
@@ -20,7 +20,7 @@
  * Spike code: see `decision.ts`.
  */
 
-import { modelAnswerFormat } from './decision';
+import { modelDecisionSchema } from './decision';
 import type { ModelInput } from './model-input';
 
 /** The model the spike measures: the one the owner's instance runs its write-ups on (2026-11-14). */
@@ -30,26 +30,34 @@ export const MODEL_TACTICS_MODEL = 'gemma4:12b';
 export const MODEL_TACTICS_MOST_TOKENS = 400;
 
 /**
- * What the model is told, once per call, before the race: #2708's tuned
- * prompt. Spike 0039's first one (#2616) described the moves and asked for
- * variety, and the model attacked 12 to 17 % of bot-time on the flat and
- * about 30 % on the hills, and hardly ever followed or chased. This one says
- * how rare an attack is and when each move is open, in the input's own field
- * names, so the model can read the condition straight off the race.
+ * What the model is told, once per call, before the race: #2720's prompt.
+ *
+ * #2708's tuned prompt gave each move a condition to read off the input and
+ * a code-computed `attackOpen` gate, with one bot at a time: attacks became
+ * rare, but on the flat the lead hardly changed hands, one bot made every
+ * attack and no flyer was ridden (spike 0039 §10.6). Under ADR 0073 the
+ * strategy is the model's and only the body's limits are rules, so this one
+ * gives guidance instead of conditions: what each move and style is for, and,
+ * plainly, that W′ spent now is not there later and a blown bot cannot go.
  */
 export const MODEL_TACTICS_SYSTEM = [
   'You choose race tactics for the computer-controlled bots in a cycling lap race in a video game.',
   'Every few seconds you get the race as JSON, and you answer with one move for each bot. Each move is ridden for the next few seconds.',
-  'Race like real amateur racers. Most of the time the bots sit in, and a race has only a few attacks, spaced out.',
+  'Race like real amateur racers. Most bots sit in most of the time, but a good race has moves: attacks, breakaways, counter-attacks and chases, made by different bots at different times, each true to its style. These are guides, not rules: read the race and choose.',
+  'A race changes, so answer what just happened, not what you answered last time. A move has a life ("secondsInMove"): an attack lasts 10 to 30 seconds, a breakaway 30 to 90 seconds, and then the bot sits up and sits in, or is caught. When a bot goes up the road, the others choose: go with it, chase it down, or let it go and wait. When a move is caught or a rival tires, that is the moment for another bot to counter. A bot that has rested can go again later.',
+  'The body has limits, and they are real:',
+  '- "wbal" is the share of a bot\'s reserve left, from 1 (full) to 0 (empty). Every effort above sitting in spends it: the kick fastest, then an attack, then a chase, a follow across a gap and a flyer. It refills only while the bot rides easy, sitting in on a wheel or recovering. What a bot spends now it does not have later.',
+  '- A bot whose "blown" is true has emptied it. It can ride no harder than steady until it has refilled, and it loses the wheel of any group going fast. A bot that attacks with little "wbal" left can blow up.',
   'The moves:',
-  '- "sit-in": ride in the group on the wheel ahead, saving energy. The default for every bot not doing something below.',
-  '- "follow": go with a move. When a bot\'s "aheadMove" is "attack" or "flyer" and its "gapAheadM" is under 50, it follows.',
-  '- "attack": surge off the front. A new attack starts only when "attackOpen" is true, and then only one bot starts it: a climber when its "gradeAheadPct" is 3 or more, otherwise an attacker, with "wbal" 0.7 or more. While "attackOpen" is false, no other bot starts an attack or a flyer. A bot whose "move" is already "attack" keeps attacking, whatever "attackOpen" says, until its "secondsInMove" is 15; then it sits in.',
-  '- "chase": bridge a real gap. Only when "gapAheadM" is 30 to 200. A bot that has chased for 20 s ("secondsInMove") and is still 30 m or more behind gives up and sits in.',
-  '- "recover": ease off to rebuild energy, when "wbal" is under 0.5.',
-  '- "flyer": a long effort off the front instead of an attack, when "lapsLeft" is 2 or less: the one bot that goes when "attackOpen" is true may go on a flyer if its "wbal" is 0.6 or more. A bot whose "move" is already "flyer" keeps going, whatever "attackOpen" says, while its "wbal" is 0.6 or more.',
-  '- "kick": the sprint for the line, only when "toLineM" is under "launchM".',
-  'Styles: a climber goes on climbs, an attacker goes on the flat, a sprinter sits in and waits for the kick, a rouleur rides steadily and chases.',
+  '- "sit-in": ride on the wheel ahead, saving energy.',
+  '- "follow": go with a move and hold the wheel of the racer in "target": "rider", or a bot\'s seat. With no target, the racer directly ahead. A bot can mark a rival or the rider this way.',
+  '- "chase": bridge a gap hard, to the racer in "target" or to the one ahead.',
+  '- "attack": a hard surge to get clear or to break a group, short and sharp or held as long as the bot can. Climbers attack on climbs, and breakaway riders and opportunists attack to get clear before a flyer or to counter.',
+  '- "flyer": a long, steady effort off the front: a breakaway, on any lap.',
+  '- "recover": ease off to refill "wbal".',
+  '- "kick": the all-out sprint for the line. "toLineM" is how far the bot thinks the line is, and "launchM" is where its legs usually launch. Go too long and it fades before the line; wait too long and it runs out of road.',
+  'Styles ("style"): a "breakaway" rider attacks and goes up the road on a flyer once or twice a race and sits in between; a "sprinter" sits on wheels, saves everything, and kicks; a "climber" attacks where "gradeAheadPct" is 3 or more; a "rouleur" chases down a move that has been away a while, naming it in "target"; an "opportunist" follows other bots\' moves and counter-attacks when a move is caught. "legs" is what the bot\'s body is good at.',
+  '"rider" is the human racing the bots, and each bot\'s "riderGapM" is how far the rider is ahead of it (below 0, behind). Bots may mark the rider, sit on the rider\'s wheel, or attack when the rider is tired. "quietS" is how long since any bot attacked or went on a flyer.',
   'Answer with JSON only, in the schema given.',
 ].join('\n');
 
@@ -63,7 +71,7 @@ export function decisionRequest(
     model: MODEL_TACTICS_MODEL,
     stream: false,
     think: false,
-    format: modelAnswerFormat(bots),
+    format: modelDecisionSchema(bots),
     keep_alive: '30m',
     options: { temperature: 0.6, seed, num_predict: MODEL_TACTICS_MOST_TOKENS },
     messages: [

@@ -414,8 +414,16 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
 
 ## Amendments
 
-Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
-
+- **2026-11-16** — **[ADR 0073](0073-ai-bots-race-with-strategy-freedom-inside-the-bodys-limits.md),
+  accepted by the owner on 2026-11-16, supersedes D-3.6 in part for a model race, and D-3.1 in part
+  for an effort level.** Its body's limits stay: the target power capped by `spendableWatts` at the
+  peak and at CP once exhausted, W′ as today, an exhausted bot keeping its seeded choice, no watts
+  field, no tools, no model output at the trainer. The answer may carry an optional effort from a
+  closed list (`easy`, `tempo`, `threshold`, `all-out`), never a number, still capped by the body.
+  Its strategy rules are lifted: the W′ floor on `attack` and `chase`, the flyer's last two laps and
+  W′ share, the attack's longest hold, `follow` and `chase` of the racer directly ahead only, and
+  the fixed launch, with the misread distance still what a bot reads as left. Read ADR 0073 for the
+  rule. This entry only points there; nothing else in this ADR changes. (#2720)
 - **2026-11-16** — **Once [ADR 0072](0072-a-model-directs-the-bot-pacer-during-a-ride.md) is
   Accepted, D-2's *"Never for the pacer"* is superseded by it**, as D-2 itself says only ADR 0072
   can do: a model on the instance may direct the bot pacer during a solo ride the rider chose to
@@ -425,4 +433,3 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   choice records it (ADR 0072 D-1.3). D-2 stands for the rider's own ghost, a cross-rider ghost, a
   room and every announcement and HUD text but the AI pacer's own screened line. Everything else in
   this ADR is unchanged. This entry only points there. (#2712)
-
