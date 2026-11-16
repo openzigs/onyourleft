@@ -11,6 +11,10 @@
  *     node tools/model-tactics-spike/run-live.mjs race hilly --host <ssh host>
  *     node tools/model-tactics-spike/run-live.mjs compare
  *
+ * `--run <name>` reads and writes `results/<name>/` instead of `results/`:
+ * #2708's tuned prompt is `--run 2708`, beside spike 0039's first run. `race`
+ * takes `--seed <n>` to ride one seed, for a quick look while tuning.
+ *
  * Ollama on the instance PC listens on 127.0.0.1 only and has no
  * authentication, so it is never exposed: each call runs `curl.exe` on that
  * machine over SSH, the body on standard input. The latency booked in race
@@ -18,15 +22,20 @@
  * Ollama on its own loopback waits; the SSH leg is logged beside it as
  * `wallMs` and left out.
  *
- * `bench` writes `results/latency.json`; `race` writes one decision log per
- * seed, `results/<circuit>-<seed>.json`, which `replay.test.ts` replays;
- * `compare` rides each field seeded and from its log, with no network, and
- * writes `results/comparison.json`, the write-up's table.
+ * `bench` writes `results/latency.json`, unloading the model first so that
+ * its cold row is a cold load (#2708); `race` writes one decision log per
+ * seed, `results/<circuit>-<seed>.json`, which `replay.test.ts` replays,
+ * with a SHA-256 of the live run's whole trace (#2708); `compare` rides each
+ * field seeded and from its log, with no network, and writes
+ * `results/comparison.json`, the write-up's table: whether the replay's
+ * outcome counts are the live run's, and, where the log carries the live
+ * trace's digest, whether its whole trace is.
  *
  * Spike code: see `decision.ts`.
  */
 
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -39,16 +48,27 @@ import { fieldNumbers } from './compare';
 import { parseModelDecision } from './decision';
 import type { LoggedDecision } from './decision-log';
 import {
+  fieldTrace,
+  quietSeconds,
   rideField,
   SPIKE_CIRCUITS,
   SPIKE_RIDDEN_SECONDS,
   SPIKE_SEEDS,
+  type FieldRun,
   type ModelCall,
   type SpikeCircuit,
 } from './race';
 
 /** Where the results are written, beside this file (a path, not a `new URL`, which the trainer walk reads as an import). */
-const RESULTS = `${join(dirname(fileURLToPath(import.meta.url)), 'results')}/`;
+const RESULTS_ROOT = join(dirname(fileURLToPath(import.meta.url)), 'results');
+
+/** The directory this run reads and writes, from `--run`: set by {@link main}. */
+let RESULTS = `${RESULTS_ROOT}/`;
+
+/** The SHA-256 of a field's whole trace: what a replay of its log must match to the bit. */
+function traceDigest(run: FieldRun): string {
+  return createHash('sha256').update(fieldTrace(run)).digest('hex');
+}
 
 /** What Ollama's `/api/chat` answers, in the fields read here. */
 interface ChatAnswer {
@@ -138,7 +158,14 @@ function modelCall(timed: Timed): ModelCall {
 async function benchInput(): Promise<ReturnType<typeof modelInput>> {
   const run = await rideField('flat', 1, { kind: 'seeded' }, 60);
   const ride = run.last;
-  return modelInput(ride.race, ride.bots, SPIKE_CIRCUITS.flat, ride.draft, 200 / 75);
+  return modelInput(
+    ride.race,
+    ride.bots,
+    SPIKE_CIRCUITS.flat,
+    ride.draft,
+    200 / 75,
+    quietSeconds(run.ticks, ride.race.atMs),
+  );
 }
 
 /**
@@ -193,9 +220,12 @@ async function bench(): Promise<void> {
   const bots = input.bots.length;
   const ask = (seed: number, think: boolean): Promise<Timed> =>
     chat({ ...decisionRequest(input, bots, seed), think });
-  // The first call loads the model if it is not resident.
+  // Unload the model (Ollama's documented `keep_alive: 0` with no
+  // messages), so that the first call loads it: a cold load, measured.
+  await chat({ model: MODEL_TACTICS_MODEL, messages: [], keep_alive: 0 });
   const cold = await ask(0, false);
   const coldLoadMs = ms(cold.answer?.load_duration);
+  const coldServerMs = ms(cold.answer?.total_duration);
   const alone: Sample[] = [];
   for (let at = 1; at <= 20; at += 1) alone.push(sample(await ask(at, false), bots));
   const thinking: Sample[] = [];
@@ -231,6 +261,7 @@ async function bench(): Promise<void> {
         measuredOn: new Date().toISOString().slice(0, 10),
         promptCharacters: JSON.stringify(input).length,
         coldLoadMs,
+        coldServerMs,
         alone,
         thinking,
         beside,
@@ -242,9 +273,17 @@ async function bench(): Promise<void> {
   );
 }
 
-async function race(circuit: SpikeCircuit): Promise<void> {
+/** A one-line look at a ridden field, for tuning: its shares of each move, and its outcomes. */
+function summary(name: string, run: FieldRun): string {
+  const { tacticShare: t } = fieldNumbers(run, 'rider');
+  const share = (value: number): string => `${(value * 100).toFixed(1)}%`;
+  return `${name}: attack ${share(t.attack)} flyer ${share(t.flyer)} follow ${share(t.follow)} chase ${share(t.chase)} sit-in ${share(t['sit-in'])}; ${JSON.stringify(run.outcomes)}\n`;
+}
+
+async function race(circuit: SpikeCircuit, only: number | undefined): Promise<void> {
   await mkdir(RESULTS, { recursive: true });
   for (const seed of SPIKE_SEEDS) {
+    if (only !== undefined && seed !== only) continue;
     let call = 0;
     const run = await rideField(circuit, seed, {
       kind: 'live',
@@ -264,18 +303,22 @@ async function race(circuit: SpikeCircuit): Promise<void> {
           seed,
           seconds: SPIKE_RIDDEN_SECONDS,
           outcomes: run.outcomes,
+          traceSha256: traceDigest(run),
           log: run.log,
         },
         null,
         2,
       )}\n`,
     );
+    process.stderr.write(summary(`${circuit} ${String(seed)}`, run));
   }
 }
 
 /**
  * The comparison, with no network: each field ridden seeded and from its
- * recorded log, and whether the replay's outcomes are the live run's.
+ * recorded log; whether the replay's outcome counts are the live run's; and,
+ * for a log that carries the live trace's digest, whether the replay's whole
+ * trace is (`null` for spike 0039's first logs, which carry none).
  */
 async function compare(): Promise<void> {
   const fields = [];
@@ -283,13 +326,20 @@ async function compare(): Promise<void> {
     for (const seed of SPIKE_SEEDS) {
       const recorded = JSON.parse(
         await readFile(`${RESULTS}${circuit}-${String(seed)}.json`, 'utf8'),
-      ) as { readonly log: readonly LoggedDecision[]; readonly outcomes: unknown };
+      ) as {
+        readonly log: readonly LoggedDecision[];
+        readonly outcomes: unknown;
+        readonly traceSha256?: string;
+      };
       const seeded = await rideField(circuit, seed, { kind: 'seeded' });
       const model = await rideField(circuit, seed, { kind: 'log', log: recorded.log });
       fields.push({
         circuit,
         seed,
-        replayIsLive: JSON.stringify(model.outcomes) === JSON.stringify(recorded.outcomes),
+        outcomeCountsMatchLive:
+          JSON.stringify(model.outcomes) === JSON.stringify(recorded.outcomes),
+        traceMatchesLive:
+          recorded.traceSha256 === undefined ? null : traceDigest(model) === recorded.traceSha256,
         outcomes: model.outcomes,
         seeded: fieldNumbers(seeded, 'rider'),
         model: fieldNumbers(model, 'rider'),
@@ -299,11 +349,29 @@ async function compare(): Promise<void> {
   await writeFile(`${RESULTS}comparison.json`, `${JSON.stringify(fields, null, 2)}\n`);
 }
 
+/** `args` with the option `name` and its value taken out, and the value. */
+function option(args: readonly string[], name: string): [readonly string[], string | undefined] {
+  const at = args.indexOf(name);
+  if (at < 0) return [args, undefined];
+  return [[...args.slice(0, at), ...args.slice(at + 2)], args[at + 1]];
+}
+
 /** Run `bench`, `race flat` / `race hilly`, or `compare`. Returns the exit code. */
 export async function main(args: readonly string[]): Promise<number> {
-  const at = args.indexOf('--host');
-  if (at >= 0) sshHost = args[at + 1];
-  const rest = at < 0 ? args : [...args.slice(0, at), ...args.slice(at + 2)];
+  const [withoutHost, hostArg] = option(args, '--host');
+  sshHost = hostArg;
+  const [withoutRun, run] = option(withoutHost, '--run');
+  const [rest, seedArg] = option(withoutRun, '--seed');
+  if (run !== undefined && !/^[a-z0-9-]+$/u.test(run)) {
+    process.stderr.write('--run takes a name of lower-case letters, numbers and dashes\n');
+    return 2;
+  }
+  RESULTS = run === undefined ? `${RESULTS_ROOT}/` : `${join(RESULTS_ROOT, run)}/`;
+  const seed = seedArg === undefined ? undefined : Number(seedArg);
+  if (seed !== undefined && !(SPIKE_SEEDS as readonly number[]).includes(seed)) {
+    process.stderr.write(`--seed takes one of ${SPIKE_SEEDS.join(', ')}\n`);
+    return 2;
+  }
   const [command, circuit] = rest;
   if (command === 'bench') {
     await bench();
@@ -314,11 +382,11 @@ export async function main(args: readonly string[]): Promise<number> {
     return 0;
   }
   if (command === 'race' && (circuit === 'flat' || circuit === 'hilly')) {
-    await race(circuit);
+    await race(circuit, seed);
     return 0;
   }
   process.stderr.write(
-    'usage: run-live.mjs bench --host <h> | race flat --host <h> | race hilly --host <h> | compare\n',
+    'usage: run-live.mjs bench --host <h> | race flat|hilly --host <h> [--seed <n>] | compare; each takes --run <name>\n',
   );
   return 2;
 }

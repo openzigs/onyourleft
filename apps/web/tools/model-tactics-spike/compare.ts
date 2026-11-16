@@ -40,9 +40,37 @@ export interface FieldNumbers {
   readonly lowestWbal: number;
   /** The rider's place at the end, 1 for the leader. */
   readonly riderPlaceAtEnd: number;
+  /** When a bot first attacked or went on a flyer, seconds, or `null` if none did (#2708). */
+  readonly firstMoveS: number | null;
+  /** The most bots attacking or on a flyer on any one tick (#2708). */
+  readonly mostMovingAtOnce: number;
+  /** For each chase, the gap to the racer ahead on its first tick, metres to 1 place (#2708). */
+  readonly chaseStartGapsM: readonly number[];
 }
 
 const round = (value: number): number => Math.round(value * 1_000) / 1_000;
+
+function gapAhead(tick: FieldTick, id: string): number | null {
+  const own = tick.at.get(id) as number;
+  const ahead = [...tick.at.values()].filter((at) => at > own);
+  return ahead.length === 0 ? null : Math.min(...ahead) - own;
+}
+
+const moving = (tactic: BotTactic | undefined): boolean =>
+  tactic === 'attack' || tactic === 'flyer';
+
+/** For each run of ticks in which a bot chased, the gap ahead on its first tick. */
+function chaseStartGaps(ticks: readonly FieldTick[], bots: readonly string[]): number[] {
+  const gaps: number[] = [];
+  for (const id of bots) {
+    ticks.forEach((tick, at) => {
+      if (tick.tactic.get(id) === 'chase' && ticks[at - 1]?.tactic.get(id) !== 'chase') {
+        gaps.push(Math.round((gapAhead(tick, id) ?? 0) * 10) / 10);
+      }
+    });
+  }
+  return gaps;
+}
 
 function gapBehind(tick: FieldTick, id: string): number | null {
   const own = tick.at.get(id) as number;
@@ -63,9 +91,9 @@ function awayMoves(ticks: readonly FieldTick[]): number {
       from = undefined;
     };
     ticks.forEach((tick, at) => {
-      const moving = tick.tactic.get(id) === 'attack' || tick.tactic.get(id) === 'flyer';
-      if (moving && from === undefined) from = at;
-      if (!moving) close(at);
+      const going = moving(tick.tactic.get(id));
+      if (going && from === undefined) from = at;
+      if (!going) close(at);
     });
     close(ticks.length);
   }
@@ -101,6 +129,8 @@ export function fieldNumbers(run: FieldRun, riderId: string): FieldNumbers {
   const end = ticks.at(-1) as FieldTick;
   const places = [...end.at.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
   const botPlaces = bots.map((id) => end.at.get(id) as number);
+  const movingCounts = ticks.map((tick) => bots.filter((id) => moving(tick.tactic.get(id))).length);
+  const firstMoving = movingCounts.findIndex((count) => count > 0);
   return {
     tacticShare: Object.fromEntries(
       BOT_TACTICS.map((each) => [each, round(counts[each] / total)]),
@@ -113,5 +143,8 @@ export function fieldNumbers(run: FieldRun, riderId: string): FieldNumbers {
     spreadAtEndM: round(Math.max(...botPlaces) - Math.min(...botPlaces)),
     lowestWbal: round(Math.min(...ticks.flatMap((tick) => [...tick.wbal.values()]))),
     riderPlaceAtEnd: places.indexOf(riderId) + 1,
+    firstMoveS: firstMoving < 0 ? null : round((ticks[firstMoving] as FieldTick).second),
+    mostMovingAtOnce: Math.max(0, ...movingCounts),
+    chaseStartGapsM: chaseStartGaps(ticks, bots),
   };
 }

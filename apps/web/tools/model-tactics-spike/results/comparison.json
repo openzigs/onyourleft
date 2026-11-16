@@ -2,7 +2,8 @@
   {
     "circuit": "flat",
     "seed": 1,
-    "replayIsLive": true,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": null,
     "outcomes": {
       "applied": 980,
       "no-decision": 42,
@@ -31,7 +32,10 @@
       "leadChanges": 22,
       "spreadAtEndM": 2.238,
       "lowestWbal": 0.931,
-      "riderPlaceAtEnd": 8
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 78.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [29.7]
     },
     "model": {
       "tacticShare": {
@@ -49,13 +53,17 @@
       "leadChanges": 8,
       "spreadAtEndM": 5.714,
       "lowestWbal": 0.766,
-      "riderPlaceAtEnd": 8
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 7.05,
+      "mostMovingAtOnce": 2,
+      "chaseStartGapsM": [32, 26.8]
     }
   },
   {
     "circuit": "flat",
     "seed": 2,
-    "replayIsLive": true,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": null,
     "outcomes": {
       "applied": 949,
       "no-decision": 56,
@@ -84,7 +92,10 @@
       "leadChanges": 21,
       "spreadAtEndM": 2.221,
       "lowestWbal": 0.948,
-      "riderPlaceAtEnd": 8
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 79.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": []
     },
     "model": {
       "tacticShare": {
@@ -102,13 +113,17 @@
       "leadChanges": 6,
       "spreadAtEndM": 4.175,
       "lowestWbal": 0.682,
-      "riderPlaceAtEnd": 8
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 7.05,
+      "mostMovingAtOnce": 2,
+      "chaseStartGapsM": [31.4, 26.4]
     }
   },
   {
     "circuit": "flat",
     "seed": 3,
-    "replayIsLive": true,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": null,
     "outcomes": {
       "applied": 930,
       "no-decision": 84,
@@ -137,7 +152,10 @@
       "leadChanges": 22,
       "spreadAtEndM": 2.329,
       "lowestWbal": 0.948,
-      "riderPlaceAtEnd": 8
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 79.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": []
     },
     "model": {
       "tacticShare": {
@@ -155,13 +173,17 @@
       "leadChanges": 8,
       "spreadAtEndM": 3.892,
       "lowestWbal": 0.63,
-      "riderPlaceAtEnd": 8
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 7.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [31.2, 26.2]
     }
   },
   {
     "circuit": "hilly",
     "seed": 1,
-    "replayIsLive": true,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": null,
     "outcomes": {
       "applied": 961,
       "no-decision": 42,
@@ -190,7 +212,10 @@
       "leadChanges": 14,
       "spreadAtEndM": 77.489,
       "lowestWbal": 0.448,
-      "riderPlaceAtEnd": 5
+      "riderPlaceAtEnd": 5,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [31.1, 30.9, 104.3, 104.5, 62.2]
     },
     "model": {
       "tacticShare": {
@@ -208,13 +233,17 @@
       "leadChanges": 8,
       "spreadAtEndM": 134.457,
       "lowestWbal": 0.454,
-      "riderPlaceAtEnd": 5
+      "riderPlaceAtEnd": 5,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 4,
+      "chaseStartGapsM": []
     }
   },
   {
     "circuit": "hilly",
     "seed": 2,
-    "replayIsLive": true,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": null,
     "outcomes": {
       "applied": 966,
       "no-decision": 42,
@@ -243,7 +272,10 @@
       "leadChanges": 10,
       "spreadAtEndM": 112.753,
       "lowestWbal": 0.487,
-      "riderPlaceAtEnd": 5
+      "riderPlaceAtEnd": 5,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [95.1, 30.8, 33.1, 69.3]
     },
     "model": {
       "tacticShare": {
@@ -261,13 +293,17 @@
       "leadChanges": 10,
       "spreadAtEndM": 157.678,
       "lowestWbal": 0.432,
-      "riderPlaceAtEnd": 6
+      "riderPlaceAtEnd": 6,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 5,
+      "chaseStartGapsM": []
     }
   },
   {
     "circuit": "hilly",
     "seed": 3,
-    "replayIsLive": true,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": null,
     "outcomes": {
       "applied": 930,
       "no-decision": 70,
@@ -296,7 +332,10 @@
       "leadChanges": 2,
       "spreadAtEndM": 131.368,
       "lowestWbal": 0.487,
-      "riderPlaceAtEnd": 6
+      "riderPlaceAtEnd": 6,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 4,
+      "chaseStartGapsM": [86.6, 36.9, 29.7, 30.4, 29.2]
     },
     "model": {
       "tacticShare": {
@@ -314,7 +353,10 @@
       "leadChanges": 3,
       "spreadAtEndM": 133.671,
       "lowestWbal": 0.426,
-      "riderPlaceAtEnd": 6
+      "riderPlaceAtEnd": 6,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 4,
+      "chaseStartGapsM": [86.6, 34.8, 75.8, 69.6, 45.8, 47, 111.4]
     }
   }
 ]

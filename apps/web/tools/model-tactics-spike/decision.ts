@@ -59,12 +59,10 @@ export type ParsedDecision =
  */
 export const MODEL_ANSWER_MOST_CHARACTERS = 8_192;
 
-/**
- * The answer's JSON Schema, which Ollama's `format` field holds the model to
- * (structured outputs) and {@link parseModelDecision} checks again on arrival,
- * because a schema the server enforces is not one the client may trust.
- */
-export function modelDecisionSchema(bots: number): Readonly<Record<string, unknown>> {
+/** A decision's shape, its moves' fields `properties`. */
+function decisionShape(
+  properties: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
   return {
     type: 'object',
     properties: {
@@ -72,16 +70,7 @@ export function modelDecisionSchema(bots: number): Readonly<Record<string, unkno
         type: 'array',
         items: {
           type: 'object',
-          properties: {
-            bot: { type: 'integer', minimum: 0, maximum: bots - 1 },
-            move: { type: 'string', enum: [...BOT_TACTICS] },
-            target: {
-              anyOf: [
-                { type: 'string', enum: ['rider'] },
-                { type: 'integer', minimum: 0, maximum: bots - 1 },
-              ],
-            },
-          },
+          properties,
           required: ['bot', 'move'],
           additionalProperties: false,
         },
@@ -90,6 +79,43 @@ export function modelDecisionSchema(bots: number): Readonly<Record<string, unkno
     required: ['bots'],
     additionalProperties: false,
   };
+}
+
+const seatSchema = (bots: number): Readonly<Record<string, unknown>> => ({
+  type: 'integer',
+  minimum: 0,
+  maximum: bots - 1,
+});
+
+/**
+ * The answer's JSON Schema, which {@link parseModelDecision} checks every
+ * answer against on arrival, because a schema the server enforces is not one
+ * the client may trust. Ollama's `format` field holds the model to the
+ * narrower {@link modelAnswerFormat}.
+ */
+export function modelDecisionSchema(bots: number): Readonly<Record<string, unknown>> {
+  return decisionShape({
+    bot: seatSchema(bots),
+    move: { type: 'string', enum: [...BOT_TACTICS] },
+    target: { anyOf: [{ type: 'string', enum: ['rider'] }, seatSchema(bots)] },
+  });
+}
+
+/**
+ * What Ollama's `format` field holds the model to (structured outputs):
+ * {@link modelDecisionSchema} with **no `target`** (#2708). A `follow` or
+ * `chase` acts on the racer directly ahead when it is ridden, 3 to 5 s after
+ * the ask, and by then that need not be the racer that was ahead when the
+ * model read the race: spike 0039's model aimed 46 moves, and 157
+ * bot-windows fell back as `target-not-ahead`. With no target to write, the
+ * move goes to whoever is on the wheel ahead. The parser still reads a target
+ * that arrives anyway, and the adapter still checks it.
+ */
+export function modelAnswerFormat(bots: number): Readonly<Record<string, unknown>> {
+  return decisionShape({
+    bot: seatSchema(bots),
+    move: { type: 'string', enum: [...BOT_TACTICS] },
+  });
 }
 
 const MOVE_KEYS = new Set(['bot', 'move', 'target']);
