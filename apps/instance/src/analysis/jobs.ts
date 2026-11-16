@@ -62,6 +62,13 @@
  * ⚠️ `job_running` is shared: an athlete has ONE job open of either type.
  * Nothing on the instance starts a re-plan; only a device's request does.
  *
+ * ## Held while a model race runs (#2709, ADR 0071 D-6)
+ *
+ * While {@link AnalysisJobsOptions.hold} is on, the worker claims re-plans
+ * only: a write-up stays `queued` — not failed — and is claimed when the hold
+ * ends. Its agent's ten-minute budget counts from its run, so the wait is not
+ * spent from it. A write-up already running is left to finish.
+ *
  * ## What is never in it
  *
  * - **No event carries a tool's arguments or its results**: progress names a
@@ -101,6 +108,7 @@ import { readReplanInput, type ReplanInput } from './replan-input.ts';
 import { REPLAN_TEMPLATE } from './replan-template.ts';
 import { hostedOriginOf } from './hosted-key.ts';
 import type { AnalysisSource, SourceFailure } from './source.ts';
+import type { RaceHold } from './tactics-hold.ts';
 
 /** How often a quiet stream writes a heartbeat: the room socket's 25 s ping (ADR 0046 D-11). */
 export const DEFAULT_HEARTBEAT_MS = 25_000;
@@ -229,7 +237,8 @@ export interface JobTimers {
   clearTimeout(handle: unknown): void;
 }
 
-const PLATFORM_TIMERS: JobTimers = {
+/** The platform's timers, each `unref`'d so none holds the process open. */
+export const PLATFORM_TIMERS: JobTimers = {
   setTimeout: (run, delayMs) => {
     const handle = setTimeout(run, delayMs) as unknown as { unref?: () => void };
     handle.unref?.();
@@ -288,6 +297,12 @@ export interface AnalysisJobsOptions {
   /** Unix milliseconds. */
   readonly now: () => number;
   readonly log?: LogSink;
+  /**
+   * The model slot (#2709, ADR 0071 D-6): while a model race holds it, no
+   * write-up is claimed — re-plans still are — and when it ends the worker
+   * looks again. Absent, nothing is ever held.
+   */
+  readonly hold?: RaceHold;
   /** {@link DEFAULT_HEARTBEAT_MS} unless the operator sets another; 0 sends none. */
   readonly heartbeatMs?: number;
   readonly timers?: JobTimers;
@@ -571,7 +586,11 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
   async function work(): Promise<void> {
     for (;;) {
       if (stopping) return;
-      const job = await store.claimAnalysisJob();
+      // #2709 (ADR 0071 D-6.1, D-6.6): while a model race holds the slot, a
+      // write-up stays queued and a re-plan does not.
+      const job = await store.claimAnalysisJob(
+        options.hold?.holding() === true ? { templateVersion: REPLAN_TEMPLATE.version } : undefined,
+      );
       if (job === undefined) return;
       await runJob(job).catch(() => undefined);
     }
@@ -694,6 +713,9 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' },
     });
   }
+
+  // #2709: a held write-up starts when the model race's hold ends, by any of its ways.
+  options.hold?.onRelease(schedule);
 
   /** #2609: a source the operator's settings do not offer this athlete, refused at the start. */
   async function refusedSource(

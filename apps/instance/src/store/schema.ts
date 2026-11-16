@@ -809,6 +809,17 @@ export interface AthleteHostedConsentTable {
 }
 
 /**
+ * A rider's own consent to model-chosen lap-race bot tactics (#2709, ADR 0071
+ * D-5.2). Added by migration 0046. One row an athlete: the local model
+ * address it names, and when.
+ */
+export interface AthleteTacticsConsentTable {
+  readonly athlete_id: string;
+  readonly model_address: string;
+  readonly recorded_at: number;
+}
+
+/**
  * One of the instance's own keys (#1189, ADR 0047 D-4, D-5). Added by
  * migration 0015. The private half is PKCS #8 wrapped with AES-256-GCM under
  * a key derived from `OYL_INSTANCE_SECRET_KEY` (`keys/wrap.ts`); its plaintext
@@ -957,6 +968,7 @@ export interface InstanceDatabase {
   readonly analysis_event: AnalysisEventTable;
   readonly athlete_hosted_key: AthleteHostedKeyTable;
   readonly athlete_hosted_consent: AthleteHostedConsentTable;
+  readonly athlete_tactics_consent: AthleteTacticsConsentTable;
   readonly notice: NoticeTable;
   readonly statement: StatementTable;
   readonly appeal: AppealTable;

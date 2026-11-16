@@ -631,7 +631,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record`, its `file` address and its `visibility` here), `segments` (the segments you published, path included) and `segmentEfforts` (every effort you shared), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`) and `notIncluded`."
+                  "description": "`onyourleft.instance-account` version 1: `athlete`, `displayNameChanges`, `deviceKeys` (public only), `recoveryEmail` (the first bound), `recoveryEmails` (every one, with when it was confirmed and the key that gave it), `accountChanges` and `accountChangeMarks` (the account-change log and each device’s place in it), `activities` (each with its `record`, its `file` address and its `visibility` here), `segments` (the segments you published, path included) and `segmentEfforts` (every effort you shared), `items`, `results`, `blocks`, `reports`, `recoveryEmailConfirmations`, `historyIndex` (which model built the history index, and how many passages — never the passages or vectors), `analysisResults` (the write-ups the instance keeps of finished analysis jobs), `hostedModelKey` (`a hosted model key is held`, or `null` — never the key), `hostedConsent` (the origin your hosted consent names and when, or `null`), `tacticsConsent` (the local model address your consent to AI bots names and when, or `null`) and `notIncluded`."
                 }
               }
             }
@@ -2358,6 +2358,524 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/analysis/tactics": {
+      "get": {
+        "operationId": "getBotTactics",
+        "summary": "Whether this instance offers you AI bots in a lap race (ADR 0071): a language model on THIS instance’s own local model picks each bot’s move, and never its power. Says the instance and local model address a consent names, and your recorded consent.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "Whether this instance offers you model races now (`offered`): its own local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; no hosted model plays the bots. `instance` and `modelAddress` are what a consent names: this instance, and the address of its local model now (null when none is offered to you). `consent` is your recorded one, or null: the address it names and when (Unix seconds); it counts only while it names `modelAddress`. `consented`: offered, and your consent names its address.",
+                  "properties": {
+                    "offered": {
+                      "type": "boolean"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "modelAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "modelAddress": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "modelAddress",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consented": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "offered",
+                    "instance",
+                    "modelAddress",
+                    "consent",
+                    "consented"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/tactics/consent": {
+      "post": {
+        "operationId": "recordBotTacticsConsent",
+        "summary": "Record your consent to this instance’s own local model choosing your lap-race bots’ tactics (ADR 0071 D-5.2). `instance` and `modelAddress` must be the ones `GET /v1/analysis/tactics` says now, else `validation_failed`. Replaces any consent you had. A change of the local model’s address withdraws it: your next race asks again. `local_unavailable` when no local model is offered to you.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "instance": {
+                    "type": "string"
+                  },
+                  "modelAddress": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "instance",
+                  "modelAddress"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "Whether this instance offers you model races now (`offered`): its own local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; no hosted model plays the bots. `instance` and `modelAddress` are what a consent names: this instance, and the address of its local model now (null when none is offered to you). `consent` is your recorded one, or null: the address it names and when (Unix seconds); it counts only while it names `modelAddress`. `consented`: offered, and your consent names its address.",
+                  "properties": {
+                    "offered": {
+                      "type": "boolean"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "modelAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "modelAddress": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "modelAddress",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consented": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "offered",
+                    "instance",
+                    "modelAddress",
+                    "consent",
+                    "consented"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/local_unavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "withdrawBotTacticsConsent",
+        "summary": "Withdraw your consent to model-chosen bot tactics (ADR 0071 D-5.4). Your next tactics request is refused, and a race you are riding finishes on its usual tactics; nothing else of yours changes.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "Whether this instance offers you model races now (`offered`): its own local model configured and offered to you — for anybody but the operator, only while the operator lets other riders use it; no hosted model plays the bots. `instance` and `modelAddress` are what a consent names: this instance, and the address of its local model now (null when none is offered to you). `consent` is your recorded one, or null: the address it names and when (Unix seconds); it counts only while it names `modelAddress`. `consented`: offered, and your consent names its address.",
+                  "properties": {
+                    "offered": {
+                      "type": "boolean"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "modelAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "consent": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "modelAddress": {
+                          "type": "string"
+                        },
+                        "recordedAt": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "modelAddress",
+                        "recordedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "consented": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "offered",
+                    "instance",
+                    "modelAddress",
+                    "consent",
+                    "consented"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/tactics/decide": {
+      "post": {
+        "operationId": "decideBotTactics",
+        "summary": "One decision for your AI bots (ADR 0071 D-3): `input` is the race as it stands, exactly `@onyourleft/domain`’s `ModelTacticsInput` — seats, styles, ranks, gaps, W′ shares, drafting, moves, laps and metres to the line, launch distance, grade ahead, your gap, rank and W/kg; no coordinate, no name — at most 4 096 characters. Answers `bots`: a move from the closed list of seven for each bot the model named, and a target only of `rider` or a seat. **No power, ever.** The model is given no tools, asked for no reasoning, and its text is neither kept nor returned. `tactics_invalid` when its answer was not such a decision, `tactics_failed` when it gave none in time; on either, and on every refusal, ride the bots’ usual tactics. Takes or refreshes the model race slot as `start` does. `rate_limited` past 30 a minute on an instance with the default limits, or while one of yours is out.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "description": "A `ModelTacticsInput` (#2709)."
+                  }
+                },
+                "required": [
+                  "input"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "bots": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "One bot’s move: `bot`, its seat; `move`, one of `sit-in`, `follow`, `attack`, `chase`, `recover`, `flyer` and `kick`; and, only when the model named one, `target`: `\"rider\"` or a seat. No other field, and never a power."
+                      }
+                    }
+                  },
+                  "required": [
+                    "bots"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "description": "One of `local_unavailable`, `tactics_consent_required`, `tactics_busy`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "description": "One of `tactics_invalid`, `tactics_failed`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/tactics/end": {
+      "post": {
+        "operationId": "endBotTacticsRace",
+        "summary": "Your AI-bots race has ended: the model race slot is let go, and write-ups held for it start. Nothing for a slot you do not hold.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/tactics/start": {
+      "post": {
+        "operationId": "startBotTacticsRace",
+        "summary": "Your AI-bots race is starting (ADR 0071 D-6): it takes this instance’s one model race slot, and post-ride write-ups on this instance wait while it runs — none already running is stopped, and a re-plan does not wait. Answers 202 at once; `warming` says a call of the same shape about a fixed race, with nothing of yours in it, has gone out to load the model, so the first decision is not late. The slot is let go by `POST /v1/analysis/tactics/end`, after 30 s with no tactics request, or 2 hours after it was taken, whichever is first. `tactics_busy` while another rider’s AI-bots race holds it; `local_unavailable` and `tactics_consent_required` before anything is sent. Counted with your decisions against `rate_limited`.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "warming": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "warming"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "description": "One of `local_unavailable`, `tactics_consent_required`, `tactics_busy`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
           }
         }
       }
@@ -12979,6 +13497,8 @@
                   "picture_source_unavailable",
                   "hosted_unavailable",
                   "local_unavailable",
+                  "tactics_consent_required",
+                  "tactics_busy",
                   "payload_too_large",
                   "file_type_unsupported",
                   "file_undecodable",
@@ -12993,6 +13513,8 @@
                   "too_many",
                   "internal",
                   "picture_model_failed",
+                  "tactics_invalid",
+                  "tactics_failed",
                   "unavailable",
                   "analysis_off",
                   "pictures_off"
@@ -13425,6 +13947,26 @@
           }
         }
       },
+      "tactics_consent_required": {
+        "description": "`tactics_consent_required` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "tactics_busy": {
+        "description": "`tactics_busy` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "payload_too_large": {
         "description": "`payload_too_large` (413), in the one error shape.",
         "content": {
@@ -13557,6 +14099,26 @@
       },
       "picture_model_failed": {
         "description": "`picture_model_failed` (502), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "tactics_invalid": {
+        "description": "`tactics_invalid` (502), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "tactics_failed": {
+        "description": "`tactics_failed` (502), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

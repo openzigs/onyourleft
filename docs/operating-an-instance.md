@@ -205,6 +205,14 @@ consent it names is checked, and again when it would run — before any key is r
 deleted. A job already queued when a source is turned off is refused when it comes to run. A rider's hosted job still runs only on their own key, under their own consent naming the
 endpoint; the switch does not change that.
 
+**AI bots in a lap race (#2709, ADR 0071).** A rider may race bots whose tactics your **local**
+model picks — never a hosted one — once they consent, naming this instance and the local model's
+address. The switch for other riders gates it the same way. **Changing the local model's address
+withdraws every rider's consent**: their next race asks again. One such race runs at a time on the
+instance, and **while it runs, post-ride write-ups wait** (queued, not failed; one already running
+is not stopped; re-plans do not wait). They start when the race ends, after 30 s with no tactics
+request, or 2 hours after the race began, whichever is first.
+
 **Back to `.env`.** Clear the settings from the app (`DELETE /v1/operate/analysis`), or on the host:
 
 ```

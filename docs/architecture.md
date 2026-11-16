@@ -2164,6 +2164,37 @@ claimed** (ADR 0040 D-8): that a model ignores an instruction planted in a goal.
 boundary unambiguous; what holds whatever the model does is that the budgets end the run, no tool
 takes an athlete, and nothing unscreened is streamed or kept.
 
+#### Bot-tactics decisions and the model slot — #2709
+
+[ADR 0071](https://github.com/openzigs/onyourleft/pull/2711) D-3 to D-7. A device racing "AI bots"
+asks its instance for one decision at a time: `POST /v1/analysis/tactics/decide` with `{ input }`,
+`@onyourleft/domain` §`ModelTacticsInput` (seats, styles, ranks, gaps, W′ shares, drafting, moves,
+laps and metres to the line, launch distance, grade ahead, the rider's gap, rank and W/kg — no
+coordinate, no name, at most 4 096 characters). `analysis/tactics.ts` refuses, before any model is
+called: a rider the settings do not offer the **local** model to (`local_unavailable`; the switch
+for other riders applies), one with no consent naming the local model address the settings give now
+(`tactics_consent_required`; migration 0046's `athlete_tactics_consent`, so a changed address
+withdraws every consent at once), a race state of any other shape (`validation_failed`), and a
+second rider while another's race holds the slot (`tactics_busy`). Then ONE call to Ollama's own
+`/api/chat` (`tactics-prompt.ts`): no `tools` field, `think: false`, `format` the answer's schema,
+at most 400 tokens, 10 s at most, the address checked on every call (`local-server.ts`
+§`askLocal`). The answer is read field by field by `@onyourleft/domain` §`readModelTacticsAnswer`
+(8 192 characters at most; any key the schema does not name, a move outside the seven, a seat
+outside the field or named twice is `tactics_invalid`) and only the moves are returned — never a
+power, never the model's text. No hosted model plays the bots, on any key.
+
+`POST /v1/analysis/tactics/start` takes the slot and sends one warm-up call about a fixed race
+(`WARM_UP_INPUT`, nothing of the rider's) so the first decision is not about 11 s late;
+`…/end` lets it go. The slot (`analysis/tactics-hold.ts`) is in memory: one model race per instance,
+and **while it is held the job worker claims re-plans only** (`claimAnalysisJob({ templateVersion
+})`), so a write-up asked during a race stays `queued` and runs when the race ends; one already
+running is not stopped, and its agent's 10-minute budget counts from its own run. The hold also
+ends after 30 s with no tactics request, and at a 2-hour ceiling however often it is refreshed —
+after which that rider is `tactics_busy` until they have been quiet 30 s, so a client in a loop
+cannot start a fresh ceiling. `tactics-jobs.test.ts` holds a write-up through a race and reads it
+back `succeeded`; `tactics.test.ts` reads every refusal back through the routes and asserts the
+model server was sent nothing.
+
 ### A room, from the client: `apps/web/src/net/`
 
 [#782](https://github.com/openzigs/onyourleft/issues/782) and

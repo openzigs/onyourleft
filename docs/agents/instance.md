@@ -177,6 +177,14 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `src/analysis/replan-*.ts`; it answers one
                         `Proposal` or none and writes nothing —
                         docs/architecture.md §"Re-plan jobs — #1243".
+                        Since #2709 (ADR 0071) `src/analysis/tactics*.ts`:
+                        `/v1/analysis/tactics/*`, sealed-only — a lap
+                        race's bot moves from the LOCAL model only, under
+                        the rider's consent naming its address (migration
+                        0046), no tools, `think: false`; and the model slot,
+                        while which the job worker claims re-plans only, so
+                        write-ups wait — docs/architecture.md §"Bot-tactics
+                        decisions and the model slot — #2709".
                         Since #1251 `src/analysis/hosted-test.ts` is the
                         test question: `POST /v1/analysis/hosted/test`,
                         sealed-only, two fixed sentences on the rider's own

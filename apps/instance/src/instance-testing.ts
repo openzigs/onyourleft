@@ -4,6 +4,7 @@ import { NO_LEGAL_SETTINGS } from './legal.ts';
 import type { Admin } from './admin/admin.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
+import type { Tactics } from './analysis/tactics.ts';
 import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { InstanceProbes, SidePose } from './route-kit.ts';
@@ -101,6 +102,8 @@ export async function startTestInstance(
     analysis?: AnalysisJobs;
     /** A rider's own hosted key and consent (#1199). */
     hostedSettings?: HostedSettings;
+    /** Model-chosen bot tactics (#2709). */
+    tactics?: Tactics;
     sidePose?: SidePose;
     /** Published segments and their boards (#68). */
     segments?: Segments;
@@ -135,6 +138,7 @@ export async function startTestInstance(
     ...(options.sealed === undefined ? {} : { sealed: options.sealed }),
     ...(options.analysis === undefined ? {} : { analysis: options.analysis }),
     ...(options.hostedSettings === undefined ? {} : { hostedSettings: options.hostedSettings }),
+    ...(options.tactics === undefined ? {} : { tactics: options.tactics }),
     ...(options.sidePose === undefined ? {} : { sidePose: options.sidePose }),
     ...(options.segments === undefined ? {} : { segments: options.segments }),
     ...(options.operate === undefined ? {} : { operate: options.operate }),

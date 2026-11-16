@@ -598,6 +598,17 @@ export interface HostedConsent {
   readonly recordedAt: number;
 }
 
+/**
+ * A rider's own consent to model-chosen lap-race bot tactics (#2709, ADR 0071
+ * D-5.2): the local model address it names, as the analysis settings wrote
+ * the base URL then, and when it was recorded, in Unix seconds.
+ */
+export interface TacticsConsent {
+  readonly athleteId: string;
+  readonly modelAddress: string;
+  readonly recordedAt: number;
+}
+
 /** What {@link SqlStore.putHostedModelKey} did. */
 export type HostedKeyPut =
   | { readonly outcome: 'stored' }
@@ -1770,6 +1781,16 @@ export interface SqlStore {
   getHostedConsent(athleteId: string): Promise<HostedConsent | undefined>;
   /** Withdraw `athleteId`'s hosted consent: `true` if there was one. */
   clearHostedConsent(athleteId: string): Promise<boolean>;
+  /**
+   * Record `athleteId`'s consent to model-chosen bot tactics naming
+   * `modelAddress` (#2709, ADR 0071 D-5.2), replacing any they had:
+   * `no-athlete` and nothing written for an athlete who is not here.
+   */
+  putTacticsConsent(consent: TacticsConsent): Promise<HostedKeyPut>;
+  /** `athleteId`'s recorded consent to model-chosen bot tactics, or `undefined`. */
+  getTacticsConsent(athleteId: string): Promise<TacticsConsent | undefined>;
+  /** Withdraw `athleteId`'s consent to model-chosen bot tactics: `true` if there was one. */
+  clearTacticsConsent(athleteId: string): Promise<boolean>;
 
   /**
    * The instance's own keys (#1189, ADR 0047 D-5), wrapped: every row, the
@@ -2569,8 +2590,10 @@ export interface SqlStore {
   /**
    * The worker's: the oldest queued job of ANY athlete, marked `running` in
    * the same statement, or `undefined` when none is queued. Not a rider's read.
+   * With `only`, the oldest queued job of that template alone: while a model
+   * race runs, write-ups wait and re-plans do not (#2709, ADR 0071 D-6.1, D-6.6).
    */
-  claimAnalysisJob(): Promise<AnalysisJob | undefined>;
+  claimAnalysisJob(only?: { readonly templateVersion: string }): Promise<AnalysisJob | undefined>;
   /**
    * Append an event to a RUNNING job: its sequence number, or `undefined`
    * when the job is not running — cancelled, ended or erased — so nothing a
@@ -7422,13 +7445,16 @@ function storeOver(
         ).map(analysisEventFrom),
       ),
 
-    claimAnalysisJob: () =>
+    claimAnalysisJob: (only) =>
       exclusive(() =>
         db.transaction().execute(async (trx) => {
           const oldest = await trx
             .selectFrom('analysis_job')
             .selectAll()
             .where('status', '=', 'queued')
+            .$if(only !== undefined, (query) =>
+              query.where('template_version', '=', only?.templateVersion ?? ''),
+            )
             .orderBy('created_at')
             .orderBy('id')
             .executeTakeFirst();
@@ -7868,6 +7894,45 @@ function storeOver(
       exclusive(async () => {
         const result = await db
           .deleteFrom('athlete_hosted_consent')
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return Number(result.numDeletedRows) > 0;
+      }),
+
+    putTacticsConsent: (consent) =>
+      exclusive(async () => {
+        const written = await sql<{ athlete_id: string }>`
+          insert into athlete_tactics_consent (athlete_id, model_address, recorded_at)
+          select id, ${consent.modelAddress}, ${consent.recordedAt}
+          from athlete where id = ${consent.athleteId}
+          on conflict (athlete_id) do update set
+            model_address = excluded.model_address, recorded_at = excluded.recorded_at
+          returning athlete_id`.execute(db);
+        return written.rows.length > 0
+          ? ({ outcome: 'stored' } as const)
+          : ({ outcome: 'no-athlete' } as const);
+      }),
+
+    getTacticsConsent: (athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('athlete_tactics_consent')
+          .selectAll()
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              athleteId: row.athlete_id,
+              modelAddress: row.model_address,
+              recordedAt: row.recorded_at,
+            };
+      }),
+
+    clearTacticsConsent: (athleteId) =>
+      exclusive(async () => {
+        const result = await db
+          .deleteFrom('athlete_tactics_consent')
           .where('athlete_id', '=', athleteId)
           .executeTakeFirst();
         return Number(result.numDeletedRows) > 0;

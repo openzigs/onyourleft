@@ -22,6 +22,13 @@ import { createStoreHarness, type StoreHarness } from './store/testing/index.ts'
 import { base64Of, testPicture } from './camera/picture-testing.ts';
 import { SEGMENT_HAPPY_CALLS } from './segments/segments-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
+import {
+  ATTACK,
+  chatServer,
+  consentToTactics,
+  OFFERED,
+  TACTICS_INPUT,
+} from './analysis/tactics-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import {
   adultIn,
@@ -924,6 +931,51 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await hostedBoth(world, token);
     return send(world, 'DELETE', '/v1/analysis/hosted/consent', token);
   },
+  // #2709: a local model offered to every rider, and one that answers at once.
+  // A race that takes the one model slot lets it go again, so the next call's
+  // rider is not `tactics_busy`.
+  getBotTactics: async (world) =>
+    send(world, 'GET', '/v1/analysis/tactics', (await signedIn(world)).token),
+  recordBotTacticsConsent: async (world) => {
+    const { token } = await signedIn(world);
+    const status = (await (await send(world, 'GET', '/v1/analysis/tactics', token)).json()) as {
+      instance: string;
+      modelAddress: string;
+    };
+    return send(world, 'POST', '/v1/analysis/tactics/consent', token, {
+      instance: status.instance,
+      modelAddress: status.modelAddress,
+    });
+  },
+  withdrawBotTacticsConsent: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    return send(world, 'DELETE', '/v1/analysis/tactics/consent', token);
+  },
+  startBotTacticsRace: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    const started = await send(world, 'POST', '/v1/analysis/tactics/start', token);
+    await send(world, 'POST', '/v1/analysis/tactics/end', token);
+    await world.tactics.idle();
+    return started;
+  },
+  decideBotTactics: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    const decided = await send(world, 'POST', '/v1/analysis/tactics/decide', token, {
+      input: TACTICS_INPUT,
+    });
+    await send(world, 'POST', '/v1/analysis/tactics/end', token);
+    return decided;
+  },
+  endBotTacticsRace: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    await send(world, 'POST', '/v1/analysis/tactics/start', token);
+    await world.tactics.idle();
+    return send(world, 'POST', '/v1/analysis/tactics/end', token);
+  },
   // #1251: nothing is held, so the answer is `not-ready` and nothing is sent
   // anywhere — still the route's own 200 and its declared shape.
   sendHostedTestQuestion: async (world) => {
@@ -999,6 +1051,8 @@ describe('every route answers with the shape its entry declares', () => {
       },
       // #1106: a picture model that answers at once, as the engine above does.
       pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
+      // #2709: a local model offered to every rider, answering every call with a decision.
+      tactics: { local: OFFERED, fetch: chatServer(() => ATTACK).fetch },
     });
   });
   afterAll(async () => {
