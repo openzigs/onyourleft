@@ -28,6 +28,7 @@ import {
   ridgeLift,
   skylineCrestFloor,
 } from './realistic-light';
+import { type Embankment } from './overpasses';
 import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import {
@@ -868,6 +869,25 @@ describe('the sky and the surfaces — #425', () => {
     flat.update({ ...world, horizonColour: world.skyColour }, { x: 0, y: 0, z: 0 });
     const flatColours = flat.mesh.geometry.getAttribute('color') as unknown as Attribute;
     expect(flatColours.getX(top)).toBeCloseTo(flatColours.getX(bottom), 6);
+  });
+
+  it('draws several embankments in one mesh, each triangle on its own embankment vertices', () => {
+    // #2699: two overpasses in view. Every other test hands the belt one, where
+    // a dropped per-embankment vertex offset still draws it correctly.
+    const triangle = (x: number): Embankment => ({
+      positions: new Float32Array([x, 0, 0, x + 1, 0, 0, x, 1, 0]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      colours: new Float32Array(9),
+      fields: new Float32Array(6),
+      indices: new Uint32Array([0, 1, 2]),
+    });
+    const belt = new TerrainBelt();
+    belt.updateEmbankments([triangle(10), triangle(50)]);
+    const geometry = belt.embankmentMesh.geometry;
+    const position = geometry.getAttribute('position');
+    const indices = Array.from(geometry.getIndex()?.array ?? []);
+    expect(indices).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(indices.map((each) => position.getX(each))).toEqual([10, 11, 10, 50, 51, 50]);
   });
 
   it('switches the ground’s detail with the rung, compiling it once each way', () => {
