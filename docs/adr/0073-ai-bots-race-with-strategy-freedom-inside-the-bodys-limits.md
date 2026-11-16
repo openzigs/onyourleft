@@ -98,8 +98,9 @@ unchanged. A rider with no instance or no consent loses nothing (ADR 0036 D-3(a)
 ### D-2 — Kept, because they are physical limits
 
 1. **The target power stays the seeded rider's**: the move's own target from `decideTactic`'s view,
-   capped by `wbal.ts` §`spendableWatts` **at the bot's peak**, and **at CP once the bot is
-   exhausted**. Capacity stays fixed at the start (ADR 0067 D-1).
+   or, where the model names one, the effort D-2.5 sets in its place, and either is capped by
+   `wbal.ts` §`spendableWatts` **at the bot's peak**, and **at CP once the bot is exhausted**.
+   Capacity stays fixed at the start (ADR 0067 D-1).
 2. **W′ drains and refills as today**, and **an exhausted bot cannot surge**. *The author's choice*:
    an exhausted bot also **keeps its seeded choice** for the window, whatever the model names, so a
    blown bot rides as the seeded tactics ride a blown bot (it recovers) until its W′ is back over
@@ -115,11 +116,14 @@ unchanged. A rider with no instance or no consent loses nothing (ADR 0036 D-3(a)
    This supersedes ADR 0071 D-3.1 in part.
    - **The field**: each seat's answer may carry an optional `effort`, one of a **closed list**:
      `easy`, `tempo`, `threshold`, `all-out`. It is never a number, so the parser checks it like
-     `move`, and an unknown value makes the answer invalid (ADR 0071 D-3.4).
-   - **What it does**: it sets where in the bot's own range the move is ridden. `all-out` is the
-     move's target held to `spendableWatts`; `easy`, `tempo` and `threshold` are fixed shares of
-     the bot's CP, chosen by #2710 and recorded there with their measurement. With no `effort`, the
-     move rides at its seeded target, as today.
+     `move`, and an unknown value makes the answer invalid (ADR 0071 D-3.2).
+   - **What it does**: on a move the bot rides at its own pace (`attack`, `chase`, `flyer`, `kick`,
+     and a bot on the front with no wheel to hold), it replaces the move's target power. `easy`,
+     `tempo` and `threshold` are fixed shares of the bot's CP, chosen by #2710 and recorded there
+     with their measurement; `all-out` is `spendableWatts` itself, the most the bot's body allows
+     at that instant. On a move ridden at the wheel's pace (`sit-in`, `follow`) the wheel sets the
+     power and an effort is ignored; on `recover` the recovery target stands and an effort is
+     ignored. With no `effort`, every move rides at its seeded target, as today.
    - **The body is still the cap**: whatever the effort, the target is capped by `spendableWatts`
      at the bot's peak, or at CP once exhausted (D-2.1, D-2.2). An exhausted bot still keeps its
      seeded choice (D-2.2). So an effort level is a pacing choice and never a power override: the
@@ -273,6 +277,9 @@ D-8.7).
 - **The longer input is slower.** Spike 0039 §11.3 measured a median of 3.56 s and 14.0 % of
   bot-windows with no decision in force, so #2710 must state a cadence that holds with it (ADR 0071
   D-7).
+- **The effort level is unmeasured.** D-7's figures were taken without the `effort` field; it adds a
+  second choice per seat to a call that is already slow, so #2710 measures it before it ships
+  (D-2.5).
 - **The bot-code version rises** in the build, and logs written under ADR 0071's rules stop
   replaying there (ADR 0071's own consequence, as it said).
 - **Marking is approximate**: a bridge is a chase past the racers between, and a mark behind is a
@@ -282,7 +289,7 @@ D-8.7).
 
 | Issue | Constraint |
 |---|---|
-| #2710 | Once this is Accepted: the adapter's D-2 and D-3 rules, D-4's seeded fallbacks, D-5's input and the prompt, and a bot-code version raised for them (D-6); the model-mode trainer cases under these rules; `lap-race-cannot-reach-trainer.test.ts` unmodified; a full-distance measurement that a model race reaches a sprint (What would make this ADR wrong) |
+| #2710 | Once this is Accepted: the adapter's D-2 and D-3 rules, D-4's seeded fallbacks, D-5's input and the prompt, and a bot-code version raised for them (D-6); the model-mode trainer cases under these rules; `lap-race-cannot-reach-trainer.test.ts` unmodified; a full-distance measurement that a model race reaches a sprint (What would make this ADR wrong); D-2.5's effort level: the CP shares for `easy`, `tempo` and `threshold` chosen and recorded, trainer-write equality at every effort level, and validity, latency and the fallback share measured with the field in the answer format |
 | #2715 | Its race-feel items are folded in here and measured in spike 0039 §11; its tool items stay its own |
 
 ### Reversing any of these
@@ -294,6 +301,7 @@ model race, or taking away a body's limit (D-2), needs one.
 
 - **The prompt's wording**, the call cadence and the late and lapse figures: the spike's are drafts,
   and #2710 states its own.
+- **The CP shares** for D-2.5's `easy`, `tempo` and `threshold`: #2710 chooses and records them.
 - **Whether the seeded tactics themselves should be freer.** This ADR changes model races only.
 
 ## What would make this ADR wrong
