@@ -331,9 +331,9 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
   const kept = own.notePacerDecision.bind(own);
   const watched: RideController = {
     ...own,
-    notePacerDecision: (record) => {
+    notePacerDecision: (record, ride) => {
       records.push(record);
-      kept(record);
+      kept(record, ride);
     },
   };
   controller = own;

@@ -11,7 +11,12 @@
  */
 
 import Dexie from 'dexie';
-import { MODEL_PACER_CODE_VERSION, type PacerDecisionRecord } from '@onyourleft/domain';
+import {
+  MODEL_PACER_CODE_VERSION,
+  unixSeconds,
+  wind,
+  type PacerDecisionRecord,
+} from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { PacerModelFact } from './records';
@@ -61,17 +66,61 @@ const DECISIONS: readonly PacerDecisionRecord[] = [
   { askedAtS: 16, arrivedAtS: 17, outcome: 'invalid' },
 ];
 
-const LOG: PacerModelFact = { version: MODEL_PACER_CODE_VERSION, decisions: DECISIONS };
+/** What the log replays with beside it — #2712's review. Still air: no wind. */
+const REPLAYED_WITH = {
+  pacerWPerKg: 2.9,
+  startedAt: unixSeconds(1_700_000_012),
+  routeId: 'route-rolling',
+  position: 'hoods',
+} as const;
 
-/** Logs that do not read: a bad version, a bad decision anywhere, decisions out of order. */
+const LOG: PacerModelFact = {
+  version: MODEL_PACER_CODE_VERSION,
+  decisions: DECISIONS,
+  ...REPLAYED_WITH,
+};
+
+/** And one ridden in a wind, which is kept beside it. */
+const WINDY: PacerModelFact = { ...LOG, wind: wind(4.5, 270) };
+
+/** {@link LOG} without one of its fields. */
+function without(key: keyof PacerModelFact): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(Object.entries(LOG).filter(([name]) => name !== key));
+}
+
+/**
+ * Logs that do not read: a bad version, a bad decision anywhere, decisions
+ * out of order — and, since #2712's review, one missing or holding malformed
+ * any of what its replay needs beside it.
+ */
 const BAD: readonly unknown[] = [
-  { version: 0, decisions: DECISIONS },
-  { version: '1', decisions: DECISIONS },
-  { version: 1, decisions: [] },
-  { version: 1, decisions: 'all of them' },
-  { version: 1, decisions: [DECISIONS[0], { ...DECISIONS[1], say: 'Stay with me.' }] },
-  { version: 1, decisions: [DECISIONS[0], { ...DECISIONS[0], plan: 'sprint' }] },
-  { version: 1, decisions: [DECISIONS[1], DECISIONS[0]] },
+  { ...LOG, version: 0 },
+  { ...LOG, version: '1' },
+  { ...LOG, decisions: [] },
+  { ...LOG, decisions: 'all of them' },
+  { ...LOG, decisions: [DECISIONS[0], { ...DECISIONS[1], say: 'Stay with me.' }] },
+  { ...LOG, decisions: [DECISIONS[0], { ...DECISIONS[0], plan: 'sprint' }] },
+  { ...LOG, decisions: [DECISIONS[1], DECISIONS[0]] },
+  without('pacerWPerKg'),
+  { ...LOG, pacerWPerKg: '2.9' },
+  { ...LOG, pacerWPerKg: 0.4 },
+  { ...LOG, pacerWPerKg: 7.1 },
+  { ...LOG, pacerWPerKg: Number.NaN },
+  without('startedAt'),
+  { ...LOG, startedAt: -1 },
+  { ...LOG, startedAt: Number.POSITIVE_INFINITY },
+  { ...LOG, startedAt: '1700000012' },
+  without('routeId'),
+  { ...LOG, routeId: '' },
+  { ...LOG, routeId: 'r'.repeat(201) },
+  { ...LOG, routeId: 7 },
+  without('position'),
+  { ...LOG, position: 'aero' },
+  { ...LOG, wind: null },
+  { ...LOG, wind: 'westerly' },
+  { ...LOG, wind: { speedMetresPerSecond: -1, fromBearing: 270 } },
+  { ...LOG, wind: { speedMetresPerSecond: 4.5, fromBearing: 360 } },
+  { ...LOG, wind: { speedMetresPerSecond: 4.5 } },
   'a log',
 ];
 
@@ -92,6 +141,16 @@ describe('the AI pacer’s log kept with its ride — #2712', () => {
     expect(read.listed.find((each) => each.id === ride.id)?.rideFacts?.pacerModel).toStrictEqual(
       LOG,
     );
+  });
+
+  it('keeps the wind a log was ridden in, read back on a fresh connection — #2712’s review', async () => {
+    const open = await opened();
+    const ride = rideFor(ATHLETE_A, { rideFacts: { pacerModel: WINDY } });
+    const read = await open.roundTrip(
+      async (store) => store.putActivity(ride),
+      async (store) => store.getActivity(ATHLETE_A, ride.id),
+    );
+    expect(read?.rideFacts).toStrictEqual({ pacerModel: WINDY });
   });
 
   it('leaves a log that does not read out on the way IN, and keeps the ride', async () => {

@@ -2679,9 +2679,17 @@ function GameScreen({
         roomId === undefined &&
         simulated === undefined
       ) {
+        // #2712's review: what the log replays with beside it, the same
+        // values this simulation was built with, so a replay is this ride's.
+        const replayedWith = {
+          pacerWPerKg: pacer.intensityWattsPerKilogram,
+          routeId: route.id,
+          position: sitting,
+          ...(air === undefined ? {} : { wind: air }),
+        };
         modelPacerRef.current = {
           director: new ModelPacer(offer, (record) => {
-            trainerPortRef.current?.pacerDecided?.(record);
+            trainerPortRef.current?.pacerDecided?.(record, replayedWith);
           }),
           plan: pacer,
           riderMassKilograms: riderMassFor(props.riderMass).mass,

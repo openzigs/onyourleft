@@ -48,7 +48,10 @@
  * The pacer's power is a function of its plan, the grade and the decision in
  * force, and nothing else: {@link pacerDirectionAt} reads the decision in
  * force at a time off the stored log. So a directed ride's pacer replays from
- * the route, the plan and the log, under {@link MODEL_PACER_CODE_VERSION}.
+ * the route, the plan, the log, and the position and wind its speed is ridden
+ * in, under {@link MODEL_PACER_CODE_VERSION} — all stored with the ride
+ * (`@onyourleft/store` §`PacerModelFact`, #2712's review), with where the
+ * ride began on the recording's clock.
  */
 
 import type { GradePercent, Watts } from '../quantities';

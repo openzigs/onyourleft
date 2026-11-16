@@ -349,3 +349,21 @@ text kept or shown unscreened (D-4), or any pacer decision reaching a trainer wr
   invalid, the rider is riding #92's pacer under another name, and the switch should say so or not
   be offered.
 - **Replay diverges under one version**: then something reads a clock or the rider outside the log.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-16** — **The log alone did not replay the pacer, and the stored fact now holds what
+  was missing.** D-5.1 says a directed pacer is a pure function of *"the route, its plan and the
+  decision log"*, and the Consequences say *"the route, the W/kg, the log and the version"* are the
+  whole of what it did. As first built, `RideFacts.pacerModel` held only the version and the
+  decisions: no W/kg, no route, and no start of the directed game ride within its recording. And
+  the pacer's course depends on two more inputs neither sentence names: the **riding position**,
+  whose drag area the pacer is ridden with (`apps/web` §`rideConditionsFor`), and the **wind**.
+  Since #2712's review the fact also holds `pacerWPerKg`, `routeId`, `position`, `wind` (absent for
+  still air) and `startedAt`, the recording-clock instant its seconds ridden count from. It is still
+  an optional ride fact with no store schema version (R-6), and a fact missing any of them, or
+  holding one malformed, is dropped whole. Read D-5.1's inputs as the route, the plan, the position,
+  the wind and the log; `apps/web/src/game/model-pacer-replay.test.tsx` replays a saved ride from
+  them, step for step.

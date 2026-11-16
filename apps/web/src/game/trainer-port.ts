@@ -84,7 +84,7 @@ import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
 import type { CourseLineEvent, LapFigures } from '../recording/laps';
 import type { RideTotals } from '../recording/totals';
-import { rideInProgress, type RidePhase } from '../ride/controller';
+import { rideInProgress, type PacerRideFacts, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
 import type { SoloDraftState } from './solo-draft';
@@ -378,8 +378,12 @@ export interface GameTrainerPort {
    * on this port for {@link gameRideEnded}'s reason, and named so nothing
    * else in production calls a method of that name. Optional, as
    * {@link soloDraftStepped} is; `gameTrainerPortOver` always supplies it.
+   *
+   * `ride` (#2712's review): what the log replays with beside it — the
+   * pacer's W/kg, the route, the position and the wind — the same on every
+   * record of one game ride.
    */
-  pacerDecided?(record: PacerDecisionRecord): void;
+  pacerDecided?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
   /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
@@ -642,7 +646,7 @@ interface GameTrainerSource {
   /** #2451. @see GameTrainerPort.soloDraftStepped. Optional for a source with no recording. */
   noteSoloDraft?(reading: SoloDraftState): void;
   /** #2712. @see GameTrainerPort.pacerDecided. Optional for a source with no recording. */
-  notePacerDecision?(record: PacerDecisionRecord): void;
+  notePacerDecision?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -806,8 +810,8 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     soloDraftStepped: (draft) => {
       controller?.noteSoloDraft?.(draft);
     },
-    pacerDecided: (record) => {
-      controller?.notePacerDecision?.(record);
+    pacerDecided: (record, ride) => {
+      controller?.notePacerDecision?.(record, ride);
     },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
     // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide

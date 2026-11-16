@@ -38,8 +38,11 @@ import {
   geographicPosition,
   altitudeMetres,
   UnitError,
+  MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   readPacerDecisionRecord,
   readReplanRecord,
+  wind as validWind,
   readWorkoutGoals,
   validateWorkout,
   WorkoutError,
@@ -49,6 +52,7 @@ import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analy
 import type {
   GeographicPosition,
   PacerDecisionRecord,
+  Wind,
   ReplanRecord,
   RouteProfile,
   Workout,
@@ -72,6 +76,7 @@ import type {
   ActivityRecord,
   DraftSpan,
   PacerModelFact,
+  PacerRidingPosition,
   RideFacts,
   RoomRaceFact,
   AthleteRecord,
@@ -188,7 +193,15 @@ export interface PersistedRideFacts {
   /** @see RideFacts.draftSpans — #2451. Re-read whole on the way in and out: @see draftSpansOf */
   draftSpans?: unknown[];
   /** @see RideFacts.pacerModel — #2712. Re-read whole on the way in and out: @see pacerModelOf */
-  pacerModel?: { version: unknown; decisions: unknown[] };
+  pacerModel?: {
+    version: unknown;
+    decisions: unknown[];
+    pacerWPerKg: unknown;
+    startedAt: unknown;
+    routeId: unknown;
+    position: unknown;
+    wind?: { speedMetresPerSecond: unknown; fromBearing: unknown };
+  };
 }
 
 /**
@@ -677,10 +690,27 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
     row.pacerModel = {
       version: pacer.version,
       decisions: pacer.decisions.map((each) => ({ ...each })),
+      pacerWPerKg: pacer.pacerWPerKg,
+      startedAt: pacer.startedAt,
+      routeId: pacer.routeId,
+      position: pacer.position,
+      ...(pacer.wind === undefined
+        ? {}
+        : {
+            wind: {
+              speedMetresPerSecond: pacer.wind.speedMetresPerSecond,
+              fromBearing: pacer.wind.fromBearing,
+            },
+          }),
     };
   }
   return row;
 }
+
+/** The longest route id a pacer log may name: **200** characters, far past a UUID's 36. */
+const PACER_ROUTE_ID_MOST_CHARACTERS = 200;
+
+const PACER_RIDING_POSITIONS: readonly PacerRidingPosition[] = ['upright', 'hoods', 'drops'];
 
 /**
  * A ride's AI-pacer log (#2712), or `undefined` when there is none or it
@@ -689,12 +719,42 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
  * `@onyourleft/domain` §`PacerDecisionRecord`'s shapes, or decisions out of
  * the order they were asked in. A decision missing from the middle would
  * replay a different pacer.
+ *
+ * #2712's review: so does a log missing what its replay needs beside it, or
+ * holding it malformed — a W/kg outside the pacer's own range, a start that
+ * is not an instant, no route, a position outside the three, or a wind
+ * `@onyourleft/domain` §`wind` refuses. A log that cannot be replayed is not
+ * kept as if it could.
  */
 export function pacerModelOf(value: unknown): PacerModelFact | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  const { version, decisions } = value as { version?: unknown; decisions?: unknown };
+  const { version, decisions, pacerWPerKg, startedAt, routeId, position } = value as {
+    version?: unknown;
+    decisions?: unknown;
+    pacerWPerKg?: unknown;
+    startedAt?: unknown;
+    routeId?: unknown;
+    position?: unknown;
+  };
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1)
     return undefined;
+  if (
+    typeof pacerWPerKg !== 'number' ||
+    !(pacerWPerKg >= MINIMUM_INTENSITY_WATTS_PER_KILOGRAM) ||
+    !(pacerWPerKg <= MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM)
+  )
+    return undefined;
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt < 0)
+    return undefined;
+  if (
+    typeof routeId !== 'string' ||
+    routeId.length === 0 ||
+    routeId.length > PACER_ROUTE_ID_MOST_CHARACTERS
+  )
+    return undefined;
+  if (!PACER_RIDING_POSITIONS.includes(position as PacerRidingPosition)) return undefined;
+  const air = pacerWindOf(value);
+  if (air === null) return undefined;
   if (!Array.isArray(decisions) || decisions.length === 0) return undefined;
   const read: PacerDecisionRecord[] = [];
   for (const each of decisions as unknown[]) {
@@ -704,7 +764,35 @@ export function pacerModelOf(value: unknown): PacerModelFact | undefined {
     if (before !== undefined && record.askedAtS < before.askedAtS) return undefined;
     read.push(record);
   }
-  return { version, decisions: read };
+  return {
+    version,
+    decisions: read,
+    pacerWPerKg,
+    startedAt: unixSeconds(startedAt),
+    routeId,
+    position: position as PacerRidingPosition,
+    ...(air === undefined ? {} : { wind: air }),
+  };
+}
+
+/** A pacer log's wind: `undefined` for none (still air), `null` for one that does not read. */
+function pacerWindOf(log: object): Wind | undefined | null {
+  if (!('wind' in log) || log.wind === undefined) return undefined;
+  const air = log.wind;
+  if (typeof air !== 'object' || air === null) return null;
+  const { speedMetresPerSecond, fromBearing } = air as {
+    speedMetresPerSecond?: unknown;
+    fromBearing?: unknown;
+  };
+  if (typeof speedMetresPerSecond !== 'number' || typeof fromBearing !== 'number') return null;
+  // `wind` normalises a bearing into [0, 360); one stored outside it was not written here.
+  if (!(fromBearing >= 0 && fromBearing < 360)) return null;
+  try {
+    return validWind(speedMetresPerSecond, fromBearing);
+  } catch (error) {
+    if (error instanceof UnitError) return null;
+    throw error;
+  }
 }
 
 /**
