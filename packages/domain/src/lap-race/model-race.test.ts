@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * #2710, ADR 0071 D-3.6, D-4 and D-7: when a logged decision is in force, how
- * a model's move is ridden through a bot's own tactics memory, the body's
- * limits outside the strategy seam and the seam's rules inside it, the launch
- * band read on the line as the bot misreads it (#2705), and a stored log read
- * back whole or not at all.
+ * #2710, ADR 0071 D-4 and D-7 and ADR 0073 D-2 to D-4: when a logged decision
+ * is in force, how a model's move is ridden through a bot's own tactics
+ * memory, the body's limits outside the strategy seam, ADR 0073's strategy
+ * (the default: every rule of ADR 0071 D-3.6 lifted) and ADR 0071's kept
+ * behind the seam, the line read as the bot misreads it (#2705), and a stored
+ * log read back whole or not at all.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -15,6 +16,7 @@ import { createItemRace } from './item-race';
 import type { ItemRaceState } from './items';
 import {
   ADR_0071_MOVE_STRATEGY,
+  ADR_0073_MOVE_STRATEGY,
   applyModelMoves,
   MODEL_TACTICS_HOLD_MS,
   modelMovesInForce,
@@ -29,6 +31,7 @@ import {
   type ModelRaceBot,
   type ModelTacticsLogEntry,
 } from './model-race';
+import type { ModelTacticsMove } from './model-tactics';
 import { botRacePlan } from './plan';
 import { raceCourse } from './race';
 import {
@@ -195,18 +198,18 @@ describe('a model move ridden through the tactics memory (D-3.6)', () => {
   });
 });
 
-/** A strategy that refuses nothing: what ADR 0073 could hand in at its loosest. */
+/** A strategy that refuses nothing and rides every move as named: the loosest seam there is. */
 const ANYTHING: ModelMoveStrategy = () => undefined;
 
-describe('the body’s limits sit outside the strategy seam', () => {
-  it('keeps an exhausted bot on its seeded choice, whatever the strategy allows', () => {
+describe('the body’s limits sit outside the strategy seam (ADR 0073 D-2)', () => {
+  it('keeps an exhausted bot on its seeded choice, whatever the strategy allows, an effort included', () => {
     const tired = bot('bot-1', { energy: { wbalJoules: 0, exhausted: true } });
     const race = raceAt(12_000, MID);
-    for (const strategy of [ADR_0071_MOVE_STRATEGY, ANYTHING]) {
+    for (const strategy of [undefined, ADR_0073_MOVE_STRATEGY, ADR_0071_MOVE_STRATEGY, ANYTHING]) {
       const applied = applyModelMoves(
         race,
         [tired, bot('bot-2'), bot('bot-3')],
-        [{ bot: 0, move: 'attack' }],
+        [{ bot: 0, move: 'attack', effort: 'all-out' }],
         SEED,
         strategy,
       );
@@ -215,15 +218,17 @@ describe('the body’s limits sit outside the strategy seam', () => {
     }
   });
 
-  it('lets a looser strategy ride what ADR 0071’s refuses', () => {
-    // Three laps out: ADR 0071 shuts the flyer; the loosest seam rides it.
+  it('rides by default what ADR 0071’s rules refuse', () => {
+    // Three laps out: ADR 0071 shuts the flyer; the race's own strategy rides it.
     const race = raceAt(12_000, { rider: 30, 'bot-1': 20, 'bot-2': 10, 'bot-3': 0 });
     const moves = [{ bot: 0, move: 'flyer' as const }];
     const bots = IDS.map((id) => bot(id));
-    expect(applyModelMoves(race, bots, moves, SEED).outcomes[0]).toBe('flyer-closed');
-    const loose = applyModelMoves(race, bots, moves, SEED, ANYTHING);
-    expect(loose.outcomes[0]).toBe('applied');
-    expect(loose.bots[0]?.tactics.tactic).toBe('flyer');
+    expect(applyModelMoves(race, bots, moves, SEED, ADR_0071_MOVE_STRATEGY).outcomes[0]).toBe(
+      'flyer-closed',
+    );
+    const ridden = applyModelMoves(race, bots, moves, SEED);
+    expect(ridden.outcomes[0]).toBe('applied');
+    expect(ridden.bots[0]?.tactics.tactic).toBe('flyer');
   });
 
   it('shows the seam the bot’s own reading of the race', () => {
@@ -255,8 +260,10 @@ describe('the body’s limits sit outside the strategy seam', () => {
       wbalShare: 0.5,
       tactics,
       ahead: 'rider',
+      targetAt: 'ahead',
     });
     expect(seen[1]?.ahead).toBe(0);
+    expect(seen[1]?.targetAt).toBeUndefined();
   });
 });
 
@@ -272,9 +279,130 @@ function ask(over: Partial<ModelMoveAsk> = {}): ModelMoveAsk {
     wbalShare: 0.9,
     tactics: { tactic: 'sit-in', sinceMs: 50_000, window: 59 },
     ahead: 1,
+    targetAt: undefined,
     ...over,
   };
 }
+
+/** One bot's move ridden under the race's own strategy, ADR 0073's: its outcome, and the memory it rides. */
+function ridden(
+  move: ModelTacticsMove,
+  over: Partial<ModelRaceBot> = {},
+  at: Readonly<Record<string, number>> = MID,
+  atMs = 12_000,
+): { outcome: string | undefined; tactics: ModelRaceBot['tactics'] | undefined } {
+  const bots = IDS.map((id, seat) => (seat === move.bot ? bot(id, over) : bot(id)));
+  const applied = applyModelMoves(raceAt(atMs, at), bots, [move], SEED);
+  return { outcome: applied.outcomes[move.bot], tactics: applied.bots[move.bot]?.tactics };
+}
+
+describe('ADR 0073 D-3: every strategy rule lifted, the race’s own strategy', () => {
+  const low = {
+    wbalJoules: PLAN.capacity.wPrimeJoules * (BOT_TACTIC_WBAL_FLOOR - 0.05),
+    exhausted: false,
+  };
+
+  it('rides an attack or a chase under the W′ floor: a gamble (D-3.1)', () => {
+    for (const move of ['attack', 'chase'] as const) {
+      expect(ridden({ bot: 1, move }, { energy: low })).toEqual({
+        outcome: 'applied',
+        tactics: { tactic: move, sinceMs: 12_000, window: 12 },
+      });
+    }
+  });
+
+  it('rides a flyer on any lap and at any W′ (D-3.2)', () => {
+    // Three laps out, and under the flyer's W′ share.
+    const start = { rider: 30, 'bot-1': 20, 'bot-2': 10, 'bot-3': 0 };
+    expect(ridden({ bot: 0, move: 'flyer' }, {}, start).tactics?.tactic).toBe('flyer');
+    const under = {
+      wbalJoules: PLAN.capacity.wPrimeJoules * (BOT_TACTIC_FLYER_WBAL_SHARE - 0.05),
+      exhausted: false,
+    };
+    expect(ridden({ bot: 0, move: 'flyer' }, { energy: under }).outcome).toBe('applied');
+  });
+
+  it('rides an attack past its longest hold, keeping when it began (D-3.3)', () => {
+    const since = 12_000 - BOT_TACTIC_ATTACK_MS * 3;
+    const held = { tactics: { tactic: 'attack' as const, sinceMs: since, window: 11 } };
+    expect(ridden({ bot: 0, move: 'attack' }, held)).toEqual({
+      outcome: 'applied',
+      tactics: { tactic: 'attack', sinceMs: since, window: 12 },
+    });
+  });
+
+  it('rides a follow or chase of a racer up the road as a chase to them: bridging (D-3.4)', () => {
+    // Order: rider, bot-1 (seat 0), bot-2 (seat 1), bot-3 (seat 2).
+    for (const move of ['follow', 'chase'] as const) {
+      expect(ridden({ bot: 2, move, target: 'rider' })).toEqual({
+        outcome: 'bridging',
+        tactics: { tactic: 'chase', sinceMs: 12_000, window: 12 },
+      });
+      expect(ridden({ bot: 2, move, target: 0 }).outcome).toBe('bridging');
+    }
+  });
+
+  it('rides a follow or chase of a racer behind as sitting in: marking (D-3.4)', () => {
+    for (const move of ['follow', 'chase'] as const) {
+      expect(ridden({ bot: 0, move, target: 2 })).toEqual({
+        outcome: 'marking',
+        tactics: { tactic: 'sit-in', sinceMs: 12_000, window: 12 },
+      });
+    }
+  });
+
+  it('rides a follow or chase of the racer directly ahead, itself, or nobody, as named (D-3.4)', () => {
+    expect(ridden({ bot: 0, move: 'follow', target: 'rider' }).tactics?.tactic).toBe('follow');
+    expect(ridden({ bot: 1, move: 'chase', target: 0 }).tactics?.tactic).toBe('chase');
+    expect(ridden({ bot: 1, move: 'follow', target: 1 }).outcome).toBe('applied');
+    expect(ridden({ bot: 1, move: 'follow' }).tactics?.tactic).toBe('follow');
+    // A target over the line is no longer racing: the move as named.
+    const race = raceAt(12_000, MID);
+    const done: ItemRaceState = {
+      ...race,
+      racers: race.racers.map((entry) =>
+        entry.racer.id === 'bot-1'
+          ? { ...entry, racer: { ...entry.racer, finishedAtMs: 11_000 } }
+          : entry,
+      ),
+    };
+    const applied = applyModelMoves(
+      done,
+      IDS.map((id) => bot(id)),
+      [{ bot: 2, move: 'follow', target: 0 }],
+      SEED,
+    );
+    expect(applied.outcomes[1]).toBe('applied');
+    expect(applied.bots[2]?.tactics.tactic).toBe('follow');
+  });
+
+  it('rides a kick anywhere, any move inside the launch, and the model ending a kick (D-3.5)', () => {
+    // A lap and more out: a kick launched long.
+    expect(ridden({ bot: 0, move: 'kick' }).tactics?.tactic).toBe('kick');
+    // Ten metres out, deep inside every launch: a launch held late.
+    const close = { rider: 2_995, 'bot-1': 2_990, 'bot-2': 0, 'bot-3': 0 };
+    expect(ridden({ bot: 0, move: 'sit-in' }, {}, close).outcome).toBe('applied');
+    // In its kick, and told to sit up: the model ends it.
+    const kicking = { tactics: { tactic: 'kick' as const, sinceMs: 11_000, window: 11 } };
+    expect(ridden({ bot: 0, move: 'sit-in' }, kicking, close).tactics?.tactic).toBe('sit-in');
+  });
+
+  it('refuses nothing, by itself', () => {
+    for (const move of [
+      'sit-in',
+      'follow',
+      'chase',
+      'attack',
+      'recover',
+      'flyer',
+      'kick',
+    ] as const) {
+      expect(
+        ADR_0073_MOVE_STRATEGY(ask({ move, wbalShare: 0, readToLineMetres: 0, lapsLeft: 9 })),
+      ).toBeUndefined();
+    }
+  });
+});
 
 describe('ADR 0071 D-3.6’s strategy rules, behind the seam', () => {
   it('rides an open move', () => {
@@ -334,7 +462,7 @@ describe('ADR 0071 D-3.6’s strategy rules, behind the seam', () => {
   });
 });
 
-describe('the launch band reads the line as seeded decideTactic does (#2705)', () => {
+describe('the launch band reads the line as seeded decideTactic does (#2705), under ADR 0071’s rules', () => {
   /** A naive bot's window, by seat and time, whose misread puts the line the given side of the true one. */
   function windowMisreading(sign: 1 | -1): { seat: number; atMs: number; misread: number } {
     for (let window = 1; window < 500; window += 1) {
@@ -353,9 +481,13 @@ describe('the launch band reads the line as seeded decideTactic does (#2705)', (
       at[id] = index === seat ? LAP * LAPS - trueToLine : 0;
     });
     const bots = IDS.map((id) => bot(id, { strategy: { skill: 'naive' } }));
-    return applyModelMoves(raceAt(atMs, at), bots, [{ bot: seat, move: 'attack' }], SEED).outcomes[
-      seat
-    ];
+    return applyModelMoves(
+      raceAt(atMs, at),
+      bots,
+      [{ bot: seat, move: 'attack' }],
+      SEED,
+      ADR_0071_MOVE_STRATEGY,
+    ).outcomes[seat];
   }
 
   it('keeps a bot that misreads the line as nearer on its own kick, outside the true band', () => {

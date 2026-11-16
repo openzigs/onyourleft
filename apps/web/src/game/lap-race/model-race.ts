@@ -26,13 +26,18 @@
  * instance mid-race finishes on seeded tactics. Nothing retries in a loop, and
  * nothing asks the rider anything mid-race.
  *
- * ## What the model is shown (D-3.4)
+ * ## What the model is shown (D-3.4, ADR 0073 D-5)
  *
  * {@link modelTacticsInputOf}: `@onyourleft/domain` §`ModelTacticsInput`, read
- * off the race on effort distance — seats, styles, ranks, who is ahead and its
- * move, gaps, W′ shares, drafting, moves and the seconds held, the lull, laps
- * and metres to the line, launch distance, grade ahead, and the rider's gap,
- * rank and W/kg. **No coordinate, no place name, no rider name, no date and no
+ * off the race on effort distance — seats, each bot's racing style dealt from
+ * the race's seed (`modelRacingStyles`) and its legs (its archetype), ranks,
+ * who is ahead and its move, gaps, W′ shares and whether a bot is blown,
+ * drafting, moves and the seconds held, the lull, laps and metres to the line
+ * **as each bot misreads them** (`botTacticsMisjudgement`, the reading seeded
+ * `decideTactic` launches on: ADR 0073 D-3.5), launch distance, grade ahead,
+ * each bot's gap to the rider, and the rider's own state: rank, W/kg, who is
+ * ahead of them, their gaps and whether they draft (D-5.2). There is no attack
+ * gate (D-5.3). **No coordinate, no place name, no rider name, no date and no
  * identifier**: every field is a number, a boolean or a word from a closed
  * list, and the device checks it with the instance's own reader before it is
  * sent. **The rider's state (#2715):** where the racer directly ahead of a bot
@@ -57,6 +62,7 @@ import {
   BOT_TACTIC_MOVE_SHARE,
   BOT_TACTICS_WINDOW_MS,
   botLaunchMetres,
+  botTacticsMisjudgement,
   distanceOnRoute,
   gradeAt,
   LAP_RACE_BOT_CODE_VERSION,
@@ -64,6 +70,7 @@ import {
   MODEL_TACTICS_LATE_MS,
   MODEL_TACTICS_LOG_REASONS,
   modelMovesInForce,
+  modelRacingStyles,
   modelTacticsNextAskAtMs,
   readModelTacticsAnswer,
   readModelTacticsInput,
@@ -73,16 +80,10 @@ import {
   type ModelTacticsInput,
   type ModelTacticsLogEntry,
   type ModelTacticsLogReason,
+  type ModelRacingStyle,
   type RouteProfile,
 } from '@onyourleft/domain';
 import { lapRaceDraftFactors, type LapRaceBot } from '@onyourleft/physics';
-
-/**
- * How long the field must have been quiet, no bot attacking or on a flyer,
- * before the model is told a new attack is open, seconds: **30**, #2708's
- * tuned figure (spike 0039 §10). ADR 0073 (#2720) is to lift it.
- */
-export const MODEL_ATTACK_QUIET_SECONDS = 30;
 
 /** How far up the road a bot's grade ahead is read, metres: the bots' own look-ahead (`physics` §`BOT_GRADE_AHEAD_METRES`). */
 const GRADE_AHEAD_METRES = 50;
@@ -163,12 +164,14 @@ const round = (value: number, places: number): number => {
  * The race at `race.atMs` as the model is shown it (D-3.4), or `undefined`
  * when no bot is still racing. See the file comment.
  *
+ * @param seed - the race's own seed: the styles' deal and each bot's misread of the line.
  * @param riderWattsPerKilogram - the rider's power as the bots read it, or `null`.
  */
 export function modelTacticsInputOf(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
   profile: RouteProfile,
+  seed: number,
   draft: boolean,
   riderWattsPerKilogram: number | null,
   quietSinceMs: number,
@@ -182,6 +185,7 @@ export function modelTacticsInputOf(
   const rider = race.racers.find((entry) => !seats.has(entry.racer.id))?.racer;
   const factors = draft ? lapRaceDraftFactors(race) : undefined;
   const { laps, lapLengthMetres } = race.course;
+  const styles = modelRacingStyles(seed, bots.length);
   const views: ModelTacticsBotView[] = [];
   bots.forEach((bot, seat) => {
     const at = rank.get(bot.id);
@@ -197,9 +201,11 @@ export function modelTacticsInputOf(
             bot.plan.capacity.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)
           ? 'attack'
           : 'sit-in';
+    const misread = botTacticsMisjudgement(seed, seat, bot.strategy.skill, race.atMs).lineMetres;
     views.push({
       bot: seat,
-      style: bot.plan.archetype,
+      style: styles[seat] as ModelRacingStyle,
+      legs: bot.plan.archetype,
       rank: at + 1,
       ahead: ahead === undefined ? null : (aheadSeat ?? 'rider'),
       aheadMove:
@@ -220,6 +226,7 @@ export function modelTacticsInputOf(
         Math.min(1, Math.max(0, bot.energy.wbalJoules / bot.plan.capacity.wPrimeJoules)),
         2,
       ),
+      blown: bot.energy.exhausted,
       drafting: (factors?.[bot.id] ?? 1) < 1,
       move: bot.tactics.tactic,
       secondsInMove:
@@ -227,7 +234,7 @@ export function modelTacticsInputOf(
           ? 0
           : Math.max(0, Math.floor((race.atMs - bot.tactics.sinceMs) / 1_000)),
       lapsLeft: Math.max(0, laps - Math.floor(own.effortDistance / lapLengthMetres)),
-      toLineM: Math.round(laps * lapLengthMetres - own.effortDistance),
+      toLineM: Math.round(laps * lapLengthMetres - own.effortDistance + misread),
       launchM: Math.round(botLaunchMetres(bot.plan.archetype)),
       gradeAheadPct: round(
         gradeAt(profile, distanceOnRoute(profile, bot.ride.distance + GRADE_AHEAD_METRES)),
@@ -237,15 +244,27 @@ export function modelTacticsInputOf(
     });
   });
   if (views.length === 0) return undefined;
-  const quietS = Math.max(0, Math.floor((race.atMs - quietSinceMs) / 1_000));
+  const riderAt = rider === undefined ? undefined : rank.get(rider.id);
+  const riderAhead = riderAt === undefined ? undefined : racing[riderAt - 1];
+  const riderBehind = riderAt === undefined ? undefined : racing[riderAt + 1];
+  const riderDistance = rider?.effortDistance ?? 0;
   return {
     laps,
     field: racing.length,
-    quietS,
-    attackOpen: quietS >= MODEL_ATTACK_QUIET_SECONDS,
+    quietS: Math.max(0, Math.floor((race.atMs - quietSinceMs) / 1_000)),
     rider: {
-      rank: rider === undefined ? 0 : (rank.get(rider.id) ?? -1) + 1,
+      rank: riderAt === undefined ? 0 : riderAt + 1,
       wPerKg: riderWattsPerKilogram === null ? null : round(riderWattsPerKilogram, 1),
+      ahead: riderAhead === undefined ? null : (seats.get(riderAhead.id) ?? null),
+      gapAheadM:
+        riderAhead === undefined
+          ? null
+          : round(Math.max(0, riderAhead.effortDistance - riderDistance), 1),
+      gapBehindM:
+        riderBehind === undefined
+          ? null
+          : round(Math.max(0, riderDistance - riderBehind.effortDistance), 1),
+      drafting: rider !== undefined && riderAt !== undefined && (factors?.[rider.id] ?? 1) < 1,
     },
     bots: views,
   };
@@ -331,6 +350,7 @@ export function askLapRaceModel(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
   profile: RouteProfile,
+  seed: number,
   draft: boolean,
   riderWattsPerKilogram: number | null,
 ): LapRaceModelAsking {
@@ -351,6 +371,7 @@ export function askLapRaceModel(
     race,
     bots,
     profile,
+    seed,
     draft,
     riderWattsPerKilogram,
     next.quietSinceMs,

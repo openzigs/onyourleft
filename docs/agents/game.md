@@ -984,9 +984,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         one instance module), logs each reply at the race
                         time it arrives, and rides a decision through domain
                         `lap-race/model-race.ts` §`applyModelMoves` (the
-                        body's limits outside, ADR 0071 D-3.6's strategy
-                        rules behind the `ModelMoveStrategy` seam). Any miss
-                        rides seeded. The record goes to `RideFacts.lapRaces`.
+                        body's limits outside; ADR 0073's strategy, which
+                        lifts ADR 0071 D-3.6's rules, behind the
+                        `ModelMoveStrategy` seam). Any miss rides seeded. The record goes to `RideFacts.lapRaces`.
                         ⚠️ Raise `LAP_RACE_BOT_CODE_VERSION` and APPEND a key
                         to `model-race-golden.json` for any change to bot
                         output; never edit an old one

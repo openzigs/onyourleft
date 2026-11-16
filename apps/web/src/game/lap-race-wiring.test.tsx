@@ -152,18 +152,30 @@ vi.mock('./simulation', async (importOriginal) => {
  * #2710, **AI bots in the shipped path** (ADR 0071 D-8.2, moved from #2616's
  * spike): while `on`, the race is chosen with AI bots and `GameView` is handed
  * a tactics port whose instance offers them, holds the rider's consent, and
- * answers every ask at once with every bot told to attack — the most a model
- * could ask. The real race asks, logs and rides each answer; the real
- * `stepBotRace` rides the moves. What the race kept with the ride is read
+ * answers every ask at once with a move for every bot that ADR 0071 D-3.6
+ * refused and ADR 0073 D-3 rides: attacks held on and on, flyers and kicks on
+ * the first lap, and a chase of the rider and a follow of another bot, which
+ * are ridden as bridging or marking. The real race asks, logs and rides each
+ * answer under ADR 0073's strategy; the real `stepBotRace` rides the moves. What the race kept with the ride is read
  * back off the trainer port's `lapRaceEnded`.
  */
 const modelMode = {
   on: false,
   decided: 0,
   kept: [] as LapRaceModelRecord[],
-  /** The effort every bot is asked to ride its attack at, or none (ADR 0073 D-2.5). */
+  /** The effort every bot is asked to ride its move at, or none (ADR 0073 D-2.5). */
   effort: undefined as BotEffort | undefined,
 };
+
+/** Moves ADR 0071 D-3.6 refused from the first lap and ADR 0073 D-3 rides, given another bot's seat. */
+const FREE_MOVES: readonly ((other: number) => Readonly<Record<string, unknown>>)[] = [
+  () => ({ move: 'attack' }),
+  () => ({ move: 'flyer' }),
+  () => ({ move: 'attack' }),
+  () => ({ move: 'kick' }),
+  () => ({ move: 'chase', target: 'rider' }),
+  (other) => ({ move: 'follow', target: other }),
+];
 
 const ATTACKING: ModelTacticsPort = {
   tacticsStatus: () =>
@@ -181,9 +193,11 @@ const ATTACKING: ModelTacticsPort = {
     return Promise.resolve({
       kind: 'answer',
       body: {
-        bots: input.bots.map((view) => ({
+        bots: input.bots.map((view, at) => ({
           bot: view.bot,
-          move: 'attack',
+          ...FREE_MOVES[(view.bot + modelMode.decided) % FREE_MOVES.length]!(
+            input.bots[(at + 1) % input.bots.length]?.bot ?? view.bot,
+          ),
           ...(modelMode.effort === undefined ? {} : { effort: modelMode.effort }),
         })),
       },
@@ -192,7 +206,7 @@ const ATTACKING: ModelTacticsPort = {
   endTacticsRace: () => Promise.resolve(),
 };
 
-/** Ride `ride` with AI bots, every bot told to attack in every window. */
+/** Ride `ride` with AI bots, every bot told a free move in every window. */
 async function inModelMode<T>(ride: () => Promise<T>): Promise<T> {
   modelMode.on = true;
   modelMode.decided = 0;
@@ -889,7 +903,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
     expect(on.writes).toStrictEqual(replay.writes);
   });
 
-  it('with AI bots, every bot told to attack, sends the trainer the same writes as an ordinary ride (D-2.1, ADR 0071 D-8.2)', async () => {
+  it('with AI bots riding ADR 0073’s free moves, sends the trainer the same writes as an ordinary ride (D-2.1, ADR 0071 D-8.2)', async () => {
     const ordinary = await plain();
     // Blind, as #2524 rides a case that reads no frame.
     const model = await inModelMode(() => rideOnce(ITEMS_OFF, { blind: true }));
@@ -903,7 +917,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
   });
 
   it.each(['easy', 'tempo', 'threshold', 'all-out'] as const)(
-    'with AI bots told to ride every attack %s, sends the trainer the same writes as an ordinary ride (ADR 0073 D-2.5)',
+    'with AI bots told to ride every free move %s, sends the trainer the same writes as an ordinary ride (ADR 0073 D-2.5)',
     async (effort) => {
       const ordinary = await plain();
       modelMode.effort = effort;

@@ -11,9 +11,13 @@
  *
  * ## What the model is shown
  *
- * {@link ModelTacticsInput}: spike 0039's shape (ADR 0071 D-3.4) — seats,
- * styles, ranks, gaps, W′ shares, drafting, current moves, laps and metres to
- * the line, launch distance, grade ahead, the rider's gap, rank and W/kg.
+ * {@link ModelTacticsInput}: spike 0039's shape (ADR 0071 D-3.4) as ADR 0073
+ * D-5 widened it (#2720, #2710) — seats, racing styles dealt from the seed
+ * ({@link modelRacingStyles}) and legs (archetypes), ranks, gaps, W′ shares
+ * and whether a bot is blown, drafting, current moves, laps and metres to the
+ * line as each bot misreads it, launch distance, grade ahead, the rider's gap,
+ * and the rider's own state: rank, W/kg, who is ahead of them, their gaps and
+ * whether they draft. There is no code-computed attack gate (D-5.3).
  * **Every field is a number, a boolean, or a word from a closed list**: there
  * is no field a coordinate, a place name, a rider's name, a date or an
  * identifier could be written into as text, and {@link readModelTacticsInput}
@@ -22,9 +26,9 @@
  *
  * ## What the model may answer
  *
- * `{"bots":[{"bot":<seat>,"move":<one of the seven>,"target"?:"rider"|<seat>}]}`
+ * `{"bots":[{"bot":<seat>,"move":<one of the seven>,"target"?:"rider"|<seat>,"effort"?:<one of four>}]}`
  * and nothing else. **There is no power field**, nor any number but a seat
- * (D-3.1). {@link readModelTacticsAnswer} reads it field by field: a key the
+ * (D-3.1); the effort is a word from a closed list (ADR 0073 D-2.5). {@link readModelTacticsAnswer} reads it field by field: a key the
  * schema does not name anywhere makes the whole answer invalid, so a model that
  * writes `"watts": 900` has said nothing; so does a move outside the seven, a
  * seat outside the field, a seat named twice, text that is not JSON, or an
@@ -36,6 +40,7 @@
  */
 
 import { BOT_ARCHETYPES, type BotArchetype } from './archetype';
+import { nextUnit, raceRandom } from './random';
 import { BOT_EFFORTS, BOT_TACTICS, type BotEffort, type BotTactic } from './tactics';
 
 /**
@@ -58,6 +63,48 @@ export const MODEL_TACTICS_ANSWER_MOST_CHARACTERS = 8_192;
  */
 export const MODEL_TACTICS_INPUT_MOST_CHARACTERS = 4_096;
 
+/**
+ * **The racing styles a bot is dealt** (ADR 0073 D-5.1): how it likes to race,
+ * apart from what its legs are good at. A `sprinter` is a wheel-sitter who
+ * waits for the line; the instance's prompt says what each of the others does.
+ */
+export const MODEL_RACING_STYLES = [
+  'breakaway',
+  'sprinter',
+  'climber',
+  'rouleur',
+  'opportunist',
+] as const;
+
+/** One of {@link MODEL_RACING_STYLES}. */
+export type ModelRacingStyle = (typeof MODEL_RACING_STYLES)[number];
+
+/** What the styles' deal mixes into the race's seed, so it draws apart from every other draw. */
+const STYLE_SALT = 0x5717_1e5d;
+
+/**
+ * Each of `count` seats its racing style, dealt from the race's `seed` (ADR
+ * 0073 D-5.1): every style once before any twice, in an order the seed
+ * shuffles, so a field of seven holds all five and the same seed deals the
+ * same field. Dealt apart from the bots' archetypes, so a bot may race in a
+ * style its legs do not suit (D-9 R-4).
+ */
+export function modelRacingStyles(seed: number, count: number): readonly ModelRacingStyle[] {
+  const deck = Array.from(
+    { length: count },
+    (_, at) => MODEL_RACING_STYLES[at % MODEL_RACING_STYLES.length] as ModelRacingStyle,
+  );
+  let random = raceRandom((raceRandom(seed).state ^ STYLE_SALT) >>> 0);
+  // A Fisher–Yates shuffle from the seeded generator.
+  for (let at = deck.length - 1; at > 0; at -= 1) {
+    const drawn = nextUnit(random);
+    random = drawn.next;
+    const swap = Math.floor(drawn.value * (at + 1));
+    [deck[at], deck[swap]] = [deck[swap] as ModelRacingStyle, deck[at] as ModelRacingStyle];
+  }
+  return deck;
+}
+
 /** The most laps a race state may say: far over the app's ten. */
 const MOST_LAPS = 100;
 /** The largest distance a race state may say, metres: a loop of 1 000 km. */
@@ -69,7 +116,10 @@ const MOST_WATTS_PER_KILOGRAM = 40;
 export interface ModelTacticsBotView {
   /** The bot's seat, from 0: its place in the ride's bots. */
   readonly bot: number;
-  readonly style: BotArchetype;
+  /** How it likes to race, dealt from the race's seed (ADR 0073 D-5.1). */
+  readonly style: ModelRacingStyle;
+  /** What its legs are good at: its archetype, which sets its sprint and its launch distance. */
+  readonly legs: BotArchetype;
   /** Its place in the race, from 1. */
   readonly rank: number;
   /** Who is directly ahead: `"rider"`, another bot's seat, or `null` when it leads (#2708). */
@@ -82,15 +132,22 @@ export interface ModelTacticsBotView {
   readonly gapBehindM: number | null;
   /** Its W′ balance as a share of its W′, 0 to 1. */
   readonly wbal: number;
+  /** Whether it is blown (ADR 0073 D-5.4): its W′ ran out, and it rides no harder than CP until it has refilled. */
+  readonly blown: boolean;
   readonly drafting: boolean;
   /** The move it is riding now. */
   readonly move: BotTactic;
   /** Whole seconds it has held {@link move}, 0 on the line (#2708). */
   readonly secondsInMove: number;
   readonly lapsLeft: number;
-  /** Metres to the finish line. */
+  /**
+   * Metres to the finish line **as the bot reads them** (ADR 0073 D-3.5): the
+   * true distance plus its skill's misjudgement for the window
+   * (`archetype.ts` §`botTacticsMisjudgement`), the reading seeded
+   * `decideTactic` launches on.
+   */
   readonly toLineM: number;
-  /** How far out it launches its sprint, metres. */
+  /** Where its legs would usually launch the sprint, metres to the line: a guide, not a rule (D-3.5). */
   readonly launchM: number;
   /** The grade 50 m up the road, percent. */
   readonly gradeAheadPct: number;
@@ -105,14 +162,23 @@ export interface ModelTacticsInput {
   readonly field: number;
   /** Whole seconds since any bot was last attacking or on a flyer, or since the start (#2708). */
   readonly quietS: number;
-  /** Whether a new attack or flyer may start: the lull is long enough (#2708). */
-  readonly attackOpen: boolean;
-  readonly rider: {
-    /** The rider's place, from 1; 0 when the rider is not racing. */
-    readonly rank: number;
-    readonly wPerKg: number | null;
-  };
+  /** The rider's state (ADR 0073 D-5.2), so a bot can mark them. */
+  readonly rider: ModelTacticsRiderView;
   readonly bots: readonly ModelTacticsBotView[];
+}
+
+/** The rider as the model is shown them (ADR 0073 D-5.2). */
+export interface ModelTacticsRiderView {
+  /** The rider's place, from 1; 0 when the rider is not racing. */
+  readonly rank: number;
+  readonly wPerKg: number | null;
+  /** The seat of the bot directly ahead of the rider, or `null` when the rider leads or is not racing. */
+  readonly ahead: number | null;
+  /** Metres to the racer directly ahead of the rider, or `null`. */
+  readonly gapAheadM: number | null;
+  /** Metres to the racer directly behind the rider, or `null`. */
+  readonly gapBehindM: number | null;
+  readonly drafting: boolean;
 }
 
 /** Who a move is aimed at: the rider, or another bot by its seat. */
@@ -167,7 +233,9 @@ export function modelTacticsSeats(input: ModelTacticsInput): readonly number[] {
 
 /**
  * The answer's JSON Schema for a field of `seats`, which a local model
- * server's structured output holds the model to — and which
+ * server's structured output holds the model to — the target offered again
+ * since ADR 0073 D-3.4 lets a `follow` or `chase` name any racer, and the
+ * optional effort (D-2.5) — and which
  * {@link readModelTacticsAnswer} checks again, because a schema a server
  * enforces is not one its caller may trust.
  */
@@ -191,39 +259,6 @@ export function modelTacticsAnswerSchema(
                 { type: 'integer', enum: [...seats] },
               ],
             },
-          },
-          required: ['bot', 'move'],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['bots'],
-    additionalProperties: false,
-  };
-}
-
-/**
- * What the model server's structured output holds the model to:
- * {@link modelTacticsAnswerSchema} with **no `target`** (#2708). A `follow` or
- * `chase` acts on the racer directly ahead when it is ridden, seconds after
- * the ask, and by then that need not be the racer that was ahead when the
- * model read the race, so the model is not asked to name one. The reader
- * still accepts a target that arrives anyway.
- */
-export function modelTacticsAnswerFormat(
-  seats: readonly number[],
-): Readonly<Record<string, unknown>> {
-  return {
-    type: 'object',
-    properties: {
-      bots: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            bot: { type: 'integer', enum: [...seats] },
-            move: { type: 'string', enum: [...BOT_TACTICS] },
-            effort: { type: 'string', enum: [...BOT_EFFORTS] },
           },
           required: ['bot', 'move'],
           additionalProperties: false,
@@ -298,12 +333,14 @@ export function readModelTacticsAnswer(text: string, seats: readonly number[]): 
 const VIEW_KEYS = [
   'bot',
   'style',
+  'legs',
   'rank',
   'ahead',
   'aheadMove',
   'gapAheadM',
   'gapBehindM',
   'wbal',
+  'blown',
   'drafting',
   'move',
   'secondsInMove',
@@ -313,10 +350,10 @@ const VIEW_KEYS = [
   'gradeAheadPct',
   'riderGapM',
 ] as const;
-const INPUT_KEYS = ['laps', 'field', 'quietS', 'attackOpen', 'rider', 'bots'] as const;
+const INPUT_KEYS = ['laps', 'field', 'quietS', 'rider', 'bots'] as const;
 /** The most seconds a race state may say: a day. */
 const MOST_SECONDS = 86_400;
-const RIDER_KEYS = ['rank', 'wPerKg'] as const;
+const RIDER_KEYS = ['rank', 'wPerKg', 'ahead', 'gapAheadM', 'gapBehindM', 'drafting'] as const;
 
 const wholeIn = (value: unknown, least: number, most: number): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= least && value <= most;
@@ -347,7 +384,13 @@ function viewProblem(view: unknown, at: string): ModelTacticsInputProblem | unde
     ['bot', wholeIn(view.bot, 0, MODEL_TACTICS_MOST_SEATS - 1), 'must be a seat'],
     [
       'style',
-      typeof view.style === 'string' && (BOT_ARCHETYPES as readonly string[]).includes(view.style),
+      typeof view.style === 'string' &&
+        (MODEL_RACING_STYLES as readonly string[]).includes(view.style),
+      'must be a racing style',
+    ],
+    [
+      'legs',
+      typeof view.legs === 'string' && (BOT_ARCHETYPES as readonly string[]).includes(view.legs),
       'must be an archetype',
     ],
     ['rank', wholeIn(view.rank, 1, MODEL_TACTICS_MOST_SEATS + 1), 'must be a place in the field'],
@@ -368,6 +411,7 @@ function viewProblem(view: unknown, at: string): ModelTacticsInputProblem | unde
     ['gapAheadM', gap(view.gapAheadM), 'must be metres, or null'],
     ['gapBehindM', gap(view.gapBehindM), 'must be metres, or null'],
     ['wbal', numberIn(view.wbal, 0, 1), 'must be a share from 0 to 1'],
+    ['blown', typeof view.blown === 'boolean', 'must be a boolean'],
     ['drafting', typeof view.drafting === 'boolean', 'must be a boolean'],
     [
       'move',
@@ -415,7 +459,6 @@ export function readModelTacticsInput(value: unknown): ModelTacticsInputRead {
   if (!wholeIn(value.quietS, 0, MOST_SECONDS)) {
     return refuse('input.quietS', 'must be a whole number of seconds');
   }
-  if (typeof value.attackOpen !== 'boolean') return refuse('input.attackOpen', 'must be a boolean');
   const rider = value.rider;
   if (!isRecord(rider)) return refuse('input.rider', 'must be an object');
   const riderKeys = keyProblem(rider, RIDER_KEYS, 'input.rider');
@@ -425,6 +468,17 @@ export function readModelTacticsInput(value: unknown): ModelTacticsInputRead {
   }
   if (rider.wPerKg !== null && !numberIn(rider.wPerKg, 0, MOST_WATTS_PER_KILOGRAM)) {
     return refuse('input.rider.wPerKg', 'must be watts per kilogram, or null');
+  }
+  if (rider.ahead !== null && !wholeIn(rider.ahead, 0, MODEL_TACTICS_MOST_SEATS - 1)) {
+    return refuse('input.rider.ahead', 'must be a seat, or null');
+  }
+  for (const key of ['gapAheadM', 'gapBehindM'] as const) {
+    if (rider[key] !== null && !numberIn(rider[key], 0, MOST_METRES)) {
+      return refuse(`input.rider.${key}`, 'must be metres, or null');
+    }
+  }
+  if (typeof rider.drafting !== 'boolean') {
+    return refuse('input.rider.drafting', 'must be a boolean');
   }
   const bots = value.bots;
   if (!Array.isArray(bots) || bots.length === 0 || bots.length > MODEL_TACTICS_MOST_SEATS) {

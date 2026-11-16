@@ -2197,7 +2197,8 @@ model server was sent nothing.
 
 #### AI bots on the device — #2710
 
-ADR 0071 D-1, D-3.6, D-4 and D-7, the app's half. The lap race's setup offers *AI bots* only while
+ADR 0071 D-1, D-4 and D-7 and ADR 0073 (which supersedes D-3.6 for a model race), the app's
+half. The lap race's setup offers *AI bots* only while
 the rider's instance says it offers its local model (`GET /v1/analysis/tactics`), and asks the
 consent there, naming the instance and the model's address (`StageChooser.tsx` §`AiBotsControl`).
 A race chosen with them and a consent recorded keeps a `LapRaceModel` (`game/lap-race/model-race.ts`):
@@ -2213,10 +2214,16 @@ available for that race, which the standings say. The race never waits.
 The moves are ridden by `@onyourleft/domain` §`applyModelMoves` (`lap-race/model-race.ts`): before
 the tick that opens a window it hands a bot the tactics memory `decideTactic` would have written,
 and the tick rides it through the bot's own capacity. **The body's limits sit outside the strategy
-seam** (an exhausted bot keeps its seeded choice; `spendableWatts` caps every target), and **ADR
-0071 D-3.6's strategy rules sit behind one**, `ModelMoveStrategy`, so ADR 0073 (#2720) can hand in
-looser ones. The launch band reads the line as the bot misreads it, as seeded `decideTactic` does
-(#2705).
+seam** (an exhausted bot keeps its seeded choice; `spendableWatts` caps every target, an effort
+level's included), and **the strategy sits behind one**, `ModelMoveStrategy`. Since bot-code
+version 2 that is `ADR_0073_MOVE_STRATEGY`, which refuses nothing: a W′-floor gamble, a flyer on
+any lap, an attack held as long as the model names it and a kick anywhere are all ridden, and a
+`follow` or `chase` of a racer up the road is ridden as a chase to them, of one behind as sitting in
+(ADR 0073 D-3). ADR 0071 D-3.6's rules stay behind the seam as `ADR_0071_MOVE_STRATEGY`, used by no
+race. The model is shown the line as each bot misreads it, the reading seeded `decideTactic`
+launches on (#2705, D-3.5), each bot's racing style dealt from the seed, its legs, whether it is
+blown, and the rider's own state (D-5); the instance's prompt is guidance, not rules
+(`tactics-prompt.ts`, `tactics-4`).
 
 The record (`LapRaceModelRecord`: seed, `LAP_RACE_BOT_CODE_VERSION`, the log, and the rider's
 effort distance, W/kg, lane and item use at every tick) is kept with the ride as
@@ -2224,8 +2231,9 @@ effort distance, W/kg, lane and item use at every tick) is kept with the ride as
 `down` drops it); it is held by the recorder in memory, not in the checkpoint, so a ride recovered
 after a crash is saved without it. No sync rule sends it. `model-race-replay.test.ts` replays
 committed races from seed and log to the bit, and holds their outcomes in `model-race-golden.json`
-keyed by version, append-only. `lap-race-wiring.test.tsx` rides AI bots told to attack in every
-window and holds the trainer's writes to an ordinary ride's, draft off and on.
+keyed by version, append-only. `lap-race-wiring.test.tsx` rides AI bots told, in every window,
+moves ADR 0071 refused and ADR 0073 rides, at every effort level, and holds the trainer's writes to
+an ordinary ride's, draft off and on.
 
 ### A room, from the client: `apps/web/src/net/`
 

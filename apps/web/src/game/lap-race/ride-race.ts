@@ -586,6 +586,7 @@ export function askLapRaceRide(ride: LapRaceRide, riderWatts?: number): LapRaceR
     ride.race,
     ride.bots,
     ride.conditions.profile,
+    ride.seed,
     ride.draft,
     wattsPerKilogramOf(ride, riderWatts) ?? null,
   );

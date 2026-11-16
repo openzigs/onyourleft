@@ -195,14 +195,17 @@ export type {
   ModelTacticsInputProblem,
   ModelTacticsInputRead,
   ModelTacticsInvalid,
+  ModelRacingStyle,
   ModelTacticsMove,
+  ModelTacticsRiderView,
   ModelTacticsTarget,
 } from './model-tactics';
 export {
   MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
   MODEL_TACTICS_INPUT_MOST_CHARACTERS,
+  MODEL_RACING_STYLES,
   MODEL_TACTICS_MOST_SEATS,
-  modelTacticsAnswerFormat,
+  modelRacingStyles,
   modelTacticsAnswerSchema,
   modelTacticsSeats,
   readModelTacticsAnswer,
@@ -238,6 +241,7 @@ export type {
   AppliedModelMoves,
   ModelMoveAsk,
   ModelMoveOutcome,
+  ModelMoveRide,
   ModelMoveStrategy,
   ModelMoveStrategyRefusal,
   LapRaceModelRecord,
@@ -248,6 +252,7 @@ export type {
 } from './model-race';
 export {
   ADR_0071_MOVE_STRATEGY,
+  ADR_0073_MOVE_STRATEGY,
   applyModelMoves,
   LAP_RACE_BOT_CODE_VERSION,
   LAP_RACE_MODEL_MOST_TICKS,

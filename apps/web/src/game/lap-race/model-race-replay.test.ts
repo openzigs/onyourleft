@@ -79,6 +79,7 @@ const RIDER_KILOGRAMS = 75;
 /** Each version's golden entry's digest. Append-only: a new version adds a line, and none is edited. */
 const SEALS: Readonly<Record<string, string>> = {
   '1': '265e3b2ac759823edbd007cc1b8d8a19a48b5bdcf2ffd9a5b69e1188a645418d',
+  '2': 'b2aa7e152fc7194801420f8e75fcc878bb8fe070d45bdcf4a481f13796d3dc80',
 };
 
 afterEach(() => {

@@ -162,7 +162,7 @@ describe('a bot-tactics decision, read back as the app reads it (#2709)', () => 
 });
 
 describe('the race state and the answer, as the spike builds and reads them (#2709, #2708)', () => {
-  it('asks the model for no target, and for the tuned prompt’s own fields', async () => {
+  it('asks the model for a target and an effort, with ADR 0073’s input and no attack gate', async () => {
     const server = chatServer(() => ATTACK);
     const { riders } = await tacticsWorld(1, { local: OFFERED, fetch: server.fetch });
     const w = world as IdentityInstance;
@@ -176,13 +176,17 @@ describe('the race state and the answer, as the spike builds and reads them (#27
       'bot',
       'move',
       'effort',
+      'target',
     ]);
-    for (const field of ['quietS', 'attackOpen', 'ahead', 'aheadMove', 'secondsInMove']) {
+    for (const field of ['quietS', 'legs', 'blown', 'style', 'secondsInMove', 'riderGapM']) {
       expect(body.messages[1]?.content).toContain(`"${field}"`);
     }
-    for (const field of ['attackOpen', 'aheadMove', 'secondsInMove']) {
+    // The prompt reads the fields it is guidance about, and no gate.
+    for (const field of ['wbal', 'blown', 'legs', 'style', 'target', 'effort', 'toLineM']) {
       expect(body.messages[0]?.content).toContain(`"${field}"`);
     }
+    expect(body.messages[0]?.content).not.toContain('attackOpen');
+    expect(body.messages[1]?.content).not.toContain('attackOpen');
   });
 
   it('reads the answer against the seats of the race it was asked about, not the seven', async () => {

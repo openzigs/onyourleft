@@ -161,6 +161,7 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
       ride.race,
       ride.bots,
       ride.conditions.profile,
+      ride.seed,
       true,
       220 / 75,
     );
@@ -198,7 +199,15 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
       if (status.kind === 'offered') await port.recordTacticsConsent(status);
     }
     const ride = raceSoFar();
-    const input = modelTacticsInputOf(ride.race, ride.bots, ride.conditions.profile, true, 3, 0)!;
+    const input = modelTacticsInputOf(
+      ride.race,
+      ride.bots,
+      ride.conditions.profile,
+      ride.seed,
+      true,
+      3,
+      0,
+    )!;
     expect((await one.startTacticsRace()).kind).toBe('answer');
     expect(await two.startTacticsRace()).toEqual({ kind: 'refused', code: 'tactics_busy' });
     expect(await two.decideTactics(input)).toEqual({ kind: 'refused', code: 'tactics_busy' });
@@ -217,7 +226,15 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
     const status = await port.tacticsStatus();
     if (status.kind === 'offered') await port.recordTacticsConsent(status);
     const ride = raceSoFar();
-    const input = modelTacticsInputOf(ride.race, ride.bots, ride.conditions.profile, true, 3, 0)!;
+    const input = modelTacticsInputOf(
+      ride.race,
+      ride.bots,
+      ride.conditions.profile,
+      ride.seed,
+      true,
+      3,
+      0,
+    )!;
     expect(await port.decideTactics(input)).toEqual({ kind: 'refused', code: 'tactics_failed' });
   });
 });

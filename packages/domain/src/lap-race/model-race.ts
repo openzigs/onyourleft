@@ -3,7 +3,8 @@
 /**
  * **A lap race whose bots' moves a language model picks: the decision log,
  * when a logged decision is in force, and how a move is ridden** — #2710,
- * ADR 0071 D-3.6, D-4 and D-7.
+ * ADR 0071 D-4 and D-7, and ADR 0073 D-2 to D-4, which supersedes ADR 0071
+ * D-3.6 for a model race.
  *
  * Written fresh for #2710 (ADR 0071 D-8.7): the spike's AGPL copies under
  * `apps/web/tools/model-tactics-spike/` are not moved.
@@ -39,19 +40,24 @@
  * - **The body's**, which nothing loosens: an exhausted bot keeps its seeded
  *   choice (it cannot surge), and its power is `spendableWatts`' whatever the
  *   move. These are checked here, outside the seam.
- * - **Strategy rules**, behind ONE seam, {@link ModelMoveStrategy}:
- *   {@link ADR_0071_MOVE_STRATEGY} is ADR 0071 D-3.6's, which the race uses
- *   today. ADR 0073 (#2720) loosens strategy, and only strategy, by handing
- *   {@link applyModelMoves} another.
+ * - **Strategy rules**, behind ONE seam, {@link ModelMoveStrategy}.
+ *   {@link ADR_0073_MOVE_STRATEGY}, the owner's ruling of 2026-11-16 (ADR
+ *   0073, accepted), is what a model race rides since bot-code version 2: it
+ *   refuses nothing, and only carries a `follow` or `chase` of a racer who is
+ *   not directly ahead through the moves a bot has (D-3.4). A W′-floor gamble,
+ *   a flyer on any lap, an attack held as long as the model names it, a kick
+ *   anywhere, and any move inside the launch, a kick ended by the model
+ *   included, are all ridden. {@link ADR_0071_MOVE_STRATEGY} is ADR 0071
+ *   D-3.6's rules, which version 1 rode; it is kept behind the seam as the
+ *   rules a superseding ADR would hand back, and no race uses it.
  *
- * ## The launch band reads the misread line (#2705)
+ * ## The line as the bot misreads it (#2705, ADR 0073 D-3.5)
  *
  * Seeded `decideTactic` launches its kick when the line **as the bot misreads
  * it** (`archetype.ts` §`botTacticsMisjudgement`'s `lineMetres`) is inside its
- * launch distance. The spike's adapter read the true distance, so inside a band
- * of up to ±60 m a model's move could replace or end a seeded kick.
- * {@link ModelMoveAsk.readToLineMetres} is the same misread distance, so the
- * two agree to the metre.
+ * launch distance. {@link ModelMoveAsk.readToLineMetres} is the same misread
+ * distance, and the model is shown it too (`toLineM`), so a launch the model
+ * times is timed on what the bot believes is left.
  */
 
 import { botTacticsMisjudgement, BOT_TACTICS_WINDOW_MS, type BotArchetype } from './archetype';
@@ -74,14 +80,16 @@ import type { BotEnergy } from './wbal';
 import type { ModelTacticsInvalid, ModelTacticsMove, ModelTacticsTarget } from './model-tactics';
 
 /**
- * **The bot-code version: 1** (ADR 0071 D-4.3). Raised by any change that
+ * **The bot-code version: 2** (ADR 0071 D-4.3, ADR 0073 D-6). Version 1 rode
+ * ADR 0071 D-3.6's strategy rules; version 2 rides ADR 0073's, with D-5's
+ * input. Raised by any change that
  * alters any bot's output for some seed and log — a tactic, a plan, the W′
  * model, the adapter, a seam's rule, a physics step. Stored beside the seed and
  * the log; a log recorded under another version is not replayed.
  * `apps/web` §`model-race-replay.test.ts` holds committed seeds and logs to
  * their outcomes, keyed by this number.
  */
-export const LAP_RACE_BOT_CODE_VERSION = 1;
+export const LAP_RACE_BOT_CODE_VERSION = 2;
 
 /** How often the model is asked, ms of race time: every **4 s**, spike 0039's draft (D-7). */
 export const MODEL_TACTICS_ASK_EVERY_MS = 4_000;
@@ -233,6 +241,22 @@ export interface ModelMoveAsk {
   readonly tactics: TacticMemory;
   /** Who is directly ahead: `"rider"`, a seat, or `null` when it leads. */
   readonly ahead: ModelTacticsTarget | null;
+  /**
+   * Where {@link target} is on the road from this bot: the racer directly
+   * `ahead`, further `up-the-road`, or `behind`; `undefined` with no target, a
+   * target that is the bot itself, or one no longer racing.
+   */
+  readonly targetAt: 'ahead' | 'up-the-road' | 'behind' | undefined;
+}
+
+/**
+ * A move ridden as another the bot has (ADR 0073 D-3.4): `bridging`, a
+ * `follow` or `chase` of a racer up the road ridden as a `chase` to them;
+ * `marking`, of a racer behind, ridden as `sit-in` until they come by.
+ */
+export interface ModelMoveRide {
+  readonly outcome: 'bridging' | 'marking';
+  readonly ride: BotTactic;
 }
 
 /** Why a strategy rule kept a bot on its seeded choice. */
@@ -241,14 +265,44 @@ export type ModelMoveStrategyRefusal =
 
 /**
  * **The one strategy seam** (the owner's ruling of 2026-11-16 on #2710): every
- * rule that decides whether a bot may ride a move it is *able* to ride. Given
- * an ask, the refusal, or `undefined` to ride the move. The body's limits are
- * not in it, and cannot be loosened through it.
+ * rule that decides whether a bot may ride a move it is *able* to ride, and
+ * as what. Given an ask, the refusal, the move it is ridden as, or `undefined`
+ * to ride the move as named. The body's limits are not in it, and cannot be
+ * loosened through it.
  */
-export type ModelMoveStrategy = (ask: ModelMoveAsk) => ModelMoveStrategyRefusal | undefined;
+export type ModelMoveStrategy = (
+  ask: ModelMoveAsk,
+) => ModelMoveStrategyRefusal | ModelMoveRide | undefined;
 
 /**
- * ADR 0071 D-3.6's strategy rules, the ones a model race rides today:
+ * **ADR 0073's strategy: the model's** (ADR 0073 D-3, accepted 2026-11-16 by
+ * the owner: *"I approve 1-5 , 6 ai can choose"*). What a model race rides.
+ * Every strategy rule of ADR 0071 D-3.6 is lifted, so nothing is refused:
+ *
+ * - an `attack` or `chase` under the W′ floor is ridden: a gamble, and the bot
+ *   may blow up (D-3.1);
+ * - a `flyer` is ridden on any lap and at any W′ (D-3.2);
+ * - an `attack` is ridden for as long as the model keeps naming it (D-3.3);
+ * - a `kick` is ridden wherever the model names it, and inside the launch a
+ *   move other than the kick is ridden too, so the model may launch long or
+ *   late and may end a kick, seeded or its own (D-3.5). **The kick-in-progress
+ *   hold of version 1 is dropped**: D-3.5 makes ending a kick the model's
+ *   choice, and D-4 hands a lapsed kick back to the seeded tactics, which hold
+ *   it to the line;
+ * - a `follow` or `chase` may name any racer (D-3.4): the one directly ahead,
+ *   or none, is the move as named; one further up the road is ridden as a
+ *   `chase` (bridging), and one behind as `sit-in` (marking).
+ */
+export const ADR_0073_MOVE_STRATEGY: ModelMoveStrategy = (ask) => {
+  if (ask.move !== 'follow' && ask.move !== 'chase') return undefined;
+  if (ask.targetAt === 'up-the-road') return { outcome: 'bridging', ride: 'chase' };
+  if (ask.targetAt === 'behind') return { outcome: 'marking', ride: 'sit-in' };
+  return undefined;
+};
+
+/**
+ * ADR 0071 D-3.6's strategy rules, the ones bot-code version 1 rode. No race
+ * uses them since version 2 ({@link ADR_0073_MOVE_STRATEGY}):
  *
  * - inside its launch distance, as it reads the line, or already in its kick,
  *   a bot sprints its own seeded way: the kick is never the model's to time
@@ -314,7 +368,12 @@ export interface ModelRaceBot {
 
 /** What became of the model's say over one bot for one window. */
 export type ModelMoveOutcome =
-  'applied' | 'no-decision' | 'not-named' | 'exhausted' | ModelMoveStrategyRefusal;
+  | 'applied'
+  | ModelMoveRide['outcome']
+  | 'no-decision'
+  | 'not-named'
+  | 'exhausted'
+  | ModelMoveStrategyRefusal;
 
 /** The bots with the moves in force applied, and what became of each whose window opened. */
 export interface AppliedModelMoves<B extends ModelRaceBot> {
@@ -336,6 +395,23 @@ function aheadOf(
   return seats.get(ahead) ?? 'rider';
 }
 
+/** Where `target` is on the road from `id` in `order` (see {@link ModelMoveAsk.targetAt}). */
+function placeOf(
+  order: readonly string[],
+  id: string,
+  target: ModelTacticsTarget | undefined,
+  bots: readonly ModelRaceBot[],
+  seats: ReadonlyMap<string, number>,
+): ModelMoveAsk['targetAt'] {
+  if (target === undefined) return undefined;
+  const wanted = target === 'rider' ? order.find((each) => !seats.has(each)) : bots[target]?.id;
+  const at = wanted === undefined ? -1 : order.indexOf(wanted);
+  const own = order.indexOf(id);
+  if (at < 0 || at === own) return undefined;
+  if (at === own - 1) return 'ahead';
+  return at < own ? 'up-the-road' : 'behind';
+}
+
 /**
  * The bots, before the tick at `race.atMs`, with `moves` applied to each whose
  * tactics window opens on it. `moves` `undefined` is no decision in force:
@@ -343,14 +419,14 @@ function aheadOf(
  * `bots` itself and allocates nothing (ADR 0067 D-6.4).
  *
  * @param seed - the race's own seed, which the misread line is drawn from.
- * @param strategy - the strategy rules (see the file comment); ADR 0071's unless given.
+ * @param strategy - the strategy rules (see the file comment); ADR 0073's unless given.
  */
 export function applyModelMoves<B extends ModelRaceBot>(
   race: ItemRaceState,
   bots: readonly B[],
   moves: readonly ModelTacticsMove[] | undefined,
   seed: number,
-  strategy: ModelMoveStrategy = ADR_0071_MOVE_STRATEGY,
+  strategy: ModelMoveStrategy = ADR_0073_MOVE_STRATEGY,
 ): AppliedModelMoves<B> {
   const window = Math.floor(race.atMs / BOT_TACTICS_WINDOW_MS);
   // Nothing to decide on a tick inside every bot's window: the common tick.
@@ -375,33 +451,46 @@ export function applyModelMoves<B extends ModelRaceBot>(
     if (plan === undefined || own === undefined || bot.tactics.window === window) return bot;
     const move = moves?.find((each) => each.bot === seat);
     let outcome: ModelMoveOutcome;
+    let ridden = move?.move;
     if (moves === undefined) outcome = 'no-decision';
     else if (move === undefined) outcome = 'not-named';
     // The body's limit, outside the seam: an exhausted bot cannot surge.
     else if (bot.energy.exhausted) outcome = 'exhausted';
     else {
       const misread = botTacticsMisjudgement(seed, seat, bot.strategy.skill, race.atMs).lineMetres;
-      outcome =
-        strategy({
-          move: move.move,
-          target: move.target,
-          atMs: race.atMs,
-          archetype: plan.archetype,
-          readToLineMetres: laps * lapLengthMetres - own + misread,
-          lapsLeft: Math.max(0, laps - Math.floor(own / lapLengthMetres)),
-          wbalShare: bot.energy.wbalJoules / plan.capacity.wPrimeJoules,
-          tactics: bot.tactics,
-          ahead: aheadOf(order, bot.id, seats),
-        }) ?? 'applied';
+      const ruling = strategy({
+        move: move.move,
+        target: move.target,
+        atMs: race.atMs,
+        archetype: plan.archetype,
+        readToLineMetres: laps * lapLengthMetres - own + misread,
+        lapsLeft: Math.max(0, laps - Math.floor(own / lapLengthMetres)),
+        wbalShare: bot.energy.wbalJoules / plan.capacity.wPrimeJoules,
+        tactics: bot.tactics,
+        ahead: aheadOf(order, bot.id, seats),
+        targetAt: placeOf(order, bot.id, move.target, bots, seats),
+      });
+      if (ruling === undefined) outcome = 'applied';
+      else if (typeof ruling === 'string') outcome = ruling;
+      else {
+        outcome = ruling.outcome;
+        ridden = ruling.ride;
+      }
     }
     outcomes.push(outcome);
-    if (outcome !== 'applied' || move === undefined) return bot;
+    if (
+      (outcome !== 'applied' && outcome !== 'bridging' && outcome !== 'marking') ||
+      move === undefined ||
+      ridden === undefined
+    ) {
+      return bot;
+    }
     changed = true;
-    const kept = move.move === bot.tactics.tactic;
+    const kept = ridden === bot.tactics.tactic;
     return {
       ...bot,
       tactics: {
-        tactic: move.move,
+        tactic: ridden,
         sinceMs: kept ? (bot.tactics.sinceMs ?? race.atMs) : race.atMs,
         window,
         ...(move.effort === undefined ? {} : { effort: move.effort }),
