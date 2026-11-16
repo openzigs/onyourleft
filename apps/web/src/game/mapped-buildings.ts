@@ -13,7 +13,9 @@
  * - {@link selectMappedBuildings}: the set a refill draws — since #2094 the
  *   nearest {@link MAPPED_LANDMARKS_AHEAD} landmarks first, then nearest first,
  *   within {@link MAPPED_BUILDING_REACH_METRES}, at most
- *   {@link MAPPED_BUILDING_MAX}, ranked by distance with the frame's
+ *   {@link MAPPED_BUILDING_MAX} (since #1638 more of a city centre's far
+ *   boxes where its cap is on, which by default it is not), ranked by
+ *   distance with the frame's
  *   procedural structures (#1586) inside `realistic-budget.ts`
  *   §`MAPPED_BUILDING_TRIANGLES`, every one beyond {@link MAPPED_BUILDING_NEAR_METRES} at its far level, and
  *   in at most {@link MAPPED_BUILDING_DRAW_CALLS} surfaces.
@@ -49,6 +51,7 @@ import {
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  MAPPED_BUILDING_MAX_CITY_FAR,
   MAPPED_BUILDING_NEAR_METRES,
   MAPPED_BUILDING_REACH_METRES,
   MAPPED_CHUNK_METRES,
@@ -88,6 +91,22 @@ export interface MappedBuildings {
   /** Scratch for {@link selectMappedBuildings}: one slot a plan, so a refill allocates nothing. */
   readonly order: Uint32Array;
   readonly distances: Float64Array;
+  /**
+   * #1638: the most buildings a refill draws, those past
+   * {@link MAPPED_BUILDING_MAX} a city centre's at their far level only —
+   * `realistic-budget.ts` §`MAPPED_BUILDING_MAX_CITY_FAR`. Absent, off: at
+   * most {@link MAPPED_BUILDING_MAX}, anywhere. @see mappedBuildingCap
+   */
+  readonly cityFarMax?: number;
+}
+
+/**
+ * The most buildings one refill of `buildings` may draw — #1638: its
+ * {@link MappedBuildings.cityFarMax}, or {@link MAPPED_BUILDING_MAX}. What a
+ * {@link MappedSelection} for it is built to hold.
+ */
+export function mappedBuildingCap(buildings: MappedBuildings): number {
+  return buildings.cityFarMax ?? MAPPED_BUILDING_MAX;
 }
 
 /** What a frame carries about the mapped buildings — the one index, and where the rider is. */
@@ -136,8 +155,25 @@ export function rankFrom(
   return nearest;
 }
 
-/** Indexes a ride's plans — once, at the press. */
-export function mappedBuildingsOf(plans: readonly FootprintPlan[]): MappedBuildings {
+/**
+ * Indexes a ride's plans — once, at the press. `cityFarMax` is #1638's city
+ * centre's far-level cap, `realistic-budget.ts` §`MAPPED_BUILDING_MAX_CITY_FAR`
+ * unless the owner's page names a candidate; `undefined` is off. A cap that is
+ * not a whole number above {@link MAPPED_BUILDING_MAX} is refused: at or
+ * under it there is nothing for it to add.
+ */
+export function mappedBuildingsOf(
+  plans: readonly FootprintPlan[],
+  cityFarMax: number | undefined = MAPPED_BUILDING_MAX_CITY_FAR,
+): MappedBuildings {
+  if (
+    cityFarMax !== undefined &&
+    !(Number.isInteger(cityFarMax) && cityFarMax > MAPPED_BUILDING_MAX)
+  ) {
+    throw new RangeError(
+      `a city centre's far-level cap is a whole number above ${String(MAPPED_BUILDING_MAX)}, not ${String(cityFarMax)}`,
+    );
+  }
   const radii = new Float32Array(plans.length);
   const cells = new Map<number, number[]>();
   plans.forEach((plan, index) => {
@@ -173,6 +209,7 @@ export function mappedBuildingsOf(plans: readonly FootprintPlan[]): MappedBuildi
     cells,
     order: new Uint32Array(plans.length),
     distances: new Float64Array(plans.length),
+    ...(cityFarMax === undefined ? {} : { cityFarMax }),
   };
 }
 
@@ -239,17 +276,21 @@ export function roleTriangles(plan: FootprintPlan, role: FootprintRole): number 
  * and every refill writes into it.
  */
 export class MappedSelection {
-  /** How many buildings are drawn, at most {@link MAPPED_BUILDING_MAX}. */
+  /**
+   * How many buildings are drawn, at most {@link MAPPED_BUILDING_MAX} — since
+   * #1638 at most the selection's capacity, where a city centre's far-level
+   * cap is on ({@link mappedBuildingCap}).
+   */
   count = 0;
   /** The drawn plans' indices, the landmarks taken ahead first (#2094), then nearest first. */
-  readonly plans = new Int32Array(MAPPED_BUILDING_MAX);
+  readonly plans: Int32Array;
   /** 1 where the drawn building at that place is at its far level. */
-  readonly far = new Uint8Array(MAPPED_BUILDING_MAX);
+  readonly far: Uint8Array;
   /**
    * 1 where the drawn building at that place is drawn as its house model —
    * #1585: near, with a model that fits, and the models loaded.
    */
-  readonly modelled = new Uint8Array(MAPPED_BUILDING_MAX);
+  readonly modelled: Uint8Array;
   /** How many are drawn as models, and their triangles — #1585. */
   modelCount = 0;
   modelTriangles = 0;
@@ -269,6 +310,16 @@ export class MappedSelection {
   readonly surfaces: StructureSurface[] = [];
   /** Each surface's triangles, by its place in {@link surfaces}: room for every surface a plan wears. */
   readonly surfaceTriangles = new Int32Array(FOOTPRINT_SURFACES.length);
+
+  /**
+   * @param capacity the most buildings it holds: {@link MAPPED_BUILDING_MAX},
+   * or since #1638 the {@link mappedBuildingCap} of the buildings it selects from
+   */
+  constructor(capacity: number = MAPPED_BUILDING_MAX) {
+    this.plans = new Int32Array(capacity);
+    this.far = new Uint8Array(capacity);
+    this.modelled = new Uint8Array(capacity);
+  }
 
   reset(): void {
     this.count = 0;
@@ -401,6 +452,15 @@ function landmarksAhead(
  * world, a test, a realistic world whose models did not load — every plan is
  * its extrusion, as before #1585. A far plan is always its extrusion.
  *
+ * **A city centre's far boxes** — #1638, off by default. Where `buildings`
+ * carries a {@link MappedBuildings.cityFarMax}, the walk goes on past
+ * {@link MAPPED_BUILDING_MAX}, up to that cap and `into`'s capacity, taking
+ * only plans whose {@link FootprintPlan.urban} is `city-centre` and that are
+ * drawn at their far level; every other plan past the 36 is passed over and
+ * ranks no rival in. The budget, the rivals and the surfaces bind as before,
+ * so the triangles and the draw calls cannot rise with it. Without it the
+ * walk stops at {@link MAPPED_BUILDING_MAX}, as before #1638.
+ *
  * `surfaceSlots` is a parameter so a test can lift the bound, its control.
  */
 export function selectMappedBuildings(
@@ -444,11 +504,17 @@ export function selectMappedBuildings(
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
   const landmarks = landmarksAhead(plans, order, inReach);
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
+  // #1638: past MAPPED_BUILDING_MAX only where a city centre's far-level cap is on.
+  const most = Math.min(mappedBuildingCap(buildings), into.plans.length);
   let stopped = false;
-  for (let at = 0; at < inReach && into.count < MAPPED_BUILDING_MAX; at += 1) {
+  for (let at = 0; at < inReach && into.count < most; at += 1) {
     const index = order[at] as number;
     const plan = plans[index] as FootprintPlan;
     const rank = distances[index] as number;
+    const far = Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES;
+    // #1638: past MAPPED_BUILDING_MAX, a city centre's far boxes and nothing
+    // else. Any other building is passed over, and ranks no rival in.
+    if (into.count >= MAPPED_BUILDING_MAX && !(far && plan.urban === 'city-centre')) continue;
     // #2094: a landmark taken ahead ranks no rival in, so it brings no hedge
     // nearer than a house the walk has not reached yet. Two costs it does
     // accept, by design (ADR 0054's 2026-11-03 amendment): its triangles come
@@ -460,7 +526,6 @@ export function selectMappedBuildings(
       stopped = true;
       break;
     }
-    const far = Math.hypot(plan.centroid.x - x, plan.centroid.z - z) > MAPPED_BUILDING_NEAR_METRES;
     // #1585: near, with a model that fits, and the models loaded. With no
     // slot left for the models' group the plan is drawn as its extrusion,
     // whose surfaces may already be open, rather than passed over.

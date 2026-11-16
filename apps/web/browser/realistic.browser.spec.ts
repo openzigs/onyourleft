@@ -27,6 +27,12 @@
  * The default URL's road is read back too, by its fingerprint, on the #616
  * load (#1559): the same road every validation 0002 row was taken on.
  *
+ * And since #1638, **the `cityfar` candidate** (validation 0002 AE5's third
+ * row): on `town=city`'s hold it draws more of the city's far boxes than the
+ * product's 36, inside the page's 35 calls and the belt's six. Here, not
+ * beside #1636's city in `realistic-mapped.browser.spec.ts`, because that
+ * file's nightly shard has no room for a load (`nightly-split.test.ts` §"#1698").
+ *
  * ⚠️ **The page's other describes are in two more files since #1698**: the
  * tree levers (#1283, #1294, #1523) in `realistic-trees.browser.spec.ts`, and
  * the village road (#1559), the mapped-blobs lever (#1657) and the holiday
@@ -43,12 +49,18 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import {
+  MAPPED_BUILDING_DRAW_CALLS,
+  MAPPED_BUILDING_MAX,
+  MAPPED_BUILDING_TRIANGLES,
+  REALISTIC_WOODED_DRAW_CALLS,
+} from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
 import { realisticRoute, routeDigest } from '../src/demo/synthetic-road';
-import { HELD, REALISTIC_LOAD_BUDGET_MS, ride } from './realistic-ride';
+import { HELD, REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
+import { classAlong } from './urban-runs';
 
 /** How far the draw-call count and three's may differ on one frame (#616). */
 const AGREEMENT = 0.01;
@@ -188,5 +200,39 @@ test.describe('the route’s own season, in the realistic world — #1623', { ta
     costsNothing(january, july);
     // The ground and the roofs are drawn under the route's own winter.
     expect(january.shot.equals(july.shot)).toBe(false);
+  });
+});
+
+test.describe('the realistic page’s candidate city cap — #1638', { tag: NIGHTLY }, () => {
+  // On `SIXTEENTH_PAGE`, as #1636's city is: what is read is the frame's
+  // calls and the page's counters, which the canvas's size does not decide.
+  test.use({ viewport: SIXTEENTH_PAGE });
+
+  test('draws more of the city’s far boxes at a cityfar candidate, inside the 35 calls and the belt’s six', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    const candidate = 2 * MAPPED_BUILDING_MAX;
+    // AE5's hold: `cityCentreFixture`'s city between its two towers, the people off.
+    const capped = await ride(
+      page,
+      `?ladder=0&panel=0&seconds=1&town=city&at=1500&levers=-people&cityfar=${String(candidate)}`,
+    );
+    const mapped = capped.page.mapped;
+    console.log(
+      `#1638 AE5 cityfar=${String(candidate)}: ${String(capped.result.lastFrame.calls)} draw ` +
+        `calls, ${String(capped.result.lastFrame.triangles)} triangles, mapped ${JSON.stringify(mapped)}`,
+    );
+    expect(capped.result.drawingBuffer).toEqual([SIXTEENTH_PAGE.width, SIXTEENTH_PAGE.height]);
+    expect(classAlong(capped.page.urbanRuns ?? [], 1_500)).toBe('city-centre');
+    // The candidate took: more than the 36, every one past them at the far level.
+    expect(mapped?.buildings).toBeGreaterThan(MAPPED_BUILDING_MAX);
+    expect(mapped?.buildings).toBeLessThanOrEqual(candidate);
+    expect(mapped?.far).toBeGreaterThanOrEqual((mapped?.buildings ?? 0) - MAPPED_BUILDING_MAX);
+    // The budgets it may not move.
+    expect(mapped?.triangles).toBeLessThanOrEqual(MAPPED_BUILDING_TRIANGLES);
+    expect(mapped?.drawCalls).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
+    expect(capped.result.lastFrame.calls).toBeGreaterThan(0);
+    expect(capped.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
   });
 });
