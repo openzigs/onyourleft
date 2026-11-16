@@ -32,6 +32,24 @@ export {
   snapshotPlace,
 } from './backups';
 export {
+  END_ROOM_CONFIRM_TEXT,
+  endRoomTypeText,
+  NO_ROOM_TEXT,
+  ROOM_END_REASON_TEXT,
+  ROOM_END_REASONS,
+  ROOM_KIND_TEXT,
+  ROOM_NOT_ENDED_TEXT,
+  ROOM_PHASE_TEXT,
+  ridersText,
+  ROOM_UNNAMED_RIDER,
+  ROOMS_LIST_TEXT,
+  ROOMS_NAMES_ONLY_TEXT,
+  ROOMS_UNREADABLE_TEXT,
+  type OperateRoomEndReason,
+  type OperateRoomKind,
+  type OperateRoomPhase,
+} from './rooms';
+export {
   COMPARE_WITH_MAIN_LABEL,
   compareWithMainUrl,
   DISK_HOLDS_TEXT,
