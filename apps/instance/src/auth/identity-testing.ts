@@ -66,6 +66,7 @@ import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts'
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
 import { instanceHpkePrimitives } from './crypto.ts';
+import { createRecentProblems } from '../log.ts';
 import { createOperate, type OperateRoomSources } from '../operate/operate.ts';
 import { diskSpace, keysState, tunnelReadiness, type StatusSources } from '../operate/status.ts';
 import { createSealed, sha256, type Sealed } from '../sealed/sealed.ts';
@@ -346,6 +347,10 @@ export async function startIdentityInstance(
       readonly limits?: AdminLimits;
       /** What the admin layer sees in place of the real store — a spy on its lookups. */
       readonly storeSeenBy?: (store: SqlStore) => SqlStore;
+      /** The loopback listener's port (#2643): its origin is `http://localhost:<port>`. */
+      readonly loopbackPort?: number;
+      /** `OYL_INSTANCE_ADMIN_ADDRESSES` (#2643). */
+      readonly addresses?: readonly string[];
     };
   } = {},
 ): Promise<IdentityInstance> {
@@ -384,6 +389,8 @@ export async function startIdentityInstance(
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
+  /** The problem lines the handler's sink keeps (#2614), stamped by the world's clock. */
+  const problems = createRecentProblems(() => clock.ms);
   const identityFor = (origin: string): Identity =>
     createIdentity({
       // The identity tests predate registration modes (#775) and register
@@ -472,7 +479,10 @@ export async function startIdentityInstance(
     },
     ...(voice === undefined ? {} : { voice }),
   });
+  /** The origin the keys state (#2613): Operate's rotation makes them over the log's transaction with it. */
+  const keyOrigin: { value?: string } = {};
   const keysFor = async (origin: string): Promise<InstanceKeys> => {
+    keyOrigin.value = origin;
     const keys = createInstanceKeys({
       store,
       secret: keyless === true ? undefined : secretBytes(7),
@@ -549,11 +559,17 @@ export async function startIdentityInstance(
       now: () => clock.ms,
       name: config?.name ?? null,
       ...(adminOptions.limits === undefined ? {} : { limits: adminOptions.limits }),
+      ...(adminOptions.loopbackPort === undefined
+        ? {}
+        : { loopbackPort: adminOptions.loopbackPort }),
+      ...(adminOptions.addresses === undefined ? {} : { addresses: adminOptions.addresses }),
     });
     return madeAdmin.value;
   };
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
+      // #2614: the handler's problem lines, kept as `instance.ts` keeps them.
+      problems,
       ...(adminOptions === undefined ? {} : { admin: adminFor(identity) as Admin }),
       sidePose,
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
@@ -583,6 +599,7 @@ export async function startIdentityInstance(
                 ...operateStatus,
               },
               // #2609: as `instance.ts` builds them, over the world's store and clock.
+              problems,
               analysis: {
                 environment: testConfig(listenerConfig),
                 resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
@@ -593,6 +610,17 @@ export async function startIdentityInstance(
                   createLocalModel({
                     settings,
                     resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
+                  }),
+              },
+              // #2613: the world's keys, and the same keys over the log's transaction.
+              keys: {
+                keys: instanceKeys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: keyless === true ? undefined : secretBytes(7),
+                    origin: keyOrigin.value ?? TEST_ORIGIN,
+                    now: () => Math.floor(clock.ms / 1000),
                   }),
               },
               ...(operateRooms === undefined ? {} : { rooms: { ...operateRooms, rooms, nameFor } }),

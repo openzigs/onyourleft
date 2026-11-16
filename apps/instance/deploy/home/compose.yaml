@@ -10,9 +10,10 @@
 # the repository's own `.env.example` lists each, ENV001). The tunnel token
 # is a secret: it lives in that file on the box and nowhere else.
 #
-# ⚠️ NOTHING PUBLISHES A PORT but the one line marked LOCAL DEBUGGING ONLY,
-# commented out. The tunnel reaches the instance over this project's own
-# network, by name; the internet reaches it only through Cloudflare.
+# ⚠️ NOTHING PUBLISHES A PORT but the admin pages' loopback listener, on the
+# HOST'S LOOPBACK ONLY (127.0.0.1:8788, #2643), and the one line marked LOCAL
+# DEBUGGING ONLY, commented out. The tunnel reaches the instance over this
+# project's own network, by name; the internet reaches it only through Cloudflare.
 
 name: onyourleft
 
@@ -54,6 +55,14 @@ services:
       OYL_INSTANCE_METRICS_TOKEN: ${OYL_INSTANCE_METRICS_TOKEN:-}
       # #2641: the instance's own admin pages at /admin, off unless .env says on.
       OYL_INSTANCE_ADMIN_PAGES: ${OYL_INSTANCE_ADMIN_PAGES:-off}
+      # #2643: the admin pages on the server machine, at http://localhost:8788,
+      # on a listener of their own. Empty: nothing listens there. 8788 to turn
+      # it on, with the admin pages on; the `ports:` line below publishes it.
+      OYL_INSTANCE_ADMIN_LOOPBACK_PORT: ${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-}
+      # #2643: the only addresses a sign-in THROUGH THE TUNNEL is taken from,
+      # read from cf-connecting-ip. Empty (the default): any — the WAF rule is
+      # what keeps others out. Not asked on the server machine.
+      OYL_INSTANCE_ADMIN_ADDRESSES: ${OYL_INSTANCE_ADMIN_ADDRESSES:-}
       # cloudflared's `/ready` (#2604), asked for the owner's Status. Empty:
       # the tunnel shows as "not known" and nothing is asked.
       OYL_INSTANCE_TUNNEL_READY_URL: ${OYL_INSTANCE_TUNNEL_READY_URL:-}
@@ -136,6 +145,18 @@ services:
       - tunnel_metrics
     # LOCAL DEBUGGING ONLY — never with the tunnel's hostname pointing here:
     # ports: ['127.0.0.1:8787:8787']
+    #
+    # #2643 (ADR 0069 D-5): the admin pages' loopback listener, published on
+    # the HOST'S LOOPBACK ONLY, the same port both sides (the instance checks
+    # `Host: localhost:<port>` against the port it listens on). ⚠️ NEVER
+    # `0.0.0.0` and never the tunnel's target. It refuses a connection from
+    # cloudflared's own addresses (OYL_INSTANCE_TRUSTED_PROXIES), but on
+    # Docker Desktop any container can still reach a loopback-published port
+    # through `host.docker.internal`, arriving from Docker's gateway like the
+    # host's own browser does: docs/operating-an-instance.md, "Admin pages on
+    # the server machine", says what that means.
+    ports:
+      - '127.0.0.1:${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-8788}:${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-8788}'
 
   # Cloudflare Tunnel (ADR 0037 D-8). Outbound only. Pinned by digest, as
   # every image here is: `docker buildx imagetools inspect

@@ -11,6 +11,7 @@ import {
   LOGGED_ITEM_KEYS,
   logEvent,
   loggedMethod,
+  isProblem,
   logUnhandled,
   REDACTED,
 } from './log.ts';
@@ -244,5 +245,44 @@ describe('what the instance logs about a request (#767)', () => {
     expect(lines.map((line) => (JSON.parse(line) as { reason: unknown }).reason)).toEqual([
       ...reasons,
     ]);
+  });
+});
+
+describe('which written lines are problems (#2614)', () => {
+  // The closed list is the feature's whole policy: each event once as a
+  // problem and once as not, so neither side can move unseen.
+  const cases: readonly (readonly [string, Record<string, unknown>, boolean])[] = [
+    ['5xx request', { event: 'request', status: 500 }, true],
+    ['4xx request', { event: 'request', status: 404 }, false],
+    ['unhandled', { event: 'unhandled' }, true],
+    ['room worker died', { event: 'room-worker-died' }, true],
+    ['room write failed', { event: 'room-write-failed' }, true],
+    ['rooms sweep failed', { event: 'rooms-sweep-failed' }, true],
+    ['history index failed', { event: 'history-index-failed' }, true],
+    ['voice request failed', { event: 'voice-failed' }, true],
+    ['refusing to serve', { event: 'refusing' }, true],
+    ['analysis job failed', { event: 'analysis-job', state: 'failed' }, true],
+    ['analysis job done', { event: 'analysis-job', state: 'done' }, false],
+    ['analysis model off', { event: 'analysis-model', state: 'off', code: 'not-set' }, true],
+    ['analysis model on', { event: 'analysis-model', state: 'on' }, false],
+    ['picture model off', { event: 'picture-model', state: 'off', code: 'not-set' }, true],
+    ['picture model on', { event: 'picture-model', state: 'on' }, false],
+    ['history index off', { event: 'history-index', state: 'off', code: 'not-set' }, true],
+    ['history index on', { event: 'history-index', state: 'on' }, false],
+    ['keys not ready', { event: 'instance-keys', state: 'no-secret' }, true],
+    ['keys ready', { event: 'instance-keys', state: 'ready' }, false],
+    ['hosted key without secret', { event: 'hosted-model-key', state: 'no-secret' }, true],
+    ['hosted key unreadable', { event: 'hosted-model-key', state: 'unreadable' }, true],
+    ['hosted key fine', { event: 'hosted-model-key', state: 'ready' }, false],
+    ['voice refused', { event: 'voice', state: 'off', code: 'bad-key' }, true],
+    ['voice merely unset', { event: 'voice', state: 'off', code: 'not-set' }, false],
+    ['voice on', { event: 'voice', state: 'on' }, false],
+    ['room lost', { event: 'room-socket-closed', reason: 'room-lost' }, true],
+    ['client-side close', { event: 'room-socket-closed', reason: 'server-stopping' }, false],
+    ['an event not on the list', { event: 'listening' }, false],
+  ];
+
+  it.each(cases)('%s', (_name, line, expected) => {
+    expect(isProblem(line)).toBe(expected);
   });
 });

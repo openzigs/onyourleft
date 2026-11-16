@@ -96,7 +96,13 @@ interface RoomRouterStandIn {
 }
 
 export interface OperateInstance {
-  readonly instance: { handler(request: Request): Promise<Response> };
+  readonly instance: {
+    handler(request: Request): Promise<Response>;
+    /** The handler's own log sink (#2614). */
+    readonly log: (line: string) => void;
+    /** Every line the handler's sink got. */
+    readonly lines: readonly string[];
+  };
   /** The instance's riders' rooms, made here as `POST /v1/rooms` makes them (#2612). */
   readonly rooms: {
     create(
@@ -105,7 +111,9 @@ export interface OperateInstance {
     ): Promise<{ readonly ok: boolean; readonly value?: { readonly roomId: string } }>;
   };
   readonly clock: { ms: number };
-  readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
+  readonly instanceKeys: {
+    show(): Promise<{ readonly card: string; readonly fingerprint: string }>;
+  };
   /** A handler answering, as this instance, one sealed inner route. */
   answeringAs(path: string, answer: () => Response): (request: Request) => Promise<Response>;
   freshRead<T>(read: (store: OperatorLogWriter & BackupWriter) => Promise<T>): Promise<T>;
@@ -121,6 +129,24 @@ interface IdentityTesting {
     withoutOperate?: boolean;
     operateRooms?: RoomRouterStandIn;
   }): Promise<OperateInstance>;
+}
+
+/** The instance's log module (#2614), by a computed path for the same reason. */
+const INSTANCE_LOG = join(dirname(fileURLToPath(import.meta.url)), '../../../instance/src/log.ts');
+
+/**
+ * Write a line through the instance's own sink as the instance writes one
+ * (`logEvent`, so through its one redaction) — #2614's problem lines.
+ */
+export async function writeInstanceLine(
+  world: OperateInstance,
+  event: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  const log = (await import(/* @vite-ignore */ INSTANCE_LOG)) as {
+    logEvent(sink: (line: string) => void, event: string, detail: Record<string, unknown>): void;
+  };
+  log.logEvent(world.instance.log, event, detail);
 }
 
 /** A path, not a URL: under jsdom a URL resolved here is `http:`, which the loader refuses. */
@@ -162,6 +188,8 @@ export interface OperateDevice {
   connect(): Promise<void>;
   /** This device's own id on the instance, once connected. */
   athleteId(): string;
+  /** The fingerprint this device pinned the instance's identity key at (#2613), once connected. */
+  pin(): string | undefined;
 }
 
 /** A device with its own store and key, not yet connected. */
@@ -198,6 +226,7 @@ export async function anOperateDevice(
       if (outcome.kind !== 'connected') throw new Error(`connect: ${JSON.stringify(outcome)}`);
     },
     athleteId: () => readInstanceAccount(storage)?.instanceAthleteId ?? '',
+    pin: () => readInstanceAccount(storage)?.pin,
   };
 }
 

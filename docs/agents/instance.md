@@ -224,6 +224,33 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         route only in-process as the owner, through
                         `handler.ts` §`dispatchAsOwner`, and only one whose
                         `admin` mark is `read` or `change`.
+                        Since #2642 the owner's passkeys too (migration
+                        0045, `admin/webauthn.ts` by hand against WebCrypto
+                        over the bounded `admin/cbor.ts`): a code session
+                        enrols one; every change needs a step-up bound to
+                        its action and fields (`admin/step-up.ts`) by a
+                        passkey `operator admin-passkeys confirm` confirmed.
+                        Since #2643 a second Node listener on
+                        `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` serves `/admin`
+                        alone, marking `ClientInfo.listener: 'loopback'`
+                        itself (never a header); its origin, cookie, RP ID
+                        and log source are its own. ⚠️ It grants nothing
+                        the tunnel does not: Docker Desktop lets the tunnel
+                        container reach it.
+                        Since #2645 the pages: the shell (`admin/pages.ts`),
+                        Status and the operator log, each the route's answer
+                        through that seam and never a store read, answered
+                        from `admin/admin-routes.ts` — which
+                        `admin/pages.test.ts` (headers, CSRF, no session) and
+                        the web a11y gate both read, so a new page is held to
+                        them by being added. Status' words are
+                        `packages/operate-text`'s, which the image now copies.
+                        Since #2648 the AI backend page CHANGES things: a
+                        `POST`/`DELETE` through the seam reaches only a route
+                        marked `admin: 'change'` (the three analysis
+                        changes), after a step-up, and the seam sets
+                        `RouteContext.adminChannel`, from which the route
+                        logs `admin_tunnel` or `admin_loopback`, never `app`.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

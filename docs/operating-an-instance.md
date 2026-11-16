@@ -55,6 +55,19 @@ signature, a latitude, a display name, an object — is replaced by `[redacted]`
 by the route PATTERN it matched, never its path, query, headers or body; an exception by its name,
 never its message (ADR 0004 decision D).
 
+**The last 200 problem lines are also kept in memory** ([#2614](https://github.com/openzigs/onyourleft/issues/2614)),
+for the owner's Operate area (`GET /v1/operate/logs`, the app's **Recent problems**): exactly the
+line standard output got, after that one redaction, so it never holds what standard output did not.
+A line is a problem when it is one of a closed list (`log.ts` §`isProblem`): a request answered
+`5xx`, an `unhandled` exception, `room-worker-died`, `room-write-failed`, `rooms-sweep-failed`,
+`history-index-failed`, `voice-failed`, `refusing`, an `analysis-job` that `failed`, the
+`analysis-model`, `picture-model` or `history-index` `off`, `instance-keys` not `ready`, a
+`hosted-model-key` that is `no-secret` or `unreadable`, `voice` off for a reason other than
+`not-set`, and a `room-socket-closed` for `room-lost`. Every other line, a `200` request included, is
+not kept. They are **gone when the instance restarts**, and are never written to the database or a
+backup. Only the main process's lines are kept: a room worker writes its own to standard output, and
+`room-worker-died` is the main process's. Reading them is not an operator action and logs nothing.
+
 ## Sizing
 
 From [spike 0013](spikes/0013-race-rooms-on-a-small-linux-box.md) and
@@ -992,8 +1005,8 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   restore is expected, not a sign of tampering; the snapshot directory you restored from dates it.
 - **Where it is in the app** ([#2603](https://github.com/openzigs/onyourleft/issues/2603)). Signed in
   as the owner, the Instance screen shows **Operate this instance**, which opens
-  `#/settings/instance/operate`: the operator log, newest first, a page at a time, and the list of
-  sections still to come. The deputy and every other rider see no such button, and anybody who opens
+  `#/settings/instance/operate`: the sections below, then the operator log, newest first, a page at
+  a time. The deputy and every other rider see no such button, and anybody who opens
   the address is told only that their account is not the owner. A device that cannot seal — no
   instance card, or a copy of the app loaded from a website — is told so and asks nothing.
 - **Status** ([#2604](https://github.com/openzigs/onyourleft/issues/2604)). The first section of
@@ -1087,6 +1100,22 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   `room_ended` entry (the reason, the kind and how many riders were in it) are written in one
   transaction. Rooms an operator opened with `room-open` are not listed. On an instance with no room
   router — the Durable Object adapter, not deployed — both routes answer `unavailable`.
+- **Instance keys** ([#2613](https://github.com/openzigs/onyourleft/issues/2613)).
+  `GET /v1/operate/keys` shows what `instance-key show` prints, public material only: the keys' state,
+  the identity key's **full** fingerprint, the **instance card** whole (as text and as a QR code, so
+  you can hand it to a rider), the current encryption key's serial, when it was made and when the
+  instance rotates it by itself (30 days on), and how many older encryption keys are still held (each
+  for 7 days after the next was made). Neither private half, nor anything derived from
+  `OYL_INSTANCE_SECRET_KEY`, is ever in it. **Rotate the encryption key** (`POST
+  /v1/operate/keys/rotate` with `{ "confirm": "rotate" }`, typed in the app) does what `instance-key
+  rotate` does, with no `--drop-old` and no `--serial-above`: the old key goes on opening requests for
+  its 7 days, devices pick the new one up from `GET /v1/instance/keys` by themselves, and nobody pins
+  the card again. It takes the same key lease as the instance's own maintenance pass, so while that
+  pass holds it the answer is `busy` and nothing is written. It is logged `instance_key_rotate`
+  (`refused` with `busy`) in the same transaction as the rotation. `rotate --drop-old`,
+  `rotate-identity` and `reset` each make every device pin again, or answer a leak, so they **stay on
+  the CLI** (§"The instance's keys"). The section names them as commands and has no button for them.
+  The instance's own admin pages never read this route through the tunnel (ADR 0069 D-2).
 - **The tunnel's readiness.** Shown as **not known** unless you set
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:
@@ -1117,8 +1146,24 @@ so the instance gains no new login. The server half is [#2602](https://github.co
 The instance can also serve **admin pages of its own**, at `/admin`, for an owner who wants to run
 it from a browser without the app ([ADR 0069](adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md),
 [#2639](https://github.com/openzigs/onyourleft/issues/2639)). What exists so far is the sign-in and
-the session ([#2641](https://github.com/openzigs/onyourleft/issues/2641)); the pages for each area,
-passkeys and a listener on the server machine itself follow.
+the session ([#2641](https://github.com/openzigs/onyourleft/issues/2641)), the owner's passkeys
+([#2642](https://github.com/openzigs/onyourleft/issues/2642)), a listener on the server machine
+([#2643](https://github.com/openzigs/onyourleft/issues/2643)), and two read-only pages
+([#2645](https://github.com/openzigs/onyourleft/issues/2645)): **Status** (`/admin/status`, where a
+sign-in lands) and the **operator log** (`/admin/log`, 50 entries a page, newest first, *Older
+entries* for the next); and since
+[#2648](https://github.com/openzigs/onyourleft/issues/2648) the **AI backend** (`/admin/analysis`): the local model, where it is set and
+whether it is on, the switches for what the instance offers riders, the models on the local server
+with *Check it calls tools*, the queue, and *Return to .env*. Each shows what the app's Operate area
+shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
+answer. On the AI backend page a passkey session can also change the settings, and **every change
+asks your passkey again** for that one change: the route's own checks run, its local-address rule
+included, and the operator log names the admin pages and the listener. There is **no field for a
+hosted key** on any admin page: set yours in the app or with `operator model-key set`. A log entry that is not
+in the log's own closed words is not drawn, and its row says so. The compare-with-main link is a
+link you open; the instance asks GitHub nothing. The pages for the other areas follow. Every page
+has the instance's name, how you signed in and through which listener, the section links and
+**Sign out**, and reads with no script; only a passkey ceremony needs the page's one script.
 
 - **Off unless you turn them on.** Set `OYL_INSTANCE_ADMIN_PAGES=on` in the `.env` beside
   `compose.yaml` and run `docker compose up -d instance`. Off, `/admin` answers as any address with
@@ -1139,9 +1184,27 @@ passkeys and a listener on the server machine itself follow.
 - **The session.** A cookie, `__Host-oyl-admin` (`Secure`, `HttpOnly`, `SameSite=Strict`), with no
   lifetime of its own, so it goes when the browser closes. The instance ends it after **15 minutes
   without use** and **2 hours after sign-in** whatever its use, and on **Sign out**. It keeps only
-  the token's SHA-256. A session opened with a code can read; the pages that read come with
-  [#2645](https://github.com/openzigs/onyourleft/issues/2645), and no change can be made from a
-  browser until passkeys ([#2642](https://github.com/openzigs/onyourleft/issues/2642)).
+  the token's SHA-256. A session opened with a code can read every page and **add one passkey**,
+  and nothing else; the pages that read are Status and the operator log
+  ([#2645](https://github.com/openzigs/onyourleft/issues/2645)) so far.
+- **Passkeys** ([#2642](https://github.com/openzigs/onyourleft/issues/2642), ADR 0069 D-1). Signed
+  in with a code, open **Passkeys** and **Add a passkey**: the browser asks your authenticator (a
+  phone, a security key, the computer's own) to make one, with user verification, Ed25519 or ES256
+  only, at most ten. Adding it ends the code's session, and you sign in with **Sign in with a
+  passkey**, which proves it works. A passkey is bound to the instance's host name (the host of
+  `OYL_INSTANCE_ORIGIN`) and to the `OYL_INSTANCE_OWNER_KEY` it was added under: change either and
+  it is listed as not usable until you revoke it and add another.
+- ⚠️ **A passkey added through the tunnel reads, and changes nothing, until you confirm it on the
+  server machine** (the owner's answer to ADR 0069 Q-C): `node src/operator/cli.ts admin-passkeys
+  list` shows its id, and `node src/operator/cli.ts admin-passkeys confirm <id>` confirms it. An
+  edge that swapped its own passkey in while you enrolled cannot run that.
+- **Every change needs a fresh passkey check.** A change made from the admin pages asks your
+  authenticator again, for that change and its fields, once, within two minutes, and only a
+  confirmed passkey can answer. Revoking a passkey is such a change, and ends every session that
+  passkey opened. On the host, `admin-passkeys revoke <id>` does the same with nothing but the
+  shell; lost every passkey, mint a code and add one again.
+- **With no passkey support**, or with the page's script blocked, every page still reads with a
+  one-time code, and no change can be made.
 - **What protects it.** Every form carries the session's own token, and every `POST` must come from
   the instance's own page (`Origin` exactly `OYL_INSTANCE_ORIGIN`, and `Sec-Fetch-Site:
   same-origin` where the browser sends it), or it is refused and changes nothing. A request for
@@ -1150,17 +1213,88 @@ passkeys and a listener on the server machine itself follow.
   The API never reads the cookie: a `/v1/*` request carrying it is answered exactly as without it,
   and a plaintext `/v1/operate/*` request is still refused `sealed_required`.
 - **Rate limits.** At most 10 sign-in attempts a minute from one address (read through
-  `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` behind the tunnel) and 30 a minute from everybody, counted
-  before any code is looked at.
+  `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` behind the tunnel) and 30 a minute from everybody — a code
+  redeemed and a passkey sign-in begun or finished alike — counted before any code or passkey is
+  looked at; and at most 30 passkey checks for a change a minute in one session.
 - **What is logged** in the operator log (above): `admin_code_minted` when the CLI mints a code
   (`voided_unused` when it voided a live one), `admin_sign_in` for each sign-in (source
-  `admin_tunnel`, naming the owner), and `admin_refused` **at most once a minute for each kind** of
-  refusal (a code, a missing or wrong form token, a foreign origin, a rate limit) with how many there
+  `admin_tunnel`, naming the owner; `code` or `passkey`), `admin_passkey_enrolled` (its algorithm),
+  `admin_passkey_revoked` (how many sessions it ended; source `cli` from the command line),
+  `admin_passkey_confirmed` (from the command line), and `admin_refused` **at most once a minute for
+  each kind** of refusal (a code, a passkey, a step-up, a signature counter that did not rise, a
+  missing or wrong form token, a foreign origin, a rate limit) with how many there
   were and no athlete, so a flood cannot grow the log. A crash loses at most a minute's counts.
   Sign-out and a session timing out are not logged. No entry names a code, a session, an address or
   a passkey. `migrate … down` refuses to undo migration 0044 while the log holds an admin entry.
 - ⚠️ **Through the tunnel, Cloudflare's edge sees these pages in full**, the cookie and every code
   you type there included (ADR 0069 D-3). Use the app's sealed Operate area when that matters.
+
+### Admin pages on the server machine
+
+[#2643](https://github.com/openzigs/onyourleft/issues/2643), ADR 0069 D-5.
+
+- **Turning it on.** Set `OYL_INSTANCE_ADMIN_LOOPBACK_PORT=8788` (with `OYL_INSTANCE_ADMIN_PAGES=on`).
+  A second listener then serves `/admin`, and nothing else, at `http://localhost:8788`. Every other
+  path there is `not_found`. The home compose file publishes it as `127.0.0.1:8788:8788`, on the
+  host's loopback only and on the same port on both sides: the instance checks that `Host` is
+  `localhost:<the port it listens on>`, so a remapped port would be refused. Open it as
+  **`localhost`**, not `127.0.0.1`. An IP address cannot be a passkey's RP ID, and the page answers
+  only to `localhost`. With the variable empty, the instance listens on no second port. ⚠️ The
+  compose file's `ports:` line still publishes `127.0.0.1:8788` then, and Docker binds that host
+  port anyway: a clash with another program fails `compose up`, and a connection to it is accepted
+  and then reset rather than refused. Free the port or set the variable to another free one.
+- **Trusted proxies.** The listener refuses any peer named in `OYL_INSTANCE_TRUSTED_PROXIES`. If
+  `cloudflared` runs on the same machine as the instance (not in a container), it arrives from
+  `127.0.0.1` like your browser, so do not list `127.0.0.1` there: your own connections would be
+  reset.
+- **Allowlist.** `OYL_INSTANCE_ADMIN_ADDRESSES` limits tunnel sign-ins to the addresses it names.
+  An IPv6 entry is matched by its /64, as the rate limits do, so it admits the whole /64.
+- **Not settled.** The owner has not yet ruled on the departures from ADR 0069 recorded in its
+  2026-11-15 amendment (a loopback passkey here needs `admin-passkeys confirm`, and the tunnel
+  container can reach this listener on Docker Desktop), nor approved screenshots at the server
+  machine and through the tunnel. Treat this section as provisional until that ruling.
+- **Not measured.** Microsoft Edge, and the dedicated `*.localhost` host name (deferred again).
+- **What it changes.** The listener marks its own requests as loopback; no header and no peer
+  address can do that, so a request on the main listener is a tunnel request whatever it carries.
+  It has its own origin (`http://localhost:8788`), its own session cookie (`oyl-admin-loopback`),
+  its own passkeys (RP ID `localhost`) and its own operator log source (`admin_loopback`). A
+  session or passkey from the tunnel is nothing here, and the reverse, so you add a passkey for
+  each place you use. Sign-in works as it does through the tunnel, and every change still needs a
+  passkey check: a code session here can read every page and add one passkey, and nothing else.
+- **The cookie, measured.** On 2026-11-15, with `apps/instance/tools/admin-cookie-probe.ts` on
+  `http://localhost`, these browsers kept a `__Host-` cookie with `Secure`:
+  - Chromium 153.0.8010.12 (Playwright): kept;
+  - Google Chrome 157.0.8103.51: kept;
+  - Firefox 155.0 (Playwright): kept;
+  - WebKit 26.6 (Playwright), Safari's engine: **kept neither `__Host-` nor any `Secure` cookie**,
+    and kept a plain one.
+
+  The loopback cookie is therefore `oyl-admin-loopback`, with `HttpOnly; SameSite=Strict; Path=/`
+  and **no** prefix and no `Secure`. The tunnel's stays `__Host-oyl-admin`. The server checks the
+  token, never the name.
+
+  **Microsoft Edge was not measured**, because it was not installed on the machine the probe ran
+  on. It is Chromium, so it is expected to behave as Chrome does. Run the probe in it with `node
+  apps/instance/tools/admin-cookie-probe.ts`, open `http://localhost:8788/set`, and add its line
+  here.
+- ⚠️ **Other software on this machine.** Any page or program on the machine can reach
+  `localhost:8788`, and a `localhost` cookie is sent to every port (ADR 0069 D-3). Every `POST`
+  must come from exactly `http://localhost:8788`, so a page on another port is refused. A program
+  that copies the cookie can still read pages.
+- ⚠️ **On Docker Desktop, the tunnel container can reach this listener.** This was measured on
+  2026-11-15 with Docker 29.5.3 on macOS. A container on any compose network reaches a port
+  published on `127.0.0.1` through `host.docker.internal`, and arrives from Docker's own gateway
+  address, which is the address the host's own browser arrives from. A container also reaches the
+  instance's address on a network it does not share. The listener refuses a connection from
+  cloudflared's fixed addresses (`OYL_INSTANCE_TRUSTED_PROXIES`), which closes the direct path. It
+  **cannot** tell cloudflared from your browser on the `host.docker.internal` path. So an edge that
+  rewrote the tunnel's ingress could reach the loopback pages.
+  - ADR 0069 names this as a condition that makes the ADR wrong ("Docker networking that cannot
+    keep the tunnel container off the second listener"). Until the owner rules on it, **this
+    listener grants nothing the tunnel does not**. In particular, a passkey added here also needs
+    `admin-passkeys confirm` on the host before it can make a change, though the owner's Q-C
+    answer would have spared it that.
+  - Not measured on Linux Docker Engine.
 
 ## Moderation and the operator's duties
 

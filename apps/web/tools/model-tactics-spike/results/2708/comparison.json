@@ -1,0 +1,362 @@
+[
+  {
+    "circuit": "flat",
+    "seed": 1,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": true,
+    "outcomes": {
+      "applied": 986,
+      "no-decision": 56,
+      "not-named": 0,
+      "launch": 0,
+      "exhausted": 0,
+      "wbal-floor": 0,
+      "kick-closed": 0,
+      "flyer-closed": 0,
+      "attack-over": 1,
+      "target-not-ahead": 0
+    },
+    "seeded": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.677,
+        "follow": 0.091,
+        "chase": 0.026,
+        "attack": 0,
+        "flyer": 0.206
+      },
+      "changesPerBotMinute": 0.8,
+      "awayMoves": 1,
+      "draftingAt30s": 6,
+      "leadChanges": 22,
+      "spreadAtEndM": 2.238,
+      "lowestWbal": 0.931,
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 78.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [29.7]
+    },
+    "model": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.921,
+        "follow": 0.028,
+        "chase": 0,
+        "attack": 0.046,
+        "flyer": 0.006
+      },
+      "changesPerBotMinute": 1.2,
+      "awayMoves": 2,
+      "draftingAt30s": 6,
+      "leadChanges": 1,
+      "spreadAtEndM": 3.901,
+      "lowestWbal": 0.846,
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 35.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": []
+    }
+  },
+  {
+    "circuit": "flat",
+    "seed": 2,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": true,
+    "outcomes": {
+      "applied": 1001,
+      "no-decision": 42,
+      "not-named": 0,
+      "launch": 0,
+      "exhausted": 0,
+      "wbal-floor": 0,
+      "kick-closed": 0,
+      "flyer-closed": 0,
+      "attack-over": 0,
+      "target-not-ahead": 0
+    },
+    "seeded": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.776,
+        "follow": 0.021,
+        "chase": 0,
+        "attack": 0,
+        "flyer": 0.203
+      },
+      "changesPerBotMinute": 0.571,
+      "awayMoves": 0,
+      "draftingAt30s": 6,
+      "leadChanges": 21,
+      "spreadAtEndM": 2.221,
+      "lowestWbal": 0.948,
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 79.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": []
+    },
+    "model": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.959,
+        "follow": 0,
+        "chase": 0,
+        "attack": 0.041,
+        "flyer": 0
+      },
+      "changesPerBotMinute": 0.286,
+      "awayMoves": 0,
+      "draftingAt30s": 6,
+      "leadChanges": 0,
+      "spreadAtEndM": 3.98,
+      "lowestWbal": 0.872,
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 35.05,
+      "mostMovingAtOnce": 1,
+      "chaseStartGapsM": []
+    }
+  },
+  {
+    "circuit": "flat",
+    "seed": 3,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": true,
+    "outcomes": {
+      "applied": 987,
+      "no-decision": 56,
+      "not-named": 0,
+      "launch": 0,
+      "exhausted": 0,
+      "wbal-floor": 0,
+      "kick-closed": 0,
+      "flyer-closed": 0,
+      "attack-over": 0,
+      "target-not-ahead": 0
+    },
+    "seeded": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.783,
+        "follow": 0.014,
+        "chase": 0,
+        "attack": 0,
+        "flyer": 0.203
+      },
+      "changesPerBotMinute": 0.457,
+      "awayMoves": 0,
+      "draftingAt30s": 6,
+      "leadChanges": 22,
+      "spreadAtEndM": 2.329,
+      "lowestWbal": 0.948,
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 79.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": []
+    },
+    "model": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.932,
+        "follow": 0.027,
+        "chase": 0,
+        "attack": 0.041,
+        "flyer": 0
+      },
+      "changesPerBotMinute": 0.514,
+      "awayMoves": 0,
+      "draftingAt30s": 6,
+      "leadChanges": 0,
+      "spreadAtEndM": 3.922,
+      "lowestWbal": 0.872,
+      "riderPlaceAtEnd": 8,
+      "firstMoveS": 35.05,
+      "mostMovingAtOnce": 1,
+      "chaseStartGapsM": []
+    }
+  },
+  {
+    "circuit": "hilly",
+    "seed": 1,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": true,
+    "outcomes": {
+      "applied": 987,
+      "no-decision": 56,
+      "not-named": 0,
+      "launch": 0,
+      "exhausted": 0,
+      "wbal-floor": 0,
+      "kick-closed": 0,
+      "flyer-closed": 0,
+      "attack-over": 0,
+      "target-not-ahead": 0
+    },
+    "seeded": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.538,
+        "follow": 0.204,
+        "chase": 0.053,
+        "attack": 0.038,
+        "flyer": 0.167
+      },
+      "changesPerBotMinute": 2.457,
+      "awayMoves": 3,
+      "draftingAt30s": 5,
+      "leadChanges": 14,
+      "spreadAtEndM": 77.489,
+      "lowestWbal": 0.448,
+      "riderPlaceAtEnd": 5,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [31.1, 30.9, 104.3, 104.5, 62.2]
+    },
+    "model": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0.03,
+        "sit-in": 0.856,
+        "follow": 0.03,
+        "chase": 0.01,
+        "attack": 0.071,
+        "flyer": 0.002
+      },
+      "changesPerBotMinute": 1.486,
+      "awayMoves": 5,
+      "draftingAt30s": 5,
+      "leadChanges": 3,
+      "spreadAtEndM": 128.167,
+      "lowestWbal": 0.431,
+      "riderPlaceAtEnd": 3,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [94.5]
+    }
+  },
+  {
+    "circuit": "hilly",
+    "seed": 2,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": true,
+    "outcomes": {
+      "applied": 987,
+      "no-decision": 56,
+      "not-named": 0,
+      "launch": 0,
+      "exhausted": 0,
+      "wbal-floor": 0,
+      "kick-closed": 0,
+      "flyer-closed": 0,
+      "attack-over": 0,
+      "target-not-ahead": 0
+    },
+    "seeded": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.584,
+        "follow": 0.18,
+        "chase": 0.037,
+        "attack": 0.042,
+        "flyer": 0.157
+      },
+      "changesPerBotMinute": 1.886,
+      "awayMoves": 7,
+      "draftingAt30s": 6,
+      "leadChanges": 10,
+      "spreadAtEndM": 112.753,
+      "lowestWbal": 0.487,
+      "riderPlaceAtEnd": 5,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [95.1, 30.8, 33.1, 69.3]
+    },
+    "model": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0.015,
+        "sit-in": 0.856,
+        "follow": 0.034,
+        "chase": 0,
+        "attack": 0.091,
+        "flyer": 0.003
+      },
+      "changesPerBotMinute": 1.543,
+      "awayMoves": 4,
+      "draftingAt30s": 6,
+      "leadChanges": 8,
+      "spreadAtEndM": 145.813,
+      "lowestWbal": 0.498,
+      "riderPlaceAtEnd": 6,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": []
+    }
+  },
+  {
+    "circuit": "hilly",
+    "seed": 3,
+    "outcomeCountsMatchLive": true,
+    "traceMatchesLive": true,
+    "outcomes": {
+      "applied": 1001,
+      "no-decision": 42,
+      "not-named": 0,
+      "launch": 0,
+      "exhausted": 0,
+      "wbal-floor": 0,
+      "kick-closed": 0,
+      "flyer-closed": 0,
+      "attack-over": 0,
+      "target-not-ahead": 0
+    },
+    "seeded": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0,
+        "sit-in": 0.522,
+        "follow": 0.228,
+        "chase": 0.102,
+        "attack": 0.046,
+        "flyer": 0.103
+      },
+      "changesPerBotMinute": 2.057,
+      "awayMoves": 9,
+      "draftingAt30s": 6,
+      "leadChanges": 2,
+      "spreadAtEndM": 131.368,
+      "lowestWbal": 0.487,
+      "riderPlaceAtEnd": 6,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 4,
+      "chaseStartGapsM": [86.6, 36.9, 29.7, 30.4, 29.2]
+    },
+    "model": {
+      "tacticShare": {
+        "kick": 0,
+        "recover": 0.015,
+        "sit-in": 0.818,
+        "follow": 0.05,
+        "chase": 0.019,
+        "attack": 0.097,
+        "flyer": 0
+      },
+      "changesPerBotMinute": 1.486,
+      "awayMoves": 3,
+      "draftingAt30s": 6,
+      "leadChanges": 0,
+      "spreadAtEndM": 101.633,
+      "lowestWbal": 0.489,
+      "riderPlaceAtEnd": 3,
+      "firstMoveS": 0.05,
+      "mostMovingAtOnce": 3,
+      "chaseStartGapsM": [134.7]
+    }
+  }
+]
