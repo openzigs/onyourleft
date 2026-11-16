@@ -1010,6 +1010,19 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
               }),
               analysis: operateAnalysis,
               ...(operateRooms === undefined ? {} : { rooms: operateRooms }),
+              // #2613: the keys shown, and the routine rotation made over the
+              // operator log's transaction with the same secret and origin.
+              keys: {
+                keys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: server.secretKey,
+                    origin: server.origin,
+                    now: () => Math.floor(now() / 1000),
+                    log,
+                  }),
+              },
             }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),

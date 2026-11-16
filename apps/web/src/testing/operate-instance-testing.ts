@@ -105,7 +105,9 @@ export interface OperateInstance {
     ): Promise<{ readonly ok: boolean; readonly value?: { readonly roomId: string } }>;
   };
   readonly clock: { ms: number };
-  readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
+  readonly instanceKeys: {
+    show(): Promise<{ readonly card: string; readonly fingerprint: string }>;
+  };
   /** A handler answering, as this instance, one sealed inner route. */
   answeringAs(path: string, answer: () => Response): (request: Request) => Promise<Response>;
   freshRead<T>(read: (store: OperatorLogWriter & BackupWriter) => Promise<T>): Promise<T>;
@@ -162,6 +164,8 @@ export interface OperateDevice {
   connect(): Promise<void>;
   /** This device's own id on the instance, once connected. */
   athleteId(): string;
+  /** The fingerprint this device pinned the instance's identity key at (#2613), once connected. */
+  pin(): string | undefined;
 }
 
 /** A device with its own store and key, not yet connected. */
@@ -198,6 +202,7 @@ export async function anOperateDevice(
       if (outcome.kind !== 'connected') throw new Error(`connect: ${JSON.stringify(outcome)}`);
     },
     athleteId: () => readInstanceAccount(storage)?.instanceAthleteId ?? '',
+    pin: () => readInstanceAccount(storage)?.pin,
   };
 }
 
