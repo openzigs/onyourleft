@@ -105,6 +105,21 @@ export interface FieldRun {
   readonly last: LapRaceRide;
 }
 
+/**
+ * Seconds from the last of `ticks` in which any bot was attacking or on a
+ * flyer to `atMs`, or from the start with none (#2708): what the model reads
+ * as `quietS`.
+ */
+export function quietSeconds(ticks: readonly FieldTick[], atMs: number): number {
+  for (let at = ticks.length - 1; at >= 0; at -= 1) {
+    const tick = ticks[at] as FieldTick;
+    if ([...tick.tactic.values()].some((move) => move === 'attack' || move === 'flyer')) {
+      return Math.max(0, atMs / 1_000 - tick.second);
+    }
+  }
+  return atMs / 1_000;
+}
+
 /** Start the field `seed` deals on `profile`, with the platform's random source held to `seed`. */
 function startField(profile: RouteProfile, seed: number): LapRaceRide {
   const source = globalThis.crypto;
@@ -191,7 +206,14 @@ export async function rideField(
     const atMs = ride.race.atMs;
     if (source.kind === 'live' && atMs >= askAtMs) {
       const call = await source.decide(
-        modelInput(ride.race, ride.bots, profile, ride.draft, RIDER_WATTS / RIDER_KILOGRAMS),
+        modelInput(
+          ride.race,
+          ride.bots,
+          profile,
+          ride.draft,
+          RIDER_WATTS / RIDER_KILOGRAMS,
+          quietSeconds(ticks, atMs),
+        ),
         atMs,
       );
       const arrivedAtMs = atMs + Math.round(call.latencyMs);
