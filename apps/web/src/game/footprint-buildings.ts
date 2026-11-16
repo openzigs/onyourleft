@@ -935,8 +935,20 @@ export const FOOTPRINT_SIMPLIFY_METRES = 0.5;
 /** Below this many square metres a footprint is `too-small`: **12**. */
 export const FOOTPRINT_MIN_AREA = 12;
 
-/** Above this many square metres it is `too-large`: **20 000**, out of frame anyway. */
-export const FOOTPRINT_MAX_AREA = 20_000;
+/**
+ * Above this many square metres it is `too-large`: **100 000** — a 316 m
+ * square, the size of a regional mall or a distribution warehouse. It was
+ * 20 000 until #2662, which found malls and big warehouses missing.
+ *
+ * ⚠️ **Not a triangle lever**: a plan's triangles are bounded by its outer
+ * vertices ({@link FOOTPRINT_MAX_VERTICES}) and {@link FOOTPRINT_MAX_TRIANGLES},
+ * whatever its area, and the frame's by `realistic-budget.ts`
+ * §`REALISTIC_STRUCTURE_ITEMS` (36), nearest first. A big footprint takes one
+ * of those slots as a small one does. What still drops one is a road through it
+ * (rule 4) or more than {@link FOOTPRINT_MAX_GROUND_RANGE_METRES} of ground
+ * under it, which most of that size on a hillside have.
+ */
+export const FOOTPRINT_MAX_AREA = 100_000;
 
 /** The most the drawn ground may vary under a footprint: **2.5 m**. */
 export const FOOTPRINT_MAX_GROUND_RANGE_METRES = 2.5;

@@ -10,22 +10,24 @@
  * keyed by an integer chunk index. Every placement rule of phase B reads it —
  * `settlements.ts` (no procedural site on mapped land, no field boundary off
  * field ground — {@link fieldGround}), `scatter.ts` (no tree, shrub or rock on built-up
- * land or water) and `streets.ts` (no pavement for a site that is not built).
+ * land, water or bare ground — {@link nothingGrowsAt}) and `streets.ts` (no pavement for a site that is not built).
  * Since #1547 it also carries how far each cell is from built-up land
  * ({@link LandClassMask.builtUpDistances}), which `landform.ts` levels a mapped
  * town's ground by.
  *
  * ⚠️ **Read every frame, on the thread GATT notifications arrive on** (#240
  * NFR-2, #469), so {@link LandClassMask.classAt} is one `Map` lookup and one
- * typed-array index, and allocates nothing: the class is one of seven string
+ * typed-array index, and allocates nothing: the class is one of eight string
  * constants, the key is a small integer.
  *
  * ## The classes
  *
  * From Protomaps v4's `landuse.kind` and `water.kind` —
  * {@link LAND_CLASS_OF_KIND}. Where polygons overlap the class with the higher
- * precedence wins: **water > wood > park > built-up > farmland > other**, so a
- * wood drawn inside a residential block is a wood. A covered cell no polygon
+ * precedence wins: **water > wood > park > built-up > bare > farmland > other**,
+ * so a wood drawn inside a residential block is a wood. `bare` (#2662) is ground
+ * where nothing grows and no field is fenced — sand, rock, ice, an airfield, a
+ * pier — below built-up so an airport's terminal land keeps its own class. A covered cell no polygon
  * reaches is `other`; a cell outside every covered tile is `unknown`, and there
  * the procedural world decides (P-8). An unknown `kind` is `other`, never
  * `built-up`.
@@ -43,7 +45,8 @@ import { rasterise, type Box, type GridSpec, type LandUseFeature } from '@onyour
 
 import type { WorldCorridor } from './world-data/corridor';
 
-export type LandClass = 'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'farmland' | 'other';
+export type LandClass =
+  'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'bare' | 'farmland' | 'other';
 
 /**
  * Every `landuse` kind this reads, and its class — #1546's table. A `water`
@@ -59,6 +62,15 @@ export type LandClass = 'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'fa
  * and `orchard` (written as `farmland`). Each now reads as `other`. A kind
  * unseen in the spike's corridors that a rule does emit — `forest`,
  * `national_park`, `zoo`, `military` — stays.
+ *
+ * #2662, ADR 0054 D-5.1 (a kind is added by naming it here, beside its rule):
+ * the smaller kinds the 2026-11-15 tag audit found falling through to `other`,
+ * where a farm fence could run across them. `kindergarten` is built-up as a
+ * `school` is; `village_green` and `allotments` are park; and the ground where
+ * nothing grows and no field is fenced is `bare` — `beach`, `sand`,
+ * `bare_rock`, `glacier`, the airfield's `aerodrome`, `runway` and `taxiway`,
+ * and the built-on `pier`, `platform` and `dam`. `grassland` stays `other`:
+ * natural grass, where the procedural world's planting is the right one.
  */
 export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unknown'>>> =
   Object.freeze({
@@ -78,16 +90,29 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     playground: 'park',
     pitch: 'park',
     grass: 'park',
+    village_green: 'park',
+    allotments: 'park',
     residential: 'built-up',
     commercial: 'built-up',
     industrial: 'built-up',
     school: 'built-up',
+    kindergarten: 'built-up',
     college: 'built-up',
     university: 'built-up',
     hospital: 'built-up',
     pedestrian: 'built-up',
     railway: 'built-up',
     military: 'built-up',
+    beach: 'bare',
+    sand: 'bare',
+    bare_rock: 'bare',
+    glacier: 'bare',
+    aerodrome: 'bare',
+    runway: 'bare',
+    taxiway: 'bare',
+    pier: 'bare',
+    platform: 'bare',
+    dam: 'bare',
     farmland: 'farmland',
     meadow: 'farmland',
   });
@@ -132,6 +157,7 @@ const CLASS_OF_CODE: readonly LandClass[] = [
   'unknown',
   'other',
   'farmland',
+  'bare',
   'built-up',
   'park',
   'wood',
@@ -253,15 +279,15 @@ function otherClass(there: LandClass, here: LandClass): boolean {
   return there !== here && there !== 'unknown';
 }
 
-/** Whether nothing grows at `(x, z)`: mapped built-up land or water. */
-export function builtUpOrWater(land: LandClassMask, x: number, z: number): boolean {
+/** Whether nothing grows at `(x, z)`: mapped built-up land, water, or `bare` ground (#2662). */
+export function nothingGrowsAt(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
-  return here === 'built-up' || here === 'water';
+  return here === 'built-up' || here === 'water' || here === 'bare';
 }
 
 /**
  * Whether a field boundary may run at `(x, z)`: ground that is not mapped as
- * built-up, water, wood or park — a field's, or the procedural world's.
+ * built-up, water, wood, park or `bare` — a field's, or the procedural world's.
  */
 export function fieldGround(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
@@ -374,7 +400,7 @@ function insidePolygon(feature: LandUseFeature, x: number, z: number): boolean {
  * mapped building stands on, `residential`, `commercial` or `industrial`,
  * which the mask's class does not keep. Of the polygons covering the point,
  * the one whose class wins by the mask's precedence (water > wood > park >
- * built-up > farmland > other), so it names the land {@link LandClassMask.classAt}
+ * built-up > bare > farmland > other), so it names the land {@link LandClassMask.classAt}
  * classes; `undefined` where none covers it. Read once a footprint at ride
  * start, never per frame: it tests every polygon's box.
  */
