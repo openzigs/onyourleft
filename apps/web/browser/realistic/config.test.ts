@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  CITY_FAR_MOST,
   configQuery,
   countrysideWithLevers,
   DEFAULT_CONFIG,
@@ -52,6 +53,7 @@ import {
 import { ANCHOR_KINDS, HOLIDAY_DECORATIONS } from '../../src/game/decorations';
 import { PLACES } from '../../src/demo/synthetic-road';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
+import { MAPPED_BUILDING_MAX } from '../../src/game/realistic-budget';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('rides the realistic world with the ladder running when given no query', () => {
@@ -166,6 +168,36 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     // #1637's own city centre, for its street and terraced blocks.
     expect(harness).toContain("config.town === 'city-street'");
     expect(harness).toContain('? cityStreetscapeFixture(latitude)');
+  });
+
+  it('takes a candidate city cap beside a town, and refuses one that adds nothing or has no town — #1638', () => {
+    expect(DEFAULT_CONFIG.cityFar).toBeUndefined();
+    expect(parseConfig('?town=city').cityFar).toBeUndefined();
+    expect(parseConfig('?town=city&cityfar=72').cityFar).toBe(72);
+    expect(parseConfig(`?town=city&cityfar=${String(CITY_FAR_MOST)}`).cityFar).toBe(CITY_FAR_MOST);
+    expect(configQuery(parseConfig('?town=city&at=1500&cityfar=72'))).toBe(
+      '?at=1500&town=city&cityfar=72',
+    );
+    expect(CITY_FAR_MOST).toBe(4 * MAPPED_BUILDING_MAX);
+    for (const bad of ['36', '0', '-72', '72.5', 'lots', '', String(CITY_FAR_MOST + 1)]) {
+      expect(() => parseConfig(`?town=city&cityfar=${bad}`), bad).toThrow(
+        /cityfar is a whole number from 37 to 144/,
+      );
+    }
+    expect(() => parseConfig('?cityfar=72')).toThrow(/name town=city/);
+    expect(() => parseConfig('?route=village&cityfar=72')).toThrow(/name town=city/);
+    // A town with no city-centre run has no far box to take: refused, not drawn as the 36.
+    for (const town of ['mixed', 'richmond', 'countryside', 'terrace']) {
+      expect(() => parseConfig(`?town=${town}&cityfar=72`), town).toThrow(/name town=city/);
+    }
+  });
+
+  it('hands the candidate to the town’s index, which is where it is wired — #1638', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('buildings: mappedBuildingsOf(plans, config.cityFar)');
   });
 
   it('switches #1542’s three changes off one by one, and none unless asked', () => {

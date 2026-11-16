@@ -3004,6 +3004,99 @@ minute 10. The summary's `skin min 20 °C` column is the last block, about minut
 
 Post both tables on #1553 and on #733 (A37). #1553 is closed by hand once they are in.
 
+### AE5 — a city centre from map data in frame ([#1638](https://github.com/openzigs/onyourleft/issues/1638))
+
+**Added 2026-11-15** by #1638. Checked with `grep 'AE5'` for a duplicate id first: AE4 is #1553's
+town, so this step is AE5. It changes no resistance, so no trainer is needed. **#733 is not edited**:
+it has been on hold since 2026-10-15, and the owner adds this step to it when device checks resume.
+AE5a is held on the page, so its readings are owner-free `adb` readings (allowed since 2026-11-06);
+AE5b is ridden, so it is the owner's.
+
+**What it is for.** Today 36 mapped buildings (`realistic-budget.ts` §`MAPPED_BUILDING_MAX`) cover
+about one downtown block either side of the road. ADR 0054 D-5.6 lets that cap rise only to a number
+measured on the tablet. AE5 takes the numbers: a **before** row with the city changes off, an
+**after** row with #1634–#1637 on, and, only if the after row passes with headroom, a **third** row at
+a candidate city-only, far-level-only cap. The owner rules on the number on #1638.
+
+**The two halves are AE4's, for AE4's reason.** The staged page rides only synthetic roads, and there
+is no committed US stage route through a downtown, so:
+
+- **AE5a** measures the page's city: `town=city` (`testing/urban-fixtures.ts` §`cityCentreFixture`,
+  #1633's synthetic city centre, with no OpenStreetMap data), held at **1 500 m**, between its two
+  towers. The page publishes the hold's urban class (`window.__oylRealistic.urbanRuns`, #1633's
+  counters): it is `city-centre` there, and `realistic-mapped.browser.spec.ts` §"#1636" reads it.
+- **AE5b** rides a real city centre from the US archive in the product, offline, as AE4b rides a town.
+
+**The control is on one build.** Every row is the same install: `main` at the time it is run, staged
+as for the AH runs (Part AH §"Build and install"). The **before** row is `levers=-urban-class`: the
+class forced to `unknown` (`browser/realistic/config.ts` §`urban-class`), which takes #1634's storeys,
+#1635's terraces, #1636's shop fronts and #1637's streetscape with it. #1636's curtain wall on a tower
+of nine storeys or more is drawn at any class, so it is in both rows. The **candidate** is the page's
+`cityfar=N` (`config.ts` §`cityfar`, 37 to 144). In the product the cap is off
+(`MAPPED_BUILDING_MAX_CITY_FAR` is `undefined`), and a candidate is never the cap: the cap is the
+number the third row supports.
+
+**The hard limit is #1523's and #1553's.** The top rung stays off the GPU ceiling: in the 5-minute run
+with everything on, **GPU p50 below 848 MHz** and **frames over 20 ms at most 0.2 %**. If the after
+row fails, the change that broke it is levered off or reverted, and the owner rules. **The cap does
+not rise to make it pass**, and no third row is taken.
+
+**The route is named by its id and a distance in metres, and by nothing else.** Write no
+coordinates, no place name and no screenshot of the map into this file, the issue or a commit.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AE5a1 | **The city, held — the after row.** AE1's procedure (§"#506's AE1 and AE2 in the same session"), at `realistic.html?world=realistic&panel=0&ladder=0&town=city&at=1500&levers=-people`. `-people` because Part AJ measures the people on their own | Draw calls and triangles (the `OYL-REALISTIC` line), the `OYL-REALISTIC-MAPPED` line beside it (`"buildings":36`, the product's cap) and Z6's `dumpsys` block. Draw calls within the page's 35 (`REALISTIC_WOODED_DRAW_CALLS`) |
+| AE5a2 | **The same hold, the class off — the before row**: AE5a1's URL with `&levers=-people,-urban-class` | The same readings. The difference from AE5a1 is what #1634–#1637 add in a city centre |
+| AE5a3 | **5 minutes held in the city, all on**: AH1–AH7, with AH4's URL as `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=6&town=city&at=1500&levers=-people` and the sampler run for **300 s** (`realistic-sampler.sh 300 …`), not 1 200. `RUN=1638-city` | One row of `realistic-summary.mjs`. **The hard limit is read here** |
+| AE5a4 | **Cool again (AH3, 25–26 °C)**, same build: AE5a3 with AE5a2's levers. `RUN=1638-city-class-off` | One row. A row inside the limit while AE5a3 is outside it names #1634–#1637 as the cost |
+| AE5a5 | **Only if AE5a3 passes the hard limit with headroom: the candidate.** Cool again, then AE5a3 with `&cityfar=N` on its URL, `RUN=1638-city-cityfar-N`. Start at `N=72`. Read the `OYL-REALISTIC-MAPPED` line first: `buildings` above 36 means the candidate took | One row, and the line. The candidate whose row still passes with headroom is the number proposed on #1638, with this row as its measurement. A row outside the limit rules that candidate out; a lower one may be tried, each its own row |
+| AE5b1 | **Choose a route once, online**, as AE4b1, but one of your own saved routes that passes through a **city centre** (blocks of four storeys and more, shops at street level), outside **every** privacy zone on the device | **"© OpenStreetMap contributors"** on the ride screen: the corridor was read and stored |
+| AE5b2 | **Record the route by id**, as AE4b2: the id and the distance in metres from the route's start to the first city block | An id and a number of metres. No name and no coordinate |
+| AE5b3 | **Aeroplane mode on**, then ride the route through the city centre in the product at your usual speed, with `dumpsys gfxinfo` reset at the start and read at the end, as AE4b3 | The credit is still shown offline. By eye: **no building in a wood, none on the road, none floating**. **Three screenshots**: the city ahead, a street side at walking distance, and the edge where the city thins out |
+
+```bash
+# AE5a3: the 5-minute run. Part AH's block, with these three lines in place of theirs.
+# AE5a4 and AE5a5 change only RUN and the URL's levers or cityfar.
+RUN=1638-city
+node apps/mobile/tools/webview-probe.mjs \
+  "location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=6&town=city&at=1500&levers=-people'"
+"$ADB" shell "nohup sh /data/local/tmp/realistic-sampler.sh 300 'VRI-dev\.openzigs\.onyourleft/' /data/local/tmp/oyl/$RUN $PID > /dev/null 2>&1 &"
+# The mapped buildings the page drew, for every AE5a row:
+"$ADB" logcat -d | grep OYL-REALISTIC-MAPPED | tail -n 1
+```
+
+The columns are #1523's and #1553's, as `realistic-summary.mjs` prints them: the Mali clock's
+mean / p50 / p90, as AE4's table explains.
+
+#### AE5 results
+
+| Reading | AE5a1 / AE5a3: city, all on (after) | AE5a2 / AE5a4: class off (before) | AE5a5: `cityfar=` |
+|---|---|---|---|
+| Draw calls at the hold | | | |
+| Triangles at the hold | | | |
+| Mapped buildings drawn (`OYL-REALISTIC-MAPPED`) | | | |
+| GPU mean / p50 / p90, MHz (5 min) | | | |
+| Present p99, ms (5 min) | | | |
+| Frames over 20 ms, % (5 min) | | | |
+| CPU both, % (5 min) | | | |
+| GL mtrack, MiB (5 min) | | | |
+| Skin before → at minute 5, °C | | | |
+| **Hard limit** (p50 < 848 MHz, > 20 ms ≤ 0.2 %) | | | |
+
+| Step | As described? | What was seen, or measured |
+|---|---|---|
+| AE5b1 | | |
+| AE5b2 | | Route id: · city at: m |
+| AE5b3 | | `gfxinfo`: frames, janky, frame and GPU percentiles. By eye: woods / road / floating. Screenshots: 1 · 2 · 3 |
+
+**Phone (OEM, model, Android, WebView):**
+**Build:** debug, `main` at
+
+Post the tables on #1638. The cap is recorded in `realistic-budget.ts` §`MAPPED_BUILDING_MAX_CITY_FAR`
+with its row only after the owner rules, and #1638 is closed by hand once the rows are in and the
+decision is recorded.
+
 ---
 
 ## Part AF — does the shell reach a plain-`http:` model server on the LAN? ([#519](https://github.com/openzigs/onyourleft/issues/519))

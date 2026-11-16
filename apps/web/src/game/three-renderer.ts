@@ -354,6 +354,7 @@ import {
 } from './footprint-buildings';
 import {
   FAR_ROLES,
+  mappedBuildingCap,
   MappedSelection,
   NEAR_ROLES,
   NO_RIVALS,
@@ -21796,8 +21797,15 @@ export class MappedBuildingBelt {
   readonly #modelTint: BufferAttribute;
   /** Each drawn building's first vertex in the models' buffer, or -1 for an extrusion. */
   readonly #modelAt: Int32Array;
-  readonly #selection = new MappedSelection();
-  /** The drawn buildings as ground-blob casters, written at a refill. @see grounded */
+  /** Since #1638 built to hold the buildings' cap (`mapped-buildings.ts` §`mappedBuildingCap`). */
+  readonly #selection: MappedSelection;
+  /**
+   * The drawn buildings as ground-blob casters, written at a refill. @see grounded
+   *
+   * ⚠️ **At most `MAPPED_BUILDING_MAX`, whatever the selection holds** —
+   * #1638: a city centre's far boxes past the 36 carry no blob, so
+   * `REALISTIC_GROUND_BLOBS` holds with the cap on.
+   */
   readonly #grounded = blobCasters(MAPPED_BUILDING_MAX);
   /** Where each surface's range starts, and where its next triangle goes, in vertices. */
   readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
@@ -21842,6 +21850,7 @@ export class MappedBuildingBelt {
   ) {
     this.buildings = buildings;
     this.#houses = houses;
+    this.#selection = new MappedSelection(mappedBuildingCap(buildings));
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);

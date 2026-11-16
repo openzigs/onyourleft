@@ -162,9 +162,11 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     seconds: 'two more loads of the owner’s page',
     why:
       'the owner’s page’s `town=city`, for #1636’s screenshots: that a city centre’s shop ' +
-      'fronts and tower stay inside the page’s 35 calls. An instrument of a page that ships ' +
-      'in no build; the shop fronts and the curtain wall are held in the required suite by ' +
-      '`city-centre.test.ts`, and the belt’s six calls by the same.',
+      'fronts and tower stay inside the page’s 35 calls, and since #1638 that the page ' +
+      'publishes a city-centre run where it holds (validation 0002 AE5). An instrument of a ' +
+      'page that ships in no build; the shop fronts and the curtain wall are held in the ' +
+      'required suite by `city-centre.test.ts`, the belt’s six calls by the same, and the ' +
+      'runs by `urban-runs.test.ts`.',
   },
   {
     spec: 'realistic-mapped.browser.spec.ts',
