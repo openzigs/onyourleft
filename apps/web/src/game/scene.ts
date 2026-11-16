@@ -52,7 +52,7 @@ import {
   type CountrysideLever,
   type LandClassMask,
 } from './land-class';
-import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
+import { horizonRelief, standingOnGround, terrainCorridor, type TerrainMesh } from './landform';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import { crashedRoll, type CrashSide } from './delivery/crash-look';
 import { LANE_CHANGE_TURN_SPEED_FLOOR, laneChangeLean, laneChangeRate } from './lane-change-lean';
@@ -126,6 +126,7 @@ import {
   streetWalks,
   type PeopleInView,
 } from './people';
+import { parkDressingInView, type ParkDressingInView } from './park-dressing';
 import { distanceToDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
@@ -349,6 +350,13 @@ export interface SceneInput {
    * safe way round, for {@link centreline}'s reason.
    */
   readonly countrysideOff?: readonly CountrysideLever[] | undefined;
+  /**
+   * #2685's golf courses and cemeteries drawn as their parks' planting alone:
+   * no stripes, greens, bunkers or paths on the ground and nothing standing on
+   * it (`park-dressing.ts`) — the realistic page's `-park-dressing` lever, and
+   * nothing else. Optional the safe way round, for {@link centreline}'s reason.
+   */
+  readonly parkDressingOff?: boolean | undefined;
   /**
    * Where a Delivery round has steered the rider across the road, in metres
    * right of the centre line — #1820, `delivery/steer.ts`
@@ -578,6 +586,11 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
     world: worldStyle(input.profile),
+    // #2685: the golf courses' and cemeteries' ground and what stands on it,
+    // round the camera, stood on this frame's ground as the scenery is.
+    ...(input.worldCorridor === undefined || input.parkDressingOff === true
+      ? {}
+      : { parkDressing: parkDressing(input, input.worldCorridor, seed, camera, ground) }),
     // #2099: and only where this frame's ground is drawn. The scenery is
     // placed from the route and the ground's reach is the frame's, which a
     // sharp bend tapers in before and after it. @see standingOnGround
@@ -645,6 +658,28 @@ function people(
     road: besideSideRoads(road, sideRoads),
     ground: groundOf(profile, origin, seed, land),
   });
+}
+
+/** The golf courses and cemeteries in reach — #2685. @see SceneFrame.parkDressing */
+function parkDressing(
+  input: SceneInput,
+  corridor: WorldCorridor,
+  seed: number,
+  camera: CameraPose,
+  ground: TerrainMesh,
+): ParkDressingInView {
+  const view = parkDressingInView(
+    corridor,
+    input.profile,
+    input.origin,
+    seed,
+    input.landClass ?? NO_LAND_CLASS,
+    camera.x,
+    camera.z,
+  );
+  return view.pieces.length === 0
+    ? view
+    : { pieces: standingOnGround(view.pieces, ground), ground: view.ground };
 }
 
 /** The streams, lakes and bridges in view. @see SceneFrame.water */

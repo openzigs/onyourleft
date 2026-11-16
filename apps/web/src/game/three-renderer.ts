@@ -552,6 +552,20 @@ import {
 } from './streets';
 import type { SideRoad } from './cross-streets';
 import {
+  GOLF_BUNKERS_PER_GREEN,
+  GOLF_GREENS_DRAWN,
+  HEADSTONE_CROSS_PATH_SLOTS,
+  HEADSTONE_CROSS_SLOTS,
+  HEADSTONE_PATH_ROWS,
+  HEADSTONE_PITCH_METRES,
+  HEADSTONE_ROW_METRES,
+  PARK_DRESSING_CAPACITY,
+  PARK_LOOK_CELLS,
+  type ParkDressingInView,
+  type ParkGround,
+  type ParkPiece,
+} from './park-dressing';
+import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
   carriesTheLogo,
@@ -4779,6 +4793,8 @@ export class TerrainBelt {
   readonly #fieldCount = { value: 1 };
   /** Where the tree line is, for the realistic ground's scree — #627. @see TerrainMesh.treeLine */
   readonly #treeLine = { value: NO_TREE_LINE };
+  /** #2685: the golf courses' and cemeteries' ground, for the photographic ground. */
+  readonly #park = new ParkGroundPaint();
   readonly #materials = {
     lit: withSurfaceDetail(
       new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
@@ -4846,8 +4862,19 @@ export class TerrainBelt {
     readonly span: { value: number };
     readonly count: { value: number };
     readonly treeLine: { value: number };
+    readonly park: ParkGroundUniforms;
   } {
-    return { span: this.#fieldSpan, count: this.#fieldCount, treeLine: this.#treeLine };
+    return {
+      span: this.#fieldSpan,
+      count: this.#fieldCount,
+      treeLine: this.#treeLine,
+      park: this.#park.uniforms,
+    };
+  }
+
+  /** This frame's golf courses' and cemeteries' ground — #2685, or none. @see ParkGroundPaint */
+  updatePark(ground: ParkGround | undefined): void {
+    this.#park.write(ground);
   }
 
   /** The surface detail, on or off — #425. @see QualitySettings.surfaceDetail */
@@ -4930,6 +4957,7 @@ export class TerrainBelt {
     this.#geometry.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#park.dispose();
   }
 
   /** Draw only the bands this rung allows, and only triangles this frame has. */
@@ -15651,6 +15679,8 @@ interface GroundBlendMaps {
   readonly crag?: { readonly colour: Texture; readonly normal: Texture };
   /** `landform.ts` §`TerrainMesh.treeLine`, written by `TerrainBelt.update`. */
   readonly treeLine: { value: number };
+  /** #2685: the golf courses' and cemeteries' ground. Absent, none is painted. @see ParkGroundPaint */
+  readonly park?: ParkGroundUniforms | undefined;
 }
 
 /**
@@ -15725,6 +15755,7 @@ uniform vec4 groundShares;
 uniform float oylVergeSlush;
 varying vec3 vOylGround;
 varying float vOylGroundUp;
+${PARK_GROUND_PARS}
 float oylVergeShare = 0.0;
 float oylRockShare = 0.0;
 float oylCragShare = 0.0;
@@ -15857,6 +15888,334 @@ const GROUND_BLEND_MIX = /* glsl */ `
 `;
 
 /**
+ * The golf courses' and cemeteries' ground, as the photographic ground's
+ * shader reads it — #2685. One per {@link TerrainBelt}, handed to every
+ * ground material it wears (`GroundBlendMaps.park`), and written from each
+ * frame's `SceneFrame.parkDressing.ground` by {@link ParkGroundPaint.write}:
+ * the window of park looks as a `park-dressing.ts` §`PARK_LOOK_CELLS`² RGBA
+ * texture, linearly filtered so an edge is soft over one 5 m cell, and the
+ * greens and their bunkers as uniform arrays. No triangle, no draw call and
+ * no vertex attribute: the texture is 102 400 bytes.
+ */
+export class ParkGroundPaint {
+  readonly uniforms: ParkGroundUniforms;
+  readonly #texture: DataTexture;
+  #written: ParkGround | undefined;
+
+  constructor() {
+    const data = new Uint8Array(PARK_LOOK_CELLS * PARK_LOOK_CELLS * 4);
+    this.#texture = new DataTexture(
+      data,
+      PARK_LOOK_CELLS,
+      PARK_LOOK_CELLS,
+      RGBAFormat,
+      UnsignedByteType,
+    );
+    this.#texture.magFilter = LinearFilter;
+    this.#texture.minFilter = LinearFilter;
+    this.#texture.generateMipmaps = false;
+    this.#texture.wrapS = ClampToEdgeWrapping;
+    this.#texture.wrapT = ClampToEdgeWrapping;
+    this.#texture.needsUpdate = true;
+    this.uniforms = {
+      oylParkLooks: { value: this.#texture },
+      oylParkWindow: { value: new Vector4(0, 0, 0, 0) },
+      oylGreens: { value: Array.from({ length: GOLF_GREENS_DRAWN }, () => new Vector4()) },
+      oylBunkers: {
+        value: Array.from(
+          { length: GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN },
+          () => new Vector4(),
+        ),
+      },
+      // The season's snow covers the stripes, greens, sand and paths alike.
+      oylParkSnow: SEASON.oylRoofSnow,
+    };
+  }
+
+  /** The window this frame's ground is painted from, or none: then nothing is painted. */
+  write(ground: ParkGround | undefined): void {
+    const window = this.uniforms.oylParkWindow.value;
+    if (ground === undefined) {
+      window.w = 0;
+      return;
+    }
+    window.set(ground.originX, ground.originZ, 1 / (ground.cells * ground.cellMetres), 1);
+    if (ground === this.#written) return;
+    this.#written = ground;
+    (this.#texture.image.data as Uint8Array).set(ground.looks);
+    this.#texture.needsUpdate = true;
+    const greens = this.uniforms.oylGreens.value;
+    const bunkers = this.uniforms.oylBunkers.value;
+    for (const slot of greens) slot.set(0, 0, 0, 0);
+    for (const slot of bunkers) slot.set(0, 0, 0, 0);
+    ground.greens.slice(0, GOLF_GREENS_DRAWN).forEach((green, index) => {
+      (greens[index] as Vector4).set(green.x, green.z, green.radius, 1);
+      green.bunkers.slice(0, GOLF_BUNKERS_PER_GREEN).forEach((bunker, which) => {
+        // `w` turns each bunker's outline, so no two are the same shape.
+        (bunkers[index * GOLF_BUNKERS_PER_GREEN + which] as Vector4).set(
+          bunker.x,
+          bunker.z,
+          bunker.radius,
+          index * 1.7 + which * 2.9,
+        );
+      });
+    });
+  }
+
+  dispose(): void {
+    this.#texture.dispose();
+  }
+}
+
+/** What {@link ParkGroundPaint} hands the ground's program. */
+export interface ParkGroundUniforms {
+  readonly oylParkLooks: { value: Texture };
+  /** `xy` the window's corner, `z` one over its side in metres, `w` 1 while a window is drawn. */
+  readonly oylParkWindow: { value: Vector4 };
+  /** Each green's `x, z, radius`, `w` 1; `w` 0 is no green. */
+  readonly oylGreens: { value: Vector4[] };
+  /** Each bunker's `x, z, radius` and the turn of its outline; a radius of 0 is none. */
+  readonly oylBunkers: { value: Vector4[] };
+  /** The season's snow, which covers all of it. */
+  readonly oylParkSnow: { value: number };
+}
+
+/** The uniforms a ground built with no {@link ParkGroundPaint} reads: no window, so nothing is painted. */
+function noParkGround(): ParkGroundUniforms {
+  return {
+    oylParkLooks: { value: new DataTexture() },
+    oylParkWindow: { value: new Vector4(0, 0, 0, 0) },
+    oylGreens: { value: Array.from({ length: GOLF_GREENS_DRAWN }, () => new Vector4()) },
+    oylBunkers: {
+      value: Array.from(
+        { length: GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN },
+        () => new Vector4(),
+      ),
+    },
+    oylParkSnow: { value: 0 },
+  };
+}
+
+/** A packed sRGB colour as a linear `vec3`. */
+function glslLinear(packed: number): string {
+  const linear = new Color(packed);
+  return `vec3(${linear.r.toFixed(6)}, ${linear.g.toFixed(6)}, ${linear.b.toFixed(6)})`;
+}
+
+/**
+ * The mown stripes' period on a golf course, in metres: **14**, a 7 m pass of
+ * the mower each way — #2685, this repository's own; turned 30° off the grid
+ * so it does not run with a road that does.
+ */
+export const GOLF_STRIPE_METRES = 18;
+
+/**
+ * The look of a golf course and a cemetery on the ground — #2685, as
+ * multipliers of the grass the ground already is, so the world's colour and
+ * the season still lead; the sand and the gravel are their own. This
+ * repository's own figures, set to read at riding distance, which the
+ * owner's screenshots settle.
+ */
+export const PARK_GROUND_LOOK = {
+  /** Close-mown fairway: fresher and a little brighter than the rough. */
+  fairway: [0.92, 1.12, 0.78],
+  /** The mower's light and dark passes. */
+  stripePale: 1.22,
+  stripeDeep: 0.8,
+  /** The fringe round a green: darker. */
+  fringe: [0.78, 0.98, 0.66],
+  /** The green itself: smooth, bright and fresh. */
+  putting: [1.0, 1.38, 0.66],
+  /** Bunker sand, packed sRGB. */
+  sand: 0xdccb9e,
+  /** A cemetery's short, kept grass. */
+  neat: [0.95, 1.08, 0.88],
+  /** Its paths' gravel, packed sRGB. */
+  gravel: 0xa69d8b,
+} as const;
+
+const PARK_GROUND_PARS = /* glsl */ `
+uniform sampler2D oylParkLooks;
+uniform vec4 oylParkWindow;
+uniform vec4 oylGreens[${String(GOLF_GREENS_DRAWN)}];
+uniform vec4 oylBunkers[${String(GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN)}];
+uniform float oylParkSnow;
+float oylParkBand(float at, float from, float to, float aa) {
+  return smoothstep(from - aa, from + aa, at) * (1.0 - smoothstep(to - 2.0 * aa, to, at));
+}
+`;
+
+/**
+ * Painted over the blended ground — #2685. Its derivatives are taken outside
+ * every branch (#627's rule), its texture read at an explicit level, and
+ * nothing runs where the window holds no golf course or cemetery. The
+ * cemetery's paths are `park-dressing.ts`' grid: row `i` is a path where
+ * `i mod 7 = 6` (§`isPathRow`), and the last two of every 25 slots across
+ * (§`isCrossPathSlot`).
+ */
+export const PARK_GROUND_MIX = ((): string => {
+  const look = PARK_GROUND_LOOK;
+  const vec = (value: readonly number[]): string => `vec3(${value.map(glslFloat).join(', ')})`;
+  const rowPeriod = HEADSTONE_PATH_ROWS * HEADSTONE_ROW_METRES;
+  const crossPeriod = HEADSTONE_CROSS_SLOTS * HEADSTONE_PITCH_METRES;
+  const greens = String(GOLF_GREENS_DRAWN);
+  const bunkers = String(GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN);
+  return /* glsl */ `
+{
+  vec2 oylAt = vOylGround.xz;
+  float oylStripeAt = dot(oylAt, vec2(0.866025, 0.5)) / ${glslFloat(GOLF_STRIPE_METRES)};
+  float oylStripeAa = fwidth(oylStripeAt);
+  vec2 oylPathAa = fwidth(oylAt);
+  vec2 oylLookUv = (oylAt - oylParkWindow.xy) * oylParkWindow.z;
+  float oylInWindow = step(0.0, oylLookUv.x) * step(oylLookUv.x, 1.0)
+    * step(0.0, oylLookUv.y) * step(oylLookUv.y, 1.0);
+  if (oylParkWindow.w * oylInWindow > 0.0) {
+    vec4 oylLook = textureLod(oylParkLooks, oylLookUv, 0.0);
+    float oylOpen = max(0.0, 1.0 - oylVergeShare - oylRockShare) * (1.0 - oylParkSnow);
+    float oylGolf = oylLook.r * oylOpen;
+    float oylCemetery = oylLook.g * oylOpen;
+    vec3 oylSmooth = oylGroundWorld * vColor.rgb;
+    if (oylGolf > 0.0) {
+      float oylPass = abs(fract(oylStripeAt) * 2.0 - 1.0);
+      float oylStripe = smoothstep(0.5 - oylStripeAa, 0.5 + oylStripeAa, oylPass);
+      vec3 oylCourse = diffuseColor.rgb * ${vec(look.fairway)}
+        * mix(${glslFloat(look.stripeDeep)}, ${glslFloat(look.stripePale)}, oylStripe);
+      float oylGreen = 0.0;
+      float oylFringe = 0.0;
+      float oylSand = oylLook.b;
+      for (int i = 0; i < ${greens}; i++) {
+        vec4 oylG = oylGreens[i];
+        if (oylG.w <= 0.0) continue;
+        float oylD = distance(oylAt, oylG.xy);
+        oylGreen = max(oylGreen, 1.0 - smoothstep(oylG.z - 0.4, oylG.z + 0.4, oylD));
+        oylFringe = max(oylFringe, 1.0 - smoothstep(oylG.z + 1.6, oylG.z + 2.4, oylD));
+      }
+      for (int i = 0; i < ${bunkers}; i++) {
+        vec4 oylB = oylBunkers[i];
+        if (oylB.z <= 0.0) continue;
+        vec2 oylO = oylAt - oylB.xy;
+        float oylTurn = atan(oylO.y, oylO.x);
+        float oylEdge = oylB.z * (1.0 + 0.22 * sin(3.0 * oylTurn + oylB.w) + 0.1 * sin(5.0 * oylTurn + 2.0 * oylB.w));
+        oylSand = max(oylSand, 1.0 - smoothstep(oylEdge - 0.3, oylEdge + 0.3, length(oylO)));
+      }
+      oylCourse = mix(oylCourse, oylSmooth * ${vec(look.fringe)}, oylFringe);
+      oylCourse = mix(oylCourse, oylSmooth * ${vec(look.putting)}, oylGreen);
+      oylCourse = mix(oylCourse, ${glslLinear(look.sand)}, oylSand);
+      diffuseColor.rgb = mix(diffuseColor.rgb, oylCourse, oylGolf);
+    }
+    if (oylCemetery > 0.0) {
+      float oylRowPath = oylParkBand(mod(oylAt.x, ${glslFloat(rowPeriod)}), ${glslFloat((HEADSTONE_PATH_ROWS - 1) * HEADSTONE_ROW_METRES)}, ${glslFloat(rowPeriod)}, oylPathAa.x);
+      float oylCrossPath = oylParkBand(mod(oylAt.y, ${glslFloat(crossPeriod)}), ${glslFloat((HEADSTONE_CROSS_SLOTS - HEADSTONE_CROSS_PATH_SLOTS) * HEADSTONE_PITCH_METRES)}, ${glslFloat(crossPeriod)}, oylPathAa.y);
+      vec3 oylKept = mix(diffuseColor.rgb * ${vec(look.neat)}, ${glslLinear(look.gravel)}, max(oylRowPath, oylCrossPath));
+      diffuseColor.rgb = mix(diffuseColor.rgb, oylKept, oylCemetery);
+    }
+  }
+}
+`;
+})();
+
+/** One `park-dressing.ts` §`ParkPiece`'s box: a unit each way, its floor left out — 10 triangles. */
+export const PARK_PIECE_TRIANGLES = 10;
+
+/** The unit box every park piece is drawn as, its base at 0. @see PARK_PIECE_TRIANGLES */
+export function parkPieceGeometry(): BufferGeometry {
+  const box = new BoxGeometry(1, 1, 1);
+  box.translate(0, 0.5, 0);
+  // BoxGeometry's groups run +x, −x, +y, −y, +z, −z: drop −y, the floor.
+  const index = box.getIndex() as BufferAttribute;
+  const kept: number[] = [];
+  for (const group of box.groups) {
+    if (group.materialIndex === 3) continue;
+    for (let at = group.start; at < group.start + group.count; at += 1) kept.push(index.getX(at));
+  }
+  box.setIndex(kept);
+  box.clearGroups();
+  return box;
+}
+
+/**
+ * What stands on a golf course and a cemetery — #2685: the headstones, the
+ * wall along a cemetery's outline, and each green's flag and its pole, every
+ * one a box (`park-dressing.ts` §`ParkPiece`), in ONE instanced call, at most
+ * `park-dressing.ts` §`PARK_DRESSING_CAPACITY` of them, coloured per
+ * instance. The view builds it on the first realistic frame that carries a
+ * piece, so every other frame — every ride with no corridor, the owner's
+ * village and wooded holds — makes no call and submits no triangle for it;
+ * hidden on a frame with none. Held to `realistic-budget.ts`
+ * §`REALISTIC_PARK_DRESSING_TRIANGLES`.
+ */
+export class ParkDressingBelt {
+  readonly #mesh: InstancedMesh;
+  readonly #matrix = new Matrix4();
+  readonly #turn = new Quaternion();
+  readonly #at = new Vector3();
+  readonly #size = new Vector3();
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #colour = new Color();
+  #held: readonly ParkPiece[] | undefined;
+
+  constructor() {
+    const material = withAtmosphere(
+      constructed(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 })),
+    );
+    this.#mesh = new InstancedMesh(parkPieceGeometry(), material, PARK_DRESSING_CAPACITY);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.instanceColor = new InstancedBufferAttribute(
+      new Float32Array(PARK_DRESSING_CAPACITY * 3),
+      3,
+    );
+    this.#mesh.instanceColor.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.visible = false;
+    // Spread over a cemetery: a sphere about them all culls nothing, and it is one call.
+    this.#mesh.frustumCulled = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For the jsdom suite. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /** This frame's pieces, written only when they are not the last frame's; none hides it. */
+  update(pieces: readonly ParkPiece[]): void {
+    if (pieces !== this.#held) {
+      this.#held = pieces;
+      const count = Math.min(pieces.length, PARK_DRESSING_CAPACITY);
+      for (let index = 0; index < count; index += 1) {
+        const piece = pieces[index] as ParkPiece;
+        this.#at.set(piece.x, piece.y + piece.lift, piece.z);
+        this.#turn.setFromAxisAngle(this.#up, piece.yaw);
+        this.#size.set(piece.width, piece.height, piece.depth);
+        this.#mesh.setMatrixAt(index, this.#matrix.compose(this.#at, this.#turn, this.#size));
+        this.#mesh.setColorAt(index, this.#colour.setHex(piece.colour));
+      }
+      this.#mesh.count = count;
+      this.#mesh.instanceMatrix.needsUpdate = true;
+      if (this.#mesh.instanceColor !== null) this.#mesh.instanceColor.needsUpdate = true;
+    }
+    this.#mesh.visible = this.#mesh.count > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    (this.#mesh.material as Material).dispose();
+  }
+}
+
+/**
+ * The belt's worst frame: every slot a box — #2685.
+ *
+ * @test-facing held to `realistic-budget.ts` §`REALISTIC_PARK_DRESSING_TRIANGLES`
+ * by `park-dressing-belt.test.ts`, which counts the geometry the belt builds,
+ * and summed into the worst frame by `realistic-budget.test.ts`
+ */
+export const PARK_DRESSING_TRIANGLES = PARK_DRESSING_CAPACITY * PARK_PIECE_TRIANGLES;
+
+/**
  * The ground's photographic material — #425.
  *
  * The grass photograph brings grain, clumps and light; the hue stays
@@ -15915,6 +16274,13 @@ export function photographicGroundMaterial(
       shader.uniforms['groundShares'] = { value: shares };
       // #1692: the season's, shared by every ground, written by the view that draws.
       shader.uniforms['oylVergeSlush'] = SEASON.oylVergeSlush;
+      // #2685: the golf courses' and cemeteries' ground, none with no paint.
+      const park = blend.park ?? noParkGround();
+      shader.uniforms['oylParkLooks'] = park.oylParkLooks;
+      shader.uniforms['oylParkWindow'] = park.oylParkWindow;
+      shader.uniforms['oylGreens'] = park.oylGreens;
+      shader.uniforms['oylBunkers'] = park.oylBunkers;
+      shader.uniforms['oylParkSnow'] = park.oylParkSnow;
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <normalmap_pars_fragment>',
@@ -15932,7 +16298,7 @@ export function photographicGroundMaterial(
         // over the patchwork, so the field pattern shows where the grass does.
         .replace(
           '#include <alphamap_fragment>',
-          `${GROUND_BLEND_MIX}\n#include <alphamap_fragment>`,
+          `${GROUND_BLEND_MIX}\n${PARK_GROUND_MIX}\n#include <alphamap_fragment>`,
         );
     }
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -23004,6 +23370,7 @@ class RealisticDrawing {
     readonly span: { value: number };
     readonly count: { value: number };
     readonly treeLine: { value: number };
+    readonly park?: ParkGroundUniforms | undefined;
   };
   #surfaces: RealisticSurfaces;
   /** This frame's structures, as ground-blob casters — #620. @see groundScenery */
@@ -23053,6 +23420,7 @@ class RealisticDrawing {
       readonly span: { value: number };
       readonly count: { value: number };
       readonly treeLine: { value: number };
+      readonly park?: ParkGroundUniforms | undefined;
     },
     /**
      * The kit the rider chose — #623. Required, so a view whose world arrives
@@ -23167,7 +23535,14 @@ class RealisticDrawing {
       // (#1523's `ground-blend` lever) the ground is #425's photograph and
       // #460's patchwork alone, as it was before #627.
       this.#surfaces.groundBlend
-        ? { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine }
+        ? {
+            verge: world.verge,
+            rock: world.rock,
+            crag: world.crag,
+            treeLine: fields.treeLine,
+            // #2685: and the golf courses' and cemeteries' ground.
+            park: fields.park,
+          }
         : { treeLine: fields.treeLine },
       this.#surfaces.bounded,
     );
@@ -24729,6 +25104,13 @@ class ThreeGameView implements GameView {
    */
   #delivery: DeliveryBelt | undefined;
   /**
+   * The headstones, walls and flags of the golf courses and cemeteries in
+   * reach — #2685. Built on the first realistic frame that carries one, so a
+   * ride with none never builds it; hidden in the stylised world, which is
+   * handed none. @see #updateParkDressing
+   */
+  #parkDressing: ParkDressingBelt | undefined;
+  /**
    * A lap race's pick-up points, puddles and hit effects — #1902, built on
    * the first frame that carries a lap race and dropped when the world
    * changes, as {@link #delivery} is. @see #updateLapRace
@@ -24920,6 +25302,11 @@ class ThreeGameView implements GameView {
     SEASON.oylVergeSlush.value = vergeSlushIn(frame.world, winter);
     const ground = winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter);
     this.#terrain.update(frame.terrain.mesh, ground);
+    // #2685: the golf courses' and cemeteries' ground and what stands on it —
+    // the realistic world's alone.
+    const park = this.#drawing === 'realistic' ? frame.parkDressing : undefined;
+    this.#terrain.updatePark(park?.ground);
+    this.#updateParkDressing(park);
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -25036,6 +25423,24 @@ class ThreeGameView implements GameView {
     );
     this.#updateShadows(frame);
     this.#placeCamera(rig);
+  }
+
+  /**
+   * The headstones, walls and flags in reach — #2685: the belt built on the
+   * first frame that carries a piece, and hidden on every frame with none.
+   */
+  #updateParkDressing(view: ParkDressingInView | undefined): void {
+    const pieces = view?.pieces ?? [];
+    if (pieces.length > 0 && this.#parkDressing === undefined) {
+      this.#parkDressing = new ParkDressingBelt();
+      this.#parkDressing.addTo(this.#scene);
+    }
+    this.#parkDressing?.update(pieces);
+  }
+
+  /** The park dressing's belt, once a frame has built it. For the jsdom suite. */
+  get parkDressingBelt(): ParkDressingBelt | undefined {
+    return this.#parkDressing;
   }
 
   /**
@@ -25910,6 +26315,7 @@ class ThreeGameView implements GameView {
     this.#decorations.dispose();
     this.#delivery?.dispose();
     this.#lapRace?.dispose();
+    this.#parkDressing?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();

@@ -40,6 +40,7 @@ import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
+import type { ParkDressingInView } from './park-dressing';
 import type { MappedBuildingsInView } from './mapped-buildings';
 import type { PeopleInView } from './people';
 import type { QualitySettings } from './quality';
@@ -516,6 +517,20 @@ export interface SceneFrame {
    * riders' own instanced meshes (`scene.ts` §`SceneInput.raceBots`).
    */
   readonly lapRace?: LapRaceInView | undefined;
+  /**
+   * The golf courses and cemeteries round the camera — #2685
+   * (`park-dressing.ts`): the window of park looks and the greens the
+   * photographic ground paints its stripes, greens, bunkers and paths from,
+   * and the headstones, walls and flags standing on this frame's ground,
+   * drawn in ONE instanced call (`three-renderer.ts` §`ParkDressingBelt`).
+   * Realistic world only. **Absent on every ride with no corridor**, and
+   * `park-dressing.ts` §`NO_PARK_DRESSING` (empty) where none is in reach.
+   *
+   * ⚠️ **An optional field**, the hole `check-wiring.mjs` §Limits names:
+   * `park-dressing.test.ts` reads it back off `sceneFrame`, and the renderer
+   * test off the belt it fills.
+   */
+  readonly parkDressing?: ParkDressingInView | undefined;
 }
 
 /**

@@ -1477,7 +1477,7 @@ function parkPlanting(
  * by a hash of the square and the route's seed. Read on the ground's own
  * coordinates, not the road's, so a stand is a stand whichever band reaches it.
  */
-function golfStandAt(seed: number, x: number, z: number): boolean {
+export function golfStandAt(seed: number, x: number, z: number): boolean {
   const square = mix(Math.floor(x / GOLF_STAND_METRES), Math.floor(z / GOLF_STAND_METRES));
   return uniform(hash(seed, square, GOLF_STAND_KEY), STREAM_KEEP) < GOLF_STAND_SHARE;
 }
