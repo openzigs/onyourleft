@@ -327,23 +327,35 @@ describe('#2710 — AI bots in the lap race’s setup', () => {
 });
 
 describe('the consent names what the privacy policy says is sent (D-5.2)', () => {
-  /** What the policy says is sent about the rider, in the policy's own words. */
-  const RIDER_SENT = [
+  /**
+   * The policy's list of what is sent, word for word as §AI bots and its table
+   * row both give it. A change to that list leaves the policy without this
+   * sentence and goes red, so {@link SENT} and the consent change with it.
+   */
+  const POLICY_SENT =
+    "each bot's place, gaps, energy and move, and your place, who is just ahead of you, your " +
+    'gaps to the racers either side of you and to each bot, whether you are drafting, and your ' +
+    'watts per kilogram';
+  /** Each item of {@link POLICY_SENT}, both the bots' half and the rider's, as the consent words it. */
+  const SENT = [
+    "each bot's place, gaps, energy and move",
     'your place',
     'who is just ahead of you',
+    'your gaps',
     'whether you are drafting',
     'your watts per kilogram',
   ];
+  const plain = (text: string): string => text.replace(/\s+/g, ' ').replace(/’/g, "'");
 
-  it('names each thing sent about the rider, as the policy does', () => {
+  it('names each thing sent, about the bots and about the rider, as the policy does', () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const policy = readFileSync(join(here, '../../../../docs/privacy-policy.md'), 'utf8').replace(
-      /\s+/g,
-      ' ',
+    const policy = plain(readFileSync(join(here, '../../../../docs/privacy-policy.md'), 'utf8'));
+    expect(policy.split(POLICY_SENT).length - 1, 'the policy’s list, in §AI bots and its row').toBe(
+      2,
     );
-    const consent = AI_BOTS_TEXT.consent(INSTANCE, MODEL);
-    for (const words of RIDER_SENT) {
-      expect(policy, `the policy names ${words}`).toContain(words);
+    const consent = plain(AI_BOTS_TEXT.consent(INSTANCE, MODEL));
+    for (const words of SENT) {
+      expect(POLICY_SENT, `the policy names ${words}`).toContain(words);
       expect(consent, `the consent names ${words}`).toContain(words);
     }
   });

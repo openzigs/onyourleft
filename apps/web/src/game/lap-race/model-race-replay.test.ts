@@ -74,13 +74,22 @@ const GOLDEN_RACES: readonly (readonly [Circuit, number])[] = [
   ['flat', 3],
 ];
 const SECONDS = 90;
+/**
+ * One golden race long enough to reach the launch, so that ADR 0074's sprint
+ * instinct is in the golden: the 90 s races above never reach a launch, and
+ * version 3's digests of them equal version 2's. The flat circuit under seed 4
+ * is the race found earliest apart from ADR 0073's strategy (148 s) and from
+ * ADR 0074 without its hold (149 s), so 170 s turns either red at a small cost.
+ */
+const LAUNCH_RACE: readonly [Circuit, number] = ['flat', 4];
+const LAUNCH_SECONDS = 170;
 const RIDER_KILOGRAMS = 75;
 
 /** Each version's golden entry's digest. Append-only: a new version adds a line, and none is edited. */
 const SEALS: Readonly<Record<string, string>> = {
   '1': '265e3b2ac759823edbd007cc1b8d8a19a48b5bdcf2ffd9a5b69e1188a645418d',
   '2': 'b2aa7e152fc7194801420f8e75fcc878bb8fe070d45bdcf4a481f13796d3dc80',
-  '3': 'b2aa7e152fc7194801420f8e75fcc878bb8fe070d45bdcf4a481f13796d3dc80',
+  '3': '786f7d2ec42b745b9de1ac60e6dc6b9ce7b8843eb9109c5838f987b5574fc146',
 };
 
 afterEach(() => {
@@ -138,13 +147,17 @@ function scripted(
 const riderWatts = (atMs: number): number => 200 + 80 * Math.sin(atMs / 9_000);
 
 /** Ride the race, 100 ms frames, its asks answered by `model` (none: a replay, which asks nothing). */
-function ride(start: LapRaceRide, model: boolean): { ride: LapRaceRide; field: string[] } {
+function ride(
+  start: LapRaceRide,
+  model: boolean,
+  seconds = SECONDS,
+): { ride: LapRaceRide; field: string[] } {
   let race = start;
   let along = 0;
   let asks = 0;
   const pending: { atMs: number; ask: LapRaceModelAsk; reply: ModelTacticsReply }[] = [];
   const field: string[] = [];
-  for (let frame = 0; frame < SECONDS * 10; frame += 1) {
+  for (let frame = 0; frame < seconds * 10; frame += 1) {
     for (const due of pending.filter((each) => each.atMs <= race.race.atMs)) {
       race = answerLapRaceRide(race, due.ask, due.reply);
       pending.splice(pending.indexOf(due), 1);
@@ -224,6 +237,16 @@ describe('the golden outcomes, keyed by bot-code version (D-4.3)', () => {
       const live = ride(startRace(circuit, seed, true), true);
       expect(digest(live.field.join('\n'))).toBe(entry?.[`${circuit}-${String(seed)}`]);
     }
+  });
+
+  it('holds a race that reaches the launch to its outcome under this version (ADR 0074)', () => {
+    const [circuit, seed] = LAUNCH_RACE;
+    const live = ride(startRace(circuit, seed, true), true, LAUNCH_SECONDS);
+    expect(digest(live.field.join('\n'))).toBe(
+      golden[String(LAP_RACE_BOT_CODE_VERSION)]?.[
+        `${circuit}-${String(seed)}-${String(LAUNCH_SECONDS)}s`
+      ],
+    );
   });
 
   it('never rewrites an older version’s outcomes', () => {
