@@ -25,7 +25,6 @@
  */
 
 import {
-  Fragment,
   useEffect,
   useId,
   useLayoutEffect,
@@ -34,6 +33,7 @@ import {
   useState,
   useSyncExternalStore,
   type JSX,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
 
@@ -101,7 +101,7 @@ import {
   totalsStripChosen,
 } from './hud-layout-preference';
 import { HIDES_ATTRIBUTE, useControlsReveal } from './controls-reveal';
-import { TAB_FOR_ATTRIBUTE, useTabPlacement, useTabletStage } from './panel-tabs';
+import { panelTapped, placeTuck, useTabletStage } from './panel-tabs';
 import type { CollapsiblePanel } from './ride-chrome-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
@@ -220,11 +220,10 @@ export interface HudCoreProps extends SharedProps {
 }
 
 /**
- * #2600: each collapsible panel's tab — the word drawn on it, and the rest of
- * its name, which a screen reader hears after it (SC 2.5.3: the name begins
- * with what is seen). A constant name with `aria-expanded`, as #437's
- * *Trainer notice* is, so a speech-control user has one thing to say.
- * `standings` takes its word from `HudCoreProps.afterActionsTab`.
+ * #2600: each collapsible panel's word — drawn on its tab when it is tucked
+ * away, and the start of its control's name, which goes on to say which way
+ * it stands ({@link panelToggleName}; SC 2.5.3: the name begins with what is
+ * seen). `standings` takes its word from `HudCoreProps.afterActionsTab`.
  */
 export const PANEL_TAB_WORDS: Readonly<Record<Exclude<CollapsiblePanel, 'standings'>, string>> = {
   primary: 'Power',
@@ -236,8 +235,17 @@ export const PANEL_TAB_WORDS: Readonly<Record<Exclude<CollapsiblePanel, 'standin
 /** The custom property `theme.css` clips a hidden actions panel to. @see HudCore */
 const ACTIONS_KEPT_PROPERTY = '--oyl-hud-actions-kept';
 
-/** What follows every tab's word in its name. */
+/** What follows every panel's word in its control's name. */
 export const PANEL_TAB_SUFFIX = ' panel';
+
+/**
+ * A panel's control's name, which says whether the panel is shown or tucked
+ * away — the owner's ruling of 2026-11-16: *"each panel stays reachable as
+ * one focusable control with an accessible name that says shown or hidden"*.
+ */
+export function panelToggleName(word: string, open: boolean): string {
+  return `${word}${PANEL_TAB_SUFFIX}, ${open ? 'shown' : 'hidden'}`;
+}
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
 export const STANDING_NOTICE_ID = 'oyl-hud-standing-notice';
@@ -380,10 +388,14 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // `controlsHeld`'s reasons holds them. @see controlsHeld
   const { chrome } = props;
   const throwButtons = props.throwing !== undefined && !(padInUse || controllerPaired);
-  const { hidden, reveal } = useControlsReveal(hud, !controlsHeld(props, asking) && !throwButtons);
-  // Hidden, the actions panel is clipped to the trainer's line at its top
-  // (`theme.css` §"#2600"): how far down that line ends, measured as it hides
-  // and again while it is hidden if the line changes size.
+  const { hidden, reveal, revealingTap } = useControlsReveal(
+    hud,
+    !controlsHeld(props, asking) && !throwButtons,
+  );
+  // Hidden, the controls fade and then the actions panel is clipped to the
+  // trainer's line at its top (`theme.css` §"#2600"): how far down that line
+  // ends, measured as it hides and again while it is hidden if the line
+  // changes size.
   const actions = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const panel = actions.current;
@@ -425,32 +437,37 @@ export function HudCore(props: HudCoreProps): JSX.Element {
     : [];
   const open = tabbed.filter((panel) => !collapsed(panel));
   const layer = useRef<HTMLDivElement>(null);
-  useTabPlacement(hud, layer, open.join(' '));
-  // A press on a tab unmounts it — an open panel's tab is on the layer, a
-  // collapsed panel's in the panel's place — so focus follows to the tab that
-  // took its place rather than falling to the page.
+  // A press on a panel's control unmounts it — an open panel's is on the
+  // layer, a tucked panel's tab in the panel's place — so focus follows to the
+  // control that took its place rather than falling to the page. A tap on the
+  // panel itself moves no focus: nothing was focused to follow.
   const toggled = useRef<CollapsiblePanel | undefined>(undefined);
   useEffect(() => {
     const panel = toggled.current;
     if (panel === undefined) return;
     toggled.current = undefined;
-    const next = hud.current?.querySelector<HTMLElement>(`[data-oyl-tab="${panel}"]`);
-    next?.focus();
-    // An open panel's tab that found no clear place is drawn hidden and cannot
-    // take focus, and the tab pressed has gone: focus stays in the HUD, not on
-    // the page (WCAG 2.4.3).
-    if (next !== undefined && next !== null && document.activeElement !== next) {
-      hud.current?.focus({ preventScroll: true });
-    }
+    hud.current?.querySelector<HTMLElement>(`[data-oyl-tab="${panel}"]`)?.focus();
   }, [chrome?.collapsed]);
+  const word = (panel: CollapsiblePanel): string =>
+    panel === 'standings' ? (props.afterActionsTab ?? 'Race') : PANEL_TAB_WORDS[panel];
+  const press = (panel: CollapsiblePanel): void => {
+    toggled.current = panel;
+    chrome?.onToggle(panel);
+  };
+  // #2600 "tap out": a tap on an open panel tucks it away (`panel-tabs.ts`).
+  // Not a key's click, which only a control receives, and not the tap that
+  // only brought the hidden ride controls back.
+  const tapOut = (event: ReactMouseEvent<HTMLElement>): void => {
+    if (chrome === undefined || event.detail === 0 || revealingTap(event.nativeEvent)) return;
+    const panel = panelTapped(event.target, event.currentTarget, open);
+    if (panel !== undefined) chrome.onToggle(panel);
+  };
   const tab = (panel: CollapsiblePanel): JSX.Element => (
     <PanelTab
       panel={panel}
-      word={panel === 'standings' ? (props.afterActionsTab ?? 'Race') : PANEL_TAB_WORDS[panel]}
-      open={!collapsed(panel)}
+      word={word(panel)}
       onToggle={() => {
-        toggled.current = panel;
-        chrome?.onToggle(panel);
+        press(panel);
       }}
     />
   );
@@ -458,8 +475,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   return (
     <section
       ref={hud}
-      // Only for the focus hand-off above, never in the tab order.
-      tabIndex={-1}
+      onClick={collapsible ? tapOut : undefined}
       className={[
         'oyl-hud',
         ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
@@ -550,7 +566,12 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         </div>
       )}
 
-      <div ref={actions} className="oyl-hud__panel oyl-hud__actions">
+      <div
+        ref={actions}
+        // #2600: with no trainer's line to keep, the whole panel fades with
+        // its controls (`theme.css` §"#2600").
+        className={`oyl-hud__panel oyl-hud__actions${props.trainer === undefined ? ' oyl-hud__actions--unlined' : ''}`}
+      >
         {/*
           ⚠️ **Inside a panel, and above the controls** — #373. It used to be a
           `<p className="oyl-muted">` that `GameView` rendered *after* this
@@ -718,15 +739,30 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       )}
 
       {/*
-        #2600: each open panel's tab, on a layer of its own over the stage and
-        just outside its panel (`panel-tabs.ts` says where, and why outside).
-        After the panels in the document, so a screen reader meets every panel
-        first; faded with the ride controls.
+        #2600: each open panel's keyboard control, on a layer of its own over
+        the stage, drawn only while focused (`panel-tabs.ts` §"A keyboard and
+        a screen reader"). After the panels in the document, so a screen
+        reader meets every panel first.
       */}
       {open.length === 0 ? null : (
         <div ref={layer} className="oyl-hud__tabs">
           {open.map((panel) => (
-            <Fragment key={panel}>{tab(panel)}</Fragment>
+            <button
+              key={panel}
+              type="button"
+              className="oyl-hud__tuck"
+              data-oyl-tab={panel}
+              onFocus={(event) => {
+                if (hud.current !== null && layer.current !== null) {
+                  placeTuck(event.currentTarget, hud.current, layer.current, panel);
+                }
+              }}
+              onClick={() => {
+                press(panel);
+              }}
+            >
+              {panelToggleName(word(panel), true)}
+            </button>
           ))}
         </div>
       )}
@@ -896,32 +932,23 @@ function CollapsedPanel(props: {
 }
 
 /**
- * #2600: one panel's tab. Open, it collapses the panel and is drawn on the
- * tab layer where `panel-tabs.ts` §`useTabPlacement` places it (hidden until
- * it does), hidden with the ride controls; collapsed, it opens the panel and
- * is always drawn.
+ * #2600: a tucked panel's tab, in the panel's own place: the panel's word,
+ * and a name that says it is hidden. One tap brings the panel back.
  */
 function PanelTab(props: {
   readonly panel: CollapsiblePanel;
   readonly word: string;
-  readonly open: boolean;
   readonly onToggle: () => void;
 }): JSX.Element {
-  const { open } = props;
   return (
     <button
       type="button"
-      className={`oyl-hud__tab ${open ? 'oyl-hud__tab--open' : 'oyl-hud__tab--collapsed'}`}
+      className="oyl-hud__tab"
       data-oyl-tab={props.panel}
-      {...(open ? { [TAB_FOR_ATTRIBUTE]: props.panel, [HIDES_ATTRIBUTE]: '' } : {})}
-      aria-expanded={open}
+      aria-label={panelToggleName(props.word, false)}
       onClick={props.onToggle}
     >
       {props.word}
-      <span className="oyl-visually-hidden">{PANEL_TAB_SUFFIX}</span>
-      <span className="oyl-hud__tab-glyph" aria-hidden="true">
-        {open ? '−' : '+'}
-      </span>
     </button>
   );
 }

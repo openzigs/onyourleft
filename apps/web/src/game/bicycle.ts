@@ -826,8 +826,9 @@ const FRONT_HUB_Z = 0.52;
  * 80 %. `browser/game.browser.spec.ts` measured that difference off the
  * drawing buffer, which is how it got here. `camera.ts` §`riderFrameBox` uses
  * this and {@link RIDER_HELMET_AHEAD_METRES} so that the rectangle the HUD is
- * kept clear of is the rectangle the rider is in — since #2600 by the HUD's
- * panel tabs too (`hud/panel-tabs.ts`), which read that rectangle in production.
+ * kept clear of is the rectangle the rider is in.
+ *
+ * @test-facing {@link RIDER_HELMET_AHEAD_METRES}'s reason applies unchanged.
  */
 export const BICYCLE_REAR_CONTACT_METRES = REAR_HUB_Z;
 

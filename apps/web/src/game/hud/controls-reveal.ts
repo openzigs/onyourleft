@@ -14,14 +14,17 @@
  * the click is hit-tested after this tap has drawn them again. So a rider
  * reaching for a control they cannot see never presses it, and the touch
  * lock's long press (`TouchLockButton.tsx`) never starts from one either. A
- * tap on anything else (a panel, a collapsed panel's tab) shows them and does
- * what it always did. The second tap presses what is now drawn.
+ * tap on a panel shows them and tucks nothing (`panel-tabs.ts` §"Tap out"
+ * asks {@link ControlsReveal.revealingTap}); a tap on a tucked panel's tab,
+ * which is always drawn, shows them and brings the panel back. The second tap
+ * presses what is now drawn.
  *
  * ⚠️ **A click with `detail` 0 is never swallowed**: that is Enter, Space, or
  * the click a screen reader sends when it activates a control
  * (`design/touch-lock.ts` §"What it ignores" draws the same line). A hidden
- * control is faded, never removed: it stays in the document, in the tab order
- * and in the accessibility tree, so a keyboard or a screen reader reaches it
+ * control is faded (`opacity`, the owner's ruling of 2026-11-16 on PR #2670:
+ * *"Fade out is better"*), never removed: it stays in the document, in the
+ * tab order and in the accessibility tree, so a keyboard or a screen reader reaches it
  * and presses it as on any ride. Focus arriving on one shows them; and while
  * the keyboard holds focus on one they do not fade, so the focus ring is
  * never drawn on nothing (WCAG 2.2 SC 2.4.7).
@@ -48,8 +51,8 @@ export const CONTROLS_HIDE_MILLISECONDS = 5000;
 
 /**
  * The attribute every control that hides wears. `theme.css` §"#2600: THE
- * RIDE CONTROLS HIDE UNTIL TOUCHED" fades them, and a tap on one while they are
- * hidden is the tap that is swallowed.
+ * RIDE CONTROLS FADE UNTIL TOUCHED" fades them, and a tap on one while they
+ * are hidden is the tap that is swallowed.
  */
 export const HIDES_ATTRIBUTE = 'data-oyl-hides';
 
@@ -59,6 +62,12 @@ export interface ControlsReveal {
   readonly hidden: boolean;
   /** Show them and start the wait again — a controller's press. */
   readonly reveal: () => void;
+  /**
+   * Whether `click` is a tap's that began while they were hidden — the tap
+   * that only shows them. Asked by what a tap on something always drawn would
+   * otherwise do, a panel tucking away (`panel-tabs.ts` §"Tap out").
+   */
+  readonly revealingTap: (click: Event) => boolean;
 }
 
 function inHiding(target: EventTarget | null, region: HTMLElement): boolean {
@@ -82,6 +91,8 @@ export function useControlsReveal(
   // shows the controls, and its `click` must still know the tap began hidden.
   const hiddenNow = useRef(false);
   const revealNow = useRef<() => void>(() => undefined);
+  // The click of the tap that only showed them, while it is dispatched.
+  const revealingClick = useRef<Event | undefined>(undefined);
 
   useEffect(() => {
     const element = region.current;
@@ -124,8 +135,8 @@ export function useControlsReveal(
     const onPointerDown = (event: PointerEvent): void => {
       byKey = false;
       // ⚠️ ANY touch that comes down while they are hidden, not only one on a
-      // control: hidden, the actions panel is clipped, so the finger lands on
-      // the road — and by the time the tap's click is hit-tested this
+      // control: once faded, the actions panel is clipped below the trainer's
+      // line (`theme.css` §"#2600"), so the finger lands on the road — and by the time the tap's click is hit-tested this
       // touch has shown them, so the click would land on the control now
       // drawn under the finger. Measured: the first tap paused the ride.
       swallowing = hiddenNow.current;
@@ -136,7 +147,9 @@ export function useControlsReveal(
       if (swallowing && inHiding(event.target, element)) swallow(event);
     };
     const onClick = (event: MouseEvent): void => {
-      if (swallowing && event.detail > 0 && inHiding(event.target, element)) swallow(event);
+      const revealing = swallowing && event.detail > 0;
+      revealingClick.current = revealing ? event : undefined;
+      if (revealing && inHiding(event.target, element)) swallow(event);
       swallowing = false;
     };
     const onKey = (): void => {
@@ -173,5 +186,9 @@ export function useControlsReveal(
   const reveal = useCallback(() => {
     revealNow.current();
   }, []);
-  return { hidden: auto && hidden, reveal };
+  const revealingTap = useCallback(
+    (click: Event) => auto && revealingClick.current === click,
+    [auto],
+  );
+  return { hidden: auto && hidden, reveal, revealingTap };
 }

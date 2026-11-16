@@ -1221,12 +1221,6 @@ function soloDraftDrawn(field: Element): boolean {
 }
 
 function measure(): StageMeasurement {
-  // #2600: the panels' tabs are placed by an observer, in the frame after a
-  // layout changes — and a spec measures in the same task as it resizes the
-  // page or lifts anchor positioning. A resize event is what the HUD places
-  // them on at once (`panel-tabs.ts` §`useTabPlacement`), so they are read
-  // where the next frame would draw them, never where the last one did.
-  window.dispatchEvent(new Event('resize'));
   const stage = document.querySelector(`.${STAGE_CLASS}`);
   const world = document.querySelector('.oyl-game__world');
   const items: StageItem[] = [];
@@ -1335,8 +1329,8 @@ function measure(): StageMeasurement {
     panels: [
       // #2387: the totals strip, where it is drawn; where a layout has no room
       // for it, it is not displayed, and `givenWay` says so.
-      // #2600: the tab layer spans the stage and catches nothing; its tabs are
-      // `ride-chrome.browser.spec.ts`'s to measure, not panels.
+      // #2600: the layer a panel's keyboard control stands on spans the stage
+      // and catches nothing; it is `ride-chrome.browser.spec.ts`'s to measure.
       ...[
         ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer], .oyl-hud__tabs)'),
       ].filter((each) => {
@@ -1591,8 +1585,8 @@ async function run(): Promise<void> {
   }
   // #2600: the ride controls DRAWN, as every layout here measures them, unless
   // `?controls=hide` asks for the auto-hide (`ride-chrome.browser.spec.ts`);
-  // and the panels `?collapsed=` names collapsed to their tabs. Hidden, the
-  // controls are the same layout clipped, which that spec measures itself.
+  // and the panels `?collapsed=` names tucked away to their tabs. Hidden, the
+  // controls are the same layout faded and clipped, which that spec measures.
   writeRideChrome(localStorage, {
     autoHide: CONTROLS_HIDE,
     collapsed: COLLAPSIBLE_PANELS.filter((panel) => COLLAPSED_ASKED.includes(panel)),

@@ -2,12 +2,13 @@
 // @vitest-environment jsdom
 
 /**
- * #2600 in the accessibility gate: the ride HUD with its controls hidden, and
- * with every panel collapsed to its tab, audited by the gate's own audit — and
- * the two things jsdom can hold that the browser gate cannot see from outside:
- * a hidden control is still in the tab order and the accessibility tree (it is
- * clipped, never `hidden`, `display: none` or `aria-hidden`), and every tab is
- * a named button that says which way it stands.
+ * #2600 in the accessibility gate: the ride HUD with its controls hidden, with
+ * every panel open and with every panel tucked away to its tab, audited by the
+ * gate's own audit — and the two things jsdom can hold that the browser gate
+ * cannot see from outside: a hidden control is still in the tab order and the
+ * accessibility tree (it is faded and then clipped, never `hidden`,
+ * `display: none` or `aria-hidden`), and each panel is one named button that
+ * says whether the panel is shown or hidden.
  *
  * The 48 px targets and the reflow at large text are layout, and so the
  * browser gate's (`ride-chrome.browser.spec.ts`); what is held here is that
@@ -34,7 +35,7 @@ import { auditAccessibility, formatViolations, tabbableElements } from '../../a1
 import { mount, type Mounted } from '../../testing/mount';
 import { atStartLine } from '../simulation';
 import { CONTROLS_HIDE_MILLISECONDS } from './controls-reveal';
-import { PANEL_TAB_SUFFIX } from './HudCore';
+import { panelToggleName } from './HudCore';
 import { HudPanel } from './HudPanel';
 import {
   COLLAPSIBLE_PANELS,
@@ -111,34 +112,48 @@ describe('the ride HUD’s hiding controls and collapsing panels — #2600', () 
     expect(audit, formatViolations(audit)).toEqual([]);
   });
 
-  it('audits clean with every panel collapsed, each tab named and saying it is collapsed', async () => {
+  it('audits clean with every panel open, each one control named as shown', async () => {
+    mounted = await mount(onAPage());
+    const controls = [...document.querySelectorAll('button[data-oyl-tab]')];
+    expect(controls.map((each) => each.textContent)).toEqual(
+      ['Power', 'Readings', 'Route', 'Trainer'].map((word) => panelToggleName(word, true)),
+    );
+    // In the tab order, and nowhere hidden from an assistive technology.
+    for (const each of controls) {
+      expect(tabbableElements(document)).toContain(each);
+      expect(each.closest('[hidden], [aria-hidden="true"], [inert]')).toBeNull();
+    }
+    const audit = auditAccessibility(document);
+    expect(audit, formatViolations(audit)).toEqual([]);
+  });
+
+  it('audits clean with every panel tucked away, each tab named and saying it is hidden', async () => {
     writeRideChrome(localStorage, { autoHide: true, collapsed: [...COLLAPSIBLE_PANELS] });
     mounted = await mount(onAPage());
     const tabs = [...document.querySelectorAll('button.oyl-hud__tab')];
     // The four this ride draws — no race and no loop, so no standings' tab
     // although the device has that panel collapsed too.
-    expect(tabs.map((each) => each.getAttribute('aria-expanded'))).toEqual([
-      'false',
-      'false',
-      'false',
-      'false',
-    ]);
-    expect(document.querySelector('.oyl-hud__laps, .oyl-hud__standings')).toBeNull();
+    expect(tabs.map((each) => each.getAttribute('aria-label'))).toEqual(
+      ['Power', 'Readings', 'Route', 'Trainer'].map((word) => panelToggleName(word, false)),
+    );
+    // SC 2.5.3: the name begins with the word drawn.
     for (const each of tabs) {
-      expect(each.textContent).toContain(PANEL_TAB_SUFFIX);
+      expect(each.getAttribute('aria-label')?.startsWith(each.textContent ?? '?')).toBe(true);
     }
+    expect(document.querySelector('.oyl-hud__laps, .oyl-hud__standings')).toBeNull();
+    expect(document.querySelector('.oyl-hud__tuck')).toBeNull();
     // Pause and End ride are never among what collapses.
     expect(names()).toEqual(expect.arrayContaining(['Pause', 'End ride']));
     const audit = auditAccessibility(document);
     expect(audit, formatViolations(audit)).toEqual([]);
   });
 
-  it('declares a tab a 48 px target both ways, as every ride-time control is', () => {
+  it('declares a tab, and a panel’s control while drawn, a 48 px target both ways', () => {
     const css = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), '../../design/theme.css'),
       'utf8',
     );
-    const rule = /\n\.oyl-hud__tab \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    const rule = /\n\.oyl-hud__tab,\n\.oyl-hud__tuck \{([^}]*)\}/.exec(css)?.[1] ?? '';
     expect(rule).toMatch(/min-height: 3rem;/);
     expect(rule).toMatch(/min-width: 3rem;/);
   });

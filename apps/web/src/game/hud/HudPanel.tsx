@@ -488,7 +488,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         // #2600: a line the actions panel holds to be READ — the simulated
         // ride's mark (#1992, every frame of the ride), a waiting re-plan's
         // sentence, the side camera's line, a report's reasons and answer — holds the controls drawn: the
-        // panel is clipped as they hide, and none of these may go with it.
+        // panel is clipped below the trainer's line once they fade, and none of these may go with it.
         autoHide:
           chrome.autoHide &&
           simulated === undefined &&

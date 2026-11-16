@@ -196,9 +196,30 @@ describe('the HUD panel a rider reads is opaque', () => {
     // `opacity` applies to the element and everything in it, so this would make
     // the world show through the panel *and* wash out the text, while every
     // colour token stayed exactly as the contrast suite reads it.
+    //
+    // ⚠️ One exception, and only this one: #2600's ride controls FADE OUT
+    // until touched (the owner's ruling of 2026-11-16, ADR 0063's amendment of
+    // that date). A faded control is not drawn, so there is nothing to read
+    // and nothing to check; drawn, it is opaque. So `opacity: 0` is admitted,
+    // under the hidden state's own selector, and no other value anywhere.
+    const fadedOut = ".oyl-hud[data-oyl-controls='hidden'] ";
     for (const { selector, block } of hudRules()) {
-      expect(block, selector).not.toMatch(/\bopacity:/);
+      const dims = [...block.matchAll(/\bopacity:[^;]*/g)].map(([each]) => each);
+      if (dims.length === 0) continue;
+      for (const each of selector.split(',')) {
+        expect(each.trim().startsWith(fadedOut), selector).toBe(true);
+      }
+      expect(dims, selector).toEqual(dims.map(() => 'opacity: 0'));
     }
+  });
+
+  it('admits the fade-out, so the exception above is not vacuous', () => {
+    // A selector renamed would leave the exception admitting nothing, and the
+    // controls drawn for ever, with the check above still green.
+    const faded = hudRules().filter(({ block }) => /\bopacity: 0;/.test(block));
+    expect(faded.map(({ selector }) => selector)).toEqual([
+      ".oyl-hud[data-oyl-controls='hidden'] [data-oyl-hides],\n.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions--unlined",
+    ]);
   });
 
   it('never composites the world behind it into the panel', () => {

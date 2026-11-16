@@ -2,16 +2,18 @@
 // @vitest-environment jsdom
 
 /**
- * #2600 — each HUD panel collapses to a tab with one tap, and the choice is
- * kept between rides, per panel (`ride-chrome-preference.ts`).
+ * #2600 — tap a HUD panel to tuck it away, tap its tab to bring it back (the
+ * owner's ruling of 2026-11-16, "tap out, tap in"), and the choice is kept
+ * between rides, per panel (`ride-chrome-preference.ts`).
  *
  * What is asserted is what a rider and the next ride read back: the panel's
- * content gone from the document and a tab in its place, and what the device
- * has stored — read through `readRideChrome`, and through a second HUD mounted
- * on the same storage, which is how the next ride reads it. Where a tab is
- * DRAWN, and that a collapsed panel is small, is the browser gate's
- * (`ride-chrome.browser.spec.ts`): jsdom lays nothing out, and has no
- * `matchMedia`, which `panel-tabs.ts` reads as a tablet.
+ * content gone from the document and a tab in its place, each panel's one
+ * control and the name it says, and what the device has stored — read through
+ * `readRideChrome`, and through a second HUD mounted on the same storage,
+ * which is how the next ride reads it. Where a tab is DRAWN, and that a tucked
+ * panel is small, is the browser gate's (`ride-chrome.browser.spec.ts`): jsdom
+ * lays nothing out, and has no `matchMedia`, which `panel-tabs.ts` reads as a
+ * tablet.
  */
 
 import { act, type JSX } from 'react';
@@ -34,7 +36,7 @@ import { TOUCH_LOCK_NAME } from '../../design/TouchLockButton';
 import { activateWithKeyboard, mount, queryAll, type Mounted } from '../../testing/mount';
 import { atStartLine } from '../simulation';
 import { CONTROLS_HIDE_MILLISECONDS, HIDES_ATTRIBUTE } from './controls-reveal';
-import { PANEL_TAB_SUFFIX } from './HudCore';
+import { panelToggleName } from './HudCore';
 import { HudPanel, type HudPanelProps } from './HudPanel';
 import { RIDE_CHROME_STORAGE_KEY, readRideChrome, writeRideChrome } from './ride-chrome-preference';
 
@@ -113,79 +115,104 @@ async function hud(more: Partial<HudPanelProps> = {}): Promise<void> {
   mounted = await mount(ride(more));
 }
 
-/** A panel's tab, by the word drawn on it. */
-function tab(word: string): HTMLButtonElement | undefined {
-  return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button.oyl-hud__tab').find(
-    (each) => (each.textContent ?? '').startsWith(`${word}${PANEL_TAB_SUFFIX}`),
-  );
+/** Each panel's one control, in document order. */
+function controls(): HTMLButtonElement[] {
+  return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button[data-oyl-tab]');
 }
 
-function tabWords(): string[] {
-  return queryAll(mounted?.container ?? document, 'button.oyl-hud__tab').map(
-    (each) => (each.textContent ?? '').split(PANEL_TAB_SUFFIX)[0] ?? '',
-  );
+/** The name a control is heard by. */
+function nameOf(control: Element): string {
+  return control.getAttribute('aria-label') ?? (control.textContent ?? '').trim();
+}
+
+function names(): string[] {
+  return controls().map(nameOf);
+}
+
+/** A panel's control, whichever way it stands. */
+function control(word: string): HTMLButtonElement | undefined {
+  return controls().find((each) => nameOf(each).startsWith(`${word} panel,`));
 }
 
 function within(selector: string): Element | null {
   return mounted?.container.querySelector(selector) ?? null;
 }
 
-describe('a HUD panel collapses to a tab — #2600', () => {
-  it('offers one tab for each panel the ride draws, every one open', async () => {
+/** Wait the controls out, under fake timers the caller installed. */
+function hidden(): void {
+  act(() => {
+    vi.advanceTimersByTime(CONTROLS_HIDE_MILLISECONDS);
+  });
+  expect(within('.oyl-hud')?.getAttribute('data-oyl-controls')).toBe('hidden');
+}
+
+const shown = (word: string): string => panelToggleName(word, true);
+const tucked = (word: string): string => panelToggleName(word, false);
+
+describe('tap a HUD panel to tuck it away, and its tab to bring it back — #2600', () => {
+  it('gives each panel the ride draws one control, whose name says it is shown', async () => {
     await hud();
-    expect(tabWords()).toEqual(['Power', 'Readings', 'Route']);
-    for (const word of tabWords()) expect(tab(word)?.getAttribute('aria-expanded')).toBe('true');
+    expect(names()).toEqual(['Power panel, shown', 'Readings panel, shown', 'Route panel, shown']);
+    // No box is drawn on an open panel to press: its control is the keyboard's.
+    expect(within('.oyl-hud__tab')).toBeNull();
 
     await hud({ trainer: { gradePercent: 3, writes: 1 }, profile: loop, laps, lapSeconds: 75 });
-    expect(tabWords()).toEqual(['Power', 'Readings', 'Route', 'Laps', 'Trainer']);
+    expect(names()).toEqual([
+      shown('Power'),
+      shown('Readings'),
+      shown('Route'),
+      shown('Laps'),
+      shown('Trainer'),
+    ]);
 
     await hud({ profile: loop, laps, lapSeconds: 75, standings });
-    expect(tabWords()).toEqual(['Power', 'Readings', 'Route', 'Race']);
+    expect(names()).toEqual([shown('Power'), shown('Readings'), shown('Route'), shown('Race')]);
 
-    // The focus readout is one panel (#2383), and its tab is the primary's.
+    // The focus readout is one panel (#2383), and its control is the primary's.
     await hud({ layout: { hidden: [], textSize: 'normal', arrangement: 'focus' } });
-    expect(tabWords()).toEqual(['Power', 'Route']);
+    expect(names()).toEqual([shown('Power'), shown('Route')]);
   });
 
-  it('collapses a panel with one tap, keeps it on the device, and the next ride opens collapsed', async () => {
+  it('tucks a panel away with one tap on it, keeps that on the device, and the next ride opens it tucked', async () => {
     await hud();
-    expect(within('.oyl-hud__route .oyl-hud__profile')).not.toBeNull();
+    const strip = within('.oyl-hud__route .oyl-hud__profile');
+    expect(strip).not.toBeNull();
 
-    tap(tab('Route') as HTMLElement);
+    tap(strip as Element);
 
     // The panel's content is gone, and its tab stands in its place.
     expect(within('.oyl-hud__profile')).toBeNull();
     const collapsed = within('.oyl-hud__route.oyl-hud__panel--collapsed');
-    expect(collapsed).not.toBeNull();
-    expect(collapsed?.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+    expect(collapsed?.querySelector('button.oyl-hud__tab')?.textContent).toBe('Route');
+    expect(nameOf(control('Route') as Element)).toBe('Route panel, hidden');
     expect(readRideChrome(localStorage).collapsed).toEqual(['route']);
 
     // The next ride, from the same device.
     await hud();
     expect(within('.oyl-hud__profile')).toBeNull();
-    expect(tab('Route')?.getAttribute('aria-expanded')).toBe('false');
+    expect(nameOf(control('Route') as Element)).toBe(tucked('Route'));
 
-    // And one tap opens it again, for this ride and the next.
-    tap(tab('Route') as HTMLElement);
+    // And one tap on its tab brings it back, for this ride and the next.
+    tap(within('button.oyl-hud__tab') as Element);
     expect(within('.oyl-hud__route .oyl-hud__profile')).not.toBeNull();
+    expect(nameOf(control('Route') as Element)).toBe(shown('Route'));
     expect(readRideChrome(localStorage).collapsed).toEqual([]);
   });
 
-  it('collapses each panel on its own, and remembers each', async () => {
+  it('tucks each panel away on its own, and remembers each', async () => {
     await hud({ trainer: { gradePercent: 3, writes: 1 }, profile: loop, laps, lapSeconds: 75 });
-    tap(tab('Power') as HTMLElement);
-    tap(tab('Trainer') as HTMLElement);
-    tap(tab('Laps') as HTMLElement);
-    tap(tab('Readings') as HTMLElement);
+    tap(within('dl.oyl-hud__fields--primary dd') as Element);
+    tap(within('.oyl-hud__actions > .oyl-hud__trainer') as Element);
+    tap(within('.oyl-hud__laps-row') as Element);
+    tap(within('dl.oyl-hud__fields--secondary dd') as Element);
 
-    expect(within('.oyl-hud__fields--primary dl, dl.oyl-hud__fields--primary')).toBeNull();
+    expect(within('dl.oyl-hud__fields--primary')).toBeNull();
     expect(within('dl.oyl-hud__fields--secondary')).toBeNull();
     expect(within('.oyl-hud__laps.oyl-hud__panel--collapsed')).not.toBeNull();
     expect(within('.oyl-hud__laps-row')).toBeNull();
     // The trainer's line is gone, and its tab is where it stood.
     const trainer = within('.oyl-hud__actions > .oyl-hud__trainer');
-    expect(trainer?.textContent).toMatch(/^Trainer/);
-    expect(trainer?.textContent).not.toMatch(/%/);
+    expect(trainer?.textContent).toBe('Trainer');
     // The route panel stayed open.
     expect(within('.oyl-hud__route .oyl-hud__profile')).not.toBeNull();
     expect(readRideChrome(localStorage).collapsed).toEqual([
@@ -196,70 +223,78 @@ describe('a HUD panel collapses to a tab — #2600', () => {
     ]);
   });
 
-  it('moves focus to the tab that takes the pressed one’s place', async () => {
-    await hud();
-    await activateWithKeyboard(tab('Readings') as HTMLElement);
-    expect(document.activeElement).toBe(tab('Readings'));
-    expect(tab('Readings')?.getAttribute('aria-expanded')).toBe('false');
-    await activateWithKeyboard(tab('Readings') as HTMLElement);
-    expect(document.activeElement).toBe(tab('Readings'));
-    expect(tab('Readings')?.getAttribute('aria-expanded')).toBe('true');
+  it('tucks nothing for a tap on a control inside a panel', async () => {
+    await hud({ profile: loop, laps, lapSeconds: 75, standings });
+    const swap = within('.oyl-hud__standings button.oyl-hud__swap');
+    expect(swap).not.toBeNull();
+    tap(swap as Element);
+    // The swap did what it does, and no panel went.
+    expect(within('.oyl-hud__laps')).not.toBeNull();
+    expect(within('.oyl-hud__panel--collapsed')).toBeNull();
+    expect(readRideChrome(localStorage).collapsed).toEqual([]);
   });
 
-  it('keeps focus in the HUD when the new tab cannot take it', async () => {
+  it('answers a key on each panel’s control, and hands focus to the control that takes its place', async () => {
     await hud();
-    await activateWithKeyboard(tab('Readings') as HTMLElement);
-    // A tab that found no clear place is drawn `visibility: hidden`, which
-    // jsdom does not model: stand in for it with a focus that does nothing.
-    const real = Reflect.get(HTMLElement.prototype, 'focus');
-    HTMLElement.prototype.focus = function (this: HTMLElement, options?: FocusOptions): void {
-      if (this.hasAttribute('data-oyl-tab')) return;
-      real.call(this, options);
-    };
-    try {
-      await activateWithKeyboard(tab('Readings') as HTMLElement);
-      expect(document.activeElement).toBe(within('.oyl-hud'));
-    } finally {
-      HTMLElement.prototype.focus = real;
-    }
+    await activateWithKeyboard(control('Readings') as HTMLElement);
+    expect(within('dl.oyl-hud__fields--secondary')).toBeNull();
+    expect(document.activeElement).toBe(control('Readings'));
+    expect(nameOf(document.activeElement as Element)).toBe(tucked('Readings'));
+    await activateWithKeyboard(control('Readings') as HTMLElement);
+    expect(within('dl.oyl-hud__fields--secondary')).not.toBeNull();
+    expect(document.activeElement).toBe(control('Readings'));
+    expect(nameOf(document.activeElement as Element)).toBe(shown('Readings'));
   });
 
-  it('hides an open panel’s tab with the controls, and never a collapsed one’s', async () => {
+  it('only shows the hidden controls on the first tap on a panel, and tucks it on the next', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     writeRideChrome(localStorage, { autoHide: true, collapsed: ['route'] });
     await hud();
-    expect(tab('Readings')?.hasAttribute(HIDES_ATTRIBUTE)).toBe(true);
-    expect(tab('Route')?.hasAttribute(HIDES_ATTRIBUTE)).toBe(false);
-    act(() => {
-      vi.advanceTimersByTime(CONTROLS_HIDE_MILLISECONDS);
-    });
-    expect(within('.oyl-hud')?.getAttribute('data-oyl-controls')).toBe('hidden');
+    // A panel's control is not one of the controls that fade.
+    for (const each of controls()) expect(each.hasAttribute(HIDES_ATTRIBUTE)).toBe(false);
+    hidden();
 
-    // A hidden tab's first tap only shows the controls.
-    tap(tab('Readings') as HTMLElement);
-    expect(tab('Readings')?.getAttribute('aria-expanded')).toBe('true');
-    act(() => {
-      vi.advanceTimersByTime(CONTROLS_HIDE_MILLISECONDS);
-    });
-    // A collapsed panel's tab is drawn all along, and opens it at once.
-    tap(tab('Route') as HTMLElement);
-    expect(tab('Route')?.getAttribute('aria-expanded')).toBe('true');
+    // A rider touching the screen to find Pause loses no panel to it.
+    tap(within('dl.oyl-hud__fields--secondary dd') as Element);
+    expect(within('.oyl-hud')?.getAttribute('data-oyl-controls')).toBe('shown');
+    expect(within('dl.oyl-hud__fields--secondary')).not.toBeNull();
+    tap(within('dl.oyl-hud__fields--secondary dd') as Element);
+    expect(within('dl.oyl-hud__fields--secondary')).toBeNull();
+
+    // A tucked panel's tab is drawn all along, and brings it back at once.
+    hidden();
+    tap(within('.oyl-hud__route button.oyl-hud__tab') as Element);
+    expect(within('.oyl-hud__route .oyl-hud__profile')).not.toBeNull();
   });
 
-  it('is refused by the touch lock, and answers a key under it', async () => {
+  it('tucks a panel on the first tap for a rider who turned the auto-hide off', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    writeRideChrome(localStorage, { autoHide: false, collapsed: [] });
+    await hud();
+    act(() => {
+      vi.advanceTimersByTime(CONTROLS_HIDE_MILLISECONDS);
+    });
+    tap(within('dl.oyl-hud__fields--secondary dd') as Element);
+    expect(within('dl.oyl-hud__fields--secondary')).toBeNull();
+  });
+
+  it('is refused by the touch lock, panel and tab alike, and answers a key under it', async () => {
+    writeRideChrome(localStorage, { autoHide: true, collapsed: ['route'] });
     await hud();
     const lock = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
       (each) => (each.textContent ?? '').trim() === TOUCH_LOCK_NAME,
     );
     tap(lock as HTMLElement);
-    tap(tab('Power') as HTMLElement);
-    expect(tab('Power')?.getAttribute('aria-expanded')).toBe('true');
-    expect(readRideChrome(localStorage).collapsed).toEqual([]);
-    await activateWithKeyboard(tab('Power') as HTMLElement);
-    expect(tab('Power')?.getAttribute('aria-expanded')).toBe('false');
+    tap(within('dl.oyl-hud__fields--primary dd') as Element);
+    tap(within('.oyl-hud__route button.oyl-hud__tab') as Element);
+    expect(within('dl.oyl-hud__fields--primary')).not.toBeNull();
+    expect(within('.oyl-hud__route .oyl-hud__profile')).toBeNull();
+    expect(readRideChrome(localStorage).collapsed).toEqual(['route']);
+    await activateWithKeyboard(control('Power') as HTMLElement);
+    expect(within('dl.oyl-hud__fields--primary')).toBeNull();
   });
 
-  it('offers no tab on a phone, and draws every panel open whatever is stored', async () => {
+  it('tucks nothing on a phone, and draws every panel open whatever is stored', async () => {
     vi.stubGlobal(
       'matchMedia',
       (query: string) =>
@@ -272,8 +307,10 @@ describe('a HUD panel collapses to a tab — #2600', () => {
     );
     writeRideChrome(localStorage, { autoHide: true, collapsed: ['route', 'primary'] });
     await hud();
-    expect(tabWords()).toEqual([]);
+    expect(names()).toEqual([]);
     expect(within('.oyl-hud__route .oyl-hud__profile')).not.toBeNull();
+    expect(within('dl.oyl-hud__fields--primary')).not.toBeNull();
+    tap(within('dl.oyl-hud__fields--primary dd') as Element);
     expect(within('dl.oyl-hud__fields--primary')).not.toBeNull();
     // Nothing a phone drew changed what the tablet will open with.
     expect(readRideChrome(localStorage).collapsed).toEqual(['route', 'primary']);

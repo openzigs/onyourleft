@@ -167,11 +167,10 @@ function chrome(): Record<string, Element | null> {
 }
 
 /**
- * #2600: the collapse tab of each panel a plain ride draws — the two readings
- * tiers and the route — as a tab's text reads: its word, the rest of its name,
- * and its glyph.
+ * #2600: the one control of each panel a plain ride draws — the two readings
+ * tiers and the route — which a tap on the panel stands in for, by its text.
  */
-const PANEL_TAB_STOPS = ['Power panel−', 'Readings panel−', 'Route panel−'];
+const PANEL_TAB_STOPS = ['Power panel, shown', 'Readings panel, shown', 'Route panel, shown'];
 
 describe('a ride takes the screen over — #423', () => {
   it('has all of its chrome while a rider is choosing a route', async () => {
