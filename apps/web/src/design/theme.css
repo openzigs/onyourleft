@@ -14147,7 +14147,9 @@ select.oyl-input {
  *
  * HIDDEN, every control that hides (`controls-reveal.ts` §`HIDES_ATTRIBUTE`)
  * FADES out over `--oyl-motion-medium`, and fades back in over
- * `--oyl-motion-short` when the screen is touched — the owner's ruling of
+ * `--oyl-motion-short` when the screen is touched (never on the ride's first
+ * frame: an element mid-fade is painted in its own layer, over a reading a
+ * phone lifts beside the controls) — the owner's ruling of
  * 2026-11-16 on PR #2670, *"Fade out is better"*. With no trainer's line in
  * it, the actions panel fades with them, its surface too.
  *
@@ -14173,8 +14175,8 @@ select.oyl-input {
   opacity: 0;
 }
 
-.oyl-hud[data-oyl-controls='shown'] [data-oyl-hides],
-.oyl-hud[data-oyl-controls='shown'] .oyl-hud__actions--unlined {
+.oyl-hud[data-oyl-controls-returned] [data-oyl-hides],
+.oyl-hud[data-oyl-controls-returned] .oyl-hud__actions--unlined {
   animation: oyl-hud-controls-fade-in var(--oyl-motion-short) var(--oyl-motion-ease-standard);
 }
 

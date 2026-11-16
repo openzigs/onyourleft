@@ -388,7 +388,7 @@ export function HudCore(props: HudCoreProps): JSX.Element {
   // `controlsHeld`'s reasons holds them. @see controlsHeld
   const { chrome } = props;
   const throwButtons = props.throwing !== undefined && !(padInUse || controllerPaired);
-  const { hidden, reveal, revealingTap } = useControlsReveal(
+  const { hidden, returned, reveal, revealingTap } = useControlsReveal(
     hud,
     !controlsHeld(props, asking) && !throwButtons,
   );
@@ -486,6 +486,9 @@ export function HudCore(props: HudCoreProps): JSX.Element {
       aria-label="Ride metrics"
       // #2600: whether the ride controls are faded out (`theme.css` §"#2600").
       data-oyl-controls={chrome === undefined ? undefined : hidden ? 'hidden' : 'shown'}
+      // Drawn again after a fade, so they fade back in: never on a ride's first
+      // frame, where a fade would paint the controls over a lifted reading.
+      data-oyl-controls-returned={chrome !== undefined && returned ? '' : undefined}
       data-oyl-hud-text={layout.textSize}
       data-oyl-hud-arrangement={focus ? 'focus' : 'full'}
       data-oyl-hud-totals={totals ? 'strip' : undefined}

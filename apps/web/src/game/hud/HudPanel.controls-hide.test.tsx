@@ -168,6 +168,21 @@ describe('the ride controls hide until touched — #2600', () => {
     expect(pressed.end).toBe(1);
   });
 
+  it('fades them back in only once they have faded out, never on the first frame', async () => {
+    // `theme.css` §"#2600" fades IN on this attribute: on the first frame a
+    // fade would paint the controls over a reading a phone lifts beside them.
+    const returned = (): boolean =>
+      mounted?.container.querySelector('.oyl-hud')?.hasAttribute('data-oyl-controls-returned') ??
+      false;
+    await hud();
+    expect(returned()).toBe(false);
+    idle();
+    expect(returned()).toBe(false);
+    tap(mounted?.container.querySelector('.oyl-hud__fields--primary') as Element);
+    expect(controls()).toBe('shown');
+    expect(returned()).toBe(true);
+  });
+
   it('shows them on a tap anywhere, and that tap starts the wait again', async () => {
     await hud();
     idle();

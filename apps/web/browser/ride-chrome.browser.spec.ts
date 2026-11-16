@@ -139,9 +139,9 @@ async function tabs(page: Page): Promise<{
           panel: tucked === null ? undefined : boxOf(tucked),
         };
       }),
-      // A control is drawn where a finger finds it; clipped, none does.
+      // Drawn: unclipped, or where a finger finds it. Clipped, it is neither.
       drawnControls: [...document.querySelectorAll('button.oyl-hud__tuck')]
-        .filter(onTop)
+        .filter((each) => onTop(each) || getComputedStyle(each).clipPath === 'none')
         .map((each) => each.textContent ?? ''),
     };
   });

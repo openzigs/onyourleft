@@ -60,6 +60,12 @@ export const HIDES_ATTRIBUTE = 'data-oyl-hides';
 export interface ControlsReveal {
   /** Whether the controls are faded out now. Always `false` while `auto` is. */
   readonly hidden: boolean;
+  /**
+   * Whether they have faded out on this ride: what they are drawn with after
+   * is a fade back IN (`theme.css` §"#2600"), and a ride that never hid them
+   * draws them with no fade at all.
+   */
+  readonly returned: boolean;
   /** Show them and start the wait again — a controller's press. */
   readonly reveal: () => void;
   /**
@@ -87,6 +93,7 @@ export function useControlsReveal(
   auto: boolean,
 ): ControlsReveal {
   const [hidden, setHidden] = useState(false);
+  const [faded, setFaded] = useState(false);
   // The same answer, read by the listeners synchronously: a tap's `pointerdown`
   // shows the controls, and its `click` must still know the tap began hidden.
   const hiddenNow = useRef(false);
@@ -116,6 +123,7 @@ export function useControlsReveal(
       }
       hiddenNow.current = true;
       setHidden(true);
+      setFaded(true);
     };
     const arm = (): void => {
       if (timer !== undefined) clearTimeout(timer);
@@ -190,5 +198,5 @@ export function useControlsReveal(
     (click: Event) => auto && revealingClick.current === click,
     [auto],
   );
-  return { hidden: auto && hidden, reveal, revealingTap };
+  return { hidden: auto && hidden, returned: faded && !(auto && hidden), reveal, revealingTap };
 }
