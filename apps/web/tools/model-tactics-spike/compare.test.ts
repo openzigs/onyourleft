@@ -64,6 +64,41 @@ describe('the comparison’s numbers (#2616)', () => {
     expect(numbers.spreadAtEndM).toBe(1);
     expect(numbers.lowestWbal).toBe(0.4);
     expect(numbers.riderPlaceAtEnd).toBe(3);
+    // #2708: `a` first moved on tick 100, alone, and nobody chased.
+    expect(numbers.firstMoveS).toBe(5.05);
+    expect(numbers.mostMovingAtOnce).toBe(1);
+    expect(numbers.chaseStartGapsM).toEqual([]);
+  });
+
+  it('reads when the first move went, how many went at once, and the gap each chase began at (#2708)', () => {
+    const run = field();
+    const ticks = run.ticks.map((tick, at) => {
+      // `b` rides a flyer on ticks 150 to 159, and from tick 400 it is 35 m
+      // up the road; `a` chases on ticks 400 to 449 and again on 600 to 609.
+      const chasing = (at >= 400 && at < 450) || (at >= 600 && at < 610);
+      return {
+        ...tick,
+        at: new Map([...tick.at].map(([id, place]) => [id, id === 'b' && at >= 400 ? 45 : place])),
+        tactic: new Map<string, BotTactic>([
+          ['a', chasing ? 'chase' : (tick.tactic.get('a') as BotTactic)],
+          ['b', at >= 150 && at < 160 ? 'flyer' : 'sit-in'],
+        ]),
+      };
+    });
+    const numbers = fieldNumbers({ ...run, ticks }, 'rider');
+    expect(numbers.firstMoveS).toBe(5.05);
+    expect(numbers.mostMovingAtOnce).toBe(2);
+    expect(numbers.chaseStartGapsM).toEqual([35, 35]);
+    // Nobody moved: no first move, and none at once.
+    const still = run.ticks.map((tick) => ({
+      ...tick,
+      tactic: new Map<string, BotTactic>([
+        ['a', 'sit-in'],
+        ['b', 'sit-in'],
+      ]),
+    }));
+    expect(fieldNumbers({ ...run, ticks: still }, 'rider').firstMoveS).toBeNull();
+    expect(fieldNumbers({ ...run, ticks: still }, 'rider').mostMovingAtOnce).toBe(0);
   });
 
   it('does not count a move that never got 5 m clear', () => {
