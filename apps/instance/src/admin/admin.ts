@@ -498,6 +498,8 @@ interface AnalysisCall {
   readonly body?: Readonly<Record<string, unknown>>;
   /** What the settings read back after it must hold, for a save. */
   readonly holds?: OperateAnalysisChange;
+  /** What the settings read back after it must show, where `holds` has no field for it. */
+  readonly readBack?: (after: OperateAnalysisAnswer) => boolean;
 }
 
 /**
@@ -528,9 +530,20 @@ function analysisCall(
         holds: { localModel: fields.localModel?.trim() ?? null },
       };
     case 'analysis_address':
-      return { method: 'POST', path: ANALYSIS_ROUTE, body: { localUrl: fields.localUrl } };
+      return {
+        method: 'POST',
+        path: ANALYSIS_ROUTE,
+        body: { localUrl: fields.localUrl },
+        // The address is the app's own now, and there is one (the route may write it in its own form).
+        readBack: (after) => after.local.setIn === 'app' && after.local.url !== null,
+      };
     case 'analysis_clear':
-      return { method: 'DELETE', path: ANALYSIS_ROUTE };
+      return {
+        method: 'DELETE',
+        path: ANALYSIS_ROUTE,
+        // Nothing is held in the app any more: the address, model and reasoning are the .env's.
+        readBack: (after) => after.local.setIn !== 'app',
+      };
   }
 }
 
@@ -1588,7 +1601,8 @@ export function createAdmin(options: AdminOptions): Admin {
           const holds =
             done &&
             after !== undefined &&
-            (call.holds === undefined || analysisHolds(after, call.holds));
+            (call.holds === undefined || analysisHolds(after, call.holds)) &&
+            (call.readBack === undefined || call.readBack(after));
           switch (action) {
             case 'analysis_offer':
               return { about: 'offers', ok: holds };

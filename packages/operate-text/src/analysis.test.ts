@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   aiNowLines,
+  withoutUserinfo,
   analysisHolds,
   CHECK_TEXT,
   jobCountLines,
@@ -51,6 +52,17 @@ describe('AI backend’s words — #2611, moved by #2648', () => {
       ['On: write-ups can run on it.'],
       ['Ollama 0.12.6'],
     ]);
+  });
+
+  it('never says an address’s user:password, in a line or on its own (#2611)', () => {
+    const secret = 'http://MARKER-user:MARKER-pass@ollama:11434/v1';
+    expect(withoutUserinfo(secret)).toBe('http://ollama:11434/v1');
+    expect(withoutUserinfo('https://ollama:11434/v1?a=b@c')).toBe('https://ollama:11434/v1?a=b@c');
+    const lines = aiNowLines({ ...ANALYSIS, local: { ...ANALYSIS.local, url: secret } }, null);
+    expect(JSON.stringify(lines)).not.toContain('MARKER');
+    expect(text(lines[0] ?? [])).toBe(
+      'Local server: http://ollama:11434/v1 (from the instance’s .env)',
+    );
   });
 
   it('names every state, server state and check outcome the instance writes', () => {

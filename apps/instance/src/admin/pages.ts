@@ -89,6 +89,7 @@ import {
   STATUS_READY_TEXT,
   STATUS_UNREADABLE_TEXT,
   statusRows,
+  withoutUserinfo,
   type OperateRow,
   type OperateStatusAnswer,
 } from '@onyourleft/operate-text';
@@ -738,7 +739,10 @@ function addressPart(view: AnalysisView, analysis: OperateAnalysisAnswer): strin
               : ` The instance’s reason: <code>${escapeHtml(view.notice.problem)}</code>.`
           }</p>\n`
       : '';
-  const value = analysis.local.url === null ? '' : ` value="${escapeHtml(analysis.local.url)}"`;
+  const value =
+    analysis.local.url === null
+      ? ''
+      : ` value="${escapeHtml(withoutUserinfo(analysis.local.url))}"`;
   return `<h2>${escapeHtml(ANALYSIS_ADDRESS_HEADING)}</h2>
 ${stepUpForm(
   '/admin/analysis/address',

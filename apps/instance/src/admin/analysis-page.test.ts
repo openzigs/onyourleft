@@ -19,6 +19,7 @@ import {
   OFFER_FAILED_TEXT,
   OFFER_SAVED_TEXT,
   ownKeyText,
+  RETURN_FAILED_TEXT,
   RETURNED_TEXT,
   type OperateAnalysisAnswer,
 } from '@onyourleft/operate-text';
@@ -174,6 +175,31 @@ describe('the AI backend page is the analysis routes’ answers, read through th
     const html = await page(tunnel(made), await codeSession(made));
     expect(await settingRow(made)).toBeUndefined();
     expect(html).toContain('Model: <code>route-only:1b</code>');
+  });
+});
+
+describe('an address with a user:password is never drawn by the page (#2648, #2611)', () => {
+  it('strips it from the Now line in a code session and from the address input in a passkey session', async () => {
+    const secret = 'http://MARKER-user:MARKER-pass@ollama:11434/v1';
+    const wrapped: readonly Route[] = ROUTES.map((route) =>
+      route.path === '/v1/operate/analysis' && route.method === 'GET'
+        ? {
+            ...route,
+            handle: async (context) => {
+              const real = (await (await route.handle(context)).json()) as OperateAnalysisAnswer;
+              return json({ ...real, local: { ...real.local, url: secret } });
+            },
+          }
+        : route,
+    );
+    const made = await startModerationWorld({ admin: {}, routes: wrapped });
+    worlds.push(made);
+    const code = await page(tunnel(made), await codeSession(made));
+    expect(code).toContain('<code>http://ollama:11434/v1</code>');
+    expect(code).not.toContain('MARKER');
+    const passkey = await page(tunnel(made), (await passkeySession(made)).token);
+    expect(passkey).toContain('value="http://ollama:11434/v1"');
+    expect(passkey).not.toContain('MARKER');
   });
 });
 
@@ -448,6 +474,53 @@ describe('a change the route answered and the read-back does not hold is said to
     expect(modelPage).toContain(escapeHtml(MODEL_SAVE_FAILED_TEXT));
     expect(modelPage).not.toContain(escapeHtml(MODEL_SAVED_TEXT));
     expect((await settings(made)).local).toMatchObject({ othersMayUse: false, model: null });
+  });
+});
+
+describe('the address and the return to .env are said to have failed when the read-back does not show them (#2648)', () => {
+  /** The routes with `method` answering as the settings read does and keeping nothing. */
+  const forgetting = (method: 'POST' | 'DELETE'): readonly Route[] =>
+    ROUTES.map((route) =>
+      route.path === '/v1/operate/analysis' && route.method === method
+        ? {
+            ...route,
+            handle: async (context) => {
+              const read = ROUTES.find(
+                (each) => each.path === '/v1/operate/analysis' && each.method === 'GET',
+              );
+              return (read as Route).handle(context);
+            },
+          }
+        : route,
+    );
+
+  it('does not say the address was saved when the route kept nothing', async () => {
+    const made = await startModerationWorld({ admin: {}, routes: forgetting('POST') });
+    worlds.push(made);
+    const browser = tunnel(made);
+    const session = await passkeySession(made);
+    const answer = await changeOn(browser, session, '/admin/analysis/address', 'analysis_address', {
+      localUrl: 'http://127.0.0.1:11434/v1',
+    });
+    const html = await answer.text();
+    expect(html).not.toContain(escapeHtml(ANALYSIS_ADDRESS_SAVED_TEXT));
+    expect(html).toContain(escapeHtml(ANALYSIS_ADDRESS_REFUSED_TEXT));
+  });
+
+  it('does not say it returned to .env when the settings are still the app’s', async () => {
+    const made = await startModerationWorld({ admin: {}, routes: forgetting('DELETE') });
+    worlds.push(made);
+    const seeded = await made.as(made.owner, 'POST', '/v1/operate/analysis', {
+      localModel: 'alpha:14b',
+    });
+    expect(seeded.status).toBe(200);
+    const browser = tunnel(made);
+    const session = await passkeySession(made);
+    const answer = await changeOn(browser, session, '/admin/analysis/clear', 'analysis_clear', {});
+    const html = await answer.text();
+    expect(html).not.toContain(escapeHtml(RETURNED_TEXT));
+    expect(html).toContain(escapeHtml(RETURN_FAILED_TEXT));
+    expect((await settings(made)).local.setIn).toBe('app');
   });
 });
 

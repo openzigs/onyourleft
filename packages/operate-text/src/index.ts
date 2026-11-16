@@ -28,6 +28,7 @@ export {
   HOSTED_OFFER_SENTENCE,
   jobCountLines,
   jobLine,
+  withoutUserinfo,
   JOBS_UNREADABLE_TEXT,
   LOCAL_STATE_TEXT,
   MODEL_LOAD_WARNING,

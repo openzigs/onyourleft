@@ -324,6 +324,11 @@ export function jobCountLines(jobs: OperateJobsAnswer): readonly string[] {
   ];
 }
 
+/** A base URL with any `user:password@` taken out: no screen draws a secret (#2611). */
+export function withoutUserinfo(url: string): string {
+  return url.replace(/^(https?:\/\/)[^/?#]*@/, '$1');
+}
+
 /**
  * The *Now* lines: the local server and where it is set, the model, its
  * state, and the server's version when it is Ollama and said one.
@@ -336,7 +341,7 @@ export function aiNowLines(
   return [
     [
       'Local server: ',
-      local.url === null ? 'none' : { code: local.url },
+      local.url === null ? 'none' : { code: withoutUserinfo(local.url) },
       ` (${SET_IN_TEXT[local.setIn]})`,
     ],
     ['Model: ', local.model === null ? 'none chosen' : { code: local.model }],
