@@ -472,7 +472,10 @@ export async function startIdentityInstance(
     },
     ...(voice === undefined ? {} : { voice }),
   });
+  /** The origin the keys state (#2613): Operate's rotation makes them over the log's transaction with it. */
+  const keyOrigin: { value?: string } = {};
   const keysFor = async (origin: string): Promise<InstanceKeys> => {
+    keyOrigin.value = origin;
     const keys = createInstanceKeys({
       store,
       secret: keyless === true ? undefined : secretBytes(7),
@@ -593,6 +596,17 @@ export async function startIdentityInstance(
                   createLocalModel({
                     settings,
                     resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
+                  }),
+              },
+              // #2613: the world's keys, and the same keys over the log's transaction.
+              keys: {
+                keys: instanceKeys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: keyless === true ? undefined : secretBytes(7),
+                    origin: keyOrigin.value ?? TEST_ORIGIN,
+                    now: () => Math.floor(clock.ms / 1000),
                   }),
               },
               ...(operateRooms === undefined ? {} : { rooms: { ...operateRooms, rooms, nameFor } }),

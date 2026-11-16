@@ -279,6 +279,8 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     'POST /v1/operate/analysis/check': { model: 'some-model' },
     // #2612: a body that would end a room.
     'POST /v1/operate/rooms/{roomId}/end': { reason: 'other', confirm: 'abcdef' },
+    // #2613: a body that would rotate the encryption key.
+    'POST /v1/operate/keys/rotate': { confirm: 'rotate' },
     // #1516
     'POST /v1/rooms/{roomId}/blocks': { row: 1 },
     'POST /v1/rooms/{roomId}/remove': { riderId: 1, reason: 'An edge’s removal' },
@@ -563,7 +565,7 @@ describe('the edge’s token opens nothing (#1192, ADR 0047 D-8)', () => {
     const f = await fixture();
     const edge = await testDevice();
     const before = everyRow(f.w.path);
-    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(47);
+    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(49);
     for (const route of PHASE_TWO_SEALED_ROUTES) {
       const { path, body } = requestFor(route, f);
       const tried = await asTheEdge(f, edge, f.bea.token, route.method, path, body);
