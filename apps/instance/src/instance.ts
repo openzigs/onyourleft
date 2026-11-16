@@ -26,6 +26,13 @@ import { effectiveAnalysisSettings, type EffectiveAnalysisSettings } from './ana
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import { forgetMaskingOnRefusal } from './analysis/masking-item.ts';
 import {
+  createTactics,
+  tacticsLocalOf,
+  type Tactics,
+  type TacticsLocal,
+} from './analysis/tactics.ts';
+import { createRaceHold } from './analysis/tactics-hold.ts';
+import {
   ANALYSIS_SWEEP_PERIOD_MS,
   createAnalysisJobs,
   type AnalysisJobs,
@@ -296,6 +303,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let analysisModel: ModelConnection | undefined;
   let analysisJobs: AnalysisJobs | undefined;
   let hostedSettings: HostedSettings | undefined;
+  let tactics: Tactics | undefined;
   let sidePose: SidePose | undefined;
   let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
@@ -838,6 +846,24 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         refusedForNoConsentOrKey: forgetMaskingOnRefusal(store, now),
       };
       hostedSettings = createHostedSettings({ store, secret: () => secretKey, now, sources });
+      // #2709 (ADR 0071): model-chosen lap-race bot tactics, on the LOCAL model
+      // only, as the settings offer it to this athlete now (the switch for
+      // other riders included, D-5.5), under their own consent naming its
+      // address. While a model race holds the slot, write-ups wait (D-6).
+      const hold = createRaceHold({ now });
+      const tacticsLocal = async (athleteId: string): Promise<TacticsLocal> =>
+        tacticsLocalOf(
+          effectiveAnalysisSettings(await reading.getAnalysisSetting(), options.config),
+          (await roles.roleOf(athleteId)) === 'owner',
+        );
+      tactics = createTactics({
+        store,
+        origin: identity.origin,
+        local: tacticsLocal,
+        hold,
+        resolve,
+        now,
+      });
       // #1106: a side-camera picture, shown to the local model the operator
       // named for pictures or to the hosted service the rider's OWN key is
       // for. Handed no store and no log: a picture is kept nowhere.
@@ -886,6 +912,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         now,
         log,
         heartbeatMs: server.analysisHeartbeatMs,
+        // #2709: write-ups wait while a model race holds the slot; re-plans do not.
+        hold,
       });
       analysisJobs = jobs;
       jobsRecovered = jobs.recover().then(
@@ -1031,6 +1059,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
+            ...(tactics === undefined ? {} : { tactics }),
             ...(sidePose === undefined ? {} : { sidePose }),
           }),
     });
@@ -1117,6 +1146,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       stopAdmin();
       // #1796: a test question out now is ended, not left for its 30 s bound.
       hostedSettings?.stop();
+      // #2709: a tactics call or warm-up out now is ended, and the hold's timer cleared.
+      tactics?.stop();
       operateStopped.abort();
       await analysisJobs?.stop();
       await router.stop();

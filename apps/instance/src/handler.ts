@@ -8,6 +8,7 @@ import {
 } from './admin/admin.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
+import type { Tactics } from './analysis/tactics.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
@@ -167,6 +168,11 @@ export interface HandlerOptions {
    * needs them answers `unavailable`.
    */
   readonly hostedSettings?: HostedSettings;
+  /**
+   * Model-chosen lap-race bot tactics (#2709, ADR 0071). Absent, every route
+   * that needs them answers `unavailable`.
+   */
+  readonly tactics?: Tactics;
   /**
    * The side camera's pictures (#1106). Absent, the route that needs them
    * answers `unavailable`.
@@ -376,6 +382,9 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.hostedSettings === true && options.hostedSettings === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.tactics === true && options.tactics === undefined) {
+      return errorResponse('unavailable');
+    }
     if (matched.sidePose === true && options.sidePose === undefined) {
       return errorResponse('unavailable');
     }
@@ -436,6 +445,7 @@ export function createHandler(options: HandlerOptions): Handler {
       rooms: options.rooms,
       analysis: options.analysis,
       hostedSettings: options.hostedSettings,
+      tactics: options.tactics,
       sidePose: options.sidePose,
       segments: options.segments,
       operate: options.operate,

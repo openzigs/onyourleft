@@ -2,6 +2,7 @@
 
 import { HOSTED_ROUTES } from './analysis/hosted-routes.ts';
 import { ANALYSIS_ROUTES } from './analysis/routes.ts';
+import { TACTICS_ROUTES } from './analysis/tactics-routes.ts';
 import { CAMERA_ROUTES } from './camera/routes.ts';
 import { IDENTITY_ROUTES } from './auth/routes.ts';
 import { INSTANCE_KEY_ROUTES } from './keys/routes.ts';
@@ -247,6 +248,7 @@ export const ROUTES: readonly Route[] = [
   ...HISTORY_ROUTES,
   ...ANALYSIS_ROUTES,
   ...HOSTED_ROUTES,
+  ...TACTICS_ROUTES,
   ...CAMERA_ROUTES,
   ...ROOM_ROUTES,
   {

@@ -9,6 +9,7 @@
 import type { Readiness } from './readiness.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
+import type { Tactics } from './analysis/tactics.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
@@ -166,6 +167,8 @@ export interface RouteContext {
   readonly analysis: AnalysisJobs | undefined;
   /** A rider's own hosted key and consent (#1199). Present for every route that declares `hostedSettings`. */
   readonly hostedSettings: HostedSettings | undefined;
+  /** Model-chosen bot tactics (#2709). Present for every route that declares `tactics`. */
+  readonly tactics: Tactics | undefined;
   /** The side camera's pictures (#1106). Present for every route that declares `sidePose`. */
   readonly sidePose: SidePose | undefined;
   /** Published segments and their boards (#68). Present for every route that declares `segments`. */
@@ -268,6 +271,11 @@ export interface Route {
    * none answers `unavailable` without calling it.
    */
   readonly hostedSettings?: true;
+  /**
+   * The route needs model-chosen bot tactics (#2709, ADR 0071). An instance
+   * handed none answers `unavailable` without calling it.
+   */
+  readonly tactics?: true;
   /**
    * The route shows a side-camera picture to a model (#1106). An instance
    * handed none answers `unavailable` without calling it.

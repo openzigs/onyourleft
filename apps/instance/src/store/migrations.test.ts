@@ -116,6 +116,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   // The columns named, so migration 0023's `reasoning_tokens` is NULL (#1268).
   athlete_hosted_key: `INSERT INTO athlete_hosted_key (athlete_id, url, model, iv, ciphertext, set_at) VALUES ('a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 25)`,
   athlete_hosted_consent: `INSERT INTO athlete_hosted_consent VALUES ('a', 'https://models.example', 26)`,
+  athlete_tactics_consent: `INSERT INTO athlete_tactics_consent VALUES ('a', 'http://ollama:11434/v1', 26)`,
   room_removal: `INSERT INTO room_removal VALUES ('room', 'a', 23)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
   statement: `INSERT INTO statement VALUES (1, 'b', 'suspend', 'Facts', 'report', NULL, 'Terms 2', NULL, 0, NULL, 28)`,
@@ -541,7 +542,13 @@ describe('the migrations (#769)', () => {
 
   it('takes 0045’s passkeys away with every session they opened, and leaves every other row as it was, down and up again (#2642)', async () => {
     const path = await freshPath();
-    await withKysely(path, (db) => migrateToLatest(db));
+    // Up to 0045 and no further: the migrations after it are undone first (#2709's 0046).
+    await withKysely(path, async (db) => {
+      await migrateToLatest(db);
+      while ((await appliedMigrations(db)).at(-1) !== '0045-admin-passkeys') {
+        await migrateDownOne(db);
+      }
+    });
     // Every table seeded, then a second session, opened with a code, that no passkey opened.
     seedEveryTable(path);
     const database = openDatabase(path);
