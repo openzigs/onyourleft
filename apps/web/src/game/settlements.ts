@@ -636,7 +636,9 @@ function buildable(
   to: number,
   lateral: number,
 ): boolean {
-  const ways = waterways(profile, seed);
+  // #2658: the invented water alone. No site is built where the map was read
+  // (`siteOnMappedLand`), and the map's water is only there.
+  const ways = waterways(profile, seed, NO_LAND_CLASS);
   for (let at = from; at <= to + 1e-9; at += 10) {
     const wrapped = distanceOnRoute(profile, at);
     if (Math.abs(gradeAt(profile, wrapped)) > SETTLEMENT_GRADE_PERCENT) return false;
@@ -1014,7 +1016,7 @@ function settlementsAt(
                 ...(plot.paint === undefined ? {} : { paint: plot.paint }),
                 ...(plot.house !== undefined &&
                 model !== undefined &&
-                modelStands(profile, origin, seed, item, plot, model)
+                modelStands(profile, origin, seed, item, plot, model, land)
                   ? { house: plot.house }
                   : {}),
               },
@@ -1545,7 +1547,7 @@ function fieldEdgesAt(
   // The ground's own field grid, so the patchwork and the walls agree (#425).
   const span = fieldSpanMetres(profile);
   const fields = Math.max(1, Math.round(total / span));
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const first = Math.floor(fromMetres / span) - 1;
   // Never more fields than the route has. @see settlementsAt's bound.
   const last = Math.min(Math.floor(toMetres / span), first + fields + 1);
@@ -2069,11 +2071,12 @@ function modelStands(
   item: ScatterItem,
   plot: Plot,
   model: PlotModelFootprint,
+  land: LandClassMask,
 ): boolean {
   if (footprintClearance(profile, origin, item, model) < ROAD_CLEARANCE_METRES) return false;
   const wrapped = distanceOnRoute(profile, plot.along);
   return !inWater(
-    waterways(profile, seed),
+    waterways(profile, seed, land),
     profile,
     wrapped,
     (plot.lateral - model.back) * plot.side,

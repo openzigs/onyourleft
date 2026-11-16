@@ -510,7 +510,13 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   const junctions =
     input.worldCorridor === undefined
       ? undefined
-      : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed);
+      : mappedJunctions(
+          input.worldCorridor,
+          input.profile,
+          input.origin,
+          seed,
+          input.landClass ?? NO_LAND_CLASS,
+        );
   const sideRoads = sideRoadsAt(
     input.profile,
     input.origin,
@@ -649,7 +655,7 @@ function people(
 
 /** The streams, lakes and bridges in view. @see SceneFrame.water */
 function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFrame {
-  const ways = waterways(input.profile, seed);
+  const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
   return {
     surface: waterSurface(input.profile, input.origin, corridor, ways),
     bridges: bridgeParts(input.profile, input.origin, corridor, ways),
@@ -730,7 +736,7 @@ function scenery(
   // #1565: and none on a side road.
   const billboards = boardsClearOfSideRoads(
     nearestBillboards(
-      billboardsAt(input.profile, input.origin, seed, first.along, last.along),
+      billboardsAt(input.profile, input.origin, seed, first.along, last.along, land),
       riderDistance,
       structureBudget,
     ),

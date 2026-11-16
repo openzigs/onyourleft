@@ -1069,7 +1069,7 @@ function fillCell(
   const plain = densityAt(place);
   const density = plain * clusterAt(seed, cell);
   // #459. Cached per profile, so this is a lookup. @see waterways
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const weights = kindWeights(place);
   // ⚠️ **Whole bands, dropped rather than squeezed.** @see MINIMUM_SCATTER_SEPARATION_METRES
   const bands = bandsAt(place.curvature);

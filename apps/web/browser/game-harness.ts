@@ -2820,7 +2820,7 @@ function waterProbe(): WaterMeasurement {
   canvas.height = 400;
   const profile = valleyRoute();
   const origin = corridorOrigin(profile);
-  const ways = waterways(profile, scatterSeed(profile));
+  const ways = waterways(profile, scatterSeed(profile), NO_LAND_CLASS);
   const crossing = ways.crossings[0]?.distance ?? 1_000;
   const start = atStartLine(profile);
   const riding = (distance: number): SceneFrame => {

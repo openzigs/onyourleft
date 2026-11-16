@@ -127,6 +127,12 @@ const CELL_RANGE = CHUNK_RANGE * LAND_CLASS_CHUNK_CELLS;
 /**
  * The classes by code, the code being the precedence: a cell keeps the
  * highest code written to it. 0 is `unknown`, which nothing writes.
+ *
+ * #2658: **two codes are `water`** — {@link CODE_WETLAND}, then open water
+ * above it — so a cell remembers that its water is a wetland, which
+ * `waterways.ts` draws as wet ground rather than as a lake, while every
+ * reader of {@link LandClassMask.classAt} still sees one class. Open water
+ * outranks a wetland, so a pool mapped inside a marsh is water.
  */
 const CLASS_OF_CODE: readonly LandClass[] = [
   'unknown',
@@ -136,9 +142,23 @@ const CLASS_OF_CODE: readonly LandClass[] = [
   'park',
   'wood',
   'water',
+  'water',
 ];
 const CODE_OTHER = 1;
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
+/** #2658: a `wetland` polygon's cells, from either layer. @see CLASS_OF_CODE */
+const CODE_WETLAND = 6;
+const CODE_WATER = 7;
+
+/** The `kind` that is a wetland, in `landuse` or in `water` (#2658). */
+const WETLAND_KIND = 'wetland';
+
+/** A feature's code: its class's, with a wetland below open water. @see CLASS_OF_CODE */
+function codeOf(layer: LandUseFeature['layer'], kind: string): number {
+  if (kind === WETLAND_KIND) return CODE_WETLAND;
+  const land = landClassOfKind(layer, kind);
+  return land === 'water' ? CODE_WATER : CLASS_OF_CODE.indexOf(land);
+}
 
 /**
  * How far the levelling field reaches from mapped built-up land, in metres:
@@ -182,6 +202,12 @@ export interface LandClassMask {
   /** True where the corridor is covered (P-8), whatever the class. */
   covered(x: number, z: number): boolean;
   /**
+   * #2658: whether the `water` at `(x, z)` is a mapped wetland — a
+   * `wetland` polygon and no open water over it. `false` wherever
+   * {@link classAt} is not `water`. O(1), as {@link classAt} is.
+   */
+  wetlandAt(x: number, z: number): boolean;
+  /**
    * Metres to the nearest mapped built-up land at each of `count` points —
    * #1547 — `points` holding them as `x, z` pairs and `into` taking one
    * distance a point. Read off a field built once, with the mask, and
@@ -207,6 +233,7 @@ export interface LandClassMask {
 export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   classAt: (): LandClass => 'unknown',
   covered: (): boolean => false,
+  wetlandAt: (): boolean => false,
   builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
     into.fill(Number.POSITIVE_INFINITY, 0, count);
   },
@@ -346,7 +373,7 @@ function kindIndexOf(corridor: WorldCorridor): readonly KindIndexEntry[] {
       minZ = Math.min(minZ, outer[i + 1] as number);
       maxZ = Math.max(maxZ, outer[i + 1] as number);
     }
-    const code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
+    const code = codeOf(feature.layer, feature.kind);
     entries.push({ feature, code, minX, maxX, minZ, maxZ });
   }
   kindIndexes.set(corridor, entries);
@@ -428,19 +455,20 @@ export function landClassMask(
   let work = maxWork;
   for (const feature of corridor.landUse) {
     if (work <= 0) break;
-    const code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
+    const code = codeOf(feature.layer, feature.kind);
     work -= paint(chunks, feature, code);
   }
   // 3. #1547: how far every cell near built-up land is from it.
   const { levels, bytes: levellingBytes } = levellingField(chunks, maxLevelledChunks);
 
-  const classAt = (x: number, z: number): LandClass => {
+  /** The code at `(x, z)`: 0, `unknown`, outside every chunk. */
+  const codeAt = (x: number, z: number): number => {
     const column = Math.floor(x / CHUNK_METRES);
     const row = Math.floor(z / CHUNK_METRES);
     // `NaN` fails both comparisons, so it is `unknown` too.
-    if (!inRange(column, row)) return 'unknown';
+    if (!inRange(column, row)) return 0;
     const chunk = chunks.get(chunkKey(column, row));
-    if (chunk === undefined) return 'unknown';
+    if (chunk === undefined) return 0;
     const cellX = Math.min(
       LAND_CLASS_CHUNK_CELLS - 1,
       Math.floor((x - column * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
@@ -449,8 +477,9 @@ export function landClassMask(
       LAND_CLASS_CHUNK_CELLS - 1,
       Math.floor((z - row * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
     );
-    return CLASS_OF_CODE[chunk[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number] as LandClass;
+    return chunk[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number;
   };
+  const classAt = (x: number, z: number): LandClass => CLASS_OF_CODE[codeAt(x, z)] as LandClass;
   /** The stored distance at a cell, by its index across the whole grid. */
   const levelCell = (cellX: number, cellZ: number): number => {
     const column = Math.floor(cellX / LAND_CLASS_CHUNK_CELLS);
@@ -520,6 +549,7 @@ export function landClassMask(
   return {
     classAt,
     covered: (x, z) => classAt(x, z) !== 'unknown',
+    wetlandAt: (x, z) => codeAt(x, z) === CODE_WETLAND,
     builtUpDistances,
     bytes: chunks.size * CHUNK_BYTES,
     levellingBytes,

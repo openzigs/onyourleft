@@ -3,11 +3,34 @@
 /**
  * Water, and the bridges that carry the road over it — #459.
  *
- * ## ⚠️ Where water goes, and where that comes from — ADR 0009 and #248
+ * ## ⚠️ Where water goes, and where that comes from — ADR 0009, #248, ADR 0054
  *
- * **From the route's own elevation, and from nothing else.** No map, no
- * hydrography, no other product: a `RouteProfile` says only how high the road
- * is at each metre of it, and that is enough to say where water plausibly is.
+ * **From the map where the corridor was read, and from the route's own
+ * elevation everywhere else** — #2658. Until then this said *"from nothing
+ * else. No map, no hydrography"*, which was ADR 0032 D-1's rule; ADR 0054
+ * superseded it for the records its D-2 lists, water polygons among them, and
+ * the land mask (`land-class.ts`) has read them since #1546 — but only to keep
+ * trees off them, so a lake or the sea beside the road was drawn as bare
+ * ground. Now:
+ *
+ * - **A mapped lake** — {@link mappedLakes}: where the mask's `water` runs
+ *   beside the road for at least {@link LAKE_MIN_LENGTH_METRES} on one side,
+ *   a {@link Lake} with the shores the mask measured, drawn by the same mesh
+ *   and banks as an invented one. A mapped **wetland** is a lake whose ground
+ *   stands just over its water ({@link WETLAND_GROUND_ABOVE_WATER_METRES}),
+ *   flat, bare and wet-tinted, with no open water drawn over it.
+ * - **No invented lake in a stretch the map covers**: there the map says
+ *   where water is and is not, so a seeded lake on mapped farmland is a lie.
+ * - **Everywhere the map was not read** — no corridor, outside the archive,
+ *   offline, a privacy zone — the world is exactly the one below, from the
+ *   route and a seed (ADR 0054 D-4).
+ *
+ * ⚠️ **The gradient is the route's own either way.** Nothing here moves the
+ * road: a mapped lake shapes the ground beside it as an invented one does.
+ *
+ * The invented water, from the route's own elevation — a `RouteProfile` says
+ * only how high the road is at each metre of it, and that is enough to say
+ * where water plausibly is:
  *
  * - **A stream crosses the road at a valley floor** — a point of the route that
  *   is the lowest within {@link VALLEY_WINDOW_METRES} either side of it, with
@@ -64,9 +87,12 @@
 
 import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyourleft/domain';
 
+import type { LandClassMask } from './land-class';
 import { slotHash, uniformFrom } from './seeded';
 import {
   ROAD_WIDTH_METRES,
+  corridorOrigin,
+  drawnRoadFrame,
   drawnRoadPosition,
   ribbonNormals,
   type CorridorOrigin,
@@ -244,6 +270,52 @@ export const LAKE_TAPER_METRES = 80;
  */
 export const LAKE_ENCLOSURE_METRES = 600;
 
+/**
+ * #2658: how far out from the road's edge the map's water is looked for,
+ * either side, in metres: **100**. Water that begins further out is not
+ * beside the road, and the ground's own relief is drawn there.
+ */
+export const MAPPED_WATER_REACH_METRES = 100;
+
+/**
+ * #2658: the step the search for the map's water takes outward from the
+ * road, in metres: **5**, one mask cell (`land-class.ts`
+ * §`LAND_CLASS_CELL_METRES`).
+ */
+export const MAPPED_WATER_STEP_METRES = 5;
+
+/**
+ * #2658: the furthest a mapped lake's far shore is drawn, in metres from the
+ * centreline: **240**, inside the corridor's 250 m (`world-data/corridor.ts`
+ * §`CORRIDOR_HALF_WIDTH_METRES`), past which the mask is `unknown`. The sea
+ * beside a coast road runs on to this, and the ground's own reach hides the
+ * rest.
+ */
+export const MAPPED_LAKE_FAR_METRES = 240;
+
+/**
+ * #2658: the narrowest mapped water that is drawn as a lake, shore to shore,
+ * in metres: **20**. A ditch or the corner of a pond is less, and is left to
+ * the mask, which keeps trees off it.
+ */
+export const MAPPED_LAKE_MIN_WIDTH_METRES = 20;
+
+/**
+ * #2658: how far the road beside one mapped lake may rise and fall, in
+ * metres: **6**. Water is level and the road beside it is not always: past
+ * this one lake ends and the next begins at its own level, so no bank falls
+ * further than a lake's own does.
+ */
+export const MAPPED_LAKE_RISE_METRES = 6;
+
+/**
+ * #2658: how far above its water a mapped wetland's ground stands, in
+ * metres: **0.25** — well inside `landform.ts` §`WET_MARGIN_METRES`, so the
+ * whole of it wears the wet margin's tint: level, bare and dark, a marsh
+ * rather than a dry field. No open water is drawn over it.
+ */
+export const WETLAND_GROUND_ABOVE_WATER_METRES = 0.25;
+
 /** How far below the lowest road beside it a lake's surface lies, in metres: **0.8**. */
 export const LAKE_BELOW_ROAD_METRES = 0.8;
 
@@ -306,6 +378,15 @@ export interface Lake {
    */
   readonly side: 1 | -1;
   readonly waterElevation: number;
+  /**
+   * #2658: the shores at the lake's widest, in metres from the centreline —
+   * the map's, for a mapped lake. Absent on an invented lake, whose shores
+   * are {@link LAKE_NEAR_METRES} and {@link LAKE_FAR_METRES}.
+   */
+  readonly near?: number;
+  readonly far?: number;
+  /** #2658: a mapped wetland — wet ground at its water's level, and no open water. */
+  readonly wetland?: boolean;
 }
 
 /** Every stream and lake a route implies. */
@@ -327,17 +408,230 @@ export interface Waterways {
  * with a window each — too much to repeat sixty times a second on the thread
  * GATT notifications arrive on, for an answer that cannot change.
  */
-const computed = new WeakMap<RouteProfile, Waterways>();
+const computed = new WeakMap<LandClassMask, WeakMap<RouteProfile, Waterways>>();
 
-/** Every stream and lake a route implies. Pure; cached per profile object. */
-export function waterways(profile: RouteProfile, seed: number): Waterways {
-  const known = computed.get(profile);
+/**
+ * Every stream and lake a route implies, beside the ride's map — #2658. Pure;
+ * cached per mask object and profile object, both collected with their ride.
+ *
+ * ⚠️ **`land` is required, and every caller passes the ride's.** A tree is
+ * kept out of the lake {@link inWater} reports and the ground is shaped by the
+ * lake {@link waterShaping} reports, so a caller asking without the map would
+ * stand things in a lake that another caller drew. `NO_LAND_CLASS` is the
+ * world with no corridor, and gives exactly the waterways of before #2658.
+ */
+export function waterways(profile: RouteProfile, seed: number, land: LandClassMask): Waterways {
+  let byProfile = computed.get(land);
+  if (byProfile === undefined) {
+    byProfile = new WeakMap();
+    computed.set(land, byProfile);
+  }
+  const known = byProfile.get(profile);
   if (known !== undefined) {
     return known;
   }
-  const found = findWaterways(profile, seed);
-  computed.set(profile, found);
+  const found = besideTheMap(profile, findWaterways(profile, seed), land);
+  byProfile.set(profile, found);
   return found;
+}
+
+/**
+ * The invented waterways with the map's laid over them — #2658: every
+ * invented lake in a stretch the map covers dropped, and {@link mappedLakes}
+ * put first, all within {@link MAXIMUM_WATERWAYS}. With no map read beside
+ * the route, `invented` itself.
+ */
+function besideTheMap(profile: RouteProfile, invented: Waterways, land: LandClassMask): Waterways {
+  if (land.bytes === 0) return invented;
+  const origin = corridorOrigin(profile);
+  const mapped = mappedLakes(profile, origin, land);
+  const kept = invented.lakes.filter((lake) => !lakeMapped(profile, origin, land, lake));
+  if (mapped.length === 0 && kept.length === invented.lakes.length) return invented;
+  return {
+    crossings: invented.crossings,
+    lakes: [...mapped, ...kept].slice(0, MAXIMUM_WATERWAYS),
+  };
+}
+
+/** #2658: the route's step between the points the map's water is looked for beside, in metres. */
+const MAPPED_SAMPLE_METRES = 10;
+
+/**
+ * Whether any of an invented lake's stretch is where the map was read, on
+ * its side, midway between its shores — #2658. There the map says where
+ * water is and is not, and a seeded lake is not drawn.
+ */
+function lakeMapped(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  land: LandClassMask,
+  lake: Lake,
+): boolean {
+  const middle = ((lake.near ?? LAKE_NEAR_METRES) + (lake.far ?? LAKE_FAR_METRES)) / 2;
+  for (let at = lake.from; at <= lake.to; at += MAPPED_SAMPLE_METRES) {
+    const frame = drawnRoadFrame(profile, origin, at);
+    if (frame === undefined) continue;
+    const x = frame.x + frame.normalX * middle * lake.side;
+    const z = frame.z + frame.normalZ * middle * lake.side;
+    if (land.covered(x, z)) return true;
+  }
+  return false;
+}
+
+/** The map's water beside one point of the road, on one side. */
+interface MappedWaterAt {
+  readonly near: number;
+  readonly far: number;
+  readonly wetland: boolean;
+}
+
+/**
+ * The map's water beside the road at `frame`, on `side` — #2658 — or
+ * `undefined` where no water at least {@link MAPPED_LAKE_MIN_WIDTH_METRES}
+ * across begins within {@link MAPPED_WATER_REACH_METRES} of the road's edge.
+ * Its near shore is the first such water stepping out — a narrower strip
+ * nearer the road, a ditch, is stepped over — and its far shore the last of
+ * the water that runs on unbroken from there, out to
+ * {@link MAPPED_LAKE_FAR_METRES}; a wetland if its first cell is one.
+ */
+function mappedWaterAt(
+  land: LandClassMask,
+  frame: {
+    readonly x: number;
+    readonly z: number;
+    readonly normalX: number;
+    readonly normalZ: number;
+  },
+  side: 1 | -1,
+): MappedWaterAt | undefined {
+  let near = Number.NaN;
+  let far = Number.NaN;
+  let wetland = false;
+  for (
+    let lateral = ROAD_HALF_WIDTH_METRES + MAPPED_WATER_STEP_METRES;
+    lateral <= MAPPED_LAKE_FAR_METRES;
+    lateral += MAPPED_WATER_STEP_METRES
+  ) {
+    const x = frame.x + frame.normalX * lateral * side;
+    const z = frame.z + frame.normalZ * lateral * side;
+    const water = land.classAt(x, z) === 'water';
+    if (Number.isNaN(near)) {
+      if (lateral > ROAD_HALF_WIDTH_METRES + MAPPED_WATER_REACH_METRES) return undefined;
+      if (!water) continue;
+      near = lateral;
+      far = lateral;
+      wetland = land.wetlandAt(x, z);
+    } else if (water) {
+      far = lateral;
+    } else if (far - near < MAPPED_LAKE_MIN_WIDTH_METRES) {
+      // A ditch between the road and the water beyond it: look on past it.
+      near = Number.NaN;
+    } else {
+      break;
+    }
+  }
+  // Water that runs on to the far end is wide enough: it began within reach.
+  if (Number.isNaN(near)) return undefined;
+  return { near, far, wetland };
+}
+
+/** A run of the road with the map's water beside it, on one side, being gathered. */
+interface MappedRun {
+  readonly from: number;
+  readonly wetland: boolean;
+  floor: number;
+  top: number;
+  to: number;
+  readonly nears: number[];
+  readonly fars: number[];
+}
+
+/**
+ * The lakes the map puts beside the road — #2658. On each side, every run of
+ * {@link mappedWaterAt} at least {@link LAKE_MIN_LENGTH_METRES} long, broken
+ * where the water changes between open water and wetland or where the road
+ * rises or falls more than {@link MAPPED_LAKE_RISE_METRES} within it. A lake's
+ * shores are its run's medians, its near shore no nearer than
+ * {@link LAKE_NEAR_METRES} (the verge is the road's), and its water
+ * {@link LAKE_BELOW_ROAD_METRES} under its lowest road, as an invented lake's.
+ * None where the mask holds nothing: every ride with no corridor.
+ *
+ * Read once per mask and route, at the first frame, by {@link waterways}: at
+ * most {@link WATERWAY_SAMPLE_LIMIT} points of the route, two sides each and
+ * at most 47 mask lookups a side.
+ */
+function mappedLakes(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  land: LandClassMask,
+): readonly Lake[] {
+  if (land.bytes === 0) return [];
+  const total = profile.totalDistance;
+  const count = Math.max(
+    2,
+    Math.min(WATERWAY_SAMPLE_LIMIT, Math.round(total / MAPPED_SAMPLE_METRES)),
+  );
+  const spacing = total / count;
+  const samples = count + (profile.loop ? 0 : 1);
+  const lakes: Lake[] = [];
+  for (const side of [1, -1] as const) {
+    let run: MappedRun | undefined;
+    const finish = (): void => {
+      if (run === undefined) return;
+      const { from, to, floor, wetland, nears, fars } = run;
+      run = undefined;
+      if (to - from < LAKE_MIN_LENGTH_METRES || lakes.length >= MAXIMUM_WATERWAYS) return;
+      const near = Math.max(LAKE_NEAR_METRES, median(nears));
+      const far = Math.min(MAPPED_LAKE_FAR_METRES, median(fars));
+      if (far - near < MAPPED_LAKE_MIN_WIDTH_METRES) return;
+      lakes.push({
+        from,
+        to,
+        side,
+        waterElevation: floor - LAKE_BELOW_ROAD_METRES,
+        near,
+        far,
+        ...(wetland ? { wetland: true } : {}),
+      });
+    };
+    for (let index = 0; index < samples; index += 1) {
+      const at = Math.min(total, index * spacing);
+      const frame = drawnRoadFrame(profile, origin, at);
+      const water = frame === undefined ? undefined : mappedWaterAt(land, frame, side);
+      const elevation = elevationAt(profile, at);
+      if (
+        run !== undefined &&
+        (water === undefined ||
+          water.wetland !== run.wetland ||
+          Math.max(run.top, elevation) - Math.min(run.floor, elevation) > MAPPED_LAKE_RISE_METRES)
+      ) {
+        finish();
+      }
+      if (water === undefined) continue;
+      run ??= {
+        from: at,
+        to: at,
+        floor: elevation,
+        top: elevation,
+        wetland: water.wetland,
+        nears: [],
+        fars: [],
+      };
+      run.floor = Math.min(run.floor, elevation);
+      run.top = Math.max(run.top, elevation);
+      run.to = at;
+      run.nears.push(water.near);
+      run.fars.push(water.far);
+    }
+    finish();
+  }
+  return lakes;
+}
+
+/** The middle value of a list that is never empty, sorting it. */
+function median(values: number[]): number {
+  values.sort((a, b) => a - b);
+  return values[Math.floor(values.length / 2)] as number;
 }
 
 /** What the water does to the ground at one point beside the route. */
@@ -444,7 +738,11 @@ export function waterShaping(
       continue;
     }
     const outside = Math.max(0, shore.near - lateral, lateral - shore.far);
-    const bed = lake.waterElevation - LAKE_DEPTH_METRES - origin.elevation;
+    // #2658: a wetland's ground stands just over its water, all of it in the wet margin.
+    const bed =
+      lake.waterElevation +
+      (lake.wetland === true ? WETLAND_GROUND_ABOVE_WATER_METRES : -LAKE_DEPTH_METRES) -
+      origin.elevation;
     ceiling = Math.min(ceiling, bankCeiling(bed, road, outside, LAKE_BANK_METRES));
     relief = Math.min(relief, smoothstep(LAKE_BANK_METRES, LAKE_BANK_METRES * 4, outside));
     wet(shoreWeight(outside), lake.waterElevation - origin.elevation);
@@ -677,6 +975,8 @@ export function waterSurface(
   if (ways.lakes.length > 0) {
     const normals = ribbonNormals(centre);
     for (const lake of ways.lakes) {
+      // #2658: a wetland is wet ground, and its water is not drawn over it.
+      if (lake.wetland === true) continue;
       let base = vertexCount;
       const y = lake.waterElevation - origin.elevation;
       for (let row = 0; row < centre.length; row += 1) {
@@ -1099,8 +1399,11 @@ function lakeShore(
     smoothstep(0, LAKE_TAPER_METRES, start),
     smoothstep(0, LAKE_TAPER_METRES, length - start),
   );
-  const middle = (LAKE_NEAR_METRES + LAKE_FAR_METRES) / 2;
-  const half = ((LAKE_FAR_METRES - LAKE_NEAR_METRES) / 2) * taper;
+  // #2658: a mapped lake's shores are the map's.
+  const nearest = lake.near ?? LAKE_NEAR_METRES;
+  const furthest = lake.far ?? LAKE_FAR_METRES;
+  const middle = (nearest + furthest) / 2;
+  const half = ((furthest - nearest) / 2) * taper;
   if (!(half > 1)) {
     return undefined;
   }

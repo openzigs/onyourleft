@@ -529,3 +529,22 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   building is still measured from the rider. The guarantee is narrower than "every building in the
   draw distance": the 36-building cap makes that unreachable, so what holds is every front-row
   building (centre within 30 m of the road) up to 100 m ahead.
+- **2026-11-15** — **PROPOSED, pending the owner's ruling on
+  [#2658](https://github.com/openzigs/onyourleft/issues/2658): the water polygons D-3.3 already
+  holds are drawn, as lakes and wetland beside the road.** Until this date they were read for one
+  thing, D-5's *"never on water"*, and through the land mask (`apps/web/src/game/land-class.ts`) to
+  keep trees off them, so a lake or the sea beside a mapped road was drawn as bare ground.
+  `apps/web/src/game/waterways.ts` §`mappedLakes` now turns the mask's `water` that runs beside the
+  road for at least 300 m on one side into a lake drawn by the invented lake's own mesh, at the
+  shores the mask measured (at most 240 m out), its water 0.8 m under the road beside it; a
+  `wetland` polygon, from either layer, is drawn as level, wet-tinted ground with no open water.
+  Where the corridor was read, an invented lake is not drawn, as D-5.3 already holds for an
+  invented village. The `waterways.ts` header's *"No map, no hydrography"*, which was ADR 0032 D-1's
+  rule and which [#248](https://github.com/openzigs/onyourleft/issues/248) and ADR 0009 were cited
+  for, is restated there. No record is added to the store and no field is read that was not
+  already: D-3.3's sentence is unchanged. What still stands, unchanged: D-4 (with nothing read, the
+  world is exactly today's, lakes and all), D-2, D-3.1 to D-3.6, and the gradient a trainer is sent,
+  which is the route's own whatever is drawn beside it. **Status: proposed, in force only when the
+  owner rules on #2658 and approves its screenshots and a moving-ride tablet frame check**; the PR
+  is not to be merged before that, and this entry is to be corrected or struck there if the ruling
+  differs.

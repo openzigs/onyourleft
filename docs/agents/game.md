@@ -1462,7 +1462,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         abutments. ⚠️ The deck is the ROAD, unchanged, and the
                         grade a trainer is sent there is the route's — a test
                         rides the gradient session across it. No culverts and
-                        no tunnels, and the file says why
+                        no tunnels, and the file says why. Since #2658 also
+                        the map's lakes, sea and wetland beside the road, from
+                        the ride's land mask, and no invented lake where the
+                        map was read: `waterways(profile, seed, land)` takes
+                        the mask, and every caller passes the ride's
     src/game/settlements.ts
                         places, not houses (#460) — villages and farmsteads on
                         level, low, dry stretches of the route, each building
