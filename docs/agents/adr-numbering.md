@@ -12,13 +12,21 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0075 is [ADR 0075](../adr/0075-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md)**, taken by
+  [#2759](https://github.com/openzigs/onyourleft/issues/2759) on 2026-11-17 for AI bots racing with
+  bodies that fit their style and a spread of strength, on the owner's ruling of that day on #2759.
+  It is **Proposed** until the owner approves it on #2759's pull request. It supersedes in part
+  ADR 0071 D-1.3, ADR 0073 D-2.5 and D-5.1, and ADR 0067 D-1.3, each of which gained one dated
+  `## Amendments` entry pointing to it. No open issue or pull request named it. **0057 and 0058 stay
+  claimed** by #1748 and #1752, 0070 by #2684 and 0072 by #2712. **The next free number is 0076.**
+  A reviewer who remembers this file offering 0075 is reading the old file.
   ⚠️ **0074 is [ADR 0074](../adr/0074-a-sprint-instinct-behind-the-models-moves.md)**, taken by
   [#2710](https://github.com/openzigs/onyourleft/issues/2710) in its pull request
   [#2724](https://github.com/openzigs/onyourleft/pull/2724) on 2026-11-16 for a sprint instinct
   behind the model's moves, accepted the same day on the owner's ruling on #2724. It supersedes in
   part ADR 0073 D-3.5, which gained one dated `## Amendments` entry pointing to it. No open issue or
   pull request named it. **0057 and 0058 stay claimed** by #1748 and #1752, 0070 by #2684 and 0072
-  by #2712. **The next free number is 0075.** A reviewer who remembers this file offering 0074 is
+  by #2712. The next free number was then 0075. A reviewer who remembers this file offering 0074 is
   reading the old file.
   ⚠️ **0073 is [ADR 0073](../adr/0073-ai-bots-race-with-strategy-freedom-inside-the-bodys-limits.md)**,
   taken by [#2720](https://github.com/openzigs/onyourleft/issues/2720) on 2026-11-16 for AI bots

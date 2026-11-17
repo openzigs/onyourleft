@@ -328,3 +328,11 @@ model race, or taking away a body's limit (D-2), needs one.
   the model names. The model may still name `kick` anywhere, earlier included, and the body's limits
   (D-2) are unchanged. Read ADR 0074 for the rule. This entry only points there; nothing else in this
   ADR changes. (#2710)
+
+- **2026-11-17** — **Once [ADR 0075](0075-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-5.1 and D-2.5 are superseded by it in part
+  for a model race.** D-5.1's every-style-once deal stands, but a style is no longer dealt apart
+  from the bot's archetype (R-4 in that part): each style brings the pace whose legs fit it and a
+  body to match. On `attack`, `chase`, `flyer` and `kick`, an effort is ridden at the harder of its
+  own target and the move's, so it never softens the move; D-2.5 stands as written on every other
+  move. The body's limits (D-2) and the strategy rules lifted (D-3) are unchanged. Read ADR 0075 for
+  the rule. This entry only points there; nothing else in this ADR changes. (#2759)

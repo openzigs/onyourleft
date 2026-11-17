@@ -32,10 +32,10 @@ found through the root's topic map.
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0075**: 0057 and 0058 are
+  **and which are claimed by open issues** before you pick one. **The next free number is 0076**: 0057 and 0058 are
   claimed by the open issues #1748 and #1752, 0059 is ADR 0059 (#1804), 0060 is ADR 0060 (#1895),
   0061 is ADR 0061 (#1960), 0062 is ADR 0062 (#1557), 0063 is ADR 0063 (#2036), 0064 is ADR
-  0064 (#2293), 0065 is ADR 0065 (#2360), 0066 is ADR 0066 (#2424), 0067 is ADR 0067 (#2457), 0068 is ADR 0068 (#2513), 0069 is ADR 0069 (#2640), 0070 is claimed by #2684 (its ADR 0070 in the open pull request #2694), 0071 is ADR 0071 (#2707), 0072 is claimed by #2712 (the AI pacer, which ADR 0071 D-2 names), 0073 is ADR 0073 (#2720), and 0074 is ADR 0074 (#2710, in its pull request #2724).
+  0064 (#2293), 0065 is ADR 0065 (#2360), 0066 is ADR 0066 (#2424), 0067 is ADR 0067 (#2457), 0068 is ADR 0068 (#2513), 0069 is ADR 0069 (#2640), 0070 is claimed by #2684 (its ADR 0070 in the open pull request #2694), 0071 is ADR 0071 (#2707), 0072 is claimed by #2712 (the AI pacer, which ADR 0071 D-2 names), 0073 is ADR 0073 (#2720), 0074 is ADR 0074 (#2710, in its pull request #2724), and 0075 is ADR 0075 (#2759).
   Which numbers were taken, by which issue and when, and the reservations, are the record in
   [`docs/agents/adr-numbering.md`](adr-numbering.md); read it before picking one.
 - **Spikes**: `docs/spikes/NNNN-kebab-case.md`. A spike write-up is **not an ADR and does not
