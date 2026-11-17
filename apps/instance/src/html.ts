@@ -39,8 +39,12 @@ export const PAGE_HEADERS: Readonly<Record<string, string>> = {
   'referrer-policy': 'no-referrer',
 };
 
-/** The page's look: legible type, visible focus, nothing fetched. */
-const STYLE = `
+/**
+ * The page's look: legible type, visible focus, nothing fetched. Inline on
+ * these pages; the admin pages (#2641) serve the same text as
+ * `/admin/admin.css`, because their policy allows no inline style.
+ */
+export const STYLE = `
 body { font: 1.0625rem/1.5 system-ui, sans-serif; margin: 0; color: #1a1a1a; background: #fff; }
 main { max-width: 42rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
 h1 { font-size: 1.6rem; line-height: 1.25; }

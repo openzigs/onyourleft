@@ -23,6 +23,7 @@
     "@onyourleft/analysis": "workspace:*",
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/fit": "workspace:*",
+    "@onyourleft/operate-text": "workspace:*",
     "@onyourleft/physics": "workspace:*",
     "@onyourleft/protocol": "workspace:*",
     "ai": "7.0.130",

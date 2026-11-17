@@ -28,9 +28,22 @@ const SRC = join(dirname(HERE), '..');
 
 const MOVED = Object.keys(operateText);
 
+const DECLARATION = '\\b(?:const|let|var|function\\*?|class)\\s+';
+
 /** A declaration of `name`: `const`, `let`, `var`, `function` or `class`. */
 function declares(source: string, name: string): boolean {
-  return new RegExp(`\\b(?:const|let|var|function\\*?|class)\\s+${name}\\b`).test(source);
+  return new RegExp(`${DECLARATION}${name}\\b`).test(source);
+}
+
+/**
+ * Every moved name a source declares, in one pass: a single pattern over all the
+ * names, rather than one pattern per name per file, which grew past the 5 s case
+ * bound under CI load as the package gained names (#1688: made cheaper, not given
+ * more time).
+ */
+const ANY_MOVED = new RegExp(`${DECLARATION}(${MOVED.join('|')})\\b`, 'g');
+function declaredMoved(source: string): string[] {
+  return [...source.matchAll(ANY_MOVED)].map((match) => match[1] ?? '');
 }
 
 function sources(directory: string): string[] {
@@ -71,13 +84,23 @@ describe('the Operate words live in @onyourleft/operate-text alone — #2644', (
     expect(declares('const NOT_RECORDED_YET = 1;', 'NOT_RECORDED')).toBe(false);
   });
 
+  it('finds the same declarations in one pass as one name at a time', () => {
+    const source = [
+      "export const NOT_RECORDED = 'not recorded';",
+      'function durationText(seconds: number) {}',
+      "export { bytesText } from '@onyourleft/operate-text';",
+      'const NOT_RECORDED_YET = 1;',
+    ].join('\n');
+    expect(declaredMoved(source)).toEqual(MOVED.filter((name) => declares(source, name)));
+    expect(declaredMoved(source)).toEqual(['NOT_RECORDED', 'durationText']);
+  });
+
   it('declares none of the moved names anywhere under apps/web/src', () => {
     const left: string[] = [];
     // This file is skipped: its own probes above are declarations on purpose.
     for (const file of sources(SRC).filter((each) => each !== HERE)) {
-      const source = readFileSync(file, 'utf8');
-      for (const name of MOVED) {
-        if (declares(source, name)) left.push(`${relative(SRC, file)}: ${name}`);
+      for (const name of declaredMoved(readFileSync(file, 'utf8'))) {
+        left.push(`${relative(SRC, file)}: ${name}`);
       }
     }
     expect(left).toEqual([]);

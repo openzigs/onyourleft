@@ -481,6 +481,12 @@ function interactiveElements(root: Document | Element): Element[] {
     // Any other summary is text by its tag, and is a control only if it CLAIMS
     // to be one: `<summary role="button">` outside a `<details>` is as
     // unreachable as `<span role="button">`, so it falls through to its role.
+    // #2645: `<input type="hidden">` is no control at all — a browser neither
+    // draws nor focuses it, and it has no role. The instance's admin forms
+    // carry their CSRF token in one; the app's React tree has none.
+    if (element.tagName === 'INPUT' && element.getAttribute('type')?.toLowerCase() === 'hidden') {
+      return false;
+    }
     if (element.tagName !== 'SUMMARY' && NATIVELY_INTERACTIVE.has(element.tagName)) {
       return true;
     }

@@ -649,7 +649,7 @@ const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
  */
 const MAILED_CODE_LENGTH = 12;
 
-function readableCode(length = 16): string {
+export function readableCode(length = 16): string {
   const ceiling = 256 - (256 % CODE_ALPHABET.length);
   let code = '';
   while (code.length < length) {

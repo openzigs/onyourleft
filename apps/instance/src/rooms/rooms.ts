@@ -334,6 +334,20 @@ export interface Rooms {
    * routes — for an account being erased (#784), before its rows go.
    */
   closeRoomsMadeBy(athleteId: string): Promise<void>;
+  /**
+   * The owner ends `roomId` from Operate (#2612), by the ONE close a room is
+   * over by (#784): its route deleted unless another open room rides the same
+   * bytes — first, as every close does (#948 N-b) — and then the close itself,
+   * which `record` runs inside the operator log's transaction, handing it the
+   * write to make through the store that transaction binds: so the room is
+   * closed and logged, or neither. Its voice channel goes once that has
+   * committed. `false`, with nothing done, for a room that is not a rider's
+   * room or is over already.
+   */
+  end(
+    roomId: string,
+    record: (close: (inside: SqlStore) => Promise<boolean>) => Promise<boolean>,
+  ): Promise<boolean>;
   sweepRateLimits(): void;
   readonly rateLimitSweepPeriodMs: number;
   heldRateLimitKeys(): number;
@@ -892,6 +906,20 @@ export function createRooms(options: RoomsOptions): Rooms {
 
     async closeRoomsMadeBy(athleteId) {
       for (const roomId of await store.listOpenPrivateRoomsMadeBy(athleteId)) await over(roomId);
+    },
+
+    async end(roomId, record) {
+      const room = await store.getRoom(roomId);
+      const made = await store.getPrivateRoom(roomId);
+      if (room === undefined || made === undefined || made.closedAt !== null) return false;
+      const closed = await onRoute(room.routeSha256, async () => {
+        if ((await store.countOpenPrivateRoomsWithRoute(room.routeSha256, roomId)) === 0) {
+          await routes.delete(room.routeSha256);
+        }
+        return record((inside) => inside.closePrivateRoom(roomId, seconds()));
+      });
+      if (closed) await options.voice?.close(roomId);
+      return closed;
     },
 
     sweepRateLimits() {

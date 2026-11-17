@@ -52,7 +52,9 @@
  * {@link RideControllerOptions.remembered}, and then a remembered sensor is
  * reconnected when the app opens and when its link drops, on a backoff
  * ({@link RECONNECT_BACKOFF_SECONDS}), and says *Reconnecting…* while it is.
- * A reconnected trainer is asked for nothing (§`reconnect`).
+ * A reconnected trainer is asked for nothing (§`reconnect`), with one
+ * exception: a workout that was riding on it when it dropped carries on once
+ * the rider is pedalling again, easing back up (§`carryOnWorkout`).
  *
  * **No timers.** `tick(now)` is called by whatever owns the clock — a browser
  * interval in `useRideController`, a loop in a test. A controller that set its
@@ -81,6 +83,7 @@ import {
   type WorkoutBlock,
   type WorkoutRescue,
   type WorkoutSegment,
+  STOPPED_CADENCE,
 } from '@onyourleft/domain';
 import {
   deviceProvides,
@@ -520,7 +523,36 @@ export interface RideWorkoutSnapshot {
    * target for a block the trainer was never sent (#1307).
    */
   readonly refused?: boolean | undefined;
+  /**
+   * Where a workout whose trainer dropped stands while the Android shell gets
+   * the trainer back — #2669, the owner's ruling of 2026-11-16 ("Trainer
+   * reconnect workout should carry on"). `undefined` when no trainer of this
+   * workout has dropped, in a browser always. `workout/carry-on-text.ts`
+   * words each one. @see WorkoutCarryOn
+   */
+  readonly carryOn?: WorkoutCarryOn | undefined;
 }
+
+/**
+ * A workout carried across a trainer that dropped and came back — #2669.
+ *
+ * - `reconnecting`: the link is down; the workout is paused where it was, and
+ *   nothing is written.
+ * - `pedal`: the trainer is back, and still nothing is written, control
+ *   included, until the rider is pedalling again.
+ * - `refused`: the rider pedalled and the trainer would not give control
+ *   back. The workout waits for the rider to take control by hand.
+ * - `resumed`: it carries on from the same block and time left, easing up to
+ *   the block's target ({@link CARRY_ON_NOTICE_SECONDS} of notice).
+ */
+export type WorkoutCarryOn = 'reconnecting' | 'pedal' | 'refused' | 'resumed';
+
+/**
+ * How long "Trainer reconnected, workout resumed" stays on the screen after a
+ * workout carried on — #2669. Longer than the ramp (`CARRY_ON_RAMP_SECONDS`),
+ * so the sentence is still there while the resistance comes back. A pick.
+ */
+export const CARRY_ON_NOTICE_SECONDS = 30;
 
 /** Re-plans during the ride, as the screen reads them (#1244). */
 export interface RideReplanSnapshot {
@@ -2876,6 +2908,11 @@ export function createRideController(options: RideControllerOptions): RideContro
     // rather than on the next tick: for that second the screen would otherwise
     // offer a Resume the controller refuses.
     syncPhaseWithEngine();
+    // #2669: after the phase has moved, so a rider pedalling out of an
+    // automatic pause carries a held workout on with the same reading.
+    if (measurement.capability === 'cadence' && measurement.cadence > STOPPED_CADENCE) {
+      void carryOnWorkout();
+    }
     changed();
   };
 
@@ -3013,6 +3050,10 @@ export function createRideController(options: RideControllerOptions): RideContro
           !disposed
         ) {
           entry.retry ??= { attempt: 0, at: now() + backoffSeconds(0), running: false };
+          // And a workout riding on this trainer waits for it, writing nothing.
+          if (workoutRidesOn(entry)) {
+            holdWorkoutForReconnect();
+          }
         }
         changed();
       }),
@@ -3092,13 +3133,15 @@ export function createRideController(options: RideControllerOptions): RideContro
    * `erg-safety.ts`, the remembered target's age in `trainer-target-memory.ts`).
    * `shell-reconnect.test.ts` reads the control point's writes after a reconnect.
    *
-   * ⚠️ **A workout running on the dropped trainer ends here, writing nothing.**
-   * Its session holds the client it was started with, which the drop has
-   * already cost its control (`onControlLost` paused the workout) and which
-   * is about to be closed — so it could only refuse every target. It is
-   * superseded rather than released: the link is down, so a release has no
-   * machine to reach and would only report a Stop that could not land. The
-   * ride itself carries on recording.
+   * ⚠️ **A workout running on the dropped trainer is kept, paused, and
+   * writes nothing here** — the owner's ruling of 2026-11-16 ("Trainer
+   * reconnect workout should carry on"), which reversed this PR's first
+   * answer (end it). Its writes were cut off from every client when the link
+   * dropped ({@link holdWorkoutForReconnect}, from the connection observer in
+   * {@link wire}), before this closes the old one, and it is
+   * handed the NEW one only by {@link carryOnWorkout}, once the rider is
+   * pedalling and control has been taken again. The ride carries on recording
+   * throughout.
    *
    * A failed try lets go of whatever it acquired and is put back on
    * {@link RECONNECT_BACKOFF_SECONDS}. One the rider forgot meanwhile ends
@@ -3116,9 +3159,6 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     retry.running = true;
-    if (entry.trainer !== undefined && workout !== undefined && trainerEntry() === entry) {
-      endWorkoutSession('replace');
-    }
     try {
       detach(entry);
     } catch {
@@ -3154,6 +3194,112 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     entry.retry = undefined;
+    // #2669: the trainer a held workout was riding on is back. Still nothing
+    // is written: the workout waits for the rider to pedal (@see carryOnWorkout).
+    if (
+      workout?.carryOn?.stage === 'reconnecting' &&
+      entry.trainer !== undefined &&
+      trainerEntry() === entry
+    ) {
+      workout.carryOn = { stage: 'pedal' };
+    }
+    changed();
+  };
+
+  /**
+   * Whether the running workout writes to `entry`'s trainer connection —
+   * #2669. False for a workout already held for a reconnect: it writes to
+   * nothing.
+   */
+  const workoutRidesOn = (entry: SensorEntry): boolean =>
+    workout !== undefined &&
+    entry.trainer !== undefined &&
+    workout.trainer.current === entry.trainer;
+
+  /**
+   * Hold the workout while its trainer is got back — #2669. Paused where it
+   * was (the player keeps the block and the time left: `player.ts`
+   * §`linkLost`), and cut off from every client, so that nothing it asks for
+   * — a target, an ease, a release — can reach the old client or the new one.
+   * Only {@link carryOnWorkout} gives it a trainer again.
+   */
+  const holdWorkoutForReconnect = (): void => {
+    if (workout === undefined) {
+      return;
+    }
+    // Usually done already, by the old client's `onControlLost`; again here
+    // because a client that held no control raises none, and the player must
+    // be paused whatever the client said.
+    workout.session.linkLost(rideSeconds(now()));
+    workout.trainer.current = undefined;
+    workout.carryOn = { stage: 'reconnecting' };
+    changed();
+  };
+
+  /**
+   * Carry the held workout on — #2669, the owner's ruling of 2026-11-16,
+   * which made it gentle in four ways, all of them here or below:
+   *
+   * 1. **Pedalling first.** Called on a cadence reading above
+   *    `STOPPED_CADENCE` (@see onMeasurement) and on nothing else, so nothing
+   *    — not even Request Control — reaches the trainer before the rider is
+   *    pedalling on it again. Not while the ride is paused by the rider.
+   * 2. **Control through the rider's own path**,
+   *    {@link RideController.requestTrainerControl}, with its holds (#718,
+   *    #721). The workout had control when it dropped; taking it back is what
+   *    carrying on means. A trainer that refuses leaves the workout held
+   *    (`refused`), and it is not asked again until the rider takes control
+   *    by hand.
+   * 3. **A ramp, not a step**: the session's `carryOn`, which caps every
+   *    target from the trainer's floor up to the block's over
+   *    `CARRY_ON_RAMP_SECONDS`.
+   * 4. **Only the workout's own targets.** Nothing here writes a target; the
+   *    session does, through the one gated writer. A game ride, a hand-set
+   *    target and anything else stay refused while a workout is loaded, as
+   *    they always were.
+   */
+  const carryOnWorkout = async (): Promise<void> => {
+    const current = workout;
+    const stage = current?.carryOn?.stage;
+    if (
+      current === undefined ||
+      (stage !== 'pedal' && stage !== 'refused') ||
+      phase === 'paused' ||
+      disposed
+    ) {
+      return;
+    }
+    const entry = trainerEntry();
+    const connection = entry?.trainer;
+    if (entry === undefined || connection === undefined || entry.retry !== undefined) {
+      return;
+    }
+    // A write to the old client still settling would be answered after the
+    // session had been handed the new one. It settles in a moment; the next
+    // reading tries again.
+    if (current.session.state().writing) {
+      return;
+    }
+    const client = connection.control;
+    if (!client.hasControl()) {
+      if (stage === 'refused') {
+        return;
+      }
+      current.carryOn = { stage: 'asking' };
+      changed();
+      await controller.requestTrainerControl();
+      if (workout !== current || current.carryOn?.stage !== 'asking') {
+        return;
+      }
+      if (entry.trainer !== connection || !client.hasControl()) {
+        current.carryOn = { stage: 'refused' };
+        changed();
+        return;
+      }
+    }
+    current.trainer.current = connection;
+    current.carryOn = { stage: 'resumed', at: now() };
+    current.session.carryOn(rideSeconds(now()));
     changed();
   };
 
@@ -3583,6 +3729,18 @@ export function createRideController(options: RideControllerOptions): RideContro
     readonly record: WorkoutRecord;
     readonly session: WorkoutSession;
     /**
+     * The trainer connection every write of this workout goes to — #2669.
+     * `undefined` while a trainer that dropped is being got back, so nothing
+     * the session asks for can reach any machine; a NEW connection once it
+     * is back and the workout carries on (@see carryOnWorkout).
+     */
+    readonly trainer: { current: TrainerConnection | undefined };
+    /** @see RideWorkoutSnapshot.carryOn. `at` is when it carried on. */
+    carryOn:
+      | { readonly stage: 'reconnecting' | 'pedal' | 'asking' | 'refused' }
+      | { readonly stage: 'resumed'; readonly at: UnixSeconds }
+      | undefined;
+    /**
      * Re-plans for this workout (#1244): set once the rider's goals and
      * library have been read, and only when they switched re-plans on.
      */
@@ -3719,6 +3877,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       },
       blockAverageWatts: blockAverage(workout),
       refused: state.raiseRefused,
+      carryOn:
+        workout.carryOn === undefined
+          ? undefined
+          : workout.carryOn.stage === 'asking'
+            ? 'pedal'
+            : workout.carryOn.stage,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
       // the library disagreeing about the same block.
@@ -4867,6 +5031,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       // left running would be a second writer on one control point.
       endManualErg();
       const timeline = expandWorkout(record.workout);
+      // #2669: which connection the session writes to, read on every call.
+      // Only `holdWorkoutForReconnect` empties it and only `carryOnWorkout`
+      // fills it again, with the reconnected trainer's NEW connection.
+      const bound: { current: TrainerConnection | undefined } = { current: connection };
+      const unbound = (): TargetHeldBack => new TargetHeldBack('disconnected', TRAINER_DETACHED);
       const session = createWorkoutSession({
         timeline,
         thresholdPower,
@@ -4875,23 +5044,39 @@ export function createRideController(options: RideControllerOptions): RideContro
         control: {
           // #721: per write, through the one rule — @see mustWaitForForget.
           // `stop` and `letGo` are not: a release is never held back.
-          setTargetPower: gatedTargets(client, connection.powerRange.minimum).setTargetPower,
-          stop: () => client.stop(),
+          setTargetPower: (target) =>
+            bound.current === undefined
+              ? Promise.reject(unbound())
+              : gatedTargets(
+                  bound.current.control,
+                  bound.current.powerRange.minimum,
+                ).setTargetPower(target),
+          stop: () => bound.current?.control.stop() ?? Promise.reject(unbound()),
           // #2348: the step-down, when the session asks for one, is written
           // by the same release, immediately before its Stop.
           letGo: async (stepDownTo): Promise<WorkoutRelease> => {
+            const to = bound.current;
+            if (to === undefined) {
+              // #2669: ended while held for a reconnect. There is no link to
+              // release, so nothing is written and no release is begun — a
+              // release here would report a Stop that never left.
+              throw unbound();
+            }
             const release = beginRelease(
-              client,
+              to.control,
               stepDownTo === undefined
                 ? undefined
-                : { to: stepDownTo, floor: connection.powerRange.minimum },
+                : { to: stepDownTo, floor: to.powerRange.minimum },
             );
             return { stop: await release.stop, steppedDown: await release.steppedDown };
           },
           // #1305: a read. What the client believes the trainer holds, a
           // hand-set target from before this workout included, and what
           // this app last had acknowledged where the client has forgotten.
-          targetPower: () => workoutsViewOfTheTarget(client, trainerId),
+          targetPower: () =>
+            bound.current === undefined
+              ? { kind: 'none' }
+              : workoutsViewOfTheTarget(bound.current.control, trainerId),
         },
         // #441: what an ease writes — the machine's own reported minimum.
         powerFloor: connection.powerRange.minimum,
@@ -4904,6 +5089,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       const started: WorkoutInProgress = {
         record,
         session,
+        trainer: bound,
+        carryOn: undefined,
         replan: undefined,
         heartRateHold,
         thresholdWatts: thresholdPower,
@@ -5162,13 +5349,26 @@ export function createRideController(options: RideControllerOptions): RideContro
       // stopped riding the workout too, and a workout whose clock ran through
       // that break would put them a minute further into an interval than they
       // are.
-      if (phase === 'paused') {
+      // #2669: a workout held for its trainer's reconnect is neither paused
+      // (an ease would be a write) nor resumed (its clock would run on with
+      // no trainer) by the ride: only `carryOnWorkout` moves it.
+      const held = workout?.carryOn !== undefined && workout.carryOn.stage !== 'resumed';
+      if (held) {
+        // Nothing: it stays where it was.
+      } else if (phase === 'paused') {
         workout?.session.pause(rideSeconds(at));
       } else if (phase === 'recording') {
         if (workout?.session.state().player.status === 'paused') {
           workout.session.resume(rideSeconds(at));
         }
         workoutTick(at);
+      }
+      // #2669: "Trainer reconnected, workout resumed" for a while, then gone.
+      if (
+        workout?.carryOn?.stage === 'resumed' &&
+        at - workout.carryOn.at >= CARRY_ON_NOTICE_SECONDS
+      ) {
+        workout.carryOn = undefined;
       }
       // #1244: after the workout's own tick, and in every phase — a paused
       // ride is when a job in flight is dropped and a waiting move is seen to

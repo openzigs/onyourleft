@@ -63,12 +63,7 @@ import {
 import { denseTownFixture } from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
 import { urbanFixture } from '../src/game/testing/urban-fixtures';
-import {
-  URBAN_WINDOW_METRES,
-  urbanClassMap,
-  type UrbanClass,
-  type UrbanClassMap,
-} from '../src/game/urban-class';
+import { urbanClassMap } from '../src/game/urban-class';
 import type { CorridorState, WorldCorridor } from '../src/game/world-data/corridor';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../src/local-athlete';
 import { readMapTilesChoice } from '../src/map/tiles-preference';
@@ -85,6 +80,7 @@ import {
   type ClassedItem,
   type DrawnJunction,
 } from './corridor-fixture';
+import { urbanRunsOf, type UrbanRun } from './urban-runs';
 
 const QUERY = new URLSearchParams(location.search);
 
@@ -253,25 +249,6 @@ function median(values: readonly number[]): number {
   return sorted.length % 2 === 1
     ? (sorted[middle] ?? 0)
     : ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
-}
-
-/** One run of an urban class along a route — #1633. */
-export interface UrbanRun {
-  readonly urban: UrbanClass;
-  readonly metres: number;
-}
-
-/** Every run of `map` along a route of `total` metres, window by window, read through `classAt`. */
-function urbanRunsOf(map: UrbanClassMap, total: number): readonly UrbanRun[] {
-  const runs: { urban: UrbanClass; metres: number }[] = [];
-  for (let start = 0; start < total; start += URBAN_WINDOW_METRES) {
-    const urban = map.classAt(start + Math.min(URBAN_WINDOW_METRES, total - start) / 2);
-    const metres = Math.min(URBAN_WINDOW_METRES, total - start);
-    const last = runs[runs.length - 1];
-    if (last?.urban === urban) last.metres += metres;
-    else runs.push({ urban, metres });
-  }
-  return runs;
 }
 
 /**

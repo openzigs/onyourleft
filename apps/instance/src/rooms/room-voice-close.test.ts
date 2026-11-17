@@ -99,6 +99,20 @@ describe('a room that is over deletes its voice channel (#874)', () => {
     expect(discord.ourChannels()).toEqual([]);
   });
 
+  it('an operator ending the room deletes its channel, and a refused end leaves it (#2612)', async () => {
+    const { w, discord, voice } = await withVoice();
+    const anna = await riderIn(w, await testDevice());
+    const room = await madeRoom(w, anna.token);
+    await voice.inviteFor(room.roomId, 8);
+    expect(await w.rooms.end(room.roomId, (close) => w.freshRead((store) => close(store)))).toBe(
+      true,
+    );
+    expect(discord.ourChannels()).toEqual([]);
+    expect(await w.rooms.end(room.roomId, (close) => w.freshRead((store) => close(store)))).toBe(
+      false,
+    );
+  });
+
   it('Discord refusing the delete never keeps a room open', async () => {
     const { w, discord, voice } = await withVoice();
     const anna = await riderIn(w, await testDevice());

@@ -184,6 +184,29 @@ export {
   TACTIC_MEMORY_AT_START,
 } from './tactics';
 
+// A language model's bot tactics (#2709, ADR 0071 D-3): the race state it is
+// shown and the answer it may give, each checked field by field. No power field.
+export type {
+  ModelTacticsAnswer,
+  ModelTacticsBotView,
+  ModelTacticsInput,
+  ModelTacticsInputProblem,
+  ModelTacticsInputRead,
+  ModelTacticsInvalid,
+  ModelTacticsMove,
+  ModelTacticsTarget,
+} from './model-tactics';
+export {
+  MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
+  MODEL_TACTICS_INPUT_MOST_CHARACTERS,
+  MODEL_TACTICS_MOST_SEATS,
+  modelTacticsAnswerFormat,
+  modelTacticsAnswerSchema,
+  modelTacticsSeats,
+  readModelTacticsAnswer,
+  readModelTacticsInput,
+} from './model-tactics';
+
 export type { BotPlanInput, BotPlanStep, BotPlanTactic, BotRacePlan } from './plan';
 export {
   BOT_PLAN_SURGE_CEILING,

@@ -3,6 +3,10 @@
 import { DEFAULT_BLOBS_PATH, DEFAULT_DATABASE_PATH } from '../server-config.ts';
 import {
   accountErase,
+  adminCode,
+  adminPasskeysConfirm,
+  adminPasskeysList,
+  adminPasskeysRevoke,
   analysisSettingsClear,
   analysisSettingsOthers,
   backup,
@@ -37,6 +41,8 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   load-accounts erase
   account-erase [--confirm]   (the rider's recovery code on standard input)
   analysis-settings clear | others on|off
+  admin-code   (a one-time code for the admin pages, valid 10 minutes)
+  admin-passkeys list | revoke <id> | confirm <id>   (the owner's passkeys for the admin pages)
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -234,6 +240,24 @@ export async function runCommand(
           (args[0] === 'on' || args[0] === 'off')
         ) {
           report = await analysisSettingsOthers(paths, args[0] === 'on');
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'admin-code': {
+        if (args.length > 0) throw new CommandError(USAGE);
+        report = await adminCode(paths);
+        break;
+      }
+      case 'admin-passkeys': {
+        const action = args.shift();
+        if (action === 'list' && args.length === 0) {
+          report = await adminPasskeysList(paths);
+        } else if (action === 'revoke' && args.length === 1) {
+          report = await adminPasskeysRevoke(paths, args[0] as string);
+        } else if (action === 'confirm' && args.length === 1) {
+          report = await adminPasskeysConfirm(paths, args[0] as string);
         } else {
           throw new CommandError(USAGE);
         }

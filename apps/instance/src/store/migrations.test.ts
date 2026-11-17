@@ -116,6 +116,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   // The columns named, so migration 0023's `reasoning_tokens` is NULL (#1268).
   athlete_hosted_key: `INSERT INTO athlete_hosted_key (athlete_id, url, model, iv, ciphertext, set_at) VALUES ('a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 25)`,
   athlete_hosted_consent: `INSERT INTO athlete_hosted_consent VALUES ('a', 'https://models.example', 26)`,
+  athlete_tactics_consent: `INSERT INTO athlete_tactics_consent VALUES ('a', 'http://ollama:11434/v1', 26)`,
   room_removal: `INSERT INTO room_removal VALUES ('room', 'a', 23)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
   statement: `INSERT INTO statement VALUES (1, 'b', 'suspend', 'Facts', 'report', NULL, 'Terms 2', NULL, 0, NULL, 28)`,
@@ -138,6 +139,13 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   backup_lease: `INSERT INTO backup_lease VALUES ('${'f'.repeat(64)}', 'token', 'host:1', 40)`,
   // #2609: the operator's settings row, every column set.
   analysis_setting: `INSERT INTO analysis_setting VALUES (1, 'http://ollama:11434/v1', 'm', 512, 1, 0, 1, 39, 'cli')`,
+  // #2641: a code redeemed, and the session it opened for athlete 'a'.
+  admin_code: `INSERT INTO admin_code VALUES ('${'a1'.repeat(32)}', 41, 641, 42, 'cli')`,
+  admin_session: `INSERT INTO admin_session VALUES ('${'a2'.repeat(32)}', 'a', 'key-a', 'tunnel', 'code', '${'a3'.repeat(32)}', 42, 43, 7242)`,
+  // #2642: a passkey, the session above tied to it, and a sign-in's challenge.
+  admin_passkey: `INSERT INTO admin_passkey VALUES ('p1', 'cred-1', 'ride.example', 'es256', '04ab', 0, 'aGFuZGxl', 'key-a', 'Laptop', 'tunnel', 44, NULL, NULL)`,
+  admin_passkey_session: `INSERT INTO admin_passkey_session VALUES ('${'a2'.repeat(32)}', 'p1')`,
+  admin_challenge: `INSERT INTO admin_challenge VALUES ('${'a4'.repeat(32)}', 'sign_in', NULL, NULL, NULL, NULL, 165)`,
 };
 
 /**
@@ -156,6 +164,10 @@ const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0036-notice-erasure': 'notice_erasure',
   '0039-leaderboard-integrity': 'segment_integrity_log',
   '0040-operator-log': 'operator_log',
+  // Not a refusal: 0045's `down` ENDS every session a passkey opened (#2642),
+  // so the earlier rows it keeps are counted with no session tied to a
+  // passkey; a test of its own holds what it ends and what it keeps.
+  '0045-admin-passkeys': 'admin_passkey_session',
 };
 
 interface Snapshot {
@@ -218,6 +230,14 @@ afterEach(async () => {
   await Promise.all(directories.map((path) => rm(path, { recursive: true, force: true })));
   directories = [];
 });
+
+/** A database at `path` migrated through `name` and no further. */
+async function migratedThrough(path: string, name: string): Promise<void> {
+  await withKysely(path, async (db) => {
+    await migrateToLatest(db);
+    while ((await appliedMigrations(db)).at(-1) !== name) await migrateDownOne(db);
+  });
+}
 
 async function freshPath(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-migrations-'));
@@ -435,6 +455,148 @@ describe('the migrations (#769)', () => {
     expect(snapshot(path)).toEqual(before);
     await withKysely(path, async (db) => {
       expect((await appliedMigrations(db)).at(-1)).toBe('0040-operator-log');
+    });
+  });
+
+  it('keeps the operator log append-only through 0044’s rebuild, and widens its sources and actor rule (#2641)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO operator_log VALUES (1, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+      // The admin sources, naming the owner or nobody.
+      database.exec(
+        `INSERT INTO operator_log VALUES (2, 39, 'admin_tunnel', 'a', 'admin_sign_in', 'code', 'done')`,
+      );
+      database.exec(
+        `INSERT INTO operator_log VALUES (3, 40, 'admin_loopback', NULL, 'admin_refused', 'code,refused=2', 'refused')`,
+      );
+      for (const refused of [
+        `INSERT INTO operator_log VALUES (4, 41, 'web', NULL, 'migrate', NULL, 'done')`,
+        `INSERT INTO operator_log VALUES (4, 41, 'cli', 'a', 'migrate', NULL, 'done')`,
+        `INSERT INTO operator_log VALUES (4, 41, 'app', NULL, 'migrate', NULL, 'done')`,
+      ]) {
+        expect(() => database.exec(refused), refused).toThrow(/CHECK constraint failed/);
+      }
+      expect(() => database.exec(`UPDATE operator_log SET outcome = 'failed'`)).toThrow(
+        /append-only/,
+      );
+      expect(() => database.exec(`DELETE FROM operator_log WHERE id = 1`)).toThrow(/append-only/);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('refuses to undo 0044 while the operator log holds an admin entry, and changes nothing; with none it keeps every entry and its id (#2641)', async () => {
+    const path = await freshPath();
+    await migratedThrough(path, '0044-admin-sign-in');
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+      database.exec(
+        `INSERT INTO operator_log VALUES (9, 39, 'admin_tunnel', NULL, 'admin_refused', 'code,refused=1', 'refused')`,
+      );
+    } finally {
+      database.close();
+    }
+    const before = snapshot(path);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0044-admin-sign-in');
+    });
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /holds entries from the admin pages/,
+    );
+    expect(snapshot(path)).toEqual(before);
+
+    // With no admin entry, `down` goes, and the CLI's entry stays with its id.
+    const other = await freshPath();
+    await migratedThrough(other, '0044-admin-sign-in');
+    const seeded = openDatabase(other);
+    try {
+      seeded.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+    } finally {
+      seeded.close();
+    }
+    await withKysely(other, (db) => migrateDownOne(db));
+    const after = openDatabase(other);
+    try {
+      expect(after.prepare('SELECT id, source FROM operator_log').all()).toEqual([
+        { id: 7, source: 'cli' },
+      ]);
+      expect(() => after.exec(`UPDATE operator_log SET outcome = 'failed'`)).toThrow(/append-only/);
+      expect(() =>
+        after.exec(
+          `INSERT INTO operator_log VALUES (8, 39, 'admin_tunnel', NULL, 'admin_refused', NULL, 'refused')`,
+        ),
+      ).toThrow(/CHECK constraint failed/);
+    } finally {
+      after.close();
+    }
+  });
+
+  it('takes 0045’s passkeys away with every session they opened, and leaves every other row as it was, down and up again (#2642)', async () => {
+    const path = await freshPath();
+    // Up to 0045 and no further: the migrations after it are undone first (#2709's 0046).
+    await withKysely(path, async (db) => {
+      await migrateToLatest(db);
+      while ((await appliedMigrations(db)).at(-1) !== '0045-admin-passkeys') {
+        await migrateDownOne(db);
+      }
+    });
+    // Every table seeded, then a second session, opened with a code, that no passkey opened.
+    seedEveryTable(path);
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO admin_session VALUES ('${'b2'.repeat(32)}', 'a', 'key-a', 'tunnel', 'code', '${'b3'.repeat(32)}', 50, 51, 7250)`,
+      );
+      database.exec(
+        `INSERT INTO operator_log VALUES (11, 52, 'admin_tunnel', 'a', 'admin_passkey_enrolled', 'es256', 'done')`,
+      );
+    } finally {
+      database.close();
+    }
+    const before = snapshot(path);
+    expect(before.rows).toMatchObject({
+      admin_passkey: 1,
+      admin_passkey_session: 1,
+      admin_session: 2,
+    });
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0045-admin-passkeys');
+      await migrateDownOne(db);
+    });
+    const undone = snapshot(path);
+    const { admin_passkey, admin_passkey_session, admin_challenge, ...rest } = before.rows;
+    expect([admin_passkey, admin_passkey_session, admin_challenge]).toEqual([1, 1, 1]);
+    // The passkey's session is ended; the code session and every other row stay.
+    expect(undone.rows).toEqual({ ...rest, admin_session: 1 });
+    const kept = openDatabase(path);
+    try {
+      expect(kept.prepare('SELECT token_sha256 FROM admin_session').all()).toEqual([
+        { token_sha256: 'b2'.repeat(32) },
+      ]);
+      // The log's entry about the passkey stays: the log is append-only.
+      expect(kept.prepare('SELECT action FROM operator_log WHERE id = 11').all()).toEqual([
+        { action: 'admin_passkey_enrolled' },
+      ]);
+    } finally {
+      kept.close();
+    }
+    await withKysely(path, (db) => migrateUpOne(db));
+    const redone = snapshot(path);
+    expect(redone.schema).toEqual(before.schema);
+    expect(redone.rows).toEqual({
+      ...undone.rows,
+      admin_passkey: 0,
+      admin_passkey_session: 0,
+      admin_challenge: 0,
     });
   });
 

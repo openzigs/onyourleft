@@ -59,6 +59,9 @@ import * as operatorLog from './0040-operator-log.ts';
 import * as openRoomsIndex from './0041-open-rooms-index.ts';
 import * as backupRecords from './0042-backup-records.ts';
 import * as analysisSetting from './0043-analysis-setting.ts';
+import * as adminSignIn from './0044-admin-sign-in.ts';
+import * as adminPasskeys from './0045-admin-passkeys.ts';
+import * as tacticsConsent from './0046-tactics-consent.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -110,4 +113,7 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0041-open-rooms-index': openRoomsIndex,
   '0042-backup-records': backupRecords,
   '0043-analysis-setting': analysisSetting,
+  '0044-admin-sign-in': adminSignIn,
+  '0045-admin-passkeys': adminPasskeys,
+  '0046-tactics-consent': tacticsConsent,
 };

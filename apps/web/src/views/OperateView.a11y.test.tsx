@@ -68,8 +68,10 @@ describe('the Operate area — #2603', () => {
       'Accounts',
       'Backups',
       'AI backend',
+      'Rooms',
+      'Instance keys',
+      'Recent problems',
       'Operator log',
-      'Still to come',
     ]);
     // #2604: Status's one control, Compare with main, is a target too.
     for (const each of controls()) expect(each.classList.contains('oyl-button')).toBe(true);
@@ -92,6 +94,11 @@ describe('the Operate area — #2603', () => {
       'Read the list again',
       'Set, replace or remove it on the Instance screen',
       'Return to .env',
+      // #2612: each open room's own.
+      'End room',
+      'End room',
+      // #2613: the Keys section's one control.
+      'Rotate the encryption key',
     ]);
   });
 

@@ -27,6 +27,8 @@ any of this. ⚠️ The Android shell is not Web Bluetooth: since
 (`apps/web/src/ride/remembered-sensors.ts`) and reconnects them itself, asking a trainer for nothing;
 since [#2672](https://github.com/openzigs/onyourleft/issues/2672) the steering controller too
 (`ride/shell-steering-controller.ts`).
+A workout riding on a trainer that dropped carries on only once the rider pedals again, taking control
+back and ramping up from the trainer's floor (`ride/controller.ts` §`carryOnWorkout`).
 
 **And `'bluetooth' in navigator` is not the feature detect.** Chrome on Linux exposes the object and
 WebBluetoothCG's own status file says *"Linux is partially implemented and not supported"*. #40's
