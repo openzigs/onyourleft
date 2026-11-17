@@ -23,6 +23,7 @@ import {
 import {
   EAVES_OVERHANG_METRES,
   FOOTPRINT_ROLES,
+  FOOTPRINT_VERTEX_FLOATS,
   type FootprintPlan,
   type FootprintVerdict,
 } from './footprint-buildings';
@@ -2133,4 +2134,13 @@ export function planFingerprint(plans: readonly FootprintPlan[], withPaint = tru
 export function eavesOverhangOf(plan: FootprintPlan): number {
   const eaves = plan.archetype === 'unknown' ? 'seeded' : ARCHETYPE_FEATURES[plan.archetype].eaves;
   return eaves === 'seeded' ? EAVES_OVERHANG_METRES : eaves;
+}
+
+/**
+ * A plan's plinth, in triangles — #2761: what its far level draws beside the
+ * walls and roof that `footprint-buildings.ts` §`FOOTPRINT_MAX_FAR_TRIANGLES`
+ * caps, so a far house on a slope stands on the ground.
+ */
+export function plinthTriangles(plan: FootprintPlan): number {
+  return plan.triangles.plinth.length / (3 * FOOTPRINT_VERTEX_FLOATS);
 }

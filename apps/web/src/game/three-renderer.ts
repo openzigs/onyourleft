@@ -21809,9 +21809,10 @@ export interface DrawnMappedBuilding {
  *   (`MAPPED_CHUNK_METRES`) changes, or the rung does; never per frame. A
  *   frame that is not a refill reads one number and allocates nothing.
  * - **Uploaded in part**: each attribute's update range is what was written.
- * - **The far level**, beyond `MAPPED_BUILDING_NEAR_METRES`, is a plan's walls
- *   and roof (#1540's `farTriangleCount`). The plinth, parapet and door are
- *   left out.
+ * - **The far level**, beyond `MAPPED_BUILDING_NEAR_METRES`, is a plan's walls,
+ *   plinth and roof (#1540's `farTriangleCount`). The parapet and door are
+ *   left out. ⚠️ The plinth was left out too until #2761, and a far house on
+ *   falling ground stood on nothing on its downhill side.
  * - **The texture coordinates** of a plan are in its storeys and bays
  *   (`footprint-buildings.ts` §`BAY_METRES`). They are taken back to metres and
  *   laid at the photograph's own size, as {@link projectedInMetres} lays a

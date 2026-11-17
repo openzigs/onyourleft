@@ -21,8 +21,12 @@ import { BUILDING_FIELD_NAMES, type BuildingFeature } from '@onyourleft/map-feat
 import { BUILDING_FIELDS_DECODED } from '@onyourleft/map-features/testing';
 import { describe, expect, it } from 'vitest';
 
-import { footprintPlans, type FootprintPlanOptions } from './footprint-buildings';
-import { denseTownFixture, footprintFixture } from './footprint-fixtures-testing';
+import {
+  footprintPlans,
+  type FootprintPlan,
+  type FootprintPlanOptions,
+} from './footprint-buildings';
+import { denseTownFixture, footprintFixture, plinthTriangles } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import {
   corridorFeaturesOfPacked,
@@ -85,15 +89,22 @@ function plansDigest(
   // #2662 raised `FOOTPRINT_MAX_AREA` to 100 000 m², so the fixture's 22 500 m² warehouse is
   // kept since; the record predates it. The warehouse is left out of the corridor
   // ({@link withoutTheWarehouse}) and its verdict counted as the record has it, `too-large`.
+  // #2761 counts the plinth in `farTriangleCount`, since the far level draws it; the record
+  // predates it, so the plinth is taken back out of the count. The triangles are unmoved.
   const recorded = { ...verdicts, 'too-large': verdicts['too-large'] + 1 };
-  const text = JSON.stringify({ plans, verdicts: recorded }, (key, value: unknown) =>
-    key === 'inferred' ||
-    key === 'steeple' ||
-    (key === 'spire' && ArrayBuffer.isView(value) && (value as Float32Array).length === 0)
-      ? undefined
-      : ArrayBuffer.isView(value)
-        ? Array.from(value as Float32Array)
-        : value,
+  const text = JSON.stringify(
+    { plans, verdicts: recorded },
+    function (this: unknown, key: string, value: unknown) {
+      return key === 'inferred' ||
+        key === 'steeple' ||
+        (key === 'spire' && ArrayBuffer.isView(value) && (value as Float32Array).length === 0)
+        ? undefined
+        : key === 'farTriangleCount'
+          ? (value as number) - plinthTriangles(this as FootprintPlan)
+          : ArrayBuffer.isView(value)
+            ? Array.from(value as Float32Array)
+            : value;
+    },
   );
   return { plans: plans.length, digest: createHash('sha256').update(text).digest('hex') };
 }
