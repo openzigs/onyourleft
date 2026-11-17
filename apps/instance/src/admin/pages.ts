@@ -209,32 +209,17 @@ export function card(inner: string, tone: 'card' | 'danger' = 'card'): string {
   return `<div class="panel${tone === 'danger' ? ' danger' : ''}">\n${inner.trimEnd()}\n</div>\n`;
 }
 
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-] as const;
-
 /**
- * A moment in a table's When column (#2771): `14 Nov 2026, 09:30 UTC`, the
- * same on every screen, in a `<time>` that carries the moment itself. A value
- * that is not a moment is drawn as operate-text's `momentText` draws it.
+ * A moment in a table's When column (#2771): operate-text's own words for it
+ * (`2026-11-14 09:30 UTC`, the app panels' — ADR 0069 D-7), in a `<time>` that
+ * carries the moment itself for a browser or a reader that wants it. A value
+ * that is not a moment is drawn as words alone, escaped.
  */
 export function readableMoment(iso: string): string {
-  const at = new Date(Date.parse(iso));
-  if (!Number.isFinite(at.getTime())) return escapeHtml(momentText(iso));
-  const two = (value: number): string => String(value).padStart(2, '0');
-  const text = `${String(at.getUTCDate())} ${MONTHS[at.getUTCMonth()] ?? ''} ${String(at.getUTCFullYear())}, ${two(at.getUTCHours())}:${two(at.getUTCMinutes())} UTC`;
-  return `<time datetime="${escapeHtml(iso)}">${text}</time>`;
+  const words = escapeHtml(momentText(iso));
+  return Number.isFinite(Date.parse(iso))
+    ? `<time datetime="${escapeHtml(iso)}">${words}</time>`
+    : words;
 }
 
 /**

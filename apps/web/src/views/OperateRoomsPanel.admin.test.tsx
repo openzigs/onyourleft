@@ -74,8 +74,10 @@ describe('the app’s Rooms panel and the admin Rooms page say the same thing (#
         notice: null,
       });
       const doc = new DOMParser().parseFromString(`<main>${html}</main>`, 'text/html');
-      const adminLines = [...doc.querySelectorAll('ol.rooms > li > p:first-child')].map((line) =>
-        squash(line.textContent),
+      // Since #2771 a room is a table row: its kind, then the rest of its line,
+      // joined with the ", " the table took away, are the line, word for word.
+      const adminLines = [...doc.querySelectorAll<HTMLTableRowElement>('table tbody tr')].map(
+        (row) => `${squash(row.cells[0]?.textContent)}, ${squash(row.cells[1]?.textContent)}`,
       );
       expect(adminLines).toEqual(PINNED_LINES);
       expect(appLines).toEqual(adminLines);

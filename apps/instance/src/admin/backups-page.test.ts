@@ -273,7 +273,7 @@ describe('the Backups page is the route’s answer, and back up now is read back
     const newest = await page(browser, token);
     expect(listed(newest)).toEqual(records.slice(0, 20).map((each) => String(each.id)));
     expect(newest).toContain('<a href="/admin/backups?all=1">Show older backups (5 more)</a>');
-    expect(newest).toContain(`<time datetime="${at(0)}">14 Nov 2026, 23:00 UTC</time>`);
+    expect(newest).toContain(`<time datetime="${at(0)}">2026-11-14 23:00 UTC</time>`);
 
     const answer = await browser.send('GET', '/admin/backups?all=1', { cookie: token });
     expect(answer.status).toBe(200);

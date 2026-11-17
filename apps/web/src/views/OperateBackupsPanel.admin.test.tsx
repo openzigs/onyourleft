@@ -30,6 +30,7 @@ interface AdminPages {
     readonly strength: 'code' | 'passkey';
     readonly csrf: string;
     readonly notice: null;
+    readonly all: boolean;
   }): string;
 }
 
@@ -87,10 +88,14 @@ describe('the app’s Backups panel and the admin Backups page say the same thin
       strength: 'code',
       csrf: 'a'.repeat(64),
       notice: null,
+      all: false,
     });
     const doc = new DOMParser().parseFromString(`<main>${html}</main>`, 'text/html');
-    const adminLines = [...doc.querySelectorAll('ol.backups > li > p:first-child')].map((line) =>
-      squash(line.textContent),
+    // Since #2771 a row's moment is its When column: joined to the Backup column
+    // with the ", " the table took away, the row is the line, word for word.
+    const adminLines = [...doc.querySelectorAll<HTMLTableRowElement>('table tbody tr')].map(
+      (row) =>
+        `${squash(row.cells[0]?.textContent)}, ${squash(row.cells[1]?.querySelector('p')?.textContent)}`,
     );
     const adminSteps = [...doc.querySelectorAll('ol.restore > li')].map((step) =>
       squash(step.textContent),

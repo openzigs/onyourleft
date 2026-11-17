@@ -119,9 +119,9 @@ describe('the operator log, a page at a time, newest first (#2645)', () => {
       '<code>code</code>',
     ]);
     expect(shown.at(-1)?.[1]).toBe('<strong>Admin sign-in code made</strong>');
-    // Each row carries its moment, readable and exact.
+    // Each row carries its moment in operate-text's words, and exact in its <time>.
     expect(shown[0]?.[0]).toMatch(
-      /^<time datetime="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z">\d{1,2} [A-Z][a-z]{2} \d{4}, \d{2}:\d{2} UTC<\/time>$/,
+      /^<time datetime="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z">\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC<\/time>$/,
     );
     expect(new Set(shown.map((row) => row.join('|'))).size).toBe(120);
   });

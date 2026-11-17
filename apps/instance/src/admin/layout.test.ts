@@ -219,17 +219,14 @@ describe('a change is drawn with the app’s button kinds; one hard to undo is d
   });
 });
 
-describe('a table’s When column is a readable moment (#2771)', () => {
-  it('draws day, month, year and the minute in UTC, inside a <time> carrying the moment', () => {
+describe('a table’s When column is a moment in operate-text’s words (#2771)', () => {
+  it('draws the minute in UTC as the app’s panels do, inside a <time> carrying the moment', () => {
     expect(readableMoment('2026-11-04T09:05:00.000Z')).toBe(
-      '<time datetime="2026-11-04T09:05:00.000Z">4 Nov 2026, 09:05 UTC</time>',
-    );
-    expect(readableMoment('2027-01-31T23:59:59.999Z')).toBe(
-      '<time datetime="2027-01-31T23:59:59.999Z">31 Jan 2027, 23:59 UTC</time>',
+      '<time datetime="2026-11-04T09:05:00.000Z">2026-11-04 09:05 UTC</time>',
     );
   });
 
-  it('draws a value that is not a moment as operate-text does, escaped, and no <time>', () => {
+  it('draws a value that is not a moment as words alone, escaped, and no <time>', () => {
     expect(readableMoment('<b>soon</b>')).toBe('&lt;b&gt;soon&lt;/b&gt; UTC');
   });
 });
