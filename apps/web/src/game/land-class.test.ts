@@ -36,8 +36,8 @@ import {
 import { NO_PAVEMENT_DATA } from './footways';
 import {
   LAND_CLASS_MAX_BYTES,
-  LAND_CLASS_MAX_WORK,
   LAND_CLASS_OF_KIND,
+  LAND_CLASS_WORK_PER_TILE,
   LEVELLING_MAX_CHUNKS,
   LEVELLING_REACH_METRES,
   LAND_CLASS_CELL_METRES,
@@ -610,7 +610,7 @@ describe('bounded — a work budget on the polygon pass', () => {
       return performance.now() - started;
     };
     const unbudgeted = time(Number.POSITIVE_INFINITY);
-    const budgeted = Math.min(time(LAND_CLASS_MAX_WORK), time(LAND_CLASS_MAX_WORK));
+    const budgeted = Math.min(time(LAND_CLASS_WORK_PER_TILE), time(LAND_CLASS_WORK_PER_TILE));
     expect(budgeted).toBeLessThan(unbudgeted / 4);
     // The unbudgeted build is the slow half on purpose: several seconds under coverage.
   }, 60_000);
@@ -699,12 +699,7 @@ describe('how far built-up land is — #1547', () => {
       rectangle('landuse', 'residential', { minX: -50, maxX: 50, minZ: 50, maxZ: 150 }),
       rectangle('landuse', 'residential', { minX: -50, maxX: 50, minZ: 1_050, maxZ: 1_150 }),
     ];
-    const capped = landClassMask(
-      corridorOf(boxes, towns),
-      LAND_CLASS_MAX_BYTES,
-      LAND_CLASS_MAX_WORK,
-      2,
-    );
+    const capped = landClassMask(corridorOf(boxes, towns), LAND_CLASS_MAX_BYTES, undefined, 2);
     expect(builtUpDistance(capped, 0, 100)).toBe(0);
     expect(builtUpDistance(capped, 0, 1_100)).toBe(Number.POSITIVE_INFINITY);
     const whole = landClassMask(corridorOf(boxes, towns));

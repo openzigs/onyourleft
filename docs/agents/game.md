@@ -1502,7 +1502,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the mask, and every caller passes the ride's. Since
                         #2659 a bridge wherever the map's rivers, streams and
                         canals (the mask's `waterLines`) cross the road, and no
-                        invented one where the map was read
+                        invented one where the map was read.
+                        ⚠️ A mapped lake is drawn between its run's MEDIAN
+                        shores, which can lie over the map's land, so since
+                        #2728 `onOpenWater` (the drawn water, not the mask's)
+                        drops a mapped footprint over it and draws nobody on it
     src/game/settlements.ts
                         places, not houses (#460) — villages and farmsteads on
                         level, low, dry stretches of the route, each building
@@ -1547,6 +1551,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `NO_LAND_CLASS`, today's world, item for item. Since
                         #1547 it also carries each cell's distance to
                         built-up land, which `landform.ts` levels by.
+                        ⚠️ Since #2728 its polygon pass is budgeted per
+                        covered tile (`LAND_CLASS_WORK_PER_TILE`), not per
+                        corridor: a long coast ride spent the old fixed
+                        budget half way and drew the sea after it as grass.
                         Since #1542 the countryside is read off it: a wood
                         planted throughout with a broadleaf edge, hedgerow
                         trees and open pasture on farmland, specimen trees
@@ -1956,7 +1964,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and `DoorPath.walk`) and the mapped footways, never
                         on the carriageway: every line is broken, and every
                         person dropped, within `PERSON_CLEARANCE_METRES`
-                        (3.8) of ANY stretch of the drawn road. Where each is
+                        (3.8) of ANY stretch of the drawn road. ⚠️ Since
+                        #2728 a mapped footway's walkers stand on the drawn
+                        ground (`landform.ts` §`standingOnGround`, as the
+                        scenery does): their `y` from `groundOf` knew nothing
+                        of a seam, a fold or a dip between two far points, and
+                        they walked in the sky. Where each is
                         is a function of the ride's clock, seeded per line and
                         slot; density by village size and land use; runners
                         only on paths and in parks. ≤ 16 bodies within 60 m,

@@ -217,6 +217,13 @@ export interface Person {
   readonly look: PersonLook;
   /** How far from the rider, in plan. */
   readonly distance: number;
+  /**
+   * #2728: what they walk on — a village's pavement or front path, whose `y`
+   * is that street's own drawn top, or a mapped footway, whose `y` is the
+   * ground's (`groundOf`) and which `scene.ts` §`people` stands on the ground
+   * drawn under them.
+   */
+  readonly on: WalkKind;
 }
 
 /** The people a frame draws: bodies near, impostors beyond. */
@@ -874,6 +881,7 @@ export function peopleAt(lines: readonly WalkLine[], options: PeopleOptions): Pe
         height: walker.height,
         look: personLook(walker.hash),
         distance,
+        on: line.kind,
       });
     }
   }

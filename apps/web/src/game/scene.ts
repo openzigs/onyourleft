@@ -130,6 +130,7 @@ import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
+  PEOPLE_FAR_METRES,
   besideSideRoads,
   clearOfPavements,
   footwayWalks,
@@ -137,13 +138,16 @@ import {
   peopleAt,
   streetWalks,
   type PeopleInView,
+  type Person,
+  type WalkKind,
 } from './people';
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
-import { distanceToDrawnRoad } from './road-grid';
+import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
 import {
   bridgeParts,
   MAXIMUM_BRIDGE_PARTS,
+  onOpenWater,
   waterSurface,
   waterways,
   type BridgePart,
@@ -661,7 +665,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // #1541: the people on those streets' pavements and the corridor's
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
-    people: people(input, streets, camera, seed, sideRoads),
+    // #2728: each on the ground drawn under them, and nobody on the drawn water.
+    people: people(input, streets, camera, seed, sideRoads, ground),
     // #2722: and the other cyclists on the road, kept clear of the rider.
     ...cyclistsOf(placedCyclists(input, corridor, riders)),
     terrain: {
@@ -697,6 +702,7 @@ function people(
   camera: CameraPose,
   seed: number,
   sideRoads: readonly SideRoad[],
+  ground: TerrainMesh,
 ): PeopleInView {
   const near = input.people ?? 0;
   if (near <= 0) return NO_PEOPLE;
@@ -712,7 +718,7 @@ function people(
       ...clearOfPavements(footwayWalks(input.worldCorridor, profile, origin, land, rule), streets),
     );
   }
-  return peopleAt(lines, {
+  const placed = peopleAt(lines, {
     x: camera.x,
     z: camera.z,
     seconds: ghostClock(input.state),
@@ -722,7 +728,50 @@ function people(
     road: besideSideRoads(road, sideRoads),
     ground: groundOf(profile, origin, seed, land),
   });
+  // #2728: a person's `y` is `terrainHeightAt`'s at the stretch of road they are
+  // nearest, read at their line's points and carried straight between them. The
+  // drawn ground is neither: another leg's seam (#2101), a fold, a dip between two
+  // points of a long straight footway. On the owner's coast people walked in the sky,
+  // so each stands on the highest triangle drawn under them, as the scenery does
+  // since #2101, and nobody stands where no ground is drawn or on the drawn water.
+  // A village's pavement and front paths are drawn at their own tops, which their
+  // walkers' `y` already is, so only a mapped footway's walkers are stood.
+  if (placed.near.length + placed.far.length === 0) return placed;
+  const ways = waterways(profile, seed, land);
+  const dry = (person: Person): boolean => {
+    if (ways.lakes.length + ways.crossings.length === 0) return true;
+    const beside = nearestOnDrawnRoad(
+      profile,
+      origin,
+      person.x,
+      person.z,
+      // Nobody is drawn beyond this of the camera, so nobody is farther from the road.
+      PEOPLE_FAR_METRES,
+    );
+    return beside === undefined || !onOpenWater(ways, profile, beside.along, beside.lateral);
+  };
+  return { near: stood(placed.near, dry, ground), far: stood(placed.far, dry, ground) };
 }
+
+/** #2728: `people` kept off the drawn water, and a mapped footway's walkers stood on the drawn ground. @see people */
+function stood(
+  people: readonly Person[],
+  dry: (person: Person) => boolean,
+  ground: TerrainMesh,
+): readonly Person[] {
+  const kept = people.filter(dry);
+  const onStreets = kept.filter((person) => STREET_WALKS.has(person.on));
+  if (onStreets.length === kept.length) return kept;
+  const footways = standingOnGround(
+    kept.filter((person) => !STREET_WALKS.has(person.on)),
+    ground,
+  );
+  // Back in the order `peopleAt` gave, nearest first.
+  return [...onStreets, ...footways].sort((a, b) => a.distance - b.distance);
+}
+
+/** What a village's street draws its walkers on, at its own top. @see stood */
+const STREET_WALKS: ReadonlySet<WalkKind> = new Set<WalkKind>(['pavement', 'door-path']);
 
 /** The golf courses and cemeteries in reach — #2685. @see SceneFrame.parkDressing */
 function parkDressing(
