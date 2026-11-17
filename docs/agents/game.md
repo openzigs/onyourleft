@@ -1536,6 +1536,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         The roadside hedge on mapped farmland is low and
                         broken (`settlements.ts` §`roadsidePiece`), rocks
                         small and set back (`scatter.ts` §`STONE_SCALE`).
+                        Since #2662 a seventh class, `bare` (sand, rock,
+                        ice, an airfield, a pier), between built-up and
+                        farmland: nothing grows on it and no field is
+                        fenced across it (`land-class.ts` §`nothingGrowsAt`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
