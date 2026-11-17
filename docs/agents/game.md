@@ -1467,10 +1467,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the ride's land mask, and no invented lake where the
                         map was read: `waterways(profile, seed, land)` takes
                         the mask, and every caller passes the ride's.
-                        ⚠️ A mapped lake is drawn between its run's MEDIAN
-                        shores, which can lie over the map's land, so since
-                        #2728 `onOpenWater` (the drawn water, not the mask's)
-                        drops a mapped footprint over it and draws nobody on it
+                        Since #2754 a mapped lake keeps its run's shores
+                        sample by sample (`LakeShores`, each the middle of
+                        three), its near shore as close as 8 m
+                        (`MAPPED_LAKE_NEAR_METRES`), not its run's medians.
+                        ⚠️ Its drawn water can still lie over the map's land,
+                        so since #2728 `onOpenWater` (the drawn water, not the
+                        mask's) drops a mapped footprint over it and draws
+                        nobody on it
     src/game/settlements.ts
                         places, not houses (#460) — villages and farmsteads on
                         level, low, dry stretches of the route, each building
@@ -1537,7 +1541,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         of (`BARE_SURFACE_OF_KIND`), and the ground draws
                         it in its own colour, not the grass's
                         (`three-renderer.ts` §`bareGroundTints`): no new
-                        vertex attribute.
+                        vertex attribute. Since #2754 a beach or a pier
+                        outranks a park or a town drawn round it
+                        (`BARE_KINDS_OVER_LAND`), and a footprint on it in
+                        a park is still dropped (`insidePark`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's

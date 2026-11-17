@@ -32,6 +32,7 @@ import {
   LAKE_BANK_METRES,
   LAKE_BELOW_ROAD_METRES,
   LAKE_DEPTH_METRES,
+  MAPPED_LAKE_NEAR_METRES,
   MAPPED_LAKE_RISE_METRES,
   WETLAND_GROUND_ABOVE_WATER_METRES,
   inWater,
@@ -214,8 +215,15 @@ describe('a mapped lake beside the road is drawn — #2658', () => {
     expect(lakesOf(LEVEL, maskBeside(LEVEL, 'water', 'lake', 800, 1_600, 130, 240))).toEqual([]);
     expect(lakesOf(LEVEL, maskBeside(LEVEL, 'water', 'lake', 800, 1_600, 30, 40))).toEqual([]);
     // Wide enough from the road's edge, but not once the verge is the road's:
-    // its shore is held 16 m out, and 16 to 35 m is too narrow a lake.
-    expect(lakesOf(LEVEL, maskBeside(LEVEL, 'water', 'lake', 800, 1_600, 5, 35))).toEqual([]);
+    // its shore is held 8 m out since #2754 (16 m before), and 8 to 25 m is
+    // too narrow a lake.
+    expect(lakesOf(LEVEL, maskBeside(LEVEL, 'water', 'lake', 800, 1_600, 5, 25))).toEqual([]);
+  });
+
+  it('holds a shore at the road to the ground’s third column — #2754', () => {
+    const lakes = lakesOf(LEVEL, maskBeside(LEVEL, 'water', 'lake', 800, 1_600, 5, 35));
+    expect(lakes).toHaveLength(1);
+    expect(lakes[0]?.near).toBe(MAPPED_LAKE_NEAR_METRES);
   });
 
   it('looks past a ditch between the road and the lake beyond it', () => {
@@ -247,7 +255,7 @@ describe('a mapped lake beside the road is drawn — #2658', () => {
 });
 
 describe('a lake keeps to the map’s shore where it moves — #2658', () => {
-  it('ends a lake where the shore moves out, and draws no water over the land beside it', () => {
+  it('follows the shore out past a town, and draws no water over the land beside it', () => {
     const origin = corridorOrigin(LEVEL);
     // A cove, then a town between the road and the sea: water 25 to 200 m out
     // from 800 to 1 400 m, then 85 to 200 m from 1 400 to 2 400 m, with
@@ -260,9 +268,12 @@ describe('a lake keeps to the map’s shore where it moves — #2658', () => {
       ]),
     );
     const seed = scatterSeed(LEVEL);
-    const lakes = lakesOf(LEVEL, mask);
-    expect(lakes.length).toBeGreaterThanOrEqual(2);
+    // Until #2754 the shore's move ended one lake and began another; since,
+    // one lake follows it, sample by sample.
+    expect(lakesOf(LEVEL, mask).length).toBeGreaterThanOrEqual(1);
     const bed = -LAKE_BELOW_ROAD_METRES - LAKE_DEPTH_METRES;
+    // Through the cove, 35 m out: the lake bed.
+    expect(terrainHeightAt(LEVEL, origin, seed, 1_100, 35, mask)).toBeCloseTo(bed, 1);
     // Through the town part, 40 to 60 m out: dry land, not the lake bed.
     for (const lateral of [40, 50, 60]) {
       for (const along of [1_700, 1_900, 2_100]) {
