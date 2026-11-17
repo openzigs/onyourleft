@@ -167,7 +167,7 @@ const ALL_ATTACK = (input: ModelTacticsInput): ModelTacticsReply => ({
 
 const SECONDS = 150;
 
-describe('a race with AI bots and no decision is the seeded race (D-1.4)', () => {
+describe('a race with AI bots and no decision rides seeded tactics on the model’s field (D-1.4)', () => {
   it('deals its own field, and leaves a seeded race’s as it was (#2759, ADR 0075 D-1)', () => {
     const model = startRace(true);
     const seeded = startRace(false);

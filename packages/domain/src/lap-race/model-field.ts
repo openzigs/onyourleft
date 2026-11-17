@@ -60,12 +60,7 @@
 
 import { BOT_MASS_KILOGRAMS } from '../pacer/pacing';
 import { LapRaceError } from './errors';
-import {
-  modelRacingStyles,
-  MODEL_RACING_STYLES,
-  type ModelRacingStyle,
-  type ModelStrengthWord,
-} from './model-tactics';
+import { modelRacingStyles, type ModelRacingStyle, type ModelStrengthWord } from './model-tactics';
 import type { BotBody, BotPace, BotPacingStyle } from './pace';
 import { nextUnit, raceRandom } from './random';
 import { botCeilingWatts, type BotCapacity } from './wbal';
@@ -83,11 +78,18 @@ export const MODEL_STYLE_PACE: Readonly<Record<ModelRacingStyle, BotPacingStyle>
   opportunist: 'negative-split',
 };
 
+/** {@link MODEL_STYLE_PACE} read backwards, typed so a new pace without a style fails to compile. */
+const PACE_RACING_STYLE: Readonly<Record<BotPacingStyle, ModelRacingStyle>> = {
+  'fast-start': 'breakaway',
+  sprinter: 'sprinter',
+  climber: 'climber',
+  even: 'rouleur',
+  'negative-split': 'opportunist',
+};
+
 /** The racing style a pace is ridden for: {@link MODEL_STYLE_PACE} read backwards. */
 export function modelRacingStyleOf(style: BotPacingStyle): ModelRacingStyle {
-  return MODEL_RACING_STYLES.find(
-    (racing) => MODEL_STYLE_PACE[racing] === style,
-  ) as ModelRacingStyle;
+  return PACE_RACING_STYLE[style];
 }
 
 /** A racing style's body, before the field's strength is dealt. */

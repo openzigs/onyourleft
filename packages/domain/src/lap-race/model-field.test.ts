@@ -185,6 +185,13 @@ describe('a spread of strength whose middle is the tier (ADR 0075 D-2)', () => {
           Math.abs((pace.body?.massKilograms ?? 0) - MODEL_STYLE_BODY[style].massKilograms),
         ).toBeLessThanOrEqual(MODEL_FIELD_MASS_JITTER_KILOGRAMS);
       });
+      expect(
+        paces.some(
+          (pace, at) =>
+            pace.body?.massKilograms !==
+            MODEL_STYLE_BODY[styles[at] as ModelRacingStyle].massKilograms,
+        ),
+      ).toBe(true);
     }
   });
 
@@ -206,22 +213,22 @@ describe('a spread of strength whose middle is the tier (ADR 0075 D-2)', () => {
 describe('a body in the race plan (ADR 0075 D-2)', () => {
   it('sets CP, W′, peak and floor from its strength at its own mass, and carries the mass', () => {
     const body = { massKilograms: 64, strength: 1.07 };
-    const pace = { style: 'climber' as const, ability: 1, body };
+    const pace = { style: 'sprinter' as const, ability: 1, body };
     const plan = botRacePlan('hard', COURSE, 3, pace);
     const own = BOT_TIER_WATTS_PER_KILOGRAM.hard * 64 * 1.07;
     expect(plan.tierWatts).toBe(own);
-    expect(plan.capacity.cpWatts).toBe(own * MODEL_STYLE_BODY.climber.cpShare);
-    expect(plan.capacity.peakWatts).toBe(own * MODEL_STYLE_BODY.climber.peakShare);
+    expect(plan.capacity.cpWatts).toBe(own * MODEL_STYLE_BODY.sprinter.cpShare);
+    expect(plan.capacity.peakWatts).toBe(own * MODEL_STYLE_BODY.sprinter.peakShare);
     expect(plan.capacity.floorWatts).toBe(own * 0.8);
     expect(plan.capacity.massKilograms).toBe(64);
     expect(plan.capacity.wPrimeJoules).toBe(
       ((BOT_WPRIME_JOULES.hard * 64) / BOT_MASS_KILOGRAMS) *
         1.07 *
-        MODEL_STYLE_BODY.climber.wPrimeShare,
+        MODEL_STYLE_BODY.sprinter.wPrimeShare,
     );
     expect(botWPrimeJoules('hard', pace)).toBe(plan.capacity.wPrimeJoules);
-    // Its legs are still its pace's: the climber's grade and its kick.
-    expect(plan.archetype).toBe('climber');
+    // Its legs are still its pace's: the sprinter's kick.
+    expect(plan.archetype).toBe('sprinter');
   });
 
   it('leaves a bot with no body as it was: 75 kg, its ability, and no mass in its capacity', () => {
