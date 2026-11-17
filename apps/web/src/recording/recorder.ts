@@ -69,6 +69,7 @@ import {
   type AutoPausePolicy,
   type RecordingOutcome,
   type RecordingSession,
+  type LapRaceModelRecord,
   type ReplanRecord,
   type Seconds,
   type UnixSeconds,
@@ -272,6 +273,19 @@ export interface Recorder {
    * back is left out of that header rather than refusing it.
    */
   noteRoomRace(race: RoomRaceFact): void;
+  /**
+   * The races with AI bots ridden during this recording, in the order they
+   * ended — #2710, ADR 0071 D-4.4.
+   *
+   * ⚠️ **Held in memory only, and never in the header**: a record holds the
+   * rider's input at every race tick, 20 a second, and the header is rewritten
+   * on every flush. So a ride recovered after the app closed before *Stop*
+   * is saved without them, as every lap race was before #2710 (ADR 0060
+   * D-12.2); the ride itself is not touched.
+   */
+  readonly lapRaces: readonly LapRaceModelRecord[];
+  /** Keep a race with AI bots that has just ended, beside any before it — #2710. Writes nothing itself. */
+  noteLapRace(race: LapRaceModelRecord): void;
   /**
    * The blocks of the workouts ridden during this recording, in order, the one
    * being ridden last and held as cut short — #1319, `workout-blocks.ts`. A
@@ -502,6 +516,8 @@ function recorderOver(
   let openCourseLap: RecordedCourseLap | undefined;
   /** @see Recorder.roomRaces */
   let roomRaces = racesSoFar;
+  /** @see Recorder.lapRaces */
+  let lapRaces: readonly LapRaceModelRecord[] = [];
   /** @see Recorder.workoutBlocks */
   let workoutBlocks = blocksSoFar;
   /** @see Recorder.replans */
@@ -651,6 +667,12 @@ function recorderOver(
     },
     noteRoomRace(race: RoomRaceFact): void {
       roomRaces = [...roomRaces, race];
+    },
+    get lapRaces() {
+      return lapRaces;
+    },
+    noteLapRace(race: LapRaceModelRecord): void {
+      lapRaces = [...lapRaces, race];
     },
     get workoutBlocks() {
       return workoutBlocks;
