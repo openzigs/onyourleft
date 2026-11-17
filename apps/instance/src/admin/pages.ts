@@ -35,6 +35,17 @@
  */
 
 import {
+  KEYS_CARD_TEXT,
+  KEYS_CLI_COMMANDS,
+  KEYS_CLI_TEXT,
+  KEYS_FINGERPRINT_TEXT,
+  KEYS_UNREADABLE_TEXT,
+  keyFactRows,
+  ROTATE_BUSY_TEXT,
+  ROTATE_KEY_TEXT,
+  ROTATE_NOT_DONE_TEXT,
+  ROTATE_TYPE_TEXT,
+  type OperateKeysWord,
   END_ROOM_CONFIRM_TEXT,
   END_ROOM_REASON_LABEL,
   endRoomTypeText,
@@ -1258,4 +1269,129 @@ export function roomsBody(view: RoomsView): string {
   return `${top}${notice}${ending}<ol class="log rooms">
 ${view.rooms.map((room, index) => roomItem(view, room, index)).join('\n')}
 </ol>`;
+}
+
+/** The keys' state as the Keys page draws it on either listener (#2650): never the card or the fingerprint. */
+export interface KeysStateView {
+  readonly state: OperateKeysWord;
+  readonly current: {
+    readonly serial: number;
+    /** ISO 8601, UTC. */
+    readonly createdAt: string;
+    readonly rotatesAt: string;
+  } | null;
+  readonly olderHeld: number;
+}
+
+/**
+ * The card and its fingerprint (ADR 0047 D-6): handed to the renderer on the
+ * LOOPBACK listener only, whose page no edge can write. The tunnel's page is
+ * drawn with `null`, so its renderer has nothing to format.
+ */
+export interface KeysCardView {
+  /** `oyl-instance:<origin>#<52 characters>`, whole. */
+  readonly card: string;
+  /** 52 base32 characters, whole. */
+  readonly fingerprint: string;
+}
+
+/** What the last rotation came to, read back after it. */
+export type KeysNotice =
+  /** The route rotated; `ok` when the keys read back name the new serial. */
+  | { readonly kind: 'rotated'; readonly ok: boolean }
+  /** The route's `busy`: the instance's own maintenance held the key lease. */
+  | { readonly kind: 'busy' }
+  /** Any other answer: a word that was not `rotate`, say. */
+  | { readonly kind: 'not-rotated' };
+
+/** What the Keys page draws. */
+export interface KeysView {
+  readonly keys: KeysStateView | undefined;
+  /** The card and fingerprint on the loopback listener, when the keys are ready; `null` otherwise. */
+  readonly card: KeysCardView | null;
+  /** Drawn on the loopback listener, where the card may be shown. */
+  readonly onServer: boolean;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: KeysNotice | null;
+}
+
+/**
+ * Said through the tunnel in place of the card (#2650, ADR 0047 D-6, ADR 0069
+ * D-2). Draft wording, for the owner's approval.
+ */
+export const KEYS_CARD_ON_SERVER_TEXT =
+  'The card and its fingerprint are shown only on the server machine, where nothing between you and the instance can change them. Open this page there, or run operator instance-key show on the host, to read the card.';
+
+/** Said in a code session in place of the rotation (ADR 0069 Q-A). */
+export const KEYS_READS_ONLY_TEXT =
+  'A one-time code’s session reads this page and changes nothing. Sign in with a passkey to rotate the encryption key: it asks your passkey again.';
+
+export const ROTATED_TEXT = 'The encryption key was rotated.';
+export const ROTATE_BUTTON = 'Rotate the encryption key';
+
+function cardPart(card: KeysCardView | null, onServer: boolean): string {
+  if (card === null) {
+    return onServer ? '' : `<p class="notice">${escapeHtml(KEYS_CARD_ON_SERVER_TEXT)}</p>\n`;
+  }
+  return `<h2>The instance’s card</h2>
+<p>${escapeHtml(KEYS_CARD_TEXT)}</p>
+<p><code class="card">${escapeHtml(card.card)}</code></p>
+<p>${escapeHtml(KEYS_FINGERPRINT_TEXT)}</p>
+<p><code class="fingerprint">${escapeHtml(card.fingerprint)}</code></p>
+`;
+}
+
+function rotatePart(view: KeysView): string {
+  const notice =
+    view.notice === null
+      ? ''
+      : view.notice.kind === 'rotated'
+        ? view.notice.ok
+          ? `<p class="notice" role="status">${escapeHtml(ROTATED_TEXT)}</p>\n`
+          : `<p class="problem" role="alert">${escapeHtml(ROTATE_NOT_DONE_TEXT)}</p>\n`
+        : `<p class="problem" role="alert">${escapeHtml(
+            view.notice.kind === 'busy' ? ROTATE_BUSY_TEXT : ROTATE_NOT_DONE_TEXT,
+          )}</p>\n`;
+  const form =
+    view.strength === 'passkey'
+      ? `${stepUpForm(
+          '/admin/keys/rotate',
+          'key_rotate',
+          view.csrf,
+          ROTATE_BUTTON,
+          `<label for="rotate-confirm">${escapeHtml(ROTATE_TYPE_TEXT)}</label>
+<input type="text" id="rotate-confirm" name="confirm" maxlength="16" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+`,
+          ROTATE_BUTTON,
+        )}\n`
+      : `<p>${escapeHtml(KEYS_READS_ONLY_TEXT)}</p>\n`;
+  return `<h2>${escapeHtml(ROTATE_BUTTON)}</h2>
+<p>${escapeHtml(ROTATE_KEY_TEXT)}</p>
+${notice}${form}`;
+}
+
+/**
+ * The Keys page's body (#2650, ADR 0047 D-4–D-6, ADR 0069 D-2, D-5): the
+ * keys' state in the app panel's words (`@onyourleft/operate-text`
+ * §`keyFactRows`), the card and its fingerprint whole on the loopback
+ * listener and a sentence in their place through the tunnel, the routine
+ * rotation in a passkey session behind the typed word and a fresh step-up,
+ * and the commands that stay on the CLI.
+ */
+export function keysBody(view: KeysView): string {
+  if (view.keys === undefined) {
+    return `<p class="problem">${escapeHtml(KEYS_UNREADABLE_TEXT)}</p>`;
+  }
+  const cli = KEYS_CLI_COMMANDS.map(
+    (each) => `<li>${escapeHtml(each.what)}: <code>${escapeHtml(each.command)}</code></li>`,
+  ).join('\n');
+  return `<dl class="facts">
+${keyFactRows(view.keys).map(fact).join('\n')}
+</dl>
+${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${rotatePart(view)}<h2>On the host’s command line</h2>
+<p>${escapeHtml(KEYS_CLI_TEXT)}</p>
+<ul class="cli">
+${cli}
+</ul>`;
 }

@@ -32,6 +32,7 @@ import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../design/con
 import {
   SCRIPTED_ANALYSIS,
   SCRIPTED_BACKUPS,
+  SCRIPTED_KEYS,
   SCRIPTED_ROOMS,
   SCRIPTED_JOBS,
   SCRIPTED_MODELS,
@@ -98,6 +99,21 @@ interface AdminPages {
   accountsBody(view: AccountsView): string;
   backupsBody(view: BackupsView): string;
   roomsBody(view: RoomsView): string;
+  keysBody(view: KeysView): string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`KeysView` (#2650). */
+interface KeysView {
+  readonly keys: unknown;
+  readonly card: { readonly card: string; readonly fingerprint: string } | null;
+  readonly onServer: boolean;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice:
+    | { readonly kind: 'rotated'; readonly ok: boolean }
+    | { readonly kind: 'busy' }
+    | { readonly kind: 'not-rotated' }
+    | null;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`RoomsView` (#2649). */
@@ -298,7 +314,37 @@ const SCRIPTED = new Set([
   '/admin/accounts',
   '/admin/backups',
   '/admin/rooms',
+  '/admin/keys',
 ]);
+
+/** The keys' state the Keys page draws (#2650), and the card it draws on the server machine only. */
+const KEY_STATE = {
+  state: SCRIPTED_KEYS.state,
+  current: SCRIPTED_KEYS.current,
+  olderHeld: SCRIPTED_KEYS.olderHeld,
+};
+const CARD = { card: SCRIPTED_KEYS.card ?? '', fingerprint: SCRIPTED_KEYS.fingerprint ?? '' };
+
+/** The Keys page (#2650), in a session of `strength`, through the tunnel unless `over` says otherwise. */
+const keysPage = (
+  strength: ShellView['strength'],
+  over: Partial<KeysView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/keys', name, strength),
+    'Keys',
+    pages.keysBody({
+      keys: KEY_STATE,
+      card: null,
+      onServer: false,
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      ...over,
+    }),
+    true,
+  );
 
 /** The Rooms page (#2649), in a session of `strength`, over the scripted rooms. */
 const roomsPage = (
@@ -531,6 +577,21 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     ['not ended', () => roomsPage('passkey', { notice: { ended: false } })],
     ['no room open', () => roomsPage('passkey', { rooms: [] })],
     ['unreadable', () => roomsPage('passkey', { rooms: undefined })],
+  ],
+  '/admin/keys': [
+    ['through the tunnel, a code session', () => keysPage('code')],
+    [
+      'through the tunnel, a passkey session, an awkward name',
+      () => keysPage('passkey', {}, AWKWARD_NAME),
+    ],
+    ['on the server machine: the card', () => keysPage('passkey', { card: CARD, onServer: true })],
+    ['rotated', () => keysPage('passkey', { notice: { kind: 'rotated', ok: true } })],
+    ['busy', () => keysPage('passkey', { notice: { kind: 'busy' } })],
+    [
+      'no keys yet',
+      () => keysPage('passkey', { keys: { state: 'no-keys', current: null, olderHeld: 0 } }),
+    ],
+    ['unreadable', () => keysPage('passkey', { keys: undefined })],
   ],
   '/admin/analysis': [
     ['a code session: reads only', () => analysisPage('code')],

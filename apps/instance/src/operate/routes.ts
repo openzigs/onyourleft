@@ -597,9 +597,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'rotateOperateKey',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: #2650's Keys page rotates it, behind a fresh passkey and
+    // the typed word, logged under the channel's own source.
+    admin: 'change',
     summary: `Rotate the encryption key (#2613), with \`{ confirm: 'rotate' }\` — else \`validation_failed\` and nothing is written: what \`instance-key rotate\` does, with no \`--drop-old\` and no \`--serial-above\`. The old key keeps opening requests for 7 days, devices pick the new one up from \`GET /v1/instance/keys\` by themselves, and nobody pins again. It takes the key lease: while the instance’s own maintenance pass holds it the answer is \`busy\` and nothing is written. Logged \`instance_key_rotate\` (\`refused\` with \`busy\`) in the same transaction as the rotation. \`rotate --drop-old\`, \`rotate-identity\` and \`reset\` stay on the CLI. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -625,7 +625,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
       },
     },
     handle: async (context) => {
-      const rotated = await operateOf(context).rotateKey(ownerOf(context), context.json);
+      const rotated = await operateOf(context).rotateKey(ownerActor(context), context.json);
       if (!rotated.ok) {
         return errorResponse(
           rotated.code,

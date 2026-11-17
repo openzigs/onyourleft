@@ -722,7 +722,7 @@ describe('the owner’s routes are the owner’s alone, checked in ONE place (#2
   const NEVER_READ: ReadonlyMap<string, string> = new Map([
     [
       'getOperateKeys',
-      'the card and fingerprint never go through the tunnel (ADR 0047 D-6); #2650 formats its own on loopback',
+      'the card and fingerprint never go through the tunnel (ADR 0047 D-6); #2650’s Keys page reads `operate.keysView` itself and draws them on loopback only',
     ],
   ]);
 
@@ -737,6 +737,7 @@ describe('the owner’s routes are the owner’s alone, checked in ONE place (#2
     ['checkOperateAnalysisModel', '#2648: the AI backend page checks a model calls tools'],
     ['requestOperateBackup', '#2647: the Backups page asks for a backup now'],
     ['endOperateRoom', '#2649: the Rooms page ends a room, by its typed code'],
+    ['rotateOperateKey', '#2650: the Keys page rotates the encryption key, by the typed word'],
   ]);
 
   it('says on every owner route whether the admin pages reach it, on no other route, and lets them read, and change only what a page makes (#2641, #2648, ADR 0069 D-2)', () => {

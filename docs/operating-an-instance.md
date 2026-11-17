@@ -1183,7 +1183,16 @@ host's display name and its riders by display name — never where anyone is, ho
 and, in a passkey session, **End room** for each: pick why, type the room's code, and your passkey
 is asked again. The route's own close runs: everyone in it is told the room closed (`4005`), nobody
 can rejoin, results already final are kept and nothing reaches anyone's trainer; the operator log's
-`room_ended` names the admin pages and the listener. Every page shows what the app's Operate area
+`room_ended` names the admin pages and the listener. Since
+[#2650](https://github.com/openzigs/onyourleft/issues/2650) there is also **Keys** (`/admin/keys`): the keys' state,
+the current encryption key's serial and when it rotates by itself, and the older keys held. **The
+instance card and its fingerprint are shown only on the server machine's listener**
+(`OYL_INSTANCE_ADMIN_LOOPBACK_PORT`), never through the tunnel, because a rider pins the card only
+from a source the edge cannot write (ADR 0047 D-6): through the tunnel the page says to open it on
+the server machine or run `operator instance-key show`. A passkey session can **rotate the
+encryption key** by typing `rotate`; the route's key lease, its `busy` and its
+`instance_key_rotate` entry are its own, the old key keeps working for 7 days and nobody pins again.
+`rotate --drop-old`, `rotate-identity` and `reset` stay on the command line. Every page shows what the app's Operate area
 shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
 answer. On the AI backend page a passkey session can also change the settings, and **every change
 asks your passkey again** for that one change: the route's own checks run, its local-address rule

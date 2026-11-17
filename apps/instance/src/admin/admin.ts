@@ -140,6 +140,8 @@ import {
 
 import { escapeHtml } from '../html.ts';
 import { MAXIMUM_REASON_LENGTH, type ModeratorRole } from '../moderation/moderation.ts';
+import type { InstanceKeys } from '../keys/instance-keys.ts';
+import { keysView } from '../operate/operate.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
   AdminPasskeyRecord,
@@ -156,6 +158,7 @@ import {
   adminPage,
   analysisBody,
   backupsBody,
+  keysBody,
   roomsBody,
   isSaveProblem,
   logBody,
@@ -167,6 +170,7 @@ import {
   type BackupRecordAnswer,
   type BackupsNotice,
   type BackupsView,
+  type KeysNotice,
   type RoomAnswer,
   type AnalysisNotice,
   type AnalysisOffer,
@@ -310,6 +314,13 @@ export interface AdminOptions {
    * not against the edge.
    */
   readonly addresses?: readonly string[];
+  /**
+   * The instance's own keys (#2650), for the Keys page: read here, not
+   * through `GET /v1/operate/keys`, which the seam never reaches (ADR 0069
+   * D-2) — and their card and fingerprint drawn on the LOOPBACK listener
+   * only (ADR 0047 D-6). Absent, the page says the keys could not be read.
+   */
+  readonly instanceKeys?: Pick<InstanceKeys, 'show'>;
 }
 
 export interface Admin {
@@ -946,6 +957,50 @@ export function createAdmin(options: AdminOptions): Admin {
     return shellPage(shell, 'Rooms', body, true);
   }
 
+  /**
+   * Keys (#2650): the keys' state, read on every load, and — only when
+   * `onServer`, which only the loopback listener's place passes — the card
+   * and its fingerprint, whole. Through the tunnel neither is handed to the
+   * renderer.
+   */
+  async function keysPage(
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    onServer: boolean,
+    noticeFor: (serial: number | null) => KeysNotice | null,
+  ): Promise<string> {
+    const shown =
+      options.instanceKeys === undefined ? undefined : await keysView(options.instanceKeys);
+    const keys =
+      shown === undefined
+        ? undefined
+        : {
+            state: shown.state,
+            current:
+              shown.current === null
+                ? null
+                : {
+                    serial: shown.current.serial,
+                    createdAt: new Date(shown.current.createdAt * 1000).toISOString(),
+                    rotatesAt: new Date(shown.current.rotatesAt * 1000).toISOString(),
+                  },
+            olderHeld: shown.olderHeld,
+          };
+    const card =
+      onServer && shown?.card != null && shown.fingerprint !== null
+        ? { card: shown.card, fingerprint: shown.fingerprint }
+        : null;
+    const body = keysBody({
+      keys,
+      card,
+      onServer,
+      strength,
+      csrf: shell.csrf,
+      notice: noticeFor(shown?.current?.serial ?? null),
+    });
+    return shellPage(shell, 'Keys', body, true);
+  }
+
   /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
   async function statusPage(view: PageCall, shell: ShellView): Promise<string> {
     const answer = await read(view.seam, '/v1/operate/status', view.caller, view.client);
@@ -1209,6 +1264,13 @@ export function createAdmin(options: AdminOptions): Admin {
       const shell = await shellOf(path, session);
       const view = { caller: callerOf(owner, session), client, seam };
       if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/keys') {
+        return adminResponse(
+          await keysPage(shell, session.record.strength, listener === 'loopback', () => null),
+          200,
+          HTML,
+        );
+      }
       if (path === '/admin/rooms') {
         return adminResponse(
           await roomsPage(view, shell, session.record.strength, () => null),
@@ -2112,6 +2174,62 @@ export function createAdmin(options: AdminOptions): Admin {
       return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
     }
 
+    /**
+     * Rotate the encryption key from the Keys page (#2650, ADR 0047 D-4,
+     * ADR 0069 D-2): through {@link gatedChange}, the word the owner typed
+     * bound to the step-up, then ONE call of `POST /v1/operate/keys/rotate`
+     * in-process as the owner — its `confirm: 'rotate'` rule, its key lease
+     * (`busy` while the maintenance pass holds it) and its
+     * `instance_key_rotate` entry under this listener's source are the
+     * route's own. `--drop-old`, `rotate-identity` and `reset` stay on the
+     * CLI: this sends only `confirm`. The answer is the page drawn again from
+     * the keys read AFTER the call.
+     */
+    async function keyChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        'key_rotate',
+        { path: '/admin/keys', what: 'Keys' },
+        (fields) => (fields.confirm ?? '').length <= 16,
+      );
+      if (gated instanceof Response) return gated;
+      const { session, fields } = gated;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch('POST', '/v1/operate/keys/rotate', caller, client, {
+        confirm: (fields.confirm ?? '').trim(),
+      });
+      let outcome: { readonly outcome?: unknown; readonly serial?: unknown } = {};
+      if (answer.status === 200) {
+        try {
+          outcome = (await answer.json()) as typeof outcome;
+        } catch {
+          outcome = {};
+        }
+      }
+      const shell = await shellOf('/admin/keys', session);
+      const page = await keysPage(
+        shell,
+        session.record.strength,
+        listener === 'loopback',
+        (serial): KeysNotice =>
+          outcome.outcome === 'rotated'
+            ? { kind: 'rotated', ok: serial !== null && serial === outcome.serial }
+            : outcome.outcome === 'busy'
+              ? { kind: 'busy' }
+              : { kind: 'not-rotated' },
+      );
+      const done = outcome.outcome === 'rotated';
+      return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
+    }
+
     return async (request, body, client, seam) => {
       // Against DNS rebinding: the page is this listener's, or it is not served.
       if (request.headers.get('host') !== place.host) {
@@ -2176,6 +2294,7 @@ export function createAdmin(options: AdminOptions): Admin {
         }
         if (route === '/admin/backups') return backupChange(request, body, owner, client, seam);
         if (route === '/admin/rooms/end') return roomChange(request, body, owner, client, seam);
+        if (route === '/admin/keys/rotate') return keyChange(request, body, owner, client, seam);
         const decision = REGISTRATION_ACTIONS.get(route);
         if (decision !== undefined) {
           return registrationChange(request, body, owner, client, seam, decision);
