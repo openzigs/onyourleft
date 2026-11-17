@@ -6,7 +6,7 @@
  * answers what a test says, and the consent a device records. Never shipped.
  */
 
-import type { ModelTacticsInput } from '@onyourleft/domain';
+import type { ModelPacerInput, ModelTacticsInput } from '@onyourleft/domain';
 
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import type { TacticsLocal } from './tactics.ts';
@@ -16,17 +16,18 @@ export const TACTICS_INPUT: ModelTacticsInput = {
   laps: 3,
   field: 8,
   quietS: 40,
-  attackOpen: true,
-  rider: { rank: 4, wPerKg: 3.1 },
+  rider: { rank: 4, wPerKg: 3.1, ahead: 2, gapAheadM: 4.2, gapBehindM: 3.4, drafting: true },
   bots: [0, 1, 2, 3, 4, 5, 6].map((seat) => ({
     bot: seat,
-    style: 'rouleur' as const,
+    style: (['breakaway', 'sprinter', 'climber', 'rouleur', 'opportunist'] as const)[seat % 5]!,
+    legs: 'rouleur' as const,
     rank: seat < 3 ? seat + 1 : seat + 2,
     ahead: seat === 0 ? null : seat === 3 ? 'rider' : seat - 1,
     aheadMove: seat === 0 || seat === 3 ? null : ('sit-in' as const),
     gapAheadM: seat === 0 ? null : 2.5,
     gapBehindM: seat === 6 ? null : 1.2,
     wbal: 0.8,
+    blown: false,
     drafting: seat !== 0,
     move: 'sit-in' as const,
     secondsInMove: 12,
@@ -109,4 +110,31 @@ export async function consentToTactics(
     token,
     body: { instance: status.instance, modelAddress: status.modelAddress },
   });
+}
+
+/** A pacer state of the domain's shape (#2712): the rider 12 m back, in the draft, a rise ahead. */
+export const PACER_INPUT: ModelPacerInput = {
+  pacerWPerKg: 2.5,
+  plan: 'rolling',
+  intent: 'hold',
+  secondsInIntent: 10,
+  riderGapM: -12,
+  riderWPerKg: 2.4,
+  riderInDraft: true,
+  gradeAheadPct: 3.5,
+  toFinishM: 6_000,
+  rideS: 240,
+};
+
+/** A model's valid pacer answer (#2712). */
+export const PACER_ANSWER = JSON.stringify({
+  plan: 'climber',
+  intent: 'ease',
+  say: 'Nice and steady, stay on my wheel.',
+});
+
+/** Whether an `/api/chat` body asks for a pacer decision: its schema names a plan. */
+export function asksForPacer(body: Readonly<Record<string, unknown>>): boolean {
+  const format = body.format as { properties?: Record<string, unknown> } | undefined;
+  return format?.properties?.plan !== undefined;
 }

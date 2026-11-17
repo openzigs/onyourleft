@@ -36,8 +36,8 @@ import {
 import { NO_PAVEMENT_DATA } from './footways';
 import {
   LAND_CLASS_MAX_BYTES,
-  LAND_CLASS_MAX_WORK,
   LAND_CLASS_OF_KIND,
+  LAND_CLASS_WORK_PER_TILE,
   LEVELLING_MAX_CHUNKS,
   LEVELLING_REACH_METRES,
   LAND_CLASS_CELL_METRES,
@@ -610,7 +610,7 @@ describe('bounded — a work budget on the polygon pass', () => {
       return performance.now() - started;
     };
     const unbudgeted = time(Number.POSITIVE_INFINITY);
-    const budgeted = Math.min(time(LAND_CLASS_MAX_WORK), time(LAND_CLASS_MAX_WORK));
+    const budgeted = Math.min(time(LAND_CLASS_WORK_PER_TILE), time(LAND_CLASS_WORK_PER_TILE));
     expect(budgeted).toBeLessThan(unbudgeted / 4);
     // The unbudgeted build is the slow half on purpose: several seconds under coverage.
   }, 60_000);
@@ -699,12 +699,7 @@ describe('how far built-up land is — #1547', () => {
       rectangle('landuse', 'residential', { minX: -50, maxX: 50, minZ: 50, maxZ: 150 }),
       rectangle('landuse', 'residential', { minX: -50, maxX: 50, minZ: 1_050, maxZ: 1_150 }),
     ];
-    const capped = landClassMask(
-      corridorOf(boxes, towns),
-      LAND_CLASS_MAX_BYTES,
-      LAND_CLASS_MAX_WORK,
-      2,
-    );
+    const capped = landClassMask(corridorOf(boxes, towns), LAND_CLASS_MAX_BYTES, undefined, 2);
     expect(builtUpDistance(capped, 0, 100)).toBe(0);
     expect(builtUpDistance(capped, 0, 1_100)).toBe(Number.POSITIVE_INFINITY);
     const whole = landClassMask(corridorOf(boxes, towns));
@@ -828,5 +823,51 @@ describe('the land use under a point — kindAt, #1540', () => {
   it('is undefined outside every polygon, and in a hole', () => {
     expect(kindAt(corridor, 500, 500)).toBeUndefined();
     expect(kindAt(corridor, 170, 170)).toBeUndefined();
+  });
+});
+
+describe('a wetland is water that remembers it is a wetland — #2658', () => {
+  const COVERED: Box = { minX: -1_000, maxX: 1_000, minZ: -1_000, maxZ: 1_000 };
+  const mask = landClassMask(
+    corridorOf(
+      [COVERED],
+      [
+        rectangle('landuse', 'wetland', { minX: 0, maxX: 200, minZ: 0, maxZ: 200 }),
+        rectangle('water', 'wetland', { minX: 300, maxX: 400, minZ: 0, maxZ: 200 }),
+        // A pool inside the marsh, and a lake on its own.
+        rectangle('water', 'water', { minX: 50, maxX: 100, minZ: 50, maxZ: 100 }),
+        rectangle('water', 'lake', { minX: -300, maxX: -100, minZ: 0, maxZ: 200 }),
+      ],
+    ),
+  );
+
+  it('is water to every reader of the class, and a wetland to wetlandAt', () => {
+    for (const [x, z] of [
+      [150, 150],
+      [350, 150],
+    ] as const) {
+      expect(mask.classAt(x, z)).toBe('water');
+      expect(mask.wetlandAt(x, z)).toBe(true);
+    }
+  });
+
+  it('is open water where open water is mapped over it, and nowhere else is a wetland', () => {
+    expect(mask.classAt(75, 75)).toBe('water');
+    expect(mask.wetlandAt(75, 75)).toBe(false);
+    expect(mask.classAt(-200, 100)).toBe('water');
+    expect(mask.wetlandAt(-200, 100)).toBe(false);
+    expect(mask.wetlandAt(600, 600)).toBe(false);
+    expect(mask.wetlandAt(5_000, 5_000)).toBe(false);
+    expect(NO_LAND_CLASS.wetlandAt(150, 150)).toBe(false);
+    // And kindAt names the water over the marsh, whichever comes first.
+    const marsh = corridorOf(
+      [COVERED],
+      [
+        rectangle('landuse', 'wetland', { minX: 0, maxX: 200, minZ: 0, maxZ: 200 }),
+        rectangle('water', 'water', { minX: 50, maxX: 100, minZ: 50, maxZ: 100 }),
+      ],
+    );
+    expect(kindAt(marsh, 75, 75)).toBe('water');
+    expect(kindAt(marsh, 150, 150)).toBe('wetland');
   });
 });

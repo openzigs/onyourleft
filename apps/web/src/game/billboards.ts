@@ -60,7 +60,7 @@
 
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
 
-import { NO_LAND_CLASS } from './land-class';
+import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { BILLBOARDS_PER_FRAME, BILLBOARD_FOOTPRINT, LOGO_POST_ACROSS_METRES } from './logo-board';
 import { TIGHT_BEND_RADIANS_PER_METRE, type ScatterItem } from './scatter';
@@ -132,6 +132,8 @@ export function billboardsAt(
   seed: number,
   fromMetres: number,
   toMetres: number,
+  /** #2658: the ride's mask, so a board is kept out of the map's lakes as out of invented ones. */
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly Billboard[] {
   const total = profile.totalDistance as number;
   const sites = Math.max(1, Math.round(total / SETTLEMENT_SPACING_METRES));
@@ -155,6 +157,7 @@ export function billboardsAt(
       profile,
       origin,
       seed,
+      land,
       along,
       uniformFrom(hash, STREAM_SIDE) < 0.5 ? 1 : -1,
     );
@@ -168,6 +171,7 @@ function billboardAt(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  land: LandClassMask,
   along: number,
   hashedSide: 1 | -1,
 ): Billboard | undefined {
@@ -194,7 +198,7 @@ function billboardAt(
   // across axis `(faceZ, −faceX)`, which at this yaw is mostly ALONG the
   // road, so a board whose middle is dry beside a stream's bank can have a
   // post in the channel.
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   for (const post of [0, -1, 1]) {
     const dx = post * LOGO_POST_ACROSS_METRES * faceZ;
     const dz = -post * LOGO_POST_ACROSS_METRES * faceX;

@@ -1178,3 +1178,233 @@ test.describe('#2331 — the built-in circuits disclosure is drawn as a control'
     });
   }
 });
+
+/*
+ * #2710 — THE AI BOTS CONTROLS ARE 48 PX TARGETS.
+ *
+ * `ride.html?picker=chooser&lap=riding&ai=offered`: the chooser on a loop,
+ * with the rider's instance offering its model and no consent given yet
+ * (`ride-harness.tsx` §`AI_BOTS`). With the race and AI bots switched on, the
+ * AI bots switch's row, *Agree and race AI bots* and *Not now* are each at
+ * least 48 px tall (the owner's ruling of 2026-10), and once agreed,
+ * *Withdraw consent* is. Each height is printed.
+ *
+ * ⚠️ **The control** strips `theme.css` §"#2710" back to the shared 44 px
+ * floors and requires every one of the four under 48, or this measures
+ * controls that were tall already.
+ */
+const AI_BOTS_TARGET_PIXELS = 48;
+
+const AI_BOTS_RULE_STRIPPED = `
+  .oyl-game__ai-bots label:has(> input[type='checkbox']),
+  .oyl-game__ai-bots .oyl-button { min-height: 2.75rem !important; }`;
+
+async function aiBotsHeights(page: Page, stripped: boolean): Promise<Record<string, number>> {
+  if (stripped) await page.addStyleTag({ content: AI_BOTS_RULE_STRIPPED });
+  await page.getByRole('switch', { name: 'Ride a lap race' }).check();
+  await page.getByRole('switch', { name: 'AI bots' }).check();
+  const height = async (locator: ReturnType<Page['locator']>): Promise<number> =>
+    (await locator.boundingBox())?.height ?? 0;
+  const heights: Record<string, number> = {
+    'AI bots': await height(page.locator('.oyl-game__ai-bots label:has(> input[role="switch"])')),
+    'Agree and race AI bots': await height(
+      page.getByRole('button', { name: 'Agree and race AI bots' }),
+    ),
+    'Not now': await height(page.getByRole('button', { name: 'Not now' })),
+  };
+  await page.getByRole('button', { name: 'Agree and race AI bots' }).click();
+  heights['Withdraw consent'] = await height(
+    page.getByRole('button', { name: 'Withdraw consent' }),
+  );
+  return heights;
+}
+
+test.describe('#2710 — the AI bots controls are 48 px targets', () => {
+  for (const viewport of CHOOSER_VIEWPORTS) {
+    test(`each is at least 48 px tall — ${viewport.name}`, async ({ page }) => {
+      await openChooser(page, viewport, 'chooser', 'promise', '&lap=riding&ai=offered');
+      const heights = await aiBotsHeights(page, false);
+      console.log(`#2710 AI bots targets — ${viewport.name}: ${JSON.stringify(heights)}`);
+      expect(Object.keys(heights)).toHaveLength(4);
+      for (const [name, tall] of Object.entries(heights)) {
+        expect(tall, name).toBeGreaterThanOrEqual(AI_BOTS_TARGET_PIXELS);
+      }
+    });
+  }
+
+  test(`the control — with the rule stripped, each falls under 48 px — ${TABLET_IN_THE_SHELL_CHOOSER.name}`, async ({
+    page,
+  }) => {
+    await openChooser(
+      page,
+      TABLET_IN_THE_SHELL_CHOOSER,
+      'chooser',
+      'promise',
+      '&lap=riding&ai=offered',
+    );
+    const heights = await aiBotsHeights(page, true);
+    console.log(`#2710 AI bots targets, the rule stripped: ${JSON.stringify(heights)}`);
+    for (const [name, tall] of Object.entries(heights)) {
+      expect(tall, name).toBeGreaterThan(0);
+      expect(tall, name).toBeLessThan(AI_BOTS_TARGET_PIXELS);
+    }
+  });
+});
+
+/*
+ * #2723 — THE AI PACER'S CONTROLS, AFTER THE OWNER'S RULING ON THE SCREENSHOTS.
+ *
+ * `ride.html?picker=chooser&aipacer=offered` hands `GameView` a stand-in
+ * instance that offers a model (`ride-harness.tsx` §`AI_PACER`). With the
+ * pacer on and the AI pacer's switch on, at 1024×600 and on the tablet:
+ *
+ * - **48 px.** The switch's row, *Allow the AI pacer* and, once agreed,
+ *   *Withdraw consent* are 48 px tall or more (`theme.css` §"THE AI PACER'S
+ *   CONTROLS"); with that floor stripped, each button is under 48 (it was
+ *   drawn 45 px).
+ * - **The loadout's width.** The AI pacer's block spans the pacer's grid from
+ *   its left edge to its right, under the stepper's row. The control puts it
+ *   back in one column, and it must then be under half that width.
+ */
+const AI_PACER_VIEWPORTS: readonly ChooserViewport[] = [
+  { name: 'a small tablet — 1024×600', width: 1024, height: 600, insets: false },
+  TABLET_IN_THE_SHELL_CHOOSER,
+];
+
+const AI_PACER_TARGET_PIXELS = 48;
+
+async function openAiPacer(page: Page, viewport: ChooserViewport): Promise<void> {
+  await openChooser(page, viewport, 'chooser', 'promise', '&aipacer=offered');
+  await page.getByRole('switch', { name: 'Ride against a pacer' }).check();
+  await page
+    .getByRole('switch', { name: 'Let the AI on your instance steer the pacer and cheer you on' })
+    .check();
+  await expect(page.getByRole('button', { name: 'Allow the AI pacer' })).toBeVisible();
+}
+
+/** Each AI pacer control's height as shipped, its declared floor, and with the floor stripped. */
+async function aiPacerTargets(page: Page): Promise<
+  readonly {
+    readonly text: string;
+    readonly height: number;
+    readonly declared: string;
+    readonly stripped: number;
+  }[]
+> {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        '.oyl-game__ai-pacer label:has(> input[type="checkbox"]), .oyl-game__ai-pacer .oyl-button',
+      ),
+    ].map((each) => {
+      const height = each.getBoundingClientRect().height;
+      const declared = getComputedStyle(each).minHeight;
+      each.style.setProperty('min-height', '0');
+      const stripped = each.getBoundingClientRect().height;
+      each.style.removeProperty('min-height');
+      return { text: (each.textContent ?? '').trim(), height, declared, stripped };
+    }),
+  );
+}
+
+/** Where the AI pacer's block sits in the pacer's grid. */
+async function aiPacerSpan(
+  page: Page,
+  oneColumn: boolean,
+): Promise<{
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly gridLeft: number;
+  readonly gridRight: number;
+  readonly stepperBottom: number;
+  readonly consentLines: number;
+}> {
+  return page.evaluate((control) => {
+    const grid = document.querySelector<HTMLElement>('.oyl-chooser__loadout > .oyl-game__pacer');
+    const block = grid?.querySelector<HTMLElement>(':scope > .oyl-game__ai-pacer');
+    const stepper = grid?.querySelector<HTMLElement>('.oyl-stepper');
+    const consent = block?.querySelector<HTMLElement>('p');
+    if (
+      grid === null ||
+      grid === undefined ||
+      block === null ||
+      block === undefined ||
+      stepper === null ||
+      stepper === undefined ||
+      consent === null ||
+      consent === undefined
+    ) {
+      throw new Error('the loadout has no pacer grid with an AI pacer, a stepper and a consent');
+    }
+    if (control) block.style.setProperty('grid-column', 'auto');
+    const style = getComputedStyle(grid);
+    const outer = grid.getBoundingClientRect();
+    const box = block.getBoundingClientRect();
+    const lineHeight = Number.parseFloat(getComputedStyle(consent).lineHeight);
+    const read = {
+      left: box.left,
+      right: box.right,
+      top: box.top,
+      gridLeft: outer.left + Number.parseFloat(style.paddingLeft),
+      gridRight: outer.right - Number.parseFloat(style.paddingRight),
+      stepperBottom: stepper.getBoundingClientRect().bottom,
+      consentLines: Math.round(consent.getBoundingClientRect().height / lineHeight),
+    };
+    if (control) block.style.removeProperty('grid-column');
+    return read;
+  }, oneColumn);
+}
+
+test.describe('#2723 — the AI pacer’s controls on the chooser', () => {
+  for (const viewport of AI_PACER_VIEWPORTS) {
+    test(`are 48 px targets — ${viewport.name}`, async ({ page }) => {
+      await openAiPacer(page, viewport);
+      const before = await aiPacerTargets(page);
+      await page.getByRole('button', { name: 'Allow the AI pacer' }).click();
+      await expect(page.getByRole('button', { name: 'Withdraw consent' })).toBeVisible();
+      const after = await aiPacerTargets(page);
+      const every = [...before, ...after];
+      console.log(
+        `#2723 ${viewport.name}: ${every.map((each) => `${each.text.slice(0, 24)} ${each.height.toFixed(1)} px (stripped ${each.stripped.toFixed(1)})`).join('; ')}`,
+      );
+      expect(before.map((each) => each.text)).toEqual([
+        'Let the AI on your instance steer the pacer and cheer you on',
+        'Allow the AI pacer',
+      ]);
+      expect(after.map((each) => each.text)).toEqual([
+        'Let the AI on your instance steer the pacer and cheer you on',
+        'Withdraw consent',
+      ]);
+      for (const each of every) {
+        expect(each.height, each.text).toBeGreaterThanOrEqual(
+          AI_PACER_TARGET_PIXELS - SUBPIXEL_TOLERANCE,
+        );
+        expect(each.declared, each.text).toBe(`${String(AI_PACER_TARGET_PIXELS)}px`);
+      }
+      // The control: stripped of the floor, each button is under 48 px again
+      // (it shipped at 45). The switch's sentence wraps to two lines in the
+      // loadout at both sizes, about 49.6 px without a floor, so only the
+      // declaration above holds it there.
+      for (const each of every.filter((one) => !one.text.startsWith('Let the AI'))) {
+        expect(each.stripped, each.text).toBeLessThan(AI_PACER_TARGET_PIXELS);
+      }
+    });
+
+    test(`span the loadout under the stepper’s row — ${viewport.name}`, async ({ page }) => {
+      await openAiPacer(page, viewport);
+      const shipped = await aiPacerSpan(page, false);
+      const control = await aiPacerSpan(page, true);
+      const width = shipped.gridRight - shipped.gridLeft;
+      console.log(
+        `#2723 ${viewport.name}: the AI pacer ${(shipped.right - shipped.left).toFixed(1)} of ${width.toFixed(1)} px, consent ${String(shipped.consentLines)} lines; in one column ${(control.right - control.left).toFixed(1)} px, ${String(control.consentLines)} lines`,
+      );
+      expect(shipped.left).toBeCloseTo(shipped.gridLeft, 0);
+      expect(shipped.right).toBeCloseTo(shipped.gridRight, 0);
+      expect(shipped.top).toBeGreaterThanOrEqual(shipped.stepperBottom - SUBPIXEL_TOLERANCE);
+      // The control: one column of the two, as it shipped.
+      expect(control.right - control.left).toBeLessThan(width / 2);
+      expect(control.consentLines).toBeGreaterThan(shipped.consentLines);
+    });
+  }
+});

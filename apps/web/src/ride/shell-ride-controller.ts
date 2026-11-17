@@ -43,6 +43,7 @@ import {
   type RideController,
   type RideControllerOptions,
 } from './controller';
+import type { RememberedSensors } from './remembered-sensors';
 
 /** The three things the shell's controller needs from `@onyourleft/mobile`. */
 export type ShellRecordingService = Pick<
@@ -58,15 +59,33 @@ export type ShellRecordingService = Pick<
  * its notification needs (#526), both over ONE `RecordingService` plugin.
  *
  * The two are set after the spread, so nothing in `options` can replace them.
+ *
+ * ⚠️ **And the remembered sensors, which are REQUIRED here** — #2669. On
+ * `RideControllerOptions` they are optional, because a browser has none, so
+ * a `main.tsx` that stopped passing them would be green in `check:wiring` for
+ * the reason this module exists. Required, it is a type error. The sensors
+ * are reconnected as the controller is built, which is the app opening:
+ * `restoreRemembered` asks the transport for nothing when none are kept.
  */
 export function createShellRideController(
   mobile: ShellRecordingService,
-  options: Omit<RideControllerOptions, 'keepAlive' | 'notificationPermission'>,
-): RideController {
+  options: Omit<RideControllerOptions, 'keepAlive' | 'notificationPermission' | 'remembered'> & {
+    readonly remembered: RememberedSensors;
+  },
+): ShellRideController {
   const recordingService = mobile.capacitorRecordingServicePlugin();
-  return createRideController({
+  const controller = createRideController({
     ...options,
     keepAlive: mobile.recordingServiceKeepAlive(recordingService),
     notificationPermission: mobile.recordingServiceNotificationPermission(recordingService),
   });
+  return Object.assign(controller, { restored: controller.restoreRemembered() });
 }
+
+/**
+ * The shell's ride controller, and its restore of the remembered sensors as
+ * the app opens — #2672, so the steering controller is reconnected after them
+ * and inside what they leave of the budget (`shell-steering-controller.ts`).
+ * `restoreRemembered` never rejects, so neither does this.
+ */
+export type ShellRideController = RideController & { readonly restored: Promise<void> };

@@ -42,6 +42,7 @@ import {
 } from './settlements';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
+import { NO_LAND_CLASS } from './land-class';
 import { inWater, waterways } from './waterways';
 
 const ALL = { maxItems: 1_000_000, riderMetres: 0 } as const;
@@ -302,7 +303,7 @@ describe('a model only where its whole length stands — #1566', () => {
         if (standing === undefined) continue;
         const ground = groundOf(standing, plot.house);
         const backInWater = inWater(
-          waterways(profile, seed),
+          waterways(profile, seed, NO_LAND_CLASS),
           profile,
           distanceOnRoute(profile, plot.along),
           (plot.lateral - ground.back) * plot.side,
