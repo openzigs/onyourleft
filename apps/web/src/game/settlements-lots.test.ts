@@ -19,7 +19,7 @@ import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 import { lotClad, lotPaintChannel, lotPaintEntry } from './building-paint';
 import { footprintPlans, mappedTown } from './footprint-buildings';
 import { buildingBeside, landBeside, rectangleBeside } from './footprint-fixtures-testing';
-import { landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
+import { kindAt, landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { circuitRoute, hairpinRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed, type ScatterItem } from './scatter';
@@ -633,5 +633,68 @@ describe('#1581 a lot is painted unlike the lots beside it', () => {
       }
     }
     expect(neighbours).toBeGreaterThan(lots.length / 2);
+  });
+});
+
+describe('#2660 no lot stands on railway land', () => {
+  // Shaped like the audit's Oak Park street: a residential town either side of
+  // the road, and a railway's land along its right-hand side from 300 to
+  // 1 500 m, under where the lots stand. `kind` names that strip, so the
+  // control can map the same strip as another built-up kind.
+  const besideTheRailway = (kind: string): Town =>
+    townOf(straight, (origin) => [
+      // First: of two built-up polygons over a point, `kindAt` names the first.
+      landBeside(straight, origin, 'landuse', kind, 300, 1_500, 5, 60),
+      landBeside(straight, origin, 'landuse', 'residential', 100, 1_900, -80, 80),
+    ]);
+  const railway = besideTheRailway('railway');
+  const industrial = besideTheRailway('industrial');
+  /** Whether any of a lot's centre and corners is on the strip's land. */
+  const onTheStrip =
+    (town: Town, kind: string) =>
+    (item: ScatterItem): boolean =>
+      [[item.x, item.z] as const, ...cornersOf(item)].some(
+        ([x, z]) => kindAt(town.corridor, x, z) === kind,
+      );
+  const start = atStartLine(straight);
+  /** The houses of a scene frame at `along`: the path a ride's frames take. */
+  const framed = (town: Town, along: number): readonly ScatterItem[] =>
+    sceneFrame({
+      profile: straight,
+      origin: town.origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(along) } },
+      worldCorridor: town.corridor,
+      landClass: town.land,
+      // As `GameView` hands it in, built at the press.
+      mappedTown: town.town,
+    }).scatter.filter((item) => BUILT.has(item.kind));
+
+  it('keeps railway land built-up, so nothing grows there', () => {
+    const frame = drawnRoadFrame(straight, railway.origin, 900);
+    if (frame === undefined) throw new Error('no road there');
+    const x = frame.x + frame.normalX * 30;
+    const z = frame.z + frame.normalZ * 30;
+    expect(railway.land.classAt(x, z)).toBe('built-up');
+    expect(kindAt(railway.corridor, x, z)).toBe('railway');
+  });
+
+  it('stands no lot on the railway, and still fills the town round it', () => {
+    const lots = lotsOf(railway, 0, straight.totalDistance);
+    expect(lots.filter(onTheStrip(railway, 'railway'))).toStrictEqual([]);
+    // The left side of the same stretch, and the right past the railway, keep theirs.
+    expect(lots.length).toBeGreaterThan(20);
+    // Control: the same strip mapped industrial is filled.
+    const control = lotsOf(industrial, 0, straight.totalDistance);
+    expect(control.filter(onTheStrip(industrial, 'industrial')).length).toBeGreaterThan(5);
+  });
+
+  it('draws no house on the railway in a scene frame', () => {
+    const houses = framed(railway, 900);
+    expect(houses.length).toBeGreaterThan(5);
+    expect(houses.filter(onTheStrip(railway, 'railway'))).toStrictEqual([]);
+    // Control: the same strip mapped industrial has houses on it in the frame.
+    expect(
+      framed(industrial, 900).filter(onTheStrip(industrial, 'industrial')).length,
+    ).toBeGreaterThan(0);
   });
 });

@@ -24,13 +24,18 @@
  *    (ADR 0060 D-1: new art is proposed in its pull request).
  * 4. **`pickUpSeen(aheadMetres)`** — #1969: what one pick-up point puts on a
  *    1280×800 frame from that far back, read as the pixels it changes.
+ * 5. **`fadeSeen()`** — #2596: a bot held between the camera and the rider,
+ *    read off a real view's 1280×800 frame (`rider-fade-probe.ts`).
+ * 6. **`fadeShot(id, back, across, fade)`** — #2596: a real view's frame with
+ *    a bot `back` metres behind the rider and `across` to their right, among
+ *    the race's bots ahead, on a canvas the spec photographs for the owner.
  */
 
 import { createItemRace, metres, raceCourse, type Hazard } from '@onyourleft/domain';
 
 import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-view';
 import type { GameView, RaceHitLook, SceneFrame } from '../src/game/port';
-import { qualitySettings } from '../src/game/quality';
+import { qualitySettings, RIDER_SHADOW_MAP_RUNG } from '../src/game/quality';
 import { northRoute } from '../src/game/route-fixtures-testing';
 import { sceneFrame, type RaceBotInput } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
@@ -39,11 +44,13 @@ import {
   PICK_UP_SEEN_FROM_METRES,
   lapRaceCallsProbe,
   lapRaceDrawnOf,
+  riderFadeOf,
   threeGameRenderer,
   type LapRaceCalls,
 } from '../src/game/three-renderer';
 
 import { drawCounter } from './realistic/draws';
+import { behind, riderFadeProbe, type RiderFadeReading } from './rider-fade-probe';
 
 /** What {@link viewCalls} counted. */
 export interface LapRaceViewCalls {
@@ -69,6 +76,8 @@ declare global {
       pickUpSeen(aheadMetres: number, shown?: boolean): PickUpSeen;
       /** `three-renderer.ts` §`PICK_UP_SEEN_FROM_METRES`, for the spec, which imports no three. */
       readonly pickUpSeenFrom: number;
+      fadeSeen(shadows: 'contact' | 'map'): RiderFadeReading;
+      fadeShot(id: string, back: number, across: number, fade: 'fade' | 'off'): void;
     };
   }
 }
@@ -302,11 +311,50 @@ function pickUpSeen(aheadMetres: number, shown = false): PickUpSeen {
   };
 }
 
+/**
+ * #2596, read off a real stylised view at the owner's tablet's 1280×800, on
+ * the top rung with the riders' contact blobs or with the shadow map every
+ * stylised ride starts on (`quality.ts` §`RIDER_SHADOW_MAP_RUNG`). @see riderFadeProbe
+ */
+function fadeSeen(shadows: 'contact' | 'map'): RiderFadeReading {
+  const drawn = canvas(1280, 800);
+  const view = threeGameRenderer.create(
+    drawn,
+    shadows === 'map' ? RIDER_SHADOW_MAP_RUNG : qualitySettings(0),
+  );
+  view.resize(1280, 800);
+  const gl = drawn.getContext('webgl2');
+  if (gl === null) throw new Error('no WebGL2 context on the fade canvas');
+  const reading = riderFadeProbe(view, gl, drawn, frameAt([], undefined));
+  view.destroy();
+  return reading;
+}
+
+/**
+ * #2596's photograph: the race's frame of the rider and bots ahead, with one
+ * more bot `back` metres behind the rider and `across` to their right, drawn
+ * faded (the product) or whole (as before #2596).
+ */
+function fadeShot(id: string, back: number, across: number, fade: 'fade' | 'off'): void {
+  const shown = canvas(1280, 800);
+  shown.id = id;
+  // The rung every stylised ride starts on, with the riders' shadow map.
+  const view = threeGameRenderer.create(shown, RIDER_SHADOW_MAP_RUNG);
+  view.resize(1280, 800);
+  riderFadeOf(view, fade);
+  const base = frameAt(BOTS.slice(0, 3), undefined);
+  const rider = base.markers.find((marker) => marker.kind === 'rider');
+  if (rider === undefined) throw new Error('no rider on the fade frame');
+  view.render({ ...base, markers: [...base.markers, behind(rider, back, across)] });
+}
+
 window.__oylLapRace = {
   ready: true,
   viewCalls,
   probeCalls,
   showcase,
   pickUpSeen,
+  fadeSeen,
+  fadeShot,
   pickUpSeenFrom: PICK_UP_SEEN_FROM_METRES,
 };

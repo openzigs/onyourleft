@@ -80,6 +80,7 @@ import {
   untaggedStreetFixture,
   // #1274's industrial estate, school and pitches, which `town=grounds` rides.
   fencedGroundsFixture,
+  parksFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -583,7 +584,10 @@ async function run(): Promise<void> {
                                     : // #2362: the fixture level, its corridor its own file's.
                                       config.town === 'level'
                                       ? fixtureLevelTown()
-                                      : undefined;
+                                      : // #2685: a golf course and cemeteries.
+                                        config.town === 'parks'
+                                        ? parksFixture(latitude)
+                                        : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -793,6 +797,8 @@ async function run(): Promise<void> {
       peopleOff: config.leversOff.includes('people'),
       // #1542's three, each off on its own.
       countrysideOff: countrysideWithLevers(config.leversOff),
+      // #2685's pair: the golf courses and cemeteries as their planting alone.
+      parkDressingOff: config.leversOff.includes('park-dressing'),
       // #1972: a lap race's bots in the pacer's place, on the scenery-free
       // frame `LAP_RACE_SCENE_DRAW_CALLS` is the ceiling of.
       ...(config.race === undefined
