@@ -24,7 +24,6 @@ import { testConfig } from '../instance-testing.ts';
 import { roomShortCode } from '../operate/operate.ts';
 import { until } from '../room/node/node-room-testing.ts';
 import { joinRoom, type RoomClient } from '../room/node/router-testing.ts';
-import { roomHash } from '../room/node/router.ts';
 import { roomBody } from '../rooms/rooms-testing.ts';
 import { sealedAt } from '../sealed/sealed-testing.ts';
 import { readServerConfig } from '../server-config.ts';
@@ -164,14 +163,8 @@ beforeAll(async () => {
   bea = await signIn(await testDevice(), 'Bea', '192.0.2.3');
   const cal = await signIn(await testDevice(), 'Cal', '192.0.2.4');
   race = await made(ann, { kind: 'race' });
-  // Each try lands on the other worker half the time: twenty make a miss one in a million.
-  let found: { roomId: string } | undefined;
-  for (let attempt = 0; attempt < 20 && found === undefined; attempt += 1) {
-    const candidate = await made(cal, { kind: 'group' });
-    if (roomHash(candidate.roomId) % 2 !== roomHash(race.roomId) % 2) found = candidate;
-  }
-  if (found === undefined) throw new Error('every group ride hashed to the race’s worker');
-  ride = found;
+  // Two workers hold the rooms wherever their ids hash: which worker is #2612's test's concern.
+  ride = await made(cal, { kind: 'group' });
   expect((await sealed(bea, 'POST', '/v1/rooms/join', { code: race.code })).status).toBe(200);
   annSocket = await socketInto(ann, race.roomId);
   beaSocket = await socketInto(bea, race.roomId);
