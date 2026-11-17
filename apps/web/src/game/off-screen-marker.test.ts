@@ -8,7 +8,7 @@
  * `GameView` draws by; the gap is the HUD's own (`hud/fields.ts`
  * §`chasedGapText`). `off-screen-marker-wiring.test.tsx` rides it through
  * `GameView`, and `browser/off-screen-marker.browser.spec.ts` measures it
- * against the HUD at 1024×600.
+ * against the HUD at 1024×600 and at the owner's tablet, 1280×800.
  */
 
 import { buildGhostTrack, metres, metresPerSecond, pacerGap } from '@onyourleft/domain';
@@ -24,6 +24,7 @@ import {
   OFF_SCREEN_MARKER_CLASS,
   OFF_SCREEN_MARKER_MARGIN_PX,
   OFF_SCREEN_MARKER_PX,
+  HUD_PANELS_SELECTOR,
   boxesOver,
   layOffScreenMarkers,
   offScreenMarkers,
@@ -343,6 +344,45 @@ describe('clear of the HUD — #2755', () => {
     expect(boxesOver(world, [panel, hidden])).toEqual([
       { left: 696, top: 469, right: 1016, bottom: 592 },
     ]);
+  });
+
+  it('counts a layer over the whole stage as no panel, so a pacer dropped on the owner’s tablet is still marked', () => {
+    // The owner's tablet, 2026-11-17: *PACER 4 s behind you* at 21.5 mph,
+    // about 38 m back, and an empty marker layer. #2600's panel tabs stand on
+    // `.oyl-hud__tabs`, a direct child of the HUD drawn over the whole stage
+    // on a tablet (`theme.css` §".oyl-hud__tabs"); taken for a panel, it
+    // covered every place on every ray, so the marker was left out. These
+    // are the boxes the browser laid out at 2560×1600 (CSS pixels).
+    const size = { width: 2560, height: 1600 } as const;
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height }) as DOMRect;
+    const stage = document.createElement('div');
+    const world = document.createElement('canvas');
+    world.getBoundingClientRect = () => rect(0, 0, size.width, size.height);
+    const hud = document.createElement('section');
+    hud.className = 'oyl-hud';
+    const child = (className: string, box: DOMRect): HTMLElement => {
+      const element = document.createElement('div');
+      element.className = className;
+      element.getBoundingClientRect = () => box;
+      hud.append(element);
+      return element;
+    };
+    child('oyl-hud__panel oyl-hud__fields oyl-hud__fields--primary', rect(8, 8, 520, 164));
+    child('oyl-hud__panel oyl-hud__fields oyl-hud__fields--secondary', rect(1784, 8, 768, 171));
+    child('oyl-hud__panel oyl-hud__route', rect(8, 1254, 288, 338));
+    child('oyl-hud__panel oyl-hud__actions', rect(2232, 1469, 320, 123));
+    child('oyl-hud__tabs', rect(0, 0, size.width, size.height));
+    child('oyl-visually-hidden', rect(0, 0, 2, 2)).setAttribute('data-oyl-announcer', '');
+    stage.append(world, hud);
+    const boxes = boxesOver(world, stage.querySelectorAll(HUD_PANELS_SELECTOR));
+    // The four panels, and neither the layer nor the announcer.
+    expect(boxes).toHaveLength(4);
+    const botAt = RIDER_AT - 38;
+    const marker = only(offScreenMarkers(frameWith(botAt), size, [pacer(botAt)], () => boxes));
+    expect(marker.to).toBe('bot');
+    expect(marker.edge).toBe('bottom');
+    expect(marker.gap).toMatch(/^\d+ s$/);
   });
 });
 
