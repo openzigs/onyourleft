@@ -74,7 +74,12 @@ import type {
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
-import { mappedGradeCrossings, overpassesAt } from './overpasses';
+import {
+  gradeCrossingsAt,
+  mappedGradeCrossings,
+  NO_CROSSINGS_IN_VIEW,
+  type CrossingsInView,
+} from './overpasses';
 import {
   LINE_LIMIT_METRES,
   MAXIMUM_LEAN_RADIANS,
@@ -136,7 +141,14 @@ import {
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
 import { distanceToDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
-import { bridgeParts, MAXIMUM_BRIDGE_PARTS, waterSurface, waterways } from './waterways';
+import {
+  bridgeParts,
+  MAXIMUM_BRIDGE_PARTS,
+  waterSurface,
+  waterways,
+  type BridgePart,
+  type Waterways,
+} from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
 import {
@@ -551,7 +563,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     input.worldCorridor === undefined
       ? undefined
       : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed);
-  const sideRoads = sideRoadsAt(
+  const crossSideRoads = sideRoadsAt(
     input.profile,
     input.origin,
     seed,
@@ -561,6 +573,15 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     junctions ?? [],
     input.landClass ?? NO_LAND_CLASS,
   );
+  // #459, #2661: the streams' bridges and the mapped overpasses and
+  // underpasses in view, before the scenery too — since #2699 an overpass's
+  // road runs on off both ends of its deck, and is a side road: drawn in the
+  // road's material by the same mesh and kept clear of the scenery.
+  const ways = waterways(input.profile, seed);
+  const streamBridges = bridgeParts(input.profile, input.origin, corridor, ways);
+  const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
+  const sideRoads =
+    crossings.roads.length === 0 ? crossSideRoads : [...crossSideRoads, ...crossings.roads];
   const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
   // #1535: the village streets along exactly the stretch of road this frame
   // drew, for `scenery`'s reason — and outside the structures' budget,
@@ -640,12 +661,14 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     terrain: {
       mesh: ground,
       horizon: horizonRelief(input.profile, input.origin, seed),
+      // #2699: and each overpass's embankment, in the ground's own material.
+      embankments: crossings.embankments,
     },
     // #459. The waterways are found once per route (`waterways.ts` §`computed`)
     // and the surfaces and bridges built for this stretch of it, from the same
     // corridor the ground and the road are built from.
     // #2661: and the mapped streets crossing over or under the route, with them.
-    water: water(input, corridor, seed, riderDistance),
+    water: water(input, corridor, ways, streamBridges, crossings),
     // #679: what stands at the lines, in the rider's units, near the rider.
     lines: linesNear(
       input.profile,
@@ -839,35 +862,47 @@ export function placedCyclists(
 }
 
 /**
- * The streams, lakes and bridges in view — the streams' (#459) and, since
- * #2661, the mapped overpasses and underpasses (`overpasses.ts`), the streams'
- * first, cut to the one belt's {@link MAXIMUM_BRIDGE_PARTS}. @see SceneFrame.water
+ * The mapped overpasses and underpasses in view — #2661 (`overpasses.ts`):
+ * whole crossings, in the room the streams' `streamParts` bridges leave of
+ * the one belt's {@link MAXIMUM_BRIDGE_PARTS}, and since #2699 each
+ * overpass's road. None with no map data.
  */
-function water(
+function crossingsInView(
   input: SceneInput,
   corridor: RoadCorridor,
   seed: number,
   riderDistance: number,
+  streamParts: number,
+): CrossingsInView {
+  if (input.worldCorridor === undefined) return NO_CROSSINGS_IN_VIEW;
+  return gradeCrossingsAt(
+    input.profile,
+    input.origin,
+    seed,
+    (corridor.centre[0] as CorridorPoint).along,
+    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    riderDistance,
+    mappedGradeCrossings(input.worldCorridor, input.profile, input.origin),
+    input.landClass ?? NO_LAND_CLASS,
+    MAXIMUM_BRIDGE_PARTS - streamParts,
+  );
+}
+
+/**
+ * The streams, lakes and bridges in view — the streams' (#459) and, since
+ * #2661, the mapped overpasses' and underpasses' boxes, the streams' first.
+ * @see SceneFrame.water
+ */
+function water(
+  input: SceneInput,
+  corridor: RoadCorridor,
+  ways: Waterways,
+  streams: readonly BridgePart[],
+  crossings: CrossingsInView,
 ): WaterFrame {
-  const ways = waterways(input.profile, seed);
-  const streams = bridgeParts(input.profile, input.origin, corridor, ways);
-  const crossings =
-    input.worldCorridor === undefined
-      ? []
-      : overpassesAt(
-          input.profile,
-          input.origin,
-          seed,
-          (corridor.centre[0] as CorridorPoint).along,
-          (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
-          riderDistance,
-          mappedGradeCrossings(input.worldCorridor, input.profile, input.origin),
-          input.landClass ?? NO_LAND_CLASS,
-        );
   return {
     surface: waterSurface(input.profile, input.origin, corridor, ways),
-    bridges:
-      crossings.length === 0 ? streams : [...streams, ...crossings].slice(0, MAXIMUM_BRIDGE_PARTS),
+    bridges: crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts],
     seconds: input.state.elapsed,
   };
 }
