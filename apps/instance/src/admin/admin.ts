@@ -2103,9 +2103,11 @@ export function createAdmin(options: AdminOptions): Admin {
         { caller, client, seam },
         shell,
         session.record.strength,
-        (after) => ({
-          ended: done && after !== undefined && !after.some((room) => room.roomId === roomId),
-        }),
+        // A closed room whose list cannot be read back says nothing: "as it was" would be false.
+        (after) =>
+          done && after === undefined
+            ? null
+            : { ended: done && !after?.some((room) => room.roomId === roomId) },
       );
       return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
     }

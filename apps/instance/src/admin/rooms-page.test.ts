@@ -152,6 +152,14 @@ async function endThrough(
   return browser.send('POST', '/admin/rooms/end', { cookie: session.token, form });
 }
 
+/**
+ * Whether a drawn page says `needle`, looking past the runs of hex it draws:
+ * a room id is 32 hex digits and the CSRF token 64, and a short number is in
+ * one of them by chance, about one run in twenty (found by flaking, once).
+ */
+const says = (html: string, needle: string): boolean =>
+  html.replace(/[0-9a-fA-F]{12,}/g, '').includes(needle);
+
 const lineHtml = (room: RoomAnswer): string => {
   const { kind, rest } = roomLine(room);
   return `<strong>${escapeHtml(kind)}</strong>${rest
@@ -202,7 +210,7 @@ describe('the Rooms page is the route’s answer (#2649)', () => {
     ]) {
       expect(html).toContain('Ann and Bea');
       for (const absent of ['317', '48213', '51.5074', '-0.1278', 'powerWatts', 'lat']) {
-        expect(html, absent).not.toContain(absent);
+        expect(says(html, absent), absent).toBe(false);
       }
     }
   });
@@ -286,6 +294,41 @@ describe('End room through the page is the route’s own (#2649, ADR 0069 D-2, D
     expect(html).not.toContain(ROOM_ENDED_TEXT);
     expect(html).toContain(escapeHtml(ROOM_NOT_ENDED_TEXT));
   });
+
+  it('does not say the room was left as it was when it ended and the list cannot be read back', async () => {
+    let ended = false;
+    const routes: readonly Route[] = ROUTES.map((route) => {
+      if (route.path === '/v1/operate/rooms/{roomId}/end') {
+        return {
+          ...route,
+          handle: async (context) => {
+            const answer = await route.handle(context);
+            ended = answer.status === 200;
+            return answer;
+          },
+        };
+      }
+      if (route.path === '/v1/operate/rooms' && route.method === 'GET') {
+        return {
+          ...route,
+          handle: (context) =>
+            ended ? Promise.resolve(json({ rooms: [{ roomId: 1 }] })) : route.handle(context),
+        };
+      }
+      return route;
+    });
+    const { made, race } = await opened({ routes });
+    const answer = await endThrough(tunnel(made), await passkeySession(made), {
+      roomId: race.roomId,
+      reason: 'other',
+      confirm: roomShortCode(race.roomId),
+    });
+    expect(answer.status).toBe(200);
+    expect(await isOpen(made, race.roomId)).toBe(false);
+    const html = await answer.text();
+    expect(html).toContain('The rooms could not be read from the instance');
+    expect(html).not.toContain(escapeHtml(ROOM_NOT_ENDED_TEXT));
+  });
 });
 
 describe('a wrong code, no code, or a step-up for another change ends nothing (#2649, ADR 0069 D-4)', () => {
@@ -351,6 +394,17 @@ describe('a wrong code, no code, or a step-up for another change ends nothing (#
       form: { csrf: csrf as string, roomId: '../../log', reason: 'other', confirm: 'x' },
     });
     expect(malformed.status).toBe(400);
+    // A reason that is not one of the closed list, and a typed code past any room's.
+    for (const bad of [
+      { reason: 'because', confirm: roomShortCode(race.roomId) },
+      { reason: 'other', confirm: 'x'.repeat(65) },
+    ]) {
+      const refused = await browser.send('POST', '/admin/rooms/end', {
+        cookie: session.token,
+        form: { csrf: csrf as string, roomId: race.roomId, ...bad },
+      });
+      expect(refused.status, bad.reason).toBe(400);
+    }
 
     expect(router.ended).toEqual([]);
     expect(await isOpen(made, race.roomId)).toBe(true);

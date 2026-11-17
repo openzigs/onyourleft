@@ -1177,13 +1177,13 @@ their off-box copies go, and the steps to restore the newest snapshot on the hos
 can **back up now**, through the same route the app uses, so its rule (one waiting, or none in the
 last 15 minutes) and its `backup_requested` entry are the route's own; a one-time code's session
 asks for none on either listener (ADR 0069 Q-A). No page names a host folder. Restore stays on the
-command line; and since [#2649](https://github.com/openzigs/onyourleft/issues/2649) **Rooms**
+command line. Since [#2649](https://github.com/openzigs/onyourleft/issues/2649) there is also **Rooms**
 (`/admin/rooms`): every open room, its kind, private or public, its phase, when it opened, its
 host's display name and its riders by display name — never where anyone is, how fast or how hard —
 and, in a passkey session, **End room** for each: pick why, type the room's code, and your passkey
 is asked again. The route's own close runs: everyone in it is told the room closed (`4005`), nobody
 can rejoin, results already final are kept and nothing reaches anyone's trainer; the operator log's
-`room_ended` names the admin pages and the listener. Each shows what the app's Operate area
+`room_ended` names the admin pages and the listener. Every page shows what the app's Operate area
 shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
 answer. On the AI backend page a passkey session can also change the settings, and **every change
 asks your passkey again** for that one change: the route's own checks run, its local-address rule
