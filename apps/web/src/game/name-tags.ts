@@ -31,6 +31,12 @@
  *    names none past it, so a name never floats over a rider who is not there.
  * 2. **In front of the eye, inside the frame, and within**
  *    {@link NAME_TAG_METRES} of it.
+ * 2a. **Not a rider the renderer is fading out** — #2596's review: a rider
+ *    behind the rider in their lane, between the camera and them, is drawn with only
+ *    part of its pixels (`rider-fade.ts` §`riderFaded`), and its name would
+ *    otherwise float whole over the road under the camera. A name is hidden
+ *    as soon as its rider begins to fade, not dimmed: dimmed, it would no
+ *    longer meet the contrast its surface and ink are paired for.
  * 3. **At most {@link MAXIMUM_NAME_TAGS}**, the nearest to the eye, and
  * 4. **none over another**: the followed rider's first, then nearest first,
  *    a name that would cover one already kept is left out.
@@ -47,6 +53,7 @@ import { cameraRig, projectToFrame } from './camera';
 import { RIDER_HEIGHT_METRES, RIDER_HELMET_AHEAD_METRES } from './bicycle';
 import type { RiderMarker, SceneFrame } from './port';
 import { REALISTIC_REMOTE_RIDERS, REALISTIC_REMOTE_STYLISED_RIDERS } from './realistic-budget';
+import { emptyRiderFadeLine, riderFadeLine, riderFaded } from './rider-fade';
 
 /**
  * How far from the camera a rider is still named: **60 m**. Chosen: past it a
@@ -152,10 +159,12 @@ export function nameTags(frame: SceneFrame, size: FrameSize): readonly NameTag[]
     .slice(0, NAMED_RIDERS_DRAWN)
     .map((each) => each.marker);
   const rig = cameraRig(frame.camera);
+  const fade = riderFadeLine(frame.camera, frame.markers, emptyRiderFadeLine());
   const seen: { readonly tag: NameTag; readonly depth: number; readonly first: boolean }[] = [];
   for (const marker of drawn) {
     const label = marker.label;
     if (label === undefined || label === '') continue;
+    if (riderFaded(marker, fade) > 0) continue;
     const at = projectToFrame(rig, aspect, hangsFrom(marker));
     if (at === undefined || at.depth > NAME_TAG_METRES) continue;
     if (at.left < 0 || at.left > 1 || at.top < 0 || at.top > 1) continue;

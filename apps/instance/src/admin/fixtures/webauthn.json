@@ -1,0 +1,157 @@
+{
+  "rpId": "ride.example",
+  "origin": "https://ride.example",
+  "fixtures": [
+    {
+      "name": "good es256 registration",
+      "kind": "registration",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOmVucm9sLWVzMjU2",
+      "response": {
+        "credentialId": "w6-upbvvNbA-gnAfW3l6tCMj27d74jBIL-YlCd1Z4nI",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9tVnVjbTlzTFdWek1qVTIiLCJvcmlnaW4iOiJodHRwczovL3JpZGUuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "attestationObject": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YVikUSr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKpFAAAAAAAAAAAAAAAAAAAAAAAAAAAAIMOvrqW77zWwPoJwH1t5erQjI9u3e-IwSC_mJQndWeJypQECAyYgASFYINlsCZRqINUjI0rtLQBPItXh2CVEOrPTYyYMojXDG86tIlggOTI-DMMT_sxPSGzIZbWESrBSpW1vOjBbmhzzn6wWVug"
+      },
+      "outcome": "accepted",
+      "credential": {
+        "algorithm": "es256",
+        "publicKey": "04d96c09946a20d523234aed2d004f22d5e1d825443ab3d363260ca235c31bcead39323e0cc313fecc4f486cc865b5844ab052a56d6f3a305b9a1cf39fac1656e8",
+        "signCount": 0
+      }
+    },
+    {
+      "name": "good es256 assertion",
+      "kind": "assertion",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOnNpZ24taW4tZXMyNTY",
+      "credential": {
+        "algorithm": "es256",
+        "publicKey": "04d96c09946a20d523234aed2d004f22d5e1d825443ab3d363260ca235c31bcead39323e0cc313fecc4f486cc865b5844ab052a56d6f3a305b9a1cf39fac1656e8",
+        "signCount": 0
+      },
+      "response": {
+        "credentialId": "w6-upbvvNbA-gnAfW3l6tCMj27d74jBIL-YlCd1Z4nI",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9uTnBaMjR0YVc0dFpYTXlOVFkiLCJvcmlnaW4iOiJodHRwczovL3JpZGUuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "authenticatorData": "USr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKoFAAAAAQ",
+        "signature": "MEQCIE3wWWwsMck3HAW8gromx4ZZW7QUEGOL79Kqc1qLnyFRAiAcbF4dMN_kuNVnR4r5RiDqnWkWSa4Zu1hjk06JjQAvhg"
+      },
+      "outcome": "accepted"
+    },
+    {
+      "name": "good ed25519 registration",
+      "kind": "registration",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOmVucm9sLWVkMjU1MTk",
+      "response": {
+        "credentialId": "XZ3VeZ92Hd3aNBM6iWTL-f_QWV6g6Uko7ix-vNa7P3A",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9tVnVjbTlzTFdWa01qVTFNVGsiLCJvcmlnaW4iOiJodHRwczovL3JpZGUuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "attestationObject": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YViBUSr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKpFAAAAAAAAAAAAAAAAAAAAAAAAAAAAIF2d1Xmfdh3d2jQTOolky_n_0FleoOlJKO4sfrzWuz9wpAEBAycgBiFYIBCdUesf98HlBbclglU7kJgUs_sS9a1cYNydkFL9pAA2"
+      },
+      "outcome": "accepted",
+      "credential": {
+        "algorithm": "ed25519",
+        "publicKey": "109d51eb1ff7c1e505b72582553b909814b3fb12f5ad5c60dc9d9052fda40036",
+        "signCount": 0
+      }
+    },
+    {
+      "name": "good ed25519 assertion",
+      "kind": "assertion",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOnNpZ24taW4tZWQyNTUxOQ",
+      "credential": {
+        "algorithm": "ed25519",
+        "publicKey": "109d51eb1ff7c1e505b72582553b909814b3fb12f5ad5c60dc9d9052fda40036",
+        "signCount": 0
+      },
+      "response": {
+        "credentialId": "XZ3VeZ92Hd3aNBM6iWTL-f_QWV6g6Uko7ix-vNa7P3A",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9uTnBaMjR0YVc0dFpXUXlOVFV4T1EiLCJvcmlnaW4iOiJodHRwczovL3JpZGUuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "authenticatorData": "USr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKoFAAAAAQ",
+        "signature": "cib7zSWqq6kWDDw6wf6BPWXi35LPNv9TEhgaOG5po-NUg7dYjUL8J0u_rKMn5U4EM-BS_Dj2G2XXAVRoULCxCg"
+      },
+      "outcome": "accepted"
+    },
+    {
+      "name": "flipped signature byte",
+      "kind": "assertion",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOmZsaXBwZWQgc2lnbmF0dXJlIGJ5dGU",
+      "credential": {
+        "algorithm": "es256",
+        "publicKey": "049781263dd68a0050d821c6739407b5aba0371c2f59671aa24026a54ba107b4d71f144700542ab0085c1ee17d54fb2ffac56ed2562dde7c88dfba48ced8ceadd4",
+        "signCount": 0
+      },
+      "response": {
+        "credentialId": "sbLKBOxLndvkJumO9ckCJlaoki3NhynAvySggWSKTLM",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9tWnNhWEJ3WldRZ2MybG5ibUYwZFhKbElHSjVkR1UiLCJvcmlnaW4iOiJodHRwczovL3JpZGUuZXhhbXBsZSIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "authenticatorData": "USr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKoFAAAAAQ",
+        "signature": "MEUCID1jsZls6kcPdqP-GJtvQS86DvIbuG78x3OH1VE2KkdNAiEA0CmZTKCbML4PVUq5NVx8egBIN0Y-i9V5-wWcwgKYd5o"
+      },
+      "outcome": "signature"
+    },
+    {
+      "name": "wrong rpIdHash",
+      "kind": "assertion",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOndyb25nIHJwSWRIYXNo",
+      "credential": {
+        "algorithm": "es256",
+        "publicKey": "049781263dd68a0050d821c6739407b5aba0371c2f59671aa24026a54ba107b4d71f144700542ab0085c1ee17d54fb2ffac56ed2562dde7c88dfba48ced8ceadd4",
+        "signCount": 0
+      },
+      "response": {
+        "credentialId": "sbLKBOxLndvkJumO9ckCJlaoki3NhynAvySggWSKTLM",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9uZHliMjVuSUhKd1NXUklZWE5vIiwib3JpZ2luIjoiaHR0cHM6Ly9yaWRlLmV4YW1wbGUiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+        "authenticatorData": "nBgN4M1pnueIl8R8_bPn7h11kG4xt3RqR0fepTaQmDcFAAAAAg",
+        "signature": "MEUCIQCOUkp5eFvjQhZZF-kuLgBN6vEDNhs-KX9c7mNf6Ao3IQIgaCLgvVojJEnUbfB0s9hi1HSaiAr9Up75uLqRKNLSGMo"
+      },
+      "outcome": "rp_id"
+    },
+    {
+      "name": "user verification unset",
+      "kind": "assertion",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOnVzZXIgdmVyaWZpY2F0aW9uIHVuc2V0",
+      "credential": {
+        "algorithm": "es256",
+        "publicKey": "049781263dd68a0050d821c6739407b5aba0371c2f59671aa24026a54ba107b4d71f144700542ab0085c1ee17d54fb2ffac56ed2562dde7c88dfba48ced8ceadd4",
+        "signCount": 0
+      },
+      "response": {
+        "credentialId": "sbLKBOxLndvkJumO9ckCJlaoki3NhynAvySggWSKTLM",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9uVnpaWElnZG1WeWFXWnBZMkYwYVc5dUlIVnVjMlYwIiwib3JpZ2luIjoiaHR0cHM6Ly9yaWRlLmV4YW1wbGUiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+        "authenticatorData": "USr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKoBAAAAAw",
+        "signature": "MEUCIFFeRVgyZwdYQ4O_lRDOMkqm8Tvo6RZoN5z3Sr0iB3-PAiEA44sdVg0q5GnWYkH1Nv5Jpjw9VA1B5mMLPOCKGzrZueg"
+      },
+      "outcome": "user_verified"
+    },
+    {
+      "name": "sign count went backwards",
+      "kind": "assertion",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOnNpZ24gY291bnQgd2VudCBiYWNrd2FyZHM",
+      "credential": {
+        "algorithm": "es256",
+        "publicKey": "049781263dd68a0050d821c6739407b5aba0371c2f59671aa24026a54ba107b4d71f144700542ab0085c1ee17d54fb2ffac56ed2562dde7c88dfba48ced8ceadd4",
+        "signCount": 10
+      },
+      "response": {
+        "credentialId": "sbLKBOxLndvkJumO9ckCJlaoki3NhynAvySggWSKTLM",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9uTnBaMjRnWTI5MWJuUWdkMlZ1ZENCaVlXTnJkMkZ5WkhNIiwib3JpZ2luIjoiaHR0cHM6Ly9yaWRlLmV4YW1wbGUiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+        "authenticatorData": "USr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKoFAAAABQ",
+        "signature": "MEUCIC8GGg70TeJp0HBzOuJCLhQNsT1oW3uiW_cWQdIXRNrKAiEApqLYdi2NDwnaV5iuS7VovYGCULheED-kSp_UuderlVY"
+      },
+      "outcome": "counter"
+    },
+    {
+      "name": "challenge from another action",
+      "kind": "assertion",
+      "challenge": "b3lsLWZpeHR1cmUtY2hhbGxlbmdlOnN0ZXAtdXAgZW5kX3Jvb20",
+      "credential": {
+        "algorithm": "es256",
+        "publicKey": "049781263dd68a0050d821c6739407b5aba0371c2f59671aa24026a54ba107b4d71f144700542ab0085c1ee17d54fb2ffac56ed2562dde7c88dfba48ced8ceadd4",
+        "signCount": 0
+      },
+      "response": {
+        "credentialId": "sbLKBOxLndvkJumO9ckCJlaoki3NhynAvySggWSKTLM",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiYjNsc0xXWnBlSFIxY21VdFkyaGhiR3hsYm1kbE9uTjBaWEF0ZFhBZ1ltRmphM1Z3WDI1dmR3Iiwib3JpZ2luIjoiaHR0cHM6Ly9yaWRlLmV4YW1wbGUiLCJjcm9zc09yaWdpbiI6ZmFsc2V9",
+        "authenticatorData": "USr__iKJepUH5u1LRte72j4SXIcaxAQRUf1r56UJrKoFAAAABA",
+        "signature": "MEYCIQDmINyFi8XhJLDiPzFyh_IA_VDbrzysbSVdiilRU34qJwIhAJjxtgmQ0rZ-0nwX_ZaqIJM5b4O0wlGK4c5igvJJN_RC"
+      },
+      "outcome": "challenge"
+    }
+  ]
+}

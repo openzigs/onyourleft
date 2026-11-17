@@ -14105,6 +14105,27 @@ select.oyl-input {
 }
 
 /*
+ * #2613: the instance's keys — one fact a row, because the card is one
+ * unbroken word of seventy-odd characters and its QR code beside it: in a
+ * Status card of 14rem the card would break into a column of fragments.
+ * `.oyl-instance__card` breaks it only where the width runs out.
+ */
+.oyl-operate__keys {
+  display: grid;
+  gap: var(--oyl-space-md);
+  margin: var(--oyl-space-lg) 0;
+}
+
+.oyl-operate__keys dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-operate__keys dd {
+  margin: 0;
+}
+
+/*
  * #2611: the AI backend's switches and the local server's models — one row
  * each and no bullet, because the row IS the control: its label is the
  * target (§"A checkbox or radio ROW"). The model's line wraps beside its

@@ -3736,6 +3736,55 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     );
   });
 
+  /**
+   * **No stall when the realistic world arrives mid-ride — #2663.** The
+   * tablet logged one frame of 1.5–3 s around a lap race's start, whose
+   * countdown is when a realistic ride's set lands. `game-harness.ts`
+   * §`worldArrivalProbe` hands two fresh stylised views the realistic rung,
+   * as `GameView` does on arrival, and draws the next frames: at once — the
+   * control, as before #2663, which must build programs inside them and pay
+   * for it in its first frame — and after `prepare`, as `GameView` does now,
+   * which must build none and keep under half the control's first-frame
+   * excess (`ride-start.ts` §`prepareTookTheStall`, #547's rule).
+   *
+   * ⚠️ That `GameView` takes the prepared order is
+   * `realistic-arrival-wiring.test.tsx`'s, required; this is what the order
+   * buys, on SwiftShader, which is not the tablet.
+   */
+  test('builds no GPU program in the first frames after the realistic world arrives mid-ride — #2663', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { worldArrival: arrival } = await realistic(harnessRun);
+    expect(arrival.measured).toBe(true);
+    // The control reproduces the stall's cause: the swap's first frames build programs.
+    expect(arrival.unpreparedLinks).toBeGreaterThan(0);
+    // And `prepare` is where they went.
+    expect(arrival.linksInPrepare).toBeGreaterThanOrEqual(arrival.unpreparedLinks);
+    expect(arrival.preparedLinks).toBe(0);
+    expect(arrival.preparedFrameMs).toHaveLength(arrival.unpreparedFrameMs.length);
+    const preparedExcess = firstFrameExcess(arrival.preparedFrameMs);
+    const controlExcess = firstFrameExcess(arrival.unpreparedFrameMs);
+    expect(
+      prepareTookTheStall(arrival.preparedFrameMs, arrival.unpreparedFrameMs),
+      `prepared first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`,
+    ).toBe(true);
+    const list = (values: readonly number[]) => values.map((each) => each.toFixed(1)).join(' / ');
+    const measured =
+      `drawn at once: ${String(arrival.unpreparedLinks)} programs linked in the first ` +
+      `${String(arrival.unpreparedFrameMs.length)} frames, longest ` +
+      `${Math.max(...arrival.unpreparedFrameMs).toFixed(1)} ms, ms ${list(arrival.unpreparedFrameMs)}; ` +
+      `prepared first (${arrival.prepareMs.toFixed(1)} ms, ${String(arrival.linksInPrepare)} programs, ` +
+      `KHR_parallel_shader_compile ${arrival.parallelCompile ? 'offered' : 'absent'}): ` +
+      `${String(arrival.preparedLinks)} linked in those frames, longest ` +
+      `${Math.max(...arrival.preparedFrameMs).toFixed(1)} ms, ms ${list(arrival.preparedFrameMs)}; ` +
+      `first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`;
+    testInfo.annotations.push({
+      type: 'the realistic world arriving mid-ride',
+      description: measured,
+    });
+    console.log(`the realistic world arriving mid-ride — ${measured}`);
+  });
+
   test('is drawn only when it is loaded, and otherwise falls back and says so — D-7', async ({
     harnessRun,
   }) => {
@@ -5254,6 +5303,39 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(measured.shoulderRock).toBeLessThan(SHOULDER_ROCK_CEILING_METRES);
     // THE CONTROL: the same two frames with no cadence reading.
     expect(measured.shoulderRockControl).toBeLessThan(1e-6);
+  });
+
+  test('fades a bot held between the camera and the rider out, body, bicycle, helmet and shadow, and draws the rider behind it as with no bot — #2596', async ({
+    harnessRun,
+  }) => {
+    const { riderFade: seen, riderFadeCalls: calls } = await realistic(harnessRun);
+    console.log(
+      `#2596 realistic squares read: ${JSON.stringify(seen)}; draw calls ${JSON.stringify(calls)}`,
+    );
+    // What it costs: no draw call. A body faded out entirely is not drawn at
+    // all, so the frame is the rider alone's; whole, the bot's body is one more.
+    expect(calls.alone).toBeGreaterThan(0);
+    expect(calls.faded).toBe(calls.alone);
+    expect(calls.whole).toBe(calls.alone + 1);
+    // The squares are what they say (the controls): the rider's is the
+    // rider, and with the fade off the bot fills its own and hides the rider.
+    expect(seen.riderDrawn).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.bot.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.rider.whole).toBeGreaterThan(0);
+    expect(seen.frame.whole).toBeGreaterThan(seen.bot.whole);
+    // The product: the bot is not drawn, its shadow is not drawn, and the
+    // rider is drawn exactly as with no bot.
+    expect(seen.bot.faded).toBe(0);
+    expect(seen.rider.faded).toBe(0);
+    expect(seen.frame.faded).toBe(0);
+    // Two places across: beside the rider, which the owner's ruling of
+    // 2026-11-15 keeps whole (`rider-fade.ts`), so its square keeps every
+    // pixel the bot drawn with the fade off does.
+    expect(seen.aside.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.aside.faded).toBe(seen.aside.whole);
+    // One place across and a metre behind — the owner's tablet case: whole.
+    expect(seen.beside.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.beside.faded).toBe(seen.beside.whole);
   });
 
   test('grounds the realistic riders with the shape of a bicycle, cast as the shipped shader and its twin agree — #626', async ({

@@ -556,6 +556,7 @@ describe('what a side road is — #1565', () => {
       classAt: () => 'built-up',
       bareSurfaceAt: () => undefined,
       covered: () => true,
+      protectedArea: () => false,
       builtUpDistances: (_points, count, into) => {
         into.fill(0, 0, count);
       },

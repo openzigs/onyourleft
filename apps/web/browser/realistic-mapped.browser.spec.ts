@@ -12,7 +12,11 @@
  *   else — on a 320 × 180 page since #1937 (`SIXTEENTH_PAGE`).
  * - **The city centre** (#1636): `town=city`, held between its two towers,
  *   draws its shop fronts and its tower inside the page's 35 calls — on a
- *   320 × 180 page since #1915.
+ *   320 × 180 page since #1915. Since #1638 (validation 0002 AE5) both holds
+ *   also read a `city-centre` run where they stand off #1633's counters, which
+ *   the page publishes (`urban-runs.ts`), and the product's 36 mapped
+ *   buildings; `realistic.browser.spec.ts` §"#1638" reads the `cityfar`
+ *   candidate, in a shard with room for its load.
  *
  * This file's nightly describes are a job of their own (docs/agents/ci.md §4c
  * §"Four nightly browser shards — #1698", whose fifth shard this is);
@@ -26,6 +30,7 @@ import { MAPPED_BUILDING_MAX, REALISTIC_WOODED_DRAW_CALLS } from '../src/game/re
 
 import { NIGHTLY } from './nightly';
 import { frameReading, REALISTIC_LOAD_BUDGET_MS, ride, SIXTEENTH_PAGE } from './realistic-ride';
+import { classAlong } from './urban-runs';
 
 test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGHTLY }, () => {
   // The case compares two frames' calls and triangles, which the canvas's
@@ -95,6 +100,12 @@ test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, 
       expect(city.result.drawingBuffer).toEqual([SIXTEENTH_PAGE.width, SIXTEENTH_PAGE.height]);
       expect(city.result.lastFrame.calls).toBeGreaterThan(0);
       expect(city.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+      // #1638, AE5's after row: #1633's counters, as the page publishes them,
+      // put the hold in a city centre; and the cap is the product's 36.
+      const runs = city.page.urbanRuns ?? [];
+      console.log(`#1638 town=city at=${String(at)}: runs ${JSON.stringify(runs)}`);
+      expect(classAlong(runs, at), String(at)).toBe('city-centre');
+      expect(city.page.mapped?.buildings).toBe(MAPPED_BUILDING_MAX);
     }
     expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
   });

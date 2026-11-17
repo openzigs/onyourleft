@@ -180,6 +180,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  MeshDepthMaterial,
   MeshLambertMaterial,
   MeshStandardMaterial,
   NearestFilter,
@@ -354,6 +355,7 @@ import {
 } from './footprint-buildings';
 import {
   FAR_ROLES,
+  mappedBuildingCap,
   MappedSelection,
   NEAR_ROLES,
   NO_RIVALS,
@@ -629,6 +631,13 @@ import {
 } from './tree-levels';
 import { nearTreeKeep, type NearTreeFade } from './near-tree-fade';
 import {
+  emptyRiderFadeLine,
+  riderFadeLine,
+  riderFaded,
+  type RiderFade,
+  type RiderFadeLine,
+} from './rider-fade';
+import {
   directionalFogColour,
   drawnHorizonColour,
   environmentIntensity,
@@ -725,6 +734,7 @@ import {
   type ShapesOf,
 } from './near-field';
 import {
+  BOUNDARY_KINDS,
   BOUNDARY_PIECE_METRES,
   FIELD_DEPTH_METRES,
   FIELD_EDGE_LATERAL_METRES,
@@ -3261,6 +3271,16 @@ export class ScatterBelt {
 export class RiderBelt {
   readonly #group = new Group();
   readonly #materials = vertexColouredMaterials();
+  /**
+   * What the riders are drawn with into the sun's shadow map — #2596: a
+   * depth material made as three 0.185's `WebGLShadowMap` makes its own
+   * default (`new MeshDepthMaterial()`, basic depth packing: the directional
+   * light's shadow map is a depth texture, so no packed colour is read),
+   * taught the rider fade, so a rider faded out casts as little as it is
+   * drawn. It is one more program, compiled in `prepare()`'s warm-up, and no
+   * new pass: the riders were already drawn into that pass with three's.
+   */
+  readonly #depth = withRiderInstance(new MeshDepthMaterial(), false);
   readonly #bodies: InstancedMesh;
   /** The upper bodies, rolled against the bicycle about the hips — #546. */
   readonly #torsos: InstancedMesh;
@@ -3325,23 +3345,26 @@ export class RiderBelt {
     // #623: each rider wears its own kind's kit under its tint. @see RIDER_KITS
     withKitPerInstance(this.#materials.lit);
     withKitPerInstance(this.#materials.flat);
-    // #2494: the bars turned by each rider's steer, the arms' hands with them.
-    withSteering(this.#materials.lit);
-    withSteering(this.#materials.flat);
-    this.#bodies = steerable(
+    // #2494: the bars turned by each rider's steer, the arms' hands with them;
+    // #2596: and every part of a rider faded by its instance.
+    withRiderInstance(this.#materials.lit, true);
+    withRiderInstance(this.#materials.flat, true);
+    this.#bodies = riderInstanceChannels(
       new InstancedMesh(mergedParts(RIDER_BICYCLE_PARTS), this.#materials.lit, riders),
       riders,
     );
-    this.#torsos = steerable(
+    this.#torsos = riderInstanceChannels(
       new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS), this.#materials.lit, riders),
       riders,
     );
-    this.#cranksets = new InstancedMesh(
-      mergedParts(RIDER_CRANK_PARTS),
-      this.#materials.lit,
+    this.#cranksets = riderInstanceChannels(
+      new InstancedMesh(mergedParts(RIDER_CRANK_PARTS), this.#materials.lit, riders),
       riders,
     );
-    this.#limbs = new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT);
+    this.#limbs = riderInstanceChannels(
+      new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT),
+      riders * LEG_BONE_COUNT,
+    );
     for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
       // ⚠️ **Allocates `instanceColor` while `count` is still the capacity**,
@@ -3362,6 +3385,8 @@ export class RiderBelt {
       // the road and the ground set it, and the opposite of the scenery belt.
       mesh.frustumCulled = false;
       this.#castersOnly(mesh, mesh === this.#limbs ? LEG_BONE_COUNT : 1);
+      // #2596: a faded rider casts as little as it is drawn.
+      mesh.customDepthMaterial = this.#depth;
       this.#group.add(mesh);
     }
     this.#group.visible = false;
@@ -3431,8 +3456,12 @@ export class RiderBelt {
    * to take one. A marker of a kind {@link RIDER_TINTS} does not name is
    * skipped rather than drawn untinted, which cannot happen for the three
    * `port.ts` declares and is what a fourth would hit.
+   *
+   * #2596: each rider but the rider's own is faded by how near it is drawn to
+   * `fade`, the frame's line from the camera toward the rider
+   * (`rider-fade.ts`); with none, every rider is drawn whole.
    */
-  place(markers: readonly RiderMarker[]): void {
+  place(markers: readonly RiderMarker[], fade?: RiderFadeLine): void {
     if (!this.#shown) {
       return;
     }
@@ -3462,6 +3491,7 @@ export class RiderBelt {
         break;
       }
       posed = this.#placeOne(slot, marker) || posed;
+      this.#fadeOne(slot, riderFaded(marker, fade));
       slot += 1;
       if (CASTS_CONTACT_SHADOW[marker.kind]) {
         casters = slot;
@@ -3554,6 +3584,7 @@ export class RiderBelt {
     // of the two is mounted, and the other would leak.
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#depth.dispose();
   }
 
   /**
@@ -3657,6 +3688,16 @@ export class RiderBelt {
     return true;
   }
 
+  /** How much of the rider in `slot` is faded out, on every mesh it is drawn by — #2596. */
+  #fadeOne(slot: number, faded: number): void {
+    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
+      fadeInstance(mesh, slot, faded);
+    }
+    for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
+      fadeInstance(this.#limbs, slot * LEG_BONE_COUNT + bone, faded);
+    }
+  }
+
   /** Where one rider's four leg segments are, for one crank angle. @see legBones */
   #poseLegs(slot: number, crankAngle: number): void {
     const bones = legBones(crankAngle);
@@ -3724,6 +3765,8 @@ export class ContactShadowBelt {
     polygonOffsetUnits: -4,
   });
   readonly #mesh: InstancedMesh;
+  /** #2596: how much of each blob's rider is faded out. */
+  readonly #faded: InstancedBufferAttribute;
   /** Reused for every rider on every frame. @see placeContactShadow */
   readonly #shadow: ContactShadow = { x: 0, y: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 };
   readonly #position = new Vector3();
@@ -3743,7 +3786,29 @@ export class ContactShadowBelt {
   }
 
   constructor() {
-    this.#mesh = new InstancedMesh(contactShadowGeometry(), this.#material, STYLISED_RIDER_SLOTS);
+    // #2596: a blob is as light as its rider is faded out.
+    const spliced = "#2596's faded blob";
+    this.#material.onBeforeCompile = (shader) => {
+      shader.vertexShader = replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          `#include <common>\nattribute float ${BLOB_FADED_ATTRIBUTE};`,
+          'vertex',
+          spliced,
+        ),
+        '#include <color_vertex>',
+        `#include <color_vertex>\nvColor.a *= 1.0 - ${BLOB_FADED_ATTRIBUTE};`,
+        'vertex',
+        spliced,
+      );
+    };
+    this.#material.customProgramCacheKey = () => 'oyl-faded-blob';
+    const geometry = contactShadowGeometry();
+    this.#faded = new InstancedBufferAttribute(new Float32Array(STYLISED_RIDER_SLOTS), 1);
+    this.#faded.setUsage(DynamicDrawUsage);
+    geometry.setAttribute(BLOB_FADED_ATTRIBUTE, this.#faded);
+    this.#mesh = new InstancedMesh(geometry, this.#material, STYLISED_RIDER_SLOTS);
     this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#mesh.count = 0;
     // For `RiderBelt`'s reason: every rider is within metres of the camera.
@@ -3773,8 +3838,12 @@ export class ContactShadowBelt {
     }
   }
 
-  /** One blob per rider who casts one, under this frame's sun. Allocates nothing. */
-  place(markers: readonly RiderMarker[], sun: SunStyle): void {
+  /**
+   * One blob per rider who casts one, under this frame's sun, as light as the
+   * rider is faded out (#2596): none for a rider faded out entirely.
+   * Allocates nothing.
+   */
+  place(markers: readonly RiderMarker[], sun: SunStyle, fade?: RiderFadeLine): void {
     if (!this.#shown) {
       return;
     }
@@ -3783,9 +3852,11 @@ export class ContactShadowBelt {
       if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
-      if (!placeContactShadow(marker, sun, this.#shadow)) {
+      const faded = riderFaded(marker, fade);
+      if (faded >= 1 || !placeContactShadow(marker, sun, this.#shadow)) {
         continue;
       }
+      this.#faded.setX(slot, faded);
       const shadow = this.#shadow;
       this.#position.set(shadow.x, shadow.y, shadow.z);
       this.#turn.setFromAxisAngle(this.#up, shadow.yaw);
@@ -3795,6 +3866,7 @@ export class ContactShadowBelt {
     }
     this.#mesh.count = slot;
     this.#mesh.instanceMatrix.needsUpdate = true;
+    this.#faded.needsUpdate = true;
     this.#mesh.visible = slot > 0;
   }
 
@@ -3804,6 +3876,9 @@ export class ContactShadowBelt {
     this.#material.dispose();
   }
 }
+
+/** The blob's instance attribute: how much of its rider is faded out — #2596. */
+const BLOB_FADED_ATTRIBUTE = 'oylFaded';
 
 /** How many points round the blob's rim: enough that 24 edges read as an ellipse. */
 const CONTACT_SHADOW_SEGMENTS = 24;
@@ -3928,7 +4003,8 @@ export class RiderSilhouetteBelt {
       new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]), 3),
     );
     geometry.setIndex([0, 2, 1, 0, 3, 2]);
-    this.#throws = new InstancedBufferAttribute(new Float32Array(STYLISED_RIDER_SLOTS * 2), 2);
+    // #2596: the third is how much of the rider casting it is faded out.
+    this.#throws = new InstancedBufferAttribute(new Float32Array(STYLISED_RIDER_SLOTS * 3), 3);
     this.#throws.setUsage(DynamicDrawUsage);
     geometry.setAttribute('oylThrow', this.#throws);
     this.#mesh = new InstancedMesh(geometry, this.#material, STYLISED_RIDER_SLOTS);
@@ -3969,8 +4045,12 @@ export class RiderSilhouetteBelt {
     this.#darkness.value = darkness;
   }
 
-  /** One silhouette per rider who casts one, under this frame's sun. Allocates nothing. */
-  place(markers: readonly RiderMarker[], sun: SunStyle): void {
+  /**
+   * One silhouette per rider who casts one, under this frame's sun, as light
+   * as the rider is faded out (#2596): none for a rider faded out entirely.
+   * Allocates nothing.
+   */
+  place(markers: readonly RiderMarker[], sun: SunStyle, fade?: RiderFadeLine): void {
     if (!this.#shown) {
       return;
     }
@@ -3979,13 +4059,14 @@ export class RiderSilhouetteBelt {
       if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
-      if (!silhouetteThrow(marker, sun, this.#throw)) {
+      const faded = riderFaded(marker, fade);
+      if (faded >= 1 || !silhouetteThrow(marker, sun, this.#throw)) {
         continue;
       }
       this.#position.set(marker.x, marker.y + CONTACT_SHADOW_LIFT_METRES, marker.z);
       this.#turn.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
       this.#mesh.setMatrixAt(slot, this.#matrix.compose(this.#position, this.#turn, this.#unit));
-      this.#throws.setXY(slot, this.#throw.x, this.#throw.z);
+      this.#throws.setXYZ(slot, this.#throw.x, this.#throw.z, faded);
       slot += 1;
     }
     this.#mesh.count = slot;
@@ -4004,11 +4085,13 @@ export class RiderSilhouetteBelt {
 
 /** The silhouette's quad, stretched over one rider's cast footprint. @see RiderSilhouetteBelt */
 const SILHOUETTE_VERTEX = /* glsl */ `
-attribute vec2 oylThrow;
+attribute vec3 oylThrow;
 uniform vec4 oylBounds;
 varying vec2 vOylGround;
 varying vec2 vOylThrow;
+varying float vOylFaded;
 void main() {
+  vOylFaded = oylThrow.z;
   float margin = ${glslFloat(SILHOUETTE_MARGIN_METRES)};
   float topAcross = oylBounds.z * oylThrow.x;
   float topAlong = oylBounds.z * oylThrow.y;
@@ -4020,7 +4103,7 @@ void main() {
     position.z
   );
   vOylGround = vec2(across, along);
-  vOylThrow = oylThrow;
+  vOylThrow = oylThrow.xy;
   gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(across, 0.0, along, 1.0);
 }
 `;
@@ -4035,6 +4118,7 @@ uniform vec4 oylBounds;
 uniform float oylDarkness;
 varying vec2 vOylGround;
 varying vec2 vOylThrow;
+varying float vOylFaded;
 void main() {
   float height = oylBounds.z;
   float reach = oylBounds.w;
@@ -4064,7 +4148,7 @@ void main() {
     cover = max(cover, texel.r * inside);
   }
   if (cover <= 0.0) discard;
-  gl_FragColor = vec4(0.0, 0.0, 0.0, oylDarkness * cover);
+  gl_FragColor = vec4(0.0, 0.0, 0.0, oylDarkness * cover * (1.0 - vOylFaded));
 }
 `;
 
@@ -4380,7 +4464,7 @@ function riderPartGeometry(each: RiderPart): BufferGeometry {
 
 /**
  * How much each vertex of a part turns with the bars — #2494, the
- * {@link STEER_ATTRIBUTE} {@link withSteering} reads: 1 for a part that turns
+ * {@link STEER_ATTRIBUTE} {@link withRiderInstance} reads: 1 for a part that turns
  * wholly, 0 for one that does not, and along a `'toward-end'` tube from 0 at
  * its start to 1 at its end (`bicycle.ts` §`RiderPart.steers`). Called BEFORE
  * the part is turned and moved, when a tube still stands along its own `+Y`
@@ -4404,79 +4488,172 @@ function markSteering(geometry: BufferGeometry, part: RiderPart): BufferGeometry
 
 /** The vertex attribute that says how much a vertex turns with the bars — #2494. */
 const STEER_ATTRIBUTE = 'oylSteer';
-/** The instance attribute that says how far a rider's bars are turned, in radians — #2494. */
-const INSTANCE_STEER_ATTRIBUTE = 'oylInstanceSteer';
+/**
+ * The instance attribute every rider mesh carries — one `vec2`, so one vertex
+ * attribute slot: `.x` how far the rider's bars are turned, in radians
+ * (#2494), and `.y` how much of the rider is faded out (#2596,
+ * `rider-fade.ts` §`riderFaded`). A mesh without it reads `(0, 0)`: bars
+ * straight, drawn whole.
+ */
+const RIDER_INSTANCE_ATTRIBUTE = 'oylRiderInstance';
 
 /**
- * Turns the front of a bicycle by each instance's steer, in the vertex shader
- * — #2494, so the bars turn with no draw call added: every vertex is turned
- * about `bicycle.ts` §`STEERING_AXIS` by its own {@link STEER_ATTRIBUTE} times
- * its instance's {@link INSTANCE_STEER_ATTRIBUTE}, before the instance's
- * matrix places it — `bicycle.ts` §`steeredPoint`'s Rodrigues turn, written
- * once more in GLSL, and its normal with it. A geometry without the
- * attributes reads them as nought (WebGL's default for an attribute with no
- * array) and is drawn as it was: the cranks and the legs share a material
- * with the frame. Chained after whatever patch the material already had.
+ * The fade of #2596 in GLSL: a fragment is kept only where the screen-space
+ * hash #617's tree levels and #545's near trees use (`TREE_DITHER_DISCARD`)
+ * is at or over `fade` — so 0 keeps every pixel, 1 none, and between them
+ * that share of pixels is discarded, evenly. No blending and no sorting, so a
+ * fading rider stays in the opaque pass in the meshes the rider is drawn by.
  */
-function withSteering<M extends Material>(material: M): M {
+function riderFadeDiscard(fade: string): string {
+  return /* glsl */ `
+  if (${fade} > 0.0) {
+    float oylRiderDither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    if (oylRiderDither < ${fade}) discard;
+  }
+`;
+}
+
+/** The materials {@link withRiderInstance} has taught. */
+const RIDER_FADE_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material fades a rider out by its instance — #2596.
+ *
+ * @test-facing held by `three-renderer.test.ts` §"#2596", which asserts it of
+ * the stylised belt's two materials (lit and flat), and by
+ * `contact-shadow.test.ts`, which asserts it of the riders' shadow-map depth
+ * material. The realistic world's materials (frame, rubber, metal, helmet and
+ * each body) are held only by the nightly browser spec
+ * (`game.browser.spec.ts` §"#2596", the realistic world).
+ */
+export function fadesRiders(material: Material): boolean {
+  return RIDER_FADE_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a rider material what {@link RIDER_INSTANCE_ATTRIBUTE} carries.
+ *
+ * - **The fade** (#2596), always: the instance's `.y` handed to the fragment,
+ *   which discards that share of its pixels ({@link riderFadeDiscard}).
+ * - **The steer** (#2494), when `steering`: every vertex turned about
+ *   `bicycle.ts` §`STEERING_AXIS` by its own {@link STEER_ATTRIBUTE} times its
+ *   instance's `.x`, before the instance's matrix places it —
+ *   `bicycle.ts` §`steeredPoint`'s Rodrigues turn, written once more in GLSL,
+ *   and its normal with it. So the bars turn with no draw call added. A
+ *   geometry without the attributes reads them as nought (WebGL's default for
+ *   an attribute with no array) and is drawn as it was: the cranks and the
+ *   legs share a material with the frame.
+ *
+ * Chained after whatever patch the material already had. Idempotent.
+ */
+function withRiderInstance<M extends Material>(material: M, steering: boolean): M {
+  if (RIDER_FADE_TAUGHT.has(material)) return material;
+  RIDER_FADE_TAUGHT.add(material);
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
-  const spliced = "#2494's steering";
+  const spliced = steering ? "#2494's steering" : "#2596's rider fade";
   const { point, direction } = STEERING_AXIS;
   const vector = (each: { x: number; y: number; z: number }): string =>
     `vec3(${[each.x, each.y, each.z].map((value) => value.toFixed(9)).join(', ')})`;
+  const steer = `${STEER_ATTRIBUTE} * ${RIDER_INSTANCE_ATTRIBUTE}.x`;
   material.onBeforeCompile = (shader, renderer) => {
     earlier(shader, renderer);
-    shader.vertexShader = replacedOrThrown(
-      replacedOrThrown(
-        replacedOrThrown(
-          shader.vertexShader,
-          '#include <common>',
-          /* glsl */ `#include <common>
-attribute float ${STEER_ATTRIBUTE};
-attribute float ${INSTANCE_STEER_ATTRIBUTE};
+    let vertex = replacedOrThrown(
+      shader.vertexShader,
+      '#include <common>',
+      /* glsl */ `#include <common>
+attribute vec2 ${RIDER_INSTANCE_ATTRIBUTE};
+varying float vOylRiderFade;
+${
+  steering
+    ? `attribute float ${STEER_ATTRIBUTE};
 vec3 oylTurned(vec3 v, float angle) {
   vec3 k = ${vector(direction)};
   float c = cos(angle);
   return v * c + cross(k, v) * sin(angle) + k * dot(k, v) * (1.0 - c);
+}`
+    : ''
 }`,
-          'vertex',
-          spliced,
-        ),
-        '#include <beginnormal_vertex>',
-        `#include <beginnormal_vertex>
-objectNormal = oylTurned(objectNormal, ${STEER_ATTRIBUTE} * ${INSTANCE_STEER_ATTRIBUTE});`,
-        'vertex',
-        spliced,
-      ),
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-transformed = ${vector(point)} + oylTurned(transformed - ${vector(point)}, ${STEER_ATTRIBUTE} * ${INSTANCE_STEER_ATTRIBUTE});`,
       'vertex',
       spliced,
     );
+    if (steering) {
+      vertex = replacedOrThrown(
+        vertex,
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+objectNormal = oylTurned(objectNormal, ${steer});`,
+        'vertex',
+        spliced,
+      );
+    }
+    shader.vertexShader = replacedOrThrown(
+      vertex,
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+vOylRiderFade = ${RIDER_INSTANCE_ATTRIBUTE}.y;${
+        steering
+          ? `
+transformed = ${vector(point)} + oylTurned(transformed - ${vector(point)}, ${steer});`
+          : ''
+      }`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylRiderFade;',
+        'fragment',
+        spliced,
+      ),
+      '#include <clipping_planes_fragment>',
+      `#include <clipping_planes_fragment>\n${riderFadeDiscard('vOylRiderFade')}`,
+      'fragment',
+      spliced,
+    );
   };
-  material.customProgramCacheKey = () => `${earlierKey}+oyl-steering`;
+  material.customProgramCacheKey = () =>
+    `${earlierKey}+${steering ? 'oyl-steering' : 'oyl-rider-fade'}`;
   return material;
 }
 
 /**
- * Gives an instanced mesh its per-instance steer, every instance straight —
- * #2494. @see withSteering
+ * Gives an instanced rider mesh its per-instance {@link RIDER_INSTANCE_ATTRIBUTE},
+ * every instance straight and whole — #2494, #2596.
  */
-function steerable(mesh: InstancedMesh, capacity: number): InstancedMesh {
-  const steer = new InstancedBufferAttribute(new Float32Array(capacity), 1);
-  steer.setUsage(DynamicDrawUsage);
-  mesh.geometry.setAttribute(INSTANCE_STEER_ATTRIBUTE, steer);
+function riderInstanceChannels(mesh: InstancedMesh, capacity: number): InstancedMesh {
+  const channels = new InstancedBufferAttribute(new Float32Array(capacity * 2), 2);
+  channels.setUsage(DynamicDrawUsage);
+  mesh.geometry.setAttribute(RIDER_INSTANCE_ATTRIBUTE, channels);
   return mesh;
 }
 
-/** Sets one instance's steer, where the mesh has one. @see steerable */
+/**
+ * Sets one instance's steer, where the mesh has one. @see riderInstanceChannels
+ *
+ * ⚠️ **Marks the buffer for upload only when the value changed** — review of
+ * #2620. Three uploads the whole buffer, not one slot, whenever it is marked,
+ * so a frame in which no rider turned its bars and none came nearer the
+ * camera's line uploads nothing. Compared as the `Float32Array` holds it.
+ */
 function steerInstance(mesh: InstancedMesh, slot: number, steer: number): void {
-  const held = mesh.geometry.getAttribute(INSTANCE_STEER_ATTRIBUTE) as
+  const held = mesh.geometry.getAttribute(RIDER_INSTANCE_ATTRIBUTE) as
     InstancedBufferAttribute | undefined;
-  if (held === undefined) return;
+  if (held === undefined || held.getX(slot) === Math.fround(steer)) return;
   held.setX(slot, steer);
+  held.needsUpdate = true;
+}
+
+/**
+ * Sets how much of one instance is faded out — #2596; only a change marks the
+ * buffer for upload, as {@link steerInstance}. @see riderInstanceChannels
+ */
+function fadeInstance(mesh: InstancedMesh, slot: number, faded: number): void {
+  const held = mesh.geometry.getAttribute(RIDER_INSTANCE_ATTRIBUTE) as InstancedBufferAttribute;
+  if (held.getY(slot) === Math.fround(faded)) return;
+  held.setY(slot, faded);
   held.needsUpdate = true;
 }
 
@@ -16161,8 +16338,12 @@ export class RealisticRiderBelt {
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
     // #623: the helmet and glasses are the file's own, coloured per vertex.
-    const helmetMaterial = withAtmosphere(
-      constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
+    // #2596: faded with the rider who wears it.
+    const helmetMaterial = withRiderInstance(
+      withAtmosphere(
+        constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
+      ),
+      false,
     );
     const helmetSource = helmetOf(body);
     // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
@@ -16176,7 +16357,10 @@ export class RealisticRiderBelt {
     const frameMaterial = bicycle.frame.material as MeshStandardMaterial;
     const rubberMaterial = bicycle.rubber.material as MeshStandardMaterial;
     const metalMaterial = bicycle.metal.material as MeshStandardMaterial;
-    this.#helmets = tintable(helmetSource.geometry.clone(), helmetMaterial, riders);
+    this.#helmets = riderInstanceChannels(
+      tintable(helmetSource.geometry.clone(), helmetMaterial, riders),
+      riders,
+    );
     this.#materials = [frameMaterial, rubberMaterial, metalMaterial, helmetMaterial];
     for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
       this.#group.add(mesh);
@@ -16194,7 +16378,8 @@ export class RealisticRiderBelt {
       if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
       const source = skinned.material as Material;
       const kit = { value: new Color(RIDER_KITS.rider.jersey) };
-      const material = riderBodyMaterial(dressed, kit, this.#kitPlain);
+      const fade = { value: 0 };
+      const material = riderBodyMaterial(dressed, kit, this.#kitPlain, fade);
       if (slot === 0) source.dispose();
       skinned.material = material;
       skinned.frustumCulled = false;
@@ -16242,6 +16427,7 @@ export class RealisticRiderBelt {
         body: skinned,
         material,
         kit,
+        fade,
         bones,
         ordered,
         restQuaternions: ordered.map((bone) => bone.quaternion.clone()),
@@ -16383,14 +16569,18 @@ export class RealisticRiderBelt {
     rubber.needsUpdate = true;
   }
 
-  /** This frame's riders, posed from their own crank angles. @see RiderBelt.place */
-  place(markers: readonly RiderMarker[]): void {
+  /**
+   * This frame's riders, posed from their own crank angles, each but the
+   * rider's own faded by how near it is drawn to `fade` (#2596). @see RiderBelt.place
+   */
+  place(markers: readonly RiderMarker[], fade?: RiderFadeLine): void {
     if (!this.#shown) return;
     let slot = 0;
     for (const marker of markers) {
       if (slot >= this.#riders.length) break;
       if (!Object.hasOwn(RIDER_TINTS, marker.kind)) continue;
       this.#placeOne(slot, marker);
+      this.#fadeOne(slot, riderFaded(marker, fade));
       slot += 1;
     }
     for (let rest = slot; rest < this.#riders.length; rest += 1) {
@@ -16413,6 +16603,20 @@ export class RealisticRiderBelt {
     for (const rider of this.#riders) {
       rider.material.dispose();
       rider.body.skeleton.dispose();
+    }
+  }
+
+  /**
+   * How much of the rider in `slot` is faded out — #2596: its body through its
+   * own material, its bicycle, cranks and helmet by their instance. A body
+   * faded out entirely is not drawn at all, so it costs no skinning.
+   */
+  #fadeOne(slot: number, faded: number): void {
+    const rider = this.#riders[slot] as RealisticRiderSlot;
+    rider.fade.value = faded;
+    rider.body.visible = faded < 1;
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      fadeInstance(mesh, slot, faded);
     }
   }
 
@@ -16843,6 +17047,8 @@ interface RealisticRiderSlot {
   readonly material: MeshStandardMaterial;
   /** This body's kit colour, linear — #623. Set per frame from {@link RIDER_KITS}. */
   readonly kit: { value: Color };
+  /** How much of this body is faded out — #2596. Set per frame from `rider-fade.ts`. */
+  readonly fade: { value: number };
   readonly bones: ReadonlyMap<string, Bone>;
   readonly restQuaternions: readonly Quaternion[];
   readonly restPositions: readonly Vector3[];
@@ -16980,11 +17186,14 @@ function helmetOf(scene: Object3D): Mesh {
  * - `plain` at 1 draws the whole body in one colour, the kit's mean under the
  *   same main colour (`REALISTIC_RIDER_KIT_MEAN`), still tinted — the browser
  *   gate's control for the pattern (#623).
+ * - `fade` is how much of the body is faded out, the share of its pixels
+ *   discarded by the same dither its bicycle's instances read (#2596).
  */
 function riderBodyMaterial(
   maps: RealisticRiderMaps,
   kit: { value: Color },
   plain: { value: number },
+  fade: { value: number },
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -17001,13 +17210,20 @@ function riderBodyMaterial(
   material.onBeforeCompile = (shader) => {
     shader.uniforms['oylKitColour'] = kit;
     shader.uniforms['oylKitPlain'] = plain;
+    shader.uniforms['oylRiderFade'] = fade;
     shader.fragmentShader = replacedOrThrown(
       replacedOrThrown(
-        shader.fragmentShader,
-        '#include <common>',
-        '#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;',
+        replacedOrThrown(
+          shader.fragmentShader,
+          '#include <common>',
+          '#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;\nuniform float oylRiderFade;',
+          'fragment',
+          spliced,
+        ),
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>\n${riderFadeDiscard('oylRiderFade')}`,
         'fragment',
-        spliced,
+        "#2596's rider fade",
       ),
       '#include <map_fragment>',
       /* glsl */ `#include <map_fragment>
@@ -17939,12 +18155,15 @@ export function realisticBicycleMeshes(
     ),
   );
   // #2494: the fork, the front wheel and the bar turned by each rider's steer.
-  for (const material of [frameMaterial, rubberMaterial, metalMaterial]) withSteering(material);
+  // #2596: and every part of a rider faded by its instance, the cranks too.
+  for (const material of [frameMaterial, rubberMaterial, metalMaterial]) {
+    withRiderInstance(material, true);
+  }
   return {
-    frame: steerable(tintable(bike.frame, frameMaterial, capacity), capacity),
-    rubber: steerable(tintable(bike.rubber, rubberMaterial, capacity), capacity),
-    metal: steerable(tintable(bike.metal, metalMaterial, capacity), capacity),
-    cranks: tintable(realisticCrankset(), metalMaterial, capacity),
+    frame: riderInstanceChannels(tintable(bike.frame, frameMaterial, capacity), capacity),
+    rubber: riderInstanceChannels(tintable(bike.rubber, rubberMaterial, capacity), capacity),
+    metal: riderInstanceChannels(tintable(bike.metal, metalMaterial, capacity), capacity),
+    cranks: riderInstanceChannels(tintable(realisticCrankset(), metalMaterial, capacity), capacity),
   };
 }
 
@@ -21856,8 +22075,15 @@ export class MappedBuildingBelt {
   readonly #modelTint: BufferAttribute;
   /** Each drawn building's first vertex in the models' buffer, or -1 for an extrusion. */
   readonly #modelAt: Int32Array;
-  readonly #selection = new MappedSelection();
-  /** The drawn buildings as ground-blob casters, written at a refill. @see grounded */
+  /** Since #1638 built to hold the buildings' cap (`mapped-buildings.ts` §`mappedBuildingCap`). */
+  readonly #selection: MappedSelection;
+  /**
+   * The drawn buildings as ground-blob casters, written at a refill. @see grounded
+   *
+   * ⚠️ **At most `MAPPED_BUILDING_MAX`, whatever the selection holds** —
+   * #1638: a city centre's far boxes past the 36 carry no blob, so
+   * `REALISTIC_GROUND_BLOBS` holds with the cap on.
+   */
   readonly #grounded = blobCasters(MAPPED_BUILDING_MAX);
   /** Where each surface's range starts, and where its next triangle goes, in vertices. */
   readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
@@ -21902,6 +22128,7 @@ export class MappedBuildingBelt {
   ) {
     this.buildings = buildings;
     this.#houses = houses;
+    this.#selection = new MappedSelection(mappedBuildingCap(buildings));
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);
@@ -22894,7 +23121,7 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * or `undefined` on a frame that is not a refill — which reads one number and
  * allocates nothing.
  *
- * **The frame's procedural structures and the mapped buildings are ranked
+ * **The frame's procedural buildings and the mapped buildings are ranked
  * together, under the one cap** — the buildings by the road ahead since #2429,
  * the structures' rivals likewise, though the structure belts still choose
  * WHICH structures in frame order, nearest the rider — #1586, ADR 0054
@@ -22904,11 +23131,18 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * The billboards are still taken first: they carry no place here, and the
  * logo belts draw them uncapped whatever this decides.
  *
+ * ⚠️ **The field boundaries are not ranked, since #2655**: a wall, hedge or
+ * fence ({@link BOUNDARY_KINDS}) takes only what the mapped buildings leave,
+ * as `structuresAt` gives them only what its buildings leave. Ranked by the
+ * road ahead, a fence 5.6 m off the road came before every house 10 to 25 m
+ * off it, so a suburb whose ground reads `other` (houses mapped, no
+ * `landuse=residential`) drew 36 fences and no house.
+ *
  * ⚠️ **The ranking decides how many procedural structures are drawn, not
  * which.** The returned cap is a count, and the structure belts admit the
  * first that many in view in the frame's own order (`settlements.ts`
  * §`structuresAt`: buildings and lots first, then field boundaries nearest the
- * rider), so the ones the cap drops are that order's tail.
+ * rider), so the ones the cap drops are that order's tail — the boundaries.
  */
 export function refillMappedBuildings(
   belt: MappedBuildingBelt,
@@ -22921,11 +23155,11 @@ export function refillMappedBuildings(
   const structure = REALISTIC_TRIANGLES.structure;
   const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
   let count = 0;
-  for (const item of scatter) if (isStructureKind(item.kind)) count += 1;
+  for (const item of scatter) if (isRival(item.kind)) count += 1;
   if (rivalDistances.length < count) rivalDistances = new Float64Array(count);
   let at = 0;
   for (const item of scatter) {
-    if (!isStructureKind(item.kind)) continue;
+    if (!isRival(item.kind)) continue;
     // #2429: by the road ahead, as the buildings it is ranked against are.
     rivalDistances[at] = rankFrom(view.ahead, view.x, view.z, item.x, item.z);
     at += 1;
@@ -22944,6 +23178,15 @@ export function refillMappedBuildings(
     view.ahead,
   );
   return items - Math.ceil(stats.triangles / structure);
+}
+
+/**
+ * Whether a procedural structure is ranked against the mapped buildings —
+ * #2655: every structure but a field boundary ({@link BOUNDARY_KINDS}), which
+ * takes only what the buildings leave.
+ */
+function isRival(kind: SceneryKind): boolean {
+  return isStructureKind(kind) && !BOUNDARY_KINDS.has(kind);
 }
 
 /** {@link refillMappedBuildings}' scratch: grown, never shrunk, so a refill rarely allocates. */
@@ -24552,6 +24795,17 @@ export function nearTreeFadeOf(view: GameView, fade: NearTreeFade): void {
 }
 
 /**
+ * Draws a view's other riders near the line from the camera to the rider faded
+ * out (the product), or whole wherever they are — #2596. @see RiderFade
+ *
+ * @test-facing the browser gate's control (`lap-race-harness.ts`); the
+ * product always fades
+ */
+export function riderFadeOf(view: GameView, fade: RiderFade): void {
+  if (view instanceof ThreeGameView) view.riderFadeMode(fade);
+}
+
+/**
  * One draw of a frame, as {@link drawOrderOf} reports it.
  *
  * @unwired the shape of what `drawOrderOf` hands the browser gate's harness
@@ -24648,6 +24902,10 @@ class ThreeGameView implements GameView {
    * second collection to hold.
    */
   readonly #riders = new RiderBelt();
+  /** #2596: whether other riders near the camera's line to the rider fade. @see riderFadeOf */
+  #riderFade: RiderFade = 'fade';
+  /** #2596: the frame's line from the eye toward the rider, written each frame. */
+  readonly #fadeLine = emptyRiderFadeLine();
   /**
    * #783's browser-gate controls, and nothing the product sets: every remote
    * rider in a mesh of its own, or the realistic world's rule for them off.
@@ -25053,7 +25311,13 @@ class ThreeGameView implements GameView {
       realisticFrame && this.#remoteControl !== 'no-realistic-rule'
         ? realisticRemoteSplit(frame.markers)
         : undefined;
-    this.#realistic?.riders.place(split?.realistic ?? frame.markers);
+    // #2596: every rider but the rider's own faded out near the line from the
+    // eye toward them, in both worlds' belts. @see riderFadeLine
+    const fade =
+      this.#riderFade === 'fade'
+        ? riderFadeLine(frame.camera, frame.markers, this.#fadeLine)
+        : undefined;
+    this.#realistic?.riders.place(split?.realistic ?? frame.markers, fade);
     // #679: the gantries at the lines in reach, and none anywhere else —
     // and since #966 in both worlds, each drawing its own, with the wordmark
     // on the start gate and the billboards. The hidden world's draw nothing.
@@ -25085,6 +25349,7 @@ class ThreeGameView implements GameView {
         (realisticFrame
           ? frame.markers.filter((marker) => marker.kind === 'remote')
           : frame.markers),
+      fade,
     );
     this.#updateShadows(frame);
     this.#placeCamera(rig);
@@ -25227,8 +25492,12 @@ class ThreeGameView implements GameView {
    *
    * ⚠️ **It warms the CURRENT rung only.** A step down later — `surfaceDetail`
    * goes, and on the map rung `shadowMap.enabled` goes with it — still builds
-   * programs on the frame it happens, once a ride, as before #547; and the
-   * realistic world's are built when it is drawn.
+   * programs on the frame it happens, once a ride, as before #547. ⚠️ **The
+   * realistic world arriving is not a step down**: since #2663 `GameView`
+   * prepares the view AGAIN once it is handed the realistic rung, with the
+   * next frame, and draws nothing until that settles. Drawn at once, the
+   * swap's first frame took about 6 s in the pinned Chromium against about
+   * 50 ms prepared (`game.browser.spec.ts` §"#2663").
    */
   async prepare(frame: SceneFrame): Promise<void> {
     const renderer = this.#renderer;
@@ -25764,6 +26033,11 @@ class ThreeGameView implements GameView {
     this.#realistic?.vegetation.setNearTreeFade(fade);
   }
 
+  /** @see riderFadeOf */
+  riderFadeMode(fade: RiderFade): void {
+    this.#riderFade = fade;
+  }
+
   /**
    * Renders one frame with every mesh's `onBeforeRender` noting it, then puts
    * each hook back. Shadow passes call `onBeforeShadow` instead, so what is
@@ -25929,8 +26203,10 @@ class ThreeGameView implements GameView {
 
   /** Where this frame's shadows fall — #426. */
   #updateShadows(frame: SceneFrame): void {
-    this.#contactShadows.place(frame.markers, frame.world.sun);
-    this.#realistic?.shadows.place(frame.markers, frame.world.sun);
+    // #2596: a faded rider's shadow fades with it.
+    const fade = this.#riderFade === 'fade' ? this.#fadeLine : undefined;
+    this.#contactShadows.place(frame.markers, frame.world.sun, fade);
+    this.#realistic?.shadows.place(frame.markers, frame.world.sun, fade);
     if (this.#riderShadows === 'map') {
       const pose = frame.camera;
       this.#lighting.aimShadowAt(pose.x, pose.y, pose.z, frame.world.sun);
@@ -26159,11 +26435,14 @@ class ThreeGameView implements GameView {
     this.#roadGeometry.setDrawRange(0, indices.length);
   }
 
-  #updateMarkers(markers: readonly RiderMarker[]): void {
+  #updateMarkers(markers: readonly RiderMarker[], fade: RiderFadeLine | undefined): void {
     if (this.#remoteControl === 'each-own-mesh') {
       // #783's control: the shape a room would cost if each rider were a mesh.
       const remote = markers.filter((marker) => marker.kind === 'remote');
-      this.#riders.place(markers.filter((marker) => marker.kind !== 'remote'));
+      this.#riders.place(
+        markers.filter((marker) => marker.kind !== 'remote'),
+        fade,
+      );
       while (this.#ownMeshes.length < remote.length) {
         const belt = new RiderBelt();
         belt.addTo(this.#scene);
@@ -26171,7 +26450,7 @@ class ThreeGameView implements GameView {
       }
       this.#ownMeshes.forEach((belt, index) => {
         const one = remote[index];
-        belt.place(one === undefined ? [] : [one]);
+        belt.place(one === undefined ? [] : [one], fade);
       });
       return;
     }
@@ -26180,7 +26459,7 @@ class ThreeGameView implements GameView {
     // `RiderBelt.place` sets every mesh's count from what it was handed, so
     // there is no "hide the ones that went" pass left to forget. #783: and for
     // a room's riders, as more instances of the same four meshes.
-    this.#riders.place(markers);
+    this.#riders.place(markers, fade);
   }
 
   /** @see remoteRiderControlOf */

@@ -100,9 +100,11 @@ describe('deploy/home/compose.yaml — the embedding model (#835, ADR 0040 D-6)'
     // Every uncommented line of the service, so a comment naming ports is not a finding.
     const lines = ollama.split('\n').filter((line) => !/^\s*#/.test(line));
     expect(lines.join('\n')).not.toMatch(/^\s*(ports|expose|network_mode):/m);
-    // And no service in the file publishes one at all, the debugging line aside.
+    // And no service in the file publishes one but the instance, once: the
+    // admin pages' loopback listener (#2643), the debugging line aside.
     const published = COMPOSE.split('\n').filter((line) => /^\s*ports:/.test(line));
-    expect(published).toStrictEqual([]);
+    expect(published).toStrictEqual(['    ports:']);
+    expect(service('instance')).toContain('\n    ports:\n');
   });
 
   it('is reached by a service name the instance accepts as local', () => {
@@ -322,5 +324,46 @@ describe('deploy/home/compose.yaml — the backup service (#2606)', () => {
     for (const folder of ['OYL_BACKUP_DIR', 'OYL_OFFBOX_DIR']) {
       expect(services.filter((name) => service(name).includes(folder))).toEqual(['backup']);
     }
+  });
+});
+
+describe('deploy/home/compose.yaml — the admin pages’ loopback listener (#2643, ADR 0069 D-5)', () => {
+  /** Every uncommented line of the instance's service. */
+  const lines = (): string[] =>
+    service('instance')
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line));
+
+  it('publishes it on the host’s loopback only, the same port on both sides, and nothing else', () => {
+    const at = lines().indexOf('    ports:');
+    expect(at).toBeGreaterThan(-1);
+    const published = lines()
+      .slice(at + 1)
+      .filter((line) => /^ {6}- /.test(line));
+    expect(published).toEqual([
+      "      - '127.0.0.1:${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-8788}:${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-8788}'",
+    ]);
+    // Never every interface, and never the main port.
+    expect(lines().join('\n')).not.toMatch(/0\.0\.0\.0|\[::\]|:8787:/);
+  });
+
+  it('leaves it off unless .env turns it on, and passes the tunnel sign-in allowlist through empty', () => {
+    expect(setting('OYL_INSTANCE_ADMIN_LOOPBACK_PORT')).toBe(
+      '${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-}',
+    );
+    expect(setting('OYL_INSTANCE_ADMIN_ADDRESSES')).toBe('${OYL_INSTANCE_ADMIN_ADDRESSES:-}');
+    const example = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    expect(example).toMatch(/^OYL_INSTANCE_ADMIN_LOOPBACK_PORT=$/m);
+    expect(example).toMatch(/^OYL_INSTANCE_ADMIN_ADDRESSES=$/m);
+  });
+
+  it('is a configuration the instance accepts with the admin pages on, and refuses without them', () => {
+    const on = readServerConfig({ adminPages: 'on', adminLoopbackPort: '8788' }, 1);
+    expect(on.ok && on.config.adminLoopbackPort).toBe(8788);
+    const off = readServerConfig({ adminPages: 'off', adminLoopbackPort: '8788' }, 1);
+    expect(off.ok).toBe(false);
   });
 });
