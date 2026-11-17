@@ -101,6 +101,7 @@ describe('the admin route table (#2645)', () => {
       '/admin/rooms',
       '/admin/keys',
       '/admin/log',
+      '/admin/problems',
       '/admin/passkeys',
     ]);
     expect(POSTS.map((route) => route.path)).toEqual([
@@ -248,7 +249,7 @@ describe('the owner is asked again on every page (#2645, ADR 0069 D-1)', () => {
 });
 
 describe('the one script is linked only on the pages with a passkey ceremony, and never inline (#2642, #2645, #2646, #2647, #2648, #2649, #2650)', () => {
-  it('the sign-in page, Passkeys, Accounts, Backups, the AI backend, Rooms and Keys link /admin/passkey.js; Status and the log link nothing', async () => {
+  it('the sign-in page, Passkeys, Accounts, Backups, the AI backend, Rooms and Keys link /admin/passkey.js; Status, the log and Recent problems link nothing', async () => {
     const made = await world();
     const handler = made.instance.handler;
     const token = await signedIn(made);
@@ -276,6 +277,8 @@ describe('the one script is linked only on the pages with a passkey ceremony, an
     expect(await scripts('/admin/keys', token)).toEqual([' src="/admin/passkey.js" defer']);
     expect(await scripts('/admin/status', token)).toEqual([]);
     expect(await scripts('/admin/log', token)).toEqual([]);
+    // #2651: read-only, so no script.
+    expect(await scripts('/admin/problems', token)).toEqual([]);
     const script = await handler(adminRequest('GET', '/admin/passkey.js'));
     expect(script.headers.get('content-type')).toBe('text/javascript; charset=utf-8');
     expect(script.headers.get('content-security-policy')).toContain("script-src 'self'");

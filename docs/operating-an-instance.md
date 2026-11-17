@@ -1192,7 +1192,11 @@ from a source the edge cannot write (ADR 0047 D-6): through the tunnel the page 
 the server machine or run `operator instance-key show`. A passkey session can **rotate the
 encryption key** by typing `rotate`; the route's key lease, its `busy` and its
 `instance_key_rotate` entry are its own, the old key keeps working for 7 days and nobody pins again.
-`rotate --drop-old`, `rotate-identity` and `reset` stay on the command line. Every page shows what the app's Operate area
+`rotate --drop-old`, `rotate-identity` and `reset` stay on the command line. Since
+[#2651](https://github.com/openzigs/onyourleft/issues/2651) there is also **Recent problems** (`/admin/problems`,
+beside the operator log): the instance's last problem lines since it started, newest first, each in
+the app's words with the line as logged under it — the lines the log's one redaction already wrote,
+so never a token, a key, a name or a coordinate; read-only, and empty again after a restart. Every page shows what the app's Operate area
 shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
 answer. On the AI backend page a passkey session can also change the settings, and **every change
 asks your passkey again** for that one change: the route's own checks run, its local-address rule

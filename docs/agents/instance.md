@@ -274,6 +274,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         Since #2650 Keys reads `operate.keysView` itself
                         (`GET /v1/operate/keys` stays `never`) and hands
                         the card to the renderer on the LOOPBACK place only.
+                        Since #2651 Recent problems draws `GET
+                        /v1/operate/logs` as given, escaped, with no
+                        redaction of its own and no second source.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

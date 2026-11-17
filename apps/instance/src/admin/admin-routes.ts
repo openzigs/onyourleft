@@ -59,6 +59,8 @@ export const ADMIN_SECTIONS = [
   'Rooms',
   'Keys',
   'Log',
+  // #2651: beside the operator log, the instance's own recent problem lines.
+  'Recent problems',
   'Passkeys',
 ] as const;
 
@@ -91,6 +93,7 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   { path: '/admin/analysis/address', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/clear', methods: ['POST'], kind: 'action' },
   { path: '/admin/log', methods: ['GET'], kind: 'page', section: 'Log' },
+  { path: '/admin/problems', methods: ['GET'], kind: 'page', section: 'Recent problems' },
   { path: '/admin/passkeys', methods: ['GET'], kind: 'page', section: 'Passkeys' },
   { path: '/admin/passkeys/options', methods: ['POST'], kind: 'action' },
   { path: '/admin/passkeys/add', methods: ['POST'], kind: 'action' },
