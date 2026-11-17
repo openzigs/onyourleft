@@ -74,6 +74,7 @@ import type {
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
+import { mappedGradeCrossings, overpassesAt } from './overpasses';
 import {
   LINE_LIMIT_METRES,
   MAXIMUM_LEAN_RADIANS,
@@ -135,7 +136,7 @@ import {
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
 import { distanceToDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
-import { bridgeParts, waterSurface, waterways } from './waterways';
+import { bridgeParts, MAXIMUM_BRIDGE_PARTS, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
 import {
@@ -649,7 +650,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // #459. The waterways are found once per route (`waterways.ts` §`computed`)
     // and the surfaces and bridges built for this stretch of it, from the same
     // corridor the ground and the road are built from.
-    water: water(input, corridor, seed),
+    // #2661: and the mapped streets crossing over or under the route, with them.
+    water: water(input, corridor, seed, riderDistance),
     // #679: what stands at the lines, in the rider's units, near the rider.
     lines: linesNear(
       input.profile,
@@ -842,12 +844,36 @@ export function placedCyclists(
   return cyclists;
 }
 
-/** The streams, lakes and bridges in view. @see SceneFrame.water */
-function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFrame {
+/**
+ * The streams, lakes and bridges in view — the streams' (#459) and, since
+ * #2661, the mapped overpasses and underpasses (`overpasses.ts`), the streams'
+ * first, cut to the one belt's {@link MAXIMUM_BRIDGE_PARTS}. @see SceneFrame.water
+ */
+function water(
+  input: SceneInput,
+  corridor: RoadCorridor,
+  seed: number,
+  riderDistance: number,
+): WaterFrame {
   const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
+  const streams = bridgeParts(input.profile, input.origin, corridor, ways);
+  const crossings =
+    input.worldCorridor === undefined
+      ? []
+      : overpassesAt(
+          input.profile,
+          input.origin,
+          seed,
+          (corridor.centre[0] as CorridorPoint).along,
+          (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+          riderDistance,
+          mappedGradeCrossings(input.worldCorridor, input.profile, input.origin),
+          input.landClass ?? NO_LAND_CLASS,
+        );
   return {
     surface: waterSurface(input.profile, input.origin, corridor, ways),
-    bridges: bridgeParts(input.profile, input.origin, corridor, ways),
+    bridges:
+      crossings.length === 0 ? streams : [...streams, ...crossings].slice(0, MAXIMUM_BRIDGE_PARTS),
     seconds: input.state.elapsed,
   };
 }
