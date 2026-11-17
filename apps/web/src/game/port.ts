@@ -40,8 +40,10 @@ import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
+import type { ParkDressingInView } from './park-dressing';
 import type { MappedBuildingsInView } from './mapped-buildings';
 import type { PeopleInView } from './people';
+import type { SceneryCyclist } from './scenery-cyclists';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
@@ -475,6 +477,16 @@ export interface SceneFrame {
    */
   readonly people?: PeopleInView | undefined;
   /**
+   * The other cyclists on the road — #2722 (`scenery-cyclists.ts`): oncoming
+   * riders, slower riders the rider catches and faster ones who overtake,
+   * each in their lane and never through the rider. Scenery only: they are
+   * not {@link markers}, so nothing that reads the riders — a draft, a race,
+   * the name tags — sees one. Drawn in the realistic world only, at the rung
+   * that draws {@link people}, and switched off with them; placed only on a
+   * free ride or a workout. Absent, or empty, everywhere else.
+   */
+  readonly cyclists?: readonly SceneryCyclist[] | undefined;
+  /**
    * The cross streets in view — #1565 (`cross-streets.ts`): a side road a
    * short way off the route at each junction, mapped where the corridor has
    * streets and one crossroads at each procedural village, the same objects
@@ -516,6 +528,20 @@ export interface SceneFrame {
    * riders' own instanced meshes (`scene.ts` §`SceneInput.raceBots`).
    */
   readonly lapRace?: LapRaceInView | undefined;
+  /**
+   * The golf courses and cemeteries round the camera — #2685
+   * (`park-dressing.ts`): the window of park looks and the greens the
+   * photographic ground paints its stripes, greens, bunkers and paths from,
+   * and the headstones, walls and flags standing on this frame's ground,
+   * drawn in ONE instanced call (`three-renderer.ts` §`ParkDressingBelt`).
+   * Realistic world only. **Absent on every ride with no corridor**, and
+   * `park-dressing.ts` §`NO_PARK_DRESSING` (empty) where none is in reach.
+   *
+   * ⚠️ **An optional field**, the hole `check-wiring.mjs` §Limits names:
+   * `park-dressing.test.ts` reads it back off `sceneFrame`, and the renderer
+   * test off the belt it fills.
+   */
+  readonly parkDressing?: ParkDressingInView | undefined;
 }
 
 /**

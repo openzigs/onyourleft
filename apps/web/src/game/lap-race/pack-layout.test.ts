@@ -10,25 +10,39 @@
 
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { kilograms, metres, metresPerSecond, type RouteProfile } from '@onyourleft/domain';
+import {
+  kilograms,
+  metres,
+  metresPerSecond,
+  racePosition,
+  type RouteProfile,
+} from '@onyourleft/domain';
 
+import { LANE_OFFSETS_METRES } from '../lanes';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
 import { circuitRoute } from '../route-fixtures-testing';
 import { drawnRiderDistance, placedRiders, sceneFrame, type SceneInput } from '../scene';
 import { atStartLine } from '../simulation';
 import { corridorOrigin, roadCorridor } from '../terrain';
 import { LAP_RACE_MOST_BOTS } from './choice';
+import { laneLateral } from './in-view';
 import {
   BIKE_LENGTH_METRES,
+  drawnLateral,
+  drawnSway,
   gridPackLayout,
   NO_PACK_LAYOUT,
   PACK_ABREAST_METRES,
+  PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND,
   PACK_CLOSE_UP_METRES_PER_SECOND,
   PACK_MOST_ABREAST,
+  PACK_ROW_LEAVE_METRES,
   PACK_ROW_METRES,
+  PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED,
   PACK_SIDEWAYS_METRES_PER_SECOND,
   stepPackLayout,
   type PackLayout,
+  type PackPlace,
   type PackRacer,
 } from './pack-layout';
 import {
@@ -50,6 +64,21 @@ const at = (id: string, along: number, lateral = 0): PackRacer => ({
   along,
   lateral,
   speed: 10,
+});
+
+/**
+ * A bot's place, held there: at rest, laid out where it is, and its row the
+ * one its shift says (#2665's fields filled in).
+ */
+const held = (place: { readonly shift: number; readonly lateral: number }): PackPlace => ({
+  rowShift: place.shift,
+  aim: place.lateral,
+  shift: place.shift,
+  shiftBefore: place.shift,
+  lateral: place.lateral,
+  lateralBefore: place.lateral,
+  sway: 0,
+  swayBefore: 0,
 });
 
 /** The layout of `racers` settled: stepped until nothing moves. */
@@ -119,28 +148,160 @@ describe('rows a bike length apart, the rider’s the anchor (#2544)', () => {
     expect(layout.get('c')?.lateral).toBe(1.75);
   });
 
-  it('moves a bot no faster than the steering speed across and the close-up speed along, a tick at a time', () => {
+  it('moves a bot across eased in and out at a rider’s pace, and at the close-up speed along, a tick at a time (#2665)', () => {
     const before = settled([at('a', 50, -1.75), at(RIDER, 49.4, 0)]);
     // It steers a lane over and drops a row behind the rider.
-    const after = stepPackLayout(
-      [at('a', 47, 1.75), at(RIDER, 49.4, 0)],
-      RIDER,
-      before,
-      LAP_RACE_TICK_SECONDS,
-    );
+    const field = [at('a', 47, 1.75), at(RIDER, 49.4, 0)];
+    const after = stepPackLayout(field, RIDER, before, LAP_RACE_TICK_SECONDS);
     const was = before.get('a');
     const now = after.get('a');
+    // From rest, one tick of the ease: never the whole sideways speed at once.
+    const ease = PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED * LAP_RACE_TICK_SECONDS;
+    expect(now?.sway).toBeCloseTo(ease, 9);
     expect(Math.abs((now?.lateral as number) - (was?.lateral as number))).toBeCloseTo(
-      PACK_SIDEWAYS_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS,
+      ease * LAP_RACE_TICK_SECONDS,
       9,
     );
-    expect(now?.sway).toBeCloseTo(PACK_SIDEWAYS_METRES_PER_SECOND, 9);
+    expect(now?.lateralBefore).toBe(was?.lateral);
     expect(Math.abs((now?.shift as number) - (was?.shift as number))).toBeCloseTo(
       PACK_CLOSE_UP_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS,
       9,
     );
+    // On across the lane: never over the sideways speed, its speed changing by
+    // no more than the ease a tick, and at rest where it was laid out.
+    let layout = after;
+    let fastest = 0;
+    for (let tick = 0; tick < 100; tick += 1) {
+      const from = layout.get('a') as PackPlace;
+      layout = stepPackLayout(field, RIDER, layout, LAP_RACE_TICK_SECONDS);
+      const to = layout.get('a') as PackPlace;
+      expect(Math.abs(to.lateral - from.lateral)).toBeLessThanOrEqual(
+        PACK_SIDEWAYS_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS + 1e-9,
+      );
+      expect(Math.abs(to.sway - from.sway)).toBeLessThanOrEqual(ease + 1e-9);
+      fastest = Math.max(fastest, Math.abs(to.sway));
+    }
+    expect(fastest).toBeCloseTo(PACK_SIDEWAYS_METRES_PER_SECOND, 9);
+    expect(layout.get('a')).toMatchObject({ lateral: 1.75, sway: 0 });
     expect(() => stepPackLayout([], RIDER, before, Number.NaN)).toThrow(RangeError);
     expect(() => stepPackLayout([], RIDER, before, -1)).toThrow(RangeError);
+  });
+
+  describe('counts an item’s push toward a row step, never on top of it (#2636)', () => {
+    // A bot alone a row ahead of a rider far behind, so nothing but its row
+    // moves it: its row's shift is a bike length, and it is drawn 0.75 m
+    // short of it (or past it), already moving toward it at the close-up speed.
+    const moving = (shift: number, rate: number): PackPlace => ({
+      ...held({ shift, lateral: 0 }),
+      rowShift: BIKE_LENGTH_METRES,
+      shiftBefore: shift - rate * LAP_RACE_TICK_SECONDS,
+    });
+    const stepped = (place: PackPlace, offsetRate: number | undefined): number => {
+      const bot: PackRacer = {
+        ...at('a', 100),
+        ...(offsetRate === undefined ? {} : { offsetRate }),
+      };
+      const next = stepPackLayout(
+        [bot, at(RIDER, 0)],
+        RIDER,
+        new Map([['a', place]]),
+        LAP_RACE_TICK_SECONDS,
+      );
+      return ((next.get('a')?.shift as number) - place.shift) / LAP_RACE_TICK_SECONDS;
+    };
+    const closing = moving(BIKE_LENGTH_METRES - 0.75, PACK_CLOSE_UP_METRES_PER_SECOND);
+    const dropping = moving(BIKE_LENGTH_METRES + 0.75, -PACK_CLOSE_UP_METRES_PER_SECOND);
+
+    it.each([
+      ['no item', undefined, PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['the drift back', -0.25, PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['a tailwind', 1.5, PACK_CLOSE_UP_METRES_PER_SECOND - 1.5],
+      ['a tow', 2, 0],
+    ] as const)(
+      'closes up on its row under %s at what is left of the close-up speed',
+      (_, offsetRate, rate) => {
+        expect(stepped(closing, offsetRate)).toBeCloseTo(rate, 9);
+      },
+    );
+
+    it.each([
+      ['no item', undefined, -PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['a tailwind', 1.5, -PACK_CLOSE_UP_METRES_PER_SECOND],
+      ['a puddle', -1.5, -(PACK_CLOSE_UP_METRES_PER_SECOND - 1.5)],
+      ['a gust', -2, 0],
+    ] as const)(
+      'drops back to its row under %s at what is left of its give-way',
+      (_, offsetRate, rate) => {
+        expect(stepped(dropping, offsetRate)).toBeCloseTo(rate, 9);
+      },
+    );
+  });
+});
+
+describe('rows and lanes that do not flicker — #2665', () => {
+  it('lets a racer join a row within PACK_ROW_METRES of its front, and keeps it there until PACK_ROW_LEAVE_METRES', () => {
+    const rider = at(RIDER, 50, 0);
+    const joined = settled([at('a', 100, 0), at('b', 100 - PACK_ROW_METRES + 0.01, 0), rider]);
+    expect(joined.get('b')?.rowShift).toBe(joined.get('a')?.rowShift);
+    // Between the two thresholds: it stays in the row it rode in...
+    const between = 100 - (PACK_ROW_METRES + PACK_ROW_LEAVE_METRES) / 2;
+    const kept = stepPackLayout(
+      [at('a', 100, 0), at('b', between, 0), rider],
+      RIDER,
+      joined,
+      LAP_RACE_TICK_SECONDS,
+    );
+    expect(kept.get('b')?.rowShift).toBe(kept.get('a')?.rowShift);
+    // ...where, laid out afresh, it is a row behind...
+    const fresh = settled([at('a', 100, 0), at('b', between, 0), rider]);
+    expect(fresh.get('b')?.rowShift).toBe(
+      (fresh.get('a')?.rowShift as number) - BIKE_LENGTH_METRES,
+    );
+    // ...and past the leaving threshold it goes back a row.
+    const left = stepPackLayout(
+      [at('a', 100, 0), at('b', 100 - PACK_ROW_LEAVE_METRES - 0.01, 0), rider],
+      RIDER,
+      kept,
+      LAP_RACE_TICK_SECONDS,
+    );
+    expect(left.get('b')?.rowShift).toBe((left.get('a')?.rowShift as number) - BIKE_LENGTH_METRES);
+  });
+
+  it('leaves a lane’s bot where it rode when the one beside it drops back, rather than centring it again', () => {
+    const rider = at(RIDER, 20, 0);
+    const pair = settled([at('a', 100, 0), at('b', 100, 0), rider]);
+    const places = ['a', 'b'].map((id) => pair.get(id)?.lateral as number).sort((x, y) => x - y);
+    expect(places[0]).toBeCloseTo(-PACK_ABREAST_METRES / 2, 9);
+    expect(places[1]).toBeCloseTo(PACK_ABREAST_METRES / 2, 9);
+    // 'b' drops two rows back: 'a' rides on alone in its row, at its own place.
+    const alone = settled([at('a', 100, 0), at('b', 96, 0), rider], pair);
+    const was = pair.get('a')?.lateral as number;
+    expect(alone.get('a')?.aim).toBeCloseTo(was, 9);
+    expect(alone.get('a')?.lateral).toBeCloseTo(was, 9);
+    // And so does 'b', in its own row. A bot laid out in a lane none of its
+    // row rode in is laid out at its middle.
+    expect(alone.get('b')?.aim).toBeCloseTo(pair.get('b')?.lateral as number, 9);
+    const moved = settled([at('a', 100, 0), at('b', 96, 1.75), rider], alone);
+    expect(moved.get('b')?.lateral).toBeCloseTo(1.75, 9);
+  });
+
+  it('draws a bot across, and its sideways speed, between its last two ticks on the frames between them', () => {
+    const place = {
+      ...held({ shift: 1, lateral: 0.5 }),
+      lateralBefore: 0.4,
+      sway: 2,
+      swayBefore: 1,
+    };
+    expect(drawnLateral(place, 0, LAP_RACE_TICK_SECONDS)).toBe(0.5);
+    expect(drawnLateral(place, LAP_RACE_TICK_SECONDS, LAP_RACE_TICK_SECONDS)).toBe(0.4);
+    expect(drawnLateral(place, LAP_RACE_TICK_SECONDS / 4, LAP_RACE_TICK_SECONDS)).toBeCloseTo(
+      0.475,
+      12,
+    );
+    expect(drawnSway(place, LAP_RACE_TICK_SECONDS / 2, LAP_RACE_TICK_SECONDS)).toBeCloseTo(1.5, 12);
+    // Never past either tick: a frame more than a tick back is drawn at the tick before.
+    expect(drawnLateral(place, 1, LAP_RACE_TICK_SECONDS)).toBe(0.4);
+    expect(drawnSway(place, -1, LAP_RACE_TICK_SECONDS)).toBe(2);
   });
 });
 
@@ -402,7 +563,7 @@ describe('drawn turning and leaning into a move across the pack, as a steered ri
   const LOOP = circuitRoute(120);
   const RIDER_AT = 200;
   /** The marker of one bot 6 m up the road, in the middle lane, moving across at `sway`. */
-  function bot(sway: number) {
+  function bot(sway: number, speed = 9) {
     const base = atStartLine(LOOP);
     const frame = sceneFrame({
       profile: LOOP,
@@ -416,7 +577,7 @@ describe('drawn turning and leaning into a move across the pack, as a steered ri
       raceBots: [
         {
           distanceMetres: RIDER_AT + 6,
-          speedMetresPerSecond: 9,
+          speedMetresPerSecond: speed,
           lateralMetres: 0,
           swayMetresPerSecond: sway,
           laidOut: true,
@@ -441,6 +602,16 @@ describe('drawn turning and leaning into a move across the pack, as a steered ri
     expect(Math.sign(turned(right) - turned(straight))).toBe(
       -Math.sign(turned(left) - turned(straight)),
     );
+  });
+
+  it('turns a bot at its own speed: the same move across turns a slower bot further (#2665)', () => {
+    const turned = (marker: ReturnType<typeof bot>): number =>
+      Math.atan2(marker?.headingX as number, marker?.headingZ as number);
+    const off = (speed: number): number =>
+      Math.abs(turned(bot(0.5, speed)) - turned(bot(0, speed)));
+    // At the rider's 10 m/s floor the two turned alike; a bot at 5 m/s rides
+    // a path twice as steep as one at 10 m/s, both well inside the 12° cap.
+    expect(off(5)).toBeGreaterThan(1.8 * off(10));
   });
 
   it('draws a laid-out row level with the rider where the layout put it, never moved aside onto one spot', () => {
@@ -602,7 +773,7 @@ describe('every pass goes round: the rider and the bots never drawn through one 
         if (
           !(moved >= 0) ||
           !(moved <= each.speed + PACK_CLOSE_UP_METRES_PER_SECOND + 0.25) ||
-          !(across <= PACK_SIDEWAYS_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS + 1e-9)
+          !(across <= PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS + 1e-9)
         ) {
           jumps.push(
             `bot ${String(bot)}, tick ${String(tick)}: ${String(moved)} m/s, ${String(across)} m across`,
@@ -787,7 +958,7 @@ describe('every pass goes round: the rider and the bots never drawn through one 
     // left and right through the grid: every 0.85 s through the first 6 s,
     // while the field is still getting going, and every 1.5 s after.
     const steerAt = [1, 1.85, 2.7, 3.55, 4.4, 5.25, 6.1, 7.6, 9.1, 10.6, 12.1, 13.6, 15.1, 16.6];
-    const placed = rideFromTheGrid((at) => Math.min(9, 2 * at), 400, SEED, false, steerAt);
+    const placed = rideFromTheGrid((at) => Math.min(9, 2 * at), 400, 2, false, steerAt);
     expectNeverAJump(placed);
     expectNeverInside(placed);
     // Not vacuous: the rider did steer across the road, and came by bots
@@ -823,7 +994,7 @@ describe('every pass goes round: the rider and the bots never drawn through one 
     // first and is never moved, and no bot may jump, so for a moment two
     // bots are drawn inside each other. This pins how long and where.
     const steerAt = [1, 1.85, 2.7, 3.55, 4.4, 5.25, 6.1, 7.6, 9.1, 10.6, 12.1, 13.6, 15.1, 16.6];
-    const placed = rideFromTheGrid((at) => Math.min(9, 2 * at), 400, 2, false, steerAt);
+    const placed = rideFromTheGrid((at) => Math.min(9, 2 * at), 400, SEED, false, steerAt);
     // Never inside the rider, on any frame, and never a jump.
     expectNeverInside(placed, true);
     expectNeverAJump(placed);
@@ -865,27 +1036,25 @@ describe('every pass goes round: the rider and the bots never drawn through one 
     // limit is gone, and this case and the PR's notes should say so.
     expect(overlapping.length).toBeGreaterThan(0);
     // Only in the second after the swerve back across the grid, 2.0 to 3.0 s
-    // after Go; 9 ticks (0.45 s) in all, 8 of them in one run, from 2.10 to
-    // 2.55 s; at worst 1.30 m inside each other along, 0.22 m apart across.
-    // Then on one line, for 7 ticks: a bot made way for the rider onto the
-    // line of a bot a bike length ahead of it, and is drawn up to 1.20 m
-    // inside it, the two 0.55 m apart nose to tail. Before #2558's review,
-    // finding H, the bot that made way was pushed a step further across by
-    // the rounding, and the two were drawn 0.32 m apart across, 1.43 m inside
-    // each other along, for 17 ticks.
+    // after Go. Since #2665 it is seed 99's, not seed 2's: a bot moving across
+    // at a rider's pace, eased, meets it on another seed. Two ticks, at 2.10
+    // and 2.15 s; at worst 0.31 m inside each other along, 0.29 m under a
+    // place across; never on one line. On seed 2 before #2665: 9 ticks (0.45
+    // s) in all, 8 of them in one run, at worst 1.30 m inside each other
+    // along, and on one line for 7 ticks, up to 1.20 m. Before #2558's
+    // review, finding H, 17 ticks, 1.43 m inside each other along.
     for (const { seconds } of overlapping) {
       expect(seconds).toBeGreaterThanOrEqual(2);
       expect(seconds).toBeLessThanOrEqual(3);
     }
-    expect(overlapping.length).toBeLessThanOrEqual(9);
-    expect(longest).toBeLessThanOrEqual(8);
-    expect(Math.max(...overlapping.map(({ along }) => along))).toBeLessThanOrEqual(1.3);
+    expect(overlapping.length).toBeLessThanOrEqual(2);
+    expect(longest).toBeLessThanOrEqual(2);
+    expect(Math.max(...overlapping.map(({ along }) => along))).toBeLessThanOrEqual(0.32);
     // And across (#2558's review, finding J): on one line no longer and no
     // deeper than that, so a change that puts two bots on one line for more
     // of the limit, or further inside each other there, is red.
     const oneLine = overlapping.filter(({ across }) => across > PACK_ABREAST_METRES - 1e-9);
-    expect(oneLine.length).toBeLessThanOrEqual(7);
-    expect(Math.max(0, ...oneLine.map(({ along }) => along))).toBeLessThanOrEqual(1.21);
+    expect(oneLine).toEqual([]);
   });
   it.each([
     // At about 63 s a bot comes up on the rider's line with a bot beside it
@@ -926,13 +1095,15 @@ describe('every pass goes round: the rider and the bots never drawn through one 
       expectNeverAJump(placed);
       expectNeverInside(placed);
       // Not vacuous: the bots reached race speed, and came up behind the
-      // rider on their line at over 12 m/s, within three bike lengths.
+      // rider at over 12 m/s, within three bike lengths and two places
+      // across: since #2665 a bot sees the rider in its line a pass's eased
+      // move ahead, and is already easing out of it.
       const held = placed.filter(({ rider, bots }) =>
         bots.some((each) => {
           const behind = rider.along - each.along;
           return (
             each.speed > 12 &&
-            Math.abs(each.across - rider.across) < PACK_ABREAST_METRES &&
+            Math.abs(each.across - rider.across) < 2 * PACK_ABREAST_METRES &&
             behind >= BIKE_LENGTH_METRES - 1e-9 &&
             behind < 3 * BIKE_LENGTH_METRES
           );
@@ -972,7 +1143,7 @@ describe('a bot the rider steers into makes way at once, within its reach (#2558
   it('steps aside and forward as far as it may in the tick, away from the rider', () => {
     // A bot a metre ahead of the rider and 0.6 m to their right, clear of
     // them; the rider then steers 0.3 m toward it.
-    const before = new Map([['a', { shift: 0, shiftBefore: 0, lateral: 0.6, sway: 0 }]]);
+    const before = new Map([['a', held({ shift: 0, lateral: 0.6 })]]);
     const after = stepPackLayout(
       [
         { id: RIDER, along: 100, lateral: 0.3, speed: 10 },
@@ -985,7 +1156,7 @@ describe('a bot the rider steers into makes way at once, within its reach (#2558
     const a = after.get('a');
     // As far away across as it may go in a tick, and as far on.
     expect(a?.lateral).toBeCloseTo(
-      0.6 + PACK_SIDEWAYS_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS,
+      0.6 + PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS,
       9,
     );
     expect(a?.shift).toBeCloseTo(PACK_CLOSE_UP_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS, 9);
@@ -1006,9 +1177,7 @@ describe('a bot exactly a place across from the rider is clear of them (#2558’
   });
 
   it('leaves a bot level with the rider a place across where it is, never giving way', () => {
-    let layout: PackLayout = new Map([
-      ['a', { shift: 0, shiftBefore: 0, lateral: BESIDE, sway: 0 }],
-    ]);
+    let layout: PackLayout = new Map([['a', held({ shift: 0, lateral: BESIDE })]]);
     for (let tick = 0; tick < 40; tick += 1) {
       const along = 100 + 10 * tick * LAP_RACE_TICK_SECONDS;
       layout = stepPackLayout(
@@ -1020,7 +1189,13 @@ describe('a bot exactly a place across from the rider is clear of them (#2558’
         layout,
         LAP_RACE_TICK_SECONDS,
       );
-      expect(layout.get('a')).toEqual({ shift: 0, shiftBefore: 0, lateral: BESIDE, sway: 0 });
+      expect(layout.get('a')).toMatchObject({
+        shift: 0,
+        shiftBefore: 0,
+        lateral: BESIDE,
+        lateralBefore: BESIDE,
+        sway: 0,
+      });
     }
   });
 
@@ -1029,9 +1204,7 @@ describe('a bot exactly a place across from the rider is clear of them (#2558’
     // drawn 2.5 m behind them, a place to their left, where a bot held behind
     // the rider was left: seed 333 drew one there for 13 s while the race had
     // it up to 13.8 m ahead.
-    let layout: PackLayout = new Map([
-      ['a', { shift: -3.5, shiftBefore: -3.5, lateral: BESIDE, sway: 0 }],
-    ]);
+    let layout: PackLayout = new Map([['a', held({ shift: -3.5, lateral: BESIDE })]]);
     let ahead = Number.NaN;
     for (let tick = 0; tick < 40; tick += 1) {
       const rider = 100 + 8 * tick * LAP_RACE_TICK_SECONDS;
@@ -1055,5 +1228,340 @@ describe('a bot exactly a place across from the rider is clear of them (#2558’
     }
     // Within two seconds it is drawn past the rider: level or ahead of them.
     expect(ahead).toBeGreaterThan(0);
+  });
+});
+
+describe('a racer a lap apart on the loop is kept clear where it is drawn (#2516, the owner’s ruling on #2544)', () => {
+  /** A loop of 500 m. */
+  const LAP = 500;
+
+  /** How far two racers are inside each other on the loop, by the pack's rule: nought or less is clear. */
+  function insideOnTheLoop(
+    one: { readonly along: number; readonly lateral: number },
+    other: { readonly along: number; readonly lateral: number },
+  ): number {
+    const apart = one.along - other.along - LAP * Math.round((one.along - other.along) / LAP);
+    return Math.min(
+      BIKE_LENGTH_METRES - 1e-9 - Math.abs(apart),
+      PACK_ABREAST_METRES - 1e-9 - Math.abs(one.lateral - other.lateral),
+    );
+  }
+
+  /**
+   * The rider at 18 m/s in the lane at 0 m, coming up on a bot a lap down at
+   * 8 m/s in the same lane, 20 m up the road: the deepest it is drawn inside
+   * the rider over 4 s, on every tick and on the frames between them.
+   */
+  function lapping(lap: number | undefined): number {
+    let layout: PackLayout = NO_PACK_LAYOUT;
+    let deepest = Number.NEGATIVE_INFINITY;
+    for (let tick = 0; tick <= 80; tick += 1) {
+      const seconds = tick * LAP_RACE_TICK_SECONDS;
+      const rider = { id: RIDER, along: 1_000 + 18 * seconds, lateral: 0, speed: 18 };
+      const bot = { id: 'a', along: 1_000 + 20 - LAP + 8 * seconds, lateral: 0, speed: 8 };
+      layout = stepPackLayout(
+        [rider, bot],
+        RIDER,
+        layout,
+        tick === 0 ? 0 : LAP_RACE_TICK_SECONDS,
+        lap,
+      );
+      const a = layout.get('a') as PackLayout extends ReadonlyMap<string, infer P> ? P : never;
+      for (const back of [0, 0.25, 0.5, 0.75]) {
+        const behind = back * LAP_RACE_TICK_SECONDS;
+        deepest = Math.max(
+          deepest,
+          insideOnTheLoop(
+            { along: rider.along - 18 * behind, lateral: 0 },
+            {
+              along:
+                bot.along -
+                8 * behind +
+                a.shift +
+                (a.shiftBefore - a.shift) * (tick === 0 ? 0 : back),
+              lateral: a.lateral,
+            },
+          ),
+        );
+      }
+    }
+    return deepest;
+  }
+
+  it('has the rider lapping a bot in their lane go round it, never through it, on any tick or between them', () => {
+    expect(lapping(LAP)).toBeLessThanOrEqual(0);
+    // The control: laid out without the lap, the same bot is drawn inside the rider.
+    expect(lapping(undefined)).toBeGreaterThan(0.5);
+  });
+
+  it('keeps two bots a lap apart, level on the road in one lane, out of each other', () => {
+    // Both behind the rider in race places: b a lap up on a, in the row behind
+    // the rider (a bike length back), a in the row behind that (two). So
+    // without the lap the two are drawn 0.3 m apart along on the road.
+    const A = 100;
+    const B = A + LAP - BIKE_LENGTH_METRES + 0.3;
+    const racers = [
+      { id: RIDER, along: 700, lateral: 0, speed: 10 },
+      { id: 'a', along: A, lateral: 1.75, speed: 10 },
+      { id: 'b', along: B, lateral: 1.75, speed: 10 },
+    ];
+    const step = (lap: number | undefined): PackLayout => {
+      let layout = stepPackLayout(racers, RIDER, NO_PACK_LAYOUT, 0, lap);
+      for (let tick = 0; tick < 200; tick += 1) {
+        layout = stepPackLayout(racers, RIDER, layout, LAP_RACE_TICK_SECONDS, lap);
+      }
+      return layout;
+    };
+    const apart = (layout: PackLayout): number =>
+      insideOnTheLoop(
+        {
+          along: A + (layout.get('a')?.shift as number),
+          lateral: layout.get('a')?.lateral as number,
+        },
+        {
+          along: B + (layout.get('b')?.shift as number),
+          lateral: layout.get('b')?.lateral as number,
+        },
+      );
+    expect(apart(step(LAP))).toBeLessThanOrEqual(0);
+    // The control: without the lap the two are drawn inside each other on the road.
+    expect(apart(step(undefined))).toBeGreaterThan(0);
+  });
+
+  it('has a bot that catches one a lap down in its lane go round it and past, never held behind it', () => {
+    // Away from the rider: x on the rider's lap at 12 m/s, 30 m back on the
+    // road from y, a lap down at 8 m/s, both in the lane at 0 m.
+    let layout: PackLayout = NO_PACK_LAYOUT;
+    let deepest = Number.NEGATIVE_INFINITY;
+    let pastAt = Number.NaN;
+    let furthestFromItsRow = 0;
+    for (let tick = 0; tick <= 200; tick += 1) {
+      const seconds = tick * LAP_RACE_TICK_SECONDS;
+      const x = { id: 'x', along: 70 + 12 * seconds, lateral: 0, speed: 12 };
+      const y = { id: 'y', along: 100 - LAP + 8 * seconds, lateral: 0, speed: 8 };
+      const rider = { id: RIDER, along: 300 + 10 * seconds, lateral: 1.75, speed: 10 };
+      layout = stepPackLayout(
+        [rider, x, y],
+        RIDER,
+        layout,
+        tick === 0 ? 0 : LAP_RACE_TICK_SECONDS,
+        LAP,
+      );
+      const xs = layout.get('x') as PackLayout extends ReadonlyMap<string, infer P> ? P : never;
+      const ys = layout.get('y') as PackLayout extends ReadonlyMap<string, infer P> ? P : never;
+      for (const back of tick === 0 ? [0] : [0, 0.25, 0.5, 0.75]) {
+        const behind = back * LAP_RACE_TICK_SECONDS;
+        deepest = Math.max(
+          deepest,
+          insideOnTheLoop(
+            {
+              along: x.along - 12 * behind + xs.shift + (xs.shiftBefore - xs.shift) * back,
+              lateral: xs.lateral,
+            },
+            {
+              along: y.along - 8 * behind + ys.shift + (ys.shiftBefore - ys.shift) * back,
+              lateral: ys.lateral,
+            },
+          ),
+        );
+      }
+      // Its row is the one behind the rider's: a bike length back.
+      furthestFromItsRow = Math.max(furthestFromItsRow, Math.abs(xs.shift + BIKE_LENGTH_METRES));
+      const ahead = x.along + xs.shift - (y.along + LAP + ys.shift);
+      if (Number.isNaN(pastAt) && ahead > BIKE_LENGTH_METRES) pastAt = seconds;
+    }
+    expect(deepest).toBeLessThanOrEqual(0);
+    // Past as soon as it can be: drawn 28.25 m back, a bike length past at
+    // 4 m/s is 7.5 s. And never held back off its row.
+    expect(pastAt).toBeLessThan(8);
+    expect(furthestFromItsRow).toBeLessThanOrEqual(BIKE_LENGTH_METRES);
+  });
+
+  it('has a bot a lap down that the rider steers into step aside and forward, as one on their lap does', () => {
+    // #2558's finding 1 a lap down: the bot a metre ahead of the rider on the
+    // road and 0.6 m to their right; the rider steers 0.3 m toward it. Its row
+    // is far behind the rider's in race places and gives way, but keeping
+    // clear of the rider it goes forward, never back into them.
+    const before = new Map([['a', held({ shift: 0, lateral: 0.6 })]]);
+    const after = stepPackLayout(
+      [
+        { id: RIDER, along: 100, lateral: 0.3, speed: 10 },
+        { id: 'a', along: 101 - LAP, lateral: 0.6, speed: 10 },
+      ],
+      RIDER,
+      before,
+      LAP_RACE_TICK_SECONDS,
+      LAP,
+    );
+    const a = after.get('a');
+    expect(a?.lateral).toBeCloseTo(
+      0.6 + PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS,
+      9,
+    );
+    expect(a?.shift).toBeCloseTo(PACK_CLOSE_UP_METRES_PER_SECOND * LAP_RACE_TICK_SECONDS, 9);
+  });
+
+  it('lays a seeded race on one lap out exactly as it did without the lap: seven bots, steering, passes and items', () => {
+    // A 1 km loop, seven Brisk bots drafting with items on, the rider at
+    // 6 m/s steering a lane every 2.5 s: the race's own layout, stepped with
+    // the lap, against one stepped from the same field without it, for 240 s:
+    // long enough for the field to string out over half a lap, short of
+    // anyone being lapped.
+    const loop = circuitRoute(159.15);
+    const lap = loop.totalDistance as number;
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = 21;
+        return array;
+      },
+    );
+    let ride = startLapRaceRide({
+      choice: { laps: 3, bots: LAP_RACE_MOST_BOTS, tier: 'brisk', itemsOn: true },
+      profile: loop,
+      conditions: lapRaceBotConditions(
+        loop,
+        rideConditionsFor(kilograms(75), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      draft: true,
+      riderMassKilograms: 75,
+    }) as LapRaceRide;
+    vi.restoreAllMocks();
+    let without: PackLayout = ride.pack;
+    let along = 0;
+    let passes = 0;
+    let steered = 0;
+    let nearestALapApart = Number.POSITIVE_INFINITY;
+    const speeds = new Set<number>();
+    let order = '';
+    const ticks = Math.round(240 / LAP_RACE_TICK_SECONDS);
+    for (let tick = 1; tick <= ticks; tick += 1) {
+      if (tick % 50 === 0) {
+        ride = askRaceLane(ride, steered % 3 === 2 ? 'lane-left' : 'lane-right');
+        steered += 1;
+      }
+      const from = along;
+      const placesBefore = new Map(
+        ride.race.racers.map((entry) => [entry.racer.id, racePosition(entry.racer)]),
+      );
+      along += 6 * LAP_RACE_TICK_SECONDS;
+      ride = stepLapRaceRide(ride, { ticks: 1, along, riderWatts: 200 });
+      // The rider's speed as the race reads it over the step.
+      const riderSpeed = (along - from) / LAP_RACE_TICK_SECONDS;
+      // The field as the race hands it to the layout (`ride-race.ts` §`packField`):
+      // each bot's speed with its race offset's rate, and where the rider is
+      // steering to and was a tick before (#2665).
+      const botSpeeds = new Map(
+        ride.bots.map((bot) => [
+          bot.id,
+          (bot.ride.speed as number) + (ride.offsetRates.get(bot.id) ?? 0),
+        ]),
+      );
+      const racers: PackRacer[] = ride.race.racers.map((entry) => ({
+        id: entry.racer.id,
+        along: racePosition(entry.racer),
+        alongBefore: placesBefore.get(entry.racer.id),
+        lateral: entry.racer.id === RIDER ? ride.input.steer.offset : laneLateral(entry.lane),
+        speed: botSpeeds.get(entry.racer.id) ?? riderSpeed,
+        // #2636: and that rate alone, which the row step reads.
+        ...(ride.offsetRates.has(entry.racer.id)
+          ? { offsetRate: ride.offsetRates.get(entry.racer.id) }
+          : {}),
+        ...(entry.racer.id === RIDER
+          ? {
+              heading: LANE_OFFSETS_METRES[ride.input.steer.lane],
+              lateralBefore: ride.steeredBefore,
+            }
+          : {}),
+      }));
+      without = stepPackLayout(racers, RIDER, without, LAP_RACE_TICK_SECONDS);
+      expect(ride.pack, `tick ${String(tick)}`).toEqual(without);
+      // What the ride went through: passes in the race's order, mixed speeds,
+      // and how near on the road two racers a lap apart ever came.
+      const now = [...racers]
+        .sort((a, b) => b.along - a.along)
+        .map((racer) => racer.id)
+        .join(' ');
+      if (order !== '' && now !== order) passes += 1;
+      order = now;
+      for (const speed of botSpeeds.values()) speeds.add(Math.round(speed));
+      racers.forEach((one, index) => {
+        for (const other of racers.slice(index + 1)) {
+          const odometers = one.along - other.along;
+          if (Math.abs(odometers) > lap / 2) {
+            nearestALapApart = Math.min(
+              nearestALapApart,
+              Math.abs(odometers - lap * Math.round(odometers / lap)),
+            );
+          }
+        }
+      });
+    }
+    // Not vacuous: the order changed, the rider steered, the bots rode at
+    // different speeds, and the field spread over half a lap, yet no two
+    // racers a lap apart came within a bike length of each other on the road.
+    expect(passes).toBeGreaterThan(10);
+    expect(steered).toBeGreaterThan(40);
+    expect(speeds.size).toBeGreaterThan(3);
+    expect(Number.isFinite(nearestALapApart)).toBe(true);
+    expect(nearestALapApart).toBeGreaterThan(BIKE_LENGTH_METRES);
+  });
+
+  it('holds the known limit of a lane jammed three abreast: the rider closing at 14 m/s is drawn inside a bot on one lap, and since #2665 not a lap apart', () => {
+    // The race sweep's '300 m, 13 to 19 m/s, seed 7' (`lap-race-lapped.test.ts`):
+    // two bots crawling at 2.7 m/s, under `PACK_ROLLING_METRES_PER_SECOND`,
+    // keep their places a place either side of the rider's line, and a third
+    // at 3.2 m/s rides in it. The rider closes at 14 m/s and the third has no
+    // place within its reach: the pack's own limit, which a lap does not make
+    // worse. Held from both sides so that a fix shows here.
+    const deepest = (offset: number): number => {
+      let layout: PackLayout = NO_PACK_LAYOUT;
+      let most = Number.NEGATIVE_INFINITY;
+      const bots = [
+        { id: 'l', ahead: 20.3, lateral: -0.55, speed: 2.7 },
+        { id: 'm', ahead: 20, lateral: 0, speed: 3.2 },
+        { id: 'r', ahead: 20.1, lateral: 0.55, speed: 2.7 },
+      ];
+      for (let tick = 0; tick <= 60; tick += 1) {
+        const seconds = tick * LAP_RACE_TICK_SECONDS;
+        const rider = { id: RIDER, along: 100 + 14 * seconds, lateral: 0, speed: 14 };
+        const racers = [
+          rider,
+          ...bots.map((bot) => ({
+            id: bot.id,
+            along: 100 + bot.ahead + offset + bot.speed * seconds,
+            lateral: bot.lateral,
+            speed: bot.speed,
+          })),
+        ];
+        layout = stepPackLayout(racers, RIDER, layout, tick === 0 ? 0 : LAP_RACE_TICK_SECONDS, LAP);
+        for (const bot of racers.slice(1)) {
+          const place = layout.get(bot.id) as PackLayout extends ReadonlyMap<string, infer P>
+            ? P
+            : never;
+          most = Math.max(
+            most,
+            insideOnTheLoop({ along: bot.along + place.shift, lateral: place.lateral }, rider),
+          );
+        }
+      }
+      return most;
+    };
+    const oneLap = deepest(0);
+    const aLapDown = deepest(-LAP);
+    expect(oneLap).toBeGreaterThan(0.2);
+    // #2665: a lap down it is now clear of the rider, the bots a lap apart
+    // looking where the rider is steering; before, 0.27 m inside them.
+    expect(aLapDown).toBeLessThanOrEqual(0);
+  });
+
+  it('refuses a lap that is not a finite number of metres above zero', () => {
+    for (const lap of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => stepPackLayout([], RIDER, NO_PACK_LAYOUT, 0, lap), String(lap)).toThrow(
+        RangeError,
+      );
+    }
   });
 });

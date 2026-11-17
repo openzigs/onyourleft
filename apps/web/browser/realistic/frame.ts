@@ -50,6 +50,8 @@ export function rideFrame(input: {
   readonly peopleOff?: boolean;
   /** #1542's levers, `levers=-land-planting` and its two siblings: those changes off. */
   readonly countrysideOff?: readonly CountrysideLever[];
+  /** #2685's lever, `levers=-park-dressing`: the golf courses and cemeteries as their planting alone. */
+  readonly parkDressingOff?: boolean;
   /**
    * #1972's `race=worst`: a lap race's bots and the rider's own hit effect,
    * as `scene.ts` §`SceneInput.raceBots` and §`SceneInput.riderHit` take
@@ -99,6 +101,7 @@ export function rideFrame(input: {
     people: input.peopleOff === true ? 0 : input.rung.people,
     settlementsWooded: input.settlementsWooded,
     countrysideOff: input.countrysideOff,
+    parkDressingOff: input.parkDressingOff,
     ...(input.town === undefined
       ? {}
       : {
