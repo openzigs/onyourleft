@@ -89,6 +89,7 @@ export type {
 export {
   BOT_FINISH_WINDOW_METRES,
   BOT_LANE_DWELL_MS,
+  BOT_LANE_JUDGEMENT_MS,
   BOT_LANE_STAY_METRES,
   BOT_LAST_CALL_METRES,
   BOT_MEMORY_AT_START,
@@ -183,6 +184,29 @@ export {
   decideTactic,
   TACTIC_MEMORY_AT_START,
 } from './tactics';
+
+// A language model's bot tactics (#2709, ADR 0071 D-3): the race state it is
+// shown and the answer it may give, each checked field by field. No power field.
+export type {
+  ModelTacticsAnswer,
+  ModelTacticsBotView,
+  ModelTacticsInput,
+  ModelTacticsInputProblem,
+  ModelTacticsInputRead,
+  ModelTacticsInvalid,
+  ModelTacticsMove,
+  ModelTacticsTarget,
+} from './model-tactics';
+export {
+  MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
+  MODEL_TACTICS_INPUT_MOST_CHARACTERS,
+  MODEL_TACTICS_MOST_SEATS,
+  modelTacticsAnswerFormat,
+  modelTacticsAnswerSchema,
+  modelTacticsSeats,
+  readModelTacticsAnswer,
+  readModelTacticsInput,
+} from './model-tactics';
 
 export type { BotPlanInput, BotPlanStep, BotPlanTactic, BotRacePlan } from './plan';
 export {

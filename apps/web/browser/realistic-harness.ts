@@ -80,6 +80,7 @@ import {
   untaggedStreetFixture,
   // #1274's industrial estate, school and pitches, which `town=grounds` rides.
   fencedGroundsFixture,
+  parksFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -106,6 +107,7 @@ import {
   lapRaceDrawnOf,
   loadRealisticWorld,
   mappedBuildingsDrawnOf,
+  mappedBuildingStatsOf,
   loadSceneryModels,
   mappedBlobsShownOf,
   overhangShadowsOf,
@@ -122,6 +124,7 @@ import {
   windowRevealsOf,
   windowRoomsOf,
   lotRealismOf,
+  type MappedBuildingStats,
   type VillageHouseStats,
 } from '../src/game/three-renderer';
 import {
@@ -176,6 +179,7 @@ import { outAndBackRoute } from '../src/game/route-fixtures-testing';
 import { fixtureLevelTown, plannedTown } from './realistic/town';
 import fixtureLevel from '../src/game/delivery/levels/fixtures/fixture-level.json';
 import { frameCensus, type FrameCensus } from './realistic/village';
+import { urbanRunsOf, type UrbanRun } from './urban-runs';
 import { deliveryInView } from '../src/game/delivery/in-view';
 import { nextHouse, startDeliveryRide } from '../src/game/delivery/ride-round';
 
@@ -419,6 +423,20 @@ declare global {
        * frames carry scenery; a realistic race's is `villageCeiling` (#1971).
        */
       readonly raceCeiling?: number;
+      /**
+       * #1638: the town's runs of each urban class (#1633's counters,
+       * `urban-runs.ts`), read off the urban map its plans were handed — all
+       * `unknown` with `levers=-urban-class`. Absent without a `town`.
+       */
+      readonly urbanRuns?: readonly UrbanRun[];
+      /**
+       * #1638: what the mapped buildings' belt drew at its last refill before
+       * the result was published (`three-renderer.ts`
+       * §`mappedBuildingStatsOf`): how many, near and far, their triangles and
+       * calls — so a row at a `cityfar` candidate shows the candidate took.
+       * Absent with the result, or before a frame carried any.
+       */
+      readonly mapped?: MappedBuildingStats;
     };
   }
 }
@@ -566,7 +584,10 @@ async function run(): Promise<void> {
                                     : // #2362: the fixture level, its corridor its own file's.
                                       config.town === 'level'
                                       ? fixtureLevelTown()
-                                      : undefined;
+                                      : // #2685: a golf course and cemeteries.
+                                        config.town === 'parks'
+                                        ? parksFixture(latitude)
+                                        : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -582,10 +603,13 @@ async function run(): Promise<void> {
     if (mixed === undefined) return undefined;
     // #1634's urban class and #1660's split roofs, as the press builds them, unless a lever is off.
     const { land, plans, urban } = plannedTown(mixed, config.leversOff);
+    // #1638: the town's urban runs, as the corridor page publishes a ride's.
+    publish({ urbanRuns: urbanRunsOf(urban, mixed.profile.totalDistance) });
     return {
       corridor: mixed.corridor,
       land,
-      buildings: mappedBuildingsOf(plans),
+      // #1638: and a candidate city cap, where the URL names one.
+      buildings: mappedBuildingsOf(plans, config.cityFar),
       // #1274: and its chain-link fence, unless that lever is off.
       lots: townWithChainLink(mappedTown(mixed.corridor, plans, urban), config.leversOff),
     };
@@ -773,6 +797,8 @@ async function run(): Promise<void> {
       peopleOff: config.leversOff.includes('people'),
       // #1542's three, each off on its own.
       countrysideOff: countrysideWithLevers(config.leversOff),
+      // #2685's pair: the golf courses and cemeteries as their planting alone.
+      parkDressingOff: config.leversOff.includes('park-dressing'),
       // #1972: a lap race's bots in the pacer's place, on the scenery-free
       // frame `LAP_RACE_SCENE_DRAW_CALLS` is the ceiling of.
       ...(config.race === undefined
@@ -831,6 +857,7 @@ async function run(): Promise<void> {
               treeTriangles: VILLAGE_TREE_TRIANGLES,
             };
       const villageHouses = villageHouseStatsOf(view);
+      const mapped = mappedBuildingStatsOf(view)?.stats;
       const delivery =
         config.delivery === undefined
           ? undefined
@@ -847,6 +874,7 @@ async function run(): Promise<void> {
         census,
         decorations,
         ...(villageHouses === undefined ? {} : { villageHouses }),
+        ...(mapped === undefined ? {} : { mapped }),
         ...(delivery === undefined ? {} : { delivery }),
         ...(config.weather === undefined ? {} : { weather: deliveryWeatherOf(view) }),
         // A stylised race is the scenery-free frame's; the village's ceiling is
@@ -862,6 +890,8 @@ async function run(): Promise<void> {
       });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
+      // #1638: for `adb logcat` too — AE5's rows say how many mapped buildings were drawn.
+      if (mapped !== undefined) console.log(`OYL-REALISTIC-MAPPED ${JSON.stringify(mapped)}`);
       // #1972: a race run says so on this line too, and what its belt drew, so the
       // reading taken off `adb logcat` alone cannot be of a frame with no race in it.
       console.log(

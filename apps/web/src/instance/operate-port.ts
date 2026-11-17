@@ -400,6 +400,60 @@ export type OperateEndRoom =
   | { readonly kind: 'not-ended' }
   | { readonly kind: Exclude<OperateStanding, 'owner' | 'not-owner'> };
 
+/**
+ * The instance's keys (#2613), as `GET /v1/operate/keys` writes them: public
+ * material only, each field held to its shape here so nothing else is drawn.
+ */
+export interface OperateKeys {
+  readonly kind: 'keys';
+  readonly state: OperateKeysState;
+  /** 64 lower-case hex, or `null` unless `ready`. */
+  readonly fingerprint: string | null;
+  /** `oyl-instance:<origin>#<52 characters>`, whole, or `null` unless `ready`. */
+  readonly card: string | null;
+  readonly current: {
+    readonly serial: number;
+    /** ISO 8601, UTC. */
+    readonly createdAt: string;
+    readonly rotatesAt: string;
+  } | null;
+  readonly olderHeld: number;
+}
+
+/** The keys, or why there are none: a standing other than `owner`. */
+export type OperateKeysRead = OperateKeys | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+/** What *Rotate the encryption key* did (#2613). */
+export type OperateKeyRotation =
+  | { readonly kind: 'rotated'; readonly serial: number }
+  /** The instance's own key maintenance held the lease: nothing was rotated. */
+  | { readonly kind: 'busy' }
+  /** The instance refused the request as written: nothing was rotated. */
+  | { readonly kind: 'not-rotated' }
+  | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
+/** One problem line (#2614): when, the line exactly as logged, and its fields. */
+export interface OperateProblem {
+  /** ISO 8601, UTC. */
+  readonly at: string;
+  /** The JSON line exactly as the instance's standard output got it. */
+  readonly line: string;
+  /** The line's fields: each a number, a boolean, `null` or a short string, as the instance's redaction keeps them. */
+  readonly fields: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+/** The instance's recent problems, newest first, since it last started (#2614). */
+export interface OperateProblems {
+  readonly kind: 'problems';
+  /** When the instance last started, ISO 8601, UTC. */
+  readonly since: string;
+  readonly lines: readonly OperateProblem[];
+}
+
+/** The problems, or why there are none: a standing other than `owner`. */
+export type OperateProblemsRead =
+  OperateProblems | { readonly kind: Exclude<OperateStanding, 'owner'> };
+
 /** What the Operate area may ask. */
 export interface OperatePort {
   /** The instance's status, read-only (#2604): one sealed request. */
@@ -428,6 +482,12 @@ export interface OperatePort {
   rooms(): Promise<OperateRoomsRead>;
   /** End `roomId`, `confirm` being the room's short code as the owner typed it (#2612). */
   endRoom(roomId: string, reason: OperateRoomEndReason, confirm: string): Promise<OperateEndRoom>;
+  /** The card, the fingerprint and the encryption keys (#2613): read-only. */
+  keys(): Promise<OperateKeysRead>;
+  /** Rotate the encryption key, with the word the owner typed (#2613). */
+  rotateKey(confirm: string): Promise<OperateKeyRotation>;
+  /** The instance's recent problem lines (#2614): read-only, and memory only on the instance. */
+  problems(): Promise<OperateProblemsRead>;
 }
 
 /** Every Operate route is sealed and signed by the owner's device key, so the port needs what a sealed call needs. */
@@ -695,6 +755,100 @@ function roomsFrom(answer: InstanceAnswer): OperateRooms | undefined {
   return { kind: 'rooms', rooms: rooms as OperateRoom[] };
 }
 
+/** The identity key's fingerprint as a rider's device shows it: 52 base32 characters, the card's tail. */
+const FINGERPRINT = /^[A-Z2-7]{52}$/;
+
+/** An instance card, whole: `oyl-instance:`, an origin, `#`, and 52 base32 characters. */
+const CARD = /^oyl-instance:https?:\/\/[A-Za-z0-9.:[\]-]{1,260}#[A-Z2-7]{52}$/;
+
+const KEYS_STATES: readonly OperateKeysState[] = [
+  'ready',
+  'no-secret',
+  'no-origin',
+  'no-keys',
+  'unreadable',
+  'busy',
+];
+
+function keysFrom(answer: InstanceAnswer): OperateKeys | undefined {
+  const body = record(answer.body);
+  if (body === undefined) return undefined;
+  const { state, fingerprint, card, olderHeld } = body;
+  if (
+    !oneOf(state, KEYS_STATES) ||
+    !(fingerprint === null || (typeof fingerprint === 'string' && FINGERPRINT.test(fingerprint))) ||
+    !(card === null || (typeof card === 'string' && CARD.test(card))) ||
+    !whole(olderHeld)
+  ) {
+    return undefined;
+  }
+  let current: OperateKeys['current'] = null;
+  if (body.current !== null) {
+    const held = record(body.current);
+    const createdAt = isoMoment(held?.createdAt);
+    const rotatesAt = isoMoment(held?.rotatesAt);
+    if (!whole(held?.serial) || createdAt === undefined || rotatesAt === undefined) {
+      return undefined;
+    }
+    current = { serial: held.serial, createdAt, rotatesAt };
+  }
+  return { kind: 'keys', state, fingerprint, card, current, olderHeld };
+}
+
+/** The longest line the instance's redaction could write: its keys are a closed list of short values. */
+const MAXIMUM_PROBLEM_LINE = 4096;
+
+/** The longest string the instance's redaction keeps (`apps/instance` §`log.ts`). */
+const MAXIMUM_LOGGED_STRING = 120;
+
+/** A line's fields, held to what the instance's redaction keeps — or `undefined`. */
+function problemFields(
+  line: string,
+): Readonly<Record<string, string | number | boolean | null>> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const fields = record(parsed);
+  if (fields === undefined || typeof fields.event !== 'string') return undefined;
+  const kept: Record<string, string | number | boolean | null> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (!/^[A-Za-z]{1,32}$/.test(key)) return undefined;
+    if (
+      value === null ||
+      typeof value === 'boolean' ||
+      (typeof value === 'number' && Number.isFinite(value)) ||
+      (typeof value === 'string' && value.length <= MAXIMUM_LOGGED_STRING)
+    ) {
+      kept[key] = value;
+    } else {
+      return undefined;
+    }
+  }
+  return kept;
+}
+
+function problemsFrom(answer: InstanceAnswer): OperateProblems | undefined {
+  const body = record(answer.body);
+  const since = isoMoment(body?.since);
+  if (body === undefined || since === undefined || !Array.isArray(body.lines)) return undefined;
+  const lines: OperateProblem[] = [];
+  for (const each of body.lines as unknown[]) {
+    const row = record(each);
+    const at = isoMoment(row?.at);
+    const line = row?.line;
+    if (at === undefined || typeof line !== 'string' || line.length > MAXIMUM_PROBLEM_LINE) {
+      return undefined;
+    }
+    const fields = problemFields(line);
+    if (fields === undefined) return undefined;
+    lines.push({ at, line, fields });
+  }
+  return { kind: 'problems', since, lines };
+}
+
 /** Said for a refused "back up now" when the instance's own sentence may not be shown. */
 const BACK_UP_REFUSED_TEXT =
   'The instance refused: a backup is already waiting, or one was made a short while ago.';
@@ -798,8 +952,14 @@ export const TOOL_CHECK_WAIT_MILLISECONDS = MAXIMUM_SEALED_CALL_MILLISECONDS;
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/;
 /** A base URL: `http:` or `https:`, short, and nothing a screen would run. */
 const BASE_URL = /^https?:\/\/[^\s<>"']{1,500}$/;
-/** A base URL with any `user:password@` taken out: the screen never draws a secret. */
-function withoutUserinfo(url: string): string {
+/**
+ * A base URL with any `user:password@` taken out: the screen never draws a secret.
+ * The same rule as `@onyourleft/operate-text`'s `withoutUserinfo`, kept as this
+ * directory's own copy under another name because this directory reaches no
+ * other package (see above), and `operate-text-moved.test.ts` forbids a second
+ * declaration of a package export's name under `apps/web/src`.
+ */
+function stripAddressUserinfo(url: string): string {
   return url.replace(/^(https?:\/\/)[^/?#]*@/, '$1');
 }
 /** An origin, as `hosted-key.ts` §`hostedOriginOf` writes one. */
@@ -835,7 +995,7 @@ function analysisFrom(answer: InstanceAnswer): OperateAnalysis | undefined {
   return {
     kind: 'analysis',
     local: {
-      url: local.url === null ? null : withoutUserinfo(local.url),
+      url: local.url === null ? null : stripAddressUserinfo(local.url),
       model: local.model,
       reasoningTokens: local.reasoningTokens,
       offered: local.offered,
@@ -1193,6 +1353,37 @@ export function createOperatePort(dependencies: OperatePortDependencies): Operat
         return { kind: 'unreachable' };
       }
     },
+
+    keys: () => ownerRead('GET', '/v1/operate/keys', undefined, keysFrom),
+
+    rotateKey: async (confirm) => {
+      // Only the one word the instance takes is sent at all.
+      if (confirm !== 'rotate') return { kind: 'not-rotated' };
+      try {
+        const session = await sealedSession();
+        if (session.kind === 'closed') return { kind: closedStanding(session) };
+        const answer = await session.sealed.call('POST', '/v1/operate/keys/rotate', {
+          token: session.token,
+          body: { confirm },
+        });
+        if (answer.status === 401) return { kind: 'signed-out' };
+        if (answer.status === 200) {
+          const body = record(answer.body);
+          if (body?.outcome === 'busy') return { kind: 'busy' };
+          return body?.outcome === 'rotated' && whole(body.serial)
+            ? { kind: 'rotated', serial: body.serial }
+            : { kind: 'unreachable' };
+        }
+        if (errorCode(answer) === 'validation_failed') return { kind: 'not-rotated' };
+        if (isNotTheOwner(answer)) return { kind: 'not-owner' };
+        if (errorCode(answer) === 'unavailable') return { kind: 'no-keys' };
+        return { kind: 'unreachable' };
+      } catch {
+        return { kind: 'unreachable' };
+      }
+    },
+
+    problems: () => ownerRead('GET', '/v1/operate/logs', undefined, problemsFrom),
 
     backUpNow: async () => {
       try {

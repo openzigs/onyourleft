@@ -84,22 +84,43 @@ import {
   verticalHalfTangent,
   type RigPoint,
 } from '../src/game/camera';
-import { emptyRiderJoints, RIDER_BICYCLE_PARTS, riderJoints } from '../src/game/bicycle';
+import {
+  BICYCLE_LENGTH_METRES,
+  emptyRiderJoints,
+  RIDER_BICYCLE_PARTS,
+  riderJoints,
+} from '../src/game/bicycle';
 import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-view';
 import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
-import { chaseRider, sceneFrame as builtSceneFrame } from '../src/game/scene';
+import {
+  chaseRider,
+  drawnRiderDistance,
+  placedCyclists,
+  placedRiders,
+  sceneFrame as builtSceneFrame,
+  type SceneInput,
+} from '../src/game/scene';
 import { drawnCamera } from '../src/game/chase-camera-testing';
+import {
+  behind,
+  FADE_PROBE_BEHIND_METRES,
+  riderFadeProbe,
+  type RiderFadeReading,
+} from './rider-fade-probe';
 import { retainedFrame } from '../src/game/frame-testing';
 import {
   ROAD_WIDTH_METRES,
   corridorOrigin,
   drawnRoadFrame,
+  roadCorridor,
   type CorridorOrigin,
 } from '../src/game/terrain';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from '../src/game/road-grid';
 import { PEOPLE_NEAR_MAX, PERSON_HALF_WIDTH_METRES } from '../src/game/people';
+import { CLEAR_METRES, cyclistsInReach, townAt } from '../src/game/scenery-cyclists';
+import { NO_URBAN_CLASS } from '../src/game/urban-class';
 import { pavementSides } from '../src/game/footways';
 import type { WorldCorridor } from '../src/game/world-data/corridor';
 import {
@@ -119,6 +140,7 @@ import {
   sBendRoute,
   steadyClimb,
   valleyRoute,
+  windingRoute,
 } from '../src/game/route-fixtures-testing';
 import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
 import {
@@ -199,6 +221,7 @@ import { buildingPlan, glassPanesOf, onFace, OPENING_RECESS_METRES } from '../sr
 import {
   bicycleTreadOf,
   lapRaceDrawnOf,
+  riderFadeOf,
   riderKitOf,
   compressedRealisticLoaders,
   drawnWorldOf,
@@ -259,6 +282,7 @@ import {
   peopleBodyFragmentsOf,
   peopleDrawnOf,
   peopleShownOf,
+  sceneryCyclistsDrawnOf,
   MappedBuildingBelt,
   mappedBuildingsShownOf,
   mappedBuildingStatsOf,
@@ -3808,6 +3832,297 @@ function peopleProbe(
   };
 }
 
+/** What {@link sceneryCyclistsProbe} publishes — #2722. */
+interface SceneryCyclistsMeasurement {
+  /** How many cyclists the view drew over the frames the probe rode, and the kinds their frames carried. */
+  readonly drawn: number;
+  readonly kinds: readonly string[];
+  /** How many drawn bicycles stood on the wrong side of the drawn road: an oncoming one right of its centre, any other left. */
+  readonly wrongSide: number;
+  /**
+   * The least distance across the road, metres, between a drawn cyclist's
+   * bicycle and the drawn rider's, of those level with the rider — within a
+   * bicycle's length along the road, where two bicycles nearer than a
+   * handlebar across would be drawn through each other — and how many such
+   * were drawn; with the clearance and without it (the control, each of the
+   * same cyclists drawn in its own lane).
+   */
+  readonly leastLevelGap: number;
+  readonly level: number;
+  readonly leastLevelGapInLane: number;
+  /** The most a drawn body stood off its own drawn bicycle, metres: nought when each body sits on its bicycle. */
+  readonly bodyOffBicycle: number;
+  /** Cyclists drawn on the same frames in a lap race, beside the pacer, and with the people switched off. */
+  readonly drawnInRaceModes: number;
+  readonly drawnPeopleOff: number;
+  /**
+   * The draw calls a frame with cyclists in view makes over the same frame
+   * without them: with people on the pavements, and with nobody there; and
+   * the triangles each cyclist adds.
+   */
+  readonly drawCalls: number;
+  readonly drawCallsAlone: number;
+  readonly triangles: number;
+  /** How many pixels round the nearest cyclist in frame change when the frame carries none. */
+  readonly pixels: number;
+}
+
+const NO_SCENERY_CYCLISTS: SceneryCyclistsMeasurement = {
+  drawn: -1,
+  kinds: [],
+  wrongSide: -1,
+  leastLevelGap: Number.NaN,
+  level: -1,
+  leastLevelGapInLane: Number.NaN,
+  bodyOffBicycle: Number.NaN,
+  drawnInRaceModes: -1,
+  drawnPeopleOff: -1,
+  drawCalls: -1,
+  drawCallsAlone: -1,
+  triangles: -1,
+  pixels: -1,
+};
+
+/**
+ * #2722: the scenery cyclists, read back off what the view DREW. A winding
+ * road (`route-fixtures-testing.ts` §`windingRoute`) is ridden a metre at a
+ * time without drawing, to find the frames where a cyclist is level with the
+ * rider; each is then built by `sceneFrame`, drawn, and read back
+ * (`sceneryCyclistsDrawnOf`):
+ *
+ * - **"never on the wrong side"**: each drawn bicycle's side of the drawn
+ *   road, against its frame's kind;
+ * - **"never overlapping the rider"**: the least plan distance between a
+ *   drawn bicycle level with the rider and the rider's own drawn bicycle —
+ *   and the control, the same frames with every cyclist moved back into its
+ *   lane, which must come nearer;
+ * - **one body on each bicycle**, and **none in a race, beside the pacer, or
+ *   with the people off**;
+ * - **the cost**: the calls and triangles a frame with cyclists adds over the
+ *   same frame with none, and the pixels round the nearest one in frame.
+ */
+function sceneryCyclistsProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): SceneryCyclistsMeasurement {
+  const profile = windingRoute(12_000);
+  const origin = corridorOrigin(profile);
+  const seed = scatterSeed(profile);
+  const town = townAt(profile, seed, NO_URBAN_CLASS);
+  const start = atStartLine(profile);
+  const inputAt = (along: number, extra: Partial<SceneInput> = {}): SceneInput => ({
+    profile,
+    origin,
+    state: {
+      ...start,
+      ride: { speed: metresPerSecond(8), distance: metres(along) },
+      ridden: seconds(along / 8),
+      elapsed: seconds(along / 8),
+    },
+    people: PEOPLE_NEAR_MAX,
+    sceneryCyclists: true,
+    ...extra,
+  });
+  // Found without drawing: the frames where a cyclist level with the rider
+  // would be drawn nearer them than the clearance if it kept its lane, and
+  // for each kind the first frame with one of it a little way off in view.
+  const levelAt: number[] = [];
+  const ofKind = new Map<string, number>();
+  for (let along = 0; along <= profile.totalDistance; along += 1) {
+    if (levelAt.length >= 6 && ofKind.size === 3) break;
+    const input = inputAt(along);
+    const rider = drawnRiderDistance(input);
+    const corridor = roadCorridor(profile, origin, rider);
+    const own = placedRiders(input, corridor)[0];
+    if (own === undefined) continue;
+    const inReach = cyclistsInReach(profile, seed, town, rider);
+    const through = inReach.some(
+      (each) =>
+        Math.abs(each.along - rider) < BICYCLE_LENGTH_METRES &&
+        Math.abs(each.encounter.lane - own.lateral) < CLEAR_METRES - 0.2,
+    );
+    if (through && levelAt.length < 6 && levelAt.every((seen) => along - seen > 20)) {
+      levelAt.push(along);
+    }
+    for (const each of inReach) {
+      const off = Math.abs(each.along - rider);
+      if (off > 15 && off < 40 && !ofKind.has(each.encounter.kind)) {
+        ofKind.set(each.encounter.kind, along);
+      }
+    }
+  }
+  if (levelAt.length === 0 || ofKind.size === 0) return NO_SCENERY_CYCLISTS;
+  const kinds = new Set<string>();
+  let drawn = 0;
+  let wrongSide = 0;
+  let level = 0;
+  let leastLevelGap = Number.POSITIVE_INFINITY;
+  let leastLevelGapInLane = Number.POSITIVE_INFINITY;
+  let bodyOffBicycle = 0;
+  // What the view drew of a frame: each bicycle's side, each body on its
+  // bicycle, and how near the rider's bicycle those level with it are.
+  const read = (frame: SceneFrame, inLane: boolean): void => {
+    view.render(frame);
+    const back = sceneryCyclistsDrawnOf(view);
+    if (back === undefined || back.rider === undefined) return;
+    const rider = back.rider;
+    const riderNear = nearestOnDrawnRoad(profile, origin, rider.x, rider.z, 10);
+    back.bicycles.forEach((bicycle, index) => {
+      const cyclist = frame.cyclists?.[index];
+      if (cyclist === undefined) return;
+      const near = nearestOnDrawnRoad(profile, origin, bicycle.x, bicycle.z, 10);
+      if (!inLane) {
+        drawn += 1;
+        kinds.add(cyclist.kind);
+        if (near === undefined || (cyclist.kind === 'oncoming') !== near.lateral < 0)
+          wrongSide += 1;
+        const body = back.bodies[index];
+        bodyOffBicycle = Math.max(
+          bodyOffBicycle,
+          body === undefined
+            ? Number.POSITIVE_INFINITY
+            : Math.hypot(body.x - bicycle.x, body.y - bicycle.y, body.z - bicycle.z),
+        );
+      }
+      if (near === undefined || riderNear === undefined) return;
+      if (Math.abs(near.along - riderNear.along) >= BICYCLE_LENGTH_METRES) return;
+      // Level within a bicycle's length: how far apart ACROSS the road.
+      const gap = Math.abs(near.lateral - riderNear.lateral);
+      if (inLane) leastLevelGapInLane = Math.min(leastLevelGapInLane, gap);
+      else {
+        level += 1;
+        leastLevelGap = Math.min(leastLevelGap, gap);
+      }
+    });
+  };
+  const count = (frame: SceneFrame): number => {
+    view.render(frame);
+    return sceneryCyclistsDrawnOf(view)?.bicycles.length ?? 0;
+  };
+  let drawnInRaceModes = 0;
+  let drawnPeopleOff = 0;
+  for (const along of [...levelAt, ...ofKind.values()]) {
+    const frame = builtSceneFrame(inputAt(along));
+    read(frame, false);
+    // The control: each of the same cyclists moved back into its own lane.
+    const lanes = new Map(
+      cyclistsInReach(profile, seed, town, drawnRiderDistance(inputAt(along))).map((each) => [
+        each.along,
+        each.encounter.lane,
+      ]),
+    );
+    const inLane = builtSceneFrame(inputAt(along));
+    read(
+      {
+        ...inLane,
+        cyclists: (inLane.cyclists ?? []).map((cyclist) => {
+          const road = drawnRoadFrame(profile, origin, cyclist.along);
+          const lane = lanes.get(cyclist.along) ?? cyclist.lateral;
+          return road === undefined
+            ? cyclist
+            : {
+                ...cyclist,
+                x: cyclist.x + road.normalX * (lane - cyclist.lateral),
+                z: cyclist.z + road.normalZ * (lane - cyclist.lateral),
+              };
+        }),
+      },
+      true,
+    );
+    drawnInRaceModes += count(builtSceneFrame(inputAt(along, { raceBots: [] })));
+    drawnInRaceModes += count(builtSceneFrame(inputAt(along, { botDistance: along + 5 })));
+    // Built again: a frame's ground is reused by the next frame built.
+    const again = builtSceneFrame(inputAt(along));
+    peopleShownOf(view, false);
+    drawnPeopleOff += count(again);
+    peopleShownOf(view, true);
+  }
+  // The cost: what a frame with cyclists adds over the same frame with none,
+  // counted with the non-empty calls — with somebody on the pavements, whose
+  // bodies' call the cyclists share, and with nobody, where it is theirs.
+  const cost = (busy: SceneFrame): { calls: number; triangles: number; each: number } => {
+    const bare: SceneFrame = { ...busy, cyclists: undefined };
+    const measure = (frame: SceneFrame): { calls: number; triangles: number } => {
+      let measured = { calls: 0, triangles: 0 };
+      view.render(frame);
+      countingTriangles((triangles) => {
+        countingNonEmptyDrawCalls((calls) => {
+          view.render(frame);
+          measured = { calls: calls(), triangles: triangles() };
+        });
+      });
+      return measured;
+    };
+    const withThem = measure(busy);
+    const without = measure(bare);
+    const triangles = withThem.triangles - without.triangles;
+    return {
+      calls: withThem.calls - without.calls,
+      triangles,
+      each: triangles / Math.max(1, busy.cyclists?.length ?? 0),
+    };
+  };
+  let withPeople: { calls: number; triangles: number; each: number } | undefined;
+  let alone: { calls: number; triangles: number; each: number } | undefined;
+  for (let along = 0; along <= profile.totalDistance && withPeople === undefined; along += 5) {
+    const input = inputAt(along);
+    const corridor = roadCorridor(profile, origin, drawnRiderDistance(input));
+    if (placedCyclists(input, corridor, placedRiders(input, corridor)).length === 0) continue;
+    const frame = builtSceneFrame(input);
+    if ((frame.people?.near.length ?? 0) === 0) continue;
+    withPeople = cost(frame);
+    // The same frame with nobody on the pavements.
+    alone = cost({ ...frame, people: { near: [], far: [] } });
+  }
+  const aheadAt = ofKind.values().next().value ?? 0;
+  const rebuilt = builtSceneFrame(inputAt(aheadAt));
+  // The pixels round the nearest cyclist, with no scenery in front of it.
+  let pixels = -1;
+  const rider = drawnRiderDistance(inputAt(aheadAt));
+  const nearest = [...(rebuilt.cyclists ?? [])].sort(
+    (a, b) => Math.abs(a.along - rider) - Math.abs(b.along - rider),
+  )[0];
+  if (nearest !== undefined) {
+    const clear: SceneFrame = { ...rebuilt, scatter: [], billboards: [] };
+    const middle = pixelFor(clear, canvas, { x: nearest.x, y: nearest.y + 1, z: nearest.z });
+    const where = {
+      x: Math.max(0, Math.round(middle.x) - 6),
+      y: Math.max(0, Math.round(middle.y) - 6),
+      width: 13,
+      height: 13,
+    };
+    view.render(clear);
+    const on = readRegion(gl, where.x, where.y, where.width, where.height);
+    view.render({ ...clear, cyclists: undefined });
+    const off = readRegion(gl, where.x, where.y, where.width, where.height);
+    pixels = 0;
+    for (let at = 0; at < on.length; at += 4) {
+      const apart = Math.max(
+        Math.abs((on[at] ?? 0) - (off[at] ?? 0)),
+        Math.abs((on[at + 1] ?? 0) - (off[at + 1] ?? 0)),
+        Math.abs((on[at + 2] ?? 0) - (off[at + 2] ?? 0)),
+      );
+      if (apart > 6) pixels += 1;
+    }
+  }
+  return {
+    drawn,
+    kinds: [...kinds].sort(),
+    wrongSide,
+    leastLevelGap,
+    level,
+    leastLevelGapInLane,
+    bodyOffBicycle,
+    drawnInRaceModes,
+    drawnPeopleOff,
+    drawCalls: withPeople?.calls ?? -1,
+    drawCallsAlone: alone?.calls ?? -1,
+    triangles: withPeople?.each ?? alone?.each ?? -1,
+    pixels,
+  };
+}
+
 /** What {@link mappedTownProbe} publishes — #1549. */
 interface MappedTownMeasurement {
   /** The buildings the belt drew at its last refill: the whole town, and its nearest ten. */
@@ -7037,6 +7352,90 @@ async function rideStartProbe(): Promise<RideStartMeasurement> {
   };
 }
 
+/**
+ * **The realistic world arriving mid-ride, drawn at once and prepared first**
+ * — #2663, the browser half of its third criterion.
+ *
+ * A realistic ride's view is made and prepared on the stylised world, which
+ * it draws while the realistic set arrives (#475); a lap race's ten-second
+ * countdown runs meanwhile (#2546). On arrival `GameView` hands the view its
+ * realistic rung, and until #2663 the next shown frame built the realistic
+ * world: every program, every texture's first upload, every buffer, inside
+ * one frame. Two fresh views here, each on its own canvas and so its own
+ * context (`rideStartProbe` says why the GPU process's cache is not a
+ * shortcut), are made at {@link QUALITY_LADDER}'s top, prepared and drawn on
+ * the stylised world, and then handed {@link REALISTIC_LADDER}'s top:
+ *
+ * - **the control** draws the next {@link RIDE_START_FRAMES} frames at once,
+ *   as `GameView` did before #2663 — the stall, reproduced;
+ * - **the product's order** awaits `prepare` with the next frame first, as
+ *   `GameView` now does, and then draws them.
+ *
+ * ⚠️ **Made at the stylised top, where `GameView` makes it at the realistic
+ * rung with no world loaded.** This page's world is already loaded, and a
+ * view made at a realistic rung would draw it from its first frame. Both
+ * halves take the same step, so the difference between them is `prepare`
+ * alone. Each frame is timed with the GPU awaited; links are counted at
+ * WebGL's own `linkProgram`. A software rasteriser's milliseconds are not the
+ * tablet's: its moving-ride frame check is the measurement of the stall.
+ */
+async function worldArrivalProbe(
+  frameAt: (distance: number) => SceneFrame,
+): Promise<RideStartMeasurement> {
+  const WIDTH = 320;
+  const HEIGHT = 180;
+  const arriving = async (prepared: boolean) =>
+    countingLinks(async (links) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = WIDTH;
+      canvas.height = HEIGHT;
+      const view = threeGameRenderer.create(canvas, QUALITY_LADDER[0] as QualitySettings);
+      view.resize(WIDTH, HEIGHT);
+      const gl = canvas.getContext('webgl2');
+      const parallelCompile = gl?.getExtension('KHR_parallel_shader_compile') != null;
+      // The ride so far: prepared and drawn on the stylised world.
+      await view.prepare(frameAt(0));
+      view.render(frameAt(SWEEP_STEP_METRES));
+      awaitTheGpu(gl);
+      // The arrival, as `GameView` hands it over.
+      view.setQuality(REALISTIC_LADDER[0] as QualitySettings);
+      const beforePrepare = links();
+      const prepareStarted = performance.now();
+      if (prepared) {
+        // As `GameView` does: the next frame it builds is the one it prepares with.
+        await view.prepare(frameAt(2 * SWEEP_STEP_METRES));
+      }
+      const prepareMs = performance.now() - prepareStarted;
+      const linksInPrepare = links() - beforePrepare;
+      const beforeFrames = links();
+      const frameMs: number[] = [];
+      for (let index = 1; index <= RIDE_START_FRAMES; index += 1) {
+        const started = performance.now();
+        view.render(frameAt((index + 2) * SWEEP_STEP_METRES));
+        awaitTheGpu(gl);
+        frameMs.push(performance.now() - started);
+      }
+      const frameLinks = links() - beforeFrames;
+      const world = drawnWorldOf(view);
+      view.destroy();
+      return { parallelCompile, prepareMs, linksInPrepare, frameLinks, frameMs, world };
+    });
+  // The control first, as in `rideStartProbe`.
+  const unprepared = await arriving(false);
+  const prepared = await arriving(true);
+  return {
+    // Both halves drew the realistic world after the swap, or neither measured it.
+    measured: unprepared.world === 'realistic' && prepared.world === 'realistic',
+    parallelCompile: prepared.parallelCompile,
+    linksInPrepare: prepared.linksInPrepare,
+    prepareMs: prepared.prepareMs,
+    preparedLinks: prepared.frameLinks,
+    preparedFrameMs: prepared.frameMs,
+    unpreparedLinks: unprepared.frameLinks,
+    unpreparedFrameMs: unprepared.frameMs,
+  };
+}
+
 /** @see presenceCostProbe */
 export interface PresenceCostMeasurement {
   readonly measured: boolean;
@@ -8726,6 +9125,11 @@ export interface RealisticMeasurement {
   /** #618: what the textures were handed to the GPU as, and the RGBA8 control. @see textureProbe */
   readonly textures: TextureMeasurement;
   /**
+   * #2663: the first frames after the realistic world arrives mid-ride, drawn
+   * at once and after `prepare`. @see worldArrivalProbe
+   */
+  readonly worldArrival: RideStartMeasurement;
+  /**
    * #618: milliseconds from asking for the world to the first realistic frame
    * finished on this machine's GPU — the load, a view, and the frame that
    * uploads what it draws. Published, never asserted: SwiftShader is not the
@@ -8771,6 +9175,14 @@ export interface RealisticMeasurement {
    */
   readonly shoulderRock: number;
   readonly shoulderRockControl: number;
+  /** #2596: a bot held between the camera and the rider, in the realistic world. @see riderFadeProbe */
+  readonly riderFade: RiderFadeReading;
+  /** #2596: the draw calls of the rider alone, and with that bot faded out and whole. */
+  readonly riderFadeCalls: {
+    readonly alone: number;
+    readonly faded: number;
+    readonly whole: number;
+  };
   /**
    * The realistic rider's shadow read off the drawing buffer from straight
    * above, the rider left out so it cannot hide it — #626. `fill` is how much
@@ -8854,6 +9266,8 @@ export interface RealisticMeasurement {
   readonly mappedPavement: MappedPavementMeasurement;
   /** #1541: the people on the village's pavements and the mapped sidewalks. @see peopleProbe */
   readonly people: PeopleMeasurement;
+  /** #2722: the scenery cyclists on a winding road. @see sceneryCyclistsProbe */
+  readonly sceneryCyclists: SceneryCyclistsMeasurement;
   /** #1547: the drawn ground under a mapped block's centre footprint. @see levellingProbe */
   readonly levelling: LevellingMeasurement;
   /** #1549: a town from map data, drawn merged, and nothing in the wood. @see mappedTownProbe */
@@ -10973,6 +11387,7 @@ const NO_REALISTIC: RealisticMeasurement = {
     stylisedFogged: 0,
   },
   textures: NO_TEXTURES,
+  worldArrival: NO_RIDE_START,
   firstFrameMs: 0,
   fallbackWorld: '',
   failedLoad: { loaded: false, offline: false },
@@ -10998,6 +11413,16 @@ const NO_REALISTIC: RealisticMeasurement = {
   crankHeldPixels: 0,
   shoulderRock: 0,
   shoulderRockControl: 0,
+  riderFade: {
+    pixels: 0,
+    bot: { faded: 0, whole: 0 },
+    rider: { faded: 0, whole: 0 },
+    aside: { faded: 0, whole: 0 },
+    beside: { faded: 0, whole: 0 },
+    riderDrawn: 0,
+    frame: { faded: 0, whole: 0 },
+  },
+  riderFadeCalls: { alone: 0, faded: 0, whole: 0 },
   riderShadow: NO_SHADOW_SHAPE,
   riderShadowControl: NO_SHADOW_SHAPE,
   riderShadowBlack: NO_SHADOW_SHAPE,
@@ -11025,6 +11450,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   pavement: NO_PAVEMENT,
   mappedPavement: NO_MAPPED_PAVEMENT,
   people: NO_PEOPLE_MEASURED,
+  sceneryCyclists: NO_SCENERY_CYCLISTS,
   levelling: NO_LEVELLING,
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
@@ -12347,6 +12773,38 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   );
   phaseEnds('realistic: road luminance and cranks');
 
+  // #2596: a bot held between the camera and the rider, the realistic bodies'.
+  const riderFade = riderFadeProbe(view, gl, canvas, riding(level, 400));
+  // And what it costs: the draw calls of the rider alone, with that bot faded
+  // out, and with it whole (the control) — a body faded out entirely is not
+  // drawn, and the bicycles' instanced calls are the same either way.
+  const riderFadeCalls = ((): { alone: number; faded: number; whole: number } => {
+    const base = riding(level, 400);
+    const rider = base.markers.find((marker) => marker.kind === 'rider');
+    if (rider === undefined) return { alone: 0, faded: 0, whole: 0 };
+    const alone: SceneFrame = { ...base, scatter: [], markers: [rider] };
+    const withBot: SceneFrame = {
+      ...alone,
+      markers: [rider, behind(rider, FADE_PROBE_BEHIND_METRES, 0)],
+    };
+    let counted = { alone: 0, faded: 0, whole: 0 };
+    countingNonEmptyDrawCalls((calls) => {
+      const of = (frame: SceneFrame): number => {
+        view.render(frame);
+        const before = calls();
+        view.render(frame);
+        return calls() - before;
+      };
+      const faded = of(withBot);
+      riderFadeOf(view, 'off');
+      const whole = of(withBot);
+      riderFadeOf(view, 'fade');
+      counted = { alone: of(alone), faded, whole };
+    });
+    return counted;
+  })();
+  phaseEnds('realistic: rider fade — #2596');
+
   // #626: the rider's shadow from 6 m straight above — nearly: a heading a
   // thousandth of a unit long puts `cameraRig`'s eye and target a few
   // millimetres apart over the rider, and still tells three which way the
@@ -12576,32 +13034,61 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   plainHouse.destroy();
   phaseEnds('realistic: house window');
 
-  // #621, on the same view and the level road.
-  const tint = tintProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: seeded tints');
+  // #2596: the fade is off from the tint probe (#621) to the kit probe (#623),
+  // and for every probe between them: the tints (#621), pavement (#1535), the
+  // mapped side's pavement (#1551), people (#1541), the scenery cyclists
+  // (#2722), levelling (#1547), the tread (#624) and the kit (#623). #621 and
+  // #623 draw a bot and the ghost in the rider's own place under a camera
+  // brought close, which is the space a rider other than the rider's own fades
+  // out of, and they read each rider's colours, so they read them with the fade
+  // off. Of the six between, five draw no rider but the rider's own, which
+  // never fades, so it changes nothing for them; the scenery cyclists' probe
+  // reads where the cyclists are drawn, which the fade would hide when one
+  // passes under the camera, so it too wants the fade off. In a `finally`, so a throw cannot leave every later probe unfaded.
+  // A probe added inside this window runs with the fade off: name it here.
+  riderFadeOf(view, 'off');
+  let tint: ReturnType<typeof tintProbe>;
+  let pavement: ReturnType<typeof pavementProbe>;
+  let mappedPavement: ReturnType<typeof mappedPavementProbe>;
+  let people: ReturnType<typeof peopleProbe>;
+  let sceneryCyclists: ReturnType<typeof sceneryCyclistsProbe>;
+  let levelling: ReturnType<typeof levellingProbe>;
+  let tread: ReturnType<typeof treadProbe>;
+  let kit: ReturnType<typeof kitProbe>;
+  try {
+    // #621, on the same view and the level road.
+    tint = tintProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: seeded tints');
 
-  // #1535, on the same view: a village's pavement, in ambientCG's paving.
-  const pavement = pavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement — #1535');
+    // #1535, on the same view: a village's pavement, in ambientCG's paving.
+    pavement = pavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement — #1535');
 
-  // #1551, on the same view and #1535's village: the pavement on the mapped side.
-  const mappedPavement = mappedPavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement on the mapped side — #1551');
+    // #1551, on the same view and #1535's village: the pavement on the mapped side.
+    mappedPavement = mappedPavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement on the mapped side — #1551');
 
-  // #1541, on the same view and #1535's village: people, never on the carriageway.
-  const people = peopleProbe(view, gl, canvas);
-  phaseEnds('realistic: people — #1541');
+    // #1541, on the same view and #1535's village: people, never on the carriageway.
+    people = peopleProbe(view, gl, canvas);
+    phaseEnds('realistic: people — #1541');
 
-  // #1547, on the same view: the ground under a mapped town, levelled.
-  const levelling = levellingProbe(view);
-  phaseEnds('realistic: a town on the flat — #1547');
+    // #2722, on the same view: the scenery cyclists, on a winding road.
+    sceneryCyclists = sceneryCyclistsProbe(view, gl, canvas);
+    phaseEnds('realistic: scenery cyclists — #2722');
 
-  // #624, on the same view and the same road.
-  const tread = treadProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: the tread — #624');
+    // #1547, on the same view: the ground under a mapped town, levelled.
+    levelling = levellingProbe(view);
+    phaseEnds('realistic: a town on the flat — #1547');
 
-  // #623, on the same view and the same road.
-  const kit = kitProbe(view, gl, canvas, riding(level, 400));
+    // #624, on the same view and the same road.
+    tread = treadProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: the tread — #624');
+
+    // #623, on the same view and the same road.
+    kit = kitProbe(view, gl, canvas, riding(level, 400));
+  } finally {
+    riderFadeOf(view, 'fade');
+  }
   phaseEnds('realistic: the kit — #623');
 
   // #620, on the same view and the same road; then what a whole wooded frame
@@ -12758,6 +13245,13 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   view.destroy();
   phaseEnds('realistic: a room of other riders — #783');
 
+  // #2663: the world arriving mid-ride, on fresh views — the valley's wooded
+  // stretch, every frame lent as `GameView`'s are.
+  const worldArrival = await worldArrivalProbe((distance) =>
+    riding(valleyRoute(), 900 + distance, lentSceneFrame),
+  );
+  phaseEnds('realistic: the world arriving mid-ride — #2663');
+
   console.log(
     `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
       `${stylisedFrameMs.toFixed(1)} ms stylised (SwiftShader); ${String(drawCalls)} draw calls; ` +
@@ -12781,6 +13275,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     waterReflection,
     waterReflectsAfterStepDown,
     textures,
+    worldArrival,
     firstFrameMs,
     fallbackWorld,
     failedLoad: failed.loaded
@@ -12808,6 +13303,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     crankHeldPixels: pixelsChanged(turned, held),
     shoulderRock,
     shoulderRockControl,
+    riderFade,
+    riderFadeCalls,
     riderShadow: riderShadow.shape,
     riderShadowControl: riderShadow.control,
     riderShadowBlack: riderShadow.black,
@@ -12836,6 +13333,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     pavement,
     mappedPavement,
     people,
+    sceneryCyclists,
     levelling,
     // #1947: measured by the `?realistic&town` load, not this one. @see realisticTownRun
     ...NO_TOWN,

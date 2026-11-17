@@ -1060,7 +1060,11 @@ export const INITIAL_REALISTIC_QUALITY: WorldQualityState = {
  * The view builds the realistic world on the first frame drawn after the swap
  * (`three-renderer.ts` §`#applyWorld`): its programs are linked and its
  * textures uploaded on the frame that first draws them, as three does unasked.
- * Those frames measure the swap, not the world. ⚠️ **That the swap was what
+ * Those frames measure the swap, not the world. ⚠️ **Since #2663 that first
+ * frame is `prepare`'s**, drawn into one pixel before any is shown
+ * (`GameView.tsx` §`prepareRoundRef`), so the frames this window ignores are
+ * mostly the wait for it, in which nothing is drawn; the window is kept for
+ * whatever a warm-up does not reach. ⚠️ **That the swap was what
  * took the Pixel 8 out of realism is NOT what was measured**: the owner's
  * 2026-11-06 reading on #2289 put load-phase pressure at a peak of 3 of 30,
  * and the heat forecast, since removed from the ladder, was the cause. This

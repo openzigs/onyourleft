@@ -128,3 +128,67 @@ test.describe('the lap race’s belt — #1902', () => {
     expect(shot.byteLength).toBeGreaterThan(5000);
   });
 });
+
+test.describe('a bot between the camera and the rider — #2596', () => {
+  for (const shadows of ['contact', 'map'] as const) {
+    test(`is faded out with its shadow, and the rider behind it is drawn exactly as with no bot, with the riders’ ${shadows === 'map' ? 'shadow map' : 'contact shadows'}`, async ({
+      page,
+    }) => {
+      await open(page);
+      const seen = await page.evaluate((s) => window.__oylLapRace?.fadeSeen(s), shadows);
+      console.log(`#2596 ${shadows}, read: ${JSON.stringify(seen)}`);
+      if (seen === undefined) throw new Error('no reading');
+      // The squares are what they say: the rider's is the rider, and with the
+      // fade off the bot fills its own and hides some of the rider's.
+      expect(seen.riderDrawn).toBeGreaterThan(seen.pixels / 2);
+      expect(seen.bot.whole).toBeGreaterThan(seen.pixels / 2);
+      expect(seen.rider.whole).toBeGreaterThan(0);
+      expect(seen.frame.whole).toBeGreaterThan(seen.bot.whole);
+      // The product: the bot is not drawn, its shadow is not drawn, and the
+      // rider is drawn exactly as with no bot.
+      expect(seen.bot.faded).toBe(0);
+      expect(seen.rider.faded).toBe(0);
+      expect(seen.frame.faded).toBe(0);
+      // Two places across: beside the rider, which the owner's ruling of
+      // 2026-11-15 keeps whole (`rider-fade.ts`), so its square keeps every
+      // pixel the bot drawn with the fade off does.
+      expect(seen.aside.whole).toBeGreaterThan(seen.pixels / 2);
+      expect(seen.aside.faded).toBe(seen.aside.whole);
+      // One place across and a metre behind — the owner's tablet case: whole.
+      expect(seen.beside.whole).toBeGreaterThan(seen.pixels / 2);
+      expect(seen.beside.faded).toBe(seen.beside.whole);
+    });
+  }
+
+  test('photographs it before and after, and a bot coming up the side, for the owner', async ({
+    page,
+  }, testInfo) => {
+    await open(page);
+    // Held in line behind the rider (a bike length and a 0.3 m wheel gap),
+    // whole as before #2596 and faded as now; then the same bot coming up the
+    // rider's side a place across, from behind to level, and one a place
+    // across a metre behind — each of them whole since the ruling of 2026-11-15.
+    const shots = [
+      ['before', 2.05, 0, 'off'],
+      ['after', 2.05, 0, 'fade'],
+      ['leaving-1', 2.05, 0.55, 'fade'],
+      ['leaving-2', 1.4, 0.55, 'fade'],
+      ['leaving-3', 0.9, 0.55, 'fade'],
+      ['leaving-4', 0.3, 0.55, 'fade'],
+      // The owner's tablet case of 2026-11-15: one place across, a little behind, whole.
+      ['beside', 1, 0.55, 'fade'],
+    ] as const;
+    for (const [name, back, across, fade] of shots) {
+      const id = `rider-fade-${name}`;
+      await page.evaluate(([i, b, a, f]) => window.__oylLapRace?.fadeShot(i, b, a, f), [
+        id,
+        back,
+        across,
+        fade,
+      ] as const);
+      const shot = await page.locator(`#${id}`).screenshot();
+      await testInfo.attach(id, { body: shot, contentType: 'image/png' });
+      expect(shot.byteLength).toBeGreaterThan(5000);
+    }
+  });
+});

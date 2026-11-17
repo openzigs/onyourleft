@@ -6,7 +6,7 @@
  * operating system chooses.
  *
  * It answers `GET /api/version`, `GET /api/tags`, `GET /api/ps` and
- * `POST /api/show` from the committed fixtures in `testing/ollama-*.json` —
+ * `POST /api/show` (and, given `chat`, `POST /api/chat`) from the committed fixtures in `testing/ollama-*.json` —
  * made by hand from Ollama's API reference, never captured from a real
  * server — and, with `ollama: false`, answers none of those and serves
  * `GET /v1/models` as an OpenAI-compatible server does. It records every
@@ -34,6 +34,8 @@ export interface OllamaStubOptions {
   readonly models?: unknown;
   /** An answer of this many bytes to `/api/tags`, for the bound on what is read. */
   readonly tagsBytes?: number;
+  /** `POST /api/chat`'s answer to each body it is sent (#2709's tactics calls). Absent, a 404. */
+  readonly chat?: (body: unknown) => unknown;
 }
 
 export interface OllamaStub {
@@ -96,6 +98,9 @@ export async function startOllamaStub(options: OllamaStubOptions): Promise<Ollam
         return send(200, options.tags);
       }
       if (isOllama && key === 'GET /api/ps') return send(200, options.ps);
+      if (isOllama && key === 'POST /api/chat' && options.chat !== undefined) {
+        return send(200, options.chat(body));
+      }
       if (isOllama && key === 'POST /api/show') {
         const name = (body as { model?: unknown } | null)?.model;
         const shown = typeof name === 'string' ? options.show?.[name] : undefined;
