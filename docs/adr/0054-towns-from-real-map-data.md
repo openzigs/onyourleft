@@ -546,3 +546,24 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   ceilings do not rise. What still holds, unchanged: the rest of the 2026-11-10 entry, including
   its pending owner approval; the 2026-11-03 landmarks; D-5.6's cap; D-5.1, whose rule for a suburb
   with no footprints at all is left to a separate issue; and D-3.1 to D-3.6.
+- **2026-11-15** — **PROPOSED, in force when the owner approves the before/after frames: a protected
+  area's boundary is not a forest, and D-5.2 does not hold on one**
+  ([#2657](https://github.com/openzigs/onyourleft/issues/2657)). The archive writes a US Forest
+  Service area (`boundary=protected_area`, `protect_class` 6) as land use of kind `forest`
+  (Protomaps' `Landuse.java`), clipped to each tile, so a whole town inside a national forest read
+  as one wood and D-5.2 dropped every footprint in it: the 2026-11-15 tag audit counted 0 houses
+  drawn at Big Bear Lake, Ruidoso and Lake Arrowhead. From this date the kinds `forest`,
+  `national_park` and `nature_reserve` (`apps/web/src/game/land-class.ts`
+  §`PROTECTED_AREA_KINDS`) are a protected area's boundary: each still reads as its class, so where nothing else overlaps it
+  what grows there is unchanged, but it ranks below every other mapped class, so built-up or
+  farmland inside it takes the cell, and that includes a small mapped `landuse=forest` wood that
+  overlaps a residential block: there the overlap reads built-up, trees are not planted and lots may
+  be placed; and a footprint on one is built. D-5.2's first sentence
+  reads, from this date: *a footprint or lot that overlaps forest, wood, water or park is not built,
+  whatever else is true, except where the forest or park it overlaps is only a protected area's boundary*. Two limits,
+  stated rather than hidden: `landuse=forest` is written as `forest` too and the tile cannot tell it
+  from the boundary, so a footprint mapped on a managed forest is built; and a `boundary=national_park`
+  that Protomaps writes as kind `park` cannot be told from a mapped park and still drops its
+  footprints. What still holds, unchanged: `wood` (`natural=wood`), water and every other park kind
+  drop a footprint as before; procedural lots still need built-up land (D-5.1) and a stretch with no
+  built-up land stays countryside (D-5.3); D-5.6's cap; and D-5.7.
