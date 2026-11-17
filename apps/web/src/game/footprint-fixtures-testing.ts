@@ -883,6 +883,50 @@ export function fencedGroundsFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/**
+ * #2685's fixture: a golf course and a cemetery beside 3 km of level road,
+ * for the owner's by-eye pair (`?town=parks`, whose before is
+ * `levers=-park-dressing`). **Rectangles from arithmetic, no real place.**
+ *
+ * - **Right, 900–1 600 m**: a golf course from 8 m back to 420 m, with two
+ *   mapped sand bunkers in it, at 1 180 m and 1 420 m.
+ * - **Left, 1 000–1 300 m**: a cemetery from 10 m back to 190 m.
+ * - **Left, 1 350–1 600 m**: a plain park, the control: mown, as before.
+ * - **Right, 1 700–2 100 m**: a second cemetery, from 30 m back, behind a field.
+ */
+export function parksFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'parks',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('golf_course', 900, 1_600, 8, 420),
+        land('sand', 1_170, 1_192, 60, 78),
+        land('sand', 1_410, 1_426, 140, 162),
+        land('cemetery', 1_000, 1_300, -190, -10),
+        land('park', 1_350, 1_600, -300, -10),
+        land('farmland', 1_700, 2_100, 4, 30),
+        land('cemetery', 1_700, 2_100, 30, 200),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
 /** Where the kerbside town's every fifth front wall is mapped, metres from the road: inside the press's clearance. */
 export const INSIDE_CLEARANCE_METRES = 2;
 

@@ -1536,6 +1536,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         The roadside hedge on mapped farmland is low and
                         broken (`settlements.ts` §`roadsidePiece`), rocks
                         small and set back (`scatter.ts` §`STONE_SCALE`).
+                        Since #2685 a park is planted by the kind that made
+                        it park (`land-class.ts` §`ParkLook`, a second
+                        sparse layer, not a class): a golf course's trees
+                        in stands, a few on a cemetery or playground, none
+                        on a pitch, meadow on a nature reserve.
                         Since #2662 a seventh class, `bare` (sand, rock,
                         ice, an airfield, a pier), between built-up and
                         farmland: nothing grows on it and no field is
@@ -1551,6 +1556,33 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `-land-planting`, `-land-boundaries`,
                         `-ground-clutter`, `-hedge-breaks`,
                         `-small-stones`, shown on `town=countryside`)
+    src/game/park-dressing.ts
+                        what a golf course and a cemetery are drawn WITH
+                        (#2685, the owner's hold of PR #2689 on 2026-11-16:
+                        each must read from the bike). On the ground, in the
+                        photographic ground's own call: a window of the mask's
+                        park looks round the rider (`ParkGround`, an 800 m
+                        RGBA texture, `three-renderer.ts` §`ParkGroundPaint`)
+                        that §`PARK_GROUND_MIX` paints a course's striped
+                        fairway lanes and rough, greens, fringes and bunkers
+                        (seeded, and mapped `sand` inside a course) and a
+                        cemetery's kept grass and narrow gravel paths from,
+                        the paths only past `CEMETERY_PATH_ROAD_CLEARANCE_METRES`
+                        (the window's alpha) — no triangle, no call. A flag
+                        stands at every green the window paints, scaled past
+                        `FLAG_TRUE_SIZE_METRES` (§`flagScaleAt`), the owner's
+                        ruling of 2026-11-16 that golf read from a public road.
+                        Standing on it: headstones in rows (the paths' grid is
+                        the shader's twin, §`isPathRow`), a low wall along a
+                        cemetery's outline open at the road, and a flag at
+                        each green, every one a box in ONE instanced call
+                        (§`ParkDressingBelt`, built on the first realistic
+                        frame that carries one), ≤ `PARK_DRESSING_CAPACITY`
+                        (512) nearest first, inside `realistic-budget.ts`
+                        §`REALISTIC_PARK_DRESSING_TRIANGLES`. A green is kept
+                        off the road and off every stand of trees
+                        (`scatter.ts` §`golfStandAt`). `SceneFrame.parkDressing`;
+                        lever `-park-dressing`, page `town=parks`
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
