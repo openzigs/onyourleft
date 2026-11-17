@@ -268,6 +268,8 @@ describe('what the rider is told before they press it', () => {
     // the list is told it goes and the policy says what it is.
     const line = ERASE_REMOVES.find((entry) => entry.includes('remembers you paired'));
     expect(line).toContain('so it can reconnect to them');
+    // #2672: and the steering controller, which is kept in the same memory.
+    expect(line).toContain('steering controller');
 
     const policy = readFileSync(
       fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
@@ -278,8 +280,13 @@ describe('what the rider is told before they press it', () => {
       policy.indexOf('## Location'),
     );
     const row =
-      table.split('\n').find((entry) => entry.includes('the sensors and trainer you paired')) ?? '';
+      table
+        .split('\n')
+        .find((entry) =>
+          entry.includes('the sensors, trainer and steering controller you paired'),
+        ) ?? '';
     expect(row).toContain('Bluetooth address');
+    expect(row).toContain('or steering controller)');
     expect(row).toContain('reconnect to it by itself');
     expect(row).toContain('*Forget* on the Devices screen removes that device');
     expect(row).toContain('*Erase everything* removes them all');

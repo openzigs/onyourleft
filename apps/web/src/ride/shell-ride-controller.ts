@@ -72,13 +72,20 @@ export function createShellRideController(
   options: Omit<RideControllerOptions, 'keepAlive' | 'notificationPermission' | 'remembered'> & {
     readonly remembered: RememberedSensors;
   },
-): RideController {
+): ShellRideController {
   const recordingService = mobile.capacitorRecordingServicePlugin();
   const controller = createRideController({
     ...options,
     keepAlive: mobile.recordingServiceKeepAlive(recordingService),
     notificationPermission: mobile.recordingServiceNotificationPermission(recordingService),
   });
-  void controller.restoreRemembered();
-  return controller;
+  return Object.assign(controller, { restored: controller.restoreRemembered() });
 }
+
+/**
+ * The shell's ride controller, and its restore of the remembered sensors as
+ * the app opens — #2672, so the steering controller is reconnected after them
+ * and inside what they leave of the budget (`shell-steering-controller.ts`).
+ * `restoreRemembered` never rejects, so neither does this.
+ */
+export type ShellRideController = RideController & { readonly restored: Promise<void> };

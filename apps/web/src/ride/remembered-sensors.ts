@@ -7,7 +7,9 @@
  * ## What is kept, and nothing else
  *
  * For each sensor the rider paired in the shell: its device id, the name it
- * advertised, and which role it was paired as ({@link PairingRole}). On Android
+ * advertised, and which role it was paired as ({@link RememberedRole}: a
+ * {@link PairingRole}, or `controller` for the steering controller, #2672).
+ * On Android
  * the device id is the sensor's Bluetooth address. Nothing it measured, no time
  * and no count is kept, so this says which sensors a rider owns and nothing
  * about a ride.
@@ -20,6 +22,12 @@
  * app opens, to reconnect them. {@link transportSeed} is the Capacitor
  * transport's view of the same list, because that transport has to know the
  * ids to ask the plugin for — `apps/mobile` `transport.ts` §`knownDevices`.
+ *
+ * The steering controller is kept here too, as role `controller` — #2672. It
+ * pairs through its own client and not the transport, so it is the steering
+ * controller that writes and reads that entry (`steering-controller.ts`
+ * §`SteeringReconnect`), and {@link transportSeed} and the ride controller's
+ * restore both pass over it.
  *
  * ⚠️ **The Android shell only.** `main.tsx` builds this beside the Capacitor
  * transport and nowhere else: Web Bluetooth has no silent reconnect
@@ -62,12 +70,26 @@ export const REMEMBERED_SENSORS_STORAGE_KEY = 'oyl.rememberedSensors.v1';
  */
 const MOST_REMEMBERED = 8;
 
+/**
+ * What a remembered device was paired as: a sensor's {@link PairingRole}, or
+ * `controller`, the steering controller (#2672).
+ */
+export type RememberedRole = PairingRole | 'controller';
+
 /** One remembered sensor: the three things kept, and nothing else. */
 export interface RememberedSensor {
   readonly id: DeviceId;
   /** As it advertised itself when it was paired. May be empty. */
   readonly name: string;
-  readonly role: PairingRole;
+  readonly role: RememberedRole;
+}
+
+/**
+ * The sensor role of a remembered device, or `undefined` for the steering
+ * controller, which neither the transport nor the ride controller pairs.
+ */
+function sensorRole(role: RememberedRole): PairingRole | undefined {
+  return role === 'controller' ? undefined : role;
 }
 
 /** The sensors this phone remembers across a restart of the app. */
@@ -94,8 +116,11 @@ export function rememberedSensorStorage(): RememberedSensorStorage | undefined {
   }
 }
 
-function isRole(value: unknown): value is PairingRole {
-  return typeof value === 'string' && Object.hasOwn(PAIRING_ROLE_CAPABILITIES, value);
+function isRole(value: unknown): value is RememberedRole {
+  return (
+    typeof value === 'string' &&
+    (value === 'controller' || Object.hasOwn(PAIRING_ROLE_CAPABILITIES, value))
+  );
 }
 
 function asRemembered(value: unknown): RememberedSensor | undefined {
@@ -185,12 +210,16 @@ export interface RememberedForTransport {
  * capabilities are the ones a pairing of that role asks the chooser for
  * ({@link PAIRING_ROLE_CAPABILITIES}), so a reconnected sensor carries what
  * the same sensor paired by hand would have.
+ *
+ * The steering controller is left out (#2672): the transport never pairs one,
+ * and its own client reaches it by id.
  */
 export function transportSeed(memory: RememberedSensors): () => readonly RememberedForTransport[] {
   return () =>
-    memory.list().map((sensor) => ({
-      id: sensor.id,
-      name: sensor.name,
-      capabilities: PAIRING_ROLE_CAPABILITIES[sensor.role],
-    }));
+    memory.list().flatMap((sensor) => {
+      const role = sensorRole(sensor.role);
+      return role === undefined
+        ? []
+        : [{ id: sensor.id, name: sensor.name, capabilities: PAIRING_ROLE_CAPABILITIES[role] }];
+    });
 }
