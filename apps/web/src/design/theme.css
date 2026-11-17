@@ -7199,6 +7199,14 @@ select.oyl-input {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* #2600: the ride controls' fade and the actions panel's closing go
+     entirely, delays included, which the rule above leaves standing
+     (`theme.css` §"#2600: THE RIDE CONTROLS FADE UNTIL TOUCHED"). */
+  .oyl-hud[data-oyl-controls] [data-oyl-hides],
+  .oyl-hud[data-oyl-controls] .oyl-hud__actions {
+    animation: none !important;
+  }
 }
 
 /*
@@ -13388,6 +13396,14 @@ select.oyl-input {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* #2600: the ride controls' fade and the actions panel's closing go
+     entirely, delays included, which the rule above leaves standing
+     (`theme.css` §"#2600: THE RIDE CONTROLS FADE UNTIL TOUCHED"). */
+  .oyl-hud[data-oyl-controls] [data-oyl-hides],
+  .oyl-hud[data-oyl-controls] .oyl-hud__actions {
+    animation: none !important;
+  }
 }
 
 /*
@@ -14182,9 +14198,11 @@ select.oyl-input {
  * like a fade, leaves a control in the tab order and the accessibility tree.
  *
  * The rider who asked for less motion, or whose screen cannot repaint, sees no
- * fade and no closing: the block at the end of this one takes every animation
- * here away, delays included (the stylesheet-wide collapse shortens a duration
- * and leaves a delay standing), and the clip comes at once.
+ * fade and no closing: a rule in each of the two blocks that collapse motion
+ * (`prefers-reduced-motion` and `update: slow`) takes every animation here
+ * away, delays included — the blocks' own rule shortens a duration and leaves
+ * a delay standing, so the closing would still wait out the fade — and the
+ * clip comes at once.
  */
 .oyl-hud[data-oyl-controls='hidden'] [data-oyl-hides],
 .oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions--unlined {
@@ -14243,13 +14261,6 @@ select.oyl-input {
 @keyframes oyl-hud-actions-close {
   from {
     clip-path: inset(0 0 0 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce), (update: slow) {
-  .oyl-hud[data-oyl-controls] [data-oyl-hides],
-  .oyl-hud[data-oyl-controls] .oyl-hud__actions {
-    animation: none !important;
   }
 }
 
