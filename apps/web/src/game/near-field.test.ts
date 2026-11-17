@@ -644,6 +644,7 @@ describe('peopleClearOfTheCamera — the people the renderer is handed (#1835)',
     height: 1.75,
     look: { skin: 0, top: 0, bottoms: 0, shoes: 0, hair: 0 },
     distance: z,
+    on: 'footway',
   });
   const pyramid = nearPyramid(LEVEL, 16 / 10);
 

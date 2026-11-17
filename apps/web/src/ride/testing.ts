@@ -70,6 +70,7 @@ export interface RecordedCalls {
   /** #785 — a room ride asked for a recording, and the races noted. */
   recordForRoom: number;
   readonly noteRoomRace: unknown[];
+  readonly noteLapRace: unknown[];
   /** #1318 — the ride screen's *Lap*. */
   markLap: number;
   /** #1042 — the result card's *Done*, and its one announcement. */
@@ -226,6 +227,7 @@ export function stubRideController(
     noteGameRideEnded: [],
     recordForRoom: 0,
     noteRoomRace: [],
+    noteLapRace: [],
     markLap: 0,
     dismissResult: 0,
     noteResultAnnounced: 0,
@@ -262,6 +264,8 @@ export function stubRideController(
       calls.unpair.push(id);
       return Promise.resolve();
     },
+    // #2669: a stub remembers nothing, so there is nothing to reconnect.
+    restoreRemembered: async () => Promise.resolve(),
     refreshRecoverable: () => {
       calls.refreshRecoverable += 1;
       return Promise.resolve();
@@ -310,12 +314,16 @@ export function stubRideController(
       calls.unlockTouch += 1;
     },
     noteSoloDraft: () => undefined,
+    notePacerDecision: () => undefined,
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },
     recordForRoom: () => {
       calls.recordForRoom += 1;
       return Promise.resolve(false);
+    },
+    noteLapRace: (race) => {
+      calls.noteLapRace.push(race);
     },
     noteRoomRace: (race) => {
       calls.noteRoomRace.push(race);

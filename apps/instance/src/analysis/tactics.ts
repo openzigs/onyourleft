@@ -38,6 +38,18 @@
  * The athlete is always the session's (D-5.6): no field of any request names
  * one. Every route is sealed-only (`tactics-routes.ts`).
  *
+ * ## The AI pacer (#2712, ADR 0072)
+ *
+ * {@link Tactics.pace} is a decision for the bot pacer instead of the bots,
+ * under ADR 0072, which applies ADR 0071's rules to it: **the same consent**
+ * (it names a place, the instance and its local model address, and one
+ * consent covers a model during either kind of ride, ADR 0072 D-1.3), **the
+ * same slot and hold** (write-ups wait while a directed ride runs; `start`
+ * and `end` claim and let it go), the same rate limit, the same one call with
+ * no tools and reasoning off. The state is `@onyourleft/domain`
+ * §`ModelPacerInput`, and the answer a plan, an intent and a line of
+ * feedback screened by §`readModelPacerAnswer` — never a power.
+ *
  * ## Warm-up (D-6.5)
  *
  * `start` claims the slot and sends one call of the same shape about a fixed
@@ -49,9 +61,13 @@
 
 import {
   modelTacticsSeats,
+  readModelPacerAnswer,
+  readModelPacerInput,
   readModelTacticsAnswer,
   readModelTacticsInput,
   type ModelTacticsMove,
+  type PacerIntent,
+  type PacerPlan,
 } from '@onyourleft/domain';
 
 import type { Caller, Outcome } from '../auth/identity.ts';
@@ -60,6 +76,7 @@ import type { FieldProblem } from '../errors.ts';
 import type { Resolver } from '../history/address.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { askLocal } from './local-server.ts';
+import { pacerRequest } from './pacer-prompt.ts';
 import type { EffectiveAnalysisSettings } from './settings.ts';
 import { tacticsRequest, WARM_UP_INPUT } from './tactics-prompt.ts';
 import type { RaceHold } from './tactics-hold.ts';
@@ -181,6 +198,18 @@ export interface Tactics {
     caller: Caller,
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ readonly bots: readonly ModelTacticsMove[] }>>;
+  /**
+   * One AI-pacer decision on the pacer state the body carries (#2712, ADR
+   * 0072): the same gates, consent, slot and call as {@link decide}, one
+   * model call with no tools and reasoning off, and a plan, an intent and a
+   * screened line back — never a power.
+   */
+  pace(
+    caller: Caller,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<
+    Outcome<{ readonly plan: PacerPlan; readonly intent: PacerIntent; readonly say: string }>
+  >;
   /** The caller's model race ended: their hold ends, and held write-ups start. */
   end(caller: Caller): void;
   /** Resolves once every warm-up call out now has settled. */
@@ -384,6 +413,35 @@ export function createTactics(options: TacticsOptions): Tactics {
       const read = readModelTacticsAnswer(text, modelTacticsSeats(input.value));
       return read.ok
         ? { ok: true, value: { bots: read.moves } }
+        : { ok: false, code: 'tactics_invalid' };
+    },
+
+    async pace(caller, body) {
+      const gated = await gate(caller.athleteId);
+      if (!gated.ok) return gated;
+      for (const key of Object.keys(body)) {
+        if (key !== 'input')
+          return refused([{ field: key, problem: 'is not a field of this request' }]);
+      }
+      const input = readModelPacerInput(body.input);
+      if (!input.ok) return refused([input.problem]);
+      if (deciding.has(caller.athleteId) || !decisions.allow(caller.athleteId)) {
+        return { ok: false, code: 'rate_limited' };
+      }
+      if (hold.claim(caller.athleteId) === 'busy') return { ok: false, code: 'tactics_busy' };
+      deciding.add(caller.athleteId);
+      let text: string | undefined;
+      try {
+        text = await ask(gated.model, pacerRequest(gated.model.model, input.value), answerWaitMs);
+      } finally {
+        deciding.delete(caller.athleteId);
+        hold.touch(caller.athleteId);
+      }
+      if (text === undefined) return { ok: false, code: 'tactics_failed' };
+      // Read field by field, and the line screened, before anything goes back (ADR 0072 D-3, D-4).
+      const read = readModelPacerAnswer(text);
+      return read.ok
+        ? { ok: true, value: { ...read.direction, say: read.say } }
         : { ok: false, code: 'tactics_invalid' };
     },
 

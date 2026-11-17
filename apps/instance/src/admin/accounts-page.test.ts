@@ -22,6 +22,7 @@ import {
   type Rider,
 } from '../moderation/moderation-testing.ts';
 import { adminCode } from '../operator/commands.ts';
+import { runCommand } from '../operator/run.ts';
 import { json, type Route } from '../route-kit.ts';
 import { ROUTES } from '../routes.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
@@ -576,6 +577,23 @@ describe('no secret and no coordinate on any Accounts answer (#2646, CLAUDE.md Â
     const second = await made.rider('Second');
     const browser = tunnel(made);
     const secret = btoa(String.fromCharCode(...secretBytes(7)));
+    const hostedKey = 'sk-MARKER-hosted-key-2646';
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      expect(
+        await runCommand(
+          ['model-key', 'set', '--url', 'https://models.example/v1', '--model', 'm'],
+          {
+            ...paths(made),
+            secret,
+            ownerKey: made.owner.device.publicKey,
+            readStandardInput: () => Promise.resolve(hostedKey),
+          },
+        ),
+      ).toBe(0);
+    } finally {
+      quiet.mockRestore();
+    }
     const { code } = await adminCode(paths(made), clockOf(made));
     const codeToken = await signInWith(made.instance.handler, code);
     const session = await passkeySession(made);
@@ -604,6 +622,8 @@ describe('no secret and no coordinate on any Accounts answer (#2646, CLAUDE.md Â
     const everything = said.join('\n');
     for (const marker of [
       secret,
+      hostedKey,
+      'sk-MARKER-hosted-key',
       'MARKER-metrics-token-2646',
       'MARKER-tunnel-token-2646',
       made.owner.token,

@@ -141,6 +141,7 @@ import type { OfferedWorkout } from '../workouts/built-in-ride';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { RideAnnouncer } from './RideAnnouncer';
+import { carryOnSentence } from '../workout/carry-on-text';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot, WorkoutChoices } from './controller';
@@ -492,6 +493,20 @@ export function WorkoutPanel({
             </Button>
           )}
         </div>
+        {workout.carryOn === undefined ? null : (
+          // #2669: a trainer that dropped and is being got back, or is back.
+          // Under *End workout*, which is how a rider who does not want to
+          // carry on ends it. Not `live`: `RideAnnouncer` says it, once a stage.
+          <StatusMessage
+            tone={
+              workout.carryOn === 'reconnecting' || workout.carryOn === 'refused'
+                ? 'warning'
+                : 'info'
+            }
+          >
+            {carryOnSentence(workout.carryOn)}
+          </StatusMessage>
+        )}
         {workout.replan?.off !== true ? null : (
           // The answer to the rider's own press, so it is `live` (#445).
           // #1329: under the re-plan lines' own label, not the design

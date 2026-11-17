@@ -37,6 +37,9 @@ import {
   STREET_FIXTURE_ROADS,
   streetsTile,
   tileAtLimit,
+  WATER_LINE_FIXTURE_KEPT,
+  WATER_LINE_FIXTURE_LINES,
+  waterLinesTile,
   WOOD_HOLE,
   WOOD_OUTER,
   woodWithHoleTile,
@@ -152,12 +155,37 @@ describe('decodeTile on the named fixtures', () => {
     expectRingAt(wood?.rings[1] as Float32Array, WOOD_HOLE);
   });
 
-  it('lake: the water polygon only; its stream and label point are not kept', () => {
+  it('lake: the water polygon, and since #2659 its stream as a water line; its label point is not kept', () => {
     const tile = decoded(lakeTile());
     expect(tile.landUse.map((f) => [f.layer, f.kind, f.rings.length])).toEqual([
       ['water', 'lake', 1],
     ]);
     expect(tile.paths).toEqual([]);
+    expect(tile.waterLines.map((f) => [f.kind, f.line.length])).toEqual([['stream', 6]]);
+  });
+
+  it('water lines — #2659: a river, a stream and a canal, along their lines; never a ditch, a drain or any other kind', () => {
+    const tile = decoded(waterLinesTile());
+    expect(tile.waterLines.map((f) => f.kind)).toEqual([...WATER_LINE_FIXTURE_KEPT]);
+    for (const kept of tile.waterLines) {
+      const spec = WATER_LINE_FIXTURE_LINES.find((each) => each.kind === kept.kind);
+      const got = vertices(kept.line);
+      expect(got).toHaveLength(spec?.line.length ?? -1);
+      spec?.line.forEach(([px, py], i) => {
+        const want = expectedMetres(px, py);
+        expect(Math.abs((got[i] as [number, number])[0] - want.x)).toBeLessThan(0.01);
+        expect(Math.abs((got[i] as [number, number])[1] - want.z)).toBeLessThan(0.01);
+      });
+    }
+    // The polygon beside them is still land use, and no line became one.
+    expect(tile.landUse.map((f) => [f.layer, f.kind])).toEqual([['water', 'lake']]);
+    expect(tile.paths).toEqual([]);
+    expect(tile.streets).toEqual([]);
+  });
+
+  it('a tile with no water lines has none', () => {
+    expect(decoded(residentialBlockTile()).waterLines).toEqual([]);
+    expect(decoded(sidewalkTile()).waterLines).toEqual([]);
   });
 
   it('sidewalk: the footway is kept along its line; the street beside it is a street, not a path', () => {
@@ -279,6 +307,8 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'line',
         'places',
         'populationRank',
+        // #2659.
+        'waterLines',
         // #1789: the building fields, from the one list.
         ...BUILDING_FIELD_NAMES,
       ];

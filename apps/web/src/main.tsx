@@ -38,6 +38,7 @@ import {
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { createShellRideController } from './ride/shell-ride-controller';
+import { createShellSteeringController } from './ride/shell-steering-controller';
 import {
   createSteeringController,
   STEERING_CONTROLLER_BUTTONS,
@@ -48,6 +49,12 @@ import {
   trainerTargetStorage,
   type TrainerTargetMemory,
 } from './ride/trainer-target-memory';
+import {
+  createRememberedSensors,
+  rememberedSensorStorage,
+  transportSeed,
+  type RememberedSensors,
+} from './ride/remembered-sensors';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { ownThresholdPowerFrom } from './game/own-threshold';
@@ -98,6 +105,7 @@ import {
 import type { HostedSettingsPort } from './ride-analysis/hosted-settings-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
 import { createReplanPort, type ReplanPort } from './workout/replan-port';
+import { createModelTacticsPort, type ModelTacticsPort } from './game/lap-race/model-tactics-port';
 import { readMaskingGuard } from '@onyourleft/analysis';
 import { keepThisRide } from './camera/keep';
 import { discardKeptFramesWithTheRide } from './camera/kept-frame-discard';
@@ -182,6 +190,7 @@ import { createStatementsPort, type StatementsPort } from './instance/statements
 import { createBlocksPort, type BlocksPort } from './instance/blocks-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
+import { createPacerPort, type PacerPort } from './instance/pacer-port';
 import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
@@ -412,10 +421,14 @@ async function buildPlatform(
   if (isNativeShell(platformCapacitor())) {
     const mobile = await import('@onyourleft/mobile');
     const plugin = mobile.capacitorBlePort();
+    // #2669. ONE memory, which the transport asks about, the controller
+    // writes and *Erase everything* forgets (`deviceRememberedSensors`).
+    const rememberedSensors = deviceRememberedSensors();
     const transport = mobile.createCapacitorTransport({
       plugin,
       profiles: rideProfiles(),
       now: browserClock,
+      remembered: transportSeed(rememberedSensors),
     });
     // ⚠️ #284. `permissionNotice` and `mayShowDeviceList` are #87's answer to
     // "what does a rider see when Bluetooth will not work", and until this line
@@ -437,6 +450,7 @@ async function buildPlatform(
     const rideController = createShellRideController(mobile, {
       ...shared,
       transport,
+      remembered: rememberedSensors,
       // ⚠️ The **same** `plugin` object the transport holds, deliberately.
       // Building a second one would give the trainer control path its own
       // subscriptions and its own view of which links are up, and the first
@@ -469,8 +483,15 @@ async function buildPlatform(
     };
     // #1826. The same `plugin`, so the controller's link is one of the
     // links this object holds, against the same connection budget.
-    const steering = createSteeringController(
+    // #2672: remembered in the sensors' memory and reconnected after them,
+    // in what they leave of that budget (`ride/shell-steering-controller.ts`).
+    const steering = createShellSteeringController(
       mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
+      {
+        remembered: rememberedSensors,
+        ride: rideController,
+        budget: transport.traits.maxConcurrentConnections,
+      },
     );
     // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
     // others in `MainActivity`: media keys have nothing to do with a link.
@@ -791,7 +812,13 @@ function buildGamePort(
   corridors: WorldCorridorPort,
 ): GamePort {
   const store = localStore();
+  const pacers = buildPacerPort();
   return {
+    // #2712, ADR 0072: the AI pacer, only through the instance. No instance,
+    // no choice: `pacers` is undefined or says it is not offered. ⚠️ An
+    // optional member, so dropping this line is green in `check:wiring`;
+    // `game/model-pacer-wiring.test.tsx` is what goes red.
+    ...(pacers === undefined ? {} : { aiPacer: pacers }),
     // #1539: the chosen route's corridor, from the store or read once. ⚠️ An
     // optional member, so dropping this line is green in `check:wiring`;
     // `world-data/corridor-wiring.test.tsx` is what goes red.
@@ -946,6 +973,18 @@ function buildGameTrainerPort(controller: RideController | undefined): GameTrain
 }
 
 let trainerTargetMemory: TrainerTargetMemory | undefined;
+let rememberedSensorMemory: RememberedSensors | undefined;
+
+/**
+ * #2669. ONE memory for the page, for {@link deviceTrainerTargets}' reason:
+ * the shell's controller writes it, its transport reads it and *Erase
+ * everything* forgets it. In a browser only the erase reaches it, and finds
+ * nothing to forget.
+ */
+function deviceRememberedSensors(): RememberedSensors {
+  rememberedSensorMemory ??= createRememberedSensors(rememberedSensorStorage());
+  return rememberedSensorMemory;
+}
 
 /**
  * #1305. ONE memory for the page: the ride controller writes it and *Erase
@@ -984,6 +1023,8 @@ function buildTransferPort(
       typeof localStorage === 'undefined' ? undefined : localStorage,
     ),
     trainerTargets: deviceTrainerTargets(),
+    // #2669: the sensors the shell remembers, by Bluetooth address.
+    rememberedSensors: deviceRememberedSensors(),
     // #1063: snapshots held in memory for a ride not yet saved go with an erase.
     ...(heldSnapshots === undefined ? {} : { heldSnapshots }),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
@@ -1113,6 +1154,35 @@ function buildReplanPort(): ReplanPort | undefined {
   });
 }
 
+/**
+ * AI bots in a lap race (#2710, ADR 0071): the ONE production place the
+ * tactics port is built, so `check:wiring` reports `createModelTacticsPort` if
+ * this goes. Over the sealed session the Connect screen keeps (#1192) and the
+ * one instance module (ADR 0036 D-3 (a)): the tactics routes are sealed-only,
+ * so a device with no sealed session sends nothing, and its races are seeded.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * re-plan port beside it.
+ */
+function buildTacticsPort(): ModelTacticsPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const sealed = heldSealedSession({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  return createModelTacticsPort({
+    session: async () => {
+      const held = await sealed();
+      return held.kind === 'open'
+        ? { kind: 'open', channel: held.sealed, token: held.token }
+        : { kind: 'closed' };
+    },
+  });
+}
+
 /** The workout goals panel's port (#1237): the local store, scoped to the local athlete. */
 function buildWorkoutGoalsPort(): WorkoutGoalsPort {
   return {
@@ -1178,6 +1248,24 @@ function buildSyncPort(): SyncPort | undefined {
     newDocumentId: () => globalThis.crypto.randomUUID(),
     // #331: the race offer is decided here, against this device's zones.
     raceRoute: raceRouteOf(localStore(), LOCAL_ATHLETE, webCryptoSha256),
+  });
+}
+
+/**
+ * The trainer game's way to the AI pacer (#2712, ADR 0072): the ONE production
+ * place a pacer port is built, so `check:wiring` reports `createPacerPort` if
+ * this goes. Over the sealed session the Connect screen keeps, through the one
+ * instance module (ADR 0036 D-3 (a)); a device with no instance is offered no
+ * AI pacer and sends nothing.
+ */
+function buildPacerPort(): PacerPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createPacerPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
   });
 }
 
@@ -1788,6 +1876,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
   const rooms = buildRoomsPort();
+  // #2710: AI bots, built once, for the same reason.
+  const tactics = buildTacticsPort();
   // #946: the menus' sounds, over the ONE audio output the ride's sounds use
   // (one context for the app). The rider's choice is read at each press, so
   // Settings' switch is heard on the very next one.
@@ -1877,6 +1967,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(hostedSettings === undefined ? {} : { hostedSettings })}
           {...(room === undefined ? {} : { room })}
           {...(rooms === undefined ? {} : { rooms })}
+          {...(tactics === undefined ? {} : { tactics })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}

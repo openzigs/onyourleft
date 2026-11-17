@@ -39,7 +39,19 @@ export const FORGET_UNNAMED_CONTROLLER = 'Forget controller';
  * row never repeats its own heading (owner ruling on #2091, 2026-11-03).
  */
 export function connectedWords(name: string | undefined): string {
-  const words = connectionWords('connected');
+  return rowWords(name, 'connected');
+}
+
+/**
+ * The row's state while a remembered controller is got back with no chooser
+ * (#2672): `<name>: Reconnecting…`, the words a sensor's row uses.
+ */
+export function reconnectingWords(name: string | undefined): string {
+  return rowWords(name, 'reconnecting');
+}
+
+function rowWords(name: string | undefined, state: 'connected' | 'reconnecting'): string {
+  const words = connectionWords(state);
   return name === undefined ? words : `${name}: ${words}`;
 }
 
@@ -85,17 +97,19 @@ export function ControllerPairing({
   const subscribe = useMemo(() => subscribeTo(controller), [controller]);
   const state = useSyncExternalStore(subscribe, () => controller.state);
   const button = useRef<HTMLButtonElement>(null);
-  const wasConnected = useRef(state.kind === 'connected');
-  const connected = state.kind === 'connected';
+  // #2672: a remembered controller being got back is listed as a connected
+  // one is, with its Forget button, so the rider can stop the tries.
+  const listed = state.kind === 'connected' || state.kind === 'reconnecting';
+  const wasListed = useRef(listed);
   const pairing = state.kind === 'pairing';
   // Pair and Forget are different buttons, so the one the rider pressed is
   // unmounted and focus falls to <body>. Hand it to the button that replaced
   // it, only when it fell (never taking it from somewhere the rider moved to).
   useEffect(() => {
-    if (wasConnected.current === connected) return;
-    wasConnected.current = connected;
+    if (wasListed.current === listed) return;
+    wasListed.current = listed;
     if (document.activeElement === document.body) button.current?.focus();
-  }, [connected]);
+  }, [listed]);
   return (
     <>
       <h2>{CONTROLLER_HEADING}</h2>
@@ -128,10 +142,14 @@ export function ControllerPairing({
           />
           <div className="oyl-pairing__body">
             <h3 className="oyl-pairing__kind">Controller</h3>
-            {state.kind === 'connected' ? (
+            {state.kind === 'connected' || state.kind === 'reconnecting' ? (
               <ul className="oyl-sensor-list">
                 <li>
-                  <p className="oyl-pairing__state">{connectedWords(shownName(state.name))}</p>
+                  <p className="oyl-pairing__state">
+                    {state.kind === 'connected'
+                      ? connectedWords(shownName(state.name))
+                      : reconnectingWords(shownName(state.name))}
+                  </p>
                   <Button
                     ref={button}
                     variant="secondary"
