@@ -56,7 +56,12 @@ import {
 import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import { crashedRoll, type CrashSide } from './delivery/crash-look';
-import { LANE_CHANGE_TURN_SPEED_FLOOR, laneChangeLean, laneChangeRate } from './lane-change-lean';
+import {
+  BOT_TURN_SPEED_FLOOR,
+  LANE_CHANGE_TURN_SPEED_FLOOR,
+  laneChangeLean,
+  laneChangeRate,
+} from './lane-change-lean';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type {
   CameraPose,
@@ -1747,10 +1752,11 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Ac
     return { metres: rider.steered, rate: laneChangeRate(rider.sway ?? 0, rider.speed) };
   }
   if (rider.laned !== undefined) {
-    // #2544: a laned bot moving across the pack turns into the move.
+    // #2544: a laned bot moving across the pack turns into the move; #2665: at
+    // its own speed, so its heading follows the path it rides.
     return {
       metres: rider.laidOut === true ? rider.laned : lanedLateral(rider, rider.laned, riders, line),
-      rate: laneChangeRate(rider.sway ?? 0, rider.speed),
+      rate: laneChangeRate(rider.sway ?? 0, rider.speed, BOT_TURN_SPEED_FLOOR),
     };
   }
   let level = 0;

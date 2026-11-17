@@ -966,7 +966,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         through the countdown, #2546) and as a race with items off and
                         on (the rider hit), and holds every write and its time
                         equal, and the recorded ride's channels and laps. ⚠️
-                        The bots ride still air on a windy ride: stated
+                        The bots ride still air on a windy ride: stated.
+                        Since #2665 the bots ride a line, not a weave: a
+                        lane is kept 10 s and a misjudged one held 60 s
+                        (domain `strategy.ts`), a bot leaves a rival's line
+                        only for a gust held behind it, and the pack layout
+                        (`pack-layout.ts`) moves a bot across at 1.4 m/s,
+                        eased at 1.75 m/s², every racer drawn between its
+                        last two ticks across as well as along;
+                        `lap-race/bot-weave.test.ts` is the gate, read at
+                        60 fps through `lapRaceDrawing` and the scene's
+                        markers
     src/game/lap-race/room-race.ts
                         a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
                         the room's first frame of a room whose welcome says
@@ -1183,7 +1193,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `steeredLateral`, so nothing the obstacles, race or
                         trainer read changes. A standstill still yaws a
                         little (the turn rate floors the speed at 10 m/s) but
-                        does not lean. ⚠️ **Since #2494 the BARS turn too**:
+                        does not lean; a lap-race bot is turned at its own
+                        speed, floored at 3 m/s (#2665,
+                        §`BOT_TURN_SPEED_FLOOR`). ⚠️ **Since #2494 the BARS turn too**:
                         `scene.ts` §`drawnSteer` gives each marker the
                         kinematic steer (`bicycle.ts` §`steerAngle`, clamped
                         at 20°) of the drawn heading's turn rate (from

@@ -62,10 +62,15 @@
  *   look-ahead"), plus `skill` × the pick-up spacing (a quarter lap), so a
  *   crafty bot picks the lane with fewer hazards over the next spacing.
  * - **Exposure**: −8 m × `caution` for a lane with a rival within gust reach
- *   behind in it. Holding or wearing a cape, it keeps the lane it rides
- *   whoever is behind, and puts the cape on when the hit comes; it still does
- *   not move **into** a rival's line, where its cape would go on at once and
- *   be spent before the hit.
+ *   behind in it **holding a crosswind gust** (#2665): what the HUD warns a
+ *   rider of in their own lane (`lap-race-hud.ts` §`incomingHit`), read here
+ *   for the lanes beside it too, which ADR 0067 D-0 permits. With items off
+ *   nobody holds one, and a rival behind holding anything else cannot hit it
+ *   from there, so it is no reason to leave: before #2665 every bot fled any
+ *   rival within 30 m behind, and the pack swapped lanes as one. Holding or
+ *   wearing a cape, it keeps the lane it rides whoever is behind, and puts
+ *   the cape on when the hit comes; it still does not move **into** such a
+ *   rival's line, where its cape would go on at once and be spent before the hit.
  * - **Aim**: holding a gust, +8 m × `attack` × `hunt` for each rival in reach
  *   ahead in the lane, so it steers to the bunch.
  * - **Sit**: holding a puddle, +6 m × `attack` for each rival in the lane about
@@ -78,7 +83,9 @@
  *   keeps it there; a tie between the others goes toward the middle.
  *
  * Having changed lane, it keeps the new one for {@link BOT_LANE_DWELL_MS}, so
- * it does not flap between lanes every tick, whatever a racer behind does.
+ * it does not flap between lanes, whatever a racer behind does: a rider picks
+ * a line and holds it (#2665: at 2 s, the bots changed lane 12 to 15 times a
+ * minute, and the median spell in a lane was the dwell itself).
  * The one thing that cuts the dwell short is a rival's puddle in its lane
  * within its puddle look-ahead: it rides round that rather than into it, so a
  * bot is never seen to change lane into a puddle and fail to change out. Its
@@ -98,8 +105,12 @@
  * {@link BOT_MISJUDGE_METRES} × {@link BOT_SKILL_MISJUDGEMENT} (all of it
  * when naive, an eighth when canny, none when crafty): each item it holds by an error
  * drawn once for that item, so a naive bot wastes some items and sits on
- * others, and each lane by an error drawn once per {@link BOT_LANE_DWELL_MS}
- * of race time, so it wanders into trouble. It sees hazards only as far
+ * others, and each lane by an error drawn once per
+ * {@link BOT_LANE_JUDGEMENT_MS} of race time, its own spells staggered from
+ * every other bot's, so it holds a preference for a lane for a long spell and
+ * wanders into trouble with it (#2665: re-drawn every 2 s against the
+ * 0.5 m a lane it rides is worth, the noise alone moved a naive bot most
+ * dwells). It sees hazards only as far
  * ahead as its skill lets it, and weighs a fresh draw and the line only as
  * far as its skill does. No error is drawn per tick, so the bot's judgement
  * does not depend on how often it is asked (the solo race ticks at 50 ms, the
@@ -113,8 +124,9 @@
  *
  * The race as it stands: where each racer is, in which lane, the puddles on
  * the road, its own item, offset and effects, and the course. **Never another
- * racer's held item or cape**, which a rider cannot see either, and never an
- * input before the tick it is sent. It draws nothing from the race's own
+ * racer's held item or cape**, which a rider cannot see either, but for one
+ * thing the HUD tells a rider: a crosswind gust held behind it within reach
+ * (§"Lanes", #2665). And never an input before the tick it is sent. It draws nothing from the race's own
  * generator: its numbers come from `random.ts` keyed by the seed, the bot and
  * the item, as `bots.ts`' do. It imports nothing from `ghost/` or
  * `recording/` (`bots.test.ts` reads its imports).
@@ -253,8 +265,19 @@ export interface StrategicBotDecision extends BotDecision {
   readonly memory: BotMemory;
 }
 
-/** How long a bot keeps a lane it has moved into before it may move again. */
-export const BOT_LANE_DWELL_MS = 2_000;
+/**
+ * How long a bot keeps a lane it has moved into before it may move again:
+ * **10 s** (#2665, the issue's 8 to 15 s). It was 2 s.
+ */
+export const BOT_LANE_DWELL_MS = 10_000;
+
+/**
+ * How long a below-crafty bot holds one misjudgement of each lane, ms of race
+ * time: **30 s**, three dwells (#2665). Each bot's spells start at its own
+ * whole second of the first, so the field does not re-judge its lanes on one
+ * tick, and a spell starts on the same tick at any tick that divides a second.
+ */
+export const BOT_LANE_JUDGEMENT_MS = 60_000;
 
 /**
  * How long a rival may sit in a bot's line, in race time, before it counts as
@@ -266,8 +289,14 @@ export const BOT_LANE_DWELL_MS = 2_000;
  */
 export const BOT_RELINE_MS = 5_000;
 
-/** What riding on in its own lane is worth, in metres: a tie between lanes stays put. */
-export const BOT_LANE_STAY_METRES = 0.5;
+/**
+ * What riding on in its own lane is worth, in metres: **2** (#2665), so a tie
+ * between lanes stays put, and so does a canny bot whose misjudgement of the
+ * lanes, at most 1.5 m, would move it for less. It was 0.5. Every reason a
+ * lane is worth leaving for, a puddle, a gust behind, a gust's targets or a
+ * puddle's victims, is worth 3 m or more.
+ */
+export const BOT_LANE_STAY_METRES = 2;
 
 /** How far short of the next pick-up point a rival counts as about to reach it, for a puddle. */
 export const BOT_PUDDLE_REACH_METRES = 60;
@@ -364,14 +393,24 @@ function itemJudgement(view: View, itemSince: number): number {
   return misjudgement(view, 0, itemSince) * view.misjudgeMetres;
 }
 
+/** Keys a bot's own start within its first spell of lane judgement apart from its lanes'. */
+const LANE_SPELL_KEY = 1 + LANE_COUNT;
+
 /**
- * How far the bot misjudges `lane` in this span of {@link BOT_LANE_DWELL_MS},
- * in metres: 0 when crafty. Keyed by the span of time, not the tick, so how
- * often the bot is asked changes nothing.
+ * How far the bot misjudges `lane` in this spell of
+ * {@link BOT_LANE_JUDGEMENT_MS}, in metres: 0 when crafty. Keyed by the spell
+ * of race time, not the tick, so how often the bot is asked changes nothing,
+ * and each bot's spells start at its own point.
  */
 function laneJudgement(view: View, lane: number): number {
-  const span = Math.floor(view.race.atMs / BOT_LANE_DWELL_MS);
-  return misjudgement(view, 1 + lane, span) * view.misjudgeMetres;
+  if (view.misjudgeMetres === 0) return 0;
+  // A whole second, so a spell starts on the same tick however often it is asked.
+  const phase =
+    Math.floor(
+      ((misjudgement(view, LANE_SPELL_KEY, 0) + 1) / 2) * (BOT_LANE_JUDGEMENT_MS / 1_000),
+    ) * 1_000;
+  const spell = Math.floor((view.race.atMs + phase) / BOT_LANE_JUDGEMENT_MS);
+  return misjudgement(view, 1 + lane, spell) * view.misjudgeMetres;
 }
 
 /** The race as one bot reads it this tick. */
@@ -423,9 +462,12 @@ function behindOf(view: View, lane: number, reach: number): readonly LapRacer[] 
   });
 }
 
-/** Whether a rival in `lane` is behind the bot within `reach`. */
-function behindIn(view: View, lane: number, reach: number): boolean {
-  return behindOf(view, lane, reach).length > 0;
+/**
+ * Whether a rival in `lane` behind the bot within gust reach holds a
+ * crosswind gust: one that can hit it there (#2665).
+ */
+function gustBehindIn(view: View, lane: number): boolean {
+  return behindOf(view, lane, GUST_REACH_METRES).some((other) => other.held === 'crosswind-gust');
 }
 
 /** Other racers' puddles, still wet, in `lane` ahead of the bot within `reach`. */
@@ -478,7 +520,7 @@ function laneScore(view: View, lane: number): number {
   let score = (lane === view.me.lane ? BOT_LANE_STAY_METRES : 0) + laneJudgement(view, lane);
   score -= caution * itemStrength('puddle') * puddlesIn(view, lane, view.spanMetres);
   // A cape covers a hit in the lane it rides, not one it moves into the line of.
-  if ((!shielded(view) || lane !== view.me.lane) && behindIn(view, lane, GUST_REACH_METRES)) {
+  if ((!shielded(view) || lane !== view.me.lane) && gustBehindIn(view, lane)) {
     score -= caution * itemStrength('crosswind-gust');
   }
   if (view.me.held === 'crosswind-gust') {

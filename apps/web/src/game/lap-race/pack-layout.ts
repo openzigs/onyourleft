@@ -77,10 +77,18 @@
  *
  * A row changes when the order does, and a lane when a bot steers. So every
  * bot's drawn place moves toward its row's at most
- * {@link PACK_SIDEWAYS_METRES_PER_SECOND} across, the rider's own steering
- * speed, and {@link PACK_CLOSE_UP_METRES_PER_SECOND} along. Its sideways speed
- * goes to the drawing with it, which turns and leans the bicycle into the move
- * (#2456's `lane-change-lean.ts`). Keeping clear of another racer may give way
+ * {@link PACK_SIDEWAYS_METRES_PER_SECOND} across, a real rider's change of
+ * line, its sideways speed eased in and out at no more than
+ * {@link PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED} (#2665: it was the
+ * rider's 4.375 m/s steering speed, from nought in one tick), and
+ * {@link PACK_CLOSE_UP_METRES_PER_SECOND} along. Its sideways speed goes to the
+ * drawing with it, which turns and leans the bicycle into the move (#2456's
+ * `lane-change-lean.ts`), and the frames between two ticks draw its place and
+ * its sideways speed between the two ({@link drawnLateral}, {@link drawnSway}),
+ * as they draw its shift. A racer joins a row within {@link PACK_ROW_METRES}
+ * of its front and leaves it only past {@link PACK_ROW_LEAVE_METRES}, so a
+ * racer riding near the threshold does not change rows, and so places across,
+ * tick by tick. Keeping clear of another racer may give way
  * faster, up to {@link PACK_GIVE_WAY_SHARE} of the bot's own speed, so no bot
  * is drawn going backwards to get out of anyone's way (#2558's review). And
  * every change in how fast a bot's drawn place moves against its race place,
@@ -101,10 +109,17 @@ export const BIKE_LENGTH_METRES = 1.75;
 
 /**
  * How far behind the front of a row, on effort distance, a racer may be and
- * still ride in it, metres: **1.4**, two of #2542's 0.65 m wheel gaps and a
- * little over.
+ * join it, metres: **1.4**, two of #2542's 0.65 m wheel gaps and a little over.
  */
 export const PACK_ROW_METRES = 1.4;
+
+/**
+ * How far behind the front of the row it rode in on the tick before a racer
+ * may be and stay in it, metres: **2** (#2665). Over {@link PACK_ROW_METRES},
+ * so a racer whose wheel gap breathes about the join threshold keeps its row,
+ * and its place across, rather than changing both tick by tick.
+ */
+export const PACK_ROW_LEAVE_METRES = 2;
 
 /** The most racers a row holds side by side: **3**. */
 export const PACK_MOST_ABREAST = 3;
@@ -116,8 +131,21 @@ export const PACK_MOST_ABREAST = 3;
  */
 export const PACK_ABREAST_METRES = 0.55;
 
-/** The fastest a bot's drawn place moves across the road, metres a second: the rider's own steering speed. */
-export const PACK_SIDEWAYS_METRES_PER_SECOND = SIDEWAYS_METRES_PER_SECOND;
+/**
+ * The fastest a bot's drawn place moves across the road, metres a second:
+ * **1.4**, a real rider's change of line (#2665, the issue's 1.2 to 1.5). It
+ * was the rider's own steering speed, 4.375 m/s, three or four times a real
+ * rider's; the rider still steers at that (`lanes.ts`).
+ */
+export const PACK_SIDEWAYS_METRES_PER_SECOND = 1.4;
+
+/**
+ * The fastest a bot's sideways speed changes, metres a second squared:
+ * **1.75** (#2665, the issue's 1.5 to 2). A bot eases into a move across and
+ * out of it, and reaches {@link PACK_SIDEWAYS_METRES_PER_SECOND} after 0.8 s:
+ * before #2665 it went from nought to full speed in one tick, 87.5 m/s².
+ */
+export const PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED = 1.75;
 
 /** The fastest a bot's drawn place moves along the road to its row's, metres a second: **2**. */
 export const PACK_CLOSE_UP_METRES_PER_SECOND = 2;
@@ -161,12 +189,35 @@ export const PACK_SHIFT_EASE_METRES_PER_SECOND_SQUARED = 40;
 export const PACK_ROLLING_METRES_PER_SECOND = 3;
 
 /**
- * How far ahead a pass is seen coming, seconds of the closing speed: **0.25**,
- * the time a bot takes to move two places across at
- * {@link PACK_SIDEWAYS_METRES_PER_SECOND}, so a bot is aside before the rider
- * reaches it.
+ * The fastest a bot may move across to keep out of the rider or another bot
+ * where nothing within its eased reach is clear, metres a second: **4.375**,
+ * the rider's own steering speed, which every bot moved at before #2665. Only
+ * then: a bot that can keep clear at {@link PACK_SIDEWAYS_METRES_PER_SECOND},
+ * eased, does.
  */
-const PACK_MAKE_WAY_SECONDS = (2 * PACK_ABREAST_METRES) / PACK_SIDEWAYS_METRES_PER_SECOND;
+export const PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND = 4.375;
+
+/**
+ * How long a bot at rest takes to move `metres` across and stop there, eased
+ * in and out: seconds.
+ */
+function secondsAcross(metres: number): number {
+  const speed = PACK_SIDEWAYS_METRES_PER_SECOND;
+  const ease = PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED;
+  // Long enough to reach full speed: speeding up, cruising, slowing; else a ramp up and down.
+  return metres >= (speed * speed) / ease
+    ? metres / speed + speed / ease
+    : 2 * Math.sqrt(metres / ease);
+}
+
+/**
+ * How far ahead a pass is seen coming, seconds of the closing speed: the time
+ * a bot takes to move two places across from rest at
+ * {@link PACK_SIDEWAYS_METRES_PER_SECOND}, eased in and out (#2665): **1.59**,
+ * so a bot is aside before the rider reaches it. It was 0.25 at the rider's
+ * steering speed and no easing.
+ */
+const PACK_MAKE_WAY_SECONDS = secondsAcross(2 * PACK_ABREAST_METRES);
 
 /** What is added to that look-ahead, metres: **0.5**, a frame's drawing and a row's closing-up. */
 const PACK_MAKE_WAY_MARGIN_METRES = 0.5;
@@ -183,10 +234,39 @@ export interface PackRacer {
    * the rider's beside a bot's, whether the two are closing (#2544).
    */
   readonly speed: number;
+  /**
+   * The rider's alone: the place across they are steering to, which they move
+   * to at `lanes.ts` §`SIDEWAYS_METRES_PER_SECOND` (#2665). A bot moves across
+   * at a rider's pace, eased, and is drawn moving on every frame, so it looks
+   * where the rider is going, not only where they are. Absent, where they are.
+   */
+  readonly heading?: number | undefined;
+  /**
+   * The rider's alone: where they were across a tick before, which the frames
+   * between two ticks draw them back toward (#2665). Absent, where they are.
+   */
+  readonly lateralBefore?: number | undefined;
+  /**
+   * Its place in the race a tick before, metres (#2665): how far it truly went
+   * over the tick, which a bot speeding up off the line went less than its
+   * speed now says. A bot gives way no faster than a share of that, so it is
+   * never drawn going backwards. Absent, its speed is taken.
+   */
+  readonly alongBefore?: number | undefined;
 }
 
 /** Where the layout draws one bot, against where the race has it. */
 export interface PackPlace {
+  /**
+   * The shift its row was laid out at on this tick: two racers with the same
+   * were in one row, which {@link PACK_ROW_LEAVE_METRES} keeps them in (#2665).
+   */
+  readonly rowShift: number;
+  /**
+   * The place across its row laid it out at on this tick, which it moves
+   * toward: a lane's bots keep the middle theirs shared (#2665).
+   */
+  readonly aim: number;
   /** Metres added to its race place along the road: bike lengths, ahead of the rider's row or behind it. */
   readonly shift: number;
   /**
@@ -197,8 +277,16 @@ export interface PackPlace {
   readonly shiftBefore: number;
   /** Metres across the road, positive to the rider's right. */
   readonly lateral: number;
+  /**
+   * {@link lateral} a tick before: a frame between two ticks draws it between
+   * the two (#2665), as it draws the shift, so a bot moving across moves on
+   * every frame rather than a tick's worth on one in three.
+   */
+  readonly lateralBefore: number;
   /** How fast {@link lateral} moved on the last step, metres a second: what turns and leans it. */
   readonly sway: number;
+  /** {@link sway} a tick before, which the frames between two ticks blend from (#2665). */
+  readonly swayBefore: number;
 }
 
 /** Every bot's drawn place, by id. Empty before the first step. */
@@ -210,8 +298,86 @@ export type PackLayout = ReadonlyMap<string, PackPlace>;
  * is drawn back along the bot's speed.
  */
 export function drawnShift(place: PackPlace, behindSeconds: number, tickSeconds: number): number {
-  const back = tickSeconds > 0 ? Math.min(1, Math.max(0, behindSeconds / tickSeconds)) : 0;
-  return place.shift + (place.shiftBefore - place.shift) * back;
+  return place.shift + (place.shiftBefore - place.shift) * backBy(behindSeconds, tickSeconds);
+}
+
+/**
+ * A bot's place across the road on a frame `behindSeconds` before the newest
+ * tick of `tickSeconds`: between the tick before's and the newest's, as
+ * {@link drawnShift} draws its shift (#2665). Drawn at the newest on every
+ * frame, a bot moving across stood still on two frames in three and jumped on
+ * the third, a tick ahead of where it was drawn along the road.
+ */
+export function drawnLateral(place: PackPlace, behindSeconds: number, tickSeconds: number): number {
+  return place.lateral + (place.lateralBefore - place.lateral) * backBy(behindSeconds, tickSeconds);
+}
+
+/**
+ * A bot's sideways speed on a frame `behindSeconds` before the newest tick,
+ * metres a second: between the tick before's and the newest's, so the turn
+ * and lean it draws change on every frame, never a tick's worth on one
+ * (#2665). Eased, it changes by at most
+ * {@link PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED} a second, which damps
+ * it as `lane-change-lean.ts` §`dampedSway` damps the rider's, more tightly;
+ * only a step out of someone's way (§`clearOf`) changes it faster.
+ */
+export function drawnSway(place: PackPlace, behindSeconds: number, tickSeconds: number): number {
+  return place.sway + (place.swayBefore - place.sway) * backBy(behindSeconds, tickSeconds);
+}
+
+/** How far back toward the tick before a frame `behindSeconds` behind the newest is, 0 to 1. */
+function backBy(behindSeconds: number, tickSeconds: number): number {
+  return tickSeconds > 0 ? Math.min(1, Math.max(0, behindSeconds / tickSeconds)) : 0;
+}
+
+/**
+ * The sideways speed a bot's eased move goes on from, metres a second: the
+ * speed it moved at over the tick before, but never over
+ * {@link PACK_SIDEWAYS_METRES_PER_SECOND}. A bot that stepped out of someone's
+ * way faster (§`clearOf`) does not carry the step on: it goes on at a
+ * rider's pace, or slows from it.
+ */
+function easedSway(was: PackPlace): number {
+  return Math.max(
+    -PACK_SIDEWAYS_METRES_PER_SECOND,
+    Math.min(PACK_SIDEWAYS_METRES_PER_SECOND, was.sway),
+  );
+}
+
+/**
+ * A bot's place across a tick of `elapsedSeconds` on, toward `target`, and its
+ * sideways speed over the tick (#2665): its speed changed by at most
+ * {@link PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED} over the tick, never
+ * over {@link PACK_SIDEWAYS_METRES_PER_SECOND}, and no faster than lets it
+ * slow to a stop at the target at that ease, tick by tick. A step that would
+ * carry it past the target stops it there, if it is slow enough to stop in
+ * the tick.
+ */
+function easedAcross(
+  was: PackPlace,
+  target: number,
+  elapsedSeconds: number,
+): { readonly lateral: number; readonly sway: number } {
+  if (elapsedSeconds <= 0) return { lateral: was.lateral, sway: was.sway };
+  const ease = PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED;
+  const gap = target - was.lateral;
+  // The fastest it may go and still stop at the target, slowing by `ease × elapsed` a tick:
+  // `v²/2a + v·dt/2 = gap`.
+  const stopping =
+    ease *
+    (Math.sqrt((elapsedSeconds * elapsedSeconds) / 4 + (2 * Math.abs(gap)) / ease) -
+      elapsedSeconds / 2);
+  const wanted = Math.sign(gap) * Math.min(PACK_SIDEWAYS_METRES_PER_SECOND, stopping);
+  const sway = toward(easedSway(was), wanted, ease * elapsedSeconds);
+  const lateral = was.lateral + sway * elapsedSeconds;
+  // Past the target, or there, slow enough to stop within the tick: it stops at
+  // it. Faster, as when the target came toward it, it runs on past and comes
+  // back at the ease rather than stopping dead.
+  const past = gap === 0 ? sway === 0 : Math.sign(target - lateral) !== Math.sign(gap);
+  if (past && Math.abs(easedSway(was)) <= ease * elapsedSeconds) {
+    return { lateral: target, sway: gap / elapsedSeconds };
+  }
+  return { lateral, sway };
 }
 
 /** A layout before the first step: every bot goes straight to its place. */
@@ -242,8 +408,11 @@ interface Target {
  * The field in rows, front first: each row's racers in the order they ride.
  * Level, the rider is last, so on the line theirs is the grid's back row.
  */
-function rows(racers: readonly PackRacer[], riderId: string): PackRacer[][] {
+function rows(racers: readonly PackRacer[], riderId: string, previous: PackLayout): PackRacer[][] {
   const last = (racer: PackRacer): number => (racer.id === riderId ? 1 : 0);
+  // The row each rode in on the tick before, by its shift: the rider's is nought.
+  const rowOf = (racer: PackRacer): number | undefined =>
+    racer.id === riderId ? 0 : previous.get(racer.id)?.rowShift;
   const ordered = [...racers].sort(
     (a, b) => b.along - a.along || last(a) - last(b) || (a.id < b.id ? -1 : 1),
   );
@@ -251,11 +420,16 @@ function rows(racers: readonly PackRacer[], riderId: string): PackRacer[][] {
   for (const racer of ordered) {
     const row = built[built.length - 1];
     const front = row?.[0];
+    const was = rowOf(racer);
+    const reach =
+      front !== undefined && was !== undefined && was === rowOf(front)
+        ? PACK_ROW_LEAVE_METRES
+        : PACK_ROW_METRES;
     if (
       row !== undefined &&
       front !== undefined &&
       row.length < PACK_MOST_ABREAST &&
-      front.along - racer.along <= PACK_ROW_METRES
+      front.along - racer.along <= reach
     ) {
       row.push(racer);
     } else {
@@ -266,9 +440,15 @@ function rows(racers: readonly PackRacer[], riderId: string): PackRacer[][] {
 }
 
 /**
- * The places across one lane for a row's racers in it: side by side, centred
- * on the lane. The rider keeps theirs and takes the place nearest it; the bots
- * take the rest, left to right in the order they were across.
+ * The places across one lane for a row's racers in it: side by side, a place
+ * apart. The rider keeps theirs and takes the place nearest it; the bots
+ * take the rest, left to right in the order they were across. Without the
+ * rider, the bots keep the middle they were laid out about on the tick
+ * before, those of them already in the lane, as far as the lane's room allows
+ * (#2665): a bot joining or leaving moves the others no more than it must.
+ * Before #2665 every change in how many shared a lane moved each of them
+ * 0.275 m at once, and a row whose count flickered drew them weaving. A bot
+ * coming in from another lane alone, and the grid, are centred on the lane.
  */
 function across(
   members: readonly PackRacer[],
@@ -281,26 +461,55 @@ function across(
   // go half to the rider's left and half to their right.
   const bots = members
     .filter((member) => member.id !== riderId)
-    .map((member) => ({ member, was: previous.get(member.id)?.lateral ?? member.lateral }))
+    .map((member) => ({
+      member,
+      was: previous.get(member.id)?.lateral ?? member.lateral,
+      aim: previous.get(member.id)?.aim ?? member.lateral,
+    }))
     .sort((a, b) => a.was - b.was || (a.member.id < b.member.id ? -1 : 1));
   const rider = members.find((member) => member.id === riderId);
   const ordered = [...bots];
   if (rider !== undefined) {
     const left = bots.filter(({ was }) => was < rider.lateral).length;
     const level = bots.filter(({ was }) => was === rider.lateral).length;
-    ordered.splice(left + Math.floor(level / 2), 0, { member: rider, was: rider.lateral });
+    ordered.splice(left + Math.floor(level / 2), 0, {
+      member: rider,
+      was: rider.lateral,
+      aim: rider.lateral,
+    });
   }
   const count = ordered.length;
   const riderAt = ordered.findIndex(({ member }) => member.id === riderId);
-  // Centred on the lane, or, with the rider among them, on the rider's own
-  // place, so the rider keeps it and every bot is a full place from them.
+  // On the rider's own place, so the rider keeps it and every bot is a full
+  // place from them; else on the middle the bots kept.
   const first =
     riderAt < 0
-      ? lane - ((count - 1) / 2) * PACK_ABREAST_METRES
+      ? sharedMiddle(ordered, lane) - ((count - 1) / 2) * PACK_ABREAST_METRES
       : (ordered[riderAt]?.member.lateral as number) - riderAt * PACK_ABREAST_METRES;
   const placed = new Map<string, number>();
   ordered.forEach(({ member }, at) => placed.set(member.id, first + at * PACK_ABREAST_METRES));
   return placed;
+}
+
+/**
+ * The middle a lane's bots ride side by side about, metres (#2665): the one
+ * those of them already laid out in the lane were laid out about on the tick
+ * before (`aim`), held so that the outermost of them is still within the
+ * lane's {@link PACK_MOST_ABREAST} places. The lane's own when none was in it.
+ */
+function sharedMiddle(ordered: readonly { readonly aim: number }[], lane: number): number {
+  const count = ordered.length;
+  const offsets = ordered.map((_, at) => (at - (count - 1) / 2) * PACK_ABREAST_METRES);
+  const inLane = ordered
+    .map(({ aim }, at) => aim - (offsets[at] as number))
+    .filter((_, at) => {
+      const aim = ordered[at]?.aim as number;
+      return Math.abs(aim - lane) <= (PACK_MOST_ABREAST * PACK_ABREAST_METRES) / 2;
+    });
+  if (inLane.length === 0) return lane;
+  const kept = inLane.reduce((sum, middle) => sum + middle, 0) / inLane.length;
+  const room = (Math.max(0, PACK_MOST_ABREAST - count) / 2) * PACK_ABREAST_METRES;
+  return Math.min(lane + room, Math.max(lane - room, kept));
 }
 
 /**
@@ -343,7 +552,7 @@ function targets(
   grid: boolean,
   lap?: number,
 ): Map<string, Target> {
-  const built = rows(racers, riderId);
+  const built = rows(racers, riderId, previous);
   const riderRow = built.findIndex((row) => row.some((racer) => racer.id === riderId));
   const rider = built[riderRow]?.find((racer) => racer.id === riderId);
   // With no rider in the field, the front row is the anchor.
@@ -442,10 +651,14 @@ export function gridPackLayout(racers: readonly PackRacer[], riderId: string): P
     const place = wanted.get(racer.id);
     if (racer.id === riderId || place === undefined) continue;
     grid.set(racer.id, {
+      rowShift: place.shift,
+      aim: place.lateral,
       shift: place.shift,
       shiftBefore: place.shift,
       lateral: place.lateral,
+      lateralBefore: place.lateral,
       sway: 0,
+      swayBefore: 0,
     });
   }
   return grid;
@@ -502,23 +715,27 @@ export function stepPackLayout(
         : wants;
     if (was === undefined) {
       next.set(racer.id, {
+        rowShift: wants.shift,
+        aim: wants.lateral,
         shift: target.shift,
         shiftBefore: target.shift,
         lateral: target.lateral,
+        lateralBefore: target.lateral,
         sway: 0,
+        swayBefore: 0,
       });
       continue;
     }
-    const lateral = toward(
-      was.lateral,
-      target.lateral,
-      PACK_SIDEWAYS_METRES_PER_SECOND * elapsedSeconds,
-    );
+    const { lateral, sway } = easedAcross(was, target.lateral, elapsedSeconds);
     next.set(racer.id, {
+      rowShift: wants.shift,
+      aim: wants.lateral,
       shift: shiftToward(racer, was, target.shift, elapsedSeconds),
       shiftBefore: was.shift,
       lateral,
-      sway: elapsedSeconds > 0 ? (lateral - was.lateral) / elapsedSeconds : 0,
+      lateralBefore: was.lateral,
+      sway,
+      swayBefore: was.sway,
     });
   }
   return clear(racers, riderId, next, previous, elapsedSeconds, lapMetres);
@@ -534,6 +751,15 @@ export function stepPackLayout(
  */
 function giveWay(racer: PackRacer): number {
   return Math.min(PACK_CLOSE_UP_METRES_PER_SECOND, PACK_GIVE_WAY_SHARE * Math.max(0, racer.speed));
+}
+
+/**
+ * How fast a racer's race place went forward over the tick, metres a second:
+ * its speed, or less where it went less far (§`PackRacer.alongBefore`).
+ */
+function progress(racer: PackRacer, elapsedSeconds: number): number {
+  if (racer.alongBefore === undefined || elapsedSeconds <= 0) return racer.speed;
+  return Math.min(racer.speed, (racer.along - racer.alongBefore) / elapsedSeconds);
 }
 
 /**
@@ -553,7 +779,7 @@ function shiftRates(
 ): { readonly least: number; readonly most: number } {
   const rate = elapsedSeconds > 0 ? (was.shift - was.shiftBefore) / elapsedSeconds : 0;
   const ease = PACK_SHIFT_EASE_METRES_PER_SECOND_SQUARED * elapsedSeconds;
-  const forward = -PACK_GIVE_WAY_SHARE * Math.max(0, racer.speed);
+  const forward = -PACK_GIVE_WAY_SHARE * Math.max(0, progress(racer, elapsedSeconds));
   const least = Math.max(forward, Math.min(rate + ease, Math.max(rate - ease, -back)));
   const most = Math.max(least, Math.min(rate + ease, PACK_CLOSE_UP_METRES_PER_SECOND));
   return { least, most };
@@ -586,10 +812,16 @@ interface Drawn {
   /**
    * Where it is drawn along on the frames back toward the tick before, at the
    * far end, metres: its race place a tick back along its speed and its shift
-   * before. The frames between two ticks draw it there and at its new place
-   * across, so a move across is clear on them too only if it is clear here.
+   * before.
    */
   readonly before: number;
+  /**
+   * Where it is drawn across there, metres: its place across a tick before.
+   * The frames between two ticks draw it between there and where it is now,
+   * along and across alike (#2665), so a move is clear on them only if that
+   * whole way is clear.
+   */
+  readonly beforeLateral: number;
 }
 
 /**
@@ -626,6 +858,66 @@ function overlap(
   );
 }
 
+/**
+ * How far two bicycles drawn on the frames between two ticks may graze each
+ * other's box and still be clear there, metres: **1 mm** (#2665). The end of
+ * each way a tick back is read along its speed now, not where it was drawn,
+ * so two a bike length apart whose speeds differ graze by a hair there; a
+ * graze that small, scored, sent a bot stepping across at full speed.
+ */
+const PACK_BETWEEN_SLACK_METRES = 0.001;
+
+/**
+ * How far two bicycles drawn on the frames between two ticks come inside each
+ * other, square metres, as {@link overlap} scores it (#2665): each is drawn on
+ * the straight way from where it was on the tick before (`from`) to where it
+ * is (`to`), along and across, so the two are inside each other on those
+ * frames where the way between them crosses the box a bike length long and a
+ * place wide. Nought when it does not; else {@link overlap} at the middle of
+ * the stretch inside, which shrinks as either moves off the other.
+ */
+function overlapBetween(
+  one: { readonly from: Place; readonly to: Place },
+  other: { readonly from: Place; readonly to: Place },
+  lap?: number,
+): number {
+  const alongTo = one.to.along - nearestOnTheLoop(other.to.along, one.to.along, lap);
+  const alongFrom = alongTo + (one.from.along - one.to.along) - (other.from.along - other.to.along);
+  const acrossTo = one.to.lateral - other.to.lateral;
+  const acrossFrom = one.from.lateral - other.from.lateral;
+  let enter = 0;
+  let leave = 1;
+  for (const [from, to, half] of [
+    [alongFrom, alongTo, BIKE_LENGTH_METRES - PACK_BETWEEN_SLACK_METRES],
+    [acrossFrom, acrossTo, PACK_ABREAST_METRES - PACK_BETWEEN_SLACK_METRES],
+  ] as const) {
+    const change = to - from;
+    if (change === 0) {
+      if (Math.abs(from) >= half) return 0;
+      continue;
+    }
+    const first = (-half - from) / change;
+    const second = (half - from) / change;
+    enter = Math.max(enter, Math.min(first, second));
+    leave = Math.min(leave, Math.max(first, second));
+  }
+  if (enter >= leave) return 0;
+  const middle = (enter + leave) / 2;
+  return overlap(
+    {
+      along: alongFrom + (alongTo - alongFrom) * middle,
+      lateral: acrossFrom + (acrossTo - acrossFrom) * middle,
+    },
+    { along: 0, lateral: 0 },
+  );
+}
+
+/** A place along the road and across it, metres. */
+interface Place {
+  readonly along: number;
+  readonly lateral: number;
+}
+
 /** One place a bot may be drawn on this tick. */
 interface Candidate {
   readonly shift: number;
@@ -634,10 +926,12 @@ interface Candidate {
 
 /**
  * How far ahead a bot sees the rider coming, seconds: **0.1**, two ticks;
- * {@link PACK_MAKE_WAY_SECONDS}, the time it takes to move two places across;
- * and **0.45**. A bot the rider would be inside by then moves already, so the
- * rider, who may close faster than a bot may move, does not reach it, and a
- * bot does not cross the rider's line just ahead of them.
+ * {@link PACK_MAKE_WAY_SECONDS}, the time it takes to move two places across,
+ * eased (1.59 s since #2665, when a bot's sideways speed fell to a rider's
+ * and was eased in: it was 0.25 s); and **0.45**. A bot the rider would be
+ * inside by then moves already, so the rider, who may close faster than a
+ * bot may move, does not reach it, and a bot does not cross the rider's line
+ * just ahead of them.
  *
  * The 0.45 s is for a line of bots coming up on the rider, each a bike length
  * behind the one before. Easing in its give-way
@@ -651,6 +945,17 @@ interface Candidate {
  */
 const PACK_SEEN_AHEAD_SECONDS = [0.1, PACK_MAKE_WAY_SECONDS, 0.45] as const;
 
+/** The shares of a step across, either way, a bot that must get clear tries (#2665). */
+const PACK_CLEAR_STEPS = [-1, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1] as const;
+
+/**
+ * How far ahead a bot sees another bot coming, seconds: **0.1**, **0.25** and
+ * **0.5**, each going on as it moved over the last tick (#2665). Ranked after
+ * a smooth move, so a bot it would soon be inside is eased away from, or held
+ * back from, and stepped from only once it is in the way.
+ */
+const PACK_BOTS_SEEN_AHEAD_SECONDS = [0.1, 0.25, 0.5] as const;
+
 /**
  * How far past a bike length a place a bot holds clear of the rider is, metres:
  * **1 mm**, so that a place a bike length on is clear of the rounding in
@@ -662,15 +967,32 @@ const PACK_CLEAR_METRES = 0.001;
  * A place's score, the lower the better, in order: how far inside the rider,
  * inside any bot, and inside the rider a moment on, and how far it moved.
  */
-type Score = readonly [number, number, number, number];
+type Score = readonly [number, number, number, number, number, number];
 
 /**
- * Whether `each` scores better than `best`: the first term that differs
- * decides. Grouped so that a worse place never wins on a difference that is
- * merely not nought (#2558's review, finding 4).
+ * `each`'s score where it scores better than `best`, else `undefined`: the
+ * first term that differs decides, so that a worse place never wins on a
+ * difference that is merely not nought (#2558's review, finding 4). Each term
+ * is scored only when the ones before it tie (#2665): most places lose on the
+ * first or the second, and the later ones read every racer a moment on.
  */
-function better(each: Score, best: Score): boolean {
-  return (each[0] - best[0] || each[1] - best[1] || each[2] - best[2] || each[3] - best[3]) < 0;
+function better(
+  terms: readonly ((each: Candidate) => number)[],
+  each: Candidate,
+  best: Score,
+): Score | undefined {
+  const scored: number[] = [];
+  for (const [at, term] of terms.entries()) {
+    const value = term(each);
+    const apart = value - (best[at] as number);
+    if (apart > 0) return undefined;
+    scored.push(value);
+    if (apart < 0) {
+      for (const rest of terms.slice(at + 1)) scored.push(rest(each));
+      return scored as unknown as Score;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -683,18 +1005,21 @@ const PACK_CLEARING_PASSES = 2;
 /**
  * The layout with no two racers inside each other (#2544): front to back,
  * each bot is drawn at the place, within the tick's reach, that is least
- * inside anyone. Its reach is what it may move in a tick:
- * {@link PACK_SIDEWAYS_METRES_PER_SECOND} across, and along no faster than
+ * inside anyone. Its reach is what it may move in a tick: across, its eased
+ * reach, and a step of {@link PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND} where
+ * nothing eased is clear (#2665); and along no faster than
  * {@link PACK_CLOSE_UP_METRES_PER_SECOND} forward or {@link PACK_GIVE_WAY_SHARE}
- * of its speed back, so it never jumps and never goes backwards (#2558's
+ * of how far its race place went on, so it never jumps and never goes backwards (#2558's
  * review, finding 1), and within
  * {@link PACK_SHIFT_EASE_METRES_PER_SECOND_SQUARED} of how fast it moved on
  * the tick before, so it is never drawn slowing and speeding up again on
  * alternate ticks (finding A). Inside the rider counts first, since the rider is
  * never moved; then inside a bot, each on this tick and on the frames drawn
  * back to the tick before; then inside the rider
- * {@link PACK_SEEN_AHEAD_SECONDS} on; then the least move from the place it
- * was laid out in.
+ * {@link PACK_SEEN_AHEAD_SECONDS} on, where the rider is steering to; then how
+ * far outside its eased reach across it is; then inside a bot
+ * {@link PACK_BOTS_SEEN_AHEAD_SECONDS} on; then the least move from the place
+ * it was laid out in.
  * Two bicycles are inside each other under a bike length along and under a
  * place across, so two nose to tail on one line are as inside each other as
  * two side by side (#2558's review, finding 2).
@@ -719,11 +1044,13 @@ function clear(
   const where = new Map<string, Drawn>();
   for (const racer of racers) {
     if (racer.id === riderId) {
+      // The rider is drawn between where they were steered and where they are.
       where.set(racer.id, {
         along: racer.along,
         lateral: racer.lateral,
         race: racer.along,
         before: racer.along - racer.speed * elapsedSeconds,
+        beforeLateral: racer.lateralBefore ?? racer.lateral,
       });
       continue;
     }
@@ -734,6 +1061,7 @@ function clear(
         lateral: was.lateral,
         race: racer.along,
         before: racer.along - racer.speed * elapsedSeconds + was.shift,
+        beforeLateral: was.lateral,
       });
     }
   }
@@ -745,7 +1073,6 @@ function clear(
         b.racer.along + b.place.shift - (a.racer.along + a.place.shift) ||
         (a.racer.id < b.racer.id ? -1 : 1),
     );
-  const across = PACK_SIDEWAYS_METRES_PER_SECOND * elapsedSeconds;
   for (let pass = 0; pass < PACK_CLEARING_PASSES; pass += 1) {
     for (const { racer, place } of bots) {
       const was = previous.get(racer.id);
@@ -757,7 +1084,6 @@ function clear(
         was,
         where,
         rider,
-        across,
         elapsedSeconds,
         lap,
       );
@@ -766,12 +1092,17 @@ function clear(
         lateral: placed.lateral,
         race: racer.along,
         before: racer.along - racer.speed * elapsedSeconds + was.shift,
+        beforeLateral: was.lateral,
       });
       layout.set(racer.id, {
+        rowShift: place.rowShift,
+        aim: place.aim,
         shift: placed.shift,
         shiftBefore: place.shiftBefore,
         lateral: placed.lateral,
+        lateralBefore: was.lateral,
         sway: elapsedSeconds > 0 ? (placed.lateral - was.lateral) / elapsedSeconds : 0,
+        swayBefore: was.sway,
       });
     }
   }
@@ -791,35 +1122,38 @@ function clearOf(
   was: PackPlace,
   where: ReadonlyMap<string, Drawn>,
   rider: PackRacer | undefined,
-  across: number,
   elapsedSeconds: number,
   lap: number | undefined,
 ): Candidate {
   const others = [...where].filter(([id]) => id !== racer.id).map(([, other]) => other);
   const drawnAt = (each: Candidate) => ({ along: racer.along + each.shift, lateral: each.lateral });
-  // On the frames drawn back toward the tick before, a bot is drawn at its
-  // shift before but already at its new place across: a move across is clear
-  // there only if it is clear of where the other is drawn there.
+  // On the frames drawn back toward the tick before, a bot is drawn on the
+  // way from where it was to where it is, along and across (#2665): a place
+  // is clear there only if that way is clear of the other's. Both ways are
+  // straight, so two that are clear at either end may still cross, as one
+  // closes up along while the other moves across. Where neither moves across,
+  // both ways run along the road, and clear at either end is clear between:
+  // the end a tick back is read along each one's speed now, and is not where
+  // either was drawn, so it is not read then.
   const before = racer.along - racer.speed * elapsedSeconds + was.shift;
-  const insideBefore = (
-    each: Candidate,
-    other: Drawn,
-    moving = each.lateral !== was.lateral,
-  ): number =>
-    moving
-      ? overlap(
-          { along: before, lateral: each.lateral },
-          { along: other.before, lateral: other.lateral },
+  const insideBefore = (each: Candidate, other: Drawn): number =>
+    each.lateral === was.lateral && other.lateral === other.beforeLateral
+      ? 0
+      : overlapBetween(
+          { from: { along: before, lateral: was.lateral }, to: drawnAt(each) },
+          {
+            from: { along: other.before, lateral: other.beforeLateral },
+            to: { along: other.along, lateral: other.lateral },
+          },
           lap,
-        )
-      : 0;
+        );
   // Inside the rider: on this tick, and on the frames back to the tick
   // before. And soon to be: a moment on, each racer at its own speed.
   const riderDrawn = rider === undefined ? undefined : where.get(rider.id);
   const insideRider = (each: Candidate): number =>
     rider === undefined || riderDrawn === undefined
       ? 0
-      : overlap(drawnAt(each), rider, lap) + insideBefore(each, riderDrawn, true);
+      : overlap(drawnAt(each), rider, lap) + insideBefore(each, riderDrawn);
   const riderSoon = (each: Candidate): number =>
     rider === undefined
       ? 0
@@ -828,31 +1162,91 @@ function clearOf(
             sum +
             overlap(
               { along: racer.along + each.shift + racer.speed * seconds, lateral: each.lateral },
-              { along: rider.along + rider.speed * seconds, lateral: rider.lateral },
+              {
+                along: rider.along + rider.speed * seconds,
+                lateral: toward(
+                  rider.lateral,
+                  rider.heading ?? rider.lateral,
+                  SIDEWAYS_METRES_PER_SECOND * seconds,
+                ),
+              },
               lap,
             ),
           0,
         );
+  // And inside a bot soon: each going on as it moved over this tick (#2665).
+  // A bot moving across at a rider's pace takes longer to get clear than one
+  // that jumped, so it looks a little ahead for a bot it is closing on.
+  const othersSoon = (each: Candidate): number => {
+    if (elapsedSeconds <= 0) return 0;
+    const at = drawnAt(each);
+    const along = (at.along - before) / elapsedSeconds;
+    const across = (each.lateral - was.lateral) / elapsedSeconds;
+    return others.reduce(
+      (sum, other) =>
+        other === riderDrawn
+          ? sum
+          : sum +
+            PACK_BOTS_SEEN_AHEAD_SECONDS.reduce(
+              (part, seconds) =>
+                part +
+                overlap(
+                  { along: at.along + along * seconds, lateral: at.lateral + across * seconds },
+                  {
+                    along: other.along + ((other.along - other.before) / elapsedSeconds) * seconds,
+                    lateral:
+                      other.lateral +
+                      ((other.lateral - other.beforeLateral) / elapsedSeconds) * seconds,
+                  },
+                  lap,
+                ),
+              0,
+            ),
+      0,
+    );
+  };
   const insideAny = (each: Candidate): number =>
     others.reduce(
-      (sum, other) => sum + overlap(drawnAt(each), other) + insideBefore(each, other),
+      (sum, other) => sum + overlap(drawnAt(each), other, lap) + insideBefore(each, other),
       0,
     );
   const now = { shift: place.shift, lateral: place.lateral };
   const moved = (each: Candidate): number =>
     Math.abs(each.shift - now.shift) + Math.abs(each.lateral - now.lateral);
+  // Across, its reach is what its eased sideways speed allows in the tick
+  // (#2665): within PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED of the speed
+  // it moved at on the tick before, and no faster than
+  // PACK_SIDEWAYS_METRES_PER_SECOND. Where nothing in that reach is clear, it
+  // may get out faster, a step of PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND either
+  // way, as every bot moved before #2665: never ghosting through anyone comes
+  // first (the owner's ruling on #2544), and a smooth move second.
+  const ease = PACK_SIDEWAYS_EASE_METRES_PER_SECOND_SQUARED * elapsedSeconds;
+  const leftmost =
+    was.lateral +
+    Math.max(-PACK_SIDEWAYS_METRES_PER_SECOND, easedSway(was) - ease) * elapsedSeconds;
+  const rightmost =
+    was.lateral + Math.min(PACK_SIDEWAYS_METRES_PER_SECOND, easedSway(was) + ease) * elapsedSeconds;
+  const within = (lateral: number): number => Math.min(rightmost, Math.max(leftmost, lateral));
+  const step = PACK_CLEAR_SIDEWAYS_METRES_PER_SECOND * elapsedSeconds;
+  const stepped = (lateral: number): number => toward(was.lateral, lateral, step);
+  const unEased = (each: Candidate): number =>
+    Math.max(0, leftmost - each.lateral, each.lateral - rightmost);
   // Each place is scored once (#2558's review, finding E): out of the rider's
   // way first, since the rider is never moved; then out of every bot's; then
-  // out of the rider's way a moment on; then the least move.
-  const score = (each: Candidate): Score => [
-    insideRider(each),
-    insideAny(each),
-    riderSoon(each),
-    moved(each),
-  ];
+  // out of the rider's way a moment on; then how far outside its eased reach
+  // across (#2665); then the least move.
+  const terms = [insideRider, insideAny, riderSoon, unEased, othersSoon, moved] as const;
+  const score = (each: Candidate): Score => terms.map((term) => term(each)) as unknown as Score;
   let chosen: Candidate = { shift: current.shift, lateral: current.lateral };
   let chosenScore = score(chosen);
-  if (chosenScore[0] === 0 && chosenScore[1] === 0 && chosenScore[2] === 0) return chosen;
+  if (
+    chosenScore[0] === 0 &&
+    chosenScore[1] === 0 &&
+    chosenScore[2] === 0 &&
+    chosenScore[4] === 0
+  ) {
+    return chosen;
+  }
   // Within reach: along, from as far back as it may give way to keep clear,
   // PACK_GIVE_WAY_SHARE of its speed so it is still drawn going forward, to
   // as far on as it may close up, each eased from the tick before's;
@@ -894,14 +1288,22 @@ function clearOf(
   // where each would be scored again for nothing (#2558's review, finding L).
   // The first of each is kept, so the place chosen is the same.
   const alongs = [...new Set(shifts)];
+  // Each place across within its eased reach, and as far as a step goes.
+  const eitherReach = (lateral: number): number[] => [within(lateral), stepped(lateral)];
   const laterals = [
     ...new Set([
       now.lateral,
+      // Toward the place its row laid it out at, as fast as it may.
+      ...eitherReach(place.aim),
+      within(was.lateral),
       was.lateral,
+      leftmost,
+      rightmost,
+      // And evenly across as far as a step goes either way, so a way out is
+      // found where none of the places above is clear.
+      ...PACK_CLEAR_STEPS.map((share) => was.lateral + share * step),
       ...near.flatMap((other) =>
-        [-1, 1].map((side) =>
-          toward(was.lateral, other.lateral + side * PACK_ABREAST_METRES, across),
-        ),
+        [-1, 1].flatMap((side) => eitherReach(other.lateral + side * PACK_ABREAST_METRES)),
       ),
       // And, for a bot a lap apart from the rider, a step toward a place
       // either side of the rider (#2516). It never shares the rider's row, so
@@ -909,16 +1311,14 @@ function clearOf(
       // on one side must not leave it held in the rider's line.
       ...(rider === undefined || nearestOnTheLoop(rider.along, racer.along, lap) === rider.along
         ? []
-        : [-1, 1].map((side) =>
-            toward(was.lateral, rider.lateral + side * PACK_ABREAST_METRES, across),
-          )),
+        : [-1, 1].flatMap((side) => eitherReach(rider.lateral + side * PACK_ABREAST_METRES))),
     ]),
   ];
   for (const shift of alongs) {
     for (const lateral of laterals) {
       const each = { shift, lateral };
-      const scored = score(each);
-      if (better(scored, chosenScore)) {
+      const scored = better(terms, each, chosenScore);
+      if (scored !== undefined) {
         chosen = each;
         chosenScore = scored;
       }
@@ -938,10 +1338,12 @@ function clearOf(
     const held = chosen;
     const [heldRider, heldAny] = chosenScore;
     const round = [first, -first]
-      .map((side) => ({
-        shift: held.shift,
-        lateral: toward(was.lateral, holding.lateral + side * PACK_ABREAST_METRES, across),
-      }))
+      .flatMap((side) =>
+        eitherReach(holding.lateral + side * PACK_ABREAST_METRES).map((lateral) => ({
+          shift: held.shift,
+          lateral,
+        })),
+      )
       .find((each) => insideRider(each) <= heldRider && insideAny(each) <= heldAny);
     if (round !== undefined) chosen = round;
   }
