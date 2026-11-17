@@ -223,6 +223,16 @@ describe('tap a HUD panel to tuck it away, and its tab to bring it back — #260
     ]);
   });
 
+  it('tucks nothing for a click with no pointer behind it, such as a screen reader’s on a reading', async () => {
+    await hud();
+    const reading = within('dl.oyl-hud__fields--primary dd') as HTMLElement;
+    act(() => {
+      reading.click();
+    });
+    expect(within('dl.oyl-hud__fields--primary')).not.toBeNull();
+    expect(readRideChrome(localStorage).collapsed).toEqual([]);
+  });
+
   it('tucks nothing for a tap on a control inside a panel', async () => {
     await hud({ profile: loop, laps, lapSeconds: 75, standings });
     const swap = within('.oyl-hud__standings button.oyl-hud__swap');

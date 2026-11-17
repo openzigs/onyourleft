@@ -53,6 +53,17 @@ describe('a tap on a panel tucks it away — #2600', () => {
     expect(panelTapped(at('pause'), section, open)).toBeUndefined();
   });
 
+  it('tucks the panel for a tap on a line in a standings list that scrolls', () => {
+    const section = hud();
+    const list = section.querySelector('ol') as HTMLElement;
+    list.setAttribute('tabindex', '0');
+    list.setAttribute('data-oyl-scrolls', '');
+    expect(panelTapped(at('line'), section, open)).toBe('standings');
+    // A focusable box that is no scroll region is still a control.
+    list.removeAttribute('data-oyl-scrolls');
+    expect(panelTapped(at('line'), section, open)).toBeUndefined();
+  });
+
   it('tucks nothing for a tap on a panel that is not open, or on no panel', () => {
     const section = hud();
     expect(panelTapped(at('power'), section, ['route'])).toBeUndefined();

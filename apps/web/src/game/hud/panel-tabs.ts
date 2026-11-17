@@ -68,10 +68,12 @@ export const PANEL_SELECTORS: Readonly<Record<CollapsiblePanel, string>> = {
 /**
  * What a tap on a control lands on, rather than on its panel. `[tabindex]`
  * catches a control drawn without a native element, `-1` excepted: that is a
- * place focus is handed to, not a control.
+ * place focus is handed to, not a control. A standings list that scrolls is
+ * focusable for the keyboard (#2599) and is no control: a tap on a line in it
+ * still tucks the panel.
  */
 const CONTROL =
-  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [tabindex]:not([tabindex="-1"])';
+  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [tabindex]:not([tabindex="-1"]):not([data-oyl-scrolls])';
 
 /**
  * The open panel a tap on `target` tucks away, or `undefined` — a tap on a
