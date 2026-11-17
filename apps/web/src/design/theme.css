@@ -9395,6 +9395,27 @@ select.oyl-input {
 }
 
 /*
+ * The AI pacer's line, larger than any other notice — #2760's review, on the
+ * owner's word of 2026-11-17: "Might need to make the feedback a bit larger.
+ * I noticed it can be hard to see." It is the one notice meant to be read
+ * at a glance while pedalling, and the only one that changes every few
+ * seconds, so it alone is set at 1.5 times a notice's size (0.8 rem to
+ * 1.2 rem) and at the HUD numerals' weight, 700. Its colours are the info
+ * tone's declared pair, unchanged. A line is at most 80 characters (ADR 0072
+ * D-4); in the notices cell's 22 rem, at 1024×600 and 1280×800, about 45 of
+ * them fit on two lines and all 80 on three, measured in the pinned Chromium.
+ * `ride-notices.browser.spec.ts` §"the AI pacer's line" measures the size,
+ * the lines, the contrast and that it covers no panel or control, and goes
+ * red at the old size. Only this notice grows: the shared rule above is
+ * untouched.
+ */
+.oyl-hud__notices .oyl-status.oyl-hud__pacer-say {
+  font-size: calc(var(--oyl-font-size-sm) * 1.5);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+/*
  * THE OVERLAY, both layouts — what they share (#423).
  *
  * The world fills the stage and the HUD is a grid laid over it, holding four

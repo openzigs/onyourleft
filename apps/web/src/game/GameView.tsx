@@ -5491,7 +5491,15 @@ function GameScreen({
           // of ride and then gone. Not `live`: the HUD's one region says it,
           // with announcements on (`announce.ts` rank 5i).
           pacerSay === undefined ? undefined : (
-            <StatusMessage key="pacer-say" tone="info" label={PACER_SAY_LABEL}>
+            <StatusMessage
+              key="pacer-say"
+              tone="info"
+              label={PACER_SAY_LABEL}
+              // #2760's review, the owner's 2026-11-17: "it can be hard to
+              // see". Larger than the other notices (`theme.css`
+              // §`.oyl-hud__pacer-say`).
+              className={PACER_SAY_CLASS}
+            >
               {pacerSay}
             </StatusMessage>
           ),
@@ -5518,6 +5526,8 @@ function GameScreen({
 
 /** The label of the AI pacer's line on the HUD — #2712. */
 const PACER_SAY_LABEL = 'Your pacer';
+/** The class that sets the AI pacer's line larger than a notice — #2760's review. */
+const PACER_SAY_CLASS = 'oyl-hud__pacer-say';
 
 /** The simulation's start for a simulated ride, or nothing: the start line. */
 function startOf(
