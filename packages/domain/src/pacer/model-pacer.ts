@@ -17,8 +17,8 @@
  * rider's W/kg and whether they are in its draft, the grade ahead, the metres
  * to the finish and the seconds ridden. **Every field is a number, a boolean
  * or a word from a closed list**, except `recentLines` (#2760): the model's
- * own last lines, screened free text (§`pacerSayProblem`: no digit, no
- * symbol, and a length), written by the model from a state that holds no
+ * own last lines, screened free text (§`pacerSayProblem`: no digit but a
+ * cadence or power target, no symbol, and a length), written by the model from a state that holds no
  * name or place. There is no other field a coordinate, a place name, a rider's name,
  * a date or an identifier could be written into, and
  * {@link readModelPacerInput} refuses any key it does not name. A problem
@@ -411,11 +411,46 @@ const NOT_A_LINE = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 /** Markup, code, a link or an address: none of it is a sentence. */
 const MARKUP = /[<>{}[\]`*_#|\\~^=@/$%&+]|:\/\/|\bwww\./i;
 /**
- * A digit of any script. No number at all: so no figure the pacer could be
- * read as asking the rider to hold, and no coordinate (CLAUDE.md §6) — the
- * input holds none, and this makes it impossible rather than unlikely.
+ * A digit of any script, once the cadence and power figures are taken out
+ * ({@link CADENCE_OR_POWER}). No other number: so no heart rate, time,
+ * distance, speed, zone or share the pacer could be read as asking the rider
+ * to hold, and no coordinate (CLAUDE.md §6) — the input holds none, and this
+ * makes it impossible rather than unlikely.
  */
 const NUMBER = /\p{N}/u;
+/**
+ * The one kind of figure a line may carry (ADR 0077, the owner's ruling of
+ * 2026-11-17): a cadence or a power target, its number in ASCII digits
+ * (after NFKC) **immediately followed by its unit**, with one space allowed —
+ * `rpm`, `watt`/`watts`, `W` or `W/kg`. No sign, no thousands separator, no
+ * range and no other digit may touch it, and nothing but a non-letter may
+ * follow the unit. {@link plausible} then bounds the value; an implausible
+ * one leaves its number behind, so the line is refused as a number.
+ */
+const CADENCE_OR_POWER =
+  /(?<![\p{L}\p{N}.,+-])(\d+(?:\.\d+)?) ?(rpm|watts?|W\/kg|W)(?![\p{L}\p{N}/])/giu;
+/**
+ * The values a cadence or power target may name, inclusive (ADR 0077 D-1):
+ * cadence 30 to 150 rpm and power 30 to 2 000 W, in whole numbers; 0.5 to 10
+ * W/kg, with at most one decimal place. No leading zero.
+ */
+function plausible(value: string, unit: string): boolean {
+  const perKg = unit.toLowerCase() === 'w/kg';
+  if (!(perKg ? /^(?:0|[1-9]\d*)(?:\.\d)?$/ : /^[1-9]\d*$/).test(value)) return false;
+  const n = Number(value);
+  if (perKg) return n >= 0.5 && n <= 10;
+  if (unit.toLowerCase() === 'rpm') return n >= 30 && n <= 150;
+  return n >= 30 && n <= 2000;
+}
+/**
+ * `visible` with each plausible cadence or power target replaced by a space,
+ * and each implausible one by its bare number, which {@link NUMBER} refuses.
+ */
+function withoutCadenceOrPower(visible: string): string {
+  return visible.replace(CADENCE_OR_POWER, (_figure: string, value: string, unit: string) =>
+    plausible(value, unit) ? ' ' : value,
+  );
+}
 /**
  * The load-metric trademarks (CLAUDE.md §6, `docs/agents/scope-and-ip.md`):
  * the abbreviations in capitals as words, and the names in any case.
@@ -445,8 +480,9 @@ export function pacerSayProblem(say: string): PacerSayProblem | undefined {
   if (say === '') return undefined;
   if (NOT_A_LINE.test(say)) return 'not-a-line';
   const visible = say.replace(INVISIBLE, '').normalize('NFKC');
-  if (MARKUP.test(visible)) return 'markup';
-  if (NUMBER.test(visible)) return 'number';
+  const rest = withoutCadenceOrPower(visible);
+  if (MARKUP.test(rest)) return 'markup';
+  if (NUMBER.test(rest)) return 'number';
   if (TRADEMARK_ABBREVIATION.test(visible) || TRADEMARK_NAME.test(visible)) return 'trademark';
   if (MEDICAL.test(visible)) return 'health-claim';
   if (!A_LETTER.test(visible)) return 'no-words';

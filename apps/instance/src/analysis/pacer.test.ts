@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import { syncWorld } from '../sync/sync-testing.ts';
-import { PACER_SYSTEM, PACER_TEMPERATURE } from './pacer-prompt.ts';
+import { PACER_PROMPT_VERSION, PACER_SYSTEM, PACER_TEMPERATURE } from './pacer-prompt.ts';
 import {
   ATTACK,
   chatServer,
@@ -110,6 +110,20 @@ describe('an AI-pacer decision, read back as the app reads it (#2712)', () => {
     expect(PACER_SYSTEM).toMatch(/never as a health matter/);
   });
 
+  it('answers a line with a cadence or power target, and asks for no other number — ADR 0077', async () => {
+    const say = 'Lighter gear, aim for 90 rpm.';
+    const server = chatServer(() => JSON.stringify({ plan: 'even', intent: 'hold', say }));
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    expect(await pace(w, riders[0]!.token)).toEqual({
+      status: 200,
+      body: { plan: 'even', intent: 'hold', say },
+    });
+    expect(PACER_PROMPT_VERSION).toBe('pacer-3');
+    expect(PACER_SYSTEM).toMatch(/"aim for 90 rpm"/);
+    expect(PACER_SYSTEM).toMatch(/Never write any other number/);
+  });
+
   it('refuses a state whose last lines carry what the screen stops, before a model is called — #2760', async () => {
     const server = chatServer(() => PACER_ANSWER);
     const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
@@ -125,7 +139,8 @@ describe('an AI-pacer decision, read back as the app reads it (#2712)', () => {
   it('is no decision for an answer with a power in it, a bad line or a bot move; no answer is a failure', async () => {
     const answers = [
       JSON.stringify({ plan: 'even', intent: 'lift', say: '', watts: 900 }),
-      JSON.stringify({ plan: 'even', intent: 'lift', say: 'Hold 300 watts now.' }),
+      JSON.stringify({ plan: 'even', intent: 'lift', say: 'Hold 3000 watts now.' }),
+      JSON.stringify({ plan: 'even', intent: 'lift', say: 'Your heart rate is 150.' }),
       JSON.stringify({ plan: 'even', intent: 'lift', say: 'Keep your TSS up.' }),
       JSON.stringify({ plan: 'even', intent: 'lift', say: 'Good for your heart condition.' }),
       ATTACK,

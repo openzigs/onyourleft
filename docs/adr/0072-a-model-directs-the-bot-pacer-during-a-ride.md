@@ -407,3 +407,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     a state carrying any new field (`validation_failed`), which the device reads as a refusal:
     the ride's asks end and the pacer rides #92's rule (D-7). Nothing is lost, and nothing reaches
     the model; deploy the instance first.
+- **2026-11-17** — **R-4's *"no digits"* and D-4.2's *"no digit of any script"* are superseded in
+  part by [ADR 0077](0077-the-ai-pacers-line-may-name-a-cadence-or-power-target.md)**, on the
+  owner's ruling of that day (*"Yes"* to *"allow cadence and power numbers only"*). A line may now
+  carry a cadence or power target — a number with `rpm`, `watt(s)`, `W` or `W/kg` straight after
+  it, at 30 to 150 rpm, 30 to 2 000 W or 0.5 to 10 W/kg — and every other digit still voids the
+  answer. The prompt is `pacer-3`. The preceding entry's *"until the owner rules it stays as it
+  is"* is answered by this. Nothing else in D-4 moves, and this ADR's body is unchanged.

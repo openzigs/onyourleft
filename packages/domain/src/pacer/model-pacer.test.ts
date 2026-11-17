@@ -210,7 +210,7 @@ describe('the rider’s own sensors, in the state — #2760', () => {
     ['recentLines', []],
     ['recentLines', 'Nice and steady.'],
     ['recentLines', ['']],
-    ['recentLines', ['Hold 300 watts.']],
+    ['recentLines', ['Hold 3000 watts.']],
     ['recentLines', ['Lat 51.5074 is home.']],
     ['recentLines', ['a', 'b', 'c', 'd']],
     ['recentLines', [7]],
@@ -270,7 +270,8 @@ describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
     ['bad-plan', answer({ plan: 'sprint' })],
     ['bad-intent', answer({ intent: 'wait' })],
     ['bad-say', answer({ say: 7 })],
-    ['bad-say', answer({ say: 'Hold 250 watts.' })],
+    ['bad-say', answer({ say: 'Hold 9000 watts.' })],
+    ['bad-say', answer({ say: 'Your heart rate is 150.' })],
     ['too-long', answer({ say: 'a'.repeat(MODEL_PACER_ANSWER_MOST_CHARACTERS) })],
   ])('reads %s as no decision', (reason, text) => {
     expect(readModelPacerAnswer(text)).toEqual({ ok: false, reason });
@@ -305,7 +306,8 @@ describe('the line of feedback — ADR 0072 D-4', () => {
     ['not-a-line', 'Nice.\nNow harder.'],
     ['markup', '<b>Go</b>'],
     ['markup', 'Read more at www.example.org'],
-    ['markup', 'Push to 2 W/kg'],
+    ['markup', 'Push to 2 W/kg / 3 W/kg'],
+    ['number', 'Push to 20 W/kg'],
     ['number', 'Hold three hundred and 5 more.'],
     ['number', 'We are at 51.5074 north.'],
     ['number', 'Two ٣ go'],
@@ -327,6 +329,66 @@ describe('the line of feedback — ADR 0072 D-4', () => {
 
   it('lets the empty line through: it shows nothing', () => {
     expect(pacerSayProblem('')).toBeUndefined();
+  });
+});
+
+describe('a cadence or power figure in the line — ADR 0077 (owner ruling 2026-11-17)', () => {
+  it.each([
+    'Aim for 90 rpm.',
+    'Hold 200 watts.',
+    'Hold around 200 W up this rise.',
+    'Try 3 W/kg for a minute.',
+    'Settle at 2.8 W/kg, then spin at 95rpm.',
+    'Spin it up to ９０ rpm.',
+    'Hold 30 watts, then 2000 watts, at 30 rpm or 150 rpm.',
+    'Ease to 0.5 W/kg, or ride 10 W/kg.',
+    'One more push at 250 watt.',
+  ])('shows “%s”', (say) => {
+    expect(pacerSayProblem(say)).toBeUndefined();
+  });
+
+  it.each([
+    ['number', 'Your heart rate is 150.'],
+    ['number', 'Heart rate 150 bpm, ease a little.'],
+    ['number', 'Five more, then 5 minutes easy.'],
+    ['number', 'Only 20 km to go.'],
+    ['number', 'Hold 35 km an hour here.'],
+    ['number', 'Stay in zone 4.'],
+    ['markup', 'You are at 90% of threshold.'],
+    ['number', 'Hold 9000 watts.'],
+    ['number', 'Hold 29 watts.'],
+    ['number', 'Hold 2001 W.'],
+    ['number', 'Spin at 5 rpm.'],
+    ['number', 'Spin at 151 rpm.'],
+    ['number', 'Push 11 W/kg.'],
+    ['number', 'Ease to 0.4 W/kg.'],
+    ['number', 'Hold 3.25 W/kg.'],
+    ['number', 'Hold 0.5074 W/kg.'],
+    ['number', 'Hold 200.5 watts.'],
+    ['number', 'Spin at 90.5 rpm.'],
+    ['number', 'Hold 0200 watts.'],
+    ['number', 'Hold 1,200 watts.'],
+    ['number', 'Hold 200-250 watts.'],
+    ['number', 'Hold -200 watts.'],
+    ['number', 'Hold 200 wattage.'],
+    ['number', 'Hold 200 W2.'],
+    ['number', 'Hold a200 W.'],
+    ['number', 'Spin at 90 rpm for 5 more.'],
+    ['number', 'Spin at ٩٠ rpm.'],
+    ['trademark', 'Hold 200 watts and keep your TSS low.'],
+    ['trademark', 'Aim for 90 rpm, good normalized power.'],
+    ['health-claim', 'Hold 200 watts if you feel no pain.'],
+    ['too-long', `Hold 200 watts ${'a'.repeat(MODEL_PACER_SAY_MOST_CHARACTERS)}`],
+  ])('refuses %s: “%s”', (problem, say) => {
+    expect(pacerSayProblem(say)).toBe(problem);
+  });
+
+  it('reads a cadence or power line as a decision, as the device and the instance do', () => {
+    expect(readModelPacerAnswer(answer({ say: 'Aim for 90 rpm.' }))).toEqual({
+      ok: true,
+      direction: { plan: 'even', intent: 'lift' },
+      say: 'Aim for 90 rpm.',
+    });
   });
 });
 

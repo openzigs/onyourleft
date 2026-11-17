@@ -182,7 +182,7 @@ describe('the AI pacer, from the instance (#2712)', () => {
 
   it('reads an answer the device will not ride as no decision', async () => {
     const answers = [
-      JSON.stringify({ plan: 'even', intent: 'lift', say: 'Hold 300 watts.' }),
+      JSON.stringify({ plan: 'even', intent: 'lift', say: 'Hold 3000 watts.' }),
       undefined,
     ];
     let next = 0;
