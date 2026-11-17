@@ -1453,7 +1453,9 @@ describe('an overpass approach stops where it must — #2699', () => {
 
   it('stops short of water, as a side road does', () => {
     const valley = valleyRoute();
-    expect(waterways(valley, scatterSeed(valley)).crossings.length).toBeGreaterThan(0);
+    expect(waterways(valley, scatterSeed(valley), NO_LAND_CLASS).crossings.length).toBeGreaterThan(
+      0,
+    );
     const roadsAt = (along: number) => {
       const found = crossingsOf([crossing(along, 'bridge', { profile: valley })], valley);
       return gradeCrossingsAt(

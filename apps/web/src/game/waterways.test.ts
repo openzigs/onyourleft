@@ -79,7 +79,7 @@ import {
 } from './waterways';
 
 function waysOf(profile: RouteProfile): Waterways {
-  return waterways(profile, scatterSeed(profile));
+  return waterways(profile, scatterSeed(profile), NO_LAND_CLASS);
 }
 
 function frameAt(profile: RouteProfile, odometer: number) {

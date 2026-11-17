@@ -562,7 +562,13 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   const junctions =
     input.worldCorridor === undefined
       ? undefined
-      : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed);
+      : mappedJunctions(
+          input.worldCorridor,
+          input.profile,
+          input.origin,
+          seed,
+          input.landClass ?? NO_LAND_CLASS,
+        );
   const crossSideRoads = sideRoadsAt(
     input.profile,
     input.origin,
@@ -577,7 +583,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // underpasses in view, before the scenery too — since #2699 an overpass's
   // road runs on off both ends of its deck, and is a side road: drawn in the
   // road's material by the same mesh and kept clear of the scenery.
-  const ways = waterways(input.profile, seed);
+  const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
   const streamBridges = bridgeParts(input.profile, input.origin, corridor, ways);
   const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
   const sideRoads =
@@ -980,7 +986,7 @@ function scenery(
   // #1565: and none on a side road.
   const billboards = boardsClearOfSideRoads(
     nearestBillboards(
-      billboardsAt(input.profile, input.origin, seed, first.along, last.along),
+      billboardsAt(input.profile, input.origin, seed, first.along, last.along, land),
       riderDistance,
       structureBudget,
     ),

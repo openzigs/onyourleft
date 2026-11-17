@@ -1057,10 +1057,11 @@ function approachStations(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  land: LandClassMask,
 ): ApproachStation[] {
   const line = crossing.approaches[side < 0 ? 0 : 1];
   const half = SIDE_ROAD_WIDTHS[crossing.widthClass] / 2;
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const stations: ApproachStation[] = [];
   // The last row kept, how far it is from the route, and the heading it was reached on.
   let last: ApproachStation | undefined;
@@ -1296,8 +1297,8 @@ function overpassRoad(
   deck: OverpassBuilt,
 ): OverpassRoad {
   const half = SIDE_ROAD_WIDTHS[crossing.widthClass] / 2;
-  const back = approachStations(crossing, -1, deck.halfSpans[0], profile, origin, seed);
-  const on = approachStations(crossing, 1, deck.halfSpans[1], profile, origin, seed);
+  const back = approachStations(crossing, -1, deck.halfSpans[0], profile, origin, seed, land);
+  const on = approachStations(crossing, 1, deck.halfSpans[1], profile, origin, seed, land);
   const lengths = [back[back.length - 1]?.past ?? 0, on[on.length - 1]?.past ?? 0] as const;
   const ramps = [
     rampOf(back, lengths[0], deck.deckTop, profile, origin, seed, land),

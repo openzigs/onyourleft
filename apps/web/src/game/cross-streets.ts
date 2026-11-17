@@ -340,12 +340,13 @@ function armFrom(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  land: LandClassMask,
 ): Candidate | undefined {
   const x0 = points[start] as number;
   const z0 = points[start + 1] as number;
   const leaves = nearestOnDrawnRoad(profile, origin, x0, z0, JUNCTION_TOLERANCE_METRES);
   if (leaves === undefined) return undefined;
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const outward: number[] = [];
   let metres = 0;
   let px = x0;
@@ -454,7 +455,7 @@ function grouped(candidates: Candidate[]): Junction[] {
 /** One corridor's junctions, kept with the profile they were found against. */
 const junctionsFound = new WeakMap<
   WorldCorridor,
-  { profile: RouteProfile; junctions: readonly Junction[] }
+  { profile: RouteProfile; land: LandClassMask; junctions: readonly Junction[] }
 >();
 
 /**
@@ -466,9 +467,14 @@ export function mappedJunctions(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  /**
+   * #2658: the ride's mask, built from `corridor`, so an arm stops at the
+   * map's lakes as at the invented ones. Absent is the world with no mask.
+   */
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly Junction[] {
   const cached = junctionsFound.get(corridor);
-  if (cached?.profile === profile) return cached.junctions;
+  if (cached?.profile === profile && cached.land === land) return cached.junctions;
   const candidates: Candidate[] = [];
   const budget = { metres: STREET_MAX_METRES };
   for (const street of corridor.streets) {
@@ -500,13 +506,14 @@ export function mappedJunctions(
           profile,
           origin,
           seed,
+          land,
         );
         if (arm !== undefined) candidates.push(arm);
       }
     }
   }
   const junctions = grouped(candidates);
-  junctionsFound.set(corridor, { profile, junctions });
+  junctionsFound.set(corridor, { profile, land, junctions });
   return junctions;
 }
 

@@ -506,7 +506,20 @@ describe('unchanged where nothing is mapped — #1547', () => {
     const mask = landClassMask(wood);
     expect(mask.bytes).toBeGreaterThan(0);
     expect(mask.levellingBytes).toBe(0);
-    expect(everyFixtureDigest(mask)).toStrictEqual(MAIN_DIGESTS);
+    // ⚠️ #2658: the box covers the whole of every fixture, so an invented
+    // lake in it is not drawn — the map says where water is there — and the
+    // two frames that reach one (the lake valley's and the circuit's at
+    // 1 200 m) lose that lake's bed. Every other frame is still main's, and
+    // those two differ because their lakes went, which is asserted here.
+    const lakeDropped = new Set(['lake valley 1200', 'circuit 1200']);
+    const kept = (digests: readonly string[]): string[] =>
+      digests.filter((entry) => !lakeDropped.has(entry.split(' ').slice(0, -1).join(' ')));
+    expect(kept(everyFixtureDigest(mask))).toStrictEqual(kept(MAIN_DIGESTS));
+    for (const profile of [lakeValleyRoute(), circuitRoute(400)]) {
+      const seed = scatterSeed(profile);
+      expect(waterways(profile, seed, NO_LAND_CLASS).lakes.length).toBeGreaterThan(0);
+      expect(waterways(profile, seed, mask).lakes).toEqual([]);
+    }
   });
 });
 
@@ -600,7 +613,7 @@ describe('the road is not the ground — #1547', () => {
 describe('water is not raised — #1547', () => {
   it('still cuts a stream’s bed through a mapped town on the valley fixture', () => {
     const profile = valleyRoute();
-    const ways = waterways(profile, scatterSeed(profile));
+    const ways = waterways(profile, scatterSeed(profile), NO_LAND_CLASS);
     const crossing = ways.crossings[0]?.distance;
     if (crossing === undefined) throw new Error('the valley fixture has no stream');
     const block = blockBeside(profile, crossing - 120, crossing + 120);

@@ -44,6 +44,7 @@ import {
   carriesTheLogo,
   logoBoxes,
 } from './logo-board';
+import { NO_LAND_CLASS } from './land-class';
 import { inWater, waterways } from './waterways';
 import {
   FIXTURE_LATITUDE,
@@ -386,7 +387,7 @@ describe('billboards — #966', () => {
     // frame by brute force against the drawn road — not by the placer's sums.
     let checked = 0;
     for (const [, profile] of ROUTES) {
-      const ways = waterways(profile, scatterSeed(profile));
+      const ways = waterways(profile, scatterSeed(profile), NO_LAND_CLASS);
       if (ways.crossings.length + ways.lakes.length === 0) continue;
       const origin = corridorOrigin(profile);
       const total = profile.totalDistance as number;

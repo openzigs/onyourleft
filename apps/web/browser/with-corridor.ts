@@ -29,7 +29,7 @@ export function withCorridor(
   corridor: RoadCorridor,
 ): SceneFrame {
   const seed = scatterSeed(profile);
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, NO_LAND_CLASS);
   return {
     ...frame,
     corridor,

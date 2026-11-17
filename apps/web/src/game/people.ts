@@ -572,7 +572,7 @@ export function footwayWalks(
   });
   const road = besideSideRoads(
     (x, z, reach) => distanceToDrawnRoad(profile, origin, x, z, reach),
-    armLines(mappedJunctions(corridor, profile, origin, scatterSeed(profile))),
+    armLines(mappedJunctions(corridor, profile, origin, scatterSeed(profile), land)),
   );
   const lines: WalkLine[] = [];
   network.lines.forEach((line, index) => {

@@ -830,3 +830,49 @@ describe('the land use under a point — kindAt, #1540', () => {
     expect(kindAt(corridor, 170, 170)).toBeUndefined();
   });
 });
+
+describe('a wetland is water that remembers it is a wetland — #2658', () => {
+  const COVERED: Box = { minX: -1_000, maxX: 1_000, minZ: -1_000, maxZ: 1_000 };
+  const mask = landClassMask(
+    corridorOf(
+      [COVERED],
+      [
+        rectangle('landuse', 'wetland', { minX: 0, maxX: 200, minZ: 0, maxZ: 200 }),
+        rectangle('water', 'wetland', { minX: 300, maxX: 400, minZ: 0, maxZ: 200 }),
+        // A pool inside the marsh, and a lake on its own.
+        rectangle('water', 'water', { minX: 50, maxX: 100, minZ: 50, maxZ: 100 }),
+        rectangle('water', 'lake', { minX: -300, maxX: -100, minZ: 0, maxZ: 200 }),
+      ],
+    ),
+  );
+
+  it('is water to every reader of the class, and a wetland to wetlandAt', () => {
+    for (const [x, z] of [
+      [150, 150],
+      [350, 150],
+    ] as const) {
+      expect(mask.classAt(x, z)).toBe('water');
+      expect(mask.wetlandAt(x, z)).toBe(true);
+    }
+  });
+
+  it('is open water where open water is mapped over it, and nowhere else is a wetland', () => {
+    expect(mask.classAt(75, 75)).toBe('water');
+    expect(mask.wetlandAt(75, 75)).toBe(false);
+    expect(mask.classAt(-200, 100)).toBe('water');
+    expect(mask.wetlandAt(-200, 100)).toBe(false);
+    expect(mask.wetlandAt(600, 600)).toBe(false);
+    expect(mask.wetlandAt(5_000, 5_000)).toBe(false);
+    expect(NO_LAND_CLASS.wetlandAt(150, 150)).toBe(false);
+    // And kindAt names the water over the marsh, whichever comes first.
+    const marsh = corridorOf(
+      [COVERED],
+      [
+        rectangle('landuse', 'wetland', { minX: 0, maxX: 200, minZ: 0, maxZ: 200 }),
+        rectangle('water', 'water', { minX: 50, maxX: 100, minZ: 50, maxZ: 100 }),
+      ],
+    );
+    expect(kindAt(marsh, 75, 75)).toBe('water');
+    expect(kindAt(marsh, 150, 150)).toBe('wetland');
+  });
+});

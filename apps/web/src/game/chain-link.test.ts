@@ -201,7 +201,7 @@ describe('the chain-link fence’s grounds — #1274', () => {
     const valley = valleyRoute();
     const valleyOrigin = corridorOrigin(valley);
     const valleySeed = scatterSeed(valley);
-    const stream = waterways(valley, valleySeed).crossings[0];
+    const stream = waterways(valley, valleySeed, NO_LAND_CLASS).crossings[0];
     if (stream === undefined) throw new Error('the valley fixture has no stream');
     const estate = landBeside(valley, valleyOrigin, 'landuse', 'industrial', 800, 1_200, 2, 160);
     const made = chainLinkPieces(fencedGrounds([estate]), {
@@ -213,7 +213,7 @@ describe('the chain-link fence’s grounds — #1274', () => {
       piece: BOUNDARY_PIECE_METRES,
       cityCentre: () => false,
     });
-    const ways = waterways(valley, valleySeed);
+    const ways = waterways(valley, valleySeed, NO_LAND_CLASS);
     // Non-vacuity: the estate is fenced either side of the stream, and the
     // stream's channel lies across its frontage.
     expect(made.filter((piece) => piece.along < stream.distance - 40).length).toBeGreaterThan(5);

@@ -426,7 +426,7 @@ describe('#1542 boundaries on the span, and clear of villages and streams', () =
     const valley = valleyRoute();
     const origin = corridorOrigin(valley);
     const seed = scatterSeed(valley);
-    const stream = waterways(valley, seed).crossings[0];
+    const stream = waterways(valley, seed, NO_LAND_CLASS).crossings[0];
     if (stream === undefined) throw new Error('the valley fixture has no stream');
     const box: Box = { minX: -1_000, maxX: 1_000, minZ: 0, maxZ: 3_000 };
     const land = setBack(box, valley);

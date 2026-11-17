@@ -287,6 +287,12 @@ const CELL_RANGE = CHUNK_RANGE * LAND_CLASS_CHUNK_CELLS;
  * of their own, below farmland, and read as the class they name. `bare`
  * takes one code a surface (#2700), in {@link BARE_SURFACES}' order, so the
  * class's place among the others is what it was.
+ *
+ * #2658: **two codes are `water`** — {@link CODE_WETLAND}, then open water
+ * above it — so a cell remembers that its water is a wetland, which
+ * `waterways.ts` draws as wet ground rather than as a lake, while every
+ * reader of {@link LandClassMask.classAt} still sees one class. Open water
+ * outranks a wetland, so a pool mapped inside a marsh is water.
  */
 const CLASS_OF_CODE: readonly LandClass[] = [
   'unknown',
@@ -299,12 +305,20 @@ const CLASS_OF_CODE: readonly LandClass[] = [
   'park',
   'wood',
   'water',
+  'water',
 ];
 const CODE_OTHER = 1;
 const CODE_PROTECTED_PARK = 2;
 const CODE_PROTECTED_WOOD = 3;
 const CODE_BARE = CLASS_OF_CODE.indexOf('bare');
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
+/** #2658: a `wetland` polygon's cells, from either layer. @see CLASS_OF_CODE */
+const CODE_WETLAND = CLASS_OF_CODE.indexOf('water');
+const CODE_WATER = CODE_WETLAND + 1;
+
+/** The `kind` that is a wetland, in `landuse` or in `water` (#2658). */
+const WETLAND_KIND = 'wetland';
+
 /**
  * The mapped `park` code, above farmland — #2685's looks are read on it and on
  * #2657's {@link CODE_PROTECTED_PARK}, which also reads `park`.
@@ -327,17 +341,20 @@ const SURFACE_OF_CODE: readonly (BareSurface | undefined)[] = CLASS_OF_CODE.map(
 );
 
 /**
- * A feature's code: its class's, a protected area's own below it (#2657), and
- * for `bare` its surface's (#2700).
+ * A feature's code: its class's, a protected area's own below it (#2657),
+ * for `bare` its surface's (#2700), and a wetland below open water (#2658).
  */
 function codeOfFeature(feature: LandUseFeature): number {
+  if (feature.kind === WETLAND_KIND) return CODE_WETLAND;
   const landClass = landClassOfKind(feature.layer, feature.kind);
   if (feature.layer === 'landuse' && PROTECTED_AREA_KINDS.has(feature.kind)) {
     return landClass === 'wood' ? CODE_PROTECTED_WOOD : CODE_PROTECTED_PARK;
   }
   return landClass === 'bare'
     ? CODE_BARE + BARE_SURFACES.indexOf(bareSurfaceOfKind(feature.kind))
-    : CLASS_OF_CODE.lastIndexOf(landClass);
+    : landClass === 'water'
+      ? CODE_WATER
+      : CLASS_OF_CODE.lastIndexOf(landClass);
 }
 
 /**
@@ -387,6 +404,12 @@ export interface LandClassMask {
   /** True where the corridor is covered (P-8), whatever the class. */
   covered(x: number, z: number): boolean;
   /**
+   * #2658: whether the `water` at `(x, z)` is a mapped wetland — a
+   * `wetland` polygon and no open water over it. `false` wherever
+   * {@link classAt} is not `water`. O(1), as {@link classAt} is.
+   */
+  wetlandAt(x: number, z: number): boolean;
+  /**
    * True where the cell's class is a protected area's boundary and no other
    * mapped land use covers it — #2657, {@link PROTECTED_AREA_KINDS}. O(1), no
    * allocation; `false` outside every covered chunk.
@@ -424,6 +447,7 @@ export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   classAt: (): LandClass => 'unknown',
   bareSurfaceAt: (): undefined => undefined,
   covered: (): boolean => false,
+  wetlandAt: (): boolean => false,
   protectedArea: (): boolean => false,
   parkLookAt: (): ParkLook => 'mown',
   builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
@@ -765,6 +789,7 @@ export function landClassMask(
     classAt,
     bareSurfaceAt: (x, z) => SURFACE_OF_CODE[codeAt(x, z)],
     covered: (x, z) => classAt(x, z) !== 'unknown',
+    wetlandAt: (x, z) => codeAt(x, z) === CODE_WETLAND,
     protectedArea: (x, z) => {
       const code = codeAt(x, z);
       return code === CODE_PROTECTED_PARK || code === CODE_PROTECTED_WOOD;
