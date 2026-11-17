@@ -259,6 +259,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         changes), after a step-up, and the seam sets
                         `RouteContext.adminChannel`, from which the route
                         logs `admin_tunnel` or `admin_loopback`, never `app`.
+                        Since #2646 Accounts reaches ADR 0069 D-9's three
+                        moderation routes too (the queue, approve, refuse):
+                        the only non-owner routes with an `admin` marker,
+                        and a decision through them writes its moderation
+                        log row with `registration_decided` in ONE operator
+                        log transaction (`moderation.ts` §`act`'s channel).
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

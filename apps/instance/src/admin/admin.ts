@@ -108,7 +108,9 @@
  *
  * Status is `GET /v1/operate/status` and the log `GET /v1/operate/log`, each
  * called through {@link AdminSeam} as the owner: what a page shows is the
- * route's answer. The log's one query, `cursor`, is the route's own cursor
+ * route's answer. Accounts (#2646) is `GET /v1/operate/status` and, by ADR
+ * 0069 D-9, the moderation routes' queue, approved or refused through the
+ * two moderation routes D-9 admits. The log's one query, `cursor`, is the route's own cursor
  * handed back: it is held to the shape the route writes
  * ({@link LOG_CURSOR}) before it is put into the path the seam is called
  * with, and the route checks it again. No other part of the browser's request
@@ -137,7 +139,7 @@ import {
 } from '@onyourleft/operate-text';
 
 import { escapeHtml } from '../html.ts';
-import type { ModeratorRole } from '../moderation/moderation.ts';
+import { MAXIMUM_REASON_LENGTH, type ModeratorRole } from '../moderation/moderation.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
   AdminPasskeyRecord,
@@ -150,6 +152,7 @@ import { ADMIN_LANDING, ADMIN_ROUTES } from './admin-routes.ts';
 import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
 import {
+  accountsBody,
   adminPage,
   analysisBody,
   isSaveProblem,
@@ -158,11 +161,14 @@ import {
   shellPage,
   signInPage,
   statusBody,
+  type AccountsNotice,
   type AnalysisNotice,
   type AnalysisOffer,
   type LogEntryAnswer,
   type LogView,
   type PasskeyView,
+  type RegistrationAnswer,
+  type RegistrationDecision,
   type ShellView,
   type SignInNotice,
 } from './pages.ts';
@@ -481,6 +487,44 @@ const ANALYSIS_ACTIONS: ReadonlyMap<string, AnalysisAction> = new Map([
 
 type AnalysisAction = Extract<AdminChange, `analysis_${string}`>;
 
+/** The Accounts page's decision behind each of its form targets (#2646, ADR 0069 D-9). */
+const REGISTRATION_ACTIONS: ReadonlyMap<string, RegistrationDecision> = new Map([
+  ['/admin/accounts/approve', 'approve'],
+  ['/admin/accounts/refuse', 'refuse'],
+]);
+
+/** The moderation routes' queue, which the Accounts page lists (ADR 0069 D-9). */
+const REGISTRATIONS_ROUTE = '/v1/moderation/registrations';
+
+/** An athlete id as the moderation routes take one in `{athleteId}` (`moderation.ts` §`ATHLETE_ID`). */
+const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * The queue as the route answered it, each rider held to the four details
+ * the route declares — or `undefined` for an answer not in that shape.
+ */
+function registrationsOf(answer: unknown): readonly RegistrationAnswer[] | undefined {
+  const list = (answer as { registrations?: unknown } | undefined)?.registrations;
+  if (!Array.isArray(list)) return undefined;
+  const shown: RegistrationAnswer[] = [];
+  for (const each of list) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    const { athleteId, displayName, createdAt, adultConfirmed } = row;
+    if (
+      typeof athleteId !== 'string' ||
+      typeof displayName !== 'string' ||
+      typeof createdAt !== 'number' ||
+      !Number.isSafeInteger(createdAt) ||
+      typeof adultConfirmed !== 'boolean'
+    ) {
+      return undefined;
+    }
+    // Only the four: anything else the answer carried is not drawn.
+    shown.push({ athleteId, displayName, createdAt, adultConfirmed });
+  }
+  return shown;
+}
+
 /** The analysis settings' route: the AI backend page reads and changes them there. */
 const ANALYSIS_ROUTE = '/v1/operate/analysis';
 
@@ -680,6 +724,44 @@ export function createAdmin(options: AdminOptions): Admin {
       body = analysisBody({ ...drawn, analysis: undefined, models: undefined, jobs: undefined });
     }
     return shellPage(shell, 'AI backend', body, true);
+  }
+
+  /**
+   * Accounts (#2646, ADR 0069 D-9): `GET /v1/operate/status`'s counts and
+   * mode, and `GET /v1/moderation/registrations`' queue, both read as the
+   * owner through the seam on every load — never kept from one to the next.
+   */
+  async function accountsPage(
+    view: PageCall,
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    noticeFor: (registrations: readonly RegistrationAnswer[] | undefined) => AccountsNotice | null,
+  ): Promise<string> {
+    const [statusAnswer, queueAnswer] = await Promise.all([
+      read(view.seam, '/v1/operate/status', view.caller, view.client),
+      read(view.seam, REGISTRATIONS_ROUTE, view.caller, view.client),
+    ]);
+    const status =
+      typeof statusAnswer === 'object' && statusAnswer !== null
+        ? (statusAnswer as OperateStatusAnswer)
+        : undefined;
+    const registrations = registrationsOf(queueAnswer);
+    const drawn = {
+      status,
+      registrations,
+      strength,
+      csrf: shell.csrf,
+      notice: noticeFor(registrations),
+      reasonLimit: MAXIMUM_REASON_LENGTH,
+    };
+    let body: string;
+    try {
+      body = accountsBody(drawn);
+    } catch {
+      // An answer not in the route's shape is as good as none.
+      body = accountsBody({ ...drawn, status: undefined });
+    }
+    return shellPage(shell, 'Accounts', body, true);
   }
 
   /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
@@ -945,6 +1027,13 @@ export function createAdmin(options: AdminOptions): Admin {
       const shell = await shellOf(path, session);
       const view = { caller: callerOf(owner, session), client, seam };
       if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/accounts') {
+        return adminResponse(
+          await accountsPage(view, shell, session.record.strength, () => null),
+          200,
+          HTML,
+        );
+      }
       if (path === '/admin/analysis') {
         return adminResponse(
           await analysisPage(view, shell, session.record.strength, () => null),
@@ -1620,6 +1709,117 @@ export function createAdmin(options: AdminOptions): Admin {
       return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
     }
 
+    /**
+     * The gate every change of a page after #2648 goes through (ADR 0069 D-2,
+     * D-4): from this origin's page, in a live PASSKEY session carrying its
+     * token, with exactly `action`'s fields — which `valid` checks — and a
+     * fresh step-up for this change and these fields, whose passkey counter
+     * moves BEFORE the change is made, so the same assertion cannot make a
+     * second. Answers the session and the fields, or the answer that refuses,
+     * having changed nothing.
+     */
+    async function gatedChange(
+      request: Request,
+      form: URLSearchParams,
+      owner: Owner,
+      action: AdminChange,
+      back: { readonly path: string; readonly what: string },
+      valid: (fields: Readonly<Record<string, string>>) => boolean,
+    ): Promise<
+      { readonly session: Session; readonly fields: Readonly<Record<string, string>> } | Response
+    > {
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'passkey') {
+        refuse('step_up');
+        return nothingChanged(
+          403,
+          'A change needs a passkey sign-in: a one-time code’s session changes nothing.',
+          back,
+        );
+      }
+      const fields = boundFields(ADMIN_CHANGES[action].fields, form);
+      if (fields === undefined || !valid(fields)) {
+        refuse('step_up');
+        return nothingChanged(400, 'That form did not name one change.', back);
+      }
+      const stepped = await steppedUp(owner, session, action, fields, form);
+      if (stepped === undefined) {
+        return nothingChanged(
+          403,
+          'The passkey check did not pass: a change needs a fresh check by a confirmed passkey, made for this change.',
+          back,
+        );
+      }
+      if (
+        !(await store.recordAdminPasskeyUse(
+          stepped.passkey.id,
+          stepped.passkey.signCount,
+          stepped.signCount,
+          seconds(),
+        ))
+      ) {
+        refuse('counter');
+        return nothingChanged(409, 'That passkey was just used elsewhere. Try again.', back);
+      }
+      return { session, fields };
+    }
+
+    /**
+     * A registration approved or refused from the Accounts page (#2646, ADR
+     * 0069 D-9): through {@link gatedChange}, then ONE call of the moderation
+     * route, in-process as the owner — its moderator check, its reason rule
+     * and its moderation log row, written with a `registration_decided`
+     * operator log entry under this listener's source in one transaction.
+     * The answer is the page drawn again from the routes' reads AFTER the
+     * call: the decision is said to be made only when the rider has left the
+     * queue read back.
+     */
+    async function registrationChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+      decision: RegistrationDecision,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        `registration_${decision}`,
+        { path: '/admin/accounts', what: 'Accounts' },
+        (fields) => ATHLETE_ID.test(fields.athleteId ?? ''),
+      );
+      if (gated instanceof Response) return gated;
+      const { session, fields } = gated;
+      const athleteId = fields.athleteId as string;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch(
+        'POST',
+        `${REGISTRATIONS_ROUTE}/${athleteId}/${decision}`,
+        caller,
+        client,
+        { reason: fields.reason },
+      );
+      const done = answer.status === 200;
+      const shell = await shellOf('/admin/accounts', session);
+      const page = await accountsPage(
+        { caller, client, seam },
+        shell,
+        session.record.strength,
+        (after): AccountsNotice => ({
+          decision,
+          ok:
+            done &&
+            after !== undefined &&
+            !after.some((registration) => registration.athleteId === athleteId),
+          problem: done ? null : answer.status === 400 ? 'reason' : 'not-waiting',
+        }),
+      );
+      return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
+    }
+
     return async (request, body, client, seam) => {
       // Against DNS rebinding: the page is this listener's, or it is not served.
       if (request.headers.get('host') !== place.host) {
@@ -1681,6 +1881,10 @@ export function createAdmin(options: AdminOptions): Admin {
         const analysisAction = ANALYSIS_ACTIONS.get(route);
         if (analysisAction !== undefined) {
           return analysisChange(request, body, owner, client, seam, analysisAction);
+        }
+        const decision = REGISTRATION_ACTIONS.get(route);
+        if (decision !== undefined) {
+          return registrationChange(request, body, owner, client, seam, decision);
         }
         switch (route) {
           case '/admin/sign-in':

@@ -72,8 +72,13 @@ export {
   type OperateToolCheckOutcome,
 } from './analysis';
 export {
+  ACCOUNTS_UNREADABLE_TEXT,
+  accountStandingLines,
   MODERATORS_ALWAYS_JOIN,
+  REGISTRATION_CHANGE_HEADING,
+  REGISTRATION_CHANGE_STEPS,
   REGISTRATION_MODE_TEXT,
+  type OperateAccountCounts,
   type OperateRegistrationMode,
 } from './accounts';
 export {
