@@ -265,6 +265,8 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   key: 'the CALLER’s own hosted model key',
   reasoningTokens: 'a setting of the CALLER’s own hosted model',
   endpoint: 'the hosted model endpoint the caller consents to',
+  instance: 'the instance the caller’s bot-tactics consent names: this one (#2709)',
+  modelAddress: 'the local model address the caller’s bot-tactics consent names (#2709)',
   picture: 'the CALLER’s own side-camera picture',
   kind: 'a room’s kind: a group ride or a race',
   ridingPosition: 'a room’s riding position setting',

@@ -865,8 +865,10 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
  * {@link REALISTIC_STRUCTURE_ITEMS} at {@link REALISTIC_TRIANGLES}' `structure`.
  * It is the structure term `realistic-budget.test.ts` has summed since #506,
  * and it is NOT raised for mapped buildings: they share it with the frame's
- * procedural structures, the two ranked together by distance from the rider,
- * nearest first (#1586, `three-renderer.ts` §`refillMappedBuildings`). It is also the capacity, in
+ * procedural structures, the two ranked together by distance from the road
+ * ahead, nearest first (#1586, #2429, `three-renderer.ts`
+ * §`refillMappedBuildings`) — since #2655 not the field boundaries, which take
+ * only what the buildings leave. It is also the capacity, in
  * triangles, of the one buffer the belt preallocates, so no plan list,
  * however long, can grow it.
  *

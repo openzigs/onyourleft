@@ -172,7 +172,8 @@ export const FOOTPRINT_FIXTURE_VERDICTS = {
   onRoad: 'on-road',
   steep: 'too-steep',
   shed: 'too-small',
-  warehouse: 'too-large',
+  // 22 500 m²: `too-large` until #2662 raised `FOOTPRINT_MAX_AREA` to 100 000.
+  warehouse: 'kept',
 } as const satisfies Readonly<Record<string, FootprintVerdict>>;
 
 export type FootprintFixtureName = keyof typeof FOOTPRINT_FIXTURE_VERDICTS;
@@ -353,6 +354,63 @@ export function rowTownFixture(nearRow = 25): {
     },
   };
 }
+
+/**
+ * #2655's fixture: a suburb whose houses are mapped and whose land is not.
+ * Many US suburbs carry every building footprint in OpenStreetMap and no
+ * `landuse=residential` polygon, so the land under them reads `other` and the
+ * procedural fields are drawn there. 3 km of level road, fields to
+ * {@link UNZONED_SUBURB_FROM} and houses from there to
+ * {@link UNZONED_SUBURB_TO}: mapped `building=house`, 8 m along by 18 m
+ * deep (a house model's shape, so each is drawn as one), every 20 m along,
+ * two rows a side, their middles 21 m and 52 m out — the front row's faces
+ * 12 m from the road. From {@link UNZONED_SUBURB_ONE_SIDED} the houses stand
+ * on the right only, set back, their middles 36 m and 67 m out, and the left
+ * is open ground: the fields across the road stand far enough from every
+ * house to be kept, and are the boundaries the houses are ranked against.
+ * Covered throughout, and no land use at all. Arithmetic, not a real place.
+ */
+export function unzonedSuburbFixture(): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  for (let along = UNZONED_SUBURB_FROM + 10; along < UNZONED_SUBURB_TO; along += 20) {
+    const laterals = along < UNZONED_SUBURB_ONE_SIDED ? [21, 52, -21, -52] : [36, 67];
+    for (const lateral of laterals) {
+      buildings.push({
+        ...buildingBeside(profile, origin, [rectangleBeside(along, lateral, 8, 18)], 7),
+        buildingType: 'house',
+      });
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'unzoned-suburb',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/** Where {@link unzonedSuburbFixture}'s houses start along its road, metres: **1 000**. */
+export const UNZONED_SUBURB_FROM = 1_000;
+
+/** Where they end: **2 600**. */
+export const UNZONED_SUBURB_TO = 2_600;
+
+/** Where they stand on one side of the road only: **1 800**. */
+export const UNZONED_SUBURB_ONE_SIDED = 1_800;
 
 /**
  * #1581's fixture: a town of mixed footprints, as a real map has them, where
@@ -2176,4 +2234,74 @@ export function planFingerprint(plans: readonly FootprintPlan[], withPaint = tru
 export function eavesOverhangOf(plan: FootprintPlan): number {
   const eaves = plan.archetype === 'unknown' ? 'seeded' : ARCHETYPE_FEATURES[plan.archetype].eaves;
   return eaves === 'seeded' ? EAVES_OVERHANG_METRES : eaves;
+}
+
+/** The named footprints of {@link nationalForestTownFixture}, and the verdict each must come to. */
+export const NATIONAL_FOREST_TOWN_VERDICTS = {
+  onResidential: 'kept',
+  onForestOnly: 'kept',
+  inNationalPark: 'kept',
+  inNatureReserve: 'kept',
+  inMappedWood: 'on-excluded-land',
+} as const satisfies Readonly<Record<string, FootprintVerdict>>;
+
+/**
+ * #2657's fixture, shaped like the 2026-11-15 audit's Big Bear Lake: a town
+ * whose whole stretch of road lies inside one `forest` square the size of a
+ * z15 tile — a Forest Service boundary clipped to the tile, not a mapped wood.
+ * Built from arithmetic only: nothing here is that place's data.
+ *
+ * Along 3 km of level road, the forest 1.2 km across its first 2.35 km.
+ * Inside it: a `residential` block (300–700 m along, right), most of the town
+ * on no land use but the forest (houses 1 000–1 600 m along, both sides, some
+ * within the scenery's reach of the road, as at Big Bear, where 706 of 756
+ * samples beside the road were forest), and a mapped `wood` with a house in
+ * it, which ADR 0054 D-5.2 still drops. Past it, a `national_park` and a
+ * `nature_reserve` with a house each. `named` holds one footprint of
+ * each, {@link NATIONAL_FOREST_TOWN_VERDICTS}'s; `boundary` the forest's kind,
+ * so a control can draw the same square as a mapped `wood`.
+ */
+export function nationalForestTownFixture(boundary = 'forest'): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly named: Readonly<Record<keyof typeof NATIONAL_FOREST_TOWN_VERDICTS, BuildingFeature>>;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const house = (along: number, lateral: number): BuildingFeature =>
+    buildingBeside(profile, origin, [rectangleBeside(along, lateral, 10, 8)], 7);
+  const named = {
+    onResidential: house(500, 40),
+    onForestOnly: house(1_300, 30),
+    inNationalPark: house(2_500, 60),
+    inNatureReserve: house(2_750, -60),
+    inMappedWood: house(2_150, -100),
+  };
+  const town: BuildingFeature[] = [];
+  for (let along = 340; along <= 660; along += 40) town.push(house(along, 80));
+  for (let along = 1_000; along <= 1_600; along += 50) {
+    town.push(house(along, 60), house(along, -18), house(along, -60));
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'national-forest-town',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', boundary, 10, 2_350, -600, 600),
+        landBeside(profile, origin, 'landuse', 'residential', 300, 700, 20, 200),
+        landBeside(profile, origin, 'landuse', 'wood', 2_000, 2_300, -220, -20),
+        landBeside(profile, origin, 'landuse', 'national_park', 2_400, 2_600, 20, 220),
+        landBeside(profile, origin, 'landuse', 'nature_reserve', 2_650, 2_850, -220, -20),
+      ],
+      buildings: [...Object.values(named), ...town],
+      paths: [],
+      streets: [],
+    },
+    named,
+  };
 }

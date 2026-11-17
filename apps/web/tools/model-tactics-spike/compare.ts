@@ -21,6 +21,8 @@ const AWAY_METRES = 5;
 const IN_DRAFT_K = 0.8;
 /** When the pack is read, seconds: #2561's 30. */
 const PACK_BY_SECONDS = 30;
+/** How long after a bot blows its places lost are read, seconds (#2720): **30**. */
+const FADE_SECONDS = 30;
 
 /** What one field came to. */
 export interface FieldNumbers {
@@ -46,6 +48,25 @@ export interface FieldNumbers {
   readonly mostMovingAtOnce: number;
   /** For each chase, the gap to the racer ahead on its first tick, metres to 1 place (#2708). */
   readonly chaseStartGapsM: readonly number[];
+  /** How many bots attacked or went on a flyer at least once (#2720). */
+  readonly movers: number;
+  /** How many bots were blown, W′ exhausted, at least once (#2720). */
+  readonly blownBots: number;
+  /**
+   * Bot-ticks ridden over the bot's CP by a bot that was exhausted going into
+   * the tick (#2720): 0 is the body's limit holding.
+   */
+  readonly blownOverCpTicks: number;
+  /**
+   * For each time a bot blew, its W′ exhausted, the places it had lost
+   * {@link FADE_SECONDS} later, or at the end if that came first (#2720):
+   * above 0, it faded.
+   */
+  readonly fadePlacesLost: readonly number[];
+  /** Bot-ticks a bot rode `follow` with the rider directly ahead: on the rider's wheel (#2720). */
+  readonly onRiderWheelTicks: number;
+  /** `follow` and `chase` moves the log's decisions aimed at the rider (#2720). */
+  readonly riderTargets: number;
 }
 
 const round = (value: number): number => Math.round(value * 1_000) / 1_000;
@@ -100,6 +121,25 @@ function awayMoves(ticks: readonly FieldTick[]): number {
   return away;
 }
 
+/** Every racer on a tick, the leader first. */
+function order(tick: FieldTick): string[] {
+  return [...tick.at.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+}
+
+/** For each time a bot blew, the places it had lost {@link FADE_SECONDS} later or at the end. */
+function fades(ticks: readonly FieldTick[], bots: readonly string[]): number[] {
+  const later = Math.round(FADE_SECONDS / LAP_RACE_TICK_SECONDS);
+  const lost: number[] = [];
+  for (const id of bots) {
+    ticks.forEach((tick, at) => {
+      if (tick.exhausted.get(id) !== true || ticks[at - 1]?.exhausted.get(id) === true) return;
+      const then = ticks[Math.min(ticks.length - 1, at + later)] as FieldTick;
+      lost.push(order(then).indexOf(id) - order(tick).indexOf(id));
+    });
+  }
+  return lost;
+}
+
 /** The numbers of one ridden field. */
 export function fieldNumbers(run: FieldRun, riderId: string): FieldNumbers {
   const { ticks } = run;
@@ -131,6 +171,22 @@ export function fieldNumbers(run: FieldRun, riderId: string): FieldNumbers {
   const botPlaces = bots.map((id) => end.at.get(id) as number);
   const movingCounts = ticks.map((tick) => bots.filter((id) => moving(tick.tactic.get(id))).length);
   const firstMoving = movingCounts.findIndex((count) => count > 0);
+  const cp = new Map(run.last.bots.map((bot) => [bot.id, bot.plan?.capacity.cpWatts]));
+  let blownOverCpTicks = 0;
+  let onRiderWheelTicks = 0;
+  ticks.forEach((tick, at) => {
+    const before = ticks[at - 1];
+    const racers = order(tick);
+    for (const id of bots) {
+      const limit = cp.get(id);
+      if (before?.exhausted.get(id) === true && limit !== undefined) {
+        if ((tick.power.get(id) ?? 0) > limit) blownOverCpTicks += 1;
+      }
+      if (tick.tactic.get(id) === 'follow' && racers[racers.indexOf(id) - 1] === riderId) {
+        onRiderWheelTicks += 1;
+      }
+    }
+  });
   return {
     tacticShare: Object.fromEntries(
       BOT_TACTICS.map((each) => [each, round(counts[each] / total)]),
@@ -146,5 +202,16 @@ export function fieldNumbers(run: FieldRun, riderId: string): FieldNumbers {
     firstMoveS: firstMoving < 0 ? null : round((ticks[firstMoving] as FieldTick).second),
     mostMovingAtOnce: Math.max(0, ...movingCounts),
     chaseStartGapsM: chaseStartGaps(ticks, bots),
+    movers: bots.filter((id) => ticks.some((tick) => moving(tick.tactic.get(id)))).length,
+    blownBots: bots.filter((id) => ticks.some((tick) => tick.exhausted.get(id) === true)).length,
+    blownOverCpTicks,
+    fadePlacesLost: fades(ticks, bots),
+    onRiderWheelTicks,
+    riderTargets: run.log
+      .filter((entry) => entry.outcome === 'decision')
+      .flatMap((entry) => entry.moves ?? [])
+      .filter(
+        (move) => move.target === 'rider' && (move.move === 'follow' || move.move === 'chase'),
+      ).length,
   };
 }

@@ -554,7 +554,9 @@ describe('what a side road is — #1565', () => {
     // follow the levelled ground rather than the relief the mask flattened.
     const town: LandClassMask = {
       classAt: () => 'built-up',
+      bareSurfaceAt: () => undefined,
       covered: () => true,
+      protectedArea: () => false,
       parkLookAt: () => 'mown',
       builtUpDistances: (_points, count, into) => {
         into.fill(0, 0, count);

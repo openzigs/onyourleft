@@ -79,6 +79,8 @@ export const ERROR_STATUS = {
   picture_source_unavailable: 409,
   hosted_unavailable: 409,
   local_unavailable: 409,
+  tactics_consent_required: 409,
+  tactics_busy: 409,
   payload_too_large: 413,
   file_type_unsupported: 415,
   file_undecodable: 422,
@@ -93,6 +95,8 @@ export const ERROR_STATUS = {
   too_many: 429,
   internal: 500,
   picture_model_failed: 502,
+  tactics_invalid: 502,
+  tactics_failed: 502,
   unavailable: 503,
   analysis_off: 503,
   pictures_off: 503,
@@ -177,6 +181,13 @@ const MESSAGES: Record<ErrorCode, string> = {
     'This instance does not offer a hosted model service now: its operator has turned it off. Nothing was read or sent.',
   local_unavailable:
     'This instance’s own model is not offered to you now: its operator has turned it off, or has not let riders other than themselves use it. Nothing was queued.',
+  tactics_consent_required:
+    'You have not agreed to this instance’s own model choosing your bots’ tactics, or the model’s address has changed since you did. Nothing was sent to a model; your bots ride their usual tactics.',
+  tactics_busy:
+    'Another AI-bots race is running on this instance now. Your bots ride their usual tactics.',
+  tactics_invalid:
+    'The model’s answer was not a decision this instance accepts. Your bots ride their usual tactics for now.',
+  tactics_failed: 'The model gave no answer in time. Your bots ride their usual tactics for now.',
   model_without_pictures:
     'The model answered that it does not take pictures, so it cannot look at the side camera’s. Choose a model that does. The picture was not kept.',
   picture_model_failed:

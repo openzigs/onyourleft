@@ -3,18 +3,24 @@
 /**
  * #2616: what the model is shown carries the race on effort distance and
  * nothing that says where it is: no coordinate, no place, no name (CLAUDE.md
- * §6). And the one call sent to Ollama gives the model no tools.
+ * §6). And the one call sent to Ollama gives the model no tools. #2720: each
+ * bot its dealt style, its W′ and whether it is blown, the line as the bot
+ * misreads it, and the rider's own state; no attack gate.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import type { BotTactic } from '@onyourleft/domain';
+import {
+  BOT_TACTICS_MISJUDGE_LINE_METRES,
+  botTacticsMisjudgement,
+  type BotTactic,
+} from '@onyourleft/domain';
 
 import type { LapRaceRide } from '../../src/game/lap-race/ride-race';
 
-import { modelAnswerFormat } from './decision';
+import { modelDecisionSchema } from './decision';
 
-import { MODEL_ATTACK_QUIET_SECONDS, modelInput, type ModelInput } from './model-input';
+import { MODEL_RACING_STYLES, modelInput, modelRacingStyles, type ModelInput } from './model-input';
 import { decisionRequest, MODEL_TACTICS_SYSTEM } from './ollama';
 import { quietSeconds, rideField, SPIKE_CIRCUITS, type FieldTick } from './race';
 
@@ -22,7 +28,15 @@ let ride: LapRaceRide;
 let input: ModelInput;
 beforeAll(async () => {
   ride = (await rideField('hilly', 1, { kind: 'seeded' }, 60)).last;
-  input = modelInput(ride.race, ride.bots, SPIKE_CIRCUITS.hilly, ride.draft, 200 / 75, 12.6);
+  input = modelInput(
+    ride.race,
+    ride.bots,
+    SPIKE_CIRCUITS.hilly,
+    ride.seed,
+    ride.draft,
+    200 / 75,
+    12.6,
+  );
 });
 
 describe('what the model reads of the race (#2616)', () => {
@@ -69,6 +83,7 @@ describe('what the model reads of the race (#2616)', () => {
       { ...ride.race, atMs: ride.race.atMs + 500 },
       ride.bots,
       SPIKE_CIRCUITS.hilly,
+      ride.seed,
       ride.draft,
       200 / 75,
       12.6,
@@ -78,14 +93,130 @@ describe('what the model reads of the race (#2616)', () => {
     );
   });
 
-  it('reads the lull in whole seconds, and opens an attack from 30 s of it (#2708)', () => {
+  it('reads the lull in whole seconds, and opens or shuts no attack itself (#2720)', () => {
     expect(input.quietS).toBe(12);
-    expect(input.attackOpen).toBe(false);
-    const at = (quiet: number): ModelInput =>
-      modelInput(ride.race, ride.bots, SPIKE_CIRCUITS.hilly, ride.draft, 200 / 75, quiet);
-    expect(at(MODEL_ATTACK_QUIET_SECONDS - 0.05).attackOpen).toBe(false);
-    expect(at(MODEL_ATTACK_QUIET_SECONDS).attackOpen).toBe(true);
-    expect(at(MODEL_ATTACK_QUIET_SECONDS).quietS).toBe(30);
+    expect(input).not.toHaveProperty('attackOpen');
+    expect(Object.keys(input).sort()).toEqual(['bots', 'field', 'laps', 'quietS', 'rider']);
+  });
+
+  it('deals each bot a racing style from the seed: every style once in a field of seven, the same seed the same deal (#2720)', () => {
+    expect(input.bots.map((bot) => bot.style)).toEqual(modelRacingStyles(ride.seed, 7));
+    for (const seed of [1, 2, 3, 99, 2 ** 31]) {
+      const deal = modelRacingStyles(seed, 7);
+      expect(new Set(deal), String(seed)).toEqual(new Set(MODEL_RACING_STYLES));
+      expect(modelRacingStyles(seed, 7)).toEqual(deal);
+      expect(modelRacingStyles(seed, 3).every((style) => MODEL_RACING_STYLES.includes(style))).toBe(
+        true,
+      );
+    }
+    // Pinned, so a change to the salt (a deal that no longer draws apart) is seen.
+    expect(modelRacingStyles(1, 7)).toEqual([
+      'opportunist',
+      'breakaway',
+      'climber',
+      'breakaway',
+      'sprinter',
+      'rouleur',
+      'sprinter',
+    ]);
+    // The seed shuffles it: not every seed deals the same field.
+    const deals = new Set([1, 2, 3, 4, 5, 6].map((seed) => modelRacingStyles(seed, 7).join()));
+    expect(deals.size).toBeGreaterThan(3);
+  });
+
+  it('reads the line as each bot misreads it, and its W′ as it is, blown or not (#2720)', () => {
+    const { laps, lapLengthMetres } = ride.race.course;
+    const misread = input.bots.map((bot) => {
+      const effort = ride.race.racers.find((entry) => entry.racer.id === ride.bots[bot.bot]?.id)
+        ?.racer.effortDistance as number;
+      const off = bot.toLineM - (laps * lapLengthMetres - effort);
+      expect(Math.abs(off)).toBeLessThanOrEqual(BOT_TACTICS_MISJUDGE_LINE_METRES + 0.5);
+      // The very read `decideTactic` launches on, with its sign (D-3.5).
+      const read = botTacticsMisjudgement(
+        ride.seed,
+        bot.bot,
+        (ride.bots[bot.bot] as (typeof ride.bots)[number]).strategy.skill,
+        ride.race.atMs,
+      ).lineMetres;
+      expect(Math.abs(off - read)).toBeLessThanOrEqual(1);
+      const energy = ride.bots[bot.bot]?.energy;
+      expect(bot.blown).toBe(energy?.exhausted);
+      return off;
+    });
+    // Not vacuous: some bot in this field misreads the line by more than rounding.
+    expect(misread.some((off) => Math.abs(off) > 1)).toBe(true);
+    const blownBots = ride.bots.map((bot) => ({
+      ...bot,
+      energy: { wbalJoules: 0, exhausted: true },
+    }));
+    const blown = modelInput(
+      ride.race,
+      blownBots,
+      SPIKE_CIRCUITS.hilly,
+      ride.seed,
+      ride.draft,
+      200 / 75,
+      0,
+    );
+    expect(blown.bots.every((bot) => bot.blown && bot.wbal === 0)).toBe(true);
+    // Blown is the body's `exhausted` flag, not an empty W′: a bot refilling is still blown,
+    // and one that has just touched zero but is not flagged is not.
+    const as = (energy: { wbalJoules: number; exhausted: boolean }): ModelInput =>
+      modelInput(
+        ride.race,
+        ride.bots.map((bot) => ({ ...bot, energy })),
+        SPIKE_CIRCUITS.hilly,
+        ride.seed,
+        ride.draft,
+        200 / 75,
+        0,
+      );
+    expect(as({ wbalJoules: 1_000, exhausted: true }).bots.every((bot) => bot.blown)).toBe(true);
+    expect(as({ wbalJoules: 0, exhausted: false }).bots.some((bot) => bot.blown)).toBe(false);
+  });
+
+  it('reads the rider’s state: rank, who is ahead of them, their gaps and whether they draft (#2720)', () => {
+    const riderAt = (effort: number): ModelInput =>
+      modelInput(
+        {
+          ...ride.race,
+          racers: ride.race.racers.map((entry) =>
+            ride.bots.some((bot) => bot.id === entry.racer.id)
+              ? entry
+              : { ...entry, racer: { ...entry.racer, effortDistance: effort } },
+          ),
+        },
+        ride.bots,
+        SPIKE_CIRCUITS.hilly,
+        ride.seed,
+        ride.draft,
+        200 / 75,
+        0,
+      );
+    // The rider put 1 m behind the third bot on the road: the fourth behind them.
+    const efforts = ride.bots
+      .map((bot, seat) => ({
+        seat,
+        effort: ride.race.racers.find((entry) => entry.racer.id === bot.id)?.racer
+          .effortDistance as number,
+      }))
+      .sort((a, b) => b.effort - a.effort);
+    const [third, fourth] = [efforts[2], efforts[3]] as [
+      (typeof efforts)[number],
+      (typeof efforts)[number],
+    ];
+    expect(third.effort - fourth.effort).toBeGreaterThan(1);
+    const middle = riderAt(third.effort - 1);
+    expect(middle.rider.rank).toBe(4);
+    expect(middle.rider.ahead).toBe(third.seat);
+    expect(middle.rider.gapAheadM).toBe(1);
+    expect(middle.rider.gapBehindM).toBeCloseTo(third.effort - 1 - fourth.effort, 1);
+    expect(middle.bots.find((bot) => bot.bot === fourth.seat)?.ahead).toBe('rider');
+    // Put in the lead, the rider has nobody ahead and no draft.
+    const leading = riderAt(5_000);
+    expect(leading.rider).toMatchObject({ rank: 1, ahead: null, gapAheadM: null, drafting: false });
+    // Last, nobody behind.
+    expect(riderAt(0).rider.gapBehindM).toBeNull();
   });
 
   it('counts the lull from the last tick any bot attacked or rode a flyer, or from the start (#2708)', () => {
@@ -94,6 +225,7 @@ describe('what the model reads of the race (#2616)', () => {
       at: new Map(),
       tactic: new Map(moves.map((move, at) => [String(at), move])),
       wbal: new Map(),
+      exhausted: new Map(),
       k: new Map(),
       power: new Map(),
       inside: 0,
@@ -109,8 +241,8 @@ describe('what the model reads of the race (#2616)', () => {
     expect(quietSeconds([], 2_500)).toBe(2.5);
   });
 
-  it('is about 1 000 tokens with the instructions: under 4 000 characters together', () => {
-    expect(JSON.stringify(input).length + MODEL_TACTICS_SYSTEM.length).toBeLessThan(4_000);
+  it('is about 1 500 tokens with the instructions: under 5 500 characters together (#2720)', () => {
+    expect(JSON.stringify(input).length + MODEL_TACTICS_SYSTEM.length).toBeLessThan(5_500);
   });
 
   it('carries no coordinate of the circuit, at any precision, and no name', () => {
@@ -142,9 +274,9 @@ describe('what the model reads of the race (#2616)', () => {
     expect(body['think']).toBe(false);
     expect(body['stream']).toBe(false);
     expect(JSON.stringify(body['format'])).toContain('"additionalProperties":false');
-    // #2708: the format offers no target, so the model cannot aim a move at a stale wheel.
-    expect(body['format']).toEqual(modelAnswerFormat(7));
-    expect(JSON.stringify(body['format'])).not.toContain('target');
+    // #2720: the format is the whole schema, the target with it, so a move may name any racer.
+    expect(body['format']).toEqual(modelDecisionSchema(7));
+    expect(JSON.stringify(body['format'])).toContain('target');
     expect(body['messages']).toHaveLength(2);
   });
 });
