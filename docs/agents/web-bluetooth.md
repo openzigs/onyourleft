@@ -22,7 +22,11 @@ programmatically; there is **no silent reconnect that is shippable in 2026** —
 `watchAdvertisements` absent on ChromeOS and Linux entirely, so the product conclusion is unchanged:
 do not build automatic reconnection; it is unavailable in Web Workers; and there is no
 background operation. **Plan for ~3 concurrent connections**, not 7. Do not design a UI that hides
-any of this.
+any of this. ⚠️ The Android shell is not Web Bluetooth: since
+[#2669](https://github.com/openzigs/onyourleft/issues/2669) it remembers paired sensors
+(`apps/web/src/ride/remembered-sensors.ts`) and reconnects them itself, asking a trainer for nothing.
+A workout riding on a trainer that dropped carries on only once the rider pedals again, taking control
+back and ramping up from the trainer's floor (`ride/controller.ts` §`carryOnWorkout`).
 
 **And `'bluetooth' in navigator` is not the feature detect.** Chrome on Linux exposes the object and
 WebBluetoothCG's own status file says *"Linux is partially implemented and not supported"*. #40's

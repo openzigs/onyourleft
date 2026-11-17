@@ -1499,7 +1499,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the map's lakes, sea and wetland beside the road, from
                         the ride's land mask, and no invented lake where the
                         map was read: `waterways(profile, seed, land)` takes
-                        the mask, and every caller passes the ride's.
+                        the mask, and every caller passes the ride's. Since
+                        #2659 a bridge wherever the map's rivers, streams and
+                        canals (the mask's `waterLines`) cross the road, and no
+                        invented one where the map was read.
                         Since #2754 a mapped lake keeps its run's shores
                         sample by sample (`LakeShores`, each the middle of
                         three), its near shore as close as 8 m
@@ -1582,7 +1585,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         vertex attribute. Since #2754 a beach or a pier
                         outranks a park or a town drawn round it
                         (`BARE_KINDS_OVER_LAND`), and a footprint on it in
-                        a park is still dropped (`insidePark`).
+                        a mapped park (not a protected area's boundary,
+                        #2657) is still dropped (`insidePark`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's

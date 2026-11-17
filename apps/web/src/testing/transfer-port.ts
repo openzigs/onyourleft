@@ -72,6 +72,7 @@ export async function emptyTransferPort(options: { readonly withRide?: boolean }
     instance: { forget: () => undefined },
     instanceAnalysis: { forget: () => undefined },
     trainerTargets: { forget: () => undefined },
+    rememberedSensors: { forget: () => undefined },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
   return { port, harness };

@@ -24,6 +24,8 @@ import {
   openCapacitorSettings,
   permissionNotice,
   readCapacitorSignal,
+  recordingServiceKeepAlive,
+  recordingServiceNotificationPermission,
 } from '@onyourleft/mobile';
 import { scriptedPort, type ScriptedPort, type ScriptedStack } from '@onyourleft/mobile/testing';
 import { unixSeconds } from '@onyourleft/domain';
@@ -38,6 +40,12 @@ import type { ShellSupportPort } from '../support/shell-support-port';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { createRideController, type RideController, type RideSnapshot } from '../ride/controller';
 import { idleSnapshot, stubRideController } from '../ride/testing';
+import {
+  createRememberedSensors,
+  transportSeed,
+  type RememberedSensorStorage,
+} from '../ride/remembered-sensors';
+import { createShellRideController } from '../ride/shell-ride-controller';
 
 import { NOT_FOUND } from '../ride/pairing-words';
 import type { SignalStrengthPort } from '../ride/signal-port';
@@ -45,7 +53,7 @@ import { BLUETOOTH_WHY, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
 import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
 import type { SystemSettingsPort } from '../support/system-settings-port';
 
-import { DevicesView } from './DevicesView';
+import { DevicesView, PHONE_RECONNECTS } from './DevicesView';
 
 /**
  * What a WebView reports, which is the wrong answer and is why #284 exists.
@@ -347,7 +355,7 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
     controller.dispose();
   });
 
-  it('keeps "no silent reconnect" visible on a phone, and claims no background limit it does not have', async () => {
+  it('says visibly that a phone reconnects by itself, and claims no limit it does not have (#2669)', async () => {
     const { port, controller } = shellPlatform();
     mounted = await mount(
       <DevicesView capabilities={WEBVIEW} shell={port} controller={controller} />,
@@ -356,7 +364,9 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
     const visible = [...document.querySelectorAll('p')].filter(
       (p) => p.closest('details') === null,
     );
-    expect(visible.some((p) => p.textContent?.includes('There is no silent reconnect'))).toBe(true);
+    expect(visible.some((p) => p.textContent === PHONE_RECONNECTS)).toBe(true);
+    // The browser's sentence, which was the shell's too until #2669, is not.
+    expect(document.body.textContent).not.toContain('There is no silent reconnect');
     expect(document.body.textContent).not.toContain(
       'Recording does not continue in the background',
     );
@@ -375,6 +385,130 @@ describe('#659 — inside the shell, Devices pairs through the Capacitor transpo
       mounted.unmount();
       mounted = undefined;
     }
+  });
+});
+
+describe('#2669 — the sensors a phone remembers, on the Devices screen', () => {
+  /** The device's own storage, which outlives the app. */
+  function deviceStorage(): RememberedSensorStorage {
+    const rows = new Map<string, string>();
+    return {
+      getItem: (key) => rows.get(key) ?? null,
+      setItem: (key, value) => void rows.set(key, value),
+      removeItem: (key) => void rows.delete(key),
+    };
+  }
+
+  /** One opening of the app, as `main.tsx` §`buildPlatform` builds the shell. */
+  function openApp(device: RememberedSensorStorage, stack: ScriptedStack = {}) {
+    const plugin = scriptedPort(stack);
+    const remembered = createRememberedSensors(device);
+    const transport = createCapacitorTransport({
+      plugin,
+      profiles: [createIndoorBikeDataProfile()],
+      now: () => unixSeconds(0),
+      remembered: transportSeed(remembered),
+    });
+    const controller = createShellRideController(
+      {
+        capacitorRecordingServicePlugin: () => ({
+          start: async () => Promise.resolve(),
+          stop: async () => Promise.resolve(),
+          notificationPermission: async () => Promise.resolve({ state: 'granted' as const }),
+          requestNotificationPermission: async () => Promise.resolve({ state: 'granted' as const }),
+        }),
+        recordingServiceKeepAlive,
+        recordingServiceNotificationPermission,
+      },
+      {
+        transport,
+        store: {
+          putRecordingSession: (record) => Promise.resolve(record.id),
+          appendRecordingChunk: () => Promise.resolve(0),
+          readRecordingSessions: () => Promise.resolve({ sessions: [], unreadable: [] }),
+          recoverRecording: () => Promise.resolve(undefined),
+          deleteRecordingSession: () => Promise.resolve(false),
+        },
+        athleteId: athleteId('shell'),
+        newSessionId: () => recordingSessionId('shell-ride'),
+        now: () => unixSeconds(0),
+        remembered,
+      },
+    );
+    const port = capacitorShellSupport({
+      availability: async () => transport.availability(),
+      notice: permissionNotice,
+      mayShowDeviceList,
+    });
+    return { plugin, controller, port };
+  }
+
+  function button(label: string): HTMLButtonElement {
+    const found = [...document.querySelectorAll('button')].find(
+      (each) => each.textContent?.trim() === label,
+    );
+    if (found === undefined) throw new Error(`no button labelled "${label}"`);
+    return found;
+  }
+
+  it('lists a sensor paired before the app was closed, connected, with no chooser, and Forget lets it go for good', async () => {
+    const device = deviceStorage();
+    const first = openApp(device);
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={first.port} controller={first.controller} />,
+    );
+    await settle();
+    await activateWithKeyboard(button('Pair a smart trainer'));
+    await settle();
+    expect(document.body.textContent).toContain('Scripted Trainer: Connected');
+    mounted.unmount();
+    first.controller.dispose();
+
+    // The app opened again: a plugin that would refuse any chooser.
+    const second = openApp(device, { chooserRejectsWith: new Error('requestDevice cancelled.') });
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={second.port} controller={second.controller} />,
+    );
+    await settle();
+    expect(document.body.textContent).toContain('Scripted Trainer: Connected');
+    expect(second.plugin.calls).not.toContain('requestDevice');
+
+    await activateWithKeyboard(button('Forget Scripted Trainer'));
+    await settle();
+    const trainerRow = document.querySelector('.oyl-pairing__row .oyl-pairing__state');
+    expect(trainerRow?.textContent).toBe('Not paired');
+    mounted.unmount();
+    second.controller.dispose();
+
+    // And the next time the app opens, it is not reconnected.
+    const third = openApp(device);
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={third.port} controller={third.controller} />,
+    );
+    await settle();
+    expect(document.querySelector('.oyl-pairing__row .oyl-pairing__state')?.textContent).toBe(
+      'Not paired',
+    );
+    expect(third.plugin.calls.some((call) => call.startsWith('getDevices'))).toBe(false);
+    third.controller.dispose();
+  });
+
+  it('says a remembered sensor that is not back yet is reconnecting, with a Forget beside it', async () => {
+    const device = deviceStorage();
+    const first = openApp(device);
+    await first.controller.pair('trainer');
+    await settle();
+    first.controller.dispose();
+
+    const second = openApp(device, { connectRejectsWith: new Error('Connection timeout.') });
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={second.port} controller={second.controller} />,
+    );
+    await settle();
+    expect(document.body.textContent).toContain('Scripted Trainer: Reconnecting…');
+    expect(document.body.textContent).not.toContain('forget it and pair it again');
+    expect(button('Forget Scripted Trainer')).toBeDefined();
+    second.controller.dispose();
   });
 });
 

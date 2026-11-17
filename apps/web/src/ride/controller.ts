@@ -43,11 +43,18 @@
  *
  * ## What is deliberately not here
  *
- * **No automatic reconnection.** Web Bluetooth has no silent reconnect that is
- * shippable in 2026 (docs/agents/web-bluetooth.md §8) and `requestDevice` needs a gesture per
- * device. A dropped sensor becomes a visible state and a button; a controller
- * that retried in a loop would produce a screen that appears to be connecting
- * for ever.
+ * **No automatic reconnection in a browser.** Web Bluetooth has no silent
+ * reconnect that is shippable in 2026 (docs/agents/web-bluetooth.md §8) and
+ * `requestDevice` needs a gesture per device. A dropped sensor becomes a
+ * visible state and a button; a controller that retried in a loop would
+ * produce a screen that appears to be connecting for ever. ⚠️ **The Android
+ * shell is the exception, since #2669**: it hands the controller
+ * {@link RideControllerOptions.remembered}, and then a remembered sensor is
+ * reconnected when the app opens and when its link drops, on a backoff
+ * ({@link RECONNECT_BACKOFF_SECONDS}), and says *Reconnecting…* while it is.
+ * A reconnected trainer is asked for nothing (§`reconnect`), with one
+ * exception: a workout that was riding on it when it dropped carries on once
+ * the rider is pedalling again, easing back up (§`carryOnWorkout`).
  *
  * **No timers.** `tick(now)` is called by whatever owns the clock — a browser
  * interval in `useRideController`, a loop in a test. A controller that set its
@@ -77,6 +84,7 @@ import {
   type WorkoutBlock,
   type WorkoutRescue,
   type WorkoutSegment,
+  STOPPED_CADENCE,
 } from '@onyourleft/domain';
 import {
   deviceProvides,
@@ -167,6 +175,7 @@ import type { RiderPresence, RiderPresencePort } from './presence-port';
 import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
 import type { TrainerTargetMemory } from './trainer-target-memory';
+import type { RememberedSensors } from './remembered-sensors';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import {
   createWorkoutSession,
@@ -515,7 +524,36 @@ export interface RideWorkoutSnapshot {
    * target for a block the trainer was never sent (#1307).
    */
   readonly refused?: boolean | undefined;
+  /**
+   * Where a workout whose trainer dropped stands while the Android shell gets
+   * the trainer back — #2669, the owner's ruling of 2026-11-16 ("Trainer
+   * reconnect workout should carry on"). `undefined` when no trainer of this
+   * workout has dropped, in a browser always. `workout/carry-on-text.ts`
+   * words each one. @see WorkoutCarryOn
+   */
+  readonly carryOn?: WorkoutCarryOn | undefined;
 }
+
+/**
+ * A workout carried across a trainer that dropped and came back — #2669.
+ *
+ * - `reconnecting`: the link is down; the workout is paused where it was, and
+ *   nothing is written.
+ * - `pedal`: the trainer is back, and still nothing is written, control
+ *   included, until the rider is pedalling again.
+ * - `refused`: the rider pedalled and the trainer would not give control
+ *   back. The workout waits for the rider to take control by hand.
+ * - `resumed`: it carries on from the same block and time left, easing up to
+ *   the block's target ({@link CARRY_ON_NOTICE_SECONDS} of notice).
+ */
+export type WorkoutCarryOn = 'reconnecting' | 'pedal' | 'refused' | 'resumed';
+
+/**
+ * How long "Trainer reconnected, workout resumed" stays on the screen after a
+ * workout carried on — #2669. Longer than the ramp (`CARRY_ON_RAMP_SECONDS`),
+ * so the sentence is still there while the resistance comes back. A pick.
+ */
+export const CARRY_ON_NOTICE_SECONDS = 30;
 
 /** Re-plans during the ride, as the screen reads them (#1244). */
 export interface RideReplanSnapshot {
@@ -1134,6 +1172,43 @@ export interface RideControllerOptions {
    * only while the page lives, which is what it did before.
    */
   readonly trainerTargets?: TrainerTargetMemory | undefined;
+  /**
+   * The sensors this phone remembers — #2669, the Android shell's only
+   * (`ride/remembered-sensors.ts`). With it, and a transport that can
+   * reconnect with no gesture (`traits.canReconnectWithoutUserGesture`), a
+   * sensor that paired is remembered, a forgotten one is let go of here too,
+   * {@link RideController.restoreRemembered} reconnects them when the app
+   * opens, and a link that drops is reconnected on
+   * {@link RECONNECT_BACKOFF_SECONDS}.
+   *
+   * ⚠️ Supplied by `ride/shell-ride-controller.ts`, which REQUIRES it, so a
+   * `main.tsx` that stopped passing it is a type error rather than a green
+   * `check:wiring`. A browser passes none, and nothing it does changes.
+   */
+  readonly remembered?: RememberedSensors | undefined;
+}
+
+/**
+ * How long the controller waits before each try at a dropped or remembered
+ * sensor — #2669's "back off between tries". The first is at once on the
+ * app's opening and two seconds after a drop; the last is repeated for as
+ * long as the sensor stays listed, so a sensor switched off is tried every
+ * thirty seconds until it is switched on or forgotten.
+ *
+ * ⚠️ **A pick, not a measurement.** A sensor that dropped for a moment is back
+ * on the first or second try; one that was switched off costs a connect
+ * attempt every half-minute, which on Android is a page-scan the radio makes
+ * anyway for the rider's other devices.
+ */
+export const RECONNECT_BACKOFF_SECONDS: readonly number[] = [2, 4, 8, 16, 30];
+
+/** The wait before try number `attempt` (counting from zero). */
+function backoffSeconds(attempt: number): number {
+  return (
+    RECONNECT_BACKOFF_SECONDS[Math.min(attempt, RECONNECT_BACKOFF_SECONDS.length - 1)] ??
+    RECONNECT_BACKOFF_SECONDS[0] ??
+    0
+  );
 }
 
 export interface RideController {
@@ -1178,6 +1253,18 @@ export interface RideController {
    * able to reach it again. Never throws.
    */
   unpair(id: DeviceId): Promise<void>;
+  /**
+   * Reconnect the sensors this phone remembers, with no chooser — #2669,
+   * what the Android shell does as the app opens. Each is listed at once,
+   * *Reconnecting…*, and tried on {@link RECONNECT_BACKOFF_SECONDS} until it
+   * connects or the rider forgets it. No more are listed than the transport's
+   * `maxConcurrentConnections`.
+   *
+   * Does nothing without {@link RideControllerOptions.remembered}, or on a
+   * transport that cannot reconnect with no gesture. ⚠️ A trainer reconnected
+   * here is asked for nothing: no control, no target. Never throws.
+   */
+  restoreRemembered(): Promise<void>;
 
   start(): Promise<void>;
   pause(): Promise<void>;
@@ -1525,10 +1612,30 @@ interface SensorEntry {
    * that was already listed when it did (@see lateForget).
    */
   readonly pairing: number;
+  /**
+   * The link is being got back with no chooser — #2669. `at` is when the next
+   * try is due on the controller's clock, and `running` is a try in flight.
+   * `undefined` for a link that is up, or that nothing is getting back.
+   */
+  retry: ReconnectTry | undefined;
+}
+
+/** One sensor's next try at its link — #2669. @see SensorEntry.retry */
+interface ReconnectTry {
+  /** How many tries have failed, counting from zero. */
+  readonly attempt: number;
+  /** When the try is due, on the controller's clock. */
+  readonly at: number;
+  /** A try is in flight, so a tick does not start a second. */
+  running: boolean;
 }
 
 export function createRideController(options: RideControllerOptions): RideController {
   const { transport, store, athleteId, newSessionId, now, openTrainer } = options;
+  /** #2669: only where the shell remembers AND the transport can reconnect alone. */
+  const remembered = transport.traits.canReconnectWithoutUserGesture
+    ? options.remembered
+    : undefined;
   const staleAfterSeconds = options.staleAfterSeconds ?? METRIC_STALE_AFTER_SECONDS;
   // #390. `undefined` with no camera, which leaves every recorder exactly as it
   // was: `recorder.ts` §`RecorderOptions.presence`. Read afresh on every
@@ -2678,7 +2785,11 @@ export function createRideController(options: RideControllerOptions): RideContro
         capabilities: [...entry.device.capabilities].filter(
           (capability): capability is MeasurementCapability => capability !== 'trainer-control',
         ),
-        state: entry.state,
+        // #2669: a link being got back reads as that, never as "link lost —
+        // forget it and pair it again", which would send the rider to undo
+        // the reconnect.
+        state:
+          entry.retry !== undefined && entry.state !== 'connected' ? 'reconnecting' : entry.state,
         readings: RIDE_METRIC_IDS.filter((metric) =>
           entry.device.capabilities.has(METRIC_CAPABILITY[metric]),
         ).map((metric) => ({
@@ -2801,6 +2912,11 @@ export function createRideController(options: RideControllerOptions): RideContro
     // rather than on the next tick: for that second the screen would otherwise
     // offer a Resume the controller refuses.
     syncPhaseWithEngine();
+    // #2669: after the phase has moved, so a rider pedalling out of an
+    // automatic pause carries a held workout on with the same reading.
+    if (measurement.capability === 'cadence' && measurement.cadence > STOPPED_CADENCE) {
+      void carryOnWorkout();
+    }
     changed();
   };
 
@@ -2823,6 +2939,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       trainer: undefined,
       controlChoice: NO_TRAINER_CONTROL,
       pairing: (pairingsMade += 1),
+      retry: undefined,
     };
     // #2045: a new pairing starts with no reading of its own, so a device
     // forgotten and paired again never shows what it read the last time.
@@ -2925,6 +3042,23 @@ export function createRideController(options: RideControllerOptions): RideContro
         if (state === 'connected' && previous !== 'connected') {
           entry.trainer?.control.linkRestored();
         }
+        // #2669: a link that DROPPED is got back with no chooser, where this
+        // platform can. Only from `connected`: a connect that failed is the
+        // try's own to reschedule (@see reconnect), and a Forget releases
+        // this observer before it lets the link go, so it never lands here.
+        if (
+          remembered !== undefined &&
+          state === 'disconnected' &&
+          previous === 'connected' &&
+          sensors.get(id) === entry &&
+          !disposed
+        ) {
+          entry.retry ??= { attempt: 0, at: now() + backoffSeconds(0), running: false };
+          // And a workout riding on this trainer waits for it, writing nothing.
+          if (workoutRidesOn(entry)) {
+            holdWorkoutForReconnect();
+          }
+        }
         changed();
       }),
     );
@@ -2981,6 +3115,205 @@ export function createRideController(options: RideControllerOptions): RideContro
         );
       }
       stillWanted();
+    }
+  };
+
+  /**
+   * One try at getting a listed sensor's link back with no chooser — #2669.
+   * Used for a link that dropped and for a sensor remembered from the last
+   * time the app was open; either way the entry stays listed, saying
+   * *Reconnecting…*, until a try connects or the rider forgets it.
+   *
+   * ⚠️ **Everything the link had is let go and wired afresh**, through the one
+   * {@link wire} a pairing uses: the measurements, and for a trainer a NEW
+   * control client from `openTrainer`. That is the trainer-safety half of
+   * #2669, and it is the reason this does not keep the old client: a new
+   * client has never been granted control, and opening one asks the machine
+   * for nothing — Request Control is a separate press
+   * (`requestTrainerControl`, rule 2 at the top of the file) — so nothing a
+   * reconnect does can write a target, a slope or a resistance. What the
+   * trainer is given next comes from the rider, or from a workout the rider
+   * starts, through the paths every target takes (`gatedTargets`,
+   * `erg-safety.ts`, the remembered target's age in `trainer-target-memory.ts`).
+   * `shell-reconnect.test.ts` reads the control point's writes after a reconnect.
+   *
+   * ⚠️ **A workout running on the dropped trainer is kept, paused, and
+   * writes nothing here** — the owner's ruling of 2026-11-16 ("Trainer
+   * reconnect workout should carry on"), which reversed this PR's first
+   * answer (end it). Its writes were cut off from every client when the link
+   * dropped ({@link holdWorkoutForReconnect}, from the connection observer in
+   * {@link wire}), before this closes the old one, and it is
+   * handed the NEW one only by {@link carryOnWorkout}, once the rider is
+   * pedalling and control has been taken again. The ride carries on recording
+   * throughout.
+   *
+   * A failed try lets go of whatever it acquired and is put back on
+   * {@link RECONNECT_BACKOFF_SECONDS}. One the rider forgot meanwhile ends
+   * quietly: `unpair` has done the rest.
+   */
+  const reconnect = async (entry: SensorEntry, retry: ReconnectTry): Promise<void> => {
+    const id = entry.device.identity.id;
+    // ⚠️ One try per link at a time, and only the try the entry holds. A second
+    // caller — `restoreRemembered` walking its list while `tick` has already
+    // started this entry's try — would connect again, subscribe again (every
+    // reading twice) and open a second trainer client over the first, which
+    // is then never closed. A try that has finished has replaced or cleared
+    // `entry.retry`, so a stale one is refused here as well.
+    if (retry.running || entry.retry !== retry || sensors.get(id) !== entry || disposed) {
+      return;
+    }
+    retry.running = true;
+    try {
+      detach(entry);
+    } catch {
+      // #704: every step has run; what is left is the new wiring below.
+    }
+    try {
+      await wire(entry);
+    } catch {
+      try {
+        detach(entry);
+      } catch {
+        // As above.
+      }
+      if (sensors.get(id) !== entry || disposed) {
+        // Forgotten (or disposed) while the try was running: nothing to report.
+        // ⚠️ And nothing to disconnect: the id may already be a NEW pairing
+        // of the same device, made after the Forget, whose link this would cut.
+        return;
+      }
+      // A link that came up and then failed to subscribe is let go, so a
+      // sensor is never up and delivering nothing between two tries.
+      await transport.disconnect(id).catch(() => undefined);
+      if (sensors.get(id) !== entry || disposed) {
+        return;
+      }
+      entry.state = 'disconnected';
+      entry.retry = {
+        attempt: retry.attempt + 1,
+        at: now() + backoffSeconds(retry.attempt + 1),
+        running: false,
+      };
+      changed();
+      return;
+    }
+    entry.retry = undefined;
+    // #2669: the trainer a held workout was riding on is back. Still nothing
+    // is written: the workout waits for the rider to pedal (@see carryOnWorkout).
+    if (
+      workout?.carryOn?.stage === 'reconnecting' &&
+      entry.trainer !== undefined &&
+      trainerEntry() === entry
+    ) {
+      workout.carryOn = { stage: 'pedal' };
+    }
+    changed();
+  };
+
+  /**
+   * Whether the running workout writes to `entry`'s trainer connection —
+   * #2669. False for a workout already held for a reconnect: it writes to
+   * nothing.
+   */
+  const workoutRidesOn = (entry: SensorEntry): boolean =>
+    workout !== undefined &&
+    entry.trainer !== undefined &&
+    workout.trainer.current === entry.trainer;
+
+  /**
+   * Hold the workout while its trainer is got back — #2669. Paused where it
+   * was (the player keeps the block and the time left: `player.ts`
+   * §`linkLost`), and cut off from every client, so that nothing it asks for
+   * — a target, an ease, a release — can reach the old client or the new one.
+   * Only {@link carryOnWorkout} gives it a trainer again.
+   */
+  const holdWorkoutForReconnect = (): void => {
+    if (workout === undefined) {
+      return;
+    }
+    // Usually done already, by the old client's `onControlLost`; again here
+    // because a client that held no control raises none, and the player must
+    // be paused whatever the client said.
+    workout.session.linkLost(rideSeconds(now()));
+    workout.trainer.current = undefined;
+    workout.carryOn = { stage: 'reconnecting' };
+    changed();
+  };
+
+  /**
+   * Carry the held workout on — #2669, the owner's ruling of 2026-11-16,
+   * which made it gentle in four ways, all of them here or below:
+   *
+   * 1. **Pedalling first.** Called on a cadence reading above
+   *    `STOPPED_CADENCE` (@see onMeasurement) and on nothing else, so nothing
+   *    — not even Request Control — reaches the trainer before the rider is
+   *    pedalling on it again. Not while the ride is paused by the rider.
+   * 2. **Control through the rider's own path**,
+   *    {@link RideController.requestTrainerControl}, with its holds (#718,
+   *    #721). The workout had control when it dropped; taking it back is what
+   *    carrying on means. A trainer that refuses leaves the workout held
+   *    (`refused`), and it is not asked again until the rider takes control
+   *    by hand.
+   * 3. **A ramp, not a step**: the session's `carryOn`, which caps every
+   *    target from the trainer's floor up to the block's over
+   *    `CARRY_ON_RAMP_SECONDS`.
+   * 4. **Only the workout's own targets.** Nothing here writes a target; the
+   *    session does, through the one gated writer. A game ride, a hand-set
+   *    target and anything else stay refused while a workout is loaded, as
+   *    they always were.
+   */
+  const carryOnWorkout = async (): Promise<void> => {
+    const current = workout;
+    const stage = current?.carryOn?.stage;
+    if (
+      current === undefined ||
+      (stage !== 'pedal' && stage !== 'refused') ||
+      phase === 'paused' ||
+      disposed
+    ) {
+      return;
+    }
+    const entry = trainerEntry();
+    const connection = entry?.trainer;
+    if (entry === undefined || connection === undefined || entry.retry !== undefined) {
+      return;
+    }
+    // A write to the old client still settling would be answered after the
+    // session had been handed the new one. It settles in a moment; the next
+    // reading tries again.
+    if (current.session.state().writing) {
+      return;
+    }
+    const client = connection.control;
+    if (!client.hasControl()) {
+      if (stage === 'refused') {
+        return;
+      }
+      current.carryOn = { stage: 'asking' };
+      changed();
+      await controller.requestTrainerControl();
+      if (workout !== current || current.carryOn?.stage !== 'asking') {
+        return;
+      }
+      if (entry.trainer !== connection || !client.hasControl()) {
+        current.carryOn = { stage: 'refused' };
+        changed();
+        return;
+      }
+    }
+    current.trainer.current = connection;
+    current.carryOn = { stage: 'resumed', at: now() };
+    current.session.carryOn(rideSeconds(now()));
+    changed();
+  };
+
+  /** Every listed sensor whose next try is due by `at`. @see reconnect */
+  const reconnectDue = (at: UnixSeconds): void => {
+    for (const entry of [...sensors.values()]) {
+      const retry = entry.retry;
+      if (retry !== undefined && !retry.running && retry.at <= at) {
+        void reconnect(entry, retry);
+      }
     }
   };
 
@@ -3402,6 +3735,18 @@ export function createRideController(options: RideControllerOptions): RideContro
     readonly record: WorkoutRecord;
     readonly session: WorkoutSession;
     /**
+     * The trainer connection every write of this workout goes to — #2669.
+     * `undefined` while a trainer that dropped is being got back, so nothing
+     * the session asks for can reach any machine; a NEW connection once it
+     * is back and the workout carries on (@see carryOnWorkout).
+     */
+    readonly trainer: { current: TrainerConnection | undefined };
+    /** @see RideWorkoutSnapshot.carryOn. `at` is when it carried on. */
+    carryOn:
+      | { readonly stage: 'reconnecting' | 'pedal' | 'asking' | 'refused' }
+      | { readonly stage: 'resumed'; readonly at: UnixSeconds }
+      | undefined;
+    /**
      * Re-plans for this workout (#1244): set once the rider's goals and
      * library have been read, and only when they switched re-plans on.
      */
@@ -3538,6 +3883,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       },
       blockAverageWatts: blockAverage(workout),
       refused: state.raiseRefused,
+      carryOn:
+        workout.carryOn === undefined
+          ? undefined
+          : workout.carryOn.stage === 'asking'
+            ? 'pedal'
+            : workout.carryOn.stage,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
       // the library disagreeing about the same block.
@@ -3937,11 +4288,71 @@ export function createRideController(options: RideControllerOptions): RideContro
         // ends here with nothing listed.
         if (await attach(device, role)) {
           askAgainIfRefused();
+          // #2669: remembered once it has PAIRED, and not before — a sensor
+          // whose link never came up is not one to reconnect to.
+          remembered?.remember({ id, name: device.name ?? '', role });
         }
       } catch (error) {
         tell(pairingFailureWords(error, step, chosen));
       } finally {
         choosing.delete(overlapped);
+      }
+    },
+
+    async restoreRemembered(): Promise<void> {
+      if (remembered === undefined || disposed) {
+        return;
+      }
+      const wanted = remembered
+        .list()
+        .filter((sensor) => !sensors.has(sensor.id) && !forgetting.has(sensor.id));
+      if (wanted.length === 0) {
+        // Nothing to ask the transport for, so the stack is not brought up:
+        // a rider who never paired is not asked for Bluetooth at launch.
+        return;
+      }
+      let known: readonly SensorDevice[];
+      try {
+        known = await transport.knownDevices();
+      } catch {
+        // Bluetooth off, or a permission withdrawn. The rider pairs by hand;
+        // the Devices screen says why that does not work either.
+        return;
+      }
+      // Every one listed first, *Reconnecting…*, so the screen shows them all
+      // at once; then tried in turn, which is the order the plugin's own
+      // queue would run them in anyway.
+      const listed: { readonly entry: SensorEntry; readonly retry: ReconnectTry }[] = [];
+      for (const sensor of wanted) {
+        // #2669: the connection budget. A sensor beyond it stays remembered
+        // and is not listed, so it never counts against a link in use.
+        if (disposed || sensors.size >= transport.traits.maxConcurrentConnections) {
+          break;
+        }
+        const device = known.find((one) => one.identity.id === sensor.id);
+        if (device === undefined || sensors.has(sensor.id) || forgetting.has(sensor.id)) {
+          continue;
+        }
+        const retry: ReconnectTry = { attempt: 0, at: now(), running: false };
+        const entry: SensorEntry = {
+          device,
+          role: sensor.role,
+          release: [],
+          measurements: [],
+          // A device `knownDevices` has only just handed out has no link yet.
+          state: 'disconnected',
+          trainer: undefined,
+          controlChoice: NO_TRAINER_CONTROL,
+          pairing: (pairingsMade += 1),
+          retry,
+        };
+        latestByDevice.delete(sensor.id);
+        sensors.set(sensor.id, entry);
+        listed.push({ entry, retry });
+      }
+      changed();
+      for (const { entry, retry } of listed) {
+        await reconnect(entry, retry);
       }
     },
 
@@ -3986,6 +4397,10 @@ export function createRideController(options: RideControllerOptions): RideContro
         // below — #706's review. Set here, `changed()` rendered "is
         // forgotten" while the transport had not let go yet.
         sensors.delete(id);
+        // #2669: and this phone stops remembering it, so the next time the
+        // app opens it is not reconnected. Here, after the trainer was let
+        // go: one that refused to let go is still listed, and still kept.
+        remembered?.drop(id);
         changed();
         let refused = false;
         let unconfirmed = false;
@@ -4623,6 +5038,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       // left running would be a second writer on one control point.
       endManualErg();
       const timeline = expandWorkout(record.workout);
+      // #2669: which connection the session writes to, read on every call.
+      // Only `holdWorkoutForReconnect` empties it and only `carryOnWorkout`
+      // fills it again, with the reconnected trainer's NEW connection.
+      const bound: { current: TrainerConnection | undefined } = { current: connection };
+      const unbound = (): TargetHeldBack => new TargetHeldBack('disconnected', TRAINER_DETACHED);
       const session = createWorkoutSession({
         timeline,
         thresholdPower,
@@ -4631,23 +5051,39 @@ export function createRideController(options: RideControllerOptions): RideContro
         control: {
           // #721: per write, through the one rule — @see mustWaitForForget.
           // `stop` and `letGo` are not: a release is never held back.
-          setTargetPower: gatedTargets(client, connection.powerRange.minimum).setTargetPower,
-          stop: () => client.stop(),
+          setTargetPower: (target) =>
+            bound.current === undefined
+              ? Promise.reject(unbound())
+              : gatedTargets(
+                  bound.current.control,
+                  bound.current.powerRange.minimum,
+                ).setTargetPower(target),
+          stop: () => bound.current?.control.stop() ?? Promise.reject(unbound()),
           // #2348: the step-down, when the session asks for one, is written
           // by the same release, immediately before its Stop.
           letGo: async (stepDownTo): Promise<WorkoutRelease> => {
+            const to = bound.current;
+            if (to === undefined) {
+              // #2669: ended while held for a reconnect. There is no link to
+              // release, so nothing is written and no release is begun — a
+              // release here would report a Stop that never left.
+              throw unbound();
+            }
             const release = beginRelease(
-              client,
+              to.control,
               stepDownTo === undefined
                 ? undefined
-                : { to: stepDownTo, floor: connection.powerRange.minimum },
+                : { to: stepDownTo, floor: to.powerRange.minimum },
             );
             return { stop: await release.stop, steppedDown: await release.steppedDown };
           },
           // #1305: a read. What the client believes the trainer holds, a
           // hand-set target from before this workout included, and what
           // this app last had acknowledged where the client has forgotten.
-          targetPower: () => workoutsViewOfTheTarget(client, trainerId),
+          targetPower: () =>
+            bound.current === undefined
+              ? { kind: 'none' }
+              : workoutsViewOfTheTarget(bound.current.control, trainerId),
         },
         // #441: what an ease writes — the machine's own reported minimum.
         powerFloor: connection.powerRange.minimum,
@@ -4660,6 +5096,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       const started: WorkoutInProgress = {
         record,
         session,
+        trainer: bound,
+        carryOn: undefined,
         replan: undefined,
         heartRateHold,
         thresholdWatts: thresholdPower,
@@ -4918,13 +5356,26 @@ export function createRideController(options: RideControllerOptions): RideContro
       // stopped riding the workout too, and a workout whose clock ran through
       // that break would put them a minute further into an interval than they
       // are.
-      if (phase === 'paused') {
+      // #2669: a workout held for its trainer's reconnect is neither paused
+      // (an ease would be a write) nor resumed (its clock would run on with
+      // no trainer) by the ride: only `carryOnWorkout` moves it.
+      const held = workout?.carryOn !== undefined && workout.carryOn.stage !== 'resumed';
+      if (held) {
+        // Nothing: it stays where it was.
+      } else if (phase === 'paused') {
         workout?.session.pause(rideSeconds(at));
       } else if (phase === 'recording') {
         if (workout?.session.state().player.status === 'paused') {
           workout.session.resume(rideSeconds(at));
         }
         workoutTick(at);
+      }
+      // #2669: "Trainer reconnected, workout resumed" for a while, then gone.
+      if (
+        workout?.carryOn?.stage === 'resumed' &&
+        at - workout.carryOn.at >= CARRY_ON_NOTICE_SECONDS
+      ) {
+        workout.carryOn = undefined;
       }
       // #1244: after the workout's own tick, and in every phase — a paused
       // ride is when a job in flight is dropped and a waiting move is seen to
@@ -4937,6 +5388,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       // somebody stops pedalling. No control check here: losing control, a
       // release and an unpair each end the hand-set target where they happen.
       manual?.erg.tick(rideSeconds(at));
+      // #2669: a dropped or remembered sensor whose next try is due. In every
+      // phase: a link is got back whether or not anything is recording.
+      reconnectDue(at);
       // Unconditionally: staleness is a function of the clock, so a channel
       // goes quiet on the tick whether or not anything is recording.
       changed();
