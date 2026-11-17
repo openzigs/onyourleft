@@ -112,7 +112,7 @@ import {
 } from './archetype';
 import { BOT_MASS_KILOGRAMS } from '../pacer/pacing';
 import { LapRaceError } from './errors';
-import { BOT_LANE_DWELL_MS, type BotSkill } from './strategy';
+import type { BotSkill } from './strategy';
 import { spendableWatts, type BotCapacity, type BotEnergy } from './wbal';
 
 /** A bot's tactical state, by key. */
@@ -227,8 +227,13 @@ export interface TacticDecision {
   readonly memory: TacticMemory;
 }
 
-/** The least a bot holds a state for, ms: twice `strategy.ts` §`BOT_LANE_DWELL_MS`, **4 s**. */
-export const BOT_TACTIC_DWELL_MS = 2 * BOT_LANE_DWELL_MS;
+/**
+ * The least a bot holds a state for, ms: **4 s**, twice what `strategy.ts`
+ * §`BOT_LANE_DWELL_MS` was until #2665 lengthened the lane dwell to 10 s for
+ * the drawing's sake. A tactic is the race's, not the drawing's, so it keeps
+ * its own.
+ */
+export const BOT_TACTIC_DWELL_MS = 4_000;
 
 /** What the state a bot is in scores on top of its own, so a close rival score does not flip it. */
 export const BOT_TACTIC_COMMITMENT = 0.15;

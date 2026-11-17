@@ -77,6 +77,14 @@ import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import { UnitsProvider } from '../units/context';
 import { START_WORD, toGoText } from './gantry-wording';
 import { endRideAnswer } from './end-ride-testing';
+import { sceneFrame } from './scene';
+
+// #2722: `sceneFrame` itself, watched — what `GameView` asks it for. Every
+// call still builds its frame: the spy passes through.
+vi.mock('./scene', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./scene')>();
+  return { ...actual, sceneFrame: vi.fn(actual.sceneFrame) };
+});
 
 /** Two kilometres of road that rises and falls, so a gradient is in play. */
 function testRoute(samples = 200): RidableRoute {
@@ -655,6 +663,37 @@ describe('riding against both a pacer and your own best (#253)', () => {
   });
 });
 
+describe('which rides get scenery cyclists — #2722', () => {
+  /**
+   * `GameView`'s mode conditions on `SceneInput.sceneryCyclists`, read off what
+   * `sceneFrame` was asked. `scene.ts` has its own backstop, so a frame never
+   * shows the difference; the ask is the only place a dropped condition shows.
+   */
+  const asked = (): readonly (boolean | undefined)[] =>
+    vi.mocked(sceneFrame).mock.calls.map(([input]) => input.sceneryCyclists);
+
+  it('asks on a free ride', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: false });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([true]));
+  });
+
+  it('does not ask beside the pacer', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: true, intensity: '0.5' });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([false]));
+  });
+
+  it('does not ask beside a ghost', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: false, ghost: true });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([false]));
+  });
+});
+
 describe('a phone backgrounded mid-ride (#254)', () => {
   /**
    * The wiring #254 was about, driven the way a rider would produce it: frames
@@ -1085,6 +1124,61 @@ describe('the ride’s moving time while the GAME is paused — #1111’s review
     mounted.unmount();
     mounted = undefined;
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe('a quick Pause, Resume, Pause on the HUD — #2656’s review (L1)', () => {
+  it('takes the second pause only once the first has been told, and resumes the first’s recording before it', async () => {
+    const log: string[] = [];
+    let releaseFirst: (paused: boolean) => void = () => undefined;
+    let pauses = 0;
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => undefined,
+      rideMovingSeconds: () => 65,
+      watchRide: () => () => undefined,
+      pauseRecording: () => {
+        log.push('pause');
+        pauses += 1;
+        return pauses === 1
+          ? new Promise<boolean>((resolve) => {
+              releaseFirst = resolve;
+            })
+          : Promise.resolve(true);
+      },
+      resumeRecording: () => {
+        log.push('resume');
+        return Promise.resolve();
+      },
+    };
+    mounted = await mount(
+      <GameView port={pedallingPort(testRoute())} trainer={trainer} now={() => nowMs} />,
+    );
+    await settle();
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find((each) =>
+        (each.textContent ?? '').startsWith('Ride '),
+      ),
+    );
+    const press = (name: string) =>
+      clickThrough(
+        queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+          (each) => each.textContent === name,
+        ),
+      );
+    await press('Pause');
+    await press('Resume');
+    await press('Pause');
+    // The first pause is still being written: the second waits behind it.
+    expect(log).toEqual(['pause']);
+    await act(async () => {
+      releaseFirst(true);
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    });
+    expect(log).toEqual(['pause', 'resume', 'pause']);
   });
 });
 

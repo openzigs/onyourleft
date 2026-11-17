@@ -25,6 +25,7 @@ import { RACE_OFFSET_BOUND_METRES, raceCourse, racePosition, type RaceCourse } f
 import {
   BOT_FINISH_WINDOW_METRES,
   BOT_LANE_DWELL_MS,
+  BOT_LANE_JUDGEMENT_MS,
   BOT_MEMORY_AT_START,
   BOT_PERSONALITIES,
   BOT_SKILLS,
@@ -300,8 +301,10 @@ describe('item timing: what a use is worth, against what the item is held for', 
       ...field([{ id: 'bot', at: 300, lane: 0, held: 'rain-cape' }, ...rival]),
       hazards: [puddle(350, 0)],
     });
-    // A puddle 50 m ahead in its lane, and a rival 10 m behind in the lane beside it.
-    expect(decide(ahead([{ id: 'x', at: 290, lane: 1 }]), 'defensive')).toMatchObject({
+    // A puddle 50 m ahead in its lane, and a rival with a gust 10 m behind in the lane beside it.
+    expect(
+      decide(ahead([{ id: 'x', at: 290, lane: 1, held: 'crosswind-gust' }]), 'defensive'),
+    ).toMatchObject({
       use: false,
       lane: 0,
     });
@@ -412,13 +415,26 @@ describe('the last lap and the last call', () => {
 });
 
 describe('lanes: a score per lane, and a dwell', () => {
-  it('moves out of the lane of a racer close behind, and stays put holding a cape, which it puts on', () => {
-    const chased = (held: ItemKind | null): ItemRaceState =>
+  it('moves out of the lane of a racer close behind with a gust, and stays put holding a cape, which it puts on', () => {
+    const chased = (
+      held: ItemKind | null,
+      theirs: ItemKind | null = 'crosswind-gust',
+    ): ItemRaceState =>
       field([
         { id: 'bot', at: 100, held },
-        { id: 'x', at: 92 },
+        { id: 'x', at: 92, held: theirs },
       ]);
     expect(decide(chased(null), 'defensive').lane).not.toBe(1);
+    // #2665: a racer behind who holds no gust cannot hit it from there, so it rides on.
+    for (const theirs of [null, 'tailwind', 'tow', 'puddle', 'rain-cape'] as const) {
+      expect(decide(chased(null, theirs), 'defensive').lane, String(theirs)).toBe(1);
+    }
+    // Nor one with a gust beyond its reach behind.
+    const far = field([
+      { id: 'bot', at: 100 },
+      { id: 'x', at: 100 - GUST_REACH_METRES - 1, held: 'crosswind-gust' },
+    ]);
+    expect(decide(far, 'defensive').lane).toBe(1);
     expect(decide(chased('rain-cape'), 'defensive')).toEqual({
       use: true,
       lane: 1,
@@ -449,8 +465,9 @@ describe('lanes: a score per lane, and a dwell', () => {
   });
 
   it('a naive bot counts puddles a tick of travel ahead when it picks a lane, beyond the fixed look-ahead (#1900)', () => {
+    // At 55 s: a spell of lane judgement (#2665) in which this seed's keeps it in its lane.
     const road = (hazards: ItemRaceState['hazards']): ItemRaceState => ({
-      ...field([{ id: 'bot', at: 100 }]),
+      ...field([{ id: 'bot', at: 100 }], 55_000),
       hazards,
     });
     const naive = (race: ItemRaceState, travel: number): number =>
@@ -481,7 +498,7 @@ describe('lanes: a score per lane, and a dwell', () => {
   it('holding a puddle, sits in the lane of the racer behind who is about to reach the point', () => {
     const race = field([
       { id: 'bot', at: 200, held: 'puddle' },
-      { id: 'x', at: 190, lane: 0 },
+      { id: 'x', at: 190, lane: 0, held: 'crosswind-gust' },
     ]);
     // The lane change lands before the items resolve, so the puddle lies in lane 0.
     expect(decide(race, 'aggressive')).toMatchObject({ use: true, lane: 0 });
@@ -517,16 +534,25 @@ describe('lanes: a score per lane, and a dwell', () => {
   it.each([1_000, 250, 50])(
     'changes lane at most once per dwell with a racer weaving behind it, on %s ms ticks',
     (tickMs) => {
-      let race = createItemRace({
-        course: COURSE,
-        seed: SEED,
-        itemsOn: false,
-        racerIds: ['bot', 'x'],
-        startMs: 0,
+      // The weaver holds a gust it never sends, so the bot has reason to move every time (#2665).
+      const armed = (state: ItemRaceState): ItemRaceState => ({
+        ...state,
+        racers: state.racers.map((entry) =>
+          entry.racer.id === 'x' ? { ...entry, held: 'crosswind-gust' } : entry,
+        ),
       });
+      let race = armed(
+        createItemRace({
+          course: COURSE,
+          seed: SEED,
+          itemsOn: true,
+          racerIds: ['bot', 'x'],
+          startMs: 0,
+        }),
+      );
       let memory = BOT_MEMORY_AT_START;
       const changes: number[] = [];
-      for (let tick = 1; tick * tickMs <= 60_000; tick += 1) {
+      for (let tick = 1; tick * tickMs <= 120_000; tick += 1) {
         const decision = strategicBotDecision(
           race,
           'bot',
@@ -539,11 +565,13 @@ describe('lanes: a score per lane, and a dwell', () => {
         const bot = race.racers.find((entry) => entry.racer.id === 'bot') as LapRacer;
         const atMs = tick * tickMs;
         // The weaver rides 8 m behind and moves into the bot's lane every tick.
-        race = stepRace(race, {
-          atMs,
-          effortDistances: { bot: (8 * atMs) / 1_000 + 8, x: (8 * atMs) / 1_000 },
-          lanes: { bot: decision.lane, x: bot.lane },
-        });
+        race = armed(
+          stepRace(race, {
+            atMs,
+            effortDistances: { bot: (8 * atMs) / 1_000 + 8, x: (8 * atMs) / 1_000 },
+            lanes: { bot: decision.lane, x: bot.lane },
+          }),
+        );
         if (decision.lane !== bot.lane) changes.push(atMs);
       }
       // It does move, again and again...
@@ -554,8 +582,8 @@ describe('lanes: a score per lane, and a dwell', () => {
     },
   );
 
-  it('misjudges lanes below crafty, once a dwell of race time, however often it is asked', () => {
-    /** The instants a lone bot changes lane on an empty road, over two minutes. */
+  it('misjudges lanes below crafty, once a long spell of race time, however often it is asked', () => {
+    /** The instants a lone bot changes lane on an empty road, over five minutes. */
     const wanders = (skill: BotSkill, tickMs: number): number[] => {
       let race = createItemRace({
         course: COURSE,
@@ -566,7 +594,7 @@ describe('lanes: a score per lane, and a dwell', () => {
       });
       let memory = BOT_MEMORY_AT_START;
       const changes: number[] = [];
-      for (let atMs = tickMs; atMs <= 120_000; atMs += tickMs) {
+      for (let atMs = tickMs; atMs <= 300_000; atMs += tickMs) {
         const decision = strategicBotDecision(
           race,
           'bot',
@@ -587,7 +615,12 @@ describe('lanes: a score per lane, and a dwell', () => {
     };
     expect(wanders('crafty', 1_000)).toEqual([]);
     const naive = wanders('naive', 1_000);
-    expect(naive.length).toBeGreaterThan(5);
+    expect(naive.length).toBeGreaterThan(2);
+    // #2665: a preference held for a spell, so it wanders seldom: never twice within a dwell,
+    // and at most once a spell (it changes one lane at a time, so a spell may take two).
+    const gaps = naive.slice(1).map((at, index) => at - (naive[index] as number));
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(BOT_LANE_DWELL_MS);
+    expect(naive.length).toBeLessThanOrEqual(2 * (300_000 / BOT_LANE_JUDGEMENT_MS));
     // Drawn per span of race time, not per tick: four times the ticks, the same wandering.
     expect(wanders('naive', 250)).toEqual(naive);
   });
@@ -848,7 +881,7 @@ describe('over a thousand seeded races', () => {
 });
 
 describe('what a decision reads, and what it does not', () => {
-  it('is the same whatever item or cape another racer holds, which a rider cannot see', () => {
+  it('is the same whatever item or cape another racer holds, which a rider cannot see, but for a gust held behind it', () => {
     const run = simulateRace(7, [
       strategy('aggressive', 'canny'),
       strategy('defensive', 'crafty'),
@@ -872,13 +905,22 @@ describe('what a decision reads, and what it does not', () => {
           },
         ];
         for (const state of owns) {
+          // #2665: a gust held within reach behind it is what the HUD warns a rider of
+          // (`lap-race-hud.ts` §`incomingHit`), so that is kept as it is; every other item
+          // and every cape is changed. A rival anywhere else is handed a gust.
+          const mine = state.racers.find((entry) => entry.racer.id === id) as LapRacer;
           const blind: ItemRaceState = {
             ...state,
-            racers: state.racers.map((entry) =>
-              entry.racer.id === id
-                ? entry
-                : { ...entry, held: 'crosswind-gust', capeUntilMs: 1e9 },
-            ),
+            racers: state.racers.map((entry) => {
+              if (entry.racer.id === id) return entry;
+              const behind = racePosition(mine.racer) - racePosition(entry.racer);
+              if (behind <= 0 || behind > GUST_REACH_METRES) {
+                return { ...entry, held: 'crosswind-gust', capeUntilMs: 1e9 };
+              }
+              const other: ItemKind | null =
+                entry.held === 'crosswind-gust' ? entry.held : entry.held === null ? 'tow' : null;
+              return { ...entry, held: other, capeUntilMs: 1e9 };
+            }),
           };
           const at = Number(id.slice(1));
           // An empty memory, and one with every rival lined up behind it: half of them
@@ -964,7 +1006,7 @@ describe('what a decision reads, and what it does not', () => {
   it('remembers when it moved and what it holds, and forgets the item once used', () => {
     const race = field([
       { id: 'bot', at: 100, held: 'puddle' },
-      { id: 'x', at: 92 },
+      { id: 'x', at: 92, held: 'crosswind-gust' },
     ]);
     const moved = decide(race, 'defensive');
     expect(moved.lane).not.toBe(1);

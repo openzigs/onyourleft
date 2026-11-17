@@ -2307,7 +2307,10 @@ on every device** (D-3). Where each part lives:
 **Water stays #459's shader on the realistic rungs, argued rather than defaulted** (#481): no D-4
 source publishes a water surface, a tiled photograph of ripples is a frozen picture, and on a
 realistic rung the shader reflects the HDRI's own zenith and horizon — `three-renderer.ts`
-§`WaterBelt.update`. **What the soak left open** is filed rather than blocking the offer, because the
+§`WaterBelt.update`. Since [#2701](https://github.com/openzigs/onyourleft/issues/2701) its ripples, in
+both worlds, are five quasi-periodic waves scaled by three long gusts that also tilt the far water, so a
+lake no longer repeats #459's 7.4 m tile — `three-renderer.ts` §`WATER_RIPPLES`, held by
+`water-pattern.test.ts`. **What the soak left open** is filed rather than blocking the offer, because the
 world is whole and off by default: the buildings had no openings
 ([#500](https://github.com/openzigs/onyourleft/issues/500), which cut them — see below), and the water's banding, bank and bridge
 seam, plus a soak route with no lake and no wall

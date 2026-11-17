@@ -1433,6 +1433,70 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       expect(mounted?.container.textContent).not.toContain(ROOM_RECORDING_PAUSED_TEXT);
       await rig.done();
     });
+
+    /** A room ride on the bench, its recording started and in the state `paused` asks for. */
+    async function inARoom(pausedOnTheRideScreen: boolean) {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      if (pausedOnTheRideScreen) await rig.controller.pause();
+      const clock = new ManualClock();
+      const room = new ScriptedRoom();
+      mounted = await mount(
+        <GameView
+          port={pedallingPort(hillRoute())}
+          trainer={gameTrainerPortOver(rig.controller)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+          room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+          roomId="room-1"
+          riderMass={kilograms(72)}
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      room.accept();
+      room.welcome(0);
+      for (let index = 0; index < 4; index += 1) {
+        await clock.advance(FRAME_MS);
+        await pump(1);
+      }
+      return rig;
+    }
+
+    it('pauses the recording on the HUD’s Pause and resumes it on its Resume, with no notice between (#2656)', async () => {
+      const rig = await inARoom(false);
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      await clickThrough(buttonStarting('Pause'));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).toBe('paused');
+      // The HUD's own Resume is in view, and it resumes this pause: the
+      // notice that sends a rider to the Ride screen would be false.
+      expect(mounted?.container.textContent).not.toContain(ROOM_RECORDING_PAUSED_TEXT);
+      expect(
+        queryAll(mounted?.container ?? document, '.oyl-status').filter((each) =>
+          (each.textContent ?? '').includes('Room:'),
+        ),
+      ).toHaveLength(0);
+      await clickThrough(buttonStarting('Resume'));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      await rig.done();
+    });
+
+    it('leaves a recording the rider paused on the Ride screen paused through the HUD’s Pause and Resume (#2656, #516)', async () => {
+      const rig = await inARoom(true);
+      expect(mounted?.container.textContent).toContain(ROOM_RECORDING_PAUSED_TEXT);
+      await clickThrough(buttonStarting('Pause'));
+      await flush();
+      await clickThrough(buttonStarting('Resume'));
+      await flush();
+      await pump(1);
+      // The game's Resume resumes only a pause its own Pause made.
+      expect(rig.controller.getSnapshot().phase).toBe('paused');
+      expect(mounted?.container.textContent).toContain(ROOM_RECORDING_PAUSED_TEXT);
+      await rig.done();
+    });
   });
 
   /**

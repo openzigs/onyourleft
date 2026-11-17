@@ -32,6 +32,7 @@ export function retainedFrame(frame: SceneFrame): SceneFrame {
         normals: mesh.normals.slice(),
         colours: mesh.colours.slice(),
         fields: mesh.fields.slice(),
+        surfaces: mesh.surfaces.slice(),
         // Owned now, so no build can write over it.
         lease: undefined,
       },
