@@ -70,6 +70,7 @@ export interface RecordedCalls {
   /** #785 — a room ride asked for a recording, and the races noted. */
   recordForRoom: number;
   readonly noteRoomRace: unknown[];
+  readonly noteLapRace: unknown[];
   /** #1318 — the ride screen's *Lap*. */
   markLap: number;
   /** #1042 — the result card's *Done*, and its one announcement. */
@@ -226,6 +227,7 @@ export function stubRideController(
     noteGameRideEnded: [],
     recordForRoom: 0,
     noteRoomRace: [],
+    noteLapRace: [],
     markLap: 0,
     dismissResult: 0,
     noteResultAnnounced: 0,
@@ -317,6 +319,9 @@ export function stubRideController(
     recordForRoom: () => {
       calls.recordForRoom += 1;
       return Promise.resolve(false);
+    },
+    noteLapRace: (race) => {
+      calls.noteLapRace.push(race);
     },
     noteRoomRace: (race) => {
       calls.noteRoomRace.push(race);

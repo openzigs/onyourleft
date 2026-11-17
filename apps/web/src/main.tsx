@@ -98,6 +98,7 @@ import {
 import type { HostedSettingsPort } from './ride-analysis/hosted-settings-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
 import { createReplanPort, type ReplanPort } from './workout/replan-port';
+import { createModelTacticsPort, type ModelTacticsPort } from './game/lap-race/model-tactics-port';
 import { readMaskingGuard } from '@onyourleft/analysis';
 import { keepThisRide } from './camera/keep';
 import { discardKeptFramesWithTheRide } from './camera/kept-frame-discard';
@@ -1124,6 +1125,35 @@ function buildReplanPort(): ReplanPort | undefined {
   });
 }
 
+/**
+ * AI bots in a lap race (#2710, ADR 0071): the ONE production place the
+ * tactics port is built, so `check:wiring` reports `createModelTacticsPort` if
+ * this goes. Over the sealed session the Connect screen keeps (#1192) and the
+ * one instance module (ADR 0036 D-3 (a)): the tactics routes are sealed-only,
+ * so a device with no sealed session sends nothing, and its races are seeded.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * re-plan port beside it.
+ */
+function buildTacticsPort(): ModelTacticsPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const sealed = heldSealedSession({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  return createModelTacticsPort({
+    session: async () => {
+      const held = await sealed();
+      return held.kind === 'open'
+        ? { kind: 'open', channel: held.sealed, token: held.token }
+        : { kind: 'closed' };
+    },
+  });
+}
+
 /** The workout goals panel's port (#1237): the local store, scoped to the local athlete. */
 function buildWorkoutGoalsPort(): WorkoutGoalsPort {
   return {
@@ -1817,6 +1847,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
   const rooms = buildRoomsPort();
+  // #2710: AI bots, built once, for the same reason.
+  const tactics = buildTacticsPort();
   // #946: the menus' sounds, over the ONE audio output the ride's sounds use
   // (one context for the app). The rider's choice is read at each press, so
   // Settings' switch is heard on the very next one.
@@ -1906,6 +1938,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(hostedSettings === undefined ? {} : { hostedSettings })}
           {...(room === undefined ? {} : { room })}
           {...(rooms === undefined ? {} : { rooms })}
+          {...(tactics === undefined ? {} : { tactics })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}

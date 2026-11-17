@@ -238,6 +238,43 @@ export const CAMERA_FRAME_SOURCE: RecordMigration<PersistedCameraFrameV20, Persi
 };
 
 /**
+ * Version 22 — #2710: a ride may carry the races with AI bots it was ridden
+ * in, `rideFacts.lapRaces` (ADR 0071 D-4.4: *"stored on the device, with the
+ * ride, at a new store schema version with a tested `down`"*).
+ *
+ * `up` changes nothing: no ride written at version 21 or before was ridden
+ * against AI bots, so none has a record to gain. A row that already carries
+ * one — the one way is a version-22 row re-imported raw into an older
+ * database — keeps it.
+ *
+ * `down` removes the field. ⚠️ **A race's record is lost on the way back, and
+ * nothing else is**: a version-21 build has no reader for it, so it could
+ * neither show nor replay it, and the ride itself — its streams, laps and
+ * every other fact — is untouched. The account export does not carry the
+ * record (it stays on the device, ADR 0071 §"Not decided here"), so export →
+ * downgrade → re-import loses it the same way.
+ *
+ * Total over whatever is on disk (#815's review): it copies every key and never
+ * throws, so one odd row cannot stop the database opening.
+ */
+export const ACTIVITY_LAP_RACES: RecordMigration<PersistedActivity, PersistedActivity> = {
+  toVersion: 22,
+  table: TABLE.activities,
+  description:
+    'let a ride keep the races with AI bots it was ridden in; up changes nothing, and down drops those races’ records',
+  up(before: PersistedActivity): PersistedActivity {
+    return { ...before };
+  },
+  down(after: PersistedActivity): PersistedActivity {
+    const facts: unknown = after.rideFacts;
+    if (typeof facts !== 'object' || facts === null || !('lapRaces' in facts)) return { ...after };
+    const kept: Record<string, unknown> = { ...(facts as Record<string, unknown>) };
+    delete kept.lapRaces;
+    return { ...after, rideFacts: kept };
+  },
+};
+
+/**
  * Every migration this build knows how to apply, in ascending `toVersion`.
  *
  * `ActivityStore` hands each one to Dexie as the `.upgrade()` of the version it
@@ -247,6 +284,7 @@ export const SCHEMA_MIGRATIONS: readonly AnyRecordMigration[] = [
   SIDE_REPORT_POSE_SUMMARY,
   ACTIVITY_MAY_BE_RACED,
   CAMERA_FRAME_SOURCE,
+  ACTIVITY_LAP_RACES,
 ];
 
 /**

@@ -253,6 +253,133 @@ export interface LapRaceOffer {
    * it stands and links there.
    */
   readonly assisted: boolean;
+  /**
+   * AI bots (#2710, ADR 0071 D-1, D-5): present only while the rider's
+   * instance offers its own local model to them. Chosen in
+   * {@link LapRaceChoice.aiBots}; ridden only once a consent names the
+   * instance and its model's address, asked here and nowhere else.
+   */
+  readonly ai?: AiBotsOffer | undefined;
+}
+
+/** What the chooser offers of AI bots, from what the rider's instance last said (#2710). */
+export interface AiBotsOffer {
+  /** The instance a consent names, as it names itself. */
+  readonly instance: string;
+  /** Its local model's address now: what a consent names. */
+  readonly modelAddress: string;
+  /** Whether the rider's consent names that address now. */
+  readonly consented: boolean;
+  /** The rider agreed: record a consent naming {@link instance} and {@link modelAddress}. */
+  readonly onConsent: () => void;
+  /** Withdraw the rider's consent (ADR 0071 D-5.4). */
+  readonly onWithdraw: () => void;
+  /** The last consent call could not reach the instance. */
+  readonly problem: boolean;
+}
+
+/**
+ * The words of the AI bots option and its consent — #2710, ADR 0071 D-1.1 and
+ * D-5.2: the consent names the endpoint, the rider's instance and its local
+ * model's address, and says what is sent. ⚠️ **Draft wording for the owner's
+ * approval with its screenshots** (D-1.1: *"The wording is #2710's, approved by
+ * the owner"*).
+ */
+export const AI_BOTS_TEXT = {
+  label: 'AI bots',
+  hint:
+    'Your instance’s own model picks the bots’ moves as the race goes. The bots keep their ' +
+    'strength and tire as usual, and any move the model misses is ridden the usual way. ' +
+    'Nothing in the race changes what your trainer is sent.',
+  consentTitle: 'Agree to AI bots',
+  consent: (instance: string, modelAddress: string): string =>
+    `Every few seconds of the race, this device sends the race as it stands to your instance ` +
+    `at ${instance}, and your instance asks its own model at ${modelAddress} for the bots’ ` +
+    `moves. What is sent: each bot’s place, gaps, energy and move, and your place, who is just ` +
+    `ahead of you, your gaps, whether you are drafting, and your watts per kilogram. No ` +
+    `location, no names and no dates. Your instance keeps none of it. ` +
+    `While the race runs, write-ups on your instance wait. You can withdraw this at any time.`,
+  agree: 'Agree and race AI bots',
+  notNow: 'Not now',
+  consented: (instance: string, modelAddress: string): string =>
+    `You agreed to your instance at ${instance} asking its model at ${modelAddress}.`,
+  withdraw: 'Withdraw consent',
+  problem: 'Your instance could not be reached. Try again when it is.',
+} as const;
+
+/**
+ * The AI bots switch, and the consent it asks for — #2710. A race chosen with
+ * it and no consent is the seeded race: the consent is asked here, on the
+ * first race, and again after a withdrawal or a change of model address.
+ */
+function AiBotsControl(props: {
+  readonly ai: AiBotsOffer;
+  readonly chosen: boolean;
+  readonly onChoose: (value: boolean) => void;
+  readonly id: (part: string) => string;
+}): JSX.Element {
+  const { ai, chosen, id } = props;
+  return (
+    <div className="oyl-game__ai-bots tw:flex tw:flex-col tw:items-start tw:gap-xs">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={chosen}
+          aria-describedby={id('ai-hint')}
+          onChange={(event) => {
+            props.onChoose(event.target.checked);
+          }}
+        />
+        {AI_BOTS_TEXT.label}
+      </label>
+      <p id={id('ai-hint')} className="tw:m-0">
+        {AI_BOTS_TEXT.hint}
+      </p>
+      {chosen && !ai.consented ? (
+        <div
+          role="group"
+          aria-labelledby={id('ai-consent-title')}
+          aria-describedby={id('ai-consent')}
+          className="tw:flex tw:flex-col tw:items-start tw:gap-xs"
+        >
+          <p id={id('ai-consent-title')} className="tw:m-0">
+            <strong>{AI_BOTS_TEXT.consentTitle}</strong>
+          </p>
+          <p id={id('ai-consent')} className="tw:m-0">
+            {AI_BOTS_TEXT.consent(ai.instance, ai.modelAddress)}
+          </p>
+          <button type="button" className="oyl-button" onClick={ai.onConsent}>
+            {AI_BOTS_TEXT.agree}
+          </button>
+          <button
+            type="button"
+            className="oyl-button oyl-button--secondary"
+            onClick={() => {
+              props.onChoose(false);
+            }}
+          >
+            {AI_BOTS_TEXT.notNow}
+          </button>
+        </div>
+      ) : null}
+      {ai.consented ? (
+        <>
+          <p className="tw:m-0">{AI_BOTS_TEXT.consented(ai.instance, ai.modelAddress)}</p>
+          <button
+            type="button"
+            className="oyl-button oyl-button--secondary"
+            onClick={ai.onWithdraw}
+          >
+            {AI_BOTS_TEXT.withdraw}
+          </button>
+        </>
+      ) : null}
+      <p role="status" className="tw:m-0">
+        {ai.problem ? AI_BOTS_TEXT.problem : ''}
+      </p>
+    </div>
+  );
 }
 
 /**
@@ -1846,6 +1973,16 @@ function LapRaceControl(props: {
             />
             {LAP_RACE_CHOICE_TEXT.items}
           </label>
+          {offer.ai === undefined ? null : (
+            <AiBotsControl
+              ai={offer.ai}
+              chosen={offer.choice.aiBots === true}
+              onChoose={(aiBots) => {
+                change({ aiBots });
+              }}
+              id={id}
+            />
+          )}
           <p className="tw:m-0">
             {offer.assisted ? LAP_RACE_CHOICE_TEXT.assistedOn : LAP_RACE_CHOICE_TEXT.assistedOff}{' '}
             <a href={hrefFor(routeById('settings'))}>{LAP_RACE_CHOICE_TEXT.assistedLink}</a>
