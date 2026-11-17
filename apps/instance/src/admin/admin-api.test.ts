@@ -20,7 +20,7 @@ import {
   type ModerationWorld,
 } from '../moderation/moderation-testing.ts';
 import { adminCode } from '../operator/commands.ts';
-import { json, type Route } from '../route-kit.ts';
+import { json, type ClientInfo, type Route } from '../route-kit.ts';
 import { ROUTES } from '../routes.ts';
 import { ADMIN_COOKIE, type Admin, type AdminSeam } from './admin.ts';
 import { adminRequest, signInWith, TEST_HOST } from './admin-testing.ts';
@@ -82,7 +82,8 @@ describe('the API ignores the admin cookie (#2641)', () => {
     expect(codeOf(await answer.json())).toBe('sealed_required');
     // The cookie was the admin layer's all along: the page still reads.
     expect(
-      (await world.instance.handler(adminRequest('GET', '/admin', { cookie: token }))).status,
+      (await world.instance.handler(adminRequest('GET', '/admin/status', { cookie: token })))
+        .status,
     ).toBe(200);
   });
 });
@@ -95,9 +96,14 @@ describe('the admin seam reaches a route only as its `admin` mark says (#2641, A
   afterAll(() => world.close());
 
   /** An admin layer that dispatches `path` through the seam, as the caller given. */
-  const dispatching = (path: string, caller: () => Caller): Admin => ({
+  const dispatching = (
+    path: string,
+    caller: () => Caller,
+    method: 'GET' | 'POST' | 'DELETE' = 'GET',
+    body?: Readonly<Record<string, unknown>>,
+  ): Admin => ({
     handle: (_request, _body, client, seam: AdminSeam) =>
-      seam.dispatch('GET', path, caller(), client),
+      seam.dispatch(method, path, caller(), client, body),
     flushRefusals: () => Promise.resolve(),
     sweepRateLimits: () => undefined,
     rateLimitSweepPeriodMs: 60_000,
@@ -109,18 +115,35 @@ describe('the admin seam reaches a route only as its `admin` mark says (#2641, A
     standing: 'active',
   });
   let called = 0;
-  const marked = (admin: Route['admin'], path: string): Route => ({
-    method: 'GET',
+  /** What each call of a probe was handed: its body and the channel marker (#2648). */
+  const seen: { readonly json: unknown; readonly channel: unknown }[] = [];
+  const marked = (
+    admin: Route['admin'],
+    path: string,
+    method: 'GET' | 'POST' | 'DELETE' = 'GET',
+  ): Route => ({
+    method,
     path,
-    operationId: `probe${path.replaceAll('/', '')}`,
+    operationId: `probe${method}${path.replaceAll('/', '')}`,
     summary: 'A probe.',
     reaches: 'owner',
     identity: true,
     auth: 'session',
     ...(admin === undefined ? {} : { admin }),
+    ...(method === 'POST'
+      ? {
+          request: {
+            type: 'object',
+            properties: { on: { type: 'boolean' } },
+            required: [],
+            additionalProperties: false,
+          },
+        }
+      : {}),
     response: { contentType: 'application/json', schema: { type: 'object', description: 'x' } },
-    handle: () => {
+    handle: (context) => {
       called += 1;
+      seen.push({ json: context.json, channel: context.adminChannel });
       return json({ ok: true });
     },
   });
@@ -128,9 +151,21 @@ describe('the admin seam reaches a route only as its `admin` mark says (#2641, A
     marked('read', '/v1/probe/read'),
     marked('never', '/v1/probe/never'),
     marked(undefined, '/v1/probe/unmarked'),
+    // #2648: changes, by method, and a GET marked `change` (which no route is).
+    marked('change', '/v1/probe/change', 'POST'),
+    marked('change', '/v1/probe/change', 'DELETE'),
+    marked('read', '/v1/probe/read-post', 'POST'),
+    marked('never', '/v1/probe/never-post', 'POST'),
+    marked('change', '/v1/probe/change-get'),
   ];
 
-  async function through(path: string, caller: () => Caller): Promise<Response> {
+  async function through(
+    path: string,
+    caller: () => Caller,
+    method: 'GET' | 'POST' | 'DELETE' = 'GET',
+    body?: Readonly<Record<string, unknown>>,
+    client: ClientInfo = { address: null },
+  ): Promise<Response> {
     const handler = createHandler({
       config: testConfig({ moderators: { owner: world.owner.device.publicKey } }),
       version: '9.8.7',
@@ -140,9 +175,9 @@ describe('the admin seam reaches a route only as its `admin` mark says (#2641, A
       identity: world.identity,
       instanceKeys: world.instanceKeys,
       sealed: world.sealed,
-      admin: dispatching(path, caller),
+      admin: dispatching(path, caller, method, body),
     });
-    return handler(adminRequest('GET', '/admin'));
+    return handler(adminRequest('GET', '/admin'), client);
   }
 
   it('calls a `read` route as the owner, and refuses `never` and an unmarked one before calling them', async () => {
@@ -155,6 +190,35 @@ describe('the admin seam reaches a route only as its `admin` mark says (#2641, A
       expect(codeOf(await answer.json())).toBe('not_found');
     }
     expect(called).toBe(1);
+  });
+
+  it('sends a change only to a `change` route, with the body it built and the listener’s marker, and nothing else (#2648)', async () => {
+    called = 0;
+    seen.length = 0;
+    const owner = () => asCaller(world.owner);
+    expect((await through('/v1/probe/change', owner, 'POST', { on: true })).status).toBe(200);
+    expect(
+      (
+        await through('/v1/probe/change', owner, 'DELETE', undefined, {
+          address: null,
+          listener: 'loopback',
+        })
+      ).status,
+    ).toBe(200);
+    expect(seen).toEqual([
+      { json: { on: true }, channel: 'tunnel' },
+      { json: {}, channel: 'loopback' },
+    ]);
+    for (const [path, method] of [
+      ['/v1/probe/read-post', 'POST'],
+      ['/v1/probe/never-post', 'POST'],
+      ['/v1/probe/change-get', 'GET'],
+    ] as const) {
+      const answer = await through(path, owner, method, method === 'POST' ? {} : undefined);
+      expect(answer.status, `${method} ${path}`).toBe(404);
+      expect(codeOf(await answer.json())).toBe('not_found');
+    }
+    expect(called).toBe(2);
   });
 
   it('runs the route’s own reaches check on the seam’s caller: the deputy is answered as no route', async () => {

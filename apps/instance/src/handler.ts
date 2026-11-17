@@ -8,12 +8,13 @@ import {
 } from './admin/admin.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
+import type { Tactics } from './analysis/tactics.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import { errorResponse } from './errors.ts';
 import { logRequest, logUnhandled, type LogSink } from './log.ts';
 import { openApiDocument } from './openapi.ts';
-import type { ClientInfo, InstanceProbes, SidePose } from './route-kit.ts';
+import type { AdminChannel, ClientInfo, InstanceProbes, SidePose } from './route-kit.ts';
 import type { History } from './history/history.ts';
 import type { InstanceKeys } from './keys/instance-keys.ts';
 import { OPERATE_NEEDS_KEYS, type Operate } from './operate/operate.ts';
@@ -167,6 +168,11 @@ export interface HandlerOptions {
    * needs them answers `unavailable`.
    */
   readonly hostedSettings?: HostedSettings;
+  /**
+   * Model-chosen lap-race bot tactics (#2709, ADR 0071). Absent, every route
+   * that needs them answers `unavailable`.
+   */
+  readonly tactics?: Tactics;
   /**
    * The side camera's pictures (#1106). Absent, the route that needs them
    * answers `unavailable`.
@@ -356,7 +362,7 @@ export function createHandler(options: HandlerOptions): Handler {
     body: Uint8Array | null,
     client: ClientInfo,
     sealedRequest: boolean,
-    asOwner?: Caller,
+    asOwner?: { readonly caller: Caller; readonly channel: AdminChannel },
   ): Promise<Response> {
     const identity = options.identity;
     // #2602 (ADR 0047 D-7, D-13): the owner's area is never served in
@@ -376,6 +382,9 @@ export function createHandler(options: HandlerOptions): Handler {
     if (matched.hostedSettings === true && options.hostedSettings === undefined) {
       return errorResponse('unavailable');
     }
+    if (matched.tactics === true && options.tactics === undefined) {
+      return errorResponse('unavailable');
+    }
     if (matched.sidePose === true && options.sidePose === undefined) {
       return errorResponse('unavailable');
     }
@@ -390,7 +399,8 @@ export function createHandler(options: HandlerOptions): Handler {
       // The admin seam's caller is the owner the admin layer signed in: no
       // bearer token is minted or looked up (ADR 0069 D-2). Every check
       // below runs on it as on any other.
-      caller = asOwner ?? (await identity?.authenticate(request.headers.get('authorization')));
+      caller =
+        asOwner?.caller ?? (await identity?.authenticate(request.headers.get('authorization')));
       if (caller === undefined) {
         return errorResponse('unauthenticated', { headers: { 'www-authenticate': 'Bearer' } });
       }
@@ -435,6 +445,7 @@ export function createHandler(options: HandlerOptions): Handler {
       rooms: options.rooms,
       analysis: options.analysis,
       hostedSettings: options.hostedSettings,
+      tactics: options.tactics,
       sidePose: options.sidePose,
       segments: options.segments,
       operate: options.operate,
@@ -442,6 +453,7 @@ export function createHandler(options: HandlerOptions): Handler {
       probes: options.probes,
       sealed: options.sealed,
       sealedRequest,
+      ...(asOwner === undefined ? {} : { adminChannel: asOwner.channel }),
       dispatch: dispatchInner,
     });
   }
@@ -474,32 +486,47 @@ export function createHandler(options: HandlerOptions): Handler {
   /**
    * The admin seam (#2641, ADR 0069 D-2): a route of the table called
    * in-process AS THE OWNER, for a fixed `(method, path)` the admin layer
-   * names — never one from the browser. A route not marked `admin: 'read'` or
-   * `'change'` is `not_found` before it is called; one that is runs through
-   * {@link answer}, so its `reaches` check, its validation and its log write
-   * run unchanged.
+   * names — never one from the browser. A `GET` reaches only a route marked
+   * `admin: 'read'`, and since #2648 a `POST` or `DELETE` only one marked
+   * `'change'`; any other is `not_found` before it is called. One that is
+   * runs through {@link answer}, so its `reaches` check, its validation and
+   * its log write run unchanged — the log's source the channel's, read from
+   * the marker this sets (ADR 0069 D-8). `body` is the JSON the admin layer
+   * built from a form it checked.
    */
   async function dispatchAsOwner(
-    method: 'GET',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     owner: Caller,
     client: ClientInfo,
+    body?: Readonly<Record<string, unknown>>,
   ): Promise<Response> {
     // The origin the Node listener builds every request URL on, never a host anybody typed.
     const url = new URL(`http://instance.invalid${path}`);
+    const admits = method === 'GET' ? 'read' : 'change';
+    const bytes = body === undefined ? null : new TextEncoder().encode(JSON.stringify(body));
     for (const candidate of innerRoutes) {
       const params = matchPath(candidate.path, url.pathname);
       if (params === undefined || candidate.method !== method) continue;
-      if (candidate.admin !== 'read' && candidate.admin !== 'change') break;
+      if (candidate.admin !== admits) break;
+      if (bytes !== null && bytes.byteLength > options.config.bodyLimitBytes) {
+        return errorResponse('payload_too_large');
+      }
       return answer(
         candidate,
         params,
-        new Request(url, { method }),
+        new Request(url, {
+          method,
+          ...(bytes === null
+            ? {}
+            : { headers: { 'content-type': 'application/json' }, body: bytes }),
+        }),
         url,
-        null,
+        bytes,
         client,
         false,
-        owner,
+        // The listener is the adapter's word (`ClientInfo.listener`, ADR 0069 D-5).
+        { caller: owner, channel: client.listener === 'loopback' ? 'loopback' : 'tunnel' },
       );
     }
     return errorResponse('not_found');
