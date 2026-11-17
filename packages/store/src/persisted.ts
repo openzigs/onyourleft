@@ -40,6 +40,7 @@ import {
   UnitError,
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  readLapRaceModelRecord,
   readPacerDecisionRecord,
   readReplanRecord,
   wind as validWind,
@@ -51,6 +52,7 @@ import {
 import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analysis';
 import type {
   GeographicPosition,
+  LapRaceModelRecord,
   PacerDecisionRecord,
   Wind,
   ReplanRecord,
@@ -192,6 +194,11 @@ export interface PersistedRideFacts {
   drafted?: boolean;
   /** @see RideFacts.draftSpans — #2451. Re-read whole on the way in and out: @see draftSpansOf */
   draftSpans?: unknown[];
+  /**
+   * @see RideFacts.lapRaces — #2710, since schema version 22. Plain JSON in
+   * the record's own shape, each re-read on the way in and out: @see lapRacesOf
+   */
+  lapRaces?: unknown[];
   /** @see RideFacts.pacerModel — #2712. Re-read whole on the way in and out: @see pacerModelOf */
   pacerModel?: {
     version: unknown;
@@ -684,6 +691,10 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   if (facts.drafted !== undefined) row.drafted = facts.drafted;
   const spans = draftSpansOf(facts.draftSpans);
   if (spans !== undefined) row.draftSpans = spans.map(({ from, to }) => ({ from, to }));
+  // #2710: a race with AI bots, each record through its reader on the way in
+  // too — one that does not read is dropped, never the ride.
+  const lapRaces = lapRacesOf(facts.lapRaces);
+  if (lapRaces !== undefined) row.lapRaces = [...lapRaces];
   // #2712: the AI pacer's log, through its reader on the way in too.
   const pacer = pacerModelOf(facts.pacerModel);
   if (pacer !== undefined) {
@@ -793,6 +804,21 @@ function pacerWindOf(log: object): Wind | undefined | null {
     if (error instanceof UnitError) return null;
     throw error;
   }
+}
+
+/**
+ * A ride's races with AI bots (#2710, ADR 0071 D-4.4), each read by
+ * `@onyourleft/domain` §`readLapRaceModelRecord`, whole or not at all.
+ * ⚠️ **A record that does not read is dropped, never the ride**, as a room
+ * race is: it is the record of a race beside the ride, and the ride is worth
+ * more. `undefined` when none reads.
+ */
+export function lapRacesOf(value: unknown): readonly LapRaceModelRecord[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const read = (value as readonly unknown[])
+    .map(readLapRaceModelRecord)
+    .filter((record): record is LapRaceModelRecord => record !== undefined);
+  return read.length === 0 ? undefined : read;
 }
 
 /**
@@ -976,6 +1002,8 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   const workoutBlocks = workoutBlockFactsOf(facts.workoutBlocks);
   // #2451: never a throw either. @see draftSpansOf
   const draftSpans = draftSpansOf(facts.draftSpans);
+  // #2710: never a throw either. @see lapRacesOf
+  const lapRaces = lapRacesOf(facts.lapRaces);
   // #2712: never a throw either. @see pacerModelOf
   const pacerModel = pacerModelOf(facts.pacerModel);
   return {
@@ -1028,6 +1056,7 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
       ? {}
       : { drafted: decodedBoolean('activity.rideFacts.drafted', facts.drafted) }),
     ...(draftSpans === undefined ? {} : { draftSpans }),
+    ...(lapRaces === undefined ? {} : { lapRaces }),
     ...(pacerModel === undefined ? {} : { pacerModel }),
   };
 }

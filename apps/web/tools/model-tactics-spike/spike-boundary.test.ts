@@ -6,8 +6,9 @@
  *
  * - **Nothing the app ships imports it.** No module under `apps/web/src/`
  *   that is not a test names this directory, so Vite, which bundles from
- *   `index.html`, never reaches it. (`lap-race-wiring.test.tsx`, a test,
- *   imports the adapter to ride a race in model mode.)
+ *   `index.html`, never reaches it. Since #2710 no test under `src/` names
+ *   it either: `lap-race-wiring.test.tsx` rides its model-mode cases through
+ *   the shipped race (`src/game/lap-race/model-race.ts`).
  * - **No spike module reaches a trainer module** by any static import chain:
  *   the walk `lap-race-cannot-reach-trainer.test.ts` uses, over the spike's
  *   own modules, which reach the race step under `src/` in turn. That file is

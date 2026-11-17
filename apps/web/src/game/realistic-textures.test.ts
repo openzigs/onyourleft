@@ -2495,7 +2495,7 @@ describe('the realistic rider moves like a rider — #625', () => {
           mesh as unknown as {
             geometry: { getAttribute: (name: string) => { getX: (at: number) => number } };
           }
-        ).geometry.getAttribute('oylInstanceSteer');
+        ).geometry.getAttribute('oylRiderInstance');
         expect(steered.getX(0)).toBeCloseTo(steer, 6);
       }
     }

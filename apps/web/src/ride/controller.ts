@@ -70,6 +70,7 @@ import {
   unixSeconds,
   type PacerDecisionRecord,
   type PlayerStatus,
+  type LapRaceModelRecord,
   type ReplanRecord,
   type Seconds,
   type ThresholdTest,
@@ -1285,6 +1286,13 @@ export interface RideController {
    * {@link noteGameRideEnded}'s reason.
    */
   noteRoomRace(race: RoomRaceFact): void;
+  /**
+   * A game ride's race with AI bots ended — #2710, ADR 0071 D-4.4: its seed,
+   * version, log and the rider's input, kept by the RECORDER
+   * (`Recorder.noteLapRace`) and saved as `RideFacts.lapRaces`. With no ride
+   * in progress it is saved with nothing, for {@link noteRoomRace}'s reason.
+   */
+  noteLapRace(race: LapRaceModelRecord): void;
   /**
    * A game ride on a course left the line, crossed it, or ended part-way
    * round — #1312. The laps of a course belong to the RECORDING: each is
@@ -3139,6 +3147,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       // recorder's own, so a ride recovered after a crash keeps them by the
       // one path, as it keeps its laps (#1360's review, B2).
       ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
+      // #2710: the races with AI bots, the recorder's own (memory only).
+      ...(current.lapRaces.length === 0 ? {} : { lapRaces: current.lapRaces }),
       // #1319: the recorder's own, so a recovered ride keeps them by this path.
       ...(current.workoutBlocks.length === 0 ? {} : { workoutBlocks: current.workoutBlocks }),
       // #1326: the store marks this checkpoint saved in the ride's own
@@ -4157,6 +4167,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       // save has already read its races (`saveTheRide`), and the next ride
       // starts a recorder of its own.
       recorder?.noteRoomRace(race);
+    },
+
+    noteLapRace(race: LapRaceModelRecord): void {
+      // No phase check, for `noteRoomRace`'s reason.
+      recorder?.noteLapRace(race);
     },
 
     noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {

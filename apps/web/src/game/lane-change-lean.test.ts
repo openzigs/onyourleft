@@ -17,6 +17,7 @@ import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft
 import { MAXIMUM_STEER_RADIANS, WHEELBASE_METRES, combinedLean, steerAngle } from './bicycle';
 import { MAXIMUM_LEAN_RADIANS, MAXIMUM_ROLL_RADIANS_PER_SECOND } from './racing-line';
 import {
+  BOT_TURN_SPEED_FLOOR,
   LANE_CHANGE_LEAN_LIMIT_RADIANS,
   LANE_CHANGE_TURN_SPEED_FLOOR,
   SWAY_ACCELERATION,
@@ -123,6 +124,15 @@ describe('what the sway draws — laneChangeLean and laneChangeRate', () => {
     expect(laneChangeRate(-4, 20)).toBeCloseTo(-0.2, 12);
     expect(laneChangeRate(4, 2)).toBeCloseTo(4 / LANE_CHANGE_TURN_SPEED_FLOOR, 12);
     expect(laneChangeRate(0, 0)).toBe(0);
+  });
+
+  it('takes a lap-race bot’s turn at its own speed, no slower than its own floor (#2665)', () => {
+    // At 6 m/s the rider's floor of 10 m/s under-turns a bot: its heading
+    // follows the path it rides only at its own speed.
+    expect(laneChangeRate(1.2, 6, BOT_TURN_SPEED_FLOOR)).toBeCloseTo(0.2, 12);
+    expect(laneChangeRate(1.2, 6)).toBeCloseTo(1.2 / LANE_CHANGE_TURN_SPEED_FLOOR, 12);
+    expect(laneChangeRate(1.2, 1, BOT_TURN_SPEED_FLOOR)).toBeCloseTo(0.4, 12);
+    expect(BOT_TURN_SPEED_FLOOR).toBeLessThan(LANE_CHANGE_TURN_SPEED_FLOOR);
   });
 });
 
