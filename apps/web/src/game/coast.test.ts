@@ -209,6 +209,30 @@ describe('no mapped house stands in the drawn water — #2728', () => {
   });
 });
 
+describe('no mapped house stands on an invented stream’s drawn surface — #2728', () => {
+  // #459's valley: an invented stream crosses under the road at its floor. A mapped
+  // town may stand around it (#2691 keeps an invented crossing in a mapped stretch),
+  // and a house on the stream's surface strip stood in the drawn water.
+  const valley = valleyRoute();
+  const origin = corridorOrigin(valley);
+  const crossing = waterways(valley, scatterSeed(valley), NO_LAND_CLASS).crossings[0];
+  if (crossing === undefined) throw new Error('the valley has no stream');
+
+  function verdictsAt(along: number) {
+    const house = buildingBeside(valley, origin, [rectangleBeside(along, 40, 10, 6)], 6);
+    const corridor = corridorOf(valley, [], { buildings: [house] });
+    return footprintPlans(corridor, NO_LAND_CLASS, valley, origin).verdicts;
+  }
+
+  it('drops a house on the stream’s surface strip', () => {
+    expect(verdictsAt(crossing.distance)['on-excluded-land']).toBe(1);
+  });
+
+  it('does not drop the same house beyond the strip — the control', () => {
+    expect(verdictsAt(crossing.distance + 60)['on-excluded-land'] ?? 0).toBe(0);
+  });
+});
+
 describe('people on the coast stand on the drawn ground, never in the sky — #2728', () => {
   const LEVEL = northRoute(3_000, () => 10);
   const ORIGIN = corridorOrigin(LEVEL);

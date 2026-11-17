@@ -119,7 +119,7 @@ export const LAND_CLASS_MAX_BYTES = 8 * 1024 * 1024;
  * to Old Orchard Beach, 179 covered tiles): 40.3 million steps, about 225 000
  * a tile, the densest stretch (Hampton Beach, 17 tiles) 237 000 a tile. Half
  * the corridor's water was lost, everything past about 45 km. Unbudgeted, the
- * whole mask built in 218 ms in Node. **1 000 000** a tile is four times the
+ * whole mask built in 218 to 236 ms in Node (two runs). **1 000 000** a tile is four times the
  * densest stretch measured, and a 600-tile corridor's whole budget
  * (`world-data/corridor.ts` §`CORRIDOR_MAX_TILES`) is 600 million steps:
  * bounded, as it was, but by the corridor's own length.

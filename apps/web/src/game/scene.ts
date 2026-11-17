@@ -118,6 +118,7 @@ import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
+  PEOPLE_FAR_METRES,
   besideSideRoads,
   clearOfPavements,
   footwayWalks,
@@ -132,7 +133,7 @@ import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
 import { bridgeParts, onOpenWater, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
-import { CORRIDOR_HALF_WIDTH_METRES, type WorldCorridor } from './world-data/corridor';
+import type { WorldCorridor } from './world-data/corridor';
 import {
   clearOfDriveways,
   clearOfMappedBuildings,
@@ -672,7 +673,8 @@ function people(
       origin,
       person.x,
       person.z,
-      CORRIDOR_HALF_WIDTH_METRES,
+      // Nobody is drawn beyond this of the camera, so nobody is farther from the road.
+      PEOPLE_FAR_METRES,
     );
     return beside === undefined || !onOpenWater(ways, profile, beside.along, beside.lateral);
   };
