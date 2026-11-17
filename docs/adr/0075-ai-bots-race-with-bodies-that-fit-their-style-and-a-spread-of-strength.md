@@ -257,6 +257,51 @@ D-2.5 as written.
   tier: about 4.2 W/kg at `brisk`, far under a real sprint. Raising it is ADR 0061 D-8.2's knob.
 - **A bot's frontal area.** Every bot keeps the same drag; a light rider is not made smaller.
 
+## What was measured
+
+On the owner's PC (`ssh zigs`, `gemma4:12b`, `think:false`, Ollama's settings unchanged), through
+the shipped `startLapRaceRide`, `askLapRaceRide` and `answerLapRaceRide` with this prompt
+(`tactics-5`), on #2724's harness races: 3 laps of the flat and the hilly 628 m circuit, 7 `brisk`
+bots, the rider at 200 W and 8 m/s, each answer booked at the server's own duration after its ask.
+Version 3 is #2724's six logged races replayed under version 3 from their logs, asking nothing. A
+bot is **dropped** when it is more than 50 m behind the racer ahead of it for 10 s, after the first
+30 s. **Spread** is the first bot's finish to the last's.
+
+| | Version 3 (#2724's logs) | Version 4 (this ADR) |
+|---|---|---|
+| Flat: spread | 0.1, 0.5, 0.4 s | 12.3, 13.9, 2.4, 1.9 s |
+| Flat: bots dropped | 0, 0, 0 | 1, 1, 0, 0 |
+| Hilly: spread | 8.4, 33.6, 21.1 s | 51.9, 37.6, 27.1, 44.7 s |
+| Hilly: bots dropped | 1, 5, 4 | 6, 5, 5, 5 |
+| Lead changes, flat / hilly | 22–27 / 18–26 | 9–28 / 6–15 |
+| Winners, flat | sprinter, breakaway, breakaway | sprinter in all four |
+| Winners, hilly | breakaway in all three | opportunist 3, sprinter 1 |
+| `flyer` efforts named | 420: 167 `tempo`, 183 none, 61 `threshold`, 9 `all-out` | 453: 389 `threshold`, 64 none, no `tempo` or `easy` |
+| `attack` efforts named | 29: 25 `threshold`, 4 none | 93: all `threshold` |
+| Calls | 275, 274 valid, 1 late; median 3.47 s | 367, 365 valid, 0 late; median 3.56 s, p90 4.34 s, highest 4.93 s |
+
+Read plainly:
+
+- **A hilly race splits**, and the field is no longer one group: five or six of seven bots are
+  dropped, and the punchiest bodies (opportunists, a big W′ and a high peak) win. **A flat race ends
+  in a bunch sprint**, as a flat club race does, won by a sprinter, though the bunch now spreads
+  over 2 to 14 s where it finished inside half a second.
+- **Attacks and breakaways are ridden hard**: the model named no `flyer` at `tempo` or `easy`, and
+  D-5 would have ridden one at the move's own target if it had.
+- **No bot blew** (emptied its W′) in any version 4 race; under version 3 one bot blew in each hilly
+  race. Bots that go too hard pay by being dropped, not by blowing.
+- **A climber won no race.** On the hilly circuit, whose climbs are 12 m and as long as its
+  descents, the punchy bodies win; the climber's share was raised from 1.06 to 1.08 and its W′ from
+  0.85 to 1.0 after the first round, and its best was second. Every bot has the same frontal area,
+  so a light rider gains nothing on the flat or downhill (Not decided here).
+- **Different every race, the same seed alike.** Each race draws its seed at the start, so its field
+  and its winner differ; seeds 1, 2 and 3 gave three different fields and podiums. One seed ridden
+  twice gave the same top two on the flat and the same order on the hills, with different gaps
+  (12.3 and 13.9 s; 37.6 and 27.1 s): the bodies decide the order, and the model's temperature the
+  margins.
+- **The longer prompt did not slow the call past its limit**: no answer was late, but the highest,
+  4.93 s, is close to the 5 s late limit (ADR 0071 D-7).
+
 ## What would make this ADR wrong
 
 - **The field still finishes together on the flat** on the tablet: then the spread is too small or
