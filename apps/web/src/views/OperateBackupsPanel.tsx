@@ -4,22 +4,21 @@ import {
   BACK_UP_NOW_CONFIRM_TEXT,
   BACKUP_FAILED_TEXT,
   BACKUP_NOT_ASKED_TEXT,
-  BACKUP_OFF_BOX_TEXT,
   BACKUP_WAITING_TEXT,
+  backupLine,
   BACKUPS_LIST_TEXT,
   BACKUPS_UNREADABLE_TEXT,
   backupsStaleText,
-  bytesText,
-  countText,
-  durationText,
   momentText,
   NO_BACKUP_TEXT,
   NO_SNAPSHOT_TO_RESTORE_TEXT,
   OFF_BOX_FAILED_TEXT,
+  RESTORE_HEADING,
   RESTORE_ONE_OFF_TEXT,
   RESTORE_PREFACE_TEXT,
   RESTORE_WHY_TEXT,
-  snapshotPlace,
+  restoreSteps,
+  type OperateLine,
 } from '@onyourleft/operate-text';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
@@ -99,28 +98,28 @@ function newestServiceSnapshot(backups: OperateBackups): Snapshot | undefined {
   );
 }
 
+/** One shared line, its machine names drawn as code. */
+function Line({ line }: { readonly line: OperateLine }): JSX.Element {
+  return (
+    <>
+      {line.map((part, index) =>
+        typeof part === 'string' ? part : <code key={String(index)}>{part.code}</code>,
+      )}
+    </>
+  );
+}
+
 function Row({ backup }: { readonly backup: OperateBackup }): JSX.Element {
-  const age = `${durationText(backup.ageSeconds)} ago`;
-  if (backup.outcome === 'failed') {
-    return (
-      <li>
-        <strong>{momentText(backup.at)}</strong>, {age}: no snapshot was made (
-        <code>{backup.error}</code>
-        ).
+  const { moment, rest } = backupLine(backup);
+  return (
+    <li>
+      <strong>{moment}</strong>
+      <Line line={rest} />
+      {backup.outcome === 'failed' ? (
         <StatusMessage tone="warning" label="Failed">
           {BACKUP_FAILED_TEXT}
         </StatusMessage>
-      </li>
-    );
-  }
-  return (
-    <li>
-      <strong>{momentText(backup.at)}</strong>, {age}
-      {backup.requested ? ', asked for from the app' : ''}
-      {backup.intervalSeconds === null ? ', a one-off' : ''}: {bytesText(backup.sizeBytes)},{' '}
-      {countText(backup.rows, 'row', 'rows')}, {countText(backup.blobs, 'blob', 'blobs')};{' '}
-      {BACKUP_OFF_BOX_TEXT[backup.offBox]}. <code>{backup.snapshot}</code>
-      {backup.offBox === 'failed' ? (
+      ) : backup.offBox === 'failed' ? (
         <StatusMessage tone="warning" label="Off-box copy failed">
           {OFF_BOX_FAILED_TEXT}
         </StatusMessage>
@@ -144,7 +143,7 @@ function RestoreSteps({ snapshots }: { readonly snapshots: readonly Snapshot[] }
           </>
         }
       >
-        Restoring a snapshot
+        {RESTORE_HEADING}
       </SectionHeading>
       <p>{RESTORE_PREFACE_TEXT}</p>
       {chosen === undefined ? (
@@ -169,35 +168,11 @@ function RestoreSteps({ snapshots }: { readonly snapshots: readonly Snapshot[] }
             </select>
           </p>
           <ol className="oyl-operate__restore">
-            <li>
-              Stop the instance and the backup service:{' '}
-              <code>docker compose stop instance backup</code>
-            </li>
-            <li>
-              Restore the snapshot. <code>--force</code> writes over the data that is there now;
-              without it the restore refuses:{' '}
-              <code>
-                {`docker compose run --rm --no-deps --entrypoint node backup src/operator/cli.ts restore ${snapshotPlace(chosen)} --force`}
-              </code>
-            </li>
-            <li>
-              A restore rotates the instance’s encryption key as its last step, but the backup
-              service holds no secret key, so rotate it in the instance service:{' '}
-              <code>
-                docker compose run --rm --no-deps -T instance node src/operator/cli.ts instance-key
-                rotate
-              </code>
-            </li>
-            <li>
-              Check what is in place: it should say {countText(chosen.rows, 'row', 'rows')} and{' '}
-              {countText(chosen.blobs, 'blob', 'blobs')}.{' '}
-              <code>
-                docker compose run --rm --no-deps -T instance node src/operator/cli.ts verify
-              </code>
-            </li>
-            <li>
-              Start them again: <code>docker compose up -d instance backup</code>
-            </li>
+            {restoreSteps(chosen).map((step, index) => (
+              <li key={String(index)}>
+                <Line line={step} />
+              </li>
+            ))}
           </ol>
         </>
       )}

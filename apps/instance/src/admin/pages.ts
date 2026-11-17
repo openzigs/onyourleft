@@ -35,6 +35,25 @@
  */
 
 import {
+  BACK_UP_NOW_CONFIRM_TEXT,
+  BACKUP_FAILED_TEXT,
+  BACKUP_NOT_ASKED_TEXT,
+  BACKUP_WAITING_TEXT,
+  backupFactRows,
+  backupLine,
+  BACKUPS_LIST_TEXT,
+  BACKUPS_UNREADABLE_TEXT,
+  backupsStaleText,
+  NO_BACKUP_TEXT,
+  NO_SNAPSHOT_TO_RESTORE_TEXT,
+  OFF_BOX_FAILED_TEXT,
+  RESTORE_HEADING,
+  RESTORE_ONE_OFF_TEXT,
+  RESTORE_PREFACE_TEXT,
+  RESTORE_WHY_TEXT,
+  restoreSteps,
+  type OperateBackupFacts,
+  type OperateBackupLine,
   ACCOUNTS_UNREADABLE_TEXT,
   accountStandingLines,
   MODERATORS_ALWAYS_JOIN,
@@ -1002,4 +1021,134 @@ ${accountStandingLines(view.status.counts.athletes)
 </ul>
 ${modePart(view.status)}`;
   return `${top}${counted}${registrationsPart(view)}${elsewhere}`;
+}
+
+/** One record as `GET /v1/operate/backups` answers it (#2647): its line's fields and its further facts. */
+export type BackupRecordAnswer = OperateBackupLine & OperateBackupFacts & { readonly id: number };
+
+/** What the last "back up now" came to, read back after it. */
+export type BackupsNotice =
+  /** The route took it; `ok` when the list read back shows it waiting. */
+  | { readonly kind: 'asked'; readonly ok: boolean }
+  /** `too_many`, with the route's own sentence. */
+  | { readonly kind: 'refused'; readonly sentence: string }
+  /** Any other answer. */
+  | { readonly kind: 'not-asked' };
+
+/** What the Backups page draws: the route's read, the session, and the last request's notice. */
+export interface BackupsView {
+  readonly backups:
+    | { readonly records: readonly BackupRecordAnswer[]; readonly pendingSince: string | null }
+    | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: BackupsNotice | null;
+}
+
+/** Said in a code session in place of "back up now" (ADR 0069 Q-A). */
+export const BACKUPS_READS_ONLY_TEXT =
+  'A one-time code’s session reads this page and changes nothing. Sign in with a passkey to back up now: it asks your passkey again.';
+
+/** Said when the route took the request and the list read back shows none waiting. */
+export const BACKUP_NOT_SHOWN_TEXT =
+  'The instance did not show the request waiting when the list was read again, so it may not have been taken.';
+
+export const BACK_UP_NOW_BUTTON = 'Back up now';
+export const BACKUPS_READ_AGAIN = 'Read the list again';
+
+/** Said beside the restore steps: they are for the newest snapshot, and how to restore another. */
+export const RESTORE_NEWEST_TEXT =
+  'These are the steps for the newest snapshot. For an older one, put its directory’s name, shown in the list above, in place of this one’s in the second step.';
+
+type Snapshot = Extract<BackupRecordAnswer, { readonly outcome: 'done' }>;
+
+function backupItem(backup: BackupRecordAnswer): string {
+  const { moment, rest } = backupLine(backup);
+  const warning =
+    backup.outcome === 'failed'
+      ? `<p class="warning"><strong>Failed:</strong> ${escapeHtml(BACKUP_FAILED_TEXT)}</p>\n`
+      : backup.offBox === 'failed'
+        ? `<p class="warning"><strong>Off-box copy failed:</strong> ${escapeHtml(OFF_BOX_FAILED_TEXT)}</p>\n`
+        : '';
+  return `<li>
+<p><strong>${escapeHtml(moment)}</strong>${lineHtml(rest)}</p>
+${warning}<dl class="facts">
+${backupFactRows(backup).map(fact).join('\n')}
+</dl>
+</li>`;
+}
+
+function backUpNowPart(view: BackupsView, waiting: boolean): string {
+  const notice =
+    view.notice === null
+      ? ''
+      : view.notice.kind === 'asked'
+        ? view.notice.ok
+          ? ''
+          : `<p class="problem" role="alert">${escapeHtml(BACKUP_NOT_SHOWN_TEXT)}</p>\n`
+        : `<p class="problem" role="alert">${escapeHtml(
+            view.notice.kind === 'refused' ? view.notice.sentence : BACKUP_NOT_ASKED_TEXT,
+          )}</p>\n`;
+  if (waiting) {
+    return `<p class="notice" role="status">${escapeHtml(BACKUP_WAITING_TEXT)}</p>
+<p><a href="/admin/backups">${escapeHtml(BACKUPS_READ_AGAIN)}</a></p>
+${notice}`;
+  }
+  if (view.strength !== 'passkey')
+    return `<p>${escapeHtml(BACKUPS_READS_ONLY_TEXT)}</p>\n${notice}`;
+  return `<p>${escapeHtml(BACK_UP_NOW_CONFIRM_TEXT)}</p>
+${stepUpForm('/admin/backups', 'backup_now', view.csrf, BACK_UP_NOW_BUTTON, '', BACK_UP_NOW_BUTTON)}
+${notice}`;
+}
+
+function restorePart(snapshots: readonly Snapshot[]): string {
+  const newest = snapshots[0];
+  const steps =
+    newest === undefined
+      ? `<p>${escapeHtml(NO_SNAPSHOT_TO_RESTORE_TEXT)}</p>`
+      : `<p>${escapeHtml(RESTORE_NEWEST_TEXT)}</p>
+<p>Snapshot: <code>${escapeHtml(newest.snapshot)}</code></p>
+<ol class="restore">
+${restoreSteps(newest)
+  .map((step) => `<li>${lineHtml(step)}</li>`)
+  .join('\n')}
+</ol>`;
+  return `<h2>${escapeHtml(RESTORE_HEADING)}</h2>
+<p>${escapeHtml(RESTORE_PREFACE_TEXT)}</p>
+<p class="hint">${escapeHtml(RESTORE_WHY_TEXT)}</p>
+<p class="hint">${escapeHtml(RESTORE_ONE_OFF_TEXT)}</p>
+${steps}`;
+}
+
+/**
+ * The Backups page's body (#2647): what `GET /v1/operate/backups` answered,
+ * each record's line in the app panel's words (`@onyourleft/operate-text`)
+ * with the route's further facts under it, "back up now" in a passkey session
+ * behind a fresh step-up, and the restore steps as text — restore stays on
+ * the CLI. No host path: a snapshot is named by its directory, and `/backups`
+ * is the folder inside the `backup` service.
+ */
+export function backupsBody(view: BackupsView): string {
+  if (view.backups === undefined) {
+    return `<p class="problem">${escapeHtml(BACKUPS_UNREADABLE_TEXT)}</p>`;
+  }
+  const { records, pendingSince } = view.backups;
+  const newest = records.find(
+    (each): each is Snapshot => each.outcome === 'done' && each.intervalSeconds !== null,
+  );
+  const stale =
+    newest !== undefined &&
+    newest.intervalSeconds !== null &&
+    newest.ageSeconds > 2 * newest.intervalSeconds
+      ? `<p class="warning"><strong>Stale:</strong> ${escapeHtml(backupsStaleText(newest.ageSeconds, newest.intervalSeconds))}</p>\n`
+      : '';
+  const list =
+    records.length === 0
+      ? `<p>${escapeHtml(NO_BACKUP_TEXT)}</p>`
+      : `<ol class="log backups">\n${records.map(backupItem).join('\n')}\n</ol>`;
+  const snapshots = records.filter((each): each is Snapshot => each.outcome === 'done');
+  return `${backUpNowPart(view, pendingSince !== null)}<h2>Snapshots</h2>
+<p>${escapeHtml(BACKUPS_LIST_TEXT)}</p>
+${stale}${list}
+${restorePart(snapshots)}`;
 }

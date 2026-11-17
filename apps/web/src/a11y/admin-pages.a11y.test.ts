@@ -31,6 +31,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../design/contrast';
 import {
   SCRIPTED_ANALYSIS,
+  SCRIPTED_BACKUPS,
   SCRIPTED_JOBS,
   SCRIPTED_MODELS,
   SCRIPTED_STATUS,
@@ -94,6 +95,20 @@ interface AdminPages {
   logBody(view: LogView): string;
   analysisBody(view: AnalysisView): string;
   accountsBody(view: AccountsView): string;
+  backupsBody(view: BackupsView): string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`BackupsView` (#2647), its records as the route answers them. */
+interface BackupsView {
+  readonly backups:
+    { readonly records: readonly unknown[]; readonly pendingSince: string | null } | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice:
+    | { readonly kind: 'asked'; readonly ok: boolean }
+    | { readonly kind: 'refused'; readonly sentence: string }
+    | { readonly kind: 'not-asked' }
+    | null;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`AccountsView` (#2646). */
@@ -271,7 +286,35 @@ const SCRIPTED = new Set([
   '/admin/passkeys',
   '/admin/analysis',
   '/admin/accounts',
+  '/admin/backups',
 ]);
+
+/** The scripted records (#2647) with the route's further facts, one with a SHA-256. */
+const RECORDS = SCRIPTED_BACKUPS.map((record, index) => ({
+  ...record,
+  databaseSha256: index === 0 ? 'ab'.repeat(32) : null,
+  removed: index === 0 ? 1 : null,
+  freeBytes: { backups: 80_000_000_000, offBox: index === 0 ? 900_000_000_000 : null },
+}));
+
+/** The Backups page (#2647), in a session of `strength`, over the scripted records. */
+const backupsPage = (
+  strength: ShellView['strength'],
+  over: Partial<BackupsView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/backups', name, strength),
+    'Backups',
+    pages.backupsBody({
+      backups: { records: RECORDS, pendingSince: null },
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      ...over,
+    }),
+    true,
+  );
 
 /** Two riders waiting (#2646), one with a name that would break the markup if it were not escaped. */
 const WAITING = [
@@ -415,6 +458,33 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
           registrations: undefined,
         }),
     ],
+  ],
+  '/admin/backups': [
+    ['a code session: reads only', () => backupsPage('code')],
+    [
+      'a passkey session: back up now, an awkward name',
+      () => backupsPage('passkey', {}, AWKWARD_NAME),
+    ],
+    [
+      'a request waiting',
+      () =>
+        backupsPage('passkey', {
+          backups: { records: RECORDS, pendingSince: '2026-11-14T21:00:00.000Z' },
+          notice: { kind: 'asked', ok: true },
+        }),
+    ],
+    [
+      'a second press refused',
+      () =>
+        backupsPage('passkey', {
+          notice: { kind: 'refused', sentence: 'A backup is already waiting.' },
+        }),
+    ],
+    [
+      'nothing recorded yet',
+      () => backupsPage('passkey', { backups: { records: [], pendingSince: null } }),
+    ],
+    ['unreadable', () => backupsPage('passkey', { backups: undefined })],
   ],
   '/admin/analysis': [
     ['a code session: reads only', () => analysisPage('code')],

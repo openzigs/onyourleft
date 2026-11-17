@@ -990,9 +990,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'requestOperateBackup',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: #2647's Backups page asks for one, behind a fresh
+    // passkey, logged under the channel's own source.
+    admin: 'change',
     summary:
       '“Back up now” (#2606): asks the `backup` service for a snapshot, which it takes within 30 seconds; answers 202 at once — the instance itself takes none, holding neither the backup folders nor a reason to. The request and its `backup_requested` entry in the operator log are written in one transaction. Refused `too_many`, and logged `refused`, while a request already waits or a backup was made in the last 15 minutes: each extra backup with `--keep` removes an older one, and shortens how far back a restore can go. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
     identity: true,
@@ -1013,9 +1013,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
       },
     },
     handle: async (context) => {
-      // The handler has answered anybody but the signed-in owner already.
-      if (context.caller === undefined) throw new Error('owner route called without a caller');
-      const asked = await operateOf(context).requestBackup(context.caller.athleteId);
+      const asked = await operateOf(context).requestBackup(ownerActor(context));
       if (!asked.ok) return errorResponse(asked.code);
       return json({ requestedAt: isoOf(asked.value.requestedAt) }, 202);
     },

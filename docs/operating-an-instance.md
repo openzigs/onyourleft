@@ -1176,7 +1176,14 @@ they asked and whether they confirmed they are 18 or over, and nothing more (ADR
 session can **approve or refuse** each, with a reason, through the same moderation route the app's
 Moderation screen uses; the decision is written to the moderation log and, as
 `registration_decided`, to the operator log in the same transaction. Suspensions and invitations stay
-on the app's Moderation screen. Each shows what the app's Operate area
+on the app's Moderation screen; and since [#2647](https://github.com/openzigs/onyourleft/issues/2647)
+**Backups** (`/admin/backups`): the newest 50 records the backup service wrote, each in the app's
+words with its database SHA-256, the snapshots it removed and the free space where snapshots and
+their off-box copies go, and the steps to restore the newest snapshot on the host. A passkey session
+can **back up now**, through the same route the app uses, so its rule (one waiting, or none in the
+last 15 minutes) and its `backup_requested` entry are the route's own; a one-time code's session
+asks for none on either listener (ADR 0069 Q-A). No page names a host folder. Restore stays on the
+command line. Each shows what the app's Operate area
 shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
 answer. On the AI backend page a passkey session can also change the settings, and **every change
 asks your passkey again** for that one change: the route's own checks run, its local-address rule

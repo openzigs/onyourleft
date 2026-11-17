@@ -76,6 +76,8 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   { path: '/admin/accounts', methods: ['GET'], kind: 'page', section: 'Accounts' },
   { path: '/admin/accounts/approve', methods: ['POST'], kind: 'action' },
   { path: '/admin/accounts/refuse', methods: ['POST'], kind: 'action' },
+  // #2647: the page, and its one change, "back up now", posted to the page's own address.
+  { path: '/admin/backups', methods: ['GET', 'POST'], kind: 'page', section: 'Backups' },
   { path: '/admin/analysis', methods: ['GET'], kind: 'page', section: 'AI backend' },
   { path: '/admin/analysis/offer', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/check', methods: ['POST'], kind: 'action' },

@@ -351,12 +351,13 @@ export interface Operate {
   /** The newest backup records and any waiting request (#2606). Writes nothing, logs nothing. */
   backups(): Promise<BackupsView>;
   /**
-   * "Back up now" (#2606), as the owner `athleteId`: the request and its
-   * `backup_requested` entry in ONE transaction, or `too_many` — logged
-   * `refused` — while one waits or a backup ran in the last 15 minutes.
-   * Answers when it was asked, Unix seconds.
+   * "Back up now" (#2606), as `owner`: the request and its
+   * `backup_requested` entry, under the owner's source (the app, or since
+   * #2647 the admin pages' listener), in ONE transaction, or `too_many` —
+   * logged `refused` — while one waits or a backup ran in the last 15
+   * minutes. Answers when it was asked, Unix seconds.
    */
-  requestBackup(athleteId: string): Promise<OperateResult<{ readonly requestedAt: number }>>;
+  requestBackup(owner: OperateOwner): Promise<OperateResult<{ readonly requestedAt: number }>>;
   /** The analysis settings (#2609), for the owner `athleteId`. Writes nothing. */
   analysisSettings(athleteId: string): Promise<AnalysisSettingsView>;
   /** Save the fields `body` names, checked first; logged either way, under `owner`'s source. */
@@ -781,10 +782,10 @@ export function createOperate(options: {
       ]);
       return { records, pendingSince: pending?.requestedAt ?? null, now: seconds() };
     },
-    async requestBackup(athleteId) {
+    async requestBackup(owner) {
       const at = seconds();
       const { value } = await store.recordOperatorAction<BackupRequestOutcome>(
-        { actor: { source: 'app', athleteId }, action: 'backup_requested', at },
+        { actor: owner, action: 'backup_requested', at },
         async (inside) => {
           const asked = await inside.requestBackup(at);
           return asked.outcome === 'requested'
