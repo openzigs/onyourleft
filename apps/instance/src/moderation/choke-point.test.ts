@@ -735,6 +735,7 @@ describe('the owner’s routes are the owner’s alone, checked in ONE place (#2
     ['setOperateAnalysis', '#2648: the AI backend page saves the model, address and offers'],
     ['clearOperateAnalysis', '#2648: the AI backend page returns the settings to .env'],
     ['checkOperateAnalysisModel', '#2648: the AI backend page checks a model calls tools'],
+    ['requestOperateBackup', '#2647: the Backups page asks for a backup now'],
   ]);
 
   it('says on every owner route whether the admin pages reach it, on no other route, and lets them read, and change only what a page makes (#2641, #2648, ADR 0069 D-2)', () => {

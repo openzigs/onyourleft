@@ -265,6 +265,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         and a decision through them writes its moderation
                         log row with `registration_decided` in ONE operator
                         log transaction (`moderation.ts` §`act`'s channel).
+                        Since #2647 Backups' "back up now" is the fourth
+                        `'change'` route; `operate.requestBackup` takes the
+                        `OperateOwner`, so its entry names the channel.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

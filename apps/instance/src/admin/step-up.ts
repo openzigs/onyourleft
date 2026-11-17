@@ -39,6 +39,8 @@ export const ADMIN_CHANGES = {
   // #2646 (ADR 0069 D-9): a registration decided, for one rider and with the reason typed.
   registration_approve: { fields: ['athleteId', 'reason'] },
   registration_refuse: { fields: ['athleteId', 'reason'] },
+  // #2647: "back up now", which takes no field.
+  backup_now: { fields: [] },
 } as const satisfies Readonly<Record<string, { readonly fields: readonly string[] }>>;
 
 export type AdminChange = keyof typeof ADMIN_CHANGES;

@@ -155,6 +155,7 @@ import {
   accountsBody,
   adminPage,
   analysisBody,
+  backupsBody,
   isSaveProblem,
   logBody,
   passkeysBody,
@@ -162,6 +163,9 @@ import {
   signInPage,
   statusBody,
   type AccountsNotice,
+  type BackupRecordAnswer,
+  type BackupsNotice,
+  type BackupsView,
   type AnalysisNotice,
   type AnalysisOffer,
   type LogEntryAnswer,
@@ -525,6 +529,87 @@ function registrationsOf(answer: unknown): readonly RegistrationAnswer[] | undef
   return shown;
 }
 
+/** The backups' route (#2647): the Backups page reads it, and "back up now" posts to it. */
+const BACKUPS_ROUTE = '/v1/operate/backups';
+
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const isCountOrNull = (value: unknown): value is number | null => value === null || isCount(value);
+const isTextOrNull = (value: unknown): value is string | null =>
+  value === null || typeof value === 'string';
+const OFF_BOX: readonly unknown[] = ['copied', 'failed', 'not-configured'];
+
+/**
+ * The backups as the route answered them, each record held to the fields the
+ * route declares (`operate/routes.ts` §`backupRecordSchema`) — or `undefined`
+ * for an answer not in that shape, which the page says it could not read.
+ */
+function backupsOf(answer: unknown): BackupsView['backups'] {
+  const body = (answer ?? {}) as { backups?: unknown; pending?: unknown };
+  const pending = body.pending as { requestedAt?: unknown } | null | undefined;
+  if (!Array.isArray(body.backups) || pending === undefined) return undefined;
+  if (pending !== null && typeof pending.requestedAt !== 'string') return undefined;
+  const records: BackupRecordAnswer[] = [];
+  for (const each of body.backups) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    const free = (row.freeBytes ?? {}) as Record<string, unknown>;
+    const shared =
+      isCount(row.id) &&
+      typeof row.at === 'string' &&
+      isCount(row.ageSeconds) &&
+      isCountOrNull(row.intervalSeconds) &&
+      typeof row.requested === 'boolean' &&
+      isTextOrNull(row.databaseSha256) &&
+      isCountOrNull(row.removed) &&
+      isCountOrNull(free.backups) &&
+      isCountOrNull(free.offBox);
+    if (!shared) return undefined;
+    const facts = {
+      id: row.id as number,
+      at: row.at as string,
+      ageSeconds: row.ageSeconds as number,
+      intervalSeconds: row.intervalSeconds as number | null,
+      requested: row.requested as boolean,
+      databaseSha256: row.databaseSha256 as string | null,
+      removed: row.removed as number | null,
+      freeBytes: { backups: free.backups as number | null, offBox: free.offBox as number | null },
+    };
+    if (row.outcome === 'failed' && typeof row.error === 'string') {
+      records.push({ ...facts, outcome: 'failed', error: row.error });
+    } else if (
+      row.outcome === 'done' &&
+      typeof row.snapshot === 'string' &&
+      isCount(row.rows) &&
+      isCount(row.blobs) &&
+      isCount(row.sizeBytes) &&
+      OFF_BOX.includes(row.offBox)
+    ) {
+      records.push({
+        ...facts,
+        outcome: 'done',
+        snapshot: row.snapshot,
+        rows: row.rows,
+        blobs: row.blobs,
+        sizeBytes: row.sizeBytes,
+        offBox: row.offBox as 'copied' | 'failed' | 'not-configured',
+      });
+    } else {
+      return undefined;
+    }
+  }
+  return { records, pendingSince: pending === null ? null : (pending.requestedAt as string) };
+}
+
+/** A refusal's own sentence, as the route wrote it, or `null`. */
+async function messageOf(answer: Response): Promise<string | null> {
+  try {
+    const message = ((await answer.json()) as { error?: { message?: unknown } }).error?.message;
+    return typeof message === 'string' ? message : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The analysis settings' route: the AI backend page reads and changes them there. */
 const ANALYSIS_ROUTE = '/v1/operate/analysis';
 
@@ -762,6 +847,28 @@ export function createAdmin(options: AdminOptions): Admin {
       body = accountsBody({ ...drawn, status: undefined });
     }
     return shellPage(shell, 'Accounts', body, true);
+  }
+
+  /**
+   * Backups (#2647): `GET /v1/operate/backups`, read as the owner through
+   * the seam on every load. `noticeFor` says what the last "back up now"
+   * came to, given the backups read back after it.
+   */
+  async function backupsPage(
+    view: PageCall,
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    noticeFor: (backups: BackupsView['backups']) => BackupsNotice | null,
+  ): Promise<string> {
+    const backups = backupsOf(await read(view.seam, BACKUPS_ROUTE, view.caller, view.client));
+    const drawn = { backups, strength, csrf: shell.csrf, notice: noticeFor(backups) };
+    let body: string;
+    try {
+      body = backupsBody(drawn);
+    } catch {
+      body = backupsBody({ ...drawn, backups: undefined });
+    }
+    return shellPage(shell, 'Backups', body, true);
   }
 
   /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
@@ -1027,6 +1134,13 @@ export function createAdmin(options: AdminOptions): Admin {
       const shell = await shellOf(path, session);
       const view = { caller: callerOf(owner, session), client, seam };
       if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/backups') {
+        return adminResponse(
+          await backupsPage(view, shell, session.record.strength, () => null),
+          200,
+          HTML,
+        );
+      }
       if (path === '/admin/accounts') {
         return adminResponse(
           await accountsPage(view, shell, session.record.strength, () => null),
@@ -1820,6 +1934,50 @@ export function createAdmin(options: AdminOptions): Admin {
       return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
     }
 
+    /**
+     * "Back up now" from the Backups page (#2647, ADR 0069 D-2): through
+     * {@link gatedChange} on BOTH listeners — the owner's answer to Q-A, which
+     * the issue's body predates — then ONE call of `POST /v1/operate/backups`
+     * in-process as the owner, whose `too_many` rule and `backup_requested`
+     * entry, under this listener's source, are the route's own. The answer is
+     * the page drawn again from the route's read AFTER the call.
+     */
+    async function backupChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        'backup_now',
+        { path: '/admin/backups', what: 'Backups' },
+        () => true,
+      );
+      if (gated instanceof Response) return gated;
+      const { session } = gated;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch('POST', BACKUPS_ROUTE, caller, client, {});
+      const asked = answer.status === 202;
+      const sentence = asked || answer.status !== 429 ? null : await messageOf(answer);
+      const shell = await shellOf('/admin/backups', session);
+      const page = await backupsPage(
+        { caller, client, seam },
+        shell,
+        session.record.strength,
+        (after): BackupsNotice =>
+          asked
+            ? { kind: 'asked', ok: after !== undefined && after.pendingSince !== null }
+            : sentence === null
+              ? { kind: 'not-asked' }
+              : { kind: 'refused', sentence },
+      );
+      return adminResponse(page, asked ? 200 : answer.status === 429 ? 429 : 409, HTML);
+    }
+
     return async (request, body, client, seam) => {
       // Against DNS rebinding: the page is this listener's, or it is not served.
       if (request.headers.get('host') !== place.host) {
@@ -1882,6 +2040,7 @@ export function createAdmin(options: AdminOptions): Admin {
         if (analysisAction !== undefined) {
           return analysisChange(request, body, owner, client, seam, analysisAction);
         }
+        if (route === '/admin/backups') return backupChange(request, body, owner, client, seam);
         const decision = REGISTRATION_ACTIONS.get(route);
         if (decision !== undefined) {
           return registrationChange(request, body, owner, client, seam, decision);
