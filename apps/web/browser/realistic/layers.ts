@@ -32,7 +32,7 @@
  * | layer | stylised | realistic |
  * |---|---|---|
  * | `sky` | the sky dome and the background colour | the photographed sky as background AND as the environment map that lights every PBR material |
- * | `surfaces` | the road, the ground, the hills on the horizon, and since #1565 the cross streets, in the road's own material | the same meshes, in their photographed materials |
+ * | `surfaces` | the road, the ground, the hills on the horizon, and since #1565 the cross streets, in the road's own material, and since #2699 the overpasses' embankments, in the ground's | the same meshes, in their photographed materials |
  * | `vegetation` | the trees, shrubs and rocks | their near meshes |
  * | `impostors` | — (there are none) | the far trees' billboards |
  * | `structures` | buildings, walls, hedges, fences, signposts, and since #966 the start and finish gantries and the wordmark's boards; since #1535 the village pavements and #1536 their street furniture | the same, photographed, and since #679 the start and finish gantries; since #966 the wordmark's boards; since #1535 the village pavements and #1536 their street furniture; since #1541 the people on them and on the footways |

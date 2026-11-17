@@ -75,6 +75,12 @@ import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './s
 import { FOLIAGE_SWAY_METRES } from './foliage-light';
 import { sceneryPlanRadius } from './near-field';
 import {
+  gradeCrossingsAt,
+  mappedGradeCrossings,
+  NO_CROSSINGS_IN_VIEW,
+  type CrossingsInView,
+} from './overpasses';
+import {
   LINE_LIMIT_METRES,
   MAXIMUM_LEAN_RADIANS,
   leanAt,
@@ -124,6 +130,7 @@ import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
+  PEOPLE_FAR_METRES,
   besideSideRoads,
   clearOfPavements,
   footwayWalks,
@@ -131,11 +138,21 @@ import {
   peopleAt,
   streetWalks,
   type PeopleInView,
+  type Person,
+  type WalkKind,
 } from './people';
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
-import { distanceToDrawnRoad } from './road-grid';
+import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
-import { bridgeParts, waterSurface, waterways } from './waterways';
+import {
+  bridgeParts,
+  MAXIMUM_BRIDGE_PARTS,
+  onOpenWater,
+  waterSurface,
+  waterways,
+  type BridgePart,
+  type Waterways,
+} from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
 import {
@@ -549,8 +566,14 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   const junctions =
     input.worldCorridor === undefined
       ? undefined
-      : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed);
-  const sideRoads = sideRoadsAt(
+      : mappedJunctions(
+          input.worldCorridor,
+          input.profile,
+          input.origin,
+          seed,
+          input.landClass ?? NO_LAND_CLASS,
+        );
+  const crossSideRoads = sideRoadsAt(
     input.profile,
     input.origin,
     seed,
@@ -560,6 +583,15 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     junctions ?? [],
     input.landClass ?? NO_LAND_CLASS,
   );
+  // #459, #2661: the streams' bridges and the mapped overpasses and
+  // underpasses in view, before the scenery too — since #2699 an overpass's
+  // road runs on off both ends of its deck, and is a side road: drawn in the
+  // road's material by the same mesh and kept clear of the scenery.
+  const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
+  const streamBridges = bridgeParts(input.profile, input.origin, corridor, ways);
+  const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
+  const sideRoads =
+    crossings.roads.length === 0 ? crossSideRoads : [...crossSideRoads, ...crossings.roads];
   const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
   // #1535: the village streets along exactly the stretch of road this frame
   // drew, for `scenery`'s reason — and outside the structures' budget,
@@ -633,17 +665,21 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // #1541: the people on those streets' pavements and the corridor's
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
-    people: people(input, streets, camera, seed, sideRoads),
+    // #2728: each on the ground drawn under them, and nobody on the drawn water.
+    people: people(input, streets, camera, seed, sideRoads, ground),
     // #2722: and the other cyclists on the road, kept clear of the rider.
     ...cyclistsOf(placedCyclists(input, corridor, riders)),
     terrain: {
       mesh: ground,
       horizon: horizonRelief(input.profile, input.origin, seed),
+      // #2699: and each overpass's embankment, in the ground's own material.
+      embankments: crossings.embankments,
     },
     // #459. The waterways are found once per route (`waterways.ts` §`computed`)
     // and the surfaces and bridges built for this stretch of it, from the same
     // corridor the ground and the road are built from.
-    water: water(input, corridor, seed),
+    // #2661: and the mapped streets crossing over or under the route, with them.
+    water: water(input, corridor, ways, streamBridges, crossings),
     // #679: what stands at the lines, in the rider's units, near the rider.
     lines: linesNear(
       input.profile,
@@ -666,6 +702,7 @@ function people(
   camera: CameraPose,
   seed: number,
   sideRoads: readonly SideRoad[],
+  ground: TerrainMesh,
 ): PeopleInView {
   const near = input.people ?? 0;
   if (near <= 0) return NO_PEOPLE;
@@ -681,7 +718,7 @@ function people(
       ...clearOfPavements(footwayWalks(input.worldCorridor, profile, origin, land, rule), streets),
     );
   }
-  return peopleAt(lines, {
+  const placed = peopleAt(lines, {
     x: camera.x,
     z: camera.z,
     seconds: ghostClock(input.state),
@@ -691,7 +728,50 @@ function people(
     road: besideSideRoads(road, sideRoads),
     ground: groundOf(profile, origin, seed, land),
   });
+  // #2728: a person's `y` is `terrainHeightAt`'s at the stretch of road they are
+  // nearest, read at their line's points and carried straight between them. The
+  // drawn ground is neither: another leg's seam (#2101), a fold, a dip between two
+  // points of a long straight footway. On the owner's coast people walked in the sky,
+  // so each stands on the highest triangle drawn under them, as the scenery does
+  // since #2101, and nobody stands where no ground is drawn or on the drawn water.
+  // A village's pavement and front paths are drawn at their own tops, which their
+  // walkers' `y` already is, so only a mapped footway's walkers are stood.
+  if (placed.near.length + placed.far.length === 0) return placed;
+  const ways = waterways(profile, seed, land);
+  const dry = (person: Person): boolean => {
+    if (ways.lakes.length + ways.crossings.length === 0) return true;
+    const beside = nearestOnDrawnRoad(
+      profile,
+      origin,
+      person.x,
+      person.z,
+      // Nobody is drawn beyond this of the camera, so nobody is farther from the road.
+      PEOPLE_FAR_METRES,
+    );
+    return beside === undefined || !onOpenWater(ways, profile, beside.along, beside.lateral);
+  };
+  return { near: stood(placed.near, dry, ground), far: stood(placed.far, dry, ground) };
 }
+
+/** #2728: `people` kept off the drawn water, and a mapped footway's walkers stood on the drawn ground. @see people */
+function stood(
+  people: readonly Person[],
+  dry: (person: Person) => boolean,
+  ground: TerrainMesh,
+): readonly Person[] {
+  const kept = people.filter(dry);
+  const onStreets = kept.filter((person) => STREET_WALKS.has(person.on));
+  if (onStreets.length === kept.length) return kept;
+  const footways = standingOnGround(
+    kept.filter((person) => !STREET_WALKS.has(person.on)),
+    ground,
+  );
+  // Back in the order `peopleAt` gave, nearest first.
+  return [...onStreets, ...footways].sort((a, b) => a.distance - b.distance);
+}
+
+/** What a village's street draws its walkers on, at its own top. @see stood */
+const STREET_WALKS: ReadonlySet<WalkKind> = new Set<WalkKind>(['pavement', 'door-path']);
 
 /** The golf courses and cemeteries in reach — #2685. @see SceneFrame.parkDressing */
 function parkDressing(
@@ -836,12 +916,48 @@ export function placedCyclists(
   return cyclists;
 }
 
-/** The streams, lakes and bridges in view. @see SceneFrame.water */
-function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFrame {
-  const ways = waterways(input.profile, seed);
+/**
+ * The mapped overpasses and underpasses in view — #2661 (`overpasses.ts`):
+ * whole crossings, in the room the streams' `streamParts` bridges leave of
+ * the one belt's {@link MAXIMUM_BRIDGE_PARTS}, and since #2699 each
+ * overpass's road. None with no map data.
+ */
+function crossingsInView(
+  input: SceneInput,
+  corridor: RoadCorridor,
+  seed: number,
+  riderDistance: number,
+  streamParts: number,
+): CrossingsInView {
+  if (input.worldCorridor === undefined) return NO_CROSSINGS_IN_VIEW;
+  return gradeCrossingsAt(
+    input.profile,
+    input.origin,
+    seed,
+    (corridor.centre[0] as CorridorPoint).along,
+    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    riderDistance,
+    mappedGradeCrossings(input.worldCorridor, input.profile, input.origin),
+    input.landClass ?? NO_LAND_CLASS,
+    MAXIMUM_BRIDGE_PARTS - streamParts,
+  );
+}
+
+/**
+ * The streams, lakes and bridges in view — the streams' (#459) and, since
+ * #2661, the mapped overpasses' and underpasses' boxes, the streams' first.
+ * @see SceneFrame.water
+ */
+function water(
+  input: SceneInput,
+  corridor: RoadCorridor,
+  ways: Waterways,
+  streams: readonly BridgePart[],
+  crossings: CrossingsInView,
+): WaterFrame {
   return {
     surface: waterSurface(input.profile, input.origin, corridor, ways),
-    bridges: bridgeParts(input.profile, input.origin, corridor, ways),
+    bridges: crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts],
     seconds: input.state.elapsed,
   };
 }
@@ -919,7 +1035,7 @@ function scenery(
   // #1565: and none on a side road.
   const billboards = boardsClearOfSideRoads(
     nearestBillboards(
-      billboardsAt(input.profile, input.origin, seed, first.along, last.along),
+      billboardsAt(input.profile, input.origin, seed, first.along, last.along, land),
       riderDistance,
       structureBudget,
     ),

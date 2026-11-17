@@ -2253,6 +2253,125 @@
         }
       }
     },
+    "/v1/analysis/pacer/decide": {
+      "post": {
+        "operationId": "decidePacer",
+        "summary": "One decision for your AI pacer (#2712, ADR 0072): `input` is the ride as it stands, exactly `@onyourleft/domain`’s `ModelPacerInput` — the pacer’s W/kg, its plan and intent and the seconds held, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden; no coordinate, no name — at most 1 024 characters. Answers `plan` (`rolling`, `even` or `climber`), `intent` (`hold`, `lift` or `ease`) and `say`, one line of feedback of at most 80 characters with no number, no metric name and no health wording, or \"\". **No power, ever**, and nothing of it reaches a trainer: the plan and intent move the pacer inside its usual range. The same consent as AI bots, the same model slot (`POST /v1/analysis/tactics/start` and `end`), the same rate limit and the same model call, with no tools and no reasoning. `tactics_invalid` when the model’s answer was not such a decision or its line did not pass, `tactics_failed` when it gave none in time; on either, and on every refusal, the pacer rides its usual rule.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "description": "A `ModelPacerInput` (#2712)."
+                  }
+                },
+                "required": [
+                  "input"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "The AI pacer’s plan and intent from their closed lists, and its line of feedback: at most 80 characters, screened, or \"\" for none. No other field, and never a power.",
+                  "properties": {
+                    "plan": {
+                      "type": "string",
+                      "enum": [
+                        "rolling",
+                        "even",
+                        "climber"
+                      ]
+                    },
+                    "intent": {
+                      "type": "string",
+                      "enum": [
+                        "hold",
+                        "lift",
+                        "ease"
+                      ]
+                    },
+                    "say": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "plan",
+                    "intent",
+                    "say"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "description": "One of `local_unavailable`, `tactics_consent_required`, `tactics_busy`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "description": "One of `tactics_invalid`, `tactics_failed`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/analysis/replans": {
       "post": {
         "operationId": "startReplanJob",
@@ -2775,7 +2894,7 @@
     "/v1/analysis/tactics/end": {
       "post": {
         "operationId": "endBotTacticsRace",
-        "summary": "Your AI-bots race has ended: the model race slot is let go, and write-ups held for it start. Nothing for a slot you do not hold.",
+        "summary": "Your AI-bots race, or your ride with an AI pacer, has ended: the model race slot is let go, and write-ups held for it start. Nothing for a slot you do not hold.",
         "security": [
           {
             "session": []
@@ -2816,7 +2935,7 @@
     "/v1/analysis/tactics/start": {
       "post": {
         "operationId": "startBotTacticsRace",
-        "summary": "Your AI-bots race is starting (ADR 0071 D-6): it takes this instance’s one model race slot, and post-ride write-ups on this instance wait while it runs — none already running is stopped, and a re-plan does not wait. Answers 202 at once; `warming` says a call of the same shape about a fixed race, with nothing of yours in it, has gone out to load the model, so the first decision is not late. The slot is let go by `POST /v1/analysis/tactics/end`, after 30 s with no tactics request, or 2 hours after it was taken, whichever is first. `tactics_busy` while another rider’s AI-bots race holds it; `local_unavailable` and `tactics_consent_required` before anything is sent. Counted with your decisions against `rate_limited`.",
+        "summary": "Your AI-bots race, or your ride with an AI pacer (ADR 0072), is starting (ADR 0071 D-6): it takes this instance’s one model race slot, and post-ride write-ups on this instance wait while it runs — none already running is stopped, and a re-plan does not wait. Answers 202 at once; `warming` says a call of the same shape about a fixed race, with nothing of yours in it, has gone out to load the model, so the first decision is not late. The slot is let go by `POST /v1/analysis/tactics/end`, after 30 s with no tactics request, or 2 hours after it was taken, whichever is first. `tactics_busy` while another rider’s AI-bots race holds it; `local_unavailable` and `tactics_consent_required` before anything is sent. Counted with your decisions against `rate_limited`.",
         "security": [
           {
             "session": []

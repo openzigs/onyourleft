@@ -139,7 +139,7 @@ import {
 } from '@onyourleft/operate-text';
 
 import { escapeHtml } from '../html.ts';
-import { MAXIMUM_REASON_LENGTH, type ModeratorRole } from '../moderation/moderation.ts';
+import { ATHLETE_ID, MAXIMUM_REASON_LENGTH, type ModeratorRole } from '../moderation/moderation.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
   AdminPasskeyRecord,
@@ -499,9 +499,6 @@ const REGISTRATION_ACTIONS: ReadonlyMap<string, RegistrationDecision> = new Map(
 
 /** The moderation routes' queue, which the Accounts page lists (ADR 0069 D-9). */
 const REGISTRATIONS_ROUTE = '/v1/moderation/registrations';
-
-/** An athlete id as the moderation routes take one in `{athleteId}` (`moderation.ts` §`ATHLETE_ID`). */
-const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 /**
  * The queue as the route answered it, each rider held to the four details

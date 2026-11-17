@@ -30,6 +30,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { RecordingCheckpointStore } from '../recording/recorder';
+import { createRememberedSensors } from './remembered-sensors';
 import { createShellRideController, type ShellRecordingService } from './shell-ride-controller';
 
 let harness: StoreHarness;
@@ -119,6 +120,8 @@ function controllerOver(mobile: ShellRecordingService) {
       return recordingSessionId(`shell-ride-${String(sessions)}`);
     },
     now: () => bench.now,
+    // #2669: required in the shell. A memory with no storage, holding nothing.
+    remembered: createRememberedSensors(undefined),
   });
 }
 

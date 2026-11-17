@@ -38,6 +38,14 @@
  * `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` are already in the manifest.
  *
  * Malformed notifications are dropped and counted, never thrown.
+ *
+ * ## Reaching it again with no chooser
+ *
+ * {@link CapacitorOpenBikeControlClient.connectKnown} — #2672. Android's
+ * plugin connects to a Bluetooth address it has not scanned for this session
+ * (`BluetoothLe.kt` 8.3.0 builds the device from the address), so the open is
+ * the chooser's, less the chooser: the same bounded steps, the same one
+ * write. ⚠️ Not yet seen on a phone: the owner's tablet check is the proof.
  */
 
 import { SensorError, type Unsubscribe } from '@onyourleft/sensors';
@@ -83,6 +91,8 @@ export interface CapacitorOpenBikeControlOptions {
 
 /** One controller, connected. The same shape as the browser client's. */
 export interface CapacitorControllerConnection {
+  /** The plugin's id for it — on Android its Bluetooth address (#2672). */
+  readonly id: string;
   readonly name: string | undefined;
   readonly connected: boolean;
   /** Notifications dropped because the parser refused them. */
@@ -103,6 +113,15 @@ export interface CapacitorOpenBikeControlClient {
    * `capability-unsupported` when the device serves no button state.
    */
   requestAndConnect(): Promise<CapacitorControllerConnection>;
+  /**
+   * Bring the plugin up and connect to the controller with this id, with no
+   * chooser — #2672. `name` is the one it was paired with: Android answers
+   * with an address and no name, and the rider's row should not go unnamed.
+   *
+   * @throws {SensorError} `not-connected` when a call fails or misses its
+   * deadline, `capability-unsupported` when the device serves no button state.
+   */
+  connectKnown(id: string, name: string): Promise<CapacitorControllerConnection>;
 }
 
 function defaultSchedule(callback: () => void, after: Seconds): () => void {
@@ -162,6 +181,10 @@ export function createCapacitorOpenBikeControlClient(
         });
       }
       return open(device);
+    },
+    async connectKnown(id, name) {
+      await bounded('initialize', () => plugin.initialize());
+      return open(name === '' ? { deviceId: id } : { deviceId: id, name });
     },
   };
 
@@ -261,6 +284,7 @@ export function createCapacitorOpenBikeControlClient(
     }
 
     return {
+      id,
       name: device.name,
       get connected() {
         return up;

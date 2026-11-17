@@ -162,6 +162,31 @@ export interface CapacitorTransportOptions {
   readonly schedule?: Schedule | undefined;
   /** How long `forget` waits for the plugin. Defaults to {@link FORGET_DEADLINE}. */
   readonly forgetDeadline?: Seconds | undefined;
+  /**
+   * The sensors this phone remembers from an earlier session — #2669. Read
+   * afresh by every `knownDevices`, so a sensor the rider forgot since is not
+   * asked about again. Absent, only what `discover` chose this session is known.
+   * @see CapacitorRememberedDevice
+   */
+  readonly remembered?: (() => readonly CapacitorRememberedDevice[]) | undefined;
+}
+
+/**
+ * One sensor a rider paired in an earlier session, as this transport needs it
+ * to reach the sensor again with no chooser — #2669.
+ *
+ * ⚠️ **The capabilities are the pairing's, not the peripheral's.** `discover`
+ * gives a device the capabilities its request named (`adopt`'s `wanted`), and
+ * a reconnect must give it the same ones: adopted with none, a heart-rate strap
+ * would be handed every profile this program knows, and the first subscribe
+ * to a service it does not serve would fail the reconnect. The name is the one
+ * it advertised then, because the plugin's Android `getDevices` returns an
+ * address and nothing else.
+ */
+export interface CapacitorRememberedDevice {
+  readonly id: string;
+  readonly name: string;
+  readonly capabilities: readonly SensorCapability[];
 }
 
 /**
@@ -240,6 +265,13 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
   const links = new Map<DeviceId, Link>();
   /** Plugin ids seen this session, so `knownDevices` has something to ask for. */
   const seen = new Set<string>();
+  /**
+   * Devices `knownDevices` handed out that hold no link yet — #2669. The
+   * first id-keyed call for one makes its link ({@link linkFor}), so a
+   * remembered sensor counts against the connection budget only once
+   * something is done with it, and not merely for having been remembered.
+   */
+  const known = new Map<DeviceId, { readonly pluginId: string; readonly device: SensorDevice }>();
 
   /**
    * The in-flight or settled `initialize()`, or `undefined` when it must be
@@ -317,12 +349,28 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
   };
 
   const linkFor = (id: DeviceId): Link => {
-    const link = links.get(id);
+    const link = links.get(id) ?? linkKnown(id);
     if (link === undefined) {
       throw new SensorError('device-not-found', 'this transport did not issue that device id', {
         deviceId: id,
       });
     }
+    return link;
+  };
+
+  /** A device {@link known} has handed out, given its link on first use. */
+  const linkKnown = (id: DeviceId): Link | undefined => {
+    const found = known.get(id);
+    if (found === undefined) {
+      return undefined;
+    }
+    known.delete(id);
+    const link: Link = {
+      session: createDeviceSession(found.device),
+      pluginId: found.pluginId,
+      notifying: new Map(),
+    };
+    links.set(id, link);
     return link;
   };
 
@@ -432,6 +480,8 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
       }
       const device = adopt(found, request.capabilities);
       seen.add(found.deviceId);
+      // Chosen again: the link made below replaces what `knownDevices` held.
+      known.delete(device.identity.id);
       // ⚠️ Only a device this transport does not already hold (#659's
       // review). Chosen again while it is connected — the ride controller's
       // "already paired" path — an overwrite put a fresh `disconnected`
@@ -448,23 +498,40 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
     },
 
     async knownDevices(): Promise<readonly SensorDevice[]> {
-      if (seen.size === 0) {
+      const remembered = new Map(
+        (options.remembered?.() ?? []).map((one) => [one.id, one] as const),
+      );
+      const asking = [...new Set([...seen, ...remembered.keys()])];
+      if (asking.length === 0) {
         // Nothing to ask the plugin, so nothing to initialise for. The stack is
         // brought up by the call that needs it and not by one that does not.
         return [];
       }
-      // ⚠️ No `ensureInitialized()` here, and that is a decision rather than an
-      // oversight. `seen` is filled by `discover` alone, which initialises
-      // before it fills it, so a guard on this line is unreachable — and an
-      // unreachable guard is a line no mutation can turn red, which CLAUDE.md
-      // §5 treats as worse than absent. **The day `seen` is seeded from
-      // storage** — which is what `canReconnectWithoutUserGesture` promises a
-      // rider after an app restart — this becomes the session's first plugin
-      // call and needs the guard, with a test that fails without it. #230 is
-      // precisely the bug of leaving that assumption implicit, so it is written
-      // down here instead.
-      const found = await plugin.getDevices([...seen]);
-      return found.map((one) => adopt(one, []));
+      // ⚠️ #2669: the guard the note here used to decline. While `seen` was
+      // filled by `discover` alone, which initialises first, this line was
+      // unreachable. Seeded from `remembered`, this is the FIRST plugin call
+      // of a session — the app opening and reconnecting with no chooser — and
+      // without it `getDevices` meets an uninitialised plugin, which is #230.
+      await ensureInitialized();
+      const found = await plugin.getDevices(asking);
+      return found.map((one) => {
+        const id = toDeviceId(one.deviceId);
+        const held = links.get(id)?.session.device ?? known.get(id)?.device;
+        if (held !== undefined) {
+          // One object per device: a second adoption would give a caller a
+          // capability set the link does not narrow.
+          return held;
+        }
+        const memory = remembered.get(one.deviceId);
+        const device = adopt(
+          one.name === undefined && memory !== undefined && memory.name !== ''
+            ? { ...one, name: memory.name }
+            : one,
+          memory?.capabilities ?? [],
+        );
+        known.set(id, { pluginId: one.deviceId, device });
+        return device;
+      });
     },
 
     async connect(id: DeviceId): Promise<void> {
@@ -533,8 +600,10 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
      *
      * ⚠️ The record goes FIRST, for Web Bluetooth's reason: a notification or
      * a disconnect callback the plugin delivers after this must find no link
-     * to drive. `seen` keeps the plugin id, because `knownDevices` asking the
-     * plugin about a peripheral is not reaching it.
+     * to drive. ⚠️ `seen` lets the plugin id go too, since #2669: it used to
+     * keep it, because asking the plugin about a peripheral is not reaching
+     * it — but `knownDevices` now hands out devices `connect` will reach, so
+     * a forgotten id kept there would come back with no chooser.
      *
      * ⚠️ Bounded (#716), by {@link FORGET_DEADLINE}: a plugin that never
      * answers the stop or the disconnect used to keep this pending for the
@@ -549,7 +618,12 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
      * browser still lists it" only where that is true.
      */
     async forget(id: DeviceId): Promise<void> {
+      // #2669: and out of what `knownDevices` answers, which is what keeps a
+      // forgotten id from coming back through `linkFor`.
+      const unlinked = known.get(id);
+      known.delete(id);
       const link = links.get(id);
+      seen.delete(link?.pluginId ?? unlinked?.pluginId ?? '');
       if (link === undefined) {
         return;
       }

@@ -1123,6 +1123,7 @@ function ErasePanel({
         heldSnapshots: port.heldSnapshots,
         instanceAnalysis: port.instanceAnalysis,
         trainerTargets: port.trainerTargets,
+        rememberedSensors: port.rememberedSensors,
         athlete: port.athleteRow,
       });
       setDone(eraseSentence(outcome));

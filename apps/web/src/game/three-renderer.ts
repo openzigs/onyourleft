@@ -555,6 +555,7 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import type { Embankment } from './overpasses';
 import {
   GOLF_BUNKERS_PER_GREEN,
   GOLF_GREENS_DRAWN,
@@ -734,6 +735,7 @@ import {
 } from './camera';
 import {
   CENTRE_LINE_LIFT_METRES,
+  ROAD_COLOUR,
   ROAD_SURFACE_GRAIN,
   ROAD_WIDTH_METRES,
   VIEW_AHEAD_METRES,
@@ -761,6 +763,7 @@ import {
 import {
   MAXIMUM_BRIDGE_PARTS,
   waterSurfaceIsCurrent,
+  type BridgeFinish,
   type BridgePart,
   type WaterSurface,
 } from './waterways';
@@ -2154,6 +2157,18 @@ export const BRIDGE_COLOUR = 0x8f8a80;
  */
 export const PAVEMENT_COLOUR = 0xa7a49c;
 
+/**
+ * An overpass's colours — #2699, by each box's `waterways.ts`
+ * §`BridgePart.finish`. The deck carries a street, so it is the road's own
+ * flat colour (`terrain.ts` §`ROAD_COLOUR`), not the bridges' stone. Its
+ * edge beams, parapets and abutments are the pavement's concrete grey,
+ * which is what makes the deck's edges read against it from the bike.
+ */
+export const OVERPASS_COLOURS: Readonly<Record<BridgeFinish, number>> = {
+  road: ROAD_COLOUR,
+  concrete: PAVEMENT_COLOUR,
+};
+
 /** One coloured solid of a piece of street furniture — #1536. */
 interface FurniturePart {
   readonly colour: number;
@@ -2370,8 +2385,11 @@ export const LIT_COLOURS: readonly number[] = [
   ...BICYCLE_COLOURS,
   // #459. The bridges' stone, which is lit like the scenery.
   BRIDGE_COLOUR,
-  // #1535. The stylised pavement, lit like the scenery.
+  // #1535. The stylised pavement, lit like the scenery — and since #2699 an
+  // overpass's concrete, which is that same colour.
   PAVEMENT_COLOUR,
+  // #2699. An overpass's deck: the road's colour, lit, as the road is not.
+  OVERPASS_COLOURS.road,
   // #1536. The street furniture's, every part of every kind, once.
   ...new Set(
     Object.values(FURNITURE_STYLE).flatMap((style) => style.parts.map((part) => part.colour)),
@@ -5017,6 +5035,18 @@ function bareGroundTints(
  * rung saves is the fill of the far ground, which is most of this mesh's
  * fragments and is already fogged by the time a rider could see it.
  *
+ * ## And the overpasses' embankments — #2699
+ *
+ * A second mesh, {@link embankmentMesh}: every mapped overpass in view's
+ * banks (`overpasses.ts` §`Embankment`), in **this mesh's own material,
+ * whichever it is** — the photographed grass and its patchwork, or the
+ * stylised pair — because the owner asked for banks "wearing the ground's
+ * own grass or earth look". `#mount` puts the one material on both, so
+ * the two can never disagree. Its buffers carry what that material reads and
+ * no more (position, normal, colour, `fields`), each face its own normal.
+ * Rebuilt only when the SET of embankments changes, as {@link SideRoadBelt}
+ * is, and not drawn where a frame holds none.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class TerrainBelt {
@@ -5059,20 +5089,33 @@ export class TerrainBelt {
    */
   #uploadedIndices: Uint32Array | undefined;
 
+  /** The overpasses' embankments — #2699, in {@link #mesh}'s material. */
+  readonly #embankments: Mesh;
+  /** The embankments {@link #embankments} holds, in the order it holds them. */
+  #heldEmbankments: readonly Embankment[] = [];
+
   constructor() {
     this.#mesh = new Mesh(this.#geometry, this.#materials.lit);
     // For the road's reason: rebuilt in world coordinates every frame, always
     // under the camera, and one mesh — a cull could only ever lose it.
     this.#mesh.frustumCulled = false;
+    this.#embankments = new Mesh(new BufferGeometry(), this.#materials.lit);
+    this.#embankments.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.#mesh);
+    scene.add(this.#embankments);
   }
 
-  /** The one mesh. For `three-renderer.test.ts`. */
+  /** The ground's mesh. For `three-renderer.test.ts`. */
   get mesh(): Mesh {
     return this.#mesh;
+  }
+
+  /** The overpasses' embankments' mesh — #2699. For `overpasses.test.ts`. */
+  get embankmentMesh(): Mesh {
+    return this.#embankments;
   }
 
   /** @see QualitySettings.shading */
@@ -5118,7 +5161,27 @@ export class TerrainBelt {
   }
 
   #mount(): void {
-    this.#mesh.material = this.#photographic ?? this.#materials[this.#shading];
+    const material = this.#photographic ?? this.#materials[this.#shading];
+    this.#mesh.material = material;
+    this.#embankments.material = material;
+  }
+
+  /**
+   * This frame's overpass embankments — #2699. The same objects every frame
+   * while the same overpasses are in view, so the mesh is rebuilt only when
+   * that set changes.
+   */
+  updateEmbankments(embankments: readonly Embankment[]): void {
+    const held = this.#heldEmbankments;
+    const same =
+      embankments.length === held.length &&
+      embankments.every((embankment, index) => embankment === held[index]);
+    if (!same) {
+      this.#heldEmbankments = embankments;
+      this.#embankments.geometry.dispose();
+      this.#embankments.geometry = embankmentGeometry(embankments);
+    }
+    this.#embankments.visible = embankments.length > 0;
   }
 
   /** How many bands of ground this rung draws, innermost first. @see QualitySettings.terrainBands */
@@ -5195,6 +5258,7 @@ export class TerrainBelt {
 
   dispose(): void {
     this.#geometry.dispose();
+    this.#embankments.geometry.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
     this.#park.dispose();
@@ -5204,6 +5268,42 @@ export class TerrainBelt {
   #applyRange(): void {
     this.#geometry.setDrawRange(0, Math.min(this.#indexCount, this.#bands * this.#indicesPerBand));
   }
+}
+
+/** Every embankment as one geometry, with the attributes the ground's material reads — #2699. */
+function embankmentGeometry(embankments: readonly Embankment[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const embankment of embankments) {
+    vertices += embankment.positions.length / 3;
+    indices += embankment.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const fields = new Float32Array(vertices * 2);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const embankment of embankments) {
+    positions.set(embankment.positions, vertex * 3);
+    normals.set(embankment.normals, vertex * 3);
+    colours.set(embankment.colours, vertex * 3);
+    fields.set(embankment.fields, vertex * 2);
+    for (let each = 0; each < embankment.indices.length; each += 1) {
+      index[at + each] = (embankment.indices[each] as number) + vertex;
+    }
+    vertex += embankment.positions.length / 3;
+    at += embankment.indices.length;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('fields', new BufferAttribute(fields, 2));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 /**
@@ -6336,6 +6436,16 @@ function environmentScaleFor(zenith: LinearColour, target: number): number {
  * The bridges — #459. Every parapet, deck slab and abutment in view is one
  * instance of one box: one draw call however many bridges there are.
  *
+ * ⚠️ **Two boxes since #2699, not one.** A stream bridge's blocks are the
+ * stone box, {@link mesh}. An overpass's (`overpasses.ts`), whose blocks name
+ * a `finish`, are {@link overpassMesh}: a white box, each instance in its
+ * {@link OVERPASS_COLOURS} colour, which the realistic world lights but never
+ * dresses in the stone — #2687's screenshots read the stone deck as a brown
+ * slab. Each holds up to `MAXIMUM_BRIDGE_PARTS`, and a frame's bridges are
+ * cut to that in all (`scene.ts` §`water`), so the triangles a frame may
+ * submit here are what they were; the second box costs a draw call on a
+ * frame with an overpass in view, and none on any other.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class BridgeBelt {
@@ -6347,13 +6457,30 @@ export class BridgeBelt {
   readonly #physical = withAtmosphere(
     constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
   );
+  /**
+   * The overpass mesh's own materials. It carries `instanceColor` and the
+   * stone mesh does not, and three re-selects a program whenever a draw's
+   * material and object disagree on that, so sharing {@link #materials} and
+   * {@link #physical} would cost both draws a program lookup each on a frame
+   * with both kinds of bridge in view.
+   */
+  readonly #overpassMaterials = vertexColouredMaterials();
+  readonly #overpassPhysical = withAtmosphere(
+    constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
+  );
   /** The realistic world's photographed stone, once it has been handed one — #501. */
   #stone: { readonly maps: StoneMaps; readonly material: MeshStandardMaterial } | undefined;
   #stoneMaps: StoneMaps | undefined;
   #shading: QualitySettings['shading'] = 'lit';
   #world: QualitySettings['world'] = 'stylised';
   readonly #mesh: InstancedMesh;
+  /** An overpass's blocks — #2699. @see overpassMesh */
+  readonly #overpass: InstancedMesh;
   readonly #matrix = new Matrix4();
+  readonly #finishes: Readonly<Record<BridgeFinish, Color>> = {
+    road: new Color(OVERPASS_COLOURS.road),
+    concrete: new Color(OVERPASS_COLOURS.concrete),
+  };
   readonly #along = new Vector3();
   readonly #across = new Vector3();
   readonly #up = new Vector3();
@@ -6367,15 +6494,31 @@ export class BridgeBelt {
     this.#mesh.count = 0;
     this.#mesh.frustumCulled = false;
     this.#mesh.visible = false;
+    const plain = new BoxGeometry(1, 1, 1);
+    paintEveryVertex(plain, 0xffffff);
+    this.#overpass = new InstancedMesh(plain, this.#overpassMaterials.lit, MAXIMUM_BRIDGE_PARTS);
+    this.#overpass.instanceMatrix.setUsage(DynamicDrawUsage);
+    // The colour buffer from the start, so the mesh's program is the same every frame.
+    this.#overpass.setColorAt(0, this.#finishes.concrete);
+    this.#overpass.instanceColor?.setUsage(DynamicDrawUsage);
+    this.#overpass.count = 0;
+    this.#overpass.frustumCulled = false;
+    this.#overpass.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.#mesh);
+    scene.add(this.#overpass);
   }
 
-  /** The one mesh. For `three-renderer.test.ts`. */
+  /** The stream bridges' stone mesh. For `three-renderer.test.ts`. */
   get mesh(): InstancedMesh {
     return this.#mesh;
+  }
+
+  /** The overpasses' mesh — #2699. For `overpasses.test.ts`. */
+  get overpassMesh(): InstancedMesh {
+    return this.#overpass;
   }
 
   /**
@@ -6420,8 +6563,11 @@ export class BridgeBelt {
   #mount(): void {
     if (this.#world !== 'realistic') {
       this.#mesh.material = this.#materials[this.#shading];
+      this.#overpass.material = this.#overpassMaterials[this.#shading];
       return;
     }
+    // An overpass is lit as the realistic world lights a primitive, never stone.
+    this.#overpass.material = this.#overpassPhysical;
     const maps = this.#stoneMaps;
     if (maps === undefined) {
       this.#mesh.material = this.#physical;
@@ -6439,9 +6585,11 @@ export class BridgeBelt {
    * `height` up. Allocates nothing.
    */
   update(parts: readonly BridgePart[]): void {
-    const count = Math.min(parts.length, MAXIMUM_BRIDGE_PARTS);
-    for (let index = 0; index < count; index += 1) {
-      const part = parts[index] as BridgePart;
+    let stone = 0;
+    let overpass = 0;
+    for (const part of parts) {
+      const finish = part.finish;
+      if ((finish === undefined ? stone : overpass) >= MAXIMUM_BRIDGE_PARTS) continue;
       this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
       this.#across.crossVectors(this.#vertical, this.#along).normalize();
       this.#up.crossVectors(this.#along, this.#across).normalize();
@@ -6450,19 +6598,37 @@ export class BridgeBelt {
       this.#along.multiplyScalar(part.length);
       this.#matrix.makeBasis(this.#across, this.#up, this.#along);
       this.#matrix.setPosition(part.x, part.y, part.z);
-      this.#mesh.setMatrixAt(index, this.#matrix);
+      if (finish === undefined) {
+        this.#mesh.setMatrixAt(stone, this.#matrix);
+        stone += 1;
+      } else {
+        this.#overpass.setMatrixAt(overpass, this.#matrix);
+        this.#overpass.setColorAt(overpass, this.#finishes[finish]);
+        overpass += 1;
+      }
     }
-    this.#mesh.count = count;
-    this.#mesh.instanceMatrix.needsUpdate = count > 0;
-    this.#mesh.visible = count > 0;
+    this.#mesh.count = stone;
+    this.#mesh.instanceMatrix.needsUpdate = stone > 0;
+    this.#mesh.visible = stone > 0;
+    this.#overpass.count = overpass;
+    this.#overpass.instanceMatrix.needsUpdate = overpass > 0;
+    if (this.#overpass.instanceColor !== null) {
+      this.#overpass.instanceColor.needsUpdate = overpass > 0;
+    }
+    this.#overpass.visible = overpass > 0;
   }
 
   dispose(): void {
     this.#mesh.geometry.dispose();
     this.#mesh.dispose();
+    this.#overpass.geometry.dispose();
+    this.#overpass.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
     this.#physical.dispose();
+    this.#overpassMaterials.lit.dispose();
+    this.#overpassMaterials.flat.dispose();
+    this.#overpassPhysical.dispose();
     this.#stone?.material.dispose();
   }
 }
@@ -10598,9 +10764,10 @@ function pavementGeometry(
 
 /**
  * Every cross street in view — #1565 (`cross-streets.ts`): the side roads a
- * short way off the route at each junction, and their give-way lines. **One
- * mesh and one draw call** however many are in view, and none where a frame
- * holds none.
+ * short way off the route at each junction, and their give-way lines — and
+ * since #2699 each overpass's road (`overpasses.ts`), its deck's top and its
+ * approaches (their embankments are ground, {@link TerrainBelt}'s). **One mesh and one draw call**
+ * however many are in view, and none where a frame holds none.
  *
  * ⚠️ **It wears the ROAD's material, whatever the road wears** —
  * `ThreeGameView` hands it the road mesh's own every frame: the stylised
@@ -26042,6 +26209,8 @@ class ThreeGameView implements GameView {
     const ground = winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter);
     // #2700: the bare ground under the same snow as the rest of it.
     this.#terrain.update(frame.terrain.mesh, ground, snowCoverIn(frame.world, winter));
+    // #2699: and the overpasses' embankments, in the ground's own material.
+    this.#terrain.updateEmbankments(frame.terrain.embankments);
     // #2685: the golf courses' and cemeteries' ground and what stands on it —
     // the realistic world's alone.
     const park = this.#drawing === 'realistic' ? frame.parkDressing : undefined;

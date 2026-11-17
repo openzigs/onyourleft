@@ -2,7 +2,9 @@
 
 /**
  * **Model-chosen lap-race bot tactics** (#2709, ADR 0071): what this instance
- * offers the rider, their consent, a race's start and end, and one decision.
+ * offers the rider, their consent, a race's start and end, and one decision —
+ * and **one AI-pacer decision** (#2712, ADR 0072), under the same consent,
+ * slot and gates.
  * `tactics.ts` says what each checks, in what order, and why.
  *
  * Every one is `auth: 'session'` and `reaches: 'own'`: the athlete is the
@@ -12,6 +14,8 @@
  * plaintext twin, and listed in `sealed/phase-one.ts`: a race state and the
  * moves answered for it never cross the tunnel's edge readable.
  */
+
+import { MODEL_PACER_SAY_MOST_CHARACTERS, PACER_INTENTS, PACER_PLANS } from '@onyourleft/domain';
 
 import { errorResponse } from '../errors.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
@@ -51,6 +55,18 @@ const decision: Schema = {
     },
   },
   required: ['bots'],
+  additionalProperties: false,
+};
+
+const pacerDecision: Schema = {
+  type: 'object',
+  description: `The AI pacer’s plan and intent from their closed lists, and its line of feedback: at most ${String(MODEL_PACER_SAY_MOST_CHARACTERS)} characters, screened, or "" for none. No other field, and never a power.`,
+  properties: {
+    plan: { type: 'string', enum: [...PACER_PLANS] },
+    intent: { type: 'string', enum: [...PACER_INTENTS] },
+    say: { type: 'string' },
+  },
+  required: ['plan', 'intent', 'say'],
   additionalProperties: false,
 };
 
@@ -134,7 +150,7 @@ export const TACTICS_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/analysis/tactics/start',
     operationId: 'startBotTacticsRace',
-    summary: `Your AI-bots race is starting (ADR 0071 D-6): it takes this instance’s one model race slot, and post-ride write-ups on this instance wait while it runs — none already running is stopped, and a re-plan does not wait. Answers 202 at once; \`warming\` says a call of the same shape about a fixed race, with nothing of yours in it, has gone out to load the model, so the first decision is not late. The slot is let go by \`POST /v1/analysis/tactics/end\`, after ${String(TACTICS_HOLD_LAPSE_MS / 1000)} s with no tactics request, or ${String(TACTICS_HOLD_CEILING_MS / 3_600_000)} hours after it was taken, whichever is first. \`tactics_busy\` while another rider’s AI-bots race holds it; \`local_unavailable\` and \`tactics_consent_required\` before anything is sent. Counted with your decisions against \`rate_limited\`.`,
+    summary: `Your AI-bots race, or your ride with an AI pacer (ADR 0072), is starting (ADR 0071 D-6): it takes this instance’s one model race slot, and post-ride write-ups on this instance wait while it runs — none already running is stopped, and a re-plan does not wait. Answers 202 at once; \`warming\` says a call of the same shape about a fixed race, with nothing of yours in it, has gone out to load the model, so the first decision is not late. The slot is let go by \`POST /v1/analysis/tactics/end\`, after ${String(TACTICS_HOLD_LAPSE_MS / 1000)} s with no tactics request, or ${String(TACTICS_HOLD_CEILING_MS / 3_600_000)} hours after it was taken, whichever is first. \`tactics_busy\` while another rider’s AI-bots race holds it; \`local_unavailable\` and \`tactics_consent_required\` before anything is sent. Counted with your decisions against \`rate_limited\`.`,
     accepted: true,
     errors: ['unauthenticated', ...GATES, 'rate_limited', 'unavailable'],
     response: {
@@ -189,10 +205,43 @@ export const TACTICS_ROUTES: readonly Route[] = [
   {
     ...COMMON,
     method: 'POST',
+    path: '/v1/analysis/pacer/decide',
+    operationId: 'decidePacer',
+    summary: `One decision for your AI pacer (#2712, ADR 0072): \`input\` is the ride as it stands, exactly \`@onyourleft/domain\`’s \`ModelPacerInput\` — the pacer’s W/kg, its plan and intent and the seconds held, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden; no coordinate, no name — at most 1 024 characters. Answers \`plan\` (\`rolling\`, \`even\` or \`climber\`), \`intent\` (\`hold\`, \`lift\` or \`ease\`) and \`say\`, one line of feedback of at most 80 characters with no number, no metric name and no health wording, or "". **No power, ever**, and nothing of it reaches a trainer: the plan and intent move the pacer inside its usual range. The same consent as AI bots, the same model slot (\`POST /v1/analysis/tactics/start\` and \`end\`), the same rate limit and the same model call, with no tools and no reasoning. \`tactics_invalid\` when the model’s answer was not such a decision or its line did not pass, \`tactics_failed\` when it gave none in time; on either, and on every refusal, the pacer rides its usual rule.`,
+    request: {
+      type: 'object',
+      properties: { input: { type: 'object', description: 'A `ModelPacerInput` (#2712).' } },
+      required: ['input'],
+      additionalProperties: false,
+    },
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      ...GATES,
+      'rate_limited',
+      'tactics_invalid',
+      'tactics_failed',
+      'unavailable',
+    ],
+    response: { contentType: 'application/json', schema: pacerDecision },
+    handle: async (context) => {
+      const got = ready(context);
+      if (got === undefined) return errorResponse('unavailable');
+      const outcome = await got.tactics.pace(got.caller, context.json);
+      if (outcome.ok) return json(outcome.value);
+      return errorResponse(
+        outcome.code,
+        outcome.fields === undefined ? {} : { fields: outcome.fields },
+      );
+    },
+  },
+  {
+    ...COMMON,
+    method: 'POST',
     path: '/v1/analysis/tactics/end',
     operationId: 'endBotTacticsRace',
     summary:
-      'Your AI-bots race has ended: the model race slot is let go, and write-ups held for it start. Nothing for a slot you do not hold.',
+      'Your AI-bots race, or your ride with an AI pacer, has ended: the model race slot is let go, and write-ups held for it start. Nothing for a slot you do not hold.',
     errors: ['unauthenticated', 'unavailable'],
     response: { contentType: 'none' },
     handle: (context) => {

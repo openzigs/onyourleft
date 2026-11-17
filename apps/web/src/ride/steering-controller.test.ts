@@ -19,6 +19,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { ControllerPort } from '../game/delivery/controller-port';
 
+import { RECONNECT_BACKOFF_SECONDS } from './controller';
+import {
+  createRememberedSensors,
+  transportSeed,
+  type RememberedSensorStorage,
+} from './remembered-sensors';
 import {
   createSteeringController,
   STEERING_CONTROLLER_BUTTONS,
@@ -262,5 +268,270 @@ describe('on one radio with a trainer and a strap', () => {
     expect(gatt.isConnected()).toBe(false);
     expect(transport.connectionState(trainer)).toBe('connected');
     expect(transport.connectionState(strap)).toBe('connected');
+  });
+});
+
+/** The device's own storage, which a second memory over it reads as the next app opening does. */
+function deviceStorage(): RememberedSensorStorage {
+  const rows = new Map<string, string>();
+  return {
+    getItem: (key) => rows.get(key) ?? null,
+    setItem: (key, value) => void rows.set(key, value),
+    removeItem: (key) => void rows.delete(key),
+  };
+}
+
+const CONTROLLER_ID = 'D1:0B:1C:00:4E:21';
+
+/**
+ * #2672: a steering controller given a `SteeringReconnect` over a real
+ * memory, with a scheduler a test fires by hand and a connect with no chooser
+ * it scripts.
+ */
+function remembering(
+  options: {
+    readonly storage?: RememberedSensorStorage;
+    readonly pairs?: SteeringControllerLink[];
+    readonly room?: () => boolean;
+  } = {},
+) {
+  const storage = options.storage ?? deviceStorage();
+  const memory = createRememberedSensors(storage);
+  const known: Array<SteeringControllerLink | Error | Promise<SteeringControllerLink>> = [];
+  const asked: Array<readonly [string, string]> = [];
+  const waiting: Array<{ readonly run: () => void; readonly after: number }> = [];
+  const steering = createSteeringController(opens(...(options.pairs ?? [])), {
+    remembered: memory,
+    connectKnown: async (id, name) => {
+      asked.push([id, name]);
+      const next = known.shift();
+      if (next === undefined) throw new SensorError('not-connected', 'nothing there');
+      if (next instanceof Error) throw next;
+      return next;
+    },
+    hasRoom: options.room ?? (() => true),
+    schedule: (run, after) => {
+      const entry = { run, after };
+      waiting.push(entry);
+      return () => {
+        const at = waiting.indexOf(entry);
+        if (at !== -1) waiting.splice(at, 1);
+      };
+    },
+  });
+  return {
+    steering,
+    memory,
+    storage,
+    known,
+    asked,
+    /** The waits the controller asked for, in seconds, still pending. */
+    get waits() {
+      return waiting.map((entry) => entry.after);
+    },
+    /** Fire every pending wait, and let the try it starts run out. */
+    async fire(): Promise<void> {
+      for (const entry of waiting.splice(0)) entry.run();
+      for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+    },
+    /** What the NEXT opening of the app would read. */
+    reopened: () => createRememberedSensors(storage).list(),
+  };
+}
+
+const withId = (hand: ReturnType<typeof handLink>, id = CONTROLLER_ID): SteeringControllerLink => ({
+  ...hand.link,
+  id,
+});
+
+/** A memory that already holds a controller, as the app finds it on opening. */
+function holdingController(name = 'Ctrl 1'): RememberedSensorStorage {
+  const storage = deviceStorage();
+  createRememberedSensors(storage).remember({
+    id: deviceId(CONTROLLER_ID),
+    name,
+    role: 'controller',
+  });
+  return storage;
+}
+
+describe('#2672 — the shell remembers a paired steering controller', () => {
+  it('remembers it once it has paired: its id, its name and its role, and nothing else', async () => {
+    const hand = handLink('Ctrl 1');
+    const rig = remembering({ pairs: [withId(hand)] });
+    expect(rig.reopened()).toEqual([]);
+    await rig.steering.pair();
+    expect(rig.reopened()).toStrictEqual([
+      { id: CONTROLLER_ID, name: 'Ctrl 1', role: 'controller' },
+    ]);
+    // Never handed to the transport, which does not pair controllers.
+    expect(transportSeed(rig.memory)()).toEqual([]);
+  });
+
+  it('keeps one controller: pairing another takes the first one’s place', async () => {
+    const first = handLink('One');
+    const second = handLink('Two');
+    const rig = remembering({ pairs: [withId(first, 'AA:00'), withId(second, 'BB:00')] });
+    rig.memory.remember({ id: deviceId('C4:01'), name: 'Strap', role: 'heart-rate' });
+    await rig.steering.pair();
+    await rig.steering.pair();
+    expect(rig.reopened()).toStrictEqual([
+      { id: 'C4:01', name: 'Strap', role: 'heart-rate' },
+      { id: 'BB:00', name: 'Two', role: 'controller' },
+    ]);
+  });
+
+  it('stops remembering it when the rider presses Forget, and leaves the sensors', async () => {
+    const hand = handLink();
+    const rig = remembering({ pairs: [withId(hand)] });
+    rig.memory.remember({ id: deviceId('C4:01'), name: 'Strap', role: 'heart-rate' });
+    await rig.steering.pair();
+    rig.steering.forget();
+    expect(rig.reopened()).toStrictEqual([{ id: 'C4:01', name: 'Strap', role: 'heart-rate' }]);
+  });
+
+  it('remembers nothing of a link with no id, which is what a browser’s is', async () => {
+    const hand = handLink();
+    const rig = remembering({ pairs: [hand.link] });
+    await rig.steering.pair();
+    expect(rig.steering.state).toEqual({ kind: 'connected', name: 'Ctrl 1' });
+    expect(rig.reopened()).toEqual([]);
+    hand.drop();
+    expect(rig.steering.state).toEqual({ kind: 'none', dropped: true });
+    expect(rig.waits).toEqual([]);
+  });
+});
+
+describe('#2672 — reconnecting it when the app opens', () => {
+  it('lists it as reconnecting, connects with no chooser, and passes its presses on', async () => {
+    // No scripted chooser: a restore that went through one throws.
+    const rig = remembering({ storage: holdingController() });
+    const hand = handLink('Ctrl 1');
+    rig.known.push(withId(hand));
+    const seen: SteeringControllerState[] = [];
+    rig.steering.subscribe(() => seen.push(rig.steering.state));
+    const heard: OpenBikeControlEvent[] = [];
+    rig.steering.onControllerEvents((events) => heard.push(...events));
+
+    await rig.steering.restoreRemembered();
+
+    expect(rig.asked).toEqual([[CONTROLLER_ID, 'Ctrl 1']]);
+    expect(seen).toEqual([
+      { kind: 'reconnecting', name: 'Ctrl 1' },
+      { kind: 'connected', name: 'Ctrl 1' },
+    ]);
+    expect(rig.steering.paired).toBe(true);
+    hand.send(PRESS);
+    expect(heard).toEqual(PRESS);
+  });
+
+  it('tries again on the backoff while it is not there, saying reconnecting meanwhile', async () => {
+    const rig = remembering({ storage: holdingController('') });
+    await rig.steering.restoreRemembered();
+    expect(rig.steering.state).toEqual({ kind: 'reconnecting', name: undefined });
+    expect(rig.waits).toEqual([RECONNECT_BACKOFF_SECONDS[1]]);
+    await rig.fire();
+    expect(rig.waits).toEqual([RECONNECT_BACKOFF_SECONDS[2]]);
+    rig.known.push({ ...withId(handLink()), name: undefined });
+    await rig.fire();
+    expect(rig.asked).toHaveLength(3);
+    expect(rig.steering.state).toEqual({ kind: 'connected', name: undefined });
+    expect(rig.waits).toEqual([]);
+  });
+
+  it('tries nothing, and lists nothing, where the sensors have taken the budget', async () => {
+    const rig = remembering({ storage: holdingController(), room: () => false });
+    await rig.steering.restoreRemembered();
+    expect(rig.asked).toEqual([]);
+    expect(rig.steering.state).toEqual({ kind: 'none', dropped: false });
+    // Still remembered, for an opening with a link free.
+    expect(rig.reopened()).toHaveLength(1);
+  });
+
+  it('does nothing with no controller remembered', async () => {
+    const rig = remembering();
+    rig.memory.remember({ id: deviceId('C4:01'), name: 'Strap', role: 'heart-rate' });
+    await rig.steering.restoreRemembered();
+    expect(rig.asked).toEqual([]);
+    expect(rig.steering.state).toEqual({ kind: 'none', dropped: false });
+  });
+
+  it('lets go of a link that a Forget overtook while the try was running', async () => {
+    const rig = remembering({ storage: holdingController() });
+    const hand = handLink();
+    let finish: (link: SteeringControllerLink) => void = () => undefined;
+    rig.known.push(
+      new Promise<SteeringControllerLink>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const restoring = rig.steering.restoreRemembered();
+    await Promise.resolve();
+    rig.steering.forget();
+    finish(withId(hand));
+    await restoring;
+    expect(rig.steering.state).toEqual({ kind: 'none', dropped: false });
+    expect(hand.disconnects).toBe(1);
+    expect(hand.listening).toBe(0);
+    expect(rig.reopened()).toEqual([]);
+  });
+});
+
+describe('#2672 — a controller link that drops comes back by itself', () => {
+  async function dropped() {
+    const hand = handLink('Ctrl 1');
+    const rig = remembering({ pairs: [withId(hand)] });
+    await rig.steering.pair();
+    hand.drop();
+    return Object.assign(rig, { hand });
+  }
+
+  it('says reconnecting, tries on the first backoff with no chooser, and is connected again', async () => {
+    const rig = await dropped();
+    expect(rig.steering.state).toEqual({ kind: 'reconnecting', name: 'Ctrl 1' });
+    expect(rig.steering.paired).toBe(false);
+    expect(rig.waits).toEqual([RECONNECT_BACKOFF_SECONDS[0]]);
+    const back = handLink('Ctrl 1');
+    rig.known.push(withId(back));
+    await rig.fire();
+    expect(rig.asked).toEqual([[CONTROLLER_ID, 'Ctrl 1']]);
+    expect(rig.steering.state).toEqual({ kind: 'connected', name: 'Ctrl 1' });
+    // And a second drop is got back the same way.
+    back.drop();
+    expect(rig.steering.state).toEqual({ kind: 'reconnecting', name: 'Ctrl 1' });
+  });
+
+  it('stops trying, and forgets it, when the rider presses Forget while it is reconnecting', async () => {
+    const rig = await dropped();
+    rig.steering.forget();
+    expect(rig.waits).toEqual([]);
+    expect(rig.steering.state).toEqual({ kind: 'none', dropped: false });
+    expect(rig.reopened()).toEqual([]);
+  });
+
+  it('is not tried again once Erase everything has taken it from the memory', async () => {
+    const rig = await dropped();
+    rig.memory.forget();
+    await rig.fire();
+    expect(rig.asked).toEqual([]);
+    expect(rig.steering.state).toEqual({ kind: 'none', dropped: false });
+    expect(rig.waits).toEqual([]);
+  });
+
+  it('waits for a link free in the budget, backing off, before it tries', async () => {
+    let room = false;
+    const hand = handLink('Ctrl 1');
+    const rig = remembering({ pairs: [withId(hand)], room: () => room });
+    await rig.steering.pair();
+    hand.drop();
+    await rig.fire();
+    expect(rig.asked).toEqual([]);
+    expect(rig.steering.state).toEqual({ kind: 'reconnecting', name: 'Ctrl 1' });
+    expect(rig.waits).toEqual([RECONNECT_BACKOFF_SECONDS[1]]);
+    room = true;
+    rig.known.push(withId(handLink('Ctrl 1')));
+    await rig.fire();
+    expect(rig.asked).toHaveLength(1);
+    expect(rig.steering.state).toEqual({ kind: 'connected', name: 'Ctrl 1' });
   });
 });

@@ -24,6 +24,12 @@ export interface LapRaceChoice {
   readonly tier: BotTier;
   /** Whether the race has items, before the assisted setting's items off. */
   readonly itemsOn: boolean;
+  /**
+   * Whether the rider chose AI bots (#2710, ADR 0071 D-1): their moves picked
+   * by the rider's instance's own model. Ridden only with the rider's consent
+   * recorded there; absent or `false`, the seeded race.
+   */
+  readonly aiBots?: boolean | undefined;
 }
 
 /** The most bots a field holds: seven, the field #1903's draw-call ceiling was measured with. */

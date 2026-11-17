@@ -39,6 +39,7 @@
  * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
  * | 5g | a standing obstacle ahead on a level (#2362), a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2; ADR 0065 D-10.9 | the obstacle ahead **yes** (#2362, the owner's ruling of 2026-11-08); the other four no (2026-10-28) |
  * | 5h | a lap race's finish, a hit, a lap, an item and a place, in that order | event (#1904) | ADR 0060 | no |
+ * | 5i | the AI pacer's line of feedback, screened, as it arrives | event (#2712) | ADR 0072 D-4 | no |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -72,6 +73,7 @@
  * | `room-draft` | `GameView` | `game/room-ride.ts` §`draftEvent`, from the room's own frame for this rider (#787) |
  * | `delivery-*` | `GameView`, on a ride running a round (#1816) | `hud/delivery-announce.ts` §`deliveryEvents` (#1812) |
  * | `lap-race-*` | nothing yet: #1906 runs a race inside a game ride | `hud/lap-race-announce.ts` §`lapRaceEvents` (#1904) |
+ * | `pacer-say` | `GameView` | `game/model-pacer.ts` §`ModelPacer.frame`'s `arrived`: the AI pacer's screened line (#2712) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -332,7 +334,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'lap-race-hit'; readonly text: string }
   | { readonly kind: 'lap-race-lap'; readonly text: string }
   | { readonly kind: 'lap-race-item'; readonly text: string }
-  | { readonly kind: 'lap-race-place'; readonly text: string };
+  | { readonly kind: 'lap-race-place'; readonly text: string }
+  | { readonly kind: 'pacer-say'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -391,6 +394,10 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'lap-race-lap',
   'lap-race-item',
   'lap-race-place',
+  // #2712, ADR 0072 D-4: the AI pacer's line of feedback, the lowest event:
+  // it is encouragement, and every other event says something about the
+  // ride. Rank 5i. With announcements on only, as the issue asks.
+  'pacer-say',
   'power-off-target',
   'distance-tick',
   'power',

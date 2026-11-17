@@ -3110,6 +3110,19 @@ ul.oyl-sections.oyl-game-courses__list {
 }
 
 /*
+ * #2710: the AI bots switch and its consent's three buttons (*Agree and race
+ * AI bots*, *Not now*, *Withdraw consent*) get the owner's 48 px target
+ * (ruling of 2026-10), declared here for those four and nothing else: the
+ * shared label and button floors above stay at 44 everywhere else.
+ * `browser/pre-ride.browser.spec.ts` §"#2710" measures them, and the same
+ * controls with this rule stripped, which fall under 48.
+ */
+.oyl-game__ai-bots label:has(> input[type='checkbox']),
+.oyl-game__ai-bots .oyl-button {
+  min-height: 3rem;
+}
+
+/*
  * A LINK drawn as a button — #566's review. A `<button>` is inline-block by
  * default and an `<a>` is inline, and `min-height`/`min-width` do not apply to
  * a non-replaced inline box: its vertical padding takes no line space either,
@@ -6615,6 +6628,19 @@ select.oyl-input {
 }
 
 /*
+ * THE AI PACER'S CONTROLS — #2712 (`StageChooser.tsx` §`AiPacerControls`).
+ * 48 px targets, the owner's ruling on PR #2723: its switch row, *Allow the AI
+ * pacer* and *Withdraw consent*, where §"A checkbox or radio ROW" and
+ * `.oyl-button` give 44 px and the button was drawn 45. Two classes and a
+ * `:has()`, so each outranks the 44 px rule it raises.
+ * `pre-ride.browser.spec.ts` §"#2723" measures them.
+ */
+.oyl-game__ai-pacer label:has(> input[type='checkbox']),
+.oyl-game__ai-pacer .oyl-button {
+  min-height: 3rem;
+}
+
+/*
  * Wide: the cards beside the loadout, under the notices and *Ride*. The game
  * route's layout is `prose` (`shell/routes.ts`), and that is what this undoes,
  * for the chooser alone and only from 60 rem: `:has()` finds the chooser
@@ -6672,6 +6698,16 @@ select.oyl-input {
 
   .oyl-chooser__loadout > .oyl-game__wind > label:first-child,
   .oyl-chooser__loadout > div > .oyl-game__problem {
+    grid-column: 1 / -1;
+  }
+
+  /*
+   * #2723, the owner's ruling: the AI pacer's switch, its consent and its
+   * button take the loadout's whole width, under the pacer's switch and its
+   * box. In the pacer's second row's first column they were 224 px wide at
+   * 1024×600, and the consent ran to 17 lines.
+   */
+  .oyl-chooser__loadout > .oyl-game__pacer > .oyl-game__ai-pacer {
     grid-column: 1 / -1;
   }
 }
@@ -9675,6 +9711,13 @@ select.oyl-input {
 }
 
 .oyl-hud__standings-summary {
+  margin: 0 0 var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+/* #2710: whether a solo race's AI bots are racing, under the summary, in its ink. */
+.oyl-hud__standings-note {
   margin: 0 0 var(--oyl-space-xs);
   font-size: var(--oyl-font-size-sm);
   color: var(--oyl-color-hud-ink-muted);

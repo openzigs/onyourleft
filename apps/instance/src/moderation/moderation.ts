@@ -422,7 +422,8 @@ export function checkReason(
   return { ok: true, reason };
 }
 
-const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** An athlete id as the routes take one in `{athleteId}`; the admin Accounts page checks its form against the same. */
+export const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** A registration's two decisions, by the word `registration_decided` logs each with (#2646). */
 const REGISTRATION_DECISIONS: ReadonlyMap<AthleteAction, 'approved' | 'refused'> = new Map([
