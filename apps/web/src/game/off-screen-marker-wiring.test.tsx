@@ -45,6 +45,7 @@ const RIDER_WATTS = 420;
 let nowMs = START_MS;
 let pending: FrameRequestCallback[] = [];
 let mounted: Mounted | undefined;
+let sizeReads = 0;
 
 beforeEach(() => {
   pending = [];
@@ -59,7 +60,10 @@ beforeEach(() => {
   // owner's small laptop window: the markers are placed from it.
   Object.defineProperty(HTMLCanvasElement.prototype, 'clientWidth', {
     configurable: true,
-    get: () => 1024,
+    get: () => {
+      sizeReads += 1;
+      return 1024;
+    },
   });
   Object.defineProperty(HTMLCanvasElement.prototype, 'clientHeight', {
     configurable: true,
@@ -157,6 +161,8 @@ interface Seen {
     readonly gap: string;
   }[];
   readonly pacerField: string;
+  /** Reads of the world's size this frame. */
+  readonly reads: number;
 }
 
 interface Ridden {
@@ -165,7 +171,20 @@ interface Ridden {
   readonly layerHidden: string | null | undefined;
 }
 
-async function ride(hasContext: boolean): Promise<Ridden> {
+async function ride(hasContext: boolean, observed = false): Promise<Ridden> {
+  if (observed) {
+    // A browser's observer, which reports the size when it starts watching.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly callback: () => void) {}
+        observe(): void {
+          this.callback();
+        }
+        disconnect(): void {}
+      },
+    );
+  }
   pending = [];
   nowMs = START_MS;
   localStorage.clear();
@@ -200,6 +219,7 @@ async function ride(hasContext: boolean): Promise<Ridden> {
     if (due.length === 0) throw new Error(`the ride asked for no frame at ${String(frame)}`);
     pending = [];
     nowMs += FRAME_MS;
+    sizeReads = 0;
     await act(async () => {
       for (const callback of due) callback(nowMs);
       await Promise.resolve();
@@ -217,6 +237,7 @@ async function ride(hasContext: boolean): Promise<Ridden> {
         }),
       ),
       pacerField: field?.querySelector('dd')?.textContent ?? '',
+      reads: sizeReads,
     });
   }
   const layerHidden = mounted.container
@@ -249,5 +270,14 @@ describe('the pacer’s marker at the world’s edge, through GameView — #2755
     // And it is drawing only: the same writes on the same frames.
     expect(drawing.written.length).toBeGreaterThan(5);
     expect(blind.written).toStrictEqual(drawing.written);
+  });
+
+  it('reads no layout on a frame with the pacer in view, and still lays the marker once it is dropped', async () => {
+    const drawing = await ride(true, true);
+    expect(drawing.seen[0]?.markers).toEqual([]);
+    const inView = drawing.seen.filter((each) => each.markers.length === 0);
+    expect(inView.length).toBeGreaterThan(3);
+    expect(inView.map((each) => each.reads)).toEqual(inView.map(() => 0));
+    expect(drawing.seen.at(-1)?.markers).toHaveLength(1);
   });
 });

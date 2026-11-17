@@ -1713,6 +1713,9 @@ function GameScreen({
    * most every {@link HUD_BOXES_MS} and only while a marker is placed, and
    * the world's size they were read at. @see boxesOver
    */
+  const worldSizeRef = useRef<{ readonly width: number; readonly height: number } | undefined>(
+    undefined,
+  );
   const hudBoxesRef = useRef<
     | {
         readonly at: number;
@@ -3209,6 +3212,9 @@ function GameScreen({
             // ratio of infinity, which three turns into a NaN projection and a
             // black frame.
             if (canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+              // #2755: the size the off-screen markers are placed from, kept
+              // here so a frame with the pacer in view reads no layout.
+              worldSizeRef.current = { width: canvas.clientWidth, height: canvas.clientHeight };
               viewRef.current?.resize(canvas.clientWidth, canvas.clientHeight);
             }
           });
@@ -4093,8 +4099,11 @@ function GameScreen({
             world !== null &&
             (edges.childElementCount > 0 || chases.length > 0)
           ) {
-            const width = world.clientWidth;
-            const height = world.clientHeight;
+            // The observer's size; a layout read only where there is no observer.
+            const { width, height } = worldSizeRef.current ?? {
+              width: world.clientWidth,
+              height: world.clientHeight,
+            };
             const hud = (): readonly PageBox[] => {
               const kept = hudBoxesRef.current;
               if (
