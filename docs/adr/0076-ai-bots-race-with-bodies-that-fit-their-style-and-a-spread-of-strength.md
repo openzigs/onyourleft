@@ -1,9 +1,8 @@
 # ADR 0076: AI bots race with bodies that fit their style and a spread of strength — superseding in part ADR 0071 D-1.3, ADR 0073 D-2.5 and D-5.1, and ADR 0067 D-1.3
 
-- **Status**: **Proposed**, 2026-11-17. The owner approves it, or overrules any of D-9's questions,
-  on #2759's pull request before it merges. **The build is in that pull request**: every decision
-  here is written there behind bot-code version 4, so the owner can ride it on the tablet before
-  ruling
+- **Status**: **Accepted**, 2026-11-17, by the owner on #2767, with the answers recorded in D-10.
+  Proposed the same day. **The build is in that pull request**, behind bot-code version 4; it merges
+  after the owner's tablet race
 - **Date**: 2026-11-17
 - **Deciders**: **the owner**, whose ruling of 2026-11-17 is quoted in Context and is not argued
   again. **The author** decided what it leaves open, marked *the author's choice* where it is made.
@@ -213,6 +212,24 @@ that goes too hard for too long is dropped. The temperature stays 0.6 (Context).
 | **R-4** | The style table's numbers (mass, CP, W′ and peak per style) | **Yes, as drafted**, for the tablet to judge | D-3 |
 | **R-5** | Four strength words per bot in the model's input, against the field's mean, at a 4 % margin | **Yes** | D-4 |
 | **R-6** | The seeded race (no instance, no consent) keeps its one-body field for now, or gets the same bodies in a follow-up | **Keep it for now**, and file a follow-up if the owner wants it: it changes the race every rider without an instance rides, and its tier-order guarantees | D-1 |
+
+### D-10 — The owner's answers
+
+**Owner ruling, 2026-11-17:** asked R-1 to R-6 in plain words, the owner first asked whether R-2's
+"±3" meant watts per kilogram (*"For 2 do you mean they can maintain +-3 watts per kg?"*). It was
+explained that ±3 is kilograms of body mass, and that strength is ±12 % of the tier (about 2.6 to
+3.4 W/kg at a 3.0 W/kg tier, with the field's mean held to the tier). The owner then answered *"I
+agree with all your recommendations"*. So:
+
+- **R-1**: ADR 0076 is approved.
+- **R-2**: a spread of ±12 % of strength and ±3 kg of mass, with the field's mean CP in W/kg held to
+  the tier, to be tuned after a tablet race if needed.
+- **R-3**: on `attack`, `chase`, `flyer` and `kick` an effort rides the harder of itself and the
+  move's own target.
+- **R-4**: the style table's numbers, as drafted, for the tablet to judge.
+- **R-5**: four strength words per bot in the model's input, against the field's mean at a 4 %
+  margin.
+- **R-6**: the seeded race keeps its one-body field for now.
 
 ## Consequences
 
