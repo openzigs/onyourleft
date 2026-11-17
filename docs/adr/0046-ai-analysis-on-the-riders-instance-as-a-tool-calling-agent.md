@@ -1274,3 +1274,14 @@ Until 2026-10-07 this section was §"Owner questions left open".
   0047 and 0048 gain no entry: each rule of theirs this cites is applied as written, and the new
   routes join ADR 0047 D-7's phase-2 row by its existing 2026-11-14 entry. The body above is
   not edited. (#2601, #2608)
+- **2026-11-16** — **Once [ADR 0071](0071-model-chosen-lap-race-bot-tactics-during-a-ride.md) is
+  Accepted, it supersedes D-7's *"nothing runs during a ride"* for one more use, lap-race bot
+  tactics, and D-9 as it applies to that use.** A model on the instance may pick the lap-race bots'
+  moves during a ride the rider chose to ride with AI bots, and **never for the pacer**. Write-ups
+  wait while such a race runs (its D-6). The tactics call uses **the instance's local model only**,
+  and the rider's own consent naming the endpoint is recorded before their first model race and can
+  be withdrawn, which D-9 point 4 did not require of the local model (its D-5). The call has no
+  tools, and its answer has no power field and no text a rider sees (its D-3). Read ADR 0071 for
+  the rule. For every other job type D-7 and D-9 stand as written, with the entries above; the
+  re-plan of the 2026-10-09 entry is unchanged. This entry only points there. The body above is not
+  edited. (#2707)

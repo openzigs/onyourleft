@@ -2,24 +2,64 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type JSX, type ReactNode } from 'react';
 
+import {
+  AI_JOBS_HEADING,
+  AI_LINE,
+  AI_NOW_HEADING,
+  AI_OFFERS_HEADING,
+  AI_OWN_KEY_HEADING,
+  AI_PICK_HEADING,
+  AI_PURPOSE,
+  AI_RETURN_HEADING,
+  AI_UNREADABLE_TEXT,
+  aiNowLines,
+  analysisHolds,
+  CHECK_BUTTON,
+  CHECK_TEXT,
+  CHECK_UNREADABLE_TEXT,
+  HOSTED_OFFER_SENTENCE,
+  jobCountLines,
+  jobLine,
+  JOBS_UNREADABLE_TEXT,
+  MODEL_LOAD_WARNING,
+  MODEL_SAVE_FAILED_TEXT,
+  MODEL_SAVED_TEXT,
+  modelLine,
+  MODELS_LEGEND,
+  MODELS_UNREADABLE_TEXT,
+  NO_JOBS_TEXT,
+  NO_MODELS_TEXT,
+  OFFER_FAILED_TEXT,
+  OFFER_HOSTED_LABEL,
+  OFFER_LOCAL_LABEL,
+  OFFER_OTHERS_LABEL,
+  OFFER_SAVED_TEXT,
+  ownKeyText,
+  READ_AGAIN_BUTTON,
+  RETURN_BUTTON,
+  RETURN_FAILED_TEXT,
+  RETURN_KEEP,
+  RETURN_SENTENCE,
+  RETURN_TITLE,
+  RETURNED_TEXT,
+  SAVE_BUTTON,
+  SAVE_NEEDS_CHECK,
+  SERVER_STATE_TEXT,
+  type OperateLine,
+} from '@onyourleft/operate-text';
 import { Button, ButtonLink } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import type {
-  GpuFit,
   LocalModel,
-  LocalModelState,
   LocalModelsRead,
-  LocalServerState,
   OperateAnalysis,
   OperateAnalysisChange,
   OperateAnalysisRead,
-  OperateJob,
   OperateJobsRead,
   OperatePort,
-  ToolCheckOutcome,
 } from '../instance/operate-port';
 import { hrefFor, routeById } from '../shell/routes';
 
@@ -56,198 +96,61 @@ import { hrefFor, routeById } from '../shell/routes';
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
 
-/** The section's one drawn line (#1013). */
-export const AI_LINE = 'Which models your instance offers riders for ride write-ups.';
-
-/** What the section is for, behind its ⓘ. */
-export const AI_PURPOSE =
-  'A write-up runs on your instance: on a model on the instance’s own machine, or on a hosted ' +
-  'service a rider brings their own key for. This app never calls a model itself.';
-
-export const AI_UNREADABLE_TEXT =
-  'The AI settings could not be read from the instance, so they are not shown here.';
-
-/** Where the local model's settings come from. */
-export const SET_IN_TEXT: Readonly<Record<OperateAnalysis['local']['setIn'], string>> = {
-  app: 'set here',
-  env: 'from the instance’s .env',
-  none: 'not set',
-};
-
-/** The local model's state, as a sentence: `on`, or the code it is off for. */
-export const LOCAL_STATE_TEXT: Readonly<Record<LocalModelState, string>> = {
-  on: 'On: write-ups can run on it.',
-  'not-set': 'Off: no local server address is set.',
-  'not-a-url': 'Off: the local server address is not a web address.',
-  'not-base-url': 'Off: the local server address has more than the server’s base address in it.',
-  'not-local': 'Off: the local server address is not on this machine or its private network.',
-  'tls-by-name':
-    'Off: the address is https: by a name, which cannot be checked. Use http: on the private network.',
-  'no-model': 'Off: no model is chosen.',
-  'bad-model': 'Off: the model’s name is not one the instance accepts.',
-  'bad-reasoning': 'Off: the reasoning allowance in .env is not a whole number in range.',
-};
-
-export const OFFER_LOCAL_LABEL = 'A model on this instance';
-export const OFFER_OTHERS_LABEL = 'Riders other than you may use the model on this instance';
-export const OFFER_HOSTED_LABEL = 'A hosted service, on each rider’s own key';
-
-/** Under the hosted switch: kept on the screen, as what leaves and on whose key. */
-export const HOSTED_OFFER_SENTENCE =
-  'Each rider brings their own key and agrees to the service by name. This instance never ' +
-  'shares your key with them.';
-
-/** Under *What the instance offers riders*, once a switch's press is read back. */
-export const OFFER_SAVED_TEXT = 'Saved. This is what the instance now offers.';
-export const OFFER_FAILED_TEXT = 'The instance did not take that change. Nothing was changed.';
-
-/** Above the list: kept on the screen, because it may slow a rider down. */
-export const MODEL_LOAD_WARNING =
-  'Checking or switching a model loads it on the server, which may slow a rider’s write-up that is running.';
-
-/** What this section keeps on the screen (`a11y/kept-visible.a11y.test.tsx`): whose key, and what a check costs riders. */
-export const OPERATE_AI_KEPT_VISIBLE: readonly string[] = [
+/**
+ * The section's words, moved to `@onyourleft/operate-text` by #2648 (ADR
+ * 0069 D-7) so that the instance's admin AI backend page says the same; the
+ * names are re-exported for this panel's tests.
+ */
+export {
+  AI_LINE,
+  AI_PURPOSE,
+  AI_UNREADABLE_TEXT,
+  CHECK_BUTTON,
+  CHECK_TEXT,
+  CHECK_UNREADABLE_TEXT,
+  gpuFitText,
   HOSTED_OFFER_SENTENCE,
+  JOBS_UNREADABLE_TEXT,
+  LOCAL_STATE_TEXT,
   MODEL_LOAD_WARNING,
-];
+  MODEL_SAVE_FAILED_TEXT,
+  MODEL_SAVED_TEXT,
+  modelLine,
+  MODELS_LEGEND,
+  MODELS_UNREADABLE_TEXT,
+  NO_JOBS_TEXT,
+  NO_MODELS_TEXT,
+  OFFER_FAILED_TEXT,
+  OFFER_HOSTED_LABEL,
+  OFFER_LOCAL_LABEL,
+  OFFER_OTHERS_LABEL,
+  OFFER_SAVED_TEXT,
+  OPERATE_AI_KEPT_VISIBLE,
+  OWN_KEY_TEXT,
+  READ_AGAIN_BUTTON,
+  RETURN_BUTTON,
+  RETURN_FAILED_TEXT,
+  RETURN_KEEP,
+  RETURN_SENTENCE,
+  RETURN_TITLE,
+  RETURNED_TEXT,
+  SAVE_BUTTON,
+  SAVE_NEEDS_CHECK,
+  SERVER_STATE_TEXT,
+  SET_IN_TEXT,
+} from '@onyourleft/operate-text';
 
-export const MODELS_LEGEND = 'Models on the local server';
-
-/** Why there is no list, by the instance's word for the server's state. */
-export const SERVER_STATE_TEXT: Readonly<Record<Exclude<LocalServerState, 'ollama'>, string>> = {
-  'openai-compatible':
-    'The local server is not Ollama, so it lists names only: no size, tools or memory.',
-  'no-address': 'No usable local server address is set, so there is no list.',
-  'not-local':
-    'The local server’s address is not on this machine or its private network now, so nothing was asked.',
-  unresolved: 'The local server’s name did not resolve, so nothing was asked.',
-  unreachable: 'The local server did not answer.',
-};
-
-export const MODELS_UNREADABLE_TEXT = 'The list of models could not be read from the instance.';
-export const NO_MODELS_TEXT = 'The local server lists no models.';
-
-export const CHECK_BUTTON = 'Check it calls tools';
-export const SAVE_BUTTON = 'Save this model';
-export const READ_AGAIN_BUTTON = 'Read the list again';
-
-/** Why *Save this model* does nothing yet. */
-export const SAVE_NEEDS_CHECK =
-  'Save is offered once this model’s check says it calls tools: write-ups need it.';
-
-/** How a check went, by the instance's word for it. */
-export const CHECK_TEXT: Readonly<Record<ToolCheckOutcome, string>> = {
-  'tools-ok': 'It called the tool and answered. You can save it.',
-  'no-tool-call': 'It answered without calling the tool, so it cannot run a write-up.',
-  'does-not-support-tools': 'The server says this model does not support tools.',
-  'server-error': 'The server did not answer the check properly. Try again.',
-  'not-local':
-    'The local server’s address is not on this machine or its private network now, so nothing was sent.',
-  'out-of-time': 'The check ran out of time. A model that is still loading may need a second try.',
-  stopped: 'The instance stopped during the check.',
-  'no-address': 'No usable local server address is set, so nothing was sent.',
-  busy: 'Another check is running. Try again when it ends.',
-};
-export const CHECK_UNREADABLE_TEXT = 'The check’s outcome did not come back from the instance.';
-
-export const MODEL_SAVED_TEXT = 'Saved. The instance now runs write-ups on the model above.';
-export const MODEL_SAVE_FAILED_TEXT = 'The instance did not take that model. Nothing was changed.';
-
-/** The owner's own hosted key, as the instance says it holds it. */
-export const OWN_KEY_TEXT: Readonly<
-  Record<OperateAnalysis['hosted']['operatorKey'], (origin: string | null) => string>
-> = {
-  none: () => 'No hosted key of yours is held.',
-  held: (origin) =>
-    `Your key is held${origin === null ? '' : ` for ${origin}`}, and this instance’s secret opens it.`,
-  'held-unreadable': (origin) =>
-    `Your key is held${origin === null ? '' : ` for ${origin}`}, and this instance’s secret cannot open it.`,
-};
+/** Where the owner's own key is set, replaced or removed: the app's Instance screen. */
 export const OWN_KEY_LINK = 'Set, replace or remove it on the Instance screen';
 
-/** The jobs' statuses, in words. */
-const STATUS_WORD: Readonly<Record<OperateJob['status'], string>> = {
-  queued: 'waiting',
-  running: 'running',
-  succeeded: 'done',
-  failed: 'failed',
-  cancelled: 'cancelled',
-  withheld: 'withheld',
-};
-export const JOBS_UNREADABLE_TEXT = 'The jobs could not be read from the instance.';
-export const NO_JOBS_TEXT = 'No write-ups in the last seven days.';
-
-export const RETURN_BUTTON = 'Return to .env';
-export const RETURN_TITLE = 'Return the AI settings to the instance’s .env?';
-export const RETURN_SENTENCE =
-  'The model, its address and both offers go back to what the instance’s .env says, and riders ' +
-  'other than you can no longer use the model on this instance. Nothing else is deleted.';
-export const RETURN_KEEP = 'Keep these settings';
-export const RETURNED_TEXT = 'Returned to .env. This is what the instance now says.';
-export const RETURN_FAILED_TEXT = 'The instance did not return to .env. Nothing was changed.';
-
-/** A size in gigabytes, one decimal: what a card's memory is counted in. */
-function gigabytes(bytes: number): string {
-  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-}
-
-/** How much of a model is in GPU memory, in words. */
-export function gpuFitText(gpu: GpuFit, percent: number | null): string {
-  switch (gpu) {
-    case 'all':
-      return 'in GPU memory: all';
-    case 'part':
-      return `in GPU memory: part, ${String(percent ?? 0)} %`;
-    case 'none':
-      return 'in GPU memory: none';
-    case 'not-loaded':
-      return 'in GPU memory: not known until loaded';
-    case 'not-reported':
-      return 'in GPU memory: not reported';
-    case 'not-known':
-      return 'in GPU memory: not known';
-  }
-}
-
-const TOOLS_TEXT: Readonly<Record<LocalModel['tools'], string>> = {
-  listed: 'lists tool support',
-  'not-listed': 'does not list tool support',
-  'not-reported': 'tool support not reported',
-};
-
-/** One model's line: what the server says of it, in its order. */
-export function modelLine(model: LocalModel): string {
-  return [
-    model.parameters,
-    model.quantisation,
-    model.sizeBytes === null ? null : gigabytes(model.sizeBytes),
-    TOOLS_TEXT[model.tools],
-    gpuFitText(model.gpu, model.gpuPercent),
-  ]
-    .filter((part): part is string => part !== null)
-    .join(', ');
-}
-
-function when(iso: string): string {
-  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
-}
-
-function jobLine(job: OperateJob): string {
-  const kind = job.kind === 're-plan' ? 'Re-plan' : 'Write-up';
-  const source = job.source === 'hosted' ? 'on a hosted service' : 'on this instance’s model';
-  const whose = job.whose === 'own' ? 'yours' : 'another rider’s';
-  const failure = job.failure === null ? '' : ` (${job.failure})`;
-  return `${kind}, ${source}, ${whose}: ${STATUS_WORD[job.status]}${failure}, ${when(job.createdAt)}`;
-}
-
-/** Whether the settings the instance reads back hold every field `change` set. */
-function holds(read: OperateAnalysis, change: OperateAnalysisChange): boolean {
+/** One shared line, its machine names drawn as code. */
+function Line({ line }: { readonly line: OperateLine }): JSX.Element {
   return (
-    (change.localModel === undefined || read.local.model === change.localModel) &&
-    (change.offerLocal === undefined || read.local.offered === (change.offerLocal ?? true)) &&
-    (change.othersLocal === undefined ||
-      read.local.othersMayUse === (change.othersLocal ?? false)) &&
-    (change.offerHosted === undefined || read.hosted.offered === (change.offerHosted ?? true))
+    <>
+      {line.map((part, index) =>
+        typeof part === 'string' ? part : <code key={String(index)}>{part.code}</code>,
+      )}
+    </>
   );
 }
 
@@ -260,18 +163,15 @@ function Now({
   readonly analysis: OperateAnalysis;
   readonly version: string | null;
 }): JSX.Element {
-  const { local } = analysis;
   return (
     <>
-      <h3>Now</h3>
+      <h3>{AI_NOW_HEADING}</h3>
       <ul data-oyl-ai-now="">
-        <li>
-          Local server: {local.url === null ? 'none' : <code>{local.url}</code>} (
-          {SET_IN_TEXT[local.setIn]})
-        </li>
-        <li>Model: {local.model === null ? 'none chosen' : <code>{local.model}</code>}</li>
-        <li>{LOCAL_STATE_TEXT[local.state]}</li>
-        {version === null ? null : <li>Ollama {version}</li>}
+        {aiNowLines(analysis, version).map((line, index) => (
+          <li key={String(index)}>
+            <Line line={line} />
+          </li>
+        ))}
       </ul>
     </>
   );
@@ -310,7 +210,7 @@ function Offers({
   );
   return (
     <>
-      <h3>What the instance offers riders</h3>
+      <h3>{AI_OFFERS_HEADING}</h3>
       <ul className="oyl-operate__offers">
         <li>{box(OFFER_LOCAL_LABEL, analysis.local.offered, (on) => ({ offerLocal: on }))}</li>
         <li>
@@ -416,7 +316,9 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
       const answer = await port.setAnalysis(change);
       const after = await port.analysis();
       setAnalysis(after);
-      return answer.kind === 'analysis' && after.kind === 'analysis' && holds(after, change);
+      return (
+        answer.kind === 'analysis' && after.kind === 'analysis' && analysisHolds(after, change)
+      );
     } finally {
       setBusy(false);
     }
@@ -481,7 +383,7 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
       {/* After the switches: controls first (#666), the state they act on beneath. */}
       <Now analysis={analysis} version={list?.version ?? null} />
 
-      <h3>Pick a local model</h3>
+      <h3>{AI_PICK_HEADING}</h3>
       <KeptVisible>
         <p>{MODEL_LOAD_WARNING}</p>
       </KeptVisible>
@@ -578,9 +480,9 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
         </StatusMessage>
       )}
 
-      <h3>Your own hosted key</h3>
+      <h3>{AI_OWN_KEY_HEADING}</h3>
       <ul>
-        <li>{OWN_KEY_TEXT[analysis.hosted.operatorKey](analysis.hosted.operatorKeyOrigin)}</li>
+        <li>{ownKeyText(analysis)}</li>
       </ul>
       <p>
         <ButtonLink variant="secondary" href={hrefFor(routeById('instance'))}>
@@ -588,7 +490,7 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
         </ButtonLink>
       </p>
 
-      <h3>Jobs</h3>
+      <h3>{AI_JOBS_HEADING}</h3>
       {jobs === 'reading' ? (
         <p className="oyl-muted">Reading the jobs…</p>
       ) : jobs.kind !== 'jobs' ? (
@@ -598,14 +500,8 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
       ) : (
         <>
           <ul data-oyl-ai-counts="">
-            <li>{`${String(jobs.counts.queued)} waiting, ${String(jobs.counts.running)} running`}</li>
-            <li>
-              {`Last seven days: ${String(jobs.counts.succeeded)} done, ${String(jobs.counts.failed)} failed, ${String(jobs.counts.withheld)} withheld, ${String(jobs.counts.cancelled)} cancelled`}
-            </li>
-            {jobs.failures.map((failure, index) => (
-              <li key={`${String(index)}-${failure.code ?? ''}`}>
-                {`Failed ${failure.code ?? 'with no reason'}: ${String(failure.count)}`}
-              </li>
+            {jobCountLines(jobs).map((line, index) => (
+              <li key={String(index)}>{line}</li>
             ))}
           </ul>
           {jobs.recent.length === 0 ? (
@@ -622,7 +518,7 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
         </>
       )}
 
-      <h3>Return to .env</h3>
+      <h3>{AI_RETURN_HEADING}</h3>
       <p>
         <Button
           variant="secondary"

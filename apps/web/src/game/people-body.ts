@@ -42,9 +42,10 @@
  * ## The animation texture
  *
  * Each kept vertex's position and normal, at {@link GAIT_PHASES} phases of the
- * walk and of the run (`gait.ts`), half-float RGBA: one column a vertex, one
- * row a phase's positions and one its normals. {@link animationBytes} is its
- * size, held under {@link PERSON_ANIMATION_MAX_BYTES}.
+ * walk and of the run (`gait.ts`), and since #2722 at {@link RIDE_PHASES} of a
+ * cyclist's crank, half-float RGBA: one column a vertex, one row a phase's
+ * positions and one its normals. {@link animationBytes} is its size, held
+ * under {@link PERSON_ANIMATION_MAX_BYTES}.
  *
  * Pure, and names no rendering library.
  */
@@ -72,8 +73,30 @@ export const PERSON_ANIMATION_MAX_BYTES = 1024 * 1024;
  */
 export const ANIMATION_BYTES_PER_TEXEL = 8;
 
-/** Rows of the animation texture: a position row and a normal row for every phase of every gait. */
-export const ANIMATION_ROWS = 2 * GAITS.length * GAIT_PHASES;
+/**
+ * How many phases of a crank's turn a scenery cyclist's body is baked at —
+ * #2722: **12**, a phase every 30°. The bodies of `scenery-cyclists.ts`' riders
+ * are this body too, seated on the realistic bicycle and posed by the
+ * realistic rider's own joints (`three-renderer.ts` §`RealisticRiderBelt`) at
+ * each phase, so they cost the frame no draw call of their own. Half the
+ * gaits' {@link GAIT_PHASES}, so the texture stays under
+ * {@link PERSON_ANIMATION_MAX_BYTES}: the shader blends the two nearest, and
+ * a foot on a 0.17 m crank cuts the corner between two phases 30° apart by
+ * under 6 mm.
+ */
+export const RIDE_PHASES = 12;
+
+/**
+ * Where the cyclists' phases are in the animation texture, as a gait's index:
+ * **after every gait**, so {@link animationRow} reads them as it reads a gait.
+ */
+export const RIDE_GAIT_INDEX = GAITS.length;
+
+/**
+ * Rows of the animation texture: a position row and a normal row for every
+ * phase of every gait, and since #2722 for every phase of the ride.
+ */
+export const ANIMATION_ROWS = 2 * (GAITS.length * GAIT_PHASES + RIDE_PHASES);
 
 /**
  * The animation texture's size in bytes for a body of `vertices` vertices: one column each.
@@ -86,7 +109,10 @@ export function animationBytes(vertices: number): number {
   return vertices * ANIMATION_ROWS * ANIMATION_BYTES_PER_TEXEL;
 }
 
-/** The row a gait's phase's positions are on; its normals are {@link ANIMATION_ROWS} / 2 below. */
+/**
+ * The row a gait's phase's positions are on — or, at {@link RIDE_GAIT_INDEX},
+ * the ride's; its normals are {@link ANIMATION_ROWS} / 2 below.
+ */
 export function animationRow(gaitIndex: number, phase: number): number {
   return gaitIndex * GAIT_PHASES + phase;
 }

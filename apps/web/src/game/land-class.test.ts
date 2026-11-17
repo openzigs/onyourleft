@@ -490,6 +490,7 @@ describe('queries are allocation-free — #240 NFR-3', () => {
         const x = box.minX - 50 + ((i * 7.31) % (width + 100));
         const z = box.minZ - 50 + ((i * 3.17) % (height + 100));
         if (mask.classAt(x, z) === 'built-up') sink += 1;
+        if (mask.protectedArea(x, z)) sink += 1;
       }
     };
     // Warm up, so the measured window runs optimised code as a ride does.

@@ -140,8 +140,9 @@ describe('the realistic page’s layer switch — #616', () => {
     for (const layer of LAYERS) {
       expect(census.objects[layer], layer).toBeGreaterThan(0);
     }
-    // The two the view adds itself.
-    expect(census.objects.surfaces).toBe(3);
+    // The horizon, the ground and — #2699 — the ground's overpass
+    // embankments, and the road the view adds itself.
+    expect(census.objects.surfaces).toBe(4);
   });
 
   it('hides a switched-off layer on a drawn frame, and nothing else', () => {

@@ -63,6 +63,7 @@ import {
   localDay,
   type CalorieRider,
   type RecordedSeries,
+  type LapRaceModelRecord,
   type ReplanRecord,
   type Seconds,
   type UnixSeconds,
@@ -140,6 +141,11 @@ export interface RideToSaveInput {
    * this device (`packages/store` §`RideFacts.races`).
    */
   readonly races?: readonly RoomRaceFact[] | undefined;
+  /**
+   * The races with AI bots this ride was ridden in — #2710, ADR 0071 D-4.4:
+   * kept with the ride on this device (`packages/store` §`RideFacts.lapRaces`).
+   */
+  readonly lapRaces?: readonly LapRaceModelRecord[] | undefined;
   /**
    * The blocks of the workouts ridden on this ride, as the recording kept
    * them — #1319, `workout-blocks.ts`. Their figures are worked out here, from
@@ -237,6 +243,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
         ghostRaced: input.ghostRaced,
         replans: input.replans,
         races: input.races,
+        lapRaces: input.lapRaces,
       }),
       // #1328: a count of the records a recovered ride's checkpoint lost, so
       // the ride says it has a gap in its record rather than none.

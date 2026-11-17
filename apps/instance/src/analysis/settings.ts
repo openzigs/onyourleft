@@ -57,6 +57,7 @@ import type { FieldProblem } from '../errors.ts';
 import { localAddressesOnly, type Resolver } from '../history/address.ts';
 import {
   ANALYSIS_SETTING_FIELD_WORDS,
+  type AdminSource,
   type AnalysisSettingRecord,
   type OperatorActor,
   type SqlStore,
@@ -272,10 +273,16 @@ export type SaveOutcome =
   | { readonly ok: false; readonly fields: readonly FieldProblem[] };
 
 /**
- * Who may write the settings: the app or the CLI, which the row's
- * `updated_by` names. The admin pages make no change yet (#2641, ADR 0069 D-1).
+ * Who may write the settings: the owner's Operate area — the app, or since
+ * #2648 the instance's own admin pages — or the CLI. The operator log entry
+ * written in the same transaction names which, the admin pages' listener
+ * included (ADR 0069 D-8). The row's `updated_by` keeps migration 0043's two
+ * words: `app` for the owner's Operate area by either channel, `cli` for the
+ * host. Nothing reads it but a test; the log is the record of who.
  */
-type SettingsActor = Extract<OperatorActor, { readonly source: 'app' | 'cli' }>;
+type SettingsActor =
+  | Extract<OperatorActor, { readonly source: 'app' | 'cli' }>
+  | { readonly source: AdminSource; readonly athleteId: string };
 
 /**
  * Check `body` and, if every field passes, write the row over what it held,
@@ -314,7 +321,7 @@ export async function saveAnalysisSettings(
       await inside.putAnalysisSetting({
         ...next,
         updatedAt: at,
-        updatedBy: actor.source,
+        updatedBy: actor.source === 'cli' ? 'cli' : 'app',
       });
       const changed = changedWords(before, next);
       return {

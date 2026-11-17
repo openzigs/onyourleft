@@ -46,6 +46,38 @@ describe('readServerConfig (#780, #791)', () => {
     });
   });
 
+  it('opens no loopback listener unless OYL_INSTANCE_ADMIN_LOOPBACK_PORT names a port, with the admin pages on (#2643)', () => {
+    const unset = readServerConfig({ adminPages: 'on' }, 1);
+    expect(unset.ok && unset.config.adminLoopbackPort).toBeUndefined();
+    const set = readServerConfig({ adminPages: 'on', adminLoopbackPort: ' 8788 ' }, 1);
+    expect(set.ok && set.config.adminLoopbackPort).toBe(8788);
+    for (const port of ['0', '65536', '87.88', '-1', 'eighty']) {
+      expect(readServerConfig({ adminPages: 'on', adminLoopbackPort: port }, 1), port).toEqual({
+        ok: false,
+        problems: ['OYL_INSTANCE_ADMIN_LOOPBACK_PORT must be a port number from 1 to 65535.'],
+      });
+    }
+    expect(readServerConfig({ adminLoopbackPort: '8788' }, 1)).toEqual({
+      ok: false,
+      problems: [
+        'OYL_INSTANCE_ADMIN_LOOPBACK_PORT serves the admin pages, so it needs OYL_INSTANCE_ADMIN_PAGES=on.',
+      ],
+    });
+  });
+
+  it('reads the tunnel sign-in allowlist as addresses, empty by default (#2643)', () => {
+    const unset = readServerConfig({}, 1);
+    expect(unset.ok && unset.config.adminAddresses).toEqual([]);
+    const listed = readServerConfig({ adminAddresses: '198.51.100.7, ::FFFF:203.0.113.9' }, 1);
+    expect(listed.ok && listed.config.adminAddresses).toEqual(['198.51.100.7', '203.0.113.9']);
+    expect(readServerConfig({ adminAddresses: '198.51.100.0/24' }, 1)).toEqual({
+      ok: false,
+      problems: [
+        'OYL_INSTANCE_ADMIN_ADDRESSES must be IP addresses separated by commas, each written exactly as the connection reports it.',
+      ],
+    });
+  });
+
   it('takes an origin alone, https unless it is this machine', () => {
     const ok = readServerConfig({ origin: 'https://ride.example' }, 1);
     expect(ok.ok && ok.config.origin).toBe('https://ride.example');

@@ -27,6 +27,7 @@ import {
   recordedAscent,
   seconds,
   type ReplanRecord,
+  type LapRaceModelRecord,
   type Seconds,
   type Watts,
 } from '@onyourleft/domain';
@@ -48,6 +49,8 @@ export interface RideFactsInput {
   readonly replans?: readonly ReplanRecord[] | undefined;
   /** The private races this ride was ridden in, as each room said it (#785). */
   readonly races?: readonly RoomRaceFact[] | undefined;
+  /** The races with AI bots this ride was ridden in, each its seed, log and the rider's input (#2710). */
+  readonly lapRaces?: readonly LapRaceModelRecord[] | undefined;
 }
 
 /**
@@ -74,6 +77,9 @@ export function rideFactsOf(input: RideFactsInput): RideFacts {
       ? {}
       : { replans: input.replans }),
     ...(input.races === undefined || input.races.length === 0 ? {} : { races: input.races }),
+    ...(input.lapRaces === undefined || input.lapRaces.length === 0
+      ? {}
+      : { lapRaces: input.lapRaces }),
   };
 }
 

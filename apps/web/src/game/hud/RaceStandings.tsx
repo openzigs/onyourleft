@@ -34,7 +34,7 @@ export function RaceStandings(props: {
   /** The control that swaps this panel with a loop's lap splits — #2080, `LapSplits.tsx`. */
   readonly swap?: ReactNode;
 }): JSX.Element {
-  const { lines, place, of } = props.standings;
+  const { lines, place, of, note } = props.standings;
   // #2599: the list as tall as the room above the actions panel holds, and
   // scrolling under a finger where that is short of every line, opening on
   // the rider's own line (`standings-room.ts`, `standings-follow.ts`).
@@ -60,6 +60,7 @@ export function RaceStandings(props: {
           {props.swap}
         </div>
       )}
+      {note === undefined ? null : <p className="oyl-hud__standings-note">{note}</p>}
       {/*
         `role="list"` because list-style none makes WebKit drop the semantics,
         and `start` because the list is windowed: its own numbering must agree

@@ -9,6 +9,7 @@
 import type { Readiness } from './readiness.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
+import type { Tactics } from './analysis/tactics.ts';
 import type { Caller, Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { History } from './history/history.ts';
@@ -77,6 +78,13 @@ export interface SidePose {
 export interface ClientInfo {
   /** The peer's address, for rate limits only — never logged. `null` when unknown. */
   readonly address: string | null;
+  /**
+   * `loopback` when the request came in on the admin pages' loopback
+   * listener (#2643, ADR 0069 D-5), set by the ADAPTER that owns that
+   * listener and by nothing else — never by a header or a peer address.
+   * Absent: the main listener.
+   */
+  readonly listener?: 'loopback';
 }
 
 /**
@@ -159,6 +167,8 @@ export interface RouteContext {
   readonly analysis: AnalysisJobs | undefined;
   /** A rider's own hosted key and consent (#1199). Present for every route that declares `hostedSettings`. */
   readonly hostedSettings: HostedSettings | undefined;
+  /** Model-chosen bot tactics (#2709). Present for every route that declares `tactics`. */
+  readonly tactics: Tactics | undefined;
   /** The side camera's pictures (#1106). Present for every route that declares `sidePose`. */
   readonly sidePose: SidePose | undefined;
   /** Published segments and their boards (#68). Present for every route that declares `segments`. */
@@ -176,6 +186,14 @@ export interface RouteContext {
   /** This request arrived inside `POST /v1/sealed`, opened and its signature checked (#1192). */
   readonly sealedRequest: boolean;
   /**
+   * The instance's own admin pages called this route in-process, as the
+   * owner, on that listener (#2648, ADR 0069 D-2's marker): set by the admin
+   * seam (`handler.ts` §`dispatchAsOwner`) and by nothing else — never read
+   * from a request. A route that writes the operator log names the channel's
+   * source from it (D-8); absent, the caller is the app.
+   */
+  readonly adminChannel?: AdminChannel;
+  /**
    * Dispatch an opened sealed request's INNER request through the same route
    * table (#1191, ADR 0047 D-9): the path matched, the method checked, the
    * inner body held to `config.bodyLimitBytes`, and then every check the
@@ -189,6 +207,9 @@ export interface RouteContext {
     client: ClientInfo,
   ) => Promise<Response>;
 }
+
+/** Which listener the admin pages that called a route were on (ADR 0069 D-5). */
+export type AdminChannel = 'tunnel' | 'loopback';
 
 /**
  * Whether, and how, a route reaches ANOTHER athlete (#83). Required on every
@@ -250,6 +271,11 @@ export interface Route {
    * none answers `unavailable` without calling it.
    */
   readonly hostedSettings?: true;
+  /**
+   * The route needs model-chosen bot tactics (#2709, ADR 0071). An instance
+   * handed none answers `unavailable` without calling it.
+   */
+  readonly tactics?: true;
   /**
    * The route shows a side-camera picture to a model (#1106). An instance
    * handed none answers `unavailable` without calling it.

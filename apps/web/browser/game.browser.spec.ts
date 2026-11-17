@@ -69,11 +69,13 @@ import {
   REALISTIC_VEGETATION_KINDS,
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
+import { CLEAR_METRES, SCENERY_CYCLISTS_MAX } from '../src/game/scenery-cyclists';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_SCENERY_CYCLIST_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
   STYLISED_SCENE_DRAW_CALLS,
@@ -3736,6 +3738,55 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     );
   });
 
+  /**
+   * **No stall when the realistic world arrives mid-ride — #2663.** The
+   * tablet logged one frame of 1.5–3 s around a lap race's start, whose
+   * countdown is when a realistic ride's set lands. `game-harness.ts`
+   * §`worldArrivalProbe` hands two fresh stylised views the realistic rung,
+   * as `GameView` does on arrival, and draws the next frames: at once — the
+   * control, as before #2663, which must build programs inside them and pay
+   * for it in its first frame — and after `prepare`, as `GameView` does now,
+   * which must build none and keep under half the control's first-frame
+   * excess (`ride-start.ts` §`prepareTookTheStall`, #547's rule).
+   *
+   * ⚠️ That `GameView` takes the prepared order is
+   * `realistic-arrival-wiring.test.tsx`'s, required; this is what the order
+   * buys, on SwiftShader, which is not the tablet.
+   */
+  test('builds no GPU program in the first frames after the realistic world arrives mid-ride — #2663', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { worldArrival: arrival } = await realistic(harnessRun);
+    expect(arrival.measured).toBe(true);
+    // The control reproduces the stall's cause: the swap's first frames build programs.
+    expect(arrival.unpreparedLinks).toBeGreaterThan(0);
+    // And `prepare` is where they went.
+    expect(arrival.linksInPrepare).toBeGreaterThanOrEqual(arrival.unpreparedLinks);
+    expect(arrival.preparedLinks).toBe(0);
+    expect(arrival.preparedFrameMs).toHaveLength(arrival.unpreparedFrameMs.length);
+    const preparedExcess = firstFrameExcess(arrival.preparedFrameMs);
+    const controlExcess = firstFrameExcess(arrival.unpreparedFrameMs);
+    expect(
+      prepareTookTheStall(arrival.preparedFrameMs, arrival.unpreparedFrameMs),
+      `prepared first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`,
+    ).toBe(true);
+    const list = (values: readonly number[]) => values.map((each) => each.toFixed(1)).join(' / ');
+    const measured =
+      `drawn at once: ${String(arrival.unpreparedLinks)} programs linked in the first ` +
+      `${String(arrival.unpreparedFrameMs.length)} frames, longest ` +
+      `${Math.max(...arrival.unpreparedFrameMs).toFixed(1)} ms, ms ${list(arrival.unpreparedFrameMs)}; ` +
+      `prepared first (${arrival.prepareMs.toFixed(1)} ms, ${String(arrival.linksInPrepare)} programs, ` +
+      `KHR_parallel_shader_compile ${arrival.parallelCompile ? 'offered' : 'absent'}): ` +
+      `${String(arrival.preparedLinks)} linked in those frames, longest ` +
+      `${Math.max(...arrival.preparedFrameMs).toFixed(1)} ms, ms ${list(arrival.preparedFrameMs)}; ` +
+      `first-frame excess ${preparedExcess.toFixed(1)} ms against the control's ${controlExcess.toFixed(1)} ms`;
+    testInfo.annotations.push({
+      type: 'the realistic world arriving mid-ride',
+      description: measured,
+    });
+    console.log(`the realistic world arriving mid-ride — ${measured}`);
+  });
+
   test('is drawn only when it is loaded, and otherwise falls back and says so — D-7', async ({
     harnessRun,
   }) => {
@@ -3886,6 +3937,46 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // The owner's look of PR #1615: a flat body lights every triangle as a
     // facet, whatever normals the animation texture holds.
     expect(people.bodyFragmentsFlat).toBe(0);
+  });
+
+  test('#2722 scenery cyclists: drawn on their own side, never through the rider, none in a race, beside the pacer or with the people off, in no call of their own beside people', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { sceneryCyclists: cyclists } = await realistic(harnessRun);
+    const measured =
+      `${String(cyclists.drawn)} drawn (${cyclists.kinds.join(', ')}), ${String(cyclists.wrongSide)} on the wrong side; ` +
+      `${String(cyclists.level)} level with the rider, nearest ${cyclists.leastLevelGap.toFixed(2)} m across the road, ` +
+      `${cyclists.leastLevelGapInLane.toFixed(2)} m left in their lanes; body off its bicycle ${cyclists.bodyOffBicycle.toFixed(3)} m; ` +
+      `${String(cyclists.drawnInRaceModes)} in race modes, ${String(cyclists.drawnPeopleOff)} with the people off; ` +
+      `${String(cyclists.drawCalls)} draw calls added beside people, ${String(cyclists.drawCallsAlone)} with nobody on the pavements; ` +
+      `${String(cyclists.triangles)} triangles a cyclist; ${String(cyclists.pixels)} pixels changed`;
+    testInfo.annotations.push({ type: 'scenery cyclists', description: measured });
+    console.log(`scenery cyclists — ${measured}`);
+    // Somebody was drawn, of every kind, and some of them level with the rider.
+    expect(cyclists.drawn).toBeGreaterThan(0);
+    expect(cyclists.kinds).toEqual(['faster', 'oncoming', 'slower']);
+    expect(cyclists.level).toBeGreaterThan(0);
+    // Each on its own side of the drawn road, and level with the rider a
+    // handlebar and the air between clear of them across it.
+    expect(cyclists.wrongSide).toBe(0);
+    expect(cyclists.leastLevelGap).toBeGreaterThan(CLEAR_METRES - 0.1);
+    // The control: left in their lanes, some of the same cyclists would be drawn nearer the rider than that.
+    expect(cyclists.leastLevelGapInLane).toBeLessThan(CLEAR_METRES - 0.1);
+    // One body on each bicycle, where it is drawn.
+    expect(cyclists.bodyOffBicycle).toBeLessThan(0.001);
+    // None in a race, beside the pacer, or with the people switched off.
+    expect(cyclists.drawnInRaceModes).toBe(0);
+    expect(cyclists.drawnPeopleOff).toBe(0);
+    // Instances of meshes already drawn: beside people, no call of their own;
+    // with nobody on the pavements, the people's bodies' one call, which the
+    // frame then makes for them alone. And what is drawn is there.
+    expect(cyclists.drawCalls).toBe(0);
+    expect(cyclists.drawCallsAlone).toBe(1);
+    expect(cyclists.triangles).toBeGreaterThan(0);
+    expect(SCENERY_CYCLISTS_MAX * cyclists.triangles).toBeLessThanOrEqual(
+      REALISTIC_SCENERY_CYCLIST_TRIANGLES,
+    );
+    expect(cyclists.pixels).toBeGreaterThan(10);
   });
 
   test('#1547 a town on the flat: the drawn ground under a mapped block’s centre footprint is within 1 m, and over 5 m without the levelling', async ({
@@ -5254,6 +5345,39 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(measured.shoulderRock).toBeLessThan(SHOULDER_ROCK_CEILING_METRES);
     // THE CONTROL: the same two frames with no cadence reading.
     expect(measured.shoulderRockControl).toBeLessThan(1e-6);
+  });
+
+  test('fades a bot held between the camera and the rider out, body, bicycle, helmet and shadow, and draws the rider behind it as with no bot — #2596', async ({
+    harnessRun,
+  }) => {
+    const { riderFade: seen, riderFadeCalls: calls } = await realistic(harnessRun);
+    console.log(
+      `#2596 realistic squares read: ${JSON.stringify(seen)}; draw calls ${JSON.stringify(calls)}`,
+    );
+    // What it costs: no draw call. A body faded out entirely is not drawn at
+    // all, so the frame is the rider alone's; whole, the bot's body is one more.
+    expect(calls.alone).toBeGreaterThan(0);
+    expect(calls.faded).toBe(calls.alone);
+    expect(calls.whole).toBe(calls.alone + 1);
+    // The squares are what they say (the controls): the rider's is the
+    // rider, and with the fade off the bot fills its own and hides the rider.
+    expect(seen.riderDrawn).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.bot.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.rider.whole).toBeGreaterThan(0);
+    expect(seen.frame.whole).toBeGreaterThan(seen.bot.whole);
+    // The product: the bot is not drawn, its shadow is not drawn, and the
+    // rider is drawn exactly as with no bot.
+    expect(seen.bot.faded).toBe(0);
+    expect(seen.rider.faded).toBe(0);
+    expect(seen.frame.faded).toBe(0);
+    // Two places across: beside the rider, which the owner's ruling of
+    // 2026-11-15 keeps whole (`rider-fade.ts`), so its square keeps every
+    // pixel the bot drawn with the fade off does.
+    expect(seen.aside.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.aside.faded).toBe(seen.aside.whole);
+    // One place across and a metre behind — the owner's tablet case: whole.
+    expect(seen.beside.whole).toBeGreaterThan(seen.pixels / 2);
+    expect(seen.beside.faded).toBe(seen.beside.whole);
   });
 
   test('grounds the realistic riders with the shape of a bicycle, cast as the shipped shader and its twin agree — #626', async ({
