@@ -11,6 +11,8 @@ import { describe, expect, it } from 'vitest';
 import { LapRaceError } from './errors';
 import {
   BOT_ABILITY_SPREAD,
+  BOT_BODY_MASS_RANGE_KILOGRAMS,
+  BOT_BODY_STRENGTH_RANGE,
   BOT_EVEN_PACE,
   BOT_PACING_STYLES,
   botFieldPaces,
@@ -112,6 +114,32 @@ describe('a pace is checked before a plan reads it', () => {
   it('names the constraint and never the value', () => {
     expect(() => {
       checkBotPace({ style: 'even', ability: 1.5 });
-    }).toThrow(/^a pace has a known style and an ability from one less the spread to one$/);
+    }).toThrow(
+      /^a pace has a known style, an ability from one less the spread to one, and a body inside its ranges$/,
+    );
+  });
+
+  it('takes a body inside its ranges and refuses one past them (#2759, ADR 0075 D-2)', () => {
+    const paced = (massKilograms: number, strength: number) =>
+      codeOf(() =>
+        checkBotPace({ style: 'climber', ability: 1, body: { massKilograms, strength } }),
+      );
+    expect(paced(62, 1)).toBeUndefined();
+    expect(
+      paced(BOT_BODY_MASS_RANGE_KILOGRAMS.least, BOT_BODY_STRENGTH_RANGE.least),
+    ).toBeUndefined();
+    expect(paced(BOT_BODY_MASS_RANGE_KILOGRAMS.most, BOT_BODY_STRENGTH_RANGE.most)).toBeUndefined();
+    for (const [mass, strength] of [
+      [BOT_BODY_MASS_RANGE_KILOGRAMS.least - 1e-9, 1],
+      [BOT_BODY_MASS_RANGE_KILOGRAMS.most + 1e-9, 1],
+      [Number.NaN, 1],
+      [70, BOT_BODY_STRENGTH_RANGE.least - 1e-9],
+      [70, BOT_BODY_STRENGTH_RANGE.most + 1e-9],
+      [70, Infinity],
+    ] as const) {
+      expect(paced(mass, strength), `${String(mass)} ${String(strength)}`).toBe(
+        'pace-out-of-range',
+      );
+    }
   });
 });

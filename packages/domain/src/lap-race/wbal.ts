@@ -69,6 +69,12 @@ export interface BotCapacity {
    * Absent, 1.
    */
   readonly recoveryFactor?: number;
+  /**
+   * What the bot weighs, kilograms: its body's, in a race with AI bots (#2759,
+   * ADR 0075 D-2). Absent, `BOT_MASS_KILOGRAMS` (75 kg), every seeded bot's.
+   * It sets the bot's 7 W/kg ceiling ({@link botCeilingWatts}).
+   */
+  readonly massKilograms?: number;
 }
 
 /** What is left of a bot's W′, and whether it has run out. */
@@ -113,6 +119,17 @@ export const BOT_WBAL_EMPTY_JOULES = 1e-3;
  */
 export const BOT_CEILING_WATTS = MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS_KILOGRAMS;
 
+/**
+ * The most this bot's power may ever be, watts: 7 W/kg at its own mass
+ * (#2759, ADR 0075 D-2.4), so {@link BOT_CEILING_WATTS} for a bot of 75 kg and
+ * every bot with no body.
+ */
+export function botCeilingWatts(capacity: BotCapacity): number {
+  return capacity.massKilograms === undefined
+    ? BOT_CEILING_WATTS
+    : MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * capacity.massKilograms;
+}
+
 /** A bot's balance at the start of a race: full, and not exhausted. */
 export function fullBotEnergy(capacity: BotCapacity): BotEnergy {
   return { wbalJoules: capacity.wPrimeJoules, exhausted: false };
@@ -133,11 +150,13 @@ function checkCapacity(capacity: BotCapacity): void {
     !Number.isFinite(capacity.peakWatts) ||
     !Number.isFinite(capacity.floorWatts) ||
     !(recoveryOf(capacity) > 0) ||
-    !Number.isFinite(recoveryOf(capacity))
+    !Number.isFinite(recoveryOf(capacity)) ||
+    (capacity.massKilograms !== undefined &&
+      !(Number.isFinite(capacity.massKilograms) && capacity.massKilograms > 0))
   ) {
     throw new LapRaceError(
       'capacity-out-of-range',
-      'a capacity has a finite critical power, W prime and recovery, each above zero, and a finite peak and floor',
+      'a capacity has a finite critical power, W prime, recovery and mass, each above zero, and a finite peak and floor',
     );
   }
 }
@@ -203,7 +222,7 @@ export function stepWbal(
 /**
  * What a bot that wants `wantedWatts` may ride for the next `dtSeconds`:
  *
- * - never over its peak, nor over {@link BOT_CEILING_WATTS} (7 W/kg at 75 kg);
+ * - never over its peak, nor over {@link botCeilingWatts} (7 W/kg at its mass);
  * - never over CP while it is exhausted;
  * - never more above CP than its balance pays for in the tick, so the balance
  *   reaches 0 and goes no further;
@@ -229,7 +248,7 @@ export function spendableWatts(
     throw new LapRaceError('power-not-finite', 'power must be a finite number of watts');
   }
   const { cpWatts } = capacity;
-  let most = Math.min(capacity.peakWatts, BOT_CEILING_WATTS);
+  let most = Math.min(capacity.peakWatts, botCeilingWatts(capacity));
   if (energy.exhausted) most = Math.min(most, cpWatts);
   else if (dtSeconds > 0) most = Math.min(most, cpWatts + energy.wbalJoules / dtSeconds);
   return Math.max(floorWatts, Math.min(wantedWatts, most));

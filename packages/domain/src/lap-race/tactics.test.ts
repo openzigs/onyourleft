@@ -37,6 +37,7 @@ import {
   BOT_TACTIC_WHEEL_NEAREST_METRES,
   BOT_TACTIC_WHEEL_PACE_SHARE,
   BOT_TACTIC_WHEEL_SURGE,
+  BOT_TACTIC_MOVE_SHARE,
   BOT_TACTICS,
   botLaunchMetres,
   decideTactic,
@@ -46,7 +47,7 @@ import {
   type TacticDecision,
   type TacticMemory,
 } from './tactics';
-import { BOT_EFFORTS, BOT_EFFORT_CP_SHARE, type BotEffort } from './tactics';
+import { BOT_EFFORTS, BOT_EFFORT_CP_SHARE, BOT_HARD_TACTICS, type BotEffort } from './tactics';
 import tacticsSource from './tactics.ts?raw';
 import { spendableWatts, type BotCapacity, type BotEnergy } from './wbal';
 
@@ -187,6 +188,23 @@ describe('the racecraft each state encodes, on hand-built views (#2462)', () => 
         'rouleur',
       ),
     ).toBe('follow');
+  });
+
+  it('reads the rider in a move against its own CP per kilogram, at its body’s mass (#2759, ADR 0075 D-2)', () => {
+    const light: BotCapacity = Object.freeze({ ...SPRINTER, massKilograms: 60 });
+    const needed = (light.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)) / 60;
+    const fresh = {
+      lapsLeft: 4,
+      energy: energyAt(light, 1),
+      capacity: light,
+      gapAheadMetres: null,
+    };
+    const at = (riderWattsPerKilogram: number) =>
+      pick(view({ ...fresh, riderGapMetres: 15, riderWattsPerKilogram }), 'rouleur');
+    expect(at(needed * 1.02)).toBe('follow');
+    // Under it, though it is over the same CP at 75 kg.
+    expect(needed * 0.98).toBeGreaterThan((light.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)) / 75);
+    expect(at(needed * 0.98)).not.toBe('follow');
   });
 
   it('attacks on a climb as a climber, recovers when it reads its W′ low, and goes on a flyer late as an attacker', () => {
@@ -732,8 +750,9 @@ describe('an effort a model asked for (ADR 0073 D-2.5, #2710)', () => {
     expect(asked('attack', 'all-out', at).targetWatts).toBe(
       spendableWatts(SPRINTER, at.energy, SPRINTER.peakWatts, 0, SPRINTER.floorWatts),
     );
+    // On the front with no wheel, a sit-in rides the effort's own share of CP.
     for (const effort of ['easy', 'tempo', 'threshold'] as const) {
-      expect(asked('attack', effort, at).targetWatts).toBe(
+      expect(asked('sit-in', effort, at).targetWatts).toBe(
         spendableWatts(
           SPRINTER,
           at.energy,
@@ -744,6 +763,32 @@ describe('an effort a model asked for (ADR 0073 D-2.5, #2710)', () => {
       );
     }
     expect(BOT_EFFORTS).toEqual(['easy', 'tempo', 'threshold', 'all-out']);
+  });
+
+  it('never softens a move made to gain ground: an attack at tempo is still an attack (#2759, ADR 0075 D-5)', () => {
+    const at = alone();
+    expect(BOT_HARD_TACTICS).toEqual(['attack', 'chase', 'flyer', 'kick']);
+    for (const tactic of BOT_HARD_TACTICS) {
+      const own = asked(tactic, undefined, at).targetWatts;
+      // Every one of the four rides over CP on its own.
+      expect(own, tactic).toBeGreaterThan(SPRINTER.cpWatts);
+      for (const effort of ['easy', 'tempo', 'threshold'] as const) {
+        const share = spendableWatts(
+          SPRINTER,
+          at.energy,
+          SPRINTER.cpWatts * BOT_EFFORT_CP_SHARE[effort],
+          0,
+          SPRINTER.floorWatts,
+        );
+        expect(asked(tactic, effort, at).targetWatts, `${tactic} ${effort}`).toBe(
+          Math.max(own, share),
+        );
+      }
+      // And `all-out` still makes it harder.
+      expect(asked(tactic, 'all-out', at).targetWatts, tactic).toBeGreaterThanOrEqual(own);
+    }
+    expect(asked('attack', 'tempo', at).targetWatts).toBeGreaterThan(SPRINTER.cpWatts);
+    expect(asked('flyer', 'easy', at).targetWatts).toBeGreaterThan(SPRINTER.cpWatts);
   });
 
   it('ignores an effort behind a wheel and on a recovery, and caps one by the body', () => {

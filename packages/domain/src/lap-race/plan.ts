@@ -111,6 +111,7 @@ import {
   botArchetype,
   type BotArchetype,
 } from './archetype';
+import { MODEL_STYLE_BODY, modelRacingStyleOf } from './model-field';
 import { BOT_EVEN_PACE, BOT_STYLE_EASING, checkBotPace, type BotPace } from './pace';
 import { nextUnit, raceRandom } from './random';
 import type { RaceCourse } from './race';
@@ -159,6 +160,16 @@ export const BOT_WPRIME_JOULES: Readonly<Record<BotTier, number>> = {
  * balance starts the race at, and the capacity its plan holds it to.
  */
 export function botWPrimeJoules(tier: BotTier, pace: BotPace = BOT_EVEN_PACE): number {
+  const { body } = pace;
+  // #2759, ADR 0075 D-2: a body's W′ is its style's share of the tier's,
+  // scaled to its mass and its strength.
+  if (body !== undefined) {
+    return (
+      ((BOT_WPRIME_JOULES[tier] * body.massKilograms) / BOT_MASS_KILOGRAMS) *
+      body.strength *
+      MODEL_STYLE_BODY[modelRacingStyleOf(pace.style)].wPrimeShare
+    );
+  }
   return BOT_WPRIME_JOULES[tier] * BOT_ARCHETYPE_WPRIME_FACTOR[botArchetype(pace.style)];
 }
 
@@ -177,7 +188,11 @@ const SPRINT_DRAW_KEY = 0x5f1d_0961;
  * nowhere in it for a recorded ride, a rider or another racer.
  */
 export interface BotRacePlan {
-  /** The tier's power at `BOT_MASS_KILOGRAMS`, watts: what the bounds are set from. */
+  /**
+   * The tier's power at `BOT_MASS_KILOGRAMS`, watts: what the bounds are set
+   * from. For a bot with a body (#2759, ADR 0075 D-2), the tier's W/kg times
+   * its strength, at its own mass.
+   */
   readonly tierWatts: number;
   /** Its rider archetype (#2459): its pace's style's, `archetype.ts` §`BOT_STYLE_ARCHETYPE`. */
   readonly archetype: BotArchetype;
@@ -252,8 +267,18 @@ export function botRacePlan(
   checkBotPace(pace);
   const { style } = pace;
   const archetype = botArchetype(style);
-  const tierWatts = BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS;
-  const ownWatts = tierWatts * pace.ability * BOT_ARCHETYPE_CP_SHARE[archetype];
+  const { body } = pace;
+  // #2759, ADR 0075 D-2: a body's bounds are set from its own strength at the
+  // tier, at its own mass; with none, from the tier at 75 kg, as before.
+  const tierWatts =
+    body === undefined
+      ? BOT_TIER_WATTS_PER_KILOGRAM[tier] * BOT_MASS_KILOGRAMS
+      : BOT_TIER_WATTS_PER_KILOGRAM[tier] * body.massKilograms * body.strength;
+  const profile = body === undefined ? undefined : MODEL_STYLE_BODY[modelRacingStyleOf(style)];
+  const ownWatts =
+    profile === undefined
+      ? tierWatts * pace.ability * BOT_ARCHETYPE_CP_SHARE[archetype]
+      : tierWatts * profile.cpShare;
   const raceMetres = course.lapLengthMetres * course.laps;
   const hardMetres = course.laps >= 2 ? course.lapLengthMetres : raceMetres / 3;
   const sprint =
@@ -263,7 +288,8 @@ export function botRacePlan(
   const split = style === 'fast-start' || style === 'negative-split';
   const wPrimeJoules = botWPrimeJoules(tier, pace);
   const surgeWatts =
-    tierWatts * Math.min(BOT_ARCHETYPE_PEAK_SHARE[archetype], BOT_PLAN_SURGE_CEILING);
+    tierWatts *
+    Math.min(profile?.peakShare ?? BOT_ARCHETYPE_PEAK_SHARE[archetype], BOT_PLAN_SURGE_CEILING);
   const floorWatts = tierWatts * PACING_FACTOR_FLOOR;
   return {
     tierWatts,
@@ -282,6 +308,7 @@ export function botRacePlan(
       peakWatts: surgeWatts,
       floorWatts,
       recoveryFactor: BOT_ARCHETYPE_RECOVERY_FACTOR[archetype],
+      ...(body === undefined ? {} : { massKilograms: body.massKilograms }),
     },
     raceMetres,
     sprintMetres: Math.min(sprint, raceMetres),

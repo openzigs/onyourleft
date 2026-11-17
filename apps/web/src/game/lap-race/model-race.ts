@@ -30,7 +30,9 @@
  *
  * {@link modelTacticsInputOf}: `@onyourleft/domain` §`ModelTacticsInput`, read
  * off the race on effort distance — seats, each bot's racing style dealt from
- * the race's seed (`modelRacingStyles`) and its legs (its archetype), ranks,
+ * the race's seed (`modelRacingStyles`) and its legs (its archetype), which
+ * since #2759 fit each other, and how it compares with the field on the flat,
+ * a climb, a sprint and in punch (`modelFieldStrengths`, ADR 0075 D-4), ranks,
  * who is ahead and its move, gaps, W′ shares and whether a bot is blown,
  * drafting, moves and the seconds held, the lull, laps and metres to the line
  * **as each bot misreads them** (`botTacticsMisjudgement`, the reading seeded
@@ -58,7 +60,6 @@
 
 import {
   applyModelMoves,
-  BOT_MASS_KILOGRAMS,
   BOT_TACTIC_MOVE_SHARE,
   BOT_TACTICS_WINDOW_MS,
   botLaunchMetres,
@@ -70,20 +71,22 @@ import {
   MODEL_TACTICS_LATE_MS,
   MODEL_TACTICS_LOG_REASONS,
   modelMovesInForce,
-  modelRacingStyles,
+  modelFieldStrengths,
+  modelRacingStyleOf,
   modelTacticsNextAskAtMs,
   readModelTacticsAnswer,
   readModelTacticsInput,
+  type BotRacePlan,
   type ItemRaceState,
   type LapRaceModelRecord,
+  type ModelBotStrengths,
   type ModelTacticsBotView,
   type ModelTacticsInput,
   type ModelTacticsLogEntry,
   type ModelTacticsLogReason,
-  type ModelRacingStyle,
   type RouteProfile,
 } from '@onyourleft/domain';
-import { lapRaceDraftFactors, type LapRaceBot } from '@onyourleft/physics';
+import { lapRaceBotMassKilograms, lapRaceDraftFactors, type LapRaceBot } from '@onyourleft/physics';
 
 /** How far up the road a bot's grade ahead is read, metres: the bots' own look-ahead (`physics` §`BOT_GRADE_AHEAD_METRES`). */
 const GRADE_AHEAD_METRES = 50;
@@ -164,7 +167,7 @@ const round = (value: number, places: number): number => {
  * The race at `race.atMs` as the model is shown it (D-3.4), or `undefined`
  * when no bot is still racing. See the file comment.
  *
- * @param seed - the race's own seed: the styles' deal and each bot's misread of the line.
+ * @param seed - the race's own seed: each bot's misread of the line.
  * @param riderWattsPerKilogram - the rider's power as the bots read it, or `null`.
  */
 export function modelTacticsInputOf(
@@ -185,7 +188,14 @@ export function modelTacticsInputOf(
   const rider = race.racers.find((entry) => !seats.has(entry.racer.id))?.racer;
   const factors = draft ? lapRaceDraftFactors(race) : undefined;
   const { laps, lapLengthMetres } = race.course;
-  const styles = modelRacingStyles(seed, bots.length);
+  // #2759, ADR 0075 D-4: how each bot compares with the whole field, every
+  // bot that has its capacity, racing or finished, so the words hold all race.
+  const planned = bots.flatMap((bot) => (bot.plan === undefined ? [] : [bot]));
+  const strengths = new Map(
+    modelFieldStrengths(planned.map((bot) => (bot.plan as BotRacePlan).capacity)).map(
+      (words, at) => [(planned[at] as LapRaceBot).id, words],
+    ),
+  );
   const views: ModelTacticsBotView[] = [];
   bots.forEach((bot, seat) => {
     const at = rank.get(bot.id);
@@ -197,15 +207,18 @@ export function modelTacticsInputOf(
     const riderMove =
       riderWattsPerKilogram === null
         ? null
-        : riderWattsPerKilogram * BOT_MASS_KILOGRAMS >
+        : riderWattsPerKilogram * lapRaceBotMassKilograms(bot) >
             bot.plan.capacity.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)
           ? 'attack'
           : 'sit-in';
     const misread = botTacticsMisjudgement(seed, seat, bot.strategy.skill, race.atMs).lineMetres;
     views.push({
       bot: seat,
-      style: styles[seat] as ModelRacingStyle,
+      // #2759, ADR 0075 D-3: the style its pace was dealt for, so style, legs
+      // and body never drift apart.
+      style: modelRacingStyleOf(bot.pace.style),
       legs: bot.plan.archetype,
+      ...(strengths.get(bot.id) as ModelBotStrengths),
       rank: at + 1,
       ahead: ahead === undefined ? null : (aheadSeat ?? 'rider'),
       aheadMove:

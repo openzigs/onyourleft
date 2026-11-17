@@ -14,6 +14,7 @@ import {
   botArchetype,
   botFieldArchetypes,
   botFieldPaces,
+  modelFieldPaces,
   botFieldPersonalities,
   botFieldSkills,
   kilograms,
@@ -72,6 +73,67 @@ function started(): LapRaceRide {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('a different race every time, and AI bots with bodies of their own (#2759, ADR 0075)', () => {
+  /** A race with AI bots on the loop, from whatever seed the platform draws. */
+  const modelRace = (): LapRaceRide => {
+    const ride = startLapRaceRide({
+      choice: DEFAULT_LAP_RACE,
+      profile: LOOP,
+      conditions: lapRaceBotConditions(
+        LOOP,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      model: true,
+    });
+    if (ride === undefined) throw new Error('a loop starts a race');
+    return ride;
+  };
+
+  it('draws a fresh seed at every start, so each race deals a different field', () => {
+    let next = 41;
+    const draw = vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = next;
+        next += 1;
+        return array;
+      });
+    const first = modelRace();
+    const second = modelRace();
+    // One draw a start, on the same route: never a seed kept per route.
+    expect(draw).toHaveBeenCalledTimes(2);
+    expect([first.seed, second.seed]).toEqual([41, 42]);
+    expect(second.bots.map((bot) => bot.pace)).not.toEqual(first.bots.map((bot) => bot.pace));
+    expect(first.bots.map((bot) => bot.pace)).toEqual(modelFieldPaces(41, LAP_RACE_MOST_BOTS));
+  });
+
+  it('shows each bot’s W/kg at its own mass in the standings, never at 75 kg', () => {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = 7;
+        return array;
+      },
+    );
+    let ride = modelRace();
+    for (let tick = 1; tick <= 200; tick += 1) {
+      ride = stepLapRaceRide(ride, { ticks: 1, along: tick * LAP_RACE_TICK_SECONDS * 8 });
+    }
+    const hud = lapRaceHud(ride, { wattsPerKilogram: 3, speed: 8 });
+    for (const bot of ride.bots) {
+      const mass = bot.pace.body?.massKilograms;
+      expect(mass, bot.id).toBeDefined();
+      expect(mass, bot.id).not.toBe(75);
+      expect(hud.entrants[bot.id]?.wattsPerKilogram, bot.id).toBeCloseTo(
+        (bot.power as number) / (mass as number),
+        9,
+      );
+    }
+  });
 });
 
 describe('a lap race in a ride — #1906', () => {

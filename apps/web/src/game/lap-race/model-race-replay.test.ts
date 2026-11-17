@@ -90,6 +90,7 @@ const SEALS: Readonly<Record<string, string>> = {
   '1': '265e3b2ac759823edbd007cc1b8d8a19a48b5bdcf2ffd9a5b69e1188a645418d',
   '2': 'b2aa7e152fc7194801420f8e75fcc878bb8fe070d45bdcf4a481f13796d3dc80',
   '3': '786f7d2ec42b745b9de1ac60e6dc6b9ce7b8843eb9109c5838f987b5574fc146',
+  '4': '8c3056a68b988cb9fcadb98d3a62b4b7c41319da6a2cacfadad843d9a45de705',
 };
 
 afterEach(() => {
