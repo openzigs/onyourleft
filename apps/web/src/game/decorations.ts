@@ -890,7 +890,7 @@ export function villageAnchors(
 
   // The crossroads green: the middle plot either side, which is never built,
   // on both sides of the side road's mouth.
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const offset = (VILLAGE_MOUTH_HALF_METRES + PLOT_METRES / 2) / 2;
   const plots = everyVillagePlot(seed, site);
   // #1627: the village's buildings, so what stands on the green stands clear of them.

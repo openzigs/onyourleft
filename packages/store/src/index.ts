@@ -33,6 +33,8 @@ export type {
   ActivitySummary,
   RideFacts,
   DraftSpan,
+  PacerModelFact,
+  PacerRidingPosition,
   RoomRaceFact,
   WorkoutBlockFact,
   WorkoutBlockOutcome,

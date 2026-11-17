@@ -94,6 +94,8 @@ function blockBeside(
   from: number,
   to: number,
   near = BLOCK_NEAR_METRES,
+  /** #2659: the map's streams, where a fixture's invented one must still run. */
+  waterLines: WorldCorridor['waterLines'] = [],
 ): Block {
   const origin = corridorOrigin(profile);
   const corner = (along: number, lateral: number): readonly [number, number] => {
@@ -118,8 +120,20 @@ function blockBeside(
     buildings: [],
     paths: [],
     streets: [],
+    waterLines,
   };
   return { profile, origin, seed: scatterSeed(profile), from, to, mask: landClassMask(corridor) };
+}
+
+/** A point `lateral` metres out from the drawn road at `along`, on its normal's side when positive. */
+function besideAt(
+  profile: RouteProfile,
+  along: number,
+  lateral: number,
+): readonly [number, number] {
+  const frame = drawnRoadFrame(profile, corridorOrigin(profile), along);
+  if (frame === undefined) throw new Error('no road frame');
+  return [frame.x + frame.normalX * lateral, frame.z + frame.normalZ * lateral];
 }
 
 /** The road's height at a route distance, in local metres. */
@@ -506,7 +520,33 @@ describe('unchanged where nothing is mapped — #1547', () => {
     const mask = landClassMask(wood);
     expect(mask.bytes).toBeGreaterThan(0);
     expect(mask.levellingBytes).toBe(0);
-    expect(everyFixtureDigest(mask)).toStrictEqual(MAIN_DIGESTS);
+    // ⚠️ #2658, #2659: the box covers the whole of every fixture, so an
+    // invented lake or stream in it is not drawn — the map says where water
+    // is there — and the frames that reach one lose its bed: the lake
+    // valley's and the circuit's lakes at 1 200 m, the valley's stream at
+    // 650 m and the rolling road's streams. Every other frame is still
+    // main's, and those differ because their water went, asserted here.
+    const waterDropped = new Set([
+      'lake valley 1200',
+      'circuit 1200',
+      'valley 650',
+      'rolling 0',
+      'rolling 650',
+      'rolling 1200',
+    ]);
+    const kept = (digests: readonly string[]): string[] =>
+      digests.filter((entry) => !waterDropped.has(entry.split(' ').slice(0, -1).join(' ')));
+    expect(kept(everyFixtureDigest(mask))).toStrictEqual(kept(MAIN_DIGESTS));
+    for (const profile of [lakeValleyRoute(), circuitRoute(400)]) {
+      const seed = scatterSeed(profile);
+      expect(waterways(profile, seed, NO_LAND_CLASS).lakes.length).toBeGreaterThan(0);
+      expect(waterways(profile, seed, mask).lakes).toEqual([]);
+    }
+    for (const profile of [valleyRoute(), rollingRoute()]) {
+      const seed = scatterSeed(profile);
+      expect(waterways(profile, seed, NO_LAND_CLASS).crossings.length).toBeGreaterThan(0);
+      expect(waterways(profile, seed, mask).crossings).toEqual([]);
+    }
   });
 });
 
@@ -600,10 +640,17 @@ describe('the road is not the ground — #1547', () => {
 describe('water is not raised — #1547', () => {
   it('still cuts a stream’s bed through a mapped town on the valley fixture', () => {
     const profile = valleyRoute();
-    const ways = waterways(profile, scatterSeed(profile));
-    const crossing = ways.crossings[0]?.distance;
+    const crossing = waterways(profile, scatterSeed(profile), NO_LAND_CLASS).crossings[0]?.distance;
     if (crossing === undefined) throw new Error('the valley fixture has no stream');
-    const block = blockBeside(profile, crossing - 120, crossing + 120);
+    // #2659: where the map was read the invented stream is not drawn, so the
+    // map carries the stream itself, across the road at the valley floor.
+    const [x0, z0] = besideAt(profile, crossing, -300);
+    const [x1, z1] = besideAt(profile, crossing, 300);
+    const block = blockBeside(profile, crossing - 120, crossing + 120, BLOCK_NEAR_METRES, [
+      { kind: 'stream', line: Float32Array.of(x0, z0, x1, z1) },
+    ]);
+    const ways = waterways(profile, block.seed, block.mask);
+    expect(Math.abs((ways.crossings[0]?.distance ?? 0) - crossing)).toBeLessThan(2);
     let cut = 0;
     let checked = 0;
     for (const odometer of [crossing - 200, crossing - 60]) {

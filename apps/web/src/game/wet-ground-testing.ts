@@ -20,6 +20,7 @@ import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
+import { NO_LAND_CLASS } from './land-class';
 import { WET_GROUND_TINT, wetness } from './landform';
 import {
   CHANNEL_BANK_METRES,
@@ -76,7 +77,7 @@ function drawnWetness(r: number, b: number): number {
 export function auditWetGround(profile: RouteProfile, odometer: number): WetGroundAudit {
   if (profile.loop) throw new Error('auditWetGround reads route distance off the odometer');
   const origin = corridorOrigin(profile);
-  const ways = waterways(profile, scatterSeed(profile));
+  const ways = waterways(profile, scatterSeed(profile), NO_LAND_CLASS);
   const start = atStartLine(profile);
   const { vertices, colours, fields } = sceneFrame({
     profile,

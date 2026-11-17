@@ -46,6 +46,7 @@ import {
   type TacticDecision,
   type TacticMemory,
 } from './tactics';
+import { BOT_EFFORTS, BOT_EFFORT_CP_SHARE, type BotEffort } from './tactics';
 import tacticsSource from './tactics.ts?raw';
 import { spendableWatts, type BotCapacity, type BotEnergy } from './wbal';
 
@@ -717,5 +718,60 @@ describe('it refuses a view that is not a race’s, and reaches nothing it shoul
       'attack',
       'flyer',
     ]);
+  });
+});
+
+describe('an effort a model asked for (ADR 0073 D-2.5, #2710)', () => {
+  const asked = (tactic: BotTactic, effort: BotEffort | undefined, at: RaceView) =>
+    decideTactic(at, 'rouleur', 'crafty', { tactic, sinceMs: 0, window: 0, effort }, 7);
+  const alone = (changes: Partial<RaceView> = {}): RaceView =>
+    view({ gapAheadMetres: null, wheelGapMetres: null, atMs: 500, ...changes });
+
+  it('rides `all-out` at the most the body allows, and the others at fixed shares of CP', () => {
+    const at = alone();
+    expect(asked('attack', 'all-out', at).targetWatts).toBe(
+      spendableWatts(SPRINTER, at.energy, SPRINTER.peakWatts, 0, SPRINTER.floorWatts),
+    );
+    for (const effort of ['easy', 'tempo', 'threshold'] as const) {
+      expect(asked('attack', effort, at).targetWatts).toBe(
+        spendableWatts(
+          SPRINTER,
+          at.energy,
+          SPRINTER.cpWatts * BOT_EFFORT_CP_SHARE[effort],
+          0,
+          SPRINTER.floorWatts,
+        ),
+      );
+    }
+    expect(BOT_EFFORTS).toEqual(['easy', 'tempo', 'threshold', 'all-out']);
+  });
+
+  it('ignores an effort behind a wheel and on a recovery, and caps one by the body', () => {
+    const wheel = view({ atMs: 500 });
+    expect(asked('sit-in', 'all-out', wheel).targetWatts).toBe(
+      asked('sit-in', undefined, wheel).targetWatts,
+    );
+    expect(asked('follow', 'easy', wheel).targetWatts).toBe(
+      asked('follow', undefined, wheel).targetWatts,
+    );
+    expect(asked('recover', 'all-out', alone()).targetWatts).toBe(
+      asked('recover', undefined, alone()).targetWatts,
+    );
+    const spent = alone({ energy: energyAt(SPRINTER, 0, true) });
+    expect(asked('attack', 'all-out', spent).targetWatts).toBeLessThanOrEqual(SPRINTER.cpWatts);
+  });
+
+  it('sets its own pace on the front in a sit-in, and drops with the window it was chosen in', () => {
+    const front = alone();
+    expect(asked('sit-in', 'easy', front).targetWatts).toBe(
+      spendableWatts(
+        SPRINTER,
+        front.energy,
+        SPRINTER.cpWatts * BOT_EFFORT_CP_SHARE.easy,
+        0,
+        SPRINTER.floorWatts,
+      ),
+    );
+    expect(asked('sit-in', 'easy', alone({ atMs: 60_000 })).memory.effort).toBeUndefined();
   });
 });

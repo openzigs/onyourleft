@@ -63,6 +63,7 @@ import {
   localDay,
   type CalorieRider,
   type RecordedSeries,
+  type LapRaceModelRecord,
   type ReplanRecord,
   type Seconds,
   type UnixSeconds,
@@ -73,6 +74,7 @@ import type {
   LapId,
   NewActivity,
   NewFinishedRide,
+  PacerModelFact,
   RecordedCourseLap,
   RecordedWorkoutBlock,
   RecordingSessionId,
@@ -141,6 +143,11 @@ export interface RideToSaveInput {
    */
   readonly races?: readonly RoomRaceFact[] | undefined;
   /**
+   * The races with AI bots this ride was ridden in — #2710, ADR 0071 D-4.4:
+   * kept with the ride on this device (`packages/store` §`RideFacts.lapRaces`).
+   */
+  readonly lapRaces?: readonly LapRaceModelRecord[] | undefined;
+  /**
    * The blocks of the workouts ridden on this ride, as the recording kept
    * them — #1319, `workout-blocks.ts`. Their figures are worked out here, from
    * `series`, and kept with the ride (`packages/store`
@@ -167,6 +174,12 @@ export interface RideToSaveInput {
    * with no draft, and for one recovered after a crash.
    */
   readonly draft?: Pick<RideFacts, 'drafted' | 'draftSpans'> | undefined;
+  /**
+   * The AI pacer's decision log of this ride — #2712, ADR 0072 D-5: known
+   * only while riding, like {@link draft}. Absent for a ride with no AI
+   * pacer, and for one recovered after a crash.
+   */
+  readonly pacerModel?: PacerModelFact | undefined;
 }
 
 /**
@@ -237,6 +250,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
         ghostRaced: input.ghostRaced,
         replans: input.replans,
         races: input.races,
+        lapRaces: input.lapRaces,
       }),
       // #1328: a count of the records a recovered ride's checkpoint lost, so
       // the ride says it has a gap in its record rather than none.
@@ -255,6 +269,8 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
       ...(input.draft?.draftSpans === undefined || input.draft.draftSpans.length === 0
         ? {}
         : { draftSpans: input.draft.draftSpans }),
+      // #2712: known only to the ride that rode it, like the draft above.
+      ...(input.pacerModel === undefined ? {} : { pacerModel: input.pacerModel }),
     },
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

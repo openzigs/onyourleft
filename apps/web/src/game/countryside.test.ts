@@ -342,12 +342,18 @@ describe('#1542 boundaries on the span, and clear of villages and streams', () =
   const edgesOf = (items: readonly ScatterItem[]): readonly ScatterItem[] =>
     items.filter((item) => BOUNDARIES.has(item.kind) && Math.abs(item.x) > 8);
   /** A field 25 m out on the positive side, over the whole covered stretch. */
-  const setBack = (box: Box, route = ROUTE): LandClassMask =>
+  const setBack = (
+    box: Box,
+    route = ROUTE,
+    /** #2659: the map's streams, where a fixture's invented one must still run. */
+    waterLines: WorldCorridor['waterLines'] = [],
+  ): LandClassMask =>
     landClassMask({
       ...corridorOf([rectangle('farmland', { ...box, minX: 25 })]),
       covered: (x, z) => x >= box.minX && x < box.maxX && z >= box.minZ && z < box.maxZ,
       coveredBoxes: [box],
       routeId: String(route.totalDistance),
+      waterLines,
     });
 
   it('admits each piece to exactly one of two adjacent spans', () => {
@@ -426,10 +432,17 @@ describe('#1542 boundaries on the span, and clear of villages and streams', () =
     const valley = valleyRoute();
     const origin = corridorOrigin(valley);
     const seed = scatterSeed(valley);
-    const stream = waterways(valley, seed).crossings[0];
+    const stream = waterways(valley, seed, NO_LAND_CLASS).crossings[0];
     if (stream === undefined) throw new Error('the valley fixture has no stream');
     const box: Box = { minX: -1_000, maxX: 1_000, minZ: 0, maxZ: 3_000 };
-    const land = setBack(box, valley);
+    // #2659: where the map was read the invented stream is not drawn, so the
+    // map carries the stream itself, across the road at the valley floor.
+    const land = setBack(box, valley, [
+      { kind: 'stream', line: Float32Array.of(-300, stream.distance, 300, stream.distance) },
+    ]);
+    expect(
+      Math.abs((waterways(valley, seed, land).crossings[0]?.distance ?? 0) - stream.distance),
+    ).toBeLessThan(2);
     const items = edgesOf(
       structuresAt(
         valley,
