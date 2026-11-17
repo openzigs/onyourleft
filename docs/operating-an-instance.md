@@ -1168,7 +1168,15 @@ sign-in lands) and the **operator log** (`/admin/log`, 50 entries a page, newest
 entries* for the next); and since
 [#2648](https://github.com/openzigs/onyourleft/issues/2648) the **AI backend** (`/admin/analysis`): the local model, where it is set and
 whether it is on, the switches for what the instance offers riders, the models on the local server
-with *Check it calls tools*, the queue, and *Return to .env*. Each shows what the app's Operate area
+with *Check it calls tools*, the queue, and *Return to .env*; and since
+[#2646](https://github.com/openzigs/onyourleft/issues/2646) **Accounts** (`/admin/accounts`): how
+many accounts await approval, are approved and are suspended, the registration mode with the steps to
+change it in `.env`, and the riders waiting for approval — each one's display name, account id, when
+they asked and whether they confirmed they are 18 or over, and nothing more (ADR 0069 D-9). A passkey
+session can **approve or refuse** each, with a reason, through the same moderation route the app's
+Moderation screen uses; the decision is written to the moderation log and, as
+`registration_decided`, to the operator log in the same transaction. Suspensions and invitations stay
+on the app's Moderation screen. Each shows what the app's Operate area
 shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
 answer. On the AI backend page a passkey session can also change the settings, and **every change
 asks your passkey again** for that one change: the route's own checks run, its local-address rule

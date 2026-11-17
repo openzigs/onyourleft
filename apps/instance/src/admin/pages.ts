@@ -35,6 +35,12 @@
  */
 
 import {
+  ACCOUNTS_UNREADABLE_TEXT,
+  accountStandingLines,
+  MODERATORS_ALWAYS_JOIN,
+  REGISTRATION_CHANGE_HEADING,
+  REGISTRATION_CHANGE_STEPS,
+  REGISTRATION_MODE_TEXT,
   AI_JOBS_HEADING,
   AI_LINE,
   AI_NOW_HEADING,
@@ -427,6 +433,7 @@ const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   admin_passkey_revoked: 'Admin passkey revoked',
   admin_passkey_confirmed: 'Admin passkey confirmed on the host',
   room_ended: 'Room ended',
+  registration_decided: 'Registration decided',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */
@@ -818,4 +825,181 @@ ${modelsPart(view)}${addressPart(view, analysis)}<h2>${escapeHtml(AI_OWN_KEY_HEA
 </ul>
 <p>${escapeHtml(ANALYSIS_KEY_ELSEWHERE_TEXT)}</p>
 ${jobsPart(view.jobs)}${returnPart(view)}`;
+}
+
+/**
+ * One rider awaiting approval as `GET /v1/moderation/registrations` answers
+ * them (#2646, ADR 0069 D-9): the four details the app's Moderation screen
+ * shows, and nothing more.
+ */
+export interface RegistrationAnswer {
+  readonly athleteId: string;
+  readonly displayName: string;
+  /** Unix seconds. */
+  readonly createdAt: number;
+  readonly adultConfirmed: boolean;
+}
+
+/** A registration decision, as its form names it. */
+export type RegistrationDecision = 'approve' | 'refuse';
+
+/** What the last decision on the Accounts page came to, read back after it. */
+export interface AccountsNotice {
+  readonly decision: RegistrationDecision;
+  /** Whether the route answered done and the rider has left the queue, read back. */
+  readonly ok: boolean;
+  /** Why not, by the route's answer: no reason, no longer waiting, or no such rider. */
+  readonly problem: 'reason' | 'not-waiting' | null;
+}
+
+/** What the Accounts page draws: the status read, the queue read, the session, and the last decision. */
+export interface AccountsView {
+  readonly status: OperateStatusAnswer | undefined;
+  readonly registrations: readonly RegistrationAnswer[] | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: AccountsNotice | null;
+  /** The longest reason a decision may carry, in characters: the moderation routes' own. */
+  readonly reasonLimit: number;
+}
+
+/** The page's one line. */
+export const ACCOUNTS_PAGE_LINE =
+  'How many accounts are in each standing, how this instance takes new riders, and who is waiting for approval.';
+
+/** Said where the app's panel links to its Moderation screen: what stays there. */
+export const ACCOUNTS_ELSEWHERE_TEXT =
+  'Lifting a suspension, inviting a rider and every other moderation step are done on the app’s Moderation screen.';
+
+/** Said above the steps: the mode is shown here, and changed only on the host. */
+export const ACCOUNTS_MODE_SHOWN_TEXT =
+  'These pages show the mode and cannot change it. On the instance’s host:';
+
+export const REGISTRATIONS_HEADING = 'Waiting for approval';
+export const NO_REGISTRATIONS_TEXT = 'Nobody is waiting for approval.';
+export const REGISTRATIONS_UNREADABLE_TEXT =
+  'The riders waiting for approval could not be read from the instance, so none is shown here.';
+
+/** Said in a code session in place of the decisions (ADR 0069 Q-A). */
+export const ACCOUNTS_READS_ONLY_TEXT =
+  'A one-time code’s session reads this page and changes nothing. Sign in with a passkey to approve or refuse a rider: each decision asks your passkey again.';
+
+const DECISION_TEXT: Readonly<
+  Record<
+    RegistrationDecision,
+    { readonly button: string; readonly done: string; readonly verb: string }
+  >
+> = {
+  approve: { button: 'Approve', done: 'Approved.', verb: 'approving' },
+  refuse: { button: 'Refuse', done: 'Refused.', verb: 'refusing' },
+};
+
+const NOTICE_PROBLEM_TEXT: Readonly<Record<NonNullable<AccountsNotice['problem']>, string>> = {
+  reason: 'Nothing was changed: a decision needs a reason, of at most 1,000 characters.',
+  'not-waiting': 'Nothing was changed: that rider is not waiting for approval any more.',
+};
+
+/** Said when the route answered and the queue read back does not show the decision. */
+export const DECISION_NOT_SHOWN_TEXT =
+  'The instance did not show the decision when the queue was read again, so it may not have been made.';
+
+function accountsNotice(notice: AccountsNotice | null): string {
+  if (notice === null) return '';
+  if (notice.ok) {
+    return `<p class="notice" role="status">${escapeHtml(DECISION_TEXT[notice.decision].done)}</p>\n`;
+  }
+  const text =
+    notice.problem === null ? DECISION_NOT_SHOWN_TEXT : NOTICE_PROBLEM_TEXT[notice.problem];
+  return `<p class="problem" role="alert">${escapeHtml(text)}</p>\n`;
+}
+
+function registrationItem(
+  view: AccountsView,
+  registration: RegistrationAnswer,
+  index: number,
+): string {
+  const name = escapeHtml(registration.displayName);
+  const adult = registration.adultConfirmed
+    ? 'They have confirmed they are 18 or over.'
+    : 'They have not confirmed they are 18 or over.';
+  const forms =
+    view.strength !== 'passkey'
+      ? ''
+      : (['approve', 'refuse'] as const)
+          .map((decision) => {
+            const id = `${decision}-reason-${String(index)}`;
+            const words = DECISION_TEXT[decision];
+            return stepUpForm(
+              `/admin/accounts/${decision}`,
+              `registration_${decision}`,
+              view.csrf,
+              `${words.button} ${registration.displayName}`,
+              `<input type="hidden" name="athleteId" value="${escapeHtml(registration.athleteId)}">
+<label for="${id}">Reason for ${words.verb} ${name}</label>
+<input type="text" id="${id}" name="reason" maxlength="${String(view.reasonLimit)}" autocomplete="off" required>
+`,
+              words.button,
+            );
+          })
+          .join('\n');
+  return `<li>
+<h3>${name}</h3>
+<p>Account <code>${escapeHtml(registration.athleteId)}</code>, asked ${when(registration.createdAt)}. ${adult}</p>
+${forms}
+</li>`;
+}
+
+function registrationsPart(view: AccountsView): string {
+  const heading = `<h2>${escapeHtml(REGISTRATIONS_HEADING)}</h2>\n`;
+  const reads =
+    view.strength === 'passkey' ? '' : `<p>${escapeHtml(ACCOUNTS_READS_ONLY_TEXT)}</p>\n`;
+  const notice = accountsNotice(view.notice);
+  if (view.registrations === undefined) {
+    return `${heading}${notice}<p class="problem">${escapeHtml(REGISTRATIONS_UNREADABLE_TEXT)}</p>\n`;
+  }
+  if (view.registrations.length === 0) {
+    return `${heading}${notice}<p>${escapeHtml(NO_REGISTRATIONS_TEXT)}</p>\n`;
+  }
+  return `${heading}${notice}${reads}<ul class="registrations">
+${view.registrations.map((each, index) => registrationItem(view, each, index)).join('\n')}
+</ul>
+`;
+}
+
+function modePart(status: OperateStatusAnswer): string {
+  const mode = status.registration;
+  const steps = REGISTRATION_CHANGE_STEPS.map((step) => `<li>${lineHtml(step)}</li>`).join('\n');
+  return `<h2>Registration mode: ${escapeHtml(mode)}</h2>
+<p>${escapeHtml(REGISTRATION_MODE_TEXT[mode].meaning)}</p>
+<p class="hint">${escapeHtml(MODERATORS_ALWAYS_JOIN)}</p>
+<h3>${escapeHtml(REGISTRATION_CHANGE_HEADING)}</h3>
+<p>${escapeHtml(ACCOUNTS_MODE_SHOWN_TEXT)}</p>
+<ol>
+${steps}
+</ol>
+`;
+}
+
+/**
+ * The Accounts page's body (#2646, ADR 0069 D-9): the standings and the
+ * registration mode from `GET /v1/operate/status`, in operate-text's words
+ * as the app's panel draws them, and the queue from `GET
+ * /v1/moderation/registrations` — each rider's four details, and in a
+ * passkey session an Approve and a Refuse form, each with its reason and
+ * behind a fresh step-up.
+ */
+export function accountsBody(view: AccountsView): string {
+  const top = `<p>${escapeHtml(ACCOUNTS_PAGE_LINE)}</p>\n`;
+  const elsewhere = `<p>${escapeHtml(ACCOUNTS_ELSEWHERE_TEXT)}</p>`;
+  const counted =
+    view.status === undefined
+      ? `<p class="problem">${escapeHtml(ACCOUNTS_UNREADABLE_TEXT)}</p>\n`
+      : `<h2>Standings</h2>
+<ul class="counts">
+${accountStandingLines(view.status.counts.athletes)
+  .map((line) => `<li>${escapeHtml(line)}</li>`)
+  .join('\n')}
+</ul>
+${modePart(view.status)}`;
+  return `${top}${counted}${registrationsPart(view)}${elsewhere}`;
 }

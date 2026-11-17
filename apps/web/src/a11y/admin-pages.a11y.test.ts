@@ -93,6 +93,28 @@ interface AdminPages {
   statusBody(status: OperateStatusAnswer | undefined, now: number): string;
   logBody(view: LogView): string;
   analysisBody(view: AnalysisView): string;
+  accountsBody(view: AccountsView): string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`AccountsView` (#2646). */
+interface AccountsView {
+  readonly status: OperateStatusAnswer | undefined;
+  readonly registrations:
+    | readonly {
+        readonly athleteId: string;
+        readonly displayName: string;
+        readonly createdAt: number;
+        readonly adultConfirmed: boolean;
+      }[]
+    | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: {
+    readonly decision: 'approve' | 'refuse';
+    readonly ok: boolean;
+    readonly problem: 'reason' | 'not-waiting' | null;
+  } | null;
+  readonly reasonLimit: number;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`AnalysisView`, its reads as the routes answer them. */
@@ -244,7 +266,49 @@ const passkeysPage = (
   );
 
 /** The pages with a passkey ceremony, which link the one script (and only it). */
-const SCRIPTED = new Set(['/admin/sign-in', '/admin/passkeys', '/admin/analysis']);
+const SCRIPTED = new Set([
+  '/admin/sign-in',
+  '/admin/passkeys',
+  '/admin/analysis',
+  '/admin/accounts',
+]);
+
+/** Two riders waiting (#2646), one with a name that would break the markup if it were not escaped. */
+const WAITING = [
+  {
+    athleteId: 'a1b2c3d4e5f6',
+    displayName: AWKWARD_NAME,
+    createdAt: 1_763_100_000,
+    adultConfirmed: true,
+  },
+  {
+    athleteId: 'f6e5d4c3b2a1',
+    displayName: 'Sam',
+    createdAt: 1_763_110_000,
+    adultConfirmed: false,
+  },
+];
+
+/** The Accounts page (#2646), in a session of `strength`, over the scripted status. */
+const accountsPage = (
+  strength: ShellView['strength'],
+  over: Partial<AccountsView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/accounts', name, strength),
+    'Accounts',
+    pages.accountsBody({
+      status: SCRIPTED_STATUS,
+      registrations: WAITING,
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      reasonLimit: 1000,
+      ...over,
+    }),
+    true,
+  );
 
 /** The AI backend page (#2648), in a session of `strength`, over the scripted reads. */
 const analysisPage = (
@@ -318,6 +382,38 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     [
       'unreadable',
       () => pages.shellPage(shell('/admin/status'), 'Status', pages.statusBody(undefined, NOW)),
+    ],
+  ],
+  '/admin/accounts': [
+    ['a code session: reads only', () => accountsPage('code')],
+    [
+      'a passkey session: a decision for each rider, an awkward name',
+      () => accountsPage('passkey', {}, AWKWARD_NAME),
+    ],
+    [
+      'approved, nobody left waiting',
+      () =>
+        accountsPage('passkey', {
+          registrations: [],
+          notice: { decision: 'approve', ok: true, problem: null },
+        }),
+    ],
+    [
+      'a refusal with no reason',
+      () =>
+        accountsPage('passkey', { notice: { decision: 'refuse', ok: false, problem: 'reason' } }),
+    ],
+    [
+      'nothing readable',
+      () => accountsPage('passkey', { status: undefined, registrations: undefined }),
+    ],
+    [
+      'the invite mode, the queue unreadable',
+      () =>
+        accountsPage('code', {
+          status: { ...SCRIPTED_STATUS, registration: 'invite' },
+          registrations: undefined,
+        }),
     ],
   ],
   '/admin/analysis': [

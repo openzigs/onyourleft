@@ -759,12 +759,16 @@ describe('the owner’s routes are the owner’s alone, checked in ONE place (#2
         'GET',
       );
     }
-    // ADR 0069 D-9's three moderation routes are #2646's to mark; none is yet.
+    // ADR 0069 D-9's three moderation routes, which #2646 marks, and no other route.
     expect(
       ROUTES.filter((route) => route.reaches !== 'owner' && route.admin !== undefined).map(
-        (route) => route.operationId,
+        (route) => [route.operationId, route.reaches, route.method, route.admin],
       ),
-    ).toEqual([]);
+    ).toEqual([
+      ['listPendingRegistrations', 'moderation', 'GET', 'read'],
+      ['approveRegistration', 'moderation', 'POST', 'change'],
+      ['refuseRegistration', 'moderation', 'POST', 'change'],
+    ]);
   });
 
   /** A route that says it is the owner's and checks nothing itself. */

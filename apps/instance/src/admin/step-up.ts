@@ -36,6 +36,9 @@ export const ADMIN_CHANGES = {
   analysis_model: { fields: ['localModel'] },
   analysis_address: { fields: ['localUrl'] },
   analysis_clear: { fields: [] },
+  // #2646 (ADR 0069 D-9): a registration decided, for one rider and with the reason typed.
+  registration_approve: { fields: ['athleteId', 'reason'] },
+  registration_refuse: { fields: ['athleteId', 'reason'] },
 } as const satisfies Readonly<Record<string, { readonly fields: readonly string[] }>>;
 
 export type AdminChange = keyof typeof ADMIN_CHANGES;

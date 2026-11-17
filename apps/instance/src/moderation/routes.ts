@@ -189,6 +189,7 @@ function athleteAction(
   operationId: string,
   action: AthleteAction,
   summary: string,
+  admin?: 'change',
 ): Route {
   return {
     method: 'POST',
@@ -197,6 +198,8 @@ function athleteAction(
     sealed: 'only',
     operationId,
     reaches: 'moderation',
+    // ADR 0069 D-9: only a registration's approval and refusal, from #2646's Accounts page.
+    ...(admin === undefined ? {} : { admin }),
     summary,
     identity: true,
     auth: 'session',
@@ -205,11 +208,18 @@ function athleteAction(
     response: actionResponse,
     handle: async (context) => {
       const target = context.params.athleteId ?? '';
-      const acted = await moderationOf(context).act(callerId(context), action, target, {
-        reason: context.json.reason,
-        reportId: context.json.reportId,
-        statement: context.json.statement,
-      });
+      const acted = await moderationOf(context).act(
+        callerId(context),
+        action,
+        target,
+        {
+          reason: context.json.reason,
+          reportId: context.json.reportId,
+          statement: context.json.statement,
+        },
+        // The admin seam's marker, on the two routes it may reach (ADR 0069 D-9).
+        admin === undefined ? undefined : context.adminChannel,
+      );
       // #876: a ban reaches the Discord voice of every room the rider is in.
       if (acted.ok && action === 'suspend') {
         await context.probes?.afterSuspension?.({
@@ -805,6 +815,8 @@ export const MODERATION_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'listPendingRegistrations',
     reaches: 'moderation',
+    // ADR 0069 D-9: #2646's Accounts page lists the queue, with the four details the app shows.
+    admin: 'read',
     summary:
       'The approval queue (#775): every athlete awaiting a moderator’s decision, oldest first, and whether each has confirmed they are 18 or over.',
     identity: true,
@@ -838,13 +850,15 @@ export const MODERATION_ROUTES: readonly Route[] = [
     'registrations/{athleteId}/approve',
     'approveRegistration',
     'approve_registration',
-    'Approve an account awaiting approval. Written to the moderation log.',
+    'Approve an account awaiting approval. Written to the moderation log — and, from the instance’s admin pages (ADR 0069 D-9), with a `registration_decided` operator log entry in the same transaction.',
+    'change',
   ),
   athleteAction(
     'registrations/{athleteId}/refuse',
     'refuseRegistration',
     'refuse_registration',
-    'Refuse an account awaiting approval: its every key is refused at sign-in from then on. Written to the moderation log.',
+    'Refuse an account awaiting approval: its every key is refused at sign-in from then on. Written to the moderation log — and, from the instance’s admin pages (ADR 0069 D-9), with a `registration_decided` operator log entry in the same transaction.',
+    'change',
   ),
   {
     method: 'POST',

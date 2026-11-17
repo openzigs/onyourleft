@@ -7217,7 +7217,7 @@
     "/v1/moderation/registrations/{athleteId}/approve": {
       "post": {
         "operationId": "approveRegistration",
-        "summary": "Approve an account awaiting approval. Written to the moderation log.",
+        "summary": "Approve an account awaiting approval. Written to the moderation log — and, from the instance’s admin pages (ADR 0069 D-9), with a `registration_decided` operator log entry in the same transaction.",
         "parameters": [
           {
             "name": "athleteId",
@@ -7361,7 +7361,7 @@
     "/v1/moderation/registrations/{athleteId}/refuse": {
       "post": {
         "operationId": "refuseRegistration",
-        "summary": "Refuse an account awaiting approval: its every key is refused at sign-in from then on. Written to the moderation log.",
+        "summary": "Refuse an account awaiting approval: its every key is refused at sign-in from then on. Written to the moderation log — and, from the instance’s admin pages (ADR 0069 D-9), with a `registration_decided` operator log entry in the same transaction.",
         "parameters": [
           {
             "name": "athleteId",
@@ -9482,7 +9482,8 @@
                               "admin_passkey_enrolled",
                               "admin_passkey_revoked",
                               "admin_passkey_confirmed",
-                              "room_ended"
+                              "room_ended",
+                              "registration_decided"
                             ]
                           },
                           "detail": {
