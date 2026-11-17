@@ -332,7 +332,7 @@ export interface BotRaceTick {
 
 /**
  * The #92 plan a bot rides through the physics: its tier's, at its body's
- * mass in a race with AI bots (#2759, ADR 0075 D-2), and at
+ * mass in a race with AI bots (#2759, ADR 0076 D-2), and at
  * `BOT_MASS_KILOGRAMS` otherwise, as before. Its mass is what the physics
  * reads of it; its power is its race plan's.
  */
@@ -458,7 +458,7 @@ export function stepBotRace(
     );
     lanes[bot.id] = decision.lane;
     if (decision.use) uses.push(bot.id);
-    // #2759: at its own mass, where it has a body (ADR 0075 D-2).
+    // #2759: at its own mass, where it has a body (ADR 0076 D-2).
     const course: BotCourse = { ...step.conditions, plan: lapRaceBotPacerPlan(bot) };
     // Its capacity, once a race (ADR 0067 D-1.1): nothing below changes it.
     const plan = bot.plan ?? botRacePlan(bot.tier, race.course, step.seed, bot.pace);

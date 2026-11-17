@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * #2759, ADR 0075: the field of a race with AI bots. Each racing style its
+ * #2759, ADR 0076: the field of a race with AI bots. Each racing style its
  * pace and a body that fits it, a spread of strength whose middle is the tier
  * the rider chose, and how each bot compares with the field in plain words.
  * What a body does on the road, on the one physics, is
@@ -55,7 +55,7 @@ function field(seed: number, count = 7, tier: (typeof BOT_TIERS)[number] = 'bris
 
 const massOf = (capacity: BotCapacity) => capacity.massKilograms ?? BOT_MASS_KILOGRAMS;
 
-describe('each racing style its pace, its legs and its body (ADR 0075 D-3)', () => {
+describe('each racing style its pace, its legs and its body (ADR 0076 D-3)', () => {
   const LEGS: Readonly<Record<ModelRacingStyle, BotArchetype>> = {
     breakaway: 'attacker',
     sprinter: 'sprinter',
@@ -140,7 +140,7 @@ describe('each racing style its pace, its legs and its body (ADR 0075 D-3)', () 
   });
 });
 
-describe('a spread of strength whose middle is the tier (ADR 0075 D-2)', () => {
+describe('a spread of strength whose middle is the tier (ADR 0076 D-2)', () => {
   it('holds the field’s mean CP in W/kg to the tier, every tier, size and seed of 100', () => {
     for (const tier of BOT_TIERS) {
       for (let count = 1; count <= 7; count += 1) {
@@ -210,7 +210,7 @@ describe('a spread of strength whose middle is the tier (ADR 0075 D-2)', () => {
   });
 });
 
-describe('a body in the race plan (ADR 0075 D-2)', () => {
+describe('a body in the race plan (ADR 0076 D-2)', () => {
   it('sets CP, W′, peak and floor from its strength at its own mass, and carries the mass', () => {
     const body = { massKilograms: 64, strength: 1.07 };
     const pace = { style: 'sprinter' as const, ability: 1, body };
@@ -238,7 +238,7 @@ describe('a body in the race plan (ADR 0075 D-2)', () => {
   });
 });
 
-describe('the 7 W/kg ceiling at a bot’s own mass (ADR 0075 D-2.4)', () => {
+describe('the 7 W/kg ceiling at a bot’s own mass (ADR 0076 D-2.4)', () => {
   const capacity = (massKilograms?: number): BotCapacity => ({
     cpWatts: 200,
     wPrimeJoules: 20_000,
@@ -266,7 +266,7 @@ describe('the 7 W/kg ceiling at a bot’s own mass (ADR 0075 D-2.4)', () => {
   });
 });
 
-describe('how a bot compares with the field, in plain words (ADR 0075 D-4)', () => {
+describe('how a bot compares with the field, in plain words (ADR 0076 D-4)', () => {
   const at = (cpWatts: number, massKilograms: number, peakWatts: number, wPrimeJoules: number) =>
     ({ cpWatts, massKilograms, peakWatts, wPrimeJoules, floorWatts: 0 }) as BotCapacity;
 

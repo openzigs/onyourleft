@@ -161,7 +161,7 @@ export const BOT_WPRIME_JOULES: Readonly<Record<BotTier, number>> = {
  */
 export function botWPrimeJoules(tier: BotTier, pace: BotPace = BOT_EVEN_PACE): number {
   const { body } = pace;
-  // #2759, ADR 0075 D-2: a body's W′ is its style's share of the tier's,
+  // #2759, ADR 0076 D-2: a body's W′ is its style's share of the tier's,
   // scaled to its mass and its strength.
   if (body !== undefined) {
     return (
@@ -190,7 +190,7 @@ const SPRINT_DRAW_KEY = 0x5f1d_0961;
 export interface BotRacePlan {
   /**
    * The tier's power at `BOT_MASS_KILOGRAMS`, watts: what the bounds are set
-   * from. For a bot with a body (#2759, ADR 0075 D-2), the tier's W/kg times
+   * from. For a bot with a body (#2759, ADR 0076 D-2), the tier's W/kg times
    * its strength, at its own mass.
    */
   readonly tierWatts: number;
@@ -268,7 +268,7 @@ export function botRacePlan(
   const { style } = pace;
   const archetype = botArchetype(style);
   const { body } = pace;
-  // #2759, ADR 0075 D-2: a body's bounds are set from its own strength at the
+  // #2759, ADR 0076 D-2: a body's bounds are set from its own strength at the
   // tier, at its own mass; with none, from the tier at 75 kg, as before.
   const tierWatts =
     body === undefined

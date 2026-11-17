@@ -425,10 +425,10 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
   the fixed launch, with the misread distance still what a bot reads as left. Read ADR 0073 for the
   rule. This entry only points there; nothing else in this ADR changes. (#2720)
 
-- **2026-11-17** — **Once [ADR 0075](0075-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-1.3 is superseded by it in part.** A model
+- **2026-11-17** — **Once [ADR 0076](0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-1.3 is superseded by it in part.** A model
   race deals its own field from its seed: each bot's racing style brings a pace whose legs fit it
   and a body, a mass and a strength around the tier, with the field's mean CP in W/kg held to the
   tier. So a model race no longer differs from a seeded one only in its moves; with no decision in
   force it rides seeded tactics on that field. **D-1.4 is unchanged**: a rider with no instance or
-  no consent rides the seeded race, to the bit. Read ADR 0075 for the rule. This entry only points
+  no consent rides the seeded race, to the bit. Read ADR 0076 for the rule. This entry only points
   there; nothing else in this ADR changes. (#2759)

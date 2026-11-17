@@ -71,7 +71,7 @@ export interface BotCapacity {
   readonly recoveryFactor?: number;
   /**
    * What the bot weighs, kilograms: its body's, in a race with AI bots (#2759,
-   * ADR 0075 D-2). Absent, `BOT_MASS_KILOGRAMS` (75 kg), every seeded bot's.
+   * ADR 0076 D-2). Absent, `BOT_MASS_KILOGRAMS` (75 kg), every seeded bot's.
    * It sets the bot's 7 W/kg ceiling ({@link botCeilingWatts}).
    */
   readonly massKilograms?: number;
@@ -121,7 +121,7 @@ export const BOT_CEILING_WATTS = MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM * BOT_MASS
 
 /**
  * The most this bot's power may ever be, watts: 7 W/kg at its own mass
- * (#2759, ADR 0075 D-2.4), so {@link BOT_CEILING_WATTS} for a bot of 75 kg and
+ * (#2759, ADR 0076 D-2.4), so {@link BOT_CEILING_WATTS} for a bot of 75 kg and
  * every bot with no body.
  */
 export function botCeilingWatts(capacity: BotCapacity): number {

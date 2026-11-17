@@ -119,7 +119,7 @@ describe('a pace is checked before a plan reads it', () => {
     );
   });
 
-  it('takes a body inside its ranges and refuses one past them (#2759, ADR 0075 D-2)', () => {
+  it('takes a body inside its ranges and refuses one past them (#2759, ADR 0076 D-2)', () => {
     const paced = (massKilograms: number, strength: number) =>
       codeOf(() =>
         checkBotPace({ style: 'climber', ability: 1, body: { massKilograms, strength } }),

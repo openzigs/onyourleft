@@ -1,4 +1,4 @@
-# ADR 0075: AI bots race with bodies that fit their style and a spread of strength — superseding in part ADR 0071 D-1.3, ADR 0073 D-2.5 and D-5.1, and ADR 0067 D-1.3
+# ADR 0076: AI bots race with bodies that fit their style and a spread of strength — superseding in part ADR 0071 D-1.3, ADR 0073 D-2.5 and D-5.1, and ADR 0067 D-1.3
 
 - **Status**: **Proposed**, 2026-11-17. The owner approves it, or overrules any of D-9's questions,
   on #2759's pull request before it merges. **The build is in that pull request**: every decision
@@ -11,10 +11,13 @@
 - **Issue**: [#2759](https://github.com/openzigs/onyourleft/issues/2759), under the epic
   [#2706](https://github.com/openzigs/onyourleft/issues/2706). It builds on
   [#2724](https://github.com/openzigs/onyourleft/pull/2724) (#2710), which ships the AI bots
-- **Number**: **0075**, the next free number on 2026-11-17 (`docs/agents/conventions.md` §7 and
-  `docs/agents/adr-numbering.md` on #2724's branch). No open issue or pull request named it. 0072
-  stays claimed by [#2712](https://github.com/openzigs/onyourleft/issues/2712), 0070 by #2684, and
-  0057 and 0058 by #1748 and #1752. The next free number is then 0076
+- **Number**: **0076**. It was written on 2026-11-17 as 0075, the next free number on #2724's
+  branch (`docs/agents/conventions.md` §7 and `docs/agents/adr-numbering.md`), and renumbered the
+  same day because 0075 is #2600's ADR for the ride controls' fade, in pull request
+  [#2670](https://github.com/openzigs/onyourleft/pull/2670), accepted by the owner. 0077 is claimed
+  by [#2762](https://github.com/openzigs/onyourleft/pull/2762) if it needs one. 0072 stays claimed
+  by [#2712](https://github.com/openzigs/onyourleft/issues/2712), 0070 by #2684, and 0057 and 0058
+  by #1748 and #1752. The next free number is then 0078
 - **Supersedes, in part**, for **a model race only** (ADR 0071 D-1):
   - [ADR 0071](0071-model-chosen-lap-race-bot-tactics-during-a-ride.md) **D-1.3**'s words *"The
     physics, W′ balance, fixed capacity … are exactly the seeded race's. A model race differs from a
@@ -204,7 +207,7 @@ that goes too hard for too long is dropped. The temperature stays 0.6 (Context).
 
 | # | Question | The author's recommendation | Where |
 |---|---|---|---|
-| **R-1** | Approve ADR 0075 for model races: bodies that fit their style, a spread of strength whose mean is the tier, the strengths in the input, the prompt | **Approve** | whole |
+| **R-1** | Approve ADR 0076 for model races: bodies that fit their style, a spread of strength whose mean is the tier, the strengths in the input, the prompt | **Approve** | whole |
 | **R-2** | A spread of ±12 % of strength and ±3 kg, with the field's mean CP in W/kg held to the tier | **Yes**; tune it on the tablet if races still finish together or spread too far | D-2 |
 | **R-3** | On `attack`, `chase`, `flyer` and `kick`, an effort rides the harder of itself and the move's own target, so an attack at `tempo` is still an attack | **Yes**: an attack under CP is no attack, and the model's choice of when and whom is untouched | D-5 |
 | **R-4** | The style table's numbers (mass, CP, W′ and peak per style) | **Yes, as drafted**, for the tablet to judge | D-3 |

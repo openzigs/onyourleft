@@ -75,7 +75,7 @@ export const BOT_PACING_STYLES: readonly BotPacingStyle[] = [
 ];
 
 /**
- * A bot's own body, in a race with AI bots (#2759, ADR 0075 D-2): what it
+ * A bot's own body, in a race with AI bots (#2759, ADR 0076 D-2): what it
  * weighs and how strong it is beside the tier. Dealt with its pace from the
  * race's seed (`model-field.ts` §`modelFieldPaces`), so fixed at the start
  * (ADR 0067 D-1.1). A seeded race's bots have none, and ride at
@@ -97,7 +97,7 @@ export interface BotPace {
   readonly style: BotPacingStyle;
   /** Its share of its tier's power: from 1 − {@link BOT_ABILITY_SPREAD} to 1. */
   readonly ability: number;
-  /** Its own body (#2759, ADR 0075): only in a race with AI bots. */
+  /** Its own body (#2759, ADR 0076): only in a race with AI bots. */
   readonly body?: BotBody;
 }
 

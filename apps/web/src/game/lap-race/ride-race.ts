@@ -351,7 +351,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   const skills = botFieldSkills(seed, ids.length);
   // #2455: each bot its own ability and pacing style, from the race's seed,
   // so the field spreads into a race rather than riding as one. #2759, ADR
-  // 0075: in a race with AI bots, each its racing style's pace and a body to
+  // 0076: in a race with AI bots, each its racing style's pace and a body to
   // match, with a spread of strength whose middle is the tier.
   const paces =
     input.model === true ? modelFieldPaces(seed, ids.length) : botFieldPaces(seed, ids.length);
@@ -824,7 +824,7 @@ export function lapRaceHud(
   for (const bot of ride.bots) {
     entrants[bot.id] = {
       name: ride.names[bot.id] ?? bot.id,
-      // #2759: at its own mass, where it has a body (ADR 0075 D-2).
+      // #2759: at its own mass, where it has a body (ADR 0076 D-2).
       wattsPerKilogram:
         bot.power > 0 ? (bot.power as number) / lapRaceBotMassKilograms(bot) : undefined,
     };

@@ -11,7 +11,7 @@
  * gives no condition a move must meet and no attack gate (D-5.3, D-5.4). One
  * sentence is #2710's own: the effort (D-2.5). #2710 measured four sentences
  * about the finish (ADR 0073 R-5) and kept none: gemma4:12b answered each
- * bot's current `move` back whatever they said. Three are #2759's (ADR 0075
+ * bot's current `move` back whatever they said. Three are #2759's (ADR 0076
  * D-4 and D-6), still guidance: what the strength words mean, that an attack
  * is a hard effort, and that riders attack where their strengths pay and let
  * a stronger rival go.

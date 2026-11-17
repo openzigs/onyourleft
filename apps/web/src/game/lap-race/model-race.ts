@@ -32,7 +32,7 @@
  * off the race on effort distance — seats, each bot's racing style dealt from
  * the race's seed (`modelRacingStyles`) and its legs (its archetype), which
  * since #2759 fit each other, and how it compares with the field on the flat,
- * a climb, a sprint and in punch (`modelFieldStrengths`, ADR 0075 D-4), ranks,
+ * a climb, a sprint and in punch (`modelFieldStrengths`, ADR 0076 D-4), ranks,
  * who is ahead and its move, gaps, W′ shares and whether a bot is blown,
  * drafting, moves and the seconds held, the lull, laps and metres to the line
  * **as each bot misreads them** (`botTacticsMisjudgement`, the reading seeded
@@ -188,7 +188,7 @@ export function modelTacticsInputOf(
   const rider = race.racers.find((entry) => !seats.has(entry.racer.id))?.racer;
   const factors = draft ? lapRaceDraftFactors(race) : undefined;
   const { laps, lapLengthMetres } = race.course;
-  // #2759, ADR 0075 D-4: how each bot compares with the whole field, every
+  // #2759, ADR 0076 D-4: how each bot compares with the whole field, every
   // bot that has its capacity, racing or finished, so the words hold all race.
   const planned = bots.flatMap((bot) => (bot.plan === undefined ? [] : [bot]));
   const strengths = new Map(
@@ -214,7 +214,7 @@ export function modelTacticsInputOf(
     const misread = botTacticsMisjudgement(seed, seat, bot.strategy.skill, race.atMs).lineMetres;
     views.push({
       bot: seat,
-      // #2759, ADR 0075 D-3: the style its pace was dealt for, so style, legs
+      // #2759, ADR 0076 D-3: the style its pace was dealt for, so style, legs
       // and body never drift apart.
       style: modelRacingStyleOf(bot.pace.style),
       legs: bot.plan.archetype,

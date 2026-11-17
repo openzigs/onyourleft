@@ -3,7 +3,7 @@
 /**
  * **The field of a race with AI bots: a spread of strength around the tier,
  * and a body that fits each bot's racing style** — #2759,
- * [ADR 0075](../../../../docs/adr/0075-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md).
+ * [ADR 0076](../../../../docs/adr/0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md).
  *
  * Before #2759 a model race's field was dealt as a seeded race's: every bot
  * at or a little under its tier (`pace.ts`, 6 %), at one 75 kg, and its racing
@@ -12,7 +12,7 @@
  * owner's ruling of 2026-11-17 asked for riders who differ, with personalities
  * whose strengths match them.
  *
- * ## The style carries its body (ADR 0075 D-3)
+ * ## The style carries its body (ADR 0076 D-3)
  *
  * The styles are still dealt every-style-once from the seed
  * (`model-tactics.ts` §`modelRacingStyles`, ADR 0073 D-5.1). Each now brings

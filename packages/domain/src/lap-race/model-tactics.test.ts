@@ -128,7 +128,7 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
     expect(bot({ blown: 'yes' })?.field).toBe('input.bots[0].blown');
   });
 
-  it('reads how each bot compares with the field in a closed word, and refuses any other (#2759, ADR 0075 D-4)', () => {
+  it('reads how each bot compares with the field in a closed word, and refuses any other (#2759, ADR 0076 D-4)', () => {
     for (const word of MODEL_STRENGTH_WORDS) {
       for (const key of ['flat', 'climb', 'sprint', 'punch']) {
         expect(readModelTacticsInput(input({ bots: [view(0, { [key]: word })] })).ok).toBe(true);

@@ -218,7 +218,7 @@ export {
   readModelTacticsInput,
 } from './model-tactics';
 
-// The field of a race with AI bots (#2759, ADR 0075): each racing style its
+// The field of a race with AI bots (#2759, ADR 0076): each racing style its
 // pace and body, a spread of strength whose middle is the tier, and how each
 // bot compares with the field in plain words.
 export type { ModelBotStrengths, ModelStyleBody } from './model-field';

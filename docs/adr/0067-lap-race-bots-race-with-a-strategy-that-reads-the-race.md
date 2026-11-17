@@ -399,10 +399,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-6.1 and D-6.3 to D-6.7 are unchanged**, and D-3.6 stays tested in model mode (its D-8). Read
   ADR 0071 for the rule. This entry only points there; nothing else in this ADR changes. (#2707)
 
-- **2026-11-17** — **Once [ADR 0075](0075-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-1.3 is superseded by it in part for a
+- **2026-11-17** — **Once [ADR 0076](0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-1.3 is superseded by it in part for a
   lap race the rider chose to ride with AI bots.** In such a race each bot has a body, a mass and a
   strength dealt from the seed around the tier, so its bounds are read against its own strength at
   its own mass: the surge ceiling of its own strength at the tier's W/kg, the −20 % floor of the
   same, and 7 W/kg at its own mass. **D-1.1 and D-1.2 are unchanged**: capacity is fixed at the
   start, and nothing changes it by rank or gap. D-1.3 stands as written for every other race. Read
-  ADR 0075 for the rule. This entry only points there; nothing else in this ADR changes. (#2759)
+  ADR 0076 for the rule. This entry only points there; nothing else in this ADR changes. (#2759)

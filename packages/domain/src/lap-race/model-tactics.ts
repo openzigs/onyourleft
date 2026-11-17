@@ -14,7 +14,7 @@
  * {@link ModelTacticsInput}: spike 0039's shape (ADR 0071 D-3.4) as ADR 0073
  * D-5 widened it (#2720, #2710) — seats, racing styles dealt from the seed
  * ({@link modelRacingStyles}) and legs (archetypes), how each bot compares
- * with the field on the flat, a climb, a sprint and in punch (#2759, ADR 0075
+ * with the field on the flat, a climb, a sprint and in punch (#2759, ADR 0076
  * D-4: {@link MODEL_STRENGTH_WORDS}), ranks, gaps, W′ shares
  * and whether a bot is blown, drafting, current moves, laps and metres to the
  * line as each bot misreads it, launch distance, grade ahead, the rider's gap,
@@ -89,7 +89,7 @@ const STYLE_SALT = 0x5717_1e5d;
  * 0073 D-5.1): every style once before any twice, in an order the seed
  * shuffles, so a field of seven holds all five and the same seed deals the
  * same field. ADR 0073 dealt it apart from the bots' archetypes (D-9 R-4);
- * since #2759 (ADR 0075 D-3) a race with AI bots deals each bot the pace and
+ * since #2759 (ADR 0076 D-3) a race with AI bots deals each bot the pace and
  * body its style fits on these styles (`model-field.ts` §`modelFieldPaces`).
  */
 export function modelRacingStyles(seed: number, count: number): readonly ModelRacingStyle[] {
@@ -110,7 +110,7 @@ export function modelRacingStyles(seed: number, count: number): readonly ModelRa
 
 /**
  * **How a bot compares with the rest of its field**, in plain words (#2759,
- * ADR 0075 D-4): on the flat, on a climb, in a sprint and in its punch, each
+ * ADR 0076 D-4): on the flat, on a climb, in a sprint and in its punch, each
  * one of these. `model-field.ts` §`modelFieldStrengths` says which.
  */
 export const MODEL_STRENGTH_WORDS = ['weak', 'average', 'strong'] as const;
@@ -133,7 +133,7 @@ export interface ModelTacticsBotView {
   readonly style: ModelRacingStyle;
   /** What its legs are good at: its archetype, which sets its sprint and its launch distance. */
   readonly legs: BotArchetype;
-  /** Beside the rest of the field, on the flat: its watts at threshold (ADR 0075 D-4). */
+  /** Beside the rest of the field, on the flat: its watts at threshold (ADR 0076 D-4). */
   readonly flat: ModelStrengthWord;
   /** Beside the rest of the field, on a climb: its watts per kilogram at threshold. */
   readonly climb: ModelStrengthWord;

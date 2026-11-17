@@ -89,7 +89,7 @@ function startRace(model: boolean): LapRaceRide {
 }
 
 /**
- * The same race ridden on seeded tactics alone (#2759, ADR 0075 D-1): a race
+ * The same race ridden on seeded tactics alone (#2759, ADR 0076 D-1): a race
  * with AI bots deals its own field (`modelFieldPaces`), so with no decision it
  * rides seeded tactics on that field, and this is what it must equal.
  */
@@ -168,7 +168,7 @@ const ALL_ATTACK = (input: ModelTacticsInput): ModelTacticsReply => ({
 const SECONDS = 150;
 
 describe('a race with AI bots and no decision rides seeded tactics on the model’s field (D-1.4)', () => {
-  it('deals its own field, and leaves a seeded race’s as it was (#2759, ADR 0075 D-1)', () => {
+  it('deals its own field, and leaves a seeded race’s as it was (#2759, ADR 0076 D-1)', () => {
     const model = startRace(true);
     const seeded = startRace(false);
     expect(model.bots.map((bot) => bot.pace)).toEqual(modelFieldPaces(SEED, LAP_RACE_MOST_BOTS));
@@ -436,7 +436,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     })).ride;
   }
 
-  it('deals each bot its racing style from the seed, with the legs that fit it (D-5.1, ADR 0075 D-3)', () => {
+  it('deals each bot its racing style from the seed, with the legs that fit it (D-5.1, ADR 0076 D-3)', () => {
     const race = raceAt30();
     const input = modelTacticsInputOf(
       race.race,
@@ -463,7 +463,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     expect(Object.keys(input)).toEqual(['laps', 'field', 'quietS', 'rider', 'bots']);
   });
 
-  it('says how each bot compares with the whole field, finished bots included, in plain words (ADR 0075 D-4)', () => {
+  it('says how each bot compares with the whole field, finished bots included, in plain words (ADR 0076 D-4)', () => {
     const race = raceAt30();
     const input = modelTacticsInputOf(
       race.race,
@@ -516,7 +516,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     expect(alone).not.toEqual([...kept].map((seat) => words[seat]));
   });
 
-  it('shows a bot the rider in a move against its own CP per kilogram, at its body’s mass (ADR 0075 D-2.5)', () => {
+  it('shows a bot the rider in a move against its own CP per kilogram, at its body’s mass (ADR 0076 D-2.5)', () => {
     const race = raceAt30();
     // The lightest bot, with the rider 2 m ahead of it and every other bot well behind.
     const seat = race.bots.reduce(
@@ -715,7 +715,7 @@ describe('the body’s limits hold under any strategy (ADR 0073 D-2)', () => {
     let blownTicks = 0;
     let overCpTicks = 0;
     // #2759: twice the other cases' length. A body's W′ grows with its mass
-    // and strength (ADR 0075 D-2), and the heaviest last more than 150 s at
+    // and strength (ADR 0076 D-2), and the heaviest last more than 150 s at
     // their peak before they blow.
     for (let tick = 0; tick < Math.round((2 * SECONDS) / LAP_RACE_TICK_SECONDS); tick += 1) {
       const blown = race.bots.map((bot) => bot.energy.exhausted);

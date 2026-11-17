@@ -1003,7 +1003,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         body's limits outside; ADR 0073's strategy, which
                         lifts ADR 0071 D-3.6's rules, with ADR 0074's sprint
                         backstop, behind the `ModelMoveStrategy` seam). Any miss rides seeded. The record goes to `RideFacts.lapRaces`.
-                        Since version 4 (#2759, ADR 0075) a model race deals
+                        Since version 4 (#2759, ADR 0076) a model race deals
                         its own field, domain `lap-race/model-field.ts`: each
                         style its legs and a body (mass, strength around the
                         tier); the seeded race keeps its one-body field

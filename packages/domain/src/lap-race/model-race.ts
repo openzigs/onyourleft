@@ -85,11 +85,11 @@ import type { BotEnergy } from './wbal';
 import type { ModelTacticsInvalid, ModelTacticsMove, ModelTacticsTarget } from './model-tactics';
 
 /**
- * **The bot-code version: 4** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074, ADR 0075).
+ * **The bot-code version: 4** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074, ADR 0076).
  * Version 1 rode ADR 0071 D-3.6's strategy rules; version 2 ADR 0073's, with
  * D-5's input; version 3 ADR 0073's with ADR 0074's sprint backstop; version 4
  * a field with bodies that fit their styles and a spread of strength, and an
- * effort that never softens an attack (#2759, ADR 0075). Raised by any change that
+ * effort that never softens an attack (#2759, ADR 0076). Raised by any change that
  * alters any bot's output for some seed and log — a tactic, a plan, the W′
  * model, the adapter, a seam's rule, a physics step. Stored beside the seed and
  * the log; a log recorded under another version is not replayed.

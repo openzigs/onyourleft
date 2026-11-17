@@ -78,7 +78,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('a different race every time, and AI bots with bodies of their own (#2759, ADR 0075)', () => {
+describe('a different race every time, and AI bots with bodies of their own (#2759, ADR 0076)', () => {
   /** A race with AI bots on the loop, from whatever seed the platform draws. */
   const modelRace = (): LapRaceRide => {
     const ride = startLapRaceRide({

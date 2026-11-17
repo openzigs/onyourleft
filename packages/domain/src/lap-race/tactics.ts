@@ -445,7 +445,7 @@ export function botLaunchMetres(archetype: BotArchetype): number {
 
 /** Whether the rider, ahead and close, is in a move the bot can see. */
 function riderMoving(view: RaceView): boolean {
-  // #2759: at the bot's own mass, where it has a body (ADR 0075 D-2).
+  // #2759: at the bot's own mass, where it has a body (ADR 0076 D-2).
   const cpPerKilogram = view.capacity.cpWatts / (view.capacity.massKilograms ?? BOT_MASS_KILOGRAMS);
   return (
     view.riderWattsPerKilogram !== null &&
@@ -551,7 +551,7 @@ function wheelWatts(view: RaceView): number | null {
 
 /**
  * The moves a bot makes off its own pace to gain ground: **`attack`, `chase`,
- * `flyer` and `kick`** (#2759, ADR 0075 D-5). An effort a model names for one
+ * `flyer` and `kick`** (#2759, ADR 0076 D-5). An effort a model names for one
  * of them is ridden at the harder of the effort's target and the move's own,
  * so it can make the move harder and never softer.
  */
@@ -599,7 +599,7 @@ function wanted(
     effort === 'all-out'
       ? view.capacity.peakWatts
       : view.capacity.cpWatts * BOT_EFFORT_CP_SHARE[effort];
-  // #2759, ADR 0075 D-5: an effort never softens a move made to gain ground.
+  // #2759, ADR 0076 D-5: an effort never softens a move made to gain ground.
   // An attack at tempo is no attack: it is ridden at the harder of the two.
   return BOT_HARD_TACTICS.includes(tactic) ? Math.max(asked, own) : asked;
 }

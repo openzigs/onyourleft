@@ -251,7 +251,7 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
     expect(bots[0]?.energy).toEqual({ wbalJoules: botWPrimeJoules('hard'), exhausted: false });
   });
 
-  it('rides a bot with a body at its own mass, and its W/kg, not its watts, decides a climb (#2759, ADR 0075 D-2)', () => {
+  it('rides a bot with a body at its own mass, and its W/kg, not its watts, decides a climb (#2759, ADR 0076 D-2)', () => {
     const body = (massKilograms: number): BotPace => ({
       style: 'climber',
       ability: 1,
@@ -362,7 +362,7 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
       | 'power'
     >();
     // #2455: a pace is a style key and a number, with nowhere for a recorded ride.
-    // #2759: and, in a race with AI bots, a body of two numbers (ADR 0075 D-2).
+    // #2759: and, in a race with AI bots, a body of two numbers (ADR 0076 D-2).
     expectTypeOf<keyof BotPace>().toEqualTypeOf<'style' | 'ability' | 'body'>();
     expectTypeOf<BotPace['ability']>().toEqualTypeOf<number>();
     expectTypeOf<keyof BotBody>().toEqualTypeOf<'massKilograms' | 'strength'>();
@@ -1565,7 +1565,7 @@ describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () =>
     expect(done.gapBehindMetres).toBe(30);
   });
 
-  it('reads the rider and a wheel at each bot’s own mass where it has a body (#2759, ADR 0075 D-2.5)', () => {
+  it('reads the rider and a wheel at each bot’s own mass where it has a body (#2759, ADR 0076 D-2.5)', () => {
     const course = raceCourse(HILLY.totalDistance, 3);
     const body = (massKilograms: number): BotPace => ({
       style: 'climber',

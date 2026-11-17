@@ -190,7 +190,7 @@ describe('the racecraft each state encodes, on hand-built views (#2462)', () => 
     ).toBe('follow');
   });
 
-  it('reads the rider in a move against its own CP per kilogram, at its body’s mass (#2759, ADR 0075 D-2)', () => {
+  it('reads the rider in a move against its own CP per kilogram, at its body’s mass (#2759, ADR 0076 D-2)', () => {
     const light: BotCapacity = Object.freeze({ ...SPRINTER, massKilograms: 60 });
     const needed = (light.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)) / 60;
     const fresh = {
@@ -765,7 +765,7 @@ describe('an effort a model asked for (ADR 0073 D-2.5, #2710)', () => {
     expect(BOT_EFFORTS).toEqual(['easy', 'tempo', 'threshold', 'all-out']);
   });
 
-  it('never softens a move made to gain ground: an attack at tempo is still an attack (#2759, ADR 0075 D-5)', () => {
+  it('never softens a move made to gain ground: an attack at tempo is still an attack (#2759, ADR 0076 D-5)', () => {
     const at = alone();
     expect(BOT_HARD_TACTICS).toEqual(['attack', 'chase', 'flyer', 'kick']);
     for (const tactic of BOT_HARD_TACTICS) {
