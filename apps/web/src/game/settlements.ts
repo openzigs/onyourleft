@@ -1116,7 +1116,8 @@ export function placeLot(
 export interface MappedFootprintIndex {
   /**
    * Whether a lot ({@link LOT_FLOATS}), grown by
-   * {@link BUILDING_CLEARANCE_METRES} all round, meets any kept footprint.
+   * {@link BUILDING_CLEARANCE_METRES} all round, meets any kept footprint —
+   * and, for a {@link MappedTown}, mapped `railway` land (#2660).
    */
   overlaps(lot: Float64Array): boolean;
 }
@@ -1192,6 +1193,8 @@ export function lotSpacing(profile: RouteProfile): {
  *    ({@link MappedFootprintIndex}).
  * 3. **Never on wood, water or park** (P-9, the owner's rule): rule 1's
  *    corners already exclude them, since those classes are not `built-up`.
+ *    #2660: **nor on railway land**, which is `built-up` — rule 2's
+ *    {@link MappedTown.overlaps} meets it as it meets a footprint.
  * 4. {@link PLOT_BUILT_SHARE} of candidates are built, by a hash of the plot.
  *    The kind is a house, with a row of shops every {@link LOT_SHOP_EVERY}th
  *    plot where the land is mapped `commercial`. No church and no signpost: a

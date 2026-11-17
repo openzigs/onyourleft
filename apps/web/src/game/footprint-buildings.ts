@@ -5817,6 +5817,10 @@ function paintTown(
  * `urban`, since #1637, is the ride's urban class, built at the press beside
  * the plans: carried on the town for `settlements.ts` §`lotsAt` and
  * `streets.ts` (`MappedTown.urban`).
+ *
+ * #2660: `overlaps` also meets mapped `railway` land, so no lot stands on a
+ * railway. The land stays built-up to the mask, so nothing grows there and
+ * no field boundary runs across it; only the lots keep off it.
  */
 export function mappedTown(
   corridor: WorldCorridor,
@@ -5827,6 +5831,14 @@ export function mappedTown(
   const index = footprintIndexOf(
     plans.flatMap((plan) =>
       plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
+    ),
+  );
+  // #2660: railway land, which is built-up but no place for a house.
+  const railways = footprintIndexOf(
+    corridor.landUse.flatMap((feature) =>
+      feature.layer === 'landuse' && feature.kind === 'railway' && feature.rings[0] !== undefined
+        ? [feature.rings[0]]
+        : [],
     ),
   );
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
@@ -5840,7 +5852,7 @@ export function mappedTown(
   const town: MappedTown = {
     // #1637: the ride's urban class, which the lots and the streets read.
     ...(urban === undefined ? {} : { urban }),
-    overlaps: (lot) => index.overlaps(lot),
+    overlaps: (lot) => index.overlaps(lot) || railways.overlaps(lot),
     chainLinkAt(profile, origin, seed, land) {
       const known = chainLinks.get(profile);
       if (known !== undefined) return known;
