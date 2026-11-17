@@ -314,6 +314,7 @@ export function stubRideController(
       calls.unlockTouch += 1;
     },
     noteSoloDraft: () => undefined,
+    notePacerDecision: () => undefined,
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },

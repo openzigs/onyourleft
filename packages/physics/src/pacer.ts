@@ -67,6 +67,12 @@
  * holds that caller's inputs to a tier, the course, the race's seed and the
  * bot's own ride.
  *
+ * ⚠️ **Except an AI pacer's** (#2712, [ADR 0072](../../../docs/adr/0072-a-model-directs-the-bot-pacer-during-a-ride.md),
+ * superseding #92 criterion 6 and ADR 0066 D-1.1 for that ride only): its
+ * {@link BotCourse.direction} is a model's choice, and the model read the
+ * rider. It reaches the bot as two words from closed lists, inside #92's
+ * envelope, and still never as a power; with none in force the bot is #92's.
+ *
  * ⚠️ **And no recorded ride, which is the patent-posture criterion.** ADR 0007
  * D4 and `pacer/pacing.ts`'s header carry the argument in full; the part that
  * belongs here is that this file adds no input to the three that file lists.
@@ -79,12 +85,14 @@ import type {
   BotPacerPlan,
   GradePercent,
   Metres,
+  PacerDirection,
   RouteProfile,
   Seconds,
   UnixSeconds,
   Watts,
 } from '@onyourleft/domain';
 import {
+  directedPowerWatts,
   distanceOnRoute,
   gradeAt,
   kilograms,
@@ -122,6 +130,14 @@ export interface BotCourse {
   readonly coefficients?: Partial<PhysicsCoefficients>;
   /** See {@link RideConditions.integrationStepSeconds}. */
   readonly integrationStepSeconds?: number;
+  /**
+   * The plan and intent a model chose for an AI pacer (#2712, ADR 0072),
+   * in force for this tick: the pacing rule becomes `@onyourleft/domain`
+   * §`directedPowerWatts`, inside #92's envelope. Two words and never a
+   * power. **Absent — every ride but an AI pacer's, and an AI pacer's
+   * whenever no decision is in force — the bot is #92's to the bit.**
+   */
+  readonly direction?: PacerDirection;
 }
 
 /** What the bot is doing at one instant, for a HUD to render. */
@@ -204,7 +220,10 @@ export function botDemand(
   return {
     distanceOnRoute: metres(on),
     grade,
-    power: pacedPowerWatts(course.plan, grade),
+    power:
+      course.direction === undefined
+        ? pacedPowerWatts(course.plan, grade)
+        : directedPowerWatts(course.plan, grade, course.direction),
   };
 }
 

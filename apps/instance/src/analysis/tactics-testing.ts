@@ -6,7 +6,7 @@
  * answers what a test says, and the consent a device records. Never shipped.
  */
 
-import type { ModelTacticsInput } from '@onyourleft/domain';
+import type { ModelPacerInput, ModelTacticsInput } from '@onyourleft/domain';
 
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import type { TacticsLocal } from './tactics.ts';
@@ -110,4 +110,31 @@ export async function consentToTactics(
     token,
     body: { instance: status.instance, modelAddress: status.modelAddress },
   });
+}
+
+/** A pacer state of the domain's shape (#2712): the rider 12 m back, in the draft, a rise ahead. */
+export const PACER_INPUT: ModelPacerInput = {
+  pacerWPerKg: 2.5,
+  plan: 'rolling',
+  intent: 'hold',
+  secondsInIntent: 10,
+  riderGapM: -12,
+  riderWPerKg: 2.4,
+  riderInDraft: true,
+  gradeAheadPct: 3.5,
+  toFinishM: 6_000,
+  rideS: 240,
+};
+
+/** A model's valid pacer answer (#2712). */
+export const PACER_ANSWER = JSON.stringify({
+  plan: 'climber',
+  intent: 'ease',
+  say: 'Nice and steady, stay on my wheel.',
+});
+
+/** Whether an `/api/chat` body asks for a pacer decision: its schema names a plan. */
+export function asksForPacer(body: Readonly<Record<string, unknown>>): boolean {
+  const format = body.format as { properties?: Record<string, unknown> } | undefined;
+  return format?.properties?.plan !== undefined;
 }

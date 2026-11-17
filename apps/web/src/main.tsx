@@ -189,6 +189,7 @@ import { createStatementsPort, type StatementsPort } from './instance/statements
 import { createBlocksPort, type BlocksPort } from './instance/blocks-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
+import { createPacerPort, type PacerPort } from './instance/pacer-port';
 import { createLeaderboardPort, type LeaderboardPort } from './instance/leaderboard-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
@@ -803,7 +804,13 @@ function buildGamePort(
   corridors: WorldCorridorPort,
 ): GamePort {
   const store = localStore();
+  const pacers = buildPacerPort();
   return {
+    // #2712, ADR 0072: the AI pacer, only through the instance. No instance,
+    // no choice: `pacers` is undefined or says it is not offered. ⚠️ An
+    // optional member, so dropping this line is green in `check:wiring`;
+    // `game/model-pacer-wiring.test.tsx` is what goes red.
+    ...(pacers === undefined ? {} : { aiPacer: pacers }),
     // #1539: the chosen route's corridor, from the store or read once. ⚠️ An
     // optional member, so dropping this line is green in `check:wiring`;
     // `world-data/corridor-wiring.test.tsx` is what goes red.
@@ -1233,6 +1240,24 @@ function buildSyncPort(): SyncPort | undefined {
     newDocumentId: () => globalThis.crypto.randomUUID(),
     // #331: the race offer is decided here, against this device's zones.
     raceRoute: raceRouteOf(localStore(), LOCAL_ATHLETE, webCryptoSha256),
+  });
+}
+
+/**
+ * The trainer game's way to the AI pacer (#2712, ADR 0072): the ONE production
+ * place a pacer port is built, so `check:wiring` reports `createPacerPort` if
+ * this goes. Over the sealed session the Connect screen keeps, through the one
+ * instance module (ADR 0036 D-3 (a)); a device with no instance is offered no
+ * AI pacer and sends nothing.
+ */
+function buildPacerPort(): PacerPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createPacerPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
   });
 }
 

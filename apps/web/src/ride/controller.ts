@@ -65,6 +65,8 @@
 import {
   expandWorkout,
   holdEligible,
+  MODEL_PACER_CODE_VERSION,
+  MODEL_PACER_LOG_MOST,
   type CadenceCue,
   type CalorieRider,
   type HeartRateHoldContext,
@@ -73,6 +75,7 @@ import {
   seconds,
   timeInZones,
   unixSeconds,
+  type PacerDecisionRecord,
   type PlayerStatus,
   type LapRaceModelRecord,
   type ReplanRecord,
@@ -111,6 +114,7 @@ import type {
   ActivityId,
   AthleteId,
   LapId,
+  PacerModelFact,
   RecordedCourseLap,
   RecordingSessionId,
   RideFacts,
@@ -1335,6 +1339,21 @@ export interface RideController {
    */
   noteSoloDraft(reading: SoloDraftReading): void;
   /**
+   * The AI pacer logged one ask — #2712, ADR 0072 D-5: kept for the
+   * recording in progress, so the saved ride carries the pacer's decision
+   * log (`RideFacts.pacerModel`). A record asked earlier than the last one
+   * kept begins a new game ride's log, which replaces it: a recording keeps
+   * its LAST directed game ride's log. Ignored unless a ride is recording or
+   * paused. A closed-list record and no text. Decides no write to the trainer.
+   *
+   * `ride` (#2712's review) is what the log replays with beside it: the
+   * pacer's W/kg, the route, the position and the wind. Where the game ride
+   * began on the recording's clock is the controller's own, worked out from
+   * the first record it keeps: its seconds ridden at arrival are the
+   * frame's, so the recording's clock less those is the ride's start.
+   */
+  notePacerDecision(record: PacerDecisionRecord, ride: PacerRideFacts): void;
+  /**
    * A game ride in a room is starting — #785, the owner's ruling of
    * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
    * is under it: a recording or paused ride carries on (a paused one stays
@@ -1669,6 +1688,13 @@ export function createRideController(options: RideControllerOptions): RideContro
   let gameOutcomeDrafted = false;
   /** The draft of the ride being recorded — #2451. @see RideController.noteSoloDraft */
   let soloDraft = NO_SOLO_DRAFT;
+  /** The AI pacer's log of the ride being recorded — #2712. @see RideController.notePacerDecision */
+  let pacerDecisions: PacerDecisionRecord[] = [];
+  /**
+   * What {@link pacerDecisions} replays with beside it — #2712's review: the
+   * game ride's facts, and its start on the recording's clock once known.
+   */
+  let pacerRide: (PacerRideFacts & { readonly startedAt: UnixSeconds | undefined }) | undefined;
   /**
    * The course laps of this recording as the HUD was told them, in order —
    * each worked out as its line was crossed. What is SAVED is the recorder's
@@ -3427,6 +3453,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     replans: readonly ReplanRecord[],
     rider: CalorieRider,
     draft?: Pick<RideFacts, 'drafted' | 'draftSpans'>,
+    pacerModel?: PacerModelFact,
   ): FinishedRide | undefined => {
     const series = current.session.series();
     return rideToSave({
@@ -3464,6 +3491,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       rider,
       // #2451: what only this ride knew of its draft. A recovered ride passes none.
       ...(draft === undefined ? {} : { draft }),
+      // #2712: and of its AI pacer. A recovered ride passes none.
+      ...(pacerModel === undefined ? {} : { pacerModel }),
     });
   };
 
@@ -3553,6 +3582,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       replans,
       await savedRider(port, current),
       soloDraftFacts(soloDraft, current.session.timeline),
+      pacerModelToSave(pacerDecisions, pacerRide),
     );
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -4516,6 +4546,27 @@ export function createRideController(options: RideControllerOptions): RideContro
       soloDraft = noteSoloDraftReading(soloDraft, reading, draftClock());
     },
 
+    notePacerDecision(record: PacerDecisionRecord, ride: PacerRideFacts): void {
+      if (phase !== 'recording' && phase !== 'paused') return;
+      const last = pacerDecisions.at(-1);
+      if (last !== undefined && record.askedAtS < last.askedAtS) {
+        pacerDecisions = [];
+        pacerRide = undefined;
+      }
+      if (pacerDecisions.length >= MODEL_PACER_LOG_MOST) return;
+      pacerDecisions.push(record);
+      // The game ride's start: the recording's clock less the seconds ridden
+      // this record arrived at, which are the frame's. Kept from the first
+      // record that can say it; paused, the recording's clock is not running.
+      const clock = draftClock();
+      const startedAt =
+        pacerRide?.startedAt ??
+        (clock === undefined || record.arrivedAtS === null
+          ? undefined
+          : unixSeconds(Math.max(0, clock - record.arrivedAtS)));
+      pacerRide = { ...ride, startedAt };
+    },
+
     async recordForRoom(): Promise<boolean> {
       // A paused ride is a ride in progress and is LEFT paused: only the
       // rider's own Resume resumes one (#516, `one-pauser.test.ts`).
@@ -4863,6 +4914,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       workoutFinishedInRide = false;
       // #2451: and the draft ridden on that ride.
       soloDraft = NO_SOLO_DRAFT;
+      // #2712: and the AI pacer's log of that ride.
+      pacerDecisions = [];
+      pacerRide = undefined;
       // #2307: and the threshold test ridden on that ride.
       testInRide = undefined;
       // #1244: and the re-plan decisions that went with that ride.
@@ -5519,6 +5573,35 @@ export function createRideController(options: RideControllerOptions): RideContro
   }
 
   return controller;
+}
+
+/**
+ * What a directed game ride hands the controller beside each record — #2712's
+ * review: what its log replays with (`@onyourleft/store` §`PacerModelFact`)
+ * but the start, which the controller works out on the recording's clock.
+ */
+export type PacerRideFacts = Omit<PacerModelFact, 'version' | 'decisions' | 'startedAt'>;
+
+/**
+ * The pacer's log as it is saved, or `undefined`: none for a ride with no
+ * decision, and none for one whose start on the recording's clock was never
+ * known — a log that cannot be placed in its recording does not replay, and
+ * the store would refuse it.
+ */
+function pacerModelToSave(
+  decisions: readonly PacerDecisionRecord[],
+  ride: (PacerRideFacts & { readonly startedAt: UnixSeconds | undefined }) | undefined,
+): PacerModelFact | undefined {
+  if (decisions.length === 0 || ride?.startedAt === undefined) return undefined;
+  return {
+    version: MODEL_PACER_CODE_VERSION,
+    decisions: [...decisions],
+    pacerWPerKg: ride.pacerWPerKg,
+    startedAt: ride.startedAt,
+    routeId: ride.routeId,
+    position: ride.position,
+    ...(ride.wind === undefined ? {} : { wind: ride.wind }),
+  };
 }
 
 /** The number a measurement carries, whichever capability it is. */

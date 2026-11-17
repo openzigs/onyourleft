@@ -6628,6 +6628,19 @@ select.oyl-input {
 }
 
 /*
+ * THE AI PACER'S CONTROLS — #2712 (`StageChooser.tsx` §`AiPacerControls`).
+ * 48 px targets, the owner's ruling on PR #2723: its switch row, *Allow the AI
+ * pacer* and *Withdraw consent*, where §"A checkbox or radio ROW" and
+ * `.oyl-button` give 44 px and the button was drawn 45. Two classes and a
+ * `:has()`, so each outranks the 44 px rule it raises.
+ * `pre-ride.browser.spec.ts` §"#2723" measures them.
+ */
+.oyl-game__ai-pacer label:has(> input[type='checkbox']),
+.oyl-game__ai-pacer .oyl-button {
+  min-height: 3rem;
+}
+
+/*
  * Wide: the cards beside the loadout, under the notices and *Ride*. The game
  * route's layout is `prose` (`shell/routes.ts`), and that is what this undoes,
  * for the chooser alone and only from 60 rem: `:has()` finds the chooser
@@ -6685,6 +6698,16 @@ select.oyl-input {
 
   .oyl-chooser__loadout > .oyl-game__wind > label:first-child,
   .oyl-chooser__loadout > div > .oyl-game__problem {
+    grid-column: 1 / -1;
+  }
+
+  /*
+   * #2723, the owner's ruling: the AI pacer's switch, its consent and its
+   * button take the loadout's whole width, under the pacer's switch and its
+   * box. In the pacer's second row's first column they were 224 px wide at
+   * 1024×600, and the consent ran to 17 lines.
+   */
+  .oyl-chooser__loadout > .oyl-game__pacer > .oyl-game__ai-pacer {
     grid-column: 1 / -1;
   }
 }
