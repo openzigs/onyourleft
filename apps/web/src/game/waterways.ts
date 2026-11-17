@@ -19,8 +19,12 @@
  *   and banks as an invented one. A mapped **wetland** is a lake whose ground
  *   stands just over its water ({@link WETLAND_GROUND_ABOVE_WATER_METRES}),
  *   flat, bare and wet-tinted, with no open water drawn over it.
- * - **No invented lake in a stretch the map covers**: there the map says
- *   where water is and is not, so a seeded lake on mapped farmland is a lie.
+ * - **A mapped stream** — #2659, {@link mappedCrossings}: wherever one of the
+ *   corridor's rivers, streams or canals crosses the drawn road, a
+ *   {@link Crossing}, bridged and channelled as an invented one is.
+ * - **No invented lake or stream in a stretch the map covers**: there the map
+ *   says where water is and is not, so a seeded lake on mapped farmland, or a
+ *   seeded bridge over a mapped field, is a lie.
  * - **Everywhere the map was not read** — no corridor, outside the archive,
  *   offline, a privacy zone — the world is exactly the one below, from the
  *   route and a seed (ADR 0054 D-4).
@@ -445,21 +449,210 @@ export function waterways(profile: RouteProfile, seed: number, land: LandClassMa
 }
 
 /**
- * The invented waterways with the map's laid over them — #2658: every
- * invented lake in a stretch the map covers dropped, and {@link mappedLakes}
- * put first, all within {@link MAXIMUM_WATERWAYS}. With no map read beside
- * the route, `invented` itself.
+ * The invented waterways with the map's laid over them — #2658, #2659: every
+ * invented lake and crossing in a stretch the map covers dropped, and
+ * {@link mappedLakes} and {@link mappedCrossings} put first, all within
+ * {@link MAXIMUM_WATERWAYS}. With no map read beside the route, `invented`
+ * itself.
  */
 function besideTheMap(profile: RouteProfile, invented: Waterways, land: LandClassMask): Waterways {
-  if (land.bytes === 0) return invented;
+  if (land.bytes === 0 && land.waterLines.length === 0) return invented;
   const origin = corridorOrigin(profile);
   const mapped = mappedLakes(profile, origin, land);
   const kept = invented.lakes.filter((lake) => !lakeMapped(profile, origin, land, lake));
-  if (mapped.length === 0 && kept.length === invented.lakes.length) return invented;
+  const bridged = mappedCrossings(profile, origin, land);
+  const unmapped = invented.crossings.filter(
+    (crossing) =>
+      !crossingMapped(profile, origin, land, crossing) &&
+      !bridged.some(
+        (mappedCrossing) =>
+          Math.abs(routeOffset(profile, mappedCrossing.distance, crossing.distance)) <
+          MAPPED_CROSSING_SPACING_METRES,
+      ),
+  );
+  if (
+    mapped.length === 0 &&
+    kept.length === invented.lakes.length &&
+    bridged.length === 0 &&
+    unmapped.length === invented.crossings.length
+  ) {
+    return invented;
+  }
   return {
-    crossings: invented.crossings,
+    crossings: [...bridged, ...unmapped]
+      .slice(0, MAXIMUM_WATERWAYS)
+      .sort((a, b) => a.distance - b.distance),
     lakes: [...mapped, ...kept].slice(0, MAXIMUM_WATERWAYS),
   };
+}
+
+/**
+ * #2659: the route's step between the points of the drawn road the map's
+ * water lines are crossed against, in metres: **10**, as the lakes'. The
+ * crossing's place along a step is interpolated, so it is not rounded to one.
+ */
+const CROSSING_SAMPLE_METRES = 10;
+
+/**
+ * #2659: the side of the grid cells the drawn road's steps are filed under,
+ * in metres: **100**. A water line's segment is tested only against the
+ * steps filed in the cells its box reaches.
+ */
+const CROSSING_CELL_METRES = 100;
+
+/**
+ * #2659: the most grid cells the water lines' segments may visit, all told:
+ * **200 000**. A corridor's lines are bounded at decode (`map-features`
+ * `limits.ts`), but a hostile segment can be kilometres long; past this the
+ * rest of the lines are not crossed, and their stretches keep what they have.
+ */
+export const MAPPED_CROSSING_MAX_WORK = 200_000;
+
+/**
+ * #2659: the nearest two crossings of the map's water may be, along the road,
+ * in metres: **90**, three channel banks ({@link CHANNEL_BANK_METRES}) — a
+ * meandering stream that crosses back and forth under one bridge's reach is
+ * one crossing, the first.
+ */
+export const MAPPED_CROSSING_SPACING_METRES = CHANNEL_BANK_METRES * 3;
+
+/**
+ * The places where the map's rivers, streams and canals cross the drawn road
+ * — #2659 — as {@link Crossing}s, so they are bridged and channelled exactly
+ * as an invented stream is, the water {@link BRIDGE_CLEARANCE_METRES} under
+ * the road there. ⚠️ **The road is not moved**: the deck is the road, and the
+ * gradient a trainer is sent is the route's own.
+ *
+ * The drawn road is stepped every {@link CROSSING_SAMPLE_METRES}, each step
+ * filed in a grid of {@link CROSSING_CELL_METRES} cells, and each segment of
+ * each line is tested against the steps in the cells its box reaches, within
+ * {@link MAPPED_CROSSING_MAX_WORK}. Crossings nearer each other than
+ * {@link MAPPED_CROSSING_SPACING_METRES} are one, the first along the road.
+ */
+function mappedCrossings(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  land: LandClassMask,
+): readonly Crossing[] {
+  if (land.waterLines.length === 0) return [];
+  const total = profile.totalDistance;
+  const steps = Math.max(
+    2,
+    Math.min(WATERWAY_SAMPLE_LIMIT, Math.round(total / CROSSING_SAMPLE_METRES)),
+  );
+  const spacing = total / steps;
+  // The drawn road, `steps + 1` points; on a loop the last is the first again.
+  const road = new Float64Array((steps + 1) * 2);
+  for (let index = 0; index <= steps; index += 1) {
+    const at = drawnRoadPosition(profile, origin, Math.min(total, index * spacing));
+    road[index * 2] = at.x;
+    road[index * 2 + 1] = at.z;
+  }
+  const cells = new Map<string, number[]>();
+  const cellOf = (value: number): number => Math.floor(value / CROSSING_CELL_METRES);
+  for (let index = 0; index < steps; index += 1) {
+    const ax = road[index * 2] as number;
+    const az = road[index * 2 + 1] as number;
+    const bx = road[index * 2 + 2] as number;
+    const bz = road[index * 2 + 3] as number;
+    for (let column = cellOf(Math.min(ax, bx)); column <= cellOf(Math.max(ax, bx)); column += 1) {
+      for (let row = cellOf(Math.min(az, bz)); row <= cellOf(Math.max(az, bz)); row += 1) {
+        const key = `${String(column)},${String(row)}`;
+        const filed = cells.get(key);
+        if (filed === undefined) cells.set(key, [index]);
+        else filed.push(index);
+      }
+    }
+  }
+  const found: number[] = [];
+  let work = MAPPED_CROSSING_MAX_WORK;
+  for (const water of land.waterLines) {
+    const line = water.line;
+    for (let at = 0; at + 3 < line.length && work > 0; at += 2) {
+      const cx = line[at] as number;
+      const cz = line[at + 1] as number;
+      const dx = line[at + 2] as number;
+      const dz = line[at + 3] as number;
+      if (![cx, cz, dx, dz].every(Number.isFinite)) continue;
+      const tested = new Set<number>();
+      for (let column = cellOf(Math.min(cx, dx)); column <= cellOf(Math.max(cx, dx)); column += 1) {
+        for (let row = cellOf(Math.min(cz, dz)); row <= cellOf(Math.max(cz, dz)); row += 1) {
+          work -= 1;
+          if (work <= 0) break;
+          for (const index of cells.get(`${String(column)},${String(row)}`) ?? []) {
+            if (tested.has(index)) continue;
+            tested.add(index);
+            const t = segmentsCross(road, index, cx, cz, dx, dz);
+            if (t !== undefined) found.push((index + t) * spacing);
+          }
+        }
+        if (work <= 0) break;
+      }
+    }
+  }
+  found.sort((a, b) => a - b);
+  const crossings: Crossing[] = [];
+  for (const along of found) {
+    if (crossings.length >= MAXIMUM_WATERWAYS) break;
+    const distance = distanceOnRoute(profile, along);
+    // Only on road the map was read beside: past the mask's cap, or through a
+    // tile that reaches uncovered road, the water is not the map's to place.
+    const at = drawnRoadPosition(profile, origin, distance);
+    if (!land.covered(at.x, at.z)) continue;
+    const near = crossings.some(
+      (crossing) =>
+        Math.abs(routeOffset(profile, distance, crossing.distance)) <
+        MAPPED_CROSSING_SPACING_METRES,
+    );
+    if (near) continue;
+    crossings.push({
+      distance,
+      waterElevation: elevationAt(profile, distance) - BRIDGE_CLEARANCE_METRES,
+    });
+  }
+  return crossings;
+}
+
+/**
+ * Where along road step `index` (from point `index` to `index + 1` of `road`)
+ * the segment from `(cx, cz)` to `(dx, dz)` crosses it, as a share of the
+ * step in `[0, 1)`, or `undefined` where it does not. Parallel segments never
+ * cross: a line that runs along the road is not a crossing.
+ */
+function segmentsCross(
+  road: Float64Array,
+  index: number,
+  cx: number,
+  cz: number,
+  dx: number,
+  dz: number,
+): number | undefined {
+  const ax = road[index * 2] as number;
+  const az = road[index * 2 + 1] as number;
+  const rx = (road[index * 2 + 2] as number) - ax;
+  const rz = (road[index * 2 + 3] as number) - az;
+  const sx = dx - cx;
+  const sz = dz - cz;
+  const denominator = rx * sz - rz * sx;
+  if (!(Math.abs(denominator) > 1e-9)) return undefined;
+  const t = ((cx - ax) * sz - (cz - az) * sx) / denominator;
+  const u = ((cx - ax) * rz - (cz - az) * rx) / denominator;
+  return t >= 0 && t < 1 && u >= 0 && u <= 1 ? t : undefined;
+}
+
+/**
+ * Whether an invented crossing is where the map was read — #2659: its road
+ * is covered, so the map says where the water is and the seeded stream is
+ * not drawn.
+ */
+function crossingMapped(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  land: LandClassMask,
+  crossing: Crossing,
+): boolean {
+  const at = drawnRoadPosition(profile, origin, crossing.distance);
+  return land.covered(at.x, at.z);
 }
 
 /** #2658: the route's step between the points the map's water is looked for beside, in metres. */

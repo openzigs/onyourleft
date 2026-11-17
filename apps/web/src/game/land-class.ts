@@ -58,7 +58,13 @@
  * Names no rendering library and no coordinate in any string: it formats none.
  */
 
-import { rasterise, type Box, type GridSpec, type LandUseFeature } from '@onyourleft/map-features';
+import {
+  rasterise,
+  type Box,
+  type GridSpec,
+  type LandUseFeature,
+  type WaterLineFeature,
+} from '@onyourleft/map-features';
 
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -410,6 +416,13 @@ export interface LandClassMask {
    */
   wetlandAt(x: number, z: number): boolean;
   /**
+   * #2659: the corridor's rivers, streams and canals, as it read them — what
+   * `waterways.ts` finds the route's mapped crossings from. Carried here so
+   * every reader of the water is handed them with the mask it already takes.
+   * None where nothing was read.
+   */
+  readonly waterLines: readonly WaterLineFeature[];
+  /**
    * True where the cell's class is a protected area's boundary and no other
    * mapped land use covers it — #2657, {@link PROTECTED_AREA_KINDS}. O(1), no
    * allocation; `false` outside every covered chunk.
@@ -448,6 +461,7 @@ export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   bareSurfaceAt: (): undefined => undefined,
   covered: (): boolean => false,
   wetlandAt: (): boolean => false,
+  waterLines: Object.freeze([]),
   protectedArea: (): boolean => false,
   parkLookAt: (): ParkLook => 'mown',
   builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
@@ -790,6 +804,7 @@ export function landClassMask(
     bareSurfaceAt: (x, z) => SURFACE_OF_CODE[codeAt(x, z)],
     covered: (x, z) => classAt(x, z) !== 'unknown',
     wetlandAt: (x, z) => codeAt(x, z) === CODE_WETLAND,
+    waterLines: corridor.waterLines ?? [],
     protectedArea: (x, z) => {
       const code = codeAt(x, z);
       return code === CODE_PROTECTED_PARK || code === CODE_PROTECTED_WOOD;
