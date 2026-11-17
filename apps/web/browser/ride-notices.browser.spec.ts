@@ -16,6 +16,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   type Viewport,
   OVERLAY_VIEWPORTS,
+  LAPTOP_VIEWPORTS,
   openRide,
   measure,
   inside,
@@ -34,6 +35,8 @@ import {
   keepScreenOnLaidOut,
   KEEP_SCREEN_ON_SEEN,
 } from './ride-stage';
+
+import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/ride-race';
 
 import type { StageMeasurement } from './ride-harness';
 
@@ -489,4 +492,132 @@ test.describe('keep the screen on, beside every notice that stays — #647', () 
       expect(clearance).toBeLessThan(EASED_RIDER_CLEARANCE_PIXELS);
     });
   }
+});
+
+/*
+ * #2710 — A LAP RACE'S AI BOTS LINE IS SEEN AT 1024×600.
+ *
+ * `?lap=riding&ai=racing`: a solo lap race with AI bots, the consent given
+ * (`ride-harness.tsx` §`AI_BOTS`). The standings carry the line for the whole
+ * race, but they are drawn on a tablet only (ADR 0051 D-7; `theme.css` §"A
+ * RACE'S STANDINGS"): under 47 rem tall they are a 1×1 box a screen reader
+ * reaches and nobody sees. So the notice cell carries it from the press, for
+ * `GameView` §`STANDING_NOTICE_SECONDS` of ride (`GameView` §`aiBotsNotice`).
+ *
+ * Held at the narrowest wide screen, beside the race's own countdown notice:
+ * every copy of the line on the page is found, and one of them must be laid
+ * out, whole on the stage, the topmost thing at each of its corners, over no
+ * other panel, no control and not the leaning rider. The control takes the
+ * notice away and requires no copy of the line left visible: the standings'
+ * own is the hidden one.
+ */
+const AI_BOTS_RACING_LINE = AI_BOTS_RACE_TEXT.racing;
+
+const SMALL_LAPTOP = LAPTOP_VIEWPORTS.find((each) => each.width === 1024 && each.height === 600);
+
+interface LineSeen {
+  readonly box: {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  };
+  readonly onTop: boolean;
+  readonly inNotices: boolean;
+}
+
+/** Every element whose own text is the line, with its box and whether it is what a press lands on. */
+async function aiBotsLines(page: Page): Promise<readonly LineSeen[]> {
+  return page.evaluate((line) => {
+    return [...document.querySelectorAll('.oyl-hud *')]
+      .filter(
+        (each) =>
+          (each.textContent ?? '').includes(line) &&
+          ![...each.children].some((child) => (child.textContent ?? '').includes(line)),
+      )
+      .map((each) => {
+        const rect = each.getBoundingClientRect();
+        const corners = [
+          [rect.left + 2, rect.top + 2],
+          [rect.right - 2, rect.top + 2],
+          [rect.left + 2, rect.bottom - 2],
+          [rect.right - 2, rect.bottom - 2],
+        ];
+        return {
+          box: {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height,
+          },
+          onTop:
+            rect.width > 4 &&
+            rect.height > 4 &&
+            corners.every(([x, y]) => {
+              const hit = document.elementFromPoint(x ?? 0, y ?? 0);
+              return hit !== null && each.contains(hit);
+            }),
+          inNotices: each.closest('.oyl-hud__notices') !== null,
+        };
+      });
+  }, AI_BOTS_RACING_LINE);
+}
+
+const seenLine = (each: LineSeen): boolean =>
+  each.box.width > 1 && each.box.height > 1 && each.onTop;
+
+test.describe('a lap race’s AI bots line is seen on the HUD at 1024×600 — #2710', () => {
+  if (SMALL_LAPTOP === undefined) throw new Error('no 1024×600 viewport to measure at');
+  const viewport = SMALL_LAPTOP;
+
+  test(`laid out, on top, over no panel, control or the rider — ${viewport.name}`, async ({
+    page,
+  }) => {
+    await openRide(page, viewport, '?lap=riding&ai=racing');
+    const lines = await aiBotsLines(page);
+    // The standings' copy is there, and hidden: the reason for the notice.
+    expect(lines.filter((each) => !each.inNotices).every((each) => !seenLine(each))).toBe(true);
+    const shown = lines.find((each) => each.inNotices && seenLine(each));
+    expect(shown, `no visible copy of the line: ${JSON.stringify(lines)}`).toBeDefined();
+    if (shown === undefined) return;
+    expect(inside(shown.box, viewport), 'the line is off the stage').toBe(true);
+    expect(overlap(shown.box, riderBox(viewport)), 'the line is over the rider').toBe(false);
+    for (const [how, seen] of await bothWays(page)) {
+      await test.step(how, () => {
+        expect(easedCollisions(seen, viewport)).toEqual([]);
+        const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+        expect(notice, 'the notice was laid out').toBeDefined();
+        if (notice === undefined) return;
+        console.log(
+          `#2710 AI bots line — ${viewport.name}, ${how} — at ${shown.box.top.toFixed(0)}–${shown.box.bottom.toFixed(0)} px; cell ${notice.box.height.toFixed(0)} px tall`,
+        );
+        const panels = seen.panels.filter(
+          (each) => each !== notice && each.box.height > 1 && overlap(each.box, notice.box),
+        );
+        expect(panels.map(describeItem)).toEqual([]);
+        const controls = seen.items.filter(
+          (each) => each.name.startsWith('control:') && overlap(each.box, shown.box),
+        );
+        expect(controls.map(describeItem)).toEqual([]);
+      });
+    }
+  });
+
+  test(`the control — without the notice, no copy of the line is seen — ${viewport.name}`, async ({
+    page,
+  }) => {
+    await openRide(page, viewport, '?lap=riding&ai=racing');
+    await page.evaluate((line) => {
+      for (const each of document.querySelectorAll<HTMLElement>('.oyl-hud__notices .oyl-status')) {
+        if ((each.textContent ?? '').includes(line)) each.style.display = 'none';
+      }
+    }, AI_BOTS_RACING_LINE);
+    const lines = await aiBotsLines(page);
+    expect(lines.length, 'the standings carry the line').toBeGreaterThan(0);
+    expect(lines.filter(seenLine)).toEqual([]);
+  });
 });
