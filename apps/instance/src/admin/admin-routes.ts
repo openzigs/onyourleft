@@ -82,6 +82,9 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   // #2649: the page, and ending a room, the room named by a form field.
   { path: '/admin/rooms', methods: ['GET'], kind: 'page', section: 'Rooms' },
   { path: '/admin/rooms/end', methods: ['POST'], kind: 'action' },
+  // #2650: the page — the card on the loopback listener only — and rotating the encryption key.
+  { path: '/admin/keys', methods: ['GET'], kind: 'page', section: 'Keys' },
+  { path: '/admin/keys/rotate', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/offer', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/check', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/model', methods: ['POST'], kind: 'action' },

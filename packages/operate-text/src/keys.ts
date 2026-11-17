@@ -4,10 +4,14 @@
  * **Keys**' words (#2613, ADR 0069 D-7): the sentences the Keys section says
  * over what `GET /v1/operate/keys` returns, and what rotating the encryption
  * key does. The instance's admin Keys page (#2650) says the same, and shows
- * the card on the loopback listener only (ADR 0069 D-2).
+ * the card on the loopback listener only (ADR 0069 D-2). Since #2650 the
+ * keys' facts other than the card are {@link keyFactRows}, which both draw.
  *
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
+
+import { KEYS_TEXT, type OperateKeysWord, type OperateRow } from './status';
+import { momentText } from './words';
 
 /** What the card is, above it. */
 export const KEYS_CARD_TEXT =
@@ -76,4 +80,42 @@ export function currentKeyText(serial: number, made: string): string {
 export function olderHeldText(count: number): string {
   if (count === 0) return 'none';
   return `${String(count)}, each kept 7 days after the next was made`;
+}
+
+/**
+ * The keys' facts that are not the card or the fingerprint (moved by #2650),
+ * as rows: their state, the current encryption key and when it rotates by
+ * itself, and how many older keys are held. Neither the card nor the
+ * fingerprint is taken, so a page that may not show them cannot draw them
+ * from here.
+ */
+export function keyFactRows(keys: {
+  readonly state: OperateKeysWord;
+  readonly current: {
+    readonly serial: number;
+    /** ISO 8601, UTC. */
+    readonly createdAt: string;
+    readonly rotatesAt: string;
+  } | null;
+  readonly olderHeld: number;
+}): readonly OperateRow[] {
+  const row = (label: string, value: string): OperateRow => ({
+    label,
+    value,
+    code: false,
+    warning: null,
+  });
+  return [
+    row('State', KEYS_TEXT[keys.state]),
+    ...(keys.current === null
+      ? []
+      : [
+          row(
+            'Encryption key',
+            currentKeyText(keys.current.serial, momentText(keys.current.createdAt)),
+          ),
+          row('Rotates by itself', momentText(keys.current.rotatesAt)),
+        ]),
+    row('Older keys held', olderHeldText(keys.olderHeld)),
+  ];
 }

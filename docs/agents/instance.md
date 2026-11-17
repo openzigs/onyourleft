@@ -276,6 +276,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         Since #2649 Rooms' End room too (`endRoom` takes
                         the `OperateOwner`); the room id is a form field,
                         shape-checked before it goes in `{roomId}`.
+                        Since #2650 Keys reads `operate.keysView` itself
+                        (`GET /v1/operate/keys` stays `never`) and hands
+                        the card to the renderer on the LOOPBACK place only.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

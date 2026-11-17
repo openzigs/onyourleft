@@ -43,6 +43,8 @@ export const ADMIN_CHANGES = {
   backup_now: { fields: [] },
   // #2649: one room, why, and its short code as the owner typed it.
   room_end: { fields: ['roomId', 'reason', 'confirm'] },
+  // #2650: the routine rotation, and the word the owner typed for it.
+  key_rotate: { fields: ['confirm'] },
 } as const satisfies Readonly<Record<string, { readonly fields: readonly string[] }>>;
 
 export type AdminChange = keyof typeof ADMIN_CHANGES;

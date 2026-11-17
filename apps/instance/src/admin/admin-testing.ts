@@ -303,6 +303,7 @@ export async function handlerOver(
     roleOf: (athleteId) => identity.moderation.roleOf(athleteId),
     now,
     name: null,
+    instanceKeys,
   });
   const config = testConfig({ moderators });
   const handler = createHandler({
