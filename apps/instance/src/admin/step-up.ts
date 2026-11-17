@@ -41,6 +41,8 @@ export const ADMIN_CHANGES = {
   registration_refuse: { fields: ['athleteId', 'reason'] },
   // #2647: "back up now", which takes no field.
   backup_now: { fields: [] },
+  // #2649: one room, why, and its short code as the owner typed it.
+  room_end: { fields: ['roomId', 'reason', 'confirm'] },
 } as const satisfies Readonly<Record<string, { readonly fields: readonly string[] }>>;
 
 export type AdminChange = keyof typeof ADMIN_CHANGES;

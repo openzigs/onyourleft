@@ -273,6 +273,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         Since #2647 Backups' "back up now" is the fourth
                         `'change'` route; `operate.requestBackup` takes the
                         `OperateOwner`, so its entry names the channel.
+                        Since #2649 Rooms' End room too (`endRoom` takes
+                        the `OperateOwner`); the room id is a form field,
+                        shape-checked before it goes in `{roomId}`.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

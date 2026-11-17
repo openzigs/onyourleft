@@ -484,9 +484,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'endOperateRoom',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: #2649's Rooms page ends one, behind a fresh passkey and
+    // the typed code, logged under the channel's own source.
+    admin: 'change',
     summary: `End a rider’s room (#2612): \`confirm\` must be the room’s short code and \`reason\` one of ${ROOM_END_REASONS.map((reason) => `\`${reason}\``).join(', ')}, or it is \`validation_failed\` and nothing changes. The room is over, as a finished one is: its route deleted, every socket in it sent \`refuse room-closed\` and closed \`4005\`, a rejoin refused, its voice channel deleted, and every result already final kept. A rider in it rides on alone; nothing is sent to anybody’s trainer. Logged \`room_ended\` with the reason, its kind and how many riders were in it, in the same transaction as the close. \`not_found\` for a room that is not an open rider’s room. \`unavailable\` where the instance has no room router. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -515,7 +515,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     },
     handle: async (context) => {
       const ended = await operateOf(context).endRoom(
-        ownerOf(context),
+        ownerActor(context),
         context.params.roomId ?? '',
         context.json,
       );

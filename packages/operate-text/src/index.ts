@@ -106,6 +106,7 @@ export {
 } from './backups';
 export {
   END_ROOM_CONFIRM_TEXT,
+  END_ROOM_REASON_LABEL,
   endRoomTypeText,
   NO_ROOM_TEXT,
   ROOM_END_REASON_TEXT,
@@ -114,6 +115,7 @@ export {
   ROOM_NOT_ENDED_TEXT,
   ROOM_PHASE_TEXT,
   ridersText,
+  roomLine,
   ROOM_UNNAMED_RIDER,
   ROOMS_LIST_TEXT,
   ROOMS_NAMES_ONLY_TEXT,
@@ -121,6 +123,7 @@ export {
   type OperateRoomEndReason,
   type OperateRoomKind,
   type OperateRoomPhase,
+  type OperateRoomVisibility,
 } from './rooms';
 export {
   currentKeyText,
