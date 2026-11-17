@@ -98,6 +98,7 @@ describe('the admin route table (#2645)', () => {
       '/admin/accounts',
       '/admin/backups',
       '/admin/analysis',
+      '/admin/rooms',
       '/admin/log',
       '/admin/passkeys',
     ]);
@@ -109,6 +110,7 @@ describe('the admin route table (#2645)', () => {
       '/admin/accounts/approve',
       '/admin/accounts/refuse',
       '/admin/backups',
+      '/admin/rooms/end',
       '/admin/analysis/offer',
       '/admin/analysis/check',
       '/admin/analysis/model',
@@ -243,8 +245,8 @@ describe('the owner is asked again on every page (#2645, ADR 0069 D-1)', () => {
   );
 });
 
-describe('the one script is linked only on the pages with a passkey ceremony, and never inline (#2642, #2645, #2646, #2647, #2648)', () => {
-  it('the sign-in page, Passkeys, Accounts, Backups and the AI backend link /admin/passkey.js; Status and the log link nothing', async () => {
+describe('the one script is linked only on the pages with a passkey ceremony, and never inline (#2642, #2645, #2646, #2647, #2648, #2649)', () => {
+  it('the sign-in page, Passkeys, Accounts, Backups, the AI backend and Rooms link /admin/passkey.js; Status and the log link nothing', async () => {
     const made = await world();
     const handler = made.instance.handler;
     const token = await signedIn(made);
@@ -266,6 +268,8 @@ describe('the one script is linked only on the pages with a passkey ceremony, an
     expect(await scripts('/admin/accounts', token)).toEqual([' src="/admin/passkey.js" defer']);
     // #2647: "back up now" asks for a step-up.
     expect(await scripts('/admin/backups', token)).toEqual([' src="/admin/passkey.js" defer']);
+    // #2649: End room asks for a step-up.
+    expect(await scripts('/admin/rooms', token)).toEqual([' src="/admin/passkey.js" defer']);
     expect(await scripts('/admin/status', token)).toEqual([]);
     expect(await scripts('/admin/log', token)).toEqual([]);
     const script = await handler(adminRequest('GET', '/admin/passkey.js'));

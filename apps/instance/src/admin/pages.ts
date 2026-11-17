@@ -35,6 +35,20 @@
  */
 
 import {
+  END_ROOM_CONFIRM_TEXT,
+  END_ROOM_REASON_LABEL,
+  endRoomTypeText,
+  NO_ROOM_TEXT,
+  ROOM_END_REASON_TEXT,
+  ROOM_END_REASONS,
+  ROOM_NOT_ENDED_TEXT,
+  roomLine,
+  ROOMS_LIST_TEXT,
+  ROOMS_NAMES_ONLY_TEXT,
+  ROOMS_UNREADABLE_TEXT,
+  type OperateRoomKind,
+  type OperateRoomPhase,
+  type OperateRoomVisibility,
   BACK_UP_NOW_CONFIRM_TEXT,
   BACKUP_FAILED_TEXT,
   BACKUP_NOT_ASKED_TEXT,
@@ -1151,4 +1165,97 @@ export function backupsBody(view: BackupsView): string {
 <p>${escapeHtml(BACKUPS_LIST_TEXT)}</p>
 ${stale}${list}
 ${restorePart(snapshots)}`;
+}
+
+/** One open room as `GET /v1/operate/rooms` answers it (#2649): never a place, a speed or a power. */
+export interface RoomAnswer {
+  readonly roomId: string;
+  readonly shortCode: string;
+  readonly kind: OperateRoomKind;
+  readonly visibility: OperateRoomVisibility;
+  readonly phase: OperateRoomPhase;
+  /** ISO 8601, UTC. */
+  readonly openedAt: string;
+  readonly host: string | null;
+  readonly riders: readonly (string | null)[];
+}
+
+/** What the last End room came to, read back after it. */
+export interface RoomsNotice {
+  /** The route answered it ended and the room is gone from the list read back. */
+  readonly ended: boolean;
+}
+
+/** What the Rooms page draws: the route's read, the session, and the last end's notice. */
+export interface RoomsView {
+  readonly rooms: readonly RoomAnswer[] | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: RoomsNotice | null;
+}
+
+/** Said in a code session in place of End room (ADR 0069 Q-A). */
+export const ROOMS_READS_ONLY_TEXT =
+  'A one-time code’s session reads this page and changes nothing. Sign in with a passkey to end a room: it asks your passkey again.';
+
+export const ROOM_ENDED_TEXT = 'The room was ended.';
+export const END_ROOM_BUTTON = 'End room';
+
+function roomItem(view: RoomsView, room: RoomAnswer, index: number): string {
+  const { kind, rest } = roomLine(room);
+  const line = `<p><strong>${escapeHtml(kind)}</strong>${lineHtml(rest)}</p>`;
+  if (view.strength !== 'passkey') return `<li>\n${line}\n</li>`;
+  const reasonId = `room-reason-${String(index)}`;
+  const codeId = `room-code-${String(index)}`;
+  const options = ROOM_END_REASONS.map(
+    (reason) =>
+      `<option value="${reason}"${reason === 'other' ? ' selected' : ''}>${escapeHtml(ROOM_END_REASON_TEXT[reason])}</option>`,
+  ).join('\n');
+  const form = stepUpForm(
+    '/admin/rooms/end',
+    'room_end',
+    view.csrf,
+    `${END_ROOM_BUTTON} ${room.shortCode}`,
+    `<input type="hidden" name="roomId" value="${escapeHtml(room.roomId)}">
+<label for="${reasonId}">${escapeHtml(END_ROOM_REASON_LABEL)}</label>
+<select id="${reasonId}" name="reason">
+${options}
+</select>
+<label for="${codeId}">${escapeHtml(endRoomTypeText(room.shortCode))}</label>
+<input type="text" id="${codeId}" name="confirm" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+`,
+    END_ROOM_BUTTON,
+  );
+  return `<li>\n${line}\n${form}\n</li>`;
+}
+
+/**
+ * The Rooms page's body (#2649): every open room `GET /v1/operate/rooms`
+ * answered, each in the app panel's words (`@onyourleft/operate-text`
+ * §`roomLine`), and in a passkey session an End room form for each — the
+ * reason, the room's short code typed, and a fresh step-up. Names only:
+ * never a place, a distance, a speed, a power, a heart rate or an id of a
+ * rider.
+ */
+export function roomsBody(view: RoomsView): string {
+  const top = `<p>${escapeHtml(ROOMS_LIST_TEXT)}</p>
+<p class="hint">${escapeHtml(ROOMS_NAMES_ONLY_TEXT)}</p>
+`;
+  const notice =
+    view.notice === null
+      ? ''
+      : view.notice.ended
+        ? `<p class="notice" role="status">${escapeHtml(ROOM_ENDED_TEXT)}</p>\n`
+        : `<p class="problem" role="alert">${escapeHtml(ROOM_NOT_ENDED_TEXT)}</p>\n`;
+  if (view.rooms === undefined) {
+    return `${top}${notice}<p class="problem">${escapeHtml(ROOMS_UNREADABLE_TEXT)}</p>`;
+  }
+  if (view.rooms.length === 0) return `${top}${notice}<p>${escapeHtml(NO_ROOM_TEXT)}</p>`;
+  const ending =
+    view.strength === 'passkey'
+      ? `<p>${escapeHtml(END_ROOM_CONFIRM_TEXT)}</p>\n`
+      : `<p>${escapeHtml(ROOMS_READS_ONLY_TEXT)}</p>\n`;
+  return `${top}${notice}${ending}<ol class="log rooms">
+${view.rooms.map((room, index) => roomItem(view, room, index)).join('\n')}
+</ol>`;
 }

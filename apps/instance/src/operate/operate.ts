@@ -386,14 +386,14 @@ export interface Operate {
    */
   rooms(athleteId: string): Promise<OperateResult<readonly OperateRoomView[]>>;
   /**
-   * End `roomId` as the owner `athleteId` (#2612): `body.reason` one of
+   * End `roomId` as `owner` (#2612; logged under its source since #2649): `body.reason` one of
    * `ROOM_END_REASONS`, and `body.confirm` the room's short code — else
    * `validation_failed`, with nothing changed and nothing logged. `not_found`
    * for a room that is not an open rider's room. Closed and logged
    * `room_ended` in one transaction, then every socket in it closed.
    */
   endRoom(
-    athleteId: string,
+    owner: OperateOwner,
     roomId: string,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<{ readonly endedAt: number }>>;
@@ -545,7 +545,7 @@ export function createOperate(options: {
       shown.sort((a, b) => b.openedAt - a.openedAt || a.roomId.localeCompare(b.roomId));
       return { ok: true, value: shown };
     },
-    async endRoom(athleteId, roomId, body) {
+    async endRoom(owner, roomId, body) {
       if (roomSources === undefined) return { ok: false, code: 'unavailable' };
       const fields: FieldProblem[] = [];
       for (const name of Object.keys(body)) {
@@ -585,7 +585,7 @@ export function createOperate(options: {
       const ended = await sources.end(roomId, () =>
         sources.rooms.end(roomId, async (close) => {
           const { value } = await store.recordOperatorAction(
-            { actor: { source: 'app', athleteId }, action: 'room_ended', at },
+            { actor: owner, action: 'room_ended', at },
             async (inside) => {
               const closed = await close(inside);
               return {

@@ -32,6 +32,7 @@ import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../design/con
 import {
   SCRIPTED_ANALYSIS,
   SCRIPTED_BACKUPS,
+  SCRIPTED_ROOMS,
   SCRIPTED_JOBS,
   SCRIPTED_MODELS,
   SCRIPTED_STATUS,
@@ -96,6 +97,15 @@ interface AdminPages {
   analysisBody(view: AnalysisView): string;
   accountsBody(view: AccountsView): string;
   backupsBody(view: BackupsView): string;
+  roomsBody(view: RoomsView): string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`RoomsView` (#2649). */
+interface RoomsView {
+  readonly rooms: readonly unknown[] | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: { readonly ended: boolean } | null;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`BackupsView` (#2647), its records as the route answers them. */
@@ -287,7 +297,27 @@ const SCRIPTED = new Set([
   '/admin/analysis',
   '/admin/accounts',
   '/admin/backups',
+  '/admin/rooms',
 ]);
+
+/** The Rooms page (#2649), in a session of `strength`, over the scripted rooms. */
+const roomsPage = (
+  strength: ShellView['strength'],
+  over: Partial<RoomsView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/rooms', name, strength),
+    'Rooms',
+    pages.roomsBody({
+      rooms: SCRIPTED_ROOMS,
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      ...over,
+    }),
+    true,
+  );
 
 /** The scripted records (#2647) with the route's further facts, one with a SHA-256. */
 const RECORDS = SCRIPTED_BACKUPS.map((record, index) => ({
@@ -485,6 +515,22 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       () => backupsPage('passkey', { backups: { records: [], pendingSince: null } }),
     ],
     ['unreadable', () => backupsPage('passkey', { backups: undefined })],
+  ],
+  '/admin/rooms': [
+    ['a code session: reads only', () => roomsPage('code')],
+    [
+      'a passkey session: End room for each, an awkward name',
+      () =>
+        roomsPage(
+          'passkey',
+          { rooms: [{ ...SCRIPTED_ROOMS[0]!, host: AWKWARD_NAME, riders: [AWKWARD_NAME] }] },
+          AWKWARD_NAME,
+        ),
+    ],
+    ['ended', () => roomsPage('passkey', { notice: { ended: true } })],
+    ['not ended', () => roomsPage('passkey', { notice: { ended: false } })],
+    ['no room open', () => roomsPage('passkey', { rooms: [] })],
+    ['unreadable', () => roomsPage('passkey', { rooms: undefined })],
   ],
   '/admin/analysis': [
     ['a code session: reads only', () => analysisPage('code')],

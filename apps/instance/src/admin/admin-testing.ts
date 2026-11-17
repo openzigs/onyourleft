@@ -9,6 +9,8 @@
  * Test support, never shipped: nothing under `src/` but a test imports it.
  */
 
+import { request as httpRequest } from 'node:http';
+
 import { expect } from 'vitest';
 
 import { createIdentity } from '../auth/identity.ts';
@@ -495,4 +497,42 @@ export async function changeOn(
 ): Promise<Response> {
   const form = await steppedUpForm(browser, session, action, fields);
   return browser.send('POST', path, { cookie: session.token, form });
+}
+
+/**
+ * The running instance as a browser on the tunnel's hostname reaches it:
+ * every request sent over HTTP to its listener, `Host` and all, and the
+ * answer read back with its `Set-Cookie`.
+ */
+export function overHttp(url: string): Handler {
+  return async (request) => {
+    const target = new URL(request.url);
+    const body = request.method === 'GET' ? undefined : await request.text();
+    const headers = Object.fromEntries(request.headers.entries());
+    return new Promise<Response>((resolve, reject) => {
+      const outgoing = httpRequest(
+        `${url}${target.pathname}${target.search}`,
+        { method: request.method, headers },
+        (incoming) => {
+          const chunks: Buffer[] = [];
+          incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+          incoming.on('end', () => {
+            const answer = new Headers();
+            for (const [name, value] of Object.entries(incoming.headers)) {
+              if (value !== undefined)
+                answer.set(name, Array.isArray(value) ? value.join(', ') : value);
+            }
+            resolve(
+              new Response(incoming.statusCode === 303 ? null : Buffer.concat(chunks), {
+                status: incoming.statusCode ?? 0,
+                headers: answer,
+              }),
+            );
+          });
+        },
+      );
+      outgoing.on('error', reject);
+      outgoing.end(body);
+    });
+  };
 }

@@ -156,6 +156,7 @@ import {
   adminPage,
   analysisBody,
   backupsBody,
+  roomsBody,
   isSaveProblem,
   logBody,
   passkeysBody,
@@ -166,6 +167,7 @@ import {
   type BackupRecordAnswer,
   type BackupsNotice,
   type BackupsView,
+  type RoomAnswer,
   type AnalysisNotice,
   type AnalysisOffer,
   type LogEntryAnswer,
@@ -600,6 +602,57 @@ function backupsOf(answer: unknown): BackupsView['backups'] {
   return { records, pendingSince: pending === null ? null : (pending.requestedAt as string) };
 }
 
+/** The rooms' route (#2649): the Rooms page reads it, and ends a room at `{roomId}/end`. */
+const ROOMS_ROUTE = '/v1/operate/rooms';
+
+/** A room's id as the route takes one in `{roomId}`: what `ATHLETE_ID` is for an athlete. */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+const ROOM_KINDS: readonly unknown[] = ['group', 'race', 'lap-race'];
+const ROOM_PHASES: readonly unknown[] = ['lobby', 'countdown', 'riding', 'finished'];
+const ROOM_VISIBILITIES: readonly unknown[] = ['private', 'public'];
+const ROOM_END_REASON_WORDS: readonly string[] = ['abuse', 'stuck', 'maintenance', 'other'];
+
+/**
+ * The rooms as the route answered them, each held to the fields the route
+ * declares and ONLY those — a rider's place, speed or power, were an answer
+ * ever to carry one, is not copied — or `undefined` for an answer not in
+ * that shape.
+ */
+function roomsOf(answer: unknown): readonly RoomAnswer[] | undefined {
+  const list = (answer as { rooms?: unknown } | undefined)?.rooms;
+  if (!Array.isArray(list)) return undefined;
+  const rooms: RoomAnswer[] = [];
+  for (const each of list) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    const { roomId, shortCode, kind, visibility, phase, openedAt, host, riders } = row;
+    if (
+      typeof roomId !== 'string' ||
+      typeof shortCode !== 'string' ||
+      !ROOM_KINDS.includes(kind) ||
+      !ROOM_VISIBILITIES.includes(visibility) ||
+      !ROOM_PHASES.includes(phase) ||
+      typeof openedAt !== 'string' ||
+      !isTextOrNull(host) ||
+      !Array.isArray(riders) ||
+      !riders.every(isTextOrNull)
+    ) {
+      return undefined;
+    }
+    rooms.push({
+      roomId,
+      shortCode,
+      kind: kind as RoomAnswer['kind'],
+      visibility: visibility as RoomAnswer['visibility'],
+      phase: phase as RoomAnswer['phase'],
+      openedAt,
+      host,
+      riders,
+    });
+  }
+  return rooms;
+}
+
 /** A refusal's own sentence, as the route wrote it, or `null`. */
 async function messageOf(answer: Response): Promise<string | null> {
   try {
@@ -871,6 +924,28 @@ export function createAdmin(options: AdminOptions): Admin {
     return shellPage(shell, 'Backups', body, true);
   }
 
+  /**
+   * Rooms (#2649): `GET /v1/operate/rooms`, read as the owner through the
+   * seam on every load. `noticeFor` says what the last End room came to,
+   * given the rooms read back after it.
+   */
+  async function roomsPage(
+    view: PageCall,
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    noticeFor: (rooms: readonly RoomAnswer[] | undefined) => { readonly ended: boolean } | null,
+  ): Promise<string> {
+    const rooms = roomsOf(await read(view.seam, ROOMS_ROUTE, view.caller, view.client));
+    const drawn = { rooms, strength, csrf: shell.csrf, notice: noticeFor(rooms) };
+    let body: string;
+    try {
+      body = roomsBody(drawn);
+    } catch {
+      body = roomsBody({ ...drawn, rooms: undefined });
+    }
+    return shellPage(shell, 'Rooms', body, true);
+  }
+
   /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
   async function statusPage(view: PageCall, shell: ShellView): Promise<string> {
     const answer = await read(view.seam, '/v1/operate/status', view.caller, view.client);
@@ -1134,6 +1209,13 @@ export function createAdmin(options: AdminOptions): Admin {
       const shell = await shellOf(path, session);
       const view = { caller: callerOf(owner, session), client, seam };
       if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/rooms') {
+        return adminResponse(
+          await roomsPage(view, shell, session.record.strength, () => null),
+          200,
+          HTML,
+        );
+      }
       if (path === '/admin/backups') {
         return adminResponse(
           await backupsPage(view, shell, session.record.strength, () => null),
@@ -1978,6 +2060,56 @@ export function createAdmin(options: AdminOptions): Admin {
       return adminResponse(page, asked ? 200 : answer.status === 429 ? 429 : 409, HTML);
     }
 
+    /**
+     * End room from the Rooms page (#2649, ADR 0069 D-2): through
+     * {@link gatedChange} — the room's id shape-checked before it is put in
+     * the route's `{roomId}`, the reason one of the route's, and the typed
+     * code bound to the step-up with them — then ONE call of `POST
+     * /v1/operate/rooms/{roomId}/end` in-process as the owner: its typed-code
+     * check, its close with `4005 room-closed`, the refused rejoin, the
+     * results kept and its `room_ended` entry under this listener's source are
+     * the route's own. Nothing is sent to any rider's trainer. The answer is
+     * the page drawn again from the route's read AFTER the call.
+     */
+    async function roomChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        'room_end',
+        { path: '/admin/rooms', what: 'Rooms' },
+        (fields) =>
+          ROOM_ID.test(fields.roomId ?? '') &&
+          ROOM_END_REASON_WORDS.includes(fields.reason ?? '') &&
+          (fields.confirm ?? '').length <= 64,
+      );
+      if (gated instanceof Response) return gated;
+      const { session, fields } = gated;
+      const roomId = fields.roomId as string;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch('POST', `${ROOMS_ROUTE}/${roomId}/end`, caller, client, {
+        reason: fields.reason,
+        confirm: fields.confirm,
+      });
+      const done = answer.status === 200;
+      const shell = await shellOf('/admin/rooms', session);
+      const page = await roomsPage(
+        { caller, client, seam },
+        shell,
+        session.record.strength,
+        (after) => ({
+          ended: done && after !== undefined && !after.some((room) => room.roomId === roomId),
+        }),
+      );
+      return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
+    }
+
     return async (request, body, client, seam) => {
       // Against DNS rebinding: the page is this listener's, or it is not served.
       if (request.headers.get('host') !== place.host) {
@@ -2041,6 +2173,7 @@ export function createAdmin(options: AdminOptions): Admin {
           return analysisChange(request, body, owner, client, seam, analysisAction);
         }
         if (route === '/admin/backups') return backupChange(request, body, owner, client, seam);
+        if (route === '/admin/rooms/end') return roomChange(request, body, owner, client, seam);
         const decision = REGISTRATION_ACTIONS.get(route);
         if (decision !== undefined) {
           return registrationChange(request, body, owner, client, seam, decision);

@@ -79,6 +79,9 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   // #2647: the page, and its one change, "back up now", posted to the page's own address.
   { path: '/admin/backups', methods: ['GET', 'POST'], kind: 'page', section: 'Backups' },
   { path: '/admin/analysis', methods: ['GET'], kind: 'page', section: 'AI backend' },
+  // #2649: the page, and ending a room, the room named by a form field.
+  { path: '/admin/rooms', methods: ['GET'], kind: 'page', section: 'Rooms' },
+  { path: '/admin/rooms/end', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/offer', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/check', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/model', methods: ['POST'], kind: 'action' },

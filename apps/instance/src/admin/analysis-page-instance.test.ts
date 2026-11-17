@@ -11,7 +11,6 @@
  * the new model.
  */
 
-import { request as httpRequest } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,14 +25,13 @@ import {
 import { jobBody } from '../analysis/jobs-testing.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from '../auth/identity-testing.ts';
 import { readAnalysisModelSettings, type AnalysisModelEnv } from '../config.ts';
-import type { Handler } from '../handler.ts';
 import { escapeHtml } from '../html.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { testConfig } from '../instance-testing.ts';
 import { sealedAt } from '../sealed/sealed-testing.ts';
 import { readServerConfig } from '../server-config.ts';
 import { migrateForDeploy } from '../store/serving.ts';
-import { adminBrowser, changeOn, passkeySessionOn } from './admin-testing.ts';
+import { adminBrowser, changeOn, overHttp, passkeySessionOn } from './admin-testing.ts';
 
 let directory: string | undefined;
 let running: StartedInstance | undefined;
@@ -82,44 +80,6 @@ async function start(
   await running.jobsRecovered;
   await running.keysMaintained;
   return { instance: running, path };
-}
-
-/**
- * The running instance as a browser on the tunnel's hostname reaches it:
- * every request sent over HTTP to its listener, `Host` and all, and the
- * answer read back with its `Set-Cookie`.
- */
-function overHttp(url: string): Handler {
-  return async (request) => {
-    const target = new URL(request.url);
-    const body = request.method === 'GET' ? undefined : await request.text();
-    const headers = Object.fromEntries(request.headers.entries());
-    return new Promise<Response>((resolve, reject) => {
-      const outgoing = httpRequest(
-        `${url}${target.pathname}${target.search}`,
-        { method: request.method, headers },
-        (incoming) => {
-          const chunks: Buffer[] = [];
-          incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
-          incoming.on('end', () => {
-            const answer = new Headers();
-            for (const [name, value] of Object.entries(incoming.headers)) {
-              if (value !== undefined)
-                answer.set(name, Array.isArray(value) ? value.join(', ') : value);
-            }
-            resolve(
-              new Response(incoming.statusCode === 303 ? null : Buffer.concat(chunks), {
-                status: incoming.statusCode ?? 0,
-                headers: answer,
-              }),
-            );
-          });
-        },
-      );
-      outgoing.on('error', reject);
-      outgoing.end(body);
-    });
-  };
 }
 
 /** Sign `device` in, sealed, as a device on an instance holding keys must. */
