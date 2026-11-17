@@ -76,7 +76,12 @@ describe('the app’s Recent problems panel and the admin page say the same thin
       },
     });
     const doc = new DOMParser().parseFromString(`<main>${html}</main>`, 'text/html');
-    const admin = said(doc.querySelectorAll('ol.problems > li'));
+    // Since #2771 a problem is a table row: its When column, then its sentence
+    // and the disclosure, joined with the ": " the table took away.
+    const admin = [...doc.querySelectorAll<HTMLTableRowElement>('table tbody tr')].map((row) => {
+      const [line, label, raw] = said([row.cells[1]!])[0]!;
+      return [`${squash(row.cells[0]?.textContent)}: ${line}`, label, raw] as const;
+    });
     expect(admin).toEqual(app);
     expect(admin[0]?.[0]).toBe(
       '2026-11-14 20:45 UTC: A request to /v1/rooms/{roomId}/route was answered 503.',

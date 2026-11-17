@@ -67,9 +67,11 @@ async function logs(made: ModerationWorld): Promise<LogsBody> {
 
 /** Each line as the page draws it: its sentence, and the line itself, escaped. */
 function drawn(html: string): { sentence: string; line: string }[] {
-  const list = /<ol class="log problems">([\s\S]*?)<\/ol>/.exec(html)?.[1] ?? '';
+  const list = /<tbody>([\s\S]*?)<\/tbody>/.exec(html)?.[1] ?? '';
   return [
-    ...list.matchAll(/<p><strong>[^<]*<\/strong>: ([^<]*)<\/p>[\s\S]*?<code>([^<]*)<\/code>/g),
+    ...list.matchAll(
+      /<td class="when"><time datetime="[^"]*">[^<]*<\/time><\/td>\n<td><p>([^<]*)<\/p>[\s\S]*?<code>([^<]*)<\/code>/g,
+    ),
   ].map(([, sentence, line]) => ({ sentence: sentence ?? '', line: line ?? '' }));
 }
 

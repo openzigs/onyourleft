@@ -13,7 +13,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { BACKUP_WAITING_TEXT, backupLine, type OperateBackupLine } from '@onyourleft/operate-text';
+import {
+  BACKUP_WAITING_TEXT,
+  backupFactRows,
+  backupLine,
+  type OperateBackupFacts,
+  type OperateBackupLine,
+} from '@onyourleft/operate-text';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { sha256Hex } from '../auth/crypto.ts';
@@ -35,7 +41,7 @@ import {
   type HandlerOver,
   type PasskeySession,
 } from './admin-testing.ts';
-import { BACKUPS_READS_ONLY_TEXT } from './pages.ts';
+import { BACKUP_DETAILS_LABEL, BACKUPS_READS_ONLY_TEXT } from './pages.ts';
 
 let worlds: ModerationWorld[] = [];
 let restarted: HandlerOver[] = [];
@@ -115,7 +121,7 @@ async function snapshot(made: ModerationWorld): Promise<Folders> {
 }
 
 interface BackupsAnswer {
-  readonly backups: (OperateBackupLine & { readonly databaseSha256: string | null })[];
+  readonly backups: (OperateBackupLine & OperateBackupFacts)[];
   readonly pending: { readonly requestedAt: string } | null;
 }
 
@@ -157,15 +163,45 @@ async function backUpNow(browser: AdminBrowser, session: PasskeySession): Promis
   return browser.send('POST', '/admin/backups', { cookie: session.token, form });
 }
 
-/** A record's line as the page draws it, from the package's words. */
+/**
+ * A record's line as the page draws it, from the package's words: in the
+ * table's Backup column (#2771), after the When column has taken its moment.
+ */
 function lineHtml(record: OperateBackupLine): string {
-  const { moment, rest } = backupLine(record);
-  return `<strong>${escapeHtml(moment)}</strong>${rest
-    .map((part) =>
-      typeof part === 'string' ? escapeHtml(part) : `<code>${escapeHtml(part.code)}</code>`,
+  const { rest } = backupLine(record);
+  return `<td><p>${rest
+    .map((part, index) =>
+      typeof part === 'string'
+        ? escapeHtml(index === 0 ? part.replace(/^, /, '') : part)
+        : `<code>${escapeHtml(part.code)}</code>`,
     )
-    .join('')}`;
+    .join('')}</p>`;
 }
+
+/**
+ * Each row of the Backups table, split as a browser draws it with its
+ * disclosure closed (#2771): what shows (everything but the `<details>`, plus
+ * its summary) and what the `<details>` holds once opened.
+ */
+function rows(
+  html: string,
+): { readonly shown: string; readonly details: string; readonly open: boolean }[] {
+  const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(html)?.[1] ?? '';
+  return [...body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(([, row = '']) => {
+    const disclosure = /<details(\s[^>]*)?>\n<summary>([^<]*)<\/summary>([\s\S]*?)<\/details>/.exec(
+      row,
+    );
+    return {
+      shown: disclosure === null ? row : row.replace(disclosure[0], disclosure[2] ?? ''),
+      details: disclosure?.[3] ?? '',
+      open: disclosure?.[1] !== undefined,
+    };
+  });
+}
+
+/** A fact as the page draws it: its label and its value, a code value as code. */
+const factHtml = (row: { label: string; value: string; code: boolean }): string =>
+  `<dt>${escapeHtml(row.label)}</dt><dd>${row.code ? `<code>${escapeHtml(row.value)}</code>` : escapeHtml(row.value)}</dd>`;
 
 describe('the Backups page is the route’s answer, and back up now is read back (#2647)', () => {
   it('draws each record as GET /v1/operate/backups answers it; a press waits, shown on a reload, in the route and in the log', async () => {
@@ -179,7 +215,15 @@ describe('the Backups page is the route’s answer, and back up now is read back
     const [record] = before.backups;
     const html = await page(browser, session.token);
     expect(html).toContain(lineHtml(record as OperateBackupLine));
-    expect(html).toContain(`<code>${record?.databaseSha256 ?? 'none'}</code>`);
+    expect(html).toContain(`<time datetime="${record?.at ?? 'none'}">`);
+    // One record: nothing older to link to.
+    expect(html).not.toContain('Show older backups');
+    // Its further facts are the route's, inside the row's disclosure (#2771).
+    const [row] = rows(html);
+    expect(row?.details).toContain(`<code>${record?.databaseSha256 ?? 'none'}</code>`);
+    for (const fact of backupFactRows(record as OperateBackupFacts)) {
+      expect(row?.details).toContain(factHtml(fact));
+    }
     expect(html).not.toContain(escapeHtml(BACKUP_WAITING_TEXT));
 
     const pressed = await backUpNow(browser, session);
@@ -199,6 +243,37 @@ describe('the Backups page is the route’s answer, and back up now is read back
     expect(await requestLog(made)).toEqual([
       { source: 'admin_tunnel', action: 'backup_requested', detail: null, outcome: 'done' },
     ]);
+  });
+
+  it('shows each row as its line, with its facts held closed in a Details disclosure (#2771)', async () => {
+    const made = await world({ startsAt: Date.now() + 30 * 60_000 });
+    await snapshot(made);
+    await snapshot(made);
+    const session = await passkeySession(made);
+    const { backups: records } = await backups(made);
+    expect(records).toHaveLength(2);
+    const drawn = rows(await page(tunnel(made), session.token));
+    expect(drawn).toHaveLength(records.length);
+    for (const [index, record] of records.entries()) {
+      const row = drawn[index];
+      expect(row?.open).toBe(false);
+      expect(row?.shown).toContain(lineHtml(record));
+      expect(row?.shown).toContain(BACKUP_DETAILS_LABEL);
+      const facts = backupFactRows(record);
+      expect(facts.map((fact) => fact.label)).toEqual([
+        'Database SHA-256',
+        'Old snapshots removed',
+        'Where snapshots go',
+        'Where off-box copies go',
+        'Backup interval',
+      ]);
+      for (const fact of facts) {
+        expect(row?.details).toContain(factHtml(fact));
+        expect(row?.shown).not.toContain(fact.label);
+      }
+      expect(row?.shown).not.toContain(record.databaseSha256 ?? 'none');
+      expect(row?.shown).not.toContain('<dl');
+    }
   });
 
   it('refuses a second press with the route’s sentence: nothing new waits, and the refusal is logged', async () => {
@@ -229,6 +304,50 @@ describe('the Backups page is the route’s answer, and back up now is read back
     expect(await requestLog(made)).toEqual([
       { source: 'admin_loopback', action: 'backup_requested', detail: null, outcome: 'done' },
     ]);
+  });
+
+  it('lists the newest 20 with a link to every record, and every record at ?all=1 with a link back (#2771)', async () => {
+    const at = (index: number): string =>
+      new Date(Date.UTC(2026, 10, 14, 23 - index)).toISOString();
+    const records = Array.from({ length: 25 }, (_, index) => ({
+      outcome: 'done',
+      id: 25 - index,
+      at: at(index),
+      ageSeconds: 3600 * (index + 1),
+      snapshot: `snapshot-number-${String(25 - index)}-end`,
+      rows: 10,
+      blobs: 1,
+      sizeBytes: 1000,
+      offBox: 'copied',
+      intervalSeconds: 3600,
+      requested: false,
+      databaseSha256: null,
+      removed: null,
+      freeBytes: { backups: null, offBox: null },
+    }));
+    const routes: readonly Route[] = ROUTES.map((route) =>
+      route.path === '/v1/operate/backups' && route.method === 'GET'
+        ? { ...route, handle: () => Promise.resolve(json({ backups: records, pending: null })) }
+        : route,
+    );
+    const made = await world({ routes });
+    const browser = tunnel(made);
+    const token = await codeSession(made);
+    const listed = (html: string): string[] =>
+      [...html.matchAll(/<td><p>[^<]*<code>snapshot-number-(\d+)-end<\/code><\/p>/g)].map(
+        ([, n]) => n ?? '',
+      );
+    const newest = await page(browser, token);
+    expect(listed(newest)).toEqual(records.slice(0, 20).map((each) => String(each.id)));
+    expect(newest).toContain('<a href="/admin/backups?all=1">Show older backups (5 more)</a>');
+    expect(newest).toContain(`<time datetime="${at(0)}">2026-11-14 23:00 UTC</time>`);
+
+    const answer = await browser.send('GET', '/admin/backups?all=1', { cookie: token });
+    expect(answer.status).toBe(200);
+    const every = await answer.text();
+    expect(listed(every)).toEqual(records.map((each) => String(each.id)));
+    expect(every).toContain('<a href="/admin/backups">Show the newest 20 only</a>');
+    expect(every).not.toContain('Show older backups');
   });
 
   it('says the list could not be read when the route’s answer is not in its shape', async () => {
