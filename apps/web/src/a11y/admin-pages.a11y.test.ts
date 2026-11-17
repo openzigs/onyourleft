@@ -825,6 +825,25 @@ describe.each(Object.entries(PAGES))('the admin page %s (#2645)', (path, states)
   }
 });
 
+describe('the Backups page’s Details disclosures (#2771)', () => {
+  it('each row’s summary is a tab stop named Details, its facts closed inside it', () => {
+    const doc = parse(backupsPage('passkey'));
+    const summaries = [...doc.querySelectorAll('tbody tr details > summary')];
+    expect(summaries).toHaveLength(RECORDS.length);
+    const tabbable = tabbableElements(doc);
+    for (const summary of summaries) {
+      expect(tabbable).toContain(summary);
+      expect(summary.textContent).toBe('Details');
+      expect(summary.parentElement?.hasAttribute('open')).toBe(false);
+      expect(summary.parentElement?.querySelector('dl')).not.toBeNull();
+    }
+    // Nothing inside a closed disclosure is reachable before it is opened.
+    for (const element of tabbable) {
+      expect(element.closest('details') === null || element.tagName === 'SUMMARY').toBe(true);
+    }
+  });
+});
+
 describe('/admin/admin.css draws the app’s own tokens (#2771, ADR 0063)', () => {
   it('every colour it mirrors is the app’s, in both themes', () => {
     const app = { light: COLOUR_TOKENS, dark: DARK_COLOUR_TOKENS } as const;

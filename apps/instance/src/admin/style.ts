@@ -168,7 +168,7 @@ button.danger:hover { color: var(--oyl-color-danger-action-ink); background: var
 
 details { margin: var(--oyl-space-xs) 0 0; }
 summary { cursor: pointer; display: flex; align-items: center; min-height: var(--admin-target); color: var(--oyl-color-link); text-decoration: underline; text-underline-offset: 0.15em; }
-details code { display: block; padding: var(--oyl-space-sm); white-space: pre-wrap; }
+details > code { display: block; padding: var(--oyl-space-sm); white-space: pre-wrap; }
 
 @media (min-width: 40rem) {
   h1 { font-size: 2.44140625rem; }

@@ -1206,9 +1206,17 @@ export const RESTORE_NEWEST_TEXT =
 type Snapshot = Extract<BackupRecordAnswer, { readonly outcome: 'done' }>;
 
 /** The Backups table's columns (#2771). */
-const BACKUP_COLUMNS = ['When', 'Backup', 'Facts'] as const;
+const BACKUP_COLUMNS = ['When', 'Backup'] as const;
 
-/** One record's row: when, its line from operate-text and any warning, and its further facts. */
+/** The control of a row's disclosure that holds its further facts (#2771). */
+export const BACKUP_DETAILS_LABEL = 'Details';
+
+/**
+ * One record's row: when, its line from operate-text and any warning, and its
+ * further facts in a closed `<details>` under them (#2771), so each backup
+ * takes about one line until its facts are asked for. No script: the browser
+ * opens and closes it.
+ */
 function backupItem(backup: BackupRecordAnswer): string {
   const { rest } = backupLine(backup);
   const warning =
@@ -1220,10 +1228,12 @@ function backupItem(backup: BackupRecordAnswer): string {
   return `<tr>
 <td class="when">${readableMoment(backup.at)}</td>
 <td><p>${restHtml(rest)}</p>
-${warning}</td>
-<td><dl class="compact">
+${warning}<details>
+<summary>${escapeHtml(BACKUP_DETAILS_LABEL)}</summary>
+<dl class="compact">
 ${backupFactRows(backup).map(fact).join('\n')}
-</dl></td>
+</dl>
+</details></td>
 </tr>`;
 }
 

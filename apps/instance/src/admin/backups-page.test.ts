@@ -13,7 +13,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { BACKUP_WAITING_TEXT, backupLine, type OperateBackupLine } from '@onyourleft/operate-text';
+import {
+  BACKUP_WAITING_TEXT,
+  backupFactRows,
+  backupLine,
+  type OperateBackupFacts,
+  type OperateBackupLine,
+} from '@onyourleft/operate-text';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { sha256Hex } from '../auth/crypto.ts';
@@ -35,7 +41,7 @@ import {
   type HandlerOver,
   type PasskeySession,
 } from './admin-testing.ts';
-import { BACKUPS_READS_ONLY_TEXT } from './pages.ts';
+import { BACKUP_DETAILS_LABEL, BACKUPS_READS_ONLY_TEXT } from './pages.ts';
 
 let worlds: ModerationWorld[] = [];
 let restarted: HandlerOver[] = [];
@@ -115,7 +121,7 @@ async function snapshot(made: ModerationWorld): Promise<Folders> {
 }
 
 interface BackupsAnswer {
-  readonly backups: (OperateBackupLine & { readonly databaseSha256: string | null })[];
+  readonly backups: (OperateBackupLine & OperateBackupFacts)[];
   readonly pending: { readonly requestedAt: string } | null;
 }
 
@@ -172,6 +178,31 @@ function lineHtml(record: OperateBackupLine): string {
     .join('')}</p>`;
 }
 
+/**
+ * Each row of the Backups table, split as a browser draws it with its
+ * disclosure closed (#2771): what shows (everything but the `<details>`, plus
+ * its summary) and what the `<details>` holds once opened.
+ */
+function rows(
+  html: string,
+): { readonly shown: string; readonly details: string; readonly open: boolean }[] {
+  const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(html)?.[1] ?? '';
+  return [...body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(([, row = '']) => {
+    const disclosure = /<details(\s[^>]*)?>\n<summary>([^<]*)<\/summary>([\s\S]*?)<\/details>/.exec(
+      row,
+    );
+    return {
+      shown: disclosure === null ? row : row.replace(disclosure[0], disclosure[2] ?? ''),
+      details: disclosure?.[3] ?? '',
+      open: disclosure?.[1] !== undefined,
+    };
+  });
+}
+
+/** A fact as the page draws it: its label and its value, a code value as code. */
+const factHtml = (row: { label: string; value: string; code: boolean }): string =>
+  `<dt>${escapeHtml(row.label)}</dt><dd>${row.code ? `<code>${escapeHtml(row.value)}</code>` : escapeHtml(row.value)}</dd>`;
+
 describe('the Backups page is the route’s answer, and back up now is read back (#2647)', () => {
   it('draws each record as GET /v1/operate/backups answers it; a press waits, shown on a reload, in the route and in the log', async () => {
     // The CLI dates its record by the wall clock: the world starts past its 15 minutes.
@@ -187,7 +218,12 @@ describe('the Backups page is the route’s answer, and back up now is read back
     expect(html).toContain(`<time datetime="${record?.at ?? 'none'}">`);
     // One record: nothing older to link to.
     expect(html).not.toContain('Show older backups');
-    expect(html).toContain(`<code>${record?.databaseSha256 ?? 'none'}</code>`);
+    // Its further facts are the route's, inside the row's disclosure (#2771).
+    const [row] = rows(html);
+    expect(row?.details).toContain(`<code>${record?.databaseSha256 ?? 'none'}</code>`);
+    for (const fact of backupFactRows(record as OperateBackupFacts)) {
+      expect(row?.details).toContain(factHtml(fact));
+    }
     expect(html).not.toContain(escapeHtml(BACKUP_WAITING_TEXT));
 
     const pressed = await backUpNow(browser, session);
@@ -207,6 +243,37 @@ describe('the Backups page is the route’s answer, and back up now is read back
     expect(await requestLog(made)).toEqual([
       { source: 'admin_tunnel', action: 'backup_requested', detail: null, outcome: 'done' },
     ]);
+  });
+
+  it('shows each row as its line, with its facts held closed in a Details disclosure (#2771)', async () => {
+    const made = await world({ startsAt: Date.now() + 30 * 60_000 });
+    await snapshot(made);
+    await snapshot(made);
+    const session = await passkeySession(made);
+    const { backups: records } = await backups(made);
+    expect(records).toHaveLength(2);
+    const drawn = rows(await page(tunnel(made), session.token));
+    expect(drawn).toHaveLength(records.length);
+    for (const [index, record] of records.entries()) {
+      const row = drawn[index];
+      expect(row?.open).toBe(false);
+      expect(row?.shown).toContain(lineHtml(record));
+      expect(row?.shown).toContain(BACKUP_DETAILS_LABEL);
+      const facts = backupFactRows(record);
+      expect(facts.map((fact) => fact.label)).toEqual([
+        'Database SHA-256',
+        'Old snapshots removed',
+        'Where snapshots go',
+        'Where off-box copies go',
+        'Backup interval',
+      ]);
+      for (const fact of facts) {
+        expect(row?.details).toContain(factHtml(fact));
+        expect(row?.shown).not.toContain(fact.label);
+      }
+      expect(row?.shown).not.toContain(record.databaseSha256 ?? 'none');
+      expect(row?.shown).not.toContain('<dl');
+    }
   });
 
   it('refuses a second press with the route’s sentence: nothing new waits, and the refusal is logged', async () => {

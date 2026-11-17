@@ -16,6 +16,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { backupFactRows } from '@onyourleft/operate-text';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { OperateBackup } from '../instance/operate-port';
@@ -96,6 +97,36 @@ describe('the app’s Backups panel and the admin Backups page say the same thin
     const adminLines = [...doc.querySelectorAll<HTMLTableRowElement>('table tbody tr')].map(
       (row) =>
         `${squash(row.cells[0]?.textContent)}, ${squash(row.cells[1]?.querySelector('p')?.textContent)}`,
+    );
+    // The route's further facts, which only the admin page draws, are each
+    // row's, inside its closed Details disclosure and not in its line (#2771).
+    const adminFacts = [...doc.querySelectorAll<HTMLTableRowElement>('table tbody tr')].map(
+      (row) => {
+        const details = row.querySelector('details');
+        return {
+          open: details?.open,
+          summary: squash(details?.querySelector(':scope > summary')?.textContent),
+          facts: [...(details?.querySelectorAll('dl > div') ?? [])].map((fact) => [
+            squash(fact.querySelector('dt')?.textContent),
+            squash(fact.querySelector('dd')?.textContent),
+          ]),
+          labelsOutside: (() => {
+            const shown = row.cloneNode(true) as HTMLTableRowElement;
+            shown.querySelector('details')?.remove();
+            return backupFactRows(withFacts(SCRIPTED_BACKUPS[0]!))
+              .map((fact) => fact.label)
+              .filter((label) => (shown.textContent ?? '').includes(label));
+          })(),
+        };
+      },
+    );
+    expect(adminFacts).toEqual(
+      SCRIPTED_BACKUPS.map(withFacts).map((record) => ({
+        open: false,
+        summary: 'Details',
+        facts: backupFactRows(record).map((fact) => [fact.label, fact.value]),
+        labelsOutside: [],
+      })),
     );
     const adminSteps = [...doc.querySelectorAll('ol.restore > li')].map((step) =>
       squash(step.textContent),
