@@ -318,3 +318,13 @@ model race, or taking away a body's limit (D-2), needs one.
 - **The freedom makes the race worse on the tablet**: if the owner finds the model races less like a
   race than ADR 0071's, the rule to restore is the one that would have prevented it, by a
   superseding ADR.
+
+## Amendments
+
+- **2026-11-16** — **[ADR 0074](0074-a-sprint-instinct-behind-the-models-moves.md), accepted by the
+  owner on #2724, supersedes D-3.5 in part for a model race.** A bot the model has not sent on its
+  kick by the time it is inside its launch distance, as it reads the line, rides its own seeded
+  kick, and a kick within its launch and the largest misread of the line holds to the line whatever
+  the model names. The model may still name `kick` anywhere, earlier included, and the body's limits
+  (D-2) are unchanged. Read ADR 0074 for the rule. This entry only points there; nothing else in this
+  ADR changes. (#2710)

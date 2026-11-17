@@ -40,6 +40,7 @@ import {
   degreesLongitude,
   geographicPosition,
   kilograms,
+  MODEL_PACER_LAPSE_S,
   routeProfile,
   seconds,
   watts,
@@ -436,6 +437,86 @@ describe('the bot pacer', () => {
     // The rider never left the start line, so the bot is somewhere else on a
     // route whose gradient changes — a single shared grade would be equal.
     expect(simulation.state.bot?.grade).not.toBe(simulation.state.grade);
+  });
+});
+
+describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
+  const PLAN = botPacerPlan(2.5);
+  const LIFT = { plan: 'climber', intent: 'lift' } as const;
+
+  /** `advanceBot` run directly, one fixed step at a time, with `direction` in force over [from, until). */
+  function reference(
+    setup: SimulationSetup,
+    steps: number,
+    direction?: { readonly from: number; readonly until: number },
+  ) {
+    const plain: BotCourse = {
+      profile: setup.profile,
+      plan: PLAN,
+      airDensityKilogramsPerCubicMetre: setup.conditions.airDensityKilogramsPerCubicMetre,
+    };
+    let state = BOT_AT_START_LINE;
+    for (let step = 0; step < steps; step += 1) {
+      const at = step * SIMULATION_STEP_SECONDS;
+      const inForce = direction !== undefined && at >= direction.from && at < direction.until;
+      state = advanceBot(
+        state,
+        seconds(SIMULATION_STEP_SECONDS),
+        inForce ? { ...plain, direction: LIFT } : plain,
+      ).state;
+    }
+    return state;
+  }
+
+  function ride(direct: (simulation: GameSimulation) => void, steps: number): GameSimulation {
+    const simulation = new GameSimulation({ ...hillyRoute(), pacer: PLAN });
+    simulation.advanceTo(0, PEDALLING);
+    direct(simulation);
+    // A frame a second, well inside the catch-up bound, landing on the last step.
+    for (let step = 20; step <= steps; step += 20) {
+      simulation.advanceTo(step * SIMULATION_STEP_SECONDS * 1000, PEDALLING);
+    }
+    simulation.advanceTo(steps * SIMULATION_STEP_SECONDS * 1000, PEDALLING);
+    return simulation;
+  }
+
+  it('rides the decision from its seconds ridden, step for step through advanceBot', () => {
+    const simulation = ride((it) => {
+      it.directPacer(LIFT, 2);
+    }, 200);
+    const expected = reference(hillyRoute(), 200, { from: 2, until: 2 + MODEL_PACER_LAPSE_S });
+    expect(simulation.state.bot?.state.distance).toBe(expected.distance);
+    expect(simulation.state.bot?.state.distance).toBeGreaterThan(
+      reference(hillyRoute(), 200).distance,
+    );
+  });
+
+  it('lapses a decision nothing replaced, and #92’s rule rides from there', () => {
+    const steps = Math.round((MODEL_PACER_LAPSE_S + 10) / SIMULATION_STEP_SECONDS);
+    const simulation = ride((it) => {
+      it.directPacer(LIFT, 0);
+    }, steps);
+    expect(simulation.state.bot?.state.distance).toBe(
+      reference(hillyRoute(), steps, { from: 0, until: MODEL_PACER_LAPSE_S }).distance,
+    );
+  });
+
+  it('moves the pacer and never the rider', () => {
+    const directed = ride((it) => {
+      it.directPacer(LIFT, 0);
+    }, 200);
+    const plain = ride(() => undefined, 200);
+    expect(directed.state.ride).toEqual(plain.state.ride);
+    expect(directed.state.grade).toBe(plain.state.grade);
+    expect(directed.state.bot?.state.distance).not.toBe(plain.state.bot?.state.distance);
+  });
+
+  it('does nothing on a ride with no pacer', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.directPacer(LIFT, 0);
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(10_000, PEDALLING);
+    expect(simulation.state.bot).toBeUndefined();
   });
 });
 

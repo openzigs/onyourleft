@@ -18,6 +18,7 @@ import type {
   ROOF_ORIENTATIONS,
   ROOF_SHAPES,
   WALL_MATERIALS,
+  WATER_LINE_KINDS,
 } from './schema';
 
 /** One z15 tile. z15 only: ADR 0054 D-2, the zoom at which buildings are individual. */
@@ -84,6 +85,17 @@ export interface BuildingFeature extends PolygonFeature, BuildingFields {
   readonly minHeightMetres: number | null;
 }
 
+/**
+ * A `water` line that is a river, a stream or a canal — #2659, ADR 0054's
+ * entry of 2026-11-15. Its `kind` and its line, and nothing else: no name, no
+ * id, no `layer`.
+ */
+export interface WaterLineFeature {
+  readonly kind: (typeof WATER_LINE_KINDS)[number];
+  /** `x0, z0, x1, z1, …` in local metres. */
+  readonly line: Float32Array;
+}
+
 /** A `roads` line that is a footway (`kind` `path`, or `kind_detail` in {@link FOOTWAY_KIND_DETAILS}). */
 export interface PathFeature {
   readonly kind: string;
@@ -137,6 +149,8 @@ export interface DecodedTile {
   readonly streets: readonly StreetFeature[];
   /** #1632: the place points, at most `DecodeLimits.maxPlacesPerTile` of them. */
   readonly places: readonly PlaceFeature[];
+  /** #2659: the rivers, streams and canals, for where they cross the route. */
+  readonly waterLines: readonly WaterLineFeature[];
 }
 
 /**

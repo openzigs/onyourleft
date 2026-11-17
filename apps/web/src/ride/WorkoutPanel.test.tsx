@@ -255,6 +255,39 @@ describe('while one is running', () => {
     expect(buttonSaying(view.container, 'End workout')).toBeDefined();
   });
 
+  it('says where a workout carried across a trainer reconnect stands, under End workout — #2669', async () => {
+    const said = {
+      reconnecting: 'Trainer disconnected. Reconnecting…',
+      pedal: 'Trainer reconnected. Start pedalling and the workout carries on',
+      refused: 'it would not give control back',
+      resumed: 'Trainer reconnected, workout resumed.',
+    } as const;
+    for (const carryOn of ['reconnecting', 'pedal', 'refused', 'resumed'] as const) {
+      const view = await render({ workout: running({ carryOn }) });
+      const text = view.container.textContent ?? '';
+      expect(text).toContain(said[carryOn]);
+      const end = buttonSaying(view.container, 'End workout');
+      expect(end, 'no way to end the workout').toBeDefined();
+      const notice = [...view.container.querySelectorAll('.oyl-status')].find((each) =>
+        (each.textContent ?? '').includes(said[carryOn]),
+      );
+      expect(
+        end !== undefined &&
+          notice !== undefined &&
+          (end.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+        'the notice is not after End workout',
+      ).toBe(true);
+      view.unmount();
+      mounted = undefined;
+    }
+  });
+
+  it('says nothing about a reconnect when no trainer has dropped', async () => {
+    const view = await render({ workout: running() });
+    expect(view.container.textContent).not.toContain('Trainer reconnected');
+    expect(view.container.textContent).not.toContain('Reconnecting');
+  });
+
   it('offers a way out', async () => {
     let ended = 0;
     const view = await render({

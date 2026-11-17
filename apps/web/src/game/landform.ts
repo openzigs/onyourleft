@@ -122,7 +122,14 @@ import {
 import { treeLineHeight } from './ground-blend';
 import { BARE_SURFACES, type BareSurface, type LandClassMask } from './land-class';
 import { slotHash, uniformFrom } from './seeded';
-import { DRY, waterNearRoute, waterShaping, waterways, type WaterShaping } from './waterways';
+import {
+  DRY,
+  waterNearRoute,
+  waterShaping,
+  waterways,
+  type WaterShaping,
+  type Waterways,
+} from './waterways';
 import {
   RETRACE_HEADING_COSINE,
   RETRACE_OVERLAP_METRES,
@@ -481,7 +488,7 @@ export function terrainHeightAt(
   if (lateral <= ROAD_HALF_WIDTH_METRES) {
     return road;
   }
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   // ⚠️ **Inside the clear band there is no relief to read**, so the hashed
   // fields are not drawn at all: the ground there is the road less the verge,
   // under whatever ceiling water puts on it. A third of the scenery stands in
@@ -559,7 +566,7 @@ export function terrainCorridor(
 ): TerrainMesh {
   // #459. The streams and lakes, as a ceiling on the ground and a damping of
   // its relief. @see waterShaping
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const centre = corridor.centre;
   const rows = centre.length;
@@ -743,7 +750,7 @@ export function terrainCorridor(
   // `landform-passes.test.ts` §"the passes' order" holds the order itself,
   // which no drawn ground can tell apart while that holds.
   if (roles !== undefined) {
-    retracedGround(profile, origin, seed, land, centre, normals2d, roles, lent);
+    retracedGround(profile, origin, seed, land, ways, centre, normals2d, roles, lent);
   }
   const indices = terrainIndices(rows);
   gridNormals(vertices, rows, normals, roles);
@@ -904,6 +911,8 @@ function retracedGround(
   origin: CorridorOrigin,
   seed: number,
   land: LandClassMask,
+  /** {@link terrainCorridor}'s own, so the rows it takes back see the same water (#2658). */
+  ways: Waterways,
   centre: readonly CorridorPoint[],
   normals2d: Float64Array,
   roles: Uint8Array,
@@ -912,7 +921,6 @@ function retracedGround(
   const rows = centre.length;
   const { capAnchor, capAngle, capWay, vertices, colours, fields, surfaces } = lent;
   const perRow = COLUMNS * 2;
-  const ways = waterways(profile, seed);
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const levelled = land.levellingBytes > 0;
   const mapped = land.bytes > 0;
