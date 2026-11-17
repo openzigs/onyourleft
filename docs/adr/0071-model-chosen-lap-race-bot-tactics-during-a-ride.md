@@ -411,3 +411,16 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
 - **The fallback is the race**: if, on the owner's PC under ordinary load, most windows fall back,
   the rider is racing seeded bots under another name, and the option should say so or not be
   offered.
+
+## Amendments
+
+- **2026-11-16** — **[ADR 0073](0073-ai-bots-race-with-strategy-freedom-inside-the-bodys-limits.md),
+  accepted by the owner on 2026-11-16, supersedes D-3.6 in part for a model race, and D-3.1 in part
+  for an effort level.** Its body's limits stay: the target power capped by `spendableWatts` at the
+  peak and at CP once exhausted, W′ as today, an exhausted bot keeping its seeded choice, no watts
+  field, no tools, no model output at the trainer. The answer may carry an optional effort from a
+  closed list (`easy`, `tempo`, `threshold`, `all-out`), never a number, still capped by the body.
+  Its strategy rules are lifted: the W′ floor on `attack` and `chase`, the flyer's last two laps and
+  W′ share, the attack's longest hold, `follow` and `chase` of the racer directly ahead only, and
+  the fixed launch, with the misread distance still what a bot reads as left. Read ADR 0073 for the
+  rule. This entry only points there; nothing else in this ADR changes. (#2720)

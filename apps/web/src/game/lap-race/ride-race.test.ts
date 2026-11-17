@@ -16,7 +16,9 @@ import {
   botFieldPaces,
   botFieldPersonalities,
   botFieldSkills,
+  BOT_LANE_DWELL_MS,
   kilograms,
+  racePosition,
 } from '@onyourleft/domain';
 import { lapRaceDraftFactors } from '@onyourleft/physics';
 
@@ -39,6 +41,7 @@ import {
   type LapRaceRide,
 } from './ride-race';
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
+import { drawnShift } from './pack-layout';
 
 const LOOP = circuitRoute(40);
 
@@ -537,6 +540,112 @@ describe('a bot is drawn every frame, where its own speed puts it (#2455’s che
       }
       before = distances;
       speedsBefore = speeds;
+    }
+  });
+});
+
+describe('a lap race is drawn between its ticks, across and along, as it moves — #2665', () => {
+  /** A seeded race, stepped a tick at a time at the rider's pace, until `until` says so or 120 s. */
+  function rideUntil(
+    seed: number,
+    choice: LapRaceChoice,
+    until: (ride: LapRaceRide) => boolean,
+  ): LapRaceRide {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = seed;
+        return array;
+      },
+    );
+    let ride = race(choice) as LapRaceRide;
+    vi.restoreAllMocks();
+    let along = 0;
+    for (let tick = 0; tick < 2_400; tick += 1) {
+      along += 8 * LAP_RACE_TICK_SECONDS;
+      ride = stepLapRaceRide(ride, { ticks: 1, along, riderWatts: 200 });
+      if (until(ride)) return ride;
+    }
+    throw new Error('the race never came to what was asked of it');
+  }
+
+  it('draws a bot an item is moving back along its effort speed and its race offset’s rate, not its effort speed alone', () => {
+    // A tick on which some bot's offset is moving fast: an item running on it.
+    const ride = rideUntil(7, DEFAULT_LAP_RACE, (each) =>
+      [...each.offsetRates.values()].some((rate) => Math.abs(rate) > 0.5),
+    );
+    const [id, rate] = [...ride.offsetRates].find(([, each]) => Math.abs(each) > 0.5) as [
+      string,
+      number,
+    ];
+    const at = ride.race.racers.findIndex((entry) => entry.racer.id === id);
+    const entry = ride.race.racers[at];
+    const bot = ride.bots.find((each) => each.id === id);
+    const place = ride.pack.get(id);
+    if (entry === undefined || bot === undefined || place === undefined) throw new Error('a bot');
+    // The rate is the offset's own over the tick: an item moves it at most 2 m/s, the drift 0.25.
+    expect(Math.abs(rate)).toBeLessThanOrEqual(2 + 0.25 + 1e-9);
+    const behind = LAP_RACE_TICK_SECONDS / 2;
+    // The drawing lists the bots in the race's own order, the rider left out.
+    const drawnAt = ride.race.racers
+      .filter((each) => ride.bots.some((one) => one.id === each.racer.id))
+      .findIndex((each) => each.racer.id === id);
+    const drawn = lapRaceDrawing(ride, ride.along, behind, false).raceBots[drawnAt];
+    expect(drawn?.distanceMetres).toBeCloseTo(
+      ride.startAlong +
+        racePosition(entry.racer) +
+        drawnShift(place, behind, LAP_RACE_TICK_SECONDS) -
+        ((bot.ride.speed as number) + rate) * behind,
+      9,
+    );
+  });
+
+  it('draws the rider and each bot across between the tick before’s place and the newest’s', () => {
+    // A tick on which a bot is moving across.
+    const ride = rideUntil(3, { ...DEFAULT_LAP_RACE, itemsOn: false }, (each) =>
+      [...each.pack.values()].some((place) => Math.abs(place.sway) > 0.5),
+    );
+    // The drawing lists the bots in the race's own order, the rider left out.
+    const order = ride.race.racers
+      .map((entry) => entry.racer.id)
+      .filter((id) => ride.bots.some((bot) => bot.id === id));
+    const at = order.findIndex((id) => Math.abs(ride.pack.get(id)?.sway ?? 0) > 0.5);
+    const place = ride.pack.get(order[at] as string);
+    if (place === undefined) throw new Error('a bot moving across');
+    const across = (behind: number): number =>
+      lapRaceDrawing(ride, ride.along, behind, false).raceBots[at]?.lateralMetres ?? Number.NaN;
+    expect(across(0)).toBe(place.lateral);
+    expect(across(LAP_RACE_TICK_SECONDS)).toBe(place.lateralBefore);
+    expect(across(LAP_RACE_TICK_SECONDS / 2)).toBeCloseTo(
+      (place.lateral + place.lateralBefore) / 2,
+      12,
+    );
+    // Its sway between the two ticks' too, which turns and leans it on every frame.
+    const sway = (behind: number): number =>
+      lapRaceDrawing(ride, ride.along, behind, false).raceBots[at]?.swayMetresPerSecond ??
+      Number.NaN;
+    expect(sway(0)).toBe(place.sway);
+    expect(sway(LAP_RACE_TICK_SECONDS)).toBe(place.swayBefore);
+    // And the rider, steered across, between where they were and where they are.
+    let steered = askRaceLane(ride, 'lane-right');
+    steered = stepLapRaceRide(steered, { ticks: 1, along: steered.along + 0.4 });
+    expect(steered.steeredBefore).not.toBe(steered.input.steer.offset);
+    const rider = (behind: number): number =>
+      lapRaceDrawing(steered, steered.along, behind, false).steeredLateral;
+    expect(rider(0)).toBe(steered.input.steer.offset);
+    expect(rider(LAP_RACE_TICK_SECONDS)).toBe(steered.steeredBefore);
+  });
+
+  it('rolls the field off its grid in the lanes it stands in, holding each for a dwell from Go', () => {
+    const ride = started();
+    for (const bot of ride.bots) expect(bot.memory.laneSinceMs, bot.id).toBe(0);
+    // Read back through the race: no bot changes lane within the dwell after Go.
+    const lanes = ride.race.racers.map((entry) => entry.lane);
+    let stepped = ride;
+    let along = 0;
+    for (let tick = 1; tick * LAP_RACE_TICK_SECONDS * 1_000 < BOT_LANE_DWELL_MS; tick += 1) {
+      along += 8 * LAP_RACE_TICK_SECONDS;
+      stepped = stepLapRaceRide(stepped, { ticks: 1, along });
+      expect(stepped.race.racers.map((entry) => entry.lane)).toEqual(lanes);
     }
   });
 });

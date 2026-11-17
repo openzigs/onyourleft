@@ -3,8 +3,10 @@
 /**
  * #2616: the decision logs gemma4:12b wrote on the owner's instance PC
  * (2026-11-16), replayed through #2561's fields: spike 0039's six, with its
- * first prompt, in `results/`, and #2708's six, with the tuned prompt, in
- * `results/2708/`.
+ * first prompt, in `results/`, #2708's six, with the tuned prompt, in
+ * `results/2708/`, both under ADR 0071's rules, and #2720's six, with its
+ * prompt under ADR 0073's rules, in `results/2720/`. Each is replayed under
+ * the rules its file names (`rules`), or ADR 0071's where it names none.
  *
  * - **A replay from the seed and the log is the same race every time.**
  * - **What the model said is held to what #2561 holds the seeded race to**
@@ -24,18 +26,20 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { MODEL_RULES_BEFORE_2720, type ModelRules } from './adapter';
 import { parseModelDecision } from './decision';
 import { MODEL_DECISION_LATE_MS, type LoggedDecision } from './decision-log';
 import { fieldTrace, rideField, SPIKE_SEEDS, type FieldRun, type SpikeCircuit } from './race';
 
-/** The two runs: spike 0039's first prompt, and #2708's tuned one. */
-const RUNS = ['', '2708/'] as const;
+/** The three runs: spike 0039's first prompt, #2708's tuned one, and #2720's. */
+const RUNS = ['', '2708/', '2720/'] as const;
 type Run = (typeof RUNS)[number];
 
 interface Recorded {
   readonly model: string;
   readonly circuit: SpikeCircuit;
   readonly seed: number;
+  readonly rules?: ModelRules;
   readonly log: readonly LoggedDecision[];
 }
 
@@ -60,7 +64,12 @@ function replay(run: Run, circuit: SpikeCircuit, seed: number): Promise<FieldRun
   const key = `${run} ${circuit} ${String(seed)}`;
   let ridden = replayed.get(key);
   if (ridden === undefined) {
-    ridden = rideField(circuit, seed, { kind: 'log', log: recorded(run, circuit, seed).log });
+    const file = recorded(run, circuit, seed);
+    ridden = rideField(circuit, seed, {
+      kind: 'log',
+      log: file.log,
+      rules: file.rules ?? MODEL_RULES_BEFORE_2720,
+    });
     replayed.set(key, ridden);
   }
   return ridden;
@@ -72,7 +81,11 @@ describe('the recorded decision logs, replayed (#2616)', () => {
     ({ run, circuit, seed }) => {
       const file = recorded(run, circuit, seed);
       expect(file.model).toBe('gemma4:12b');
-      expect(file.log.length).toBeGreaterThan(30);
+      // #2720's logs say they were ridden under ADR 0073's rules; the older ones name none.
+      expect(file.rules ?? MODEL_RULES_BEFORE_2720).toBe(run === '2720/' ? 'adr-0073' : 'adr-0071');
+      // #2720's longer prompt took over 4 s on 37 of its 186 calls, and the
+      // next ask waits for the next 4 s mark after an answer: fewer calls.
+      expect(file.log.length).toBeGreaterThan(run === '2720/' ? 20 : 30);
       for (const entry of file.log) {
         expect(entry.outcome).toBe('decision');
         expect(entry.arrivedAtMs - entry.requestedAtMs).toBeLessThanOrEqual(MODEL_DECISION_LATE_MS);
@@ -100,8 +113,12 @@ describe('the recorded decision logs, replayed (#2616)', () => {
   it.each(RUNS.flatMap((run) => (['flat', 'hilly'] as const).map((circuit) => ({ run, circuit }))))(
     'replays the %o log of seed 1 identically',
     async ({ run, circuit }) => {
-      const log = recorded(run, circuit, 1).log;
-      const again = await rideField(circuit, 1, { kind: 'log', log });
+      const file = recorded(run, circuit, 1);
+      const again = await rideField(circuit, 1, {
+        kind: 'log',
+        log: file.log,
+        rules: file.rules ?? MODEL_RULES_BEFORE_2720,
+      });
       expect(fieldTrace(again)).toBe(fieldTrace(await replay(run, circuit, 1)));
       expect(again.outcomes).toEqual((await replay(run, circuit, 1)).outcomes);
     },

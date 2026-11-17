@@ -865,8 +865,10 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
  * {@link REALISTIC_STRUCTURE_ITEMS} at {@link REALISTIC_TRIANGLES}' `structure`.
  * It is the structure term `realistic-budget.test.ts` has summed since #506,
  * and it is NOT raised for mapped buildings: they share it with the frame's
- * procedural structures, the two ranked together by distance from the rider,
- * nearest first (#1586, `three-renderer.ts` §`refillMappedBuildings`). It is also the capacity, in
+ * procedural structures, the two ranked together by distance from the road
+ * ahead, nearest first (#1586, #2429, `three-renderer.ts`
+ * §`refillMappedBuildings`) — since #2655 not the field boundaries, which take
+ * only what the buildings leave. It is also the capacity, in
  * triangles, of the one buffer the belt preallocates, so no plan list,
  * however long, can grow it.
  *
@@ -1071,6 +1073,27 @@ export const REALISTIC_REMOTE_TRIANGLES = 64_226;
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
 export const REALISTIC_FRAME_TRIANGLES = 300_000;
+
+/**
+ * The most triangles a frame's golf courses and cemeteries may add — #2685:
+ * **5 120**, `park-dressing.ts` §`PARK_DRESSING_CAPACITY` (512) boxes — the
+ * headstones, the cemetery wall's pieces, and the flags and their poles — at
+ * the belt's box of 10 triangles, its floor left out (`three-renderer.ts`
+ * §`PARK_PIECE_TRIANGLES`). The realistic world's alone, so counted INSIDE
+ * {@link REALISTIC_FRAME_TRIANGLES}' worst frame by that constant's own rule;
+ * the stripes, greens, bunkers and paths are the ground's shader and add none.
+ *
+ * ⚠️ **Sized to fit, not the other way round.** The worst frame with a room's
+ * remote riders in it ({@link REALISTIC_REMOTE_STYLISED_RIDERS}) left about
+ * 6 600 triangles, and this is what fits in them; the capacity was set from
+ * it, so a dense cemetery draws its nearest stones and leaves the far ones
+ * to the ground's paths. A frame with neither in reach draws none and makes
+ * no call. The tablet's reading is the owner's (#733).
+ *
+ * @test-facing held by `realistic-budget.test.ts` (the worst frame, both
+ * cases) and `park-dressing-belt.test.ts` (the belt as built)
+ */
+export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
 
 /**
  * The most triangles a frame's village streets may add — #1535's pavements,

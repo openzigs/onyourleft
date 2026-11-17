@@ -103,6 +103,12 @@ import {
   type SceneInput,
 } from '../src/game/scene';
 import { drawnCamera } from '../src/game/chase-camera-testing';
+import {
+  behind,
+  FADE_PROBE_BEHIND_METRES,
+  riderFadeProbe,
+  type RiderFadeReading,
+} from './rider-fade-probe';
 import { retainedFrame } from '../src/game/frame-testing';
 import {
   ROAD_WIDTH_METRES,
@@ -215,6 +221,7 @@ import { buildingPlan, glassPanesOf, onFace, OPENING_RECESS_METRES } from '../sr
 import {
   bicycleTreadOf,
   lapRaceDrawnOf,
+  riderFadeOf,
   riderKitOf,
   compressedRealisticLoaders,
   drawnWorldOf,
@@ -7345,6 +7352,90 @@ async function rideStartProbe(): Promise<RideStartMeasurement> {
   };
 }
 
+/**
+ * **The realistic world arriving mid-ride, drawn at once and prepared first**
+ * — #2663, the browser half of its third criterion.
+ *
+ * A realistic ride's view is made and prepared on the stylised world, which
+ * it draws while the realistic set arrives (#475); a lap race's ten-second
+ * countdown runs meanwhile (#2546). On arrival `GameView` hands the view its
+ * realistic rung, and until #2663 the next shown frame built the realistic
+ * world: every program, every texture's first upload, every buffer, inside
+ * one frame. Two fresh views here, each on its own canvas and so its own
+ * context (`rideStartProbe` says why the GPU process's cache is not a
+ * shortcut), are made at {@link QUALITY_LADDER}'s top, prepared and drawn on
+ * the stylised world, and then handed {@link REALISTIC_LADDER}'s top:
+ *
+ * - **the control** draws the next {@link RIDE_START_FRAMES} frames at once,
+ *   as `GameView` did before #2663 — the stall, reproduced;
+ * - **the product's order** awaits `prepare` with the next frame first, as
+ *   `GameView` now does, and then draws them.
+ *
+ * ⚠️ **Made at the stylised top, where `GameView` makes it at the realistic
+ * rung with no world loaded.** This page's world is already loaded, and a
+ * view made at a realistic rung would draw it from its first frame. Both
+ * halves take the same step, so the difference between them is `prepare`
+ * alone. Each frame is timed with the GPU awaited; links are counted at
+ * WebGL's own `linkProgram`. A software rasteriser's milliseconds are not the
+ * tablet's: its moving-ride frame check is the measurement of the stall.
+ */
+async function worldArrivalProbe(
+  frameAt: (distance: number) => SceneFrame,
+): Promise<RideStartMeasurement> {
+  const WIDTH = 320;
+  const HEIGHT = 180;
+  const arriving = async (prepared: boolean) =>
+    countingLinks(async (links) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = WIDTH;
+      canvas.height = HEIGHT;
+      const view = threeGameRenderer.create(canvas, QUALITY_LADDER[0] as QualitySettings);
+      view.resize(WIDTH, HEIGHT);
+      const gl = canvas.getContext('webgl2');
+      const parallelCompile = gl?.getExtension('KHR_parallel_shader_compile') != null;
+      // The ride so far: prepared and drawn on the stylised world.
+      await view.prepare(frameAt(0));
+      view.render(frameAt(SWEEP_STEP_METRES));
+      awaitTheGpu(gl);
+      // The arrival, as `GameView` hands it over.
+      view.setQuality(REALISTIC_LADDER[0] as QualitySettings);
+      const beforePrepare = links();
+      const prepareStarted = performance.now();
+      if (prepared) {
+        // As `GameView` does: the next frame it builds is the one it prepares with.
+        await view.prepare(frameAt(2 * SWEEP_STEP_METRES));
+      }
+      const prepareMs = performance.now() - prepareStarted;
+      const linksInPrepare = links() - beforePrepare;
+      const beforeFrames = links();
+      const frameMs: number[] = [];
+      for (let index = 1; index <= RIDE_START_FRAMES; index += 1) {
+        const started = performance.now();
+        view.render(frameAt((index + 2) * SWEEP_STEP_METRES));
+        awaitTheGpu(gl);
+        frameMs.push(performance.now() - started);
+      }
+      const frameLinks = links() - beforeFrames;
+      const world = drawnWorldOf(view);
+      view.destroy();
+      return { parallelCompile, prepareMs, linksInPrepare, frameLinks, frameMs, world };
+    });
+  // The control first, as in `rideStartProbe`.
+  const unprepared = await arriving(false);
+  const prepared = await arriving(true);
+  return {
+    // Both halves drew the realistic world after the swap, or neither measured it.
+    measured: unprepared.world === 'realistic' && prepared.world === 'realistic',
+    parallelCompile: prepared.parallelCompile,
+    linksInPrepare: prepared.linksInPrepare,
+    prepareMs: prepared.prepareMs,
+    preparedLinks: prepared.frameLinks,
+    preparedFrameMs: prepared.frameMs,
+    unpreparedLinks: unprepared.frameLinks,
+    unpreparedFrameMs: unprepared.frameMs,
+  };
+}
+
 /** @see presenceCostProbe */
 export interface PresenceCostMeasurement {
   readonly measured: boolean;
@@ -9034,6 +9125,11 @@ export interface RealisticMeasurement {
   /** #618: what the textures were handed to the GPU as, and the RGBA8 control. @see textureProbe */
   readonly textures: TextureMeasurement;
   /**
+   * #2663: the first frames after the realistic world arrives mid-ride, drawn
+   * at once and after `prepare`. @see worldArrivalProbe
+   */
+  readonly worldArrival: RideStartMeasurement;
+  /**
    * #618: milliseconds from asking for the world to the first realistic frame
    * finished on this machine's GPU — the load, a view, and the frame that
    * uploads what it draws. Published, never asserted: SwiftShader is not the
@@ -9079,6 +9175,14 @@ export interface RealisticMeasurement {
    */
   readonly shoulderRock: number;
   readonly shoulderRockControl: number;
+  /** #2596: a bot held between the camera and the rider, in the realistic world. @see riderFadeProbe */
+  readonly riderFade: RiderFadeReading;
+  /** #2596: the draw calls of the rider alone, and with that bot faded out and whole. */
+  readonly riderFadeCalls: {
+    readonly alone: number;
+    readonly faded: number;
+    readonly whole: number;
+  };
   /**
    * The realistic rider's shadow read off the drawing buffer from straight
    * above, the rider left out so it cannot hide it — #626. `fill` is how much
@@ -11283,6 +11387,7 @@ const NO_REALISTIC: RealisticMeasurement = {
     stylisedFogged: 0,
   },
   textures: NO_TEXTURES,
+  worldArrival: NO_RIDE_START,
   firstFrameMs: 0,
   fallbackWorld: '',
   failedLoad: { loaded: false, offline: false },
@@ -11308,6 +11413,16 @@ const NO_REALISTIC: RealisticMeasurement = {
   crankHeldPixels: 0,
   shoulderRock: 0,
   shoulderRockControl: 0,
+  riderFade: {
+    pixels: 0,
+    bot: { faded: 0, whole: 0 },
+    rider: { faded: 0, whole: 0 },
+    aside: { faded: 0, whole: 0 },
+    beside: { faded: 0, whole: 0 },
+    riderDrawn: 0,
+    frame: { faded: 0, whole: 0 },
+  },
+  riderFadeCalls: { alone: 0, faded: 0, whole: 0 },
   riderShadow: NO_SHADOW_SHAPE,
   riderShadowControl: NO_SHADOW_SHAPE,
   riderShadowBlack: NO_SHADOW_SHAPE,
@@ -12658,6 +12773,38 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   );
   phaseEnds('realistic: road luminance and cranks');
 
+  // #2596: a bot held between the camera and the rider, the realistic bodies'.
+  const riderFade = riderFadeProbe(view, gl, canvas, riding(level, 400));
+  // And what it costs: the draw calls of the rider alone, with that bot faded
+  // out, and with it whole (the control) — a body faded out entirely is not
+  // drawn, and the bicycles' instanced calls are the same either way.
+  const riderFadeCalls = ((): { alone: number; faded: number; whole: number } => {
+    const base = riding(level, 400);
+    const rider = base.markers.find((marker) => marker.kind === 'rider');
+    if (rider === undefined) return { alone: 0, faded: 0, whole: 0 };
+    const alone: SceneFrame = { ...base, scatter: [], markers: [rider] };
+    const withBot: SceneFrame = {
+      ...alone,
+      markers: [rider, behind(rider, FADE_PROBE_BEHIND_METRES, 0)],
+    };
+    let counted = { alone: 0, faded: 0, whole: 0 };
+    countingNonEmptyDrawCalls((calls) => {
+      const of = (frame: SceneFrame): number => {
+        view.render(frame);
+        const before = calls();
+        view.render(frame);
+        return calls() - before;
+      };
+      const faded = of(withBot);
+      riderFadeOf(view, 'off');
+      const whole = of(withBot);
+      riderFadeOf(view, 'fade');
+      counted = { alone: of(alone), faded, whole };
+    });
+    return counted;
+  })();
+  phaseEnds('realistic: rider fade — #2596');
+
   // #626: the rider's shadow from 6 m straight above — nearly: a heading a
   // thousandth of a unit long puts `cameraRig`'s eye and target a few
   // millimetres apart over the rider, and still tells three which way the
@@ -12887,36 +13034,61 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   plainHouse.destroy();
   phaseEnds('realistic: house window');
 
-  // #621, on the same view and the level road.
-  const tint = tintProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: seeded tints');
+  // #2596: the fade is off from the tint probe (#621) to the kit probe (#623),
+  // and for every probe between them: the tints (#621), pavement (#1535), the
+  // mapped side's pavement (#1551), people (#1541), the scenery cyclists
+  // (#2722), levelling (#1547), the tread (#624) and the kit (#623). #621 and
+  // #623 draw a bot and the ghost in the rider's own place under a camera
+  // brought close, which is the space a rider other than the rider's own fades
+  // out of, and they read each rider's colours, so they read them with the fade
+  // off. Of the six between, five draw no rider but the rider's own, which
+  // never fades, so it changes nothing for them; the scenery cyclists' probe
+  // reads where the cyclists are drawn, which the fade would hide when one
+  // passes under the camera, so it too wants the fade off. In a `finally`, so a throw cannot leave every later probe unfaded.
+  // A probe added inside this window runs with the fade off: name it here.
+  riderFadeOf(view, 'off');
+  let tint: ReturnType<typeof tintProbe>;
+  let pavement: ReturnType<typeof pavementProbe>;
+  let mappedPavement: ReturnType<typeof mappedPavementProbe>;
+  let people: ReturnType<typeof peopleProbe>;
+  let sceneryCyclists: ReturnType<typeof sceneryCyclistsProbe>;
+  let levelling: ReturnType<typeof levellingProbe>;
+  let tread: ReturnType<typeof treadProbe>;
+  let kit: ReturnType<typeof kitProbe>;
+  try {
+    // #621, on the same view and the level road.
+    tint = tintProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: seeded tints');
 
-  // #1535, on the same view: a village's pavement, in ambientCG's paving.
-  const pavement = pavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement — #1535');
+    // #1535, on the same view: a village's pavement, in ambientCG's paving.
+    pavement = pavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement — #1535');
 
-  // #1551, on the same view and #1535's village: the pavement on the mapped side.
-  const mappedPavement = mappedPavementProbe(view, gl, canvas);
-  phaseEnds('realistic: pavement on the mapped side — #1551');
+    // #1551, on the same view and #1535's village: the pavement on the mapped side.
+    mappedPavement = mappedPavementProbe(view, gl, canvas);
+    phaseEnds('realistic: pavement on the mapped side — #1551');
 
-  // #1541, on the same view and #1535's village: people, never on the carriageway.
-  const people = peopleProbe(view, gl, canvas);
-  phaseEnds('realistic: people — #1541');
+    // #1541, on the same view and #1535's village: people, never on the carriageway.
+    people = peopleProbe(view, gl, canvas);
+    phaseEnds('realistic: people — #1541');
 
-  // #2722, on the same view: the scenery cyclists, on a winding road.
-  const sceneryCyclists = sceneryCyclistsProbe(view, gl, canvas);
-  phaseEnds('realistic: scenery cyclists — #2722');
+    // #2722, on the same view: the scenery cyclists, on a winding road.
+    sceneryCyclists = sceneryCyclistsProbe(view, gl, canvas);
+    phaseEnds('realistic: scenery cyclists — #2722');
 
-  // #1547, on the same view: the ground under a mapped town, levelled.
-  const levelling = levellingProbe(view);
-  phaseEnds('realistic: a town on the flat — #1547');
+    // #1547, on the same view: the ground under a mapped town, levelled.
+    levelling = levellingProbe(view);
+    phaseEnds('realistic: a town on the flat — #1547');
 
-  // #624, on the same view and the same road.
-  const tread = treadProbe(view, gl, canvas, riding(level, 400));
-  phaseEnds('realistic: the tread — #624');
+    // #624, on the same view and the same road.
+    tread = treadProbe(view, gl, canvas, riding(level, 400));
+    phaseEnds('realistic: the tread — #624');
 
-  // #623, on the same view and the same road.
-  const kit = kitProbe(view, gl, canvas, riding(level, 400));
+    // #623, on the same view and the same road.
+    kit = kitProbe(view, gl, canvas, riding(level, 400));
+  } finally {
+    riderFadeOf(view, 'fade');
+  }
   phaseEnds('realistic: the kit — #623');
 
   // #620, on the same view and the same road; then what a whole wooded frame
@@ -13073,6 +13245,13 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   view.destroy();
   phaseEnds('realistic: a room of other riders — #783');
 
+  // #2663: the world arriving mid-ride, on fresh views — the valley's wooded
+  // stretch, every frame lent as `GameView`'s are.
+  const worldArrival = await worldArrivalProbe((distance) =>
+    riding(valleyRoute(), 900 + distance, lentSceneFrame),
+  );
+  phaseEnds('realistic: the world arriving mid-ride — #2663');
+
   console.log(
     `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
       `${stylisedFrameMs.toFixed(1)} ms stylised (SwiftShader); ${String(drawCalls)} draw calls; ` +
@@ -13096,6 +13275,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     waterReflection,
     waterReflectsAfterStepDown,
     textures,
+    worldArrival,
     firstFrameMs,
     fallbackWorld,
     failedLoad: failed.loaded
@@ -13123,6 +13303,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     crankHeldPixels: pixelsChanged(turned, held),
     shoulderRock,
     shoulderRockControl,
+    riderFade,
+    riderFadeCalls,
     riderShadow: riderShadow.shape,
     riderShadowControl: riderShadow.control,
     riderShadowBlack: riderShadow.black,
