@@ -517,6 +517,24 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     expect(JSON.stringify(directed.asked.inputs)).not.toMatch(/latitude|longitude/);
     expect(directed.asked.inputs[0]).toMatchObject({ pacerWPerKg: 2.9, plan: 'rolling' });
     expect(directed.asked.inputs.at(-1)).toMatchObject({ plan: 'climber', intent: 'lift' });
+    // #2760: the consent names the new data, and the state carries the
+    // rider's own sensors from the shipped frame loop — cadence and heart
+    // rate as the port reads them, the HUD's 3 s power — and the model's own
+    // last line. No threshold is set on this port, so no zone is guessed.
+    expect(directed.consentText).toContain('cadence');
+    expect(directed.consentText).toContain('heart rate');
+    expect(directed.asked.inputs[0]).not.toHaveProperty('recentLines');
+    const last = directed.asked.inputs.at(-1);
+    // The double says the same line every time; the last three are sent back.
+    expect(last).toMatchObject({
+      cadenceRpm: 88,
+      heartRateBpm: 142,
+      recentLines: [LINE, LINE, LINE],
+    });
+    expect(last?.rider3sWPerKg).toBeGreaterThan(0);
+    expect(last).not.toHaveProperty('powerZone');
+    expect(last).not.toHaveProperty('heartRateZone');
+    expect(last).not.toHaveProperty('aboveThresholdS');
   });
 
   it('reaches no trainer write in simulation mode: the grade at the rider’s own odometer, the defaults, and the same release', async () => {

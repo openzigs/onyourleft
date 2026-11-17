@@ -10,6 +10,7 @@ import {
   MODEL_PACER_INPUT_MOST_CHARACTERS,
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
+  MODEL_PACER_RECENT_LINES,
   MODEL_PACER_SAY_MOST_CHARACTERS,
   modelPacerAnswerSchema,
   PACER_INTENTS,
@@ -164,6 +165,80 @@ describe('the pacer state the model is shown — ADR 0072 D-3', () => {
       plan: 'x'.repeat(MODEL_PACER_INPUT_MOST_CHARACTERS),
     });
     expect(long.ok ? undefined : long.problem.field).toBe('input');
+  });
+});
+
+/** The same state with every sensor live and three lines said — #2760. */
+const SENSED: ModelPacerInput = {
+  ...STATE,
+  rider3sWPerKg: 2.6,
+  riderMinuteWPerKg: 2.4,
+  powerZone: 'Tempo',
+  powerTrend: 'fading',
+  aboveThresholdS: 0,
+  cadenceRpm: 62,
+  heartRateBpm: 151,
+  heartRateZone: 'Endurance',
+  heartRateTrend: 'rising',
+  recentLines: ['Nice and steady.', 'Find a lighter gear here.', 'Stay with me.'],
+};
+
+describe('the rider’s own sensors, in the state — #2760', () => {
+  it('reads a state with every sensor, and one with none of them', () => {
+    expect(readModelPacerInput(SENSED)).toEqual({ ok: true, value: SENSED });
+    expect(readModelPacerInput({ ...STATE, cadenceRpm: 90 })).toEqual({
+      ok: true,
+      value: { ...STATE, cadenceRpm: 90 },
+    });
+    expect(readModelPacerInput(STATE).ok).toBe(true);
+  });
+
+  it.each([
+    ['rider3sWPerKg', 41],
+    ['rider3sWPerKg', null],
+    ['riderMinuteWPerKg', -0.1],
+    ['powerZone', 'Zone 9'],
+    ['powerZone', 'Threshold heart'],
+    ['powerTrend', 'falling'],
+    ['aboveThresholdS', 2.5],
+    ['cadenceRpm', 88.5],
+    ['cadenceRpm', 251],
+    ['heartRateBpm', 19],
+    ['heartRateBpm', null],
+    ['heartRateZone', 'Sprint'],
+    ['heartRateTrend', 'fading'],
+    ['recentLines', []],
+    ['recentLines', 'Nice and steady.'],
+    ['recentLines', ['']],
+    ['recentLines', ['Hold 300 watts.']],
+    ['recentLines', ['Lat 51.5074 is home.']],
+    ['recentLines', ['a', 'b', 'c', 'd']],
+    ['recentLines', [7]],
+  ])('refuses a bad %s (%j), naming the field and never the value', (field, value) => {
+    const read = readModelPacerInput({ ...SENSED, [field]: value });
+    expect(read.ok).toBe(false);
+    expect(read.ok ? undefined : read.problem.field).toBe(`input.${field}`);
+    expect(JSON.stringify(read)).not.toContain('51.5074');
+  });
+
+  it('fits a state with every sensor and the longest lines inside the cap', () => {
+    const longest = '"'.repeat(MODEL_PACER_SAY_MOST_CHARACTERS - 1) + 'a';
+    expect(pacerSayProblem(longest)).toBeUndefined();
+    const widest: ModelPacerInput = {
+      ...SENSED,
+      riderGapM: -999_999.9,
+      gradeAheadPct: -99.9,
+      toFinishM: 999_999,
+      rideS: 86_399,
+      secondsInIntent: 86_399,
+      aboveThresholdS: 86_399,
+      riderWPerKg: 39.9,
+      rider3sWPerKg: 39.9,
+      riderMinuteWPerKg: 39.9,
+      recentLines: Array.from({ length: MODEL_PACER_RECENT_LINES }, () => longest),
+    };
+    expect(JSON.stringify(widest).length).toBeLessThanOrEqual(MODEL_PACER_INPUT_MOST_CHARACTERS);
+    expect(readModelPacerInput(widest).ok).toBe(true);
   });
 });
 

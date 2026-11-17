@@ -2200,8 +2200,10 @@ model server was sent nothing.
 [ADR 0072](adr/0072-a-model-directs-the-bot-pacer-during-a-ride.md). A device riding with an AI pacer
 asks `POST /v1/analysis/pacer/decide` with `{ input }`, `@onyourleft/domain` §`ModelPacerInput`
 (the pacer's W/kg, plan, intent and the seconds held, the rider's gap, W/kg and draft, the grade
-ahead, the metres to the finish, the seconds ridden — no coordinate, no name, at most 1 024
-characters), through the same gates, consent, slot and rate limit as a tactics decision
+ahead, the metres to the finish, the seconds ridden; since #2760, each only when its sensor is
+live, the rider's 3 s and last-minute power with its zone, trend and seconds at or above threshold,
+cadence, and heart rate with its zone and trend, and up to three of the model's own last lines —
+no coordinate, no name, at most 2 048 characters), through the same gates, consent, slot and rate limit as a tactics decision
 (`analysis/tactics.ts` §`pace`), and one call with `pacer-prompt.ts`'s body: no tools, `think:
 false`, `format` §`modelPacerAnswerSchema`. The answer is read by §`readModelPacerAnswer` — a plan
 and an intent from closed lists and one line screened by §`pacerSayProblem` (80 characters, no

@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import { syncWorld } from '../sync/sync-testing.ts';
-import { PACER_SYSTEM } from './pacer-prompt.ts';
+import { PACER_SYSTEM, PACER_TEMPERATURE } from './pacer-prompt.ts';
 import {
   ATTACK,
   chatServer,
@@ -74,6 +74,52 @@ describe('an AI-pacer decision, read back as the app reads it (#2712)', () => {
     const format = JSON.stringify(body.format);
     expect(format).toContain('"enum":["rolling","even","climber"]');
     expect(format).not.toMatch(/watt|power|resistance|erg/i);
+  });
+
+  it('passes the rider’s own sensors and the model’s last lines to the model, asking for varied coaching — #2760', async () => {
+    const server = chatServer(() => PACER_ANSWER);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    const sensed = {
+      ...PACER_INPUT,
+      rider3sWPerKg: 3.4,
+      riderMinuteWPerKg: 3.1,
+      powerZone: 'VO₂',
+      powerTrend: 'rising',
+      aboveThresholdS: 75,
+      cadenceRpm: 58,
+      heartRateBpm: 168,
+      heartRateZone: 'Threshold',
+      heartRateTrend: 'rising',
+      recentLines: ['Nice and steady, stay on my wheel.'],
+    };
+    expect((await pace(w, riders[0]!.token, { input: sensed })).status).toBe(200);
+
+    const body = server.requests[0]?.body as {
+      messages: { content: string }[];
+      options: { temperature: number };
+    };
+    expect(JSON.parse(body.messages[1]!.content)).toEqual(sensed);
+    expect(body.options.temperature).toBe(PACER_TEMPERATURE);
+    expect(PACER_TEMPERATURE).toBeGreaterThan(0);
+    for (const field of ['cadenceRpm', 'heartRateTrend', 'aboveThresholdS', 'recentLines']) {
+      expect(PACER_SYSTEM).toContain(`"${field}"`);
+    }
+    expect(PACER_SYSTEM).toMatch(/lighter gear/);
+    expect(PACER_SYSTEM).toMatch(/Never repeat/);
+    expect(PACER_SYSTEM).toMatch(/never as a health matter/);
+  });
+
+  it('refuses a state whose last lines carry what the screen stops, before a model is called — #2760', async () => {
+    const server = chatServer(() => PACER_ANSWER);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    const placed = await pace(w, riders[0]!.token, {
+      input: { ...PACER_INPUT, recentLines: ['Home is at 51.5074 north.'] },
+    });
+    expect(codeOf(placed)).toBe('validation_failed');
+    expect(JSON.stringify(placed.body)).not.toContain('51.5074');
+    expect(server.requests).toEqual([]);
   });
 
   it('is no decision for an answer with a power in it, a bad line or a bot move; no answer is a failure', async () => {

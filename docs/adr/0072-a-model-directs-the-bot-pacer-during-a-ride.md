@@ -367,3 +367,43 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   holding one malformed, is dropped whole. Read D-5.1's inputs as the route, the plan, the position,
   the wind and the log; `apps/web/src/game/model-pacer-replay.test.tsx` replays a saved ride from
   them, step for step.
+- **2026-11-17** — **The model is shown the rider's own sensors and its own last lines
+  ([#2760](https://github.com/openzigs/onyourleft/issues/2760)).** On the first tablet ride the
+  owner ruled: *"the messages did change. Did not vary much. Also AI should analyze my ride and
+  stats and offer suggestions based on cadence, heart rate, power etc if the stats are
+  available"*. So D-3.4's input is wider, and nothing else in D-1 to D-9 moves:
+  - **What is added to `ModelPacerInput`**, each field **left out when its sensor is not live**,
+    never guessed or zeroed: the rider's W/kg over 3 s (the HUD's average) and over the last
+    minute; its zone, and the whole seconds held at or above threshold, **only of a threshold
+    power the rider set**; whether it is rising, steady or fading over the last minute; cadence
+    in whole rpm; heart rate in whole bpm, its zone **only of a threshold heart rate the rider
+    set**, and whether it is rising, steady or falling. A zone is named by its name in
+    `analysis/zones.ts`. Every one is a number or a word from a closed list, so D-3.4's *no
+    coordinate, no place name, no rider name, no date, no identifier* still holds, and the
+    instance still refuses any key it does not name. The cap is 2 048 characters, from 1 024.
+  - **The model's own last three lines** (`recentLines`) ride in the input so it does not repeat
+    itself. This narrows D-4.4's *"Never kept"* by exactly this: the device holds the last three
+    shown lines **in memory for the ride** and sends them back, sealed, to the same instance's
+    own model with the next asks. They are still never stored, logged or synced; the decision
+    log holds no text; the instance keeps neither the question nor the answer. Each line is read
+    again on the instance by `pacerSayProblem` before any model call, so a line the screen would
+    stop cannot ride back in.
+  - **The prompt is `pacer-2`** (`PACER_PROMPT_VERSION`): coach from what the rider is doing, one
+    thing at a time (ease after a long stretch above threshold, a lighter gear for a low cadence on
+    a climb, a pacing note for power fading against heart rate, encouragement when steady), vary
+    the words, and name heart rate only as effort, never as a health matter. **The temperature is
+    0.7** (`PACER_TEMPERATURE`), above 0 as #2760 asks; it was 0.7 already, and on the owner's PC
+    0.9 varied the lines little more and kept them less on what the rider was doing.
+  - **What does not move.** D-4.2's screen is the same function and the same rules, R-4's *no
+    digits* among them, so a line with a digit voids the answer as before, and the prompt still
+    asks for no number in any form. Whether coaching may carry cadence and power digits is a
+    change to R-4 that #2760 puts to the owner; until the owner rules it stays as it is. The data goes
+    only to the rider's own instance's local model (D-8.1); D-6's trainer guarantee and its
+    tests are unmodified.
+  - **The consent wording (D-1.3) names the new data** — cadence and heart rate, how they trend,
+    their zones, and the pacer's last lines — as does `docs/privacy-policy.md`. It is draft
+    wording for the owner to approve from screenshots, so R-8 stays open.
+  - **A device and an instance on either side of this change.** An instance from before it refuses
+    a state carrying any new field (`validation_failed`), which the device reads as a refusal:
+    the ride's asks end and the pacer rides #92's rule (D-7). Nothing is lost, and nothing reaches
+    the model; deploy the instance first.
