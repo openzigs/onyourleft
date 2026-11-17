@@ -159,7 +159,7 @@ describe('Backups over the real instance — #2607', () => {
     await until(() => rows().length === 4);
     expect(rows()).toHaveLength(4);
     expect(rows()[0]).toContain(served.snapshot);
-    expect(rows()[0]).toContain('asked for by the owner');
+    expect(rows()[0]).toContain('asked for from the app');
     expect(text()).not.toContain(BACKUP_WAITING_TEXT);
     expect(backUpNowButton()).toBeDefined();
     // Nothing waits, so nothing is read again.

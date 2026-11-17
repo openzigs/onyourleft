@@ -55,7 +55,7 @@ const withFacts = (record: OperateBackup) => ({
 });
 
 const PINNED_LINES = [
-  '2026-11-14 20:00 UTC, 1 hour ago, asked for by the owner: 3.4 GB, 48213 rows, 1204 blobs; off-box copy made. snapshot-2026-11-14T20-00-00-000Z',
+  '2026-11-14 20:00 UTC, 1 hour ago, asked for from the app: 3.4 GB, 48213 rows, 1204 blobs; off-box copy made. snapshot-2026-11-14T20-00-00-000Z',
   '2026-11-14 18:00 UTC, 3 hours ago: no snapshot was made (ENOSPC).',
   '2026-11-14 12:00 UTC, 9 hours ago: 3.4 GB, 48100 rows, 1200 blobs; off-box copy FAILED. snapshot-2026-11-14T12-00-00-000Z',
 ];

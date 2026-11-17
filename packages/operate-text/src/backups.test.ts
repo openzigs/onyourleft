@@ -111,7 +111,7 @@ describe('a record’s line, its facts and the restore steps (#2647)', () => {
     });
     expect(done.moment).toBe('2026-11-14 18:00 UTC');
     expect(text(done.rest)).toBe(
-      ', 3 hours ago, asked for by the owner, a one-off: 48 MB, 1 row, 2 blobs; off-box copy FAILED. snapshot-a',
+      ', 3 hours ago, asked for from the app, a one-off: 48 MB, 1 row, 2 blobs; off-box copy FAILED. snapshot-a',
     );
     const failed = backupLine({
       outcome: 'failed',

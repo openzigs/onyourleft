@@ -137,7 +137,7 @@ export function backupLine(backup: OperateBackupLine): {
   if (backup.outcome === 'failed') {
     return { moment, rest: [`, ${age}: no snapshot was made (`, { code: backup.error }, ').'] };
   }
-  const asked = backup.requested ? ', asked for by the owner' : '';
+  const asked = backup.requested ? ', asked for from the app' : '';
   const oneOff = backup.intervalSeconds === null ? ', a one-off' : '';
   return {
     moment,
