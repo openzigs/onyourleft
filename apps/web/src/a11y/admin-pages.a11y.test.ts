@@ -33,6 +33,7 @@ import {
   SCRIPTED_ANALYSIS,
   SCRIPTED_BACKUPS,
   SCRIPTED_KEYS,
+  SCRIPTED_PROBLEMS,
   SCRIPTED_ROOMS,
   SCRIPTED_JOBS,
   SCRIPTED_MODELS,
@@ -100,6 +101,11 @@ interface AdminPages {
   backupsBody(view: BackupsView): string;
   roomsBody(view: RoomsView): string;
   keysBody(view: KeysView): string;
+  problemsBody(view: {
+    readonly problems:
+      | { readonly since: string; readonly lines: readonly { at: string; line: string }[] }
+      | undefined;
+  }): string;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`KeysView` (#2650). */
@@ -592,6 +598,46 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       () => keysPage('passkey', { keys: { state: 'no-keys', current: null, olderHeld: 0 } }),
     ],
     ['unreadable', () => keysPage('passkey', { keys: undefined })],
+  ],
+  '/admin/problems': [
+    [
+      'three lines, one holding markup',
+      () =>
+        pages.shellPage(
+          shell('/admin/problems'),
+          'Recent problems',
+          pages.problemsBody({
+            problems: {
+              since: '2026-11-14T08:00:00.000Z',
+              lines: [
+                ...SCRIPTED_PROBLEMS.map(({ at, line }) => ({ at, line })),
+                {
+                  at: '2026-11-14T21:00:00.000Z',
+                  line: '{"event":"request","route":"/v1/<script>x</script>","status":500}',
+                },
+              ],
+            },
+          }),
+        ),
+    ],
+    [
+      'none since the start, an awkward name',
+      () =>
+        pages.shellPage(
+          shell('/admin/problems', AWKWARD_NAME),
+          'Recent problems',
+          pages.problemsBody({ problems: { since: '2026-11-14T08:00:00.000Z', lines: [] } }),
+        ),
+    ],
+    [
+      'unreadable',
+      () =>
+        pages.shellPage(
+          shell('/admin/problems'),
+          'Recent problems',
+          pages.problemsBody({ problems: undefined }),
+        ),
+    ],
   ],
   '/admin/analysis': [
     ['a code session: reads only', () => analysisPage('code')],

@@ -35,6 +35,12 @@
  */
 
 import {
+  noProblemsText,
+  PROBLEMS_HELD_TEXT,
+  PROBLEMS_UNREADABLE_TEXT,
+  problemSentence,
+  problemsSinceText,
+  RAW_LINE_LABEL,
   KEYS_CARD_TEXT,
   KEYS_CLI_COMMANDS,
   KEYS_CLI_TEXT,
@@ -1394,4 +1400,62 @@ ${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${rota
 <ul class="cli">
 ${cli}
 </ul>`;
+}
+
+/** One problem line as `GET /v1/operate/logs` answers it (#2651): already through the log's redaction. */
+export interface ProblemAnswer {
+  /** ISO 8601, UTC. */
+  readonly at: string;
+  /** The JSON line exactly as standard output got it. */
+  readonly line: string;
+}
+
+/** What the Recent problems page draws: the route's read, or `undefined` when it did not come. */
+export interface ProblemsView {
+  readonly problems:
+    { readonly since: string; readonly lines: readonly ProblemAnswer[] } | undefined;
+}
+
+/** A line's fields, parsed as the app's port parses them: an object, or none. */
+function fieldsOf(line: string): Readonly<Record<string, unknown>> {
+  try {
+    const parsed: unknown = JSON.parse(line);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The Recent problems page's body (#2651): what `GET /v1/operate/logs`
+ * answered, newest first, each line in the app panel's words
+ * (`@onyourleft/operate-text` §`problemSentence`) and, under a disclosure,
+ * the line exactly as the route gave it — escaped by `html.ts`, with no
+ * redaction of this page's own and no second source. Read-only.
+ */
+export function problemsBody(view: ProblemsView): string {
+  const held = `<p class="hint">${escapeHtml(PROBLEMS_HELD_TEXT)}</p>`;
+  if (view.problems === undefined) {
+    return `<p class="problem">${escapeHtml(PROBLEMS_UNREADABLE_TEXT)}</p>\n${held}`;
+  }
+  const since = momentText(view.problems.since);
+  if (view.problems.lines.length === 0) {
+    return `<p>${escapeHtml(noProblemsText(since))}</p>\n${held}`;
+  }
+  const items = view.problems.lines.map(
+    (problem) => `<li>
+<p><strong>${escapeHtml(momentText(problem.at))}</strong>: ${escapeHtml(problemSentence(fieldsOf(problem.line)))}</p>
+<details>
+<summary>${escapeHtml(RAW_LINE_LABEL)}</summary>
+<code>${escapeHtml(problem.line)}</code>
+</details>
+</li>`,
+  );
+  return `<p>${escapeHtml(problemsSinceText(since))}</p>
+<ol class="log problems">
+${items.join('\n')}
+</ol>
+${held}`;
 }

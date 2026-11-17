@@ -159,6 +159,7 @@ import {
   analysisBody,
   backupsBody,
   keysBody,
+  problemsBody,
   roomsBody,
   isSaveProblem,
   logBody,
@@ -171,6 +172,8 @@ import {
   type BackupsNotice,
   type BackupsView,
   type KeysNotice,
+  type ProblemAnswer,
+  type ProblemsView,
   type RoomAnswer,
   type AnalysisNotice,
   type AnalysisOffer,
@@ -659,6 +662,23 @@ function roomsOf(answer: unknown): readonly RoomAnswer[] | undefined {
     });
   }
   return rooms;
+}
+
+/**
+ * The problem lines as the route answered them (#2651), each held to its two
+ * fields — or `undefined` for an answer not in that shape. Nothing of a line
+ * is changed here: the route's redaction is the only one (#2601's decision).
+ */
+function problemsOf(answer: unknown): ProblemsView['problems'] {
+  const body = (answer ?? {}) as { since?: unknown; lines?: unknown };
+  if (typeof body.since !== 'string' || !Array.isArray(body.lines)) return undefined;
+  const lines: ProblemAnswer[] = [];
+  for (const each of body.lines) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    if (typeof row.at !== 'string' || typeof row.line !== 'string') return undefined;
+    lines.push({ at: row.at, line: row.line });
+  }
+  return { since: body.since, lines };
 }
 
 /** A refusal's own sentence, as the route wrote it, or `null`. */
@@ -1261,6 +1281,19 @@ export function createAdmin(options: AdminOptions): Admin {
       const shell = await shellOf(path, session);
       const view = { caller: callerOf(owner, session), client, seam };
       if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/problems') {
+        // #2651: `GET /v1/operate/logs`, read as the owner on every load; read-only.
+        const problems = problemsOf(
+          await read(view.seam, '/v1/operate/logs', view.caller, view.client),
+        );
+        let body: string;
+        try {
+          body = problemsBody({ problems });
+        } catch {
+          body = problemsBody({ problems: undefined });
+        }
+        return adminResponse(shellPage(shell, 'Recent problems', body), 200, HTML);
+      }
       if (path === '/admin/keys') {
         return adminResponse(
           await keysPage(shell, session.record.strength, listener === 'loopback', () => null),
