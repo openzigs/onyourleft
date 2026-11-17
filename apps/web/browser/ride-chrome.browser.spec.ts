@@ -28,6 +28,13 @@
  *   the issue asks for).
  * - In a lap race the standings still clear the actions panel by #2599's
  *   16 px with the trainer's line tucked away, or with the standings.
+ * - **A fade, not a pop** (the owner's report of 2026-11-17 from the tablet,
+ *   *"Not a fade just a pop"*): sampled mid-fade off the page's own
+ *   animations, the controls in the lined actions panel go out over
+ *   `HUD_CONTROLS_FADE_MS.out` with no step, the panel is not clipped until
+ *   they have, its clip then closes over `--oyl-motion-medium` with no step,
+ *   and they come back over `HUD_CONTROLS_FADE_MS.in` — at the owner's tablet
+ *   and a 1024×600 window. Under reduced motion none of it animates.
  *
  * Each case opens its own page: a panel tucked or a control hidden is state a
  * shared page would carry into the next case.
@@ -35,7 +42,9 @@
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
+import { HUD_CONTROLS_FADE_MS, MOTION_DURATION_MS } from '../src/design/tokens';
 import {
+  LAPTOP_VIEWPORTS,
   TABLET_VIEWPORTS,
   inside,
   layoutFaults,
@@ -80,7 +89,7 @@ async function ride(
 }
 
 /**
- * The fade, and the hold before the clip, run to their end. A CSS animation
+ * The fade, the hold before the clip and its closing, run to their end. A CSS animation
  * runs on the page's own clock, which `page.clock` does not drive, so this
  * waits for them as the page reports them rather than for a guessed time.
  */
@@ -164,6 +173,206 @@ function tabFaults(seen: readonly TabSeen[], viewport: Viewport): string[] {
   });
   return faults;
 }
+
+/** One moment of the fade, read off the page with its animations held there. */
+interface FadeSample {
+  readonly atMs: number;
+  /** *Pause*'s opacity as drawn: its own times every ancestor's. */
+  readonly opacity: number;
+  /** Whether *Pause*'s middle still hit-tests inside the actions panel (not clipped). */
+  readonly pauseInPanel: boolean;
+  /** How far down from its top the actions panel is drawn, by hit-testing its middle column. */
+  readonly drawnHeight: number;
+  /** The panel's own height, and the trainer's line's bottom below its top. */
+  readonly panelHeight: number;
+  readonly lineBottom: number;
+}
+
+/**
+ * Hold every animation in the actions panel at each of `atMs` in turn and read
+ * what a rider would see then. A CSS animation runs on the page's own clock,
+ * not `page.clock`'s, so they are paused and seeked rather than waited for.
+ */
+async function sampleFade(page: Page, atMs: readonly number[]): Promise<FadeSample[]> {
+  return page.evaluate((times) => {
+    const panel = document.querySelector('.oyl-hud__actions');
+    const pause = document.querySelector('.oyl-hud__controls button');
+    const line = document.querySelector('.oyl-hud__actions > .oyl-hud__trainer');
+    if (panel === null || pause === null) throw new Error('no actions panel or no Pause');
+    const animations = panel.getAnimations({ subtree: true });
+    for (const each of animations) each.pause();
+    const drawnOpacity = (element: Element): number => {
+      let opacity = 1;
+      for (let at: Element | null = element; at !== null; at = at.parentElement) {
+        opacity *= Number(getComputedStyle(at).opacity);
+      }
+      return opacity;
+    };
+    const inPanel = (x: number, y: number): boolean => {
+      const hit = document.elementFromPoint(x, y);
+      return hit !== null && panel.contains(hit);
+    };
+    const samples = times.map((atMs) => {
+      for (const each of animations) each.currentTime = atMs;
+      const box = panel.getBoundingClientRect();
+      const pauseBox = pause.getBoundingClientRect();
+      const x = box.left + box.width / 2;
+      let drawnHeight = 0;
+      for (let y = box.top + 1; y < box.bottom; y += 1) {
+        if (inPanel(x, y)) drawnHeight = y - box.top + 1;
+      }
+      return {
+        atMs,
+        opacity: drawnOpacity(pause),
+        pauseInPanel: inPanel(
+          pauseBox.left + pauseBox.width / 2,
+          pauseBox.top + pauseBox.height / 2,
+        ),
+        drawnHeight,
+        panelHeight: box.height,
+        lineBottom: line === null ? 0 : line.getBoundingClientRect().bottom - box.top,
+      };
+    });
+    for (const each of animations) each.finish();
+    return samples;
+  }, atMs);
+}
+
+/** `0, step, 2 × step, …, end`. */
+function steps(start: number, end: number, step: number): number[] {
+  const out: number[] = [];
+  for (let at = start; at < end; at += step) out.push(at);
+  out.push(end);
+  return out;
+}
+
+/** Every place one sample to the next does not move the way `by` says, as lines. */
+function stepFaults(
+  samples: readonly FadeSample[],
+  read: (sample: FadeSample) => number,
+  direction: 'falls' | 'rises',
+  largestStep: number,
+): string[] {
+  const faults: string[] = [];
+  samples.slice(1).forEach((sample, index) => {
+    const before = samples[index];
+    if (before === undefined) return;
+    const change = read(sample) - read(before);
+    const moved = direction === 'falls' ? -change : change;
+    const where = `${String(before.atMs)}→${String(sample.atMs)} ms`;
+    if (moved <= 0) faults.push(`${where}: held at ${read(sample).toFixed(3)}`);
+    if (moved > largestStep) faults.push(`${where}: a step of ${moved.toFixed(3)}`);
+  });
+  return faults;
+}
+
+/** The owner's tablet, and the 1024×600 window the owner's report names beside it. */
+const FADE_VIEWPORTS: readonly Viewport[] = [
+  ...TABLET_VIEWPORTS.filter((each) => each.width === 1280 && each.height === 800),
+  ...LAPTOP_VIEWPORTS.filter((each) => each.width === 1024 && each.height === 600),
+];
+
+for (const viewport of FADE_VIEWPORTS) {
+  test(`#2600 the controls fade out and back in, and the lined actions panel closes only after, with no step — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await ride(browser, viewport, '?controls=hide', true);
+    const out = HUD_CONTROLS_FADE_MS.out;
+    const close = MOTION_DURATION_MS.medium;
+    await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
+    await expect(page.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'hidden');
+    // One reading of the page, held at each moment in turn: the fade, and the
+    // clip's closing after it.
+    const samples = await sampleFade(page, [
+      ...steps(0, out, 100),
+      ...steps(out, out + close, close / 4).slice(1),
+    ]);
+    const fading = samples.filter((each) => each.atMs <= out);
+    const where = sized(viewport);
+    expect(fading[0]?.opacity, `drawn at the start, ${where}`).toBeGreaterThan(0.99);
+    expect(fading.at(-1)?.opacity, `gone at the end, ${where}`).toBeLessThan(0.01);
+    // A fade: every 100 ms lower than the last, and none of them most of it.
+    expect(
+      stepFaults(fading, (each) => each.opacity, 'falls', 0.5),
+      where,
+    ).toEqual([]);
+    // Halfway through it is still there to see.
+    const half = fading.find((each) => each.atMs === out / 2);
+    expect(half?.opacity, `halfway, ${where}`).toBeGreaterThan(0.02);
+    expect(half?.opacity, `halfway, ${where}`).toBeLessThan(0.9);
+    // Nothing is clipped while anything can be seen: the panel is whole.
+    expect(
+      fading.filter((each) => !each.pauseInPanel).map((each) => each.atMs),
+      `clipped mid-fade, ${where}`,
+    ).toEqual([]);
+    for (const each of fading) {
+      expect(each.drawnHeight, `${String(each.atMs)} ms, ${where}`).toBeGreaterThan(
+        each.panelHeight - 2,
+      );
+    }
+
+    // Then the clip closes up to the trainer's line, a little at a time.
+    const closing = samples.filter((each) => each.atMs >= out);
+    const first = closing[0];
+    const last = closing.at(-1);
+    if (first === undefined || last === undefined) throw new Error('no samples');
+    expect(first.drawnHeight, where).toBeGreaterThan(first.panelHeight - 2);
+    expect(last.lineBottom, `the trainer's line, ${where}`).toBeGreaterThan(0);
+    expect(last.drawnHeight, where).toBeGreaterThanOrEqual(last.lineBottom - 1);
+    expect(last.drawnHeight, where).toBeLessThan(last.panelHeight * 0.75);
+    expect(last.pauseInPanel, `Pause still under a finger, ${where}`).toBe(false);
+    expect(
+      stepFaults(
+        closing,
+        (each) => each.drawnHeight,
+        'falls',
+        0.75 * (first.drawnHeight - last.drawnHeight),
+      ),
+      where,
+    ).toEqual([]);
+
+    // A touch brings them back, and they fade in rather than appear.
+    await page.touchscreen.tap(viewport.width / 2, viewport.height / 2);
+    await expect(page.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'shown');
+    const back = HUD_CONTROLS_FADE_MS.in;
+    const returning = await sampleFade(page, steps(0, back, back / 5));
+    expect(returning[0]?.opacity, where).toBeLessThan(0.01);
+    expect(returning.at(-1)?.opacity, where).toBeGreaterThan(0.99);
+    expect(
+      stepFaults(returning, (each) => each.opacity, 'rises', 0.75),
+      where,
+    ).toEqual([]);
+    expect(returning.every((each) => each.pauseInPanel)).toBe(true);
+    await page.context().close();
+  });
+}
+
+test('#2600 under reduced motion the controls go at once, with no fade and no closing', async ({
+  browser,
+}) => {
+  const [viewport] = FADE_VIEWPORTS;
+  if (viewport === undefined) throw new Error('no viewport');
+  const context = await browser.newContext({ hasTouch: true, reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  await page.clock.install();
+  await openRide(page, viewport, '?controls=hide');
+  await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
+  await expect(page.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'hidden');
+  // No fade and no closing: none of `theme.css` §"#2600"'s animations runs.
+  // (The stylesheet-wide collapse still gives every change a 0.01 ms
+  // transition, which is a switch rather than motion.)
+  const running = await page.locator('.oyl-hud__actions').evaluate((panel) =>
+    panel
+      .getAnimations({ subtree: true })
+      .filter((each) => each instanceof CSSAnimation)
+      .map((each) => each.animationName),
+  );
+  expect(running).toEqual([]);
+  await expect
+    .poll(async () => (await sampleFade(page, [0]))[0])
+    .toMatchObject({ opacity: 0, pauseInPanel: false });
+  await context.close();
+});
 
 for (const viewport of TABLET_VIEWPORTS) {
   test(`#2600 hidden, the controls are faded, and the first touch shows them and presses nothing — ${viewport.name}`, async ({

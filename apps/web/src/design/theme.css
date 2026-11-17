@@ -199,6 +199,10 @@
   --oyl-motion-short: 120ms;
   --oyl-motion-medium: 200ms;
   --oyl-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  /* The ride controls' fade (#2600, ADR 0075): the two durations above the
+     200 ms cap, read under `.oyl-hud[data-oyl-controls…]` and nowhere else. */
+  --oyl-motion-hud-fade-out: 800ms;
+  --oyl-motion-hud-fade-in: 250ms;
 
   /*
    * The body face — #992. Every word that is not a view's title or
@@ -14146,12 +14150,20 @@ select.oyl-input {
  * #2600: THE RIDE CONTROLS FADE UNTIL TOUCHED, AND A PANEL TUCKS AWAY.
  *
  * HIDDEN, every control that hides (`controls-reveal.ts` §`HIDES_ATTRIBUTE`)
- * FADES out over `--oyl-motion-medium`, and fades back in over
- * `--oyl-motion-short` when the screen is touched (never on the ride's first
- * frame: an element mid-fade is painted in its own layer, over a reading a
- * phone lifts beside the controls) — the owner's ruling of
- * 2026-11-16 on PR #2670, *"Fade out is better"*. With no trainer's line in
- * it, the actions panel fades with them, its surface too.
+ * FADES out over `--oyl-motion-hud-fade-out`, and fades back in over
+ * `--oyl-motion-hud-fade-in` when the screen is touched (never on the ride's
+ * first frame: an element mid-fade is painted in its own layer, over a reading
+ * a phone lifts beside the controls) — the owner's ruling of 2026-11-16 on PR
+ * #2670, *"Fade out is better"*. With no trainer's line in it, the actions
+ * panel fades with them, its surface too.
+ *
+ * ⚠️ **The two fade tokens are the ride's, not the menus'.** The owner's
+ * report of 2026-11-17 from the tablet, *"Not a fade just a pop"*: over
+ * `--oyl-motion-medium`'s 200 ms the controls read as gone at once. ADR 0075
+ * lifts ADR 0041 D-5's 200 ms cap for these two tokens and nothing else, and
+ * `theme.a11y.test.ts` §"no motion runs longer than 200 ms" holds them to the
+ * rules here: each at its own number and read nowhere but under
+ * `.oyl-hud[data-oyl-controls…]`.
  *
  * ⚠️ **Opaque or not drawn, never see-through at rest.** `opacity` is admitted
  * in the HUD here and nowhere else (`hud-surface.a11y.test.ts`, ADR 0063's
@@ -14160,40 +14172,52 @@ select.oyl-input {
  * not read; while it is drawn it is the opaque control the contrast walk
  * checks. Between the two there is only the fade itself.
  *
- * When the fade has run, the actions panel is CLIPPED to the trainer's line at
- * its top (`--oyl-hud-actions-kept`, measured by `HudCore.tsx`), or to nothing
- * with no line: the clip takes the panel's emptied surface below the line
- * away, and a finger then lands on the road under it rather than on it — the
- * first touch shows the controls and presses nothing. A clip, like a fade,
- * leaves a control in the tab order and the accessibility tree. The rider who
- * asked for less motion sees no fade: the reduced-motion block above collapses
- * every animation, and the clip comes at once.
+ * Only AFTER the fade has run is the actions panel CLIPPED to the trainer's
+ * line at its top (`--oyl-hud-actions-kept`, measured by `HudCore.tsx`), or to
+ * nothing with no line — and the clip CLOSES over `--oyl-motion-medium`, so the
+ * panel's emptied surface slides up into the line rather than going in one
+ * step (the owner's report again: held whole and then clipped at once, the
+ * lined panel was the pop). A finger then lands on the road under it rather
+ * than on it — the first touch shows the controls and presses nothing. A clip,
+ * like a fade, leaves a control in the tab order and the accessibility tree.
+ *
+ * The rider who asked for less motion, or whose screen cannot repaint, sees no
+ * fade and no closing: the block at the end of this one takes every animation
+ * here away, delays included (the stylesheet-wide collapse shortens a duration
+ * and leaves a delay standing), and the clip comes at once.
  */
 .oyl-hud[data-oyl-controls='hidden'] [data-oyl-hides],
 .oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions--unlined {
-  animation: oyl-hud-controls-fade-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard);
+  animation: oyl-hud-controls-fade-out var(--oyl-motion-hud-fade-out)
+    var(--oyl-motion-ease-standard);
   opacity: 0;
 }
 
 .oyl-hud[data-oyl-controls-returned] [data-oyl-hides],
 .oyl-hud[data-oyl-controls-returned] .oyl-hud__actions--unlined {
-  animation: oyl-hud-controls-fade-in var(--oyl-motion-short) var(--oyl-motion-ease-standard);
+  animation: oyl-hud-controls-fade-in var(--oyl-motion-hud-fade-in) var(--oyl-motion-ease-standard);
 }
 
 .oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions {
   clip-path: inset(0 0 calc(100% - var(--oyl-hud-actions-kept, 0px)) 0);
 }
 
-/* The panel the fade runs in is drawn whole until the fade has run. The
-   unlined panel's own fade is named first, so this one adds the hold to it. */
+/* The panel the fade runs in is drawn whole until the fade has run, and then
+   its clip closes. The unlined panel's own fade is named first, so this one
+   adds the hold and the closing to it. */
 .oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions:not(.oyl-hud__actions--unlined) {
-  animation: oyl-hud-actions-hold var(--oyl-motion-medium) step-end;
+  animation:
+    oyl-hud-actions-hold var(--oyl-motion-hud-fade-out) step-end,
+    oyl-hud-actions-close var(--oyl-motion-medium) var(--oyl-motion-ease-standard)
+      var(--oyl-motion-hud-fade-out);
 }
 
 .oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions.oyl-hud__actions--unlined {
   animation:
-    oyl-hud-controls-fade-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard),
-    oyl-hud-actions-hold var(--oyl-motion-medium) step-end;
+    oyl-hud-controls-fade-out var(--oyl-motion-hud-fade-out) var(--oyl-motion-ease-standard),
+    oyl-hud-actions-hold var(--oyl-motion-hud-fade-out) step-end,
+    oyl-hud-actions-close var(--oyl-motion-medium) var(--oyl-motion-ease-standard)
+      var(--oyl-motion-hud-fade-out);
 }
 
 @keyframes oyl-hud-controls-fade-out {
@@ -14212,6 +14236,20 @@ select.oyl-input {
   from,
   to {
     clip-path: inset(-100vmax);
+  }
+}
+
+/* From the panel's own box to the rule's clip, which it ends on. */
+@keyframes oyl-hud-actions-close {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce), (update: slow) {
+  .oyl-hud[data-oyl-controls] [data-oyl-hides],
+  .oyl-hud[data-oyl-controls] .oyl-hud__actions {
+    animation: none !important;
   }
 }
 

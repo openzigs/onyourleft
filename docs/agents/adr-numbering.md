@@ -12,6 +12,17 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0075 is [ADR 0075](../adr/0075-the-ride-controls-fade-slower-than-the-menus-motion-cap.md)**,
+  taken by [#2600](https://github.com/openzigs/onyourleft/issues/2600) on 2026-11-17 for the ride
+  controls' fade (800 ms out, 250 ms in), on the owner's report of that day from the tablet. It is
+  **Proposed** until the owner approves #2600's screenshots and tablet check. It supersedes in part
+  ADR 0041 D-3 and D-5 and ADR 0063 D-7, as an ADR rather than an amendment, because ADR 0013 D-3
+  sends a reversed decision to a new ADR; both gained one dated `## Amendments` entry pointing
+  there. ⚠️ **It skipped 0074**, which this file then still offered as the next free number: **0074
+  is claimed by [#2710](https://github.com/openzigs/onyourleft/issues/2710)**, whose open pull
+  request [#2724](https://github.com/openzigs/onyourleft/pull/2724) writes ADR 0074. **0057 and 0058
+  stay claimed** by #1748 and #1752, 0070 by #2684 and 0072 by #2712. **The next free number is
+  0076.** A reviewer who remembers this file offering 0074 or 0075 is reading the old file.
   ⚠️ **0073 is [ADR 0073](../adr/0073-ai-bots-race-with-strategy-freedom-inside-the-bodys-limits.md)**,
   taken by [#2720](https://github.com/openzigs/onyourleft/issues/2720) on 2026-11-16 for AI bots
   racing with strategy freedom inside the body's limits, on the owner's ruling of that day on the
@@ -22,7 +33,7 @@ It has the same authority as the root file. Where the text below says "this file
   0072**, which this file then still offered as the next free number: **0072 is claimed by
   [#2712](https://github.com/openzigs/onyourleft/issues/2712)** (the AI pacer), whose title names it
   and which ADR 0071 D-2 cites. **0057 and 0058 stay claimed** by #1748 and #1752, and 0070 by
-  #2684. **The next free number is 0074.** A reviewer who remembers this file offering 0072 or
+  #2684. The next free number was then 0074. A reviewer who remembers this file offering 0072 or
   0073 is reading the old file.
   ⚠️ **0071 is [ADR 0071](../adr/0071-model-chosen-lap-race-bot-tactics-during-a-ride.md)**,
   taken by [#2707](https://github.com/openzigs/onyourleft/issues/2707) on 2026-11-16 for

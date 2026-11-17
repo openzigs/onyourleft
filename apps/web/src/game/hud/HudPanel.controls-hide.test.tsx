@@ -34,7 +34,7 @@ import { CONTROLS_HIDE_MILLISECONDS, HIDES_ATTRIBUTE } from './controls-reveal';
 import { HudCore } from './HudCore';
 import { HudPanel, type HudPanelProps } from './HudPanel';
 import { REPORT_REASONS_MS } from './RoomReport';
-import { BOTS, RIDER, hudOf, startRace, tick } from './lap-race-testing';
+import { BOTS, RIDER, holding, hudOf, startRace, tick } from './lap-race-testing';
 import { RIDE_CHROME_STORAGE_KEY, writeRideChrome } from './ride-chrome-preference';
 
 let mounted: Mounted | undefined;
@@ -363,6 +363,30 @@ describe('the ride controls hide until touched — #2600', () => {
     mounted?.unmount();
     await hud({ lapRace: hudOf(startRace({ laps: 1 })) });
     idle();
+    expect(controls()).toBe('hidden');
+  });
+
+  it('keep Use item shown while the rider holds an item in a lap race, and a first tap uses it', async () => {
+    // The owner's report of 2026-11-17 from the tablet: *"the pause menu
+    // fading away that has the use item for lap race"*.
+    let used = 0;
+    const items = {
+      useItem: () => {
+        used += 1;
+      },
+    };
+    const race = startRace({ laps: 3 });
+    await hud({ lapRace: hudOf(holding(race, RIDER, 'tailwind')), items });
+    idle();
+    idle();
+    expect(controls()).toBe('shown');
+    tap(button('Use item'));
+    expect(used, 'the first tap was spent showing Use item').toBe(1);
+
+    // The control: the same race with nothing held hides as any ride does —
+    // and comes back hidden once the item is used up.
+    await mounted?.rerender(ride({ lapRace: hudOf(holding(race, RIDER, null)), items }));
+    wait(CONTROLS_HIDE_MILLISECONDS);
     expect(controls()).toBe('hidden');
   });
 
