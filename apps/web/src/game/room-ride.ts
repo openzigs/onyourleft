@@ -104,10 +104,12 @@ export function roomNotice(status: RoomSessionStatus | undefined): string | unde
  * Said while the recording under a ride in a room is PAUSED — #785, #1360's
  * review (N1). A ride in a room always records (the owner's ruling of
  * 2026-10-14), but a paused recording is left paused: only the rider's own
- * *Resume* resumes one (#516), and the game has no *Resume* of the recording —
- * the Ride screen does, and going there leaves the room. The likeliest way
- * here is a recovered ride, which comes back paused. ⚠️ Draft wording
- * awaiting the owner's approval.
+ * *Resume* resumes one (#516), and the game's *Resume* resumes only a pause
+ * its own *Pause* made (#2656, `GameView.tsx` §`recordingPausedHereRef`) —
+ * any other is the Ride screen's to resume, and going there leaves the room.
+ * Not said while the game's *Pause* holds the ride: its *Resume* is in view.
+ * The likeliest way here is a recovered ride, which comes back paused.
+ * ⚠️ Draft wording awaiting the owner's approval.
  */
 export const ROOM_RECORDING_PAUSED_TEXT =
   'Recording paused: this ride is not being recorded, and resuming it on the Ride screen leaves ' +

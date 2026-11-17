@@ -194,12 +194,12 @@ describe('the kind table', () => {
     expect(landClassOfKind('landuse', 'cemetery')).toBe('park');
     expect(landClassOfKind('landuse', 'meadow')).toBe('farmland');
     expect(landClassOfKind('landuse', 'wetland')).toBe('water');
-    expect(landClassOfKind('landuse', 'beach')).toBe('other');
-    expect(landClassOfKind('landuse', 'aerodrome')).toBe('other');
+    expect(landClassOfKind('landuse', 'beach')).toBe('bare');
+    expect(landClassOfKind('landuse', 'aerodrome')).toBe('bare');
     expect(landClassOfKind('landuse', 'a kind nobody wrote down')).toBe('other');
     // A `water` feature is water, whatever its kind says.
     expect(landClassOfKind('water', 'residential')).toBe('water');
-    expect(Object.keys(LAND_CLASS_OF_KIND)).toHaveLength(28);
+    expect(Object.keys(LAND_CLASS_OF_KIND)).toHaveLength(41);
   });
 
   it('does not find Object’s own properties for a hostile kind', () => {
@@ -490,6 +490,7 @@ describe('queries are allocation-free — #240 NFR-3', () => {
         const x = box.minX - 50 + ((i * 7.31) % (width + 100));
         const z = box.minZ - 50 + ((i * 3.17) % (height + 100));
         if (mask.classAt(x, z) === 'built-up') sink += 1;
+        if (mask.protectedArea(x, z)) sink += 1;
       }
     };
     // Warm up, so the measured window runs optimised code as a ride does.

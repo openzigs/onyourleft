@@ -71,6 +71,7 @@ import {
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
+  REALISTIC_PARK_DRESSING_TRIANGLES,
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
@@ -108,6 +109,7 @@ import { urbanClassMap } from './urban-class';
 import { REALISTIC_LADDER } from './quality';
 import {
   FURNITURE_CAPACITY,
+  PARK_DRESSING_TRIANGLES,
   FurnitureBelt,
   MappedBuildingBelt,
   realisticBicycleTriangles,
@@ -553,6 +555,16 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(
       vegetation + riders + structureItems * heaviestStructure + blobs + gantries + lamps,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // #2685: and a full belt of headstones, walls and flags with it.
+    expect(
+      vegetation +
+        riders +
+        structureItems * heaviestStructure +
+        blobs +
+        gantries +
+        lamps +
+        PARK_DRESSING_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // #1283: with EITHER set's trees, since the owner's page can load both —
     // at every structure's ceiling, the heaviest frame the budget prices.
     for (const trees of REALISTIC_TREE_SETS) {
@@ -598,6 +610,22 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         lamps +
         remote,
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // #2685: and with a cemetery or a golf course in reach, its belt full —
+    // the rule's own worst room and the belt fit together in what the worst
+    // frame leaves the room (`realistic-budget.ts`
+    // §`REALISTIC_PARK_DRESSING_TRIANGLES` was sized to it).
+    expect(
+      vegetation +
+        riders +
+        structureItems * REALISTIC_TRIANGLES.structure +
+        blobs +
+        gantries +
+        lamps +
+        remote +
+        PARK_DRESSING_TRIANGLES,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    expect(remote + PARK_DRESSING_TRIANGLES).toBeLessThanOrEqual(REALISTIC_REMOTE_TRIANGLES);
+    expect(PARK_DRESSING_TRIANGLES).toBe(REALISTIC_PARK_DRESSING_TRIANGLES);
     // Non-vacuity: the stylised term is real, and the room's whole K drawn
     // stylised would NOT fit — which is why the rule stops at 24.
     expect(stylised).toBeGreaterThan(1_000);

@@ -26,6 +26,7 @@ import type { UnitSystem } from '@onyourleft/store';
 import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
 import {
+  distanceOnRoute,
   ghostDistanceAt,
   ghostHasFinished,
   gradeAt,
@@ -52,10 +53,15 @@ import {
   type CountrysideLever,
   type LandClassMask,
 } from './land-class';
-import { horizonRelief, standingOnGround, terrainCorridor } from './landform';
+import { horizonRelief, standingOnGround, terrainCorridor, type TerrainMesh } from './landform';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import { crashedRoll, type CrashSide } from './delivery/crash-look';
-import { LANE_CHANGE_TURN_SPEED_FLOOR, laneChangeLean, laneChangeRate } from './lane-change-lean';
+import {
+  BOT_TURN_SPEED_FLOOR,
+  LANE_CHANGE_TURN_SPEED_FLOOR,
+  laneChangeLean,
+  laneChangeRate,
+} from './lane-change-lean';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type {
   CameraPose,
@@ -126,6 +132,7 @@ import {
   streetWalks,
   type PeopleInView,
 } from './people';
+import { parkDressingInView, type ParkDressingInView } from './park-dressing';
 import { distanceToDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
@@ -140,6 +147,14 @@ import {
   type MappedBuildingsInView,
 } from './mapped-buildings';
 import { MAPPED_RANKED_AHEAD_METRES } from './realistic-budget';
+import {
+  clearLateral,
+  cyclistLook,
+  cyclistsInReach,
+  townAt,
+  type SceneryCyclist,
+} from './scenery-cyclists';
+import { NO_URBAN_CLASS } from './urban-class';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -342,6 +357,22 @@ export interface SceneInput {
    */
   readonly peopleOnTheRoad?: boolean | undefined;
   /**
+   * Whether this ride may put other cyclists on the road — #2722
+   * (`scenery-cyclists.ts`): `GameView` says so on a free ride or a workout,
+   * and on nothing else, where another rider on the road means something — a
+   * lap race, a room or a group ride, a Delivery round, the pacer or a ghost.
+   * They are placed only at a rung that draws {@link people}, so they switch
+   * off with the people when the tablet steps down, and never where any of
+   * {@link botDistance}, {@link ghost}, {@link remoteRiders}, {@link raceBots}
+   * or {@link steeredLateral} is given, whatever this says.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a ride that forgot it draws nobody on the road.
+   * `realistic-choice.test.tsx` §"#2722" reads it back off what `GameView`
+   * asked `sceneFrame` for.
+   */
+  readonly sceneryCyclists?: boolean | undefined;
+  /**
    * #1542's changes switched off, each restoring the countryside before it —
    * the realistic page's `-land-planting`, `-land-boundaries` and
    * `-ground-clutter` levers, and nothing else (`land-class.ts`
@@ -349,6 +380,13 @@ export interface SceneInput {
    * safe way round, for {@link centreline}'s reason.
    */
   readonly countrysideOff?: readonly CountrysideLever[] | undefined;
+  /**
+   * #2685's golf courses and cemeteries drawn as their parks' planting alone:
+   * no stripes, greens, bunkers or paths on the ground and nothing standing on
+   * it (`park-dressing.ts`) — the realistic page's `-park-dressing` lever, and
+   * nothing else. Optional the safe way round, for {@link centreline}'s reason.
+   */
+  readonly parkDressingOff?: boolean | undefined;
   /**
    * Where a Delivery round has steered the rider across the road, in metres
    * right of the centre line — #1820, `delivery/steer.ts`
@@ -450,7 +488,8 @@ export interface SceneInput {
  *
  * ⚠️ **Its distance is the DRAWN one** (ADR 0060 D-3.3: `effortDistance +
  * raceOffset`), as an odometer on this ride's road; what it rode is never
- * read here.
+ * read here. A race runs on a loop, and a bot a lap or more from the rider is
+ * drawn on the lap of the road the frame built (#2516, `onTheCorridorsLap`).
  */
 export interface RaceBotInput {
   readonly distanceMetres: number;
@@ -578,6 +617,11 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
     world: worldStyle(input.profile),
+    // #2685: the golf courses' and cemeteries' ground and what stands on it,
+    // round the camera, stood on this frame's ground as the scenery is.
+    ...(input.worldCorridor === undefined || input.parkDressingOff === true
+      ? {}
+      : { parkDressing: parkDressing(input, input.worldCorridor, seed, camera, ground) }),
     // #2099: and only where this frame's ground is drawn. The scenery is
     // placed from the route and the ground's reach is the frame's, which a
     // sharp bend tapers in before and after it. @see standingOnGround
@@ -590,6 +634,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
     people: people(input, streets, camera, seed, sideRoads),
+    // #2722: and the other cyclists on the road, kept clear of the rider.
+    ...cyclistsOf(placedCyclists(input, corridor, riders)),
     terrain: {
       mesh: ground,
       horizon: horizonRelief(input.profile, input.origin, seed),
@@ -645,6 +691,149 @@ function people(
     road: besideSideRoads(road, sideRoads),
     ground: groundOf(profile, origin, seed, land),
   });
+}
+
+/** The golf courses and cemeteries in reach — #2685. @see SceneFrame.parkDressing */
+function parkDressing(
+  input: SceneInput,
+  corridor: WorldCorridor,
+  seed: number,
+  camera: CameraPose,
+  ground: TerrainMesh,
+): ParkDressingInView {
+  const view = parkDressingInView(
+    corridor,
+    input.profile,
+    input.origin,
+    seed,
+    input.landClass ?? NO_LAND_CLASS,
+    camera.x,
+    camera.z,
+  );
+  if (view.pieces.length === 0) return view;
+  const stood = standingOnGround(view.pieces, ground);
+  // `standingOnGround` hands back a new array every call; the belt re-composes
+  // and re-uploads its matrices whenever the array it is given changes. So keep
+  // returning the last frame's pieces while the same view stands at the same
+  // heights — the common case — and only a real change reaches the belt.
+  const held = lastStood;
+  if (held !== undefined && held.source === view.pieces && sameStanding(held.pieces, stood)) {
+    return { pieces: held.pieces, ground: view.ground };
+  }
+  lastStood = { source: view.pieces, pieces: stood };
+  return { pieces: stood, ground: view.ground };
+}
+
+/** The last frame's park pieces, stood on the ground. @see parkDressing */
+let lastStood:
+  | { readonly source: ParkDressingInView['pieces']; readonly pieces: ParkDressingInView['pieces'] }
+  | undefined;
+
+function sameStanding(
+  before: ParkDressingInView['pieces'],
+  after: ParkDressingInView['pieces'],
+): boolean {
+  if (before.length !== after.length) return false;
+  for (let index = 0; index < after.length; index += 1) {
+    const a = before[index]!;
+    const b = after[index]!;
+    if (a.x !== b.x || a.y !== b.y || a.z !== b.z) return false;
+  }
+  return true;
+}
+
+/** The frame's cyclists, where there are any: a frame with none carries no key for them. */
+function cyclistsOf(cyclists: readonly SceneryCyclist[]): { cyclists?: readonly SceneryCyclist[] } {
+  return cyclists.length === 0 ? {} : { cyclists };
+}
+
+/**
+ * Whether a frame may carry other cyclists — #2722: the ride says it is a
+ * free ride or a workout, its rung draws people, and nothing on the road
+ * means something. @see SceneInput.sceneryCyclists
+ */
+function sceneryCyclistsAllowed(input: SceneInput): boolean {
+  return (
+    input.sceneryCyclists === true &&
+    (input.people ?? 0) > 0 &&
+    input.botDistance === undefined &&
+    input.ghost === undefined &&
+    input.remoteRiders === undefined &&
+    input.raceBots === undefined &&
+    input.steeredLateral === undefined
+  );
+}
+
+/**
+ * The other cyclists a frame draws — #2722 (`scenery-cyclists.ts`): each
+ * encounter's cyclist in reach of the rider's DRAWN place and on the corridor
+ * this frame built, nearest first, put across the road clear of the rider and
+ * of each one placed before it, and on the road as a rider's marker is
+ * (`markerAt`, on the same line). An oncoming one faces against the road and
+ * leans its own way. Only after the riders are placed, and from their places
+ * (`riders`, {@link placedRiders}' on the same corridor), so a cyclist never
+ * moves the rider.
+ *
+ * Its own export for {@link placedRiders}' reason: a test sweeping thousands
+ * of rider positions places them without building the scenery.
+ * `scenery-cyclists.test.ts` checks that it and `sceneFrame` agree.
+ */
+export function placedCyclists(
+  input: SceneInput,
+  corridor: RoadCorridor,
+  riders: readonly PlacedRider[],
+): readonly SceneryCyclist[] {
+  if (!sceneryCyclistsAllowed(input)) return [];
+  const riderDistance = drawnRider(input).distance;
+  const seed = scatterSeed(input.profile);
+  const first = corridor.centre[0];
+  const last = corridor.centre[corridor.centre.length - 1];
+  const rider = riders[0];
+  if (first === undefined || last === undefined || rider === undefined) return [];
+  const town = townAt(input.profile, seed, input.mappedTown?.urban ?? NO_URBAN_CLASS);
+  const line =
+    input.centreline === true ? undefined : (easingLine(input) ?? racingLine(input.profile));
+  const placed: { readonly along: number; readonly lateral: number }[] = [
+    { along: riderDistance, lateral: rider.lateral },
+  ];
+  const cyclists: SceneryCyclist[] = [];
+  for (const each of cyclistsInReach(input.profile, seed, town, riderDistance)) {
+    if (each.along < first.along || each.along > last.along) continue;
+    const { encounter } = each;
+    const lateral = clearLateral(
+      encounter.lane,
+      placed.map((other) => ({ gap: each.along - other.along, lateral: other.lateral })),
+      BICYCLE_LENGTH_METRES,
+    );
+    placed.push({ along: each.along, lateral });
+    const oncoming = encounter.kind === 'oncoming';
+    const speed = encounter.pace * input.state.ride.speed;
+    const bend = line === undefined ? 0 : leanAt(line, each.along, speed);
+    const marker = markerAt(
+      corridor,
+      each.along,
+      'bot',
+      { metres: lateral, rate: 0 },
+      { bicycle: 0, body: 0 },
+      line,
+      { pedalling: 0, rideSeconds: 0 },
+    );
+    cyclists.push({
+      kind: encounter.kind,
+      x: marker.x,
+      y: marker.y,
+      z: marker.z,
+      headingX: oncoming ? -marker.headingX : marker.headingX,
+      headingZ: oncoming ? -marker.headingZ : marker.headingZ,
+      // Into the bend on the road, which is the other way by an oncoming one's own right.
+      lean: oncoming ? -bend : bend,
+      crankAngle: simulatedCrankAngle(each.ridden),
+      lateral,
+      along: each.along,
+      look: cyclistLook(encounter.key),
+    });
+  }
+  return cyclists;
 }
 
 /** The streams, lakes and bridges in view. @see SceneFrame.water */
@@ -1483,14 +1672,18 @@ function ridersOnTheRoad(
     });
   }
   // #1902: a lap race's bots, on the corridor this frame built, for the
-  // remote riders' reason.
+  // remote riders' reason. #2516: each on the lap of the corridor it stands
+  // on, so a bot a lap down or a lap up is drawn where it is on the road.
   for (const bot of input.raceBots ?? []) {
     if (first === undefined || last === undefined) break;
-    if (bot.distanceMetres < first.along || bot.distanceMetres > last.along) continue;
+    const distance = onTheCorridorsLap(input.profile, bot.distanceMetres, first.along);
+    if (distance < first.along || distance > last.along) continue;
     riders.push({
       kind: 'bot',
-      distance: bot.distanceMetres,
-      odometer: bot.distanceMetres,
+      distance,
+      // #2427 orders the drawn riders by odometer: the one on the corridor's
+      // lap (#2516), so a lapped bot is ordered where it is drawn, not a lap off.
+      odometer: distance,
       speed: bot.speedMetresPerSecond,
       ownSpeed: bot.speedMetresPerSecond,
       crankAngle: pedalling(bot.distanceMetres),
@@ -1566,6 +1759,26 @@ function ridersOnTheRoad(
       lateral,
     };
   });
+}
+
+/**
+ * A race bot's drawn odometer moved by whole laps onto the lap that starts at
+ * `from`, the corridor's first point — #2516. On a loop a race position is an
+ * odometer on the rider's road, so a bot a lap down (or up) is a lap of
+ * odometer from the rider while it stands on the same stretch of road: with
+ * no move it is never on the corridor, and the rider lapping the field rode
+ * up to an empty road. On a loop longer than the corridor a bot stands on it
+ * once at most; on a shorter one it is drawn once, at its first place on it.
+ *
+ * Its cranks still turn from its own odometer (`ridersOnTheRoad`), so a move
+ * by a lap never jumps them. Unmoved on a road that is not a loop, and when
+ * already on that lap, so the number is the one it was handed.
+ */
+function onTheCorridorsLap(profile: RouteProfile, distance: number, from: number): number {
+  const lap: number = profile.totalDistance;
+  if (!profile.loop || !(lap > 0) || !Number.isFinite(distance)) return distance;
+  const laps = Math.floor((distance - from) / lap);
+  return laps === 0 ? distance : distance - laps * lap;
 }
 
 /**
@@ -1667,7 +1880,11 @@ function ridingOf(rider: Rider, profile: RouteProfile): RidingInputs {
   return {
     cadence: rider.cadence,
     power: rider.power,
-    grade: rider.grade ?? gradeAt(profile, metres(rider.distance)),
+    // #2516: wrapped first, as `gradeAt` wraps it anyway, so a negative drawn
+    // distance on a loop never throws out of the frame (`metres` refuses one).
+    // `lapRaceDrawing` holds its bots at nought or more since #2544, so a race
+    // no longer hands one in; this keeps the frame safe for any that does.
+    grade: rider.grade ?? gradeAt(profile, metres(distanceOnRoute(profile, rider.distance))),
     speed: rider.ownSpeed,
   };
 }
@@ -1717,10 +1934,11 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): Ac
     return { metres: rider.steered, rate: laneChangeRate(rider.sway ?? 0, rider.speed) };
   }
   if (rider.laned !== undefined) {
-    // #2544: a laned bot moving across the pack turns into the move.
+    // #2544: a laned bot moving across the pack turns into the move; #2665: at
+    // its own speed, so its heading follows the path it rides.
     return {
       metres: rider.laidOut === true ? rider.laned : lanedLateral(rider, rider.laned, riders, line),
-      rate: laneChangeRate(rider.sway ?? 0, rider.speed),
+      rate: laneChangeRate(rider.sway ?? 0, rider.speed, BOT_TURN_SPEED_FLOOR),
     };
   }
   let level = 0;

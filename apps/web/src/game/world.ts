@@ -105,6 +105,7 @@ import { VIEW_AHEAD_METRES } from './terrain';
 
 import type { GeographicPosition, RouteProfile } from '@onyourleft/domain';
 
+import type { BareSurface } from './land-class';
 import type { Hemisphere } from './season';
 
 /**
@@ -601,6 +602,31 @@ export function snowCoverIn(world: Pick<WorldStyle, 'snow'>, winter: number): nu
  */
 export function groundColourIn(world: Pick<WorldStyle, 'snow'>, winter: number): number {
   return mix(world.snow.bareColour, SNOW, snowCoverIn(world, winter));
+}
+
+/**
+ * The colour each kind of mapped bare ground is drawn in, with no snow on it —
+ * #2700, sRGB. **This repository's own**, as every other ground colour here:
+ * a dry sand, the tree line's own {@link ROCK} for stone, a weathered
+ * concrete for paving, a pale blue-white under {@link SNOW} for ice, and a
+ * neutral brown-grey earth. None is matched to any photograph.
+ */
+export const BARE_SURFACE_COLOURS: Readonly<Record<BareSurface, number>> = Object.freeze({
+  earth: 0x7d6b56,
+  stone: ROCK,
+  paved: 0x8a8984,
+  ice: 0xcfdce6,
+  sand: 0xcdb88f,
+});
+
+/**
+ * The colour bare ground of `surface` is drawn in under the ground's own snow
+ * cover — #2700: {@link BARE_SURFACE_COLOURS}' colour mixed toward the snow
+ * by `snowCover` ({@link snowCoverIn}), exactly as {@link groundColourIn}
+ * mixes what grows, so a beach under snow is the snow the fields beside it are.
+ */
+export function bareSurfaceColourIn(surface: BareSurface, snowCover: number): number {
+  return mix(BARE_SURFACE_COLOURS[surface], SNOW, snowCover);
 }
 
 /**

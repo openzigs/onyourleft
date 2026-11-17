@@ -867,9 +867,11 @@ function watchNothing(): () => void {
  *
  * ⚠️ **Subscribed, not only read during render**, for {@link useOneNoticeOnly}'s
  * reason. A running game re-renders on every frame, but a PAUSED one does not
- * — and the game's *Pause* does not pause the RECORDING (`trainer-port.ts`
- * §`GameTrainerPort.rideMovingSeconds`), so a figure read only on the tick's
- * render froze at the press while the recorder went on counting. The
+ * — and until #2656 the game's *Pause* did not pause the RECORDING
+ * (`trainer-port.ts` §`GameTrainerPort.rideMovingSeconds`), so a figure read
+ * only on the tick's render froze at the press while the recorder went on
+ * counting. It still goes on counting through a pause the game did not make,
+ * and *Elapsed* through every pause. The
  * controller tells its subscribers on every tick of the ride's clock
  * (`ride/controller.ts` §`tick`), and `useSyncExternalStore` re-renders only
  * when the figure has changed. It is still read on every other render, so a
@@ -902,9 +904,10 @@ function useRideElapsedSeconds(trainer: GameTrainerPort | undefined): number | u
 
 /**
  * The moving time of the lap in progress, kept current — #1312. The
- * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason: a
- * paused GAME does not pause the recording, and the lap's clock is the
- * recording's.
+ * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason:
+ * the lap's clock is the recording's, and a paused game holds it only when
+ * its *Pause* paused the recording too (#2656), which a recording already
+ * paused, or woken from an auto-pause, it did not.
  */
 function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undefined {
   const watch = useCallback(
@@ -1693,6 +1696,26 @@ function GameScreen({
   const powerZoneTime = useRidePowerZoneTime(props.trainer, thresholdPower);
   /** @see useRecordingPaused */
   const recordingPaused = useRecordingPaused(props.trainer);
+  /**
+   * Whether the HUD's own *Pause* paused the recording under the ride — #2656:
+   * the answer of `GameTrainerPort.pauseRecording` for the press that paused
+   * the game, `undefined` while the game is not paused. Its *Resume* resumes
+   * the recording only when this says the game paused it (#516: a pause the
+   * rider made on the Ride screen, the engine's, or a recovery's is not resumed
+   * for them). A promise because the press does not wait: the game pauses on
+   * the frame it is pressed, and the recording as soon as its checkpoint is
+   * written.
+   */
+  const recordingPausedHereRef = useRef<Promise<boolean> | undefined>(undefined);
+  /**
+   * The recording work of every press so far, in order — #2656's review (L1).
+   * `pauseRecording` answers from the controller's cached snapshot, which says
+   * `recording` until the awaited pause has been told, so a second *Pause*
+   * inside the first's checkpoint write would see no pause to take and answer
+   * `true`, and the first *Resume* would then resume the recording under a
+   * paused game. Each press waits for the one before it.
+   */
+  const recordingWorkRef = useRef<Promise<unknown>>(Promise.resolve());
   const sidePairingRef = useRef(props.sidePairing);
   sidePairingRef.current = props.sidePairing;
   const sideLostRef = useRef(false);
@@ -1732,6 +1755,12 @@ function GameScreen({
   const preparedViewRef = useRef<RendererView | undefined>(undefined);
   /** The view whose `prepare` is in flight, so it is asked once. @see preparedViewRef */
   const preparingViewRef = useRef<RendererView | undefined>(undefined);
+  /**
+   * Which `prepare` may mark its view ready — #2663. Moved on by every ask and
+   * by the realistic world's arrival, so a warm-up the arrival overtook
+   * settles into nothing: only the one asked AFTER the swap readies the view.
+   */
+  const prepareRoundRef = useRef(0);
   const ghostRef = useRef<GhostTrack | undefined>(undefined);
   /**
    * Whose ghost {@link ghostRef} is, when it is another rider's — #331: their
@@ -3181,6 +3210,20 @@ function GameScreen({
                   // #2289: the next frames upload the world; they are not counted.
                   qualityRef.current = realisticWorldArrived(qualityRef.current);
                   view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
+                  // #2663: and the view is PREPARED again before it draws the
+                  // world it now holds, as it was for the ride's first frame
+                  // (#547). Drawn at once, its programs linked and its
+                  // textures uploaded inside one shown frame — read off the
+                  // code, not a tablet trace, as the 1.5–3 s stall logged
+                  // around a lap race's start: a race counts down ten seconds
+                  // from the press, while this load is still arriving. The
+                  // loop asks the next frame's `prepare` and draws nothing
+                  // until it settles; the canvas keeps the last stylised
+                  // frame meanwhile, and the HUD, the simulation and the
+                  // trainer run on.
+                  prepareRoundRef.current += 1;
+                  preparedViewRef.current = undefined;
+                  preparingViewRef.current = undefined;
                   // #2392: the town is here, so the round begins from where the rider is.
                   beginWaitingRound(deliveryWaitingRef);
                   return;
@@ -3963,6 +4006,17 @@ function GameScreen({
           structureItems: structureItemsRef.current,
           // #1541: the people the rung draws — none but on the realistic top rung.
           people: peopleRef.current,
+          // #2722: other cyclists on the road, on a free ride or a workout
+          // only — never in a room, a lap race, a Delivery round, or beside
+          // the pacer or a ghost — and, through `people`, only where the rung
+          // draws people. Scenery only: no simulation or trainer reads them.
+          sceneryCyclists:
+            roomRef.current === undefined &&
+            racing === undefined &&
+            roomRacing === undefined &&
+            deliveryRef.current === undefined &&
+            drawn.botDistance === undefined &&
+            ghostRef.current === undefined,
           // #349: how far the cranks have turned. `port.ts`
           // §`RiderMarker.crankAngle` records that an optional field nobody
           // supplies is a hole this repository's gates cannot see, which is
@@ -4132,8 +4186,13 @@ function GameScreen({
           }
         } else {
           preparingViewRef.current = view;
+          // The arrival's own bump (above) carries the guarantee that a warm-up it
+          // overtook readies nothing; this one is defence in depth.
+          prepareRoundRef.current += 1;
+          const round = prepareRoundRef.current;
           void view.prepare(frame).then(() => {
-            preparedViewRef.current = view;
+            // #2663: a warm-up the world's arrival overtook readies nothing.
+            if (prepareRoundRef.current === round) preparedViewRef.current = view;
           });
         }
       }
@@ -4972,7 +5031,30 @@ function GameScreen({
         // during the ride.
         corridor={rideHasCorridor ? worldCorridorRef.current : undefined}
         onPause={() => {
-          setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
+          // #2656: the ride's pause, not only the game's. The simulation stops
+          // with the loop, and the recording with the controller's own
+          // `pause()`, so *Moving* stops and no paused second's reading
+          // reaches an average, the saved ride or an export.
+          const trainer = props.trainer;
+          if (phase === 'paused') {
+            setPhase('riding');
+            const pausedHere = recordingPausedHereRef.current;
+            recordingPausedHereRef.current = undefined;
+            if (pausedHere !== undefined) {
+              recordingWorkRef.current = pausedHere
+                .then((paused) => (paused ? trainer?.resumeRecording?.() : undefined))
+                .catch(() => undefined);
+            }
+            return;
+          }
+          setPhase('paused');
+          // A pause that did not take is a recording that carries on, which
+          // is what it did before #2656; the HUD's *Moving* shows it.
+          const pausedHere = recordingWorkRef.current
+            .then(() => trainer?.pauseRecording?.() ?? false)
+            .catch(() => false);
+          recordingPausedHereRef.current = pausedHere;
+          recordingWorkRef.current = pausedHere;
         }}
         // #2349: *End ride* ASKS, and never ends the ride on one press.
         onEnd={askToEnd}
@@ -5085,9 +5167,12 @@ function GameScreen({
           // freeze. After the side camera, in `announce.ts`'s order.
           // #1360's review (N1): and, in the same place, a recording paused
           // under the ride in the room — said, never resumed for the rider.
-          roomRideNotice(roomRef.current?.status(), recordingPaused) === undefined ? undefined : (
+          // #2656: not while the HUD's own *Pause* holds the ride, whose
+          // *Resume* is in view and resumes the recording it paused.
+          roomRideNotice(roomRef.current?.status(), recordingPaused && phase !== 'paused') ===
+          undefined ? undefined : (
             <StatusMessage key="room" tone="warning" label={ROOM_NOTICE_LABEL}>
-              {roomRideNotice(roomRef.current?.status(), recordingPaused)}
+              {roomRideNotice(roomRef.current?.status(), recordingPaused && phase !== 'paused')}
             </StatusMessage>
           ),
           // #785: a race held on its line, counting down, or over — the room's
