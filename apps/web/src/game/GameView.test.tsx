@@ -77,6 +77,14 @@ import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import { UnitsProvider } from '../units/context';
 import { START_WORD, toGoText } from './gantry-wording';
 import { endRideAnswer } from './end-ride-testing';
+import { sceneFrame } from './scene';
+
+// #2722: `sceneFrame` itself, watched — what `GameView` asks it for. Every
+// call still builds its frame: the spy passes through.
+vi.mock('./scene', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./scene')>();
+  return { ...actual, sceneFrame: vi.fn(actual.sceneFrame) };
+});
 
 /** Two kilometres of road that rises and falls, so a gradient is in play. */
 function testRoute(samples = 200): RidableRoute {
@@ -652,6 +660,37 @@ describe('riding against both a pacer and your own best (#253)', () => {
     // could produce.
     expect(pacer).toContain('behind you');
     expect(best).toContain('ahead of you');
+  });
+});
+
+describe('which rides get scenery cyclists — #2722', () => {
+  /**
+   * `GameView`'s mode conditions on `SceneInput.sceneryCyclists`, read off what
+   * `sceneFrame` was asked. `scene.ts` has its own backstop, so a frame never
+   * shows the difference; the ask is the only place a dropped condition shows.
+   */
+  const asked = (): readonly (boolean | undefined)[] =>
+    vi.mocked(sceneFrame).mock.calls.map(([input]) => input.sceneryCyclists);
+
+  it('asks on a free ride', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: false });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([true]));
+  });
+
+  it('does not ask beside the pacer', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: true, intensity: '0.5' });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([false]));
+  });
+
+  it('does not ask beside a ghost', async () => {
+    vi.mocked(sceneFrame).mockClear();
+    await startRiding({ pacer: false, ghost: true });
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([false]));
   });
 });
 

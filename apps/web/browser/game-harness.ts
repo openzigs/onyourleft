@@ -84,12 +84,24 @@ import {
   verticalHalfTangent,
   type RigPoint,
 } from '../src/game/camera';
-import { emptyRiderJoints, RIDER_BICYCLE_PARTS, riderJoints } from '../src/game/bicycle';
+import {
+  BICYCLE_LENGTH_METRES,
+  emptyRiderJoints,
+  RIDER_BICYCLE_PARTS,
+  riderJoints,
+} from '../src/game/bicycle';
 import { hitLook, lapRaceInView, laneLateral } from '../src/game/lap-race/in-view';
 import type { CameraPose, GameView, RiderMarker, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
-import { chaseRider, sceneFrame as builtSceneFrame } from '../src/game/scene';
+import {
+  chaseRider,
+  drawnRiderDistance,
+  placedCyclists,
+  placedRiders,
+  sceneFrame as builtSceneFrame,
+  type SceneInput,
+} from '../src/game/scene';
 import { drawnCamera } from '../src/game/chase-camera-testing';
 import {
   behind,
@@ -102,10 +114,13 @@ import {
   ROAD_WIDTH_METRES,
   corridorOrigin,
   drawnRoadFrame,
+  roadCorridor,
   type CorridorOrigin,
 } from '../src/game/terrain';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from '../src/game/road-grid';
 import { PEOPLE_NEAR_MAX, PERSON_HALF_WIDTH_METRES } from '../src/game/people';
+import { CLEAR_METRES, cyclistsInReach, townAt } from '../src/game/scenery-cyclists';
+import { NO_URBAN_CLASS } from '../src/game/urban-class';
 import { pavementSides } from '../src/game/footways';
 import type { WorldCorridor } from '../src/game/world-data/corridor';
 import {
@@ -125,6 +140,7 @@ import {
   sBendRoute,
   steadyClimb,
   valleyRoute,
+  windingRoute,
 } from '../src/game/route-fixtures-testing';
 import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
 import {
@@ -266,6 +282,7 @@ import {
   peopleBodyFragmentsOf,
   peopleDrawnOf,
   peopleShownOf,
+  sceneryCyclistsDrawnOf,
   MappedBuildingBelt,
   mappedBuildingsShownOf,
   mappedBuildingStatsOf,
@@ -3812,6 +3829,297 @@ function peopleProbe(
     bodyFragments: fragments.length,
     bodyFragmentsFlat: fragments.filter((source) => source.includes('#define FLAT_SHADED')).length,
     bodyFragmentsSpliced: fragments.filter((source) => source.includes('vOylColour')).length,
+  };
+}
+
+/** What {@link sceneryCyclistsProbe} publishes — #2722. */
+interface SceneryCyclistsMeasurement {
+  /** How many cyclists the view drew over the frames the probe rode, and the kinds their frames carried. */
+  readonly drawn: number;
+  readonly kinds: readonly string[];
+  /** How many drawn bicycles stood on the wrong side of the drawn road: an oncoming one right of its centre, any other left. */
+  readonly wrongSide: number;
+  /**
+   * The least distance across the road, metres, between a drawn cyclist's
+   * bicycle and the drawn rider's, of those level with the rider — within a
+   * bicycle's length along the road, where two bicycles nearer than a
+   * handlebar across would be drawn through each other — and how many such
+   * were drawn; with the clearance and without it (the control, each of the
+   * same cyclists drawn in its own lane).
+   */
+  readonly leastLevelGap: number;
+  readonly level: number;
+  readonly leastLevelGapInLane: number;
+  /** The most a drawn body stood off its own drawn bicycle, metres: nought when each body sits on its bicycle. */
+  readonly bodyOffBicycle: number;
+  /** Cyclists drawn on the same frames in a lap race, beside the pacer, and with the people switched off. */
+  readonly drawnInRaceModes: number;
+  readonly drawnPeopleOff: number;
+  /**
+   * The draw calls a frame with cyclists in view makes over the same frame
+   * without them: with people on the pavements, and with nobody there; and
+   * the triangles each cyclist adds.
+   */
+  readonly drawCalls: number;
+  readonly drawCallsAlone: number;
+  readonly triangles: number;
+  /** How many pixels round the nearest cyclist in frame change when the frame carries none. */
+  readonly pixels: number;
+}
+
+const NO_SCENERY_CYCLISTS: SceneryCyclistsMeasurement = {
+  drawn: -1,
+  kinds: [],
+  wrongSide: -1,
+  leastLevelGap: Number.NaN,
+  level: -1,
+  leastLevelGapInLane: Number.NaN,
+  bodyOffBicycle: Number.NaN,
+  drawnInRaceModes: -1,
+  drawnPeopleOff: -1,
+  drawCalls: -1,
+  drawCallsAlone: -1,
+  triangles: -1,
+  pixels: -1,
+};
+
+/**
+ * #2722: the scenery cyclists, read back off what the view DREW. A winding
+ * road (`route-fixtures-testing.ts` §`windingRoute`) is ridden a metre at a
+ * time without drawing, to find the frames where a cyclist is level with the
+ * rider; each is then built by `sceneFrame`, drawn, and read back
+ * (`sceneryCyclistsDrawnOf`):
+ *
+ * - **"never on the wrong side"**: each drawn bicycle's side of the drawn
+ *   road, against its frame's kind;
+ * - **"never overlapping the rider"**: the least plan distance between a
+ *   drawn bicycle level with the rider and the rider's own drawn bicycle —
+ *   and the control, the same frames with every cyclist moved back into its
+ *   lane, which must come nearer;
+ * - **one body on each bicycle**, and **none in a race, beside the pacer, or
+ *   with the people off**;
+ * - **the cost**: the calls and triangles a frame with cyclists adds over the
+ *   same frame with none, and the pixels round the nearest one in frame.
+ */
+function sceneryCyclistsProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): SceneryCyclistsMeasurement {
+  const profile = windingRoute(12_000);
+  const origin = corridorOrigin(profile);
+  const seed = scatterSeed(profile);
+  const town = townAt(profile, seed, NO_URBAN_CLASS);
+  const start = atStartLine(profile);
+  const inputAt = (along: number, extra: Partial<SceneInput> = {}): SceneInput => ({
+    profile,
+    origin,
+    state: {
+      ...start,
+      ride: { speed: metresPerSecond(8), distance: metres(along) },
+      ridden: seconds(along / 8),
+      elapsed: seconds(along / 8),
+    },
+    people: PEOPLE_NEAR_MAX,
+    sceneryCyclists: true,
+    ...extra,
+  });
+  // Found without drawing: the frames where a cyclist level with the rider
+  // would be drawn nearer them than the clearance if it kept its lane, and
+  // for each kind the first frame with one of it a little way off in view.
+  const levelAt: number[] = [];
+  const ofKind = new Map<string, number>();
+  for (let along = 0; along <= profile.totalDistance; along += 1) {
+    if (levelAt.length >= 6 && ofKind.size === 3) break;
+    const input = inputAt(along);
+    const rider = drawnRiderDistance(input);
+    const corridor = roadCorridor(profile, origin, rider);
+    const own = placedRiders(input, corridor)[0];
+    if (own === undefined) continue;
+    const inReach = cyclistsInReach(profile, seed, town, rider);
+    const through = inReach.some(
+      (each) =>
+        Math.abs(each.along - rider) < BICYCLE_LENGTH_METRES &&
+        Math.abs(each.encounter.lane - own.lateral) < CLEAR_METRES - 0.2,
+    );
+    if (through && levelAt.length < 6 && levelAt.every((seen) => along - seen > 20)) {
+      levelAt.push(along);
+    }
+    for (const each of inReach) {
+      const off = Math.abs(each.along - rider);
+      if (off > 15 && off < 40 && !ofKind.has(each.encounter.kind)) {
+        ofKind.set(each.encounter.kind, along);
+      }
+    }
+  }
+  if (levelAt.length === 0 || ofKind.size === 0) return NO_SCENERY_CYCLISTS;
+  const kinds = new Set<string>();
+  let drawn = 0;
+  let wrongSide = 0;
+  let level = 0;
+  let leastLevelGap = Number.POSITIVE_INFINITY;
+  let leastLevelGapInLane = Number.POSITIVE_INFINITY;
+  let bodyOffBicycle = 0;
+  // What the view drew of a frame: each bicycle's side, each body on its
+  // bicycle, and how near the rider's bicycle those level with it are.
+  const read = (frame: SceneFrame, inLane: boolean): void => {
+    view.render(frame);
+    const back = sceneryCyclistsDrawnOf(view);
+    if (back === undefined || back.rider === undefined) return;
+    const rider = back.rider;
+    const riderNear = nearestOnDrawnRoad(profile, origin, rider.x, rider.z, 10);
+    back.bicycles.forEach((bicycle, index) => {
+      const cyclist = frame.cyclists?.[index];
+      if (cyclist === undefined) return;
+      const near = nearestOnDrawnRoad(profile, origin, bicycle.x, bicycle.z, 10);
+      if (!inLane) {
+        drawn += 1;
+        kinds.add(cyclist.kind);
+        if (near === undefined || (cyclist.kind === 'oncoming') !== near.lateral < 0)
+          wrongSide += 1;
+        const body = back.bodies[index];
+        bodyOffBicycle = Math.max(
+          bodyOffBicycle,
+          body === undefined
+            ? Number.POSITIVE_INFINITY
+            : Math.hypot(body.x - bicycle.x, body.y - bicycle.y, body.z - bicycle.z),
+        );
+      }
+      if (near === undefined || riderNear === undefined) return;
+      if (Math.abs(near.along - riderNear.along) >= BICYCLE_LENGTH_METRES) return;
+      // Level within a bicycle's length: how far apart ACROSS the road.
+      const gap = Math.abs(near.lateral - riderNear.lateral);
+      if (inLane) leastLevelGapInLane = Math.min(leastLevelGapInLane, gap);
+      else {
+        level += 1;
+        leastLevelGap = Math.min(leastLevelGap, gap);
+      }
+    });
+  };
+  const count = (frame: SceneFrame): number => {
+    view.render(frame);
+    return sceneryCyclistsDrawnOf(view)?.bicycles.length ?? 0;
+  };
+  let drawnInRaceModes = 0;
+  let drawnPeopleOff = 0;
+  for (const along of [...levelAt, ...ofKind.values()]) {
+    const frame = builtSceneFrame(inputAt(along));
+    read(frame, false);
+    // The control: each of the same cyclists moved back into its own lane.
+    const lanes = new Map(
+      cyclistsInReach(profile, seed, town, drawnRiderDistance(inputAt(along))).map((each) => [
+        each.along,
+        each.encounter.lane,
+      ]),
+    );
+    const inLane = builtSceneFrame(inputAt(along));
+    read(
+      {
+        ...inLane,
+        cyclists: (inLane.cyclists ?? []).map((cyclist) => {
+          const road = drawnRoadFrame(profile, origin, cyclist.along);
+          const lane = lanes.get(cyclist.along) ?? cyclist.lateral;
+          return road === undefined
+            ? cyclist
+            : {
+                ...cyclist,
+                x: cyclist.x + road.normalX * (lane - cyclist.lateral),
+                z: cyclist.z + road.normalZ * (lane - cyclist.lateral),
+              };
+        }),
+      },
+      true,
+    );
+    drawnInRaceModes += count(builtSceneFrame(inputAt(along, { raceBots: [] })));
+    drawnInRaceModes += count(builtSceneFrame(inputAt(along, { botDistance: along + 5 })));
+    // Built again: a frame's ground is reused by the next frame built.
+    const again = builtSceneFrame(inputAt(along));
+    peopleShownOf(view, false);
+    drawnPeopleOff += count(again);
+    peopleShownOf(view, true);
+  }
+  // The cost: what a frame with cyclists adds over the same frame with none,
+  // counted with the non-empty calls — with somebody on the pavements, whose
+  // bodies' call the cyclists share, and with nobody, where it is theirs.
+  const cost = (busy: SceneFrame): { calls: number; triangles: number; each: number } => {
+    const bare: SceneFrame = { ...busy, cyclists: undefined };
+    const measure = (frame: SceneFrame): { calls: number; triangles: number } => {
+      let measured = { calls: 0, triangles: 0 };
+      view.render(frame);
+      countingTriangles((triangles) => {
+        countingNonEmptyDrawCalls((calls) => {
+          view.render(frame);
+          measured = { calls: calls(), triangles: triangles() };
+        });
+      });
+      return measured;
+    };
+    const withThem = measure(busy);
+    const without = measure(bare);
+    const triangles = withThem.triangles - without.triangles;
+    return {
+      calls: withThem.calls - without.calls,
+      triangles,
+      each: triangles / Math.max(1, busy.cyclists?.length ?? 0),
+    };
+  };
+  let withPeople: { calls: number; triangles: number; each: number } | undefined;
+  let alone: { calls: number; triangles: number; each: number } | undefined;
+  for (let along = 0; along <= profile.totalDistance && withPeople === undefined; along += 5) {
+    const input = inputAt(along);
+    const corridor = roadCorridor(profile, origin, drawnRiderDistance(input));
+    if (placedCyclists(input, corridor, placedRiders(input, corridor)).length === 0) continue;
+    const frame = builtSceneFrame(input);
+    if ((frame.people?.near.length ?? 0) === 0) continue;
+    withPeople = cost(frame);
+    // The same frame with nobody on the pavements.
+    alone = cost({ ...frame, people: { near: [], far: [] } });
+  }
+  const aheadAt = ofKind.values().next().value ?? 0;
+  const rebuilt = builtSceneFrame(inputAt(aheadAt));
+  // The pixels round the nearest cyclist, with no scenery in front of it.
+  let pixels = -1;
+  const rider = drawnRiderDistance(inputAt(aheadAt));
+  const nearest = [...(rebuilt.cyclists ?? [])].sort(
+    (a, b) => Math.abs(a.along - rider) - Math.abs(b.along - rider),
+  )[0];
+  if (nearest !== undefined) {
+    const clear: SceneFrame = { ...rebuilt, scatter: [], billboards: [] };
+    const middle = pixelFor(clear, canvas, { x: nearest.x, y: nearest.y + 1, z: nearest.z });
+    const where = {
+      x: Math.max(0, Math.round(middle.x) - 6),
+      y: Math.max(0, Math.round(middle.y) - 6),
+      width: 13,
+      height: 13,
+    };
+    view.render(clear);
+    const on = readRegion(gl, where.x, where.y, where.width, where.height);
+    view.render({ ...clear, cyclists: undefined });
+    const off = readRegion(gl, where.x, where.y, where.width, where.height);
+    pixels = 0;
+    for (let at = 0; at < on.length; at += 4) {
+      const apart = Math.max(
+        Math.abs((on[at] ?? 0) - (off[at] ?? 0)),
+        Math.abs((on[at + 1] ?? 0) - (off[at + 1] ?? 0)),
+        Math.abs((on[at + 2] ?? 0) - (off[at + 2] ?? 0)),
+      );
+      if (apart > 6) pixels += 1;
+    }
+  }
+  return {
+    drawn,
+    kinds: [...kinds].sort(),
+    wrongSide,
+    leastLevelGap,
+    level,
+    leastLevelGapInLane,
+    bodyOffBicycle,
+    drawnInRaceModes,
+    drawnPeopleOff,
+    drawCalls: withPeople?.calls ?? -1,
+    drawCallsAlone: alone?.calls ?? -1,
+    triangles: withPeople?.each ?? alone?.each ?? -1,
+    pixels,
   };
 }
 
@@ -8958,6 +9266,8 @@ export interface RealisticMeasurement {
   readonly mappedPavement: MappedPavementMeasurement;
   /** #1541: the people on the village's pavements and the mapped sidewalks. @see peopleProbe */
   readonly people: PeopleMeasurement;
+  /** #2722: the scenery cyclists on a winding road. @see sceneryCyclistsProbe */
+  readonly sceneryCyclists: SceneryCyclistsMeasurement;
   /** #1547: the drawn ground under a mapped block's centre footprint. @see levellingProbe */
   readonly levelling: LevellingMeasurement;
   /** #1549: a town from map data, drawn merged, and nothing in the wood. @see mappedTownProbe */
@@ -11140,6 +11450,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   pavement: NO_PAVEMENT,
   mappedPavement: NO_MAPPED_PAVEMENT,
   people: NO_PEOPLE_MEASURED,
+  sceneryCyclists: NO_SCENERY_CYCLISTS,
   levelling: NO_LEVELLING,
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
@@ -12725,19 +13036,22 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
 
   // #2596: the fade is off from the tint probe (#621) to the kit probe (#623),
   // and for every probe between them: the tints (#621), pavement (#1535), the
-  // mapped side's pavement (#1551), people (#1541), levelling (#1547), the
-  // tread (#624) and the kit (#623). #621 and #623 draw a bot and the ghost in
-  // the rider's own place under a camera brought close, which is the space a
-  // rider other than the rider's own fades out of, and they read each rider's
-  // colours, so they read them with the fade off; the five between draw no
-  // rider but the rider's own, which never fades, so it changes nothing for
-  // them. In a `finally`, so a throw cannot leave every later probe unfaded.
+  // mapped side's pavement (#1551), people (#1541), the scenery cyclists
+  // (#2722), levelling (#1547), the tread (#624) and the kit (#623). #621 and
+  // #623 draw a bot and the ghost in the rider's own place under a camera
+  // brought close, which is the space a rider other than the rider's own fades
+  // out of, and they read each rider's colours, so they read them with the fade
+  // off. Of the six between, five draw no rider but the rider's own, which
+  // never fades, so it changes nothing for them; the scenery cyclists' probe
+  // reads where the cyclists are drawn, which the fade would hide when one
+  // passes under the camera, so it too wants the fade off. In a `finally`, so a throw cannot leave every later probe unfaded.
   // A probe added inside this window runs with the fade off: name it here.
   riderFadeOf(view, 'off');
   let tint: ReturnType<typeof tintProbe>;
   let pavement: ReturnType<typeof pavementProbe>;
   let mappedPavement: ReturnType<typeof mappedPavementProbe>;
   let people: ReturnType<typeof peopleProbe>;
+  let sceneryCyclists: ReturnType<typeof sceneryCyclistsProbe>;
   let levelling: ReturnType<typeof levellingProbe>;
   let tread: ReturnType<typeof treadProbe>;
   let kit: ReturnType<typeof kitProbe>;
@@ -12757,6 +13071,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     // #1541, on the same view and #1535's village: people, never on the carriageway.
     people = peopleProbe(view, gl, canvas);
     phaseEnds('realistic: people — #1541');
+
+    // #2722, on the same view: the scenery cyclists, on a winding road.
+    sceneryCyclists = sceneryCyclistsProbe(view, gl, canvas);
+    phaseEnds('realistic: scenery cyclists — #2722');
 
     // #1547, on the same view: the ground under a mapped town, levelled.
     levelling = levellingProbe(view);
@@ -13015,6 +13333,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     pavement,
     mappedPavement,
     people,
+    sceneryCyclists,
     levelling,
     // #1947: measured by the `?realistic&town` load, not this one. @see realisticTownRun
     ...NO_TOWN,

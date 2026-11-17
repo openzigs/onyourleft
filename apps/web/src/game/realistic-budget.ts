@@ -1224,6 +1224,27 @@ export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
 export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
 
 /**
+ * The most triangles the scenery cyclists may add to a realistic frame —
+ * #2722: **25 000**, for `scenery-cyclists.ts` §`SCENERY_CYCLISTS_MAX` (3) of
+ * them, each the people's cut body (`people-body.ts` §`PERSON_MAX_TRIANGLES`,
+ * 2 000 at most) on the realistic bicycle with its crankset and helmet:
+ * 8 056 a cyclist, counted at the WebGL entry points in the pinned Chromium
+ * on 2026-11-16, so 24 168 for three. They are instances of meshes the frame
+ * already draws — the people's bodies and the riders' bicycles — so beside
+ * people they add triangles and no draw call.
+ *
+ * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, as the people are**, and
+ * drawn only where the people are: on the top realistic rung (`quality.ts`
+ * §`QualitySettings.people`), the owner's ruling of 2026-11-16, and never
+ * in a Delivery round, so the Delivery village frame
+ * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES} holds does not carry them.
+ *
+ * @test-facing held by `game.browser.spec.ts` §"#2722", which counts what a
+ * frame with cyclists in view adds over the same frame with none
+ */
+export const REALISTIC_SCENERY_CYCLIST_TRIANGLES = 25_000;
+
+/**
  * The most triangles the start and finish gantries may add to a frame:
  * **4 400** since #1274 — #679's ceiling was **1 000**, against the 1 350 its
  * research found spare in the worst frame before #617 freed more. Spent only within

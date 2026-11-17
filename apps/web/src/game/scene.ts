@@ -147,6 +147,14 @@ import {
   type MappedBuildingsInView,
 } from './mapped-buildings';
 import { MAPPED_RANKED_AHEAD_METRES } from './realistic-budget';
+import {
+  clearLateral,
+  cyclistLook,
+  cyclistsInReach,
+  townAt,
+  type SceneryCyclist,
+} from './scenery-cyclists';
+import { NO_URBAN_CLASS } from './urban-class';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -348,6 +356,22 @@ export interface SceneInput {
    * carriageway. Optional the safe way round, for {@link centreline}'s reason.
    */
   readonly peopleOnTheRoad?: boolean | undefined;
+  /**
+   * Whether this ride may put other cyclists on the road — #2722
+   * (`scenery-cyclists.ts`): `GameView` says so on a free ride or a workout,
+   * and on nothing else, where another rider on the road means something — a
+   * lap race, a room or a group ride, a Delivery round, the pacer or a ghost.
+   * They are placed only at a rung that draws {@link people}, so they switch
+   * off with the people when the tablet steps down, and never where any of
+   * {@link botDistance}, {@link ghost}, {@link remoteRiders}, {@link raceBots}
+   * or {@link steeredLateral} is given, whatever this says.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a ride that forgot it draws nobody on the road.
+   * `realistic-choice.test.tsx` §"#2722" reads it back off what `GameView`
+   * asked `sceneFrame` for.
+   */
+  readonly sceneryCyclists?: boolean | undefined;
   /**
    * #1542's changes switched off, each restoring the countryside before it —
    * the realistic page's `-land-planting`, `-land-boundaries` and
@@ -610,6 +634,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
     people: people(input, streets, camera, seed, sideRoads),
+    // #2722: and the other cyclists on the road, kept clear of the rider.
+    ...cyclistsOf(placedCyclists(input, corridor, riders)),
     terrain: {
       mesh: ground,
       horizon: horizonRelief(input.profile, input.origin, seed),
@@ -714,6 +740,100 @@ function sameStanding(
     if (a.x !== b.x || a.y !== b.y || a.z !== b.z) return false;
   }
   return true;
+}
+
+/** The frame's cyclists, where there are any: a frame with none carries no key for them. */
+function cyclistsOf(cyclists: readonly SceneryCyclist[]): { cyclists?: readonly SceneryCyclist[] } {
+  return cyclists.length === 0 ? {} : { cyclists };
+}
+
+/**
+ * Whether a frame may carry other cyclists — #2722: the ride says it is a
+ * free ride or a workout, its rung draws people, and nothing on the road
+ * means something. @see SceneInput.sceneryCyclists
+ */
+function sceneryCyclistsAllowed(input: SceneInput): boolean {
+  return (
+    input.sceneryCyclists === true &&
+    (input.people ?? 0) > 0 &&
+    input.botDistance === undefined &&
+    input.ghost === undefined &&
+    input.remoteRiders === undefined &&
+    input.raceBots === undefined &&
+    input.steeredLateral === undefined
+  );
+}
+
+/**
+ * The other cyclists a frame draws — #2722 (`scenery-cyclists.ts`): each
+ * encounter's cyclist in reach of the rider's DRAWN place and on the corridor
+ * this frame built, nearest first, put across the road clear of the rider and
+ * of each one placed before it, and on the road as a rider's marker is
+ * (`markerAt`, on the same line). An oncoming one faces against the road and
+ * leans its own way. Only after the riders are placed, and from their places
+ * (`riders`, {@link placedRiders}' on the same corridor), so a cyclist never
+ * moves the rider.
+ *
+ * Its own export for {@link placedRiders}' reason: a test sweeping thousands
+ * of rider positions places them without building the scenery.
+ * `scenery-cyclists.test.ts` checks that it and `sceneFrame` agree.
+ */
+export function placedCyclists(
+  input: SceneInput,
+  corridor: RoadCorridor,
+  riders: readonly PlacedRider[],
+): readonly SceneryCyclist[] {
+  if (!sceneryCyclistsAllowed(input)) return [];
+  const riderDistance = drawnRider(input).distance;
+  const seed = scatterSeed(input.profile);
+  const first = corridor.centre[0];
+  const last = corridor.centre[corridor.centre.length - 1];
+  const rider = riders[0];
+  if (first === undefined || last === undefined || rider === undefined) return [];
+  const town = townAt(input.profile, seed, input.mappedTown?.urban ?? NO_URBAN_CLASS);
+  const line =
+    input.centreline === true ? undefined : (easingLine(input) ?? racingLine(input.profile));
+  const placed: { readonly along: number; readonly lateral: number }[] = [
+    { along: riderDistance, lateral: rider.lateral },
+  ];
+  const cyclists: SceneryCyclist[] = [];
+  for (const each of cyclistsInReach(input.profile, seed, town, riderDistance)) {
+    if (each.along < first.along || each.along > last.along) continue;
+    const { encounter } = each;
+    const lateral = clearLateral(
+      encounter.lane,
+      placed.map((other) => ({ gap: each.along - other.along, lateral: other.lateral })),
+      BICYCLE_LENGTH_METRES,
+    );
+    placed.push({ along: each.along, lateral });
+    const oncoming = encounter.kind === 'oncoming';
+    const speed = encounter.pace * input.state.ride.speed;
+    const bend = line === undefined ? 0 : leanAt(line, each.along, speed);
+    const marker = markerAt(
+      corridor,
+      each.along,
+      'bot',
+      { metres: lateral, rate: 0 },
+      { bicycle: 0, body: 0 },
+      line,
+      { pedalling: 0, rideSeconds: 0 },
+    );
+    cyclists.push({
+      kind: encounter.kind,
+      x: marker.x,
+      y: marker.y,
+      z: marker.z,
+      headingX: oncoming ? -marker.headingX : marker.headingX,
+      headingZ: oncoming ? -marker.headingZ : marker.headingZ,
+      // Into the bend on the road, which is the other way by an oncoming one's own right.
+      lean: oncoming ? -bend : bend,
+      crankAngle: simulatedCrankAngle(each.ridden),
+      lateral,
+      along: each.along,
+      look: cyclistLook(encounter.key),
+    });
+  }
+  return cyclists;
 }
 
 /** The streams, lakes and bridges in view. @see SceneFrame.water */

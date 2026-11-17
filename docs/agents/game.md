@@ -1956,6 +1956,26 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reads: without one, three compiles a standard material
                         FLAT_SHADED and every triangle is lit as a facet
                         (the owner's look of PR #1615)
+    src/game/scenery-cyclists.ts
+                        other cyclists on the road (#2722) — oncoming, slower
+                        (caught) and faster (overtaking), a few a ride, more on
+                        a town's road, seeded from the route. Where each is is
+                        a function of the rider's DRAWN distance, so every
+                        encounter happens at its meeting point. Each kind has
+                        its lane (`LANES`); level with the rider it moves
+                        clear by 1.2 m (`clearLateral`), never into the other
+                        half. ⚠️ SCENERY ONLY (the owner's ruling): not
+                        markers, no draft, no race standing, no trainer —
+                        `scenery-cyclists.test.ts` holds who may import it and
+                        `scenery-cyclists-trainer.test.tsx` the trainer's
+                        writes on and off. Placed only when `GameView` says
+                        `sceneryCyclists` (a free ride or a workout) AND the
+                        rung draws people, never beside a pacer, ghost, room,
+                        race or Delivery round. Drawn as instances: the
+                        people's body seated by `RealisticRiderBelt`
+                        §`ridingPose` and baked into the people's texture
+                        (`people-body.ts` §`RIDE_PHASES`), on the riders'
+                        bicycle meshes — no call of their own beside people
     src/game/cross-streets.ts
                         cross streets (#1565) — a side road 60 m off the
                         route at each junction where a mapped street
