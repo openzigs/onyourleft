@@ -1178,3 +1178,75 @@ test.describe('#2331 — the built-in circuits disclosure is drawn as a control'
     });
   }
 });
+
+/*
+ * #2710 — THE AI BOTS CONTROLS ARE 48 PX TARGETS.
+ *
+ * `ride.html?picker=chooser&lap=riding&ai=offered`: the chooser on a loop,
+ * with the rider's instance offering its model and no consent given yet
+ * (`ride-harness.tsx` §`AI_BOTS`). With the race and AI bots switched on, the
+ * AI bots switch's row, *Agree and race AI bots* and *Not now* are each at
+ * least 48 px tall (the owner's ruling of 2026-10), and once agreed,
+ * *Withdraw consent* is. Each height is printed.
+ *
+ * ⚠️ **The control** strips `theme.css` §"#2710" back to the shared 44 px
+ * floors and requires every one of the four under 48, or this measures
+ * controls that were tall already.
+ */
+const AI_BOTS_TARGET_PIXELS = 48;
+
+const AI_BOTS_RULE_STRIPPED = `
+  .oyl-game__ai-bots label:has(> input[type='checkbox']),
+  .oyl-game__ai-bots .oyl-button { min-height: 2.75rem !important; }`;
+
+async function aiBotsHeights(page: Page, stripped: boolean): Promise<Record<string, number>> {
+  if (stripped) await page.addStyleTag({ content: AI_BOTS_RULE_STRIPPED });
+  await page.getByRole('switch', { name: 'Ride a lap race' }).check();
+  await page.getByRole('switch', { name: 'AI bots' }).check();
+  const height = async (locator: ReturnType<Page['locator']>): Promise<number> =>
+    (await locator.boundingBox())?.height ?? 0;
+  const heights: Record<string, number> = {
+    'AI bots': await height(page.locator('.oyl-game__ai-bots label:has(> input[role="switch"])')),
+    'Agree and race AI bots': await height(
+      page.getByRole('button', { name: 'Agree and race AI bots' }),
+    ),
+    'Not now': await height(page.getByRole('button', { name: 'Not now' })),
+  };
+  await page.getByRole('button', { name: 'Agree and race AI bots' }).click();
+  heights['Withdraw consent'] = await height(
+    page.getByRole('button', { name: 'Withdraw consent' }),
+  );
+  return heights;
+}
+
+test.describe('#2710 — the AI bots controls are 48 px targets', () => {
+  for (const viewport of CHOOSER_VIEWPORTS) {
+    test(`each is at least 48 px tall — ${viewport.name}`, async ({ page }) => {
+      await openChooser(page, viewport, 'chooser', 'promise', '&lap=riding&ai=offered');
+      const heights = await aiBotsHeights(page, false);
+      console.log(`#2710 AI bots targets — ${viewport.name}: ${JSON.stringify(heights)}`);
+      expect(Object.keys(heights)).toHaveLength(4);
+      for (const [name, tall] of Object.entries(heights)) {
+        expect(tall, name).toBeGreaterThanOrEqual(AI_BOTS_TARGET_PIXELS);
+      }
+    });
+  }
+
+  test(`the control — with the rule stripped, each falls under 48 px — ${TABLET_IN_THE_SHELL_CHOOSER.name}`, async ({
+    page,
+  }) => {
+    await openChooser(
+      page,
+      TABLET_IN_THE_SHELL_CHOOSER,
+      'chooser',
+      'promise',
+      '&lap=riding&ai=offered',
+    );
+    const heights = await aiBotsHeights(page, true);
+    console.log(`#2710 AI bots targets, the rule stripped: ${JSON.stringify(heights)}`);
+    for (const [name, tall] of Object.entries(heights)) {
+      expect(tall, name).toBeGreaterThan(0);
+      expect(tall, name).toBeLessThan(AI_BOTS_TARGET_PIXELS);
+    }
+  });
+});

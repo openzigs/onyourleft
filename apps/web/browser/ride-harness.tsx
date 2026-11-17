@@ -100,6 +100,7 @@ import { roomPortOver } from '../src/net/room-port';
 import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
+import type { ModelTacticsPort, TacticsStatus } from '../src/game/lap-race/model-tactics-port';
 import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
 import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
@@ -435,6 +436,46 @@ const HUD_CALLOUT_OFF = new URLSearchParams(window.location.search).get('callout
  */
 const PICKER = new URLSearchParams(window.location.search).get('picker');
 const AT_THE_PICKER = PICKER === 'chooser' || PICKER === 'list';
+
+/**
+ * `ride.html?…&ai=offered` and `?lap=riding&ai=racing` — #2710: the rider's
+ * instance offers its model for a lap race's AI bots, through a double of the
+ * tactics port (`game/lap-race/model-tactics-port.ts`) that answers at once.
+ *
+ * - `offered`: no consent yet, so switching AI bots on in the chooser asks
+ *   for it; *Agree* records it and *Withdraw consent* takes it back.
+ * - `racing`: consented, and the ride is a lap race with AI bots: the
+ *   harness switches *Ride a lap race* and *AI bots* on before *Ride*. Every
+ *   decision the race asks for is refused, so the bots ride their own
+ *   tactics; the race's start is accepted, so the HUD says they race.
+ */
+const AI_BOTS = new URLSearchParams(window.location.search).get('ai');
+const AI_BOTS_RACING = AI_BOTS === 'racing';
+
+function tacticsDouble(consented: boolean): ModelTacticsPort {
+  let agreed = consented;
+  const status = (): Promise<TacticsStatus> =>
+    Promise.resolve({
+      kind: 'offered',
+      instance: 'https://ride.example',
+      modelAddress: 'http://192.168.1.20:11434/v1',
+      consented: agreed,
+    });
+  const setConsent = (to: boolean): Promise<TacticsStatus> => {
+    agreed = to;
+    return status();
+  };
+  return {
+    tacticsStatus: status,
+    recordTacticsConsent: () => setConsent(true),
+    withdrawTacticsConsent: () => setConsent(false),
+    startTacticsRace: () => Promise.resolve({ kind: 'answer', body: { warming: true } }),
+    decideTactics: () => Promise.resolve({ kind: 'refused', code: 'harness' }),
+    endTacticsRace: () => Promise.resolve(),
+  };
+}
+
+const TACTICS = AI_BOTS === 'offered' || AI_BOTS_RACING ? tacticsDouble(AI_BOTS_RACING) : undefined;
 
 /**
  * `ride.html?picker=chooser&notices=all` — #940's review (B2): the chooser with
@@ -1607,6 +1648,7 @@ async function run(): Promise<void> {
           game={GAME}
           gameTrainer={TRAINER}
           {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
+          {...(TACTICS === undefined ? {} : { tactics: TACTICS })}
           {...RACE_PORTS}
         />
       </StrictMode>,
@@ -1647,6 +1689,21 @@ async function run(): Promise<void> {
       throw new Error(`ride harness: the picker offers no usable "${text}" checkbox`);
     }
     box.click();
+  }
+  // #2710: a lap race with AI bots, the consent already given. The AI bots
+  // switch is drawn once the race is on and the instance has answered.
+  if (AI_BOTS_RACING) {
+    for (const text of ['Ride a lap race', 'AI bots']) {
+      const box = await until(`the "${text}" switch`, () =>
+        labelled<HTMLInputElement>('input[role="switch"]', text),
+      );
+      if (!box.checked) box.click();
+    }
+    await until('the AI bots consent to be read', () =>
+      (document.querySelector('.oyl-game__ai-bots')?.textContent ?? '').includes('You agreed')
+        ? true
+        : undefined,
+    );
   }
   const speed = await until('the wind speed box', () =>
     labelled<HTMLInputElement>('input[type="number"]', 'Wind speed'),

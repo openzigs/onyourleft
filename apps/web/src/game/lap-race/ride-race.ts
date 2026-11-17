@@ -74,7 +74,10 @@
  * Drawn once at the press from the platform's cryptographic source, handed
  * to the race and to the bots' decisions, and never stored, as Delivery's
  * (`delivery/targets.ts` §`drawRoundSeed`), restated here because the lap
- * race reaches none of Delivery's modules.
+ * race reaches none of Delivery's modules. ⚠️ **Except a race with AI bots**
+ * (#2710, ADR 0071 D-4.4): its seed, decision log, bot-code version and the
+ * rider's input at every tick are kept with the ride (`model-race.ts`,
+ * {@link lapRaceRideFact}), so it replays under the version it was ridden with.
  *
  * ## The bots ride still air
  *
@@ -97,6 +100,7 @@ import {
   type BotPersonality,
   type BotSkill,
   type ItemRaceState,
+  type LapRaceModelRecord,
   type RouteProfile,
 } from '@onyourleft/domain';
 import {
@@ -124,6 +128,18 @@ import { assistedBotTier, assistedRaceSetup, assistedTick } from './assist';
 import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './assist-preference';
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
+import {
+  answerLapRaceModel,
+  applyLapRaceModel,
+  askLapRaceModel,
+  lapRaceModelFact,
+  noteLapRaceModelTick,
+  startedLapRaceModel,
+  startLapRaceModel,
+  type LapRaceModel,
+  type LapRaceModelAsk,
+  type ModelTacticsReply,
+} from './model-race';
 import {
   drawnLateral,
   drawnShift,
@@ -209,6 +225,13 @@ export interface LapRaceRide {
    * rider is held on the line until it is nought (#2546). @see countLapRaceDown
    */
   readonly countdownLeftMs: number;
+  /**
+   * The AI side of a race the rider chose to ride with AI bots (#2710, ADR
+   * 0071): its decision log and the rider's own input, or `undefined` for a
+   * seeded race, which is the race before #2710 to the bit (D-1.4).
+   * @see model-race.ts
+   */
+  readonly model: LapRaceModel | undefined;
 }
 
 /** What a race needs at the press. */
@@ -234,6 +257,12 @@ export interface LapRaceRideStart {
    * (#2463, ADR 0067 D-0), as the standings show it. Absent, they read none.
    */
   readonly riderMassKilograms?: number | undefined;
+  /**
+   * Whether the rider chose AI bots and consented (#2710, ADR 0071 D-1): the
+   * race then keeps a decision log, and the bots ride the moves in it. Absent,
+   * a seeded race.
+   */
+  readonly model?: boolean | undefined;
 }
 
 /**
@@ -377,6 +406,7 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     offsetRates: NO_RATES,
     steeredBefore: riderInput.steer.offset,
     countdownLeftMs: LAP_RACE_COUNTDOWN_MS,
+    model: input.model === true ? startLapRaceModel() : undefined,
   };
 }
 
@@ -510,15 +540,8 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
   const from = ride.along;
   // Never backwards: a race runs on a solo ride, where no room corrects the rider.
   const to = Math.max(from, step.along);
-  const mass = ride.riderMassKilograms;
-  // A mass that is not above 0 would turn the watts into Infinity or NaN for
-  // the bots to read, so the bots read no W/kg then: this is the boundary
-  // of an optional field, not a case the rider's own mass reaches.
-  const riderWattsPerKilogram =
-    step.riderWatts === undefined || mass === undefined || !(mass > 0)
-      ? undefined
-      : step.riderWatts / mass;
-  let { race, bots, input, owed, riderDraft, pack, offsetRates, steeredBefore } = ride;
+  const riderWattsPerKilogram = wattsPerKilogramOf(ride, step.riderWatts);
+  let { race, bots, input, owed, riderDraft, pack, offsetRates, steeredBefore, model } = ride;
   // The rider's speed on effort distance over the step, which the pack layout
   // reads to see a pass coming (#2544).
   const riderSpeed = (to - from) / (ticks * LAP_RACE_TICK_SECONDS);
@@ -535,7 +558,10 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       uses: asked.uses,
     });
     const before = race;
-    const stepped = stepBotRace(race, bots, {
+    // #2710: the moves in force handed to the bots whose window opens on this
+    // tick, before the step rides them through their own tactics.
+    const riding = model === undefined ? bots : applyLapRaceModel(model, race, bots, ride.seed);
+    const stepped = stepBotRace(race, riding, {
       elapsed: seconds(LAP_RACE_TICK_SECONDS),
       conditions: ride.conditions,
       seed: ride.seed,
@@ -559,6 +585,14 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
         return [bot.id, (now - (offsetsBefore.get(bot.id) ?? now)) / LAP_RACE_TICK_SECONDS];
       }),
     );
+    if (model !== undefined) {
+      model = noteLapRaceModelTick(model, race, bots, {
+        effortDistance: at - ride.startAlong,
+        wattsPerKilogram: riderWattsPerKilogram ?? null,
+        lane: asked.lanes[LAP_RACE_RIDER_ID] ?? 0,
+        used: (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
+      });
+    }
     // #2461: the rider's `k` from the same call that drafted the bots.
     riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
     // #2544: the field laid out for the drawing, a tick on, the rider where
@@ -589,8 +623,74 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     pack,
     offsetRates,
     steeredBefore,
+    model,
     along: to,
   };
+}
+
+/**
+ * The rider's power as the bots read it, W/kg, or `undefined` with none. A
+ * mass that is not above 0 would turn the watts into Infinity or NaN for the
+ * bots to read, so they read no W/kg then: the boundary of an optional field,
+ * not a case the rider's own mass reaches.
+ */
+function wattsPerKilogramOf(ride: LapRaceRide, riderWatts: number | undefined): number | undefined {
+  const mass = ride.riderMassKilograms;
+  return riderWatts === undefined || mass === undefined || !(mass > 0)
+    ? undefined
+    : riderWatts / mass;
+}
+
+/** What {@link askLapRaceRide} hands `GameView`: the race, and the race state to send with its ask. */
+export interface LapRaceRideAsking {
+  readonly ride: LapRaceRide;
+  readonly send: ReturnType<typeof askLapRaceModel>['send'];
+}
+
+/**
+ * Between frames, for a race with AI bots (#2710): give up a call out too
+ * long, and the race state to ask about when an ask is due. Nothing for a
+ * seeded race. `GameView` sends it through the tactics port and hands the
+ * reply to {@link answerLapRaceRide}; the race never waits for it (D-4.5).
+ */
+export function askLapRaceRide(ride: LapRaceRide, riderWatts?: number): LapRaceRideAsking {
+  if (ride.model === undefined) return { ride, send: undefined };
+  const asking = askLapRaceModel(
+    ride.model,
+    ride.race,
+    ride.bots,
+    ride.conditions.profile,
+    ride.seed,
+    ride.draft,
+    wattsPerKilogramOf(ride, riderWatts) ?? null,
+  );
+  return {
+    ride: asking.model === ride.model ? ride : { ...ride, model: asking.model },
+    send: asking.send,
+  };
+}
+
+/** The race once the reply to `ask` arrived, logged at the race's time now (#2710, D-4.2). */
+export function answerLapRaceRide(
+  ride: LapRaceRide,
+  ask: LapRaceModelAsk,
+  reply: ModelTacticsReply,
+): LapRaceRide {
+  if (ride.model === undefined) return ride;
+  const model = answerLapRaceModel(ride.model, ride.race, ask, reply);
+  return model === ride.model ? ride : { ...ride, model };
+}
+
+/** The race once the instance answered its start (#2710, D-6.3): refused, it rides seeded tactics. */
+export function startedLapRaceRide(ride: LapRaceRide, reply: ModelTacticsReply): LapRaceRide {
+  if (ride.model === undefined) return ride;
+  const model = startedLapRaceModel(ride.model, reply);
+  return model === ride.model ? ride : { ...ride, model };
+}
+
+/** What a race with AI bots keeps with the ride (#2710, D-4.4), or `undefined` for a seeded race. */
+export function lapRaceRideFact(ride: LapRaceRide): LapRaceModelRecord | undefined {
+  return ride.model === undefined ? undefined : lapRaceModelFact(ride.model, ride.seed);
 }
 
 /** What the race offers the HUD's one region at `now`, ride seconds: one event per kind owed. */
@@ -729,4 +829,23 @@ export function lapRaceHud(
     riderWattsPerKilogram: rider.wattsPerKilogram,
     speedMetresPerSecond: rider.speed,
   };
+}
+
+/**
+ * What the standings say of a race's AI bots (#2710), or `undefined` for a
+ * seeded race: that they are racing, or — when the instance refused the
+ * race's start — that they are not available now (ADR 0071 D-6.3).
+ * ⚠️ Draft wording for the owner's approval with the screenshots.
+ */
+export const AI_BOTS_RACE_TEXT = {
+  racing: 'AI bots: your instance’s model picks their moves.',
+  unavailable: 'AI bots are not available right now. The bots race on their own.',
+} as const;
+
+/** @see AI_BOTS_RACE_TEXT */
+export function lapRaceModelNote(ride: LapRaceRide): string | undefined {
+  if (ride.model === undefined) return undefined;
+  return ride.model.unavailable === undefined
+    ? AI_BOTS_RACE_TEXT.racing
+    : AI_BOTS_RACE_TEXT.unavailable;
 }

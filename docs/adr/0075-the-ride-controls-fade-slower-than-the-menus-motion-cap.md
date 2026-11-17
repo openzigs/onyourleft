@@ -12,15 +12,15 @@
   comment above. **The author** chose the rest, marked *the author's choice* where it is made
 - **Issue**: [#2600](https://github.com/openzigs/onyourleft/issues/2600), in pull request
   [#2670](https://github.com/openzigs/onyourleft/pull/2670)
-- **Number**: **0075**. On 2026-11-17 `main` holds no `docs/adr/` file numbered 0074 or 0075, and
-  `docs/agents/conventions.md` §7 gave 0074 as the next free number. **0074 is claimed** by
-  [#2710](https://github.com/openzigs/onyourleft/issues/2710), whose open pull request
-  [#2724](https://github.com/openzigs/onyourleft/pull/2724) writes
-  `docs/adr/0074-a-sprint-instinct-behind-the-models-moves.md`. **0057 and 0058 stay claimed** by
+- **Number**: **0075**. It was written on 2026-11-17 while 0074 was still unmerged, and
+  [#2710](https://github.com/openzigs/onyourleft/issues/2710)'s pull request
+  [#2724](https://github.com/openzigs/onyourleft/pull/2724) then merged
+  `docs/adr/0074-a-sprint-instinct-behind-the-models-moves.md` to `main` first, so **0074 is
+  taken** and this is the next number after it. **0057 and 0058 stay claimed** by
   [#1748](https://github.com/openzigs/onyourleft/issues/1748) and
   [#1752](https://github.com/openzigs/onyourleft/issues/1752), 0070 by
   [#2684](https://github.com/openzigs/onyourleft/issues/2684) and 0072 by
-  [#2712](https://github.com/openzigs/onyourleft/issues/2712). The next free number is then 0076
+  [#2712](https://github.com/openzigs/onyourleft/issues/2712). The next free number is 0076
 - **Supersedes, in part**, for **the ride controls that hide until touched and nothing else**
   (`apps/web/src/game/hud/controls-reveal.ts`, `theme.css` §"#2600"):
   [ADR 0041](0041-motion-for-menu-animation.md) **D-5** (*"nothing runs longer than 200 ms"*) and

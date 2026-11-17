@@ -569,6 +569,10 @@ export interface LapRaceInView {
 /** What {@link SceneFrame.water} carries. */
 export interface WaterFrame {
   readonly surface: WaterSurface;
+  /**
+   * Every bridge's boxes: the streams' (#459) and, since #2661, the mapped
+   * streets' that cross over or under the route (`overpasses.ts`).
+   */
   readonly bridges: readonly BridgePart[];
   /** Seconds, for the ripples. */
   readonly seconds: number;

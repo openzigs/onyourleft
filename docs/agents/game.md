@@ -992,6 +992,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `room-lap-race-wiring.test.tsx` holds every write
                         equal to a solo race with items off while the room
                         overrules three predictions
+    src/game/lap-race/model-race.ts, model-tactics-port.ts
+                        AI bots in a solo lap race (#2710, ADR 0071): the
+                        option and its consent in the chooser only while the
+                        instance offers its local model; the race asks every
+                        4 s of race time through the tactics port (sealed, the
+                        one instance module), logs each reply at the race
+                        time it arrives, and rides a decision through domain
+                        `lap-race/model-race.ts` §`applyModelMoves` (the
+                        body's limits outside; ADR 0073's strategy, which
+                        lifts ADR 0071 D-3.6's rules, with ADR 0074's sprint
+                        backstop, behind the `ModelMoveStrategy` seam). Any miss rides seeded. The record goes to `RideFacts.lapRaces`.
+                        ⚠️ Raise `LAP_RACE_BOT_CODE_VERSION` and APPEND a key
+                        to `model-race-golden.json` for any change to bot
+                        output; never edit an old one
     src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
                         a lap race's lanes and item use (#1901, ADR 0060
                         D-5.4, D-13): race INPUTS only, a lane and "use the
@@ -2017,6 +2031,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
                         is broken at its crossroads with dropped kerbs
+    src/game/overpasses.ts
+                        overpasses and underpasses (#2661) — where a mapped
+                        street on a bridge crosses the route, a level deck 5 m
+                        over the road with parapets and an abutment each side;
+                        where one in a tunnel under 80 m long crosses it, a
+                        parapet along each edge of the road. ⚠️ **Boxes in
+                        `three-renderer.ts` §`BridgeBelt`**, handed in with the
+                        streams' bridges (`scene.ts` §`water`), so no new mesh,
+                        attribute or structure: the belt's 128 boxes bound them
+                        and the streams' come first
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that
