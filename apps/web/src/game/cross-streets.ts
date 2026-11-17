@@ -28,6 +28,8 @@
  *   which a cycling route meets at grade almost never, and whose bridge a
  *   tile may not flag on every way. The route's own grade is not known: a
  *   route crossing a street on its own bridge still gets a junction there.
+ *   Such a street is drawn, as an overpass or an underpass, by
+ *   `overpasses.ts` since #2661.
  * - **Procedural** ({@link villageJunction}): one crossroads at the centre of
  *   every procedural village (`settlements.ts` §`Site`), square to the road,
  *   so that the world with no map data (ADR 0054 D-4) has them too. The plots
@@ -247,8 +249,11 @@ export function meetsAtGrade(street: Pick<StreetFeature, 'kind' | 'grade'>): boo
   return street.kind !== 'highway' && street.grade === 'ground';
 }
 
-/** A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`. */
-function resampled(line: Float32Array, budget: { metres: number }): number[] {
+/**
+ * A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`.
+ * `overpasses.ts` resamples the streets that cross the route over or under it with it — #2661.
+ */
+export function resampled(line: Float32Array, budget: { metres: number }): number[] {
   const out: number[] = [];
   for (let at = 0; at + 1 < line.length; at += 2) {
     const ax = line[at] as number;
