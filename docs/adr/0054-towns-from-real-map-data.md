@@ -529,3 +529,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   building is still measured from the rider. The guarantee is narrower than "every building in the
   draw distance": the 36-building cap makes that unreachable, so what holds is every front-row
   building (centre within 30 m of the road) up to 100 m ahead.
+- **2026-11-15** — **The 2026-11-10 entry's ranking does not reach the field boundaries, and no
+  procedural boundary stands beside a mapped house**
+  ([#2655](https://github.com/openzigs/onyourleft/issues/2655)). Where OSM maps a suburb's
+  footprints and no `landuse=residential`, the ground reads `other`, the procedural fields fenced
+  it, and the 2026-11-10 entry's ranking by the road ahead put each fence 5.6 m off the road before
+  every house 10 to 25 m off it, so the fences spent the 36-structure cap and the houses were not
+  drawn. That entry's *"and the procedural structures that compete with them for the cap"* now
+  reads *"and the procedural buildings and signposts that compete with them for the cap"*: a wall,
+  a hedge or a fence (the chain-link among them) is not ranked, and takes only what the mapped
+  buildings leave, as `structuresAt` (`apps/web/src/game/settlements.ts`) has always given the
+  boundaries only what its buildings leave. And `fieldEdgesAt` stands no procedural boundary
+  piece within `BOUNDARY_HOUSE_CLEARANCE_METRES` (**31** m straight across, up to 40 m on the
+  diagonal) of a kept footprint or its driveway; mapped farmland's own edges (#1542) keep their
+  places. Both take structures away and add none: the cap stays at 36 and the frame's triangle
+  ceilings do not rise. What still holds, unchanged: the rest of the 2026-11-10 entry, including
+  its pending owner approval; the 2026-11-03 landmarks; D-5.6's cap; D-5.1, whose rule for a suburb
+  with no footprints at all is left to a separate issue; and D-3.1 to D-3.6.

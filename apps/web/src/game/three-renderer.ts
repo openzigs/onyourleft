@@ -734,6 +734,7 @@ import {
   type ShapesOf,
 } from './near-field';
 import {
+  BOUNDARY_KINDS,
   BOUNDARY_PIECE_METRES,
   FIELD_DEPTH_METRES,
   FIELD_EDGE_LATERAL_METRES,
@@ -23060,7 +23061,7 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * or `undefined` on a frame that is not a refill — which reads one number and
  * allocates nothing.
  *
- * **The frame's procedural structures and the mapped buildings are ranked
+ * **The frame's procedural buildings and the mapped buildings are ranked
  * together, under the one cap** — the buildings by the road ahead since #2429,
  * the structures' rivals likewise, though the structure belts still choose
  * WHICH structures in frame order, nearest the rider — #1586, ADR 0054
@@ -23070,11 +23071,18 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * The billboards are still taken first: they carry no place here, and the
  * logo belts draw them uncapped whatever this decides.
  *
+ * ⚠️ **The field boundaries are not ranked, since #2655**: a wall, hedge or
+ * fence ({@link BOUNDARY_KINDS}) takes only what the mapped buildings leave,
+ * as `structuresAt` gives them only what its buildings leave. Ranked by the
+ * road ahead, a fence 5.6 m off the road came before every house 10 to 25 m
+ * off it, so a suburb whose ground reads `other` (houses mapped, no
+ * `landuse=residential`) drew 36 fences and no house.
+ *
  * ⚠️ **The ranking decides how many procedural structures are drawn, not
  * which.** The returned cap is a count, and the structure belts admit the
  * first that many in view in the frame's own order (`settlements.ts`
  * §`structuresAt`: buildings and lots first, then field boundaries nearest the
- * rider), so the ones the cap drops are that order's tail.
+ * rider), so the ones the cap drops are that order's tail — the boundaries.
  */
 export function refillMappedBuildings(
   belt: MappedBuildingBelt,
@@ -23087,11 +23095,11 @@ export function refillMappedBuildings(
   const structure = REALISTIC_TRIANGLES.structure;
   const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
   let count = 0;
-  for (const item of scatter) if (isStructureKind(item.kind)) count += 1;
+  for (const item of scatter) if (isRival(item.kind)) count += 1;
   if (rivalDistances.length < count) rivalDistances = new Float64Array(count);
   let at = 0;
   for (const item of scatter) {
-    if (!isStructureKind(item.kind)) continue;
+    if (!isRival(item.kind)) continue;
     // #2429: by the road ahead, as the buildings it is ranked against are.
     rivalDistances[at] = rankFrom(view.ahead, view.x, view.z, item.x, item.z);
     at += 1;
@@ -23110,6 +23118,15 @@ export function refillMappedBuildings(
     view.ahead,
   );
   return items - Math.ceil(stats.triangles / structure);
+}
+
+/**
+ * Whether a procedural structure is ranked against the mapped buildings —
+ * #2655: every structure but a field boundary ({@link BOUNDARY_KINDS}), which
+ * takes only what the buildings leave.
+ */
+function isRival(kind: SceneryKind): boolean {
+  return isStructureKind(kind) && !BOUNDARY_KINDS.has(kind);
 }
 
 /** {@link refillMappedBuildings}' scratch: grown, never shrunk, so a refill rarely allocates. */
