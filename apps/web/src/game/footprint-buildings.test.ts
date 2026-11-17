@@ -692,7 +692,16 @@ describe('every land-use kind our archive emits keeps its footprint use — #194
   const USE_BEFORE_1946 = {
     residential: ['residential'],
     industrial: ['industrial', 'railway'],
-    commercial: ['commercial', 'school', 'college', 'university', 'hospital', 'pedestrian'],
+    // #2662 classed `kindergarten` built-up since, as a `school` is.
+    commercial: [
+      'commercial',
+      'school',
+      'kindergarten',
+      'college',
+      'university',
+      'hospital',
+      'pedestrian',
+    ],
     farmland: ['farmland', 'meadow'],
   } as const;
   const kinds = [...Object.keys(TOWN_LAND_USE_CLASSES), ...REMOVED_LAND_USE_KINDS];

@@ -180,6 +180,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  MeshDepthMaterial,
   MeshLambertMaterial,
   MeshStandardMaterial,
   NearestFilter,
@@ -354,6 +355,7 @@ import {
 } from './footprint-buildings';
 import {
   FAR_ROLES,
+  mappedBuildingCap,
   MappedSelection,
   NEAR_ROLES,
   NO_RIVALS,
@@ -474,6 +476,8 @@ import {
   ANIMATION_ROWS,
   PERSON_MAX_TRIANGLES,
   PersonRegion,
+  RIDE_GAIT_INDEX,
+  RIDE_PHASES,
   animationRow,
   clusterDecimate,
   dressed,
@@ -488,6 +492,7 @@ import {
   type PeopleInView,
   type Person,
 } from './people';
+import { SCENERY_CYCLISTS_MAX, type SceneryCyclist } from './scenery-cyclists';
 import {
   isRealisticVegetation,
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
@@ -550,6 +555,22 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import type { Embankment } from './overpasses';
+import {
+  GOLF_BUNKERS_PER_GREEN,
+  GOLF_GREENS_DRAWN,
+  HEADSTONE_CROSS_PATH_SLOTS,
+  HEADSTONE_CROSS_SLOTS,
+  HEADSTONE_PATH_ROWS,
+  HEADSTONE_PATH_WIDTH_METRES,
+  HEADSTONE_PITCH_METRES,
+  HEADSTONE_ROW_METRES,
+  PARK_DRESSING_CAPACITY,
+  PARK_LOOK_CELLS,
+  type ParkDressingInView,
+  type ParkGround,
+  type ParkPiece,
+} from './park-dressing';
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
@@ -629,6 +650,13 @@ import {
 } from './tree-levels';
 import { nearTreeKeep, type NearTreeFade } from './near-tree-fade';
 import {
+  emptyRiderFadeLine,
+  riderFadeLine,
+  riderFaded,
+  type RiderFade,
+  type RiderFadeLine,
+} from './rider-fade';
+import {
   directionalFogColour,
   drawnHorizonColour,
   environmentIntensity,
@@ -707,6 +735,7 @@ import {
 } from './camera';
 import {
   CENTRE_LINE_LIFT_METRES,
+  ROAD_COLOUR,
   ROAD_SURFACE_GRAIN,
   ROAD_WIDTH_METRES,
   VIEW_AHEAD_METRES,
@@ -725,6 +754,7 @@ import {
   type ShapesOf,
 } from './near-field';
 import {
+  BOUNDARY_KINDS,
   BOUNDARY_PIECE_METRES,
   FIELD_DEPTH_METRES,
   FIELD_EDGE_LATERAL_METRES,
@@ -733,11 +763,21 @@ import {
 import {
   MAXIMUM_BRIDGE_PARTS,
   waterSurfaceIsCurrent,
+  type BridgeFinish,
   type BridgePart,
   type WaterSurface,
 } from './waterways';
 import { roadTintIn, WeatherShading, sunColourIn, weatheredWorld } from './weather-look';
-import { groundColourIn, roofSnowIn, vergeSlushIn, type SunStyle, type WorldStyle } from './world';
+import { BARE_SURFACES, type BareSurface } from './land-class';
+import {
+  bareSurfaceColourIn,
+  groundColourIn,
+  roofSnowIn,
+  snowCoverIn,
+  vergeSlushIn,
+  type SunStyle,
+  type WorldStyle,
+} from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
   decorationsFor,
@@ -2117,6 +2157,18 @@ export const BRIDGE_COLOUR = 0x8f8a80;
  */
 export const PAVEMENT_COLOUR = 0xa7a49c;
 
+/**
+ * An overpass's colours — #2699, by each box's `waterways.ts`
+ * §`BridgePart.finish`. The deck carries a street, so it is the road's own
+ * flat colour (`terrain.ts` §`ROAD_COLOUR`), not the bridges' stone. Its
+ * edge beams, parapets and abutments are the pavement's concrete grey,
+ * which is what makes the deck's edges read against it from the bike.
+ */
+export const OVERPASS_COLOURS: Readonly<Record<BridgeFinish, number>> = {
+  road: ROAD_COLOUR,
+  concrete: PAVEMENT_COLOUR,
+};
+
 /** One coloured solid of a piece of street furniture — #1536. */
 interface FurniturePart {
   readonly colour: number;
@@ -2333,8 +2385,11 @@ export const LIT_COLOURS: readonly number[] = [
   ...BICYCLE_COLOURS,
   // #459. The bridges' stone, which is lit like the scenery.
   BRIDGE_COLOUR,
-  // #1535. The stylised pavement, lit like the scenery.
+  // #1535. The stylised pavement, lit like the scenery — and since #2699 an
+  // overpass's concrete, which is that same colour.
   PAVEMENT_COLOUR,
+  // #2699. An overpass's deck: the road's colour, lit, as the road is not.
+  OVERPASS_COLOURS.road,
   // #1536. The street furniture's, every part of every kind, once.
   ...new Set(
     Object.values(FURNITURE_STYLE).flatMap((style) => style.parts.map((part) => part.colour)),
@@ -3252,6 +3307,16 @@ export class ScatterBelt {
 export class RiderBelt {
   readonly #group = new Group();
   readonly #materials = vertexColouredMaterials();
+  /**
+   * What the riders are drawn with into the sun's shadow map — #2596: a
+   * depth material made as three 0.185's `WebGLShadowMap` makes its own
+   * default (`new MeshDepthMaterial()`, basic depth packing: the directional
+   * light's shadow map is a depth texture, so no packed colour is read),
+   * taught the rider fade, so a rider faded out casts as little as it is
+   * drawn. It is one more program, compiled in `prepare()`'s warm-up, and no
+   * new pass: the riders were already drawn into that pass with three's.
+   */
+  readonly #depth = withRiderInstance(new MeshDepthMaterial(), false);
   readonly #bodies: InstancedMesh;
   /** The upper bodies, rolled against the bicycle about the hips — #546. */
   readonly #torsos: InstancedMesh;
@@ -3316,23 +3381,26 @@ export class RiderBelt {
     // #623: each rider wears its own kind's kit under its tint. @see RIDER_KITS
     withKitPerInstance(this.#materials.lit);
     withKitPerInstance(this.#materials.flat);
-    // #2494: the bars turned by each rider's steer, the arms' hands with them.
-    withSteering(this.#materials.lit);
-    withSteering(this.#materials.flat);
-    this.#bodies = steerable(
+    // #2494: the bars turned by each rider's steer, the arms' hands with them;
+    // #2596: and every part of a rider faded by its instance.
+    withRiderInstance(this.#materials.lit, true);
+    withRiderInstance(this.#materials.flat, true);
+    this.#bodies = riderInstanceChannels(
       new InstancedMesh(mergedParts(RIDER_BICYCLE_PARTS), this.#materials.lit, riders),
       riders,
     );
-    this.#torsos = steerable(
+    this.#torsos = riderInstanceChannels(
       new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS), this.#materials.lit, riders),
       riders,
     );
-    this.#cranksets = new InstancedMesh(
-      mergedParts(RIDER_CRANK_PARTS),
-      this.#materials.lit,
+    this.#cranksets = riderInstanceChannels(
+      new InstancedMesh(mergedParts(RIDER_CRANK_PARTS), this.#materials.lit, riders),
       riders,
     );
-    this.#limbs = new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT);
+    this.#limbs = riderInstanceChannels(
+      new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT),
+      riders * LEG_BONE_COUNT,
+    );
     for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
       // ⚠️ **Allocates `instanceColor` while `count` is still the capacity**,
@@ -3353,6 +3421,8 @@ export class RiderBelt {
       // the road and the ground set it, and the opposite of the scenery belt.
       mesh.frustumCulled = false;
       this.#castersOnly(mesh, mesh === this.#limbs ? LEG_BONE_COUNT : 1);
+      // #2596: a faded rider casts as little as it is drawn.
+      mesh.customDepthMaterial = this.#depth;
       this.#group.add(mesh);
     }
     this.#group.visible = false;
@@ -3422,8 +3492,12 @@ export class RiderBelt {
    * to take one. A marker of a kind {@link RIDER_TINTS} does not name is
    * skipped rather than drawn untinted, which cannot happen for the three
    * `port.ts` declares and is what a fourth would hit.
+   *
+   * #2596: each rider but the rider's own is faded by how near it is drawn to
+   * `fade`, the frame's line from the camera toward the rider
+   * (`rider-fade.ts`); with none, every rider is drawn whole.
    */
-  place(markers: readonly RiderMarker[]): void {
+  place(markers: readonly RiderMarker[], fade?: RiderFadeLine): void {
     if (!this.#shown) {
       return;
     }
@@ -3453,6 +3527,7 @@ export class RiderBelt {
         break;
       }
       posed = this.#placeOne(slot, marker) || posed;
+      this.#fadeOne(slot, riderFaded(marker, fade));
       slot += 1;
       if (CASTS_CONTACT_SHADOW[marker.kind]) {
         casters = slot;
@@ -3545,6 +3620,7 @@ export class RiderBelt {
     // of the two is mounted, and the other would leak.
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#depth.dispose();
   }
 
   /**
@@ -3648,6 +3724,16 @@ export class RiderBelt {
     return true;
   }
 
+  /** How much of the rider in `slot` is faded out, on every mesh it is drawn by — #2596. */
+  #fadeOne(slot: number, faded: number): void {
+    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
+      fadeInstance(mesh, slot, faded);
+    }
+    for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
+      fadeInstance(this.#limbs, slot * LEG_BONE_COUNT + bone, faded);
+    }
+  }
+
   /** Where one rider's four leg segments are, for one crank angle. @see legBones */
   #poseLegs(slot: number, crankAngle: number): void {
     const bones = legBones(crankAngle);
@@ -3715,6 +3801,8 @@ export class ContactShadowBelt {
     polygonOffsetUnits: -4,
   });
   readonly #mesh: InstancedMesh;
+  /** #2596: how much of each blob's rider is faded out. */
+  readonly #faded: InstancedBufferAttribute;
   /** Reused for every rider on every frame. @see placeContactShadow */
   readonly #shadow: ContactShadow = { x: 0, y: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 };
   readonly #position = new Vector3();
@@ -3734,7 +3822,29 @@ export class ContactShadowBelt {
   }
 
   constructor() {
-    this.#mesh = new InstancedMesh(contactShadowGeometry(), this.#material, STYLISED_RIDER_SLOTS);
+    // #2596: a blob is as light as its rider is faded out.
+    const spliced = "#2596's faded blob";
+    this.#material.onBeforeCompile = (shader) => {
+      shader.vertexShader = replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          `#include <common>\nattribute float ${BLOB_FADED_ATTRIBUTE};`,
+          'vertex',
+          spliced,
+        ),
+        '#include <color_vertex>',
+        `#include <color_vertex>\nvColor.a *= 1.0 - ${BLOB_FADED_ATTRIBUTE};`,
+        'vertex',
+        spliced,
+      );
+    };
+    this.#material.customProgramCacheKey = () => 'oyl-faded-blob';
+    const geometry = contactShadowGeometry();
+    this.#faded = new InstancedBufferAttribute(new Float32Array(STYLISED_RIDER_SLOTS), 1);
+    this.#faded.setUsage(DynamicDrawUsage);
+    geometry.setAttribute(BLOB_FADED_ATTRIBUTE, this.#faded);
+    this.#mesh = new InstancedMesh(geometry, this.#material, STYLISED_RIDER_SLOTS);
     this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#mesh.count = 0;
     // For `RiderBelt`'s reason: every rider is within metres of the camera.
@@ -3764,8 +3874,12 @@ export class ContactShadowBelt {
     }
   }
 
-  /** One blob per rider who casts one, under this frame's sun. Allocates nothing. */
-  place(markers: readonly RiderMarker[], sun: SunStyle): void {
+  /**
+   * One blob per rider who casts one, under this frame's sun, as light as the
+   * rider is faded out (#2596): none for a rider faded out entirely.
+   * Allocates nothing.
+   */
+  place(markers: readonly RiderMarker[], sun: SunStyle, fade?: RiderFadeLine): void {
     if (!this.#shown) {
       return;
     }
@@ -3774,9 +3888,11 @@ export class ContactShadowBelt {
       if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
-      if (!placeContactShadow(marker, sun, this.#shadow)) {
+      const faded = riderFaded(marker, fade);
+      if (faded >= 1 || !placeContactShadow(marker, sun, this.#shadow)) {
         continue;
       }
+      this.#faded.setX(slot, faded);
       const shadow = this.#shadow;
       this.#position.set(shadow.x, shadow.y, shadow.z);
       this.#turn.setFromAxisAngle(this.#up, shadow.yaw);
@@ -3786,6 +3902,7 @@ export class ContactShadowBelt {
     }
     this.#mesh.count = slot;
     this.#mesh.instanceMatrix.needsUpdate = true;
+    this.#faded.needsUpdate = true;
     this.#mesh.visible = slot > 0;
   }
 
@@ -3795,6 +3912,9 @@ export class ContactShadowBelt {
     this.#material.dispose();
   }
 }
+
+/** The blob's instance attribute: how much of its rider is faded out — #2596. */
+const BLOB_FADED_ATTRIBUTE = 'oylFaded';
 
 /** How many points round the blob's rim: enough that 24 edges read as an ellipse. */
 const CONTACT_SHADOW_SEGMENTS = 24;
@@ -3919,7 +4039,8 @@ export class RiderSilhouetteBelt {
       new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]), 3),
     );
     geometry.setIndex([0, 2, 1, 0, 3, 2]);
-    this.#throws = new InstancedBufferAttribute(new Float32Array(STYLISED_RIDER_SLOTS * 2), 2);
+    // #2596: the third is how much of the rider casting it is faded out.
+    this.#throws = new InstancedBufferAttribute(new Float32Array(STYLISED_RIDER_SLOTS * 3), 3);
     this.#throws.setUsage(DynamicDrawUsage);
     geometry.setAttribute('oylThrow', this.#throws);
     this.#mesh = new InstancedMesh(geometry, this.#material, STYLISED_RIDER_SLOTS);
@@ -3960,8 +4081,12 @@ export class RiderSilhouetteBelt {
     this.#darkness.value = darkness;
   }
 
-  /** One silhouette per rider who casts one, under this frame's sun. Allocates nothing. */
-  place(markers: readonly RiderMarker[], sun: SunStyle): void {
+  /**
+   * One silhouette per rider who casts one, under this frame's sun, as light
+   * as the rider is faded out (#2596): none for a rider faded out entirely.
+   * Allocates nothing.
+   */
+  place(markers: readonly RiderMarker[], sun: SunStyle, fade?: RiderFadeLine): void {
     if (!this.#shown) {
       return;
     }
@@ -3970,13 +4095,14 @@ export class RiderSilhouetteBelt {
       if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
-      if (!silhouetteThrow(marker, sun, this.#throw)) {
+      const faded = riderFaded(marker, fade);
+      if (faded >= 1 || !silhouetteThrow(marker, sun, this.#throw)) {
         continue;
       }
       this.#position.set(marker.x, marker.y + CONTACT_SHADOW_LIFT_METRES, marker.z);
       this.#turn.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
       this.#mesh.setMatrixAt(slot, this.#matrix.compose(this.#position, this.#turn, this.#unit));
-      this.#throws.setXY(slot, this.#throw.x, this.#throw.z);
+      this.#throws.setXYZ(slot, this.#throw.x, this.#throw.z, faded);
       slot += 1;
     }
     this.#mesh.count = slot;
@@ -3995,11 +4121,13 @@ export class RiderSilhouetteBelt {
 
 /** The silhouette's quad, stretched over one rider's cast footprint. @see RiderSilhouetteBelt */
 const SILHOUETTE_VERTEX = /* glsl */ `
-attribute vec2 oylThrow;
+attribute vec3 oylThrow;
 uniform vec4 oylBounds;
 varying vec2 vOylGround;
 varying vec2 vOylThrow;
+varying float vOylFaded;
 void main() {
+  vOylFaded = oylThrow.z;
   float margin = ${glslFloat(SILHOUETTE_MARGIN_METRES)};
   float topAcross = oylBounds.z * oylThrow.x;
   float topAlong = oylBounds.z * oylThrow.y;
@@ -4011,7 +4139,7 @@ void main() {
     position.z
   );
   vOylGround = vec2(across, along);
-  vOylThrow = oylThrow;
+  vOylThrow = oylThrow.xy;
   gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(across, 0.0, along, 1.0);
 }
 `;
@@ -4026,6 +4154,7 @@ uniform vec4 oylBounds;
 uniform float oylDarkness;
 varying vec2 vOylGround;
 varying vec2 vOylThrow;
+varying float vOylFaded;
 void main() {
   float height = oylBounds.z;
   float reach = oylBounds.w;
@@ -4055,7 +4184,7 @@ void main() {
     cover = max(cover, texel.r * inside);
   }
   if (cover <= 0.0) discard;
-  gl_FragColor = vec4(0.0, 0.0, 0.0, oylDarkness * cover);
+  gl_FragColor = vec4(0.0, 0.0, 0.0, oylDarkness * cover * (1.0 - vOylFaded));
 }
 `;
 
@@ -4371,7 +4500,7 @@ function riderPartGeometry(each: RiderPart): BufferGeometry {
 
 /**
  * How much each vertex of a part turns with the bars — #2494, the
- * {@link STEER_ATTRIBUTE} {@link withSteering} reads: 1 for a part that turns
+ * {@link STEER_ATTRIBUTE} {@link withRiderInstance} reads: 1 for a part that turns
  * wholly, 0 for one that does not, and along a `'toward-end'` tube from 0 at
  * its start to 1 at its end (`bicycle.ts` §`RiderPart.steers`). Called BEFORE
  * the part is turned and moved, when a tube still stands along its own `+Y`
@@ -4395,79 +4524,172 @@ function markSteering(geometry: BufferGeometry, part: RiderPart): BufferGeometry
 
 /** The vertex attribute that says how much a vertex turns with the bars — #2494. */
 const STEER_ATTRIBUTE = 'oylSteer';
-/** The instance attribute that says how far a rider's bars are turned, in radians — #2494. */
-const INSTANCE_STEER_ATTRIBUTE = 'oylInstanceSteer';
+/**
+ * The instance attribute every rider mesh carries — one `vec2`, so one vertex
+ * attribute slot: `.x` how far the rider's bars are turned, in radians
+ * (#2494), and `.y` how much of the rider is faded out (#2596,
+ * `rider-fade.ts` §`riderFaded`). A mesh without it reads `(0, 0)`: bars
+ * straight, drawn whole.
+ */
+const RIDER_INSTANCE_ATTRIBUTE = 'oylRiderInstance';
 
 /**
- * Turns the front of a bicycle by each instance's steer, in the vertex shader
- * — #2494, so the bars turn with no draw call added: every vertex is turned
- * about `bicycle.ts` §`STEERING_AXIS` by its own {@link STEER_ATTRIBUTE} times
- * its instance's {@link INSTANCE_STEER_ATTRIBUTE}, before the instance's
- * matrix places it — `bicycle.ts` §`steeredPoint`'s Rodrigues turn, written
- * once more in GLSL, and its normal with it. A geometry without the
- * attributes reads them as nought (WebGL's default for an attribute with no
- * array) and is drawn as it was: the cranks and the legs share a material
- * with the frame. Chained after whatever patch the material already had.
+ * The fade of #2596 in GLSL: a fragment is kept only where the screen-space
+ * hash #617's tree levels and #545's near trees use (`TREE_DITHER_DISCARD`)
+ * is at or over `fade` — so 0 keeps every pixel, 1 none, and between them
+ * that share of pixels is discarded, evenly. No blending and no sorting, so a
+ * fading rider stays in the opaque pass in the meshes the rider is drawn by.
  */
-function withSteering<M extends Material>(material: M): M {
+function riderFadeDiscard(fade: string): string {
+  return /* glsl */ `
+  if (${fade} > 0.0) {
+    float oylRiderDither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    if (oylRiderDither < ${fade}) discard;
+  }
+`;
+}
+
+/** The materials {@link withRiderInstance} has taught. */
+const RIDER_FADE_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material fades a rider out by its instance — #2596.
+ *
+ * @test-facing held by `three-renderer.test.ts` §"#2596", which asserts it of
+ * the stylised belt's two materials (lit and flat), and by
+ * `contact-shadow.test.ts`, which asserts it of the riders' shadow-map depth
+ * material. The realistic world's materials (frame, rubber, metal, helmet and
+ * each body) are held only by the nightly browser spec
+ * (`game.browser.spec.ts` §"#2596", the realistic world).
+ */
+export function fadesRiders(material: Material): boolean {
+  return RIDER_FADE_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a rider material what {@link RIDER_INSTANCE_ATTRIBUTE} carries.
+ *
+ * - **The fade** (#2596), always: the instance's `.y` handed to the fragment,
+ *   which discards that share of its pixels ({@link riderFadeDiscard}).
+ * - **The steer** (#2494), when `steering`: every vertex turned about
+ *   `bicycle.ts` §`STEERING_AXIS` by its own {@link STEER_ATTRIBUTE} times its
+ *   instance's `.x`, before the instance's matrix places it —
+ *   `bicycle.ts` §`steeredPoint`'s Rodrigues turn, written once more in GLSL,
+ *   and its normal with it. So the bars turn with no draw call added. A
+ *   geometry without the attributes reads them as nought (WebGL's default for
+ *   an attribute with no array) and is drawn as it was: the cranks and the
+ *   legs share a material with the frame.
+ *
+ * Chained after whatever patch the material already had. Idempotent.
+ */
+function withRiderInstance<M extends Material>(material: M, steering: boolean): M {
+  if (RIDER_FADE_TAUGHT.has(material)) return material;
+  RIDER_FADE_TAUGHT.add(material);
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
-  const spliced = "#2494's steering";
+  const spliced = steering ? "#2494's steering" : "#2596's rider fade";
   const { point, direction } = STEERING_AXIS;
   const vector = (each: { x: number; y: number; z: number }): string =>
     `vec3(${[each.x, each.y, each.z].map((value) => value.toFixed(9)).join(', ')})`;
+  const steer = `${STEER_ATTRIBUTE} * ${RIDER_INSTANCE_ATTRIBUTE}.x`;
   material.onBeforeCompile = (shader, renderer) => {
     earlier(shader, renderer);
-    shader.vertexShader = replacedOrThrown(
-      replacedOrThrown(
-        replacedOrThrown(
-          shader.vertexShader,
-          '#include <common>',
-          /* glsl */ `#include <common>
-attribute float ${STEER_ATTRIBUTE};
-attribute float ${INSTANCE_STEER_ATTRIBUTE};
+    let vertex = replacedOrThrown(
+      shader.vertexShader,
+      '#include <common>',
+      /* glsl */ `#include <common>
+attribute vec2 ${RIDER_INSTANCE_ATTRIBUTE};
+varying float vOylRiderFade;
+${
+  steering
+    ? `attribute float ${STEER_ATTRIBUTE};
 vec3 oylTurned(vec3 v, float angle) {
   vec3 k = ${vector(direction)};
   float c = cos(angle);
   return v * c + cross(k, v) * sin(angle) + k * dot(k, v) * (1.0 - c);
+}`
+    : ''
 }`,
-          'vertex',
-          spliced,
-        ),
-        '#include <beginnormal_vertex>',
-        `#include <beginnormal_vertex>
-objectNormal = oylTurned(objectNormal, ${STEER_ATTRIBUTE} * ${INSTANCE_STEER_ATTRIBUTE});`,
-        'vertex',
-        spliced,
-      ),
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-transformed = ${vector(point)} + oylTurned(transformed - ${vector(point)}, ${STEER_ATTRIBUTE} * ${INSTANCE_STEER_ATTRIBUTE});`,
       'vertex',
       spliced,
     );
+    if (steering) {
+      vertex = replacedOrThrown(
+        vertex,
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+objectNormal = oylTurned(objectNormal, ${steer});`,
+        'vertex',
+        spliced,
+      );
+    }
+    shader.vertexShader = replacedOrThrown(
+      vertex,
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+vOylRiderFade = ${RIDER_INSTANCE_ATTRIBUTE}.y;${
+        steering
+          ? `
+transformed = ${vector(point)} + oylTurned(transformed - ${vector(point)}, ${steer});`
+          : ''
+      }`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylRiderFade;',
+        'fragment',
+        spliced,
+      ),
+      '#include <clipping_planes_fragment>',
+      `#include <clipping_planes_fragment>\n${riderFadeDiscard('vOylRiderFade')}`,
+      'fragment',
+      spliced,
+    );
   };
-  material.customProgramCacheKey = () => `${earlierKey}+oyl-steering`;
+  material.customProgramCacheKey = () =>
+    `${earlierKey}+${steering ? 'oyl-steering' : 'oyl-rider-fade'}`;
   return material;
 }
 
 /**
- * Gives an instanced mesh its per-instance steer, every instance straight —
- * #2494. @see withSteering
+ * Gives an instanced rider mesh its per-instance {@link RIDER_INSTANCE_ATTRIBUTE},
+ * every instance straight and whole — #2494, #2596.
  */
-function steerable(mesh: InstancedMesh, capacity: number): InstancedMesh {
-  const steer = new InstancedBufferAttribute(new Float32Array(capacity), 1);
-  steer.setUsage(DynamicDrawUsage);
-  mesh.geometry.setAttribute(INSTANCE_STEER_ATTRIBUTE, steer);
+function riderInstanceChannels(mesh: InstancedMesh, capacity: number): InstancedMesh {
+  const channels = new InstancedBufferAttribute(new Float32Array(capacity * 2), 2);
+  channels.setUsage(DynamicDrawUsage);
+  mesh.geometry.setAttribute(RIDER_INSTANCE_ATTRIBUTE, channels);
   return mesh;
 }
 
-/** Sets one instance's steer, where the mesh has one. @see steerable */
+/**
+ * Sets one instance's steer, where the mesh has one. @see riderInstanceChannels
+ *
+ * ⚠️ **Marks the buffer for upload only when the value changed** — review of
+ * #2620. Three uploads the whole buffer, not one slot, whenever it is marked,
+ * so a frame in which no rider turned its bars and none came nearer the
+ * camera's line uploads nothing. Compared as the `Float32Array` holds it.
+ */
 function steerInstance(mesh: InstancedMesh, slot: number, steer: number): void {
-  const held = mesh.geometry.getAttribute(INSTANCE_STEER_ATTRIBUTE) as
+  const held = mesh.geometry.getAttribute(RIDER_INSTANCE_ATTRIBUTE) as
     InstancedBufferAttribute | undefined;
-  if (held === undefined) return;
+  if (held === undefined || held.getX(slot) === Math.fround(steer)) return;
   held.setX(slot, steer);
+  held.needsUpdate = true;
+}
+
+/**
+ * Sets how much of one instance is faded out — #2596; only a change marks the
+ * buffer for upload, as {@link steerInstance}. @see riderInstanceChannels
+ */
+function fadeInstance(mesh: InstancedMesh, slot: number, faded: number): void {
+  const held = mesh.geometry.getAttribute(RIDER_INSTANCE_ATTRIBUTE) as InstancedBufferAttribute;
+  if (held.getY(slot) === Math.fround(faded)) return;
+  held.setY(slot, faded);
   held.needsUpdate = true;
 }
 
@@ -4734,6 +4956,51 @@ function reserve(mesh: InstancedMesh, needed: number): void {
   mesh.instanceMatrix = grown;
 }
 
+/** Each bare surface's tint, three channels a surface, written each frame. @see bareGroundTints */
+const BARE_TINTS = new Float32Array(BARE_SURFACES.length * 3);
+const BARE_GROUND_SCRATCH = new Color();
+const BARE_SURFACE_SCRATCH = new Color();
+
+/**
+ * Draws mapped bare ground in its own colour, not the grass's — #2700.
+ *
+ * The ground's material is ONE colour, the world's (`world.ts`
+ * §`groundColourIn`), and each vertex's colour multiplies it. So a vertex on
+ * bare ground (`landform.ts` §`TerrainMesh.surfaces`) has its colour, the
+ * mottle and the wet margin, multiplied again by its surface's colour over
+ * the ground's, channel by channel in the linear space the shader multiplies
+ * in: what is drawn there is the surface's colour, mottled, wet where it is.
+ * In place, on the colours just uploaded, so the mesh's lent array is left as
+ * `landform.ts` built it and no vertex attribute is added (#2700's
+ * constraint).
+ */
+function bareGroundTints(
+  colours: Float32Array,
+  surfaces: Uint8Array,
+  groundColour: number,
+  snowCover: number,
+): void {
+  const ground = BARE_GROUND_SCRATCH.setHex(groundColour);
+  for (let index = 0; index < BARE_SURFACES.length; index += 1) {
+    const surface = BARE_SURFACE_SCRATCH.setHex(
+      bareSurfaceColourIn(BARE_SURFACES[index] as BareSurface, snowCover),
+    );
+    BARE_TINTS[index * 3] = surface.r / Math.max(ground.r, 1e-4);
+    BARE_TINTS[index * 3 + 1] = surface.g / Math.max(ground.g, 1e-4);
+    BARE_TINTS[index * 3 + 2] = surface.b / Math.max(ground.b, 1e-4);
+  }
+  for (let vertex = 0; vertex < surfaces.length; vertex += 1) {
+    const byte = surfaces[vertex] as number;
+    if (byte === 0) continue;
+    const tint = (byte - 1) * 3;
+    colours[vertex * 3] = (colours[vertex * 3] as number) * (BARE_TINTS[tint] as number);
+    colours[vertex * 3 + 1] =
+      (colours[vertex * 3 + 1] as number) * (BARE_TINTS[tint + 1] as number);
+    colours[vertex * 3 + 2] =
+      (colours[vertex * 3 + 2] as number) * (BARE_TINTS[tint + 2] as number);
+  }
+}
+
 /**
  * The ground beside the road — #458. One mesh, one draw call, rebuilt from
  * `landform.ts` every frame the way the road is.
@@ -4768,6 +5035,18 @@ function reserve(mesh: InstancedMesh, needed: number): void {
  * rung saves is the fill of the far ground, which is most of this mesh's
  * fragments and is already fogged by the time a rider could see it.
  *
+ * ## And the overpasses' embankments — #2699
+ *
+ * A second mesh, {@link embankmentMesh}: every mapped overpass in view's
+ * banks (`overpasses.ts` §`Embankment`), in **this mesh's own material,
+ * whichever it is** — the photographed grass and its patchwork, or the
+ * stylised pair — because the owner asked for banks "wearing the ground's
+ * own grass or earth look". `#mount` puts the one material on both, so
+ * the two can never disagree. Its buffers carry what that material reads and
+ * no more (position, normal, colour, `fields`), each face its own normal.
+ * Rebuilt only when the SET of embankments changes, as {@link SideRoadBelt}
+ * is, and not drawn where a frame holds none.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class TerrainBelt {
@@ -4778,6 +5057,8 @@ export class TerrainBelt {
   readonly #fieldCount = { value: 1 };
   /** Where the tree line is, for the realistic ground's scree — #627. @see TerrainMesh.treeLine */
   readonly #treeLine = { value: NO_TREE_LINE };
+  /** #2685: the golf courses' and cemeteries' ground, for the photographic ground. */
+  readonly #park = new ParkGroundPaint();
   readonly #materials = {
     lit: withSurfaceDetail(
       new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
@@ -4808,20 +5089,33 @@ export class TerrainBelt {
    */
   #uploadedIndices: Uint32Array | undefined;
 
+  /** The overpasses' embankments — #2699, in {@link #mesh}'s material. */
+  readonly #embankments: Mesh;
+  /** The embankments {@link #embankments} holds, in the order it holds them. */
+  #heldEmbankments: readonly Embankment[] = [];
+
   constructor() {
     this.#mesh = new Mesh(this.#geometry, this.#materials.lit);
     // For the road's reason: rebuilt in world coordinates every frame, always
     // under the camera, and one mesh — a cull could only ever lose it.
     this.#mesh.frustumCulled = false;
+    this.#embankments = new Mesh(new BufferGeometry(), this.#materials.lit);
+    this.#embankments.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.#mesh);
+    scene.add(this.#embankments);
   }
 
-  /** The one mesh. For `three-renderer.test.ts`. */
+  /** The ground's mesh. For `three-renderer.test.ts`. */
   get mesh(): Mesh {
     return this.#mesh;
+  }
+
+  /** The overpasses' embankments' mesh — #2699. For `overpasses.test.ts`. */
+  get embankmentMesh(): Mesh {
+    return this.#embankments;
   }
 
   /** @see QualitySettings.shading */
@@ -4845,8 +5139,19 @@ export class TerrainBelt {
     readonly span: { value: number };
     readonly count: { value: number };
     readonly treeLine: { value: number };
+    readonly park: ParkGroundUniforms;
   } {
-    return { span: this.#fieldSpan, count: this.#fieldCount, treeLine: this.#treeLine };
+    return {
+      span: this.#fieldSpan,
+      count: this.#fieldCount,
+      treeLine: this.#treeLine,
+      park: this.#park.uniforms,
+    };
+  }
+
+  /** This frame's golf courses' and cemeteries' ground — #2685, or none. @see ParkGroundPaint */
+  updatePark(ground: ParkGround | undefined): void {
+    this.#park.write(ground);
   }
 
   /** The surface detail, on or off — #425. @see QualitySettings.surfaceDetail */
@@ -4856,7 +5161,27 @@ export class TerrainBelt {
   }
 
   #mount(): void {
-    this.#mesh.material = this.#photographic ?? this.#materials[this.#shading];
+    const material = this.#photographic ?? this.#materials[this.#shading];
+    this.#mesh.material = material;
+    this.#embankments.material = material;
+  }
+
+  /**
+   * This frame's overpass embankments — #2699. The same objects every frame
+   * while the same overpasses are in view, so the mesh is rebuilt only when
+   * that set changes.
+   */
+  updateEmbankments(embankments: readonly Embankment[]): void {
+    const held = this.#heldEmbankments;
+    const same =
+      embankments.length === held.length &&
+      embankments.every((embankment, index) => embankment === held[index]);
+    if (!same) {
+      this.#heldEmbankments = embankments;
+      this.#embankments.geometry.dispose();
+      this.#embankments.geometry = embankmentGeometry(embankments);
+    }
+    this.#embankments.visible = embankments.length > 0;
   }
 
   /** How many bands of ground this rung draws, innermost first. @see QualitySettings.terrainBands */
@@ -4874,8 +5199,12 @@ export class TerrainBelt {
   /**
    * This frame's ground, in the world's ground colour. Grows its buffers and
    * never shrinks them, for the road's reason (#240's NFR-3).
+   *
+   * #2700: and its mapped bare ground in that ground's own colour —
+   * {@link bareGroundTints} — under `snowCover`, the ground's snow
+   * (`world.ts` §`snowCoverIn`), which `#stage` passes for the frame's winter.
    */
-  update(ground: TerrainMesh, groundColour: number): void {
+  update(ground: TerrainMesh, groundColour: number, snowCover = 0): void {
     // ⚠️ #469: the mesh's arrays are lent, and a later build has written over
     // them. Drawing it would draw that build's ground under this frame's road
     // — silently, and only in a caller that holds two frames, which is every
@@ -4911,7 +5240,9 @@ export class TerrainBelt {
     }
     upload(this.#geometry.getAttribute('position') as BufferAttribute, ground.vertices);
     upload(this.#geometry.getAttribute('normal') as BufferAttribute, ground.normals);
-    upload(this.#geometry.getAttribute('color') as BufferAttribute, ground.colours);
+    const colour = this.#geometry.getAttribute('color') as BufferAttribute;
+    upload(colour, ground.colours);
+    bareGroundTints(colour.array as Float32Array, ground.surfaces, groundColour, snowCover);
     upload(this.#geometry.getAttribute('fields') as BufferAttribute, ground.fields);
     if (ground.indices !== this.#uploadedIndices) {
       upload(this.#geometry.getIndex() as BufferAttribute, ground.indices);
@@ -4927,14 +5258,52 @@ export class TerrainBelt {
 
   dispose(): void {
     this.#geometry.dispose();
+    this.#embankments.geometry.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#park.dispose();
   }
 
   /** Draw only the bands this rung allows, and only triangles this frame has. */
   #applyRange(): void {
     this.#geometry.setDrawRange(0, Math.min(this.#indexCount, this.#bands * this.#indicesPerBand));
   }
+}
+
+/** Every embankment as one geometry, with the attributes the ground's material reads — #2699. */
+function embankmentGeometry(embankments: readonly Embankment[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const embankment of embankments) {
+    vertices += embankment.positions.length / 3;
+    indices += embankment.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const fields = new Float32Array(vertices * 2);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const embankment of embankments) {
+    positions.set(embankment.positions, vertex * 3);
+    normals.set(embankment.normals, vertex * 3);
+    colours.set(embankment.colours, vertex * 3);
+    fields.set(embankment.fields, vertex * 2);
+    for (let each = 0; each < embankment.indices.length; each += 1) {
+      index[at + each] = (embankment.indices[each] as number) + vertex;
+    }
+    vertex += embankment.positions.length / 3;
+    at += embankment.indices.length;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('fields', new BufferAttribute(fields, 2));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 /**
@@ -5501,12 +5870,128 @@ void main() {
 export const RIPPLE_FADE_RADIANS_PER_PIXEL: readonly [number, number] = [0.5, 1.5];
 
 /**
+ * One travelling wave on the water — #2701. A height of `amplitude · sin(k·p +
+ * speed · t)` metres, where `k` is the wave vector `(kx, kz)` in radians a
+ * metre; its slope, which is all the shader needs, is `amplitude · cos(…) · k`.
+ */
+export interface WaterWave {
+  /** The wave vector's x component, radians a metre. */
+  readonly kx: number;
+  /** The wave vector's z component, radians a metre. */
+  readonly kz: number;
+  /** How fast its phase turns, radians a second; the sign is which way it travels. */
+  readonly speed: number;
+  /** Its height, metres. */
+  readonly amplitude: number;
+}
+
+/** A wave `wavenumber` radians a metre, travelling toward `degrees` from +x toward +z. */
+function waterWave(degrees: number, wavenumber: number, speed: number, slope: number): WaterWave {
+  const radians = (degrees * Math.PI) / 180;
+  return {
+    kx: Math.cos(radians) * wavenumber,
+    kz: Math.sin(radians) * wavenumber,
+    speed,
+    amplitude: slope / wavenumber,
+  };
+}
+
+/**
+ * The ripples — #2701: five travelling waves, each band-limited by
+ * {@link RIPPLE_FADE_RADIANS_PER_PIXEL}, as the shader's `ripples` uniform.
+ *
+ * ⚠️ **Why five, and not #459's two.** Any two plane waves add up to a field
+ * that is exactly periodic on a lattice: #459's pair repeated itself every
+ * 7.4 m, so a lake 100 m across showed the same diamond tile a dozen times
+ * over, and the owner's map screenshots of 2026-11-16 read it as a tiled
+ * texture. Five waves spread over 19° to 156° with wavelengths of 1.5 m to
+ * 14 m and no two in a simple ratio are only quasi-periodic: the field comes
+ * back to within 90 % of itself on under 0.2 % of the shifts within 40 m,
+ * where #459's pair did on 3.3 % of them (`water-pattern.test.ts`). The first
+ * two are #459's own directions and wavelengths, at about two thirds of their
+ * slope, so the water close to the bike moves the way it did; the 14 m swell
+ * is the longest, and the last to fade with distance, so water too far off
+ * for any ripple still carries one. Every figure is this repository's own,
+ * chosen by searching for a set that does not repeat within 40 m.
+ */
+export const WATER_RIPPLES: readonly WaterWave[] = [
+  waterWave(34, 1.7, 1.3, 0.04),
+  waterWave(118, 2.9, -1.9, 0.036),
+  waterWave(156, 0.92, 0.95, 0.034),
+  waterWave(70, 4.31, -2.6, 0.026),
+  waterWave(19, 0.45, 0.55, 0.03),
+];
+
+/**
+ * The gusts — #2701: three long waves, 29 m to 61 m, as the shader's `gusts`
+ * uniform. Their sum does two things.
+ *
+ * - **Calm and rough patches.** It scales every ripple's slope between
+ *   {@link WATER_CALM_SHARE} and 1, so a lake has darker, choppier stretches
+ *   and glassier ones drifting across it — scale variation that no shift of
+ *   the ripples alone reproduces.
+ * - **Shading where no ripple is left.** It is itself a low swell, a slope of
+ *   about 0.02 each, which tilts the surface by a degree or so. Seen from the
+ *   bike at a grazing angle, a degree is a large change in the Fresnel term
+ *   and in which part of the sky is reflected, so water a few hundred metres
+ *   off, where {@link RIPPLE_FADE_RADIANS_PER_PIXEL} has faded every ripple,
+ *   shows broad lighter and darker bands rather than one flat colour. At 29 m
+ *   and longer they are still band-limited by `oylRippleWeight` like the
+ *   ripples: at a grazing angle even a 29 m swell changes phase by more than
+ *   a radian a pixel past about 150 m, where fog has not yet hidden it.
+ */
+export const WATER_GUSTS: readonly WaterWave[] = [
+  waterWave(25, (2 * Math.PI) / 43, 0.07, 0.022),
+  waterWave(112, (2 * Math.PI) / 61, -0.05, 0.02),
+  waterWave(67, (2 * Math.PI) / 29, 0.04, 0.018),
+];
+
+/** The ripples' slope in the calmest patch, as a share of their own: **0.4**. @see WATER_GUSTS */
+export const WATER_CALM_SHARE = 0.4;
+
+/** A wave set as the `vec4`s the shader reads: `(kx, kz, speed, amplitude)`. */
+function waveUniform(waves: readonly WaterWave[]): Vector4[] {
+  return waves.map((wave) => new Vector4(wave.kx, wave.kz, wave.speed, wave.amplitude));
+}
+
+/**
+ * The GLSL that sums the gusts and the ripples into `slope` — #2701, unrolled
+ * so that every array index is a constant and no derivative is taken inside a
+ * loop. The ripples are named `a1`…`a5`, as #459's two were.
+ */
+function waterSlopeGlsl(): string {
+  const gusts = WATER_GUSTS.map(
+    (_, i) =>
+      `  float g${String(i + 1)} = dot(p, gusts[${String(i)}].xy) + time * gusts[${String(i)}].z;`,
+  );
+  const gust = WATER_GUSTS.map((_, i) => `sin(g${String(i + 1)})`).join(' + ');
+  const swell = WATER_GUSTS.map(
+    (_, i) =>
+      `gusts[${String(i)}].w * oylRippleWeight(g${String(i + 1)}) * cos(g${String(i + 1)}) * gusts[${String(i)}].xy`,
+  ).join('\n    + ');
+  const phases = WATER_RIPPLES.map(
+    (_, i) =>
+      `  float a${String(i + 1)} = dot(p, ripples[${String(i)}].xy) + time * ripples[${String(i)}].z;`,
+  );
+  const ripples = WATER_RIPPLES.map(
+    (_, i) =>
+      `ripples[${String(i)}].w * oylRippleWeight(a${String(i + 1)}) * cos(a${String(i + 1)}) * ripples[${String(i)}].xy`,
+  ).join('\n    + ');
+  return `${gusts.join('\n')}
+  float rough = mix(${glslFloat(WATER_CALM_SHARE)}, 1.0, 0.5 + (${gust}) / ${glslFloat(2 * WATER_GUSTS.length)});
+${phases.join('\n')}
+  vec2 slope = rough * (${ripples})
+    + ${swell};`;
+}
+
+/**
  * The water shader's fragment half: the sky reflected with a Fresnel term,
  * ripples as an analytic normal that scrolls with the ride's clock, and the
  * edges tinted shallow by the geometry's own shore weight.
  *
- * ⚠️ **No texture, and no second pass.** The ripple normal is two travelling
- * waves differentiated by hand, so there is no normal map to fetch — #366's
+ * ⚠️ **No texture, and no second pass.** The ripple normal is travelling
+ * waves differentiated by hand — {@link WATER_RIPPLES} scaled by
+ * {@link WATER_GUSTS}, since #2701 — so there is no normal map to fetch — #366's
  * "no texture reaches the GPU" holds — and the reflection is the sky's own two
  * colours along the reflected ray, so there is no planar reflection render.
  * The fog and colour-space chunks are three's, in the order its own
@@ -5519,6 +6004,8 @@ uniform vec3 deepColour;
 uniform vec3 shallowColour;
 uniform float time;
 uniform float rippleFilter;
+uniform vec4 ripples[${String(WATER_RIPPLES.length)}];
+uniform vec4 gusts[${String(WATER_GUSTS.length)}];
 varying vec3 vWorld;
 varying float vShore;
 #include <fog_pars_fragment>
@@ -5528,12 +6015,7 @@ float oylRippleWeight(float phase) {
 }
 void main() {
   vec2 p = vWorld.xz;
-  vec2 d1 = vec2(0.83, 0.56);
-  vec2 d2 = vec2(-0.47, 0.88);
-  float a1 = dot(p, d1) * 1.7 + time * 1.3;
-  float a2 = dot(p, d2) * 2.9 - time * 1.9;
-  vec2 slope = 0.06 * oylRippleWeight(a1) * cos(a1) * d1
-    + 0.058 * oylRippleWeight(a2) * cos(a2) * d2;
+${waterSlopeGlsl()}
   vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
   vec3 v = normalize(cameraPosition - vWorld);
   float facing = clamp(dot(n, v), 0.0, 1.0);
@@ -5685,6 +6167,8 @@ export class WaterBelt {
         shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
         time: { value: 0 },
         rippleFilter: { value: 1 },
+        ripples: { value: waveUniform(WATER_RIPPLES) },
+        gusts: { value: waveUniform(WATER_GUSTS) },
       },
     ]),
   });
@@ -5918,6 +6402,8 @@ function reflectingWaterMaterial(environment: Texture): ShaderMaterial {
           shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
           time: { value: 0 },
           rippleFilter: { value: 1 },
+          ripples: { value: waveUniform(WATER_RIPPLES) },
+          gusts: { value: waveUniform(WATER_GUSTS) },
           envMap: { value: null },
           envMapRotation: { value: new Matrix3() },
           environmentScale: { value: 0 },
@@ -5950,6 +6436,16 @@ function environmentScaleFor(zenith: LinearColour, target: number): number {
  * The bridges — #459. Every parapet, deck slab and abutment in view is one
  * instance of one box: one draw call however many bridges there are.
  *
+ * ⚠️ **Two boxes since #2699, not one.** A stream bridge's blocks are the
+ * stone box, {@link mesh}. An overpass's (`overpasses.ts`), whose blocks name
+ * a `finish`, are {@link overpassMesh}: a white box, each instance in its
+ * {@link OVERPASS_COLOURS} colour, which the realistic world lights but never
+ * dresses in the stone — #2687's screenshots read the stone deck as a brown
+ * slab. Each holds up to `MAXIMUM_BRIDGE_PARTS`, and a frame's bridges are
+ * cut to that in all (`scene.ts` §`water`), so the triangles a frame may
+ * submit here are what they were; the second box costs a draw call on a
+ * frame with an overpass in view, and none on any other.
+ *
  * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
  */
 export class BridgeBelt {
@@ -5961,13 +6457,30 @@ export class BridgeBelt {
   readonly #physical = withAtmosphere(
     constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
   );
+  /**
+   * The overpass mesh's own materials. It carries `instanceColor` and the
+   * stone mesh does not, and three re-selects a program whenever a draw's
+   * material and object disagree on that, so sharing {@link #materials} and
+   * {@link #physical} would cost both draws a program lookup each on a frame
+   * with both kinds of bridge in view.
+   */
+  readonly #overpassMaterials = vertexColouredMaterials();
+  readonly #overpassPhysical = withAtmosphere(
+    constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 })),
+  );
   /** The realistic world's photographed stone, once it has been handed one — #501. */
   #stone: { readonly maps: StoneMaps; readonly material: MeshStandardMaterial } | undefined;
   #stoneMaps: StoneMaps | undefined;
   #shading: QualitySettings['shading'] = 'lit';
   #world: QualitySettings['world'] = 'stylised';
   readonly #mesh: InstancedMesh;
+  /** An overpass's blocks — #2699. @see overpassMesh */
+  readonly #overpass: InstancedMesh;
   readonly #matrix = new Matrix4();
+  readonly #finishes: Readonly<Record<BridgeFinish, Color>> = {
+    road: new Color(OVERPASS_COLOURS.road),
+    concrete: new Color(OVERPASS_COLOURS.concrete),
+  };
   readonly #along = new Vector3();
   readonly #across = new Vector3();
   readonly #up = new Vector3();
@@ -5981,15 +6494,31 @@ export class BridgeBelt {
     this.#mesh.count = 0;
     this.#mesh.frustumCulled = false;
     this.#mesh.visible = false;
+    const plain = new BoxGeometry(1, 1, 1);
+    paintEveryVertex(plain, 0xffffff);
+    this.#overpass = new InstancedMesh(plain, this.#overpassMaterials.lit, MAXIMUM_BRIDGE_PARTS);
+    this.#overpass.instanceMatrix.setUsage(DynamicDrawUsage);
+    // The colour buffer from the start, so the mesh's program is the same every frame.
+    this.#overpass.setColorAt(0, this.#finishes.concrete);
+    this.#overpass.instanceColor?.setUsage(DynamicDrawUsage);
+    this.#overpass.count = 0;
+    this.#overpass.frustumCulled = false;
+    this.#overpass.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.#mesh);
+    scene.add(this.#overpass);
   }
 
-  /** The one mesh. For `three-renderer.test.ts`. */
+  /** The stream bridges' stone mesh. For `three-renderer.test.ts`. */
   get mesh(): InstancedMesh {
     return this.#mesh;
+  }
+
+  /** The overpasses' mesh — #2699. For `overpasses.test.ts`. */
+  get overpassMesh(): InstancedMesh {
+    return this.#overpass;
   }
 
   /**
@@ -6034,8 +6563,11 @@ export class BridgeBelt {
   #mount(): void {
     if (this.#world !== 'realistic') {
       this.#mesh.material = this.#materials[this.#shading];
+      this.#overpass.material = this.#overpassMaterials[this.#shading];
       return;
     }
+    // An overpass is lit as the realistic world lights a primitive, never stone.
+    this.#overpass.material = this.#overpassPhysical;
     const maps = this.#stoneMaps;
     if (maps === undefined) {
       this.#mesh.material = this.#physical;
@@ -6053,9 +6585,11 @@ export class BridgeBelt {
    * `height` up. Allocates nothing.
    */
   update(parts: readonly BridgePart[]): void {
-    const count = Math.min(parts.length, MAXIMUM_BRIDGE_PARTS);
-    for (let index = 0; index < count; index += 1) {
-      const part = parts[index] as BridgePart;
+    let stone = 0;
+    let overpass = 0;
+    for (const part of parts) {
+      const finish = part.finish;
+      if ((finish === undefined ? stone : overpass) >= MAXIMUM_BRIDGE_PARTS) continue;
       this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
       this.#across.crossVectors(this.#vertical, this.#along).normalize();
       this.#up.crossVectors(this.#along, this.#across).normalize();
@@ -6064,19 +6598,37 @@ export class BridgeBelt {
       this.#along.multiplyScalar(part.length);
       this.#matrix.makeBasis(this.#across, this.#up, this.#along);
       this.#matrix.setPosition(part.x, part.y, part.z);
-      this.#mesh.setMatrixAt(index, this.#matrix);
+      if (finish === undefined) {
+        this.#mesh.setMatrixAt(stone, this.#matrix);
+        stone += 1;
+      } else {
+        this.#overpass.setMatrixAt(overpass, this.#matrix);
+        this.#overpass.setColorAt(overpass, this.#finishes[finish]);
+        overpass += 1;
+      }
     }
-    this.#mesh.count = count;
-    this.#mesh.instanceMatrix.needsUpdate = count > 0;
-    this.#mesh.visible = count > 0;
+    this.#mesh.count = stone;
+    this.#mesh.instanceMatrix.needsUpdate = stone > 0;
+    this.#mesh.visible = stone > 0;
+    this.#overpass.count = overpass;
+    this.#overpass.instanceMatrix.needsUpdate = overpass > 0;
+    if (this.#overpass.instanceColor !== null) {
+      this.#overpass.instanceColor.needsUpdate = overpass > 0;
+    }
+    this.#overpass.visible = overpass > 0;
   }
 
   dispose(): void {
     this.#mesh.geometry.dispose();
     this.#mesh.dispose();
+    this.#overpass.geometry.dispose();
+    this.#overpass.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
     this.#physical.dispose();
+    this.#overpassMaterials.lit.dispose();
+    this.#overpassMaterials.flat.dispose();
+    this.#overpassPhysical.dispose();
     this.#stone?.material.dispose();
   }
 }
@@ -10212,9 +10764,10 @@ function pavementGeometry(
 
 /**
  * Every cross street in view — #1565 (`cross-streets.ts`): the side roads a
- * short way off the route at each junction, and their give-way lines. **One
- * mesh and one draw call** however many are in view, and none where a frame
- * holds none.
+ * short way off the route at each junction, and their give-way lines — and
+ * since #2699 each overpass's road (`overpasses.ts`), its deck's top and its
+ * approaches (their embankments are ground, {@link TerrainBelt}'s). **One mesh and one draw call**
+ * however many are in view, and none where a frame holds none.
  *
  * ⚠️ **It wears the ROAD's material, whatever the road wears** —
  * `ThreeGameView` hands it the road mesh's own every frame: the stylised
@@ -15650,6 +16203,8 @@ interface GroundBlendMaps {
   readonly crag?: { readonly colour: Texture; readonly normal: Texture };
   /** `landform.ts` §`TerrainMesh.treeLine`, written by `TerrainBelt.update`. */
   readonly treeLine: { value: number };
+  /** #2685: the golf courses' and cemeteries' ground. Absent, none is painted. @see ParkGroundPaint */
+  readonly park?: ParkGroundUniforms | undefined;
 }
 
 /**
@@ -15724,6 +16279,7 @@ uniform vec4 groundShares;
 uniform float oylVergeSlush;
 varying vec3 vOylGround;
 varying float vOylGroundUp;
+${PARK_GROUND_PARS}
 float oylVergeShare = 0.0;
 float oylRockShare = 0.0;
 float oylCragShare = 0.0;
@@ -15856,6 +16412,384 @@ const GROUND_BLEND_MIX = /* glsl */ `
 `;
 
 /**
+ * The golf courses' and cemeteries' ground, as the photographic ground's
+ * shader reads it — #2685. One per {@link TerrainBelt}, handed to every
+ * ground material it wears (`GroundBlendMaps.park`), and written from each
+ * frame's `SceneFrame.parkDressing.ground` by {@link ParkGroundPaint.write}:
+ * the window of park looks as a `park-dressing.ts` §`PARK_LOOK_CELLS`² RGBA
+ * texture, linearly filtered so an edge is soft over one 5 m cell, and the
+ * greens and their bunkers as uniform arrays. No triangle, no draw call and
+ * no vertex attribute: the texture is 102 400 bytes.
+ */
+export class ParkGroundPaint {
+  readonly uniforms: ParkGroundUniforms;
+  readonly #texture: DataTexture;
+  #written: ParkGround | undefined;
+
+  constructor() {
+    const data = new Uint8Array(PARK_LOOK_CELLS * PARK_LOOK_CELLS * 4);
+    this.#texture = new DataTexture(
+      data,
+      PARK_LOOK_CELLS,
+      PARK_LOOK_CELLS,
+      RGBAFormat,
+      UnsignedByteType,
+    );
+    this.#texture.magFilter = LinearFilter;
+    this.#texture.minFilter = LinearFilter;
+    this.#texture.generateMipmaps = false;
+    this.#texture.wrapS = ClampToEdgeWrapping;
+    this.#texture.wrapT = ClampToEdgeWrapping;
+    this.#texture.needsUpdate = true;
+    this.uniforms = {
+      oylParkLooks: { value: this.#texture },
+      oylParkWindow: { value: new Vector4(0, 0, 0, 0) },
+      oylGreens: { value: Array.from({ length: GOLF_GREENS_DRAWN }, () => new Vector4()) },
+      oylBunkers: {
+        value: Array.from(
+          { length: GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN },
+          () => new Vector4(),
+        ),
+      },
+      // The season's snow covers the stripes, greens, sand and paths alike.
+      oylParkSnow: SEASON.oylRoofSnow,
+    };
+  }
+
+  /** The window this frame's ground is painted from, or none: then nothing is painted. */
+  write(ground: ParkGround | undefined): void {
+    const window = this.uniforms.oylParkWindow.value;
+    if (ground === undefined) {
+      window.w = 0;
+      return;
+    }
+    window.set(ground.originX, ground.originZ, 1 / (ground.cells * ground.cellMetres), 1);
+    if (ground === this.#written) return;
+    this.#written = ground;
+    (this.#texture.image.data as Uint8Array).set(ground.looks);
+    this.#texture.needsUpdate = true;
+    const greens = this.uniforms.oylGreens.value;
+    const bunkers = this.uniforms.oylBunkers.value;
+    for (const slot of greens) slot.set(0, 0, 0, 0);
+    for (const slot of bunkers) slot.set(0, 0, 0, 0);
+    ground.greens.slice(0, GOLF_GREENS_DRAWN).forEach((green, index) => {
+      (greens[index] as Vector4).set(green.x, green.z, green.radius, 1);
+      green.bunkers.slice(0, GOLF_BUNKERS_PER_GREEN).forEach((bunker, which) => {
+        // `w` turns each bunker's outline, so no two are the same shape.
+        (bunkers[index * GOLF_BUNKERS_PER_GREEN + which] as Vector4).set(
+          bunker.x,
+          bunker.z,
+          bunker.radius,
+          index * 1.7 + which * 2.9,
+        );
+      });
+    });
+  }
+
+  dispose(): void {
+    this.#texture.dispose();
+  }
+}
+
+/** What {@link ParkGroundPaint} hands the ground's program. */
+export interface ParkGroundUniforms {
+  readonly oylParkLooks: { value: Texture };
+  /** `xy` the window's corner, `z` one over its side in metres, `w` 1 while a window is drawn. */
+  readonly oylParkWindow: { value: Vector4 };
+  /** Each green's `x, z, radius`, `w` 1; `w` 0 is no green. */
+  readonly oylGreens: { value: Vector4[] };
+  /** Each bunker's `x, z, radius` and the turn of its outline; a radius of 0 is none. */
+  readonly oylBunkers: { value: Vector4[] };
+  /** The season's snow, which covers all of it. */
+  readonly oylParkSnow: { value: number };
+}
+
+/** The uniforms a ground built with no {@link ParkGroundPaint} reads: no window, so nothing is painted. */
+function noParkGround(): ParkGroundUniforms {
+  return {
+    oylParkLooks: { value: new DataTexture() },
+    oylParkWindow: { value: new Vector4(0, 0, 0, 0) },
+    oylGreens: { value: Array.from({ length: GOLF_GREENS_DRAWN }, () => new Vector4()) },
+    oylBunkers: {
+      value: Array.from(
+        { length: GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN },
+        () => new Vector4(),
+      ),
+    },
+    oylParkSnow: { value: 0 },
+  };
+}
+
+/** A packed sRGB colour as a linear `vec3`. */
+function glslLinear(packed: number): string {
+  const linear = new Color(packed);
+  return `vec3(${linear.r.toFixed(6)}, ${linear.g.toFixed(6)}, ${linear.b.toFixed(6)})`;
+}
+
+/**
+ * The mown stripes' period on a golf course, in metres: **18**, a 9 m pass of
+ * the mower each way — #2685, this repository's own; turned 30° off the grid
+ * so it does not run with a road that does.
+ */
+export const GOLF_STRIPE_METRES = 18;
+
+/**
+ * A golf course's fairways and rough — #2685, the owner's ruling of
+ * 2026-11-16 ("stronger mown fairway and rough stripes"): lanes of striped
+ * fairway {@link GOLF_FAIRWAY_WIDTH_METRES} wide, one every
+ * {@link GOLF_FAIRWAY_PERIOD_METRES}, running across the mower's stripes,
+ * with unstriped, darker rough between them: lanes broad enough to read from
+ * the road at 100 m and more, where the 9 m stripes have blurred into one
+ * tone. 60 m in every 80 keeps three quarters of the course striped, so a
+ * road beside it is seldom faced with rough alone: 45 m in 80 left the near
+ * view mostly rough on the owner's `town=parks` page. This repository's own
+ * figures, for the owner's screenshots to settle.
+ */
+export const GOLF_FAIRWAY_PERIOD_METRES = 80;
+export const GOLF_FAIRWAY_WIDTH_METRES = 60;
+
+/**
+ * How far past a green's edge it stands on fairway, its approach, whatever
+ * lane it falls in, in metres: **10**.
+ */
+export const GOLF_APPROACH_METRES = 10;
+
+/**
+ * The look of a golf course and a cemetery on the ground — #2685, as
+ * multipliers of the grass the ground already is, so the world's colour and
+ * the season still lead; the sand and the gravel are their own. This
+ * repository's own figures, set to read at riding distance, which the
+ * owner's screenshots settle.
+ */
+export const PARK_GROUND_LOOK = {
+  /** Close-mown fairway: fresher and a little brighter than the rough. */
+  fairway: [0.92, 1.12, 0.78],
+  /**
+   * The mower's light and dark passes: since the owner's ruling of 2026-11-16
+   * further apart than the 1.22 and 0.8 the course did not read with.
+   */
+  stripePale: 1.32,
+  stripeDeep: 0.72,
+  /** The rough between the fairways: longer grass, darker and yellower, unstriped. */
+  rough: [0.82, 0.9, 0.62],
+  /** The fringe round a green: darker. */
+  fringe: [0.78, 0.98, 0.66],
+  /** The green itself: smooth, bright and fresh. */
+  putting: [1.0, 1.38, 0.66],
+  /** Bunker sand, packed sRGB. */
+  sand: 0xdccb9e,
+  /** A cemetery's short, kept grass. */
+  neat: [0.95, 1.08, 0.88],
+  /**
+   * Its paths' gravel, packed sRGB, laid at {@link PARK_GROUND_LOOK}.path of
+   * the grass: since the owner's ruling of 2026-11-16 a darker, browner
+   * gravel than the 0xa69d8b laid whole, which read as a bright band.
+   */
+  gravel: 0x958c79,
+  path: 0.7,
+} as const;
+
+const PARK_GROUND_PARS = /* glsl */ `
+uniform sampler2D oylParkLooks;
+uniform vec4 oylParkWindow;
+uniform vec4 oylGreens[${String(GOLF_GREENS_DRAWN)}];
+uniform vec4 oylBunkers[${String(GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN)}];
+uniform float oylParkSnow;
+float oylParkBand(float at, float from, float to, float aa) {
+  return smoothstep(from - aa, from + aa, at) * (1.0 - smoothstep(to - 2.0 * aa, to, at));
+}
+`;
+
+/**
+ * Painted over the blended ground — #2685. Its derivatives are taken outside
+ * every branch (#627's rule), its texture read at an explicit level, and
+ * nothing runs where the window holds no golf course or cemetery. The
+ * cemetery's paths are `park-dressing.ts`' grid: row `i` is a path where
+ * `i mod 7 = 6` (§`isPathRow`), and the last two of every 25 slots across
+ * (§`isCrossPathSlot`); each path is §`HEADSTONE_PATH_WIDTH_METRES` down the
+ * middle of them, and only where the window's alpha says the road is far
+ * enough (§`CEMETERY_PATH_ROAD_CLEARANCE_METRES`). A course is striped
+ * fairway in lanes ({@link GOLF_FAIRWAY_PERIOD_METRES}) with rough between,
+ * and fairway round every green ({@link GOLF_APPROACH_METRES}).
+ */
+export const PARK_GROUND_MIX = ((): string => {
+  const look = PARK_GROUND_LOOK;
+  const vec = (value: readonly number[]): string => `vec3(${value.map(glslFloat).join(', ')})`;
+  const rowPeriod = HEADSTONE_PATH_ROWS * HEADSTONE_ROW_METRES;
+  const crossPeriod = HEADSTONE_CROSS_SLOTS * HEADSTONE_PITCH_METRES;
+  // Each path down the middle of the row, or the pair of slots, left for it.
+  const rowPath = (HEADSTONE_PATH_ROWS - 0.5) * HEADSTONE_ROW_METRES;
+  const crossPath =
+    (HEADSTONE_CROSS_SLOTS - HEADSTONE_CROSS_PATH_SLOTS / 2) * HEADSTONE_PITCH_METRES;
+  const halfPath = HEADSTONE_PATH_WIDTH_METRES / 2;
+  const greens = String(GOLF_GREENS_DRAWN);
+  const bunkers = String(GOLF_GREENS_DRAWN * GOLF_BUNKERS_PER_GREEN);
+  return /* glsl */ `
+{
+  vec2 oylAt = vOylGround.xz;
+  float oylStripeAt = dot(oylAt, vec2(0.866025, 0.5)) / ${glslFloat(GOLF_STRIPE_METRES)};
+  float oylStripeAa = fwidth(oylStripeAt);
+  float oylLaneAt = dot(oylAt, vec2(-0.5, 0.866025));
+  float oylLaneAa = fwidth(oylLaneAt);
+  vec2 oylPathAa = fwidth(oylAt);
+  vec2 oylLookUv = (oylAt - oylParkWindow.xy) * oylParkWindow.z;
+  float oylInWindow = step(0.0, oylLookUv.x) * step(oylLookUv.x, 1.0)
+    * step(0.0, oylLookUv.y) * step(oylLookUv.y, 1.0);
+  if (oylParkWindow.w * oylInWindow > 0.0) {
+    vec4 oylLook = textureLod(oylParkLooks, oylLookUv, 0.0);
+    float oylOpen = max(0.0, 1.0 - oylVergeShare - oylRockShare) * (1.0 - oylParkSnow);
+    float oylGolf = oylLook.r * oylOpen;
+    float oylCemetery = oylLook.g * oylOpen;
+    vec3 oylSmooth = oylGroundWorld * vColor.rgb;
+    if (oylGolf > 0.0) {
+      float oylPass = abs(fract(oylStripeAt) * 2.0 - 1.0);
+      float oylStripe = smoothstep(0.5 - oylStripeAa, 0.5 + oylStripeAa, oylPass);
+      float oylFairway = oylParkBand(mod(oylLaneAt, ${glslFloat(GOLF_FAIRWAY_PERIOD_METRES)}), ${glslFloat((GOLF_FAIRWAY_PERIOD_METRES - GOLF_FAIRWAY_WIDTH_METRES) / 2)}, ${glslFloat((GOLF_FAIRWAY_PERIOD_METRES + GOLF_FAIRWAY_WIDTH_METRES) / 2)}, oylLaneAa);
+      float oylGreen = 0.0;
+      float oylFringe = 0.0;
+      float oylSand = oylLook.b;
+      for (int i = 0; i < ${greens}; i++) {
+        vec4 oylG = oylGreens[i];
+        if (oylG.w <= 0.0) continue;
+        float oylD = distance(oylAt, oylG.xy);
+        oylGreen = max(oylGreen, 1.0 - smoothstep(oylG.z - 0.4, oylG.z + 0.4, oylD));
+        oylFringe = max(oylFringe, 1.0 - smoothstep(oylG.z + 1.6, oylG.z + 2.4, oylD));
+        oylFairway = max(oylFairway, 1.0 - smoothstep(oylG.z + ${glslFloat(GOLF_APPROACH_METRES - 2)}, oylG.z + ${glslFloat(GOLF_APPROACH_METRES + 2)}, oylD));
+      }
+      vec3 oylMown = diffuseColor.rgb * ${vec(look.fairway)}
+        * mix(${glslFloat(look.stripeDeep)}, ${glslFloat(look.stripePale)}, oylStripe);
+      vec3 oylCourse = mix(diffuseColor.rgb * ${vec(look.rough)}, oylMown, oylFairway);
+      for (int i = 0; i < ${bunkers}; i++) {
+        vec4 oylB = oylBunkers[i];
+        if (oylB.z <= 0.0) continue;
+        vec2 oylO = oylAt - oylB.xy;
+        // The edge never passes 1.32 r (+ the 0.3 m blend): skip the trig outside it.
+        float oylReach = oylB.z * 1.32 + 0.3;
+        if (dot(oylO, oylO) > oylReach * oylReach) continue;
+        float oylTurn = atan(oylO.y, oylO.x);
+        float oylEdge = oylB.z * (1.0 + 0.22 * sin(3.0 * oylTurn + oylB.w) + 0.1 * sin(5.0 * oylTurn + 2.0 * oylB.w));
+        oylSand = max(oylSand, 1.0 - smoothstep(oylEdge - 0.3, oylEdge + 0.3, length(oylO)));
+      }
+      oylCourse = mix(oylCourse, oylSmooth * ${vec(look.fringe)}, oylFringe);
+      oylCourse = mix(oylCourse, oylSmooth * ${vec(look.putting)}, oylGreen);
+      oylCourse = mix(oylCourse, ${glslLinear(look.sand)}, oylSand);
+      diffuseColor.rgb = mix(diffuseColor.rgb, oylCourse, oylGolf);
+    }
+    if (oylCemetery > 0.0) {
+      float oylRowPath = oylParkBand(mod(oylAt.x, ${glslFloat(rowPeriod)}), ${glslFloat(rowPath - halfPath)}, ${glslFloat(rowPath + halfPath)}, oylPathAa.x);
+      float oylCrossPath = oylParkBand(mod(oylAt.y, ${glslFloat(crossPeriod)}), ${glslFloat(crossPath - halfPath)}, ${glslFloat(crossPath + halfPath)}, oylPathAa.y);
+      // No path within the clearance of the road: the window's alpha.
+      float oylPath = max(oylRowPath, oylCrossPath) * oylLook.a * ${glslFloat(look.path)};
+      vec3 oylKept = mix(diffuseColor.rgb * ${vec(look.neat)}, ${glslLinear(look.gravel)}, oylPath);
+      diffuseColor.rgb = mix(diffuseColor.rgb, oylKept, oylCemetery);
+    }
+  }
+}
+`;
+})();
+
+/** One `park-dressing.ts` §`ParkPiece`'s box: a unit each way, its floor left out — 10 triangles. */
+export const PARK_PIECE_TRIANGLES = 10;
+
+/** The unit box every park piece is drawn as, its base at 0. @see PARK_PIECE_TRIANGLES */
+export function parkPieceGeometry(): BufferGeometry {
+  const box = new BoxGeometry(1, 1, 1);
+  box.translate(0, 0.5, 0);
+  // BoxGeometry's groups run +x, −x, +y, −y, +z, −z: drop −y, the floor.
+  const index = box.getIndex() as BufferAttribute;
+  const kept: number[] = [];
+  for (const group of box.groups) {
+    if (group.materialIndex === 3) continue;
+    for (let at = group.start; at < group.start + group.count; at += 1) kept.push(index.getX(at));
+  }
+  box.setIndex(kept);
+  box.clearGroups();
+  return box;
+}
+
+/**
+ * What stands on a golf course and a cemetery — #2685: the headstones, the
+ * wall along a cemetery's outline, and each green's flag and its pole, every
+ * one a box (`park-dressing.ts` §`ParkPiece`), in ONE instanced call, at most
+ * `park-dressing.ts` §`PARK_DRESSING_CAPACITY` of them, coloured per
+ * instance. The view builds it on the first realistic frame that carries a
+ * piece, so every other frame — every ride with no corridor, the owner's
+ * village and wooded holds — makes no call and submits no triangle for it;
+ * hidden on a frame with none. Held to `realistic-budget.ts`
+ * §`REALISTIC_PARK_DRESSING_TRIANGLES`.
+ */
+export class ParkDressingBelt {
+  readonly #mesh: InstancedMesh;
+  readonly #matrix = new Matrix4();
+  readonly #turn = new Quaternion();
+  readonly #at = new Vector3();
+  readonly #size = new Vector3();
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #colour = new Color();
+  #held: readonly ParkPiece[] | undefined;
+
+  constructor() {
+    const material = withAtmosphere(
+      constructed(new MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 })),
+    );
+    this.#mesh = new InstancedMesh(parkPieceGeometry(), material, PARK_DRESSING_CAPACITY);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.instanceColor = new InstancedBufferAttribute(
+      new Float32Array(PARK_DRESSING_CAPACITY * 3),
+      3,
+    );
+    this.#mesh.instanceColor.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.visible = false;
+    // Spread over a cemetery: a sphere about them all culls nothing, and it is one call.
+    this.#mesh.frustumCulled = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For the jsdom suite. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /** This frame's pieces, written only when they are not the last frame's; none hides it. */
+  update(pieces: readonly ParkPiece[]): void {
+    if (pieces !== this.#held) {
+      this.#held = pieces;
+      const count = Math.min(pieces.length, PARK_DRESSING_CAPACITY);
+      for (let index = 0; index < count; index += 1) {
+        const piece = pieces[index] as ParkPiece;
+        this.#at.set(piece.x, piece.y + piece.lift, piece.z);
+        this.#turn.setFromAxisAngle(this.#up, piece.yaw);
+        this.#size.set(piece.width, piece.height, piece.depth);
+        this.#mesh.setMatrixAt(index, this.#matrix.compose(this.#at, this.#turn, this.#size));
+        this.#mesh.setColorAt(index, this.#colour.setHex(piece.colour));
+      }
+      this.#mesh.count = count;
+      this.#mesh.instanceMatrix.needsUpdate = true;
+      if (this.#mesh.instanceColor !== null) this.#mesh.instanceColor.needsUpdate = true;
+    }
+    this.#mesh.visible = this.#mesh.count > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    (this.#mesh.material as Material).dispose();
+  }
+}
+
+/**
+ * The belt's worst frame: every slot a box — #2685.
+ *
+ * @test-facing held to `realistic-budget.ts` §`REALISTIC_PARK_DRESSING_TRIANGLES`
+ * by `park-dressing-belt.test.ts`, which counts the geometry the belt builds,
+ * and summed into the worst frame by `realistic-budget.test.ts`
+ */
+export const PARK_DRESSING_TRIANGLES = PARK_DRESSING_CAPACITY * PARK_PIECE_TRIANGLES;
+
+/**
  * The ground's photographic material — #425.
  *
  * The grass photograph brings grain, clumps and light; the hue stays
@@ -15914,6 +16848,13 @@ export function photographicGroundMaterial(
       shader.uniforms['groundShares'] = { value: shares };
       // #1692: the season's, shared by every ground, written by the view that draws.
       shader.uniforms['oylVergeSlush'] = SEASON.oylVergeSlush;
+      // #2685: the golf courses' and cemeteries' ground, none with no paint.
+      const park = blend.park ?? noParkGround();
+      shader.uniforms['oylParkLooks'] = park.oylParkLooks;
+      shader.uniforms['oylParkWindow'] = park.oylParkWindow;
+      shader.uniforms['oylGreens'] = park.oylGreens;
+      shader.uniforms['oylBunkers'] = park.oylBunkers;
+      shader.uniforms['oylParkSnow'] = park.oylParkSnow;
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <normalmap_pars_fragment>',
@@ -15931,7 +16872,7 @@ export function photographicGroundMaterial(
         // over the patchwork, so the field pattern shows where the grass does.
         .replace(
           '#include <alphamap_fragment>',
-          `${GROUND_BLEND_MIX}\n#include <alphamap_fragment>`,
+          `${GROUND_BLEND_MIX}\n${PARK_GROUND_MIX}\n#include <alphamap_fragment>`,
         );
     }
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -16097,17 +17038,37 @@ export class RealisticRiderBelt {
   /** #2494's scratch: a grip where the turned bars hold it, and its hand's tip. */
   readonly #steeredGrip = { x: 0, y: 0, z: 0 };
   readonly #handTip = { x: 0, y: 0, z: 0 };
+  /**
+   * #2722: where a scenery cyclist's helmet sits in its bicycle's frame, as
+   * {@link ridingPose} seats the body — read off the pose, never typed.
+   */
+  readonly #cyclistHelmet = new Matrix4();
+  /** #2722's scratch: a scenery cyclist's bicycle in the world. */
+  readonly #cyclistAt = new Matrix4();
+  readonly #cyclistPosition = new Vector3();
+  readonly #cyclistTurn = new Quaternion();
+  readonly #cyclistTint = new Color();
+  readonly #white = new Color(0xffffff);
+  /** #2722: which instances the last frame's scenery cyclists are. @see cyclistSlots */
+  #cyclistSlots = { first: 0, count: 0 };
   #shown = true;
 
   constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
     // #623: the helmet and glasses are the file's own, coloured per vertex.
-    const helmetMaterial = withAtmosphere(
-      constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
+    // #2596: faded with the rider who wears it.
+    const helmetMaterial = withRiderInstance(
+      withAtmosphere(
+        constructed(new MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0 })),
+      ),
+      false,
     );
     const helmetSource = helmetOf(body);
     // The rider, the pacer, the ghost, and #783's nearest remote riders. @see realisticRemoteSplit
     const riders = 3 + REALISTIC_REMOTE_RIDERS;
-    const bicycle = realisticBicycleMeshes(maps, riders);
+    // #2722: and the scenery cyclists' bicycles and helmets, instances of the
+    // same meshes — no draw call of their own. Their bodies are the people's.
+    const instances = riders + SCENERY_CYCLISTS_MAX;
+    const bicycle = realisticBicycleMeshes(maps, instances);
     this.#frame = bicycle.frame;
     this.#rubber = bicycle.rubber;
     this.#metal = bicycle.metal;
@@ -16116,7 +17077,10 @@ export class RealisticRiderBelt {
     const frameMaterial = bicycle.frame.material as MeshStandardMaterial;
     const rubberMaterial = bicycle.rubber.material as MeshStandardMaterial;
     const metalMaterial = bicycle.metal.material as MeshStandardMaterial;
-    this.#helmets = tintable(helmetSource.geometry.clone(), helmetMaterial, riders);
+    this.#helmets = riderInstanceChannels(
+      tintable(helmetSource.geometry.clone(), helmetMaterial, instances),
+      instances,
+    );
     this.#materials = [frameMaterial, rubberMaterial, metalMaterial, helmetMaterial];
     for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
       this.#group.add(mesh);
@@ -16134,7 +17098,8 @@ export class RealisticRiderBelt {
       if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
       const source = skinned.material as Material;
       const kit = { value: new Color(RIDER_KITS.rider.jersey) };
-      const material = riderBodyMaterial(dressed, kit, this.#kitPlain);
+      const fade = { value: 0 };
+      const material = riderBodyMaterial(dressed, kit, this.#kitPlain, fade);
       if (slot === 0) source.dispose();
       skinned.material = material;
       skinned.frustumCulled = false;
@@ -16182,6 +17147,7 @@ export class RealisticRiderBelt {
         body: skinned,
         material,
         kit,
+        fade,
         bones,
         ordered,
         restQuaternions: ordered.map((bone) => bone.quaternion.clone()),
@@ -16228,6 +17194,16 @@ export class RealisticRiderBelt {
   /** The helmet and glasses' one instanced mesh. For the tests. */
   get helmets(): InstancedMesh {
     return this.#helmets;
+  }
+
+  /** The bicycles' frames' one instanced mesh — #2722's read-back. */
+  get frames(): InstancedMesh {
+    return this.#frame;
+  }
+
+  /** Which of the bicycles' instances the last frame's scenery cyclists are — #2722. */
+  get cyclistSlots(): { readonly first: number; readonly count: number } {
+    return this.#cyclistSlots;
   }
 
   /**
@@ -16323,25 +17299,107 @@ export class RealisticRiderBelt {
     rubber.needsUpdate = true;
   }
 
-  /** This frame's riders, posed from their own crank angles. @see RiderBelt.place */
-  place(markers: readonly RiderMarker[]): void {
+  /**
+   * This frame's riders, posed from their own crank angles, each but the
+   * rider's own faded by how near it is drawn to `fade` (#2596), and since
+   * #2722 the scenery cyclists' bicycles and helmets after them, in the same
+   * instanced meshes. @see RiderBelt.place
+   */
+  place(
+    markers: readonly RiderMarker[],
+    fade?: RiderFadeLine,
+    cyclists: readonly SceneryCyclist[] = [],
+  ): void {
     if (!this.#shown) return;
     let slot = 0;
     for (const marker of markers) {
       if (slot >= this.#riders.length) break;
       if (!Object.hasOwn(RIDER_TINTS, marker.kind)) continue;
       this.#placeOne(slot, marker);
+      this.#fadeOne(slot, riderFaded(marker, fade));
       slot += 1;
     }
     for (let rest = slot; rest < this.#riders.length; rest += 1) {
       (this.#riders[rest] as RealisticRiderSlot).root.visible = false;
     }
+    const first = slot;
+    for (const cyclist of cyclists.slice(0, SCENERY_CYCLISTS_MAX)) {
+      this.#placeCyclist(slot, cyclist);
+      slot += 1;
+    }
+    this.#cyclistSlots = { first, count: slot - first };
     for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
       mesh.count = slot;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
     }
     this.#group.visible = slot > 0;
+  }
+
+  /**
+   * The body seated on the bicycle at the origin, facing `+z`, at a crank
+   * angle — #2722: slot 0 posed by this belt's own `#pose` exactly as a
+   * rider with no pedal-stroke motion is, its skeleton's world matrices
+   * current, for `PeopleBelt` to bake a scenery cyclist's ride from. It also
+   * reads where the helmet then sits on the head, for {@link place}. Run
+   * while the realistic world is built, before a frame is placed, as
+   * {@link silhouette} is; it leaves slot 0 hidden.
+   */
+  ridingPose(crankAngle: number): SkinnedMesh {
+    const seated: RiderMarker = {
+      kind: 'rider',
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      lean: 0,
+      bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
+      crankAngle,
+    };
+    this.#placeOne(0, seated);
+    const rider = this.#riders[0] as RealisticRiderSlot;
+    rider.root.updateMatrixWorld(true);
+    this.#helmets.getMatrixAt(0, this.#cyclistHelmet);
+    rider.root.visible = false;
+    return rider.body;
+  }
+
+  /**
+   * One scenery cyclist's bicycle, crankset and helmet, in instance `slot` —
+   * #2722: turned to its heading and rolled by its lean about the line
+   * between its tyres, as a rider's root is; the frame and the helmet in its
+   * own colours, the rest of the bicycle untinted.
+   */
+  #placeCyclist(slot: number, cyclist: SceneryCyclist): void {
+    const world = cyclistMatrix(
+      cyclist,
+      this.#cyclistAt,
+      this.#cyclistPosition,
+      this.#cyclistTurn,
+      this.#roll,
+    );
+    for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
+      mesh.setMatrixAt(slot, world);
+      mesh.setColorAt(
+        slot,
+        mesh === this.#frame ? this.#cyclistTint.setHex(cyclist.look.frame) : this.#white,
+      );
+      steerInstance(mesh, slot, 0);
+    }
+    this.#a.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
+    this.#turn.setFromAxisAngle(this.#acrossTheBicycle, cyclist.crankAngle);
+    this.#local.compose(this.#a, this.#turn, this.#unit);
+    this.#cranks.setMatrixAt(slot, this.#matrix.multiplyMatrices(world, this.#local));
+    this.#cranks.setColorAt(slot, this.#white);
+    this.#helmets.setMatrixAt(slot, this.#matrix.multiplyMatrices(world, this.#cyclistHelmet));
+    this.#helmets.setColorAt(slot, this.#cyclistTint.setHex(cyclist.look.helmet));
+    // #2596: a slot a faded rider held last frame is unfaded for a cyclist.
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      fadeInstance(mesh, slot, 0);
+    }
   }
 
   dispose(): void {
@@ -16353,6 +17411,20 @@ export class RealisticRiderBelt {
     for (const rider of this.#riders) {
       rider.material.dispose();
       rider.body.skeleton.dispose();
+    }
+  }
+
+  /**
+   * How much of the rider in `slot` is faded out — #2596: its body through its
+   * own material, its bicycle, cranks and helmet by their instance. A body
+   * faded out entirely is not drawn at all, so it costs no skinning.
+   */
+  #fadeOne(slot: number, faded: number): void {
+    const rider = this.#riders[slot] as RealisticRiderSlot;
+    rider.fade.value = faded;
+    rider.body.visible = faded < 1;
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      fadeInstance(mesh, slot, faded);
     }
   }
 
@@ -16783,6 +17855,8 @@ interface RealisticRiderSlot {
   readonly material: MeshStandardMaterial;
   /** This body's kit colour, linear — #623. Set per frame from {@link RIDER_KITS}. */
   readonly kit: { value: Color };
+  /** How much of this body is faded out — #2596. Set per frame from `rider-fade.ts`. */
+  readonly fade: { value: number };
   readonly bones: ReadonlyMap<string, Bone>;
   readonly restQuaternions: readonly Quaternion[];
   readonly restPositions: readonly Vector3[];
@@ -16920,11 +17994,14 @@ function helmetOf(scene: Object3D): Mesh {
  * - `plain` at 1 draws the whole body in one colour, the kit's mean under the
  *   same main colour (`REALISTIC_RIDER_KIT_MEAN`), still tinted — the browser
  *   gate's control for the pattern (#623).
+ * - `fade` is how much of the body is faded out, the share of its pixels
+ *   discarded by the same dither its bicycle's instances read (#2596).
  */
 function riderBodyMaterial(
   maps: RealisticRiderMaps,
   kit: { value: Color },
   plain: { value: number },
+  fade: { value: number },
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -16941,13 +18018,20 @@ function riderBodyMaterial(
   material.onBeforeCompile = (shader) => {
     shader.uniforms['oylKitColour'] = kit;
     shader.uniforms['oylKitPlain'] = plain;
+    shader.uniforms['oylRiderFade'] = fade;
     shader.fragmentShader = replacedOrThrown(
       replacedOrThrown(
-        shader.fragmentShader,
-        '#include <common>',
-        '#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;',
+        replacedOrThrown(
+          shader.fragmentShader,
+          '#include <common>',
+          '#include <common>\nuniform vec3 oylKitColour;\nuniform float oylKitPlain;\nuniform float oylRiderFade;',
+          'fragment',
+          spliced,
+        ),
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>\n${riderFadeDiscard('oylRiderFade')}`,
         'fragment',
-        spliced,
+        "#2596's rider fade",
       ),
       '#include <map_fragment>',
       /* glsl */ `#include <map_fragment>
@@ -16996,6 +18080,31 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
     : new RealisticRiderBelt(world.body, world.bicycle, world.rider);
 }
 
+/** #2722: the vertical, a bicycle's own long axis, and no scale, for {@link cyclistMatrix}. */
+const CYCLIST_UP = new Vector3(0, 1, 0);
+const CYCLIST_ALONG = new Vector3(0, 0, 1);
+const CYCLIST_SCALE = new Vector3(1, 1, 1);
+
+/**
+ * A scenery cyclist's bicycle in the world — #2722: at its place, turned to
+ * its heading about the vertical and rolled by its lean about its own `+z`,
+ * exactly as `RealisticRiderBelt` turns and rolls a rider's root, so the body
+ * `PeopleBelt` draws with the same matrix sits on the bicycle drawn with it.
+ * Written into `into`; the other three are scratch.
+ */
+function cyclistMatrix(
+  cyclist: SceneryCyclist,
+  into: Matrix4,
+  position: Vector3,
+  turn: Quaternion,
+  roll: Quaternion,
+): Matrix4 {
+  position.set(cyclist.x, cyclist.y, cyclist.z);
+  turn.setFromAxisAngle(CYCLIST_UP, Math.atan2(cyclist.headingX, cyclist.headingZ));
+  turn.multiply(roll.setFromAxisAngle(CYCLIST_ALONG, cyclist.lean));
+  return into.compose(position, turn, CYCLIST_SCALE);
+}
+
 /**
  * The people — #1541 (`people.ts` places them, `gait.ts` moves them,
  * `people-body.ts` cuts and dresses their body). Two draw calls, whatever is
@@ -17030,6 +18139,17 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
  *
  * Both materials are constructed here and breathe the realistic air (ADR
  * 0026 D-11, #622). Neither casts a shadow.
+ *
+ * ## And the scenery cyclists' bodies — #2722
+ *
+ * A scenery cyclist (`scenery-cyclists.ts`) is this same cut body, seated on
+ * the realistic bicycle: `RealisticRiderBelt` §`ridingPose` poses it by the
+ * realistic rider's own joints at `people-body.ts` §`RIDE_PHASES` phases of a
+ * crank's turn, and each phase is baked into the same texture, after the
+ * gaits', in metres of the bicycle's own frame. A cyclist is one more
+ * instance of the bodies' draw, at its bicycle's matrix, its phase its crank
+ * angle's, in its kit's colours — so the bodies' one call draws them too, and
+ * they go when the people are switched off.
  */
 export class PeopleBelt {
   readonly #group = new Group();
@@ -17058,22 +18178,32 @@ export class PeopleBelt {
   readonly #turn = new Quaternion();
   readonly #scale = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
+  readonly #roll = new Quaternion();
+  /** #2722: which bodies the last frame's scenery cyclists are. @see cyclistBodies */
+  #cyclistBodies = { first: 0, count: 0 };
   #shown = true;
   #switchedOn = true;
 
-  constructor(body: Object3D) {
-    const baked = bakedPeople(body);
+  /**
+   * @param ride #2722: the body seated on the bicycle at a crank angle, its
+   * skeleton posed — `RealisticRiderBelt` §`ridingPose` — for the cyclists'
+   * phases of the texture.
+   */
+  constructor(body: Object3D, ride: (crankAngle: number) => SkinnedMesh) {
+    const baked = bakedPeople(body, ride);
     this.triangles = baked.geometry.index === null ? 0 : baked.geometry.index.count / 3;
     this.standOff = baked.standOff;
     this.#animation = baked.animation;
-    this.#bodyLooks = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
-    this.#bodyMotion = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
+    // #2722: room for the scenery cyclists' bodies after the people's.
+    const bodies = PEOPLE_NEAR_MAX + SCENERY_CYCLISTS_MAX;
+    this.#bodyLooks = new InstancedBufferAttribute(new Float32Array(bodies * 4), 4);
+    this.#bodyMotion = new InstancedBufferAttribute(new Float32Array(bodies * 4), 4);
     this.#bodyLooks.setUsage(DynamicDrawUsage);
     this.#bodyMotion.setUsage(DynamicDrawUsage);
     baked.geometry.setAttribute('oylLook', this.#bodyLooks);
     baked.geometry.setAttribute('oylMotion', this.#bodyMotion);
     const bodyMaterial = peopleBodyMaterial(this.#animation, baked.vertices);
-    this.#bodies = new InstancedMesh(baked.geometry, bodyMaterial, PEOPLE_NEAR_MAX);
+    this.#bodies = new InstancedMesh(baked.geometry, bodyMaterial, bodies);
     this.#bodies.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#bodies.count = 0;
     this.#bodies.frustumCulled = false;
@@ -17112,6 +18242,11 @@ export class PeopleBelt {
     return this.#impostors;
   }
 
+  /** Which of the bodies the last frame's scenery cyclists are — #2722's read-back. */
+  get cyclistBodies(): { readonly first: number; readonly count: number } {
+    return this.#cyclistBodies;
+  }
+
   /** Every material the people wear. For the D-11 assertion. */
   get materials(): readonly Material[] {
     return this.#materials;
@@ -17136,9 +18271,18 @@ export class PeopleBelt {
     this.#switchedOn = on;
   }
 
-  /** This frame's people. */
-  update(people: PeopleInView | undefined): void {
-    const drawn = this.#shown && this.#switchedOn ? (people ?? NO_PEOPLE) : NO_PEOPLE;
+  /**
+   * Whether this belt draws anybody — #2722: the scenery cyclists' bicycles
+   * are drawn exactly when their bodies are, so they go with the people.
+   */
+  get drawing(): boolean {
+    return this.#shown && this.#switchedOn;
+  }
+
+  /** This frame's people, and since #2722 the scenery cyclists' bodies after them. */
+  update(people: PeopleInView | undefined, cyclists: readonly SceneryCyclist[] = []): void {
+    const drawn = this.drawing ? (people ?? NO_PEOPLE) : NO_PEOPLE;
+    const riding = this.drawing ? cyclists.slice(0, SCENERY_CYCLISTS_MAX) : [];
     drawn.near.forEach((person, index) => {
       this.#place(this.#bodies, index, person, true);
       this.#bodyLooks.setXYZW(
@@ -17162,7 +18306,20 @@ export class PeopleBelt {
       const pose = gaitPose(person.gait, person.phase);
       this.#farMotion.setXYZW(index, person.yaw, pose.left.hip, pose.right.hip, person.look.hair);
     });
-    this.#bodies.count = drawn.near.length;
+    riding.forEach((cyclist, at) => {
+      const index = drawn.near.length + at;
+      this.#bodies.setMatrixAt(
+        index,
+        cyclistMatrix(cyclist, this.#matrix, this.#position, this.#turn, this.#roll),
+      );
+      const look = cyclist.look;
+      this.#bodyLooks.setXYZW(index, look.skin, look.jersey, look.shorts, look.shoes);
+      const turn = cyclist.crankAngle / (2 * Math.PI);
+      this.#bodyMotion.setXYZW(index, RIDE_GAIT_INDEX, turn - Math.floor(turn), look.hair, 0);
+    });
+    const bodies = drawn.near.length + riding.length;
+    this.#cyclistBodies = { first: drawn.near.length, count: riding.length };
+    this.#bodies.count = bodies;
     this.#impostors.count = drawn.far.length;
     for (const attribute of [
       this.#bodies.instanceMatrix,
@@ -17174,7 +18331,7 @@ export class PeopleBelt {
     ]) {
       attribute.needsUpdate = true;
     }
-    this.#bodies.visible = drawn.near.length > 0;
+    this.#bodies.visible = bodies > 0;
     this.#impostors.visible = drawn.far.length > 0;
   }
 
@@ -17221,9 +18378,10 @@ function turnBoneInWorld(bone: Bone, axis: Vector3, angle: number): void {
 
 /**
  * The rider's body cut to a person's, dressed by region, and posed at every
- * phase of both gaits into the animation texture — #1541. @see PeopleBelt
+ * phase of both gaits into the animation texture — #1541 — and since #2722
+ * seated by `ride` at every phase of a crank's turn after them. @see PeopleBelt
  */
-function bakedPeople(body: Object3D): BakedPeople {
+function bakedPeople(body: Object3D, ride: (crankAngle: number) => SkinnedMesh): BakedPeople {
   const holder = cloneSkinned(body);
   let skinned: SkinnedMesh | undefined;
   holder.traverse((node) => {
@@ -17465,6 +18623,36 @@ function bakedPeople(body: Object3D): BakedPeople {
       }
     }
   });
+  // #2722: the cyclists' phases — the same clothed vertices, each skinned by
+  // the seated rider's skeleton and put in the bicycle's frame, in metres. No
+  // floor: the bicycle's origin is on the road, where the tyres stand.
+  for (let phase = 0; phase < RIDE_PHASES; phase += 1) {
+    const seated = ride((2 * Math.PI * phase) / RIDE_PHASES);
+    for (let vertex = 0; vertex < kept; vertex += 1) {
+      scratch.set(
+        clothed[vertex * 3] as number,
+        clothed[vertex * 3 + 1] as number,
+        clothed[vertex * 3 + 2],
+      );
+      seated.applyBoneTransform(cut.kept[vertex] as number, scratch);
+      scratch.applyMatrix4(seated.matrixWorld);
+      posed[vertex * 3] = scratch.x;
+      posed[vertex * 3 + 1] = scratch.y;
+      posed[vertex * 3 + 2] = scratch.z;
+    }
+    const normals = vertexNormals(posed, cut.indices);
+    const row = animationRow(RIDE_GAIT_INDEX, phase);
+    for (let vertex = 0; vertex < kept; vertex += 1) {
+      const at = (row * width + vertex) * 4;
+      const normalAt = ((row + ANIMATION_ROWS / 2) * width + vertex) * 4;
+      for (let axis = 0; axis < 3; axis += 1) {
+        data[at + axis] = DataUtils.toHalfFloat(posed[vertex * 3 + axis] as number);
+        data[normalAt + axis] = DataUtils.toHalfFloat(normals[vertex * 3 + axis] as number);
+      }
+      data[at + 3] = DataUtils.toHalfFloat(1);
+      data[normalAt + 3] = DataUtils.toHalfFloat(0);
+    }
+  }
   const animation = new DataTexture(data, width, height, RGBAFormat, HalfFloatType);
   animation.minFilter = NearestFilter;
   animation.magFilter = NearestFilter;
@@ -17514,12 +18702,15 @@ ${PEOPLE_UNPACK}`,
         ),
         '#include <beginnormal_vertex>',
         /* glsl */ `
-float oylAt = oylMotion.y * ${glslFloat(GAIT_PHASES)};
+int oylGait = int(oylMotion.x + 0.5);
+// #2722: a scenery cyclist's ride is baked at fewer phases than a gait.
+int oylPhases = oylGait == ${String(RIDE_GAIT_INDEX)} ? ${String(RIDE_PHASES)} : ${String(GAIT_PHASES)};
+float oylAt = oylMotion.y * float(oylPhases);
 float oylLow = floor(oylAt);
 float oylBlend = oylAt - oylLow;
-int oylBase = int(oylMotion.x + 0.5) * ${String(GAIT_PHASES)};
-int oylRowA = oylBase + int(oylLow) % ${String(GAIT_PHASES)};
-int oylRowB = oylBase + (int(oylLow) + 1) % ${String(GAIT_PHASES)};
+int oylBase = oylGait * ${String(GAIT_PHASES)};
+int oylRowA = oylBase + int(oylLow) % oylPhases;
+int oylRowB = oylBase + (int(oylLow) + 1) % oylPhases;
 int oylColumn = int(oylVertex + 0.5);
 vec3 objectNormal = normalize(mix(
   texelFetch(oylAnimation, ivec2(oylColumn, oylRowA + ${String(ANIMATION_ROWS / 2)}), 0).xyz,
@@ -17691,6 +18882,53 @@ float oylCapsule(vec2 p, vec2 a, vec2 b, float r) {
  */
 export function peopleShownOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.peopleShown(on);
+}
+
+/** A point a view drew something at. */
+interface DrawnPoint3 {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/**
+ * The scenery cyclists a view drew in its last frame — #2722, read back off
+ * its meshes, never off the frame: each one's bicycle (the realistic frames'
+ * instances after the riders'), its body (the people's bodies' instances
+ * after the people's), and the rider's own bicycle (the first instance).
+ * Empty where the realistic world drew none; `undefined` with no realistic world.
+ *
+ * @test-facing the browser gate's read-back, by `game-harness.ts`
+ */
+export function sceneryCyclistsDrawnOf(view: GameView):
+  | {
+      readonly bicycles: readonly DrawnPoint3[];
+      readonly bodies: readonly DrawnPoint3[];
+      readonly rider: DrawnPoint3 | undefined;
+    }
+  | undefined {
+  if (!(view instanceof ThreeGameView)) return undefined;
+  const riders = view.realisticRiders;
+  const people = view.people;
+  if (riders === undefined || people === undefined) return undefined;
+  const at = (mesh: InstancedMesh, index: number): DrawnPoint3 => {
+    const matrix = new Matrix4();
+    mesh.getMatrixAt(index, matrix);
+    const place = new Vector3().setFromMatrixPosition(matrix);
+    return { x: place.x, y: place.y, z: place.z };
+  };
+  const frames = riders.frames;
+  const bikes = riders.cyclistSlots;
+  const bodies = people.cyclistBodies;
+  const drawn = (mesh: InstancedMesh, slots: { first: number; count: number }): DrawnPoint3[] =>
+    mesh.visible && mesh.count >= slots.first + slots.count
+      ? [...Array(slots.count).keys()].map((index) => at(mesh, slots.first + index))
+      : [];
+  return {
+    bicycles: drawn(frames, bikes),
+    bodies: drawn(people.bodies, bodies),
+    rider: frames.visible && frames.count > 0 && bikes.first > 0 ? at(frames, 0) : undefined,
+  };
 }
 
 /**
@@ -17879,12 +19117,15 @@ export function realisticBicycleMeshes(
     ),
   );
   // #2494: the fork, the front wheel and the bar turned by each rider's steer.
-  for (const material of [frameMaterial, rubberMaterial, metalMaterial]) withSteering(material);
+  // #2596: and every part of a rider faded by its instance, the cranks too.
+  for (const material of [frameMaterial, rubberMaterial, metalMaterial]) {
+    withRiderInstance(material, true);
+  }
   return {
-    frame: steerable(tintable(bike.frame, frameMaterial, capacity), capacity),
-    rubber: steerable(tintable(bike.rubber, rubberMaterial, capacity), capacity),
-    metal: steerable(tintable(bike.metal, metalMaterial, capacity), capacity),
-    cranks: tintable(realisticCrankset(), metalMaterial, capacity),
+    frame: riderInstanceChannels(tintable(bike.frame, frameMaterial, capacity), capacity),
+    rubber: riderInstanceChannels(tintable(bike.rubber, rubberMaterial, capacity), capacity),
+    metal: riderInstanceChannels(tintable(bike.metal, metalMaterial, capacity), capacity),
+    cranks: riderInstanceChannels(tintable(realisticCrankset(), metalMaterial, capacity), capacity),
   };
 }
 
@@ -21796,8 +23037,15 @@ export class MappedBuildingBelt {
   readonly #modelTint: BufferAttribute;
   /** Each drawn building's first vertex in the models' buffer, or -1 for an extrusion. */
   readonly #modelAt: Int32Array;
-  readonly #selection = new MappedSelection();
-  /** The drawn buildings as ground-blob casters, written at a refill. @see grounded */
+  /** Since #1638 built to hold the buildings' cap (`mapped-buildings.ts` §`mappedBuildingCap`). */
+  readonly #selection: MappedSelection;
+  /**
+   * The drawn buildings as ground-blob casters, written at a refill. @see grounded
+   *
+   * ⚠️ **At most `MAPPED_BUILDING_MAX`, whatever the selection holds** —
+   * #1638: a city centre's far boxes past the 36 carry no blob, so
+   * `REALISTIC_GROUND_BLOBS` holds with the cap on.
+   */
   readonly #grounded = blobCasters(MAPPED_BUILDING_MAX);
   /** Where each surface's range starts, and where its next triangle goes, in vertices. */
   readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
@@ -21842,6 +23090,7 @@ export class MappedBuildingBelt {
   ) {
     this.buildings = buildings;
     this.#houses = houses;
+    this.#selection = new MappedSelection(mappedBuildingCap(buildings));
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#spireAt = new Int32Array(this.#selection.plans.length);
@@ -22834,7 +24083,7 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * or `undefined` on a frame that is not a refill — which reads one number and
  * allocates nothing.
  *
- * **The frame's procedural structures and the mapped buildings are ranked
+ * **The frame's procedural buildings and the mapped buildings are ranked
  * together, under the one cap** — the buildings by the road ahead since #2429,
  * the structures' rivals likewise, though the structure belts still choose
  * WHICH structures in frame order, nearest the rider — #1586, ADR 0054
@@ -22844,11 +24093,18 @@ function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
  * The billboards are still taken first: they carry no place here, and the
  * logo belts draw them uncapped whatever this decides.
  *
+ * ⚠️ **The field boundaries are not ranked, since #2655**: a wall, hedge or
+ * fence ({@link BOUNDARY_KINDS}) takes only what the mapped buildings leave,
+ * as `structuresAt` gives them only what its buildings leave. Ranked by the
+ * road ahead, a fence 5.6 m off the road came before every house 10 to 25 m
+ * off it, so a suburb whose ground reads `other` (houses mapped, no
+ * `landuse=residential`) drew 36 fences and no house.
+ *
  * ⚠️ **The ranking decides how many procedural structures are drawn, not
  * which.** The returned cap is a count, and the structure belts admit the
  * first that many in view in the frame's own order (`settlements.ts`
  * §`structuresAt`: buildings and lots first, then field boundaries nearest the
- * rider), so the ones the cap drops are that order's tail.
+ * rider), so the ones the cap drops are that order's tail — the boundaries.
  */
 export function refillMappedBuildings(
   belt: MappedBuildingBelt,
@@ -22861,11 +24117,11 @@ export function refillMappedBuildings(
   const structure = REALISTIC_TRIANGLES.structure;
   const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
   let count = 0;
-  for (const item of scatter) if (isStructureKind(item.kind)) count += 1;
+  for (const item of scatter) if (isRival(item.kind)) count += 1;
   if (rivalDistances.length < count) rivalDistances = new Float64Array(count);
   let at = 0;
   for (const item of scatter) {
-    if (!isStructureKind(item.kind)) continue;
+    if (!isRival(item.kind)) continue;
     // #2429: by the road ahead, as the buildings it is ranked against are.
     rivalDistances[at] = rankFrom(view.ahead, view.x, view.z, item.x, item.z);
     at += 1;
@@ -22884,6 +24140,15 @@ export function refillMappedBuildings(
     view.ahead,
   );
   return items - Math.ceil(stats.triangles / structure);
+}
+
+/**
+ * Whether a procedural structure is ranked against the mapped buildings —
+ * #2655: every structure but a field boundary ({@link BOUNDARY_KINDS}), which
+ * takes only what the buildings leave.
+ */
+function isRival(kind: SceneryKind): boolean {
+  return isStructureKind(kind) && !BOUNDARY_KINDS.has(kind);
 }
 
 /** {@link refillMappedBuildings}' scratch: grown, never shrunk, so a refill rarely allocates. */
@@ -22995,6 +24260,7 @@ class RealisticDrawing {
     readonly span: { value: number };
     readonly count: { value: number };
     readonly treeLine: { value: number };
+    readonly park?: ParkGroundUniforms | undefined;
   };
   #surfaces: RealisticSurfaces;
   /** This frame's structures, as ground-blob casters — #620. @see groundScenery */
@@ -23044,6 +24310,7 @@ class RealisticDrawing {
       readonly span: { value: number };
       readonly count: { value: number };
       readonly treeLine: { value: number };
+      readonly park?: ParkGroundUniforms | undefined;
     },
     /**
      * The kit the rider chose — #623. Required, so a view whose world arrives
@@ -23080,7 +24347,8 @@ class RealisticDrawing {
       world.litter,
     );
     this.lampModelled = world.roadside !== undefined;
-    this.people = new PeopleBelt(world.body);
+    // #2722: the scenery cyclists' bodies seated by the riders' own pose.
+    this.people = new PeopleBelt(world.body, (crankAngle) => this.riders.ridingPose(crankAngle));
     this.decorations = new DecorationBelt('realistic');
     this.villageHouses = new VillageHouseBelt(world.houses);
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
@@ -23158,7 +24426,14 @@ class RealisticDrawing {
       // (#1523's `ground-blend` lever) the ground is #425's photograph and
       // #460's patchwork alone, as it was before #627.
       this.#surfaces.groundBlend
-        ? { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine }
+        ? {
+            verge: world.verge,
+            rock: world.rock,
+            crag: world.crag,
+            treeLine: fields.treeLine,
+            // #2685: and the golf courses' and cemeteries' ground.
+            park: fields.park,
+          }
         : { treeLine: fields.treeLine },
       this.#surfaces.bounded,
     );
@@ -24492,6 +25767,17 @@ export function nearTreeFadeOf(view: GameView, fade: NearTreeFade): void {
 }
 
 /**
+ * Draws a view's other riders near the line from the camera to the rider faded
+ * out (the product), or whole wherever they are — #2596. @see RiderFade
+ *
+ * @test-facing the browser gate's control (`lap-race-harness.ts`); the
+ * product always fades
+ */
+export function riderFadeOf(view: GameView, fade: RiderFade): void {
+  if (view instanceof ThreeGameView) view.riderFadeMode(fade);
+}
+
+/**
  * One draw of a frame, as {@link drawOrderOf} reports it.
  *
  * @unwired the shape of what `drawOrderOf` hands the browser gate's harness
@@ -24588,6 +25874,10 @@ class ThreeGameView implements GameView {
    * second collection to hold.
    */
   readonly #riders = new RiderBelt();
+  /** #2596: whether other riders near the camera's line to the rider fade. @see riderFadeOf */
+  #riderFade: RiderFade = 'fade';
+  /** #2596: the frame's line from the eye toward the rider, written each frame. */
+  readonly #fadeLine = emptyRiderFadeLine();
   /**
    * #783's browser-gate controls, and nothing the product sets: every remote
    * rider in a mesh of its own, or the realistic world's rule for them off.
@@ -24719,6 +26009,13 @@ class ThreeGameView implements GameView {
    * when the world changes, so an ordinary ride never builds one. @see #updateDelivery
    */
   #delivery: DeliveryBelt | undefined;
+  /**
+   * The headstones, walls and flags of the golf courses and cemeteries in
+   * reach — #2685. Built on the first realistic frame that carries one, so a
+   * ride with none never builds it; hidden in the stylised world, which is
+   * handed none. @see #updateParkDressing
+   */
+  #parkDressing: ParkDressingBelt | undefined;
   /**
    * A lap race's pick-up points, puddles and hit effects — #1902, built on
    * the first frame that carries a lap race and dropped when the world
@@ -24910,7 +26207,15 @@ class ThreeGameView implements GameView {
     // #1692: and the verge's ploughed slush, so the road's edge line still reads.
     SEASON.oylVergeSlush.value = vergeSlushIn(frame.world, winter);
     const ground = winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter);
-    this.#terrain.update(frame.terrain.mesh, ground);
+    // #2700: the bare ground under the same snow as the rest of it.
+    this.#terrain.update(frame.terrain.mesh, ground, snowCoverIn(frame.world, winter));
+    // #2699: and the overpasses' embankments, in the ground's own material.
+    this.#terrain.updateEmbankments(frame.terrain.embankments);
+    // #2685: the golf courses' and cemeteries' ground and what stands on it —
+    // the realistic world's alone.
+    const park = this.#drawing === 'realistic' ? frame.parkDressing : undefined;
+    this.#terrain.updatePark(park?.ground);
+    this.#updateParkDressing(park);
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -24992,7 +26297,16 @@ class ThreeGameView implements GameView {
       realisticFrame && this.#remoteControl !== 'no-realistic-rule'
         ? realisticRemoteSplit(frame.markers)
         : undefined;
-    this.#realistic?.riders.place(split?.realistic ?? frame.markers);
+    // #2596: every rider but the rider's own faded out near the line from the
+    // eye toward them, in both worlds' belts. @see riderFadeLine
+    const fade =
+      this.#riderFade === 'fade'
+        ? riderFadeLine(frame.camera, frame.markers, this.#fadeLine)
+        : undefined;
+    // #2722: and the scenery cyclists' bicycles after them — exactly while
+    // their bodies are drawn, which is while the people are.
+    const cyclists = this.#realistic?.people.drawing === true ? (frame.cyclists ?? []) : [];
+    this.#realistic?.riders.place(split?.realistic ?? frame.markers, fade, cyclists);
     // #679: the gantries at the lines in reach, and none anywhere else —
     // and since #966 in both worlds, each drawing its own, with the wordmark
     // on the start gate and the billboards. The hidden world's draw nothing.
@@ -25013,7 +26327,7 @@ class ThreeGameView implements GameView {
     this.#decorations.update(frame.streets, frame.camera, holiday, this.#decorationKinds);
     // #1541: and who walks them, in the realistic world only.
     // #1835: and none the near plane would cut, at a frame wide enough to.
-    this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near));
+    this.#realistic?.people.update(peopleClearOfTheCamera(frame.people, near), cyclists);
     // #1814: and a Delivery round's pieces, on a frame that carries one;
     // #2453: its far markers enlarged by their distance from the eye.
     this.#updateDelivery(frame.delivery, rig.eye, frame.water.seconds);
@@ -25024,9 +26338,28 @@ class ThreeGameView implements GameView {
         (realisticFrame
           ? frame.markers.filter((marker) => marker.kind === 'remote')
           : frame.markers),
+      fade,
     );
     this.#updateShadows(frame);
     this.#placeCamera(rig);
+  }
+
+  /**
+   * The headstones, walls and flags in reach — #2685: the belt built on the
+   * first frame that carries a piece, and hidden on every frame with none.
+   */
+  #updateParkDressing(view: ParkDressingInView | undefined): void {
+    const pieces = view?.pieces ?? [];
+    if (pieces.length > 0 && this.#parkDressing === undefined) {
+      this.#parkDressing = new ParkDressingBelt();
+      this.#parkDressing.addTo(this.#scene);
+    }
+    this.#parkDressing?.update(pieces);
+  }
+
+  /** The park dressing's belt, once a frame has built it. For the jsdom suite. */
+  get parkDressingBelt(): ParkDressingBelt | undefined {
+    return this.#parkDressing;
   }
 
   /**
@@ -25166,8 +26499,12 @@ class ThreeGameView implements GameView {
    *
    * ⚠️ **It warms the CURRENT rung only.** A step down later — `surfaceDetail`
    * goes, and on the map rung `shadowMap.enabled` goes with it — still builds
-   * programs on the frame it happens, once a ride, as before #547; and the
-   * realistic world's are built when it is drawn.
+   * programs on the frame it happens, once a ride, as before #547. ⚠️ **The
+   * realistic world arriving is not a step down**: since #2663 `GameView`
+   * prepares the view AGAIN once it is handed the realistic rung, with the
+   * next frame, and draws nothing until that settles. Drawn at once, the
+   * swap's first frame took about 6 s in the pinned Chromium against about
+   * 50 ms prepared (`game.browser.spec.ts` §"#2663").
    */
   async prepare(frame: SceneFrame): Promise<void> {
     const renderer = this.#renderer;
@@ -25529,6 +26866,11 @@ class ThreeGameView implements GameView {
     return this.#realistic?.people;
   }
 
+  /** @see sceneryCyclistsDrawnOf — the realistic world's riders, whether or not it is the one drawn. */
+  get realisticRiders(): RealisticRiderBelt | undefined {
+    return this.#realistic?.riders;
+  }
+
   /** @see peopleBodyFragmentsOf */
   peopleBodyFragments(): string[] {
     const renderer = this.#renderer;
@@ -25703,6 +27045,11 @@ class ThreeGameView implements GameView {
     this.#realistic?.vegetation.setNearTreeFade(fade);
   }
 
+  /** @see riderFadeOf */
+  riderFadeMode(fade: RiderFade): void {
+    this.#riderFade = fade;
+  }
+
   /**
    * Renders one frame with every mesh's `onBeforeRender` noting it, then puts
    * each hook back. Shadow passes call `onBeforeShadow` instead, so what is
@@ -25868,8 +27215,10 @@ class ThreeGameView implements GameView {
 
   /** Where this frame's shadows fall — #426. */
   #updateShadows(frame: SceneFrame): void {
-    this.#contactShadows.place(frame.markers, frame.world.sun);
-    this.#realistic?.shadows.place(frame.markers, frame.world.sun);
+    // #2596: a faded rider's shadow fades with it.
+    const fade = this.#riderFade === 'fade' ? this.#fadeLine : undefined;
+    this.#contactShadows.place(frame.markers, frame.world.sun, fade);
+    this.#realistic?.shadows.place(frame.markers, frame.world.sun, fade);
     if (this.#riderShadows === 'map') {
       const pose = frame.camera;
       this.#lighting.aimShadowAt(pose.x, pose.y, pose.z, frame.world.sun);
@@ -25901,6 +27250,7 @@ class ThreeGameView implements GameView {
     this.#decorations.dispose();
     this.#delivery?.dispose();
     this.#lapRace?.dispose();
+    this.#parkDressing?.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
@@ -26098,11 +27448,14 @@ class ThreeGameView implements GameView {
     this.#roadGeometry.setDrawRange(0, indices.length);
   }
 
-  #updateMarkers(markers: readonly RiderMarker[]): void {
+  #updateMarkers(markers: readonly RiderMarker[], fade: RiderFadeLine | undefined): void {
     if (this.#remoteControl === 'each-own-mesh') {
       // #783's control: the shape a room would cost if each rider were a mesh.
       const remote = markers.filter((marker) => marker.kind === 'remote');
-      this.#riders.place(markers.filter((marker) => marker.kind !== 'remote'));
+      this.#riders.place(
+        markers.filter((marker) => marker.kind !== 'remote'),
+        fade,
+      );
       while (this.#ownMeshes.length < remote.length) {
         const belt = new RiderBelt();
         belt.addTo(this.#scene);
@@ -26110,7 +27463,7 @@ class ThreeGameView implements GameView {
       }
       this.#ownMeshes.forEach((belt, index) => {
         const one = remote[index];
-        belt.place(one === undefined ? [] : [one]);
+        belt.place(one === undefined ? [] : [one], fade);
       });
       return;
     }
@@ -26119,7 +27472,7 @@ class ThreeGameView implements GameView {
     // `RiderBelt.place` sets every mesh's count from what it was handed, so
     // there is no "hide the ones that went" pass left to forget. #783: and for
     // a room's riders, as more instances of the same four meshes.
-    this.#riders.place(markers);
+    this.#riders.place(markers, fade);
   }
 
   /** @see remoteRiderControlOf */

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { metres } from '@onyourleft/domain';
 
-import { footprintPlans, type FootprintPlan } from './footprint-buildings';
+import { FOOTPRINT_MAX_VERTICES, footprintPlans, type FootprintPlan } from './footprint-buildings';
 import {
   buildingBeside,
   mixedTownFixture,
@@ -24,6 +24,7 @@ import { landClassMask } from './land-class';
 import {
   clearOfMappedBuildings,
   DRIVEWAY_MARGIN_METRES,
+  mappedBuildingCap,
   mappedBuildingsOf,
   mappedChunk,
   MappedSelection,
@@ -35,6 +36,7 @@ import {
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
+  MAPPED_BUILDING_MAX_CITY_FAR,
   MAPPED_BUILDING_NEAR_METRES,
   MAPPED_BUILDING_REACH_METRES,
   MAPPED_BUILDING_TRIANGLES,
@@ -50,6 +52,8 @@ import { sceneFrame } from './scene';
 import { SETTLEMENT_CLEARED_KINDS, SETTLEMENT_MARGIN_METRES } from './settlements';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame, VIEW_AHEAD_METRES } from './terrain';
+import { cityCentreFixture } from './testing/urban-fixtures';
+import { NO_URBAN_CLASS, urbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
 const town = rowTownFixture();
@@ -654,5 +658,137 @@ describe('the house models in the selection — #1585', () => {
         (index, at) => selection.far[at] === 1 && streetPlans[index]?.model !== undefined,
       ),
     ).toBe(true);
+  });
+});
+
+describe('a city centre’s far-level cap — #1638, off by default', () => {
+  const city = cityCentreFixture();
+  const cityLand = landClassMask(city.corridor);
+  /** The city planned as the press plans it: with its urban class, or with none. */
+  const cityPlans = (classed: boolean): readonly FootprintPlan[] =>
+    footprintPlans(
+      city.corridor,
+      cityLand,
+      city.profile,
+      city.origin,
+      FOOTPRINT_MAX_VERTICES,
+      classed ? urbanClassMap(city.corridor, cityLand, city.profile) : NO_URBAN_CLASS,
+    ).plans;
+  const classed = cityPlans(true);
+  const frame = drawnRoadFrame(city.profile, city.origin, 1_500);
+  if (frame === undefined) throw new Error('the city road has no direction there');
+  /** Between the city's two towers, where the owner's page holds `town=city`. */
+  const rider = { x: frame.x, z: frame.z };
+  /** A cap to try: twice the 36, a candidate and not a measured number. */
+  const candidate = 2 * MAPPED_BUILDING_MAX;
+
+  /** What one refill of `index` draws from the city's hold, inside the whole term. */
+  const refill = (
+    index: MappedBuildings,
+    budget: number = MAPPED_BUILDING_TRIANGLES,
+  ): MappedSelection => {
+    const selection = new MappedSelection(mappedBuildingCap(index));
+    selectMappedBuildings(index, rider.x, rider.z, budget, selection);
+    return selection;
+  };
+
+  it('is off: the product’s index carries no cap, and the city draws MAPPED_BUILDING_MAX', () => {
+    expect(MAPPED_BUILDING_MAX_CITY_FAR).toBeUndefined();
+    const index = mappedBuildingsOf(classed);
+    expect(index.cityFarMax).toBeUndefined();
+    expect(mappedBuildingCap(index)).toBe(MAPPED_BUILDING_MAX);
+    expect(refill(index).count).toBe(MAPPED_BUILDING_MAX);
+  });
+
+  it('draws past 36 only the city centre’s far boxes, after the same 36, inside the term and six surfaces', () => {
+    const off = refill(mappedBuildingsOf(classed));
+    const on = refill(mappedBuildingsOf(classed, candidate));
+    // Non-vacuity: the city has more far boxes in reach than the cap admits.
+    const farInCity = classed.filter(
+      (plan) =>
+        plan.urban === 'city-centre' &&
+        apart(plan, rider) > MAPPED_BUILDING_NEAR_METRES &&
+        apart(plan, rider) <= MAPPED_BUILDING_REACH_METRES,
+    );
+    expect(farInCity.length).toBeGreaterThan(candidate);
+    expect(on.count).toBe(candidate);
+    // The 36 are the same 36, in the same order, at the same levels.
+    expect(Array.from(on.plans.subarray(0, MAPPED_BUILDING_MAX))).toStrictEqual(
+      Array.from(off.plans.subarray(0, off.count)),
+    );
+    expect(Array.from(on.far.subarray(0, MAPPED_BUILDING_MAX))).toStrictEqual(
+      Array.from(off.far.subarray(0, off.count)),
+    );
+    // Every one past them a city centre's, at its far level.
+    for (let at = MAPPED_BUILDING_MAX; at < on.count; at += 1) {
+      const plan = classed[on.plans[at] as number] as FootprintPlan;
+      expect(plan.urban, String(at)).toBe('city-centre');
+      expect(on.far[at], String(at)).toBe(1);
+      expect(apart(plan, rider)).toBeGreaterThan(MAPPED_BUILDING_NEAR_METRES);
+    }
+    expect(on.near).toBe(off.near);
+    expect(on.farCount).toBe(off.farCount + candidate - MAPPED_BUILDING_MAX);
+    expect(on.triangles).toBeGreaterThan(off.triangles);
+    expect(on.triangles).toBeLessThanOrEqual(MAPPED_BUILDING_TRIANGLES);
+    expect(on.surfaces.length).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
+  });
+
+  it('draws 36 where nothing is a city centre: the class unknown, and a town with no class', () => {
+    // #1638's "before" row: the city with its urban class off is today's world.
+    const unclassed = cityPlans(false);
+    expect(unclassed.every((plan) => plan.urban === 'unknown')).toBe(true);
+    const off = refill(mappedBuildingsOf(unclassed));
+    const on = refill(mappedBuildingsOf(unclassed, candidate));
+    expect(on.count).toBe(MAPPED_BUILDING_MAX);
+    expect(Array.from(on.plans.subarray(0, on.count))).toStrictEqual(
+      Array.from(off.plans.subarray(0, off.count)),
+    );
+    // #1549's row town, whose far plans past the 36 are many, and none a city's.
+    const aside = { x: roadAt(1_500).x + 170, z: roadAt(1_500).z };
+    const town = new MappedSelection(candidate);
+    selectMappedBuildings(
+      mappedBuildingsOf(planned, candidate),
+      aside.x,
+      aside.z,
+      MAPPED_BUILDING_TRIANGLES,
+      town,
+    );
+    expect(town.count).toBe(MAPPED_BUILDING_MAX);
+    expect(town.farCount).toBeGreaterThan(0);
+  });
+
+  it('stops at the budget as before: the cap adds no triangle the term does not have', () => {
+    const off = refill(mappedBuildingsOf(classed));
+    // Room for the 36 and for two more far boxes of the city's, and no more.
+    const most = Math.max(
+      ...classed.filter((plan) => plan.urban === 'city-centre').map((p) => p.farTriangleCount),
+    );
+    const budget = off.triangles + 2 * most;
+    const on = refill(mappedBuildingsOf(classed, candidate), budget);
+    expect(on.count).toBeGreaterThan(MAPPED_BUILDING_MAX);
+    expect(on.count).toBeLessThan(candidate);
+    expect(on.triangles).toBeLessThanOrEqual(budget);
+  });
+
+  it('holds no more than the selection it is written into', () => {
+    const small = new MappedSelection();
+    selectMappedBuildings(
+      mappedBuildingsOf(classed, candidate),
+      rider.x,
+      rider.z,
+      MAPPED_BUILDING_TRIANGLES,
+      small,
+    );
+    expect(small.plans.length).toBe(MAPPED_BUILDING_MAX);
+    expect(small.count).toBe(MAPPED_BUILDING_MAX);
+  });
+
+  it('refuses a cap that is not a whole number above 36', () => {
+    for (const cap of [MAPPED_BUILDING_MAX, 0, -1, MAPPED_BUILDING_MAX + 0.5, Number.NaN]) {
+      expect(() => mappedBuildingsOf(classed, cap), String(cap)).toThrow(RangeError);
+    }
+    expect(mappedBuildingsOf(classed, MAPPED_BUILDING_MAX + 1).cityFarMax).toBe(
+      MAPPED_BUILDING_MAX + 1,
+    );
   });
 });

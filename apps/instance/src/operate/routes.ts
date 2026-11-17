@@ -13,10 +13,11 @@
 import { TOOL_CHECK_OUTCOMES } from '../analysis/tool-check.ts';
 import { REGISTRATION_MODES, REPOSITORY, type Config } from '../config.ts';
 import { errorResponse } from '../errors.ts';
+import { RECENT_PROBLEMS_KEPT } from '../log.ts';
 import type { Readiness } from '../readiness.ts';
 import { OPERATOR_ACTIONS, ROOM_END_REASONS } from '../store/sql-store.ts';
 import { json, type Route, type RouteContext, type Schema } from '../route-kit.ts';
-import type { Operate } from './operate.ts';
+import type { Operate, OperateOwner } from './operate.ts';
 
 function operateOf(context: RouteContext): Operate {
   // The handler answers `unavailable` before calling a route that declares
@@ -117,6 +118,23 @@ const analysisSchema: Schema = {
 function ownerOf(context: RouteContext): string {
   if (context.caller === undefined) throw new Error('operate route called without a caller');
   return context.caller.athleteId;
+}
+
+/**
+ * The owner as the operator log names them (ADR 0069 D-8): from the app, or
+ * from the admin pages on the listener the admin seam's marker names — the
+ * marker is set by that seam alone, never by a request.
+ */
+function ownerActor(context: RouteContext): OperateOwner {
+  const athleteId = ownerOf(context);
+  switch (context.adminChannel) {
+    case undefined:
+      return { source: 'app', athleteId };
+    case 'tunnel':
+      return { source: 'admin_tunnel', athleteId };
+    case 'loopback':
+      return { source: 'admin_loopback', athleteId };
+  }
 }
 
 const ANALYSIS_SUMMARY_TAIL =
@@ -417,6 +435,8 @@ const roomSchema: Schema = {
   additionalProperties: false,
 };
 
+const KEYS_STATES = ['ready', 'no-secret', 'no-origin', 'no-keys', 'unreadable', 'busy'] as const;
+
 export const OPERATE_ROUTES: readonly Route[] = [
   {
     method: 'GET',
@@ -510,6 +530,167 @@ export const OPERATE_ROUTES: readonly Route[] = [
   },
   {
     method: 'GET',
+    path: '/v1/operate/keys',
+    sealed: 'only',
+    operationId: 'getOperateKeys',
+    reaches: 'owner',
+    // ADR 0069 D-2: the card and the fingerprint are worth something only
+    // because the edge cannot write them (ADR 0047 D-6): never through the
+    // tunnel's admin pages. #2650's loopback page formats its own.
+    admin: 'never',
+    summary: `The instance’s keys (#2613), public material only — what \`instance-key show\` prints: their state (\`ready\`, or \`no-secret\`, \`no-origin\`, \`no-keys\`, \`unreadable\`, \`busy\`), the identity key’s full SHA-256 fingerprint (52 base32 characters, as a rider’s device shows it), the instance card (\`oyl-instance:<origin>#<52 characters>\`, whole), the current encryption key’s serial, when it was made and when the instance rotates it by itself (30 days on), and how many superseded encryption keys are still held (each for 7 days after its successor). **Never** a private half, nor anything derived from \`OYL_INSTANCE_SECRET_KEY\`. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          state: { type: 'string', enum: KEYS_STATES },
+          /** 64 lower-case hex; `null` unless \`ready\`. */
+          fingerprint: { type: ['string', 'null'] },
+          /** The whole card; `null` unless \`ready\`. */
+          card: { type: ['string', 'null'] },
+          current: {
+            type: ['object', 'null'],
+            properties: {
+              serial: count,
+              /** ISO 8601, UTC. */
+              createdAt: { type: 'string' },
+              /** When the instance rotates it by itself, ISO 8601, UTC. */
+              rotatesAt: { type: 'string' },
+            },
+            required: ['serial', 'createdAt', 'rotatesAt'],
+            additionalProperties: false,
+          },
+          olderHeld: count,
+        },
+        required: ['state', 'fingerprint', 'card', 'current', 'olderHeld'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const read = await operateOf(context).keys();
+      if (!read.ok) return errorResponse(read.code);
+      const view = read.value;
+      return json({
+        state: view.state,
+        fingerprint: view.fingerprint,
+        card: view.card,
+        current:
+          view.current === null
+            ? null
+            : {
+                serial: view.current.serial,
+                createdAt: isoOf(view.current.createdAt),
+                rotatesAt: isoOf(view.current.rotatesAt),
+              },
+        olderHeld: view.olderHeld,
+      });
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/operate/keys/rotate',
+    sealed: 'only',
+    operationId: 'rotateOperateKey',
+    reaches: 'owner',
+    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
+    // channel's own log source before the admin pages may make it.
+    admin: 'never',
+    summary: `Rotate the encryption key (#2613), with \`{ confirm: 'rotate' }\` — else \`validation_failed\` and nothing is written: what \`instance-key rotate\` does, with no \`--drop-old\` and no \`--serial-above\`. The old key keeps opening requests for 7 days, devices pick the new one up from \`GET /v1/instance/keys\` by themselves, and nobody pins again. It takes the key lease: while the instance’s own maintenance pass holds it the answer is \`busy\` and nothing is written. Logged \`instance_key_rotate\` (\`refused\` with \`busy\`) in the same transaction as the rotation. \`rotate --drop-old\`, \`rotate-identity\` and \`reset\` stay on the CLI. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    request: {
+      type: 'object',
+      properties: { confirm: { type: 'string', enum: ['rotate'] } },
+      required: ['confirm'],
+      additionalProperties: false,
+    },
+    errors: ['unauthenticated', 'validation_failed', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          outcome: { type: 'string', enum: ['rotated', 'busy'] },
+          /** The new key's serial; `null` when \`busy\`. */
+          serial: { type: ['integer', 'null'] },
+        },
+        required: ['outcome', 'serial'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const rotated = await operateOf(context).rotateKey(ownerOf(context), context.json);
+      if (!rotated.ok) {
+        return errorResponse(
+          rotated.code,
+          rotated.fields === undefined ? {} : { fields: rotated.fields },
+        );
+      }
+      return json(
+        rotated.value.outcome === 'rotated'
+          ? { outcome: 'rotated', serial: rotated.value.serial }
+          : { outcome: 'busy', serial: null },
+      );
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/operate/logs',
+    sealed: 'only',
+    operationId: 'getOperateLogs',
+    reaches: 'owner',
+    // ADR 0069 D-2: a read of redacted lines; #2651's page renders it.
+    admin: 'read',
+    summary: `The instance’s recent problems (#2614): its last ${String(RECENT_PROBLEMS_KEPT)} problem lines — a request answered 5xx, an exception no route handled, a room worker that died, a failed analysis job, a model or the keys off or unreadable, a failed voice request, a room socket closed for a server-side reason, and the rest of \`log.ts\` §\`isProblem\`’s closed list — newest first, each exactly as standard output got it, after the log’s one redaction: never a token, a key, a name or a coordinate. Held in memory only, so a restart empties it; \`since\` is when this process started. The main process’s lines only. Changes nothing, so it logs nothing. ${ANALYSIS_SUMMARY_TAIL}`,
+    identity: true,
+    operate: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'unavailable'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          /** When this process started, ISO 8601, UTC: the lines are all since then. */
+          since: { type: 'string' },
+          lines: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                /** When it was written, ISO 8601, UTC. */
+                at: { type: 'string' },
+                /** The JSON line exactly as standard output got it. */
+                line: { type: 'string' },
+              },
+              required: ['at', 'line'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['since', 'lines'],
+        additionalProperties: false,
+      },
+    },
+    handle: (context) => {
+      const read = operateOf(context).problems();
+      if (!read.ok) return Promise.resolve(errorResponse(read.code));
+      return Promise.resolve(
+        json({
+          since: isoOfMs(read.value.since),
+          lines: read.value.lines.map((each) => ({ at: isoOfMs(each.at), line: each.line })),
+        }),
+      );
+    },
+  },
+  {
+    method: 'GET',
     path: '/v1/operate/analysis',
     sealed: 'only',
     operationId: 'getOperateAnalysis',
@@ -531,9 +712,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'setOperateAnalysis',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: a change the admin AI backend page makes (#2648), after
+    // #2642's fresh passkey, logged with the channel's own source.
+    admin: 'change',
     summary: `Save the operator’s analysis settings (#2609): every field is optional, a field left out is unchanged, and \`null\` returns it to its fallback — a model field to its \`.env\` line, a source to offered, the switch to off. They apply from the next job, with no restart; a job already running keeps its own. \`localUrl\` is held to the rule \`.env\`’s address is, and a name must resolve, now, to local addresses only; a field that fails is \`validation_failed\` with its code (\`not-a-url\`, \`not-base-url\`, \`not-local\`, \`tls-by-name\`, \`unresolved\`, \`bad-model\`, \`bad-reasoning\`) as the problem, and nothing is saved. Logged \`analysis_settings_set\` in the operator log, naming the fields changed and never a value. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -554,7 +735,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     errors: ['unauthenticated', 'validation_failed'],
     response: { contentType: 'application/json', schema: analysisSchema },
     handle: async (context) => {
-      const saved = await operateOf(context).setAnalysisSettings(ownerOf(context), context.json);
+      const saved = await operateOf(context).setAnalysisSettings(ownerActor(context), context.json);
       if (!saved.ok) {
         return errorResponse(
           saved.code,
@@ -570,9 +751,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'clearOperateAnalysis',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: a change the admin AI backend page makes (#2648), after
+    // #2642's fresh passkey, logged with the channel's own source.
+    admin: 'change',
     summary: `Clear the operator’s analysis settings (#2609): every field falls back — the local model to \`.env\`, both sources to offered, the switch for other riders to off — from the next job. Logged \`analysis_settings_cleared\`. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -580,7 +761,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     errors: ['unauthenticated'],
     response: { contentType: 'application/json', schema: analysisSchema },
     handle: async (context) =>
-      json(await operateOf(context).clearAnalysisSettings(ownerOf(context))),
+      json(await operateOf(context).clearAnalysisSettings(ownerActor(context))),
   },
   {
     method: 'GET',
@@ -603,9 +784,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'checkOperateAnalysisModel',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: a change the admin AI backend page makes (#2648), after
+    // #2642's fresh passkey, logged with the channel's own source.
+    admin: 'change',
     summary: `Check that a model on the configured local server calls tools (#2610, ADR 0046 D-7), before it is saved: the instance sends it a fixed instruction and one fixed, harmless tool — no ride, no rider’s text, no history — and the outcome is \`tools-ok\` only if it called the tool and then answered; else \`no-tool-call\`, \`does-not-support-tools\`, \`server-error\`, \`not-local\`, \`out-of-time\`, \`stopped\` (the instance stopped), \`no-address\` or \`busy\` (another check is out: one at a time). ⚠️ **Asking the server for a model loads it, which may unload the model a rider’s job is using.** Only the local source: a hosted service has its own test (\`POST /v1/analysis/hosted/test\`). Logged \`analysis_model_checked\` with the outcome, never the model’s name. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -627,7 +808,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
       },
     },
     handle: async (context) => {
-      const checked = await operateOf(context).checkModel(ownerOf(context), context.json);
+      const checked = await operateOf(context).checkModel(ownerActor(context), context.json);
       if (!checked.ok) {
         return errorResponse(
           checked.code,

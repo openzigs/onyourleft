@@ -132,10 +132,14 @@
  * they never leave the device, and they are a cache, so the rollback below
  * drops them and loses nothing of the rider's.
  *
+ * ⚠️ **Version 22 is #2710's races with AI bots**, a record migration with no
+ * store change: a ride's facts may carry `lapRaces` (ADR 0071 D-4.4), and
+ * `migrations.ts` §`ACTIVITY_LAP_RACES` is its pair, whose `down` drops them.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -1004,6 +1008,13 @@ export const STORES_V21: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 22 — #2710's races with AI bots: **no store and no index changes**.
+ * A ride's facts may carry `lapRaces`, which is a record migration
+ * (`migrations.ts` §`ACTIVITY_LAP_RACES`), and every store is inherited.
+ */
+export const STORES_V22: Readonly<Record<string, string>> = {};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -1026,4 +1037,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V19,
   STORES_V20,
   STORES_V21,
+  STORES_V22,
 ];

@@ -120,7 +120,7 @@ import {
 } from '@onyourleft/domain';
 
 import { treeLineHeight } from './ground-blend';
-import type { LandClassMask } from './land-class';
+import { BARE_SURFACES, type BareSurface, type LandClassMask } from './land-class';
 import { slotHash, uniformFrom } from './seeded';
 import {
   DRY,
@@ -331,6 +331,16 @@ export interface TerrainMesh {
   /** Three floats a vertex, linear, multiplying the ground colour: the mottle. */
   readonly colours: Float32Array;
   /**
+   * One byte a vertex: what mapped bare ground it stands on — #2700. 0 where
+   * the ground is not `bare` (it grows), else one more than its surface's
+   * index in `land-class.ts` §`BARE_SURFACES` ({@link surfaceByte}).
+   * `three-renderer.ts` §`TerrainBelt` draws each in its own colour.
+   *
+   * ⚠️ **Not a vertex attribute**: the renderer folds it into the colours it
+   * uploads, so the ground's program reads what it always read.
+   */
+  readonly surfaces: Uint8Array;
+  /**
    * Two floats a vertex: the row's ODOMETER and the signed lateral offset, in
    * metres. Where on the route a vertex stands, in the route's own frame, for a
    * shader that draws something tied to the route rather than to the screen
@@ -382,10 +392,10 @@ export interface TerrainMesh {
   readonly treeLine: number;
   /**
    * Which build lent {@link vertices}, {@link normals}, {@link colours} and
-   * {@link fields} — #469. Absent on a mesh somebody owns outright (a copy, or
-   * one built by hand in a test).
+   * {@link fields} — #469 — and, since #2700, {@link surfaces}. Absent on a
+   * mesh somebody owns outright (a copy, or one built by hand in a test).
    *
-   * ⚠️ **Those four arrays are BORROWED, and valid until the next
+   * ⚠️ **Those arrays are BORROWED, and valid until the next
    * {@link terrainCorridor}.** They are storage this module keeps and writes
    * again on the next build, for the reason {@link indices} already was: a
    * frame that allocates four fresh arrays sixty times a second is a GC pause
@@ -614,10 +624,14 @@ export function terrainCorridor(
   const lines = tapered(centre, lent.lines);
   const rises = meetingRises(centre, shallow, meets, lent.rises);
   const perRow = COLUMNS * 2;
-  const { vertices, colours, fields, normals } = lent;
+  const { vertices, colours, fields, normals, surfaces } = lent;
   // #1547: asked only where the mask levels anything, so a ride with no
   // corridor pays nothing for it and builds today's ground to the bit.
   const levelled = land.levellingBytes > 0;
+  // #2700: and the bare ground only where the mask holds any class at all.
+  // Lent, so a row no pass below writes — a sunk one — must read as grown.
+  const mapped = land.bytes > 0;
+  surfaces.fill(0);
 
   for (let row = 0; row < rows; row += 1) {
     if (retraced[row] !== KEPT) continue;
@@ -719,6 +733,7 @@ export function terrainCorridor(
         colours[at * 3 + 2] = tint * (1 + (WET_GROUND_TINT[2] - 1) * wet);
         fields[at * 2] = point.along;
         fields[at * 2 + 1] = lateral * sign;
+        if (mapped) surfaces[at] = surfaceByte(land.bareSurfaceAt(x, z));
       }
     }
   }
@@ -745,6 +760,7 @@ export function terrainCorridor(
     normals,
     colours,
     fields,
+    surfaces,
     indices,
     rows,
     indicesPerBand: Math.max(0, rows - 1) * 2 * 6,
@@ -775,7 +791,7 @@ export const RETRACE_SINK_METRES = 200;
 
 /**
  * How far under its own heights the ground of a pass lying ALONGSIDE a nearer
- * one is drawn, in metres: **1** — #1996. @see retracedRoles
+ * one is drawn, in metres: **1.5** — #1996, #2469. @see retracedRoles
  *
  * Both passes read one height field, so their grounds are the same ground but
  * for the passes' distance apart, which moves the relief's clear band by as
@@ -783,8 +799,20 @@ export const RETRACE_SINK_METRES = 200;
  * level with the nearer pass's, they fought for the same depth; drawn under
  * it, the nearer pass's ground is on top wherever it is, and the other's
  * covers the inside of the nearer pass's U-turn, where it is folded away.
+ *
+ * ⚠️ **Why 1.5 and not #1996's 1** — #2469. The nearer pass has a seam at
+ * its own U-turn (#2101) and the pass alongside it, a pass of its own, has
+ * none, so for {@link SEAM_CREST_FADE_METRES} of road past the turn the
+ * nearer pass's relief is held down and the other's is not. Measured on
+ * `outAndBackRoute({ offset: 3 })`, every 2 m of the 16 : 10 view out to
+ * 100 m in 26 frames from both chase cameras: the other pass's own ground
+ * stood up to 0.755 m over the nearer one's — 0.406 m with the hold taken
+ * away, inside the clear band's 0.18 × 3 m — so at 1 m under it was 0.245 m
+ * clear, and the drawn-path camera (#2422) looked at it 32 m ahead. 0.755 m
+ * plus `out-and-back.test.ts`' half-metre floor is 1.255 m; 1.5 is the next
+ * half metre, not a measured optimum.
  */
-export const RETRACE_UNDER_METRES = 1;
+export const RETRACE_UNDER_METRES = 1.5;
 
 /**
  * The most rows the ground round a turning point is drawn with: **8** — #1996,
@@ -891,10 +919,11 @@ function retracedGround(
   lent: NonNullable<typeof terrainScratch>,
 ): void {
   const rows = centre.length;
-  const { capAnchor, capAngle, capWay, vertices, colours, fields } = lent;
+  const { capAnchor, capAngle, capWay, vertices, colours, fields, surfaces } = lent;
   const perRow = COLUMNS * 2;
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const levelled = land.levellingBytes > 0;
+  const mapped = land.bytes > 0;
   for (let row = 0; row < rows; row += 1) {
     const role = roles[row];
     if (role === KEPT) continue;
@@ -953,15 +982,18 @@ function retracedGround(
         ? waterShaping(ways, profile, origin, point.distance, lateral * Math.sign(cos), point.y)
         : DRY;
       const hold = levelled ? (LEVEL_HOLDS[column] as number) : Number.POSITIVE_INFINITY;
-      vertices[at * 3] = point.x + towardsX * lateral;
+      const x = point.x + towardsX * lateral;
+      const z = point.z + towardsZ * lateral;
+      vertices[at * 3] = x;
       vertices[at * 3 + 1] =
         column === 0
           ? Math.min(shaping.ceiling, point.y - VERGE_DROP_METRES)
           : groundHeight(point.y, relief, lateral, shaping, hold, hold);
-      vertices[at * 3 + 2] = point.z + towardsZ * lateral;
+      vertices[at * 3 + 2] = z;
       colours.fill(tint, at * 3, at * 3 + 3);
       fields[at * 2] = point.along + lateral * sin;
       fields[at * 2 + 1] = lateral * cos;
+      surfaces[at] = mapped ? surfaceByte(land.bareSurfaceAt(x, z)) : 0;
     }
     // The left side is the anchor's own, so every quad it makes is nothing.
     const from = anchor * perRow + COLUMNS;
@@ -969,7 +1001,21 @@ function retracedGround(
     vertices.copyWithin(to * 3, from * 3, (from + COLUMNS) * 3);
     colours.copyWithin(to * 3, from * 3, (from + COLUMNS) * 3);
     fields.copyWithin(to * 2, from * 2, (from + COLUMNS) * 2);
+    surfaces.copyWithin(to, from, from + COLUMNS);
   }
+}
+
+/** Each surface's byte in {@link TerrainMesh.surfaces}: one more than its index. */
+const SURFACE_BYTES: Readonly<Record<BareSurface, number>> = Object.freeze(
+  Object.fromEntries(BARE_SURFACES.map((surface, index) => [surface, index + 1])) as Record<
+    BareSurface,
+    number
+  >,
+);
+
+/** A vertex's {@link TerrainMesh.surfaces} byte: 0 where nothing bare is mapped. */
+function surfaceByte(surface: BareSurface | undefined): number {
+  return surface === undefined ? 0 : SURFACE_BYTES[surface];
 }
 
 /**
@@ -1306,6 +1352,8 @@ let terrainScratch:
       readonly normals: Float32Array;
       readonly colours: Float32Array;
       readonly fields: Float32Array;
+      /** @see TerrainMesh.surfaces */
+      readonly surfaces: Uint8Array;
       /** {@link foldReach}'s answer, which {@link clearReach} then tightens in place. */
       readonly reach: Float64Array;
       /** {@link steadied}'s answer. */
@@ -1349,6 +1397,7 @@ function terrainScratchFor(rows: number): NonNullable<typeof terrainScratch> {
     normals: new Float32Array(vertexCount * 3),
     colours: new Float32Array(vertexCount * 3),
     fields: new Float32Array(vertexCount * 2),
+    surfaces: new Uint8Array(vertexCount),
     reach: new Float64Array(rows * 2),
     steadied: new Float64Array(rows * 2),
     seams: new Float64Array(rows * 2),
