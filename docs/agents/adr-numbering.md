@@ -12,6 +12,31 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0073 is [ADR 0073](../adr/0073-ai-bots-race-with-strategy-freedom-inside-the-bodys-limits.md)**,
+  taken by [#2720](https://github.com/openzigs/onyourleft/issues/2720) on 2026-11-16 for AI bots
+  racing with strategy freedom inside the body's limits, on the owner's ruling of that day on the
+  epic [#2706](https://github.com/openzigs/onyourleft/issues/2706). It is **Proposed** until the
+  owner approves it, before #2710 merges. It supersedes in part ADR 0071 D-3.6, as an ADR rather
+  than an amendment, because ADR 0013 D-3 sends a reversed decision to a new ADR; ADR 0071 gained
+  one dated `## Amendments` entry pointing here. #2720 claimed it by its title. ⚠️ **It skipped
+  0072**, which this file then still offered as the next free number: **0072 is claimed by
+  [#2712](https://github.com/openzigs/onyourleft/issues/2712)** (the AI pacer), whose title names it
+  and which ADR 0071 D-2 cites. **0057 and 0058 stay claimed** by #1748 and #1752, and 0070 by
+  #2684. **The next free number is 0074.** A reviewer who remembers this file offering 0072 or
+  0073 is reading the old file.
+  ⚠️ **0071 is [ADR 0071](../adr/0071-model-chosen-lap-race-bot-tactics-during-a-ride.md)**,
+  taken by [#2707](https://github.com/openzigs/onyourleft/issues/2707) on 2026-11-16 for
+  model-chosen lap-race bot tactics during a ride, on the owner's ruling of that day on the epic
+  [#2706](https://github.com/openzigs/onyourleft/issues/2706). It is **Proposed** until the owner
+  approves it on its pull request. It supersedes in part ADR 0067 D-6.2 and ADR 0046 D-7 and D-9,
+  as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed decision to a new ADR;
+  ADR 0046 and ADR 0067 each gained one dated `## Amendments` entry pointing here. #2707 claimed it
+  by its title. ⚠️ **It skipped 0070**, which this file then still offered as the next free number:
+  **0070 is claimed by [#2684](https://github.com/openzigs/onyourleft/issues/2684)**, whose open
+  pull request [#2694](https://github.com/openzigs/onyourleft/pull/2694) writes ADR 0070 (houses on
+  inferred built-up land in a suburb mapped only by its streets). **0057 and 0058 stay claimed** by
+  #1748 and #1752. The next free number was then 0072. A reviewer who remembers this file offering
+  0070 or 0071 is reading the old file.
   ⚠️ **0069 is [ADR 0069](../adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md)**,
   taken by [#2640](https://github.com/openzigs/onyourleft/issues/2640) on 2026-11-15 for the
   instance's own admin pages: a browser sign-in for the owner and a TLS-only admin channel, on the
@@ -23,7 +48,7 @@ It has the same authority as the root file. Where the text below says "this file
   and D-11, as an ADR rather than amendments, because ADR 0013 D-3 sends a reversed decision to a new
   ADR; ADR 0047 gained one dated `## Amendments` entry pointing here. #2640 claimed it by its title.
   It took the next free number after 0068; **0057 and 0058 stay claimed** by #1748 and #1752.
-  **The next free number is 0070.** A reviewer who remembers this file offering 0069 is reading the
+  The next free number was then 0070. A reviewer who remembers this file offering 0069 is reading the
   old file.
   ⚠️ **0068 is [ADR 0068](../adr/0068-a-delivery-round-holds-the-realistic-worlds-floor.md)**,
   taken by [#2513](https://github.com/openzigs/onyourleft/issues/2513) on 2026-11-12 for a Delivery

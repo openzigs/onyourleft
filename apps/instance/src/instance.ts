@@ -4,7 +4,7 @@ import { lookup } from 'node:dns/promises';
 import { mkdir, stat, statfs } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { createAdmin, type Admin } from './admin/admin.ts';
+import { createAdmin, isAdminPath, type Admin } from './admin/admin.ts';
 import { createIdentity, type Identity } from './auth/identity.ts';
 import { sweepPeriodMs } from './auth/rate-limit.ts';
 import { createDiskBlobStore } from './blob/disk-blob-store.ts';
@@ -26,6 +26,13 @@ import { effectiveAnalysisSettings, type EffectiveAnalysisSettings } from './ana
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import { forgetMaskingOnRefusal } from './analysis/masking-item.ts';
 import {
+  createTactics,
+  tacticsLocalOf,
+  type Tactics,
+  type TacticsLocal,
+} from './analysis/tactics.ts';
+import { createRaceHold } from './analysis/tactics-hold.ts';
+import {
   ANALYSIS_SWEEP_PERIOD_MS,
   createAnalysisJobs,
   type AnalysisJobs,
@@ -42,8 +49,9 @@ import { createSidePose } from './camera/side-pose.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
-import { logEvent, logUnhandled, type LogSink } from './log.ts';
+import { createRecentProblems, keepProblems, logEvent, logUnhandled, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
+import { errorResponse } from './errors.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
 import { assessReadiness, type MigrationState } from './readiness.ts';
 import type { InstanceProbes, SidePose } from './route-kit.ts';
@@ -170,6 +178,8 @@ export interface InstanceOptions {
 export interface StartedInstance {
   readonly url: string;
   readonly listening: Listening;
+  /** The admin pages' loopback listener (#2643), when `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` is set. */
+  readonly adminLoopback: Listening | undefined;
   readonly router: RoomRouter;
   /** Resolves once the store is open and rooms may be admitted. */
   readonly opened: Promise<void>;
@@ -276,6 +286,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   const now = options.now ?? (() => Date.now());
   // #2604: what the owner's Status counts its uptime from.
   const startedAt = now();
+  // #2614: this process's problem lines, kept in memory for the owner's
+  // Operate area from the first line it writes — and gone when it stops.
+  const problems = createRecentProblems(now);
+  keepProblems(log, problems);
   const path = server.databasePath;
   await mkdir(dirname(path), { recursive: true });
 
@@ -289,6 +303,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let analysisModel: ModelConnection | undefined;
   let analysisJobs: AnalysisJobs | undefined;
   let hostedSettings: HostedSettings | undefined;
+  let tactics: Tactics | undefined;
   let sidePose: SidePose | undefined;
   let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
@@ -485,6 +500,27 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     clientAddressHeader: options.config.clientAddressHeader,
     trustedProxies: options.config.trustedProxies,
   });
+  // #2643 (ADR 0069 D-5): the admin pages' loopback listener, when the
+  // operator set its port. It answers `/admin` and nothing else, marks every
+  // request it reads `loopback` itself, believes no client-address header,
+  // and closes a connection from a trusted proxy — cloudflared — unread.
+  const adminLoopback =
+    server.adminPages && server.adminLoopbackPort !== undefined
+      ? await listen(
+          (request, client) =>
+            isAdminPath(new URL(request.url).pathname)
+              ? handler(request, client)
+              : Promise.resolve(errorResponse('not_found')),
+          {
+            host: options.config.host,
+            port: server.adminLoopbackPort,
+            clientAddressHeader: null,
+            trustedProxies: [],
+            listener: 'loopback',
+            refusePeers: options.config.trustedProxies,
+          },
+        )
+      : undefined;
   listening.server.on('upgrade', (request, socket, head) => {
     if (!router.upgrade(request, socket, head)) socket.destroy();
   });
@@ -810,6 +846,24 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         refusedForNoConsentOrKey: forgetMaskingOnRefusal(store, now),
       };
       hostedSettings = createHostedSettings({ store, secret: () => secretKey, now, sources });
+      // #2709 (ADR 0071): model-chosen lap-race bot tactics, on the LOCAL model
+      // only, as the settings offer it to this athlete now (the switch for
+      // other riders included, D-5.5), under their own consent naming its
+      // address. While a model race holds the slot, write-ups wait (D-6).
+      const hold = createRaceHold({ now });
+      const tacticsLocal = async (athleteId: string): Promise<TacticsLocal> =>
+        tacticsLocalOf(
+          effectiveAnalysisSettings(await reading.getAnalysisSetting(), options.config),
+          (await roles.roleOf(athleteId)) === 'owner',
+        );
+      tactics = createTactics({
+        store,
+        origin: identity.origin,
+        local: tacticsLocal,
+        hold,
+        resolve,
+        now,
+      });
       // #1106: a side-camera picture, shown to the local model the operator
       // named for pictures or to the hosted service the rider's OWN key is
       // for. Handed no store and no log: a picture is kept nowhere.
@@ -858,6 +912,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         now,
         log,
         heartbeatMs: server.analysisHeartbeatMs,
+        // #2709: write-ups wait while a model race holds the slot; re-plans do not.
+        hold,
       });
       analysisJobs = jobs;
       jobsRecovered = jobs.recover().then(
@@ -933,6 +989,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           accounts === undefined ? undefined : (athleteId) => accounts.moderation.roleOf(athleteId),
         now,
         name: options.config.name,
+        ...(server.adminLoopbackPort === undefined
+          ? {}
+          : { loopbackPort: server.adminLoopbackPort }),
+        addresses: server.adminAddresses,
       });
       admin = pages;
       // Each minute: the coalesced refusals written, and the sign-in limits'
@@ -982,9 +1042,24 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
               }),
               analysis: operateAnalysis,
               ...(operateRooms === undefined ? {} : { rooms: operateRooms }),
+              // #2613: the keys shown, and the routine rotation made over the
+              // operator log's transaction with the same secret and origin.
+              keys: {
+                keys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: server.secretKey,
+                    origin: server.origin,
+                    now: () => Math.floor(now() / 1000),
+                    log,
+                  }),
+              },
+              problems,
             }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
+            ...(tactics === undefined ? {} : { tactics }),
             ...(sidePose === undefined ? {} : { sidePose }),
           }),
     });
@@ -1047,6 +1122,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   return {
     url: listening.url,
     listening,
+    adminLoopback,
     router,
     opened,
     heldRateLimitKeys: () =>
@@ -1070,10 +1146,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       stopAdmin();
       // #1796: a test question out now is ended, not left for its 30 s bound.
       hostedSettings?.stop();
+      // #2709: a tactics call or warm-up out now is ended, and the hold's timer cleared.
+      tactics?.stop();
       operateStopped.abort();
       await analysisJobs?.stop();
       await router.stop();
       await listening.close();
+      await adminLoopback?.close();
       await history?.idle();
       // #2641: the refusals counted since the last minute, before the store goes.
       await admin?.flushRefusals();

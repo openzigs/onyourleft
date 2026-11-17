@@ -873,6 +873,9 @@ describe('a mapped footway on every land-use kind our archive emits — #1946', 
     playground: 'park',
     pitch: 'park',
     grass: 'park',
+    // #2662: classed since, kindergarten built-up as a school is and a village green park.
+    kindergarten: 'built-up',
+    village_green: 'park',
   };
   const expectedDensity = (kind: string): number =>
     PEOPLE_PER_METRE[DENSITY_BEFORE_1946[kind] ?? 'elsewhere'];

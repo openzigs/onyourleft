@@ -4,6 +4,7 @@ import { NO_LEGAL_SETTINGS } from './legal.ts';
 import type { Admin } from './admin/admin.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
+import type { Tactics } from './analysis/tactics.ts';
 import type { Identity } from './auth/identity.ts';
 import type { Config } from './config.ts';
 import type { InstanceProbes, SidePose } from './route-kit.ts';
@@ -18,6 +19,7 @@ import type { Operate } from './operate/operate.ts';
 import type { Sync } from './sync/sync.ts';
 import { createServer } from 'node:net';
 
+import { keepProblems, type LogSink, type RecentProblems } from './log.ts';
 import { listen, type Listening } from './node-listener.ts';
 
 /**
@@ -81,6 +83,8 @@ export interface TestInstance {
   readonly listening: Listening;
   readonly url: string;
   readonly lines: string[];
+  /** The handler's own sink: a line a test writes through it is the instance's (#2614). */
+  readonly log: LogSink;
 }
 
 export async function startTestInstance(
@@ -98,6 +102,8 @@ export async function startTestInstance(
     analysis?: AnalysisJobs;
     /** A rider's own hosted key and consent (#1199). */
     hostedSettings?: HostedSettings;
+    /** Model-chosen bot tactics (#2709). */
+    tactics?: Tactics;
     sidePose?: SidePose;
     /** Published segments and their boards (#68). */
     segments?: Segments;
@@ -107,15 +113,21 @@ export async function startTestInstance(
     admin?: Admin;
     /** What `/metrics` would count of each response (#1095's never-logged test). */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
+    /** Where the handler's sink keeps its problem lines (#2614), as `instance.ts` keeps them. */
+    problems?: RecentProblems;
   } = {},
 ): Promise<TestInstance> {
   const lines: string[] = [];
   const config = testConfig(options.config);
+  const log: LogSink = (line) => {
+    lines.push(line);
+  };
+  if (options.problems !== undefined) keepProblems(log, options.problems);
   const handler = createHandler({
     config,
     version: '9.8.7',
     notices: options.notices ?? 'notices',
-    log: (line) => lines.push(line),
+    log,
     ...(options.routes === undefined ? {} : { routes: options.routes }),
     ...(options.identity === undefined ? {} : { identity: options.identity }),
     ...(options.sync === undefined ? {} : { sync: options.sync }),
@@ -126,6 +138,7 @@ export async function startTestInstance(
     ...(options.sealed === undefined ? {} : { sealed: options.sealed }),
     ...(options.analysis === undefined ? {} : { analysis: options.analysis }),
     ...(options.hostedSettings === undefined ? {} : { hostedSettings: options.hostedSettings }),
+    ...(options.tactics === undefined ? {} : { tactics: options.tactics }),
     ...(options.sidePose === undefined ? {} : { sidePose: options.sidePose }),
     ...(options.segments === undefined ? {} : { segments: options.segments }),
     ...(options.operate === undefined ? {} : { operate: options.operate }),
@@ -138,5 +151,5 @@ export async function startTestInstance(
     clientAddressHeader: config.clientAddressHeader,
     trustedProxies: config.trustedProxies,
   });
-  return { handler, listening, url: listening.url, lines };
+  return { handler, listening, url: listening.url, lines, log };
 }

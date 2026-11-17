@@ -1,0 +1,1355 @@
+{
+  "model": "gemma4:12b",
+  "circuit": "flat",
+  "seed": 3,
+  "seconds": 150,
+  "outcomes": {
+    "applied": 930,
+    "no-decision": 84,
+    "not-named": 0,
+    "launch": 0,
+    "exhausted": 0,
+    "wbal-floor": 0,
+    "kick-closed": 0,
+    "flyer-closed": 0,
+    "attack-over": 5,
+    "target-not-ahead": 24
+  },
+  "log": [
+    {
+      "requestedAtMs": 4000,
+      "arrivedAtMs": 6393,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 962,
+      "outputTokens": 73,
+      "serverMs": 2393,
+      "wallMs": 3601
+    },
+    {
+      "requestedAtMs": 8000,
+      "arrivedAtMs": 10394,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 956,
+      "outputTokens": 73,
+      "serverMs": 2394,
+      "wallMs": 3583
+    },
+    {
+      "requestedAtMs": 12000,
+      "arrivedAtMs": 14453,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 965,
+      "outputTokens": 73,
+      "serverMs": 2453,
+      "wallMs": 3667
+    },
+    {
+      "requestedAtMs": 16000,
+      "arrivedAtMs": 19985,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 963,
+      "outputTokens": 179,
+      "serverMs": 3985,
+      "wallMs": 5144
+    },
+    {
+      "requestedAtMs": 20000,
+      "arrivedAtMs": 22588,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 965,
+      "outputTokens": 73,
+      "serverMs": 2588,
+      "wallMs": 3752
+    },
+    {
+      "requestedAtMs": 24000,
+      "arrivedAtMs": 27920,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 961,
+      "outputTokens": 179,
+      "serverMs": 3920,
+      "wallMs": 5101
+    },
+    {
+      "requestedAtMs": 28000,
+      "arrivedAtMs": 30612,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "chase",
+          "target": "rider"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 966,
+      "outputTokens": 76,
+      "serverMs": 2612,
+      "wallMs": 3749
+    },
+    {
+      "requestedAtMs": 32000,
+      "arrivedAtMs": 36051,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "sit-in"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 964,
+      "outputTokens": 179,
+      "serverMs": 4051,
+      "wallMs": 5171
+    },
+    {
+      "requestedAtMs": 40000,
+      "arrivedAtMs": 42419,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 970,
+      "outputTokens": 71,
+      "serverMs": 2419,
+      "wallMs": 3601
+    },
+    {
+      "requestedAtMs": 44000,
+      "arrivedAtMs": 46526,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 966,
+      "outputTokens": 71,
+      "serverMs": 2526,
+      "wallMs": 3748
+    },
+    {
+      "requestedAtMs": 48000,
+      "arrivedAtMs": 50431,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 960,
+      "outputTokens": 71,
+      "serverMs": 2431,
+      "wallMs": 3591
+    },
+    {
+      "requestedAtMs": 52000,
+      "arrivedAtMs": 54596,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 966,
+      "outputTokens": 71,
+      "serverMs": 2596,
+      "wallMs": 3795
+    },
+    {
+      "requestedAtMs": 56000,
+      "arrivedAtMs": 58347,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 969,
+      "outputTokens": 71,
+      "serverMs": 2347,
+      "wallMs": 3563
+    },
+    {
+      "requestedAtMs": 60000,
+      "arrivedAtMs": 63901,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 973,
+      "outputTokens": 177,
+      "serverMs": 3901,
+      "wallMs": 5125
+    },
+    {
+      "requestedAtMs": 64000,
+      "arrivedAtMs": 66708,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": "rider"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 972,
+      "outputTokens": 75,
+      "serverMs": 2708,
+      "wallMs": 3906
+    },
+    {
+      "requestedAtMs": 68000,
+      "arrivedAtMs": 70507,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 969,
+      "outputTokens": 71,
+      "serverMs": 2507,
+      "wallMs": 3726
+    },
+    {
+      "requestedAtMs": 72000,
+      "arrivedAtMs": 74501,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "sit-in"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 975,
+      "outputTokens": 75,
+      "serverMs": 2501,
+      "wallMs": 3685
+    },
+    {
+      "requestedAtMs": 76000,
+      "arrivedAtMs": 78516,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 979,
+      "outputTokens": 73,
+      "serverMs": 2516,
+      "wallMs": 3668
+    },
+    {
+      "requestedAtMs": 80000,
+      "arrivedAtMs": 82358,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 977,
+      "outputTokens": 71,
+      "serverMs": 2358,
+      "wallMs": 3489
+    },
+    {
+      "requestedAtMs": 84000,
+      "arrivedAtMs": 86535,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 971,
+      "outputTokens": 71,
+      "serverMs": 2535,
+      "wallMs": 3675
+    },
+    {
+      "requestedAtMs": 88000,
+      "arrivedAtMs": 90497,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 970,
+      "outputTokens": 71,
+      "serverMs": 2497,
+      "wallMs": 3679
+    },
+    {
+      "requestedAtMs": 92000,
+      "arrivedAtMs": 94490,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 971,
+      "outputTokens": 71,
+      "serverMs": 2490,
+      "wallMs": 3721
+    },
+    {
+      "requestedAtMs": 96000,
+      "arrivedAtMs": 98556,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 983,
+      "outputTokens": 71,
+      "serverMs": 2556,
+      "wallMs": 3741
+    },
+    {
+      "requestedAtMs": 100000,
+      "arrivedAtMs": 102418,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "sit-in"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "attack"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 975,
+      "outputTokens": 73,
+      "serverMs": 2418,
+      "wallMs": 3521
+    },
+    {
+      "requestedAtMs": 104000,
+      "arrivedAtMs": 106576,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 977,
+      "outputTokens": 73,
+      "serverMs": 2576,
+      "wallMs": 3738
+    },
+    {
+      "requestedAtMs": 108000,
+      "arrivedAtMs": 110694,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": "rider"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 973,
+      "outputTokens": 75,
+      "serverMs": 2694,
+      "wallMs": 3817
+    },
+    {
+      "requestedAtMs": 112000,
+      "arrivedAtMs": 115986,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 976,
+      "outputTokens": 179,
+      "serverMs": 3986,
+      "wallMs": 5158
+    },
+    {
+      "requestedAtMs": 116000,
+      "arrivedAtMs": 120084,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "sit-in"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 976,
+      "outputTokens": 179,
+      "serverMs": 4084,
+      "wallMs": 5325
+    },
+    {
+      "requestedAtMs": 124000,
+      "arrivedAtMs": 128019,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": 0
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 977,
+      "outputTokens": 184,
+      "serverMs": 4019,
+      "wallMs": 5250
+    },
+    {
+      "requestedAtMs": 132000,
+      "arrivedAtMs": 134679,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": "rider"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 973,
+      "outputTokens": 75,
+      "serverMs": 2679,
+      "wallMs": 3904
+    },
+    {
+      "requestedAtMs": 136000,
+      "arrivedAtMs": 138758,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": "rider"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 973,
+      "outputTokens": 75,
+      "serverMs": 2758,
+      "wallMs": 3952
+    },
+    {
+      "requestedAtMs": 140000,
+      "arrivedAtMs": 142601,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": "rider"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 969,
+      "outputTokens": 75,
+      "serverMs": 2601,
+      "wallMs": 3823
+    },
+    {
+      "requestedAtMs": 144000,
+      "arrivedAtMs": 146640,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": "rider"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 973,
+      "outputTokens": 75,
+      "serverMs": 2640,
+      "wallMs": 3829
+    },
+    {
+      "requestedAtMs": 148000,
+      "arrivedAtMs": 150676,
+      "outcome": "decision",
+      "moves": [
+        {
+          "bot": 0,
+          "move": "attack"
+        },
+        {
+          "bot": 1,
+          "move": "sit-in"
+        },
+        {
+          "bot": 2,
+          "move": "sit-in"
+        },
+        {
+          "bot": 3,
+          "move": "sit-in"
+        },
+        {
+          "bot": 4,
+          "move": "follow",
+          "target": "rider"
+        },
+        {
+          "bot": 5,
+          "move": "sit-in"
+        },
+        {
+          "bot": 6,
+          "move": "sit-in"
+        }
+      ],
+      "promptTokens": 973,
+      "outputTokens": 75,
+      "serverMs": 2676,
+      "wallMs": 3899
+    }
+  ]
+}

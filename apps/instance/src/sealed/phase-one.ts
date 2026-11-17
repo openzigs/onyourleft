@@ -63,6 +63,13 @@ const JOB_ROW = 'Each analysis job’s input, every SSE event’s text, the resu
 const KEY_ROW = 'A pasted API key, a rider’s own or the shared one set from the app';
 const CONSENT_ROW = 'The rider’s recorded hosted consent and the endpoint it names';
 
+/**
+ * The row ADR 0071 D-5.6 adds to ADR 0047 D-7's table (#2709): a race state,
+ * the moves answered for it, and the consent that lets one be asked.
+ */
+const TACTICS_ROW =
+  'A lap race’s state, the bot moves a model answered, and the rider’s consent to it';
+
 /** The row ADR 0050 D-2 adds to ADR 0047 D-7's table (#1106). */
 const PICTURE_ROW = 'A side-camera picture and the model’s answer about it';
 
@@ -159,6 +166,13 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('DELETE', '/v1/analysis/hosted/consent', CONSENT_ROW),
   // #1251: the test question goes out on that key, to the endpoint that consent names.
   only('POST', '/v1/analysis/hosted/test', `${KEY_ROW}; ${CONSENT_ROW}`),
+  // Model-chosen bot tactics (#2709, ADR 0071 D-5.6): born sealed, with no plaintext twin.
+  only('GET', '/v1/analysis/tactics', TACTICS_ROW),
+  only('POST', '/v1/analysis/tactics/consent', TACTICS_ROW),
+  only('DELETE', '/v1/analysis/tactics/consent', TACTICS_ROW),
+  only('POST', '/v1/analysis/tactics/start', TACTICS_ROW),
+  only('POST', '/v1/analysis/tactics/decide', TACTICS_ROW),
+  only('POST', '/v1/analysis/tactics/end', TACTICS_ROW),
   // A side-camera picture (#1106, ADR 0050 D-2): born sealed, and
   // refused unsealed on an instance with no keys too (`camera/routes.ts`).
   only('POST', '/v1/camera/side-pose', PICTURE_ROW),
