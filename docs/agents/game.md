@@ -1499,7 +1499,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the map's lakes, sea and wetland beside the road, from
                         the ride's land mask, and no invented lake where the
                         map was read: `waterways(profile, seed, land)` takes
-                        the mask, and every caller passes the ride's.
+                        the mask, and every caller passes the ride's. Since
+                        #2659 a bridge wherever the map's rivers, streams and
+                        canals (the mask's `waterLines`) cross the road, and no
+                        invented one where the map was read.
                         ⚠️ A mapped lake is drawn between its run's MEDIAN
                         shores, which can lie over the map's land, so since
                         #2728 `onOpenWater` (the drawn water, not the mask's)

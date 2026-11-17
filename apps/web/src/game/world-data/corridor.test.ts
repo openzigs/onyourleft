@@ -18,6 +18,7 @@ import {
 import {
   BUILDING_FIELD_NAMES,
   corridorTileCover,
+  decodeTile,
   NO_BUILDING_FIELDS,
   tileBounds,
   type BuildingFeature,
@@ -35,6 +36,7 @@ import {
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   sidewalkTile,
+  waterLinesTile,
   woodWithHoleTile,
 } from '@onyourleft/map-features/testing';
 import { privacyZoneId, type PrivacyZoneRecord } from '@onyourleft/store';
@@ -540,7 +542,8 @@ describe('packing', () => {
       true,
       false,
     ]);
-    expect(packed.v).toBe(4);
+    // 5 since #2659 added the water lines.
+    expect(packed.v).toBe(5);
   });
 
   it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {
@@ -560,6 +563,7 @@ describe('packing', () => {
       paths: [],
       streets: [],
       places: [],
+      waterLines: [],
     });
     const building = back.buildings[0] as BuildingFeature;
     expect([
@@ -570,6 +574,61 @@ describe('packing', () => {
       building.wallColour,
       building.landmark,
     ]).toStrictEqual([null, null, 'gabled', 1890, null, null]);
+  });
+
+  it('keeps the water lines through the store, and only the decoder’s kinds (#2659)', async () => {
+    const decoded = decodeTile(waterLinesTile(), FIXTURE_TILE, FIXTURE_FRAME);
+    if ('reason' in decoded) throw new Error(decoded.reason);
+    expect(decoded.waterLines.length).toBe(3);
+    const back = await unpackCorridorFeatures(
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+        waterLines: decoded.waterLines,
+      }),
+    );
+    expect(back.waterLines?.map((line) => line.kind)).toStrictEqual(['river', 'stream', 'canal']);
+    back.waterLines?.forEach((line, index) => {
+      const want = decoded.waterLines[index]?.line as Float32Array;
+      expect(line.line.length).toBe(want.length);
+      line.line.forEach((value, at) => {
+        expect(Math.abs(value - (want[at] as number))).toBeLessThanOrEqual(0.006);
+      });
+    });
+    // A kind the decoder would not keep, edited into a blob, is not read back.
+    const edited = corridorFeaturesOfPacked({
+      ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      waterLines: [
+        { kind: 'stream', line: [0, 0, 100, 100] },
+        { kind: 'ditch' as 'stream', line: [0, 0, 100, 100] },
+      ],
+    });
+    expect(edited.waterLines?.map((line) => line.kind)).toStrictEqual(['stream']);
+    // A corridor with none packs no `waterLines` at all, as it did at version 4.
+    const none = packedCorridorFeatures({
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets: [],
+      places: [],
+      waterLines: [],
+    });
+    expect('waterLines' in none).toBe(false);
+    expect(corridorFeaturesOfPacked(none).waterLines).toStrictEqual([]);
+  });
+
+  it('refuses a blob of the reader before the water lines (#2659)', async () => {
+    const json = new Blob([
+      JSON.stringify({ v: 4, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    await expect(
+      unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
+    ).rejects.toThrow(/not a version/);
   });
 
   it('refuses a blob of the reader before the building fields (#1789)', async () => {

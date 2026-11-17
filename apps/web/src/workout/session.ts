@@ -130,6 +130,20 @@ export const HEART_RATE_HISTORY_SECONDS = 30;
 export const LARGEST_RAISE_WATTS = 50;
 
 /**
+ * How long a workout carried on after its trainer reconnected takes to ease
+ * back up to the block's target, in seconds — #2669, the owner's ruling of
+ * 2026-11-16: "a ramp, not a step". From the trainer's own lowest target
+ * ({@link WorkoutSessionOptions.powerFloor}) to the block's, in a straight
+ * line, one write a tick (@see WorkoutSession.carryOn).
+ *
+ * ⚠️ **A pick, not a measurement.** "A few seconds" was the ruling; ten is
+ * long enough that a rider who has only just found the pedals again is not
+ * met with an interval's full target, and short enough that the interval is
+ * still the interval.
+ */
+export const CARRY_ON_RAMP_SECONDS = 10;
+
+/**
  * What the session needs from a trainer.
  *
  * `setTargetPower`, `stop` and `letGo` and nothing else that COMMANDS — in
@@ -289,6 +303,20 @@ export interface WorkoutSession {
   resume(now: Seconds): void;
   /** The trainer link dropped. Pauses; loses nothing. */
   linkLost(now: Seconds): void;
+  /**
+   * Carry on after the trainer came back from a lost link — #2669, the
+   * owner's ruling of 2026-11-16. {@link resume}, and then the block's
+   * target is NOT written at once: every target is capped by a ramp that
+   * rises from the trainer's lowest target to the block's own over
+   * {@link CARRY_ON_RAMP_SECONDS}, one write a tick, each acknowledged before
+   * the next. A target the block asks for under the ramp is written as it
+   * is; an ease and the end of the workout are never held back.
+   *
+   * ⚠️ Writes nothing itself. The first write is the next tick's, which is
+   * why the ride controller calls this only once the rider is pedalling and
+   * control has been taken again (`ride/controller.ts` §`carryOnWorkout`).
+   */
+  carryOn(now: Seconds): void;
   /** End the workout and release the trainer — see the module note. */
   stop(): void;
   /**
@@ -377,6 +405,35 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    * @see WorkoutSessionState.rescue
    */
   let blockAtFloor = false;
+
+  /**
+   * The ramp of a workout carried on after a reconnect — #2669, `undefined`
+   * with none in force. `from` is when its first step was written, on the
+   * session's clock: anchored there and not at {@link WorkoutSession.carryOn},
+   * so the first write is the floor itself whenever the next tick falls.
+   * @see WorkoutSession.carryOn
+   */
+  let ramp: { from: Seconds | undefined } | undefined;
+
+  /**
+   * What the ramp lets the trainer be sent at `now` for a target of
+   * `target`, or `undefined` when the ramp holds nothing back — none is in
+   * force, it has run its length (and is ended here), or the target is at or
+   * under what it allows. Never under the floor: that is where it starts.
+   */
+  const rampCap = (now: Seconds, target: Watts): Watts | undefined => {
+    if (ramp === undefined) {
+      return undefined;
+    }
+    ramp.from ??= now;
+    const progress = (now - ramp.from) / CARRY_ON_RAMP_SECONDS;
+    if (progress >= 1) {
+      ramp = undefined;
+      return undefined;
+    }
+    const cap = Math.round(powerFloor + (target - powerFloor) * Math.max(0, progress));
+    return cap < target ? watts(Math.max(powerFloor, cap)) : undefined;
+  };
 
   /** @see WorkoutSessionState.rescue */
   const rescueAsTold = (rescue: WorkoutRescue | undefined): WorkoutRescue | undefined =>
@@ -557,25 +614,41 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
    * ramp that started under the minimum waited for ever at the minimum, long
    * after the ramp had climbed past it.
    */
-  let lastOffered: { readonly target: Watts; landed: Watts | undefined } | undefined;
+  let lastOffered:
+    { readonly target: Watts; readonly ramped: boolean; landed: Watts | undefined } | undefined;
   // Invariant: `released === true` implies `lastOffered === undefined`, which is
   // why `resume()` need not forget it (`ease()` clears it when it releases).
 
-  const offer = (target: Watts): void => {
+  /**
+   * The player's ask answered with what the trainer holds — and, for a
+   * target the ramp held under the ask (#2669), asked again: the player asks
+   * only for a target it has not had acknowledged, so it is told it has not,
+   * and the next tick writes the ramp's next step.
+   */
+  const answer = (landed: Watts, ramped: boolean): void => {
+    player.acknowledge(landed);
+    if (ramped) {
+      player.writeFailed();
+    }
+  };
+
+  const offer = (target: Watts, ramped = false): void => {
     released = false;
     if (lastOffered?.target === target) {
       // Still on the wire: its own answer acknowledges the player's ask, which
       // is the current one (`asks` has not moved). Already landed: nothing
       // else will, so the ask is answered here with what the trainer said.
       if (lastOffered.landed !== undefined) {
-        player.acknowledge(lastOffered.landed);
+        answer(lastOffered.landed, ramped);
       }
       return;
     }
-    const offered: { readonly target: Watts; landed: Watts | undefined } = {
-      target,
-      landed: undefined,
-    };
+    const offered: { readonly target: Watts; readonly ramped: boolean; landed: Watts | undefined } =
+      {
+        target,
+        ramped,
+        landed: undefined,
+      };
     lastOffered = offered;
     asks += 1;
     const ask = asks;
@@ -591,7 +664,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           // wattage as held. What the trainer confirmed is still recorded —
           // `holding` is the writer's, and is true of the wire.
           if (current) {
-            player.acknowledge(outcome.quantised);
+            answer(outcome.quantised, offered.ramped);
           }
           break;
         case 'failed':
@@ -622,6 +695,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     start(now: Seconds): void {
       player.start(now);
       lastOffered = undefined;
+      ramp = undefined;
       changed();
     },
 
@@ -691,7 +765,10 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           // #1305's second pass. `share` is the block's own ask, before
           // any relief (`player.ts` §`write-target`).
           blockAtFloor = Math.round(thresholdPower * state.intent.share) <= powerFloor;
-          offer(raised ? powerFloor : asked);
+          // #2669: a workout carried on after a reconnect eases back up.
+          const target = raised ? powerFloor : asked;
+          const capped = rampCap(now, target);
+          offer(capped ?? target, capped !== undefined);
           break;
         }
         case 'release':
@@ -731,6 +808,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       raiseRefused = false;
       // What the machine holds is no longer known to be this block's raise.
       raisedFrom = undefined;
+      // #2669: a ramp in force is over; the next carry-on starts its own.
+      ramp = undefined;
       // ⚠️ No `stop()`, no release, and — the one that was wrong first — **no
       // `writer.close()`**. The link is down, so a write would only queue
       // against a machine that is not there; but closing the writer is
@@ -743,8 +822,17 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       changed();
     },
 
+    carryOn(now: Seconds): void {
+      player.resume(now);
+      // Only once the player is running again: a finished workout has nothing
+      // to ramp to, and a ramp left set would cap the next start's targets.
+      ramp = player.state().status === 'running' ? { from: undefined } : undefined;
+      changed();
+    },
+
     stop(): void {
       player.stop();
+      ramp = undefined;
       // `finish` closes the writer, after asking it whether anything is on
       // the wire (#2348).
       finish();
@@ -753,6 +841,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
     supersede(): void {
       player.stop();
+      ramp = undefined;
       writer.close();
       // A bare Stop, as ever. Not `ease`: the writer is closed, and the
       // replacement's first target follows at once.
