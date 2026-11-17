@@ -78,7 +78,7 @@
  * drives the second one only, and the first belongs to the workout session.
  */
 
-import type { TimeInZones, Watts, WorkoutRescue } from '@onyourleft/domain';
+import type { LapRaceModelRecord, TimeInZones, Watts, WorkoutRescue } from '@onyourleft/domain';
 import type { RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
@@ -419,6 +419,13 @@ export interface GameTrainerPort {
    */
   roomRaceEnded?(race: RoomRaceFact): void;
   /**
+   * A ride's race with AI bots ended, and this is its record — #2710, ADR
+   * 0071 D-4.4: kept with the recording and saved with the ride
+   * (`RideFacts.lapRaces`), on this device only. Data only: nothing in it is
+   * a trainer command, and this port writes it to no trainer.
+   */
+  lapRaceEnded?(race: LapRaceModelRecord): void;
+  /**
    * Whether the recording under this ride is PAUSED by the rider — #1360's
    * review (N1): the game says so while it rides in a room, and resumes
    * nothing (#516). `false` with nothing recording. Read through
@@ -676,6 +683,8 @@ interface GameTrainerSource {
    */
   recordForRoom?(): Promise<boolean>;
   noteRoomRace?(race: RoomRaceFact): void;
+  /** #2710. @see GameTrainerPort.lapRaceEnded */
+  noteLapRace?(race: LapRaceModelRecord): void;
   /**
    * #2656. @see GameTrainerPort.pauseRecording, GameTrainerPort.resumeRecording.
    * Optional for {@link recordForRoom}'s reason; the ride controller has both.
@@ -848,6 +857,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);
+    },
+    lapRaceEnded: (race) => {
+      controller?.noteLapRace?.(race);
     },
     recordingPaused: () => controller?.getSnapshot().phase === 'paused',
     pauseRecording: async () => {

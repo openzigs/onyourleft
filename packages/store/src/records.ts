@@ -33,6 +33,7 @@ import type {
   GradePercent,
   Kilocalories,
   Kilograms,
+  LapRaceModelRecord,
   Metres,
   ReplanRecord,
   RevolutionsPerMinute,
@@ -573,6 +574,18 @@ export interface RideFacts {
    * @see WorkoutBlockFact
    */
   readonly workoutBlocks?: readonly WorkoutBlockFact[];
+  /**
+   * The races with AI bots this ride was ridden in, in the order they ended —
+   * #2710, ADR 0071 D-4.4: each one's seed, bot-code version, decision log and
+   * the rider's own input at every race tick, so the race replays under the
+   * version it was ridden with. Known only while riding, like
+   * {@link workoutFinished}; absent for a ride with none. Stays on this device:
+   * no sync rule sends it (D-11, *"Not decided here"*).
+   *
+   * ⚠️ **A record that does not read is dropped, never the ride**, on the way
+   * in and on the way out, as for {@link races}. Since schema version 22.
+   */
+  readonly lapRaces?: readonly LapRaceModelRecord[];
   /**
    * `true` when the rider rode at least the drafted share of this ride's
    * distance in the bot pacer's or their own ghost's draft — #2451, ADR 0066

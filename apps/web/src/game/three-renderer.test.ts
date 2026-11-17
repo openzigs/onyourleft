@@ -1704,6 +1704,7 @@ function frameWithScatter(): SceneFrame {
           NO_LAND_CLASS,
         ),
         horizon: horizonRelief(profile, origin, 7),
+        embankments: [],
       };
     })(),
     water: {

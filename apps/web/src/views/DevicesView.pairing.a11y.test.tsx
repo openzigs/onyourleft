@@ -223,6 +223,7 @@ describe('#942 — the garage: one card per kind of device, its state in words',
         "lockTouch": 0,
         "markLap": 0,
         "noteGameRideEnded": [],
+        "noteLapRace": [],
         "noteResultAnnounced": 0,
         "noteRoomRace": [],
         "pair": [

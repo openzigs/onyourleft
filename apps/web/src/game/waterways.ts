@@ -1095,7 +1095,18 @@ export interface BridgePart {
   readonly length: number;
   readonly width: number;
   readonly height: number;
+  /**
+   * What the block is dressed in — #2699. Absent, as every stream bridge's
+   * block is: the bridges' stone. Otherwise an overpass's
+   * (`overpasses.ts`): `'road'` for its deck, which carries a street and wears
+   * the road's colour, and `'concrete'` for its edge beams and
+   * abutments. `three-renderer.ts` §`BridgeBelt` draws the two apart.
+   */
+  readonly finish?: BridgeFinish;
 }
+
+/** An overpass block's dress — #2699. @see BridgePart.finish */
+export type BridgeFinish = 'road' | 'concrete';
 
 /** The most blocks one frame's bridges may be built from — a bound on the instance buffer. */
 export const MAXIMUM_BRIDGE_PARTS = 128;
