@@ -29,9 +29,12 @@
  *    (ADR 0054 D-5.2) is categorical, and D-5.2's one possible exception is
  *    not taken. #2657: a protected area's boundary (`land-class.ts`
  *    §`PROTECTED_AREA_KINDS`, a national forest drawn round a whole town)
- *    is not a wood or a park, and a footprint on it is built.
+ *    is not a wood or a park, and a footprint on it is built. Since #2754 a
+ *    beach or pier inside a park reads as `bare` (`land-class.ts`
+ *    §`BARE_KINDS_OVER_LAND`), and is still inside it (`insidePark`, a
+ *    mapped park's polygon, not a protected area's), so it is dropped.
  *    ⚠️ Since #2728 also any of them over the open water the scene
- *    DRAWS (`waterways.ts` §`onOpenWater`), which a mapped lake's median
+ *    DRAWS (`waterways.ts` §`onOpenWater`), which a mapped lake's
  *    shores can lay over mapped land: tested once rule 4 has found the road
  *    each point is beside.
  * 3. **The road** (D-5.4): any edge within `landform.ts`
@@ -421,7 +424,7 @@ import {
 } from './house-archetypes';
 import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
-import { kindAt, type LandClass, type LandClassMask } from './land-class';
+import { insidePark, kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { onOpenWater, waterways } from './waterways';
 import {
@@ -6190,8 +6193,10 @@ function measureFootprint(
   // 2. The land: the centroid and every vertex the map drew. #2657: a
   // protected area's boundary (a national forest round a whole town) is not
   // a wood, so a footprint on it is built — ADR 0054's 2026-11-15 amendment.
+  // #2754: a beach inside a park is a beach, and still inside the park.
   const excluded = (x: number, z: number): boolean => {
     const here = land.classAt(x, z);
+    if (here === 'bare') return insidePark(corridor, x, z);
     return (here === 'wood' || here === 'water' || here === 'park') && !land.protectedArea(x, z);
   };
   if (excluded(centroid.x, centroid.z)) return 'on-excluded-land';
@@ -6253,8 +6258,8 @@ function measureFootprint(
     highest = Math.max(highest, height);
   }
   if (highest - lowest > FOOTPRINT_MAX_GROUND_RANGE_METRES) return 'too-steep';
-  // #2728: rule 2 again, over the water the scene DRAWS — a mapped lake's shores are its
-  // run's medians, which may lie past the map's own, so mapped land can be under drawn
+  // #2728: rule 2 again, over the water the scene DRAWS — a mapped lake's shores are
+  // smoothed and its surface reaches past them, so mapped land can be under drawn
   // water, and a house there stood in it on the lake bed.
   const ways = waterways(profile, seed, land);
   const wet = (x: number, z: number): boolean => {

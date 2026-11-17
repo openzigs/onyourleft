@@ -161,20 +161,22 @@ describe('no mapped house stands in the drawn water — #2728', () => {
   const LEVEL = northRoute(3_000, () => 10);
   const ORIGIN = corridorOrigin(LEVEL);
   /**
-   * The sea on the right from 30 m out, from 800 to 1 600 m, but for an inlet's
-   * far bank from 1 150 to 1 250 m: there the water stops at 185 m and a
-   * residential plot runs on to 200 m. The bank is 15 m, inside the 20 m a
-   * mapped lake's far shore may wander, so the lake is drawn to its median far
-   * shore, about 200 m, over the plot.
+   * The sea on the right from 30 m out, from 800 to 1 600 m, but for a dry
+   * notch in its far bank from 1 196 to 1 204 m: there the water stops at
+   * 185 m and a residential plot runs on to 200 m. The notch is one sample of
+   * the road long, and a mapped lake's shore is the middle of each sample's
+   * and its neighbours' since #2754 (its run's median, 20 m either way,
+   * before), so the lake is drawn to its far shore either side, about 200 m,
+   * over the plot.
    */
   const sea: LandUseFeature[] = [
-    landBeside(LEVEL, ORIGIN, 'water', 'ocean', 800, 1_150, 30, 200),
-    landBeside(LEVEL, ORIGIN, 'water', 'ocean', 1_150, 1_250, 30, 185),
-    landBeside(LEVEL, ORIGIN, 'water', 'ocean', 1_250, 1_600, 30, 200),
+    landBeside(LEVEL, ORIGIN, 'water', 'ocean', 800, 1_196, 30, 200),
+    landBeside(LEVEL, ORIGIN, 'water', 'ocean', 1_196, 1_204, 30, 185),
+    landBeside(LEVEL, ORIGIN, 'water', 'ocean', 1_204, 1_600, 30, 200),
   ];
-  const plot = landBeside(LEVEL, ORIGIN, 'landuse', 'residential', 1_150, 1_250, 185, 200);
-  /** A house on the plot, 190 to 196 m out at 1 200 m: on the map's land. */
-  const house = buildingBeside(LEVEL, ORIGIN, [rectangleBeside(1_200, 193, 10, 6)], 6);
+  const plot = landBeside(LEVEL, ORIGIN, 'landuse', 'residential', 1_196, 1_204, 185, 200);
+  /** A house on the plot, 190 to 196 m out from 1 197 to 1 203 m: on the map's land. */
+  const house = buildingBeside(LEVEL, ORIGIN, [rectangleBeside(1_200, 193, 6, 6)], 6);
 
   function plansOf(landUse: readonly LandUseFeature[]) {
     const corridor = corridorOf(LEVEL, landUse, { buildings: [house] });
