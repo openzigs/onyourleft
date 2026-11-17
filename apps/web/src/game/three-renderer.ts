@@ -747,7 +747,16 @@ import {
   type WaterSurface,
 } from './waterways';
 import { roadTintIn, WeatherShading, sunColourIn, weatheredWorld } from './weather-look';
-import { groundColourIn, roofSnowIn, vergeSlushIn, type SunStyle, type WorldStyle } from './world';
+import { BARE_SURFACES, type BareSurface } from './land-class';
+import {
+  bareSurfaceColourIn,
+  groundColourIn,
+  roofSnowIn,
+  snowCoverIn,
+  vergeSlushIn,
+  type SunStyle,
+  type WorldStyle,
+} from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
   decorationsFor,
@@ -4911,6 +4920,51 @@ function reserve(mesh: InstancedMesh, needed: number): void {
   mesh.instanceMatrix = grown;
 }
 
+/** Each bare surface's tint, three channels a surface, written each frame. @see bareGroundTints */
+const BARE_TINTS = new Float32Array(BARE_SURFACES.length * 3);
+const BARE_GROUND_SCRATCH = new Color();
+const BARE_SURFACE_SCRATCH = new Color();
+
+/**
+ * Draws mapped bare ground in its own colour, not the grass's — #2700.
+ *
+ * The ground's material is ONE colour, the world's (`world.ts`
+ * §`groundColourIn`), and each vertex's colour multiplies it. So a vertex on
+ * bare ground (`landform.ts` §`TerrainMesh.surfaces`) has its colour, the
+ * mottle and the wet margin, multiplied again by its surface's colour over
+ * the ground's, channel by channel in the linear space the shader multiplies
+ * in: what is drawn there is the surface's colour, mottled, wet where it is.
+ * In place, on the colours just uploaded, so the mesh's lent array is left as
+ * `landform.ts` built it and no vertex attribute is added (#2700's
+ * constraint).
+ */
+function bareGroundTints(
+  colours: Float32Array,
+  surfaces: Uint8Array,
+  groundColour: number,
+  snowCover: number,
+): void {
+  const ground = BARE_GROUND_SCRATCH.setHex(groundColour);
+  for (let index = 0; index < BARE_SURFACES.length; index += 1) {
+    const surface = BARE_SURFACE_SCRATCH.setHex(
+      bareSurfaceColourIn(BARE_SURFACES[index] as BareSurface, snowCover),
+    );
+    BARE_TINTS[index * 3] = surface.r / Math.max(ground.r, 1e-4);
+    BARE_TINTS[index * 3 + 1] = surface.g / Math.max(ground.g, 1e-4);
+    BARE_TINTS[index * 3 + 2] = surface.b / Math.max(ground.b, 1e-4);
+  }
+  for (let vertex = 0; vertex < surfaces.length; vertex += 1) {
+    const byte = surfaces[vertex] as number;
+    if (byte === 0) continue;
+    const tint = (byte - 1) * 3;
+    colours[vertex * 3] = (colours[vertex * 3] as number) * (BARE_TINTS[tint] as number);
+    colours[vertex * 3 + 1] =
+      (colours[vertex * 3 + 1] as number) * (BARE_TINTS[tint + 1] as number);
+    colours[vertex * 3 + 2] =
+      (colours[vertex * 3 + 2] as number) * (BARE_TINTS[tint + 2] as number);
+  }
+}
+
 /**
  * The ground beside the road — #458. One mesh, one draw call, rebuilt from
  * `landform.ts` every frame the way the road is.
@@ -5051,8 +5105,12 @@ export class TerrainBelt {
   /**
    * This frame's ground, in the world's ground colour. Grows its buffers and
    * never shrinks them, for the road's reason (#240's NFR-3).
+   *
+   * #2700: and its mapped bare ground in that ground's own colour —
+   * {@link bareGroundTints} — under `snowCover`, the ground's snow
+   * (`world.ts` §`snowCoverIn`), which `#stage` passes for the frame's winter.
    */
-  update(ground: TerrainMesh, groundColour: number): void {
+  update(ground: TerrainMesh, groundColour: number, snowCover = 0): void {
     // ⚠️ #469: the mesh's arrays are lent, and a later build has written over
     // them. Drawing it would draw that build's ground under this frame's road
     // — silently, and only in a caller that holds two frames, which is every
@@ -5088,7 +5146,9 @@ export class TerrainBelt {
     }
     upload(this.#geometry.getAttribute('position') as BufferAttribute, ground.vertices);
     upload(this.#geometry.getAttribute('normal') as BufferAttribute, ground.normals);
-    upload(this.#geometry.getAttribute('color') as BufferAttribute, ground.colours);
+    const colour = this.#geometry.getAttribute('color') as BufferAttribute;
+    upload(colour, ground.colours);
+    bareGroundTints(colour.array as Float32Array, ground.surfaces, groundColour, snowCover);
     upload(this.#geometry.getAttribute('fields') as BufferAttribute, ground.fields);
     if (ground.indices !== this.#uploadedIndices) {
       upload(this.#geometry.getIndex() as BufferAttribute, ground.indices);
@@ -25285,7 +25345,8 @@ class ThreeGameView implements GameView {
     // #1692: and the verge's ploughed slush, so the road's edge line still reads.
     SEASON.oylVergeSlush.value = vergeSlushIn(frame.world, winter);
     const ground = winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter);
-    this.#terrain.update(frame.terrain.mesh, ground);
+    // #2700: the bare ground under the same snow as the rest of it.
+    this.#terrain.update(frame.terrain.mesh, ground, snowCoverIn(frame.world, winter));
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
