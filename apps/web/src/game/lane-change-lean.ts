@@ -88,6 +88,17 @@ const LANE_CHANGE_TURN_RADIANS_PER_SECOND = 1;
 export const LANE_CHANGE_TURN_SPEED_FLOOR = 10;
 
 /**
+ * The slowest speed a lap-race bot's turn into a move across the pack is
+ * taken at, in metres a second: **3**, the speed under which the pack holds a
+ * bot on its grid place (`lap-race/pack-layout.ts`
+ * §`PACK_ROLLING_METRES_PER_SECOND`). Above it a bot turns at its own speed
+ * (#2665): at the rider's 10 m/s floor a bot moving across at the old 4.375 m/s
+ * asked for a 24° path and was turned 12°, so it crabbed; a bot's move across
+ * is eased at the pack's own rate, so its turn never snaps.
+ */
+export const BOT_TURN_SPEED_FLOOR = 3;
+
+/**
  * The drawn sway `seconds` after `held`, moved toward `wanted` (`lanes.ts`
  * §`sidewaysSpeedOf`) by at most {@link SWAY_ACCELERATION} a second, and never
  * past it. A time that is not a finite number of seconds above nought moves
@@ -106,10 +117,15 @@ export function dampedSway(held: number, wanted: number, seconds: number): numbe
  * its sign: positive to the rider's right. Taken at no less than
  * {@link LANE_CHANGE_TURN_SPEED_FLOOR}, so a rider at a standstill still
  * yaws a little (about 11.5°) on a move while {@link laneChangeLean} is 0: a
- * chosen simplicity, left for the tablet to judge (#2456 review).
+ * chosen simplicity, left for the tablet to judge (#2456 review). A lap-race
+ * bot's is taken at {@link BOT_TURN_SPEED_FLOOR} (#2665).
  */
-export function laneChangeRate(sway: number, speed: number): number {
-  return sway / Math.max(speed, LANE_CHANGE_TURN_SPEED_FLOOR);
+export function laneChangeRate(
+  sway: number,
+  speed: number,
+  floor: number = LANE_CHANGE_TURN_SPEED_FLOOR,
+): number {
+  return sway / Math.max(speed, floor);
 }
 
 /**
