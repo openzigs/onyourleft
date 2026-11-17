@@ -36,6 +36,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  beatsPerMinute,
   distanceOnRoute,
   gradeAt,
   gradePercent,
@@ -228,8 +229,18 @@ function aiPacerPort(asked: Asked): PacerPort {
   };
 }
 
-function tracedPort(route: RidableRoute, aiPacer: PacerPort | undefined): GamePort {
+function tracedPort(
+  route: RidableRoute,
+  aiPacer: PacerPort | undefined,
+  thresholds?: { readonly power: number; readonly heartRate: number },
+): GamePort {
   return {
+    ...(thresholds === undefined
+      ? {}
+      : {
+          ownThresholdPower: () => Promise.resolve(watts(thresholds.power)),
+          ownThresholdHeartRate: () => Promise.resolve(beatsPerMinute(thresholds.heartRate)),
+        }),
     listRoutes: () => Promise.resolve([route]),
     loadGhost: () => Promise.resolve(undefined),
     readSensors: () => ({
@@ -564,13 +575,17 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     const RACE: LapRaceChoice = { laps: 2, bots: 1, tier: 'brisk', itemsOn: false };
 
     /** A loop ridden with the AI pacer consented to, raced or not; what the instance was asked. */
-    async function askedOnLoop(race: LapRaceChoice | undefined): Promise<Asked> {
+    async function askedOnLoop(
+      race: LapRaceChoice | undefined,
+      thresholds?: { readonly power: number; readonly heartRate: number },
+    ): Promise<Asked> {
       const asked: Asked = { inputs: [], starts: 0, ends: 0 };
       mounted = await mount(
         <GameView
           port={tracedPort(
             { id: 'route-loop', name: 'Loop', profile: circuitRoute(400), attempts: 0 },
             aiPacerPort(asked),
+            thresholds,
           )}
           renderer={() => Promise.resolve(blankRenderer())}
           now={() => nowMs}
@@ -594,6 +609,16 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
       }
       return asked;
     }
+
+    it('sends the zones and the stretch above threshold when the port knows both thresholds (#2760)', async () => {
+      // 100 W and 60 bpm sit below the whole trace, so the rider is above
+      // threshold on every frame and in a zone.
+      const asked = await askedOnLoop(undefined, { power: 100, heartRate: 60 });
+      const last = asked.inputs.at(-1);
+      expect(last).toHaveProperty('powerZone');
+      expect(last).toHaveProperty('heartRateZone');
+      expect(last?.aboveThresholdS).toBeGreaterThan(0);
+    });
 
     it('asks the instance on the same loop when it is not raced', async () => {
       const asked = await askedOnLoop(undefined);

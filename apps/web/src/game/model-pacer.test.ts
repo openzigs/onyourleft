@@ -345,6 +345,29 @@ describe('the rider’s own sensors in the state — #2760', () => {
     });
   });
 
+  it('sends no minute average or trend once its sensor has dropped, though the trace still holds it', () => {
+    const trace = traceOf(60, (index) => ({
+      power: index < 30 ? 300 : 240,
+      heartRate: index < 30 ? 150 : 156,
+    }));
+    const live = modelPacerSensorFields(
+      { ...NO_SENSORS, power3s: 240, heartRateBpm: 156, trace },
+      80,
+    );
+    expect(live).toHaveProperty('riderMinuteWPerKg');
+    expect(live).toHaveProperty('powerTrend');
+    expect(live).toHaveProperty('heartRateTrend');
+    // Power dropped out, heart rate still reads.
+    const noPower = modelPacerSensorFields({ ...NO_SENSORS, heartRateBpm: 156, trace }, 80);
+    expect(noPower).not.toHaveProperty('riderMinuteWPerKg');
+    expect(noPower).not.toHaveProperty('powerTrend');
+    expect(noPower).toHaveProperty('heartRateTrend');
+    // Heart rate dropped out, power still reads.
+    const noHeart = modelPacerSensorFields({ ...NO_SENSORS, power3s: 240, trace }, 80);
+    expect(noHeart).not.toHaveProperty('heartRateTrend');
+    expect(noHeart).toHaveProperty('powerTrend');
+  });
+
   it('leaves out a zone with no threshold set, and a reading out of range rather than clamping it', () => {
     const fields = modelPacerSensorFields(
       { ...NO_SENSORS, power3s: 200, cadenceRpm: 400, heartRateBpm: 5 },

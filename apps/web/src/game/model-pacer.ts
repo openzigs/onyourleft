@@ -256,12 +256,15 @@ export function modelPacerSensorFields(
       fields.aboveThresholdS = secondsAtOrAbove(trace, thresholdPower);
     }
   }
-  const minute = liveOf(trace.slice(-SENSOR_WINDOW_S), 'power');
+  // The minute and the trend come from the recent trace, which outlives a
+  // sensor that has just dropped: only while the sensor reads now.
+  const powerLive = power3s !== undefined && Number.isFinite(power3s) && power3s >= 0;
+  const minute = powerLive ? liveOf(trace.slice(-SENSOR_WINDOW_S), 'power') : [];
   if (minute.length >= SENSOR_LEAST_LIVE_S * 2) {
     const average = perKilogram(mean(minute), riderMassKilograms);
     if (average !== undefined) fields.riderMinuteWPerKg = average;
   }
-  const trend = powerTrend(trace);
+  const trend = powerLive ? powerTrend(trace) : undefined;
   if (trend !== undefined) fields.powerTrend = trend;
   const cadence = wholeWithin(sensors.cadenceRpm, 0, 250);
   if (cadence !== undefined) fields.cadenceRpm = cadence;
@@ -273,7 +276,7 @@ export function modelPacerSensorFields(
       if (zone !== undefined) fields.heartRateZone = zone.name;
     }
   }
-  const heartTrend = heartRateTrend(trace);
+  const heartTrend = heartRate === undefined ? undefined : heartRateTrend(trace);
   if (heartTrend !== undefined) fields.heartRateTrend = heartTrend;
   return fields;
 }

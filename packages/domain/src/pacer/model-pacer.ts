@@ -16,8 +16,11 @@
  * now and how long it has held the intent, where the rider is against it, the
  * rider's W/kg and whether they are in its draft, the grade ahead, the metres
  * to the finish and the seconds ridden. **Every field is a number, a boolean
- * or a word from a closed list**: there is no field a coordinate, a place
- * name, a rider's name, a date or an identifier could be written into, and
+ * or a word from a closed list**, except `recentLines` (#2760): the model's
+ * own last lines, screened free text (§`pacerSayProblem`: no digit, no
+ * symbol, and a length), written by the model from a state that holds no
+ * name or place. There is no other field a coordinate, a place name, a rider's name,
+ * a date or an identifier could be written into, and
  * {@link readModelPacerInput} refuses any key it does not name. A problem
  * names the field and the rule, never the value (ADR 0004 D).
  *
@@ -234,7 +237,7 @@ export type ModelPacerInputRead =
 
 /**
  * The longest pacer state accepted, characters of its JSON: **2 048**. One
- * with every sensor and three lines is about 700; 1 024 until #2760 widened it.
+ * with every sensor and three lines is about 615; 1 024 until #2760 widened it.
  */
 export const MODEL_PACER_INPUT_MOST_CHARACTERS = 2_048;
 
