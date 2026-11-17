@@ -1,11 +1,11 @@
 # ADR 0075: The ride controls fade slower than the menus' motion cap — superseding in part ADR 0041 D-3 and D-5 and ADR 0063 D-7, for the ride controls that hide until touched
 
-- **Status**: **Proposed, 2026-11-17**, on the owner's report of that day from the tablet on
+- **Status**: **Accepted, 2026-11-17**, by the owner on #2670 (D-5). Proposed the same day, on the
+  owner's report from the tablet on
   [#2600](https://github.com/openzigs/onyourleft/issues/2600#issuecomment-6946037944) (*"menu does
   disappear on touch. Not a fade just a pop."*) and the maintainer's reading of it in the same
   comment (*"out over about 0.8 s, back in over about 0.25 s. Use dedicated tokens, not the shared
-  motion-medium"*). Accepted on the owner's approval of the screenshots and the tablet check that
-  #2600 already requires before its pull request (#2670) merges
+  motion-medium"*). The pull request still merges only after the tablet check #2600 requires
 - **Date**: 2026-11-17
 - **Deciders**: **the owner**, whose rulings of 2026-11-16 (*"Fade out is better"*) and report of
   2026-11-17 asked for a fade a rider can see. **The maintainer** set the two numbers in the
@@ -90,6 +90,14 @@ A rider who asked for less motion, or whose screen cannot repaint, sees no fade 
 stylesheet-wide collapse shortens a duration but leaves a delay in place, so the closing would still
 wait out the fade. For that reason `theme.css` §"#2600" removes every one of these animations under
 `prefers-reduced-motion: reduce` and `update: slow`, and the controls and the clip go at once.
+
+### D-5 — The owner's answers
+
+**Owner ruling, 2026-11-17:** asked *"Approve ADR 0075? It allows the 0.8 s fade on the ride
+controls only"* and *"Keep the whole panel up while you hold an item in a lap race?"*, the owner
+answered *"1 approve"* and *"2 yes"*. So ADR 0075 is accepted, and while the rider holds an item in a
+lap race the whole actions panel stays drawn (Pause and End ride with Use item), as `HudCore.tsx`
+§`controlsHeld` does.
 
 ## Consequences
 
