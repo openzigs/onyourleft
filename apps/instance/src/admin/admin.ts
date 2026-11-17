@@ -936,16 +936,18 @@ export function createAdmin(options: AdminOptions): Admin {
   /**
    * Backups (#2647): `GET /v1/operate/backups`, read as the owner through
    * the seam on every load. `noticeFor` says what the last "back up now"
-   * came to, given the backups read back after it.
+   * came to, given the backups read back after it. `all` lists every record,
+   * where the page otherwise lists the newest (#2771).
    */
   async function backupsPage(
     view: PageCall,
     shell: ShellView,
     strength: AdminSessionRecord['strength'],
     noticeFor: (backups: BackupsView['backups']) => BackupsNotice | null,
+    all = false,
   ): Promise<string> {
     const backups = backupsOf(await read(view.seam, BACKUPS_ROUTE, view.caller, view.client));
-    const drawn = { backups, strength, csrf: shell.csrf, notice: noticeFor(backups) };
+    const drawn = { backups, strength, csrf: shell.csrf, notice: noticeFor(backups), all };
     let body: string;
     try {
       body = backupsBody(drawn);
@@ -1313,7 +1315,13 @@ export function createAdmin(options: AdminOptions): Admin {
       }
       if (path === '/admin/backups') {
         return adminResponse(
-          await backupsPage(view, shell, session.record.strength, () => null),
+          await backupsPage(
+            view,
+            shell,
+            session.record.strength,
+            () => null,
+            url.searchParams.get('all') === '1',
+          ),
           200,
           HTML,
         );

@@ -157,14 +157,19 @@ async function backUpNow(browser: AdminBrowser, session: PasskeySession): Promis
   return browser.send('POST', '/admin/backups', { cookie: session.token, form });
 }
 
-/** A record's line as the page draws it, from the package's words. */
+/**
+ * A record's line as the page draws it, from the package's words: in the
+ * table's Backup column (#2771), after the When column has taken its moment.
+ */
 function lineHtml(record: OperateBackupLine): string {
-  const { moment, rest } = backupLine(record);
-  return `<strong>${escapeHtml(moment)}</strong>${rest
-    .map((part) =>
-      typeof part === 'string' ? escapeHtml(part) : `<code>${escapeHtml(part.code)}</code>`,
+  const { rest } = backupLine(record);
+  return `<td><p>${rest
+    .map((part, index) =>
+      typeof part === 'string'
+        ? escapeHtml(index === 0 ? part.replace(/^, /, '') : part)
+        : `<code>${escapeHtml(part.code)}</code>`,
     )
-    .join('')}`;
+    .join('')}</p>`;
 }
 
 describe('the Backups page is the route’s answer, and back up now is read back (#2647)', () => {
@@ -179,6 +184,9 @@ describe('the Backups page is the route’s answer, and back up now is read back
     const [record] = before.backups;
     const html = await page(browser, session.token);
     expect(html).toContain(lineHtml(record as OperateBackupLine));
+    expect(html).toContain(`<time datetime="${record?.at ?? 'none'}">`);
+    // One record: nothing older to link to.
+    expect(html).not.toContain('Show older backups');
     expect(html).toContain(`<code>${record?.databaseSha256 ?? 'none'}</code>`);
     expect(html).not.toContain(escapeHtml(BACKUP_WAITING_TEXT));
 
@@ -229,6 +237,50 @@ describe('the Backups page is the route’s answer, and back up now is read back
     expect(await requestLog(made)).toEqual([
       { source: 'admin_loopback', action: 'backup_requested', detail: null, outcome: 'done' },
     ]);
+  });
+
+  it('lists the newest 20 with a link to every record, and every record at ?all=1 with a link back (#2771)', async () => {
+    const at = (index: number): string =>
+      new Date(Date.UTC(2026, 10, 14, 23 - index)).toISOString();
+    const records = Array.from({ length: 25 }, (_, index) => ({
+      outcome: 'done',
+      id: 25 - index,
+      at: at(index),
+      ageSeconds: 3600 * (index + 1),
+      snapshot: `snapshot-number-${String(25 - index)}-end`,
+      rows: 10,
+      blobs: 1,
+      sizeBytes: 1000,
+      offBox: 'copied',
+      intervalSeconds: 3600,
+      requested: false,
+      databaseSha256: null,
+      removed: null,
+      freeBytes: { backups: null, offBox: null },
+    }));
+    const routes: readonly Route[] = ROUTES.map((route) =>
+      route.path === '/v1/operate/backups' && route.method === 'GET'
+        ? { ...route, handle: () => Promise.resolve(json({ backups: records, pending: null })) }
+        : route,
+    );
+    const made = await world({ routes });
+    const browser = tunnel(made);
+    const token = await codeSession(made);
+    const listed = (html: string): string[] =>
+      [...html.matchAll(/<td><p>[^<]*<code>snapshot-number-(\d+)-end<\/code><\/p>/g)].map(
+        ([, n]) => n ?? '',
+      );
+    const newest = await page(browser, token);
+    expect(listed(newest)).toEqual(records.slice(0, 20).map((each) => String(each.id)));
+    expect(newest).toContain('<a href="/admin/backups?all=1">Show older backups (5 more)</a>');
+    expect(newest).toContain(`<time datetime="${at(0)}">14 Nov 2026, 23:00 UTC</time>`);
+
+    const answer = await browser.send('GET', '/admin/backups?all=1', { cookie: token });
+    expect(answer.status).toBe(200);
+    const every = await answer.text();
+    expect(listed(every)).toEqual(records.map((each) => String(each.id)));
+    expect(every).toContain('<a href="/admin/backups">Show the newest 20 only</a>');
+    expect(every).not.toContain('Show older backups');
   });
 
   it('says the list could not be read when the route’s answer is not in its shape', async () => {

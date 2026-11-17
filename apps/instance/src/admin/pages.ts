@@ -164,9 +164,16 @@ export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></scrip
 
 /**
  * The frame: the stylesheet linked, never inline, and with `script` the
- * passkey script linked too. `body` and `before` are markup the caller escaped.
+ * passkey script linked too. `body` and `before` are markup the caller escaped;
+ * `signedOut` draws the narrower column of the sign-in page.
  */
-export function adminPage(title: string, body: string, before = '', script = false): string {
+export function adminPage(
+  title: string,
+  body: string,
+  before = '',
+  script = false,
+  signedOut = false,
+): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -175,13 +182,90 @@ export function adminPage(title: string, body: string, before = '', script = fal
 <title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="/admin/admin.css">
 ${script ? PASSKEY_SCRIPT_TAG : ''}</head>
-<body>
+<body${signedOut ? ' class="signed-out"' : ''}>
 ${before}<main id="main">
 ${body}
 </main>
 </body>
 </html>
 `;
+}
+
+/**
+ * The On Your Left mark (#2771): the arrow and the name, drawn here rather
+ * than served as the app's image, so the header needs no request of its own.
+ * The arrow is decoration; the name is the text.
+ */
+const WORDMARK =
+  '<span class="wordmark"><svg class="mark" viewBox="0 0 28 16" aria-hidden="true" focusable="false"><path d="M0 6h17V0l11 8-11 8v-6H0z"/></svg>On Your Left</span>';
+
+/**
+ * A part of a page drawn as a card; `danger` for a change that is hard to
+ * undo, set apart. A `div`, not a `section`: an unnamed section is a landmark
+ * to the audit (`a11y/audit.ts` §`landmarks-are-distinguishable`), and the
+ * card's heading already says what it is.
+ */
+export function card(inner: string, tone: 'card' | 'danger' = 'card'): string {
+  return `<div class="panel${tone === 'danger' ? ' danger' : ''}">\n${inner.trimEnd()}\n</div>\n`;
+}
+
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+/**
+ * A moment in a table's When column (#2771): `14 Nov 2026, 09:30 UTC`, the
+ * same on every screen, in a `<time>` that carries the moment itself. A value
+ * that is not a moment is drawn as operate-text's `momentText` draws it.
+ */
+export function readableMoment(iso: string): string {
+  const at = new Date(Date.parse(iso));
+  if (!Number.isFinite(at.getTime())) return escapeHtml(momentText(iso));
+  const two = (value: number): string => String(value).padStart(2, '0');
+  const text = `${String(at.getUTCDate())} ${MONTHS[at.getUTCMonth()] ?? ''} ${String(at.getUTCFullYear())}, ${two(at.getUTCHours())}:${two(at.getUTCMinutes())} UTC`;
+  return `<time datetime="${escapeHtml(iso)}">${text}</time>`;
+}
+
+/**
+ * A table inside its own focusable scroll region, named by its caption, as
+ * the app's `design/ScrollTable.tsx` draws one (`a11y/audit.ts`
+ * §`table-in-scroll-region`): on a phone the columns scroll in the box and
+ * never widen the page. `id` names the caption, unique on its page; `rows`
+ * are `<tr>` markup the caller escaped.
+ */
+function scrollTable(
+  id: string,
+  caption: string,
+  heads: readonly string[],
+  rows: readonly string[],
+): string {
+  return `<div class="scroll" role="region" aria-labelledby="${id}" tabindex="0">
+<table>
+<caption id="${id}">${escapeHtml(caption)}</caption>
+<thead><tr>${heads.map((head) => `<th scope="col">${escapeHtml(head)}</th>`).join('')}</tr></thead>
+<tbody>
+${rows.join('\n')}
+</tbody>
+</table>
+</div>
+`;
+}
+
+/** An operate-text line that goes on from a first part drawn elsewhere: its leading ", " dropped. */
+function restHtml(rest: OperateLine): string {
+  const [first, ...others] = rest;
+  return lineHtml(typeof first === 'string' ? [first.replace(/^, /, ''), ...others] : rest);
 }
 
 /** What the shell says of the instance and the session it is drawn for. */
@@ -231,17 +315,21 @@ export function shellPage(view: ShellView, heading: string, body: string, script
     .join('\n');
   const banner = `<a class="skip" href="#main">Skip to the page</a>
 <header class="shell">
-<p class="name">${escapeHtml(instanceName(view.name))}</p>
-<p>Signed in as the instance’s owner with ${STRENGTH_TEXT[view.strength]}, ${LISTENER_TEXT[view.listener]}.${STRENGTH_LIMIT[view.strength]}</p>
+<div class="shell-inner">
+<div class="bar">
+<p class="brand">${WORDMARK} <span class="name">${escapeHtml(instanceName(view.name))}</span></p>
+<form class="sign-out" method="post" action="/admin/sign-out" aria-label="Sign out">
+<input type="hidden" name="csrf" value="${escapeHtml(view.csrf)}">
+<button type="submit" class="secondary">Sign out</button>
+</form>
+</div>
+<p class="session">Signed in as the instance’s owner with ${STRENGTH_TEXT[view.strength]}, ${LISTENER_TEXT[view.listener]}.${STRENGTH_LIMIT[view.strength]}</p>
 <nav class="sections" aria-label="Admin sections">
 <ul>
 ${links}
 </ul>
 </nav>
-<form method="post" action="/admin/sign-out" aria-label="Sign out">
-<input type="hidden" name="csrf" value="${escapeHtml(view.csrf)}">
-<button type="submit">Sign out</button>
-</form>
+</div>
 </header>
 `;
   return adminPage(
@@ -276,20 +364,25 @@ export function signInPage(name: string | null, notice: SignInNotice): string {
     'Sign in',
     `<h1>Sign in to the admin pages of ${escapeHtml(title)}</h1>
 ${top}<p>Only the instance’s owner can sign in.</p>
-<h2>With a passkey</h2>
+${card(`<h2>With a passkey</h2>
 <form method="post" action="/admin/sign-in/passkey" data-passkey="sign-in" data-passkey-supported hidden>
 <button type="submit">Sign in with a passkey</button>
 <p data-passkey-status role="status"></p>
 </form>
-<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. Sign in with a one-time code instead.</p>
-<h2>With a one-time code</h2>
+<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. Sign in with a one-time code instead.</p>`)}${card(`<h2>With a one-time code</h2>
 <p>On the server machine, run <code>node src/operator/cli.ts admin-code</code> (in the home deployment, <code>docker compose exec instance node src/operator/cli.ts admin-code</code>) and type the code it prints. A code works once, for 10 minutes. A code session can read every page and add one passkey; it changes nothing else.</p>
 <form method="post" action="/admin/sign-in">
 <label for="code">One-time code</label>
 ${codeProblem ? '<p class="problem" id="code-problem">That code was not accepted. A code works once, for 10 minutes: mint a new one on the server machine.</p>\n' : ''}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${described}>
 <button type="submit">Sign in</button>
-</form>`,
-    '',
+</form>`)}`,
+    `<header class="shell">
+<div class="shell-inner">
+<p class="brand">${WORDMARK}</p>
+</div>
+</header>
+`,
+    true,
     true,
   );
 }
@@ -352,14 +445,14 @@ export function passkeysBody(view: PasskeysView): string {
   const items = view.passkeys.map((passkey) => {
     const label = escapeHtml(passkey.label);
     const revoke = byPasskey
-      ? `<form method="post" action="/admin/passkeys/${escapeHtml(passkey.id)}/revoke" data-step-up="passkey_revoke" aria-label="Revoke ${label}">
+      ? `<form class="apart" method="post" action="/admin/passkeys/${escapeHtml(passkey.id)}/revoke" data-step-up="passkey_revoke" aria-label="Revoke ${label}">
 <input type="hidden" name="csrf" value="${csrf}">
 <input type="hidden" name="id" value="${escapeHtml(passkey.id)}">
-<button type="submit">Revoke ${label}</button>
+<button type="submit" class="danger">Revoke ${label}</button>
 <p data-passkey-status role="status"></p>
 </form>`
       : '';
-    return `<li>
+    return `<li class="item">
 <h3>${label}</h3>
 <dl class="facts">
 <div><dt>Id</dt><dd><code>${escapeHtml(passkey.id)}</code></dd></div>
@@ -374,12 +467,12 @@ ${revoke}
   const list =
     items.length === 0
       ? '<p>There are no passkeys yet.</p>'
-      : `<ul class="passkeys">\n${items.join('\n')}\n</ul>`;
+      : `<ul class="passkeys items">\n${items.join('\n')}\n</ul>`;
   const add = byPasskey
     ? '<p>To add another passkey, sign in with a one-time code from the server machine: a code session can add one.</p>'
     : view.passkeys.length >= view.max
       ? `<p>You hold ${String(view.max)} passkeys, the most there may be. Revoke one before adding another.</p>`
-      : `<h2>Add a passkey</h2>
+      : card(`<h2>Add a passkey</h2>
 <p>This adds one passkey for ${escapeHtml(view.rpId)}, then signs you out so you can sign in with it. Revoking a passkey needs a passkey sign-in.</p>
 <form method="post" action="/admin/passkeys/add" data-passkey="enrol" data-passkey-supported hidden aria-label="Add a passkey">
 <input type="hidden" name="csrf" value="${csrf}">
@@ -388,11 +481,10 @@ ${revoke}
 <button type="submit">Add a passkey</button>
 <p data-passkey-status role="status"></p>
 </form>
-<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. You can keep using the admin pages with a one-time code, which reads every page and changes nothing.</p>`;
+<p data-passkey-unsupported>This browser cannot use a passkey on this page, or the page’s script is blocked. You can keep using the admin pages with a one-time code, which reads every page and changes nothing.</p>`);
   // Each passkey's name is an h3 under this, so the headings go 1, 2, 3 (WCAG 1.3.1).
-  return `<h2>Your passkeys</h2>
-${list}
-${add}`;
+  return `${card(`<h2>Your passkeys</h2>
+${list}`)}${add}`;
 }
 
 function fact(row: OperateRow): string {
@@ -426,10 +518,9 @@ export function statusBody(status: OperateStatusAnswer | undefined, now: number)
       : `<p><a href="${escapeHtml(url)}" rel="noreferrer">${escapeHtml(COMPARE_WITH_MAIN_LABEL)}</a></p>\n`;
   const facts = statusRows(status, now).map(fact).join('\n');
   return `${ready}
-${compare}<dl class="facts">
+${compare}${card(`<dl class="facts">
 ${facts}
-</dl>
-${purpose}`;
+</dl>`)}${purpose}`;
 }
 
 /** One operator log entry as `GET /v1/operate/log` answers it, before it is checked. */
@@ -518,7 +609,10 @@ function isoMoment(value: unknown): string | undefined {
   return new Date(ms).toISOString() === value ? value : undefined;
 }
 
-/** One entry's line, or the sentence that it could not be shown. */
+/** The log table's columns (#2771). */
+const LOG_COLUMNS = ['When', 'Action', 'Source', 'Outcome', 'Detail'] as const;
+
+/** One entry's row, or a row with the sentence that it could not be shown. */
 function entryLine(entry: LogEntryAnswer): string {
   const at = isoMoment(entry.at);
   const { action, source, detail, outcome } = entry;
@@ -528,9 +622,11 @@ function entryLine(entry: LogEntryAnswer): string {
     isSource(source) &&
     OUTCOMES.includes(outcome) &&
     (detail === null || (typeof detail === 'string' && operatorDetailFits(action, detail)));
-  if (!fits) return `<li>${escapeHtml(LOG_ENTRY_NOT_SHOWN_TEXT)}</li>`;
-  const said = detail === null ? '' : ` (<code>${escapeHtml(detail)}</code>)`;
-  return `<li><strong>${escapeHtml(ACTION_LABEL[action])}</strong>, ${escapeHtml(momentText(at))}, ${escapeHtml(SOURCE_TEXT[source])}: ${escapeHtml(outcome as string)}${said}.</li>`;
+  if (!fits) {
+    return `<tr><td colspan="${String(LOG_COLUMNS.length)}">${escapeHtml(LOG_ENTRY_NOT_SHOWN_TEXT)}</td></tr>`;
+  }
+  const said = detail === null ? '' : `<code>${escapeHtml(detail)}</code>`;
+  return `<tr><td class="when">${readableMoment(at)}</td><td><strong>${escapeHtml(ACTION_LABEL[action])}</strong></td><td>${escapeHtml(SOURCE_TEXT[source])}</td><td>${escapeHtml(outcome as string)}</td><td>${said}</td></tr>`;
 }
 
 /** The log page's body: a page of entries, newest first, and the links to older and newest. */
@@ -554,10 +650,7 @@ export function logBody(view: LogView): string {
     ...(view.newest ? [] : [newest]),
   ];
   return `${intro}
-<ol class="log">
-${view.entries.map(entryLine).join('\n')}
-</ol>
-${links.length === 0 ? '<p>These are the oldest entries.</p>' : `<p>${links.join(' · ')}</p>`}`;
+${card(`${scrollTable('log-caption', 'Operator log entries, newest first', LOG_COLUMNS, view.entries.map(entryLine))}${links.length === 0 ? '<p>These are the oldest entries.</p>' : `<p class="pager">${links.join(' · ')}</p>`}`)}`;
 }
 
 /** The change a form on the AI backend page makes, and the route it is dispatched to. */
@@ -647,6 +740,20 @@ const noticeHtml = (ok: boolean, done: string, failed: string): string =>
     ? `<p class="notice" role="status">${escapeHtml(done)}</p>\n`
     : `<p class="problem" role="alert">${escapeHtml(failed)}</p>\n`;
 
+/**
+ * How a change's button is drawn (#2771), as the app's kinds are: `primary`
+ * for the change the part is for, `secondary` for a switch, and `danger` for
+ * a change that is hard to undo. `apart` sets a danger form off from the
+ * reading content above it, where it is not in a danger card of its own.
+ */
+type Tone = 'primary' | 'secondary' | 'danger';
+
+const TONE_CLASS: Readonly<Record<Tone, string>> = {
+  primary: '',
+  secondary: ' class="secondary"',
+  danger: ' class="danger"',
+};
+
 /** A form that makes one change behind a fresh step-up: the session's token, its fields, its button. */
 function stepUpForm(
   action: string,
@@ -655,10 +762,12 @@ function stepUpForm(
   label: string,
   inside: string,
   button: string,
+  tone: Tone = 'primary',
+  apart = false,
 ): string {
-  return `<form method="post" action="${action}" data-step-up="${change}" aria-label="${escapeHtml(label)}">
+  return `<form${apart ? ' class="apart"' : ''} method="post" action="${action}" data-step-up="${change}" aria-label="${escapeHtml(label)}">
 <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
-${inside}<button type="submit">${escapeHtml(button)}</button>
+${inside}<button type="submit"${TONE_CLASS[tone]}>${escapeHtml(button)}</button>
 <p data-passkey-status role="status"></p>
 </form>`;
 }
@@ -672,7 +781,7 @@ function offersPart(view: AnalysisView, analysis: OperateAnalysisAnswer): string
   const items = OFFERS.map(({ offer, label }) => {
     const on = state[offer];
     const line = `<p><strong>${escapeHtml(label)}</strong>: ${on ? 'on' : 'off'}.</p>`;
-    if (view.strength !== 'passkey') return `<li>${line}</li>`;
+    if (view.strength !== 'passkey') return `<li class="item">${line}</li>`;
     const form = stepUpForm(
       '/admin/analysis/offer',
       'analysis_offer',
@@ -680,19 +789,20 @@ function offersPart(view: AnalysisView, analysis: OperateAnalysisAnswer): string
       label,
       `<input type="hidden" name="offer" value="${offer}">\n<input type="hidden" name="on" value="${on ? 'off' : 'on'}">\n`,
       on ? 'Turn off' : 'Turn on',
+      'secondary',
     );
-    return `<li>${line}\n${form}</li>`;
+    return `<li class="item">${line}\n${form}</li>`;
   });
   const notice =
     view.notice?.about === 'offers'
       ? noticeHtml(view.notice.ok, OFFER_SAVED_TEXT, OFFER_FAILED_TEXT)
       : '';
-  return `<h2>${escapeHtml(AI_OFFERS_HEADING)}</h2>
-<ul class="offers">
+  return card(`<h2>${escapeHtml(AI_OFFERS_HEADING)}</h2>
+<ul class="offers items">
 ${items.join('\n')}
 </ul>
 <p>${escapeHtml(HOSTED_OFFER_SENTENCE)}</p>
-${notice}`;
+${notice}`);
 }
 
 /** The models, as a list or the check's form; or why there is no list. */
@@ -773,10 +883,9 @@ ${stepUpForm(
     view.notice?.about === 'model'
       ? noticeOf(view.notice.ok, view.notice.ok ? MODEL_SAVED_TEXT : MODEL_SAVE_FAILED_TEXT)
       : '';
-  return `<h2>${escapeHtml(AI_PICK_HEADING)}</h2>
+  return card(`<h2>${escapeHtml(AI_PICK_HEADING)}</h2>
 <p>${escapeHtml(MODEL_LOAD_WARNING)}</p>
-${modelList(view, view.models)}${outcome}${save}${saved}<p><a href="/admin/analysis">${escapeHtml(READ_AGAIN_BUTTON)}</a></p>
-`;
+${modelList(view, view.models)}${outcome}${save}${saved}<p class="pager"><a href="/admin/analysis">${escapeHtml(READ_AGAIN_BUTTON)}</a></p>`);
 }
 
 /** A notice that is either good news or a problem, by `ok`, in one sentence. */
@@ -800,7 +909,7 @@ function addressPart(view: AnalysisView, analysis: OperateAnalysisAnswer): strin
     analysis.local.url === null
       ? ''
       : ` value="${escapeHtml(withoutUserinfo(analysis.local.url))}"`;
-  return `<h2>${escapeHtml(ANALYSIS_ADDRESS_HEADING)}</h2>
+  return card(`<h2>${escapeHtml(ANALYSIS_ADDRESS_HEADING)}</h2>
 ${stepUpForm(
   '/admin/analysis/address',
   'analysis_address',
@@ -812,13 +921,13 @@ ${stepUpForm(
 `,
   ANALYSIS_ADDRESS_BUTTON,
 )}
-${notice}`;
+${notice}`);
 }
 
 function jobsPart(jobs: OperateJobsAnswer | undefined): string {
   const heading = `<h2>${escapeHtml(AI_JOBS_HEADING)}</h2>\n`;
   if (jobs === undefined) {
-    return `${heading}<p class="problem">${escapeHtml(JOBS_UNREADABLE_TEXT)}</p>\n`;
+    return card(`${heading}<p class="problem">${escapeHtml(JOBS_UNREADABLE_TEXT)}</p>`);
   }
   const counts = jobCountLines(jobs)
     .map((line) => `<li>${escapeHtml(line)}</li>`)
@@ -827,11 +936,10 @@ function jobsPart(jobs: OperateJobsAnswer | undefined): string {
     jobs.recent.length === 0
       ? `<p>${escapeHtml(NO_JOBS_TEXT)}</p>`
       : `<ol class="log jobs">\n${jobs.recent.map((job) => `<li>${escapeHtml(jobLine(job))}</li>`).join('\n')}\n</ol>`;
-  return `${heading}<ul class="counts">
+  return card(`${heading}<ul class="counts">
 ${counts}
 </ul>
-${recent}
-`;
+${recent}`);
 }
 
 function returnPart(view: AnalysisView): string {
@@ -841,11 +949,14 @@ function returnPart(view: AnalysisView): string {
       : '';
   const form =
     view.strength === 'passkey'
-      ? `${stepUpForm('/admin/analysis/clear', 'analysis_clear', view.csrf, RETURN_BUTTON, '', RETURN_BUTTON)}\n`
+      ? `${stepUpForm('/admin/analysis/clear', 'analysis_clear', view.csrf, RETURN_BUTTON, '', RETURN_BUTTON, 'danger')}\n`
       : '';
-  return `<h2>${escapeHtml(AI_RETURN_HEADING)}</h2>
+  return card(
+    `<h2>${escapeHtml(AI_RETURN_HEADING)}</h2>
 <p>${escapeHtml(RETURN_SENTENCE)}</p>
-${form}${notice}`;
+${form}${notice}`,
+    view.strength === 'passkey' ? 'danger' : 'card',
+  );
 }
 
 /**
@@ -865,16 +976,14 @@ ${view.strength === 'passkey' ? '' : `<p>${escapeHtml(ANALYSIS_READS_ONLY_TEXT)}
   const now = aiNowLines(analysis, view.models?.version ?? null)
     .map((line) => `<li>${lineHtml(line)}</li>`)
     .join('\n');
-  return `${top}${offersPart(view, analysis)}<h2>${escapeHtml(AI_NOW_HEADING)}</h2>
+  return `${top}${offersPart(view, analysis)}${card(`<h2>${escapeHtml(AI_NOW_HEADING)}</h2>
 <ul class="now">
 ${now}
-</ul>
-${modelsPart(view)}${addressPart(view, analysis)}<h2>${escapeHtml(AI_OWN_KEY_HEADING)}</h2>
+</ul>`)}${modelsPart(view)}${addressPart(view, analysis)}${card(`<h2>${escapeHtml(AI_OWN_KEY_HEADING)}</h2>
 <ul class="own-key">
 <li>${escapeHtml(ownKeyText(analysis))}</li>
 </ul>
-<p>${escapeHtml(ANALYSIS_KEY_ELSEWHERE_TEXT)}</p>
-${jobsPart(view.jobs)}${returnPart(view)}`;
+<p>${escapeHtml(ANALYSIS_KEY_ELSEWHERE_TEXT)}</p>`)}${jobsPart(view.jobs)}${returnPart(view)}`;
 }
 
 /**
@@ -989,10 +1098,12 @@ function registrationItem(
 <input type="text" id="${id}" name="reason" maxlength="${String(view.reasonLimit)}" autocomplete="off" required>
 `,
               words.button,
+              decision === 'refuse' ? 'danger' : 'primary',
+              decision === 'refuse',
             );
           })
           .join('\n');
-  return `<li>
+  return `<li class="item">
 <h3>${name}</h3>
 <p>Account <code>${escapeHtml(registration.athleteId)}</code>, asked ${when(registration.createdAt)}. ${adult}</p>
 ${forms}
@@ -1005,29 +1116,40 @@ function registrationsPart(view: AccountsView): string {
     view.strength === 'passkey' ? '' : `<p>${escapeHtml(ACCOUNTS_READS_ONLY_TEXT)}</p>\n`;
   const notice = accountsNotice(view.notice);
   if (view.registrations === undefined) {
-    return `${heading}${notice}<p class="problem">${escapeHtml(REGISTRATIONS_UNREADABLE_TEXT)}</p>\n`;
+    return card(
+      `${heading}${notice}<p class="problem">${escapeHtml(REGISTRATIONS_UNREADABLE_TEXT)}</p>`,
+    );
   }
   if (view.registrations.length === 0) {
-    return `${heading}${notice}<p>${escapeHtml(NO_REGISTRATIONS_TEXT)}</p>\n`;
+    return card(`${heading}${notice}<p>${escapeHtml(NO_REGISTRATIONS_TEXT)}</p>`);
   }
-  return `${heading}${notice}${reads}<ul class="registrations">
+  return card(`${heading}${notice}${reads}<ul class="registrations items">
 ${view.registrations.map((each, index) => registrationItem(view, each, index)).join('\n')}
-</ul>
-`;
+</ul>`);
 }
 
 function modePart(status: OperateStatusAnswer): string {
   const mode = status.registration;
   const steps = REGISTRATION_CHANGE_STEPS.map((step) => `<li>${lineHtml(step)}</li>`).join('\n');
-  return `<h2>Registration mode: ${escapeHtml(mode)}</h2>
+  return card(`<h2>Registration mode: ${escapeHtml(mode)}</h2>
 <p>${escapeHtml(REGISTRATION_MODE_TEXT[mode].meaning)}</p>
 <p class="hint">${escapeHtml(MODERATORS_ALWAYS_JOIN)}</p>
 <h3>${escapeHtml(REGISTRATION_CHANGE_HEADING)}</h3>
 <p>${escapeHtml(ACCOUNTS_MODE_SHOWN_TEXT)}</p>
 <ol>
 ${steps}
-</ol>
-`;
+</ol>`);
+}
+
+/**
+ * A count's line as a tile (#2771): its leading figure set large above the
+ * rest of the line, which reads, as text, exactly as the line does.
+ */
+function tile(line: string): string {
+  const counted = /^(\d+) (.+)$/.exec(line);
+  if (counted === null) return `<li>${escapeHtml(line)}</li>`;
+  const [, figure = '', label = ''] = counted;
+  return `<li><span class="figure">${figure}</span> <span class="label">${escapeHtml(label)}</span></li>`;
 }
 
 /**
@@ -1044,13 +1166,10 @@ export function accountsBody(view: AccountsView): string {
   const counted =
     view.status === undefined
       ? `<p class="problem">${escapeHtml(ACCOUNTS_UNREADABLE_TEXT)}</p>\n`
-      : `<h2>Standings</h2>
-<ul class="counts">
-${accountStandingLines(view.status.counts.athletes)
-  .map((line) => `<li>${escapeHtml(line)}</li>`)
-  .join('\n')}
-</ul>
-${modePart(view.status)}`;
+      : `${card(`<h2>Standings</h2>
+<ul class="tiles counts">
+${accountStandingLines(view.status.counts.athletes).map(tile).join('\n')}
+</ul>`)}${modePart(view.status)}`;
   return `${top}${counted}${registrationsPart(view)}${elsewhere}`;
 }
 
@@ -1074,7 +1193,15 @@ export interface BackupsView {
   readonly strength: 'code' | 'passkey';
   readonly csrf: string;
   readonly notice: BackupsNotice | null;
+  /** Every record (`?all=1`), or the newest {@link BACKUPS_SHOWN} (#2771). */
+  readonly all: boolean;
 }
+
+/** How many records the Backups page lists until the owner asks for every one (#2771). */
+export const BACKUPS_SHOWN = 20;
+
+/** The address of the Backups page with every record listed. */
+export const BACKUPS_ALL_PATH = '/admin/backups?all=1';
 
 /** Said in a code session in place of "back up now" (ADR 0069 Q-A). */
 export const BACKUPS_READS_ONLY_TEXT =
@@ -1093,20 +1220,34 @@ export const RESTORE_NEWEST_TEXT =
 
 type Snapshot = Extract<BackupRecordAnswer, { readonly outcome: 'done' }>;
 
+/** The Backups table's columns (#2771). */
+const BACKUP_COLUMNS = ['When', 'Backup', 'Facts'] as const;
+
+/** One record's row: when, its line from operate-text and any warning, and its further facts. */
 function backupItem(backup: BackupRecordAnswer): string {
-  const { moment, rest } = backupLine(backup);
+  const { rest } = backupLine(backup);
   const warning =
     backup.outcome === 'failed'
       ? `<p class="warning"><strong>Failed:</strong> ${escapeHtml(BACKUP_FAILED_TEXT)}</p>\n`
       : backup.offBox === 'failed'
         ? `<p class="warning"><strong>Off-box copy failed:</strong> ${escapeHtml(OFF_BOX_FAILED_TEXT)}</p>\n`
         : '';
-  return `<li>
-<p><strong>${escapeHtml(moment)}</strong>${lineHtml(rest)}</p>
-${warning}<dl class="facts">
+  return `<tr>
+<td class="when">${readableMoment(backup.at)}</td>
+<td><p>${restHtml(rest)}</p>
+${warning}</td>
+<td><dl class="compact">
 ${backupFactRows(backup).map(fact).join('\n')}
-</dl>
-</li>`;
+</dl></td>
+</tr>`;
+}
+
+/** The link under the table: to every record, or back to the newest; none when every one is shown anyway. */
+function backupsPager(view: BackupsView, count: number): string {
+  if (count <= BACKUPS_SHOWN) return '';
+  return view.all
+    ? `<p class="pager"><a href="/admin/backups">Show the newest ${String(BACKUPS_SHOWN)} only</a></p>\n`
+    : `<p class="pager"><a href="${BACKUPS_ALL_PATH}">Show older backups (${String(count - BACKUPS_SHOWN)} more)</a></p>\n`;
 }
 
 function backUpNowPart(view: BackupsView, waiting: boolean): string {
@@ -1120,16 +1261,17 @@ function backUpNowPart(view: BackupsView, waiting: boolean): string {
         : `<p class="problem" role="alert">${escapeHtml(
             view.notice.kind === 'refused' ? view.notice.sentence : BACKUP_NOT_ASKED_TEXT,
           )}</p>\n`;
+  const heading = `<h2>${escapeHtml(BACK_UP_NOW_BUTTON)}</h2>\n`;
   if (waiting) {
-    return `<p class="notice" role="status">${escapeHtml(BACKUP_WAITING_TEXT)}</p>
-<p><a href="/admin/backups">${escapeHtml(BACKUPS_READ_AGAIN)}</a></p>
-${notice}`;
+    return card(`${heading}<p class="notice" role="status">${escapeHtml(BACKUP_WAITING_TEXT)}</p>
+<p class="pager"><a href="/admin/backups">${escapeHtml(BACKUPS_READ_AGAIN)}</a></p>
+${notice}`);
   }
   if (view.strength !== 'passkey')
-    return `<p>${escapeHtml(BACKUPS_READS_ONLY_TEXT)}</p>\n${notice}`;
-  return `<p>${escapeHtml(BACK_UP_NOW_CONFIRM_TEXT)}</p>
+    return card(`${heading}<p>${escapeHtml(BACKUPS_READS_ONLY_TEXT)}</p>\n${notice}`);
+  return card(`${heading}<p>${escapeHtml(BACK_UP_NOW_CONFIRM_TEXT)}</p>
 ${stepUpForm('/admin/backups', 'backup_now', view.csrf, BACK_UP_NOW_BUTTON, '', BACK_UP_NOW_BUTTON)}
-${notice}`;
+${notice}`);
 }
 
 function restorePart(snapshots: readonly Snapshot[]): string {
@@ -1144,11 +1286,11 @@ ${restoreSteps(newest)
   .map((step) => `<li>${lineHtml(step)}</li>`)
   .join('\n')}
 </ol>`;
-  return `<h2>${escapeHtml(RESTORE_HEADING)}</h2>
+  return card(`<h2>${escapeHtml(RESTORE_HEADING)}</h2>
 <p>${escapeHtml(RESTORE_PREFACE_TEXT)}</p>
 <p class="hint">${escapeHtml(RESTORE_WHY_TEXT)}</p>
 <p class="hint">${escapeHtml(RESTORE_ONE_OFF_TEXT)}</p>
-${steps}`;
+${steps}`);
 }
 
 /**
@@ -1173,15 +1315,20 @@ export function backupsBody(view: BackupsView): string {
     newest.ageSeconds > 2 * newest.intervalSeconds
       ? `<p class="warning"><strong>Stale:</strong> ${escapeHtml(backupsStaleText(newest.ageSeconds, newest.intervalSeconds))}</p>\n`
       : '';
+  const shown = view.all ? records : records.slice(0, BACKUPS_SHOWN);
   const list =
     records.length === 0
-      ? `<p>${escapeHtml(NO_BACKUP_TEXT)}</p>`
-      : `<ol class="log backups">\n${records.map(backupItem).join('\n')}\n</ol>`;
+      ? `<p>${escapeHtml(NO_BACKUP_TEXT)}</p>\n`
+      : scrollTable(
+          'backups-caption',
+          'Backups, newest first',
+          BACKUP_COLUMNS,
+          shown.map(backupItem),
+        );
   const snapshots = records.filter((each): each is Snapshot => each.outcome === 'done');
-  return `${backUpNowPart(view, pendingSince !== null)}<h2>Snapshots</h2>
+  return `${backUpNowPart(view, pendingSince !== null)}${card(`<h2>Snapshots</h2>
 <p>${escapeHtml(BACKUPS_LIST_TEXT)}</p>
-${stale}${list}
-${restorePart(snapshots)}`;
+${stale}${list}${backupsPager(view, records.length)}`)}${restorePart(snapshots)}`;
 }
 
 /** One open room as `GET /v1/operate/rooms` answers it (#2649): never a place, a speed or a power. */
@@ -1216,12 +1363,20 @@ export const ROOMS_READS_ONLY_TEXT =
   'A one-time code’s session reads this page and changes nothing. Sign in with a passkey to end a room: it asks your passkey again.';
 
 export const ROOM_ENDED_TEXT = 'The room was ended.';
+
+/** The Rooms table's columns (#2771). */
+const ROOM_COLUMNS = ['Room', 'Details'] as const;
 export const END_ROOM_BUTTON = 'End room';
 
-function roomItem(view: RoomsView, room: RoomAnswer, index: number): string {
+/** One room's row: what it is, and the rest of its line from operate-text. */
+function roomRow(room: RoomAnswer): string {
   const { kind, rest } = roomLine(room);
-  const line = `<p><strong>${escapeHtml(kind)}</strong>${lineHtml(rest)}</p>`;
-  if (view.strength !== 'passkey') return `<li>\n${line}\n</li>`;
+  return `<tr><td><strong>${escapeHtml(kind)}</strong></td><td>${restHtml(rest)}</td></tr>`;
+}
+
+/** One room's End room form, under the room's kind and code, in the danger card below the table. */
+function roomEndForm(view: RoomsView, room: RoomAnswer, index: number): string {
+  const { kind } = roomLine(room);
   const reasonId = `room-reason-${String(index)}`;
   const codeId = `room-code-${String(index)}`;
   const options = ROOM_END_REASONS.map(
@@ -1242,8 +1397,9 @@ ${options}
 <input type="text" id="${codeId}" name="confirm" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
 `,
     END_ROOM_BUTTON,
+    'danger',
   );
-  return `<li>\n${line}\n${form}\n</li>`;
+  return `<li class="item">\n<h3>${escapeHtml(kind)} <code>${escapeHtml(room.shortCode)}</code></h3>\n${form}\n</li>`;
 }
 
 /**
@@ -1268,13 +1424,18 @@ export function roomsBody(view: RoomsView): string {
     return `${top}${notice}<p class="problem">${escapeHtml(ROOMS_UNREADABLE_TEXT)}</p>`;
   }
   if (view.rooms.length === 0) return `${top}${notice}<p>${escapeHtml(NO_ROOM_TEXT)}</p>`;
-  const ending =
-    view.strength === 'passkey'
-      ? `<p>${escapeHtml(END_ROOM_CONFIRM_TEXT)}</p>\n`
-      : `<p>${escapeHtml(ROOMS_READS_ONLY_TEXT)}</p>\n`;
-  return `${top}${notice}${ending}<ol class="log rooms">
-${view.rooms.map((room, index) => roomItem(view, room, index)).join('\n')}
-</ol>`;
+  const table = scrollTable('rooms-caption', 'Open rooms', ROOM_COLUMNS, view.rooms.map(roomRow));
+  if (view.strength !== 'passkey') {
+    return `${top}${notice}${card(`${table}<p>${escapeHtml(ROOMS_READS_ONLY_TEXT)}</p>`)}`;
+  }
+  return `${top}${notice}${card(table)}${card(
+    `<h2>${escapeHtml(END_ROOM_BUTTON)}</h2>
+<p>${escapeHtml(END_ROOM_CONFIRM_TEXT)}</p>
+<ul class="items">
+${view.rooms.map((room, index) => roomEndForm(view, room, index)).join('\n')}
+</ul>`,
+    'danger',
+  )}`;
 }
 
 /** The keys' state as the Keys page draws it on either listener (#2650): never the card or the fingerprint. */
@@ -1336,16 +1497,15 @@ export const KEYS_READS_ONLY_TEXT =
 export const ROTATED_TEXT = 'The encryption key was rotated.';
 export const ROTATE_BUTTON = 'Rotate the encryption key';
 
-function cardPart(card: KeysCardView | null, onServer: boolean): string {
-  if (card === null) {
+function cardPart(shown: KeysCardView | null, onServer: boolean): string {
+  if (shown === null) {
     return onServer ? '' : `<p class="notice">${escapeHtml(KEYS_CARD_ON_SERVER_TEXT)}</p>\n`;
   }
-  return `<h2>The instance’s card</h2>
+  return card(`<h2>The instance’s card</h2>
 <p>${escapeHtml(KEYS_CARD_TEXT)}</p>
-<p><code class="card">${escapeHtml(card.card)}</code></p>
+<p><code class="card">${escapeHtml(shown.card)}</code></p>
 <p>${escapeHtml(KEYS_FINGERPRINT_TEXT)}</p>
-<p><code class="fingerprint">${escapeHtml(card.fingerprint)}</code></p>
-`;
+<p><code class="fingerprint">${escapeHtml(shown.fingerprint)}</code></p>`);
 }
 
 function rotatePart(view: KeysView): string {
@@ -1370,11 +1530,15 @@ function rotatePart(view: KeysView): string {
 <input type="text" id="rotate-confirm" name="confirm" maxlength="16" autocomplete="off" autocapitalize="none" spellcheck="false" required>
 `,
           ROTATE_BUTTON,
+          'danger',
         )}\n`
       : `<p>${escapeHtml(KEYS_READS_ONLY_TEXT)}</p>\n`;
-  return `<h2>${escapeHtml(ROTATE_BUTTON)}</h2>
+  return card(
+    `<h2>${escapeHtml(ROTATE_BUTTON)}</h2>
 <p>${escapeHtml(ROTATE_KEY_TEXT)}</p>
-${notice}${form}`;
+${notice}${form}`,
+    view.strength === 'passkey' ? 'danger' : 'card',
+  );
 }
 
 /**
@@ -1392,14 +1556,13 @@ export function keysBody(view: KeysView): string {
   const cli = KEYS_CLI_COMMANDS.map(
     (each) => `<li>${escapeHtml(each.what)}: <code>${escapeHtml(each.command)}</code></li>`,
   ).join('\n');
-  return `<dl class="facts">
+  return `${card(`<dl class="facts">
 ${keyFactRows(view.keys).map(fact).join('\n')}
-</dl>
-${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${rotatePart(view)}<h2>On the host’s command line</h2>
+</dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
 <p>${escapeHtml(KEYS_CLI_TEXT)}</p>
 <ul class="cli">
 ${cli}
-</ul>`;
+</ul>`)}`;
 }
 
 /** One problem line as `GET /v1/operate/logs` answers it (#2651): already through the log's redaction. */
@@ -1415,6 +1578,9 @@ export interface ProblemsView {
   readonly problems:
     { readonly since: string; readonly lines: readonly ProblemAnswer[] } | undefined;
 }
+
+/** The Recent problems table's columns (#2771). */
+const PROBLEM_COLUMNS = ['When', 'Problem'] as const;
 
 /** A line's fields, parsed as the app's port parses them: an object, or none. */
 function fieldsOf(line: string): Readonly<Record<string, unknown>> {
@@ -1444,18 +1610,16 @@ export function problemsBody(view: ProblemsView): string {
   if (view.problems.lines.length === 0) {
     return `<p>${escapeHtml(noProblemsText(since))}</p>\n${held}`;
   }
-  const items = view.problems.lines.map(
-    (problem) => `<li>
-<p><strong>${escapeHtml(momentText(problem.at))}</strong>: ${escapeHtml(problemSentence(fieldsOf(problem.line)))}</p>
+  const rows = view.problems.lines.map(
+    (problem) => `<tr>
+<td class="when">${readableMoment(problem.at)}</td>
+<td><p>${escapeHtml(problemSentence(fieldsOf(problem.line)))}</p>
 <details>
 <summary>${escapeHtml(RAW_LINE_LABEL)}</summary>
 <code>${escapeHtml(problem.line)}</code>
-</details>
-</li>`,
+</details></td>
+</tr>`,
   );
   return `<p>${escapeHtml(problemsSinceText(since))}</p>
-<ol class="log problems">
-${items.join('\n')}
-</ol>
-${held}`;
+${card(scrollTable('problems-caption', 'Problems, newest first', PROBLEM_COLUMNS, rows))}${held}`;
 }

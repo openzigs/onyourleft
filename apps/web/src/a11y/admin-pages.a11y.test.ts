@@ -30,6 +30,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../design/contrast';
 import {
+  COLOUR_TOKENS,
+  DARK_COLOUR_TOKENS,
+  FONT_FAMILY_TOKENS,
+  FONT_SIZE_TOKENS,
+  SPACE_TOKENS,
+} from '../design/tokens';
+import {
   SCRIPTED_ANALYSIS,
   SCRIPTED_BACKUPS,
   SCRIPTED_KEYS,
@@ -141,6 +148,7 @@ interface BackupsView {
     | { readonly kind: 'refused'; readonly sentence: string }
     | { readonly kind: 'not-asked' }
     | null;
+  readonly all: boolean;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`AccountsView` (#2646). */
@@ -187,6 +195,14 @@ interface AdminRoutes {
   }[];
 }
 
+/** `apps/instance` §`admin/tokens.ts`, as far as it is used here. */
+interface AdminTokens {
+  readonly ADMIN_COLOURS: Readonly<Record<'light' | 'dark', Readonly<Record<string, string>>>>;
+  readonly ADMIN_SPACE: Readonly<Record<string, string>>;
+  readonly ADMIN_FONT_SIZE: Readonly<Record<string, string>>;
+  readonly ADMIN_FONT_FAMILY: Readonly<Record<string, string>>;
+}
+
 /** `apps/instance` §`admin/style.ts`, as far as it is used here. */
 interface AdminStyle {
   readonly ADMIN_STYLE: string;
@@ -203,13 +219,15 @@ const ADMIN = join(dirname(fileURLToPath(import.meta.url)), '../../../instance/s
 let pages: AdminPages;
 let routes: AdminRoutes;
 let style: AdminStyle;
+let tokens: AdminTokens;
 
 beforeAll(async () => {
-  [pages, routes, style] = (await Promise.all([
+  [pages, routes, style, tokens] = (await Promise.all([
     import(/* @vite-ignore */ join(ADMIN, 'pages.ts')),
     import(/* @vite-ignore */ join(ADMIN, 'admin-routes.ts')),
     import(/* @vite-ignore */ join(ADMIN, 'style.ts')),
-  ])) as [AdminPages, AdminRoutes, AdminStyle];
+    import(/* @vite-ignore */ join(ADMIN, 'tokens.ts')),
+  ])) as [AdminPages, AdminRoutes, AdminStyle, AdminTokens];
 });
 
 const NOW = Date.parse('2026-11-14T21:00:00.000Z');
@@ -379,6 +397,12 @@ const RECORDS = SCRIPTED_BACKUPS.map((record, index) => ({
   freeBytes: { backups: 80_000_000_000, offBox: index === 0 ? 900_000_000_000 : null },
 }));
 
+/** Thirty records (#2771): more than the page lists until asked for every one. */
+const MANY_RECORDS = Array.from({ length: 30 }, (_, index) => ({
+  ...RECORDS[index % RECORDS.length]!,
+  id: 30 - index,
+}));
+
 /** The Backups page (#2647), in a session of `strength`, over the scripted records. */
 const backupsPage = (
   strength: ShellView['strength'],
@@ -393,6 +417,7 @@ const backupsPage = (
       strength,
       csrf: 'a'.repeat(64),
       notice: null,
+      all: false,
       ...over,
     }),
     true,
@@ -567,6 +592,15 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       () => backupsPage('passkey', { backups: { records: [], pendingSince: null } }),
     ],
     ['unreadable', () => backupsPage('passkey', { backups: undefined })],
+    [
+      'more than 20: the newest, and a link to the rest (#2771)',
+      () => backupsPage('passkey', { backups: { records: MANY_RECORDS, pendingSince: null } }),
+    ],
+    [
+      'more than 20: every one (#2771)',
+      () =>
+        backupsPage('code', { backups: { records: MANY_RECORDS, pendingSince: null }, all: true }),
+    ],
   ],
   '/admin/rooms': [
     ['a code session: reads only', () => roomsPage('code')],
@@ -789,6 +823,27 @@ describe.each(Object.entries(PAGES))('the admin page %s (#2645)', (path, states)
       },
     );
   }
+});
+
+describe('/admin/admin.css draws the app’s own tokens (#2771, ADR 0063)', () => {
+  it('every colour it mirrors is the app’s, in both themes', () => {
+    const app = { light: COLOUR_TOKENS, dark: DARK_COLOUR_TOKENS } as const;
+    for (const theme of ['light', 'dark'] as const) {
+      const mirrored = tokens.ADMIN_COLOURS[theme];
+      expect(Object.keys(mirrored).length).toBeGreaterThan(20);
+      for (const [name, value] of Object.entries(mirrored)) {
+        expect(value, `${theme} ${name}`).toBe((app[theme] as Record<string, string>)[name]);
+      }
+    }
+  });
+
+  it('its spacing, type steps and faces are the app’s', () => {
+    expect(tokens.ADMIN_SPACE).toEqual(SPACE_TOKENS);
+    for (const [step, value] of Object.entries(tokens.ADMIN_FONT_SIZE)) {
+      expect(value, step).toBe((FONT_SIZE_TOKENS as Record<string, string>)[step]);
+    }
+    expect(tokens.ADMIN_FONT_FAMILY).toEqual(FONT_FAMILY_TOKENS);
+  });
 });
 
 describe('/admin/admin.css meets WCAG 2.2 AA in both schemes (#2645)', () => {

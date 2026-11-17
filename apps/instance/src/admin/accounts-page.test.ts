@@ -96,15 +96,19 @@ async function approvedInApp(made: ModerationWorld, rider: Rider): Promise<void>
   expect(answer.status).toBe(200);
 }
 
-/** The standings as the page lists them. */
+/** The standings as the page lists them: each tile's text, its figure and its label (#2771). */
 function standingsOf(html: string): string[] {
-  const list = /<ul class="counts">\n([\s\S]*?)\n<\/ul>/.exec(html)?.[1] ?? '';
-  return [...list.matchAll(/<li>([^<]*)<\/li>/g)].map(([, line]) => line ?? '');
+  const list = /<ul class="tiles counts">\n([\s\S]*?)\n<\/ul>/.exec(html)?.[1] ?? '';
+  return [
+    ...list.matchAll(
+      /<li><span class="figure">(\d+)<\/span> <span class="label">([^<]*)<\/span><\/li>/g,
+    ),
+  ].map(([, figure, label]) => `${figure ?? ''} ${label ?? ''}`);
 }
 
 /** The account ids the page lists as waiting. */
 function queuedOf(html: string): string[] {
-  const list = /<ul class="registrations">([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '';
+  const list = /<ul class="registrations items">([\s\S]*?)<\/ul>/.exec(html)?.[1] ?? '';
   return [...list.matchAll(/Account <code>([^<]*)<\/code>/g)].map(([, id]) => id ?? '');
 }
 

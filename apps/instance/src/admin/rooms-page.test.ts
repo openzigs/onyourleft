@@ -160,13 +160,16 @@ async function endThrough(
 const says = (html: string, needle: string): boolean =>
   html.replace(/[0-9a-fA-F]{12,}/g, '').includes(needle);
 
+/** A room's row as the page draws it (#2771), from the package's words. */
 const lineHtml = (room: RoomAnswer): string => {
   const { kind, rest } = roomLine(room);
-  return `<strong>${escapeHtml(kind)}</strong>${rest
-    .map((part) =>
-      typeof part === 'string' ? escapeHtml(part) : `<code>${escapeHtml(part.code)}</code>`,
+  return `<tr><td><strong>${escapeHtml(kind)}</strong></td><td>${rest
+    .map((part, index) =>
+      typeof part === 'string'
+        ? escapeHtml(index === 0 ? part.replace(/^, /, '') : part)
+        : `<code>${escapeHtml(part.code)}</code>`,
     )
-    .join('')}`;
+    .join('')}</td></tr>`;
 };
 
 describe('the Rooms page is the route’s answer (#2649)', () => {
