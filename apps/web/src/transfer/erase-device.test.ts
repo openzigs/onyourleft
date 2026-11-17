@@ -20,6 +20,10 @@ import {
   REMEMBERED_TARGET_MAX_AGE_SECONDS,
   TRAINER_TARGETS_STORAGE_KEY,
 } from '../ride/trainer-target-memory';
+import {
+  createRememberedSensors,
+  REMEMBERED_SENSORS_STORAGE_KEY,
+} from '../ride/remembered-sensors';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import {
   ATHLETE_A,
@@ -256,6 +260,30 @@ describe('what the rider is told before they press it', () => {
     expect(row).toContain(`Trusted for ${REMEMBERED_TARGET_MAX_AGE_SECONDS / 60} minutes`);
     expect(row).toContain('*Erase everything* removes it');
     expect(row).toContain('never leaves the device');
+  });
+
+  it('names the remembered sensors, here and in the policy’s device-storage table — #2669', () => {
+    // Not a store row (`ride/remembered-sensors.ts` keeps it in
+    // `localStorage`), and keyed by a Bluetooth address, so a rider reading
+    // the list is told it goes and the policy says what it is.
+    const line = ERASE_REMOVES.find((entry) => entry.includes('remembers you paired'));
+    expect(line).toContain('so it can reconnect to them');
+
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const table = policy.slice(
+      policy.indexOf('## What the app holds, and where'),
+      policy.indexOf('## Location'),
+    );
+    const row =
+      table.split('\n').find((entry) => entry.includes('the sensors and trainer you paired')) ?? '';
+    expect(row).toContain('Bluetooth address');
+    expect(row).toContain('reconnect to it by itself');
+    expect(row).toContain('*Forget* on the Devices screen removes that device');
+    expect(row).toContain('*Erase everything* removes them all');
+    expect(row).toContain('never sent to an instance and never put in an export');
   });
 
   it('says an exported file is out of reach, and that a shared ride is a copy', () => {
@@ -616,6 +644,32 @@ describe('erasing, against the real store', () => {
     memory.remember(deviceId('neo'), watts(150), unixSeconds(1001));
     expect(rows.get(TRAINER_TARGETS_STORAGE_KEY)).not.toContain('C4:7C');
     expect(createTrainerTargetMemory(storage).recall(address, unixSeconds(1001))).toBeUndefined();
+  });
+
+  it('forgets every remembered sensor, on the device and in the page, and only that key (#2669)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const rows = new Map<string, string>([['oyl.units.other', 'kept']]);
+    const storage = {
+      getItem: (key: string) => rows.get(key) ?? null,
+      setItem: (key: string, value: string) => void rows.set(key, value),
+      removeItem: (key: string) => void rows.delete(key),
+    };
+    const address = deviceId('C4:7C:8D:6A:00:02');
+    const memory = createRememberedSensors(storage);
+    memory.remember({ id: address, name: 'KICKR 1F2A', role: 'trainer' });
+    expect(rows.has(REMEMBERED_SENSORS_STORAGE_KEY)).toBe(true);
+
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, { rememberedSensors: memory }),
+    );
+
+    expect([...rows.keys()]).toStrictEqual(['oyl.units.other']);
+    // The app opened again remembers nothing to reconnect to.
+    expect(createRememberedSensors(storage).list()).toEqual([]);
+    // The page's copy went too: the next pairing rewrites the key without it.
+    memory.remember({ id: deviceId('strap'), name: 'HRM-Pro', role: 'heart-rate' });
+    expect(rows.get(REMEMBERED_SENSORS_STORAGE_KEY)).not.toContain('00:02');
   });
 
   it('does not forget the pending-job note when the cascade threw (#1102)', async () => {
