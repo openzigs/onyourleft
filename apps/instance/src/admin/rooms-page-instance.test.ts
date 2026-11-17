@@ -43,6 +43,14 @@ const WAIT_MS = 3_000;
 /** A power nothing else in a body could be by accident. */
 const POWER_WATTS = 317;
 
+/**
+ * Whether `html` says the power anywhere a reader could see it: with every
+ * run of hex — a room id, a token, the CSRF value — taken out first, any of
+ * which may hold `317` by chance (as `rooms-instance.test.ts` found, once).
+ */
+const saysPower = (html: string): boolean =>
+  html.replace(/[0-9a-fA-F]{12,}/g, '').includes(String(POWER_WATTS));
+
 interface Session {
   readonly device: TestDevice;
   readonly token: string;
@@ -204,7 +212,7 @@ describe('the Rooms page on the running instance (#2649)', () => {
     expect(listed.status).toBe(200);
     expect(html).toContain('2 riders: Ann and Bea.');
     expect(html).toContain('1 rider: Cal.');
-    expect(html).not.toContain(String(POWER_WATTS));
+    expect(saysPower(html)).toBe(false);
 
     const wrong = await endThrough({
       roomId: race.roomId,
@@ -212,7 +220,7 @@ describe('the Rooms page on the running instance (#2649)', () => {
       confirm: roomShortCode(ride.roomId),
     });
     expect(wrong.status).toBe(400);
-    expect(await wrong.text()).not.toContain(String(POWER_WATTS));
+    expect(saysPower(await wrong.text())).toBe(false);
     for (const socket of [annSocket, beaSocket, calSocket]) {
       expect(socket.socket.readyState).toBe(socket.socket.OPEN);
     }
@@ -226,7 +234,7 @@ describe('the Rooms page on the running instance (#2649)', () => {
       confirm: roomShortCode(race.roomId),
     });
     expect(ended.status, await ended.clone().text()).toBe(200);
-    expect(await ended.text()).not.toContain(String(POWER_WATTS));
+    expect(saysPower(await ended.text())).toBe(false);
 
     const [annClosed, beaClosed] = await Promise.all([annSocket.closed, beaSocket.closed]);
     expect(annClosed).toEqual({ code: 4005, reason: 'room-closed' });
@@ -251,7 +259,7 @@ describe('the Rooms page on the running instance (#2649)', () => {
     ).text();
     expect(reloaded).toContain(ride.roomId);
     expect(reloaded).not.toContain(race.roomId);
-    expect(reloaded).not.toContain(String(POWER_WATTS));
+    expect(saysPower(reloaded)).toBe(false);
 
     expect(await roomEndedEntries()).toEqual([
       expect.objectContaining({
