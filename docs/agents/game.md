@@ -1529,6 +1529,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         The roadside hedge on mapped farmland is low and
                         broken (`settlements.ts` §`roadsidePiece`), rocks
                         small and set back (`scatter.ts` §`STONE_SCALE`).
+                        Since #2662 a seventh class, `bare` (sand, rock,
+                        ice, an airfield, a pier), between built-up and
+                        farmland: nothing grows on it and no field is
+                        fenced across it (`land-class.ts` §`nothingGrowsAt`).
+                        Since #2700 the mask keeps what bare ground is made
+                        of (`BARE_SURFACE_OF_KIND`), and the ground draws
+                        it in its own colour, not the grass's
+                        (`three-renderer.ts` §`bareGroundTints`): no new
+                        vertex attribute.
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's

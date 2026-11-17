@@ -10,22 +10,27 @@
  * keyed by an integer chunk index. Every placement rule of phase B reads it —
  * `settlements.ts` (no procedural site on mapped land, no field boundary off
  * field ground — {@link fieldGround}), `scatter.ts` (no tree, shrub or rock on built-up
- * land or water) and `streets.ts` (no pavement for a site that is not built).
+ * land, water or bare ground — {@link nothingGrowsAt}) and `streets.ts` (no pavement for a site that is not built).
  * Since #1547 it also carries how far each cell is from built-up land
  * ({@link LandClassMask.builtUpDistances}), which `landform.ts` levels a mapped
  * town's ground by.
  *
  * ⚠️ **Read every frame, on the thread GATT notifications arrive on** (#240
  * NFR-2, #469), so {@link LandClassMask.classAt} is one `Map` lookup and one
- * typed-array index, and allocates nothing: the class is one of seven string
+ * typed-array index, and allocates nothing: the class is one of eight string
  * constants, the key is a small integer.
  *
  * ## The classes
  *
  * From Protomaps v4's `landuse.kind` and `water.kind` —
  * {@link LAND_CLASS_OF_KIND}. Where polygons overlap the class with the higher
- * precedence wins: **water > wood > park > built-up > farmland > other**, so a
- * wood drawn inside a residential block is a wood. A covered cell no polygon
+ * precedence wins: **water > wood > park > built-up > bare > farmland > other**,
+ * so a wood drawn inside a residential block is a wood. `bare` (#2662) is ground
+ * where nothing grows and no field is fenced — sand, rock, ice, an airfield, a
+ * pier — below built-up so an airport's terminal land keeps its own class. Since
+ * #2700 the mask also keeps what bare ground is made of
+ * ({@link BARE_SURFACE_OF_KIND}, {@link LandClassMask.bareSurfaceAt}), so the
+ * ground is drawn as sand, stone, ice, paving or earth rather than as grass. A covered cell no polygon
  * reaches is `other`; a cell outside every covered tile is `unknown`, and there
  * the procedural world decides (P-8). An unknown `kind` is `other`, never
  * `built-up`.
@@ -43,7 +48,8 @@ import { rasterise, type Box, type GridSpec, type LandUseFeature } from '@onyour
 
 import type { WorldCorridor } from './world-data/corridor';
 
-export type LandClass = 'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'farmland' | 'other';
+export type LandClass =
+  'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'bare' | 'farmland' | 'other';
 
 /**
  * Every `landuse` kind this reads, and its class — #1546's table. A `water`
@@ -59,6 +65,15 @@ export type LandClass = 'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'fa
  * and `orchard` (written as `farmland`). Each now reads as `other`. A kind
  * unseen in the spike's corridors that a rule does emit — `forest`,
  * `national_park`, `zoo`, `military` — stays.
+ *
+ * #2662, ADR 0054 D-5.1 (a kind is added by naming it here, beside its rule):
+ * the smaller kinds the 2026-11-15 tag audit found falling through to `other`,
+ * where a farm fence could run across them. `kindergarten` is built-up as a
+ * `school` is; `village_green` and `allotments` are park; and the ground where
+ * nothing grows and no field is fenced is `bare` — `beach`, `sand`,
+ * `bare_rock`, `glacier`, the airfield's `aerodrome`, `runway` and `taxiway`,
+ * and the built-on `pier`, `platform` and `dam`. `grassland` stays `other`:
+ * natural grass, where the procedural world's planting is the right one.
  */
 export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unknown'>>> =
   Object.freeze({
@@ -78,19 +93,73 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     playground: 'park',
     pitch: 'park',
     grass: 'park',
+    village_green: 'park',
+    allotments: 'park',
     residential: 'built-up',
     commercial: 'built-up',
     industrial: 'built-up',
     school: 'built-up',
+    kindergarten: 'built-up',
     college: 'built-up',
     university: 'built-up',
     hospital: 'built-up',
     pedestrian: 'built-up',
     railway: 'built-up',
     military: 'built-up',
+    beach: 'bare',
+    sand: 'bare',
+    bare_rock: 'bare',
+    glacier: 'bare',
+    aerodrome: 'bare',
+    runway: 'bare',
+    taxiway: 'bare',
+    pier: 'bare',
+    platform: 'bare',
+    dam: 'bare',
     farmland: 'farmland',
     meadow: 'farmland',
   });
+
+/**
+ * What `bare` ground is made of — #2700, in precedence order, least first: a
+ * cell two bare polygons cover is the more built one's, so a runway drawn over
+ * its airfield is paved, and a pier or platform drawn across a beach is paved
+ * where the two overlap (a pier starts on the sand), whichever came first. `landform.ts` writes it for every vertex of the ground
+ * and `three-renderer.ts` §`TerrainBelt` draws each in its own colour
+ * (`world.ts` §`bareSurfaceColourIn`) instead of the grass's.
+ */
+export const BARE_SURFACES = ['earth', 'stone', 'ice', 'sand', 'paved'] as const;
+export type BareSurface = (typeof BARE_SURFACES)[number];
+
+/**
+ * Every `bare` kind and what it is made of — #2700, ADR 0054 D-5.1 (a kind is
+ * named here, beside its rule). The map's sand is sand (`beach`, `sand`:
+ * Protomaps emits no `dune`); its rock is stone (`bare_rock`, which Protomaps
+ * also writes for Overture's `scree`, `stone` and `shingle`); a `glacier` is
+ * ice; the airfield's strips and the built-on `platform` and `pier` are
+ * paved; and the rest — the airfield's own `aerodrome` land and a `dam` — is
+ * a neutral bare earth, which is also what a bare kind not named here would be
+ * ({@link bareSurfaceOfKind}).
+ */
+export const BARE_SURFACE_OF_KIND: Readonly<Record<string, BareSurface>> = Object.freeze({
+  beach: 'sand',
+  sand: 'sand',
+  bare_rock: 'stone',
+  glacier: 'ice',
+  runway: 'paved',
+  taxiway: 'paved',
+  platform: 'paved',
+  pier: 'paved',
+  aerodrome: 'earth',
+  dam: 'earth',
+});
+
+/** A `bare` kind's surface: {@link BARE_SURFACE_OF_KIND}'s, own properties only, else earth. */
+export function bareSurfaceOfKind(kind: string): BareSurface {
+  return Object.hasOwn(BARE_SURFACE_OF_KIND, kind)
+    ? (BARE_SURFACE_OF_KIND[kind] as BareSurface)
+    : 'earth';
+}
 
 /** One cell's side, in metres. */
 export const LAND_CLASS_CELL_METRES = 5;
@@ -147,7 +216,9 @@ const CELL_RANGE = CHUNK_RANGE * LAND_CLASS_CHUNK_CELLS;
 
 /**
  * The classes by code, the code being the precedence: a cell keeps the
- * highest code written to it. 0 is `unknown`, which nothing writes.
+ * highest code written to it. 0 is `unknown`, which nothing writes. `bare`
+ * takes one code a surface (#2700), in {@link BARE_SURFACES}' order, so the
+ * class's place among the others is what it was.
  *
  * #2658: **two codes are `water`** — {@link CODE_WETLAND}, then open water
  * above it — so a cell remembers that its water is a wetland, which
@@ -159,6 +230,7 @@ const CLASS_OF_CODE: readonly LandClass[] = [
   'unknown',
   'other',
   'farmland',
+  ...BARE_SURFACES.map((): LandClass => 'bare'),
   'built-up',
   'park',
   'wood',
@@ -166,19 +238,34 @@ const CLASS_OF_CODE: readonly LandClass[] = [
   'water',
 ];
 const CODE_OTHER = 1;
+const CODE_BARE = CLASS_OF_CODE.indexOf('bare');
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
-/** #2658: a `wetland` polygon's cells, from either layer. @see CLASS_OF_CODE */
-const CODE_WETLAND = 6;
-const CODE_WATER = 7;
+/** #2658: open water, the highest code. @see CLASS_OF_CODE */
+const CODE_WATER = CLASS_OF_CODE.length - 1;
+/** #2658: a `wetland` polygon's cells, from either layer, just under open water. */
+const CODE_WETLAND = CODE_WATER - 1;
 
 /** The `kind` that is a wetland, in `landuse` or in `water` (#2658). */
 const WETLAND_KIND = 'wetland';
 
-/** A feature's code: its class's, with a wetland below open water. @see CLASS_OF_CODE */
-function codeOf(layer: LandUseFeature['layer'], kind: string): number {
-  if (kind === WETLAND_KIND) return CODE_WETLAND;
-  const land = landClassOfKind(layer, kind);
-  return land === 'water' ? CODE_WATER : CLASS_OF_CODE.indexOf(land);
+/** Each code's bare surface, `undefined` where the class is not `bare`. @see LandClassMask.bareSurfaceAt */
+const SURFACE_OF_CODE: readonly (BareSurface | undefined)[] = CLASS_OF_CODE.map((_, code) =>
+  code >= CODE_BARE && code < CODE_BARE + BARE_SURFACES.length
+    ? BARE_SURFACES[code - CODE_BARE]
+    : undefined,
+);
+
+/**
+ * A feature's code: its class's, with a wetland below open water (#2658), and
+ * for `bare` its surface's (#2700). @see CLASS_OF_CODE
+ */
+function codeOfFeature(feature: LandUseFeature): number {
+  if (feature.kind === WETLAND_KIND) return CODE_WETLAND;
+  const landClass = landClassOfKind(feature.layer, feature.kind);
+  if (landClass === 'water') return CODE_WATER;
+  return landClass === 'bare'
+    ? CODE_BARE + BARE_SURFACES.indexOf(bareSurfaceOfKind(feature.kind))
+    : CLASS_OF_CODE.indexOf(landClass);
 }
 
 /**
@@ -220,6 +307,11 @@ const LEVEL_SCRATCH_CELLS = LAND_CLASS_CHUNK_CELLS + 2 * LEVEL_APRON_CELLS;
 export interface LandClassMask {
   /** O(1), no allocation. `'unknown'` outside every covered chunk. */
   classAt(x: number, z: number): LandClass;
+  /**
+   * What the ground at `(x, z)` is made of where it is `bare` — #2700 — and
+   * `undefined` wherever it is not. O(1), no allocation, as {@link classAt}.
+   */
+  bareSurfaceAt(x: number, z: number): BareSurface | undefined;
   /** True where the corridor is covered (P-8), whatever the class. */
   covered(x: number, z: number): boolean;
   /**
@@ -253,6 +345,7 @@ export interface LandClassMask {
 /** Everything `unknown`: today's world, and what the scene takes with no corridor. */
 export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   classAt: (): LandClass => 'unknown',
+  bareSurfaceAt: (): undefined => undefined,
   covered: (): boolean => false,
   wetlandAt: (): boolean => false,
   builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
@@ -301,15 +394,15 @@ function otherClass(there: LandClass, here: LandClass): boolean {
   return there !== here && there !== 'unknown';
 }
 
-/** Whether nothing grows at `(x, z)`: mapped built-up land or water. */
-export function builtUpOrWater(land: LandClassMask, x: number, z: number): boolean {
+/** Whether nothing grows at `(x, z)`: mapped built-up land, water, or `bare` ground (#2662). */
+export function nothingGrowsAt(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
-  return here === 'built-up' || here === 'water';
+  return here === 'built-up' || here === 'water' || here === 'bare';
 }
 
 /**
  * Whether a field boundary may run at `(x, z)`: ground that is not mapped as
- * built-up, water, wood or park — a field's, or the procedural world's.
+ * built-up, water, wood, park or `bare` — a field's, or the procedural world's.
  */
 export function fieldGround(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
@@ -394,7 +487,7 @@ function kindIndexOf(corridor: WorldCorridor): readonly KindIndexEntry[] {
       minZ = Math.min(minZ, outer[i + 1] as number);
       maxZ = Math.max(maxZ, outer[i + 1] as number);
     }
-    const code = codeOf(feature.layer, feature.kind);
+    const code = codeOfFeature(feature);
     entries.push({ feature, code, minX, maxX, minZ, maxZ });
   }
   kindIndexes.set(corridor, entries);
@@ -422,7 +515,7 @@ function insidePolygon(feature: LandUseFeature, x: number, z: number): boolean {
  * mapped building stands on, `residential`, `commercial` or `industrial`,
  * which the mask's class does not keep. Of the polygons covering the point,
  * the one whose class wins by the mask's precedence (water > wood > park >
- * built-up > farmland > other), so it names the land {@link LandClassMask.classAt}
+ * built-up > bare > farmland > other), so it names the land {@link LandClassMask.classAt}
  * classes; `undefined` where none covers it. Read once a footprint at ride
  * start, never per frame: it tests every polygon's box.
  */
@@ -476,7 +569,7 @@ export function landClassMask(
   let work = maxWork;
   for (const feature of corridor.landUse) {
     if (work <= 0) break;
-    const code = codeOf(feature.layer, feature.kind);
+    const code = codeOfFeature(feature);
     work -= paint(chunks, feature, code);
   }
   // 3. #1547: how far every cell near built-up land is from it.
@@ -569,6 +662,7 @@ export function landClassMask(
   };
   return {
     classAt,
+    bareSurfaceAt: (x, z) => SURFACE_OF_CODE[codeAt(x, z)],
     covered: (x, z) => classAt(x, z) !== 'unknown',
     wetlandAt: (x, z) => codeAt(x, z) === CODE_WETLAND,
     builtUpDistances,

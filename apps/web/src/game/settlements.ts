@@ -98,10 +98,10 @@ import {
   type PlotModelFootprint,
 } from './house-models';
 import {
-  builtUpOrWater,
   COUNTRYSIDE,
   fieldGround,
   NO_LAND_CLASS,
+  nothingGrowsAt,
   type Countryside,
   type LandClass,
   type LandClassMask,
@@ -2111,7 +2111,7 @@ export const SETTLEMENT_CLEARED_KINDS: ReadonlySet<string> = new Set([
 /**
  * The natural scenery, less every tree, shrub and rock standing on a
  * settlement's ground — #1534 — or, since #1546, on mapped built-up land or
- * water. Pure, and a function of positions only. In `sceneFrame` the land half is
+ * water, and since #2662 bare ground. Pure, and a function of positions only. In `sceneFrame` the land half is
  * belt and braces: `scatterAt` has already filtered those items with the same mask.
  */
 export function clearOfSettlements(
@@ -2124,7 +2124,7 @@ export function clearOfSettlements(
     (item) =>
       !SETTLEMENT_CLEARED_KINDS.has(item.kind) ||
       !(
-        builtUpOrWater(land, item.x, item.z) ||
+        nothingGrowsAt(land, item.x, item.z) ||
         footprints.some((piece) => onSettlementGround(item, piece))
       ),
   );

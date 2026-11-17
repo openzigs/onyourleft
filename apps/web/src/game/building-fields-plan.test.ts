@@ -82,7 +82,11 @@ function plansDigest(
   if (options.buildingTypes === false) expect(plans.every((plan) => !plan.steeple)).toBe(true);
   // #2206 added the `spire` role to every plan; it is empty unless a roof tag is read, and
   // an empty one is left out of the record, which predates it.
-  const text = JSON.stringify({ plans, verdicts }, (key, value: unknown) =>
+  // #2662 raised `FOOTPRINT_MAX_AREA` to 100 000 m², so the fixture's 22 500 m² warehouse is
+  // kept since; the record predates it. The warehouse is left out of the corridor
+  // ({@link withoutTheWarehouse}) and its verdict counted as the record has it, `too-large`.
+  const recorded = { ...verdicts, 'too-large': verdicts['too-large'] + 1 };
+  const text = JSON.stringify({ plans, verdicts: recorded }, (key, value: unknown) =>
     key === 'inferred' ||
     key === 'steeple' ||
     (key === 'spire' && ArrayBuffer.isView(value) && (value as Float32Array).length === 0)
@@ -92,6 +96,15 @@ function plansDigest(
         : value,
   );
   return { plans: plans.length, digest: createHash('sha256').update(text).digest('hex') };
+}
+
+/**
+ * {@link footprintFixture}'s corridor without its warehouse, which #2662 keeps and
+ * {@link PLANS_BEFORE_1789} does not: every other footprint plans float for float as it did.
+ */
+function withoutTheWarehouse(fixture: ReturnType<typeof footprintFixture>): WorldCorridor {
+  const { corridor, named } = fixture;
+  return { ...corridor, buildings: corridor.buildings.filter((each) => each !== named.warehouse) };
 }
 
 /** Every footprint of `corridor` carrying every field, set. */
@@ -107,7 +120,7 @@ function withEveryField(corridor: WorldCorridor): WorldCorridor {
 
 describe('#1789: an archive without the building fields plans as before', () => {
   it('plans the fixture town to the same plans, float for float, as before #1789', () => {
-    const corridor = throughTheStore(footprintFixture().corridor);
+    const corridor = throughTheStore(withoutTheWarehouse(footprintFixture()));
     // Every field null, as from Protomaps' own build.
     for (const building of corridor.buildings) {
       for (const name of BUILDING_FIELD_NAMES) expect(building[name]).toBeNull();
@@ -119,7 +132,7 @@ describe('#1789: an archive without the building fields plans as before', () => 
   // (`building-types.ts`) and since #1792 the colours and materials — every footprint here is
   // set a church with a roof:shape, levels, colours and materials.
   it('nothing draws from the fields with #1790’s, #1791’s and #1792’s levers off: every field set plans the same as none', () => {
-    const corridor = throughTheStore(withEveryField(footprintFixture().corridor));
+    const corridor = throughTheStore(withEveryField(withoutTheWarehouse(footprintFixture())));
     // Not vacuous: the fields survived the store's pack.
     expect(corridor.buildings[0]?.roofShape).toBe(BUILDING_FIELDS_DECODED.roofShape);
     const off = { mappedRoofShape: false, buildingTypes: false, mappedPaint: false } as const;

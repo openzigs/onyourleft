@@ -89,9 +89,9 @@ import {
 
 import {
   atClassEdge,
-  builtUpOrWater,
   COUNTRYSIDE,
   NO_LAND_CLASS,
+  nothingGrowsAt,
   type Countryside,
   type LandClass,
   type LandClassMask,
@@ -1183,10 +1183,11 @@ function fillCell(
       }
       const kind =
         keep >= kept ? 'rock' : pickKind(planting?.weights ?? weights, uniform(base, STREAM_KIND));
-      // #1546: nothing grows on mapped built-up land or water. Dropped after
+      // #1546: nothing grows on mapped built-up land or water, nor since #2662
+      // on bare ground (sand, rock, ice, an airfield, a pier). Dropped after
       // every draw and before {@link thin}, as the water and the road above.
       // A post marks a bend, which built-up land may have, so it stays.
-      if (kind !== 'post' && builtUpOrWater(land, x, z)) {
+      if (kind !== 'post' && nothingGrowsAt(land, x, z)) {
         continue;
       }
       // #1542's `small-stones`, the owner's ruling of 2026-10-24: on mapped

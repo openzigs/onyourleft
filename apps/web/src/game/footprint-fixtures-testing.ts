@@ -172,7 +172,8 @@ export const FOOTPRINT_FIXTURE_VERDICTS = {
   onRoad: 'on-road',
   steep: 'too-steep',
   shed: 'too-small',
-  warehouse: 'too-large',
+  // 22 500 m²: `too-large` until #2662 raised `FOOTPRINT_MAX_AREA` to 100 000.
+  warehouse: 'kept',
 } as const satisfies Readonly<Record<string, FootprintVerdict>>;
 
 export type FootprintFixtureName = keyof typeof FOOTPRINT_FIXTURE_VERDICTS;
