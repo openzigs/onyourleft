@@ -9400,7 +9400,10 @@ select.oyl-input {
  * I noticed it can be hard to see." It is the one notice meant to be read
  * at a glance while pedalling, and the only one that changes every few
  * seconds, so it alone is set at 1.5 times a notice's size (0.8 rem to
- * 1.2 rem) and at the HUD numerals' weight, 700. Its colours are the info
+ * 1.2 rem), in the HUD numerals' face and weight, Barlow at 700. The face is
+ * bundled, so the line wraps the same on every device: in the body's
+ * `system-ui` it took three lines on a Mac and four on the CI runner's
+ * DejaVu Sans (run 44099666536). Its colours are the info
  * tone's declared pair, unchanged. A line is at most 80 characters (ADR 0072
  * D-4); in the notices cell's 22 rem, at 1024×600 and 1280×800, about 45 of
  * them fit on two lines and all 80 on three, measured in the pinned Chromium.
@@ -9410,6 +9413,7 @@ select.oyl-input {
  * untouched.
  */
 .oyl-hud__notices .oyl-status.oyl-hud__pacer-say {
+  font-family: var(--oyl-font-family-display);
   font-size: calc(var(--oyl-font-size-sm) * 1.5);
   font-weight: 700;
   line-height: 1.25;

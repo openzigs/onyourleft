@@ -634,7 +634,7 @@ test.describe('a lap race’s AI bots line is seen on the HUD at 1024×600 — #
  * instance answering every ask with {@link AI_PACER_LINE}, the longest line a
  * pacer may say. At 1024×600 and the owner's 1280×800, the line is read back
  * off the engine: its type at least 1.5 times a notice's (`theme.css`
- * §`.oyl-hud__pacer-say`) and at 700, at most three lines, nothing clipped or
+ * §`.oyl-hud__pacer-say`) and in Barlow at 700, at most three lines, nothing clipped or
  * scrolled, its ink at least 4.5:1 on its surface, on top, and over no other
  * panel and no control, with the anchors on and off. At the old size (the
  * class's rule deleted) the size assertion goes red.
@@ -654,6 +654,7 @@ interface PacerLineSeen {
     width: number;
     height: number;
   };
+  readonly face: string;
   readonly fontSize: number;
   readonly fontWeight: number;
   readonly noticeSize: number;
@@ -664,12 +665,20 @@ interface PacerLineSeen {
 }
 
 async function pacerLine(page: Page): Promise<PacerLineSeen | undefined> {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
     const notice = [
       ...document.querySelectorAll<HTMLElement>('.oyl-hud__notices .oyl-status'),
     ].find((each) => each.querySelector('.oyl-status__label')?.textContent === 'Your pacer: ');
     if (notice === undefined) return undefined;
     const style = getComputedStyle(notice);
+    // Measured in the face it is drawn in, Barlow, not the fallback it swaps from.
+    await document.fonts.load(`${style.fontWeight} ${style.fontSize} Barlow`).catch(() => []);
+    await document.fonts.ready;
+    const barlow =
+      [...document.fonts].find(
+        (face) =>
+          face.family.replaceAll(/['"]/g, '') === 'Barlow' && face.weight === style.fontWeight,
+      )?.status ?? 'absent';
     const root = parseFloat(getComputedStyle(document.documentElement).fontSize);
     const token = getComputedStyle(document.documentElement).getPropertyValue('--oyl-font-size-sm');
     const noticeSize = parseFloat(token) * (token.trim().endsWith('rem') ? root : 1);
@@ -720,6 +729,7 @@ async function pacerLine(page: Page): Promise<PacerLineSeen | undefined> {
         width: rect.width,
         height: rect.height,
       },
+      face: `${style.fontFamily.split(',')[0]?.replaceAll(/['"]/g, '') ?? ''} ${barlow}`,
       fontSize: parseFloat(style.fontSize),
       fontWeight: Number(style.fontWeight),
       noticeSize,
@@ -762,7 +772,7 @@ test.describe('the AI pacer’s line, large enough to read while riding — #276
       expect(seen, 'the pacer’s line is on the HUD').toBeDefined();
       if (seen === undefined) return;
       console.log(
-        `#2760 the AI pacer's line — ${viewport.name}: ${seen.fontSize.toFixed(1)} px at ${String(seen.fontWeight)} (a notice ${seen.noticeSize.toFixed(1)} px), ${String(seen.lines)} lines, ${seen.box.width.toFixed(0)}×${seen.box.height.toFixed(0)} px, ${seen.contrast.toFixed(2)}:1`,
+        `#2760 the AI pacer's line — ${viewport.name}: ${seen.fontSize.toFixed(1)} px at ${String(seen.fontWeight)} in ${seen.face} (a notice ${seen.noticeSize.toFixed(1)} px), ${String(seen.lines)} lines, ${seen.box.width.toFixed(0)}×${seen.box.height.toFixed(0)} px, ${seen.contrast.toFixed(2)}:1`,
       );
       expect(seen.fontSize, 'the line is 1.5 times a notice’s size').toBeGreaterThanOrEqual(
         seen.noticeSize * 1.5 - 0.05,
@@ -770,6 +780,7 @@ test.describe('the AI pacer’s line, large enough to read while riding — #276
       expect(seen.fontWeight, 'the line is at the HUD numerals’ weight').toBeGreaterThanOrEqual(
         700,
       );
+      expect(seen.face, 'the line is in the HUD numerals’ face, loaded').toBe('Barlow loaded');
       expect(seen.lines, 'the longest line takes at most three lines').toBeLessThanOrEqual(3);
       expect(seen.overflows, 'nothing is clipped or scrolled').toEqual([]);
       expect(seen.contrast, 'its ink on its surface').toBeGreaterThanOrEqual(4.5);
