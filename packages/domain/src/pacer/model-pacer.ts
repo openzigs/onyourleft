@@ -419,16 +419,32 @@ const MARKUP = /[<>{}[\]`*_#|\\~^=@/$%&+]|:\/\/|\bwww\./i;
  */
 const NUMBER = /\p{N}/u;
 /**
+ * A number written as a number form — a letter-like numeral (`\p{Nl}`) or a
+ * Roman numeral, U+2160 to U+2188 — read before NFKC, which turns `Ⅳ` into
+ * the letters `IV` that {@link NUMBER} cannot see.
+ */
+const NUMBER_FORM = /[\p{Nl}\u2160-\u2188]/u;
+/** A zone named by a bare Roman numeral in ASCII letters: `zone IV`. */
+const ZONE_NUMERAL = /\bzones?\s+[ivxlcdm]+\b/i;
+/**
+ * Words for a quantity that is not a cadence or a power. A line that carries
+ * an admitted figure may name none of them, so the figure is admitted only in
+ * a cadence or power sentence: `Heart rate 150 W` is refused.
+ */
+const OTHER_QUANTITY =
+  /\b(?:heart\s*rates?|bpm|pulses?|minutes?|seconds?|km|miles?|(?:kilo)?met(?:re|er)s?|hours?|zones?)\b|%/i;
+/**
  * The one kind of figure a line may carry (ADR 0077, the owner's ruling of
  * 2026-11-17): a cadence or a power target, its number in ASCII digits
  * (after NFKC) **immediately followed by its unit**, with one space allowed —
  * `rpm`, `watt`/`watts`, `W` or `W/kg`. No sign, no thousands separator, no
- * range and no other digit may touch it, and nothing but a non-letter may
- * follow the unit. {@link plausible} then bounds the value; an implausible
+ * range and no other digit may touch it — a sign of any script, so no
+ * dash (`\p{Pd}`) and no mathematical symbol (`\p{Sm}`: `−`, `±`, `+`) — and
+ * nothing but a non-letter may follow the unit. {@link plausible} then bounds the value; an implausible
  * one leaves its number behind, so the line is refused as a number.
  */
 const CADENCE_OR_POWER =
-  /(?<![\p{L}\p{N}.,+-])(\d+(?:\.\d+)?) ?(rpm|watts?|W\/kg|W)(?![\p{L}\p{N}/])/giu;
+  /(?<![\p{L}\p{N}\p{Pd}\p{Sm}.,])(\d+(?:\.\d+)?) ?(rpm|watts?|W\/kg|W)(?![\p{L}\p{N}/])/giu;
 /**
  * The values a cadence or power target may name, inclusive (ADR 0077 D-1):
  * cadence 30 to 150 rpm and power 30 to 2 000 W, in whole numbers; 0.5 to 10
@@ -444,12 +460,17 @@ function plausible(value: string, unit: string): boolean {
 }
 /**
  * `visible` with each plausible cadence or power target replaced by a space,
- * and each implausible one by its bare number, which {@link NUMBER} refuses.
+ * and each implausible one by its bare number, which {@link NUMBER} refuses;
+ * and whether any figure was admitted.
  */
-function withoutCadenceOrPower(visible: string): string {
-  return visible.replace(CADENCE_OR_POWER, (_figure: string, value: string, unit: string) =>
-    plausible(value, unit) ? ' ' : value,
-  );
+function withoutCadenceOrPower(visible: string): { rest: string; admitted: boolean } {
+  let admitted = false;
+  const rest = visible.replace(CADENCE_OR_POWER, (_figure: string, value: string, unit: string) => {
+    if (!plausible(value, unit)) return value;
+    admitted = true;
+    return ' ';
+  });
+  return { rest, admitted };
 }
 /**
  * The load-metric trademarks (CLAUDE.md §6, `docs/agents/scope-and-ip.md`):
@@ -479,10 +500,12 @@ export function pacerSayProblem(say: string): PacerSayProblem | undefined {
   if (say.length > MODEL_PACER_SAY_MOST_CHARACTERS) return 'too-long';
   if (say === '') return undefined;
   if (NOT_A_LINE.test(say)) return 'not-a-line';
-  const visible = say.replace(INVISIBLE, '').normalize('NFKC');
-  const rest = withoutCadenceOrPower(visible);
+  const shown = say.replace(INVISIBLE, '');
+  const visible = shown.normalize('NFKC');
+  const { rest, admitted } = withoutCadenceOrPower(visible);
   if (MARKUP.test(rest)) return 'markup';
-  if (NUMBER.test(rest)) return 'number';
+  if (NUMBER.test(rest) || NUMBER_FORM.test(shown) || ZONE_NUMERAL.test(visible)) return 'number';
+  if (admitted && OTHER_QUANTITY.test(visible)) return 'number';
   if (TRADEMARK_ABBREVIATION.test(visible) || TRADEMARK_NAME.test(visible)) return 'trademark';
   if (MEDICAL.test(visible)) return 'health-claim';
   if (!A_LETTER.test(visible)) return 'no-words';

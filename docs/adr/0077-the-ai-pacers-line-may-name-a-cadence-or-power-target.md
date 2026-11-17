@@ -32,10 +32,15 @@ spin"), and #2762 put the question to the owner, recommending cadence and power 
 
 ### What the owner ruled
 
-> **Owner ruling, 2026-11-17**, on ADR 0072 R-4: the pacer's line may contain digits for **cadence
-> and power only**. Examples: "aim for 90 rpm", "hold around 200 watts", "try 3 W/kg". Every other
-> digit stays refused: heart rate, time, distance, speed, zones and percentages. The owner answered
-> *"Yes"* to the recommendation *"allow cadence and power numbers only"*.
+The owner answered *"Yes"* to the recommendation, and ruled in a
+[comment on #2762](https://github.com/openzigs/onyourleft/pull/2762#issuecomment-6948468037):
+
+> **Owner ruling, 2026-11-17, on R-4 (numbers in the pacer's line):** "Yes". This allows cadence and
+> power digits only, as the PR recommended. Every other digit stays refused, heart rate included.
+
+*Context, not the owner's words*: the recommendation was *"allow cadence and power numbers only"*,
+with "aim for 90 rpm", "hold around 200 watts" and "try 3 W/kg" as its examples. "Every other
+digit" is read here as heart rate, time, distance, speed, zones and percentages.
 
 ## Decision
 
@@ -46,16 +51,26 @@ spin"), and #2762 put the question to the owner, recommending cadence and power 
 1. **A number is admitted only when its unit follows it at once**, with one space allowed: `rpm`,
    `watt` or `watts`, `W`, or `W/kg` (in any case). The number is ASCII digits after NFKC, so a
    full-width `９０ rpm` reads as `90 rpm` and a digit of another script is still refused. No sign,
-   thousands separator, decimal point, range or letter may touch the number, and no letter, digit or
-   slash may follow the unit (`200 wattage`, `200 W2` and `200-250 watts` are refused).
+   thousands separator, range or letter may touch the number, and no letter, digit or slash may
+   follow the unit (`200 wattage`, `200 W2` and `200-250 watts` are refused). A sign is any dash
+   (`\p{Pd}`) or mathematical symbol (`\p{Sm}`), so `−200 watts` and `±200 watts` are refused as
+   well as `-200 watts`. A decimal point may not touch the number either, except as W/kg's one
+   decimal place (D-1.2).
 2. **The value must be plausible**, inclusive: cadence **30 to 150 rpm** and power **30 to 2 000 W**,
    in whole numbers; **0.5 to 10 W/kg**, with at most one decimal place (*the author's choice*: one
    place is all a target needs, and it keeps a long decimal out). No leading zero. An implausible
    value is refused as a number.
 3. **Every other digit voids the answer, as before**: a heart rate, a time, a distance, a speed, a
-   zone, a percentage (whose `%` is also markup), or a number with any other unit or none.
+   zone, a percentage (whose `%` is also markup), or a number with any other unit or none. A
+   Unicode number form (`\p{Nl}`, and the Roman numerals U+2160 to U+2188) is refused as a number,
+   read before NFKC, which would turn `Ⅳ` into letters; so is a bare Roman numeral in ASCII letters
+   after the word "zone" (`zone IV`).
 4. The slash in `W/kg` is admitted only inside an admitted figure; anywhere else it is markup, as
    before.
+5. **A figure is admitted only in a cadence or power sentence.** A line that carries an admitted
+   figure and also names a heart rate, `bpm`, a pulse, a minute, second or hour, a `km`, mile or
+   metre (meter), a zone, or `%` (in any case, after NFKC) is refused as a number: `Heart rate
+   150 W` is not a power target. A line with no figure may still say "easy for a minute".
 
 A coordinate still cannot be shown: no admitted form reads as one (a latitude would need a value
 above 10 W/kg, or a decimal power or cadence), and the input still holds none (ADR 0072 D-3.4).
@@ -63,17 +78,21 @@ above 10 W/kg, or a decimal power or cadence), and the input still holds none (A
 ### D-2 — The prompt is `pacer-3`
 
 The model is told it may give a cadence target in rpm or a power target in watts or W/kg, from the
-player's own readings, in digits with the unit straight after (quoting the owner's three examples),
+player's own readings, in digits with the unit straight after (with the three examples above),
 and never any other number, in digits or in words. `PACER_PROMPT_VERSION` is `pacer-3`.
 
 ### D-3 — A device and an instance on either side of this change
 
-- **An instance from before it, a device after it**: the instance's `pacer-2` asks for no number,
-  and its screen refuses one, so nothing changes.
+**Deploy the instance first.** This change ships in the same pull request as #2760's new input
+fields, so:
+
+- **An instance from before it, a device after it**: the instance refuses a state carrying #2760's
+  new fields as `validation_failed` (ADR 0072's amendment for #2760), and the ride's asks end
+  (ADR 0072 D-7). This is the order to avoid.
 - **An instance after it, a device from before it**: the device screens the line again under ADR
   0072's rule, so a line with a figure voids the answer (R-5) and the pacer keeps the decision in
-  force. Nothing wrong is shown; directions with a figure are lost until the app is updated. Ship the
-  app with, or before, the instance.
+  force. Nothing wrong is shown; an older app only loses the lines that carry a figure, until it is
+  updated.
 - **A figure line carried back in `recentLines` to an instance from before it** (an instance rolled
   back mid-ride) is refused as `validation_failed`, which ends the ride's asks (ADR 0072 D-7).
 

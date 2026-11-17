@@ -27,7 +27,7 @@ It has the same authority as the root file. Where the text below says "this file
   behind the model's moves, accepted the same day on the owner's ruling on #2724. It supersedes in
   part ADR 0073 D-3.5, which gained one dated `## Amendments` entry pointing to it. No open issue or
   pull request named it. **0057 and 0058 stay claimed** by #1748 and #1752 and 0070 by #2684; 0072
-  is ADR 0072 (#2712, below). **The next free number is 0075.** A reviewer who remembers this file offering 0074 is
+  is ADR 0072 (#2712, below). The next free number was then 0075. A reviewer who remembers this file offering 0074 is
   reading the old file.
   ⚠️ **0073 is [ADR 0073](../adr/0073-ai-bots-race-with-strategy-freedom-inside-the-bodys-limits.md)**,
   taken by [#2720](https://github.com/openzigs/onyourleft/issues/2720) on 2026-11-16 for AI bots
