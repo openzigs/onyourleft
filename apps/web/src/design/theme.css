@@ -13723,6 +13723,12 @@ select.oyl-input {
   transform: scaleX(-1);
 }
 
+/* #2785: the instance card's scanner reads with the BACK camera, whose picture
+   is shown as it is seen, so the code moves the way the rider moves the device. */
+.oyl-scan-viewfinder__video--as-seen {
+  transform: none;
+}
+
 /* =============================================================================
  * THE PAIRING CODE — #529, ADR 0033 D-1.
  *

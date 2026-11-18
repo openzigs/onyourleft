@@ -7,6 +7,7 @@ import type { BlocksPort } from '../instance/blocks-port';
 import { BlocksPanel } from './BlocksPanel';
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
+import type { CameraController } from '../camera/session';
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
@@ -16,6 +17,7 @@ import type {
   InstancePort,
   InstanceState,
 } from '../instance/instance-port';
+import { codeWithCard, readCodeWithCard } from '../instance/instance-pin';
 import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
 import type { OperatePort, OperateStanding } from '../instance/operate-port';
 import type { SyncPort } from '../instance/sync-port';
@@ -24,6 +26,7 @@ import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { InstanceDevices } from './InstanceDevices';
 import { CHANGE_NAME_TEXT, InstanceNamePanel } from './InstanceName';
+import { CardScanner } from './CardScanner';
 import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
 import { SyncPanel } from './SyncPanel';
 
@@ -131,6 +134,18 @@ export const CONNECT_WITHOUT_CARD =
 export const LINK_FORM_HEADING = 'Add this device with a code from another of your devices';
 export const LINK_FIELD_LABEL = 'The line your other device shows';
 
+/**
+ * What the Connect form says once a scan has filled a box (#2785). Nothing is
+ * sent by a scan: the rider still presses, as the form's own sentence says.
+ * Draft wording.
+ */
+export const CONNECT_SCANNED_TEXT = {
+  card: 'The card was read into the box above. Check the address, then press Connect.',
+  line:
+    'That code is from another of your devices, so it is in the box under “Add this device with ' +
+    'a code from another of your devices”. Press Add this device to use it.',
+} as const;
+
 /** The recovery codes, shown once — ruling Q1 of 2026-09-28. */
 export const RECOVERY_CODES_LEAD =
   'Write these recovery codes down and keep them somewhere safe. Each one adds a new device to ' +
@@ -198,7 +213,13 @@ export function InstanceView({
   hostedSettings,
   statements,
   blocks,
+  camera,
 }: {
+  /**
+   * The device's camera, to scan the instance's card with (#2785). Without
+   * one the card boxes are paste-only.
+   */
+  readonly camera?: CameraController | undefined;
   /**
    * The statements of reasons about this rider's account (#910): read once
    * the device has an instance, signed in or not — a suspended rider cannot
@@ -229,6 +250,8 @@ export function InstanceView({
   const [name, setName] = useState('');
   const [card, setCard] = useState('');
   const [offer, setOffer] = useState('');
+  /** Which box a scan just filled (#2785), said until the rider changes either. */
+  const [scanned, setScanned] = useState<keyof typeof CONNECT_SCANNED_TEXT | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [recoveryCodes, setRecoveryCodes] = useState<readonly string[] | undefined>(undefined);
@@ -328,6 +351,9 @@ export function InstanceView({
         ) : null}
         <form
           className="oyl-trainer__form"
+          // #2785: two forms on one screen are two form landmarks, so each is
+          // named (`a11y/audit.ts` §`landmarksAreDistinguishable`).
+          aria-label="Connect"
           onSubmit={(event) => {
             event.preventDefault();
             void connect();
@@ -378,12 +404,38 @@ export function InstanceView({
               onChange={(event) => {
                 setCard(event.target.value);
                 setRefusal(undefined);
+                setScanned(undefined);
               }}
             />
           </p>
           <p className="oyl-muted" id={cardHintId}>
             {CARD_FIELD_HINT} {CONNECT_WITHOUT_CARD}
           </p>
+          {camera === undefined ? null : (
+            <CardScanner
+              controller={camera}
+              onScanned={(text) => {
+                // #2785: a scan fills a box, as a paste would, and sends
+                // nothing — the press does. A card goes in the card box; a
+                // card with a code is another device's line, which only
+                // "Add this device" uses.
+                setRefusal(undefined);
+                const line = readCodeWithCard(text);
+                if (line === undefined) {
+                  setCard(text.trim());
+                  setScanned('card');
+                } else {
+                  setOffer(codeWithCard(line.card, line.code));
+                  setScanned('line');
+                }
+              }}
+            />
+          )}
+          {scanned === undefined ? null : (
+            <StatusMessage tone="info" label="Scanned" live>
+              {CONNECT_SCANNED_TEXT[scanned]}
+            </StatusMessage>
+          )}
           <Receives />
           <p className="oyl-muted">{NOTHING_SENT_UNTIL_CONNECT}</p>
           <Button type="submit" disabled={busy}>
@@ -393,6 +445,7 @@ export function InstanceView({
         <h3>{LINK_FORM_HEADING}</h3>
         <form
           className="oyl-trainer__form"
+          aria-label={LINK_FORM_HEADING}
           onSubmit={(event) => {
             event.preventDefault();
             void link();
@@ -412,6 +465,7 @@ export function InstanceView({
               onChange={(event) => {
                 setOffer(event.target.value);
                 setRefusal(undefined);
+                setScanned(undefined);
               }}
             />
           </p>
@@ -560,7 +614,7 @@ export function InstanceView({
 
       {/* #1210: a sign-in this device cannot read is opened again by a card given here. */}
       {state.kind === 'connected' || state.kind === 'unreadable' ? (
-        <InstanceKeys port={port} onChange={() => void read()} />
+        <InstanceKeys port={port} camera={camera} onChange={() => void read()} />
       ) : null}
 
       {sync === undefined ? null : <SyncPanel port={sync} />}

@@ -925,6 +925,8 @@ function viewFor(
           hostedSettings={props.hostedSettings}
           statements={props.statements}
           blocks={props.blocks}
+          // #2785: the instance card's scanner reads with the same camera.
+          camera={props.camera}
         />
       );
     case 'moderation':
