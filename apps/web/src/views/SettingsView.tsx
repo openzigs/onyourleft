@@ -929,33 +929,33 @@ function useInstanceState(port: InstancePort | undefined): InstanceState | undef
  * instance* on a device that was connected, and the owner read a connected
  * tablet as a disconnected one. Connected, it says so: the instance's ADDRESS
  * and the rider's name there, both as the instance answered them, never a
- * position. With nothing connected it says what it always said. A device that
+ * position. With nothing connected it offers to connect to a server. A device that
  * holds a sign-in the instance did not answer as connected (signed out,
  * unreachable, or a sign-in it cannot read) names the address and sends the
- * rider to the Instance screen, which says which. Draft wording, awaiting the
- * owner's approval in #2756's pull request.
+ * rider to the Instance screen, which says which. Wording approved by the
+ * owner in #2756's pull request (2026-11-18), which says "server" where the
+ * setup screens do.
  */
 function InstanceLink({ port }: { readonly port: InstancePort | undefined }): JSX.Element {
   const state = useInstanceState(port);
   const href = hrefFor(routeById('instance'));
   const see = <a href={href}>See this device’s connection</a>;
   if (state === undefined) {
-    return (
-      <p>{see} and your devices there, or connect to an instance to ride with other people.</p>
-    );
+    return <p>{see} and your devices there, or connect to a server to ride with other people.</p>;
   }
   switch (state.kind) {
     case 'not-connected':
       return (
         <p>
-          <a href={href}>Connect to an instance</a>, to ride with other people, and see this
-          device’s connection and your devices there.
+          <a href={href}>Connect to a server</a>, to ride with other people, and see this device’s
+          connection and your devices there.
         </p>
       );
     case 'connected':
       return (
         <p>
-          Connected to {state.origin} as {state.displayName}. {see} and your devices there.
+          Connected to your server at {state.origin} as {state.displayName}. {see} and your devices
+          there.
         </p>
       );
     case 'signed-out':
@@ -963,8 +963,7 @@ function InstanceLink({ port }: { readonly port: InstancePort | undefined }): JS
     case 'unreachable':
       return (
         <p>
-          This device holds a sign-in for {state.origin}, which did not answer as connected just
-          now. {see} for why.
+          Your server at {state.origin} is not answering right now. <a href={href}>See why</a>.
         </p>
       );
   }

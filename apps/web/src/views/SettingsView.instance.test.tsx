@@ -150,31 +150,31 @@ describe('#2756 — the Connect and keep card says whether this device is connec
 
     expect(sent).toContain('/v1/auth/session');
     expect(line()).toBe(
-      `Connected to ${ORIGIN} as ${RIDER}. See this device’s connection and your devices there.`,
+      `Connected to your server at ${ORIGIN} as ${RIDER}. See this device’s connection and your devices there.`,
     );
-    expect(line()).not.toContain('Connect to an instance');
+    expect(line()).not.toContain('Connect to a server');
     expect(link().textContent).toBe('See this device’s connection');
     expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
   });
 
-  it('with no stored session, keeps today’s wording and sends nothing', async () => {
+  it('with no stored session, offers to connect to a server and sends nothing', async () => {
     const { port, reads, sent } = realPort(false);
     mounted = await mount(<Settings instance={port} />);
     await readsDone(reads);
 
     expect(line()).toBe(
-      'Connect to an instance, to ride with other people, and see this device’s connection and your devices there.',
+      'Connect to a server, to ride with other people, and see this device’s connection and your devices there.',
     );
-    expect(link().textContent).toBe('Connect to an instance');
+    expect(link().textContent).toBe('Connect to a server');
     expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
     expect(sent).toEqual([]);
   });
 
-  it('where this browser cannot connect at all, keeps today’s wording', async () => {
+  it('where this browser cannot connect at all, offers to connect to a server', async () => {
     mounted = await mount(<Settings />);
 
     expect(line()).toBe(
-      'Connect to an instance, to ride with other people, and see this device’s connection and your devices there.',
+      'Connect to a server, to ride with other people, and see this device’s connection and your devices there.',
     );
   });
 
@@ -183,9 +183,8 @@ describe('#2756 — the Connect and keep card says whether this device is connec
     mounted = await mount(<Settings instance={port} />);
     await readsDone(reads);
 
-    expect(line()).toBe(
-      `This device holds a sign-in for ${ORIGIN}, which did not answer as connected just now. See this device’s connection for why.`,
-    );
+    expect(line()).toBe(`Your server at ${ORIGIN} is not answering right now. See why.`);
+    expect(link().textContent).toBe('See why');
     expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
   });
 
@@ -197,7 +196,7 @@ describe('#2756 — the Connect and keep card says whether this device is connec
     mounted = await mount(<Settings instance={waiting} />);
 
     expect(line()).toBe(
-      'See this device’s connection and your devices there, or connect to an instance to ride with other people.',
+      'See this device’s connection and your devices there, or connect to a server to ride with other people.',
     );
     expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
   });
@@ -207,20 +206,16 @@ describe('#2756 — the Connect and keep card says whether this device is connec
     mounted = await mount(<Settings instance={port} />);
     await readsDone(reads);
 
-    expect(line()).toBe(
-      `This device holds a sign-in for ${ORIGIN}, which did not answer as connected just now. See this device’s connection for why.`,
-    );
+    expect(line()).toBe(`Your server at ${ORIGIN} is not answering right now. See why.`);
     expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
   });
 
-  it('with a sign-in this device cannot read, does not say "Connect to an instance"', async () => {
+  it('with a sign-in this device cannot read, does not say "Connect to a server"', async () => {
     const { port, reads } = realPort(true, 403, { error: { code: 'sealed_required' } });
     mounted = await mount(<Settings instance={port} />);
     await readsDone(reads);
 
-    expect(line()).toBe(
-      `This device holds a sign-in for ${ORIGIN}, which did not answer as connected just now. See this device’s connection for why.`,
-    );
+    expect(line()).toBe(`Your server at ${ORIGIN} is not answering right now. See why.`);
     expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
   });
 });
