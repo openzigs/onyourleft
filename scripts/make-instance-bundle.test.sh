@@ -45,6 +45,7 @@ new_fixture() {
   cp "${SCRIPT_DIR}/make-instance-bundle.sh" "${tmp}/repo/scripts/"
   cp "${REPO}/apps/instance/deploy/home/compose.yaml" "${REPO}/apps/instance/deploy/home/deploy.sh" \
     "${REPO}/apps/instance/deploy/home/instance.env.example" "${tmp}/repo/apps/instance/deploy/home/"
+  cp -R "${REPO}/apps/instance/deploy/home/tailscale" "${tmp}/repo/apps/instance/deploy/home/"
 }
 
 run_bundle() {
@@ -88,12 +89,21 @@ else
 fi
 if cmp -s "${b}/deploy.sh" "${REPO}/apps/instance/deploy/home/deploy.sh"; then ok 'deploy.sh is copied unchanged'; else bad 'deploy.sh is copied unchanged'; fi
 if [ -x "${b}/deploy.sh" ]; then ok 'and is executable'; else bad 'and is executable'; fi
+# #2805: compose.yaml mounts ./tailscale into the tailscale service, which serves
+# the file OYL_INSTANCE_REMOTE_PATH names. A bundle without them serves nothing.
+for serve in serve-tailnet.json serve-funnel.json; do
+  if cmp -s "${b}/tailscale/${serve}" "${REPO}/apps/instance/deploy/home/tailscale/${serve}"; then
+    ok "the bundle holds tailscale/${serve}, unchanged"
+  else
+    bad "the bundle holds tailscale/${serve}, unchanged"
+  fi
+done
 listing="$(unzip -Z1 "${tmp}/out/onyourleft-instance-1.2.3.zip" 2>&1 | sort | tr '\n' ' ')"
-if [ "${listing}" = 'onyourleft-instance/ onyourleft-instance/compose.yaml onyourleft-instance/deploy.sh onyourleft-instance/instance.env.example onyourleft-instance/release.image ' ]; then
-  ok 'the zip holds those four files in one unversioned folder and nothing else -- no .env'
+if [ "${listing}" = 'onyourleft-instance/ onyourleft-instance/compose.yaml onyourleft-instance/deploy.sh onyourleft-instance/instance.env.example onyourleft-instance/release.image onyourleft-instance/tailscale/ onyourleft-instance/tailscale/serve-funnel.json onyourleft-instance/tailscale/serve-tailnet.json ' ]; then
+  ok 'the zip holds those files in one unversioned folder and nothing else -- no .env'
 else
   out="${listing}"
-  bad 'the zip holds those four files in one unversioned folder and nothing else -- no .env'
+  bad 'the zip holds those files in one unversioned folder and nothing else -- no .env'
 fi
 
 # A .env beside the home deployment (the owner's own box) is not bundled.
@@ -143,6 +153,17 @@ sed -i.bak 's/^OYL_INSTANCE_IMAGE=onyourleft-instance:local$/OYL_INSTANCE_IMAGE=
 run_bundle "${IMAGE}" 1.2.3 "${tmp}/out"
 assert_exit 'an instance.env.example whose image setting moved is refused' 1
 assert_says 'as BUNDLE002, naming the file' 'instance.env.example does not have exactly one line'
+
+# --- BUNDLE004 ---------------------------------------------------------------------
+
+for serve in serve-tailnet.json serve-funnel.json; do
+  new_fixture
+  rm "${tmp}/repo/apps/instance/deploy/home/tailscale/${serve}"
+  run_bundle "${IMAGE}" 1.2.3 "${tmp}/out"
+  assert_exit "a home deployment with no tailscale/${serve} is refused" 1
+  assert_says 'as BUNDLE004, naming the file' "BUNDLE004 apps/instance/deploy/home/tailscale/${serve} is missing"
+  if [ -e "${tmp}/out/onyourleft-instance-1.2.3.zip" ]; then bad 'and writes no zip'; else ok 'and writes no zip'; fi
+done
 
 # --- BUNDLE003 ---------------------------------------------------------------------
 

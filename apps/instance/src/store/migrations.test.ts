@@ -146,6 +146,9 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   admin_passkey: `INSERT INTO admin_passkey VALUES ('p1', 'cred-1', 'ride.example', 'es256', '04ab', 0, 'aGFuZGxl', 'key-a', 'Laptop', 'tunnel', 44, NULL, NULL)`,
   admin_passkey_session: `INSERT INTO admin_passkey_session VALUES ('${'a2'.repeat(32)}', 'p1')`,
   admin_challenge: `INSERT INTO admin_challenge VALUES ('${'a4'.repeat(32)}', 'sign_in', NULL, NULL, NULL, NULL, 165)`,
+  // #2782: a claim code a device redeemed and the owner has not yet decided, and an owner claimed.
+  owner_claim_code: `INSERT INTO owner_claim_code VALUES ('${'b1'.repeat(32)}', 45, 645, 46, '${'b2'.repeat(32)}', '012345')`,
+  instance_owner: `INSERT INTO instance_owner VALUES (1, '${'b3'.repeat(32)}', 47)`,
 };
 
 /**
@@ -413,6 +416,42 @@ describe('the migrations (#769)', () => {
       ]) {
         expect(set(laps, items, seed), JSON.stringify([laps, items, seed])).toThrow(/CHECK/);
       }
+    } finally {
+      database.close();
+    }
+  });
+
+  it('holds 0047’s pending claim together, its comparison code six digits, and one owner row, as CHECKs (#2782)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    seedEveryTable(path);
+    const database = openDatabase(path);
+    try {
+      const set = (at: unknown, key: unknown, comparison: unknown) => () =>
+        database
+          .prepare(
+            `UPDATE owner_claim_code SET redeemed_at = ?, device_key = ?, comparison_code = ?`,
+          )
+          .run(at as number, key as string, comparison as string);
+      expect(set(null, null, null)).not.toThrow();
+      expect(set(46, 'key', '000000')).not.toThrow();
+      for (const [at, key, comparison] of [
+        [46, null, '012345'],
+        [46, 'key', null],
+        [null, 'key', '012345'],
+        [46, 'key', '12345'],
+        [46, 'key', '1234567'],
+        [46, 'key', '01234a'],
+      ]) {
+        expect(set(at, key, comparison), JSON.stringify([at, key, comparison])).toThrow(/CHECK/);
+      }
+      // One owner: the slot is 1, and a second row cannot be written.
+      expect(() => database.exec(`INSERT INTO instance_owner VALUES (2, 'another', 48)`)).toThrow(
+        /CHECK/,
+      );
+      expect(() => database.exec(`INSERT INTO instance_owner VALUES (1, 'another', 48)`)).toThrow(
+        /UNIQUE|PRIMARY/,
+      );
     } finally {
       database.close();
     }

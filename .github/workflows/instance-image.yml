@@ -53,6 +53,7 @@ on:
       - apps/instance/deploy/home/deploy.sh
       - apps/instance/deploy/home/compose.yaml
       - apps/instance/deploy/home/instance.env.example
+      - apps/instance/deploy/home/tailscale/**
       - apps/instance/Dockerfile.dockerignore
       - scripts/check-image-layers.sh
       - scripts/make-instance-bundle.sh
@@ -262,7 +263,11 @@ jobs:
       # The guide's own step: copy the template and fill it in. The backup
       # folders are written by the container's `node` user, so they are made
       # writable; the tunnel's token is a placeholder, and the tunnel is left
-      # to fail on it -- nothing here needs Cloudflare. Since #2781 (ADR 0080
+      # to fail on it -- nothing here needs Cloudflare. The template's remote
+      # path is the tailnet (#2805), which would wait for a Tailscale sign-in
+      # nobody gives, so the job names the cloudflare profile, the remote path
+      # this job ran before the profiles, and the header that path needs.
+      # Since #2781 (ADR 0080
       # D-4) the instance makes its secret key in `secrets/` on its first start,
       # so that folder is made first, owner-only and owned by the image's uid
       # 1000, as the guide says ("The instance's secrets"): compose alone would
@@ -280,6 +285,9 @@ jobs:
           sed \
             -e 's|^OYL_INSTANCE_ORIGIN=.*|OYL_INSTANCE_ORIGIN=https://instance.example.invalid|' \
             -e 's|^CLOUDFLARE_TUNNEL_TOKEN=.*|CLOUDFLARE_TUNNEL_TOKEN=not-a-token|' \
+            -e 's|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=cloudflare|' \
+            -e 's|^OYL_INSTANCE_REMOTE_PATH=.*|OYL_INSTANCE_REMOTE_PATH=cloudflare|' \
+            -e 's|^OYL_INSTANCE_CLIENT_ADDRESS_HEADER=.*|OYL_INSTANCE_CLIENT_ADDRESS_HEADER=cf-connecting-ip|' \
             -e "s|^OYL_BACKUP_DIR=.*|OYL_BACKUP_DIR=${RUNNER_TEMP}/backups|" \
             -e "s|^OYL_OFFBOX_DIR=.*|OYL_OFFBOX_DIR=${RUNNER_TEMP}/offbox|" \
             instance.env.example > .env
@@ -316,6 +324,18 @@ jobs:
           set -euo pipefail
           bash deploy.sh
           grep -qxF "image=${REFERENCE}" .deployed
+          # #2805: the pull path starts the remote path the profile names, and
+          # only that one.
+          services="$(docker compose ps -a --format '{{.Service}}')"
+          printf '%s\n' "${services}"
+          grep -qxF tunnel <<< "${services}" || {
+            echo "::error::deploy.sh did not start the tunnel the cloudflare profile names."
+            exit 1
+          }
+          if grep -qxF tailscale <<< "${services}"; then
+            echo "::error::deploy.sh started tailscale, which no profile here names."
+            exit 1
+          fi
 
       # #2786: the rollback, for real. An image built FROM the published one
       # whose server never starts: its migrate step works (compose gives it the

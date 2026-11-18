@@ -13,12 +13,16 @@
 # `docker compose up` at an image a bundle never builds, so the bundle's leaves
 # it unset. The files are copied, not kept twice, so the bundle cannot drift
 # from the deployment the rest of the repository tests (home-compose.test.ts).
+# The `tailscale/` folder goes too, unchanged (#2805): compose.yaml mounts it
+# into the `tailscale` service, and the file in it that OYL_INSTANCE_REMOTE_PATH
+# names is what `tailscale serve` serves. Without it a bundle on the tailnet
+# would mount an empty folder and serve nothing.
 #
 #   bash scripts/make-instance-bundle.sh IMAGE@sha256:DIGEST VERSION OUTDIR
 #
 # Writes OUTDIR/onyourleft-instance/ and OUTDIR/onyourleft-instance-VERSION.zip,
 # whose one folder is `onyourleft-instance` whatever the version: a release's
-# zip extracted where the last one was replaces these four files and leaves the
+# zip extracted where the last one was replaces these files and leaves the
 # operator's `.env`, `secrets/` and deploy.sh's `.deployed` beside them, which
 # is what lets deploy.sh roll back to the previous release.
 #
@@ -27,6 +31,8 @@
 #   BUNDLE002  compose.yaml's default image is not where this expects it, so
 #              the bundle would not name the digest
 #   BUNDLE003  the version is empty or is not a plain version string
+#   BUNDLE004  a serve file the tailscale profile reads is missing from
+#              apps/instance/deploy/home/tailscale/
 #
 # Its own suite: bash scripts/make-instance-bundle.test.sh
 
@@ -63,6 +69,14 @@ out="${3:-}"
 [ "$(grep -cxF -- "${LOCAL_IMAGE_SETTING}" "${HOME_DEPLOY}/instance.env.example")" = 1 ] ||
   die "BUNDLE002 apps/instance/deploy/home/instance.env.example does not have exactly one line '${LOCAL_IMAGE_SETTING}' to leave unset."
 
+# The serve files OYL_INSTANCE_REMOTE_PATH can name (compose.yaml's
+# TS_SERVE_CONFIG): `tailnet` and `funnel`.
+SERVE_FILES='serve-tailnet.json serve-funnel.json'
+for serve in ${SERVE_FILES}; do
+  [ -f "${HOME_DEPLOY}/tailscale/${serve}" ] ||
+    die "BUNDLE004 apps/instance/deploy/home/tailscale/${serve} is missing: the tailscale profile serves it."
+done
+
 name='onyourleft-instance'
 zip="${name}-${version}.zip"
 bundle="${out}/${name}"
@@ -84,6 +98,10 @@ awk -v from="${LOCAL_IMAGE_SETTING}" '
   }
   { print }' "${HOME_DEPLOY}/instance.env.example" > "${bundle}/instance.env.example"
 printf '%s\n' "${image}" > "${bundle}/release.image"
+mkdir -p "${bundle}/tailscale"
+for serve in ${SERVE_FILES}; do
+  cp "${HOME_DEPLOY}/tailscale/${serve}" "${bundle}/tailscale/${serve}"
+done
 
 # Read back: the digest is in compose.yaml exactly once, and the local tag is not.
 [ "$(grep -cF -- "${image}" "${bundle}/compose.yaml")" = 1 ] ||

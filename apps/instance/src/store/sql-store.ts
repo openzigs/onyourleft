@@ -999,6 +999,12 @@ export const OPERATOR_ACTIONS = [
   'registration_decided',
   // #2781 (ADR 0080 D-4, D-7): the emergency kit, downloaded on the server machine.
   'emergency_kit_downloaded',
+  // #2782 (ADR 0080 D-3, D-5, D-7): the owner's claim — a code minted, a
+  // pending claim confirmed or discarded on the loopback page, and the reset.
+  'owner_claim_code_minted',
+  'owner_claim_confirmed',
+  'owner_claim_discarded',
+  'owner_claim_reset',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1114,6 +1120,13 @@ export const OPERATOR_DETAILS: {
   // #2646 (ADR 0069 D-8): the decision, never the rider, their name or the reason.
   registration_decided: { words: ['approved', 'refused'], counts: [] },
   emergency_kit_downloaded: { words: [], counts: [] },
+  // #2782 (ADR 0080 D-7): never a code, a key or a comparison code. Minting
+  // voids every other code, a pending claim's included, and says so.
+  owner_claim_code_minted: { words: ['voided_unused'], counts: [] },
+  owner_claim_confirmed: { words: [], counts: [] },
+  owner_claim_discarded: { words: [], counts: [] },
+  // Whether a claimed key was cleared, and how many admin sessions ended.
+  owner_claim_reset: { words: ['cleared', 'none_claimed'], counts: ['sessions_ended'] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
@@ -1245,6 +1258,36 @@ export interface AdminCodeRedemption {
   readonly source: AdminSource;
   /** A session not seen for this long is over: it is pruned as this one is opened. */
   readonly idleSeconds: number;
+}
+
+/** A claim code for the owner, as it is written (#2782, migration 0047, ADR 0080 D-3). */
+export interface OwnerClaimCodeWrite {
+  /** The SHA-256 of the code as `auth/owner-claim.ts` normalises it. */
+  readonly codeSha256: string;
+  /** Unix seconds. */
+  readonly mintedAt: number;
+  readonly expiresAt: number;
+}
+
+/** What redeeming a claim code asks of the store (#2782). */
+export interface OwnerClaimRedemption {
+  readonly codeSha256: string;
+  /** The device key that signed the sealed redemption. */
+  readonly deviceKey: string;
+  /** Six digits, derived from the code and that key (ADR 0080 D-5). */
+  readonly comparisonCode: string;
+  /** Unix seconds: the code must be live then. */
+  readonly at: number;
+}
+
+/** A claim a device redeemed and the owner has not yet confirmed or discarded (ADR 0080 D-5). */
+export interface PendingOwnerClaim {
+  readonly deviceKey: string;
+  readonly comparisonCode: string;
+  /** Unix seconds. */
+  readonly redeemedAt: number;
+  /** The claim code's end, which is the pending claim's too. */
+  readonly expiresAt: number;
 }
 
 /**
@@ -2498,6 +2541,49 @@ export interface SqlStore {
    * `admin_sign_in` entry (`passkey`) appended to the operator log.
    */
   openAdminSessionWithPasskey(signIn: AdminPasskeySignIn): Promise<'opened' | 'refused'>;
+  /**
+   * The owner key a confirmed claim set (#2782, ADR 0080 D-3), or
+   * `undefined`. `OYL_INSTANCE_OWNER_KEY`, when it is set, wins over it
+   * (`moderation/moderation.ts` §`ownerKey`); this is read on every owner
+   * check, so a claim and a reset take effect without a restart.
+   */
+  claimedOwnerKey(): Promise<string | undefined>;
+  /**
+   * Hold a new claim code (#2782, ADR 0080 D-3), DELETING every other one —
+   * unused, pending or dead — so at most one is live and minting ends a
+   * pending claim (D-5's "No … voids the claim code and draws a new QR").
+   * `claimed`, and nothing written, while a claimed owner key is held.
+   * Answers how many live codes it voided.
+   */
+  mintOwnerClaimCode(
+    code: OwnerClaimCodeWrite,
+  ): Promise<
+    { readonly outcome: 'minted'; readonly voided: number } | { readonly outcome: 'claimed' }
+  >;
+  /**
+   * Redeem a claim code (#2782): in ONE statement the code becomes the
+   * pending claim — only while no owner key is claimed, the code is live at
+   * `at` and not redeemed, and no other code holds a live pending claim.
+   * `refused` writes nothing, whichever of those failed.
+   */
+  redeemOwnerClaimCode(redemption: OwnerClaimRedemption): Promise<'pending' | 'refused'>;
+  /** The pending claim that is live at `at`, Unix seconds, or `undefined`. */
+  pendingOwnerClaim(at: number): Promise<PendingOwnerClaim | undefined>;
+  /**
+   * Confirm the pending claim live at `at` whose comparison code is
+   * `comparisonCode` (ADR 0080 D-5): in ONE transaction its device key written
+   * as the owner key and every claim code deleted. `none` writes nothing: no
+   * such claim, or an owner key already claimed.
+   */
+  confirmOwnerClaim(comparisonCode: string, at: number): Promise<'confirmed' | 'none'>;
+  /** Discard the pending claim live at `at`: its code deleted, so it is void. `false` when there was none. */
+  discardOwnerClaim(at: number): Promise<boolean>;
+  /**
+   * `operator owner-claim reset` (ADR 0080 D-3): in ONE transaction the
+   * claimed owner key cleared, every claim code deleted and every admin
+   * session ended. Answers whether a key was claimed and how many sessions ended.
+   */
+  resetOwnerClaim(): Promise<{ readonly claimed: boolean; readonly sessionsEnded: number }>;
   /**
    * One page of the suspended accounts, most recently suspended first (#961):
    * at most `limit` of them after the (suspendedAt, id) position `after`, in
@@ -7739,6 +7825,130 @@ function storeOver(
           return written.rows.length > 0
             ? ({ outcome: 'stored' } as const)
             : ({ outcome: 'no-athlete' } as const);
+        }),
+      ),
+
+    claimedOwnerKey: () =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('instance_owner')
+          .select('owner_key')
+          .where('slot', '=', 1)
+          .executeTakeFirst();
+        return row?.owner_key;
+      }),
+
+    mintOwnerClaimCode: (code) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const owner = await trx.selectFrom('instance_owner').select('slot').executeTakeFirst();
+          if (owner !== undefined) return { outcome: 'claimed' } as const;
+          const voided = await trx
+            .deleteFrom('owner_claim_code')
+            .where('expires_at', '>', code.mintedAt)
+            .executeTakeFirst();
+          // Dead codes are kept no longer than they can matter.
+          await trx.deleteFrom('owner_claim_code').execute();
+          await trx
+            .insertInto('owner_claim_code')
+            .values({
+              code_sha256: code.codeSha256,
+              minted_at: code.mintedAt,
+              expires_at: code.expiresAt,
+              redeemed_at: null,
+              device_key: null,
+              comparison_code: null,
+            })
+            .execute();
+          return { outcome: 'minted', voided: Number(voided.numDeletedRows) } as const;
+        }),
+      ),
+
+    redeemOwnerClaimCode: (redemption) =>
+      exclusive(async () => {
+        const at = redemption.at;
+        // ONE statement, so two redemptions at once cannot both find none pending.
+        const taken = await sql`update owner_claim_code
+          set redeemed_at = ${at}, device_key = ${redemption.deviceKey},
+            comparison_code = ${redemption.comparisonCode}
+          where code_sha256 = ${redemption.codeSha256}
+            and redeemed_at is null
+            and expires_at > ${at}
+            and not exists (select 1 from instance_owner)
+            and not exists (select 1 from owner_claim_code as other
+              where other.redeemed_at is not null and other.expires_at > ${at})`.execute(db);
+        return Number(taken.numAffectedRows ?? 0) === 1
+          ? ('pending' as const)
+          : ('refused' as const);
+      }),
+
+    pendingOwnerClaim: (at) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('owner_claim_code')
+          .selectAll()
+          .where('redeemed_at', 'is not', null)
+          .where('expires_at', '>', at)
+          .executeTakeFirst();
+        if (
+          row === undefined ||
+          row.redeemed_at === null ||
+          row.device_key === null ||
+          row.comparison_code === null
+        ) {
+          return undefined;
+        }
+        return {
+          deviceKey: row.device_key,
+          comparisonCode: row.comparison_code,
+          redeemedAt: row.redeemed_at,
+          expiresAt: row.expires_at,
+        };
+      }),
+
+    confirmOwnerClaim: (comparisonCode, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const owner = await trx.selectFrom('instance_owner').select('slot').executeTakeFirst();
+          if (owner !== undefined) return 'none' as const;
+          const pending = await trx
+            .selectFrom('owner_claim_code')
+            .select('device_key')
+            .where('redeemed_at', 'is not', null)
+            .where('expires_at', '>', at)
+            .where('comparison_code', '=', comparisonCode)
+            .executeTakeFirst();
+          const deviceKey = pending?.device_key;
+          if (deviceKey === null || deviceKey === undefined) return 'none' as const;
+          await trx
+            .insertInto('instance_owner')
+            .values({ slot: 1, owner_key: deviceKey, claimed_at: at })
+            .execute();
+          await trx.deleteFrom('owner_claim_code').execute();
+          return 'confirmed' as const;
+        }),
+      ),
+
+    discardOwnerClaim: (at) =>
+      exclusive(async () => {
+        const discarded = await db
+          .deleteFrom('owner_claim_code')
+          .where('redeemed_at', 'is not', null)
+          .where('expires_at', '>', at)
+          .executeTakeFirst();
+        return Number(discarded.numDeletedRows) > 0;
+      }),
+
+    resetOwnerClaim: () =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const cleared = await trx.deleteFrom('instance_owner').executeTakeFirst();
+          await trx.deleteFrom('owner_claim_code').execute();
+          const ended = await trx.deleteFrom('admin_session').executeTakeFirst();
+          return {
+            claimed: Number(cleared.numDeletedRows) > 0,
+            sessionsEnded: Number(ended.numDeletedRows),
+          };
         }),
       ),
 

@@ -820,6 +820,32 @@ export interface AthleteTacticsConsentTable {
 }
 
 /**
+ * A claim code for the instance's owner (#2782, migration 0047, ADR 0080
+ * D-3), kept only as the SHA-256 of its normalised form; once a device
+ * redeemed it, the pending claim too. The three redemption columns are all
+ * `NULL` or all set (a `CHECK`).
+ */
+export interface OwnerClaimCodeTable {
+  readonly code_sha256: string;
+  /** Unix seconds. */
+  readonly minted_at: number;
+  readonly expires_at: number;
+  readonly redeemed_at: number | null;
+  /** The device key that signed the sealed redemption. */
+  readonly device_key: string | null;
+  /** Six digits, derived from the code and that key. */
+  readonly comparison_code: string | null;
+}
+
+/** The owner key a confirmed claim set (#2782, migration 0047): at most one row, `slot` 1. */
+export interface InstanceOwnerTable {
+  readonly slot: number;
+  readonly owner_key: string;
+  /** Unix seconds. */
+  readonly claimed_at: number;
+}
+
+/**
  * One of the instance's own keys (#1189, ADR 0047 D-4, D-5). Added by
  * migration 0015. The private half is PKCS #8 wrapped with AES-256-GCM under
  * a key derived from `OYL_INSTANCE_SECRET_KEY` (`keys/wrap.ts`); its plaintext
@@ -969,6 +995,8 @@ export interface InstanceDatabase {
   readonly athlete_hosted_key: AthleteHostedKeyTable;
   readonly athlete_hosted_consent: AthleteHostedConsentTable;
   readonly athlete_tactics_consent: AthleteTacticsConsentTable;
+  readonly owner_claim_code: OwnerClaimCodeTable;
+  readonly instance_owner: InstanceOwnerTable;
   readonly notice: NoticeTable;
   readonly statement: StatementTable;
   readonly appeal: AppealTable;

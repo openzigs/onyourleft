@@ -715,7 +715,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
     },
     handle: async (context) =>
       json({
-        soleModerator: moderationOf(context).soleModerator,
+        soleModerator: await moderationOf(context).soleModerator(),
         reports: (await moderationOf(context).openReports()).map((report) => ({
           reportId: report.id,
           reporterAthleteId: report.athleteId,

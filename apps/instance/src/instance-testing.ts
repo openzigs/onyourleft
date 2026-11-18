@@ -67,6 +67,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
     clientAddressHeader: null,
     trustedProxies: [],
+    remotePath: null,
     history: { kind: 'off', code: 'not-set', reason: 'A test instance has no embedding model.' },
     analysis: { kind: 'off', code: 'not-set', reason: 'A test instance has no analysis model.' },
     analysisEnv: {},
