@@ -1604,3 +1604,11 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the instance card is never shown through the tunnel, and no admin page accepts a pasted key. See
   [ADR 0069](0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md). The body above is
   not edited. (#2640)
+- **2026-11-17** — **Once [ADR 0080](0080-first-run-setup-and-owner-claim-on-the-loopback-listener.md)
+  is Accepted, D-6's places a card reaches a device from include the loopback listener's setup QR**,
+  which holds the card and a single-use claim code together, shown only on the host (its D-3).
+  ADR 0069's loopback Keys page was already one more. D-6's rule is unchanged: a pin comes only from a
+  source Cloudflare cannot write, the fingerprint is never truncated, and the card is scanned inside
+  the app. The claim is a sealed, sessionless request signed by the claiming device's key (D-8). The
+  six-digit comparison code in ADR 0080 D-5 is not a fingerprint and pins nothing. This entry only
+  points there. The body above is not edited. (#2780)
