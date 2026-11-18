@@ -12,15 +12,20 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0078 is [ADR 0078](../adr/0078-a-floor-under-the-ai-pacers-intent.md)**, taken by
+  [#2777](https://github.com/openzigs/onyourleft/issues/2777) on 2026-11-17 for a floor under the
+  AI pacer's intent, **Proposed** for the owner's answer. It supersedes in part ADR 0072 D-2 and
+  D-5.1, which gained one dated `## Amendments` entry pointing to it. **The next free number is
+  0079.** A reviewer who remembers this file offering 0078 is reading the old file.
   ⚠️ **0077 is [ADR 0077](../adr/0077-the-ai-pacers-line-may-name-a-cadence-or-power-target.md)**,
   taken by [#2760](https://github.com/openzigs/onyourleft/issues/2760) in its pull request
   [#2762](https://github.com/openzigs/onyourleft/pull/2762) on 2026-11-17 for the AI pacer's line
   naming a cadence or power target, accepted the same day on the owner's ruling. It supersedes in
   part ADR 0072 D-4.2 and R-4, which gained one dated `## Amendments` entry pointing to it. It
   skipped **0074** (ADR 0074, #2710), **0075** (#2670, the ride-controls fade) and **0076** (#2767,
-  AI bots' bodies). **0057 and 0058 stay claimed** by #1748 and #1752, and 0070 by #2684. **The
-  next free number is 0078.** A reviewer who remembers this file offering 0074 is reading the old
-  file.
+  AI bots' bodies). **0057 and 0058 stay claimed** by #1748 and #1752, and 0070 by #2684. The
+  next free number was then 0078. A reviewer who remembers this file offering 0074 is reading the
+  old file.
   ⚠️ **0074 is [ADR 0074](../adr/0074-a-sprint-instinct-behind-the-models-moves.md)**, taken by
   [#2710](https://github.com/openzigs/onyourleft/issues/2710) in its pull request
   [#2724](https://github.com/openzigs/onyourleft/pull/2724) on 2026-11-16 for a sprint instinct

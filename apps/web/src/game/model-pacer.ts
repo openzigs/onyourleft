@@ -31,11 +31,22 @@
  *   and dropped with the director. None is stored.
  * - **Guess a sensor.** A reading that is not live is a field left out of the
  *   state (§`modelPacerSensorFields`, #2760), never a zero or a stale value.
+ *
+ * ## Where the rider is, and the floor (#2777)
+ *
+ * Each ask carries `riderPlace` (`ahead`, `level` or `behind`, at the rider's
+ * own speed) and, from the second ask on, `gapTrend`: how the gap moved since
+ * the last ask. The director keeps the run of asks with the rider ahead, and
+ * an `ease` that answers an ask built after `PACER_AHEAD_FLOOR_S` of it
+ * is ridden, and logged, as `hold` (`@onyourleft/domain` §`flooredDirection`,
+ * ADR 0078, Proposed).
  */
 
 import {
   beatsPerMinute,
   distanceOnRoute,
+  flooredDirection,
+  gapTrendOf,
   gradeAt,
   heartRateZones,
   metres,
@@ -44,7 +55,9 @@ import {
   MODEL_PACER_RECENT_LINES,
   MODEL_PACER_SAY_SHOWN_S,
   pacerDecisionRecord,
+  pacerSaysEasing,
   powerZones,
+  riderPlaceOf,
   watts,
   zoneOf,
   type BotPacerPlan,
@@ -52,6 +65,7 @@ import {
   type ModelPacerInput,
   type PacerDecisionRecord,
   type PacerDirection,
+  type PacerGapReading,
   type PacerHeartRateTrend,
   type PacerPowerTrend,
   type RouteProfile,
@@ -111,12 +125,15 @@ export function modelPacerInput(options: {
   const pacerAt = state.bot?.state.distance ?? 0;
   const ahead = gradeAt(profile, distanceOnRoute(profile, metres(pacerAt + 100)));
   const power = state.input.live ? (state.input.power as number) : undefined;
+  const riderGapM = tenth(state.ride.distance - pacerAt);
+  // #2777: where the rider is, in a word, at their own speed.
+  const place = riderPlaceOf(riderGapM, state.ride.speed);
   return {
     pacerWPerKg: plan.intensityWattsPerKilogram,
     plan: inForce.direction.plan,
     intent: inForce.direction.intent,
     secondsInIntent: Math.max(0, Math.floor(state.ridden - inForce.since)),
-    riderGapM: tenth(state.ride.distance - pacerAt),
+    riderGapM,
     riderWPerKg:
       power === undefined || !(options.riderMassKilograms > 0)
         ? null
@@ -126,6 +143,7 @@ export function modelPacerInput(options: {
     toFinishM: profile.loop ? null : Math.max(0, Math.round(profile.totalDistance - pacerAt)),
     rideS: Math.max(0, Math.floor(state.ridden)),
     ...(sensors === undefined ? {} : modelPacerSensorFields(sensors, options.riderMassKilograms)),
+    ...(place === undefined ? {} : { riderPlace: place }),
   };
 }
 
@@ -309,6 +327,12 @@ export class ModelPacer {
   #line: { readonly text: string; readonly until: number } | undefined;
   /** The last lines shown this ride, oldest first, for the next asks (#2760). Never stored. */
   readonly #said: string[] = [];
+  /** The gap at the last ask, for the next one's `gapTrend` (#2777). */
+  #lastGap: PacerGapReading | undefined;
+  /** The seconds ridden of the first ask in this unbroken run of asks with the rider `ahead` (#2777). */
+  #aheadSince: number | undefined;
+  /** How long the rider had been ahead when the ask now out was built, for the floor (ADR 0078). */
+  #askedAheadForS: number | undefined;
 
   constructor(link: ModelPacerLink, onRecord: (record: PacerDecisionRecord) => void) {
     this.#link = link;
@@ -330,22 +354,23 @@ export class ModelPacer {
     if (settled !== undefined && asked !== undefined) {
       this.#settled = undefined;
       this.#asked = undefined;
-      const record = pacerDecisionRecord(asked, at, answerOf(settled));
+      const reply = this.#floored(settled);
+      const record = pacerDecisionRecord(asked, at, answerOf(reply));
       this.#log.push(record);
       this.#onRecord(record);
-      if (settled.kind === 'refused') this.#stopped = true;
-      if (record.outcome === 'applied' && settled.kind === 'answer') {
-        const { direction } = settled;
+      if (reply.kind === 'refused') this.#stopped = true;
+      if (record.outcome === 'applied' && reply.kind === 'answer') {
+        const { direction } = reply;
         frame.direct(direction, at);
         if (direction.intent !== this.#inForce.direction.intent) {
           this.#inForce = { direction, since: at };
         } else {
           this.#inForce = { direction, since: this.#inForce.since };
         }
-        if (settled.say !== '') {
-          this.#line = { text: settled.say, until: at + MODEL_PACER_SAY_SHOWN_S };
-          arrived = settled.say;
-          this.#said.push(settled.say);
+        if (reply.say !== '') {
+          this.#line = { text: reply.say, until: at + MODEL_PACER_SAY_SHOWN_S };
+          arrived = reply.say;
+          this.#said.push(reply.say);
           if (this.#said.length > MODEL_PACER_RECENT_LINES) this.#said.shift();
         }
       }
@@ -356,7 +381,7 @@ export class ModelPacer {
       this.#log.length < MODEL_PACER_LOG_MOST &&
       (this.#lastAskAt === undefined || at - this.#lastAskAt >= MODEL_PACER_ASK_EVERY_S)
     ) {
-      const input = frame.input(this.#inForce);
+      const input = this.#placed(at, frame.input(this.#inForce));
       this.#ask(at, this.#said.length === 0 ? input : { ...input, recentLines: [...this.#said] });
     }
     if (this.#line !== undefined && at >= this.#line.until) this.#line = undefined;
@@ -372,6 +397,35 @@ export class ModelPacer {
     this.#ended = true;
     this.#stopped = true;
     void this.#link.endPacerRide();
+  }
+
+  /**
+   * #2777: `input` with how the gap moved since the last ask, and the run of
+   * asks with the rider ahead kept for the floor. Read off the state the
+   * model is shown, so the floor answers what the model saw.
+   */
+  #placed(at: number, input: ModelPacerInput): ModelPacerInput {
+    const now: PacerGapReading = { atS: at, riderGapM: input.riderGapM };
+    const trend = this.#lastGap === undefined ? undefined : gapTrendOf(this.#lastGap, now);
+    this.#lastGap = now;
+    if (input.riderPlace === 'ahead') this.#aheadSince ??= at;
+    else this.#aheadSince = undefined;
+    this.#askedAheadForS = this.#aheadSince === undefined ? undefined : at - this.#aheadSince;
+    return trend === undefined ? input : { ...input, gapTrend: trend };
+  }
+
+  /**
+   * The reply as it is ridden: ADR 0078's floor (Proposed), an `ease` ridden
+   * as `hold` once the rider has been ahead for `PACER_AHEAD_FLOOR_S`. The
+   * log records the direction ridden, so the pacer still replays from the
+   * log alone (ADR 0072 D-5.1). A line that says the pacer is easing is not
+   * shown beside a `hold` it does not describe.
+   */
+  #floored(reply: PacerReply): PacerReply {
+    if (reply.kind !== 'answer') return reply;
+    const direction = flooredDirection(reply.direction, this.#askedAheadForS);
+    if (direction === reply.direction) return reply;
+    return { kind: 'answer', direction, say: pacerSaysEasing(reply.say) ? '' : reply.say };
   }
 
   #ask(at: number, input: ModelPacerInput): void {

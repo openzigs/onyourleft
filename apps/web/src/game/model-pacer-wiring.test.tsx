@@ -41,6 +41,8 @@ import {
   gradeAt,
   gradePercent,
   metres,
+  PACER_GAP_TRENDS,
+  RIDER_PLACES,
   seconds,
   thresholdShare,
   unixSeconds,
@@ -546,6 +548,11 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     expect(last).not.toHaveProperty('powerZone');
     expect(last).not.toHaveProperty('heartRateZone');
     expect(last).not.toHaveProperty('aboveThresholdS');
+    // #2777: where the rider is, and how the gap moved since the last ask,
+    // through the shipped frame loop; the first ask has no trend.
+    expect(directed.asked.inputs[0]).not.toHaveProperty('gapTrend');
+    expect(RIDER_PLACES).toContain(last?.riderPlace);
+    expect(PACER_GAP_TRENDS).toContain(last?.gapTrend);
   });
 
   it('reaches no trainer write in simulation mode: the grade at the rider’s own odometer, the defaults, and the same release', async () => {
