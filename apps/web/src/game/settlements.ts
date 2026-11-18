@@ -156,6 +156,16 @@ export const PLOT_METRES = 18;
 export const PLOT_BUILT_SHARE = 0.8;
 
 /**
+ * The share of a plot's candidates that are built on **inferred** built-up
+ * land (`land-class.ts` §`inferBuiltUp`) — #2684, ADR 0070 D-2.1, the owner's
+ * ruling of 2026-11-15: where the map does not mark the houses, do not
+ * over-saturate, but draw some. Under {@link PLOT_BUILT_SHARE}, so gaps stand
+ * between the houses and not a solid row; the same hash, so a plot built here
+ * is built on mapped land too.
+ */
+export const INFERRED_PLOT_BUILT_SHARE = 0.5;
+
+/**
  * How far from the centreline a village's buildings stand, in metres: **15** —
  * one setback for the whole street, which is what makes it a street. Past the
  * 3.5 m road, the verge and its wall, and a front garden.
@@ -1276,9 +1286,12 @@ export function lotsAt(
     for (let side = 1; side >= -1; side -= 2) {
       const hash = slotHash(seed, wrappedPlot, LOT_KEY + (side === 1 ? 1 : 2));
       // Rule 4's share first: it is the cheapest, and it reads no land.
-      if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
+      const share = uniformFrom(hash, STREAM_PLOT);
+      if (share >= PLOT_BUILT_SHARE) continue;
       const x = frame.x + frame.normalX * SETBACK_METRES * side;
       const z = frame.z + frame.normalZ * SETBACK_METRES * side;
+      // #2684: sparser where the land is inferred and not mapped.
+      if (share >= INFERRED_PLOT_BUILT_SHARE && mask.inferredAt(x, z)) continue;
       const shops = wrappedPlot % LOT_SHOP_EVERY === 0 && mapped.commercialAt(x, z);
       const kind: StructureKind = shops ? 'shop-row' : 'building';
       // Facing the road: back along the normal from its side. @see standing

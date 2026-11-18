@@ -15,7 +15,7 @@
   [#2793](https://github.com/openzigs/onyourleft/pull/2793) (#2777) writes
   `docs/adr/0078-a-floor-under-the-ai-pacers-intent.md`, and #2790's title claims 0079. #2780 says
   *"take the next free one if 0078 has gone"*. 0075, 0076 and 0077 are written in the open pull
-  requests #2670, #2767 and #2762, and 0070 in #2694. Wherever #2781 to #2784 say "ADR 0078"
+  requests #2670, #2767 and #2762, and 0070 is ADR 0070 (#2694 merged on 2026-11-17). Wherever #2781 to #2784 say "ADR 0078"
   about first-run setup, they mean this ADR
 - **Supersedes, in part** (D-8 lists each one and what stays):
   [ADR 0069](0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md) D-5's *"serves
