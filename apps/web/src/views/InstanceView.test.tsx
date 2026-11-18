@@ -204,9 +204,9 @@ describe('the Connect screen — #777, #778', () => {
     expect(room).toContain('the route of a room you make');
     expect(room).toContain('your power and cadence while you ride in it');
     expect(room).toContain('the weight you declare once as you join');
-    expect(sync).toContain('which needs the instance’s card');
+    expect(sync).toContain('which needs the server’s card');
     expect(sync).toContain('with their positions and heart rate');
-    expect(sync).toContain('sealed on this device for the instance alone');
+    expect(sync).toContain('sealed on this device for the server alone');
     expect(sync).toContain('Nothing is synced until you press Sync now');
     expect(sync).not.toContain('does not offer Sync yet');
     // #1104 (F-3): what a sync also sends since #1100 and #1237.

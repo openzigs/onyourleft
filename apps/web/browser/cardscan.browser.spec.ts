@@ -64,7 +64,7 @@ async function expectFits(page: Page, where: string): Promise<void> {
   }));
   expect(widths.scrollWidth, where).toBeLessThanOrEqual(widths.inner);
   const receives = page.locator('details[open] > summary', {
-    hasText: 'What the instance receives from this app',
+    hasText: 'What the server receives from this app',
   });
   await expect(receives, where).toHaveCount(1);
   await expect(
@@ -99,7 +99,7 @@ test.describe('#2785 — the scanner reads a real QR picture', () => {
       page.getByRole('heading', { name: 'Where did this code come from?' }),
     ).toBeVisible();
     await expect(
-      page.getByText('The code is for the instance at https://instance.example.org.'),
+      page.getByText('The code is for the server at https://instance.example.org.'),
     ).toBeVisible();
     // #2828: no box was filled, three or otherwise.
     await expect(page.locator('textarea')).toHaveCount(0);
@@ -202,15 +202,60 @@ test.describe('#2828 — one scan, then one question, at 320 and 1280 px', () =>
       await page.getByRole('button', { name: 'Paste a code instead' }).click();
       const box = page.getByLabel('The code, or the line under it');
       await expect(box).toBeFocused();
+      // The walkthrough's gap: the paste box's label stands apart from Scan a code.
+      const scanBox = await page.getByRole('button', { name: 'Scan a code' }).boundingBox();
+      const labelBox = await page.getByText('The code, or the line under it').boundingBox();
+      expect(labelBox!.y - (scanBox!.y + scanBox!.height)).toBeGreaterThanOrEqual(16);
       await box.fill(CARD_QR_TEXT.split(' ')[0] ?? '');
       await page.getByRole('button', { name: 'Continue' }).click();
-      await expect(page.getByRole('heading', { name: 'Connect with this card' })).toBeFocused();
+      await expect(page.getByRole('heading', { name: 'Connect with this code' })).toBeFocused();
       await expect(page.getByText('Where did this code come from?')).toHaveCount(0);
       // The address is the card's, in the expert's shut disclosure.
-      await expect(page.getByLabel('Instance address')).toBeHidden();
+      await expect(page.getByLabel('Server address')).toBeHidden();
       await page.getByText('Enter the address yourself').click();
-      await expect(page.getByLabel('Instance address')).toHaveValue('https://instance.example.org');
+      await expect(page.getByLabel('Server address')).toHaveValue('https://instance.example.org');
       await expectFits(page, `card at ${at}`);
+    });
+
+    test(`shows a whole address, each label above its box, and Connect under the name, at ${at}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await open(page);
+      await page.getByRole('button', { name: 'Paste a code instead' }).click();
+      await page.getByLabel('The code, or the line under it').fill(CARD_QR_TEXT);
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await page.getByRole('button', { name: 'Someone invited me' }).click();
+      const name = page.getByLabel('The name other riders will see (optional)');
+      const connect = page.getByRole('button', { name: 'Connect', exact: true });
+      const nothingSent = page.getByText('Nothing is sent until you press “Connect”.');
+      const expert = page.getByText('Enter the address yourself');
+      // Name, what is sent, Connect, then the expert's disclosure: in that order, down the page.
+      const order = await Promise.all(
+        [name, nothingSent, connect, expert].map(async (each) => (await each.boundingBox())!.y),
+      );
+      expect(order, `order at ${at}`).toEqual([...order].sort((a, b) => a - b));
+      await expert.click();
+      const address = page.getByLabel('Server address');
+      await expect(address).toHaveValue('https://instance.example.org');
+      for (const [label, field] of [
+        ['Server address', address],
+        ['The name other riders will see (optional)', name],
+      ] as const) {
+        const labelBox = await page.getByText(label, { exact: true }).boundingBox();
+        const fieldBox = await field.boundingBox();
+        // Above its box, not beside it.
+        expect(labelBox!.y + labelBox!.height, label).toBeLessThanOrEqual(fieldBox!.y + 1);
+        // The column's width, up to its measure of 32rem.
+        const column = await field.evaluate((element) => element.parentElement!.clientWidth);
+        expect(fieldBox!.width, label).toBeGreaterThanOrEqual(Math.min(column, 32 * 16) - 1);
+      }
+      // The whole example origin is in view: nothing of it is scrolled out of the box.
+      const clipped = await address.evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      );
+      expect(clipped, `address clipped at ${at}`).toBeLessThanOrEqual(0);
+      await expectFits(page, `invite with the address open at ${at}`);
     });
 
     test(`says a refused code directly under the button pressed, at ${at}`, async ({ page }) => {

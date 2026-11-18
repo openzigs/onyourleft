@@ -70,16 +70,16 @@ import { SyncPanel } from './SyncPanel';
  * file: rooms shipped, and sync's disclosure comes before sync does.
  */
 export const INSTANCE_RECEIVES: readonly string[] = [
-  'This device’s public key, which is how the instance knows it is you. The private key never leaves this device.',
-  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the instance keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. An instance keeps your earlier names there too, for moderation.',
+  'This device’s public key, which is how the server knows it is you. The private key never leaves this device.',
+  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the server keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. A server keeps your earlier names there too, for moderation.',
   'Your internet address and your device or browser type, as any server you connect to sees them.',
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
-  'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, your goals, notes and documents, your saved workouts and your workout goals. They are sealed on this device for the instance alone, and stay on this device too. Nothing is synced until you press Sync now.',
+  'Only if you sync with it, which needs the server’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, your goals, notes and documents, your saved workouts and your workout goals. They are sealed on this device for the server alone, and stay on this device too. Nothing is synced until you press Sync now.',
   'Only if you ask it for one: a ride’s numbers for a write-up, sealed, and — if you store your own key for a hosted service there and agree to it — that key, sealed, and your list of words to mask, and your privacy zones: their names, where they are and how large. Only if you switch them on: a summary of each block you have ridden, for a re-plan during the ride, and the side camera’s pictures, both sealed.',
 ];
 
-export const INSTANCE_RECEIVES_LEAD = 'What the instance receives from this app';
+export const INSTANCE_RECEIVES_LEAD = 'What the server receives from this app';
 
 /** Who holds it. Kept visible. */
 export const INSTANCE_BELONGS_TO_ITS_OPERATOR =

@@ -55,26 +55,32 @@ export const CONNECT_FLOW_TEXT = {
     'That is not a code this app can use. Scan the code your server’s setup page, an invite or ' +
     'another of your devices shows, or paste the line under it.',
   question: 'Where did this code come from?',
-  codeFor: (origin: string) => `The code is for the instance at ${origin}.`,
+  codeFor: (origin: string) => `The code is for the server at ${origin}.`,
   choices: {
     claim: 'My server’s setup page',
     invite: 'Someone invited me',
     device: 'Another of my devices',
   },
   again: 'Use another code',
-  cardHeading: 'Connect with this card',
-  cardFor: (origin: string) => `The card is for the instance at ${origin}.`,
+  cardHeading: 'Connect with this code',
+  cardFor: (origin: string) => `The code is for the server at ${origin}.`,
   inviteHeading: 'Join with this invite',
-  inviteFor: (origin: string) => `You were invited to the instance at ${origin}.`,
+  inviteFor: (origin: string) => `You were invited to the server at ${origin}.`,
   deviceHeading: 'Add this device',
   deviceFor: (origin: string) =>
-    `This device joins the account your other device is signed in to, on the instance at ${origin}.`,
+    `This device joins the account your other device is signed in to, on the server at ${origin}.`,
   deviceButton: 'Add this device',
-  deviceNothingSent: 'Nothing is sent until you press Add this device.',
+  deviceNothingSent: 'Nothing is sent until you press “Add this device”.',
   expert: 'Enter the address yourself',
-  addressLabel: 'Instance address',
+  addressLabel: 'Server address',
   nameLabel: 'The name other riders will see (optional)',
 } as const;
+
+/**
+ * A field of the flow (#2828's walkthrough): its label above its box, and the
+ * box the column's width up to a measure, so an address is read whole.
+ */
+const FIELD_CLASS = 'oyl-connect__field';
 
 /** Under the expert's address form (#1190, D-14 Q1). Draft. */
 export const CONNECT_WITHOUT_CARD =
@@ -82,7 +88,7 @@ export const CONNECT_WITHOUT_CARD =
   'anything that needs the card.';
 
 /** Nothing leaves until the press. */
-export const NOTHING_SENT_UNTIL_CONNECT = 'Nothing is sent until you press Connect.';
+export const NOTHING_SENT_UNTIL_CONNECT = 'Nothing is sent until you press “Connect”.';
 
 /** What a scanned or pasted code is, read on this device: nothing is sent to read it. */
 export type CodeRead =
@@ -287,8 +293,8 @@ export function ConnectFlow({
   );
 
   const nameField = (
-    <p>
-      <label htmlFor={nameId}>{CONNECT_FLOW_TEXT.nameLabel}</label>{' '}
+    <p className={FIELD_CLASS}>
+      <label htmlFor={nameId}>{CONNECT_FLOW_TEXT.nameLabel}</label>
       <input
         className="oyl-input"
         id={nameId}
@@ -304,8 +310,8 @@ export function ConnectFlow({
   );
 
   const addressField = (
-    <p>
-      <label htmlFor={addressId}>{CONNECT_FLOW_TEXT.addressLabel}</label>{' '}
+    <p className={FIELD_CLASS}>
+      <label htmlFor={addressId}>{CONNECT_FLOW_TEXT.addressLabel}</label>
       <input
         className="oyl-input"
         id={addressId}
@@ -339,16 +345,17 @@ export function ConnectFlow({
           }}
         >
           {nameField}
-          {/* The address is the card's (#2828); an expert may send it elsewhere. */}
-          <details className="oyl-details">
-            <summary>{CONNECT_FLOW_TEXT.expert}</summary>
-            {addressField}
-          </details>
           <p className="oyl-muted">{NOTHING_SENT_UNTIL_CONNECT}</p>
           <Button type="submit" disabled={busy}>
             Connect
           </Button>
           {refusedAt('step')}
+          {/* The address is the card's (#2828); an expert may send it elsewhere.
+              Under the button, so the name, what is sent and Connect sit together. */}
+          <details className="oyl-details">
+            <summary>{CONNECT_FLOW_TEXT.expert}</summary>
+            {addressField}
+          </details>
         </form>
         {again}
       </div>

@@ -462,7 +462,7 @@ export const CLAIM_REFUSAL_TEXT = {
   'not-a-claim':
     'That is not a claim code, so scan the code on your server’s setup page or paste the whole line under it.',
   'card-only':
-    'That is your server’s card without a claim code, so press Show the claim code on its setup page and scan that.',
+    'That is your server’s card without a claim code, so press “Show the claim code” on its setup page and scan that.',
   refused:
     'Your server did not take that claim code, so show a new one on its setup page and scan it again.',
   rate_limited:
@@ -470,7 +470,7 @@ export const CLAIM_REFUSAL_TEXT = {
   'no-answer':
     'Your server did not answer, so nothing was claimed: check that it is running and try again.',
   'not-confirmed':
-    'Your server has not confirmed the claim yet, so press Yes on its setup page and then sign in again. If that page no longer shows the claim, show a new claim code there and scan it.',
+    'Your server has not confirmed the claim yet, so press “Yes” on its setup page and then sign in again. If that page no longer shows the claim, show a new claim code there and scan it.',
   'this-device':
     'This device could not prepare its key, so nothing was sent and your claim code is still good: try again.',
 } as const;

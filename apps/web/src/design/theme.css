@@ -6938,6 +6938,27 @@ select.oyl-input {
 }
 
 /*
+ * A field of the flow (#2828's walkthrough): the label above its box, and the
+ * box the column's width up to a measure, where `.oyl-input`'s 8rem showed
+ * "https://instar" of an address (`cardscan.browser.spec.ts`).
+ */
+.oyl-connect__field > label {
+  display: block;
+  margin-bottom: var(--oyl-space-xs);
+}
+
+.oyl-connect__field > .oyl-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 32rem;
+}
+
+/* The paste box under *Scan a code* stands apart from it. */
+.oyl-card-scan + .oyl-connect__form {
+  margin-top: var(--oyl-space-md);
+}
+
+/*
  * The Moderation screen (#955). An account id is one unbroken word of up to
  * 128 characters, and a rider's name and a report's reason come from other
  * riders: each breaks where it must rather than widen a 320 px page

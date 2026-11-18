@@ -26,7 +26,7 @@ import {
   typeName,
 } from '../testing/connect-flow';
 import { mount, settle, submitForm, typeInto, type Mounted } from '../testing/mount';
-import { CONNECT_FLOW_TEXT, readCode } from './ConnectFlow';
+import { CONNECT_FLOW_TEXT, ConnectFlow, readCode } from './ConnectFlow';
 import { InstanceView } from './InstanceView';
 import { OWNER_CLAIM_TEXT } from './OwnerClaim';
 
@@ -261,5 +261,71 @@ describe('the Connect flow — #2828', () => {
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
     expect(document.activeElement).toBe(document.body);
+  });
+});
+
+/**
+ * #2828's walkthrough, for a rider who is not technical: one word for one
+ * thing, and a button named inside a sentence marked as one.
+ */
+describe('the Connect flow’s words — #2828', () => {
+  /** Reach each step a rider can, and `check` it while it is on the screen. */
+  async function eachStep(check: (step: string, shown: HTMLElement) => void): Promise<string[]> {
+    const seen: string[] = [];
+    const visit = async (step: string, drive: () => Promise<void>): Promise<void> => {
+      mounted?.unmount();
+      mounted = await mount(
+        <ConnectFlow port={scriptedInstance().port} onConnected={() => undefined} />,
+      );
+      await settle();
+      await drive();
+      // Every disclosure open, so what an expert reads is read too.
+      for (const details of mounted.container.querySelectorAll('details')) details.open = true;
+      check(step, mounted.container);
+      seen.push(step);
+    };
+    await visit('start', () => Promise.resolve());
+    await visit('question', () => pasteCode(LINE));
+    await visit('card', () => pasteCode(CARD));
+    for (const kind of ['invite', 'device', 'claim'] as const) {
+      await visit(kind, async () => {
+        await pasteCode(LINE);
+        await answer(kind);
+      });
+    }
+    await visit('claim pending', async () => {
+      await pasteCode(LINE);
+      await answer('claim');
+      await pressNamed(OWNER_CLAIM_TEXT.claim);
+    });
+    return seen;
+  }
+
+  it('says server, never instance, on every step', async () => {
+    const seen = await eachStep((step) => {
+      expect(text(), step).not.toMatch(/instance/i);
+    });
+    expect(seen).toHaveLength(7);
+    expect(CONNECT_FLOW_TEXT.cardHeading).toBe('Connect with this code');
+  });
+
+  it('quotes each button it names inside a sentence', async () => {
+    let checked = 0;
+    await eachStep((step, shown) => {
+      const names = [...shown.querySelectorAll('button')]
+        .map((button) => button.textContent ?? '')
+        .filter((name) => name !== '');
+      for (const sentence of shown.querySelectorAll('p')) {
+        if (sentence.querySelector('button') !== null) continue;
+        const said = sentence.textContent ?? '';
+        for (const name of names) {
+          if (!said.includes(name)) continue;
+          checked += 1;
+          expect(said.replaceAll(`“${name}”`, ''), `${step}: ${name}`).not.toContain(name);
+        }
+      }
+    });
+    // The claim's two sentences, the device's, the card's and the invite's at least.
+    expect(checked).toBeGreaterThanOrEqual(5);
   });
 });
