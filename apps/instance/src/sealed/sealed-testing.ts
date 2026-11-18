@@ -101,8 +101,9 @@ export async function sendEnvelope(
   url: string,
   envelope: SealedEnvelope | string,
   token?: string,
+  extraHeaders: Readonly<Record<string, string>> = {},
 ): Promise<Response> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = { ...extraHeaders, 'content-type': 'application/json' };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
   return fetch(`${url}${SEALED_PATH}`, {
     method: 'POST',
@@ -185,6 +186,8 @@ export async function sealedAt(
     readonly body?: unknown;
     readonly token?: string;
     readonly signer?: SigningKey;
+    /** Outer headers beside the envelope: a client address a test's trusted proxy names (#2612). */
+    readonly headers?: Readonly<Record<string, string>>;
   },
 ): Promise<{ readonly status: number; readonly text: string }> {
   const served = (await (await fetch(`${url}/v1/instance/keys`)).json()) as {
@@ -208,7 +211,7 @@ export async function sealedAt(
     ...(options.signer === undefined ? {} : { signer: options.signer }),
     minimumPadding: PAD_MINIMUM_BYTES,
   });
-  const response = await sendEnvelope(url, sealed.envelope, options.token);
+  const response = await sendEnvelope(url, sealed.envelope, options.token, options.headers);
   const raw = await response.text();
   if (response.status !== 200) return { status: response.status, text: raw };
   const reply = await sealed.openReply(JSON.parse(raw) as unknown);

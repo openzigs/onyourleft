@@ -1,0 +1,222 @@
+{
+  "model": "gemma4:12b",
+  "measuredOn": "2026-11-16",
+  "promptCharacters": 1378,
+  "coldLoadMs": 21,
+  "alone": [
+    {
+      "serverMs": 1648,
+      "wallMs": 2857,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1707,
+      "wallMs": 2868,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1648,
+      "wallMs": 2825,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1650,
+      "wallMs": 2813,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1673,
+      "wallMs": 2817,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1689,
+      "wallMs": 2803,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1676,
+      "wallMs": 2873,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1663,
+      "wallMs": 2871,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1609,
+      "wallMs": 2743,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1665,
+      "wallMs": 2867,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1630,
+      "wallMs": 2783,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1666,
+      "wallMs": 2865,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1665,
+      "wallMs": 2781,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1624,
+      "wallMs": 2855,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1666,
+      "wallMs": 2872,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1587,
+      "wallMs": 2794,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1630,
+      "wallMs": 2770,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1668,
+      "wallMs": 2848,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1658,
+      "wallMs": 2848,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 1705,
+      "wallMs": 2910,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    }
+  ],
+  "thinking": [
+    {
+      "serverMs": 7370,
+      "wallMs": 8544,
+      "promptTokens": 959,
+      "outputTokens": 400,
+      "valid": false,
+      "thinkingCharacters": 835
+    },
+    {
+      "serverMs": 7377,
+      "wallMs": 8537,
+      "promptTokens": 959,
+      "outputTokens": 400,
+      "valid": false,
+      "thinkingCharacters": 1042
+    },
+    {
+      "serverMs": 6790,
+      "wallMs": 7997,
+      "promptTokens": 959,
+      "outputTokens": 400,
+      "valid": false,
+      "thinkingCharacters": 950
+    }
+  ],
+  "beside": [
+    {
+      "serverMs": 29754,
+      "wallMs": 30951,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    },
+    {
+      "serverMs": 23605,
+      "wallMs": 24692,
+      "promptTokens": 961,
+      "outputTokens": 73,
+      "valid": true,
+      "thinkingCharacters": 0
+    }
+  ],
+  "writeUps": [
+    {
+      "serverMs": 29328,
+      "wallMs": 30474
+    },
+    {
+      "serverMs": 23275,
+      "wallMs": 24320
+    }
+  ]
+}

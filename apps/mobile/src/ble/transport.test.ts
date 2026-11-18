@@ -27,7 +27,11 @@ import {
 import { DEFAULT_GATT_OPERATION_TIMEOUT } from '@onyourleft/sensors/web-bluetooth';
 import { describe, expect, it } from 'vitest';
 
-import { createCapacitorTransport, FORGET_DEADLINE } from './transport';
+import {
+  createCapacitorTransport,
+  FORGET_DEADLINE,
+  type CapacitorRememberedDevice,
+} from './transport';
 import {
   NOT_INITIALIZED_MESSAGE,
   SCRIPTED_DEVICE,
@@ -1095,6 +1099,113 @@ describe('known devices', () => {
     await transport.discover({ capabilities: [] });
     const known = await transport.knownDevices();
     expect(known.map((one) => one.identity.id)).toEqual([SCRIPTED_DEVICE.deviceId]);
+  });
+});
+
+describe('#2669 — sensors remembered from an earlier session', () => {
+  const STRAP = 'C4:7C:8D:6A:00:01';
+
+  /** A transport opened as the app opens, with these remembered. */
+  const reopened = (
+    remembered: () => readonly CapacitorRememberedDevice[],
+    stack: ScriptedStack = {},
+  ) => {
+    const plugin = scriptedPort(stack);
+    const transport = createCapacitorTransport({
+      plugin,
+      profiles: [compositeProfile],
+      now: () => AT,
+      remembered,
+    });
+    return { plugin, transport };
+  };
+
+  it('reaches a remembered sensor after a restart with no chooser, initialising first', async () => {
+    const { plugin, transport } = reopened(() => [
+      { id: STRAP, name: 'Assioma', capabilities: ['power'] },
+    ]);
+
+    const [device, ...rest] = await transport.knownDevices();
+    expect(rest).toEqual([]);
+    // ⚠️ The guard `knownDevices` used to decline: this is the session's
+    // first plugin call, and without `initialize` first the plugin refuses it.
+    expect(plugin.calls).toEqual(['initialize', `getDevices:${STRAP}`]);
+    if (device === undefined) throw new Error('nothing was known');
+
+    await transport.connect(device.identity.id);
+    expect(transport.connectionState(device.identity.id)).toBe('connected');
+    const read: number[] = [];
+    await transport.subscribe(device.identity.id, 'power', (measurement) => {
+      read.push(measurement.power);
+    });
+    plugin.notify(POWER_SERVICE, POWER_CHARACTERISTIC, EMPTY_VALUE);
+    expect(read).toEqual([220]);
+    expect(plugin.calls).not.toContain('requestDevice');
+  });
+
+  it('keeps the name it was paired with, since Android answers an address and nothing else', async () => {
+    const { transport } = reopened(() => [{ id: STRAP, name: 'Assioma', capabilities: ['power'] }]);
+    const known = await transport.knownDevices();
+    expect(known.map((one) => one.name)).toEqual(['Assioma']);
+  });
+
+  it('gives it the capabilities it was paired for, not every profile’s', async () => {
+    // Adopted with none, a sensor paired for power alone would be handed
+    // cadence too, and subscribe to a service it may not serve.
+    const { transport } = reopened(() => [{ id: STRAP, name: 'Assioma', capabilities: ['power'] }]);
+    const [device] = await transport.knownDevices();
+    expect([...(device?.capabilities ?? [])]).toEqual(['power']);
+  });
+
+  it('counts a remembered sensor against the budget only once something is done with it', async () => {
+    const remembered = [1, 2, 3, 4, 5].map((n) => ({
+      id: `C4:7C:8D:6A:00:0${String(n)}`,
+      name: `Sensor ${String(n)}`,
+      capabilities: ['power'] as const,
+    }));
+    const { transport } = reopened(() => remembered);
+    const known = await transport.knownDevices();
+    expect(known).toHaveLength(5);
+    const outcomes: string[] = [];
+    for (const device of known) {
+      await transport.connect(device.identity.id).then(
+        () => outcomes.push('ok'),
+        (error: unknown) => outcomes.push((error as { code?: string }).code ?? String(error)),
+      );
+    }
+    // Five remembered, three reached: the budget counts what is used.
+    expect(outcomes).toEqual([
+      'ok',
+      'ok',
+      'ok',
+      'connection-budget-exceeded',
+      'connection-budget-exceeded',
+    ]);
+  });
+
+  it('stops issuing a remembered sensor the moment it is forgotten, before it was ever used', async () => {
+    let remembered: readonly CapacitorRememberedDevice[] = [
+      { id: STRAP, name: 'Assioma', capabilities: ['power'] },
+    ];
+    const { transport } = reopened(() => remembered);
+    const [device] = await transport.knownDevices();
+    if (device === undefined) throw new Error('nothing was known');
+    await transport.forget(device.identity.id);
+    remembered = [];
+
+    expect(() => transport.connectionState(device.identity.id)).toThrow(
+      expect.objectContaining({ code: 'device-not-found' }),
+    );
+    await expect(transport.knownDevices()).resolves.toEqual([]);
+  });
+
+  it('does not offer a device chosen this session again once it is forgotten', async () => {
+    // The conformance rule (`simulator/conformance.ts`): a forgotten id is not
+    // among the known devices. `seen` used to keep it, which was harmless
+    // only while nothing could connect to what `knownDevices` returned.
+    const { transport, device } = await connected();
+    await transport.forget(device.identity.id);
+    await expect(transport.knownDevices()).resolves.toEqual([]);
   });
 });
 

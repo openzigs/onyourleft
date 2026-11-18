@@ -333,12 +333,19 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // each heading's ⓘ. The mode heading names the populated instance's mode,
   // read from its fixture so the two cannot drift. #2607: why a restore is
   // steps rather than a button, and where a one-off snapshot is, are behind
-  // Restoring a snapshot's ⓘ.
+  // Restoring a snapshot's ⓘ. #2611: the AI backend's purpose is behind its ⓘ.
   operate: [
     'Status',
     'Accounts',
     `Registration mode: ${SCRIPTED_STATUS.registration}`,
     'Restoring a snapshot',
+    'AI backend',
+    // #2612: that only names are shown, never a place or a power, is behind its ⓘ.
+    'Rooms',
+    // #2613: what the card and the fingerprint are, and what a rotation does, are behind its ⓘ.
+    'Instance keys',
+    // #2614: that the lines are memory only, and a worker's stay on standard output, is behind its ⓘ.
+    'Recent problems',
   ],
   // #1439: what a new write-up does to the ride's saved one is behind the
   // section's ⓘ; the section has a heading only once an instance is

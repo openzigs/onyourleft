@@ -1274,3 +1274,24 @@ Until 2026-10-07 this section was §"Owner questions left open".
   0047 and 0048 gain no entry: each rule of theirs this cites is applied as written, and the new
   routes join ADR 0047 D-7's phase-2 row by its existing 2026-11-14 entry. The body above is
   not edited. (#2601, #2608)
+- **2026-11-16** — **Once [ADR 0071](0071-model-chosen-lap-race-bot-tactics-during-a-ride.md) is
+  Accepted, it supersedes D-7's *"nothing runs during a ride"* for one more use, lap-race bot
+  tactics, and D-9 as it applies to that use.** A model on the instance may pick the lap-race bots'
+  moves during a ride the rider chose to ride with AI bots, and **never for the pacer**. Write-ups
+  wait while such a race runs (its D-6). The tactics call uses **the instance's local model only**,
+  and the rider's own consent naming the endpoint is recorded before their first model race and can
+  be withdrawn, which D-9 point 4 did not require of the local model (its D-5). The call has no
+  tools, and its answer has no power field and no text a rider sees (its D-3). Read ADR 0071 for
+  the rule. For every other job type D-7 and D-9 stand as written, with the entries above; the
+  re-plan of the 2026-10-09 entry is unchanged. This entry only points there. The body above is not
+  edited. (#2707)
+- **2026-11-16** — **Once [ADR 0072](0072-a-model-directs-the-bot-pacer-during-a-ride.md) is
+  Accepted, it supersedes D-7's *"nothing runs during a ride"* for one more use, the AI pacer**,
+  beside the re-plan of the 2026-10-09 entry and ADR 0071's lap-race bot tactics. A model on the
+  instance may pick the bot pacer's plan and intent, and write one screened line of feedback, during
+  a solo ride the rider chose to ride with an AI pacer, on ADR 0071's terms: the instance's local
+  model only, the rider's consent naming the endpoint, write-ups waiting while the ride runs, no
+  tools, no power field (its D-3, D-4 and D-8). It is the first model text a rider is shown during a
+  ride, and it is screened on the instance and on the device (its D-4). For every other job type D-7
+  and D-9 stand as written, with the entries above. This entry only points there. The body above is
+  not edited. (#2712)

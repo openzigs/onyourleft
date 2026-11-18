@@ -50,7 +50,7 @@ import {
   nearestPlace,
   suburbCues,
   LAND_CLASS_MAX_BYTES,
-  LAND_CLASS_MAX_WORK,
+  landClassWork,
   LEVELLING_MAX_CHUNKS,
   type LandClass,
   type LandClassMask,
@@ -132,7 +132,7 @@ function maskWithoutInference(corridor: WorldCorridor): LandClassMask {
   return landClassMask(
     corridor,
     LAND_CLASS_MAX_BYTES,
-    LAND_CLASS_MAX_WORK,
+    landClassWork(corridor),
     LEVELLING_MAX_CHUNKS,
     0,
   );
@@ -273,10 +273,16 @@ describe('what inference never reads as built-up — #2684', () => {
   });
 
   it('leaves a polygon that classes other alone — an aerodrome, a beach — but not Protomaps’ own `other`', () => {
-    for (const kind of ['aerodrome', 'beach', 'heath']) {
+    // Integration with #2662: an aerodrome and a beach class `bare` now, a
+    // class of their own, and are still never inferred built-up.
+    for (const [kind, held] of [
+      ['aerodrome', 'bare'],
+      ['beach', 'bare'],
+      ['heath', 'other'],
+    ] as const) {
       const fixture = streetSuburbFixture('residential', 'ground', polygon(kind));
       const land = landClassMask(fixture.corridor);
-      expect(classBeside(fixture, land, 1_600, 20), kind).toBe('other');
+      expect(classBeside(fixture, land, 1_600, 20), kind).toBe(held);
       expect(classBeside(fixture, land, 1_600, -20), kind).toBe('built-up');
     }
     const neighbourhood = streetSuburbFixture('residential', 'ground', polygon('other'));
@@ -285,16 +291,18 @@ describe('what inference never reads as built-up — #2684', () => {
     );
   });
 
-  it('keeps a wood a wood where a beach is drawn over it, as before', () => {
+  // Integration with #2662: a beach is `bare` now, which outranks farmland, so
+  // the mapped-`other` case is a heath.
+  it('keeps a wood a wood where a heath is drawn over it, as before', () => {
     const fixture = streetSuburbFixture('residential', 'ground', (profile, origin) => [
       landBeside(profile, origin, 'landuse', 'wood', 1_400, 1_800, -5, 60),
-      landBeside(profile, origin, 'landuse', 'beach', 1_400, 1_800, -5, 60),
+      landBeside(profile, origin, 'landuse', 'heath', 1_400, 1_800, -5, 60),
     ]);
     const land = landClassMask(fixture.corridor);
     expect(classBeside(fixture, land, 1_600, 20)).toBe('wood');
-    // And a beach drawn over farmland leaves it farmland.
+    // And a heath drawn over farmland leaves it farmland.
     const field = streetSuburbFixture('residential', 'ground', (profile, origin) => [
-      landBeside(profile, origin, 'landuse', 'beach', 1_400, 1_800, -5, 60),
+      landBeside(profile, origin, 'landuse', 'heath', 1_400, 1_800, -5, 60),
       landBeside(profile, origin, 'landuse', 'farmland', 1_400, 1_800, -5, 60),
     ]);
     expect(classBeside(field, landClassMask(field.corridor), 1_600, 20)).toBe('farmland');
@@ -338,7 +346,7 @@ describe('what inference never reads as built-up — #2684', () => {
     const capped = landClassMask(
       suburb.corridor,
       LAND_CLASS_MAX_BYTES,
-      LAND_CLASS_MAX_WORK,
+      landClassWork(suburb.corridor),
       LEVELLING_MAX_CHUNKS,
       500_000,
     );
@@ -349,7 +357,7 @@ describe('what inference never reads as built-up — #2684', () => {
     const starved = landClassMask(
       suburb.corridor,
       LAND_CLASS_MAX_BYTES,
-      LAND_CLASS_MAX_WORK,
+      landClassWork(suburb.corridor),
       LEVELLING_MAX_CHUNKS,
       1_000,
     );

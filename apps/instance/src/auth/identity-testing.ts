@@ -14,6 +14,8 @@ import { mkdtemp, readFile, rm, stat, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createAdmin, type Admin, type AdminLimits } from '../admin/admin.ts';
+
 import {
   decodeFrame,
   openSealedRequest,
@@ -41,6 +43,8 @@ import { createHostedSettings } from '../analysis/hosted-settings.ts';
 import { hostedBehindMasking, readMaskingGuard } from '../analysis/hosted.ts';
 import { forgetMaskingOnRefusal } from '../analysis/masking-item.ts';
 import { createLocalModel } from '../analysis/model.ts';
+import { createTactics, type Tactics, type TacticsOptions } from '../analysis/tactics.ts';
+import { createRaceHold } from '../analysis/tactics-hold.ts';
 import { hostedForPictures } from '../camera/hosted-pictures.ts';
 import type { PictureConnection } from '../camera/picture-model.ts';
 import { createSidePose } from '../camera/side-pose.ts';
@@ -64,7 +68,8 @@ import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts'
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
 import { instanceHpkePrimitives } from './crypto.ts';
-import { createOperate } from '../operate/operate.ts';
+import { createRecentProblems } from '../log.ts';
+import { createOperate, type OperateRoomSources } from '../operate/operate.ts';
 import { diskSpace, keysState, tunnelReadiness, type StatusSources } from '../operate/status.ts';
 import { createSealed, sha256, type Sealed } from '../sealed/sealed.ts';
 import { sealFor } from '../sealed/sealed-testing.ts';
@@ -233,6 +238,10 @@ export interface IdentityInstance {
   readonly sealed: Sealed;
   /** The analysis jobs, when the world was given an engine (#1095). */
   readonly analysis: AnalysisJobs | undefined;
+  /** Model-chosen bot tactics (#2709), over the world's store and clock. */
+  readonly tactics: Tactics;
+  /** The admin pages (#2641), when the world was given them. */
+  readonly admin: Admin | undefined;
   /** A second, fresh store on the same file — a read the instance's store did not serve. */
   freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -304,6 +313,18 @@ export async function startIdentityInstance(
      */
     pictures?: { local?: PictureConnection; hostedFetch?: typeof globalThis.fetch };
     /**
+     * Model-chosen lap-race bot tactics (#2709), over the world's store and
+     * clock, sharing one model slot with {@link analysis}'s jobs as
+     * `instance.ts` builds them. Absent: no local model is offered, no name
+     * resolves and nothing is reached.
+     */
+    tactics?: Partial<
+      Pick<
+        TacticsOptions,
+        'local' | 'fetch' | 'resolve' | 'hold' | 'decisions' | 'answerWaitMs' | 'warmUpWaitMs'
+      >
+    >;
+    /**
      * The `fetch` a hosted TEXT model is reached through (#1251's test
      * question), behind the world's own store's consent, key and masking item
      * as a running instance's is. Absent, a hosted request reaches nothing.
@@ -316,6 +337,13 @@ export async function startIdentityInstance(
     /** A handler handed no Operate area (#2602), for the `unavailable` it answers then. */
     withoutOperate?: boolean;
     /**
+     * What the owner's Rooms reads from the room workers and ends through
+     * (#2612), as `instance.ts` hands it the router; the world's own rooms
+     * and names are used beside it. Absent, the Rooms routes answer
+     * `unavailable`, as on an adapter with no router.
+     */
+    operateRooms?: Pick<OperateRoomSources, 'live' | 'end'>;
+    /**
      * Where a name resolves to, for the Operate area's analysis settings
      * (#2609): a save checks it. Absent, a name looked up is a failed lookup.
      */
@@ -326,6 +354,20 @@ export async function startIdentityInstance(
      * world's directory, no tunnel address, and the world's own keys.
      */
     operateStatus?: Partial<StatusSources>;
+    /**
+     * The instance's own admin pages (#2641), over the world's store, clock
+     * and accounts, as `instance.ts` mounts them when `OYL_INSTANCE_ADMIN_PAGES`
+     * is on: the owner is the world's `moderators.owner`.
+     */
+    admin?: {
+      readonly limits?: AdminLimits;
+      /** What the admin layer sees in place of the real store — a spy on its lookups. */
+      readonly storeSeenBy?: (store: SqlStore) => SqlStore;
+      /** The loopback listener's port (#2643): its origin is `http://localhost:<port>`. */
+      readonly loopbackPort?: number;
+      /** `OYL_INSTANCE_ADMIN_ADDRESSES` (#2643). */
+      readonly addresses?: readonly string[];
+    };
   } = {},
 ): Promise<IdentityInstance> {
   const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-identity-'));
@@ -352,15 +394,20 @@ export async function startIdentityInstance(
     startsAt,
     analysis,
     pictures,
+    tactics: tacticsOptions,
     hostedFetch,
     observe,
     voice,
     withoutOperate,
+    operateRooms,
     operateStatus,
     resolve,
+    admin: adminOptions,
     ...rest
   } = options;
   const clock: TestClock = { ms: startsAt ?? 1_790_000_000_000 };
+  /** The problem lines the handler's sink keeps (#2614), stamped by the world's clock. */
+  const problems = createRecentProblems(() => clock.ms);
   const identityFor = (origin: string): Identity =>
     createIdentity({
       // The identity tests predate registration modes (#775) and register
@@ -449,7 +496,10 @@ export async function startIdentityInstance(
     },
     ...(voice === undefined ? {} : { voice }),
   });
+  /** The origin the keys state (#2613): Operate's rotation makes them over the log's transaction with it. */
+  const keyOrigin: { value?: string } = {};
   const keysFor = async (origin: string): Promise<InstanceKeys> => {
+    keyOrigin.value = origin;
     const keys = createInstanceKeys({
       store,
       secret: keyless === true ? undefined : secretBytes(7),
@@ -481,10 +531,22 @@ export async function startIdentityInstance(
     now: () => clock.ms,
     ...(sealedPrimitives === undefined ? {} : { primitives: sealedPrimitives }),
   });
+  // #2709: one model slot, shared by the jobs and the tactics, as `instance.ts` shares it.
+  const raceHold = tacticsOptions?.hold ?? createRaceHold({ now: () => clock.ms });
   const analysisJobs =
     analysis === undefined
       ? undefined
-      : createAnalysisJobs({ ...analysis, store, now: () => clock.ms });
+      : createAnalysisJobs({ hold: raceHold, ...analysis, store, now: () => clock.ms });
+  const tactics = createTactics({
+    local: () => Promise.resolve({ offered: false, model: undefined }),
+    resolve: () => Promise.reject(new Error('a test resolved a name')),
+    fetch: () => Promise.reject(new Error('a test reached for the network')),
+    ...tacticsOptions,
+    store,
+    origin: TEST_ORIGIN,
+    hold: raceHold,
+    now: () => clock.ms,
+  });
   // A rider's own hosted key and consent (#1199), under the same secret as the keys.
   const hostedSecret =
     keyless === true ? Promise.resolve(undefined) : importSecretKey(secretBytes(7));
@@ -514,11 +576,36 @@ export async function startIdentityInstance(
     hostedKey: ownKey,
     hosted: (key) => hostedForPictures(key, pictures?.hostedFetch),
   });
+  const madeAdmin: { value?: Admin } = {};
+  const adminFor = (identity: Identity): Admin | undefined => {
+    if (adminOptions === undefined) return undefined;
+    madeAdmin.value = createAdmin({
+      store: adminOptions.storeSeenBy === undefined ? store : adminOptions.storeSeenBy(store),
+      origin: TEST_ORIGIN,
+      ownerKey: rest.moderators?.owner,
+      secretKeySet: keyless !== true,
+      roleOf: (athleteId) => identity.moderation.roleOf(athleteId),
+      now: () => clock.ms,
+      name: config?.name ?? null,
+      ...(adminOptions.limits === undefined ? {} : { limits: adminOptions.limits }),
+      ...(adminOptions.loopbackPort === undefined
+        ? {}
+        : { loopbackPort: adminOptions.loopbackPort }),
+      ...(adminOptions.addresses === undefined ? {} : { addresses: adminOptions.addresses }),
+      // #2650: the world's keys, as `instance.ts` hands them.
+      instanceKeys,
+    });
+    return madeAdmin.value;
+  };
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
+      // #2614: the handler's problem lines, kept as `instance.ts` keeps them.
+      problems,
+      ...(adminOptions === undefined ? {} : { admin: adminFor(identity) as Admin }),
       sidePose,
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
       hostedSettings,
+      tactics,
       ...(observe === undefined ? {} : { observe }),
       identity,
       sync,
@@ -544,6 +631,7 @@ export async function startIdentityInstance(
                 ...operateStatus,
               },
               // #2609: as `instance.ts` builds them, over the world's store and clock.
+              problems,
               analysis: {
                 environment: testConfig(listenerConfig),
                 resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
@@ -556,6 +644,18 @@ export async function startIdentityInstance(
                     resolve: resolve ?? (() => Promise.reject(new Error('a test resolved a name'))),
                   }),
               },
+              // #2613: the world's keys, and the same keys over the log's transaction.
+              keys: {
+                keys: instanceKeys,
+                over: (inside) =>
+                  createInstanceKeys({
+                    store: inside,
+                    secret: keyless === true ? undefined : secretBytes(7),
+                    origin: keyOrigin.value ?? TEST_ORIGIN,
+                    now: () => Math.floor(clock.ms / 1000),
+                  }),
+              },
+              ...(operateRooms === undefined ? {} : { rooms: { ...operateRooms, rooms, nameFor } }),
             }),
           }),
       history,
@@ -720,6 +820,8 @@ export async function startIdentityInstance(
     instanceKeys,
     sealed,
     analysis: analysisJobs,
+    tactics,
+    admin: madeAdmin.value,
     confirmations,
     call,
     request,
@@ -789,6 +891,8 @@ export async function startIdentityInstance(
       }
     },
     close: async () => {
+      tactics.stop();
+      await tactics.idle();
       await analysisJobs?.stop();
       await instance.listening.close();
       await history.idle();

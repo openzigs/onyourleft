@@ -30,6 +30,7 @@ const DIGESTS: Readonly<Record<string, string>> = {
   streets: 'fe3bd3eeeb96e84b90626f48bf57bd8919aba69332ead3951515eb4797ffbaf0',
   places: '9851995321b9ab45bce3c24df91e06b9f33fa6949f846806cdaf111a1ffd6d5d',
   buildingFields: '28639c36c4c37e47b25fa3e4af834afd3ae772121bf486742dbe6bcc72f27dd7',
+  waterLines: '006e9d5229c38c320fd24d126ef189a2683fcb34b26b460eba06eb180e3531a7',
 };
 
 describe('the synthetic fixtures', () => {

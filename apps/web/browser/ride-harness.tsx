@@ -100,6 +100,8 @@ import { roomPortOver } from '../src/net/room-port';
 import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
+import type { ModelTacticsPort, TacticsStatus } from '../src/game/lap-race/model-tactics-port';
+import type { PacerPort, PacerStatus } from '../src/instance/pacer-port';
 import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
 import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
@@ -389,6 +391,37 @@ function route(): RouteProfile {
 }
 
 /**
+ * `ride.html?climb=ahead` / `?climb=on` — #2593: the same 40 km as
+ * {@link route}, flat at 60 m but for one 800 m climb at 6 %, 300 m from the
+ * start (`ahead`, so the climb callout says how far it is) or from the start
+ * itself (`on`, so it counts down to the top). The rest of the ride is the
+ * widest one, as ever. With `?corridor=` the corridor's own 2 km road carries
+ * the same climb (`ride-corridor.ts`), so the map credit stands beside it.
+ */
+const CLIMB_QUERY = new URLSearchParams(window.location.search).get('climb');
+const CLIMB_AT = CLIMB_QUERY === 'ahead' ? 300 : CLIMB_QUERY === 'on' ? 0 : undefined;
+
+function climbRoute(from: number): RouteProfile {
+  const points: RoutePoint[] = [];
+  const spacing = 100;
+  for (let index = 0; index <= 400; index += 1) {
+    const along = index * spacing;
+    const climbed = Math.min(Math.max(along - from, 0), 800) * 0.06;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + along / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(60 + climbed),
+    });
+  }
+  return routeProfile(points);
+}
+
+/** #2593: `?callout=off`, the climb callout turned off in Settings, the control. */
+const HUD_CALLOUT_OFF = new URLSearchParams(window.location.search).get('callout') === 'off';
+
+/**
  * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SEVEN
  * routes, and NOT ridden: the page stops once the chooser offers *Ride*, so
  * `pre-ride.browser.spec.ts` §"#940" can choose the last card and measure where
@@ -403,6 +436,46 @@ function route(): RouteProfile {
  */
 const PICKER = new URLSearchParams(window.location.search).get('picker');
 const AT_THE_PICKER = PICKER === 'chooser' || PICKER === 'list';
+
+/**
+ * `ride.html?…&ai=offered` and `?lap=riding&ai=racing` — #2710: the rider's
+ * instance offers its model for a lap race's AI bots, through a double of the
+ * tactics port (`game/lap-race/model-tactics-port.ts`) that answers at once.
+ *
+ * - `offered`: no consent yet, so switching AI bots on in the chooser asks
+ *   for it; *Agree* records it and *Withdraw consent* takes it back.
+ * - `racing`: consented, and the ride is a lap race with AI bots: the
+ *   harness switches *Ride a lap race* and *AI bots* on before *Ride*. Every
+ *   decision the race asks for is refused, so the bots ride their own
+ *   tactics; the race's start is accepted, so the HUD says they race.
+ */
+const AI_BOTS = new URLSearchParams(window.location.search).get('ai');
+const AI_BOTS_RACING = AI_BOTS === 'racing';
+
+function tacticsDouble(consented: boolean): ModelTacticsPort {
+  let agreed = consented;
+  const status = (): Promise<TacticsStatus> =>
+    Promise.resolve({
+      kind: 'offered',
+      instance: 'https://ride.example',
+      modelAddress: 'http://192.168.1.20:11434/v1',
+      consented: agreed,
+    });
+  const setConsent = (to: boolean): Promise<TacticsStatus> => {
+    agreed = to;
+    return status();
+  };
+  return {
+    tacticsStatus: status,
+    recordTacticsConsent: () => setConsent(true),
+    withdrawTacticsConsent: () => setConsent(false),
+    startTacticsRace: () => Promise.resolve({ kind: 'answer', body: { warming: true } }),
+    decideTactics: () => Promise.resolve({ kind: 'refused', code: 'harness' }),
+    endTacticsRace: () => Promise.resolve(),
+  };
+}
+
+const TACTICS = AI_BOTS === 'offered' || AI_BOTS_RACING ? tacticsDouble(AI_BOTS_RACING) : undefined;
 
 /**
  * `ride.html?picker=chooser&notices=all` — #940's review (B2): the chooser with
@@ -504,8 +577,11 @@ function restoreTheList(): void {
  * none, and the ride screen credits OpenStreetMap or does not. @see ride-corridor.ts
  */
 const CORRIDOR_KIND = corridorRideKind(window.location.search);
+// #2593: `&climb=` puts its climb on the corridor's road too.
 const CORRIDOR =
-  CORRIDOR_KIND === undefined ? undefined : corridorRide(CORRIDOR_KIND, 'harness', errors);
+  CORRIDOR_KIND === undefined
+    ? undefined
+    : corridorRide(CORRIDOR_KIND, 'harness', errors, CLIMB_AT);
 
 /**
  * `ride.html?delivery=round` — #1816: the widest ride the picker starts, with
@@ -563,7 +639,42 @@ const CIRCUITS =
  */
 const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 'lost';
 
+/**
+ * `ride.html?picker=chooser&aipacer=offered` — #2712's AI pacer on the
+ * chooser, with a stand-in instance that offers a model and records consent
+ * in memory (the double `ai-pacer-chooser.a11y.test.tsx` uses). No instance is
+ * contacted: `pre-ride.browser.spec.ts` §"#2723" measures the switch, the
+ * consent and its button as the owner's ruling on PR #2723 asks.
+ */
+const AI_PACER = new URLSearchParams(window.location.search).get('aipacer') === 'offered';
+
+function aiPacerStandIn(): PacerPort {
+  let consented = false;
+  const status = (): PacerStatus => ({
+    kind: 'offered',
+    instance: 'https://ride.example',
+    modelAddress: 'http://192.168.1.10:11434/v1',
+    consented,
+  });
+  return {
+    offered: () => true,
+    pacerStatus: () => Promise.resolve(status()),
+    consentToPacer: () => {
+      consented = true;
+      return Promise.resolve(status());
+    },
+    withdrawPacerConsent: () => {
+      consented = false;
+      return Promise.resolve(status());
+    },
+    startPacerRide: () => Promise.resolve(false),
+    decidePacer: () => Promise.resolve({ kind: 'failed' }),
+    endPacerRide: () => Promise.resolve(),
+  };
+}
+
 const GAME: GamePort = {
+  ...(AI_PACER ? { aiPacer: aiPacerStandIn() } : {}),
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
@@ -579,9 +690,11 @@ const GAME: GamePort = {
             ? DELIVERY_TOWN.profile
             : CORRIDOR !== undefined
               ? CORRIDOR.profile
-              : new URLSearchParams(window.location.search).get('lap') === null
-                ? route()
-                : lapCircuit(),
+              : new URLSearchParams(window.location.search).get('lap') !== null
+                ? lapCircuit()
+                : CLIMB_AT !== undefined
+                  ? climbRoute(CLIMB_AT)
+                  : route(),
         attempts: 1,
       },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
@@ -1219,6 +1332,8 @@ function measure(): StageMeasurement {
     ['the map credit', '.oyl-hud__attribution'],
     // #2078: the last ten minutes, where it is drawn (`givenWay` where not).
     ['the recent graph', '.oyl-hud__recent'],
+    // #2593: the climb callout, in the notice cell, on a ride with a climb near.
+    ['the climb callout', '.oyl-hud__climb-callout'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element === null) continue;
@@ -1522,7 +1637,8 @@ async function run(): Promise<void> {
     HUD_HIDDEN.length > 0 ||
     HUD_FOCUS ||
     HUD_TOTALS ||
-    HUD_DELIVERY_EVERYTHING
+    HUD_DELIVERY_EVERYTHING ||
+    HUD_CALLOUT_OFF
   ) {
     writeHudLayout(localStorage, {
       textSize: HUD_TEXT ?? 'normal',
@@ -1530,6 +1646,7 @@ async function run(): Promise<void> {
       arrangement: HUD_FOCUS ? 'focus' : 'full',
       totalsStrip: HUD_TOTALS,
       delivery: HUD_DELIVERY_EVERYTHING ? 'everything' : 'game',
+      climbCallout: !HUD_CALLOUT_OFF,
     });
   }
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
@@ -1548,6 +1665,7 @@ async function run(): Promise<void> {
           game={GAME}
           gameTrainer={TRAINER}
           {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
+          {...(TACTICS === undefined ? {} : { tactics: TACTICS })}
           {...RACE_PORTS}
         />
       </StrictMode>,
@@ -1588,6 +1706,21 @@ async function run(): Promise<void> {
       throw new Error(`ride harness: the picker offers no usable "${text}" checkbox`);
     }
     box.click();
+  }
+  // #2710: a lap race with AI bots, the consent already given. The AI bots
+  // switch is drawn once the race is on and the instance has answered.
+  if (AI_BOTS_RACING) {
+    for (const text of ['Ride a lap race', 'AI bots']) {
+      const box = await until(`the "${text}" switch`, () =>
+        labelled<HTMLInputElement>('input[role="switch"]', text),
+      );
+      if (!box.checked) box.click();
+    }
+    await until('the AI bots consent to be read', () =>
+      (document.querySelector('.oyl-game__ai-bots')?.textContent ?? '').includes('You agreed')
+        ? true
+        : undefined,
+    );
   }
   const speed = await until('the wind speed box', () =>
     labelled<HTMLInputElement>('input[type="number"]', 'Wind speed'),

@@ -27,7 +27,16 @@
  *    mapped wood, water or park, and it is dropped — `on-excluded-land`. A
  *    building inside a mapped park is dropped deliberately: the owner's rule
  *    (ADR 0054 D-5.2) is categorical, and D-5.2's one possible exception is
- *    not taken.
+ *    not taken. #2657: a protected area's boundary (`land-class.ts`
+ *    §`PROTECTED_AREA_KINDS`, a national forest drawn round a whole town)
+ *    is not a wood or a park, and a footprint on it is built. Since #2754 a
+ *    beach or pier inside a park reads as `bare` (`land-class.ts`
+ *    §`BARE_KINDS_OVER_LAND`), and is still inside it (`insidePark`, a
+ *    mapped park's polygon, not a protected area's), so it is dropped.
+ *    ⚠️ Since #2728 also any of them over the open water the scene
+ *    DRAWS (`waterways.ts` §`onOpenWater`), which a mapped lake's
+ *    shores can lay over mapped land: tested once rule 4 has found the road
+ *    each point is beside.
  * 3. **The road** (D-5.4): any edge within `landform.ts`
  *    §`ROAD_CLEARANCE_METRES` of ANY stretch of the drawn road, and it is
  *    dropped — `on-road`. The `settlements.ts` §`footprintClearance` measure,
@@ -415,8 +424,9 @@ import {
 } from './house-archetypes';
 import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
-import { kindAt, type LandClass, type LandClassMask } from './land-class';
+import { insidePark, kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
+import { onOpenWater, waterways } from './waterways';
 import {
   CHURCH,
   CHURCH_FEATURES,
@@ -935,8 +945,20 @@ export const FOOTPRINT_SIMPLIFY_METRES = 0.5;
 /** Below this many square metres a footprint is `too-small`: **12**. */
 export const FOOTPRINT_MIN_AREA = 12;
 
-/** Above this many square metres it is `too-large`: **20 000**, out of frame anyway. */
-export const FOOTPRINT_MAX_AREA = 20_000;
+/**
+ * Above this many square metres it is `too-large`: **100 000** — a 316 m
+ * square, the size of a regional mall or a distribution warehouse. It was
+ * 20 000 until #2662, which found malls and big warehouses missing.
+ *
+ * ⚠️ **Not a triangle lever**: a plan's triangles are bounded by its outer
+ * vertices ({@link FOOTPRINT_MAX_VERTICES}) and {@link FOOTPRINT_MAX_TRIANGLES},
+ * whatever its area, and the frame's by `realistic-budget.ts`
+ * §`REALISTIC_STRUCTURE_ITEMS` (36), nearest first. A big footprint takes one
+ * of those slots as a small one does. What still drops one is a road through it
+ * (rule 4) or more than {@link FOOTPRINT_MAX_GROUND_RANGE_METRES} of ground
+ * under it, which most of that size on a hillside have.
+ */
+export const FOOTPRINT_MAX_AREA = 100_000;
 
 /** The most the drawn ground may vary under a footprint: **2.5 m**. */
 export const FOOTPRINT_MAX_GROUND_RANGE_METRES = 2.5;
@@ -1286,7 +1308,7 @@ const RESIDENTIAL_KINDS = new Set(['residential']);
  * land industrial, and every other built-up kind (commercial, a school, a
  * hospital) commercial. #1946: the archive emits no `neighbourhood` or `retail`
  * (#1630, spike 0031), so neither is named. ⚠️ A footprint on land the map classes as
- * neither — `other`, or `unknown` where no tile was read — is residential:
+ * neither — `other`, `bare` (an aerodrome, say), or `unknown` where no tile was read — is residential:
  * most buildings are houses, and a mapped house on unmapped land is still one.
  */
 export function footprintUse(landClass: LandClass, kind: string | undefined): FootprintUse {
@@ -5817,6 +5839,10 @@ function paintTown(
  * `urban`, since #1637, is the ride's urban class, built at the press beside
  * the plans: carried on the town for `settlements.ts` §`lotsAt` and
  * `streets.ts` (`MappedTown.urban`).
+ *
+ * #2660: `overlaps` also meets mapped `railway` land, so no lot stands on a
+ * railway. The land stays built-up to the mask, so nothing grows there and
+ * no field boundary runs across it; only the lots keep off it.
  */
 export function mappedTown(
   corridor: WorldCorridor,
@@ -5827,6 +5853,14 @@ export function mappedTown(
   const index = footprintIndexOf(
     plans.flatMap((plan) =>
       plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
+    ),
+  );
+  // #2660: railway land, which is built-up but no place for a house.
+  const railways = footprintIndexOf(
+    corridor.landUse.flatMap((feature) =>
+      feature.layer === 'landuse' && feature.kind === 'railway' && feature.rings[0] !== undefined
+        ? [feature.rings[0]]
+        : [],
     ),
   );
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
@@ -5840,7 +5874,7 @@ export function mappedTown(
   const town: MappedTown = {
     // #1637: the ride's urban class, which the lots and the streets read.
     ...(urban === undefined ? {} : { urban }),
-    overlaps: (lot) => index.overlaps(lot),
+    overlaps: (lot) => index.overlaps(lot) || railways.overlaps(lot),
     chainLinkAt(profile, origin, seed, land) {
       const known = chainLinks.get(profile);
       if (known !== undefined) return known;
@@ -6156,10 +6190,14 @@ function measureFootprint(
   if (outer === undefined || outer.length < 6) return 'too-small';
   const centroid = centroidOf(outer);
 
-  // 2. The land: the centroid and every vertex the map drew.
+  // 2. The land: the centroid and every vertex the map drew. #2657: a
+  // protected area's boundary (a national forest round a whole town) is not
+  // a wood, so a footprint on it is built — ADR 0054's 2026-11-15 amendment.
+  // #2754: a beach inside a park is a beach, and still inside the park.
   const excluded = (x: number, z: number): boolean => {
     const here = land.classAt(x, z);
-    return here === 'wood' || here === 'water' || here === 'park';
+    if (here === 'bare') return insidePark(corridor, x, z);
+    return (here === 'wood' || here === 'water' || here === 'park') && !land.protectedArea(x, z);
   };
   if (excluded(centroid.x, centroid.z)) return 'on-excluded-land';
   for (let i = 0; i + 1 < outer.length; i += 2) {
@@ -6220,6 +6258,20 @@ function measureFootprint(
     highest = Math.max(highest, height);
   }
   if (highest - lowest > FOOTPRINT_MAX_GROUND_RANGE_METRES) return 'too-steep';
+  // #2728: rule 2 again, over the water the scene DRAWS — a mapped lake's shores are
+  // smoothed and its surface reaches past them, so mapped land can be under drawn
+  // water, and a house there stood in it on the lake bed.
+  const ways = waterways(profile, seed, land);
+  const wet = (x: number, z: number): boolean => {
+    nearestOnRoadSegments(road, nearSegments, x, z, beside);
+    return onOpenWater(ways, profile, beside.along, beside.lateral);
+  };
+  if (ways.lakes.length + ways.crossings.length > 0) {
+    if (wet(centroid.x, centroid.z)) return 'on-excluded-land';
+    for (let i = 0; i + 1 < outer.length; i += 2) {
+      if (wet(outer[i] as number, outer[i + 1] as number)) return 'on-excluded-land';
+    }
+  }
 
   // 5. The size, as mapped.
   const area = footprintArea(building.rings);

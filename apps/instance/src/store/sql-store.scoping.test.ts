@@ -367,6 +367,37 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   listOperatorLogPage: {
     notAScopedRead: 'the operator’s own record, a page at a time, newest first (#2602)',
   },
+  mintAdminCode: { notAScopedRead: 'a write; an admin code names no athlete (#2641)' },
+  openAdminSessionWithCode: {
+    notAScopedRead:
+      'a write: the code is what admits, and the session is opened for the owner the admin layer named (#2641)',
+  },
+  findAdminSession: {
+    notAScopedRead: 'authentication: the admin cookie’s token is what names the athlete (#2641)',
+  },
+  touchAdminSession: { notAScopedRead: 'a write, by the token (#2641)' },
+  endAdminSession: { notAScopedRead: 'a write, by the token (#2641)' },
+  issueAdminChallenge: {
+    notAScopedRead: 'a write; a challenge names a session at most, never an athlete (#2642)',
+  },
+  takeAdminChallenge: {
+    notAScopedRead:
+      'a single-use take by the challenge or by the session’s token, which is what names the owner (#2642)',
+  },
+  listAdminPasskeys: {
+    notAScopedRead: 'the owner’s passkeys: they name no athlete, and are the owner’s alone (#2642)',
+  },
+  findAdminPasskeyByCredential: {
+    notAScopedRead: 'authentication: the credential is what admits, for the owner (#2642)',
+  },
+  addAdminPasskey: { notAScopedRead: 'a write; a passkey names no athlete (#2642)' },
+  removeAdminPasskey: { notAScopedRead: 'a write, by the passkey’s id (#2642)' },
+  confirmAdminPasskey: { notAScopedRead: 'the operator CLI’s write, by the passkey’s id (#2642)' },
+  recordAdminPasskeyUse: { notAScopedRead: 'a write, by the passkey’s id (#2642)' },
+  openAdminSessionWithPasskey: {
+    notAScopedRead:
+      'a write: the verified assertion is what admits, and the session is opened for the owner the admin layer named (#2642)',
+  },
   listSuspendedAthletes: {
     notAScopedRead: 'the moderators’ list of suspended accounts, a page at a time (#961)',
   },
@@ -493,6 +524,15 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   clearHostedConsent: {
     notAScopedRead: 'a write; scoping is sql-store.rider-hosted-key.test.ts’s (#1199)',
+  },
+  putTacticsConsent: {
+    notAScopedRead: 'a write; scoping is analysis/tactics.test.ts’s (#2709)',
+  },
+  getTacticsConsent: {
+    probe: async (store, athleteId) => one(await store.getTacticsConsent(athleteId)),
+  },
+  clearTacticsConsent: {
+    notAScopedRead: 'a write; scoping is analysis/tactics.test.ts’s (#2709)',
   },
   listInstanceKeys: {
     notAScopedRead:

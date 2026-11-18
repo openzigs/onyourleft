@@ -12,6 +12,7 @@
 
 import { readSecretKey, SECRET_KEY_MALFORMED } from './analysis/hosted-key.ts';
 import { DEFAULT_HEARTBEAT_MS, MAXIMUM_HEARTBEAT_MS } from './analysis/jobs.ts';
+import { isAddress, normalisedAddress } from './client-address.ts';
 import { configuredHostProblem } from './history/address.ts';
 import { DEFAULT_MAXIMUM_BUFFERED_BYTES, DEFAULT_PING_INTERVAL_MS } from './room/node/room-host.ts';
 import type { DiscordSettings } from './voice/discord.ts';
@@ -31,6 +32,9 @@ export interface RawServerConfig {
   readonly discordBotTokenFile?: DiscordTokenFile | undefined;
   readonly discordGuildId?: string | undefined;
   readonly tunnelReadyUrl?: string | undefined;
+  readonly adminPages?: string | undefined;
+  readonly adminLoopbackPort?: string | undefined;
+  readonly adminAddresses?: string | undefined;
 }
 
 /**
@@ -105,6 +109,25 @@ export interface ServerConfig {
    * rule (`history/address.ts`): a private address or a single-label name.
    */
   readonly tunnelReadyUrl: URL | undefined;
+  /**
+   * The instance's own admin pages at `/admin` (#2641, ADR 0069 D-2): OFF
+   * unless the operator sets `OYL_INSTANCE_ADMIN_PAGES=on`. A new login
+   * surface on the internet is the operator's choice to open.
+   */
+  readonly adminPages: boolean;
+  /**
+   * `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` (#2643, ADR 0069 D-5): the port of a
+   * SECOND listener that serves `/admin` and nothing else, at
+   * `http://localhost:<port>` — or `undefined`, and nothing listens. Off
+   * unless set, and it needs the admin pages on. The home compose file
+   * publishes it on the host's loopback only.
+   */
+  readonly adminLoopbackPort: number | undefined;
+  /**
+   * `OYL_INSTANCE_ADMIN_ADDRESSES` (#2643, ADR 0069 D-5): the only client
+   * addresses a tunnel admin sign-in is taken from; empty, any.
+   */
+  readonly adminAddresses: readonly string[];
 }
 
 export type ServerConfigResult =
@@ -168,6 +191,36 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
 
   const compression = onOff(raw.compression, 'OYL_INSTANCE_WS_COMPRESSION', problems);
   const metrics = onOff(raw.metrics, 'OYL_INSTANCE_METRICS', problems);
+  const adminPages = onOff(raw.adminPages, 'OYL_INSTANCE_ADMIN_PAGES', problems);
+
+  let adminLoopbackPort: number | undefined;
+  if (present(raw.adminLoopbackPort)) {
+    const text = raw.adminLoopbackPort.trim();
+    const value = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
+    if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+      problems.push('OYL_INSTANCE_ADMIN_LOOPBACK_PORT must be a port number from 1 to 65535.');
+    } else if (!adminPages) {
+      problems.push(
+        'OYL_INSTANCE_ADMIN_LOOPBACK_PORT serves the admin pages, so it needs OYL_INSTANCE_ADMIN_PAGES=on.',
+      );
+    } else {
+      adminLoopbackPort = value;
+    }
+  }
+
+  const adminAddresses: string[] = [];
+  if (present(raw.adminAddresses)) {
+    for (const entry of raw.adminAddresses.split(',').map((each) => each.trim())) {
+      if (isAddress(entry)) {
+        adminAddresses.push(normalisedAddress(entry));
+      } else {
+        problems.push(
+          'OYL_INSTANCE_ADMIN_ADDRESSES must be IP addresses separated by commas, each written exactly as the connection reports it.',
+        );
+        break;
+      }
+    }
+  }
 
   let pingIntervalMs = DEFAULT_PING_INTERVAL_MS;
   if (present(raw.pingIntervalMs)) {
@@ -297,6 +350,9 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
       analysisHeartbeatMs,
       discord,
       tunnelReadyUrl,
+      adminPages,
+      adminLoopbackPort,
+      adminAddresses,
     },
   };
 }

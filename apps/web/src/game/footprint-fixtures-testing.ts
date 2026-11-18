@@ -172,7 +172,8 @@ export const FOOTPRINT_FIXTURE_VERDICTS = {
   onRoad: 'on-road',
   steep: 'too-steep',
   shed: 'too-small',
-  warehouse: 'too-large',
+  // 22 500 m²: `too-large` until #2662 raised `FOOTPRINT_MAX_AREA` to 100 000.
+  warehouse: 'kept',
 } as const satisfies Readonly<Record<string, FootprintVerdict>>;
 
 export type FootprintFixtureName = keyof typeof FOOTPRINT_FIXTURE_VERDICTS;
@@ -1042,6 +1043,50 @@ export function fencedGroundsFixture(latitude = FIXTURE_LATITUDE): {
         land('wood', 1_800, 2_100, -60, -300),
       ],
       buildings: [shed(1_050, 70, 50, 30), shed(1_170, 90, 40, 40), shed(1_420, -135, 50, 20)],
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/**
+ * #2685's fixture: a golf course and a cemetery beside 3 km of level road,
+ * for the owner's by-eye pair (`?town=parks`, whose before is
+ * `levers=-park-dressing`). **Rectangles from arithmetic, no real place.**
+ *
+ * - **Right, 900–1 600 m**: a golf course from 8 m back to 420 m, with two
+ *   mapped sand bunkers in it, at 1 180 m and 1 420 m.
+ * - **Left, 1 000–1 300 m**: a cemetery from 10 m back to 190 m.
+ * - **Left, 1 350–1 600 m**: a plain park, the control: mown, as before.
+ * - **Right, 1 700–2 100 m**: a second cemetery, from 30 m back, behind a field.
+ */
+export function parksFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'parks',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('golf_course', 900, 1_600, 8, 420),
+        land('sand', 1_170, 1_192, 60, 78),
+        land('sand', 1_410, 1_426, 140, 162),
+        land('cemetery', 1_000, 1_300, -190, -10),
+        land('park', 1_350, 1_600, -300, -10),
+        land('farmland', 1_700, 2_100, 4, 30),
+        land('cemetery', 1_700, 2_100, 30, 200),
+      ],
+      buildings: [],
       paths: [],
       streets: [],
     },
@@ -2355,4 +2400,74 @@ export function planFingerprint(plans: readonly FootprintPlan[], withPaint = tru
 export function eavesOverhangOf(plan: FootprintPlan): number {
   const eaves = plan.archetype === 'unknown' ? 'seeded' : ARCHETYPE_FEATURES[plan.archetype].eaves;
   return eaves === 'seeded' ? EAVES_OVERHANG_METRES : eaves;
+}
+
+/** The named footprints of {@link nationalForestTownFixture}, and the verdict each must come to. */
+export const NATIONAL_FOREST_TOWN_VERDICTS = {
+  onResidential: 'kept',
+  onForestOnly: 'kept',
+  inNationalPark: 'kept',
+  inNatureReserve: 'kept',
+  inMappedWood: 'on-excluded-land',
+} as const satisfies Readonly<Record<string, FootprintVerdict>>;
+
+/**
+ * #2657's fixture, shaped like the 2026-11-15 audit's Big Bear Lake: a town
+ * whose whole stretch of road lies inside one `forest` square the size of a
+ * z15 tile — a Forest Service boundary clipped to the tile, not a mapped wood.
+ * Built from arithmetic only: nothing here is that place's data.
+ *
+ * Along 3 km of level road, the forest 1.2 km across its first 2.35 km.
+ * Inside it: a `residential` block (300–700 m along, right), most of the town
+ * on no land use but the forest (houses 1 000–1 600 m along, both sides, some
+ * within the scenery's reach of the road, as at Big Bear, where 706 of 756
+ * samples beside the road were forest), and a mapped `wood` with a house in
+ * it, which ADR 0054 D-5.2 still drops. Past it, a `national_park` and a
+ * `nature_reserve` with a house each. `named` holds one footprint of
+ * each, {@link NATIONAL_FOREST_TOWN_VERDICTS}'s; `boundary` the forest's kind,
+ * so a control can draw the same square as a mapped `wood`.
+ */
+export function nationalForestTownFixture(boundary = 'forest'): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly named: Readonly<Record<keyof typeof NATIONAL_FOREST_TOWN_VERDICTS, BuildingFeature>>;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const house = (along: number, lateral: number): BuildingFeature =>
+    buildingBeside(profile, origin, [rectangleBeside(along, lateral, 10, 8)], 7);
+  const named = {
+    onResidential: house(500, 40),
+    onForestOnly: house(1_300, 30),
+    inNationalPark: house(2_500, 60),
+    inNatureReserve: house(2_750, -60),
+    inMappedWood: house(2_150, -100),
+  };
+  const town: BuildingFeature[] = [];
+  for (let along = 340; along <= 660; along += 40) town.push(house(along, 80));
+  for (let along = 1_000; along <= 1_600; along += 50) {
+    town.push(house(along, 60), house(along, -18), house(along, -60));
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'national-forest-town',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', boundary, 10, 2_350, -600, 600),
+        landBeside(profile, origin, 'landuse', 'residential', 300, 700, 20, 200),
+        landBeside(profile, origin, 'landuse', 'wood', 2_000, 2_300, -220, -20),
+        landBeside(profile, origin, 'landuse', 'national_park', 2_400, 2_600, 20, 220),
+        landBeside(profile, origin, 'landuse', 'nature_reserve', 2_650, 2_850, -220, -20),
+      ],
+      buildings: [...Object.values(named), ...town],
+      paths: [],
+      streets: [],
+    },
+    named,
+  };
 }

@@ -10,7 +10,7 @@
 
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
-import { decideTactic } from '@onyourleft/domain';
+import { BOT_LANE_DWELL_MS, decideTactic } from '@onyourleft/domain';
 
 import type {
   BotPace,
@@ -628,18 +628,26 @@ describe('the same race gives the same decisions', () => {
     const start = createItemRace({
       course: raceCourse(FLAT.totalDistance, 3),
       seed: 1,
-      itemsOn: false,
+      itemsOn: true,
       racerIds: ['bot', 'rider'],
       startMs: 0,
     });
+    // The rider holds a gust it never sends (#2665: a bot leaves the lane of a racer behind
+    // only for one).
+    const armed = (state: ItemRaceState): ItemRaceState => ({
+      ...state,
+      racers: state.racers.map((entry) =>
+        entry.racer.id === 'rider' ? { ...entry, held: 'crosswind-gust' } : entry,
+      ),
+    });
     // The bot at 100 m, the rider 8 m behind it in its lane, as a gust would come up.
-    let race: ItemRaceState = {
+    let race: ItemRaceState = armed({
       ...start,
       racers: start.racers.map((entry) => ({
         ...entry,
         racer: { ...entry.racer, effortDistance: entry.racer.id === 'bot' ? 100 : 92 },
       })),
-    };
+    });
     let bots: readonly LapRaceBot[] = [
       {
         ...lapRaceBot('bot', 'steady', { personality: 'defensive', skill: 'crafty' }),
@@ -647,7 +655,8 @@ describe('the same race gives the same decisions', () => {
       },
     ];
     const lanes: number[] = [];
-    for (let second = 0; second < 3; second += 1) {
+    const dwell = BOT_LANE_DWELL_MS / 1_000;
+    for (let second = 0; second <= dwell; second += 1) {
       const bot = race.racers.find(
         (entry) => entry.racer.id === 'bot',
       ) as ItemRaceState['racers'][number];
@@ -658,15 +667,15 @@ describe('the same race gives the same decisions', () => {
         seed: 1,
         rider: { effortDistances: { rider: 92 + 8 * (second + 1) }, lanes: { rider: bot.lane } },
       });
-      race = next.race;
+      race = armed(next.race);
       bots = next.bots;
       lanes.push(race.racers.find((entry) => entry.racer.id === 'bot')?.lane ?? -1);
     }
-    expect(bots[0]?.memory.laneSinceMs).toBe(2_000);
+    expect(bots[0]?.memory.laneSinceMs).toBe(BOT_LANE_DWELL_MS);
     // Out at once; held for the dwell with the rider behind it again; out again after it.
     expect(lanes[0]).not.toBe(1);
-    expect(lanes[1]).toBe(lanes[0]);
-    expect(lanes[2]).not.toBe(lanes[1]);
+    for (let second = 1; second < dwell; second += 1) expect(lanes[second]).toBe(lanes[0]);
+    expect(lanes[dwell]).not.toBe(lanes[dwell - 1]);
   });
 });
 
@@ -674,9 +683,15 @@ describe('skill is its own axis, and never capacity (#1959, ADR 0067 D-4, D-7)',
   it('a crafty bot beats a naive one of the same tier and capacity more often than not, with the same CP, W′ and peak', () => {
     // #2523: at the quarter-second sub-step, not `advance`'s 10 ms (#1688's
     // ruling: a slow case is made cheaper, never given a longer timeout).
+    // #2652: two bots, not three, and 96 seeds, a whole number of the six that
+    // cycle the personality and which id is crafty. Under coverage on a CI runner
+    // the case, at three bots over 150 seeds, went past Vitest's 5 s default. The
+    // canny third bot is not what the claim is about. 96, not 48: at 48 the real
+    // effect cleared by one seed in some windows and a no-skill mutant passed in
+    // one (#2653's review); at 96 seeds 1-96 give 57:39 and the mutant 46:50.
     let ahead = 0;
     let behind = 0;
-    for (let seed = 1; seed <= 150; seed += 1) {
+    for (let seed = 1; seed <= 96; seed += 1) {
       // Which id is crafty alternates, so a tie broken by id favours neither.
       const crafty = seed % 2 === 0 ? 'a' : 'b';
       const naive = crafty === 'a' ? 'b' : 'a';
@@ -686,14 +701,6 @@ describe('skill is its own axis, and never capacity (#1959, ADR 0067 D-4, D-7)',
         [
           { id: crafty, tier: 'hard', strategy: { personality, skill: 'crafty' } },
           { id: naive, tier: 'hard', strategy: { personality, skill: 'naive' } },
-          {
-            id: 'c',
-            tier: 'hard',
-            strategy: {
-              personality: BOT_PERSONALITIES[(seed + 1) % 3] as BotStrategy['personality'],
-              skill: 'canny',
-            },
-          },
         ],
         seed,
         true,

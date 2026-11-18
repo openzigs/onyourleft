@@ -385,3 +385,16 @@ and any bot in a room (D-5.1) needs one.
   and the change is wrong rather than the gate.
 - **The W′ balance cannot be made tick-rate independent within a named tolerance** at 50 ms and 1 s:
   then D-2's form is wrong for this game, and the integral form's `Math.exp` reopens D-5.2.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-16** — **Once [ADR 0071](0071-model-chosen-lap-race-bot-tactics-during-a-ride.md) is
+  Accepted, D-6.2 is superseded by it for a lap race the rider chose to ride with AI bots.** In such
+  a race the bots are pure functions of the seed, **the decision log** (each answer with the race
+  time it arrived at) and **a stored bot-code version**, still with no wall clock and no
+  `Math.random`; the same seed, log and version replay byte for byte (its D-4). D-6.2 stands as
+  written for every other race, and a seeded race is a model race with an empty log. **D-1, D-3,
+  D-6.1 and D-6.3 to D-6.7 are unchanged**, and D-3.6 stays tested in model mode (its D-8). Read
+  ADR 0071 for the rule. This entry only points there; nothing else in this ADR changes. (#2707)

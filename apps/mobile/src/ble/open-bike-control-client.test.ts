@@ -253,3 +253,47 @@ describe('failures a rider can act on', () => {
     expect(plugin.calls).toContain(`disconnect:${ID}`);
   });
 });
+
+describe('#2672 — reaching a remembered controller with no chooser', () => {
+  const REMEMBERED = 'D1:0B:1C:00:4E:21';
+
+  it('brings the plugin up and opens it by id, showing nothing, with the same one write', async () => {
+    // A chooser that would refuse, so an open that went through one fails here.
+    const { plugin, client } = rig({ chooserRejectsWith: new Error('User cancelled') });
+    const connection = await client.connectKnown(REMEMBERED, 'Ctrl 1');
+    expect(connection.connected).toBe(true);
+    expect(connection.id).toBe(REMEMBERED);
+    expect(connection.name).toBe('Ctrl 1');
+    expect(plugin.calls).toEqual([
+      'initialize',
+      `connect:${REMEMBERED}`,
+      `getServices:${REMEMBERED}`,
+      `requestConnectionPriority:${REMEMBERED}:high`,
+      `startNotifications:${SERVICE}|${STATE}`,
+      `write:${SERVICE}|${INFORMATION}`,
+    ]);
+    const events: OpenBikeControlEvent[][] = [];
+    connection.onEvents((batch) => events.push([...batch]));
+    plugin.notify(SERVICE, STATE, view([0x01, 0x19, 0x01]));
+    expect(events).toHaveLength(1);
+  });
+
+  it('gives no name where it was remembered with none', async () => {
+    const { client } = rig();
+    const connection = await client.connectKnown(REMEMBERED, '');
+    expect(connection.name).toBeUndefined();
+  });
+
+  it('gives the chooser’s device id on a pairing, for the shell to remember it by', async () => {
+    const { connection } = await connected();
+    expect(connection.id).toBe(ID);
+  });
+
+  it('fails as a pairing would when it is not there, and leaves no link up', async () => {
+    const { plugin, client } = rig({ connectRejectsWith: new Error('Connection timeout') });
+    await expect(client.connectKnown(REMEMBERED, 'Ctrl 1')).rejects.toMatchObject({
+      code: 'not-connected',
+    });
+    expect(plugin.calls).toContain(`disconnect:${REMEMBERED}`);
+  });
+});

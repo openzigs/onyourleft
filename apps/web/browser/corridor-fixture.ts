@@ -59,8 +59,11 @@ export const LONG_CORRIDOR_ARCHIVE_FILE = 'corridor-fixture-long.pmtiles';
  * 250 km, whose corridor is past the cap, so a read is exactly
  * `CORRIDOR_MAX_TILES` tiles — #1539's performance budget.
  */
-export function corridorFixtureRoute(long = false): RouteProfile {
-  return northRoute(long ? 250_000 : 2_000, () => 10);
+export function corridorFixtureRoute(
+  long = false,
+  elevation: (along: number) => number = () => 10,
+): RouteProfile {
+  return northRoute(long ? 250_000 : 2_000, elevation);
 }
 
 /**

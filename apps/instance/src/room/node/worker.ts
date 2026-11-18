@@ -139,6 +139,12 @@ process.on('message', (message: ToWorker, handle?: Socket) => {
         seat: host.seatOf(message.roomId, message.riderId) ?? null,
       });
       return;
+    case 'rooms':
+      send({ type: 'rooms', id: message.id, rooms: host.summaries() });
+      return;
+    case 'end':
+      send({ type: 'ended', id: message.id, ok: host.end(message.roomId) });
+      return;
     case 'metrics':
       send({
         type: 'metrics',

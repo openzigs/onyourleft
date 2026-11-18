@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import {
+  ACCOUNTS_UNREADABLE_TEXT,
+  MODERATORS_ALWAYS_JOIN,
+  REGISTRATION_CHANGE_HEADING,
+  REGISTRATION_CHANGE_STEPS,
+  REGISTRATION_MODE_TEXT,
+} from '@onyourleft/operate-text';
 import type { JSX } from 'react';
 
 import { ButtonLink } from '../design/Button';
@@ -34,45 +41,21 @@ import { hrefFor, hrefForModerationSection, routeById } from '../shell/routes';
 export type RegistrationMode = OperateStatus['registration'];
 
 /**
- * Every registration mode, in words: the ONE table both Status's short line
- * and this section's sentence are read from. Keyed by the type the port
- * accepts, so a mode added there and not here is a type error, and
- * `OperateAccountsPanel.test.tsx` holds it to the instance's own
- * `REGISTRATION_MODES` (`apps/instance/src/config.ts`).
+ * The registration mode in words, and what every mode has in common, are
+ * `@onyourleft/operate-text`'s since #2644 (ADR 0069 D-7), so the instance's
+ * admin Accounts page says the same — and since #2646 the steps to change
+ * it, `REGISTRATION_CHANGE_STEPS`. `REGISTRATION_MODE_TEXT` is keyed by the
+ * package's mode type and indexed here with the port's, so a mode the port
+ * admits and the package does not is a type error, and
+ * `OperateAccountsPanel.test.tsx` holds its keys to the instance's own
+ * `REGISTRATION_MODES` (`apps/instance/src/config.ts`). Re-exported so the
+ * names this panel's tests read are the ones they read before the move.
  */
-export const REGISTRATION_MODE_TEXT: Readonly<
-  Record<RegistrationMode, { readonly short: string; readonly meaning: string }>
-> = {
-  approval: {
-    short: 'approval: a moderator approves each account',
-    meaning:
-      'A new rider’s account waits until a moderator approves it; until then other riders cannot see it.',
-  },
-  invite: {
-    short: 'invite: only with an invite code',
-    meaning:
-      'A new rider joins only with a single-use invitation from a moderator, good for seven days.',
-  },
-  open: {
-    short: 'open: anybody may join',
-    meaning: 'Anybody who reaches the instance gets an active account at once.',
-  },
-  closed: {
-    short: 'closed: nobody new may join',
-    meaning: 'Nobody new can join.',
-  },
-};
-
-/** The modes, in the order the steps name them. */
-const MODES = Object.keys(REGISTRATION_MODE_TEXT) as RegistrationMode[];
-
-/** What every mode has in common, behind the mode heading's ⓘ. */
-export const MODERATORS_ALWAYS_JOIN =
-  'In every mode, the keys named as owner and deputy sign in with an active account.';
-
-/** Said in place of the counts when the owner's read of the status did not come. */
-export const ACCOUNTS_UNREADABLE_TEXT =
-  'The account counts could not be read from the instance, so they are not shown here.';
+export {
+  ACCOUNTS_UNREADABLE_TEXT,
+  MODERATORS_ALWAYS_JOIN,
+  REGISTRATION_MODE_TEXT,
+} from '@onyourleft/operate-text';
 
 /** The section's one drawn line (#1013, `a11y/section-lines.ts`). */
 export const ACCOUNTS_LINE = 'Approve, refuse and invite on the Moderation screen.';
@@ -114,27 +97,16 @@ function Counted({ status }: { readonly status: OperateStatus }): JSX.Element {
           </ButtonLink>
         </p>
       ) : null}
-      <h3>Changing the mode</h3>
+      <h3>{REGISTRATION_CHANGE_HEADING}</h3>
       <p>This app shows the mode and cannot change it. On the instance’s host:</p>
       <ol>
-        <li>
-          Open the <code>.env</code> file beside <code>compose.yaml</code>.
-        </li>
-        <li>
-          Set <code>OYL_INSTANCE_REGISTRATION</code> to{' '}
-          {MODES.map((each, index) => (
-            <span key={each}>
-              <code>{each}</code>
-              {index === MODES.length - 1 ? '' : index === MODES.length - 2 ? ' or ' : ', '}
-            </span>
-          ))}
-          .
-        </li>
-        <li>
-          In that folder, run <code>docker compose up -d instance</code>, which starts the instance
-          again with the new mode. <code>docker compose restart</code> does not read{' '}
-          <code>.env</code> again.
-        </li>
+        {REGISTRATION_CHANGE_STEPS.map((step, index) => (
+          <li key={String(index)}>
+            {step.map((part, at) =>
+              typeof part === 'string' ? part : <code key={String(at)}>{part.code}</code>,
+            )}
+          </li>
+        ))}
       </ol>
     </>
   );

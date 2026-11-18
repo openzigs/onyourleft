@@ -1,5 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import {
+  BACK_UP_NOW_CONFIRM_TEXT,
+  BACKUP_FAILED_TEXT,
+  BACKUP_NOT_ASKED_TEXT,
+  BACKUP_WAITING_TEXT,
+  backupLine,
+  BACKUPS_LIST_TEXT,
+  BACKUPS_UNREADABLE_TEXT,
+  backupsStaleText,
+  momentText,
+  NO_BACKUP_TEXT,
+  NO_SNAPSHOT_TO_RESTORE_TEXT,
+  OFF_BOX_FAILED_TEXT,
+  RESTORE_HEADING,
+  RESTORE_ONE_OFF_TEXT,
+  RESTORE_PREFACE_TEXT,
+  RESTORE_WHY_TEXT,
+  restoreSteps,
+  type OperateLine,
+} from '@onyourleft/operate-text';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
@@ -13,7 +33,6 @@ import type {
   OperateBackupsRead,
   OperatePort,
 } from '../instance/operate-port';
-import { bytesText, durationText } from './OperateStatusPanel';
 
 /**
  * **Backups** (#2607, epic #2601): the third section of the owner's Operate
@@ -56,55 +75,19 @@ const everyInterval: Every = (milliseconds, tick) => {
   };
 };
 
-/** Said in place of the list when the owner's read of it did not come. */
-export const BACKUPS_UNREADABLE_TEXT =
-  'The backups could not be read from the instance, so they are not shown here.';
-
-/** Said while a "back up now" waits for the `backup` service. */
-export const BACKUP_WAITING_TEXT =
-  'Waiting for the backup service. It takes the snapshot within 30 seconds, and this list is ' +
-  'read again until it appears.';
-
-/** Said when "back up now" was not taken for a reason other than the instance's refusal. */
-export const BACKUP_NOT_ASKED_TEXT =
-  'The instance did not take the request, so no backup was asked for. Try again.';
-
-/** The confirmation's sentence: what "back up now" removes, in plain words. */
-export const BACK_UP_NOW_CONFIRM_TEXT =
-  'The backup service takes a snapshot within 30 seconds. It keeps the number of snapshots it ' +
-  'is set to keep, so the oldest one beyond that number is removed, as a scheduled backup ' +
-  'would remove it.';
-
-/** The steps' one line: where they are run. */
-export const RESTORE_PREFACE_TEXT =
-  'Restore stops the instance, so it stays on the host. Run these in the folder that holds compose.yaml.';
-
-/** Behind the steps' ⓘ: why restore is not a button, and what it puts back. */
-export const RESTORE_WHY_TEXT =
-  'A restore replaces everything the instance holds and needs it stopped, so the app does not ' +
-  'run it. The operator log goes back to what it held when the snapshot was taken.';
-
-/** Behind the steps' ⓘ: where a one-off snapshot is. */
-export const RESTORE_ONE_OFF_TEXT =
-  'A one-off snapshot, such as the one taken before a deploy, is under /backups/pre-deploy, ' +
-  'and the steps say so for one.';
-
-const OFF_BOX_TEXT: Readonly<
-  Record<Extract<OperateBackup, { outcome: 'done' }>['offBox'], string>
-> = {
-  copied: 'off-box copy made',
-  failed: 'off-box copy FAILED',
-  'not-configured': 'no off-box copy is set up',
-};
-
-/** A moment, in UTC, so the screen says the same thing wherever it is read. */
-function when(iso: string): string {
-  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
-}
-
-function count(value: number, one: string, many: string): string {
-  return `${String(value)} ${value === 1 ? one : many}`;
-}
+/**
+ * The section's sentences and words are `@onyourleft/operate-text`'s since
+ * #2644 (ADR 0069 D-7), so the instance's admin Backups page says the same.
+ * Re-exported so the names this panel's tests read are the ones they read
+ * before the move; the declarations are the package's alone
+ * (`operate-text-moved.test.ts`).
+ */
+export {
+  BACK_UP_NOW_CONFIRM_TEXT,
+  BACKUP_NOT_ASKED_TEXT,
+  BACKUP_WAITING_TEXT,
+  BACKUPS_UNREADABLE_TEXT,
+} from '@onyourleft/operate-text';
 
 type Snapshot = Extract<OperateBackup, { outcome: 'done' }>;
 
@@ -115,37 +98,30 @@ function newestServiceSnapshot(backups: OperateBackups): Snapshot | undefined {
   );
 }
 
-/** Where the `backup` service sees a snapshot: deploy.sh writes its one-off under `pre-deploy`. */
-export function snapshotPlace(snapshot: Snapshot): string {
-  return snapshot.intervalSeconds === null
-    ? `/backups/pre-deploy/${snapshot.snapshot}`
-    : `/backups/${snapshot.snapshot}`;
+/** One shared line, its machine names drawn as code. */
+function Line({ line }: { readonly line: OperateLine }): JSX.Element {
+  return (
+    <>
+      {line.map((part, index) =>
+        typeof part === 'string' ? part : <code key={String(index)}>{part.code}</code>,
+      )}
+    </>
+  );
 }
 
 function Row({ backup }: { readonly backup: OperateBackup }): JSX.Element {
-  const age = `${durationText(backup.ageSeconds)} ago`;
-  if (backup.outcome === 'failed') {
-    return (
-      <li>
-        <strong>{when(backup.at)}</strong>, {age}: no snapshot was made (<code>{backup.error}</code>
-        ).
-        <StatusMessage tone="warning" label="Failed">
-          This backup run failed. The snapshots below it are as they were.
-        </StatusMessage>
-      </li>
-    );
-  }
+  const { moment, rest } = backupLine(backup);
   return (
     <li>
-      <strong>{when(backup.at)}</strong>, {age}
-      {backup.requested ? ', asked for from the app' : ''}
-      {backup.intervalSeconds === null ? ', a one-off' : ''}: {bytesText(backup.sizeBytes)},{' '}
-      {count(backup.rows, 'row', 'rows')}, {count(backup.blobs, 'blob', 'blobs')};{' '}
-      {OFF_BOX_TEXT[backup.offBox]}. <code>{backup.snapshot}</code>
-      {backup.offBox === 'failed' ? (
+      <strong>{moment}</strong>
+      <Line line={rest} />
+      {backup.outcome === 'failed' ? (
+        <StatusMessage tone="warning" label="Failed">
+          {BACKUP_FAILED_TEXT}
+        </StatusMessage>
+      ) : backup.offBox === 'failed' ? (
         <StatusMessage tone="warning" label="Off-box copy failed">
-          This snapshot is only on the machine the instance runs on. Check the off-box drive or
-          share.
+          {OFF_BOX_FAILED_TEXT}
         </StatusMessage>
       ) : null}
     </li>
@@ -167,11 +143,11 @@ function RestoreSteps({ snapshots }: { readonly snapshots: readonly Snapshot[] }
           </>
         }
       >
-        Restoring a snapshot
+        {RESTORE_HEADING}
       </SectionHeading>
       <p>{RESTORE_PREFACE_TEXT}</p>
       {chosen === undefined ? (
-        <p className="oyl-muted">There is no snapshot to restore yet.</p>
+        <p className="oyl-muted">{NO_SNAPSHOT_TO_RESTORE_TEXT}</p>
       ) : (
         <>
           <p>
@@ -186,41 +162,17 @@ function RestoreSteps({ snapshots }: { readonly snapshots: readonly Snapshot[] }
             >
               {snapshots.map((each) => (
                 <option key={each.id} value={String(each.id)}>
-                  {when(each.at)}: {each.snapshot}
+                  {momentText(each.at)}: {each.snapshot}
                 </option>
               ))}
             </select>
           </p>
           <ol className="oyl-operate__restore">
-            <li>
-              Stop the instance and the backup service:{' '}
-              <code>docker compose stop instance backup</code>
-            </li>
-            <li>
-              Restore the snapshot. <code>--force</code> writes over the data that is there now;
-              without it the restore refuses:{' '}
-              <code>
-                {`docker compose run --rm --no-deps --entrypoint node backup src/operator/cli.ts restore ${snapshotPlace(chosen)} --force`}
-              </code>
-            </li>
-            <li>
-              A restore rotates the instance’s encryption key as its last step, but the backup
-              service holds no secret key, so rotate it in the instance service:{' '}
-              <code>
-                docker compose run --rm --no-deps -T instance node src/operator/cli.ts instance-key
-                rotate
-              </code>
-            </li>
-            <li>
-              Check what is in place: it should say {count(chosen.rows, 'row', 'rows')} and{' '}
-              {count(chosen.blobs, 'blob', 'blobs')}.{' '}
-              <code>
-                docker compose run --rm --no-deps -T instance node src/operator/cli.ts verify
-              </code>
-            </li>
-            <li>
-              Start them again: <code>docker compose up -d instance backup</code>
-            </li>
+            {restoreSteps(chosen).map((step, index) => (
+              <li key={String(index)}>
+                <Line line={step} />
+              </li>
+            ))}
           </ol>
         </>
       )}
@@ -335,14 +287,14 @@ export function OperateBackupsPanel({
           {asked.kind === 'refused' ? asked.sentence : BACKUP_NOT_ASKED_TEXT}
         </StatusMessage>
       )}
-      <p>The snapshots the backup service recorded, newest first.</p>
+      <p>{BACKUPS_LIST_TEXT}</p>
       {newest !== undefined && staleInterval !== undefined ? (
         <StatusMessage tone="warning" label="Stale">
-          {`The newest scheduled snapshot is ${durationText(newest.ageSeconds)} old, more than twice the backup interval of ${durationText(staleInterval)}: a backup was missed.`}
+          {backupsStaleText(newest.ageSeconds, staleInterval)}
         </StatusMessage>
       ) : null}
       {read.records.length === 0 ? (
-        <p className="oyl-muted">No backup is recorded yet.</p>
+        <p className="oyl-muted">{NO_BACKUP_TEXT}</p>
       ) : (
         <ol className="oyl-operate__backups">
           {read.records.map((backup) => (

@@ -37,6 +37,9 @@ import {
   STREET_FIXTURE_ROADS,
   streetsTile,
   tileAtLimit,
+  WATER_LINE_FIXTURE_KEPT,
+  WATER_LINE_FIXTURE_LINES,
+  waterLinesTile,
   WOOD_HOLE,
   WOOD_OUTER,
   woodWithHoleTile,
@@ -59,6 +62,26 @@ function decoded(bytes: Uint8Array): DecodedTile {
   const result = decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
   if ('reason' in result) throw new Error(`refused: ${result.reason}`);
   return result;
+}
+
+/**
+ * The fastest of five timed decodes of `bytes`, after one untimed decode to
+ * warm the JIT, as a long-lived page would be. A wall-clock sample of ONE call
+ * also times whatever else the process did meanwhile — a collection, a
+ * preemption, the coverage writer — and #2595 is one such sample reading
+ * 50.34 ms against a 50 ms bound on a nightly runner under coverage, green on
+ * the re-run. The fastest of five is the decoder's own cost: a decoder that is
+ * slow is slow in all five.
+ */
+function bestOfFive(bytes: Uint8Array): number {
+  decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
+  let fastest = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 5; i++) {
+    const started = performance.now();
+    decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
+    fastest = Math.min(fastest, performance.now() - started);
+  }
+  return fastest;
 }
 
 /**
@@ -132,12 +155,37 @@ describe('decodeTile on the named fixtures', () => {
     expectRingAt(wood?.rings[1] as Float32Array, WOOD_HOLE);
   });
 
-  it('lake: the water polygon only; its stream and label point are not kept', () => {
+  it('lake: the water polygon, and since #2659 its stream as a water line; its label point is not kept', () => {
     const tile = decoded(lakeTile());
     expect(tile.landUse.map((f) => [f.layer, f.kind, f.rings.length])).toEqual([
       ['water', 'lake', 1],
     ]);
     expect(tile.paths).toEqual([]);
+    expect(tile.waterLines.map((f) => [f.kind, f.line.length])).toEqual([['stream', 6]]);
+  });
+
+  it('water lines — #2659: a river, a stream and a canal, along their lines; never a ditch, a drain or any other kind', () => {
+    const tile = decoded(waterLinesTile());
+    expect(tile.waterLines.map((f) => f.kind)).toEqual([...WATER_LINE_FIXTURE_KEPT]);
+    for (const kept of tile.waterLines) {
+      const spec = WATER_LINE_FIXTURE_LINES.find((each) => each.kind === kept.kind);
+      const got = vertices(kept.line);
+      expect(got).toHaveLength(spec?.line.length ?? -1);
+      spec?.line.forEach(([px, py], i) => {
+        const want = expectedMetres(px, py);
+        expect(Math.abs((got[i] as [number, number])[0] - want.x)).toBeLessThan(0.01);
+        expect(Math.abs((got[i] as [number, number])[1] - want.z)).toBeLessThan(0.01);
+      });
+    }
+    // The polygon beside them is still land use, and no line became one.
+    expect(tile.landUse.map((f) => [f.layer, f.kind])).toEqual([['water', 'lake']]);
+    expect(tile.paths).toEqual([]);
+    expect(tile.streets).toEqual([]);
+  });
+
+  it('a tile with no water lines has none', () => {
+    expect(decoded(residentialBlockTile()).waterLines).toEqual([]);
+    expect(decoded(sidewalkTile()).waterLines).toEqual([]);
   });
 
   it('sidewalk: the footway is kept along its line; the street beside it is a street, not a path', () => {
@@ -259,6 +307,8 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'line',
         'places',
         'populationRank',
+        // #2659.
+        'waterLines',
         // #1789: the building fields, from the one list.
         ...BUILDING_FIELD_NAMES,
       ];
@@ -442,12 +492,11 @@ describe('decodeTile refuses hostile input, and never throws', () => {
   for (const fixture of HOSTILE_FIXTURES) {
     it(`${fixture.name}: refused as ${fixture.refusal.reason}, inside 50 ms`, () => {
       const bytes = fixture.bytes();
-      decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME); // warm the JIT, as a long-lived page would be
-      const started = performance.now();
-      const result = decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
-      const elapsed = performance.now() - started;
-      expect(result).toEqual(fixture.refusal);
-      expect(elapsed).toBeLessThan(50);
+      expect(decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME)).toEqual(fixture.refusal);
+      // The bound is #1544's and is not raised (#1688); only the sampling is
+      // (#2595). The slowest fixture, the tile over the vertex limit, read
+      // 10.5–17.5 ms a call under coverage on a Mac and 0.8–1.4 ms without.
+      expect(bestOfFive(bytes)).toBeLessThan(50);
     });
   }
 
@@ -514,23 +563,13 @@ describe('decodeTile at each limit', () => {
    * under the same instrumentation — so the runner divides out. Linear is 10;
    * a decoder gone quadratic would read about 100. The bound is 25.
    */
-  const best = (bytes: Uint8Array): number => {
-    decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
-    let fastest = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 5; i++) {
-      const started = performance.now();
-      decodeTile(bytes, FIXTURE_TILE, FIXTURE_FRAME);
-      fastest = Math.min(fastest, performance.now() - started);
-    }
-    return fastest;
-  };
   for (const [limit, build, full] of [
     ['featuresPerLayer', footprintTile, MAX_FEATURES_PER_LAYER],
     ['verticesPerTile', footwayTile, MAX_VERTICES_PER_TILE],
   ] as const) {
     it(`the ${limit} fixture, one of the two densest, decodes at a cost linear in its size`, () => {
-      const dense = best(build(full));
-      const tenth = best(build(full / 10));
+      const dense = bestOfFive(build(full));
+      const tenth = bestOfFive(build(full / 10));
       console.info(
         `map-features: ${limit} at its limit decoded in ${dense.toFixed(2)} ms (best of 5); ` +
           `a tenth of it in ${tenth.toFixed(2)} ms; ${cpus()[0]?.model ?? 'unknown CPU'}`,

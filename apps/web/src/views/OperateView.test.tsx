@@ -27,7 +27,6 @@ import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mo
 import {
   OPERATE_NO_PORT,
   OPERATE_PURPOSE,
-  OPERATE_SECTIONS_TO_COME,
   OPERATE_STANDING_TEXT,
   OPERATOR_LOG_MORE_UNREADABLE_TEXT,
   OPERATOR_LOG_UNREADABLE_TEXT,
@@ -138,9 +137,16 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
     const headings = [...(mounted.container.querySelectorAll('h2') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(headings.slice(0, 4)).toEqual(['Status', 'Accounts', 'Backups', 'Operator log']);
-    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Status');
-    expect(OPERATE_SECTIONS_TO_COME).not.toContain('Backups');
+    expect(headings).toEqual([
+      'Status',
+      'Accounts',
+      'Backups',
+      'AI backend',
+      'Rooms',
+      'Instance keys',
+      'Recent problems',
+      'Operator log',
+    ]);
   });
 
   it.each(['deputy', 'rider'] as const)(
@@ -248,16 +254,20 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()[2]).toContain(
       'Database migrated, 2026-11-14 09:00 UTC, from the command line on the host: done (applied=40).',
     );
-    // Backups (#2607) reads its own list as it is drawn.
-    expect(scripted.calls).toEqual(['standing', 'status', 'log', 'backups', 'log 2']);
+    // Backups (#2607) reads its own list as it is drawn; the log's own reads,
+    // among the AI backend's (#2611).
+    expect(
+      scripted.calls.filter(
+        (call) => ['standing', 'status', 'backups'].includes(call) || call.startsWith('log'),
+      ),
+    ).toEqual(['standing', 'status', 'log', 'backups', 'log 2']);
     expect(showOlder()).toBeUndefined();
   });
 
-  it('says what each part of the area is for, and lists the sections still to come', async () => {
+  it('says what the area is for', async () => {
     mounted = await mount(<OperateView port={scriptedOperate().port} />);
     await settle();
     expect(text()).toContain(OPERATE_PURPOSE);
-    for (const section of OPERATE_SECTIONS_TO_COME) expect(text()).toContain(section);
   });
 
   it('shows an action a newer instance added by its own name', async () => {
@@ -278,6 +288,51 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(logLines()).toEqual([
       'tunnel check, 2026-11-14 09:00 UTC, from the command line on the host: done.',
     ]);
+  });
+
+  it('names the instance’s admin pages as an entry’s source, by listener (#2641)', async () => {
+    const scripted = scriptedOperate({
+      entries: [
+        {
+          id: 2,
+          at: '2026-11-15T09:01:00.000Z',
+          source: 'admin_loopback',
+          action: 'admin_refused',
+          detail: 'code,refused=3',
+          outcome: 'refused',
+        },
+        {
+          id: 1,
+          at: '2026-11-15T09:00:00.000Z',
+          source: 'admin_tunnel',
+          action: 'admin_sign_in',
+          detail: 'code',
+          outcome: 'done',
+        },
+      ],
+    });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    expect([...logLines()].sort()).toEqual([
+      'Admin sign-in attempts refused, 2026-11-15 09:01 UTC, from the admin pages, on the server machine: refused (code,refused=3).',
+      'Signed in to the admin pages, 2026-11-15 09:00 UTC, from the admin pages, through the tunnel: done (code).',
+    ]);
+  });
+
+  it.each([
+    ['analysis_settings_set', 'AI settings changed'],
+    ['analysis_settings_cleared', 'AI settings returned to .env'],
+    ['analysis_model_checked', 'Model checked for tool calling'],
+  ])('names the AI backend’s action %s in words (#2611)', (action, label) => {
+    expect(operatorActionLabel(action)).toBe(label);
+  });
+
+  it.each([
+    ['admin_passkey_enrolled', 'Admin passkey added'],
+    ['admin_passkey_revoked', 'Admin passkey revoked'],
+    ['admin_passkey_confirmed', 'Admin passkey confirmed on the host'],
+  ])('names the admin passkeys’ action %s in words (#2642)', (action, label) => {
+    expect(operatorActionLabel(action)).toBe(label);
   });
 
   it('names “back up now” in the log as the owner asked for it (#2607)', () => {

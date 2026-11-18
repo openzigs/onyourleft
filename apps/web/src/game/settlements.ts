@@ -98,10 +98,10 @@ import {
   type PlotModelFootprint,
 } from './house-models';
 import {
-  builtUpOrWater,
   COUNTRYSIDE,
   fieldGround,
   NO_LAND_CLASS,
+  nothingGrowsAt,
   type Countryside,
   type LandClass,
   type LandClassMask,
@@ -659,7 +659,9 @@ function buildable(
   to: number,
   lateral: number,
 ): boolean {
-  const ways = waterways(profile, seed);
+  // #2658: the invented water alone. No site is built where the map was read
+  // (`siteOnMappedLand`), and the map's water is only there.
+  const ways = waterways(profile, seed, NO_LAND_CLASS);
   for (let at = from; at <= to + 1e-9; at += 10) {
     const wrapped = distanceOnRoute(profile, at);
     if (Math.abs(gradeAt(profile, wrapped)) > SETTLEMENT_GRADE_PERCENT) return false;
@@ -1037,7 +1039,7 @@ function settlementsAt(
                 ...(plot.paint === undefined ? {} : { paint: plot.paint }),
                 ...(plot.house !== undefined &&
                 model !== undefined &&
-                modelStands(profile, origin, seed, item, plot, model)
+                modelStands(profile, origin, seed, item, plot, model, land)
                   ? { house: plot.house }
                   : {}),
               },
@@ -1126,7 +1128,8 @@ export function placeLot(
 export interface MappedFootprintIndex {
   /**
    * Whether a lot ({@link LOT_FLOATS}), grown by
-   * {@link BUILDING_CLEARANCE_METRES} all round, meets any kept footprint.
+   * {@link BUILDING_CLEARANCE_METRES} all round, meets any kept footprint —
+   * and, for a {@link MappedTown}, mapped `railway` land (#2660).
    */
   overlaps(lot: Float64Array): boolean;
 }
@@ -1202,6 +1205,8 @@ export function lotSpacing(profile: RouteProfile): {
  *    ({@link MappedFootprintIndex}).
  * 3. **Never on wood, water or park** (P-9, the owner's rule): rule 1's
  *    corners already exclude them, since those classes are not `built-up`.
+ *    #2660: **nor on railway land**, which is `built-up` — rule 2's
+ *    {@link MappedTown.overlaps} meets it as it meets a footprint.
  * 4. {@link PLOT_BUILT_SHARE} of candidates are built, by a hash of the plot.
  *    The kind is a house, with a row of shops every {@link LOT_SHOP_EVERY}th
  *    plot where the land is mapped `commercial`. No church and no signpost: a
@@ -1579,7 +1584,7 @@ function fieldEdgesAt(
   // The ground's own field grid, so the patchwork and the walls agree (#425).
   const span = fieldSpanMetres(profile);
   const fields = Math.max(1, Math.round(total / span));
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const first = Math.floor(fromMetres / span) - 1;
   // Never more fields than the route has. @see settlementsAt's bound.
   const last = Math.min(Math.floor(toMetres / span), first + fields + 1);
@@ -2151,11 +2156,12 @@ function modelStands(
   item: ScatterItem,
   plot: Plot,
   model: PlotModelFootprint,
+  land: LandClassMask,
 ): boolean {
   if (footprintClearance(profile, origin, item, model) < ROAD_CLEARANCE_METRES) return false;
   const wrapped = distanceOnRoute(profile, plot.along);
   return !inWater(
-    waterways(profile, seed),
+    waterways(profile, seed, land),
     profile,
     wrapped,
     (plot.lateral - model.back) * plot.side,
@@ -2190,7 +2196,7 @@ export const SETTLEMENT_CLEARED_KINDS: ReadonlySet<string> = new Set([
 /**
  * The natural scenery, less every tree, shrub and rock standing on a
  * settlement's ground — #1534 — or, since #1546, on mapped built-up land or
- * water. Pure, and a function of positions only. In `sceneFrame` the land half is
+ * water, and since #2662 bare ground. Pure, and a function of positions only. In `sceneFrame` the land half is
  * belt and braces: `scatterAt` has already filtered those items with the same mask.
  */
 export function clearOfSettlements(
@@ -2203,7 +2209,7 @@ export function clearOfSettlements(
     (item) =>
       !SETTLEMENT_CLEARED_KINDS.has(item.kind) ||
       !(
-        builtUpOrWater(land, item.x, item.z) ||
+        nothingGrowsAt(land, item.x, item.z) ||
         footprints.some((piece) => onSettlementGround(item, piece))
       ),
   );

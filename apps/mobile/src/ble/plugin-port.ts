@@ -138,10 +138,11 @@ export interface CapacitorBlePort {
    * The plugin's `getDevices(ids)` takes the ids to look up, so the caller has
    * to have kept them. That is the adapter's business, not this seam's.
    *
-   * @unwired nothing reconnects silently, on either platform. docs/agents/web-bluetooth.md §8:
-   * *"there is no silent reconnect that is shippable in 2026 … do not build
-   * automatic reconnection"*. This is the call that would serve one when the
-   * product decides to have it.
+   * Since #2669 the Android shell keeps them — `transport.ts` §`knownDevices`
+   * asks with the ids of the sensors the rider paired before, so the app
+   * reconnects to them with no chooser. A browser still cannot
+   * (docs/agents/web-bluetooth.md §8). ⚠️ On Android the answer carries the
+   * address and no name, which is why the remembered name travels beside it.
    */
   getDevices(ids: readonly string[]): Promise<readonly PluginDevice[]>;
 

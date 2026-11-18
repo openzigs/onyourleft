@@ -45,6 +45,7 @@ import {
   migrateDown,
   migrateUp,
   SCHEMA_MIGRATIONS,
+  ACTIVITY_LAP_RACES,
   ACTIVITY_MAY_BE_RACED,
   CAMERA_FRAME_SOURCE,
   SIDE_REPORT_POSE_SUMMARY,
@@ -324,11 +325,15 @@ describe('the production registry', () => {
     //
     // ⚠️ Version 21 (#1063) is the third record migration: every camera frame
     // gains a REQUIRED `source`, `activityId` and `outline`. So it holds three.
-    expect(SCHEMA_VERSION).toBe(21);
+    //
+    // ⚠️ Version 22 (#2710) is the fourth: a ride's facts may carry its races
+    // with AI bots, and the pair's `down` drops them (ADR 0071 D-4.4). Four.
+    expect(SCHEMA_VERSION).toBe(22);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([
       SIDE_REPORT_POSE_SUMMARY,
       ACTIVITY_MAY_BE_RACED,
       CAMERA_FRAME_SOURCE,
+      ACTIVITY_LAP_RACES,
     ]);
   });
 
@@ -1566,5 +1571,115 @@ describe('version 20 to version 21 — #1063’s side-camera snapshots, a record
     );
     // The rollback, executed against what the real upgrade wrote.
     expect(migrateDown(CAMERA_FRAME_SOURCE, onDisk)).toStrictEqual(V20_FRAMES);
+  });
+});
+
+describe('version 21 to version 22 — #2710’s races with AI bots, a record migration', () => {
+  const LAP_RACE = {
+    version: 1,
+    seed: 77,
+    log: [
+      {
+        askedAtMs: 4_000,
+        arrivedAtMs: 6_500,
+        outcome: 'decision',
+        moves: [{ bot: 0, move: 'attack' }],
+      },
+      { askedAtMs: 8_000, arrivedAtMs: 8_100, outcome: 'refused', reason: 'tactics_busy' },
+    ],
+    rider: { effortDistances: [0.4, 0.8], wattsPerKilogram: [3, null], lanes: [1, 1], uses: [] },
+  } as const;
+  /** Two rides as version 21 wrote them: one with facts, one with none. */
+  const V21_RIDES: readonly PersistedActivity[] = [
+    {
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'Raced at twenty-one',
+      startedAt: 1_760_000_000,
+      startedAtTimeZone: 'Europe/London',
+      elapsedTime: 600,
+      movingTime: 590,
+      distance: 5000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_760_000_600,
+      mayBeRaced: false,
+      rideFacts: { ghostRaced: true },
+    },
+    {
+      id: 'ride-2',
+      athleteId: 'athlete-a',
+      name: 'No facts',
+      startedAt: 1_760_100_000,
+      startedAtTimeZone: 'UTC',
+      elapsedTime: 1200,
+      movingTime: 1200,
+      distance: 10_000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_760_101_200,
+      mayBeRaced: false,
+    },
+  ];
+
+  it('up then down returns every version-21 ride to exactly its version-21 shape', () => {
+    expect(migrateDown(ACTIVITY_LAP_RACES, migrateUp(ACTIVITY_LAP_RACES, V21_RIDES))).toStrictEqual(
+      V21_RIDES,
+    );
+    expect(migrateUp(ACTIVITY_LAP_RACES, V21_RIDES)).toStrictEqual(V21_RIDES);
+  });
+
+  it('down drops a race’s record and nothing else of the ride — the loss its description names', () => {
+    const raced: PersistedActivity = {
+      ...V21_RIDES[0]!,
+      rideFacts: { ghostRaced: true, lapRaces: [LAP_RACE] },
+    };
+    expect(ACTIVITY_LAP_RACES.down(raced)).toStrictEqual(V21_RIDES[0]);
+    expect(ACTIVITY_LAP_RACES.up(raced)).toStrictEqual(raced);
+    expect(ACTIVITY_LAP_RACES.description).toMatch(/down drops/);
+  });
+
+  it('is pure — the fixture is not mutated', () => {
+    const raced = { ...V21_RIDES[0]!, rideFacts: { lapRaces: [LAP_RACE] } };
+    const before = structuredClone(raced);
+    ACTIVITY_LAP_RACES.down(raced);
+    expect(raced).toStrictEqual(before);
+  });
+
+  it('opens a real version-21 database, keeps a race’s record with a ride saved after, and rolls back exactly', async () => {
+    const v21 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 21).forEach((stores, index) => {
+      v21.version(index + 1).stores(stores);
+    });
+    await v21.table(TABLE.athletes).bulkPut([{ id: 'athlete-a', displayName: 'A', createdAt: 1 }]);
+    await v21.table(TABLE.activities).bulkPut([...V21_RIDES]);
+    const beforeVersion = v21.backendDB().version;
+    v21.close();
+
+    const store = openActivityStore(databaseName);
+    const owner = athleteId('athlete-a');
+    const old = await store.getActivity(owner, activityId('ride-1'));
+    const updated = await store.setActivityRideFacts(owner, activityId('ride-1'), {
+      ghostRaced: true,
+      lapRaces: [LAP_RACE],
+    });
+    const read = await store.getActivity(owner, activityId('ride-1'));
+    store.close();
+
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = (await raw
+      .table(TABLE.activities)
+      .orderBy('id')
+      .toArray()) as PersistedActivity[];
+    raw.close();
+
+    expect(beforeVersion).toBe(21 * 10);
+    expect(old?.rideFacts).toStrictEqual({ ghostRaced: true });
+    expect(updated).toBe(true);
+    expect(read?.rideFacts?.lapRaces).toStrictEqual([LAP_RACE]);
+    expect(migrateDown(ACTIVITY_LAP_RACES, onDisk)).toStrictEqual(V21_RIDES);
   });
 });

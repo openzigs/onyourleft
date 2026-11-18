@@ -13,6 +13,8 @@ import {
   PERSON_ANIMATION_MAX_BYTES,
   PERSON_MAX_TRIANGLES,
   PersonRegion,
+  RIDE_GAIT_INDEX,
+  RIDE_PHASES,
   animationBytes,
   animationRow,
   clusterDecimate,
@@ -123,7 +125,7 @@ describe('a person’s body, cut from the rider’s by vertex clustering — #15
     }
   });
 
-  it('cuts the committed rider to at most 2 000 triangles, and its walk and run to under 1 MiB', () => {
+  it('cuts the committed rider to at most 2 000 triangles, and its walk, run and ride to under 1 MiB', () => {
     const path = fileURLToPath(
       new URL(`../../public/realistic/${REALISTIC_RIDER}`, import.meta.url),
     );
@@ -160,11 +162,14 @@ describe('a person’s body, cut from the rider’s by vertex clustering — #15
     expect(animationBytes(positions.length / 3)).toBeGreaterThan(PERSON_ANIMATION_MAX_BYTES);
   });
 
-  it('lays the animation texture out a position row and a normal row a phase of each gait', () => {
-    expect(ANIMATION_ROWS).toBe(2 * GAITS.length * GAIT_PHASES);
+  it('lays the animation texture out a position row and a normal row a phase of each gait, and of the ride', () => {
+    expect(ANIMATION_ROWS).toBe(2 * (GAITS.length * GAIT_PHASES + RIDE_PHASES));
     expect(animationRow(0, 0)).toBe(0);
     expect(animationRow(1, 0)).toBe(GAIT_PHASES);
-    expect(animationRow(1, GAIT_PHASES - 1)).toBe(ANIMATION_ROWS / 2 - 1);
+    // #2722: the cyclists' crank phases after every gait's, ending where the normals begin.
+    expect(RIDE_GAIT_INDEX).toBe(GAITS.length);
+    expect(animationRow(RIDE_GAIT_INDEX, 0)).toBe(GAITS.length * GAIT_PHASES);
+    expect(animationRow(RIDE_GAIT_INDEX, RIDE_PHASES - 1)).toBe(ANIMATION_ROWS / 2 - 1);
     expect(animationBytes(1_000)).toBe(1_000 * ANIMATION_ROWS * 8);
   });
 

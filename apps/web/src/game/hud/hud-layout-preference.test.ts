@@ -17,6 +17,7 @@ import {
   HUD_PANELS,
   HUD_POWER_VIEWS,
   HUD_ROUTE_VIEWS,
+  climbCalloutChosen,
   compactRoute,
   focusArrangement,
   panelShown,
@@ -52,6 +53,7 @@ describe('the HUD layout preference (#2079)', () => {
       route: 'full',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
     expect(panelShown(read, 'route')).toBe(false);
     expect(panelShown(read, 'readings')).toBe(true);
@@ -107,6 +109,7 @@ describe('the focus arrangement (#2383)', () => {
       route: 'full',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
     expect(focusArrangement(read)).toBe(true);
   });
@@ -175,6 +178,7 @@ describe('the compact route panel (#2385)', () => {
       route: 'compact',
       power: 'average',
       delivery: 'game',
+      climbCallout: true,
     });
     expect(compactRoute(read)).toBe(true);
     // Compact says how the route panel is drawn, never whether.
@@ -228,6 +232,7 @@ describe('power as a 3 s average or instant (#2420)', () => {
       route: 'full',
       power: 'instant',
       delivery: 'game',
+      climbCallout: true,
     });
     expect(powerView(read)).toBe('instant');
   });
@@ -246,5 +251,36 @@ describe('power as a 3 s average or instant (#2420)', () => {
     expect(powerView(readHudLayout(localStorage))).toBe('average');
     // A preference built by hand with no power view says the average too.
     expect(powerView({ hidden: [], textSize: 'normal' })).toBe('average');
+  });
+});
+
+describe('the climb callout (#2593)', () => {
+  it('is on by default, and on for a preference kept before #2593', () => {
+    expect(climbCalloutChosen(DEFAULT_HUD_LAYOUT)).toBe(true);
+    expect(climbCalloutChosen(readHudLayout(localStorage))).toBe(true);
+    localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ hidden: [], textSize: 'large' }));
+    expect(climbCalloutChosen(readHudLayout(localStorage))).toBe(true);
+  });
+
+  it('keeps it turned off on the device and reads it back, beside the other choices', () => {
+    expect(
+      writeHudLayout(localStorage, {
+        hidden: ['graph'],
+        textSize: 'large',
+        totalsStrip: true,
+        climbCallout: false,
+      }),
+    ).toBe(true);
+    const read = readHudLayout(localStorage);
+    expect(climbCalloutChosen(read)).toBe(false);
+    expect(read.hidden).toEqual(['graph']);
+    expect(read.totalsStrip).toBe(true);
+  });
+
+  it('reads anything but a stored false as on', () => {
+    for (const stored of ['no', 0, null, 'false']) {
+      localStorage.setItem(HUD_LAYOUT_STORAGE_KEY, JSON.stringify({ climbCallout: stored }));
+      expect(climbCalloutChosen(readHudLayout(localStorage)), String(stored)).toBe(true);
+    }
   });
 });

@@ -65,6 +65,7 @@
  */
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import type { AdminChannel } from '../route-kit.ts';
 import { encodeCursor, parsePageRequest } from '../pagination.ts';
 import type {
   AthleteRecord,
@@ -347,6 +348,14 @@ export interface Moderation {
       /** The statement of reasons (#910): required of a restriction ({@link RESTRICTIONS}). */
       readonly statement?: unknown;
     },
+    /**
+     * The admin channel the decision came through (#2646, ADR 0069 D-8, D-9),
+     * set only by the admin seam's marker and only for a registration's
+     * approval or refusal: its moderation log row is then written in ONE
+     * transaction with a `registration_decided` operator log entry under that
+     * channel's source, so the decision is told apart from one made in the app.
+     */
+    channel?: AdminChannel,
   ): Promise<ModerationResult<{ logId: number }>>;
   dismiss(
     moderatorId: string,
@@ -413,7 +422,14 @@ export function checkReason(
   return { ok: true, reason };
 }
 
-const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** An athlete id as the routes take one in `{athleteId}`; the admin Accounts page checks its form against the same. */
+export const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A registration's two decisions, by the word `registration_decided` logs each with (#2646). */
+const REGISTRATION_DECISIONS: ReadonlyMap<AthleteAction, 'approved' | 'refused'> = new Map([
+  ['approve_registration', 'approved'],
+  ['refuse_registration', 'refused'],
+]);
 
 export function createModeration(options: ModerationOptions): Moderation {
   const { store, now } = options;
@@ -729,7 +745,7 @@ export function createModeration(options: ModerationOptions): Moderation {
       };
     },
 
-    async act(moderatorId, action, target, fields) {
+    async act(moderatorId, action, target, fields, channel) {
       const checked = checkReason(fields.reason);
       if (!checked.ok) {
         return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
@@ -757,17 +773,39 @@ export function createModeration(options: ModerationOptions): Moderation {
       if ((await roleOf(target)) !== undefined) {
         return refusedOnModerator(action, moderatorId, target, reportId, checked.reason);
       }
-      return logged(
-        await store.moderate({
-          action,
-          actorAthleteId: moderatorId,
-          targetAthleteId: target,
-          reportId,
-          reason: checked.reason,
-          at: seconds(),
-          ...(statement === undefined ? {} : { statement }),
-        }),
+      const moderated = {
+        action,
+        actorAthleteId: moderatorId,
+        targetAthleteId: target,
+        reportId,
+        reason: checked.reason,
+        at: seconds(),
+        ...(statement === undefined ? {} : { statement }),
+      };
+      const decision = REGISTRATION_DECISIONS.get(action);
+      if (channel === undefined || decision === undefined) {
+        return logged(await store.moderate(moderated));
+      }
+      // ADR 0069 D-9: the moderation log row and the operator log entry together, or neither.
+      const { value } = await store.recordOperatorAction(
+        {
+          actor: {
+            source: channel === 'loopback' ? 'admin_loopback' : 'admin_tunnel',
+            athleteId: moderatorId,
+          },
+          action: 'registration_decided',
+          at: moderated.at,
+        },
+        async (inside) => {
+          const outcome = await inside.moderate(moderated);
+          return {
+            outcome: outcome.outcome === 'applied' ? 'done' : 'refused',
+            detail: decision,
+            value: outcome,
+          };
+        },
       );
+      return logged(value);
     },
 
     statements: (athleteId) => store.listStatements(athleteId),

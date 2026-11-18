@@ -421,12 +421,96 @@ export interface OperatorLogTable {
   readonly id: Generated<number>;
   /** Unix seconds. */
   readonly at: number;
-  readonly source: 'app' | 'cli';
-  /** The owner's athlete for `app`; `NULL` for `cli`, which has none. */
+  /** Since migration 0044 (#2641) also the admin pages, by listener (ADR 0069 D-8). */
+  readonly source: 'app' | 'cli' | 'admin_tunnel' | 'admin_loopback';
+  /**
+   * The owner's athlete for `app`; `NULL` for `cli`, which has none; the
+   * owner's athlete, or `NULL` for an `admin_refused` count, for an admin source.
+   */
   readonly actor_athlete_id: string | null;
   readonly action: string;
   readonly detail: string | null;
   readonly outcome: 'done' | 'refused' | 'failed';
+}
+
+/**
+ * A one-time code for the admin pages (#2641, migration 0044, ADR 0069 D-1),
+ * kept only as the SHA-256 of its normalised form. Single use, ten minutes.
+ */
+export interface AdminCodeTable {
+  readonly code_sha256: string;
+  /** Unix seconds. */
+  readonly minted_at: number;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+  readonly minted_by: 'cli' | 'app';
+}
+
+/**
+ * A browser's admin session (#2641, migration 0044, ADR 0069 D-4): the
+ * cookie's token and the CSRF token kept only as SHA-256s.
+ */
+export interface AdminSessionTable {
+  readonly token_sha256: string;
+  readonly athlete_id: string;
+  /** The `OYL_INSTANCE_OWNER_KEY` the athlete held at sign-in. */
+  readonly owner_key: string;
+  readonly listener: 'tunnel' | 'loopback';
+  readonly strength: 'code' | 'passkey';
+  readonly csrf_sha256: string;
+  /** Unix seconds. */
+  readonly created_at: number;
+  readonly last_seen_at: number;
+  /** Two hours after `created_at`, whatever use it saw. */
+  readonly expires_at: number;
+}
+
+/**
+ * One of the owner's passkeys for the admin pages (#2642, migration 0045,
+ * ADR 0069 D-1). It names no athlete: it is whoever holds
+ * `OYL_INSTANCE_OWNER_KEY`'s.
+ */
+export interface AdminPasskeyTable {
+  readonly id: string;
+  /** base64url, unique. */
+  readonly credential_id: string;
+  readonly rp_id: string;
+  readonly algorithm: 'ed25519' | 'es256';
+  /** Ed25519's 32 bytes, or P-256's uncompressed point, as lowercase hex. */
+  readonly public_key: string;
+  readonly sign_count: number;
+  /** base64url: the WebAuthn user handle it was enrolled under. */
+  readonly user_handle: string;
+  /** The `OYL_INSTANCE_OWNER_KEY` held at enrolment: no other owner's passkey. */
+  readonly owner_key: string;
+  readonly label: string;
+  readonly listener: 'tunnel' | 'loopback';
+  /** Unix seconds. */
+  readonly enrolled_at: number;
+  readonly last_used_at: number | null;
+  /** `NULL` until `operator admin-passkeys confirm`, for one enrolled through the tunnel. */
+  readonly confirmed_at: number | null;
+}
+
+/** Which passkey opened which admin session (#2642, migration 0045). */
+export interface AdminPasskeySessionTable {
+  readonly token_sha256: string;
+  readonly passkey_id: string;
+}
+
+/** A WebAuthn challenge issued and not yet answered (#2642, migration 0045, ADR 0069 D-4). */
+export interface AdminChallengeTable {
+  readonly challenge_sha256: string;
+  readonly purpose: 'sign_in' | 'enrol' | 'step_up';
+  /** `NULL` for a sign-in's; the session's otherwise. */
+  readonly session_sha256: string | null;
+  /** A step-up's action, and the SHA-256 of its canonical fields; `NULL` otherwise. */
+  readonly action: string | null;
+  readonly fields_sha256: string | null;
+  /** An enrolment's WebAuthn user handle, base64url; `NULL` otherwise. */
+  readonly user_handle: string | null;
+  /** Unix seconds. */
+  readonly expires_at: number;
 }
 
 /**
@@ -725,6 +809,17 @@ export interface AthleteHostedConsentTable {
 }
 
 /**
+ * A rider's own consent to model-chosen lap-race bot tactics (#2709, ADR 0071
+ * D-5.2). Added by migration 0046. One row an athlete: the local model
+ * address it names, and when.
+ */
+export interface AthleteTacticsConsentTable {
+  readonly athlete_id: string;
+  readonly model_address: string;
+  readonly recorded_at: number;
+}
+
+/**
  * One of the instance's own keys (#1189, ADR 0047 D-4, D-5). Added by
  * migration 0015. The private half is PKCS #8 wrapped with AES-256-GCM under
  * a key derived from `OYL_INSTANCE_SECRET_KEY` (`keys/wrap.ts`); its plaintext
@@ -848,6 +943,11 @@ export interface InstanceDatabase {
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
   readonly operator_log: OperatorLogTable;
+  readonly admin_code: AdminCodeTable;
+  readonly admin_session: AdminSessionTable;
+  readonly admin_passkey: AdminPasskeyTable;
+  readonly admin_passkey_session: AdminPasskeySessionTable;
+  readonly admin_challenge: AdminChallengeTable;
   readonly backup_record: BackupRecordTable;
   readonly backup_request: BackupRequestTable;
   readonly backup_lease: BackupLeaseTable;
@@ -868,6 +968,7 @@ export interface InstanceDatabase {
   readonly analysis_event: AnalysisEventTable;
   readonly athlete_hosted_key: AthleteHostedKeyTable;
   readonly athlete_hosted_consent: AthleteHostedConsentTable;
+  readonly athlete_tactics_consent: AthleteTacticsConsentTable;
   readonly notice: NoticeTable;
   readonly statement: StatementTable;
   readonly appeal: AppealTable;

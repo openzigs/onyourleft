@@ -294,6 +294,33 @@ describe('which world a ride draws — #475', () => {
     expect(new Set(asked())).toEqual(new Set([PEOPLE_NEAR_MAX]));
   });
 
+  it('asks for the scenery cyclists on a free ride, on the stylised world and the realistic top rung alike — #2722', async () => {
+    // The consumer of `SceneInput.sceneryCyclists`, optional the unsafe way
+    // round: a `GameView` that forgot it would put nobody on the road, with
+    // every `scenery-cyclists.test.ts` case green. `sceneFrame` places them
+    // only where the rung also draws people, so the stylised world's frames
+    // ask and carry none; `scenery-cyclists.test.ts` places them from it.
+    const asked = (): readonly (boolean | undefined)[] =>
+      vi.mocked(sceneFrame).mock.calls.map(([input]) => input.sceneryCyclists);
+    vi.mocked(sceneFrame).mockClear();
+    await ride();
+    await frames(1000 / 60, 5);
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([true]));
+    for (const frame of rendered) expect(frame.cyclists).toBeUndefined();
+    mounted?.unmount();
+    mounted = undefined;
+    rendered = [];
+
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
+    await settleLoad({ loaded: true });
+    vi.mocked(sceneFrame).mockClear();
+    await frames(1000 / 60, 5);
+    expect(asked().length).toBeGreaterThan(0);
+    expect(new Set(asked())).toEqual(new Set([true]));
+  });
+
   it('falls back to the stylised top and says so when the load fails — ADR 0026 D-7', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     // The plain top, not the shadow map's rung, though the map is the

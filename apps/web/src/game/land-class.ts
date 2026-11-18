@@ -10,25 +10,46 @@
  * keyed by an integer chunk index. Every placement rule of phase B reads it —
  * `settlements.ts` (no procedural site on mapped land, no field boundary off
  * field ground — {@link fieldGround}), `scatter.ts` (no tree, shrub or rock on built-up
- * land or water) and `streets.ts` (no pavement for a site that is not built).
+ * land, water or bare ground — {@link nothingGrowsAt}) and `streets.ts` (no pavement for a site that is not built).
  * Since #1547 it also carries how far each cell is from built-up land
  * ({@link LandClassMask.builtUpDistances}), which `landform.ts` levels a mapped
  * town's ground by.
  *
  * ⚠️ **Read every frame, on the thread GATT notifications arrive on** (#240
  * NFR-2, #469), so {@link LandClassMask.classAt} is one `Map` lookup and one
- * typed-array index, and allocates nothing: the class is one of seven string
+ * typed-array index, and allocates nothing: the class is one of eight string
  * constants, the key is a small integer.
  *
  * ## The classes
  *
  * From Protomaps v4's `landuse.kind` and `water.kind` —
  * {@link LAND_CLASS_OF_KIND}. Where polygons overlap the class with the higher
- * precedence wins: **water > wood > park > built-up > farmland > other**, so a
- * wood drawn inside a residential block is a wood. A covered cell no polygon
+ * precedence wins: **water > wood > a beach or pier > park > built-up > other
+ * bare ground > farmland > protected area > other**, so a wood drawn inside a
+ * residential block is a wood. `bare` (#2662) is ground where nothing grows
+ * and no field is fenced — sand, rock, ice, an airfield, a pier — below
+ * built-up so an airport's terminal land keeps its own class, but for the
+ * map's sand and what is built across it ({@link BARE_KINDS_OVER_LAND},
+ * #2754), so a beach inside a park or a town is a beach. Since
+ * #2700 the mask also keeps what bare ground is made of
+ * ({@link BARE_SURFACE_OF_KIND}, {@link LandClassMask.bareSurfaceAt}), so the
+ * ground is drawn as sand, stone, ice, paving or earth rather than as grass. A covered cell no polygon
  * reaches is `other`; a cell outside every covered tile is `unknown`, and there
  * the procedural world decides (P-8). An unknown `kind` is `other`, never
  * `built-up`.
+ *
+ * ## A protected area's boundary is not a forest — #2657
+ *
+ * {@link PROTECTED_AREA_KINDS} — `forest`, `national_park` and
+ * `nature_reserve` — are boundaries drawn round whole towns: the archive writes
+ * a US Forest Service area as `forest` (Protomaps' `Landuse.java`), clipped to
+ * each tile, so Big Bear Lake read as one wood and lost every house. Such a
+ * cell still reads as its class, `wood` or `park`, so where nothing else
+ * overlaps it what grows there is unchanged, but it ranks below every other mapped class: a residential block
+ * inside a national forest is built-up, and nothing grows on it.
+ * {@link LandClassMask.protectedArea} says which cells they are, and
+ * `footprint-buildings.ts` builds a mapped footprint on one (ADR 0054's
+ * amendment of 2026-11-15 to D-5.2). `wood`, a mapped wood, is unchanged.
  *
  * ## Bounded
  *
@@ -44,7 +65,9 @@
  * {@link INFERRED_REACH_METRES} of a residential street and the street
  * density about it is a suburb's ({@link INFERRED_MIN_STREET_DENSITY}) —
  * {@link inferBuiltUp}'s rule. Every reader then treats it as mapped built-up
- * land: lots stand there, field boundaries and trees do not.
+ * land: lots stand there, field boundaries and trees do not. It is last in the
+ * precedence above, outranking only `other`: it is written only onto a cell
+ * that is still plain `other` once every polygon is painted.
  *
  * Names no rendering library and no coordinate in any string: it formats none.
  */
@@ -55,11 +78,13 @@ import {
   type GridSpec,
   type LandUseFeature,
   type PlaceFeature,
+  type WaterLineFeature,
 } from '@onyourleft/map-features';
 
 import type { WorldCorridor } from './world-data/corridor';
 
-export type LandClass = 'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'farmland' | 'other';
+export type LandClass =
+  'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'bare' | 'farmland' | 'other';
 
 /**
  * Every `landuse` kind this reads, and its class — #1546's table. A `water`
@@ -75,6 +100,15 @@ export type LandClass = 'unknown' | 'water' | 'wood' | 'park' | 'built-up' | 'fa
  * and `orchard` (written as `farmland`). Each now reads as `other`. A kind
  * unseen in the spike's corridors that a rule does emit — `forest`,
  * `national_park`, `zoo`, `military` — stays.
+ *
+ * #2662, ADR 0054 D-5.1 (a kind is added by naming it here, beside its rule):
+ * the smaller kinds the 2026-11-15 tag audit found falling through to `other`,
+ * where a farm fence could run across them. `kindergarten` is built-up as a
+ * `school` is; `village_green` and `allotments` are park; and the ground where
+ * nothing grows and no field is fenced is `bare` — `beach`, `sand`,
+ * `bare_rock`, `glacier`, the airfield's `aerodrome`, `runway` and `taxiway`,
+ * and the built-on `pier`, `platform` and `dam`. `grassland` stays `other`:
+ * natural grass, where the procedural world's planting is the right one.
  */
 export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unknown'>>> =
   Object.freeze({
@@ -94,19 +128,146 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     playground: 'park',
     pitch: 'park',
     grass: 'park',
+    village_green: 'park',
+    allotments: 'park',
     residential: 'built-up',
     commercial: 'built-up',
     industrial: 'built-up',
     school: 'built-up',
+    kindergarten: 'built-up',
     college: 'built-up',
     university: 'built-up',
     hospital: 'built-up',
     pedestrian: 'built-up',
     railway: 'built-up',
     military: 'built-up',
+    beach: 'bare',
+    sand: 'bare',
+    bare_rock: 'bare',
+    glacier: 'bare',
+    aerodrome: 'bare',
+    runway: 'bare',
+    taxiway: 'bare',
+    pier: 'bare',
+    platform: 'bare',
+    dam: 'bare',
     farmland: 'farmland',
     meadow: 'farmland',
   });
+
+/**
+ * The kinds that are a protected area's boundary rather than mapped cover —
+ * #2657. Each keeps its class in {@link LAND_CLASS_OF_KIND}, and ranks below
+ * every other mapped class (§"A protected area's boundary is not a forest").
+ *
+ * ⚠️ `forest` is also what `landuse=forest` is written as, which the tile
+ * cannot tell from the Forest Service's boundary; a footprint mapped on a
+ * managed forest is a building someone mapped there, so it is built too.
+ */
+export const PROTECTED_AREA_KINDS: ReadonlySet<string> = new Set([
+  'forest',
+  'national_park',
+  'nature_reserve',
+]);
+
+/**
+ * What `bare` ground is made of — #2700, in precedence order, least first: a
+ * cell two bare polygons cover is the more built one's, so a runway drawn over
+ * its airfield is paved, and a pier or platform drawn across a beach is paved
+ * where the two overlap (a pier starts on the sand), whichever came first. `landform.ts` writes it for every vertex of the ground
+ * and `three-renderer.ts` §`TerrainBelt` draws each in its own colour
+ * (`world.ts` §`bareSurfaceColourIn`) instead of the grass's.
+ */
+export const BARE_SURFACES = ['earth', 'stone', 'ice', 'sand', 'paved'] as const;
+export type BareSurface = (typeof BARE_SURFACES)[number];
+
+/**
+ * Every `bare` kind and what it is made of — #2700, ADR 0054 D-5.1 (a kind is
+ * named here, beside its rule). The map's sand is sand (`beach`, `sand`:
+ * Protomaps emits no `dune`); its rock is stone (`bare_rock`, which Protomaps
+ * also writes for Overture's `scree`, `stone` and `shingle`); a `glacier` is
+ * ice; the airfield's strips and the built-on `platform` and `pier` are
+ * paved; and the rest — the airfield's own `aerodrome` land and a `dam` — is
+ * a neutral bare earth, which is also what a bare kind not named here would be
+ * ({@link bareSurfaceOfKind}).
+ */
+export const BARE_SURFACE_OF_KIND: Readonly<Record<string, BareSurface>> = Object.freeze({
+  beach: 'sand',
+  sand: 'sand',
+  bare_rock: 'stone',
+  glacier: 'ice',
+  runway: 'paved',
+  taxiway: 'paved',
+  platform: 'paved',
+  pier: 'paved',
+  aerodrome: 'earth',
+  dam: 'earth',
+});
+
+/** A `bare` kind's surface: {@link BARE_SURFACE_OF_KIND}'s, own properties only, else earth. */
+export function bareSurfaceOfKind(kind: string): BareSurface {
+  return Object.hasOwn(BARE_SURFACE_OF_KIND, kind)
+    ? (BARE_SURFACE_OF_KIND[kind] as BareSurface)
+    : 'earth';
+}
+
+/**
+ * How `park` land is drawn, by the kind that made it park — #2685, the
+ * owner's ruling of 2026-11-15: a golf course is not a cemetery and a pitch is
+ * not a nature reserve. **Not a class**: the precedence order is untouched,
+ * and a look is read only where {@link LandClassMask.classAt} says `park`.
+ *
+ * - `mown`: mown grass with specimen trees, as every park was before.
+ * - `natural`: a nature reserve or national park, natural ground rather than
+ *   mown — meadow where the map draws no wood in it (a wood inside one is a
+ *   `wood` by precedence, and planted as one).
+ * - `golf`: open fairway with trees in stands.
+ * - `cemetery`: short grass and a few trees.
+ * - `playground`: a few trees.
+ * - `pitch`: a flat, even green with no tree on it.
+ *
+ * `scatter.ts` §`landPlanting` is the one reader.
+ */
+export type ParkLook = 'mown' | 'natural' | 'golf' | 'cemetery' | 'playground' | 'pitch';
+
+/**
+ * Every park kind with a look of its own — #2685. ADR 0054 D-5.1: a kind is
+ * added by naming it here, beside its rule. Every other `park` kind of
+ * {@link LAND_CLASS_OF_KIND} — `park`, `garden`, `recreation_ground`,
+ * `grass`, `dog_park`, `zoo` — is `mown`.
+ */
+export const PARK_LOOK_OF_KIND: Readonly<Record<string, Exclude<ParkLook, 'mown'>>> = Object.freeze(
+  {
+    nature_reserve: 'natural',
+    national_park: 'natural',
+    golf_course: 'golf',
+    cemetery: 'cemetery',
+    playground: 'playground',
+    pitch: 'pitch',
+  },
+);
+
+/**
+ * The looks by code, the code being the precedence where park polygons
+ * overlap: the smaller, more particular place wins, so a pitch inside a
+ * recreation ground is a pitch and a park inside a national park is mown.
+ * 0 is a park cell no look polygon reached, which is `mown`.
+ */
+const LOOK_OF_CODE: readonly ParkLook[] = [
+  'mown',
+  'natural',
+  'mown',
+  'golf',
+  'cemetery',
+  'playground',
+  'pitch',
+];
+const LOOK_CODE_MOWN = 2;
+
+/** A park kind's look. Own properties only, for {@link landClassOfKind}'s reason. */
+export function parkLookOfKind(kind: string): ParkLook {
+  return Object.hasOwn(PARK_LOOK_OF_KIND, kind) ? (PARK_LOOK_OF_KIND[kind] as ParkLook) : 'mown';
+}
 
 /** One cell's side, in metres. */
 export const LAND_CLASS_CELL_METRES = 5;
@@ -118,13 +279,34 @@ export const LAND_CLASS_CHUNK_CELLS = 64;
 export const LAND_CLASS_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
- * The most edge-by-row steps the polygon pass may take, so a hostile or very
- * dense archive cannot freeze the press: a polygon's cost is its vertices times
- * the rows it crosses on each existing chunk. Past it the rest of the polygons
- * are not painted and their cells keep the class they hold (`other`), the same
- * answer as a tile with no land-use data.
+ * The edge-by-row steps the polygon pass may take **for each covered tile**,
+ * so a hostile or very dense archive cannot freeze the press: a polygon's cost
+ * is its vertices times the rows it crosses on each existing chunk. The pass's
+ * budget is this times the corridor's covered tiles ({@link landClassWork}).
+ * Past it the rest of the polygons are not painted and their cells keep the
+ * class they hold (`other`), the same answer as a tile with no land-use data.
+ *
+ * ⚠️ **Per tile since #2728, and a fixed 20 000 000 a corridor before it.** A
+ * coast's tiles are dense — the sea, its marshes and inlets, the beaches —
+ * and the polygons are painted in route order, so a long coastal ride spent
+ * the whole budget part way along and every polygon after it went unpainted:
+ * the sea beside the road read as `other`, and was drawn as grass. Measured
+ * on 2026-11-16 through `corridor-source.ts` from the published archive, on a
+ * public ~90 km corridor up the New Hampshire and Maine coast (Salisbury Beach
+ * to Old Orchard Beach, 179 covered tiles): 40.3 million steps, about 225 000
+ * a tile, the densest stretch (Hampton Beach, 17 tiles) 237 000 a tile. Half
+ * the corridor's water was lost, everything past about 45 km. Unbudgeted, the
+ * whole mask built in 218 to 236 ms in Node (two runs). **1 000 000** a tile is four times the
+ * densest stretch measured, and a 600-tile corridor's whole budget
+ * (`world-data/corridor.ts` §`CORRIDOR_MAX_TILES`) is 600 million steps:
+ * bounded, as it was, but by the corridor's own length.
  */
-export const LAND_CLASS_MAX_WORK = 20_000_000;
+export const LAND_CLASS_WORK_PER_TILE = 1_000_000;
+
+/** The polygon pass's whole budget for `corridor`: {@link LAND_CLASS_WORK_PER_TILE} a covered tile. */
+export function landClassWork(corridor: WorldCorridor): number {
+  return LAND_CLASS_WORK_PER_TILE * Math.max(1, corridor.coveredBoxes.length);
+}
 
 /**
  * The streets a cell of inferred built-up land is near — #2684, ADR 0070
@@ -220,7 +402,7 @@ export const INFERRED_HAMLET_REACH_METRES = 600;
 /**
  * The most cell tests inference may take, so a hostile or very dense archive
  * cannot freeze the press: past it the rest of the cells are not inferred,
- * today's world. {@link LAND_CLASS_MAX_WORK}'s precedent.
+ * today's world. {@link landClassWork}'s precedent.
  */
 export const LAND_CLASS_MAX_INFERENCE_WORK = 20_000_000;
 
@@ -239,24 +421,92 @@ const CHUNK_STRIDE = 2 * CHUNK_RANGE;
 const CELL_RANGE = CHUNK_RANGE * LAND_CLASS_CHUNK_CELLS;
 
 /**
- * The classes by code, the code being the precedence: a cell keeps the
- * highest code written to it. 0 is `unknown`, which nothing writes.
+ * The bare kinds whose polygon outranks a park and built-up land drawn round
+ * it — #2754: the map's sand (`beach`, `sand`), and the `pier` and `platform`
+ * built across it, so a pier across a beach is still paved (#2700). Every
+ * other bare kind ranks below built-up, where #2662 put the class.
+ *
+ * ⚠️ **What drew a beach as grass.** #2662 put all of `bare` below built-up,
+ * for an airport's terminal land inside its `aerodrome` or across a runway.
+ * But a beach is mapped inside a park as often as not, and inside a town's
+ * residential land, and both outranked it: measured on 2026-11-16 through
+ * `corridor-source.ts` from the published archive, on NH 1A at Hampton
+ * Beach NH (public), the `beach` polygon from about 35 m out lies inside a
+ * `park` one the whole way, so the mask said park, the ground was drawn as
+ * grass to the sea and a park's specimen trees were planted on the sand. A
+ * polygon that names what the ground is made of says more than one drawn
+ * round a whole park or town. It stays under a wood, as #2662 has it, so a
+ * wood mapped inside a stretch of sand is a wood.
  */
-const CLASS_OF_CODE: readonly LandClass[] = [
-  'unknown',
-  'other',
-  'farmland',
-  'built-up',
-  'park',
-  'wood',
-  'water',
+export const BARE_KINDS_OVER_LAND: ReadonlySet<string> = new Set([
+  'beach',
+  'sand',
+  'pier',
+  'platform',
+]);
+
+/** One code of the mask: its class, and for `bare` what it is made of. */
+interface Code {
+  readonly land: LandClass;
+  readonly surface?: BareSurface;
+}
+
+/** Each bare surface's code, in {@link BARE_SURFACES}' order. */
+function bareCodes(): readonly Code[] {
+  return BARE_SURFACES.map((surface): Code => ({ land: 'bare', surface }));
+}
+
+/**
+ * The classes by code, the code being the precedence: a cell keeps the
+ * highest code written to it. 0 is `unknown`, which nothing writes. #2657: a
+ * protected area's `park` and `wood` ({@link PROTECTED_AREA_KINDS}) are codes
+ * of their own, below farmland, and read as the class they name. `bare`
+ * takes one code a surface (#2700), in {@link BARE_SURFACES}' order, and
+ * since #2754 twice: once below built-up, where #2662 placed the class, and
+ * once above a mapped park for {@link BARE_KINDS_OVER_LAND}.
+ *
+ * #2658: **two codes are `water`** — {@link CODE_WETLAND}, then open water
+ * above it — so a cell remembers that its water is a wetland, which
+ * `waterways.ts` draws as wet ground rather than as a lake, while every
+ * reader of {@link LandClassMask.classAt} still sees one class. Open water
+ * outranks a wetland, so a pool mapped inside a marsh is water.
+ */
+const CODES: readonly Code[] = [
+  { land: 'unknown' },
+  { land: 'other' },
+  { land: 'park' },
+  { land: 'wood' },
+  { land: 'farmland' },
+  ...bareCodes(),
+  { land: 'built-up' },
+  { land: 'park' },
+  ...bareCodes(),
+  { land: 'wood' },
+  { land: 'water' },
+  { land: 'water' },
   // #2684: `built-up` by inference, no polygon's. Last, so that no polygon's
   // class is its code: it is written once, after every polygon.
-  'built-up',
+  { land: 'built-up' },
 ];
+const CLASS_OF_CODE: readonly LandClass[] = CODES.map((code) => code.land);
 const CODE_OTHER = 1;
+const CODE_PROTECTED_PARK = 2;
+const CODE_PROTECTED_WOOD = 3;
 const CODE_FARMLAND = CLASS_OF_CODE.indexOf('farmland');
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
+/**
+ * The mapped `park` code, above farmland — #2685's looks are read on it and on
+ * #2657's {@link CODE_PROTECTED_PARK}, which also reads `park`.
+ */
+const CODE_PARK = CLASS_OF_CODE.indexOf('park', CODE_FARMLAND);
+/** #2754: the first bare code below built-up, and the first above a mapped park. */
+const CODE_BARE = CLASS_OF_CODE.indexOf('bare');
+const CODE_BARE_OVER_LAND = CODE_PARK + 1;
+/** #2658: a `wetland` polygon's cells, from either layer, just under open water. @see CODES */
+const CODE_WETLAND = CLASS_OF_CODE.indexOf('water');
+/** #2658: open water, above a wetland and below only #2684's inferred code. */
+const CODE_WATER = CODE_WETLAND + 1;
+/** #2684: `built-up` by inference from the streets, the last code. @see CODES */
 const CODE_INFERRED = CLASS_OF_CODE.length - 1;
 
 /** Whether a stored code is built-up land, mapped or inferred. */
@@ -265,12 +515,63 @@ function isBuiltCode(code: number): boolean {
 }
 
 /**
- * #2684: an `other` cell a land-use polygon covers — a beach, an aerodrome, a
- * heath — which {@link inferBuiltUp} leaves alone. Held only while the mask is
+ * #2684: an `other` cell a land-use polygon covers — a heath, say; since
+ * #2662 a beach or an aerodrome is `bare`, its own code — which
+ * {@link inferBuiltUp} leaves alone. Held only while the mask is
  * built, and `other` by precedence while it is; every one is `other` again
  * before the mask is returned.
  */
 const CODE_MAPPED_OTHER = CLASS_OF_CODE.length;
+
+/** The `kind` that is a wetland, in `landuse` or in `water` (#2658). */
+const WETLAND_KIND = 'wetland';
+
+/**
+ * Whether a stored code reads `park`: a mapped park, or a protected area's
+ * (#2657) — a nature reserve or national park keeps its `natural` look (#2685).
+ */
+function isParkCode(code: number): boolean {
+  return code === CODE_PARK || code === CODE_PROTECTED_PARK;
+}
+
+/**
+ * Whether a stored code takes a park polygon's look (#2685): a park's
+ * ({@link isParkCode}), or since #2754 a beach or sand inside it
+ * ({@link BARE_KINDS_OVER_LAND}), which reads `bare` but is still the park's
+ * ground — so a golf course's mapped sand is still its bunker
+ * (`park-dressing.ts` §`paintSand`). Only `park` cells are planted by their
+ * look (`scatter.ts`), so a bare cell's look plants nothing.
+ */
+function takesParkLook(code: number): boolean {
+  return (
+    isParkCode(code) ||
+    (code >= CODE_BARE_OVER_LAND && code < CODE_BARE_OVER_LAND + BARE_SURFACES.length)
+  );
+}
+
+/** Each code's bare surface, `undefined` where the class is not `bare`. @see LandClassMask.bareSurfaceAt */
+const SURFACE_OF_CODE: readonly (BareSurface | undefined)[] = CODES.map((code) => code.surface);
+
+/**
+ * A feature's code: its class's, a protected area's own below it (#2657),
+ * a wetland below open water (#2658), and for `bare` its surface's (#2700),
+ * above a mapped park for {@link BARE_KINDS_OVER_LAND} (#2754). A mapped
+ * class's code is looked up from farmland up, past the protected codes, and
+ * never reaches {@link CODE_INFERRED}, which no polygon writes (#2684).
+ * @see CODES
+ */
+function codeOfFeature(feature: LandUseFeature): number {
+  if (feature.kind === WETLAND_KIND) return CODE_WETLAND;
+  const landClass = landClassOfKind(feature.layer, feature.kind);
+  if (feature.layer === 'landuse' && PROTECTED_AREA_KINDS.has(feature.kind)) {
+    return landClass === 'wood' ? CODE_PROTECTED_WOOD : CODE_PROTECTED_PARK;
+  }
+  if (landClass === 'other') return CODE_OTHER;
+  if (landClass === 'water') return CODE_WATER;
+  if (landClass !== 'bare') return CLASS_OF_CODE.indexOf(landClass, CODE_FARMLAND);
+  const first = BARE_KINDS_OVER_LAND.has(feature.kind) ? CODE_BARE_OVER_LAND : CODE_BARE;
+  return first + BARE_SURFACES.indexOf(bareSurfaceOfKind(feature.kind));
+}
 
 /**
  * How far the levelling field reaches from mapped built-up land, in metres:
@@ -311,6 +612,11 @@ const LEVEL_SCRATCH_CELLS = LAND_CLASS_CHUNK_CELLS + 2 * LEVEL_APRON_CELLS;
 export interface LandClassMask {
   /** O(1), no allocation. `'unknown'` outside every covered chunk. */
   classAt(x: number, z: number): LandClass;
+  /**
+   * What the ground at `(x, z)` is made of where it is `bare` — #2700 — and
+   * `undefined` wherever it is not. O(1), no allocation, as {@link classAt}.
+   */
+  bareSurfaceAt(x: number, z: number): BareSurface | undefined;
   /** True where the corridor is covered (P-8), whatever the class. */
   covered(x: number, z: number): boolean;
   /**
@@ -320,6 +626,32 @@ export interface LandClassMask {
    * says people built there, and not how many.
    */
   inferredAt(x: number, z: number): boolean;
+  /**
+   * #2658: whether the `water` at `(x, z)` is a mapped wetland — a
+   * `wetland` polygon and no open water over it. `false` wherever
+   * {@link classAt} is not `water`. O(1), as {@link classAt} is.
+   */
+  wetlandAt(x: number, z: number): boolean;
+  /**
+   * #2659: the corridor's rivers, streams and canals, as it read them — what
+   * `waterways.ts` finds the route's mapped crossings from. Carried here so
+   * every reader of the water is handed them with the mask it already takes.
+   * None where nothing was read.
+   */
+  readonly waterLines: readonly WaterLineFeature[];
+  /**
+   * True where the cell's class is a protected area's boundary and no other
+   * mapped land use covers it — #2657, {@link PROTECTED_AREA_KINDS}. O(1), no
+   * allocation; `false` outside every covered chunk.
+   */
+  protectedArea(x: number, z: number): boolean;
+  /**
+   * #2685: how the `park` land at `(x, z)` is drawn — {@link ParkLook}.
+   * `'mown'` wherever the class is not `park`, but for a beach or sand
+   * inside a park (#2754, {@link BARE_KINDS_OVER_LAND}), which keeps the
+   * park's look. O(1), no allocation.
+   */
+  parkLookAt(x: number, z: number): ParkLook;
   /**
    * Metres to the nearest mapped built-up land at each of `count` points —
    * #1547 — `points` holding them as `x, z` pairs and `into` taking one
@@ -336,7 +668,7 @@ export interface LandClassMask {
    * measures the heap a build.
    */
   builtUpDistances(points: Float64Array, count: number, into: Float64Array): void;
-  /** What the mask holds, for the budget: the classes. */
+  /** What the mask holds, for the budget: the classes, and the park looks (#2685). */
   readonly bytes: number;
   /** What the levelling field holds, in bytes: 0 where no built-up land was mapped. */
   readonly levellingBytes: number;
@@ -345,8 +677,13 @@ export interface LandClassMask {
 /** Everything `unknown`: today's world, and what the scene takes with no corridor. */
 export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   classAt: (): LandClass => 'unknown',
+  bareSurfaceAt: (): undefined => undefined,
   covered: (): boolean => false,
   inferredAt: (): boolean => false,
+  wetlandAt: (): boolean => false,
+  waterLines: Object.freeze([]),
+  protectedArea: (): boolean => false,
+  parkLookAt: (): ParkLook => 'mown',
   builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
     into.fill(Number.POSITIVE_INFINITY, 0, count);
   },
@@ -393,15 +730,15 @@ function otherClass(there: LandClass, here: LandClass): boolean {
   return there !== here && there !== 'unknown';
 }
 
-/** Whether nothing grows at `(x, z)`: mapped built-up land or water. */
-export function builtUpOrWater(land: LandClassMask, x: number, z: number): boolean {
+/** Whether nothing grows at `(x, z)`: mapped built-up land, water, or `bare` ground (#2662). */
+export function nothingGrowsAt(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
-  return here === 'built-up' || here === 'water';
+  return here === 'built-up' || here === 'water' || here === 'bare';
 }
 
 /**
  * Whether a field boundary may run at `(x, z)`: ground that is not mapped as
- * built-up, water, wood or park — a field's, or the procedural world's.
+ * built-up, water, wood, park or `bare` — a field's, or the procedural world's.
  */
 export function fieldGround(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
@@ -486,7 +823,7 @@ function kindIndexOf(corridor: WorldCorridor): readonly KindIndexEntry[] {
       minZ = Math.min(minZ, outer[i + 1] as number);
       maxZ = Math.max(maxZ, outer[i + 1] as number);
     }
-    const code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
+    const code = codeOfFeature(feature);
     entries.push({ feature, code, minX, maxX, minZ, maxZ });
   }
   kindIndexes.set(corridor, entries);
@@ -513,8 +850,9 @@ function insidePolygon(feature: LandUseFeature, x: number, z: number): boolean {
  * The `landuse` (or `water`) `kind` at `(x, z)` — #1540: which built-up land a
  * mapped building stands on, `residential`, `commercial` or `industrial`,
  * which the mask's class does not keep. Of the polygons covering the point,
- * the one whose class wins by the mask's precedence (water > wood > park >
- * built-up > farmland > other), so it names the land {@link LandClassMask.classAt}
+ * the one whose code wins by the mask's precedence ({@link CODES}: water >
+ * wood > a beach or pier > park > built-up > other bare ground > farmland >
+ * protected area > other), so it names the land {@link LandClassMask.classAt}
  * classes; `undefined` where none covers it. Read once a footprint at ride
  * start, never per frame: it tests every polygon's box.
  */
@@ -526,6 +864,23 @@ export function kindAt(corridor: WorldCorridor, x: number, z: number): string | 
     if (insidePolygon(entry.feature, x, z)) best = entry;
   }
   return best?.feature.kind;
+}
+
+/**
+ * Whether a mapped `park` polygon covers `(x, z)`, whatever outranks it
+ * there — #2754. A protected area's boundary (#2657, {@link CODE_PROTECTED_PARK})
+ * is not a park here, as it is not for D-5.2. A beach inside a park reads as `bare` since #2754
+ * ({@link BARE_KINDS_OVER_LAND}), and ADR 0054 D-5.2 drops a footprint inside
+ * a park "whatever else is true": `footprint-buildings.ts` rule 2 asks this
+ * where the mask says `bare`. Read once a footprint at ride start, never per
+ * frame: it tests every polygon's box, as {@link kindAt} does.
+ */
+export function insidePark(corridor: WorldCorridor, x: number, z: number): boolean {
+  for (const entry of kindIndexOf(corridor)) {
+    if (x < entry.minX || x > entry.maxX || z < entry.minZ || z > entry.maxZ) continue;
+    if (entry.code === CODE_PARK && insidePolygon(entry.feature, x, z)) return true;
+  }
+  return false;
 }
 
 function chunkKey(column: number, row: number): number {
@@ -553,7 +908,7 @@ function cellSpan(min: number, max: number, edge: number): readonly [number, num
 export function landClassMask(
   corridor: WorldCorridor,
   maxBytes: number = LAND_CLASS_MAX_BYTES,
-  maxWork: number = LAND_CLASS_MAX_WORK,
+  maxWork: number = landClassWork(corridor),
   maxLevelledChunks: number = LEVELLING_MAX_CHUNKS,
   maxInferenceWork: number = LAND_CLASS_MAX_INFERENCE_WORK,
 ): LandClassMask {
@@ -576,12 +931,16 @@ export function landClassMask(
       polygonsPainted = false;
       break;
     }
-    let code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
+    let code = codeOfFeature(feature);
     if (code === CODE_OTHER && feature.kind !== 'other') {
       code = CODE_MAPPED_OTHER;
       mappedOther = true;
     }
-    work -= paint(chunks, feature, code);
+    work -= paint(chunks, feature, (chunk, _key, cell) => {
+      const held = chunk[cell] as number;
+      // An uncovered cell stays `unknown`: a tile's buffer reaches past it.
+      if (held !== 0 && precedence(held) < precedence(code)) chunk[cell] = code;
+    });
   }
   // 2a. #2684: inferred built-up land — only where every polygon was painted,
   // so a wood the work cap left out is never read as open land beside a street.
@@ -595,9 +954,13 @@ export function landClassMask(
       }
     }
   }
+  // 2b. #2685: each park kind's look, onto the cells the classes left `park`.
+  const looks = new Map<number, Uint8Array>();
+  parkLooks(chunks, looks, corridor, maxChunks - chunks.size, work);
   // 3. #1547: how far every cell near built-up land is from it.
   const { levels, bytes: levellingBytes } = levellingField(chunks, maxLevelledChunks);
 
+  /** The code at a point: 0 (`unknown`) outside every covered chunk. */
   const codeAt = (x: number, z: number): number => {
     const column = Math.floor(x / CHUNK_METRES);
     const row = Math.floor(z / CHUNK_METRES);
@@ -682,14 +1045,89 @@ export function landClassMask(
       into[point] = Math.max(0, near + (far - near) * (fz - cellZ) - LAND_CLASS_CELL_METRES / 2);
     }
   };
+  const parkLookAt = (x: number, z: number): ParkLook => {
+    const column = Math.floor(x / CHUNK_METRES);
+    const row = Math.floor(z / CHUNK_METRES);
+    if (!inRange(column, row)) return 'mown';
+    const look = looks.get(chunkKey(column, row));
+    if (look === undefined) return 'mown';
+    const cellX = Math.min(
+      LAND_CLASS_CHUNK_CELLS - 1,
+      Math.floor((x - column * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
+    );
+    const cellZ = Math.min(
+      LAND_CLASS_CHUNK_CELLS - 1,
+      Math.floor((z - row * CHUNK_METRES) / LAND_CLASS_CELL_METRES),
+    );
+    return LOOK_OF_CODE[look[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number] as ParkLook;
+  };
   return {
     classAt,
-    covered: (x, z) => codeAt(x, z) !== 0,
+    bareSurfaceAt: (x, z) => SURFACE_OF_CODE[codeAt(x, z)],
+    covered: (x, z) => classAt(x, z) !== 'unknown',
     inferredAt: (x, z) => codeAt(x, z) === CODE_INFERRED,
+    wetlandAt: (x, z) => codeAt(x, z) === CODE_WETLAND,
+    waterLines: corridor.waterLines ?? [],
+    protectedArea: (x, z) => {
+      const code = codeAt(x, z);
+      return code === CODE_PROTECTED_PARK || code === CODE_PROTECTED_WOOD;
+    },
+    parkLookAt,
     builtUpDistances,
-    bytes: chunks.size * CHUNK_BYTES,
+    bytes: (chunks.size + looks.size) * CHUNK_BYTES,
     levellingBytes,
   };
+}
+
+/**
+ * #2685: every park polygon's look onto the class chunks' `park` cells
+ * ({@link isParkCode}, a protected area's among them — #2657, and since #2754
+ * a beach inside the park, {@link takesParkLook}), the
+ * higher look code winning ({@link LOOK_OF_CODE}). A look chunk is made only
+ * where a polygon with a look of its own reaches, at most `maxChunks` of them;
+ * a `mown` polygon writes only into chunks already made, so a park inside a
+ * nature reserve is mown and a town of plain parks costs nothing. Spends what
+ * the classes left of their `work`; past it, the rest of the park is `mown`.
+ */
+function parkLooks(
+  chunks: Map<number, Uint8Array>,
+  looks: Map<number, Uint8Array>,
+  corridor: WorldCorridor,
+  maxChunks: number,
+  left: number,
+): void {
+  let work = left;
+  const mown: LandUseFeature[] = [];
+  for (const feature of corridor.landUse) {
+    if (work <= 0) return;
+    if (landClassOfKind(feature.layer, feature.kind) !== 'park') continue;
+    const look = parkLookOfKind(feature.kind);
+    if (look === 'mown') {
+      mown.push(feature);
+      continue;
+    }
+    const code = LOOK_OF_CODE.indexOf(look);
+    work -= paint(chunks, feature, (chunk, key, cell) => {
+      if (!takesParkLook(chunk[cell] as number)) return;
+      let into = looks.get(key);
+      if (into === undefined) {
+        if (looks.size >= maxChunks) return;
+        into = new Uint8Array(CHUNK_BYTES);
+        looks.set(key, into);
+      }
+      if ((into[cell] as number) < code) into[cell] = code;
+    });
+  }
+  if (looks.size === 0) return;
+  for (const feature of mown) {
+    if (work <= 0) return;
+    work -= paint(chunks, feature, (chunk, key, cell) => {
+      if (!takesParkLook(chunk[cell] as number)) return;
+      const into = looks.get(key);
+      if (into !== undefined && (into[cell] as number) < LOOK_CODE_MOWN)
+        into[cell] = LOOK_CODE_MOWN;
+    });
+  }
 }
 
 /** The chamfer's step to a side neighbour and to a diagonal one, in metres. */
@@ -894,10 +1332,15 @@ function markCovered(chunks: Map<number, Uint8Array>, box: Box, maxChunks: numbe
 }
 
 /**
- * Writes `code` into every covered cell of every existing chunk the polygon covers, where it outranks.
- * Returns the work it cost: edges times the rows of each chunk it rasterised.
+ * Hands `visit` every cell of every existing chunk the polygon covers, with the
+ * chunk and its key. Returns the work it cost: edges times the rows of each
+ * chunk it rasterised.
  */
-function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: number): number {
+function paint(
+  chunks: Map<number, Uint8Array>,
+  feature: LandUseFeature,
+  visit: (chunk: Uint8Array, key: number, cell: number) => void,
+): number {
   const outer = feature.rings[0];
   if (outer === undefined || outer.length < 6) return 0;
   let edges = 0;
@@ -920,7 +1363,8 @@ function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: n
       column++
     ) {
       if (!inRange(column, row)) continue;
-      const chunk = chunks.get(chunkKey(column, row));
+      const key = chunkKey(column, row);
+      const chunk = chunks.get(key);
       if (chunk === undefined) continue;
       const grid: GridSpec = {
         originX: column * CHUNK_METRES,
@@ -930,11 +1374,7 @@ function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: n
         rows: LAND_CLASS_CHUNK_CELLS,
       };
       cost += edges * LAND_CLASS_CHUNK_CELLS;
-      rasterise(feature, grid, (cell) => {
-        const held = chunk[cell] as number;
-        // An uncovered cell stays `unknown`: a tile's buffer reaches past it.
-        if (held !== 0 && precedence(held) < precedence(code)) chunk[cell] = code;
-      });
+      rasterise(feature, grid, (cell) => visit(chunk, key, cell));
     }
   }
   return cost;
@@ -943,7 +1383,10 @@ function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: n
 /**
  * A code's place in the precedence: {@link CODE_MAPPED_OTHER} is above a
  * covered cell no polygon reaches and below every other class, so a wood
- * drawn over a beach is still a wood.
+ * drawn over a heath is still a wood. That includes #2657's protected-area
+ * codes: a national forest's boundary over a heath reads `wood`, as it did
+ * before #2684 marked the heath. (A beach is `bare` since #2662, above the
+ * protected codes, so a beach inside a national forest stays a beach.)
  */
 function precedence(code: number): number {
   return code === CODE_MAPPED_OTHER ? CODE_OTHER + 0.5 : code;
@@ -1090,9 +1533,11 @@ export function suburbCues(window: {
  *    other cues — joins, farmland, footprints and built-up land, places — do
  *    not cancel one another out. No cue but the density is enough alone.
  *
- * Never on farmland, meadow, wood, water or park, nor on any polygon of
- * another kind that classes `other` (an aerodrome, a beach, a heath): those
- * cells do not hold plain `other` ({@link CODE_MAPPED_OTHER}). Rail,
+ * Never on farmland, meadow, wood, water, park or `bare` ground (#2662: an
+ * aerodrome, a beach), nor on any polygon of another kind that classes
+ * `other` (a heath): those cells do not hold plain `other`
+ * ({@link CODE_MAPPED_OTHER}); nor on a protected area's boundary (#2657),
+ * whose cells hold its own codes. Rail,
  * industrial and military land is already `built-up` and is not changed.
  * Built once, at the press, after the polygons; bounded by `maxWork` cell
  * tests, past which the rest is not inferred — today's world.

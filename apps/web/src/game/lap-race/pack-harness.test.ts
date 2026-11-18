@@ -16,7 +16,10 @@
  * - **the drawn layout never overlaps**: no two racers inside each other's
  *   bike box, a bike length along and a place across, on any tick or on the
  *   frames drawn between ticks;
- * - **a run replays identically**.
+ * - **a run replays identically**;
+ * - **with items on** (#2636), the same fields still draw no two racers inside
+ *   each other, on ticks or between them, and every bot's speed smoothly,
+ *   read against its race speed with an item's push in it.
  *
  * Each field is ridden once and read by every case that asks about it. No case
  * sets its own timeout (#1688); a whole field rides in well under a second.
@@ -134,6 +137,12 @@ interface Tick {
   readonly flips: number;
   /** Every racer as it is drawn, along and across, to the millimetre. */
   readonly drawn: string;
+  /**
+   * How many bots an item's effect is moving on this tick, drawn within two
+   * bike lengths along of another racer (#2636): what makes an items-on
+   * field's never-inside case not vacuous.
+   */
+  readonly movedNear: number;
 }
 
 /** Every racer on one drawing, along the road and across it, the rider first. */
@@ -167,8 +176,11 @@ function deepest(drawn: readonly { readonly along: number; readonly lateral: num
   return most;
 }
 
-/** Ride the field `seed` deals on `profile` for {@link RIDDEN_SECONDS}. */
-function ride(profile: RouteProfile, seed: number): Tick[] {
+/**
+ * Ride the field `seed` deals on `profile` for {@link RIDDEN_SECONDS}: with
+ * items off, as #2545 rode it, or on (#2636).
+ */
+function ride(profile: RouteProfile, seed: number, itemsOn = false): Tick[] {
   vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
     <T extends ArrayBufferView>(array: T): T => {
       (array as unknown as Uint32Array)[0] = seed;
@@ -176,7 +188,7 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
     },
   );
   let race = startLapRaceRide({
-    choice: { laps: 3, bots: LAP_RACE_MOST_BOTS, tier: 'brisk', itemsOn: false },
+    choice: { laps: 3, bots: LAP_RACE_MOST_BOTS, tier: 'brisk', itemsOn },
     profile,
     conditions: lapRaceBotConditions(
       profile,
@@ -202,9 +214,16 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
     race = stepLapRaceRide(race, { ticks: 1, along, riderWatts: RIDER_WATTS });
     const drawing = lapRaceDrawing(race, along, 0, false);
     const drawn = placed(drawing);
-    const bots = drawing.raceBots.map((bot) => ({
+    // Its race speed: its effort speed, and the rate an item's effect or the
+    // drift moved its race offset at over the tick (#2636), which is nought
+    // with items off. So a bot an item speeds up is not read as a jolt.
+    const { offsetRates } = race;
+    const ids = race.race.racers
+      .map((entry) => entry.racer.id)
+      .filter((id) => id !== LAP_RACE_RIDER_ID);
+    const bots = drawing.raceBots.map((bot, at) => ({
       along: bot.distanceMetres,
-      speed: bot.speedMetresPerSecond,
+      speed: bot.speedMetresPerSecond + (offsetRates.get(ids[at] as string) ?? 0),
     }));
     const drawnSpeeds = bots.map(
       (bot, at) => (bot.along - (botsBefore?.[at]?.along ?? Number.NaN)) / LAP_RACE_TICK_SECONDS,
@@ -248,6 +267,21 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
       ),
     );
     const k = lapRaceDraftFactors(race.race);
+    // `raceBots` is the race's racers in order, the rider left out, and
+    // `drawn` is the rider and then those.
+    const movedNear = race.race.racers
+      .filter((entry) => entry.racer.id !== LAP_RACE_RIDER_ID)
+      .filter((entry, at) => {
+        const one = drawn[at + 1];
+        return (
+          entry.effects.length > 0 &&
+          one !== undefined &&
+          drawn.some(
+            (other, index) =>
+              index !== at + 1 && Math.abs(other.along - one.along) < 2 * BIKE_LENGTH_METRES,
+          )
+        );
+      }).length;
     ticks.push({
       second: tick * LAP_RACE_TICK_SECONDS,
       at: new Map(
@@ -269,6 +303,7 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
       jolt,
       flips,
       drawn: drawn.map((each) => `${each.along.toFixed(3)},${each.lateral.toFixed(3)}`).join(' '),
+      movedNear,
     });
   }
   return ticks;
@@ -276,11 +311,11 @@ function ride(profile: RouteProfile, seed: number): Tick[] {
 
 /** Every field, ridden once, the first time a case asks. */
 const ridden = new Map<string, Tick[]>();
-function field(name: 'flat' | 'hilly', seed: number): Tick[] {
-  const key = `${name} ${String(seed)}`;
+function field(name: 'flat' | 'hilly', seed: number, itemsOn = false): Tick[] {
+  const key = `${name} ${String(seed)} ${itemsOn ? 'items on' : 'items off'}`;
   let ticks = ridden.get(key);
   if (ticks === undefined) {
-    ticks = ride(name === 'flat' ? FLAT : HILLY, seed);
+    ticks = ride(name === 'flat' ? FLAT : HILLY, seed, itemsOn);
     ridden.set(key, ticks);
   }
   return ticks;
@@ -427,6 +462,43 @@ describe.each(['flat', 'hilly'] as const)(
         JSON.stringify(ticks.map((tick) => [...tick.at, ...tick.tactic, ...tick.wbal, tick.drawn]));
       expect(trace(again)).toBe(trace(field(name, SEEDS[0])));
     });
+  },
+);
+
+describe.each(['flat', 'hilly'] as const)(
+  'seeded seven-bot fields on the %s circuit with items on (#2636)',
+  (name) => {
+    it.each(SEEDS)(
+      'never draws two racers inside each other through an item’s effects, on any tick or between ticks (seed %i)',
+      (seed) => {
+        const ticks = field(name, seed, true);
+        // Not vacuous: items moved bots drawn near another racer, on many ticks.
+        expect(ticks.reduce((sum, tick) => sum + tick.movedNear, 0)).toBeGreaterThan(100);
+        expect(ticks.every((tick) => Number.isFinite(tick.insideBetween))).toBe(true);
+        const inside = ticks
+          .filter((tick) => tick.inside > 1e-9 || tick.insideBetween > DRAWN_BACK_SLACK_METRES)
+          .map(
+            (tick) =>
+              `${tick.second.toFixed(2)} s: ${tick.inside.toFixed(3)} m, between ${tick.insideBetween.toFixed(3)} m`,
+          );
+        expect(inside).toEqual([]);
+      },
+    );
+
+    it.each(SEEDS)(
+      'draws every bot’s speed smoothly through an item’s effects (seed %i)',
+      (seed) => {
+        const ticks = field(name, seed, true);
+        const jolts = ticks
+          .filter((tick) => !(tick.jolt <= EASED_PER_TICK) || tick.flips > 0)
+          .map(
+            (tick) =>
+              `${tick.second.toFixed(2)} s: ${String(tick.jolt)} m/s, ${String(tick.flips)} flips`,
+          );
+        expect(jolts).toEqual([]);
+        expect(ticks.slice(2).some((tick) => tick.jolt > 1.5)).toBe(true);
+      },
+    );
   },
 );
 
