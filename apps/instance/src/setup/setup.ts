@@ -50,11 +50,11 @@
  * `pages.ts` for ADR 0080's own exceptions).
  */
 
+import type { SetupSummary } from '@onyourleft/operate-text';
+
 import { randomToken, sha256Hex } from '../auth/crypto.ts';
 import { adminCodeSha256 } from '../admin/code.ts';
-import { adminResponse } from '../admin/headers.ts';
-import { ACTION_LABEL } from '../admin/pages.ts';
-import { ADMIN_STYLE } from '../admin/style.ts';
+import { ADMIN_CONTENT_SECURITY_POLICY, adminResponse } from '../admin/headers.ts';
 import { INVITE_LIFETIME_SECONDS, readableCode } from '../auth/identity.ts';
 import type { OwnerClaim } from '../auth/owner-claim.ts';
 import {
@@ -69,6 +69,7 @@ import { keysView } from '../operate/operate.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
   BackupRequestOutcome,
+  OperatorAction,
   OperatorChange,
   SetupSessionRecord,
   SqlStore,
@@ -77,7 +78,9 @@ import { emergencyKitText, EMERGENCY_KIT_FILE_NAME } from './emergency-kit.ts';
 import {
   backupsBody,
   claimBody,
+  claimWaits,
   finishBody,
+  FINISHED_PAGE_STYLE,
   finishedPage,
   formRefusedPage,
   inviteBody,
@@ -95,6 +98,7 @@ import {
 import type { SecretFromFile } from './secrets.ts';
 import { removeSetupCodeFile, setupAddress } from './setup-code.ts';
 import { SETUP_ROUTES, SETUP_STEPS, stepPath, type SetupStep } from './setup-routes.ts';
+import { SETUP_STYLE } from './style.ts';
 
 /** The setup session's cookie. */
 export const SETUP_COOKIE = 'oyl-setup';
@@ -234,6 +238,34 @@ const ACTION_STEP: ReadonlyMap<string, SetupStep> = new Map([
 
 const iso = (seconds: number): string => new Date(seconds * 1000).toISOString();
 
+/**
+ * The finished page's Content-Security-Policy: the admin pages' own, with
+ * `style-src` allowing exactly the stylesheet that page carries inline, by
+ * its SHA-256 — `/setup/setup.css` is gone by the time it is read (D-7).
+ */
+async function finishedPagePolicy(): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(FINISHED_PAGE_STYLE),
+  );
+  const hash = btoa(String.fromCharCode(...new Uint8Array(digest)));
+  return ADMIN_CONTENT_SECURITY_POLICY.replace("style-src 'self'", `style-src 'sha256-${hash}'`);
+}
+
+/**
+ * A claim code this setup showed and no tablet has scanned yet, held in
+ * memory only, so its step can show the SAME QR while it waits (ADR 0080
+ * D-3: the database keeps only the code's hash). Shown only to the session
+ * that asked for it, and only until it runs out.
+ */
+interface ShownClaim {
+  readonly sessionSha256: string;
+  readonly card: string;
+  readonly code: string;
+  /** Unix seconds. */
+  readonly expiresAt: number;
+}
+
 export function createSetup(options: SetupOptions): Setup {
   const { store } = options;
   const limits = options.limits ?? DEFAULT_SETUP_LIMITS;
@@ -246,6 +278,7 @@ export function createSetup(options: SetupOptions): Setup {
   const cookieFor = (token: string): string => `${SETUP_COOKIE}=${token}; ${attributes}`;
   const CLEARED = `${SETUP_COOKIE}=; ${attributes}; Max-Age=0`;
   const refused = new Map<SetupRefusal, number>();
+  let shownClaim: ShownClaim | undefined;
   const refuse = (kind: SetupRefusal): void => {
     refused.set(kind, (refused.get(kind) ?? 0) + 1);
   };
@@ -387,21 +420,20 @@ export function createSetup(options: SetupOptions): Setup {
     switch (step) {
       case 'claim': {
         if ((await store.claimedOwnerKey()) !== undefined) {
-          return page(stepPage(frame, claimBody({ kind: 'claimed' }, csrf), true), 200);
+          shownClaim = undefined;
+          return page(stepPage(frame, claimBody({ kind: 'claimed' }, csrf), { next: true }), 200);
         }
-        const pending = await options.ownerClaim.pending();
-        const view: ClaimView =
-          pending === undefined
-            ? {
-                kind: 'open',
-                card: (await cardOf()) !== null,
-                notConfirmed: url.searchParams.has('unconfirmed'),
-              }
-            : { kind: 'pending', comparisonCode: pending.comparisonCode };
-        return page(stepPage(frame, claimBody(view, csrf), false), 200);
+        const view = await claimView(url, session);
+        return page(
+          stepPage(frame, claimBody(view, csrf), {
+            next: false,
+            ...(claimWaits(view) ? { refresh: stepPath('claim') } : {}),
+          }),
+          200,
+        );
       }
       case 'passkey':
-        return page(stepPage(frame, passkeyBody(`${origin}/admin`), true), 200);
+        return page(stepPage(frame, passkeyBody(`${origin}/admin`), { next: true }), 200);
       case 'secrets': {
         const kit =
           options.kitSecrets.length === 0
@@ -409,7 +441,7 @@ export function createSetup(options: SetupOptions): Setup {
             : session.record.kitDownloadedAt === null
               ? 'offer'
               : 'taken';
-        return page(stepPage(frame, secretsBody(kit, csrf), true), 200);
+        return page(stepPage(frame, secretsBody(kit, csrf), { next: true }), 200);
       }
       case 'backups': {
         const [records, pending] = await Promise.all([
@@ -417,13 +449,14 @@ export function createSetup(options: SetupOptions): Setup {
           store.pendingBackupRequest(),
         ]);
         const newest = records[0];
+        const waiting = pending !== undefined;
         const body = backupsBody(
           {
             last:
               newest === undefined
                 ? null
                 : { at: iso(newest.at), outcome: newest.outcome, offBox: newest.offBox },
-            waiting: pending !== undefined,
+            waiting,
             notice: url.searchParams.has('too-soon')
               ? 'too-soon'
               : url.searchParams.has('asked')
@@ -432,25 +465,53 @@ export function createSetup(options: SetupOptions): Setup {
           },
           csrf,
         );
-        return page(stepPage(frame, body, true), 200);
+        return page(
+          stepPage(frame, body, {
+            next: true,
+            ...(waiting ? { refresh: stepPath('backups') } : {}),
+          }),
+          200,
+        );
       }
       case 'registration': {
-        const held = await store.registrationSetting();
-        const body = registrationBody(
-          {
-            mode: held ?? options.environmentRegistration,
-            from: held === undefined ? 'env' : 'setup',
-            saved: url.searchParams.has('saved'),
-          },
-          csrf,
-        );
-        return page(stepPage(frame, body, true), 200);
+        // One button saves the choice and moves on: no "Next step" to leave a choice unsaved.
+        const body = registrationBody({ mode: await modeNow() }, csrf);
+        return page(stepPage(frame, body, { next: false }), 200);
       }
       case 'invite':
-        return page(stepPage(frame, inviteBody(await inviteView(), csrf), true), 200);
+        return page(stepPage(frame, inviteBody(await inviteView(), csrf), { next: true }), 200);
       case 'finish':
-        return page(stepPage(frame, finishBody(await changesOf(), csrf), false), 200);
+        return page(stepPage(frame, finishBody(await summaryOf(), csrf), { next: false }), 200);
     }
+  }
+
+  /** The claim step with no owner: a claim to compare, the code still waiting for a scan, or the start. */
+  async function claimView(url: URL, session: Session): Promise<ClaimView> {
+    const pending = await options.ownerClaim.pending();
+    if (pending !== undefined) {
+      shownClaim = undefined;
+      return { kind: 'pending', comparisonCode: pending.comparisonCode };
+    }
+    const at = seconds();
+    const shown = shownClaim;
+    if (
+      shown !== undefined &&
+      shown.expiresAt > at &&
+      shown.sessionSha256 === session.record.tokenSha256
+    ) {
+      return {
+        kind: 'code',
+        card: shown.card,
+        code: shown.code,
+        expiresAt: iso(shown.expiresAt),
+        secondsLeft: shown.expiresAt - at,
+      };
+    }
+    return {
+      kind: 'open',
+      card: (await cardOf()) !== null,
+      notConfirmed: url.searchParams.has('unconfirmed'),
+    };
   }
 
   async function modeNow(): Promise<RegistrationMode> {
@@ -465,26 +526,49 @@ export function createSetup(options: SetupOptions): Setup {
   }
 
   /**
-   * What this setup changed, oldest first, in the operator log's own words:
-   * every `done` entry from the `setup` source since the setup last began —
-   * across the sessions and restarts a resumed setup took (D-7's summary is
-   * of the wizard's changes, and a resumed setup is one wizard) — stopping
-   * at the newest `owner_claim_reset`, which reopened the setup and began a
-   * new one.
+   * Whether this setup did `action`: a `done` entry from the `setup` source
+   * since the setup last began — across the sessions and restarts a resumed
+   * setup took — stopping at the newest `owner_claim_reset`, which reopened
+   * the setup and began a new one.
    */
-  async function changesOf(): Promise<readonly string[]> {
-    const changes: string[] = [];
+  async function setupDid(action: OperatorAction): Promise<boolean> {
     for (const entry of await store.listOperatorLogPage(undefined, 200)) {
-      if (entry.action === 'owner_claim_reset') break;
-      if (entry.source !== 'setup' || entry.outcome !== 'done') continue;
-      if (entry.action === 'setup_sign_in') continue;
-      changes.push(
-        entry.detail === null
-          ? ACTION_LABEL[entry.action]
-          : `${ACTION_LABEL[entry.action]}: ${entry.detail.replaceAll('_', ' ')}`,
-      );
+      if (entry.action === 'owner_claim_reset') return false;
+      if (entry.source === 'setup' && entry.outcome === 'done' && entry.action === action) {
+        return true;
+      }
     }
-    return changes.reverse();
+    return false;
+  }
+
+  /** Where the server stands at the finish (D-7's summary), each read from where it is kept. */
+  async function summaryOf(): Promise<SetupSummary> {
+    const [owner, records, state, mode] = await Promise.all([
+      store.claimedOwnerKey(),
+      store.listBackupRecords(1),
+      store.setupState(),
+      modeNow(),
+    ]);
+    const newest = records[0];
+    return {
+      ownerClaimed: owner !== undefined,
+      kit:
+        options.kitSecrets.length === 0
+          ? 'none'
+          : (await setupDid('emergency_kit_downloaded'))
+            ? 'downloaded'
+            : 'not-downloaded',
+      backups:
+        newest === undefined
+          ? 'none-yet'
+          : newest.outcome === 'failed'
+            ? 'failed'
+            : newest.offBox === 'copied'
+              ? 'working'
+              : 'this-computer-only',
+      mode,
+      invites: (state?.inviteMintedAt ?? null) === null ? 0 : 1,
+    };
   }
 
   /** One change, by its form's target, in a session the origin and token checks admitted. */
@@ -512,12 +596,14 @@ export function createSetup(options: SetupOptions): Setup {
         if (card === null) return seeOther('/setup/claim');
         const minted = await options.ownerClaim.mint('setup');
         if (minted === 'claimed') return seeOther('/setup/claim');
-        const frame = await frameOf('claim', session);
-        const body = claimBody(
-          { kind: 'code', card, code: minted.code, expiresAt: iso(minted.expiresAt) },
-          frame.csrf,
-        );
-        return page(stepPage(frame, body, false), 200);
+        // Held for the claim step's page, which shows it — the same QR — until a tablet scans it.
+        shownClaim = {
+          sessionSha256: session.record.tokenSha256,
+          card,
+          code: minted.code,
+          expiresAt: minted.expiresAt,
+        };
+        return seeOther('/setup/claim');
       }
       case '/setup/claim/confirm': {
         const comparison = single(form, 'comparison');
@@ -526,10 +612,13 @@ export function createSetup(options: SetupOptions): Setup {
             ? await options.ownerClaim.confirm(comparison, 'setup')
             : 'none';
         if (confirmed !== 'confirmed') return seeOther('/setup/claim?unconfirmed');
+        shownClaim = undefined;
         await store.setSetupStep('passkey', at);
-        return seeOther('/setup/passkey');
+        // The claim step, now saying the tablet owns the server, before the next step.
+        return seeOther('/setup/claim');
       }
       case '/setup/claim/discard':
+        shownClaim = undefined;
         await options.ownerClaim.discard('setup');
         return seeOther('/setup/claim');
       case '/setup/secrets/kit': {
@@ -585,7 +674,9 @@ export function createSetup(options: SetupOptions): Setup {
             return { outcome: 'done', detail: mode, value: undefined };
           },
         );
-        return seeOther('/setup/registration?saved');
+        // Saved, and on: the step's one button does both.
+        if (now === 'registration') await store.setSetupStep('invite', at);
+        return seeOther(stepPath('invite'));
       }
       case '/setup/invite/code': {
         const athleteId = await ownerAthlete();
@@ -613,9 +704,10 @@ export function createSetup(options: SetupOptions): Setup {
           card,
           code,
           expiresAt: iso(expiresAt),
+          secondsLeft: expiresAt - at,
           inviteMode: (await modeNow()) === 'invite',
         };
-        return page(stepPage(frame, inviteBody(view, frame.csrf), true), 200);
+        return page(stepPage(frame, inviteBody(view, frame.csrf), { next: true }), 200);
       }
       default: {
         // '/setup/finish/done' (D-7): the setup done, every code and session gone, and the file.
@@ -628,7 +720,11 @@ export function createSetup(options: SetupOptions): Setup {
         );
         await removeSetupCodeFile(options.secretsDirectory);
         if (!finished) return seeOther('/setup');
-        return page(finishedPage(options.name), 200, { 'set-cookie': CLEARED });
+        shownClaim = undefined;
+        return page(finishedPage(options.name), 200, {
+          'set-cookie': CLEARED,
+          'content-security-policy': await finishedPagePolicy(),
+        });
       }
     }
   }
@@ -656,7 +752,7 @@ export function createSetup(options: SetupOptions): Setup {
         );
       }
       if (route === '/setup/setup.css') {
-        return adminResponse(ADMIN_STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
+        return adminResponse(SETUP_STYLE, 200, { 'content-type': 'text/css; charset=utf-8' });
       }
       const body = request.method === 'POST' ? await readBody() : null;
       if (body === 'too-large') {

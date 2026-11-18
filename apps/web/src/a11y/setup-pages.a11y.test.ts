@@ -45,14 +45,19 @@ interface SetupPages {
   formRefusedPage(): string;
   messagePage(heading: string, text: string): string;
   finishedPage(name: string | null): string;
-  stepPage(frame: Frame, body: string, next: boolean): string;
+  stepPage(
+    frame: Frame,
+    body: string,
+    options: { readonly next: boolean; readonly refresh?: string },
+  ): string;
   claimBody(view: unknown, csrf: string): string;
   passkeyBody(adminAddress: string): string;
   secretsBody(view: 'offer' | 'taken' | 'none', csrf: string): string;
   backupsBody(view: unknown, csrf: string): string;
   registrationBody(view: unknown, csrf: string): string;
   inviteBody(view: unknown, csrf: string): string;
-  finishBody(changes: readonly string[], csrf: string): string;
+  finishBody(summary: unknown, csrf: string): string;
+  readonly FINISHED_PAGE_STYLE: string;
 }
 
 /** `apps/instance` §`setup/setup-routes.ts`, as far as it is used here. */
@@ -98,9 +103,12 @@ const frame = (step: Step, reached: Step = 'finish', name: string | null = null)
 });
 
 const step =
-  (step: Step, body: () => string, next = true, reached: Step = 'finish') =>
+  (step: Step, body: () => string, next = true, reached: Step = 'finish', refresh?: string) =>
   () =>
-    pages.stepPage(frame(step, reached, AWKWARD_NAME), body(), next);
+    pages.stepPage(frame(step, reached, AWKWARD_NAME), body(), {
+      next,
+      ...(refresh === undefined ? {} : { refresh }),
+    });
 
 const record = (offBox: string | null, outcome = 'done') => ({
   at: '2026-11-18T09:00:00.000Z',
@@ -154,11 +162,18 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
         'claim',
         () =>
           pages.claimBody(
-            { kind: 'code', card: CARD, code: CODE, expiresAt: '2026-11-18T09:10:00.000Z' },
+            {
+              kind: 'code',
+              card: CARD,
+              code: CODE,
+              expiresAt: '2026-11-18T09:10:00.000Z',
+              secondsLeft: 600,
+            },
             CSRF,
           ),
         false,
         'claim',
+        '/setup/claim',
       ),
     ],
   ],
@@ -189,8 +204,16 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     ],
     [
       'no off-box folder, waiting',
-      step('backups', () =>
-        pages.backupsBody({ last: record('not-configured'), waiting: true, notice: 'asked' }, CSRF),
+      step(
+        'backups',
+        () =>
+          pages.backupsBody(
+            { last: record('not-configured'), waiting: true, notice: 'asked' },
+            CSRF,
+          ),
+        true,
+        'finish',
+        '/setup/backups',
       ),
     ],
     [
@@ -202,16 +225,12 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
   ],
   '/setup/registration': [
     [
-      'from .env',
-      step('registration', () =>
-        pages.registrationBody({ mode: 'approval', from: 'env', saved: false }, CSRF),
-      ),
+      'approval checked',
+      step('registration', () => pages.registrationBody({ mode: 'approval' }, CSRF), false),
     ],
     [
-      'chosen here, saved',
-      step('registration', () =>
-        pages.registrationBody({ mode: 'closed', from: 'setup', saved: true }, CSRF),
-      ),
+      'closed checked',
+      step('registration', () => pages.registrationBody({ mode: 'closed' }, CSRF), false),
     ],
   ],
   '/setup/invite': [
@@ -235,6 +254,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
             card: CARD,
             code: CODE,
             expiresAt: '2026-11-25T09:00:00.000Z',
+            secondsLeft: 7 * 24 * 60 * 60,
             inviteMode: false,
           },
           CSRF,
@@ -244,14 +264,41 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
   ],
   '/setup/finish': [
     [
-      'changes',
+      'all done',
       step(
         'finish',
-        () => pages.finishBody(['Owner claim confirmed', 'Registration mode set: closed'], CSRF),
+        () =>
+          pages.finishBody(
+            {
+              ownerClaimed: true,
+              kit: 'downloaded',
+              backups: 'working',
+              mode: 'invite',
+              invites: 1,
+            },
+            CSRF,
+          ),
         false,
       ),
     ],
-    ['nothing changed', step('finish', () => pages.finishBody([], CSRF), false)],
+    [
+      'little done',
+      step(
+        'finish',
+        () =>
+          pages.finishBody(
+            {
+              ownerClaimed: true,
+              kit: 'not-downloaded',
+              backups: 'none-yet',
+              mode: 'approval',
+              invites: 0,
+            },
+            CSRF,
+          ),
+        false,
+      ),
+    ],
   ],
 };
 
@@ -273,17 +320,29 @@ describe.each(Object.entries(PAGES))('the setup page %s (#2784)', (path, states)
   });
 
   it.each(states)(
-    '%s: one h1, a main, no script, no inline style, the setup’s stylesheet',
-    (_state, render) => {
+    '%s: one h1, a main, no script, the setup’s stylesheet, and a title that says the setup once',
+    (state, render) => {
       const html = render();
       const doc = parse(html);
       expect(doc.querySelectorAll('h1')).toHaveLength(1);
       expect(doc.querySelectorAll('main')).toHaveLength(1);
       expect(doc.documentElement.lang).toBe('en');
-      expect(html).not.toMatch(/<style|\sstyle=|\son[a-z]+=|<script/i);
-      expect(doc.querySelector('link[rel=stylesheet]')?.getAttribute('href')).toBe(
-        '/setup/setup.css',
-      );
+      expect(html).not.toMatch(/\sstyle=|\son[a-z]+=|<script/i);
+      if (state === 'finished') {
+        // Served after /setup/setup.css has gone: the same sheet, inline, and no link to fail.
+        expect(doc.querySelector('link[rel=stylesheet]')).toBeNull();
+        expect(doc.querySelectorAll('style')).toHaveLength(1);
+        expect(doc.querySelector('style')?.textContent).toBe(pages.FINISHED_PAGE_STYLE);
+      } else {
+        expect(html).not.toMatch(/<style/i);
+        expect(doc.querySelector('link[rel=stylesheet]')?.getAttribute('href')).toBe(
+          '/setup/setup.css',
+        );
+      }
+      expect(doc.title.split('Set up this instance')).toHaveLength(2);
+      // No h2 that repeats the page's h1.
+      const h1 = doc.querySelector('h1')?.textContent;
+      for (const h2 of doc.querySelectorAll('h2')) expect(h2.textContent).not.toBe(h1);
       expect(doc.body.textContent).not.toContain('<Club>&');
     },
   );
@@ -300,6 +359,11 @@ describe.each(Object.entries(PAGES))('the setup page %s (#2784)', (path, states)
         expect(nav).not.toBeNull();
         const current = nav?.querySelector('a[aria-current="step"]');
         expect(current?.getAttribute('href')).toBe(path);
+        // Never colour alone: a done step says so in words beside its tick, and each step's box
+        // is the same element class whether it is a link or not, so no row changes height.
+        const items = [...(nav?.querySelectorAll('li') ?? [])];
+        expect(items).toHaveLength(7);
+        for (const item of items) expect(item.firstElementChild?.className).toBe('step');
         // Every form is reached by Tab, and each is operated by its button.
         for (const form of doc.querySelectorAll('main form')) {
           const button = form.querySelector('button[type=submit]');
@@ -333,5 +397,49 @@ describe.each([
     expect(line?.textContent).toBe(codeWithCard(CARD, CODE));
     expect(readCodeWithCard(line?.textContent ?? '')).toEqual({ card: CARD, code: CODE });
     expect(tabbableElements(doc)).not.toContain(svg);
+  });
+});
+
+describe('the setup’s progress bar (#2784)', () => {
+  it('ticks and names each done step, marks the current one, and draws later steps as plain items', () => {
+    const doc = parse(
+      pages.stepPage(
+        frame('backups', 'registration'),
+        pages.backupsBody({ last: null, waiting: false, notice: null }, CSRF),
+        {
+          next: true,
+        },
+      ),
+    );
+    const steps = [...doc.querySelectorAll('header nav li')].map((item) => ({
+      link: item.querySelector('a') !== null,
+      current: item.querySelector('[aria-current="step"]') !== null,
+      mark: item.querySelector('.step-mark')?.textContent,
+      said: item.querySelector('.step')?.textContent,
+    }));
+    expect(steps).toEqual([
+      { link: true, current: false, mark: '✓', said: '✓Done: Claim' },
+      { link: true, current: false, mark: '✓', said: '✓Done: Passkey' },
+      { link: true, current: false, mark: '✓', said: '✓Done: Emergency kit' },
+      { link: true, current: true, mark: '✓', said: '✓Done: Backups' },
+      { link: true, current: false, mark: '5', said: '5Who may join' },
+      { link: false, current: false, mark: '6', said: '6Invite' },
+      { link: false, current: false, mark: '7', said: '7Finish' },
+    ]);
+    // The tick and the number are drawn, not read: the words are.
+    for (const mark of doc.querySelectorAll('.step-mark')) {
+      expect(mark.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('reloads only a page that waits, and to its own step', () => {
+    const waits = (path: string, state: string): string | null | undefined =>
+      parse((PAGES[path]?.find(([name]) => name === state)?.[1] ?? (() => ''))())
+        .querySelector('meta[http-equiv="refresh"]')
+        ?.getAttribute('content');
+    expect(waits('/setup/claim', 'the claim QR')).toBe('5; url=/setup/claim');
+    expect(waits('/setup/backups', 'no off-box folder, waiting')).toBe('5; url=/setup/backups');
+    expect(waits('/setup/claim', 'a claim to compare')).toBeUndefined();
+    expect(waits('/setup/backups', 'copied')).toBeUndefined();
   });
 });

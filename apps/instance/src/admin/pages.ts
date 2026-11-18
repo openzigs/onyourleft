@@ -172,7 +172,11 @@ export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></scrip
  * `signedOut` draws the narrower column of the sign-in page. `stylesheet` is
  * the admin pages' own address unless a caller serves the same sheet at its
  * own: the setup wizard's pages (#2784) link `/setup/setup.css`, because
- * `/admin` is not served while the admin pages are off.
+ * `/admin` is not served while the admin pages are off. `head` is markup
+ * the caller wrote, put in the `head` after the link: the setup's pages that
+ * wait use it for a `meta` refresh, and its finished page, which answers
+ * when `/setup/setup.css` no longer does, for its stylesheet inline, with
+ * `stylesheet` `null` (the response carries that sheet's hash in its CSP).
  */
 export function adminPage(
   title: string,
@@ -180,7 +184,8 @@ export function adminPage(
   before = '',
   script = false,
   signedOut = false,
-  stylesheet = '/admin/admin.css',
+  stylesheet: string | null = '/admin/admin.css',
+  head = '',
 ): string {
   return `<!doctype html>
 <html lang="en">
@@ -188,8 +193,7 @@ export function adminPage(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="${escapeHtml(stylesheet)}">
-${script ? PASSKEY_SCRIPT_TAG : ''}</head>
+${stylesheet === null ? '' : `<link rel="stylesheet" href="${escapeHtml(stylesheet)}">\n`}${head}${script ? PASSKEY_SCRIPT_TAG : ''}</head>
 <body${signedOut ? ' class="signed-out"' : ''}>
 ${before}<main id="main">
 ${body}
@@ -1675,18 +1679,33 @@ export const CARD_CODE_LINE_TEXT =
 export const CARD_CODE_UNTIL_TEXT = 'It works once, until';
 
 /**
+ * A caller's own words around the QR, in place of {@link CARD_CODE_TEXT}'s
+ * heading and lead and the moment it stops working: the setup wizard's step
+ * already carries the heading as its `h1`, and says when in its own words
+ * (#2784).
+ */
+export interface CardCodeWords {
+  readonly lead: string;
+  /** The whole sentence on when the code stops working. */
+  readonly until: string;
+}
+
+/**
  * A card and a single-use code as one QR, server-drawn SVG (`qr.ts`), with
  * the same line beside it as text a person can select and copy: the QR is
  * named for what it is for and described by that line, which is its
  * alternative. Throws unless the card is whole and the code is one the
  * instance mints (`qr.ts` §`cardWithCode`).
  */
-export function cardCodePart(view: CardCodeView): string {
+export function cardCodePart(view: CardCodeView, words?: CardCodeWords): string {
   const line = cardWithCode(view.card, view.code);
   const text = CARD_CODE_TEXT[view.purpose];
   const lineId = `${view.purpose}-code-line`;
-  return card(`<h2>${escapeHtml(text.heading)}</h2>
-<p>${escapeHtml(text.lead)}</p>
+  const until =
+    words === undefined
+      ? `${escapeHtml(CARD_CODE_UNTIL_TEXT)} ${readableMoment(view.expiresAt)}.`
+      : escapeHtml(words.until);
+  return card(`${words === undefined ? `<h2>${escapeHtml(text.heading)}</h2>\n` : ''}<p>${escapeHtml(words?.lead ?? text.lead)}</p>
 <figure class="qr-figure">
 ${qrSvg(line, text.label, lineId)}
 <figcaption>
@@ -1694,7 +1713,7 @@ ${qrSvg(line, text.label, lineId)}
 <p><code class="card" id="${escapeHtml(lineId)}">${escapeHtml(line)}</code></p>
 </figcaption>
 </figure>
-<p>${escapeHtml(CARD_CODE_UNTIL_TEXT)} ${readableMoment(view.expiresAt)}.</p>`);
+<p>${until}</p>`);
 }
 
 /** One problem line as `GET /v1/operate/logs` answers it (#2651): already through the log's redaction. */
