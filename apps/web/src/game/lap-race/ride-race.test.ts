@@ -17,10 +17,13 @@ import {
   botFieldPersonalities,
   botFieldSkills,
   BOT_LANE_DWELL_MS,
+  botTierPlan,
+  distanceOnRoute,
+  gradeAt,
   kilograms,
   racePosition,
 } from '@onyourleft/domain';
-import { lapRaceDraftFactors } from '@onyourleft/physics';
+import { botDemand, lapRaceDraftFactors } from '@onyourleft/physics';
 
 import { botName, lapRaceStandings } from '../hud/lap-race-hud';
 
@@ -41,6 +44,7 @@ import {
   type LapRaceRide,
 } from './ride-race';
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
+import { modelTacticsInputOf } from './model-race';
 import { drawnShift } from './pack-layout';
 
 const LOOP = circuitRoute(40);
@@ -648,4 +652,81 @@ describe('a lap race is drawn between its ticks, across and along, as it moves â
       expect(stepped.race.racers.map((entry) => entry.lane)).toEqual(lanes);
     }
   });
+});
+
+describe('the bots ride the road from the line â€” #2800', () => {
+  // The issue's circuit: 628 m round, flat for 100 m, 250 m up at 6 %, then
+  // down to the line.
+  const ROUND = 2 * Math.PI * 100;
+  const HILL = circuitRoute(100, (along) =>
+    along < 100 ? 0 : along < 350 ? 0.06 * (along - 100) : 15 * (1 - (along - 350) / (ROUND - 350)),
+  );
+
+  function raceFrom(riderDistance: number): LapRaceRide {
+    const ride = startLapRaceRide({
+      choice: { ...DEFAULT_LAP_RACE, itemsOn: false },
+      profile: HILL,
+      conditions: lapRaceBotConditions(
+        HILL,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance,
+      lineOffset: 0,
+      storage: undefined,
+    });
+    if (ride === undefined) throw new Error('a circuit starts a race');
+    return { ...ride, countdownLeftMs: 0 };
+  }
+
+  /** The grade on the road where the race draws `id`: at the line plus its effort distance. */
+  function gradeWhereDrawn(ride: LapRaceRide, id: string, ahead = 0): number {
+    const racer = ride.race.racers.find((entry) => entry.racer.id === id)?.racer;
+    if (racer === undefined) throw new Error('a racer in the race');
+    return gradeAt(HILL, distanceOnRoute(HILL, ride.startAlong + racer.effortDistance + ahead));
+  }
+
+  it.each([
+    ['300 m round the lap', 300],
+    ['300 m round its third lap', 300 + 2 * ROUND],
+  ])(
+    'has each bot feel, and the model read ahead of it, the grade where it is drawn, from %s',
+    (_, line) => {
+      let ride = raceFrom(line);
+      let along = line;
+      let climbed = 0;
+      // About 20 s, as the issue's evidence: 100 ms frames, two ticks a frame.
+      for (let frame = 0; frame < 200; frame += 1) {
+        along += 8 * 2 * LAP_RACE_TICK_SECONDS;
+        ride = stepLapRaceRide(ride, { ticks: 2, along });
+        for (const bot of ride.bots) {
+          // What the bot's tick reads the grade through: its ride and the race's course.
+          const felt = botDemand(bot.ride, { ...ride.conditions, plan: botTierPlan(bot.tier) });
+          const drawn = gradeWhereDrawn(ride, bot.id);
+          expect(felt.grade, `${bot.id} at frame ${String(frame)}`).toBeCloseTo(drawn, 6);
+          if (drawn > 2) climbed += 1;
+        }
+      }
+      // Non-vacuity: the field is on the climb where it is drawn, and the
+      // route's own start is flat for the bots' first 100 m.
+      expect(climbed).toBeGreaterThan(ride.bots.length * 50);
+      // And the model is shown the grade 50 m up the road the bots ride.
+      const input = modelTacticsInputOf(
+        ride.race,
+        ride.bots,
+        ride.conditions,
+        ride.seed,
+        false,
+        3,
+        0,
+      );
+      if (input === undefined) throw new Error('bots still racing');
+      for (const view of input.bots) {
+        const bot = ride.bots[view.bot];
+        if (bot === undefined) throw new Error('a seat in the field');
+        // Shown to a tenth of a per cent: within half of one of the exact grade.
+        const exact = gradeWhereDrawn(ride, bot.id, 50);
+        expect(Math.abs(view.gradeAheadPct - exact), bot.id).toBeLessThanOrEqual(0.05 + 1e-9);
+      }
+    },
+  );
 });

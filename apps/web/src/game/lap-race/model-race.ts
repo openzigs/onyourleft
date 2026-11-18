@@ -81,12 +81,18 @@ import {
   type ModelTacticsLogEntry,
   type ModelTacticsLogReason,
   type ModelRacingStyle,
-  type RouteProfile,
 } from '@onyourleft/domain';
-import { lapRaceDraftFactors, type LapRaceBot } from '@onyourleft/physics';
+import {
+  lapRaceDraftFactors,
+  type LapRaceBot,
+  type LapRaceBotConditions,
+} from '@onyourleft/physics';
 
 /** How far up the road a bot's grade ahead is read, metres: the bots' own look-ahead (`physics` §`BOT_GRADE_AHEAD_METRES`). */
 const GRADE_AHEAD_METRES = 50;
+
+/** The road the bots ride, as the model is shown it: the route and the line (#2800). */
+export type BotRoad = Pick<LapRaceBotConditions, 'profile' | 'lineMetres'>;
 
 /**
  * The rider's own input at every race tick, appended in place, one entry a
@@ -164,18 +170,23 @@ const round = (value: number, places: number): number => {
  * The race at `race.atMs` as the model is shown it (D-3.4), or `undefined`
  * when no bot is still racing. See the file comment.
  *
+ * @param road - the road the bots ride (`ride-race.ts` §`LapRaceRide.conditions`):
+ * the route, and the line their odometers read nought at (#2800), so the grade
+ * ahead the model is shown is the one each bot reads, where it is drawn.
  * @param seed - the race's own seed: the styles' deal and each bot's misread of the line.
  * @param riderWattsPerKilogram - the rider's power as the bots read it, or `null`.
  */
 export function modelTacticsInputOf(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
-  profile: RouteProfile,
+  road: BotRoad,
   seed: number,
   draft: boolean,
   riderWattsPerKilogram: number | null,
   quietSinceMs: number,
 ): ModelTacticsInput | undefined {
+  const { profile } = road;
+  const line = road.lineMetres ?? 0;
   const racing = race.racers
     .filter((entry) => entry.racer.finishedAtMs === null)
     .map((entry) => entry.racer)
@@ -237,7 +248,7 @@ export function modelTacticsInputOf(
       toLineM: Math.round(laps * lapLengthMetres - own.effortDistance + misread),
       launchM: Math.round(botLaunchMetres(bot.plan.archetype)),
       gradeAheadPct: round(
-        gradeAt(profile, distanceOnRoute(profile, bot.ride.distance + GRADE_AHEAD_METRES)),
+        gradeAt(profile, distanceOnRoute(profile, bot.ride.distance + line + GRADE_AHEAD_METRES)),
         1,
       ),
       riderGapM: rider === undefined ? 0 : round(rider.effortDistance - own.effortDistance, 1),
@@ -349,7 +360,7 @@ export function askLapRaceModel(
   model: LapRaceModel,
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
-  profile: RouteProfile,
+  road: BotRoad,
   seed: number,
   draft: boolean,
   riderWattsPerKilogram: number | null,
@@ -370,7 +381,7 @@ export function askLapRaceModel(
   const input = modelTacticsInputOf(
     race,
     bots,
-    profile,
+    road,
     seed,
     draft,
     riderWattsPerKilogram,

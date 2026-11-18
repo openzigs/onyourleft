@@ -412,7 +412,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const input = modelTacticsInputOf(
       race.race,
       race.bots,
-      race.conditions.profile,
+      race.conditions,
       race.seed,
       true,
       2,
@@ -434,15 +434,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const bots = race.bots.map((bot, seat) =>
       seat === blownSeat ? { ...bot, energy: { wbalJoules: 0, exhausted: true } } : bot,
     );
-    const input = modelTacticsInputOf(
-      race.race,
-      bots,
-      race.conditions.profile,
-      race.seed,
-      true,
-      2,
-      0,
-    )!;
+    const input = modelTacticsInputOf(race.race, bots, race.conditions, race.seed, true, 2, 0)!;
     const { laps, lapLengthMetres } = race.race.course;
     let misreadSomewhere = false;
     for (const view of input.bots) {
@@ -482,7 +474,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const input = modelTacticsInputOf(
       race.race,
       race.bots,
-      race.conditions.profile,
+      race.conditions,
       race.seed,
       true,
       2,
@@ -620,7 +612,7 @@ describe('what is kept with the ride (D-4.4)', () => {
     }));
     const fact = lapRaceRideFact(model.ride);
     expect(fact?.seed).toBe(SEED);
-    expect(fact?.version).toBe(3);
+    expect(fact?.version).toBe(4);
     expect(fact?.log).toEqual(model.ride.model?.log);
     const ticks = Math.round(30 / LAP_RACE_TICK_SECONDS);
     expect(fact?.rider.effortDistances).toHaveLength(ticks);
