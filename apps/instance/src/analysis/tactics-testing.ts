@@ -39,6 +39,14 @@ export const TACTICS_INPUT: ModelTacticsInput = {
     gradeAheadPct: 1.5,
     riderGapM: seat < 3 ? -4.2 : 3.4,
   })),
+  // #2794: a climb coming, a descent after it, and a flat finish.
+  course: {
+    climb: { inM: 400, lengthM: 600, avgPct: 6, maxPct: 9 },
+    descent: { inM: 1_100, lengthM: 500, avgPct: -5, maxPct: -7 },
+    lapLeftM: 1_800,
+    lapClimbM: 38,
+    finishPct: 0,
+  },
 };
 
 /** The local model a test world offers: a loopback address, so no name is resolved. */

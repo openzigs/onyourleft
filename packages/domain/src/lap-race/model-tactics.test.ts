@@ -111,6 +111,48 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
     });
   });
 
+  it('reads the course ahead, and a state from before it that has none (#2794)', () => {
+    const course = {
+      climb: { inM: 400, lengthM: 600, avgPct: 6, maxPct: 9 },
+      descent: null,
+      lapLeftM: 1_850,
+      lapClimbM: 36,
+      finishPct: 0,
+    };
+    const got = readModelTacticsInput(JSON.parse(JSON.stringify(input({ course }))) as unknown);
+    expect(got).toEqual({ ok: true, value: input({ course }) });
+    expect(readModelTacticsInput(input()).ok).toBe(true);
+    const field = (over: unknown) => {
+      const read = readModelTacticsInput(input({ course: over }));
+      return read.ok ? undefined : read.problem;
+    };
+    expect(field(null)).toEqual({ field: 'input.course', problem: 'must be an object' });
+    expect(field({ ...course, name: 'Alpe' })).toEqual({
+      field: 'input.course',
+      problem: 'has a field this race state does not',
+    });
+    expect(field({ ...course, finishPct: undefined })).toEqual({
+      field: 'input.course.finishPct',
+      problem: 'must be a grade in percent',
+    });
+    const noClimb: Record<string, unknown> = { ...course };
+    delete noClimb.lapClimbM;
+    expect(field(noClimb)).toEqual({ field: 'input.course.lapClimbM', problem: 'is required' });
+    expect(field({ ...course, climb: { ...course.climb, at: 'x' } })).toEqual({
+      field: 'input.course.climb',
+      problem: 'must be a hill, or null',
+    });
+    expect(field({ ...course, descent: { inM: 0, lengthM: 300, avgPct: -4 } })).toEqual({
+      field: 'input.course.descent',
+      problem: 'must be a hill, or null',
+    });
+    expect(field({ ...course, lapLeftM: -1 })?.field).toBe('input.course.lapLeftM');
+    expect(field({ ...course, lapClimbM: Number.POSITIVE_INFINITY })?.field).toBe(
+      'input.course.lapClimbM',
+    );
+    expect(field({ ...course, finishPct: 120 })?.field).toBe('input.course.finishPct');
+  });
+
   it('has no attack gate: a state that still carries one is refused (D-5.3)', () => {
     expect(readModelTacticsInput(input({ attackOpen: true }))).toEqual({
       ok: false,

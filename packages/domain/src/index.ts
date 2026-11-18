@@ -584,6 +584,22 @@ export {
   wind,
 } from './route/wind';
 
+// The course ahead in a few numbers (#2794): the next climb and descent, the
+// climbing left and a stretch's grade, which the AI bots and the AI pacer are
+// both shown. One module, so the two read the road alike.
+
+export type { CourseHill, CourseHills } from './route/course-ahead';
+export {
+  COURSE_AHEAD_MOST_METRES,
+  COURSE_HILL_GRADE_PERCENT,
+  COURSE_HILL_LEAST_METRES,
+  COURSE_ROUNDING_METRES,
+  courseAverageGrade,
+  courseClimbing,
+  courseHillsAhead,
+  isCourseHill,
+} from './route/course-ahead';
+
 // --- Routing (#70) -----------------------------------------------------------
 //
 // The engine-agnostic routing interface, and the one place an engine's numbers
