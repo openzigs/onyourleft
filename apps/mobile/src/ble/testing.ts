@@ -232,14 +232,17 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
     // method with no `await` is what `@typescript-eslint/require-await` exists
     // to catch. Returning the promise explicitly keeps the port's contract --
     // every call resolves rather than throwing -- without the empty ceremony.
+    // ⚠️ An address and NO name, since #2669, because that is what the plugin's
+    // Android `getDevices` answers (`BluetoothLe.kt` 8.3.0 puts `deviceId` and
+    // nothing else on each). The double used to name every id after the
+    // chooser's device, which let a reconnect that lost the rider's name for a
+    // sensor pass here and read "Unnamed sensor" on the phone.
     getDevices(ids) {
       calls.push(`getDevices:${ids.join(',')}`);
       if (!started) {
         return notInitialized();
       }
-      return Promise.resolve(
-        ids.map((id) => ({ deviceId: id, name: (stack.chooses ?? DEFAULT_DEVICE).name })),
-      );
+      return Promise.resolve(ids.map((id) => ({ deviceId: id })));
     },
 
     async connect(deviceId, disconnected) {

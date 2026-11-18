@@ -49,6 +49,8 @@
 #   IMG006  the migrate step (`node src/operator/cli.ts migrate`) failed in the image
 #   IMG007  /ready is not `ready`: the store did not open, or a room worker is down
 #   IMG008  a base image is not from the project's GHCR mirror, ghcr.io/openzigs/ (#1231)
+#   IMG009  a layer of the image holds an env file or a secrets folder, or its
+#           configuration sets a secret (scripts/check-image-layers.sh, #2786)
 #
 # Its own suite, with a fake `docker` on PATH and no Docker needed:
 #   bash scripts/check-instance-image.test.sh
@@ -151,6 +153,12 @@ if ! docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
   -f "${ROOT}/apps/instance/Dockerfile" -t "${TAG}" "${ROOT}" >/dev/null; then
   fail 'IMG001 apps/instance/Dockerfile did not build.'
 fi
+
+# #2786: every layer, not the finished filesystem, read for a deploy's `.env`
+# and `secrets/` before anything runs. The release workflow asks the same of
+# each platform it pushes; this asks it of every pull request's build.
+bash "${ROOT}/scripts/check-image-layers.sh" "${TAG}" >/dev/null ||
+  fail 'IMG009 the image carries an env file, a secrets folder or a secret: check-image-layers says which, above.'
 
 # The deploy's migrate step, in the image, on the volume the server will use:
 # the server never migrates, and refuses a database that is not (#791).

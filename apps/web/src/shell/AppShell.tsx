@@ -96,6 +96,7 @@ import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
+import type { ModelTacticsPort } from '../game/lap-race/model-tactics-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { SignalStrengthPort } from '../ride/signal-port';
@@ -344,6 +345,8 @@ export interface AppShellProps {
    * and joins rooms through it.
    */
   readonly rooms?: RoomsPort | undefined;
+  /** AI bots in a lap race — #2710: `main.tsx` builds it over the instance's sealed session. */
+  readonly tactics?: ModelTacticsPort | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -810,6 +813,7 @@ function viewFor(
           {...(props.roomId === undefined ? {} : { roomId: props.roomId })}
           {...(props.madeTheRoom === undefined ? {} : { madeTheRoom: props.madeTheRoom })}
           {...(props.rooms === undefined ? {} : { rooms: props.rooms })}
+          {...(props.tactics === undefined ? {} : { tactics: props.tactics })}
         />
       );
     case 'games':
@@ -907,6 +911,8 @@ function viewFor(
           riderText={props.riderText}
           workoutGoals={props.workoutGoals}
           soundOutput={props.soundOutput}
+          // #2756: the Instance line says whether this device is connected.
+          instance={props.instance}
         />
       );
     case 'about':
@@ -921,6 +927,8 @@ function viewFor(
           hostedSettings={props.hostedSettings}
           statements={props.statements}
           blocks={props.blocks}
+          // #2785: the instance card's scanner reads with the same camera.
+          camera={props.camera}
         />
       );
     case 'moderation':

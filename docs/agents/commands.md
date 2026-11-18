@@ -737,6 +737,20 @@ bash scripts/check-instance-image.sh
 # 2026-09-29 (69 with #780 before #864's merge, 62 with #864 alone, 43 before #852) -- the count is what the run prints.
 bash scripts/check-instance-image.test.sh
 
+# #2786: every layer of an image, read for a deploy's `.env`, `secrets/` or
+# `.deployed`, and its configuration for a secret-named variable
+# (LAYER001-003). The image check above runs it on its own build as IMG009;
+# instance-image.yml runs it with --archive on each platform it pushes. Both
+# suites are plain bash, need no Docker and run in the required `checks` shard.
+bash scripts/check-image-layers.sh onyourleft-instance
+bash scripts/check-image-layers.test.sh
+
+# #2786: the pull-only release bundle -- the home deployment's compose.yaml with
+# the image BY DIGEST, its deploy.sh, instance.env.example and release.image,
+# zipped. Run by instance-image.yml with the digest it pushed, not by hand.
+bash scripts/make-instance-bundle.sh ghcr.io/openzigs/onyourleft-instance@sha256:<digest> <version> <outdir>
+bash scripts/make-instance-bundle.test.sh
+
 # The mirror's script and its suite (#1231). The script copies Docker Hub's
 # official image, by the digest the Dockerfile pins, to ghcr.io/openzigs/, and
 # needs skopeo and a GHCR login with `packages: write`, so it is run by
@@ -767,6 +781,11 @@ docker run --rm -v oyl-data:/data -p 127.0.0.1:8787:8787 onyourleft-instance
 # a Mac with Docker 29.5.3 on 2026-09-29 (deploy 10 s, rollback with a restore
 # 9 s); the owner's Windows box is issue #733's. NOT a gate.
 bash apps/instance/deploy/home/deploy.sh
+# The same script in a release bundle (#2786), with `release.image` beside it:
+# pulls that digest and builds nothing, and needs no git. `--image REF` deploys
+# REF instead, from either place.
+bash deploy.sh
+bash deploy.sh --image ghcr.io/openzigs/onyourleft-instance@sha256:<digest>
 ```
 
 `scripts/check-repo-rules.sh` enforces:

@@ -28,6 +28,9 @@
  *   which a cycling route meets at grade almost never, and whose bridge a
  *   tile may not flag on every way. The route's own grade is not known: a
  *   route crossing a street on its own bridge still gets a junction there.
+ *   Such a street is drawn, as an overpass or an underpass, by
+ *   `overpasses.ts` since #2661 — and since #2699 an overpass's road, in this
+ *   file's mesh, kept clear of the scenery as a side road is.
  * - **Procedural** ({@link villageJunction}): one crossroads at the centre of
  *   every procedural village (`settlements.ts` §`Site`), square to the road,
  *   so that the world with no map data (ADR 0054 D-4) has them too. The plots
@@ -247,8 +250,11 @@ export function meetsAtGrade(street: Pick<StreetFeature, 'kind' | 'grade'>): boo
   return street.kind !== 'highway' && street.grade === 'ground';
 }
 
-/** A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`. */
-function resampled(line: Float32Array, budget: { metres: number }): number[] {
+/**
+ * A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`.
+ * `overpasses.ts` resamples the streets that cross the route over or under it with it — #2661.
+ */
+export function resampled(line: Float32Array, budget: { metres: number }): number[] {
   const out: number[] = [];
   for (let at = 0; at + 1 < line.length; at += 2) {
     const ax = line[at] as number;
@@ -334,12 +340,13 @@ function armFrom(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  land: LandClassMask,
 ): Candidate | undefined {
   const x0 = points[start] as number;
   const z0 = points[start + 1] as number;
   const leaves = nearestOnDrawnRoad(profile, origin, x0, z0, JUNCTION_TOLERANCE_METRES);
   if (leaves === undefined) return undefined;
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const outward: number[] = [];
   let metres = 0;
   let px = x0;
@@ -448,7 +455,7 @@ function grouped(candidates: Candidate[]): Junction[] {
 /** One corridor's junctions, kept with the profile they were found against. */
 const junctionsFound = new WeakMap<
   WorldCorridor,
-  { profile: RouteProfile; junctions: readonly Junction[] }
+  { profile: RouteProfile; land: LandClassMask; junctions: readonly Junction[] }
 >();
 
 /**
@@ -460,9 +467,14 @@ export function mappedJunctions(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  /**
+   * #2658: the ride's mask, built from `corridor`, so an arm stops at the
+   * map's lakes as at the invented ones. Absent is the world with no mask.
+   */
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly Junction[] {
   const cached = junctionsFound.get(corridor);
-  if (cached?.profile === profile) return cached.junctions;
+  if (cached?.profile === profile && cached.land === land) return cached.junctions;
   const candidates: Candidate[] = [];
   const budget = { metres: STREET_MAX_METRES };
   for (const street of corridor.streets) {
@@ -494,13 +506,14 @@ export function mappedJunctions(
           profile,
           origin,
           seed,
+          land,
         );
         if (arm !== undefined) candidates.push(arm);
       }
     }
   }
   const junctions = grouped(candidates);
-  junctionsFound.set(corridor, { profile, junctions });
+  junctionsFound.set(corridor, { profile, land, junctions });
   return junctions;
 }
 
@@ -547,12 +560,13 @@ function linear(byte: number): number {
   return proportion <= 0.04045 ? proportion / 12.92 : Math.pow((proportion + 0.055) / 1.055, 2.4);
 }
 
-function linearColour(packed: number): readonly [number, number, number] {
+/** A packed sRGB colour in linear light. `overpasses.ts` colours its approaches with it — #2699. */
+export function linearColour(packed: number): readonly [number, number, number] {
   return [linear((packed >> 16) & 0xff), linear((packed >> 8) & 0xff), linear(packed & 0xff)];
 }
 
-/** The side road's tarmac: the level road's own tint. */
-const TARMAC = linearColour(roadTint(0));
+/** The side road's tarmac: the level road's own tint. An overpass's approaches wear it too — #2699. */
+export const TARMAC = linearColour(roadTint(0));
 
 /** Its give-way line: the main road's paint, which #628's wear reads as paint. */
 const PAINT = linearColour(MARKING_COLOUR);
@@ -629,14 +643,18 @@ class MeshBuilder {
 }
 
 /** A point along a polyline, by arc length, and its direction there. */
-interface Station {
+export interface Station {
   readonly x: number;
   readonly z: number;
   readonly dx: number;
   readonly dz: number;
 }
 
-function stationAt(line: Float32Array, metres: number): Station {
+/**
+ * Where a polyline is `metres` along it, carried on along its last segment
+ * past its end. `overpasses.ts` follows an overpass's approaches with it — #2699.
+ */
+export function stationAt(line: Float32Array, metres: number): Station {
   let travelled = 0;
   for (let at = 0; at + 3 < line.length; at += 2) {
     const ax = line[at] as number;
@@ -1078,9 +1096,15 @@ export function onSideRoad(
       const az = s[segment * 4 + 1] as number;
       const bx = s[segment * 4 + 2] as number;
       const bz = s[segment * 4 + 3] as number;
-      const clear = (road.halfWidths[segment] as number) + margin;
-      // A cheap reject: the segment's middle further than it could reach.
-      if (Math.hypot((ax + bx) / 2 - at.x, (az + bz) / 2 - at.z) > reach + SIDE_ROAD_STEP_METRES)
+      const half = road.halfWidths[segment] as number;
+      const clear = half + margin;
+      // A cheap reject: the segment's middle further than it could reach —
+      // with its own half-width, which since #2699 an overpass's embankment
+      // makes wider than the 10 m `reach` allows a side road.
+      if (
+        Math.hypot((ax + bx) / 2 - at.x, (az + bz) / 2 - at.z) >
+        reach + half + SIDE_ROAD_STEP_METRES
+      )
         continue;
       for (let p = 0; p + 1 < points.length; p += 2) {
         if (

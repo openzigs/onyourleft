@@ -120,9 +120,16 @@ import {
 } from '@onyourleft/domain';
 
 import { treeLineHeight } from './ground-blend';
-import type { LandClassMask } from './land-class';
+import { BARE_SURFACES, type BareSurface, type LandClassMask } from './land-class';
 import { slotHash, uniformFrom } from './seeded';
-import { DRY, waterNearRoute, waterShaping, waterways, type WaterShaping } from './waterways';
+import {
+  DRY,
+  waterNearRoute,
+  waterShaping,
+  waterways,
+  type WaterShaping,
+  type Waterways,
+} from './waterways';
 import {
   RETRACE_HEADING_COSINE,
   RETRACE_OVERLAP_METRES,
@@ -324,6 +331,16 @@ export interface TerrainMesh {
   /** Three floats a vertex, linear, multiplying the ground colour: the mottle. */
   readonly colours: Float32Array;
   /**
+   * One byte a vertex: what mapped bare ground it stands on — #2700. 0 where
+   * the ground is not `bare` (it grows), else one more than its surface's
+   * index in `land-class.ts` §`BARE_SURFACES` ({@link surfaceByte}).
+   * `three-renderer.ts` §`TerrainBelt` draws each in its own colour.
+   *
+   * ⚠️ **Not a vertex attribute**: the renderer folds it into the colours it
+   * uploads, so the ground's program reads what it always read.
+   */
+  readonly surfaces: Uint8Array;
+  /**
    * Two floats a vertex: the row's ODOMETER and the signed lateral offset, in
    * metres. Where on the route a vertex stands, in the route's own frame, for a
    * shader that draws something tied to the route rather than to the screen
@@ -375,10 +392,10 @@ export interface TerrainMesh {
   readonly treeLine: number;
   /**
    * Which build lent {@link vertices}, {@link normals}, {@link colours} and
-   * {@link fields} — #469. Absent on a mesh somebody owns outright (a copy, or
-   * one built by hand in a test).
+   * {@link fields} — #469 — and, since #2700, {@link surfaces}. Absent on a
+   * mesh somebody owns outright (a copy, or one built by hand in a test).
    *
-   * ⚠️ **Those four arrays are BORROWED, and valid until the next
+   * ⚠️ **Those arrays are BORROWED, and valid until the next
    * {@link terrainCorridor}.** They are storage this module keeps and writes
    * again on the next build, for the reason {@link indices} already was: a
    * frame that allocates four fresh arrays sixty times a second is a GC pause
@@ -471,7 +488,7 @@ export function terrainHeightAt(
   if (lateral <= ROAD_HALF_WIDTH_METRES) {
     return road;
   }
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   // ⚠️ **Inside the clear band there is no relief to read**, so the hashed
   // fields are not drawn at all: the ground there is the road less the verge,
   // under whatever ceiling water puts on it. A third of the scenery stands in
@@ -549,7 +566,7 @@ export function terrainCorridor(
 ): TerrainMesh {
   // #459. The streams and lakes, as a ceiling on the ground and a damping of
   // its relief. @see waterShaping
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const centre = corridor.centre;
   const rows = centre.length;
@@ -607,10 +624,14 @@ export function terrainCorridor(
   const lines = tapered(centre, lent.lines);
   const rises = meetingRises(centre, shallow, meets, lent.rises);
   const perRow = COLUMNS * 2;
-  const { vertices, colours, fields, normals } = lent;
+  const { vertices, colours, fields, normals, surfaces } = lent;
   // #1547: asked only where the mask levels anything, so a ride with no
   // corridor pays nothing for it and builds today's ground to the bit.
   const levelled = land.levellingBytes > 0;
+  // #2700: and the bare ground only where the mask holds any class at all.
+  // Lent, so a row no pass below writes — a sunk one — must read as grown.
+  const mapped = land.bytes > 0;
+  surfaces.fill(0);
 
   for (let row = 0; row < rows; row += 1) {
     if (retraced[row] !== KEPT) continue;
@@ -712,6 +733,7 @@ export function terrainCorridor(
         colours[at * 3 + 2] = tint * (1 + (WET_GROUND_TINT[2] - 1) * wet);
         fields[at * 2] = point.along;
         fields[at * 2 + 1] = lateral * sign;
+        if (mapped) surfaces[at] = surfaceByte(land.bareSurfaceAt(x, z));
       }
     }
   }
@@ -728,7 +750,7 @@ export function terrainCorridor(
   // `landform-passes.test.ts` §"the passes' order" holds the order itself,
   // which no drawn ground can tell apart while that holds.
   if (roles !== undefined) {
-    retracedGround(profile, origin, seed, land, centre, normals2d, roles, lent);
+    retracedGround(profile, origin, seed, land, ways, centre, normals2d, roles, lent);
   }
   const indices = terrainIndices(rows);
   gridNormals(vertices, rows, normals, roles);
@@ -738,6 +760,7 @@ export function terrainCorridor(
     normals,
     colours,
     fields,
+    surfaces,
     indices,
     rows,
     indicesPerBand: Math.max(0, rows - 1) * 2 * 6,
@@ -888,17 +911,19 @@ function retracedGround(
   origin: CorridorOrigin,
   seed: number,
   land: LandClassMask,
+  /** {@link terrainCorridor}'s own, so the rows it takes back see the same water (#2658). */
+  ways: Waterways,
   centre: readonly CorridorPoint[],
   normals2d: Float64Array,
   roles: Uint8Array,
   lent: NonNullable<typeof terrainScratch>,
 ): void {
   const rows = centre.length;
-  const { capAnchor, capAngle, capWay, vertices, colours, fields } = lent;
+  const { capAnchor, capAngle, capWay, vertices, colours, fields, surfaces } = lent;
   const perRow = COLUMNS * 2;
-  const ways = waterways(profile, seed);
   const hasWater = ways.crossings.length + ways.lakes.length > 0;
   const levelled = land.levellingBytes > 0;
+  const mapped = land.bytes > 0;
   for (let row = 0; row < rows; row += 1) {
     const role = roles[row];
     if (role === KEPT) continue;
@@ -957,15 +982,18 @@ function retracedGround(
         ? waterShaping(ways, profile, origin, point.distance, lateral * Math.sign(cos), point.y)
         : DRY;
       const hold = levelled ? (LEVEL_HOLDS[column] as number) : Number.POSITIVE_INFINITY;
-      vertices[at * 3] = point.x + towardsX * lateral;
+      const x = point.x + towardsX * lateral;
+      const z = point.z + towardsZ * lateral;
+      vertices[at * 3] = x;
       vertices[at * 3 + 1] =
         column === 0
           ? Math.min(shaping.ceiling, point.y - VERGE_DROP_METRES)
           : groundHeight(point.y, relief, lateral, shaping, hold, hold);
-      vertices[at * 3 + 2] = point.z + towardsZ * lateral;
+      vertices[at * 3 + 2] = z;
       colours.fill(tint, at * 3, at * 3 + 3);
       fields[at * 2] = point.along + lateral * sin;
       fields[at * 2 + 1] = lateral * cos;
+      surfaces[at] = mapped ? surfaceByte(land.bareSurfaceAt(x, z)) : 0;
     }
     // The left side is the anchor's own, so every quad it makes is nothing.
     const from = anchor * perRow + COLUMNS;
@@ -973,7 +1001,21 @@ function retracedGround(
     vertices.copyWithin(to * 3, from * 3, (from + COLUMNS) * 3);
     colours.copyWithin(to * 3, from * 3, (from + COLUMNS) * 3);
     fields.copyWithin(to * 2, from * 2, (from + COLUMNS) * 2);
+    surfaces.copyWithin(to, from, from + COLUMNS);
   }
+}
+
+/** Each surface's byte in {@link TerrainMesh.surfaces}: one more than its index. */
+const SURFACE_BYTES: Readonly<Record<BareSurface, number>> = Object.freeze(
+  Object.fromEntries(BARE_SURFACES.map((surface, index) => [surface, index + 1])) as Record<
+    BareSurface,
+    number
+  >,
+);
+
+/** A vertex's {@link TerrainMesh.surfaces} byte: 0 where nothing bare is mapped. */
+function surfaceByte(surface: BareSurface | undefined): number {
+  return surface === undefined ? 0 : SURFACE_BYTES[surface];
 }
 
 /**
@@ -1310,6 +1352,8 @@ let terrainScratch:
       readonly normals: Float32Array;
       readonly colours: Float32Array;
       readonly fields: Float32Array;
+      /** @see TerrainMesh.surfaces */
+      readonly surfaces: Uint8Array;
       /** {@link foldReach}'s answer, which {@link clearReach} then tightens in place. */
       readonly reach: Float64Array;
       /** {@link steadied}'s answer. */
@@ -1353,6 +1397,7 @@ function terrainScratchFor(rows: number): NonNullable<typeof terrainScratch> {
     normals: new Float32Array(vertexCount * 3),
     colours: new Float32Array(vertexCount * 3),
     fields: new Float32Array(vertexCount * 2),
+    surfaces: new Uint8Array(vertexCount),
     reach: new Float64Array(rows * 2),
     steadied: new Float64Array(rows * 2),
     seams: new Float64Array(rows * 2),
@@ -1408,12 +1453,36 @@ export function terrainMeshIsCurrent(mesh: TerrainMesh): boolean {
  * one. Nothing moves in plan: an item is kept or dropped, and lifted or
  * lowered onto the ground.
  *
+ * ⚠️ **And a building's whole foot, not its middle — #2761.** A building
+ * set into the ground ({@link GroundedFootprint}, `footprintOf`) stands at
+ * the ground under its middle as everything else does, and its walls reach
+ * `depth` below that. Where this frame's ground under its outline falls
+ * further than that below its middle, its downhill side would stand in the
+ * air — on the owner's coast a house stood on stilts above the ground — so
+ * it is lowered until its foot meets the lowest ground under it, by at most
+ * another `depth`, and dropped where that is not enough. Lowering buries its
+ * uphill side a little; dropping it leaves a gap in a street, so a small
+ * fall is lowered: a village church on a gentle slope, 0.2 m. What is
+ * dropped is where the drawn ground is not the ground beside the road at all
+ * — another leg's, under a lot on the inside of a hairpin, 1.7 m to 7.4 m
+ * below it. `settlements.ts` §`lotsAt` keeps a lot off ground that falls
+ * away under it before this is asked.
+ *
  * Lent storage, like {@link terrainCorridor}'s: valid for the mesh it was
  * asked about, and asked about in the same frame it was built in.
  */
 export function standingOnGround<
-  T extends { readonly x: number; readonly y: number; readonly z: number },
->(items: readonly T[], mesh: TerrainMesh): readonly T[] {
+  T extends {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly rotation?: number;
+  },
+>(
+  items: readonly T[],
+  mesh: TerrainMesh,
+  footprintOf?: (item: T) => GroundedFootprint | undefined,
+): readonly T[] {
   const across = rowCrossings(mesh);
   const fanned = fannedPairs(mesh);
   const bounds = blockBounds(mesh);
@@ -1421,9 +1490,65 @@ export function standingOnGround<
   for (const item of items) {
     const y = groundTop(mesh, across, fanned, bounds, item.x, item.z);
     if (Number.isNaN(y)) continue;
-    kept.push(y === item.y ? item : { ...item, y });
+    let stands = y;
+    const footprint = footprintOf?.(item);
+    if (footprint !== undefined) {
+      // How far its foot would stand above the lowest ground under its corners.
+      const fall = y - footprint.depth - lowestUnder(mesh, across, fanned, bounds, item, footprint);
+      if (fall > footprint.depth) continue;
+      if (fall > 0) stands = y - fall;
+    }
+    kept.push(stands === item.y ? item : { ...item, y: stands });
   }
   return kept;
+}
+
+/**
+ * A building's outline in its own frame — #2761, as `settlements.ts`
+ * §`STRUCTURE_FOOTPRINTS` writes one: `x` its half-width across, `back` and
+ * `front` how far behind and ahead of its point its ends are along the way it
+ * faces — and how far its walls reach below that point, which is also the
+ * most {@link standingOnGround} lowers it.
+ */
+export interface GroundedFootprint {
+  readonly x: number;
+  readonly back: number;
+  readonly front: number;
+  readonly depth: number;
+}
+
+/**
+ * The lowest of this frame's ground under `footprint`'s four corners about
+ * `item`, or `+Infinity` where none of them is over ground: a corner over no
+ * ground is no evidence either way. Turned as three turns a yaw: `x` across
+ * is `(cos, −sin)` and ahead is `(sin, cos)`.
+ *
+ * ⚠️ **The corners, and nothing between them**: this runs for every building
+ * in every frame. A bank falls one way, so its lowest under an outline is at
+ * a corner; a dip under the middle of a wall — a ditch between two corners —
+ * is not looked for.
+ */
+function lowestUnder(
+  mesh: TerrainMesh,
+  across: Float64Array,
+  fanned: Uint8Array,
+  bounds: Float64Array,
+  item: { readonly x: number; readonly z: number; readonly rotation?: number },
+  footprint: GroundedFootprint,
+): number {
+  const rotation = item.rotation ?? 0;
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const ahead of [footprint.back, footprint.front]) {
+    for (const sideways of [-footprint.x, footprint.x]) {
+      const x = item.x + sideways * cos + ahead * sin;
+      const z = item.z - sideways * sin + ahead * cos;
+      const ground = groundTop(mesh, across, fanned, bounds, x, z);
+      if (ground < lowest) lowest = ground;
+    }
+  }
+  return lowest;
 }
 
 /**

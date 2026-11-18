@@ -5,8 +5,9 @@ import { StatementsPanel } from './StatementsPanel';
 import { ERASE_ACCOUNT_TEXT, EraseAccountPanel } from './EraseAccount';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BlocksPanel } from './BlocksPanel';
-import { useCallback, useEffect, useId, useState, type JSX } from 'react';
+import { useCallback, useEffect, useState, type JSX } from 'react';
 
+import type { CameraController } from '../camera/session';
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
@@ -24,7 +25,9 @@ import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { InstanceDevices } from './InstanceDevices';
 import { CHANGE_NAME_TEXT, InstanceNamePanel } from './InstanceName';
-import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
+import { ConnectFlow } from './ConnectFlow';
+import { InstanceKeys } from './InstanceKeys';
+import { OWNER_CLAIM_TEXT } from './OwnerClaim';
 import { SyncPanel } from './SyncPanel';
 
 /**
@@ -35,11 +38,18 @@ import { SyncPanel } from './SyncPanel';
  * ## Before anything is sent, the rider is told what will be
  *
  * #778's criterion: before sign-in the screen lists what the instance will
- * receive, and that list is **kept visible** — never in a `<details>` — because
- * it says what leaves the device and to whom (#666's ruling). It stays on the
- * screen once connected too, as what the instance goes on receiving.
- * {@link INSTANCE_KEPT_VISIBLE} is the list, and
- * `a11y/kept-visible.a11y.test.tsx` holds it to this route.
+ * receive, and that list is **kept visible** because it says what leaves the
+ * device and to whom (#666's ruling). It stays on the screen once connected
+ * too, as what the instance goes on receiving. {@link INSTANCE_KEPT_VISIBLE}
+ * is the list, and `a11y/kept-visible.a11y.test.tsx` holds it to this route.
+ *
+ * ⚠️ **Since #2828 it is a disclosure before sign-in, drawn OPEN.** The
+ * owner's ruling of 2026-11-18 moved it out from between *Scan* and *Connect*
+ * into "a disclosure that is visible before anything is sent"
+ * ({@link ReceivesBeforeConnect}): under the flow's controls, open on every
+ * step, so it is on the screen before any press without the rider opening
+ * anything — and the kept-visible gate, which fails a closed `<details>` above
+ * it, still holds it there. A rider may fold it; nothing opens it closed.
  *
  * ## What is shown is what the instance says
  *
@@ -60,25 +70,22 @@ import { SyncPanel } from './SyncPanel';
  * file: rooms shipped, and sync's disclosure comes before sync does.
  */
 export const INSTANCE_RECEIVES: readonly string[] = [
-  'This device’s public key, which is how the instance knows it is you. The private key never leaves this device.',
-  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the instance keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. An instance keeps your earlier names there too, for moderation.',
+  'This device’s public key, which is how the server knows it is you. The private key never leaves this device.',
+  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the server keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. A server keeps your earlier names there too, for moderation.',
   'Your internet address and your device or browser type, as any server you connect to sees them.',
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
-  'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, your goals, notes and documents, your saved workouts and your workout goals. They are sealed on this device for the instance alone, and stay on this device too. Nothing is synced until you press Sync now.',
+  'Only if you sync with it, which needs the server’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, your goals, notes and documents, your saved workouts and your workout goals. They are sealed on this device for the server alone, and stay on this device too. Nothing is synced until you press Sync now.',
   'Only if you ask it for one: a ride’s numbers for a write-up, sealed, and — if you store your own key for a hosted service there and agree to it — that key, sealed, and your list of words to mask, and your privacy zones: their names, where they are and how large. Only if you switch them on: a summary of each block you have ridden, for a re-plan during the ride, and the side camera’s pictures, both sealed.',
 ];
 
-export const INSTANCE_RECEIVES_LEAD = 'What the instance receives from this app';
+export const INSTANCE_RECEIVES_LEAD = 'What the server receives from this app';
 
 /** Who holds it. Kept visible. */
 export const INSTANCE_BELONGS_TO_ITS_OPERATOR =
   'An instance belongs to whoever runs it, and they decide how long it keeps what it receives. ' +
   'The project’s own instance runs on its maintainer’s computer at home, and its traffic passes ' +
   'through Cloudflare, which decrypts it on the way.';
-
-/** Nothing leaves until the press. */
-export const NOTHING_SENT_UNTIL_CONNECT = 'Nothing is sent until you press Connect.';
 
 /** Public rooms — ruling Q5 of 2026-09-28. Kept visible. */
 export const PUBLIC_ROOMS_ADULTS_ONLY =
@@ -121,25 +128,14 @@ export const INSTANCE_NO_PORT =
   'This app cannot connect to an instance here, because this browser has no local store to ' +
   'keep a sign-in in.';
 
-/** Beside the card box on the Connect form (#1190, D-14 Q1). Draft. */
-export const CONNECT_CARD_LABEL = 'The instance’s card (optional)';
-export const CONNECT_WITHOUT_CARD =
-  'Without the card this device can sign in to an account it already has, but cannot use ' +
-  'anything that needs the card.';
-
-/** The form that adds this device with another device's code (#773, #1190). Draft. */
-export const LINK_FORM_HEADING = 'Add this device with a code from another of your devices';
-export const LINK_FIELD_LABEL = 'The line your other device shows';
-
 /** The recovery codes, shown once — ruling Q1 of 2026-09-28. */
 export const RECOVERY_CODES_LEAD =
   'Write these recovery codes down and keep them somewhere safe. Each one adds a new device to ' +
   'your account once, if you ever lose every device you have. They are shown only now.';
 
-function Receives(): JSX.Element {
+function ReceivesList(): JSX.Element {
   return (
-    <KeptVisible>
-      <h2>{INSTANCE_RECEIVES_LEAD}</h2>
+    <>
       <ul>
         {INSTANCE_RECEIVES.map((sentence) => (
           <li key={sentence}>{sentence}</li>
@@ -148,6 +144,35 @@ function Receives(): JSX.Element {
       <p>{INSTANCE_BELONGS_TO_ITS_OPERATOR}</p>
       <p>{PUBLIC_ROOMS_ADULTS_ONLY}</p>
       <p>{VOICE_CHAT_IS_DISCORD}</p>
+    </>
+  );
+}
+
+/** Once connected: what the instance goes on receiving, as a section of its own. */
+function Receives(): JSX.Element {
+  return (
+    <KeptVisible>
+      <h2>{INSTANCE_RECEIVES_LEAD}</h2>
+      <ReceivesList />
+    </KeptVisible>
+  );
+}
+
+/**
+ * Before sign-in (#2828): the same sentences in a disclosure drawn OPEN, under
+ * the flow's controls on every step, so they are on the screen before any
+ * press. Its summary is the lead, which a summary may hold and a heading may
+ * not (`a11y/kept-visible.a11y.test.tsx`, N5).
+ */
+function ReceivesBeforeConnect(): JSX.Element {
+  return (
+    // The mark holds the whole disclosure, summary and all: a `div` may not
+    // sit in a `<summary>`, and the lead is one of the sentences it marks.
+    <KeptVisible>
+      <details className="oyl-details" open>
+        <summary>{INSTANCE_RECEIVES_LEAD}</summary>
+        <ReceivesList />
+      </details>
     </KeptVisible>
   );
 }
@@ -198,7 +223,13 @@ export function InstanceView({
   hostedSettings,
   statements,
   blocks,
+  camera,
 }: {
+  /**
+   * The device's camera, to scan the instance's card with (#2785). Without
+   * one the card boxes are paste-only.
+   */
+  readonly camera?: CameraController | undefined;
   /**
    * The statements of reasons about this rider's account (#910): read once
    * the device has an instance, signed in or not — a suspended rider cannot
@@ -225,20 +256,12 @@ export function InstanceView({
   const [changes, setChanges] = useState<AccountChangesOutcome | undefined>(undefined);
   /** The key this screen revoked (#1208): the list is shown marked after it. */
   const [revoked, setRevoked] = useState<string | undefined>(undefined);
-  const [address, setAddress] = useState('');
-  const [name, setName] = useState('');
-  const [card, setCard] = useState('');
-  const [offer, setOffer] = useState('');
+  /** This screen signed in after a claim (#2823): the connected screen says whether it owns the server. */
+  const [claimed, setClaimed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [recoveryCodes, setRecoveryCodes] = useState<readonly string[] | undefined>(undefined);
   /** This screen deleted the account on the instance (#906): said once the device is disconnected. */
   const [erased, setErased] = useState(false);
-  const addressId = useId();
-  const nameId = useId();
-  const cardId = useId();
-  const cardHintId = useId();
-  const offerId = useId();
 
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
@@ -272,35 +295,6 @@ export function InstanceView({
     );
   }
 
-  async function connect(): Promise<void> {
-    if (port === undefined) return;
-    setBusy(true);
-    setRefusal(undefined);
-    setErased(false);
-    const outcome = await port.connect(address, name, card);
-    setBusy(false);
-    if (outcome.kind === 'refused') {
-      setRefusal(outcome.text);
-      return;
-    }
-    setRecoveryCodes(outcome.recoveryCodes);
-    // ⚠️ What the screen now shows is READ BACK from the instance, not the form.
-    await read();
-  }
-
-  async function link(): Promise<void> {
-    if (port === undefined) return;
-    setBusy(true);
-    setRefusal(undefined);
-    const outcome = await port.link(offer);
-    setBusy(false);
-    if (outcome.kind === 'refused') {
-      setRefusal(outcome.text);
-      return;
-    }
-    await read();
-  }
-
   async function disconnect(): Promise<void> {
     if (port === undefined) return;
     setBusy(true);
@@ -310,6 +304,7 @@ export function InstanceView({
     setDevices(undefined);
     setChanges(undefined);
     setRevoked(undefined);
+    setClaimed(false);
     await read();
   }
 
@@ -326,104 +321,19 @@ export function InstanceView({
             {ERASE_ACCOUNT_TEXT.erased}
           </StatusMessage>
         ) : null}
-        <form
-          className="oyl-trainer__form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void connect();
+        {/* #2828: one scan, then one question about where the code came from. */}
+        <ConnectFlow
+          port={port}
+          camera={camera}
+          onConnected={(outcome, byClaim) => {
+            setErased(false);
+            setClaimed(byClaim);
+            setRecoveryCodes(outcome.recoveryCodes);
+            // ⚠️ What the screen now shows is READ BACK from the instance, not the form.
+            void read();
           }}
-        >
-          <p>
-            <label htmlFor={addressId}>Instance address</label>{' '}
-            <input
-              className="oyl-input"
-              id={addressId}
-              type="url"
-              inputMode="url"
-              autoComplete="url"
-              placeholder="https://ride.example"
-              value={address}
-              onChange={(event) => {
-                setAddress(event.target.value);
-                setRefusal(undefined);
-              }}
-            />
-          </p>
-          <p>
-            <label htmlFor={nameId}>The name other riders will see (optional)</label>{' '}
-            <input
-              className="oyl-input"
-              id={nameId}
-              autoComplete="nickname"
-              maxLength={64}
-              value={name}
-              onChange={(event) => {
-                setName(event.target.value);
-                setRefusal(undefined);
-              }}
-            />
-          </p>
-          <p>
-            <label htmlFor={cardId}>{CONNECT_CARD_LABEL}</label>
-            <br />
-            <textarea
-              className="oyl-input oyl-instance__card-box"
-              id={cardId}
-              rows={3}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoComplete="off"
-              aria-describedby={cardHintId}
-              value={card}
-              onChange={(event) => {
-                setCard(event.target.value);
-                setRefusal(undefined);
-              }}
-            />
-          </p>
-          <p className="oyl-muted" id={cardHintId}>
-            {CARD_FIELD_HINT} {CONNECT_WITHOUT_CARD}
-          </p>
-          <Receives />
-          <p className="oyl-muted">{NOTHING_SENT_UNTIL_CONNECT}</p>
-          <Button type="submit" disabled={busy}>
-            Connect
-          </Button>
-        </form>
-        <h3>{LINK_FORM_HEADING}</h3>
-        <form
-          className="oyl-trainer__form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void link();
-          }}
-        >
-          <p>
-            <label htmlFor={offerId}>{LINK_FIELD_LABEL}</label>
-            <br />
-            <textarea
-              className="oyl-input oyl-instance__card-box"
-              id={offerId}
-              rows={3}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoComplete="off"
-              value={offer}
-              onChange={(event) => {
-                setOffer(event.target.value);
-                setRefusal(undefined);
-              }}
-            />
-          </p>
-          <Button type="submit" variant="secondary" disabled={busy}>
-            Add this device
-          </Button>
-        </form>
-        {refusal === undefined ? null : (
-          <StatusMessage tone="danger" label="Not connected" live>
-            {refusal}
-          </StatusMessage>
-        )}
+        />
+        <ReceivesBeforeConnect />
         {/* #1195: with no instance on this device the panel draws nothing at
             all; it is here so that only its own availability decides. */}
         {sync === undefined ? null : <SyncPanel port={sync} />}
@@ -466,6 +376,16 @@ export function InstanceView({
             <dt>Your name there</dt>
             <dd>{state.displayName}</dd>
           </dl>
+          {/* #2823: after a claim, whether the server now says this device owns it. */}
+          {claimed && ownership === 'owner' ? (
+            <StatusMessage tone="success" label="Claimed" live>
+              {OWNER_CLAIM_TEXT.owned}
+            </StatusMessage>
+          ) : claimed && ownership === 'not-owner' ? (
+            <StatusMessage tone="warning" label="Not the owner yet" live>
+              {OWNER_CLAIM_TEXT['not-owner']}
+            </StatusMessage>
+          ) : null}
           {/* Controls first (#666): the one action on this state is here, not
               under the device list. */}
           {disconnectControl}
@@ -560,7 +480,7 @@ export function InstanceView({
 
       {/* #1210: a sign-in this device cannot read is opened again by a card given here. */}
       {state.kind === 'connected' || state.kind === 'unreadable' ? (
-        <InstanceKeys port={port} onChange={() => void read()} />
+        <InstanceKeys port={port} camera={camera} onChange={() => void read()} />
       ) : null}
 
       {sync === undefined ? null : <SyncPanel port={sync} />}

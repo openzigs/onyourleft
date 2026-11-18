@@ -284,6 +284,11 @@ export {
   STATEMENT_TRUST_CAP_SECONDS,
   statementId,
 } from './identity/instance-pin';
+export {
+  normalisedClaimCode,
+  OWNER_CLAIM_COMPARISON_LABEL,
+  ownerClaimComparisonCode,
+} from './identity/owner-claim';
 export type { DisplayNameCheck, DisplayNameProblem } from './identity/display-name';
 export { checkDisplayName, MAXIMUM_DISPLAY_NAME_SCALARS } from './identity/display-name';
 
@@ -679,6 +684,54 @@ export {
 
 export type { GapInput, PacerGap } from './pacer/gap';
 export { botIsAhead, gapMagnitudeSeconds, pacerGap } from './pacer/gap';
+
+// --- The AI pacer: a model's plan and intent for the pacer (#2712, ADR 0072) --
+//
+// A rider who chose it rides the pacer above with one difference: a model on
+// their own instance picks its plan and intent from two closed lists, and the
+// product is held inside #92's envelope. No power field, no number in the
+// feedback, and never a trainer write (ADR 0072 D-3, D-6).
+
+export type {
+  ModelPacerAnswer,
+  ModelPacerInput,
+  ModelPacerInputProblem,
+  ModelPacerInputRead,
+  ModelPacerInvalid,
+  PacerDecisionOutcome,
+  PacerDecisionRecord,
+  PacerDirection,
+  PacerIntent,
+  PacerPlan,
+  PacerSayProblem,
+} from './pacer/model-pacer';
+export {
+  CLIMBER_CLIMB_GRADE_PERCENT,
+  CLIMBER_DESCENT_GRADE_PERCENT,
+  directedPacingFactor,
+  directedPowerWatts,
+  MODEL_PACER_ANSWER_MOST_CHARACTERS,
+  MODEL_PACER_ASK_EVERY_S,
+  MODEL_PACER_CODE_VERSION,
+  MODEL_PACER_INPUT_MOST_CHARACTERS,
+  MODEL_PACER_LAPSE_S,
+  MODEL_PACER_LATE_S,
+  MODEL_PACER_LOG_MOST,
+  MODEL_PACER_SAY_MOST_CHARACTERS,
+  MODEL_PACER_SAY_SHOWN_S,
+  modelPacerAnswerSchema,
+  PACER_DECISION_OUTCOMES,
+  PACER_EASE,
+  PACER_INTENTS,
+  PACER_LIFT,
+  PACER_PLANS,
+  pacerDecisionRecord,
+  pacerDirectionAt,
+  pacerSayProblem,
+  readModelPacerAnswer,
+  readModelPacerInput,
+  readPacerDecisionRecord,
+} from './pacer/model-pacer';
 
 // --- Racing your own previous attempt (#93) ----------------------------------
 //

@@ -581,6 +581,7 @@ export function streetsAt(
       fromMetres,
       toMetres,
       sides,
+      land,
       urban,
       junctions,
       known,
@@ -602,6 +603,7 @@ function cityStreetsAt(
   fromMetres: number,
   toMetres: number,
   sides: PavementSides,
+  land: LandClassMask,
   urban: UrbanClassMap,
   junctions: readonly Junction[],
   known: Map<number, Known>,
@@ -620,7 +622,7 @@ function cityStreetsAt(
       const key = -1 - piece;
       let street = known.get(key);
       if (street === undefined) {
-        street = cityStreetOf(profile, origin, seed, piece, sides, urban, junctions);
+        street = cityStreetOf(profile, origin, seed, piece, sides, land, urban, junctions);
         known.set(key, street);
       }
       if (street === null || found.includes(street)) continue;
@@ -653,6 +655,7 @@ function cityStreetOf(
   seed: number,
   piece: number,
   sides: PavementSides,
+  land: LandClassMask,
   urban: UrbanClassMap,
   junctions: readonly Junction[],
 ): Known {
@@ -687,6 +690,7 @@ function cityStreetOf(
       profile,
       origin,
       seed,
+      land,
       side,
       start,
       end,
@@ -751,7 +755,7 @@ function streetOf(
   };
   // #1551: whether any of the street's road was read. @see the header
   const read = wasRead(sides, street.start, street.end);
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const doorPaths: DoorPath[] = [];
   const doors: DoorOfPlot[] = [];
   for (const [at, side] of ([1, -1] as const).entries()) {
@@ -768,6 +772,7 @@ function streetOf(
         profile,
         origin,
         seed,
+        land,
         side,
         own.start,
         own.end,
@@ -789,6 +794,7 @@ function streetOf(
         profile,
         origin,
         seed,
+        land,
         side,
         street.start,
         street.end,
@@ -963,7 +969,7 @@ export function doorPathFor(
     profile,
     origin,
     seed,
-    waterways(profile, seed),
+    waterways(profile, seed, NO_LAND_CLASS),
     plot,
     0,
     paved,
@@ -1031,7 +1037,21 @@ export function pavementAlong(
   urban?: UrbanClassMap,
 ): PavementMesh | undefined {
   const mesh = new MeshBuilder();
-  return lay(mesh, [], profile, origin, seed, side, start, end, undefined, [], undefined, urban)
+  return lay(
+    mesh,
+    [],
+    profile,
+    origin,
+    seed,
+    NO_LAND_CLASS,
+    side,
+    start,
+    end,
+    undefined,
+    [],
+    undefined,
+    urban,
+  )
     ? mesh.done()
     : undefined;
 }
@@ -1059,6 +1079,7 @@ export function furnitureAlong(
     profile,
     origin,
     seed,
+    NO_LAND_CLASS,
     side,
     start,
     end,
@@ -1110,6 +1131,8 @@ function lay(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  /** #2658: the ride's mask, so a pavement is kept out of the map's lakes as out of invented ones. */
+  land: LandClassMask,
   side: 1 | -1,
   start: number,
   end: number,
@@ -1119,7 +1142,7 @@ function lay(
   urban?: UrbanClassMap,
   cuts: readonly number[] = [],
 ): boolean {
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   // #1565: no pavement over a side road's mouth, and a dropped kerb beside it.
   const inMouth = (along: number): boolean =>
     mouths.some((mouth) => along >= mouth.from && along <= mouth.to);

@@ -50,6 +50,15 @@ import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
 import { createRecentProblems, keepProblems, logEvent, logUnhandled, type LogSink } from './log.ts';
+import type { SecretFromFile } from './setup/secrets.ts';
+import { createSetup, type Setup } from './setup/setup.ts';
+import {
+  mintSetupCode,
+  SETUP_CODE_FILE,
+  SETUP_LOG_EVENT,
+  setupAddress,
+} from './setup/setup-code.ts';
+import { isSetupPath } from './setup/setup-routes.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { errorResponse } from './errors.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
@@ -167,12 +176,26 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
+  /** A new room's id: `rooms.ts`'s, from the CSPRNG, unless a test's (#2702). */
+  readonly roomId?: () => string;
   /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
   readonly hostedFetch?: typeof globalThis.fetch;
   /** The `fetch` Discord is reached through, for voice (#874): the platform's unless a test's. */
   readonly discordFetch?: typeof globalThis.fetch;
   /** How long a room socket waits for its voice link (#875): {@link VOICE_INVITE_WAIT_MS} unless a test's. */
   readonly voiceInviteWaitMs?: number;
+  /**
+   * The secrets `setup/secrets.ts` read from their files in the secrets folder
+   * (#2781, ADR 0080 D-4): what the loopback Keys page's emergency kit holds.
+   * None when every secret came from the environment.
+   */
+  readonly kitSecrets?: readonly SecretFromFile[];
+  /**
+   * `OYL_INSTANCE_SECRETS_DIR` (#2784, ADR 0080 D-2): where the setup code's
+   * file is written at every start while the first-run setup is open, and
+   * removed from once the code is used or the setup is done.
+   */
+  readonly secretsDirectory?: string;
 }
 
 export interface StartedInstance {
@@ -330,6 +353,20 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let stopRetrying = (): void => undefined;
   let admin: Admin | undefined;
   let stopAdmin = (): void => undefined;
+  /**
+   * #2784 (ADR 0080 D-1): the first-run setup wizard runs where the owner can
+   * claim the instance from it — a loopback port, an origin (accounts), and no
+   * OYL_INSTANCE_OWNER_KEY, which makes the setup done from the first start.
+   * Whether it is still OPEN is the database's, read on every request.
+   */
+  const setupOn =
+    server.adminLoopbackPort !== undefined &&
+    server.origin !== null &&
+    options.config.moderators.owner === undefined;
+  let setup: Setup | undefined;
+  let stopSetup = (): void => undefined;
+  /** The start's own operator-log entries and the setup code, written once the store is open. */
+  let startWritten: Promise<void> = Promise.resolve();
   let stopping = false;
   const counters = new HttpCounters();
 
@@ -494,23 +531,39 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   // Until the store is open the handler has no accounts; it is replaced, not
   // mutated, once it does, so no request ever sees half of either.
   let handler: Handler = createHandler(handlerOptions);
-  const listening = await listen((request, client) => handler(request, client), {
-    host: options.config.host,
-    port: options.config.port,
-    clientAddressHeader: options.config.clientAddressHeader,
-    trustedProxies: options.config.trustedProxies,
-  });
+  // #2805 (ADR 0079 D-3): with Funnel on, the public listener is on the
+  // internet with no edge rule in front of it, so it answers every `/admin`
+  // path `not_found` — and this setting alone decides it, never a header. The
+  // loopback listener below calls the handler itself and is not asked.
+  const hideAdmin = options.config.remotePath === 'funnel';
+  const listening = await listen(
+    (request, client) =>
+      hideAdmin && isAdminPath(new URL(request.url).pathname)
+        ? Promise.resolve(errorResponse('not_found'))
+        : handler(request, client),
+    {
+      host: options.config.host,
+      port: options.config.port,
+      clientAddressHeader: options.config.clientAddressHeader,
+      trustedProxies: options.config.trustedProxies,
+    },
+  );
   // #2643 (ADR 0069 D-5): the admin pages' loopback listener, when the
   // operator set its port. It answers `/admin` and nothing else, marks every
   // request it reads `loopback` itself, believes no client-address header,
   // and closes a connection from a trusted proxy — cloudflared — unread.
+  // #2784 (ADR 0080 D-1): and with the admin pages off while the first-run
+  // setup can run, for `/setup` alone; the handler answers `/admin` there
+  // only with the admin pages on, and `/setup` only while the setup is open.
   const adminLoopback =
-    server.adminPages && server.adminLoopbackPort !== undefined
+    (server.adminPages || setupOn) && server.adminLoopbackPort !== undefined
       ? await listen(
-          (request, client) =>
-            isAdminPath(new URL(request.url).pathname)
+          (request, client) => {
+            const pathname = new URL(request.url).pathname;
+            return isAdminPath(pathname) || isSetupPath(pathname)
               ? handler(request, client)
-              : Promise.resolve(errorResponse('not_found')),
+              : Promise.resolve(errorResponse('not_found'));
+          },
           {
             host: options.config.host,
             port: server.adminLoopbackPort,
@@ -653,6 +706,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         origin: server.origin,
         ...identitySettings(options.config),
         now,
+        // #2784 (ADR 0080 D-3): no stranger's account before the owner claims it.
+        refuseWhileUnclaimed: setupOn,
       });
       // #1195: sync (#37, #38, #776, #35), and ONLY where the instance holds
       // keys. Every sync route is sealed-only (ADR 0047 D-7, the owner's D-14
@@ -732,6 +787,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           return held.ok && held.value.publicRooms.eligible;
         },
         ...(roomsVoice === undefined ? {} : { voice: roomsVoice }),
+        ...(options.roomId === undefined ? {} : { roomId: options.roomId }),
       });
       // #2612: the owner's Rooms, from the workers, ended through the router.
       operateRooms = {
@@ -993,6 +1049,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           ? {}
           : { loopbackPort: server.adminLoopbackPort }),
         addresses: server.adminAddresses,
+        // #2650: the Keys page's; the card is drawn on the loopback listener only.
+        instanceKeys: keys,
+        // #2781: the emergency kit's, offered on the loopback listener only.
+        kitSecrets: options.kitSecrets ?? [],
       });
       admin = pages;
       // Each minute: the coalesced refusals written, and the sign-in limits'
@@ -1011,11 +1071,45 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         options.sweepTimers,
       );
     }
+    // #2784 (ADR 0080 D-1, D-2, D-7): the first-run setup wizard on the
+    // loopback listener, with the owner's claim it mints and confirms.
+    const loopbackPort = server.adminLoopbackPort;
+    if (setupOn && identity !== undefined && loopbackPort !== undefined && server.origin !== null) {
+      const wizard = createSetup({
+        store,
+        now,
+        port: loopbackPort,
+        origin: server.origin,
+        name: options.config.name,
+        ownerKeyFromEnvironment: false,
+        ownerClaim: identity.ownerClaim,
+        instanceKeys: keys,
+        kitSecrets: options.kitSecrets ?? [],
+        environmentRegistration: options.config.registration,
+        secretsDirectory: options.secretsDirectory,
+      });
+      setup = wizard;
+      stopSetup = sweepOnBoundaries(
+        {
+          periodMs: sweepPeriodMs([
+            { limit: 1, windowMs: wizard.rateLimitSweepPeriodMs },
+            { limit: 1, windowMs: 60_000 },
+          ]),
+          run: () => {
+            wizard.sweepRateLimits();
+            void wizard.flushRefusals();
+          },
+        },
+        options.sweepTimers,
+      );
+    }
+    startWritten = writeAtStart(store, loopbackPort);
     // Replaced, not mutated (above): the accounts when there is an origin, and
     // the instance's keys whatever there is.
     handler = createHandler({
       ...handlerOptions,
       ...(admin === undefined ? {} : { admin }),
+      ...(setup === undefined ? {} : { setup }),
       instanceKeys: keys,
       // #1191: sealed requests need the accounts, so they come with them.
       ...(identity === undefined
@@ -1119,12 +1213,53 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     });
   }
 
+  /**
+   * What the start itself writes once the store is open (#2784): an
+   * operator-log entry for each secret this start generated (ADR 0080 D-7,
+   * #2781's deferred entry), and while the setup is open a new setup code in
+   * its file, with a log line that says where it is and never what it is
+   * (ADR 0080 D-2). A failure is logged by its name and never stops the start.
+   */
+  async function writeAtStart(opened: SqlStore, port: number | undefined): Promise<void> {
+    try {
+      for (const secret of options.kitSecrets ?? []) {
+        if (!secret.generated) continue;
+        await opened.recordOperatorAction(
+          { actor: { source: 'start' }, action: 'secret_generated', at: Math.floor(now() / 1000) },
+          () => ({
+            outcome: 'done',
+            detail:
+              secret.variable === 'OYL_INSTANCE_SECRET_KEY'
+                ? 'instance_secret_key'
+                : 'metrics_token',
+            value: undefined,
+          }),
+        );
+      }
+      if (setup === undefined || port === undefined) return;
+      const minted = await mintSetupCode(opened, {
+        mintedBy: 'start',
+        now,
+        directory: options.secretsDirectory,
+        port,
+      });
+      if (minted.outcome !== 'minted') return;
+      logEvent(log, SETUP_LOG_EVENT, {
+        open: setupAddress(port),
+        codeIn: minted.written ? `secrets/${SETUP_CODE_FILE}` : 'operator setup-code',
+        validUntil: new Date(minted.expiresAt * 1000).toISOString(),
+      });
+    } catch (error) {
+      logUnhandled(log, null, error);
+    }
+  }
+
   return {
     url: listening.url,
     listening,
     adminLoopback,
     router,
-    opened,
+    opened: opened.then(() => startWritten),
     heldRateLimitKeys: () =>
       (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
     analysisModel: () => analysisModel,
@@ -1144,6 +1279,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       stopSweeping();
       stopRetrying();
       stopAdmin();
+      stopSetup();
       // #1796: a test question out now is ended, not left for its 30 s bound.
       hostedSettings?.stop();
       // #2709: a tactics call or warm-up out now is ended, and the hold's timer cleared.
@@ -1156,6 +1292,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       await history?.idle();
       // #2641: the refusals counted since the last minute, before the store goes.
       await admin?.flushRefusals();
+      await setup?.flushRefusals();
+      // #2784: the start's own entries and the setup code are written before the store goes.
+      await startWritten;
       await store?.close();
     },
   };

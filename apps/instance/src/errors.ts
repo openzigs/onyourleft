@@ -56,6 +56,7 @@ export const ERROR_STATUS = {
   code_used: 401,
   code_expired: 401,
   address_unbound: 401,
+  claim_refused: 401,
   registration_closed: 403,
   sealed_required: 403,
   account_suspended: 403,
@@ -147,6 +148,10 @@ const MESSAGES: Record<ErrorCode, string> = {
   code_unknown: 'That code is not one this instance issued.',
   code_used: 'That code has already been used.',
   code_expired: 'That code has expired.',
+  // #2782 (ADR 0080 D-3): one sentence for an unknown, used or expired claim
+  // code, a claim while another waits, and an instance already claimed.
+  claim_refused:
+    'That claim code was not accepted. Make a new one on the setup page on the server machine and scan it again.',
   registration_closed: 'This instance is not registering new riders.',
   account_suspended: 'This account has been suspended by the instance’s moderators.',
   step_up_required:

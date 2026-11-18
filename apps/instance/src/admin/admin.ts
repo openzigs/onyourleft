@@ -108,7 +108,9 @@
  *
  * Status is `GET /v1/operate/status` and the log `GET /v1/operate/log`, each
  * called through {@link AdminSeam} as the owner: what a page shows is the
- * route's answer. The log's one query, `cursor`, is the route's own cursor
+ * route's answer. Accounts (#2646) is `GET /v1/operate/status` and, by ADR
+ * 0069 D-9, the moderation routes' queue, approved or refused through the
+ * two moderation routes D-9 admits. The log's one query, `cursor`, is the route's own cursor
  * handed back: it is held to the shape the route writes
  * ({@link LOG_CURSOR}) before it is put into the path the seam is called
  * with, and the route checks it again. No other part of the browser's request
@@ -137,7 +139,9 @@ import {
 } from '@onyourleft/operate-text';
 
 import { escapeHtml } from '../html.ts';
-import type { ModeratorRole } from '../moderation/moderation.ts';
+import { ATHLETE_ID, MAXIMUM_REASON_LENGTH, type ModeratorRole } from '../moderation/moderation.ts';
+import type { InstanceKeys } from '../keys/instance-keys.ts';
+import { keysView } from '../operate/operate.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
   AdminPasskeyRecord,
@@ -146,23 +150,40 @@ import type {
   OperatorChange,
   SqlStore,
 } from '../store/sql-store.ts';
+import { emergencyKitText, EMERGENCY_KIT_FILE_NAME } from '../setup/emergency-kit.ts';
+import type { SecretFromFile } from '../setup/secrets.ts';
 import { ADMIN_LANDING, ADMIN_ROUTES } from './admin-routes.ts';
 import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
 import {
+  accountsBody,
   adminPage,
   analysisBody,
+  backupsBody,
+  keysBody,
+  problemsBody,
+  roomsBody,
   isSaveProblem,
   logBody,
   passkeysBody,
   shellPage,
   signInPage,
   statusBody,
+  type AccountsNotice,
+  type BackupRecordAnswer,
+  type BackupsNotice,
+  type BackupsView,
+  type KeysNotice,
+  type ProblemAnswer,
+  type ProblemsView,
+  type RoomAnswer,
   type AnalysisNotice,
   type AnalysisOffer,
   type LogEntryAnswer,
   type LogView,
   type PasskeyView,
+  type RegistrationAnswer,
+  type RegistrationDecision,
   type ShellView,
   type SignInNotice,
 } from './pages.ts';
@@ -274,7 +295,10 @@ export interface AdminOptions {
   readonly store: SqlStore;
   /** `OYL_INSTANCE_ORIGIN`, or `null`: no accounts, so no owner. */
   readonly origin: string | null;
-  /** `OYL_INSTANCE_OWNER_KEY`, or `undefined`. */
+  /**
+   * `OYL_INSTANCE_OWNER_KEY`, or `undefined` — and then the key the owner's
+   * claim recorded, read from the store on every request (ADR 0080 D-3).
+   */
   readonly ownerKey: string | undefined;
   /** Whether `OYL_INSTANCE_SECRET_KEY` is set. */
   readonly secretKeySet: boolean;
@@ -298,6 +322,20 @@ export interface AdminOptions {
    * not against the edge.
    */
   readonly addresses?: readonly string[];
+  /**
+   * The instance's own keys (#2650), for the Keys page: read here, not
+   * through `GET /v1/operate/keys`, which the seam never reaches (ADR 0069
+   * D-2) — and their card and fingerprint drawn on the LOOPBACK listener
+   * only (ADR 0047 D-6). Absent, the page says the keys could not be read.
+   */
+  readonly instanceKeys?: Pick<InstanceKeys, 'show'>;
+  /**
+   * The secrets read from the secrets folder (#2781, ADR 0080 D-4): what the
+   * emergency kit holds, downloaded on the LOOPBACK listener only, behind a
+   * fresh step-up. Absent or empty, no kit is offered: every secret is in
+   * `.env`, which is the operator's copy of it.
+   */
+  readonly kitSecrets?: readonly SecretFromFile[];
 }
 
 export interface Admin {
@@ -355,9 +393,10 @@ const UNAVAILABLE: Readonly<Record<Unavailable, string>> = {
     'OYL_INSTANCE_ORIGIN is not set, so this instance has no accounts, and no owner to sign in.',
   secret:
     'OYL_INSTANCE_SECRET_KEY is not set: the admin pages are served only on an instance that holds keys, as the app’s Operate area is.',
-  'owner-key': 'OYL_INSTANCE_OWNER_KEY is not set, so this instance has no owner to sign in.',
+  'owner-key':
+    'This instance has no owner to sign in: OYL_INSTANCE_OWNER_KEY is not set, and no owner has claimed it from the app.',
   'no-owner':
-    'No account holds the device key OYL_INSTANCE_OWNER_KEY names. Sign in to this instance once from the app on that device, then come back.',
+    'No account holds the device key OYL_INSTANCE_OWNER_KEY names, or the one the owner’s claim recorded. Sign in to this instance once from the app on that device, then come back.',
 };
 
 /** What a signed-in page calls the seam with. */
@@ -460,6 +499,11 @@ const METHODS: ReadonlyMap<string, readonly string[]> = new Map(
   ADMIN_ROUTES.map((route) => [route.path, route.methods]),
 );
 
+/** The paths served on the loopback listener only (#2781): not found through the tunnel. */
+const LOOPBACK_ONLY: ReadonlySet<string> = new Set(
+  ADMIN_ROUTES.filter((route) => route.loopbackOnly === true).map((route) => route.path),
+);
+
 /** A page of the operator log, as the app's Operate area reads one. */
 export const LOG_PAGE_SIZE = 50;
 
@@ -480,6 +524,190 @@ const ANALYSIS_ACTIONS: ReadonlyMap<string, AnalysisAction> = new Map([
 ]);
 
 type AnalysisAction = Extract<AdminChange, `analysis_${string}`>;
+
+/** The Accounts page's decision behind each of its form targets (#2646, ADR 0069 D-9). */
+const REGISTRATION_ACTIONS: ReadonlyMap<string, RegistrationDecision> = new Map([
+  ['/admin/accounts/approve', 'approve'],
+  ['/admin/accounts/refuse', 'refuse'],
+]);
+
+/** The moderation routes' queue, which the Accounts page lists (ADR 0069 D-9). */
+const REGISTRATIONS_ROUTE = '/v1/moderation/registrations';
+
+/**
+ * The queue as the route answered it, each rider held to the four details
+ * the route declares — or `undefined` for an answer not in that shape.
+ */
+function registrationsOf(answer: unknown): readonly RegistrationAnswer[] | undefined {
+  const list = (answer as { registrations?: unknown } | undefined)?.registrations;
+  if (!Array.isArray(list)) return undefined;
+  const shown: RegistrationAnswer[] = [];
+  for (const each of list) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    const { athleteId, displayName, createdAt, adultConfirmed } = row;
+    if (
+      typeof athleteId !== 'string' ||
+      typeof displayName !== 'string' ||
+      typeof createdAt !== 'number' ||
+      !Number.isSafeInteger(createdAt) ||
+      typeof adultConfirmed !== 'boolean'
+    ) {
+      return undefined;
+    }
+    // Only the four: anything else the answer carried is not drawn.
+    shown.push({ athleteId, displayName, createdAt, adultConfirmed });
+  }
+  return shown;
+}
+
+/** The backups' route (#2647): the Backups page reads it, and "back up now" posts to it. */
+const BACKUPS_ROUTE = '/v1/operate/backups';
+
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const isCountOrNull = (value: unknown): value is number | null => value === null || isCount(value);
+const isTextOrNull = (value: unknown): value is string | null =>
+  value === null || typeof value === 'string';
+const OFF_BOX: readonly unknown[] = ['copied', 'failed', 'not-configured'];
+
+/**
+ * The backups as the route answered them, each record held to the fields the
+ * route declares (`operate/routes.ts` §`backupRecordSchema`) — or `undefined`
+ * for an answer not in that shape, which the page says it could not read.
+ */
+function backupsOf(answer: unknown): BackupsView['backups'] {
+  const body = (answer ?? {}) as { backups?: unknown; pending?: unknown };
+  const pending = body.pending as { requestedAt?: unknown } | null | undefined;
+  if (!Array.isArray(body.backups) || pending === undefined) return undefined;
+  if (pending !== null && typeof pending.requestedAt !== 'string') return undefined;
+  const records: BackupRecordAnswer[] = [];
+  for (const each of body.backups) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    const free = (row.freeBytes ?? {}) as Record<string, unknown>;
+    const shared =
+      isCount(row.id) &&
+      typeof row.at === 'string' &&
+      isCount(row.ageSeconds) &&
+      isCountOrNull(row.intervalSeconds) &&
+      typeof row.requested === 'boolean' &&
+      isTextOrNull(row.databaseSha256) &&
+      isCountOrNull(row.removed) &&
+      isCountOrNull(free.backups) &&
+      isCountOrNull(free.offBox);
+    if (!shared) return undefined;
+    const facts = {
+      id: row.id as number,
+      at: row.at as string,
+      ageSeconds: row.ageSeconds as number,
+      intervalSeconds: row.intervalSeconds as number | null,
+      requested: row.requested as boolean,
+      databaseSha256: row.databaseSha256 as string | null,
+      removed: row.removed as number | null,
+      freeBytes: { backups: free.backups as number | null, offBox: free.offBox as number | null },
+    };
+    if (row.outcome === 'failed' && typeof row.error === 'string') {
+      records.push({ ...facts, outcome: 'failed', error: row.error });
+    } else if (
+      row.outcome === 'done' &&
+      typeof row.snapshot === 'string' &&
+      isCount(row.rows) &&
+      isCount(row.blobs) &&
+      isCount(row.sizeBytes) &&
+      OFF_BOX.includes(row.offBox)
+    ) {
+      records.push({
+        ...facts,
+        outcome: 'done',
+        snapshot: row.snapshot,
+        rows: row.rows,
+        blobs: row.blobs,
+        sizeBytes: row.sizeBytes,
+        offBox: row.offBox as 'copied' | 'failed' | 'not-configured',
+      });
+    } else {
+      return undefined;
+    }
+  }
+  return { records, pendingSince: pending === null ? null : (pending.requestedAt as string) };
+}
+
+/** The rooms' route (#2649): the Rooms page reads it, and ends a room at `{roomId}/end`. */
+const ROOMS_ROUTE = '/v1/operate/rooms';
+
+/** A room's id as the route takes one in `{roomId}`: what `ATHLETE_ID` is for an athlete. */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+const ROOM_KINDS: readonly unknown[] = ['group', 'race', 'lap-race'];
+const ROOM_PHASES: readonly unknown[] = ['lobby', 'countdown', 'riding', 'finished'];
+const ROOM_VISIBILITIES: readonly unknown[] = ['private', 'public'];
+const ROOM_END_REASON_WORDS: readonly string[] = ['abuse', 'stuck', 'maintenance', 'other'];
+
+/**
+ * The rooms as the route answered them, each held to the fields the route
+ * declares and ONLY those — a rider's place, speed or power, were an answer
+ * ever to carry one, is not copied — or `undefined` for an answer not in
+ * that shape.
+ */
+function roomsOf(answer: unknown): readonly RoomAnswer[] | undefined {
+  const list = (answer as { rooms?: unknown } | undefined)?.rooms;
+  if (!Array.isArray(list)) return undefined;
+  const rooms: RoomAnswer[] = [];
+  for (const each of list) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    const { roomId, shortCode, kind, visibility, phase, openedAt, host, riders } = row;
+    if (
+      typeof roomId !== 'string' ||
+      typeof shortCode !== 'string' ||
+      !ROOM_KINDS.includes(kind) ||
+      !ROOM_VISIBILITIES.includes(visibility) ||
+      !ROOM_PHASES.includes(phase) ||
+      typeof openedAt !== 'string' ||
+      !isTextOrNull(host) ||
+      !Array.isArray(riders) ||
+      !riders.every(isTextOrNull)
+    ) {
+      return undefined;
+    }
+    rooms.push({
+      roomId,
+      shortCode,
+      kind: kind as RoomAnswer['kind'],
+      visibility: visibility as RoomAnswer['visibility'],
+      phase: phase as RoomAnswer['phase'],
+      openedAt,
+      host,
+      riders,
+    });
+  }
+  return rooms;
+}
+
+/**
+ * The problem lines as the route answered them (#2651), each held to its two
+ * fields — or `undefined` for an answer not in that shape. Nothing of a line
+ * is changed here: the route's redaction is the only one (#2601's decision).
+ */
+function problemsOf(answer: unknown): ProblemsView['problems'] {
+  const body = (answer ?? {}) as { since?: unknown; lines?: unknown };
+  if (typeof body.since !== 'string' || !Array.isArray(body.lines)) return undefined;
+  const lines: ProblemAnswer[] = [];
+  for (const each of body.lines) {
+    const row = (typeof each === 'object' && each !== null ? each : {}) as Record<string, unknown>;
+    if (typeof row.at !== 'string' || typeof row.line !== 'string') return undefined;
+    lines.push({ at: row.at, line: row.line });
+  }
+  return { since: body.since, lines };
+}
+
+/** A refusal's own sentence, as the route wrote it, or `null`. */
+async function messageOf(answer: Response): Promise<string | null> {
+  try {
+    const message = ((await answer.json()) as { error?: { message?: unknown } }).error?.message;
+    return typeof message === 'string' ? message : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The analysis settings' route: the AI backend page reads and changes them there. */
 const ANALYSIS_ROUTE = '/v1/operate/analysis';
@@ -599,7 +827,9 @@ export function createAdmin(options: AdminOptions): Admin {
   async function ownerNow(): Promise<Owner | Unavailable> {
     if (expected === null || options.roleOf === undefined) return 'origin';
     if (!options.secretKeySet) return 'secret';
-    const ownerKey = options.ownerKey;
+    // The owner key (ADR 0080 D-3): the environment's, else the claimed one,
+    // read on every request so a claim or a reset applies at once (#2782).
+    const ownerKey = options.ownerKey ?? (await store.claimedOwnerKey());
     if (ownerKey === undefined) return 'owner-key';
     const key = await store.findDeviceKey(ownerKey);
     if (key === undefined) return 'no-owner';
@@ -680,6 +910,135 @@ export function createAdmin(options: AdminOptions): Admin {
       body = analysisBody({ ...drawn, analysis: undefined, models: undefined, jobs: undefined });
     }
     return shellPage(shell, 'AI backend', body, true);
+  }
+
+  /**
+   * Accounts (#2646, ADR 0069 D-9): `GET /v1/operate/status`'s counts and
+   * mode, and `GET /v1/moderation/registrations`' queue, both read as the
+   * owner through the seam on every load — never kept from one to the next.
+   */
+  async function accountsPage(
+    view: PageCall,
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    noticeFor: (registrations: readonly RegistrationAnswer[] | undefined) => AccountsNotice | null,
+  ): Promise<string> {
+    const [statusAnswer, queueAnswer] = await Promise.all([
+      read(view.seam, '/v1/operate/status', view.caller, view.client),
+      read(view.seam, REGISTRATIONS_ROUTE, view.caller, view.client),
+    ]);
+    const status =
+      typeof statusAnswer === 'object' && statusAnswer !== null
+        ? (statusAnswer as OperateStatusAnswer)
+        : undefined;
+    const registrations = registrationsOf(queueAnswer);
+    const drawn = {
+      status,
+      registrations,
+      strength,
+      csrf: shell.csrf,
+      notice: noticeFor(registrations),
+      reasonLimit: MAXIMUM_REASON_LENGTH,
+    };
+    let body: string;
+    try {
+      body = accountsBody(drawn);
+    } catch {
+      // An answer not in the route's shape is as good as none.
+      body = accountsBody({ ...drawn, status: undefined });
+    }
+    return shellPage(shell, 'Accounts', body, true);
+  }
+
+  /**
+   * Backups (#2647): `GET /v1/operate/backups`, read as the owner through
+   * the seam on every load. `noticeFor` says what the last "back up now"
+   * came to, given the backups read back after it. `all` lists every record,
+   * where the page otherwise lists the newest (#2771).
+   */
+  async function backupsPage(
+    view: PageCall,
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    noticeFor: (backups: BackupsView['backups']) => BackupsNotice | null,
+    all = false,
+  ): Promise<string> {
+    const backups = backupsOf(await read(view.seam, BACKUPS_ROUTE, view.caller, view.client));
+    const drawn = { backups, strength, csrf: shell.csrf, notice: noticeFor(backups), all };
+    let body: string;
+    try {
+      body = backupsBody(drawn);
+    } catch {
+      body = backupsBody({ ...drawn, backups: undefined });
+    }
+    return shellPage(shell, 'Backups', body, true);
+  }
+
+  /**
+   * Rooms (#2649): `GET /v1/operate/rooms`, read as the owner through the
+   * seam on every load. `noticeFor` says what the last End room came to,
+   * given the rooms read back after it.
+   */
+  async function roomsPage(
+    view: PageCall,
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    noticeFor: (rooms: readonly RoomAnswer[] | undefined) => { readonly ended: boolean } | null,
+  ): Promise<string> {
+    const rooms = roomsOf(await read(view.seam, ROOMS_ROUTE, view.caller, view.client));
+    const drawn = { rooms, strength, csrf: shell.csrf, notice: noticeFor(rooms) };
+    let body: string;
+    try {
+      body = roomsBody(drawn);
+    } catch {
+      body = roomsBody({ ...drawn, rooms: undefined });
+    }
+    return shellPage(shell, 'Rooms', body, true);
+  }
+
+  /**
+   * Keys (#2650): the keys' state, read on every load, and — only when
+   * `onServer`, which only the loopback listener's place passes — the card
+   * and its fingerprint, whole. Through the tunnel neither is handed to the
+   * renderer.
+   */
+  async function keysPage(
+    shell: ShellView,
+    strength: AdminSessionRecord['strength'],
+    onServer: boolean,
+    noticeFor: (serial: number | null) => KeysNotice | null,
+  ): Promise<string> {
+    const shown =
+      options.instanceKeys === undefined ? undefined : await keysView(options.instanceKeys);
+    const keys =
+      shown === undefined
+        ? undefined
+        : {
+            state: shown.state,
+            current:
+              shown.current === null
+                ? null
+                : {
+                    serial: shown.current.serial,
+                    createdAt: new Date(shown.current.createdAt * 1000).toISOString(),
+                    rotatesAt: new Date(shown.current.rotatesAt * 1000).toISOString(),
+                  },
+            olderHeld: shown.olderHeld,
+          };
+    const card =
+      onServer && shown?.card != null && shown.fingerprint !== null
+        ? { card: shown.card, fingerprint: shown.fingerprint }
+        : null;
+    const body = keysBody({
+      keys,
+      card,
+      onServer,
+      kit: onServer && (options.kitSecrets ?? []).length > 0,
+      strength,
+      csrf: shell.csrf,
+      notice: noticeFor(shown?.current?.serial ?? null),
+    });
+    return shellPage(shell, 'Keys', body, true);
   }
 
   /** Status: `GET /v1/operate/status`'s answer, drawn as operate-text's rows. */
@@ -945,6 +1304,53 @@ export function createAdmin(options: AdminOptions): Admin {
       const shell = await shellOf(path, session);
       const view = { caller: callerOf(owner, session), client, seam };
       if (path === '/admin/status') return adminResponse(await statusPage(view, shell), 200, HTML);
+      if (path === '/admin/problems') {
+        // #2651: `GET /v1/operate/logs`, read as the owner on every load; read-only.
+        const problems = problemsOf(
+          await read(view.seam, '/v1/operate/logs', view.caller, view.client),
+        );
+        let body: string;
+        try {
+          body = problemsBody({ problems });
+        } catch {
+          body = problemsBody({ problems: undefined });
+        }
+        return adminResponse(shellPage(shell, 'Recent problems', body), 200, HTML);
+      }
+      if (path === '/admin/keys') {
+        return adminResponse(
+          await keysPage(shell, session.record.strength, listener === 'loopback', () => null),
+          200,
+          HTML,
+        );
+      }
+      if (path === '/admin/rooms') {
+        return adminResponse(
+          await roomsPage(view, shell, session.record.strength, () => null),
+          200,
+          HTML,
+        );
+      }
+      if (path === '/admin/backups') {
+        return adminResponse(
+          await backupsPage(
+            view,
+            shell,
+            session.record.strength,
+            () => null,
+            url.searchParams.get('all') === '1',
+          ),
+          200,
+          HTML,
+        );
+      }
+      if (path === '/admin/accounts') {
+        return adminResponse(
+          await accountsPage(view, shell, session.record.strength, () => null),
+          200,
+          HTML,
+        );
+      }
       if (path === '/admin/analysis') {
         return adminResponse(
           await analysisPage(view, shell, session.record.strength, () => null),
@@ -1620,6 +2026,351 @@ export function createAdmin(options: AdminOptions): Admin {
       return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
     }
 
+    /**
+     * The gate every change of a page after #2648 goes through (ADR 0069 D-2,
+     * D-4): from this origin's page, in a live PASSKEY session carrying its
+     * token, with exactly `action`'s fields — which `valid` checks — and a
+     * fresh step-up for this change and these fields, whose passkey counter
+     * moves BEFORE the change is made, so the same assertion cannot make a
+     * second. Answers the session and the fields, or the answer that refuses,
+     * having changed nothing.
+     */
+    async function gatedChange(
+      request: Request,
+      form: URLSearchParams,
+      owner: Owner,
+      action: AdminChange,
+      back: { readonly path: string; readonly what: string },
+      valid: (fields: Readonly<Record<string, string>>) => boolean,
+    ): Promise<
+      { readonly session: Session; readonly fields: Readonly<Record<string, string>> } | Response
+    > {
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'passkey') {
+        refuse('step_up');
+        return nothingChanged(
+          403,
+          'A change needs a passkey sign-in: a one-time code’s session changes nothing.',
+          back,
+        );
+      }
+      const fields = boundFields(ADMIN_CHANGES[action].fields, form);
+      if (fields === undefined || !valid(fields)) {
+        refuse('step_up');
+        return nothingChanged(400, 'That form did not name one change.', back);
+      }
+      const stepped = await steppedUp(owner, session, action, fields, form);
+      if (stepped === undefined) {
+        return nothingChanged(
+          403,
+          'The passkey check did not pass: a change needs a fresh check by a confirmed passkey, made for this change.',
+          back,
+        );
+      }
+      if (
+        !(await store.recordAdminPasskeyUse(
+          stepped.passkey.id,
+          stepped.passkey.signCount,
+          stepped.signCount,
+          seconds(),
+        ))
+      ) {
+        refuse('counter');
+        return nothingChanged(409, 'That passkey was just used elsewhere. Try again.', back);
+      }
+      return { session, fields };
+    }
+
+    /**
+     * A registration approved or refused from the Accounts page (#2646, ADR
+     * 0069 D-9): through {@link gatedChange}, then ONE call of the moderation
+     * route, in-process as the owner — its moderator check, its reason rule
+     * and its moderation log row, written with a `registration_decided`
+     * operator log entry under this listener's source in one transaction.
+     * The answer is the page drawn again from the routes' reads AFTER the
+     * call: the decision is said to be made only when the rider has left the
+     * queue read back.
+     */
+    async function registrationChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+      decision: RegistrationDecision,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        `registration_${decision}`,
+        { path: '/admin/accounts', what: 'Accounts' },
+        (fields) => ATHLETE_ID.test(fields.athleteId ?? ''),
+      );
+      if (gated instanceof Response) return gated;
+      const { session, fields } = gated;
+      const athleteId = fields.athleteId as string;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch(
+        'POST',
+        `${REGISTRATIONS_ROUTE}/${athleteId}/${decision}`,
+        caller,
+        client,
+        { reason: fields.reason },
+      );
+      const done = answer.status === 200;
+      const shell = await shellOf('/admin/accounts', session);
+      const page = await accountsPage(
+        { caller, client, seam },
+        shell,
+        session.record.strength,
+        (after): AccountsNotice => ({
+          decision,
+          ok:
+            done &&
+            after !== undefined &&
+            !after.some((registration) => registration.athleteId === athleteId),
+          problem: done ? null : answer.status === 400 ? 'reason' : 'not-waiting',
+        }),
+      );
+      return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
+    }
+
+    /**
+     * "Back up now" from the Backups page (#2647, ADR 0069 D-2): through
+     * {@link gatedChange} on BOTH listeners — the owner's answer to Q-A, which
+     * the issue's body predates — then ONE call of `POST /v1/operate/backups`
+     * in-process as the owner, whose `too_many` rule and `backup_requested`
+     * entry, under this listener's source, are the route's own. The answer is
+     * the page drawn again from the route's read AFTER the call.
+     */
+    async function backupChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        'backup_now',
+        { path: '/admin/backups', what: 'Backups' },
+        () => true,
+      );
+      if (gated instanceof Response) return gated;
+      const { session } = gated;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch('POST', BACKUPS_ROUTE, caller, client, {});
+      const asked = answer.status === 202;
+      const sentence = asked || answer.status !== 429 ? null : await messageOf(answer);
+      const shell = await shellOf('/admin/backups', session);
+      const page = await backupsPage(
+        { caller, client, seam },
+        shell,
+        session.record.strength,
+        (after): BackupsNotice =>
+          asked
+            ? { kind: 'asked', ok: after !== undefined && after.pendingSince !== null }
+            : sentence === null
+              ? { kind: 'not-asked' }
+              : { kind: 'refused', sentence },
+      );
+      return adminResponse(page, asked ? 200 : answer.status === 429 ? 429 : 409, HTML);
+    }
+
+    /**
+     * End room from the Rooms page (#2649, ADR 0069 D-2): through
+     * {@link gatedChange} — the room's id shape-checked before it is put in
+     * the route's `{roomId}`, the reason one of the route's, and the typed
+     * code bound to the step-up with them — then ONE call of `POST
+     * /v1/operate/rooms/{roomId}/end` in-process as the owner: its typed-code
+     * check, its close with `4005 room-closed`, the refused rejoin, the
+     * results kept and its `room_ended` entry under this listener's source are
+     * the route's own. Nothing is sent to any rider's trainer. The answer is
+     * the page drawn again from the route's read AFTER the call.
+     */
+    async function roomChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        'room_end',
+        { path: '/admin/rooms', what: 'Rooms' },
+        (fields) =>
+          ROOM_ID.test(fields.roomId ?? '') &&
+          ROOM_END_REASON_WORDS.includes(fields.reason ?? '') &&
+          (fields.confirm ?? '').length <= 64,
+      );
+      if (gated instanceof Response) return gated;
+      const { session, fields } = gated;
+      const roomId = fields.roomId as string;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch('POST', `${ROOMS_ROUTE}/${roomId}/end`, caller, client, {
+        reason: fields.reason,
+        confirm: fields.confirm,
+      });
+      const done = answer.status === 200;
+      const shell = await shellOf('/admin/rooms', session);
+      const page = await roomsPage(
+        { caller, client, seam },
+        shell,
+        session.record.strength,
+        // A closed room whose list cannot be read back says nothing: "as it was" would be false.
+        (after) =>
+          done && after === undefined
+            ? null
+            : { ended: done && !after?.some((room) => room.roomId === roomId) },
+      );
+      return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
+    }
+
+    /**
+     * Rotate the encryption key from the Keys page (#2650, ADR 0047 D-4,
+     * ADR 0069 D-2): through {@link gatedChange}, the word the owner typed
+     * bound to the step-up, then ONE call of `POST /v1/operate/keys/rotate`
+     * in-process as the owner — its `confirm: 'rotate'` rule, its key lease
+     * (`busy` while the maintenance pass holds it) and its
+     * `instance_key_rotate` entry under this listener's source are the
+     * route's own. `--drop-old`, `rotate-identity` and `reset` stay on the
+     * CLI: this sends only `confirm`. The answer is the page drawn again from
+     * the keys read AFTER the call.
+     */
+    async function keyChange(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+      client: ClientInfo,
+      seam: AdminSeam,
+    ): Promise<Response> {
+      const gated = await gatedChange(
+        request,
+        formOf(body),
+        owner,
+        'key_rotate',
+        { path: '/admin/keys', what: 'Keys' },
+        (fields) => (fields.confirm ?? '').length <= 16,
+      );
+      if (gated instanceof Response) return gated;
+      const { session, fields } = gated;
+      const caller = callerOf(owner, session);
+      const answer = await seam.dispatch('POST', '/v1/operate/keys/rotate', caller, client, {
+        confirm: (fields.confirm ?? '').trim(),
+      });
+      let outcome: { readonly outcome?: unknown; readonly serial?: unknown } = {};
+      if (answer.status === 200) {
+        try {
+          outcome = (await answer.json()) as typeof outcome;
+        } catch {
+          outcome = {};
+        }
+      }
+      const shell = await shellOf('/admin/keys', session);
+      const page = await keysPage(
+        shell,
+        session.record.strength,
+        listener === 'loopback',
+        (serial): KeysNotice =>
+          outcome.outcome === 'rotated'
+            ? { kind: 'rotated', ok: serial !== null && serial === outcome.serial }
+            : outcome.outcome === 'busy'
+              ? { kind: 'busy' }
+              : { kind: 'not-rotated' },
+      );
+      const done = outcome.outcome === 'rotated';
+      return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
+    }
+
+    /**
+     * The emergency kit (#2781, ADR 0080 D-4), on the loopback listener only
+     * — the route table's `loopbackOnly`, so the tunnel's place never reaches
+     * here: from this origin's page, in a live PASSKEY session carrying its
+     * token, with a fresh step-up made for it. The passkey's counter and the
+     * `emergency_kit_downloaded` entry are written in ONE transaction BEFORE
+     * the kit is handed over, so no kit leaves unlogged and one assertion
+     * downloads it once. `Cache-Control: no-store` is the admin headers'.
+     */
+    async function emergencyKit(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+    ): Promise<Response> {
+      const back = { path: '/admin/keys', what: 'Keys' };
+      const form = formOf(body);
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'passkey') {
+        refuse('step_up');
+        return nothingChanged(
+          403,
+          'The emergency kit needs a passkey sign-in: a one-time code’s session downloads nothing.',
+          back,
+        );
+      }
+      const fields = boundFields(ADMIN_CHANGES.emergency_kit.fields, form);
+      if (fields === undefined) {
+        refuse('step_up');
+        return nothingChanged(400, 'That form did not ask for the emergency kit.', back);
+      }
+      const stepped = await steppedUp(owner, session, 'emergency_kit', fields, form);
+      if (stepped === undefined) {
+        return nothingChanged(
+          403,
+          'The passkey check did not pass: the emergency kit needs a fresh check by a confirmed passkey, made for it.',
+          back,
+        );
+      }
+      const secrets = options.kitSecrets ?? [];
+      if (secrets.length === 0) {
+        return nothingChanged(
+          409,
+          'There is no emergency kit: every secret this instance uses is set in .env, which is your copy of it.',
+          back,
+        );
+      }
+      const at = seconds();
+      const { value } = await store.recordOperatorAction(
+        { actor: { source, athleteId: owner.athleteId }, action: 'emergency_kit_downloaded', at },
+        async (inside): Promise<OperatorChange<boolean>> =>
+          (await inside.recordAdminPasskeyUse(
+            stepped.passkey.id,
+            stepped.passkey.signCount,
+            stepped.signCount,
+            at,
+          ))
+            ? { outcome: 'done', detail: null, value: true }
+            : { outcome: 'refused', detail: null, value: false },
+      );
+      if (!value) {
+        refuse('counter');
+        return nothingChanged(409, 'That passkey was just used elsewhere. Try again.', back);
+      }
+      const shown =
+        options.instanceKeys === undefined ? undefined : await keysView(options.instanceKeys);
+      return adminResponse(
+        emergencyKitText({
+          // `OYL_INSTANCE_ORIGIN`, which the keys are bound to — not this listener's.
+          origin: origin.origin,
+          card: shown?.card ?? null,
+          secrets,
+          madeAt: new Date(options.now()),
+        }),
+        200,
+        {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-disposition': `attachment; filename="${EMERGENCY_KIT_FILE_NAME}"`,
+        },
+      );
+    }
+
     return async (request, body, client, seam) => {
       // Against DNS rebinding: the page is this listener's, or it is not served.
       if (request.headers.get('host') !== place.host) {
@@ -1633,7 +2384,9 @@ export function createAdmin(options: AdminOptions): Admin {
       const path = url.pathname;
       const revokeId = REVOKE_PATH.exec(path)?.[1];
       const route = revokeId === undefined ? path : '/admin/passkeys/{id}/revoke';
-      const methods = METHODS.get(route);
+      // #2781: a loopback-only path is, through the tunnel, a path with no route.
+      const methods =
+        listener === 'tunnel' && LOOPBACK_ONLY.has(route) ? undefined : METHODS.get(route);
       if (methods === undefined) {
         return htmlAnswer(
           'Not found',
@@ -1681,6 +2434,14 @@ export function createAdmin(options: AdminOptions): Admin {
         const analysisAction = ANALYSIS_ACTIONS.get(route);
         if (analysisAction !== undefined) {
           return analysisChange(request, body, owner, client, seam, analysisAction);
+        }
+        if (route === '/admin/backups') return backupChange(request, body, owner, client, seam);
+        if (route === '/admin/rooms/end') return roomChange(request, body, owner, client, seam);
+        if (route === '/admin/keys/rotate') return keyChange(request, body, owner, client, seam);
+        if (route === '/admin/keys/emergency-kit') return emergencyKit(request, body, owner);
+        const decision = REGISTRATION_ACTIONS.get(route);
+        if (decision !== undefined) {
+          return registrationChange(request, body, owner, client, seam, decision);
         }
         switch (route) {
           case '/admin/sign-in':

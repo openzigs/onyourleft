@@ -276,3 +276,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   identifier, no name, no address. What still stands, unchanged: D-1 to D-8. The place points are
   read, held and used exactly as above, and no building field is a prior in `urban-class.ts` under
   this ADR.
+
+- **2026-11-15** — **D-5.4 admits a second reader of the place points: `land-class.ts`'s inference of
+  built-up land**, on the owner's ruling of that day on
+  [#2684](https://github.com/openzigs/onyourleft/issues/2684) that the nearest `place` label is one
+  cue, among several, between a suburb and the country
+  ([ADR 0070](0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md) D-1.7).
+  It reads a point's kind, detail and position as a cue and nothing else: no name, no `wikidata` id, no
+  `population`, no rank, and nothing it reads is shown. `world-data/places-never-shown.test.ts` admits
+  `land-class.ts` beside `urban-class.ts` and `corridor.ts`. What still stands, unchanged: D-1 to D-8
+  other than this admission.

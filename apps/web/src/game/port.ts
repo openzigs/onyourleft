@@ -40,8 +40,11 @@ import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
+import type { ParkDressingInView } from './park-dressing';
 import type { MappedBuildingsInView } from './mapped-buildings';
+import type { Embankment } from './overpasses';
 import type { PeopleInView } from './people';
+import type { SceneryCyclist } from './scenery-cyclists';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
@@ -475,12 +478,24 @@ export interface SceneFrame {
    */
   readonly people?: PeopleInView | undefined;
   /**
+   * The other cyclists on the road — #2722 (`scenery-cyclists.ts`): oncoming
+   * riders, slower riders the rider catches and faster ones who overtake,
+   * each in their lane and never through the rider. Scenery only: they are
+   * not {@link markers}, so nothing that reads the riders — a draft, a race,
+   * the name tags — sees one. Drawn in the realistic world only, at the rung
+   * that draws {@link people}, and switched off with them; placed only on a
+   * free ride or a workout. Absent, or empty, everywhere else.
+   */
+  readonly cyclists?: readonly SceneryCyclist[] | undefined;
+  /**
    * The cross streets in view — #1565 (`cross-streets.ts`): a side road a
    * short way off the route at each junction, mapped where the corridor has
    * streets and one crossroads at each procedural village, the same objects
    * every frame while the same junctions are in view, drawn in both worlds in
    * the road's own material by one mesh (`three-renderer.ts`
-   * §`SideRoadBelt`). Empty away from a junction.
+   * §`SideRoadBelt`). Empty away from a junction. Since #2699 each mapped
+   * overpass in view's road too, after them (`overpasses.ts`): its deck's top
+   * and its approaches, kept clear of the scenery as a side road is.
    */
   readonly sideRoads: readonly SideRoad[];
   /**
@@ -516,6 +531,20 @@ export interface SceneFrame {
    * riders' own instanced meshes (`scene.ts` §`SceneInput.raceBots`).
    */
   readonly lapRace?: LapRaceInView | undefined;
+  /**
+   * The golf courses and cemeteries round the camera — #2685
+   * (`park-dressing.ts`): the window of park looks and the greens the
+   * photographic ground paints its stripes, greens, bunkers and paths from,
+   * and the headstones, walls and flags standing on this frame's ground,
+   * drawn in ONE instanced call (`three-renderer.ts` §`ParkDressingBelt`).
+   * Realistic world only. **Absent on every ride with no corridor**, and
+   * `park-dressing.ts` §`NO_PARK_DRESSING` (empty) where none is in reach.
+   *
+   * ⚠️ **An optional field**, the hole `check-wiring.mjs` §Limits names:
+   * `park-dressing.test.ts` reads it back off `sceneFrame`, and the renderer
+   * test off the belt it fills.
+   */
+  readonly parkDressing?: ParkDressingInView | undefined;
 }
 
 /**
@@ -543,6 +572,10 @@ export interface LapRaceInView {
 /** What {@link SceneFrame.water} carries. */
 export interface WaterFrame {
   readonly surface: WaterSurface;
+  /**
+   * Every bridge's boxes: the streams' (#459) and, since #2661, the mapped
+   * streets' that cross over or under the route (`overpasses.ts`).
+   */
   readonly bridges: readonly BridgePart[];
   /** Seconds, for the ripples. */
   readonly seconds: number;
@@ -649,6 +682,14 @@ export interface DeliveryMarkerPiece extends DeliveryPiece {
 export interface TerrainFrame {
   readonly mesh: TerrainMesh;
   readonly horizon: HorizonRelief;
+  /**
+   * Each mapped overpass in view's embankment — #2699 (`overpasses.ts`): the
+   * banks its approaches stand on, drawn by `three-renderer.ts`
+   * §`TerrainBelt` in the ground's own material, the same objects every frame
+   * while the same overpasses are in view. Empty away from one, and with no
+   * map data.
+   */
+  readonly embankments: readonly Embankment[];
 }
 
 /** A live 3D view. Created by a {@link GameRenderer}, destroyed by its owner. */

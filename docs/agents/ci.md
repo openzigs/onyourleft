@@ -115,6 +115,21 @@ each of those can do is turn `main` red on a day the service is down. For the ba
   `FROM` lines to Docker Hub's, read with `docker buildx imagetools inspect node:<tag>`; that pull
   request's own run of the mirror workflow copies it across before a re-run of its required check
   pulls it.
+- **The published image is its own workflow, and not a gate**
+  ([#2786](https://github.com/openzigs/onyourleft/issues/2786)).
+  [`.github/workflows/instance-image.yml`](../../.github/workflows/instance-image.yml) builds the
+  image for `linux/amd64` and `linux/arm64` (QEMU, on `ubuntu-latest`), pushes it to
+  `ghcr.io/openzigs/onyourleft-instance` as a `sha-<commit>` candidate, signs the digest with cosign
+  keyless, runs the guide's own `cosign verify` against it, reads every layer of each platform with
+  `scripts/check-image-layers.sh`, and makes the pull-only bundle (`scripts/make-instance-bundle.sh`).
+  A second job with **no checkout** brings the bundle up and requires `deploy.sh` to roll a
+  never-ready image back to the published digest; only then, and only on a `v*` tag, does a third
+  job tag the digest `<version>` and attach the bundle to the release. It runs on a tag, by hand, and
+  on a same-repository pull request that touches the workflow, the Dockerfile, `deploy.sh` or either
+  script (pushing a candidate, promoting nothing). It is **not** a required check: the required
+  `instance image` checker asks the layer question of every pull request's build as `IMG009`, and
+  the two scripts' suites run in the `checks` shard. ⚠️ Its GHCR package is private until the owner
+  makes it public once, by hand, like the mirror's.
 - **An outage is named, not disguised.** The checker pulls the base image as its own step before it
   builds, so a registry that will not serve it fails as `IMG004`, naming the registry host (`ghcr.io`) and not
   `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not

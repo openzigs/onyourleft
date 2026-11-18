@@ -89,12 +89,13 @@ import {
 
 import {
   atClassEdge,
-  builtUpOrWater,
   COUNTRYSIDE,
   NO_LAND_CLASS,
+  nothingGrowsAt,
   type Countryside,
   type LandClass,
   type LandClassMask,
+  type ParkLook,
 } from './land-class';
 import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad } from './road-grid';
@@ -868,6 +869,13 @@ const STREAM_VARIANT = 8;
  */
 const CLUSTER_KEY = 0x1_0000;
 
+/**
+ * The slot {@link golfStandAt} hashes a stand's square under — #2685. Past
+ * every band's slot, like {@link CLUSTER_KEY}, so a stand is not correlated
+ * with any one item's draws.
+ */
+const GOLF_STAND_KEY = 0x1_0001;
+
 /** An arbitrary non-zero start, so a route at (0, 0) of length 0 still mixes. */
 const SEED_BASIS = 0x6f79_6c00;
 
@@ -1069,7 +1077,7 @@ function fillCell(
   const plain = densityAt(place);
   const density = plain * clusterAt(seed, cell);
   // #459. Cached per profile, so this is a lookup. @see waterways
-  const ways = waterways(profile, seed);
+  const ways = waterways(profile, seed, land);
   const weights = kindWeights(place);
   // ⚠️ **Whole bands, dropped rather than squeezed.** @see MINIMUM_SCATTER_SEPARATION_METRES
   const bands = bandsAt(place.curvature);
@@ -1172,10 +1180,14 @@ function fillCell(
       // procedural mix and the clustering field where it does not.
       const cover: LandClass = mapped ? land.classAt(x, z) : 'unknown';
       const planting =
-        plantings === undefined ? undefined : landPlanting(plantings, land, cover, x, z, band);
+        plantings === undefined
+          ? undefined
+          : landPlanting(plantings, land, cover, x, z, band, seed);
       const kept = planting?.density ?? density;
+      // #2685: a nature reserve is natural ground, stones and all.
+      const natural = cover === 'park' && land.parkLookAt(x, z) === 'natural';
       const stones =
-        countryside.clutter && (cover === 'farmland' || cover === 'wood')
+        countryside.clutter && (cover === 'farmland' || cover === 'wood' || natural)
           ? plain * CLUTTER_SHARE
           : 0;
       if (keep >= kept + stones) {
@@ -1183,10 +1195,11 @@ function fillCell(
       }
       const kind =
         keep >= kept ? 'rock' : pickKind(planting?.weights ?? weights, uniform(base, STREAM_KIND));
-      // #1546: nothing grows on mapped built-up land or water. Dropped after
+      // #1546: nothing grows on mapped built-up land or water, nor since #2662
+      // on bare ground (sand, rock, ice, an airfield, a pier). Dropped after
       // every draw and before {@link thin}, as the water and the road above.
       // A post marks a bend, which built-up land may have, so it stays.
-      if (kind !== 'post' && builtUpOrWater(land, x, z)) {
+      if (kind !== 'post' && nothingGrowsAt(land, x, z)) {
         continue;
       }
       // #1542's `small-stones`, the owner's ruling of 2026-10-24: on mapped
@@ -1194,7 +1207,7 @@ function fillCell(
       const stone =
         countryside['small-stones'] &&
         kind === 'rock' &&
-        (cover === 'farmland' || cover === 'wood');
+        (cover === 'farmland' || cover === 'wood' || natural);
       if (stone && band < STONE_FIRST_BAND) {
         continue;
       }
@@ -1246,7 +1259,12 @@ function fillCell(
  * | `wood` | all of it, with no open stretch ({@link clusterAt} is not read) | the procedural mix; within {@link WOOD_EDGE_METRES} of its edge, broadleaf and scrub — trees mostly, because a shrub past the nearest `REALISTIC_NEAR_MESHES.shrub` (8) is not drawn at all |
  * | `farmland`, nearest band or within {@link HEDGEROW_EDGE_METRES} of its edge | {@link HEDGEROW_TREE_SHARE} | hedgerow trees |
  * | `farmland`, elsewhere | {@link PASTURE_TREE_SHARE} | open pasture: a lone field tree |
- * | `park` | {@link PARK_TREE_SHARE} | specimen trees on mown grass, no rock |
+ * | `park`, `mown` | {@link PARK_TREE_SHARE} | specimen trees on mown grass, no rock |
+ * | `park`, `natural` (#2685) | {@link PASTURE_TREE_SHARE}, and the stones farmland has | meadow: natural ground, not mown |
+ * | `park`, `golf` (#2685) | {@link GOLF_STAND_TREE_SHARE} in a stand ({@link golfStandAt}), none between | open fairway with trees in groups |
+ * | `park`, `cemetery` (#2685) | {@link CEMETERY_TREE_SHARE} | short grass, a few trees |
+ * | `park`, `playground` (#2685) | {@link PLAYGROUND_TREE_SHARE} | a few trees |
+ * | `park`, `pitch` (#2685) | none | a flat, even green |
  * | `other`, `unknown` | the procedural world, clustering and all | |
  *
  * ⚠️ **No new kind, shape, material or mesh**: every item is one the
@@ -1266,7 +1284,14 @@ interface LandPlantings {
   readonly hedgerow: LandPlanting;
   readonly pasture: LandPlanting;
   readonly park: LandPlanting;
+  // #2685: a park's look, by the kind that made it park (`land-class.ts` §`ParkLook`).
+  readonly golfStand: LandPlanting;
+  readonly cemetery: LandPlanting;
+  readonly playground: LandPlanting;
 }
+
+/** Nothing grows: a pitch's even green, and a golf course's fairway between its stands. */
+const BARE: LandPlanting = Object.freeze({ density: 0, weights: Object.freeze([1, 0, 0, 0, 0]) });
 
 /** How far into a wood its edge's scrub reaches, in metres: **8**. */
 export const WOOD_EDGE_METRES = 8;
@@ -1282,6 +1307,38 @@ export const PASTURE_TREE_SHARE = 0.06;
 
 /** The share a park keeps: **0.3**. */
 export const PARK_TREE_SHARE = 0.3;
+
+/**
+ * The side of the square a golf course's stand of trees is drawn on, in
+ * metres: **40** — #2685, this repository's own. About the width of a
+ * fairway, so a stand reads as the rough between two holes, not a wood.
+ */
+export const GOLF_STAND_METRES = 40;
+
+/**
+ * How many of a golf course's {@link GOLF_STAND_METRES} squares are a stand:
+ * **0.25** — #2685, this repository's own. The rest is open fairway.
+ */
+export const GOLF_STAND_SHARE = 0.25;
+
+/**
+ * A golf course's trees in a stand, of the geography's density: **0.6** —
+ * #2685. Over the course that is 0.6 × {@link GOLF_STAND_SHARE} = 0.15, half a
+ * mown park's {@link PARK_TREE_SHARE}, gathered into groups.
+ */
+export const GOLF_STAND_TREE_SHARE = 0.6;
+
+/**
+ * A cemetery's trees, of the geography's density: **0.1** — #2685, this
+ * repository's own. Short grass and a few trees.
+ */
+export const CEMETERY_TREE_SHARE = 0.1;
+
+/**
+ * A playground's trees, of the geography's density: **0.1** — #2685, this
+ * repository's own. Open ground with a few trees for shade.
+ */
+export const PLAYGROUND_TREE_SHARE = 0.1;
 
 /**
  * Ground clutter — #1542's third bullet: the share of the geography's density
@@ -1332,6 +1389,9 @@ function landPlantings(place: Place, procedural: readonly number[]): LandPlantin
     hedgerow: { density: plain * HEDGEROW_TREE_SHARE, weights: mix(7, 1) },
     pasture: { density: plain * PASTURE_TREE_SHARE, weights: mix(5, 1) },
     park: { density: plain * PARK_TREE_SHARE, weights: mix(6, 1) },
+    golfStand: { density: plain * GOLF_STAND_TREE_SHARE, weights: mix(7, 1) },
+    cemetery: { density: plain * CEMETERY_TREE_SHARE, weights: mix(1, 0) },
+    playground: { density: plain * PLAYGROUND_TREE_SHARE, weights: mix(1, 0) },
   };
 }
 
@@ -1370,6 +1430,7 @@ function landPlanting(
   x: number,
   z: number,
   band: number,
+  seed: number,
 ): LandPlanting | undefined {
   switch (cover) {
     case 'wood':
@@ -1381,10 +1442,45 @@ function landPlanting(
         ? plantings.hedgerow
         : plantings.pasture;
     case 'park':
-      return plantings.park;
+      return parkPlanting(plantings, land.parkLookAt(x, z), seed, x, z);
     default:
       return undefined;
   }
+}
+
+/** A park's planting by its look — #2685, `land-class.ts` §`ParkLook`. */
+function parkPlanting(
+  plantings: LandPlantings,
+  look: ParkLook,
+  seed: number,
+  x: number,
+  z: number,
+): LandPlanting {
+  switch (look) {
+    case 'natural':
+      return plantings.pasture;
+    case 'golf':
+      return golfStandAt(seed, x, z) ? plantings.golfStand : BARE;
+    case 'cemetery':
+      return plantings.cemetery;
+    case 'playground':
+      return plantings.playground;
+    case 'pitch':
+      return BARE;
+    case 'mown':
+      return plantings.park;
+  }
+}
+
+/**
+ * Whether `(x, z)` on a golf course is in a stand of trees — #2685: its
+ * {@link GOLF_STAND_METRES} square is one of {@link GOLF_STAND_SHARE} of them,
+ * by a hash of the square and the route's seed. Read on the ground's own
+ * coordinates, not the road's, so a stand is a stand whichever band reaches it.
+ */
+export function golfStandAt(seed: number, x: number, z: number): boolean {
+  const square = mix(Math.floor(x / GOLF_STAND_METRES), Math.floor(z / GOLF_STAND_METRES));
+  return uniform(hash(seed, square, GOLF_STAND_KEY), STREAM_KEEP) < GOLF_STAND_SHARE;
 }
 
 /**

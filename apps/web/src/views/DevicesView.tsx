@@ -184,13 +184,21 @@ export const DEVICES_NO_BLUETOOTH_KEPT_VISIBLE: readonly string[] = [
 ];
 
 /**
+ * What the Android shell does that a browser cannot — #2669. Until then this
+ * sentence said the shell had no silent reconnect either, which was true: the
+ * transport could reach a device again with no chooser, and nothing kept the
+ * device's id across a restart to ask it with. `ride/remembered-sensors.ts`
+ * keeps it now, and the ride controller reconnects.
+ */
+export const PHONE_RECONNECTS =
+  'This phone remembers the devices you pair and reconnects to them by itself when the app opens or a link drops. Forget one to stop that.';
+
+/**
  * The shell's equivalent. No background sentence: the Android shell keeps a
  * ride alive with its foreground service (#524), so saying it cannot would be
  * false there.
  */
-const PHONE_LIMITS: readonly string[] = [
-  'There is no silent reconnect: after the app is closed, each device is chosen again.',
-];
+const PHONE_LIMITS: readonly string[] = [PHONE_RECONNECTS];
 
 /**
  * The sentences the Devices screen never tucks where the Android shell can

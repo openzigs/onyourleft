@@ -8,7 +8,7 @@
  * big. ADR 0055 lets it be a prior in `urban-class.ts` and nothing else: no
  * label, HUD line, toast, credit or log may name its kind, detail or rank. So
  * this walks every shipped module under `apps/web/src` for a read of a
- * `places` property, and admits two: `world-data/corridor.ts`, which reads,
+ * `places` property, and admits three (`land-class.ts` since #2684): `world-data/corridor.ts`, which reads,
  * packs and hands them over, and `urban-class.ts`, the prior.
  * `apps/web/browser/` is not walked: it is the browser gate's harness, which
  * counts the places a read kept and ships to no rider.
@@ -28,7 +28,12 @@ const WEB_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const TREES = [join(WEB_ROOT, 'src')] as const;
 
 /** The modules that may read a corridor's places. */
-const ADMITTED = ['src/game/urban-class.ts', 'src/game/world-data/corridor.ts'];
+// #2684, ADR 0055's amendment of 2026-11-15: `land-class.ts` reads kind and detail as one cue.
+const ADMITTED = [
+  'src/game/land-class.ts',
+  'src/game/urban-class.ts',
+  'src/game/world-data/corridor.ts',
+];
 
 /** A read of a `places` property that is not a call: `vegetation.places()` is another thing. */
 const READS_PLACES = /\.places\b(?!\s*\()|\{[^}]*\bplaces\b[^}]*\}\s*=/;

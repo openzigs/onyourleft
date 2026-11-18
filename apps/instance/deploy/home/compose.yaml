@@ -2,18 +2,28 @@
 #
 # The project's first instance, on the owner's own machine (#807, ADR 0037
 # D-8): the instance, its deploy-time migrate step, a scheduled backup, and
-# `cloudflared`, which dials OUT to Cloudflare so the router opens no port.
+# ONE remote path, which dials OUT so the router opens no port (ADR 0079):
+#
+#   - `tailscale` (profile `tailscale`, #2805): the owner's tailnet, served by
+#     `tailscale serve` at https://<machine>.<tailnet>.ts.net. Needs no domain.
+#   - `tunnel` (profile `cloudflare`): `cloudflared`, for an owner with a
+#     domain on Cloudflare.
+#
+# COMPOSE_PROFILES in `.env` turns one on; `deploy.sh` refuses both at once,
+# because an instance has one origin (ADR 0079 D-8). With neither, the
+# instance is reachable on this machine only.
 # `docs/self-hosting/home-machine.md` is the guide; `deploy.sh` beside this
 # file is the one command (#52).
 #
 # Every variable is in `.env` beside this file (copy `instance.env.example`;
 # the repository's own `.env.example` lists each, ENV001). The tunnel token
-# is a secret: it lives in that file on the box and nowhere else.
+# and a Tailscale auth key are secrets: they live in that file on the box and
+# nowhere else.
 #
 # ⚠️ NOTHING PUBLISHES A PORT but the admin pages' loopback listener, on the
 # HOST'S LOOPBACK ONLY (127.0.0.1:8788, #2643), and the one line marked LOCAL
-# DEBUGGING ONLY, commented out. The tunnel reaches the instance over this
-# project's own network, by name; the internet reaches it only through Cloudflare.
+# DEBUGGING ONLY, commented out. The remote path reaches the instance over this
+# project's own network, by name; nothing outside reaches it any other way.
 
 name: onyourleft
 
@@ -42,7 +52,7 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     environment:
-      OYL_INSTANCE_ORIGIN: ${OYL_INSTANCE_ORIGIN:?set OYL_INSTANCE_ORIGIN to the tunnel's public hostname, https://…}
+      OYL_INSTANCE_ORIGIN: ${OYL_INSTANCE_ORIGIN:?set OYL_INSTANCE_ORIGIN to the instance's one address, https://<machine>.<tailnet>.ts.net or the tunnel's public hostname}
       # The name the app shows, and where a MODIFIED build's source is (the
       # repository's .env.example says what each means). Empty: no name, and
       # the source is this build's commit.
@@ -56,12 +66,15 @@ services:
       # #2641: the instance's own admin pages at /admin, off unless .env says on.
       OYL_INSTANCE_ADMIN_PAGES: ${OYL_INSTANCE_ADMIN_PAGES:-off}
       # #2643: the admin pages on the server machine, at http://localhost:8788,
-      # on a listener of their own. Empty: nothing listens there. 8788 to turn
-      # it on, with the admin pages on; the `ports:` line below publishes it.
-      OYL_INSTANCE_ADMIN_LOOPBACK_PORT: ${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-}
-      # #2643: the only addresses a sign-in THROUGH THE TUNNEL is taken from,
-      # read from cf-connecting-ip. Empty (the default): any — the WAF rule is
-      # what keeps others out. Not asked on the server machine.
+      # on a listener of their own; the `ports:` line below publishes it.
+      # #2784 (ADR 0080 D-1): 8788 unless .env says otherwise, the same as that
+      # line, because the first-run setup is served there too, at
+      # http://localhost:8788/setup, while the admin pages are still off.
+      OYL_INSTANCE_ADMIN_LOOPBACK_PORT: ${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-8788}
+      # #2643: the only addresses a sign-in THROUGH THE REMOTE PATH is taken
+      # from, read from the client-address header below. Empty (the default):
+      # any — the WAF rule, or the tailnet, is what keeps others out. Not asked
+      # on the server machine.
       OYL_INSTANCE_ADMIN_ADDRESSES: ${OYL_INSTANCE_ADMIN_ADDRESSES:-}
       # cloudflared's `/ready` (#2604), asked for the owner's Status. Empty:
       # the tunnel shows as "not known" and nothing is asked.
@@ -92,16 +105,23 @@ services:
       OYL_INSTANCE_TERMS_FILE: ${OYL_INSTANCE_TERMS_FILE:-}
       OYL_INSTANCE_TERMS_VERSION: ${OYL_INSTANCE_TERMS_VERSION:-}
       OYL_INSTANCE_PUBLIC_ROOMS: ${OYL_INSTANCE_PUBLIC_ROOMS:-off}
-      # Every connection's peer is cloudflared, so the rate limits read the
-      # rider's own address from the header Cloudflare writes (#895, B3) —
-      # and believe it ONLY from cloudflared's own address below (#891, #903
-      # item 4): another container on this network, or a port published for
-      # local debugging, arrives from somewhere else and is counted as itself.
-      # #2604: and its address on `tunnel_metrics` too. The tunnel is on both
-      # networks, and Docker's DNS may answer `instance` with this network's
-      # address, so cloudflared's requests could arrive from either.
-      OYL_INSTANCE_CLIENT_ADDRESS_HEADER: cf-connecting-ip
-      OYL_INSTANCE_TRUSTED_PROXIES: 172.30.87.10,172.30.88.10
+      # #2805 (ADR 0079): which remote path this is — tailnet, funnel or
+      # cloudflare — and the ONE setting that decides it. `funnel` answers
+      # every /admin path not_found on the public listener (D-3), and picks
+      # the serve configuration below. Empty: none is named.
+      OYL_INSTANCE_REMOTE_PATH: ${OYL_INSTANCE_REMOTE_PATH:-}
+      # Every connection's peer is the remote path's proxy, so the rate limits
+      # read the rider's own address from the header that proxy writes (#895,
+      # B3) — and believe it ONLY from the proxies' own addresses below (#891,
+      # #903 item 4): another container on this network, or a port published
+      # for local debugging, arrives from somewhere else and is counted as
+      # itself. cf-connecting-ip behind Cloudflare; x-forwarded-for behind
+      # `tailscale serve`, which REPLACES any copy the client sent (#2805,
+      # measured). The instance refuses a remote path with the other one.
+      # The addresses: cloudflared's on both its networks (#2604: Docker's DNS
+      # may answer `instance` with either), and the `tailscale` service's.
+      OYL_INSTANCE_CLIENT_ADDRESS_HEADER: ${OYL_INSTANCE_CLIENT_ADDRESS_HEADER:-cf-connecting-ip}
+      OYL_INSTANCE_TRUSTED_PROXIES: 172.30.87.10,172.30.88.10,172.30.87.11
       # The history index (#835, ADR 0040): http://ollama:11434 with the
       # `ollama` service below running; empty, and the index is off.
       OYL_INSTANCE_EMBEDDING_URL: ${OYL_INSTANCE_EMBEDDING_URL:-}
@@ -119,7 +139,14 @@ services:
       # (#1189) are encrypted under: HERE and on no other service. The `backup` service below deliberately does not get
       # it, so nothing that writes a snapshot holds the secret that opens the
       # key in it (docs/operating-an-instance.md, "A hosted model key").
+      # OPTIONAL since #2781, for an existing install: empty, the instance
+      # makes it on its first start in `secrets/instance-secret-key` (below).
       OYL_INSTANCE_SECRET_KEY: ${OYL_INSTANCE_SECRET_KEY:-}
+      # #2781 (ADR 0080 D-4): where a secret .env leaves empty is kept — the
+      # secret key, and the metrics token with metrics on — made there on the
+      # first start, owner-only, and read on every later one. The mount
+      # below, never the `data` volume the backups copy.
+      OYL_INSTANCE_SECRETS_DIR: /run/secrets/onyourleft
       # Voice on Discord (#874): your own bot's token and your own server's id.
       # Both empty is no voice, and nothing else changes; one without the
       # other refuses to start. The token is a secret and is NOT in the
@@ -131,10 +158,13 @@ services:
       OYL_INSTANCE_DISCORD_GUILD_ID: ${OYL_INSTANCE_DISCORD_GUILD_ID:-}
     volumes:
       - data:/data
-      # #2146: this box's secrets for the instance, read-only and on no other
-      # service — the `backup` service below does not mount it, so no snapshot
-      # holds the bot token. Docker makes the directory if it is not there.
-      - ./secrets:/run/secrets/onyourleft:ro
+      # #2146: this box's secrets for the instance, on no other service — the
+      # `backup`, `migrate` and `tunnel` services do not mount it, so no
+      # snapshot holds the bot token or the secret key, and cloudflared cannot
+      # read them. WRITABLE since #2781 (ADR 0080 D-4, Q-5), because the
+      # instance makes its secret key here on its first start. `deploy.sh`
+      # makes the folder first; Docker would make it owned by root on Linux.
+      - ./secrets:/run/secrets/onyourleft
     # Docker waits this long after SIGTERM before it kills the instance: the
     # rooms are told the server is stopping and final results written first.
     stop_grace_period: 20s
@@ -143,15 +173,15 @@ services:
     networks:
       - default
       - tunnel_metrics
-    # LOCAL DEBUGGING ONLY — never with the tunnel's hostname pointing here:
+    # LOCAL DEBUGGING ONLY — never with a remote path pointing here:
     # ports: ['127.0.0.1:8787:8787']
     #
     # #2643 (ADR 0069 D-5): the admin pages' loopback listener, published on
     # the HOST'S LOOPBACK ONLY, the same port both sides (the instance checks
     # `Host: localhost:<port>` against the port it listens on). ⚠️ NEVER
-    # `0.0.0.0` and never the tunnel's target. It refuses a connection from
-    # cloudflared's own addresses (OYL_INSTANCE_TRUSTED_PROXIES), but on
-    # Docker Desktop any container can still reach a loopback-published port
+    # `0.0.0.0` and never a remote path's target. It refuses a connection from
+    # cloudflared's and tailscale's own addresses (OYL_INSTANCE_TRUSTED_PROXIES),
+    # but on Docker Desktop any container can still reach a loopback-published port
     # through `host.docker.internal`, arriving from Docker's gateway like the
     # host's own browser does: docs/operating-an-instance.md, "Admin pages on
     # the server machine", says what that means.
@@ -163,8 +193,14 @@ services:
   # cloudflare/cloudflared:2026.10.3`, read 2026-10-26. Apache-2.0. 2026.10.2 is
   # the first release that no longer trusts the eight weak-keyed eMudhra
   # (emSign) intermediates (Cloudflare's notice of 2026-10-20): stay at or above it.
+  #
+  # #2805: only with the `cloudflare` profile (COMPOSE_PROFILES=cloudflare in
+  # .env), so the file starts with no token and no domain (ADR 0079 D-1).
+  # The token is `:-` and not `:?` because compose reads EVERY service's
+  # variables, profile on or not; `deploy.sh` refuses the profile without it.
   tunnel:
     image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    profiles: ['cloudflare']
     # `--metrics` serves cloudflared's `/ready` for the instance's Status
     # (#2604), bound to its address on `tunnel_metrics` ALONE: that server also
     # serves `/metrics`, `/config` (the tunnel's ingress), `/debug/pprof` and
@@ -172,7 +208,7 @@ services:
     # it. ⚠️ NO `ports:` for it, EVER.
     command: ['tunnel', '--no-autoupdate', '--metrics', '172.30.88.10:20241', 'run']
     environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env beside this file}
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
       - instance
     restart: unless-stopped
@@ -186,12 +222,60 @@ services:
       tunnel_metrics:
         ipv4_address: 172.30.88.10
 
+  # The owner's tailnet (#2805, ADR 0079 D-2): `tailscale serve` answers on
+  # https://<TAILSCALE_HOSTNAME>.<tailnet>.ts.net:443 and proxies to the
+  # instance's PUBLIC listener, by name, and to nothing else. Only with the
+  # `tailscale` profile (COMPOSE_PROFILES=tailscale in .env). Outbound only:
+  # TLS ends HERE, with a key Tailscale never sees, and its relays carry
+  # WireGuard ciphertext. Pinned by digest: `docker buildx imagetools inspect
+  # tailscale/tailscale:v1.104.7`, read 2026-11-18. BSD-3-Clause (the client;
+  # the coordination service it signs in to is Tailscale's own).
+  #
+  # The serve configuration is the file in `tailscale/` beside this one that
+  # OYL_INSTANCE_REMOTE_PATH names, read-only: `serve-tailnet.json` (Funnel
+  # off) or `serve-funnel.json` (D-3); unset names no file, so the profile
+  # cannot start with no remote path to cross-check the client header against. Kept on the box, never in
+  # a dashboard. Tailscale's state — this machine's node key — is the
+  # `tailscale` volume, so a restart is the same machine and the same name.
+  #
+  # ⚠️ NO `ports:`, EVER, and not on `tunnel_metrics`. Its FIXED address below
+  # is in the instance's OYL_INSTANCE_TRUSTED_PROXIES, which is what makes the
+  # admin pages' loopback listener close its connections unread (ADR 0069 D-5,
+  # the condition it puts on cloudflared). No auth key: the first start prints
+  # a sign-in link in `docker compose logs tailscale`.
+  tailscale:
+    image: tailscale/tailscale:v1.104.7@sha256:72c1e19e0aedca96b8533bbb0b4368564410ff20b17e53b804eb6c1f04a31be4
+    profiles: ['tailscale']
+    environment:
+      TS_HOSTNAME: ${TAILSCALE_HOSTNAME:-onyourleft}
+      TS_AUTHKEY: ${TAILSCALE_AUTH_KEY:-}
+      # Sign in once: with state kept, a restart does not use the key again.
+      TS_AUTH_ONCE: 'true'
+      TS_STATE_DIR: /var/lib/tailscale
+      # No /dev/net/tun and no NET_ADMIN: serve needs neither.
+      TS_USERSPACE: 'true'
+      # The tag the documented tailnet rule lets riders reach on 443 alone
+      # (home-machine.md, "The tailnet's access rule").
+      TS_EXTRA_ARGS: --advertise-tags=tag:onyourleft
+      TS_SERVE_CONFIG: /config/serve-${OYL_INSTANCE_REMOTE_PATH:-unset}.json
+    volumes:
+      - tailscale:/var/lib/tailscale
+      # A directory, not a file: Tailscale's docs say the serve file must be
+      # mounted so, and containerboot watches it.
+      - ./tailscale:/config:ro
+    depends_on:
+      - instance
+    restart: unless-stopped
+    networks:
+      default:
+        ipv4_address: 172.30.87.11
+
   # The history index's embedding model (#835, ADR 0040 D-5, D-6): a local
   # Ollama, which the instance reaches by this service's name. Only with the
   # `history` profile (COMPOSE_PROFILES=history in .env) and started by hand
   # once — `docker compose up -d ollama`, then
   # `docker compose exec ollama ollama pull nomic-embed-text` — because
-  # deploy.sh starts the instance, the tunnel and the backup and nothing else.
+  # deploy.sh starts the instance, its remote path and the backup and nothing else.
   #
   # ⚠️ NO `ports:`, EVER, and never the tunnel's target: Ollama's API has NO
   # AUTHENTICATION, so a published port is an open model server for anybody
@@ -260,8 +344,9 @@ services:
       - ${OYL_OFFBOX_DIR:?set OYL_OFFBOX_DIR to a drive or share that is NOT this machine}:/offbox
 
 networks:
-  # The project's own network, with a subnet stated so cloudflared's address
-  # can be fixed (above). Nothing else in it is trusted with the header.
+  # The project's own network, with a subnet stated so cloudflared's and
+  # tailscale's addresses can be fixed (above). Nothing else in it is trusted
+  # with the header.
   default:
     ipam:
       config:
@@ -285,3 +370,8 @@ volumes:
   # `ollama pull`, so not backed up. The history index itself is in `data`,
   # and is made again from the synced items if it is ever lost (ADR 0040 D-1).
   models:
+  # #2805: Tailscale's state, this machine's identity on the tailnet. Not
+  # backed up: lost, the machine signs in again as a new one, and keeps its
+  # name only if the old one is removed from the tailnet first — a new name is
+  # a new origin (ADR 0079 D-8).
+  tailscale:

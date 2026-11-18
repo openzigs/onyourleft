@@ -100,6 +100,8 @@ import { roomPortOver } from '../src/net/room-port';
 import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
+import type { ModelTacticsPort, TacticsStatus } from '../src/game/lap-race/model-tactics-port';
+import type { PacerPort, PacerStatus } from '../src/instance/pacer-port';
 import type { GameRenderer } from '../src/game/port';
 import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
 import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
@@ -437,6 +439,46 @@ const PICKER = new URLSearchParams(window.location.search).get('picker');
 const AT_THE_PICKER = PICKER === 'chooser' || PICKER === 'list';
 
 /**
+ * `ride.html?…&ai=offered` and `?lap=riding&ai=racing` — #2710: the rider's
+ * instance offers its model for a lap race's AI bots, through a double of the
+ * tactics port (`game/lap-race/model-tactics-port.ts`) that answers at once.
+ *
+ * - `offered`: no consent yet, so switching AI bots on in the chooser asks
+ *   for it; *Agree* records it and *Withdraw consent* takes it back.
+ * - `racing`: consented, and the ride is a lap race with AI bots: the
+ *   harness switches *Ride a lap race* and *AI bots* on before *Ride*. Every
+ *   decision the race asks for is refused, so the bots ride their own
+ *   tactics; the race's start is accepted, so the HUD says they race.
+ */
+const AI_BOTS = new URLSearchParams(window.location.search).get('ai');
+const AI_BOTS_RACING = AI_BOTS === 'racing';
+
+function tacticsDouble(consented: boolean): ModelTacticsPort {
+  let agreed = consented;
+  const status = (): Promise<TacticsStatus> =>
+    Promise.resolve({
+      kind: 'offered',
+      instance: 'https://ride.example',
+      modelAddress: 'http://192.168.1.20:11434/v1',
+      consented: agreed,
+    });
+  const setConsent = (to: boolean): Promise<TacticsStatus> => {
+    agreed = to;
+    return status();
+  };
+  return {
+    tacticsStatus: status,
+    recordTacticsConsent: () => setConsent(true),
+    withdrawTacticsConsent: () => setConsent(false),
+    startTacticsRace: () => Promise.resolve({ kind: 'answer', body: { warming: true } }),
+    decideTactics: () => Promise.resolve({ kind: 'refused', code: 'harness' }),
+    endTacticsRace: () => Promise.resolve(),
+  };
+}
+
+const TACTICS = AI_BOTS === 'offered' || AI_BOTS_RACING ? tacticsDouble(AI_BOTS_RACING) : undefined;
+
+/**
  * `ride.html?picker=chooser&notices=all` — #940's review (B2): the chooser with
  * the TALLEST stack of standing notices it can show above *Ride*. A release the
  * trainer did not confirm (#372), the trainer notice a running workout makes
@@ -598,7 +640,42 @@ const CIRCUITS =
  */
 const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 'lost';
 
+/**
+ * `ride.html?picker=chooser&aipacer=offered` — #2712's AI pacer on the
+ * chooser, with a stand-in instance that offers a model and records consent
+ * in memory (the double `ai-pacer-chooser.a11y.test.tsx` uses). No instance is
+ * contacted: `pre-ride.browser.spec.ts` §"#2723" measures the switch, the
+ * consent and its button as the owner's ruling on PR #2723 asks.
+ */
+const AI_PACER = new URLSearchParams(window.location.search).get('aipacer') === 'offered';
+
+function aiPacerStandIn(): PacerPort {
+  let consented = false;
+  const status = (): PacerStatus => ({
+    kind: 'offered',
+    instance: 'https://ride.example',
+    modelAddress: 'http://192.168.1.10:11434/v1',
+    consented,
+  });
+  return {
+    offered: () => true,
+    pacerStatus: () => Promise.resolve(status()),
+    consentToPacer: () => {
+      consented = true;
+      return Promise.resolve(status());
+    },
+    withdrawPacerConsent: () => {
+      consented = false;
+      return Promise.resolve(status());
+    },
+    startPacerRide: () => Promise.resolve(false),
+    decidePacer: () => Promise.resolve({ kind: 'failed' }),
+    endPacerRide: () => Promise.resolve(),
+  };
+}
+
 const GAME: GamePort = {
+  ...(AI_PACER ? { aiPacer: aiPacerStandIn() } : {}),
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
@@ -1623,6 +1700,7 @@ async function run(): Promise<void> {
           gameTrainer={TRAINER}
           {...(DROPPED ? { gameRenderer: () => Promise.resolve(BLANK_WORLD) } : {})}
           {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
+          {...(TACTICS === undefined ? {} : { tactics: TACTICS })}
           {...RACE_PORTS}
         />
       </StrictMode>,
@@ -1663,6 +1741,21 @@ async function run(): Promise<void> {
       throw new Error(`ride harness: the picker offers no usable "${text}" checkbox`);
     }
     box.click();
+  }
+  // #2710: a lap race with AI bots, the consent already given. The AI bots
+  // switch is drawn once the race is on and the instance has answered.
+  if (AI_BOTS_RACING) {
+    for (const text of ['Ride a lap race', 'AI bots']) {
+      const box = await until(`the "${text}" switch`, () =>
+        labelled<HTMLInputElement>('input[role="switch"]', text),
+      );
+      if (!box.checked) box.click();
+    }
+    await until('the AI bots consent to be read', () =>
+      (document.querySelector('.oyl-game__ai-bots')?.textContent ?? '').includes('You agreed')
+        ? true
+        : undefined,
+    );
   }
   const speed = await until('the wind speed box', () =>
     labelled<HTMLInputElement>('input[type="number"]', 'Wind speed'),

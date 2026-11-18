@@ -228,6 +228,9 @@ export default defineConfig({
         // own ViewTransition and Suspense around the real AboutView, with the
         // old markup as the control. `logo-harness.tsx` says what it proves.
         logo: 'browser/logo.html',
+        // #2785: the instance card's scanner, from a canvas's stream through
+        // the real camera port and QR reader into the Connect form's box.
+        cardscan: 'browser/cardscan.html',
         // #1539: a route's corridor read from a synthetic archive at this
         // origin, through the product's port and reader, into IndexedDB.
         // `corridor-harness.ts` says what it does and does not prove.

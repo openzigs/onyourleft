@@ -529,3 +529,92 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   building is still measured from the rider. The guarantee is narrower than "every building in the
   draw distance": the 36-building cap makes that unreachable, so what holds is every front-row
   building (centre within 30 m of the road) up to 100 m ahead.
+- **2026-11-15** — **The 2026-11-10 entry's ranking does not reach the field boundaries, and no
+  procedural boundary stands beside a mapped house**
+  ([#2655](https://github.com/openzigs/onyourleft/issues/2655)). Where OSM maps a suburb's
+  footprints and no `landuse=residential`, the ground reads `other`, the procedural fields fenced
+  it, and the 2026-11-10 entry's ranking by the road ahead put each fence 5.6 m off the road before
+  every house 10 to 25 m off it, so the fences spent the 36-structure cap and the houses were not
+  drawn. That entry's *"and the procedural structures that compete with them for the cap"* now
+  reads *"and the procedural buildings and signposts that compete with them for the cap"*: a wall,
+  a hedge or a fence (the chain-link among them) is not ranked, and takes only what the mapped
+  buildings leave, as `structuresAt` (`apps/web/src/game/settlements.ts`) has always given the
+  boundaries only what its buildings leave. And `fieldEdgesAt` stands no procedural boundary
+  piece within `BOUNDARY_HOUSE_CLEARANCE_METRES` (**31** m straight across, up to 40 m on the
+  diagonal) of a kept footprint or its driveway; mapped farmland's own edges (#1542) keep their
+  places. Both take structures away and add none: the cap stays at 36 and the frame's triangle
+  ceilings do not rise. What still holds, unchanged: the rest of the 2026-11-10 entry, including
+  its pending owner approval; the 2026-11-03 landmarks; D-5.6's cap; D-5.1, whose rule for a suburb
+  with no footprints at all is left to a separate issue; and D-3.1 to D-3.6.
+- **2026-11-15** — **PROPOSED, in force when the owner approves the before/after frames: a protected
+  area's boundary is not a forest, and D-5.2 does not hold on one**
+  ([#2657](https://github.com/openzigs/onyourleft/issues/2657)). The archive writes a US Forest
+  Service area (`boundary=protected_area`, `protect_class` 6) as land use of kind `forest`
+  (Protomaps' `Landuse.java`), clipped to each tile, so a whole town inside a national forest read
+  as one wood and D-5.2 dropped every footprint in it: the 2026-11-15 tag audit counted 0 houses
+  drawn at Big Bear Lake, Ruidoso and Lake Arrowhead. From this date the kinds `forest`,
+  `national_park` and `nature_reserve` (`apps/web/src/game/land-class.ts`
+  §`PROTECTED_AREA_KINDS`) are a protected area's boundary: each still reads as its class, so where nothing else overlaps it
+  what grows there is unchanged, but it ranks below every other mapped class, so built-up or
+  farmland inside it takes the cell, and that includes a small mapped `landuse=forest` wood that
+  overlaps a residential block: there the overlap reads built-up, trees are not planted and lots may
+  be placed; and a footprint on one is built. D-5.2's first sentence
+  reads, from this date: *a footprint or lot that overlaps forest, wood, water or park is not built,
+  whatever else is true, except where the forest or park it overlaps is only a protected area's boundary*. Two limits,
+  stated rather than hidden: `landuse=forest` is written as `forest` too and the tile cannot tell it
+  from the boundary, so a footprint mapped on a managed forest is built; and a `boundary=national_park`
+  that Protomaps writes as kind `park` cannot be told from a mapped park and still drops its
+  footprints. What still holds, unchanged: `wood` (`natural=wood`), water and every other park kind
+  drop a footprint as before; procedural lots still need built-up land (D-5.1) and a stretch with no
+  built-up land stays countryside (D-5.3); D-5.6's cap; and D-5.7.
+- **2026-11-15** — **PROPOSED, pending the owner's ruling on
+  [#2658](https://github.com/openzigs/onyourleft/issues/2658): the water polygons D-3.3 already
+  holds are drawn, as lakes and wetland beside the road.** Until this date they were read for one
+  thing, D-5's *"never on water"*, and through the land mask (`apps/web/src/game/land-class.ts`) to
+  keep trees off them, so a lake or the sea beside a mapped road was drawn as bare ground.
+  `apps/web/src/game/waterways.ts` §`mappedLakes` now turns the mask's `water` that runs beside the
+  road for at least 300 m on one side into a lake drawn by the invented lake's own mesh, at the
+  shores the mask measured (at most 240 m out), its water 0.8 m under the road beside it; a
+  `wetland` polygon, from either layer, is drawn as level, wet-tinted ground with no open water.
+  Where the corridor was read, an invented lake is not drawn, as D-5.3 already holds for an
+  invented village. The `waterways.ts` header's *"No map, no hydrography"*, which was ADR 0032 D-1's
+  rule and which [#248](https://github.com/openzigs/onyourleft/issues/248) and ADR 0009 were cited
+  for, is restated there. No record is added to the store and no field is read that was not
+  already: D-3.3's sentence is unchanged. What still stands, unchanged: D-4 (with nothing read, the
+  world is exactly today's, lakes and all), D-2, D-3.1 to D-3.6, and the gradient a trainer is sent,
+  which is the route's own whatever is drawn beside it. **Status: proposed, in force only when the
+  owner rules on #2658 and approves its screenshots and a moving-ride tablet frame check**; the PR
+  is not to be merged before that, and this entry is to be corrected or struck there if the ruling
+  differs.
+- **2026-11-15** — **PROPOSED, pending the owner's ruling on
+  [#2659](https://github.com/openzigs/onyourleft/issues/2659): water lines are a new kind of record
+  in `worldCorridors`, and the world bridges them where they cross the route.** Context's table
+  reads the `water` layer for *"presence only"*, and the decoder kept its polygons alone. From this
+  date `packages/map-features` (`schema.ts` §`WATER_LINE_KINDS`) also keeps the layer's **lines whose
+  `kind` is `river`, `stream` or `canal`** — Protomaps v4 writes a waterway line's `waterway` tag as
+  its `kind` and gives it no `kind_detail` — as `WaterLineFeature`, its kind and its line, and
+  nothing else: no name, no OSM identifier, no `layer`. A `ditch` or a `drain` line is dropped at
+  decode, because a road crosses one in a culvert, the archive marks no culvert on a line, and one
+  kept would draw a bridge over every roadside drain. `apps/web/src/game/world-data/corridor.ts`
+  packs them into the store (packed version 5, `CORRIDOR_READER_VERSION` 5, so a row of either
+  build is read again by the other and no Dexie schema changes), and `waterways.ts`
+  §`mappedCrossings` makes a crossing, with the existing bridge and channel, wherever one crosses
+  the drawn road; where the corridor was read, an invented crossing is not drawn. D-3.3's sentence
+  reads, from this entry, as the 2026-11-01 entry left it, with *"water polygons"* followed by
+  *"; water lines with `kind` (river, stream or canal)"*. What still stands, unchanged: D-2.3's
+  corridor and the tiles read, D-3.1 to D-3.6, including that the store never leaves the device
+  (D-3.5; `apps/web/src/transfer/world-corridor-not-exported.test.ts` now packs decoded water lines
+  too), D-4, and the gradient a trainer is sent, which is the route's own over a mapped bridge as
+  over an invented one. **Status: proposed, in force only when the owner rules on #2659 and approves
+  its screenshots and a moving-ride tablet frame check**; the PR is not to be merged before that,
+  and this entry is to be corrected or struck there if the ruling differs.
+- **2026-11-15** — **D-5.1 and D-5.3 are superseded in part by
+  [ADR 0070](0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**
+  ([#2684](https://github.com/openzigs/onyourleft/issues/2684)), on the owner's ruling of that day:
+  a suburb that OpenStreetMap maps by its streets alone, with no footprint and no built-up land use,
+  has its ground read as **inferred built-up land** — near a residential street, where the streets
+  are as dense as a suburb's — and procedural lots stand there. D-5.3's *"no built-up land"* reads
+  *"no built-up land, mapped or inferred"*. ADR 0070 was **Proposed**, and the owner accepted it
+  on 2026-11-17 on its pull request [#2694](https://github.com/openzigs/onyourleft/pull/2694).
+  What still holds, unchanged: D-5.2, D-5.4 to D-5.7, and the rest of D-5.1. This entry is a
+  pointer and changes nothing else here.
