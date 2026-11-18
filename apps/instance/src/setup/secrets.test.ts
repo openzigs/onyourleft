@@ -235,6 +235,28 @@ describe('owner-only, or the instance refuses to start (#2781)', () => {
   });
 });
 
+describe('a permission probe that cannot be made fails closed (#2781)', () => {
+  it('refuses a world-readable file when the folder cannot say whether it keeps permissions', async () => {
+    const { secrets, raw } = await box();
+    await resolved(raw);
+    await chmod(join(secrets, KEY_FILE), 0o644);
+    // The probe file cannot be read back (a read-only or root-owned folder in
+    // real life): the answer is "unknown", and unknown is not "not kept".
+    const unknownForProbe = async (path: string): Promise<number> => {
+      if (path.includes('.permission-probe-')) throw new Error('EACCES');
+      return (await stat(path)).mode;
+    };
+    const { result, lines } = await resolved(raw, { modeOf: unknownForProbe });
+    expect(result.ok).toBe(false);
+    const problems = result.ok ? [] : result.problems;
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(join(secrets, KEY_FILE));
+    expect(problems[0]).toContain('chmod 600');
+    expect(lines).toEqual([]);
+    expect(await readdir(secrets)).toEqual([KEY_FILE]);
+  });
+});
+
 describe('never inside the data the backups copy (#2781, ADR 0080 D-4)', () => {
   it.each([
     ['the database’s folder', (root: string) => join(root, 'data')],
