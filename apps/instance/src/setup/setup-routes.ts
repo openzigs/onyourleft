@@ -6,12 +6,12 @@
  * route table is (`admin/admin-routes.ts`), it is what the tests are DERIVED
  * from rather than written beside:
  *
- * - `setup-tunnel.test.ts` sends every route here every method, on the tunnel
+ * - `setup-instance.test.ts` sends every route here every method, on the tunnel
  *   listener and on a loopback listener whose setup is done, and holds each
- *   answer to the `not_found` of a path with no route;
- * - `setup.test.ts` holds each `POST` to the origin and CSRF refusals, and each
- *   page to the locked page with no session;
- * - `apps/web/src/a11y/admin-pages.a11y.test.ts` fails when a `page` or
+ *   answer to the `not_found` of a path with no route; it also holds each
+ *   `POST` to the origin and CSRF refusals, and each page to the locked page
+ *   with no session;
+ * - `apps/web/src/a11y/setup-pages.a11y.test.ts` fails when a `page` or
  *   `locked` route here is missing from its list of setup pages to audit.
  */
 

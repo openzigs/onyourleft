@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { sha256Hex } from '../auth/crypto.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from '../auth/identity-testing.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { freeLoopbackPort, testConfig } from '../instance-testing.ts';
@@ -423,6 +424,10 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
 
     // Passkey: optional, explained.
     expect((await browser.get('/setup/passkey')).body).toContain('admin-passkeys confirm');
+    // Next pressed on an earlier step's page does not skip the step the setup has reached.
+    const stale = await browser.post('/setup/next', { from: 'claim' });
+    expect(stale.headers.location).toBe('/setup/passkey');
+    expect((await browser.get('/setup/passkey')).status).toBe(200);
     expect((await browser.post('/setup/next', { from: 'passkey' })).headers.location).toBe(
       '/setup/secrets',
     );
@@ -622,6 +627,20 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
       expect(rebound.status, route.path).toBe(421);
       expect(rebound.body).toContain(`http://localhost:${String(at.port)}/setup`);
     }
+    // A page from this origin that the browser says is cross-site is refused (layer 3's second half).
+    const crossSite = await send(
+      at.port,
+      'POST',
+      '/setup/sign-in',
+      {
+        host: `localhost:${String(at.port)}`,
+        origin: `http://localhost:${String(at.port)}`,
+        'sec-fetch-site': 'cross-site',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      'code=aaaa-bbbb-cccc-dddd',
+    );
+    expect(crossSite.status).toBe(403);
     // Nothing those refusals sent changed the setup: still at the claim, nothing claimed.
     const store = await openSqlStore(at.path);
     try {
@@ -630,6 +649,101 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     } finally {
       await store.close();
     }
+  });
+});
+
+describe('the setup session and its step gate (#2784, ADR 0069 D-4, ADR 0080 D-2)', () => {
+  const MINUTE = 60 * 1000;
+
+  /** Whether the database still holds the session this cookie names. */
+  async function sessionHeld(at: World, cookie: string): Promise<boolean> {
+    const store = await openSqlStore(at.path);
+    try {
+      return (await store.findSetupSession(await sha256Hex(cookie))) !== undefined;
+    } finally {
+      await store.close();
+    }
+  }
+
+  it('ends a session idle for fifteen minutes, and one kept busy past two hours, and takes its row', async () => {
+    const at = await world();
+    at.clock = Date.now();
+    await restart(at);
+    const idle = new Browser(at);
+    await idle.signIn(await codeInFile(at));
+    const idleCookie = idle.cookie ?? '';
+    expect((await idle.get('/setup/claim')).status).toBe(200);
+    // Fourteen minutes of quiet is inside the limit and restarts it; sixteen is not.
+    at.clock += 14 * MINUTE;
+    expect((await idle.get('/setup/claim')).status).toBe(200);
+    at.clock += 16 * MINUTE;
+    const gone = await idle.get('/setup/claim');
+    expect(gone.status).toBe(303);
+    expect(gone.headers.location).toBe('/setup');
+
+    // A session used every fourteen minutes is never idle, and still ends at two hours.
+    await restart(at);
+    const busy = new Browser(at);
+    await busy.signIn(await codeInFile(at));
+    const busyCookie = busy.cookie ?? '';
+    for (let used = 1; used <= 8; used += 1) {
+      at.clock += 14 * MINUTE;
+      expect((await busy.get('/setup/claim')).status, `after ${String(used * 14)} minutes`).toBe(
+        200,
+      );
+    }
+    at.clock += 14 * MINUTE;
+    const over = await busy.get('/setup/claim');
+    expect(over.status).toBe(303);
+    expect(over.headers.location).toBe('/setup');
+
+    await running?.stop();
+    running = undefined;
+    expect(await sessionHeld(at, idleCookie)).toBe(false);
+    expect(await sessionHeld(at, busyCookie)).toBe(false);
+  });
+
+  it('refuses a form for a step the setup has not reached, so a setup cannot finish unclaimed', async () => {
+    const at = await world();
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    for (const route of [
+      '/setup/finish/done',
+      '/setup/backups/now',
+      '/setup/registration/mode',
+      '/setup/invite/code',
+    ]) {
+      const answer = await browser.post(route, { mode: 'closed' });
+      expect(answer.status, route).toBe(303);
+      expect(answer.headers.location, route).toBe('/setup/claim');
+    }
+    const next = await browser.post('/setup/next', { from: 'finish' });
+    expect(next.headers.location).toBe('/setup/claim');
+    await running?.stop();
+    running = undefined;
+    const store = await openSqlStore(at.path);
+    try {
+      expect((await store.setupState())?.doneAt ?? null).toBeNull();
+      expect(await store.registrationSetting()).toBeUndefined();
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('ends the session the browser held when it signs in again', async () => {
+    const at = await world();
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    const before = browser.cookie ?? '';
+    const printed = await setupCode(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    await browser.signIn(printed.code);
+    expect(browser.cookie).not.toBe(before);
+    expect(await sessionHeld(at, before)).toBe(false);
+    expect(await sessionHeld(at, browser.cookie ?? '')).toBe(true);
   });
 });
 

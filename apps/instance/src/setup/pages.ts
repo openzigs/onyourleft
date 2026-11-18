@@ -4,7 +4,7 @@
  * **The setup wizard's markup** (#2784, ADR 0080 D-1, D-7): the locked page,
  * each step's page in its frame, and the page that says the setup is done.
  * Pure, as `admin/pages.ts` is: data in, HTML out, nothing read from a store,
- * a clock or the network — so `apps/web/src/a11y/admin-pages.a11y.test.ts`
+ * a clock or the network — so `apps/web/src/a11y/setup-pages.a11y.test.ts`
  * audits exactly what `setup.ts` serves by calling these.
  *
  * - The admin pages' frame and stylesheet (`admin/pages.ts` §`adminPage`,

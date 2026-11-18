@@ -1314,7 +1314,6 @@ export interface OwnerClaimRedemption {
   readonly at: number;
 }
 
-/** A claim a device redeemed and the owner has not yet confirmed or discarded (ADR 0080 D-5). */
 /** The first-run setup wizard's steps, in order (#2784, ADR 0080 D-7; migration 0048's CHECK). */
 export const SETUP_STEPS = [
   'claim',
@@ -1371,6 +1370,7 @@ export interface SetupCodeRedemption {
 /** A registration mode the database may hold over the environment (ADR 0080 D-6). */
 export type RegistrationModeSetting = 'open' | 'approval' | 'invite' | 'closed';
 
+/** A claim a device redeemed and the owner has not yet confirmed or discarded (ADR 0080 D-5). */
 export interface PendingOwnerClaim {
   readonly deviceKey: string;
   readonly comparisonCode: string;
