@@ -1,33 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { CLAIM_NO_BUTTON, CLAIM_YES_BUTTON, SETUP_NEXT_BUTTON } from '@onyourleft/operate-text';
 import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
-import type { CameraController } from '../camera/session';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import type { ConnectOutcome, InstancePort } from '../instance/instance-port';
-import { CardScanner } from './CardScanner';
 
 /**
  * **Claim your own server from this device** — #2823, ADR 0080 D-3, D-5.
  *
  * The setup page on the owner's server machine shows a claim code beside the
- * server's card, as one QR (#2783, #2784). Here the owner scans it or pastes
- * the line under it, and presses *Claim this server*:
+ * server's card, as one QR (#2783, #2784). Since #2828 the Connect screen
+ * reads it (`ConnectFlow.tsx`): the owner scans it or pastes the line under
+ * it, says it came from the server's setup page, and presses *Claim this
+ * server* here:
  *
  * 1. the port checks the card against the server's keys, then sends the code
  *    sealed to them and signed by this device's key
  *    (`instance-port.ts` §`claimOwner`);
- * 2. this screen shows the six digits it derived itself, large, in two groups
+ * 2. this step shows the six digits it derived itself, large, in two groups
  *    of three as the setup page does, and asks the owner to check both screens
  *    match;
  * 3. once the owner has said Yes there, *Sign in as the owner* signs this
  *    device in, so the setup page's invite step opens.
  *
  * A claim line is the same `<card> <code>` as a link line or a rider's
- * invite, so it is this box that says "claim", and the server's answer that
- * says whether it was one. Every refusal is one sentence, and none names the
- * code.
+ * invite, so it is the rider's answer that says "claim", and the server's
+ * that says whether it was one. Every refusal is one sentence, under the
+ * button that was pressed, and none names the code.
  *
  * ⚠️ **Every sentence here is DRAFT wording for the owner to approve** (#880).
  */
@@ -36,25 +37,28 @@ import { CardScanner } from './CardScanner';
 export const OWNER_CLAIM_TEXT = {
   heading: 'Claim your server',
   /** One short line (#1013): what the claim is for is the setup page's to say. */
-  lead: 'Setting up your own server? Scan the claim code its setup page shows, or paste the line under it.',
-  label: 'The claim code from your server’s setup page',
-  scan: 'Scan the claim code with the camera',
+  lead: 'Make this device the owner of the server whose setup page showed this code.',
   claim: 'Claim this server',
+  /** Before the press (#2828): the claim sends nothing until it. */
+  nothingSent: 'Nothing is sent until you press “Claim this server”.',
   compare: 'Check that your server’s setup page shows the same number:',
+  /** The setup page's buttons by their own names (`@onyourleft/operate-text` §setup). */
   then:
-    'If it does, press Yes on the setup page, then Sign in as the owner here. If it does not, ' +
-    'press No there, then It shows another number here.',
+    `If it does, press “${CLAIM_YES_BUTTON}” on the setup page, then “Sign in as the owner” here. ` +
+    `If it does not, press “${CLAIM_NO_BUTTON}” there, then “It shows another number” here.`,
   signIn: 'Sign in as the owner',
   differs: 'It shows another number',
   mismatch:
-    'Then press No on your server’s setup page if you have not yet, show a new claim code there ' +
-    'and scan it again.',
+    `Then press “${CLAIM_NO_BUTTON}” on your server’s setup page if you have not yet, show a new ` +
+    'claim code there and scan it again.',
+  /** What the code was spent on, said where the screen starts again (#2828). */
+  mismatchLabel: 'Not claimed',
   /** Once signed in, and the server says this device owns it. */
-  owned: 'This device now owns your server, so go back to its setup page and press Next step.',
+  owned: `This device now owns your server, so go back to its setup page and press “${SETUP_NEXT_BUTTON}”.`,
   /** Once signed in, but the server does not say this device owns it. */
   'not-owner':
-    'This device is signed in, but your server has not made it the owner yet: press Yes on its ' +
-    'setup page, then come back to this screen.',
+    `This device is signed in, but your server has not made it the owner yet: press “${CLAIM_YES_BUTTON}” ` +
+    'on its setup page, then come back to this screen.',
 } as const;
 
 /** The six digits as the setup page draws them: two groups of three. */
@@ -62,40 +66,57 @@ export function comparisonGroups(code: string): readonly [string, string] {
   return [code.slice(0, 3), code.slice(3)];
 }
 
+/** What {@link OwnerClaim} tells the screen around it. */
+export interface ClaimProgress {
+  readonly busy: boolean;
+  readonly pending: boolean;
+}
+
 export function OwnerClaim({
   port,
-  camera,
   line,
-  onLineChange,
+  focusHeading,
   onSignedIn,
+  onMismatch,
+  onProgress,
 }: {
   readonly port: InstancePort;
-  readonly camera?: CameraController | undefined;
-  /** The box's text: the Connect form's scanner may fill it too (`InstanceView.tsx`). */
+  /** The line the rider scanned or pasted, which they said a setup page showed. */
   readonly line: string;
-  readonly onLineChange: (line: string) => void;
+  /** Focus the heading as it first appears: it replaced the answer just pressed. */
+  readonly focusHeading: boolean;
   /** Signed in as the claimed owner: the screen reads the instance again. */
   readonly onSignedIn: (outcome: Extract<ConnectOutcome, { kind: 'connected' }>) => void;
+  /** The owner said the numbers differ: the code is spent, and the screen starts again. */
+  readonly onMismatch: () => void;
+  /**
+   * Where the claim stands, for a control outside it: a press is in flight, or
+   * the code is spent and its numbers are on the screen waiting for the answer.
+   */
+  readonly onProgress: (progress: ClaimProgress) => void;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState<
     { readonly comparisonCode: string; readonly card: string } | undefined
   >(undefined);
-  /** The owner said the numbers differ: focus goes back to the box. */
-  const [cleared, setCleared] = useState(false);
-  const box = useRef<HTMLTextAreaElement>(null);
-  const boxId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
 
   useEffect(() => {
-    if (cleared) box.current?.focus();
-  }, [cleared]);
+    onProgress({ busy, pending: pending !== undefined });
+  }, [busy, pending, onProgress]);
+
+  // On mount only, as `Button`'s `focusOnMount` (#557): read once, so a
+  // later render does not move focus that the rider has moved since.
+  const focusFirst = useRef(focusHeading);
+  useEffect(() => {
+    if (focusFirst.current) heading.current?.focus();
+  }, []);
 
   async function claim(): Promise<void> {
     setBusy(true);
     setRefusal(undefined);
-    setCleared(false);
     const outcome = await port.claimOwner(line);
     setBusy(false);
     if (outcome.kind === 'refused') {
@@ -117,6 +138,7 @@ export function OwnerClaim({
     onSignedIn(outcome);
   }
 
+  // #2828: directly under the button that was pressed.
   const refused =
     refusal === undefined ? null : (
       <StatusMessage tone="danger" label="Not claimed" live>
@@ -126,8 +148,11 @@ export function OwnerClaim({
 
   if (pending !== undefined) {
     const [first, second] = comparisonGroups(pending.comparisonCode);
+    // Keyed apart from the claim's own step, so the digits' buttons are new
+    // ones: *Sign in as the owner* takes the focus as it appears (#557), and
+    // is never the *Claim this server* node React would otherwise reuse.
     return (
-      <div aria-labelledby={headingId} role="group">
+      <div key="pending" aria-labelledby={headingId} role="group">
         <h3 id={headingId}>{OWNER_CLAIM_TEXT.heading}</h3>
         <div role="status">
           <p>{OWNER_CLAIM_TEXT.compare}</p>
@@ -145,73 +170,43 @@ export function OwnerClaim({
             }}
           >
             {OWNER_CLAIM_TEXT.signIn}
-          </Button>{' '}
+          </Button>
+        </p>
+        {refused}
+        <p>
           <Button
             variant="secondary"
             disabled={busy}
             onClick={() => {
               // The code is spent on the server: neither it nor the digits stay here.
-              setPending(undefined);
-              onLineChange('');
-              setRefusal(OWNER_CLAIM_TEXT.mismatch);
-              setCleared(true);
+              onMismatch();
             }}
           >
             {OWNER_CLAIM_TEXT.differs}
           </Button>
         </p>
-        {refused}
       </div>
     );
   }
 
   return (
-    <>
-      <h3 id={headingId}>{OWNER_CLAIM_TEXT.heading}</h3>
-      <form
-        className="oyl-trainer__form"
-        aria-labelledby={headingId}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void claim();
-        }}
-      >
-        <p>{OWNER_CLAIM_TEXT.lead}</p>
-        <p>
-          <label htmlFor={boxId}>{OWNER_CLAIM_TEXT.label}</label>
-          <br />
-          <textarea
-            ref={box}
-            className="oyl-input oyl-instance__card-box"
-            id={boxId}
-            rows={3}
-            spellCheck={false}
-            autoCapitalize="off"
-            autoComplete="off"
-            value={line}
-            onChange={(event) => {
-              onLineChange(event.target.value);
-              setRefusal(undefined);
-            }}
-          />
-        </p>
-        {camera === undefined ? null : (
-          <CardScanner
-            controller={camera}
-            startLabel={OWNER_CLAIM_TEXT.scan}
-            onScanned={(text) => {
-              // A scan fills the box, as a paste would, and sends nothing: the press does.
-              setRefusal(undefined);
-              onLineChange(text.trim());
-            }}
-          />
-        )}
-        {/* Secondary, as Add this device is: Connect is the screen's one primary (#668). */}
-        <Button type="submit" variant="secondary" disabled={busy}>
+    <div key="claim" aria-labelledby={headingId} role="group">
+      <h3 id={headingId} ref={heading} tabIndex={-1}>
+        {OWNER_CLAIM_TEXT.heading}
+      </h3>
+      <p>{OWNER_CLAIM_TEXT.lead}</p>
+      <p className="oyl-muted">{OWNER_CLAIM_TEXT.nothingSent}</p>
+      <p>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void claim();
+          }}
+        >
           {OWNER_CLAIM_TEXT.claim}
         </Button>
-      </form>
+      </p>
       {refused}
-    </>
+    </div>
   );
 }

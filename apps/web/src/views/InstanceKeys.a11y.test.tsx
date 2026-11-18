@@ -34,6 +34,7 @@ import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, queryAll, settle, typeIntoTextArea, type Mounted } from '../testing/mount';
 import { CARD_SCAN_TEXT } from './CardScanner';
+import { CONNECT_FLOW_TEXT } from './ConnectFlow';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -132,11 +133,12 @@ describe('the card-entry and confirm-new-card screens (#1190)', () => {
 /**
  * #2785: the card's scanner, open. Its close button is a named `Button`, and
  * the paste box stays in the tab order beside the camera's picture — on the
- * connected screen and on the Connect form.
+ * connected screen; and on the Connect flow (#2828), *Paste a code instead*.
  */
 describe('the instance card’s scanner, open (#2785)', () => {
   async function openWithCamera(
     scripted: ReturnType<typeof scriptedInstance>,
+    startLabel: string = CARD_SCAN_TEXT.start,
   ): Promise<ReturnType<typeof scriptedCamera>> {
     const camera = scriptedCamera();
     const controller = new CameraController({
@@ -151,7 +153,7 @@ describe('the instance card’s scanner, open (#2785)', () => {
     );
     await settle();
     const scan = queryAll<HTMLButtonElement>(document.body, 'button').find(
-      (each) => each.textContent === CARD_SCAN_TEXT.start,
+      (each) => each.textContent === startLabel,
     );
     expect(scan, 'no scan button').toBeDefined();
     await act(async () => {
@@ -183,10 +185,18 @@ describe('the instance card’s scanner, open (#2785)', () => {
     expectScannerReachable('Instance, connected, scanning');
   });
 
-  it('passes the audit on the Connect form, with the scanner open', async () => {
-    const camera = await openWithCamera(scriptedInstance());
+  it('passes the audit on the Connect flow, with the scanner open and paste still reachable (#2828)', async () => {
+    const camera = await openWithCamera(scriptedInstance(), CONNECT_FLOW_TEXT.scan);
     expect(camera.liveStreams()).toBe(1);
     expectClean('Connect, scanning');
-    expectScannerReachable('Connect, scanning');
+    const close = queryAll<HTMLButtonElement>(document.body, 'button').find(
+      (each) => each.textContent === CARD_SCAN_TEXT.close,
+    );
+    expect(close?.classList.contains('oyl-button')).toBe(true);
+    const paste = queryAll<HTMLButtonElement>(document.body, 'button').find(
+      (each) => each.textContent === CONNECT_FLOW_TEXT.pasteInstead,
+    );
+    expect(paste, 'no paste link').toBeDefined();
+    expect(paste!.disabled || paste!.tabIndex < 0, 'paste left the tab order').toBe(false);
   });
 });

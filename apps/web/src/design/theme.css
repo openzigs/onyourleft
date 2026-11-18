@@ -6905,6 +6905,60 @@ select.oyl-input {
 }
 
 /*
+ * The Connect screen's large buttons (#2828): *Scan a code*, and the three
+ * answers to where a code came from. Each takes its column's width up to a
+ * reading measure and a taller target than `.oyl-button`'s 44 px floor, so the
+ * one question reads as three plain choices. Layout only: the colour is the
+ * button's own kind (`Button.tsx`).
+ */
+.oyl-connect__choice {
+  width: 100%;
+  max-width: 28rem;
+  min-height: 3.5rem;
+  justify-content: flex-start;
+  text-align: start;
+}
+
+/*
+ * The flow's forms (#2828) are a column, never a row that wraps: a step's
+ * button sits under its fields, and a refusal directly under the button that
+ * was pressed, at every width (`cardscan.browser.spec.ts`).
+ */
+.oyl-connect__form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-connect__form > p,
+.oyl-connect__form > details {
+  align-self: stretch;
+  margin: 0;
+}
+
+/*
+ * A field of the flow (#2828's walkthrough): the label above its box, and the
+ * box the column's width up to a measure, where `.oyl-input`'s 8rem showed
+ * "https://instar" of an address (`cardscan.browser.spec.ts`).
+ */
+.oyl-connect__field > label {
+  display: block;
+  margin-bottom: var(--oyl-space-xs);
+}
+
+.oyl-connect__field > .oyl-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 32rem;
+}
+
+/* The paste box under *Scan a code* stands apart from it. */
+.oyl-card-scan + .oyl-connect__form {
+  margin-top: var(--oyl-space-md);
+}
+
+/*
  * The Moderation screen (#955). An account id is one unbroken word of up to
  * 128 characters, and a rider's name and a report's reason come from other
  * riders: each breaks where it must rather than widen a 320 px page

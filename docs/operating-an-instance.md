@@ -1058,14 +1058,16 @@ whoever holds **the owner key**. There are two ways to set it
   and the tablet's key, and only when you confirm on the setup page that they match does that key
   become the owner key. A **No** voids the code; make a new one and scan again.
 
-**In the app** ([#2823](https://github.com/openzigs/onyourleft/issues/2823)): open **Instance**, and
-under **Claim your server** press **Scan the claim code with the camera** (or paste the line printed
-under the QR), then **Claim this server**. The app shows its six digits large, in two groups of three
-as the setup page does. Once you have pressed **Yes** on the setup page, press **Sign in as the
-owner** in the app: it signs the tablet in, says it now owns the server, and the setup page's invite
-step opens. If you press it before the Yes, the app says to confirm on the setup page first. The claim
-QR is the same `<card> <code>` line as a code from another of your devices, so the Connect form's own
-scanner puts what it reads in both boxes, and the button you press says which it is.
+**In the app** ([#2823](https://github.com/openzigs/onyourleft/issues/2823),
+[#2828](https://github.com/openzigs/onyourleft/issues/2828)): open **Instance**, press **Scan a
+code** (or **Paste a code instead** and paste the line printed under the QR), answer **My server's
+setup page** to *Where did this code come from?*, then press **Claim this server**. The app shows its
+six digits large, in two groups of three as the setup page does. Once you have pressed **Yes** on the
+setup page, press **Sign in as the owner** in the app: it signs the tablet in, says it now owns the
+server, and the setup page's invite step opens. If you press it before the Yes, the app says to
+confirm on the setup page first. The claim QR is the same `<card> <code>` line as a rider invite and
+a code from another of your devices, which is why the app asks where the code came from rather than
+guessing; nothing is sent until you press the button the answer opens.
 
 What to know about it:
 

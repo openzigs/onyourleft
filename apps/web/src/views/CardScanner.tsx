@@ -46,15 +46,14 @@ export const CARD_SCAN_TEXT = {
     'goes away once the code is read or the scanner is closed.',
   'no-consent':
     'Scanning uses this device’s camera, which you have not agreed to yet. Agree to it on the ' +
-    'Camera screen and come back, or paste the card in the box instead.',
+    'Camera screen and come back, or paste the code instead.',
   camera:
     'This device’s camera could not be used, so the card cannot be scanned. Paste the card in ' +
     'the box instead.',
-  stopped:
-    'The camera stopped, so the scanner closed. Paste the card in the box instead, or scan again.',
+  stopped: 'The camera stopped, so the scanner closed. Paste the code instead, or scan again.',
   reader:
-    'This device could not load what reads the code, so it has stopped looking. Paste the card ' +
-    'in the box instead, or reload the page and try again.',
+    'This device could not load what reads the code, so it has stopped looking. Paste the code ' +
+    'instead, or reload the page and try again.',
 } as const;
 
 /**
@@ -64,16 +63,35 @@ export const CARD_SCAN_TEXT = {
  */
 const SCAN_FACING: CameraFacing = 'environment';
 
+/**
+ * A large button the width of its column (#2828): the Connect screen's *Scan a
+ * code* and its three answers to where a code came from. Layout only
+ * (`theme.css` §`.oyl-connect__choice`).
+ */
+export const CONNECT_CHOICE_CLASS = 'oyl-connect__choice';
+
 export function CardScanner({
   controller,
   onScanned,
   every,
   startLabel = CARD_SCAN_TEXT.start,
+  primary = false,
+  focusOnMount = false,
+  disabled = false,
 }: {
   readonly controller: CameraController;
   /**
-   * The start button's name, where a screen has two scanners for two things
-   * (#2823: the owner's claim code beside the Connect form's card).
+   * The start button as the screen's one primary action (#2828: the Connect
+   * screen opens on *Scan a code*). Secondary otherwise, beside a paste box.
+   */
+  readonly primary?: boolean;
+  /** The start button is held while something else on the screen is being sent. */
+  readonly disabled?: boolean;
+  /** Focus the start button as it first appears: it replaced the control just pressed (#557). */
+  readonly focusOnMount?: boolean;
+  /**
+   * The start button's name, where a screen scans for something other than
+   * the card (#2828: the Connect screen's *Scan a code*).
    */
   readonly startLabel?: string;
   /** The text of the code read, once: the scanner has already closed. */
@@ -210,7 +228,14 @@ export function CardScanner({
           </Button>
         </>
       ) : (
-        <Button variant="secondary" onClick={start} ref={startButton}>
+        <Button
+          variant={primary ? 'primary' : 'secondary'}
+          {...(primary ? { className: CONNECT_CHOICE_CLASS } : {})}
+          disabled={disabled}
+          onClick={start}
+          ref={startButton}
+          focusOnMount={focusOnMount}
+        >
           {startLabel}
         </Button>
       )}
