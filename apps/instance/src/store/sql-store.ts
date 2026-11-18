@@ -997,6 +997,8 @@ export const OPERATOR_ACTIONS = [
   'room_ended',
   // #2646 (ADR 0069 D-8, D-9): a registration approved or refused from the admin Accounts page.
   'registration_decided',
+  // #2781 (ADR 0080 D-4, D-7): the emergency kit, downloaded on the server machine.
+  'emergency_kit_downloaded',
   // #2782 (ADR 0080 D-3, D-5, D-7): the owner's claim — a code minted, a
   // pending claim confirmed or discarded on the loopback page, and the reset.
   'owner_claim_code_minted',
@@ -1117,6 +1119,7 @@ export const OPERATOR_DETAILS: {
   room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
   // #2646 (ADR 0069 D-8): the decision, never the rider, their name or the reason.
   registration_decided: { words: ['approved', 'refused'], counts: [] },
+  emergency_kit_downloaded: { words: [], counts: [] },
   // #2782 (ADR 0080 D-7): never a code, a key or a comparison code. Minting
   // voids every other code, a pending claim's included, and says so.
   owner_claim_code_minted: { words: ['voided_unused'], counts: [] },

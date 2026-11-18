@@ -28,8 +28,11 @@ log as `room-worker-died`).
 ## Metrics
 
 `OYL_INSTANCE_METRICS=on` serves `GET /metrics`, and **only to a request carrying
-`OYL_INSTANCE_METRICS_TOKEN`** as `Authorization: Bearer <token>` (32 characters or more —
-`openssl rand -hex 32`; the instance refuses to start with metrics on and no token). Any other
+`OYL_INSTANCE_METRICS_TOKEN`** as `Authorization: Bearer <token>` (32 characters or more). With
+`OYL_INSTANCE_SECRETS_DIR` set, as the home compose file sets it, and the token left empty, the
+instance makes one on its first start in `secrets/metrics-token` ([The instance's
+secrets](#the-instances-secrets)); otherwise make one with `openssl rand -hex 32`, and the instance
+refuses to start with metrics on and no token. Any other
 request gets `404`, as if metrics were off. It names no rider, but it is not for the public: scrape
 it from the box with the token, and keep the token in the box's `.env` beside the tunnel's.
 
@@ -390,7 +393,10 @@ account export says only `"hostedModelKey": "a hosted model key is held"`; anoth
 `null` unless they stored one of their own.
 
 **The secret.** The key is encrypted at rest with AES-256-GCM under `OYL_INSTANCE_SECRET_KEY`, 32
-bytes of base64 that you make once and keep in the deployment's `.env`, beside nothing else:
+bytes of base64. On the home deployment the instance makes it on its first start
+([The instance's secrets](#the-instances-secrets)). Making it yourself is **optional, for an
+existing install** or a deployment with no secrets folder: make it once and keep it in the
+deployment's `.env`, beside nothing else:
 
 ```
 openssl rand -base64 32
@@ -454,6 +460,64 @@ the log over from its start. Neither is the key in clear.
 re-enter: stop the instance, set the new `OYL_INSTANCE_SECRET_KEY`, run `model-key set` again with
 the key (which seals it under the new secret), and start the instance. Snapshots taken before then
 need the old secret to read their key; the rest of a snapshot needs no secret at all.
+
+## The instance's secrets
+
+[#2781](https://github.com/openzigs/onyourleft/issues/2781), ADR 0080 D-4. A fresh install needs no
+`openssl` and no `.env` edit for its secrets.
+
+- **Made on the first start.** With `OYL_INSTANCE_SECRETS_DIR` set (the home compose file sets it
+  to `/run/secrets/onyourleft`, the `secrets/` folder beside `compose.yaml`), a secret that `.env`
+  leaves empty is made there on the first start: `OYL_INSTANCE_SECRET_KEY` in
+  `secrets/instance-secret-key`, and, with metrics on, `OYL_INSTANCE_METRICS_TOKEN` in
+  `secrets/metrics-token`. Each is 32 random bytes, written whole and owner-only (`0600`). Every
+  later start reads the same file and never makes another, and the operator's commands read it
+  too.
+- **`.env` wins.** A secret set in `.env` is used, and no file is read or written for it, so an
+  existing install is unchanged. Making a secret yourself with `openssl` is optional, for an
+  existing install.
+- **Never in the data volume.** The `backup` service copies the database and the blobs off the
+  box. A snapshot holds the instance's keys wrapped under the secret, so a copy with the secret
+  beside it would be the instance's identity. The instance refuses to start if
+  `OYL_INSTANCE_SECRETS_DIR` is inside the database's folder or the blobs. Only the `instance`
+  service mounts `secrets/`, and since #2781 it mounts it writable; `backup`, `migrate` and
+  `tunnel` do not mount it.
+- **Owner-only, or no start.** A file that others than its owner can read stops the instance, with
+  a line that names the file and never its content. Make it `chmod 600` and start again. On Linux
+  the folder must be writable by uid 1000, the image's user; `deploy.sh` makes it if it is missing,
+  because Docker would make it owned by root.
+- ⚠️ **A folder that keeps no permission bits.** A Windows folder bind-mounted by Docker Desktop may
+  report every file as readable by everyone. The instance checks a file that looks open against a
+  probe it makes `0600` in the same folder. If the probe looks open too, the folder cannot show
+  permissions: the instance starts, and logs `"event":"secret",…,"permissions":"not-kept"`. There,
+  the folder's own access on the host is what keeps the secret: keep `secrets/` in your own user
+  folder, not one shared with other accounts. **Not measured on Windows yet** (#2781): until it is,
+  read that log line after the first start on a Windows machine.
+- **The log says where each came from**, and never what it is:
+
+  | You see | It means |
+  |---|---|
+  | `"event":"secret","variable":"OYL_INSTANCE_SECRET_KEY","from":"generated"` | this start made it |
+  | `…"from":"file"` | read from the file an earlier start made |
+
+- **The emergency kit.** Once you are signed in to the admin pages **on the server machine**
+  (`http://localhost:8788`, [below](#admin-pages-on-the-server-machine)) with a passkey, the Keys
+  page offers **Download the emergency kit**. It is one text file holding each secret read from
+  `secrets/`, the `OYL_INSTANCE_ORIGIN` they are bound to, and the instance card. It asks your
+  passkey again, writes `emergency_kit_downloaded` to the operator log, and is never offered
+  through the tunnel, where its address answers as if there were no such page. Keep it in a
+  password manager or on paper, **never beside the backups**. With it, a backup can be restored on
+  a new machine and every device keeps trusting the instance. Without it, a restore makes new keys
+  and every device has to pin again. A secret set in `.env` is not in the kit: `.env` is your copy
+  of it.
+- **Restoring with the kit.** On the new machine, put each secret alone in its file in `secrets/`
+  (or in `.env`), set the same `OYL_INSTANCE_ORIGIN`, then [restore](#restore) the backup.
+- ⚠️ **Rolling back to an image from before #2781** starts with no secret if the secret is only in
+  `secrets/`, because that image reads `.env` alone: no instance keys, no sealed routes. Copy the
+  secret into `.env` before rolling back that far.
+- **Not yet.** The setup wizard's one offer of the kit from its setup session (ADR 0080 D-4) is
+  #2784's, and the operator log entry for a secret made at start waits for the log source that
+  issue's migration adds.
 
 ## The instance's keys
 
@@ -673,8 +737,9 @@ voice: nothing else changes.
   refuses to start, naming the variable and nothing the file holds. The environment is not used
   because every child process inherits it and `docker inspect` prints it.
   - **The home deploy** (`apps/instance/deploy/home/compose.yaml`) mounts `secrets/` beside the
-    compose file, read-only, at `/run/secrets/onyourleft/`, on the instance only (the `backup`
-    service does not mount it). Git ignores the directory. On the box, beside the compose file
+    compose file at `/run/secrets/onyourleft/`, on the instance only (the `backup`
+    service does not mount it). It was read-only until #2781, which made it writable so the
+    instance can make its secret key there ([The instance's secrets](#the-instances-secrets)). Git ignores the directory. On the box, beside the compose file
     (the token is typed at a prompt that does not echo it, so it is in no shell history, and the
     file is made readable by you alone before anything is written to it):
 

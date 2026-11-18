@@ -170,6 +170,9 @@ details { margin: var(--oyl-space-xs) 0 0; }
 summary { cursor: pointer; display: flex; align-items: center; min-height: var(--admin-target); color: var(--oyl-color-link); text-decoration: underline; text-underline-offset: 0.15em; }
 details > code { display: block; padding: var(--oyl-space-sm); white-space: pre-wrap; }
 
+.qr-figure { margin: var(--oyl-space-md) 0; }
+.qr { display: block; width: 100%; max-width: 22rem; height: auto; forced-color-adjust: none; }
+
 @media (min-width: 40rem) {
   h1 { font-size: 2.44140625rem; }
   main { padding: var(--oyl-space-xl) var(--oyl-space-lg); }
