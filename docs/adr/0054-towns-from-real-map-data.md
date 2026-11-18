@@ -608,3 +608,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   over an invented one. **Status: proposed, in force only when the owner rules on #2659 and approves
   its screenshots and a moving-ride tablet frame check**; the PR is not to be merged before that,
   and this entry is to be corrected or struck there if the ruling differs.
+- **2026-11-15** — **D-5.1 and D-5.3 are superseded in part by
+  [ADR 0070](0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**
+  ([#2684](https://github.com/openzigs/onyourleft/issues/2684)), on the owner's ruling of that day:
+  a suburb that OpenStreetMap maps by its streets alone, with no footprint and no built-up land use,
+  has its ground read as **inferred built-up land** — near a residential street, where the streets
+  are as dense as a suburb's — and procedural lots stand there. D-5.3's *"no built-up land"* reads
+  *"no built-up land, mapped or inferred"*. ADR 0070 was **Proposed**, and the owner accepted it
+  on 2026-11-17 on its pull request [#2694](https://github.com/openzigs/onyourleft/pull/2694).
+  What still holds, unchanged: D-5.2, D-5.4 to D-5.7, and the rest of D-5.1. This entry is a
+  pointer and changes nothing else here.

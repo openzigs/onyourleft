@@ -1600,6 +1600,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `-land-planting`, `-land-boundaries`,
                         `-ground-clutter`, `-hedge-breaks`,
                         `-small-stones`, shown on `town=countryside`)
+                        ⚠️ Since #2684 (ADR 0070) `built-up` includes
+                        INFERRED land: unmapped ground within 60 m of a
+                        residential street where the streets are a
+                        suburb's (`inferBuiltUp`), so a suburb mapped by
+                        its streets alone gets lots and no field fences.
     src/game/park-dressing.ts
                         what a golf course and a cemetery are drawn WITH
                         (#2685, the owner's hold of PR #2689 on 2026-11-16:
