@@ -179,7 +179,8 @@
  * ({@link FootprintPlanOptions}' `mappedRoofShape`).
  *
  * The near level stays inside {@link FOOTPRINT_MAX_TRIANGLES} and the far
- * level, walls and roof, inside {@link FOOTPRINT_MAX_FAR_TRIANGLES}: a house's
+ * level's walls and roof inside {@link FOOTPRINT_MAX_FAR_TRIANGLES} (since
+ * #2761 the far level draws the plinth beside them): a house's
  * detail is about 40 triangles, and since #1588 about 60 more — gutters, a
  * downpipe, dormers, a garage door and a driveway — and none of it is on the
  * far level but the roof's overhang.
@@ -895,7 +896,10 @@ export interface FootprintPlan {
   readonly triangles: Readonly<Record<FootprintRole, Float32Array>>;
   /** ≤ {@link FOOTPRINT_MAX_TRIANGLES}. */
   readonly triangleCount: number;
-  /** Walls and roof only — #1549's far level, ≤ {@link FOOTPRINT_MAX_FAR_TRIANGLES}. */
+  /**
+   * #1549's far level: its walls, roof and spire, ≤ {@link FOOTPRINT_MAX_FAR_TRIANGLES}
+   * but the spire, and since #2761 its plinth beside them.
+   */
   readonly farTriangleCount: number;
 }
 
@@ -966,7 +970,16 @@ export const FOOTPRINT_MAX_GROUND_RANGE_METRES = 2.5;
 /** The most triangles a plan is: `realistic-budget.ts` §`REALISTIC_TRIANGLES.structure`, **640**. */
 export const FOOTPRINT_MAX_TRIANGLES = REALISTIC_TRIANGLES.structure;
 
-/** The most triangles a plan's far level is — its walls and roof: **200**. */
+/**
+ * The most triangles a plan's walls and roof are, which its far level draws:
+ * **200**.
+ *
+ * ⚠️ **Since #2761 the far level also draws the plinth**, two triangles a
+ * ring edge, so a far house on falling ground stands in it
+ * (`mapped-buildings.ts` §`FAR_ROLES`); `farTriangleCount` counts it, and
+ * #1549's selection spends that. This cap still holds the walls and roof
+ * alone, so no plan's shape changed for it.
+ */
 export const FOOTPRINT_MAX_FAR_TRIANGLES = 200;
 
 /** A flat roof's parapet, above the eaves: **0.5 m**. */
@@ -7635,7 +7648,11 @@ function planFootprint(
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,
+    // #2761: and the plinth, which the far level draws so a house on a slope stands on the ground.
     farTriangleCount:
-      trianglesOf(writing.wall) + trianglesOf(writing.roof) + trianglesOf(writing.spire),
+      trianglesOf(writing.wall) +
+      trianglesOf(writing.plinth) +
+      trianglesOf(writing.roof) +
+      trianglesOf(writing.spire),
   };
 }

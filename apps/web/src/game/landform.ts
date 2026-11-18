@@ -1453,12 +1453,36 @@ export function terrainMeshIsCurrent(mesh: TerrainMesh): boolean {
  * one. Nothing moves in plan: an item is kept or dropped, and lifted or
  * lowered onto the ground.
  *
+ * ⚠️ **And a building's whole foot, not its middle — #2761.** A building
+ * set into the ground ({@link GroundedFootprint}, `footprintOf`) stands at
+ * the ground under its middle as everything else does, and its walls reach
+ * `depth` below that. Where this frame's ground under its outline falls
+ * further than that below its middle, its downhill side would stand in the
+ * air — on the owner's coast a house stood on stilts above the ground — so
+ * it is lowered until its foot meets the lowest ground under it, by at most
+ * another `depth`, and dropped where that is not enough. Lowering buries its
+ * uphill side a little; dropping it leaves a gap in a street, so a small
+ * fall is lowered: a village church on a gentle slope, 0.2 m. What is
+ * dropped is where the drawn ground is not the ground beside the road at all
+ * — another leg's, under a lot on the inside of a hairpin, 1.7 m to 7.4 m
+ * below it. `settlements.ts` §`lotsAt` keeps a lot off ground that falls
+ * away under it before this is asked.
+ *
  * Lent storage, like {@link terrainCorridor}'s: valid for the mesh it was
  * asked about, and asked about in the same frame it was built in.
  */
 export function standingOnGround<
-  T extends { readonly x: number; readonly y: number; readonly z: number },
->(items: readonly T[], mesh: TerrainMesh): readonly T[] {
+  T extends {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly rotation?: number;
+  },
+>(
+  items: readonly T[],
+  mesh: TerrainMesh,
+  footprintOf?: (item: T) => GroundedFootprint | undefined,
+): readonly T[] {
   const across = rowCrossings(mesh);
   const fanned = fannedPairs(mesh);
   const bounds = blockBounds(mesh);
@@ -1466,9 +1490,65 @@ export function standingOnGround<
   for (const item of items) {
     const y = groundTop(mesh, across, fanned, bounds, item.x, item.z);
     if (Number.isNaN(y)) continue;
-    kept.push(y === item.y ? item : { ...item, y });
+    let stands = y;
+    const footprint = footprintOf?.(item);
+    if (footprint !== undefined) {
+      // How far its foot would stand above the lowest ground under its corners.
+      const fall = y - footprint.depth - lowestUnder(mesh, across, fanned, bounds, item, footprint);
+      if (fall > footprint.depth) continue;
+      if (fall > 0) stands = y - fall;
+    }
+    kept.push(stands === item.y ? item : { ...item, y: stands });
   }
   return kept;
+}
+
+/**
+ * A building's outline in its own frame — #2761, as `settlements.ts`
+ * §`STRUCTURE_FOOTPRINTS` writes one: `x` its half-width across, `back` and
+ * `front` how far behind and ahead of its point its ends are along the way it
+ * faces — and how far its walls reach below that point, which is also the
+ * most {@link standingOnGround} lowers it.
+ */
+export interface GroundedFootprint {
+  readonly x: number;
+  readonly back: number;
+  readonly front: number;
+  readonly depth: number;
+}
+
+/**
+ * The lowest of this frame's ground under `footprint`'s four corners about
+ * `item`, or `+Infinity` where none of them is over ground: a corner over no
+ * ground is no evidence either way. Turned as three turns a yaw: `x` across
+ * is `(cos, −sin)` and ahead is `(sin, cos)`.
+ *
+ * ⚠️ **The corners, and nothing between them**: this runs for every building
+ * in every frame. A bank falls one way, so its lowest under an outline is at
+ * a corner; a dip under the middle of a wall — a ditch between two corners —
+ * is not looked for.
+ */
+function lowestUnder(
+  mesh: TerrainMesh,
+  across: Float64Array,
+  fanned: Uint8Array,
+  bounds: Float64Array,
+  item: { readonly x: number; readonly z: number; readonly rotation?: number },
+  footprint: GroundedFootprint,
+): number {
+  const rotation = item.rotation ?? 0;
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const ahead of [footprint.back, footprint.front]) {
+    for (const sideways of [-footprint.x, footprint.x]) {
+      const x = item.x + sideways * cos + ahead * sin;
+      const z = item.z - sideways * sin + ahead * cos;
+      const ground = groundTop(mesh, across, fanned, bounds, x, z);
+      if (ground < lowest) lowest = ground;
+    }
+  }
+  return lowest;
 }
 
 /**

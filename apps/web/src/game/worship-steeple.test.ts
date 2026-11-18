@@ -48,6 +48,7 @@ import {
   buildingBeside,
   landBeside,
   planFingerprint,
+  plinthTriangles,
   polygonBeside,
   rectangleBeside,
   typedStreetFixture,
@@ -385,7 +386,10 @@ describe('#2021: a mapped place of worship’s steeple, read back from the plan'
     ];
     const holed = planOne(rings, CHURCH);
     expect(holed.steeple).toBe(false);
-    expect(holed.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
+    // #2761: the far cap is its walls and roof; its plinth is drawn far too, beside them.
+    expect(holed.farTriangleCount - plinthTriangles(holed)).toBeLessThanOrEqual(
+      FOOTPRINT_MAX_FAR_TRIANGLES,
+    );
     // Its courts kept: more than the plan without them.
     const solid = planOne([rings[0] as (typeof rings)[number]], CHURCH);
     expect(holed.farTriangleCount).toBeGreaterThan(solid.farTriangleCount);
