@@ -29,7 +29,14 @@
  *    (ADR 0054 D-5.2) is categorical, and D-5.2's one possible exception is
  *    not taken. #2657: a protected area's boundary (`land-class.ts`
  *    §`PROTECTED_AREA_KINDS`, a national forest drawn round a whole town)
- *    is not a wood or a park, and a footprint on it is built.
+ *    is not a wood or a park, and a footprint on it is built. Since #2754 a
+ *    beach or pier inside a park reads as `bare` (`land-class.ts`
+ *    §`BARE_KINDS_OVER_LAND`), and is still inside it (`insidePark`, a
+ *    mapped park's polygon, not a protected area's), so it is dropped.
+ *    ⚠️ Since #2728 also any of them over the open water the scene
+ *    DRAWS (`waterways.ts` §`onOpenWater`), which a mapped lake's
+ *    shores can lay over mapped land: tested once rule 4 has found the road
+ *    each point is beside.
  * 3. **The road** (D-5.4): any edge within `landform.ts`
  *    §`ROAD_CLEARANCE_METRES` of ANY stretch of the drawn road, and it is
  *    dropped — `on-road`. The `settlements.ts` §`footprintClearance` measure,
@@ -172,7 +179,8 @@
  * ({@link FootprintPlanOptions}' `mappedRoofShape`).
  *
  * The near level stays inside {@link FOOTPRINT_MAX_TRIANGLES} and the far
- * level, walls and roof, inside {@link FOOTPRINT_MAX_FAR_TRIANGLES}: a house's
+ * level's walls and roof inside {@link FOOTPRINT_MAX_FAR_TRIANGLES} (since
+ * #2761 the far level draws the plinth beside them): a house's
  * detail is about 40 triangles, and since #1588 about 60 more — gutters, a
  * downpipe, dormers, a garage door and a driveway — and none of it is on the
  * far level but the roof's overhang.
@@ -417,8 +425,9 @@ import {
 } from './house-archetypes';
 import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
-import { kindAt, type LandClass, type LandClassMask } from './land-class';
+import { insidePark, kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
+import { onOpenWater, waterways } from './waterways';
 import {
   CHURCH,
   CHURCH_FEATURES,
@@ -887,7 +896,10 @@ export interface FootprintPlan {
   readonly triangles: Readonly<Record<FootprintRole, Float32Array>>;
   /** ≤ {@link FOOTPRINT_MAX_TRIANGLES}. */
   readonly triangleCount: number;
-  /** Walls and roof only — #1549's far level, ≤ {@link FOOTPRINT_MAX_FAR_TRIANGLES}. */
+  /**
+   * #1549's far level: its walls, roof and spire, ≤ {@link FOOTPRINT_MAX_FAR_TRIANGLES}
+   * but the spire, and since #2761 its plinth beside them.
+   */
   readonly farTriangleCount: number;
 }
 
@@ -958,7 +970,16 @@ export const FOOTPRINT_MAX_GROUND_RANGE_METRES = 2.5;
 /** The most triangles a plan is: `realistic-budget.ts` §`REALISTIC_TRIANGLES.structure`, **640**. */
 export const FOOTPRINT_MAX_TRIANGLES = REALISTIC_TRIANGLES.structure;
 
-/** The most triangles a plan's far level is — its walls and roof: **200**. */
+/**
+ * The most triangles a plan's walls and roof are, which its far level draws:
+ * **200**.
+ *
+ * ⚠️ **Since #2761 the far level also draws the plinth**, two triangles a
+ * ring edge, so a far house on falling ground stands in it
+ * (`mapped-buildings.ts` §`FAR_ROLES`); `farTriangleCount` counts it, and
+ * #1549's selection spends that. This cap still holds the walls and roof
+ * alone, so no plan's shape changed for it.
+ */
 export const FOOTPRINT_MAX_FAR_TRIANGLES = 200;
 
 /** A flat roof's parapet, above the eaves: **0.5 m**. */
@@ -6185,8 +6206,10 @@ function measureFootprint(
   // 2. The land: the centroid and every vertex the map drew. #2657: a
   // protected area's boundary (a national forest round a whole town) is not
   // a wood, so a footprint on it is built — ADR 0054's 2026-11-15 amendment.
+  // #2754: a beach inside a park is a beach, and still inside the park.
   const excluded = (x: number, z: number): boolean => {
     const here = land.classAt(x, z);
+    if (here === 'bare') return insidePark(corridor, x, z);
     return (here === 'wood' || here === 'water' || here === 'park') && !land.protectedArea(x, z);
   };
   if (excluded(centroid.x, centroid.z)) return 'on-excluded-land';
@@ -6248,6 +6271,20 @@ function measureFootprint(
     highest = Math.max(highest, height);
   }
   if (highest - lowest > FOOTPRINT_MAX_GROUND_RANGE_METRES) return 'too-steep';
+  // #2728: rule 2 again, over the water the scene DRAWS — a mapped lake's shores are
+  // smoothed and its surface reaches past them, so mapped land can be under drawn
+  // water, and a house there stood in it on the lake bed.
+  const ways = waterways(profile, seed, land);
+  const wet = (x: number, z: number): boolean => {
+    nearestOnRoadSegments(road, nearSegments, x, z, beside);
+    return onOpenWater(ways, profile, beside.along, beside.lateral);
+  };
+  if (ways.lakes.length + ways.crossings.length > 0) {
+    if (wet(centroid.x, centroid.z)) return 'on-excluded-land';
+    for (let i = 0; i + 1 < outer.length; i += 2) {
+      if (wet(outer[i] as number, outer[i + 1] as number)) return 'on-excluded-land';
+    }
+  }
 
   // 5. The size, as mapped.
   const area = footprintArea(building.rings);
@@ -7611,7 +7648,11 @@ function planFootprint(
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,
+    // #2761: and the plinth, which the far level draws so a house on a slope stands on the ground.
     farTriangleCount:
-      trianglesOf(writing.wall) + trianglesOf(writing.roof) + trianglesOf(writing.spire),
+      trianglesOf(writing.wall) +
+      trianglesOf(writing.plinth) +
+      trianglesOf(writing.roof) +
+      trianglesOf(writing.spire),
   };
 }

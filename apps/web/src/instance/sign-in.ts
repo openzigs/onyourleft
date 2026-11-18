@@ -171,7 +171,15 @@ export function readInstanceAccount(storage: InstanceAccountStorage): InstanceAc
 /** Why signing in did not work: the instance's own error code, or a transport failure. */
 export class InstanceSignInError extends Error {
   override readonly name = 'InstanceSignInError';
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    /**
+     * The first field a `validation_failed` names (#2826): an invite-only
+     * instance refuses a new key with no invite as `inviteCode`, which is not
+     * a bad name. Only the field's name — never what was sent in it.
+     */
+    readonly field?: string,
+  ) {
     super(`The instance refused: ${code}.`);
   }
 }
@@ -222,6 +230,14 @@ const codeOf = (body: unknown): string => {
   return typeof code === 'string' ? code : 'unknown';
 };
 
+const fieldOf = (body: unknown): string | undefined => {
+  const fields = (body as { error?: { fields?: unknown } } | null)?.error?.fields;
+  const field = Array.isArray(fields)
+    ? (fields[0] as { field?: unknown } | null)?.field
+    : undefined;
+  return typeof field === 'string' ? field : undefined;
+};
+
 /** A challenge from the instance, signed for `purpose` by this device's key. */
 async function signedStatement(
   dependencies: SignInDependencies,
@@ -262,10 +278,16 @@ function refuseUnconfirmedPin(dependencies: SignInDependencies): void {
   }
 }
 
-/** Sign this device in to an instance, registering it there if the instance has never seen its key. */
+/**
+ * Sign this device in to an instance, registering it there if the instance
+ * has never seen its key. `registration.inviteCode` is a rider invite (#2826):
+ * an invite-only instance spends it on the registration, and an instance that
+ * already knows the key ignores it. ⚠️ The caller sends one only through
+ * `dependencies.sealed`, as `instance-port.ts` §`connectTo` does.
+ */
 export async function signInToInstance(
   dependencies: SignInDependencies,
-  registration: { readonly displayName?: string } = {},
+  registration: { readonly displayName?: string; readonly inviteCode?: string } = {},
 ): Promise<SignedIn> {
   refuseUnconfirmedPin(dependencies);
   await dependencies.ensureLocalAthlete();
@@ -279,6 +301,7 @@ export async function signInToInstance(
   const answer = await sealedOrKeyless.post('/v1/auth/session', {
     ...statement,
     ...(registration.displayName === undefined ? {} : { displayName: registration.displayName }),
+    ...(registration.inviteCode === undefined ? {} : { inviteCode: registration.inviteCode }),
   });
   const body = answer.body as Partial<Record<string, unknown>> | null;
   if (
@@ -286,7 +309,7 @@ export async function signInToInstance(
     typeof body?.sessionToken !== 'string' ||
     typeof body.athleteId !== 'string'
   ) {
-    throw new InstanceSignInError(codeOf(answer.body));
+    throw new InstanceSignInError(codeOf(answer.body), fieldOf(answer.body));
   }
   const held = readInstanceAccount(dependencies.storage);
   const kept =

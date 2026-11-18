@@ -1,0 +1,317 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * **The first-run setup wizard's words** (#2784, ADR 0080 D-1, D-2, D-4, D-6,
+ * D-7): what the instance's `/setup` pages on the server machine say, step by
+ * step, to an owner who has never edited a `.env` file. Kept here beside the
+ * Operate sections' words (ADR 0069 D-7), so the app can say the same thing
+ * one day without a second copy.
+ *
+ * **Plain words first.** The reader is a non-technical owner: a sentence on a
+ * page names no environment variable and no command. Those are kept for the
+ * reader who wants them, in a collapsed "for people comfortable with the
+ * command line" block ({@link SETUP_EXPERT_SUMMARY}).
+ *
+ * Nothing here is a code, a key, a secret or an address of anybody's: a page
+ * puts those in, escaped, where it must.
+ *
+ * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
+ */
+
+/** The wizard's steps, in order: `apps/instance`'s `SETUP_STEPS`, which its tests hold this to. */
+export type OperateSetupStep =
+  'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'finish';
+
+/** Each step's name, as its page's heading. */
+export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
+  claim: 'Claim it with your tablet',
+  passkey: 'A passkey for the admin pages',
+  secrets: 'The emergency kit',
+  backups: 'Backups',
+  registration: 'Who may join',
+  invite: 'Invite a rider',
+  finish: 'Finish',
+};
+
+/** Each step's short name, in the progress bar across the top of every step's page. */
+export const SETUP_STEP_SHORT_NAMES: Readonly<Record<OperateSetupStep, string>> = {
+  claim: 'Claim',
+  passkey: 'Passkey',
+  secrets: 'Emergency kit',
+  backups: 'Backups',
+  registration: 'Who may join',
+  invite: 'Invite',
+  finish: 'Finish',
+};
+
+/**
+ * Read out before a step's name in the progress bar: its number, which is what
+ * a narrow screen shows of it (WCAG 2.5.3, label in name), and whether it is
+ * done (the tick is drawn, not read). "Step 5:", "Step 1, done:".
+ */
+export function setupStepNumberText(number: number, done: boolean): string {
+  return `Step ${String(number)}${done ? ', done' : ''}:`;
+}
+
+/** The title every setup page carries. */
+export const SETUP_TITLE = 'Set up this instance';
+
+/** The locked page: what the code is and where it is. */
+export const SETUP_LOCKED_LEAD =
+  'This page sets up the instance, on this machine only. To begin, type the setup code. It is in the file setup-code, in the secrets folder beside compose.yaml. A code works once, for 10 minutes.';
+
+/** How to get a new code, without a button the tunnel could press (ADR 0080 D-2). */
+export const SETUP_NEW_CODE_TEXT =
+  'Each start of the instance makes a new code. If yours has run out, restart the instance (docker compose restart instance) and open the file again, or run the setup-code command on this machine.';
+
+/** The code's label. */
+export const SETUP_CODE_LABEL = 'Setup code';
+
+/** The one sentence for a code that was not accepted, whatever the reason (ADR 0080 D-2). */
+export const SETUP_CODE_REFUSED_TEXT =
+  'That code was not accepted. A code works once, for 10 minutes: open the file again after a restart for a new one.';
+
+/** Too many attempts, from this machine or all together (ADR 0069 D-4's limits). */
+export const SETUP_TOO_MANY_TEXT = 'Too many attempts. Wait a minute, then try again.';
+
+/** The page for any address but `localhost:<port>` (ADR 0080 D-1). */
+export const SETUP_WRONG_ADDRESS_TEXT =
+  'The setup page is served at one address only, on this machine:';
+
+/** A form that did not come from the setup page's own origin. */
+export const SETUP_FORM_REFUSED_TEXT =
+  'That form did not come from this setup page, so nothing was changed. Go back to the setup page and try again.';
+
+/** The line under every step's page: how long the session lasts. */
+export const SETUP_SESSION_TEXT =
+  'This setup session ends after 15 minutes without use, and 2 hours after you typed the code. Leave whenever you like: the setup starts again at this step.';
+
+/** The button that moves on. */
+export const SETUP_NEXT_BUTTON = 'Next step';
+
+/** The steps list's name. */
+export const SETUP_STEPS_LABEL = 'Setup steps';
+
+/** The heading of every collapsed block that holds commands and settings names. */
+export const SETUP_EXPERT_SUMMARY = 'For people comfortable with the command line';
+
+/**
+ * The button on a page that waits for something outside this browser: pressed,
+ * it loads the page again. No page reloads by itself (WCAG 2.2.1, F41).
+ */
+export const SETUP_CHECK_NOW_BUTTON = 'Check now';
+
+/**
+ * When a code stops working, from the seconds it has left: "in 10 minutes",
+ * "in 7 days". Relative, so it never needs a time zone: the server's clock and
+ * the reader's are the same machine's, but its zone is often UTC in a container.
+ */
+export function expiresInText(seconds: number): string {
+  if (seconds < 60) return 'in less than a minute';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 120) return `in ${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `in ${String(hours)} hours`;
+  return `in ${String(Math.floor(hours / 24))} days`;
+}
+
+/** A code shown on a step's page: it works once, and stops working {@link expiresInText}. */
+export function codeWorksOnceText(seconds: number): string {
+  return `It works once, and stops working ${expiresInText(seconds)}.`;
+}
+
+// --- claim (ADR 0080 D-3, D-5)
+
+export const CLAIM_LEAD =
+  'Your tablet becomes this server’s owner: the one account that runs it. Show a claim code here, scan it with the On Your Left app on your tablet, then check that both screens show the same number.';
+export const CLAIM_SHOW_BUTTON = 'Show the claim code';
+/** Above the claim QR, in place of the admin page's own words (#2783). */
+export const CLAIM_CODE_LEAD =
+  'Scan this with the On Your Left app on your tablet. In the app, go to Instance and use its own scanner, not the camera app. Your tablet then shows a six-digit number.';
+/** Below the claim QR, while no tablet has scanned it. */
+export const CLAIM_WAITING_TEXT =
+  'Waiting for your tablet to scan the code. Once it has, press I’ve scanned it, and this page shows the number to compare.';
+/** The claim step's button once the tablet has scanned the code: it loads the step again. */
+export const CLAIM_SCANNED_BUTTON = 'I’ve scanned it';
+export const CLAIM_PENDING_LEAD =
+  'A tablet has scanned the code. Does your tablet show this number?';
+export const CLAIM_PENDING_LABEL = 'The number on this screen';
+export const CLAIM_YES_BUTTON = 'Yes, it shows the same number';
+export const CLAIM_NO_BUTTON = 'No, it shows another number or none';
+export const CLAIM_NO_TEXT =
+  'If the numbers differ, somebody else may have scanned the code: say No, and show a new code.';
+/** The claim step once the owner is the tablet's: a success, before the next step. */
+export const CLAIMED_TEXT = 'Your tablet now owns this server.';
+export const CLAIMED_NEXT_TEXT =
+  'Nobody else can claim it now. Press Next step to carry on with the setup.';
+export const CLAIMED_WRONG_TEXT =
+  'If the wrong tablet claimed it, run the owner-claim reset command on this machine and claim it again.';
+export const CLAIM_NOT_CONFIRMED_TEXT =
+  'That claim could not be confirmed: it ran out, or a new code replaced it. Show a new claim code and scan it again.';
+export const CLAIM_NO_CARD_TEXT =
+  'The instance’s own keys could not be read, so there is no card to claim it with. The instance makes them when it starts with its secret key: restart it, then come back.';
+
+// --- passkey (ADR 0080 D-7, Q-6)
+
+export const PASSKEY_STEP_LEAD =
+  'This step is optional, and you can skip it. Your tablet already owns this server, and you run the server from the app on it.';
+export const PASSKEY_STEP_LATER =
+  'A passkey lets you sign in to the server’s admin pages on this computer without a code. You can add one later, from the admin pages, whenever you want it.';
+/** How to add one, after the setup: `adminAddress` is the admin pages' address on this machine. */
+export function passkeyStepHow(adminAddress: string): readonly string[] {
+  return [
+    'Turn the admin pages on: set OYL_INSTANCE_ADMIN_PAGES=on in .env, then run docker compose up -d instance.',
+    `Run the admin-code command on this machine and sign in at ${adminAddress} with the code it prints.`,
+    'On the Passkeys page, add a passkey. It reads every page, and changes nothing until you confirm it with the admin-passkeys confirm command on this machine.',
+  ];
+}
+
+// --- the emergency kit (ADR 0080 D-4)
+
+export const KIT_STEP_LEAD =
+  'The emergency kit is one small text file. With it and a backup, you can bring this server back on a new computer if this one is lost.';
+export const KIT_KEEP_TEXT =
+  'Keep the kit in a password manager, or print it. Never keep it beside the backups: whoever holds the kit and a backup can pretend to be your server.';
+export const KIT_DOWNLOAD_BUTTON = 'Download the emergency kit';
+export const KIT_ONCE_TEXT =
+  'You can download it once during this setup. After setup, you can download it again from the admin pages on this computer, once you have added a passkey there.';
+export const KIT_TAKEN_TEXT =
+  'The kit was downloaded in this session. Keep it safe, away from the backups.';
+export const KIT_NONE_TEXT =
+  'There is no emergency kit to download: every secret this server uses is in its settings file, .env, which is your copy of it.';
+
+// --- backups (ADR 0080 D-6)
+
+export const BACKUPS_STEP_LEAD =
+  'Every six hours the server saves a backup in a folder on this computer, and copies it to a second place: the copy kept elsewhere, so a backup survives if this computer fails.';
+export const BACKUPS_FOLDERS_TEXT =
+  'This page cannot choose the two folders: they are set when the server is installed. It checks that both work.';
+export const OFFBOX_RULE_TEXT =
+  'The copy kept elsewhere must be on another drive or a network share, not this computer’s own disk. On Windows a USB stick does not work for it: the server cannot reach it, and every copy fails.';
+export const BACKUPS_NONE_YET_TEXT =
+  'No backup has run yet. Back up now to check that both folders work.';
+export const BACKUPS_LAST_COPIED_TEXT =
+  'Both folders work: the last backup was saved on this computer, and copied to the copy kept elsewhere.';
+export const BACKUPS_LAST_COPY_FAILED_TEXT =
+  'The last backup was saved on this computer, but it could not be copied to the copy kept elsewhere. Check that drive or share is plugged in and can be written to, then back up again.';
+export const BACKUPS_LAST_NOT_CONFIGURED_TEXT =
+  'The last backup was saved on this computer only: no place for the copy kept elsewhere has been set.';
+export const BACKUPS_LAST_FAILED_TEXT =
+  'The last backup failed: it could not be saved on this computer.';
+export const BACKUPS_LAST_AT_TEXT = 'The last backup ran at';
+export const BACKUPS_WAITING_TEXT =
+  'Waiting for the backup to run. It usually starts within 30 seconds: press Check now to see whether it has.';
+export const BACKUPS_TOO_SOON_TEXT =
+  'A backup ran in the last 15 minutes, or one is already waiting, so no new one was asked for.';
+export const BACK_UP_NOW_STEP_BUTTON = 'Back up now';
+/** The command-line details: what sets the two folders, and how to check the service. */
+export const BACKUPS_EXPERT_LINES: readonly string[] = [
+  'The folder on this computer is OYL_BACKUP_DIR in .env, and the copy kept elsewhere is OYL_OFFBOX_DIR.',
+  'To change one, edit its line in .env and run the deploy again: the backup service is started with them.',
+  'To check the backup service is running: docker compose ps backup.',
+];
+
+// --- registration (ADR 0080 D-6, Q-3)
+
+export const REGISTRATION_STEP_LEAD =
+  'Choose who may make an account on this server. You can change it later.';
+export const REGISTRATION_STEP_LEGEND = 'Who may join';
+/** One button: the choice is saved, and the setup moves on. */
+export const REGISTRATION_SAVE_BUTTON = 'Save and go to the next step';
+
+/**
+ * Each registration mode in the setup's own plain words. The stored values
+ * stay the instance's (`approval`, `invite`, `open`, `closed`); the app's
+ * Operate words for them are `accounts.ts`'s.
+ */
+export const SETUP_REGISTRATION_MODE_TEXT: Readonly<
+  Record<
+    'open' | 'approval' | 'invite' | 'closed',
+    { readonly short: string; readonly meaning: string }
+  >
+> = {
+  open: {
+    short: 'Anyone can join',
+    meaning: 'Anyone who has this server’s address can make an account and ride at once.',
+  },
+  approval: {
+    short: 'I approve each new rider',
+    meaning:
+      'A new rider’s account waits until you approve it in the app. Until then, other riders cannot see it.',
+  },
+  invite: {
+    short: 'Only people I invite',
+    meaning:
+      'A new rider needs an invite you make in the app. Each invite works once, for seven days.',
+  },
+  closed: {
+    short: 'Nobody new',
+    meaning: 'Nobody new can join. Riders who already have an account keep it.',
+  },
+};
+
+// --- invite (ADR 0080 D-7)
+
+export const INVITE_STEP_LEAD =
+  'Make one invite for a rider: a code they scan with the On Your Left app. It works once, for seven days.';
+/** Above the invite QR, in place of the admin page's own words (#2783). */
+export const INVITE_CODE_LEAD =
+  'Scan this with the On Your Left app on the new rider’s phone or tablet. In the app, go to Instance and use its own scanner, not the camera app.';
+export const INVITE_MAKE_BUTTON = 'Make an invite';
+export const INVITE_TAKEN_TEXT =
+  'This setup has made its one invite. You can make more later, from the app.';
+/**
+ * Before the owner's tablet has signed in. The app does not sign in by itself
+ * after the claim, so this is an instruction, not a fault.
+ */
+export const INVITE_NO_OWNER_TEXT =
+  'One more thing on your tablet first: an invite is made from your account, and your tablet has not signed in to this server yet. In the On Your Left app on your tablet, go to Instance and connect to this server. Then come back to this page.';
+export const INVITE_CHECK_AGAIN_LINK = 'Check again';
+export const INVITE_NOT_INVITE_MODE_TEXT =
+  'You chose to let riders join without an invite. The code still helps: it carries this server’s address and card, so the rider’s app trusts it at once.';
+
+// --- finish (ADR 0080 D-7)
+
+export const FINISH_LEAD = 'Here is where your server stands:';
+export const FINISH_CLOSE_TEXT =
+  'Finishing closes this setup page for good: it will not open again, even after a restart.';
+export const FINISH_BUTTON = 'Finish setup';
+export const FINISHED_HEADING = 'Setup is finished';
+export const FINISHED_TEXT =
+  'The setup page is closed, and the setup code file is gone. Run the server from the app on your tablet.';
+
+/** What the finish step reports, each in plain words. */
+export interface SetupSummary {
+  readonly ownerClaimed: boolean;
+  /** The kit, in this setup: downloaded, not, or there is none to download. */
+  readonly kit: 'downloaded' | 'not-downloaded' | 'none';
+  /** The newest backup: both folders worked, this computer only, failed, or none yet. */
+  readonly backups: 'working' | 'this-computer-only' | 'failed' | 'none-yet';
+  readonly mode: 'open' | 'approval' | 'invite' | 'closed';
+  /** Invites this setup made. */
+  readonly invites: number;
+}
+
+/** The finish step's list: one plain sentence per thing an owner wants to know. */
+export function setupSummaryLines(summary: SetupSummary): readonly string[] {
+  return [
+    summary.ownerClaimed
+      ? 'Owner: your tablet owns this server.'
+      : 'Owner: nobody has claimed this server yet.',
+    {
+      downloaded: 'Emergency kit: downloaded.',
+      'not-downloaded':
+        'Emergency kit: not downloaded. You can download it later from the admin pages on this computer, once you have added a passkey there.',
+      none: 'Emergency kit: none needed, every secret is in .env.',
+    }[summary.kit],
+    {
+      working: 'Backups: working, on this computer and in the copy kept elsewhere.',
+      'this-computer-only':
+        'Backups: on this computer only. The copy kept elsewhere is not working.',
+      failed: 'Backups: not working. The last backup failed.',
+      'none-yet': 'Backups: not checked yet. No backup has run.',
+    }[summary.backups],
+    `Who may join: ${SETUP_REGISTRATION_MODE_TEXT[summary.mode].short}.`,
+    summary.invites === 0 ? 'Invites made: none.' : `Invites made: ${String(summary.invites)}.`,
+  ];
+}

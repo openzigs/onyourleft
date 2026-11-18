@@ -42,6 +42,9 @@
  * - `redirect: 'error'` — a redirect would carry a session token somewhere the
  *   rider did not type. `credentials: 'omit'`, `referrerPolicy: 'no-referrer'`,
  *   `cache: 'no-store'`: nothing ambient rides along, and nothing is kept.
+ *   ⚠️ **Except a sealed call's `cache`, since #2796**: see
+ *   {@link SEALED_CALL_CACHE}, which says why `no-store` cost every sealed
+ *   call a second round trip and kept nothing.
  * - **A time limit** ({@link INSTANCE_TIMEOUT_MILLISECONDS}), because an
  *   instance that never answers must not leave the screen waiting for ever.
  * - **A size limit on the answer** ({@link MAXIMUM_INSTANCE_ANSWER_BYTES}),
@@ -93,6 +96,17 @@
  * - **A stream ends `finished` only on its sealed `end` event.** One that
  *   stops without it, or whose next event does not open in order, is `cut`;
  *   resuming is a NEW sealed request naming the last event id opened.
+ * - **A key the instance no longer holds** (#2776). A caller that keeps the
+ *   instance's verified key for a session, rather than reading the keys before
+ *   every request, hands in {@link SealedCallDependencies.refreshKey}: on a
+ *   plaintext `instance_key_unknown` the call asks it for the key to seal to
+ *   now and is sent again ONCE, and only to a DIFFERENT key. The refusal is
+ *   plaintext, so the edge could write it; given the same verified key back,
+ *   nothing is sent again. That is the whole guarantee: an edge that forwards
+ *   a request and then forges the refusal, after the instance has rotated,
+ *   makes the device seal the request again to the new key (a new nonce, so
+ *   replay protection does not catch it), and a non-idempotent route may run
+ *   twice. An active edge can already do as much by dropping the answer.
  *
  * The instance key is the caller's: from a statement verified under the
  * identity key the device pinned (#1190). Which routes are called sealed is
@@ -461,6 +475,14 @@ export interface SealedCallDependencies {
   readonly clock: InstanceClock;
   /** Unix milliseconds. */
   readonly now?: () => number;
+  /**
+   * The key to seal to now, after the instance answered a plaintext
+   * `instance_key_unknown` to a request sealed to `used` (#2776): read again and
+   * verified under the pin by the caller, or `undefined` for none. The request
+   * is sent again once, and only when the key is not `used`. Without it, the
+   * refusal is the answer.
+   */
+  readonly refreshKey?: (used: SealedInstanceKey) => Promise<SealedInstanceKey | undefined>;
 }
 
 export interface SealedCallOptions {
@@ -552,6 +574,41 @@ function staleTime(body: unknown): number | undefined {
     : undefined;
 }
 
+/** Whether a plaintext refusal says the instance does not hold the key a request was sealed to. */
+function keyUnknown(body: unknown): boolean {
+  return (body as { error?: { code?: unknown } } | null)?.error?.code === 'instance_key_unknown';
+}
+
+/**
+ * A sealed call's fetch cache mode (#2796): `default`, where every other call
+ * here says `no-store`.
+ *
+ * ⚠️ **`no-store` made the browser ask a CORS preflight before EVERY sealed
+ * call.** The `POST /v1/sealed` carries `content-type: application/json` (and
+ * `Authorization` when signed in), so it is preflighted, and the instance
+ * allows the preflight to be cached for ten minutes
+ * (`apps/instance/src/handler.ts` §`PREFLIGHT_MAX_AGE_SECONDS`). Chromium,
+ * which is the Android WebView, never stores a preflight's result for a
+ * request whose cache mode is `no-store` (`LOAD_DISABLE_CACHE`, in
+ * `services/network/cors/preflight_controller.cc`), and skips the lookup for
+ * `no-cache` too — measured on 2026-11-17 against the owner's tunnel, one
+ * `OPTIONS` per call with either and one per ten minutes with `default`. So
+ * every AI decision of a race paid a second round trip through the tunnel to
+ * the instance before its own (about 0.5 s on that tunnel), on top of the
+ * model's time and inside the pacer's five-second limit.
+ *
+ * And `no-store` kept nothing here that `default` keeps: a sealed call is
+ * always a `POST`, and a browser's HTTP cache answers no `fetch` `POST` from
+ * the cache; the instance says `cache-control: no-store` on every answer; and
+ * a sealed reply opens only under the HPKE context this call drops with the
+ * call (D-2), so a copy of it is ciphertext to everybody. What IS kept is the
+ * preflight's answer — the methods and the two header names the instance
+ * allows on `/v1/sealed`, which is what the cache is for. Nothing else
+ * changes: no credentials, no referrer, no redirect, and the same one `fetch`
+ * (`privacy/no-network.test.ts`).
+ */
+export const SEALED_CALL_CACHE: RequestCache = 'default';
+
 /**
  * Sealed calls to the instance at `origin` (#1191). Throws
  * {@link InstanceUnreachableError} at once, having sent nothing, for an
@@ -568,8 +625,11 @@ export function sealedInstance(
   }
   const sender: InstanceSend = send ?? platformSend;
   const now = sealing.now ?? (() => Date.now());
+  /** The key requests are sealed to: the caller's, until {@link rekeyed} replaces it (#2776). */
+  let instanceKey = sealing.instanceKey;
 
   async function seal(
+    key: SealedInstanceKey,
     method: string,
     path: string,
     body: Readonly<Record<string, unknown>> | undefined,
@@ -580,7 +640,7 @@ export function sealedInstance(
       primitives: sealing.primitives,
       sha256: sealing.sha256,
       instanceOrigin: origin,
-      instanceKey: sealing.instanceKey,
+      instanceKey: key,
       sessionToken: token ?? null,
       method,
       path,
@@ -611,7 +671,7 @@ export function sealedInstance(
         redirect: 'error',
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
-        cache: 'no-store',
+        cache: SEALED_CALL_CACHE,
         signal:
           stop === undefined
             ? AbortSignal.timeout(timeout)
@@ -666,7 +726,24 @@ export function sealedInstance(
 
   const WRONG: SealedNotice = { kind: 'instance-clock-wrong', text: INSTANCE_CLOCK_WRONG_NOTICE };
 
-  /** One whole sealed call, re-signed once on a sealed `stale_request` (D-9). */
+  /**
+   * Whether to send a request sealed to `used` again (#2776): only on a
+   * PLAINTEXT `instance_key_unknown`, and only when the caller hands back a
+   * key that is not `used`, which every later request is then sealed to.
+   */
+  async function rekeyed(used: SealedInstanceKey, answer: { sealed: boolean; body: unknown }) {
+    if (answer.sealed || !keyUnknown(answer.body) || sealing.refreshKey === undefined) return false;
+    const fresh = await sealing.refreshKey(used);
+    if (fresh === undefined || fresh.keyId === used.keyId) return false;
+    instanceKey = fresh;
+    return true;
+  }
+
+  /**
+   * One whole sealed call, re-signed once on a sealed `stale_request` (D-9),
+   * and sealed again once to a fresh key on a plaintext `instance_key_unknown`
+   * (#2776).
+   */
   async function wholeCall(
     method: string,
     path: string,
@@ -683,9 +760,14 @@ export function sealedInstance(
       options.timeoutMilliseconds ?? INSTANCE_TIMEOUT_MILLISECONDS,
       MAXIMUM_SEALED_CALL_MILLISECONDS,
     );
-    const attempt = async () => {
-      const sealed = await seal(method, inner, options.body, options.token, options);
+    const sendTo = async (key: SealedInstanceKey) => {
+      const sealed = await seal(key, method, inner, options.body, options.token, options);
       return whole(sealed, await post(sealed, options.token, timeout), limit);
+    };
+    const attempt = async () => {
+      const key = instanceKey;
+      const answer = await sendTo(key);
+      return (await rekeyed(key, answer)) ? sendTo(instanceKey) : answer;
     };
     const first = await attempt();
     const instanceTime = first.sealed ? staleTime(first.body) : undefined;
@@ -716,8 +798,9 @@ export function sealedInstance(
     async stream(path, options) {
       if (!isPlainPath(path)) throw new InstanceUnreachableError('refused-path');
       let notice: SealedNotice | undefined;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const sealed = await seal(options.method ?? 'GET', path, options.body, options.token, {
+      /** One stream request sealed to `key`: its answer when the instance refused instead. */
+      const open = async (key: SealedInstanceKey) => {
+        const sealed = await seal(key, options.method ?? 'GET', path, options.body, options.token, {
           ...(options.lastEventId === undefined ? {} : { lastEventId: options.lastEventId }),
         });
         const response = await post(
@@ -726,8 +809,20 @@ export function sealedInstance(
           SEALED_STREAM_TIMEOUT_MILLISECONDS,
           options.signal,
         );
-        if (!(response.headers.get('content-type') ?? '').startsWith('text/event-stream')) {
-          const answer = await whole(sealed, response, MAXIMUM_INSTANCE_ANSWER_BYTES);
+        const refused = (response.headers.get('content-type') ?? '').startsWith('text/event-stream')
+          ? undefined
+          : await whole(sealed, response, MAXIMUM_INSTANCE_ANSWER_BYTES);
+        return { sealed, response, refused };
+      };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const key = instanceKey;
+        let sent = await open(key);
+        // #2776: sealed again once to a fresh key; that send is not the clock's retry.
+        if (sent.refused !== undefined && (await rekeyed(key, sent.refused))) {
+          sent = await open(instanceKey);
+        }
+        const { sealed, response, refused: answer } = sent;
+        if (answer !== undefined) {
           const instanceTime = answer.sealed ? staleTime(answer.body) : undefined;
           if (instanceTime !== undefined && attempt === 0) {
             notice = learnOffset(instanceTime);

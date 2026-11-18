@@ -10,6 +10,7 @@ import {
   ROOM_KIND_TEXT,
   ROOM_PHASE_TEXT,
   ridersText,
+  roomLine,
 } from './rooms';
 
 describe('the Rooms section’s words — #2612', () => {
@@ -32,5 +33,25 @@ describe('the Rooms section’s words — #2612', () => {
     expect(END_ROOM_CONFIRM_TEXT).toContain('keeps recording');
     expect(END_ROOM_CONFIRM_TEXT).toContain('nothing is sent to anyone’s trainer');
     expect(endRoomTypeText('a1b2c3')).toBe('To end it, type the room’s code, a1b2c3.');
+  });
+});
+
+describe('a room’s line (#2649)', () => {
+  it('says its kind, visibility, phase, when and by whom, who is in it and its code', () => {
+    const line = roomLine({
+      kind: 'lap-race',
+      visibility: 'public',
+      phase: 'countdown',
+      openedAt: '2026-11-14T19:30:00.000Z',
+      host: null,
+      riders: ['Ann'],
+      shortCode: 'a1b2c3',
+    });
+    expect(line.kind).toBe('Lap race');
+    expect(line.rest).toEqual([
+      ', public, counting down. Opened 2026-11-14 19:30 UTC by a rider. 1 rider: Ann. Code ',
+      { code: 'a1b2c3' },
+      '.',
+    ]);
   });
 });

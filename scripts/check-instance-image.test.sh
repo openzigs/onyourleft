@@ -56,6 +56,7 @@ new_fixture() {
   tmp="$(mktemp -d)"
   mkdir -p "${tmp}/repo/scripts" "${tmp}/repo/apps/instance" "${tmp}/bin" "${tmp}/fake"
   cp "${CHECK}" "${tmp}/repo/scripts/check-instance-image.sh"
+  cp "${SCRIPT_DIR}/check-image-layers.sh" "${tmp}/repo/scripts/check-image-layers.sh"
   printf 'FROM %s\nCMD ["node", "src/main.ts"]\n' "${PINNED}" > "${tmp}/repo/apps/instance/Dockerfile"
   git -C "${tmp}/repo" init --quiet
   git -C "${tmp}/repo" add -A
@@ -78,6 +79,9 @@ new_fixture() {
   printf '{"url":"https://github.com/openzigs/onyourleft/tree/%s"}' "${commit}" > "${tmp}/fake/source"
   : > "${tmp}/fake/calls"
   printf '0\n' > "${tmp}/fake/exec-count"
+  # #2786: what `docker save` prints, in its shape -- one layer of ordinary
+  # files and a config with no secret in it. image_with puts a path in it.
+  image_with srv/apps/instance/src/main.ts
 
   cat > "${tmp}/bin/docker" <<'FAKE'
 #!/usr/bin/env bash
@@ -91,6 +95,7 @@ case "$1" in
     esac ;;
   pull) exit "$(cat "${fake}/pull")" ;;
   build) exit "$(cat "${fake}/build")" ;;
+  save) cat "${fake}/image.tar" ;;
   volume) exit 0 ;;
   run)
     case "$*" in
@@ -133,6 +138,19 @@ FAKE
 }
 
 set_fake() { printf '%s\n' "$2" > "${tmp}/fake/$1"; }
+
+# image_with PATH... -- the archive the fake `docker save` prints holds these files.
+image_with() {
+  local image="${tmp}/fake/image"
+  rm -rf "${image}" && mkdir -p "${image}/layer" "${image}/archive/blobs/sha256"
+  for path in "$@"; do
+    mkdir -p "$(dirname "${image}/layer/${path}")" && printf 'x\n' > "${image}/layer/${path}"
+  done
+  tar -cf "${image}/archive/blobs/sha256/layer" -C "${image}/layer" .
+  printf '{"config":{"Env":["NODE_ENV=production"]}}' > "${image}/archive/blobs/sha256/config"
+  printf '[{"Config":"blobs/sha256/config","Layers":["blobs/sha256/layer"]}]' > "${image}/archive/manifest.json"
+  tar -cf "${tmp}/fake/image.tar" -C "${image}/archive" .
+}
 
 run_check() {
   out="$(OYL_FAKE_DIR="${tmp}/fake" PATH="${tmp}/bin:${PATH}" bash "${tmp}/repo/scripts/check-instance-image.sh" 2>&1)"
@@ -197,6 +215,21 @@ run_check
 assert_exit 'an image that does not build fails' 1
 assert_says 'as IMG001' 'IMG001 apps/instance/Dockerfile did not build.'
 assert_asked 'and still removes what it made' 'docker image rm -f onyourleft-instance:check-'
+
+# --- IMG009 (#2786) ---------------------------------------------------------------
+
+new_fixture
+image_with srv/apps/instance/src/main.ts srv/apps/instance/deploy/home/.env
+run_check
+assert_exit 'an image with a deploy'"'"'s .env in a layer fails' 1
+assert_says 'as IMG009' 'IMG009 the image carries an env file'
+assert_says 'with the path the layer check found' 'srv/apps/instance/deploy/home/.env'
+assert_not_asked 'and runs nothing from it' 'node src/operator/cli.ts migrate'
+assert_asked 'and still removes what it made' 'docker image rm -f onyourleft-instance:check-'
+
+new_fixture
+run_check
+assert_asked 'a clean image is read layer by layer through docker save' 'docker save onyourleft-instance:check-'
 
 # --- IMG002 ------------------------------------------------------------------------
 

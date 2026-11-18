@@ -72,6 +72,8 @@ const READINGS: Record<string, string> = {
     'the route being drawn, read back: its distance, its surfaces and its profile, each a reading of the draft',
   'route-builder A short loop for a lap race':
     'the route being drawn, read back against the chosen target (#2102): whether it is a loop yet and its length, each a reading of the draft',
+  'settings Instance':
+    'this device’s connection, read back from the instance (#2756): the server’s address and the rider’s name there, in the wording the owner approved, so its length is the address’s and the name’s and not an explanation’s',
 };
 
 let mounted: Mounted | undefined;

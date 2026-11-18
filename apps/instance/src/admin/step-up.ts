@@ -36,6 +36,17 @@ export const ADMIN_CHANGES = {
   analysis_model: { fields: ['localModel'] },
   analysis_address: { fields: ['localUrl'] },
   analysis_clear: { fields: [] },
+  // #2646 (ADR 0069 D-9): a registration decided, for one rider and with the reason typed.
+  registration_approve: { fields: ['athleteId', 'reason'] },
+  registration_refuse: { fields: ['athleteId', 'reason'] },
+  // #2647: "back up now", which takes no field.
+  backup_now: { fields: [] },
+  // #2649: one room, why, and its short code as the owner typed it.
+  room_end: { fields: ['roomId', 'reason', 'confirm'] },
+  // #2650: the routine rotation, and the word the owner typed for it.
+  key_rotate: { fields: ['confirm'] },
+  // #2781 (ADR 0080 D-4): the emergency kit, which takes no field.
+  emergency_kit: { fields: [] },
 } as const satisfies Readonly<Record<string, { readonly fields: readonly string[] }>>;
 
 export type AdminChange = keyof typeof ADMIN_CHANGES;

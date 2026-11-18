@@ -368,6 +368,49 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead: 'the operator’s own record, a page at a time, newest first (#2602)',
   },
   mintAdminCode: { notAScopedRead: 'a write; an admin code names no athlete (#2641)' },
+  claimedOwnerKey: {
+    notAScopedRead:
+      'the instance’s ONE owner key a claim recorded (#2782): names no athlete, read on every owner check',
+  },
+  mintOwnerClaimCode: { notAScopedRead: 'a write; a claim code names no athlete (#2782)' },
+  redeemOwnerClaimCode: {
+    notAScopedRead: 'a write, by the code; a claim names a device key, never an athlete (#2782)',
+  },
+  pendingOwnerClaim: {
+    notAScopedRead:
+      'the instance’s one pending claim (#2782), read by the loopback setup page: a device key, no athlete',
+  },
+  confirmOwnerClaim: { notAScopedRead: 'a write; the owner key names no athlete (#2782)' },
+  discardOwnerClaim: { notAScopedRead: 'a write; a claim names no athlete (#2782)' },
+  resetOwnerClaim: {
+    notAScopedRead: 'a write, instance-wide: the operator’s reset of the claim (#2782)',
+  },
+  setupState: {
+    notAScopedRead: 'the instance’s ONE setup state (#2784): a step and two moments, no athlete',
+  },
+  setSetupStep: { notAScopedRead: 'a write, instance-wide: the setup’s step (#2784)' },
+  mintSetupCode: { notAScopedRead: 'a write; a setup code names no athlete (#2784)' },
+  openSetupSessionWithCode: {
+    notAScopedRead:
+      'a write: the code is what admits, and a setup session names no athlete (#2784)',
+  },
+  findSetupSession: {
+    notAScopedRead:
+      'authentication: the setup cookie’s token, and a setup session names no athlete (#2784)',
+  },
+  touchSetupSession: { notAScopedRead: 'a write, by the token (#2784)' },
+  endSetupSession: { notAScopedRead: 'a write, by the token (#2784)' },
+  takeSetupKit: { notAScopedRead: 'a write, by the token (#2784)' },
+  takeSetupInvite: { notAScopedRead: 'a write, instance-wide: the setup’s one invite (#2784)' },
+  finishSetup: { notAScopedRead: 'a write, instance-wide: the setup done (#2784)' },
+  registrationSetting: {
+    notAScopedRead: 'the instance’s ONE registration mode setting (#2784): no athlete',
+  },
+  putRegistrationSetting: { notAScopedRead: 'a write, instance-wide (#2784)' },
+  anyAthlete: {
+    notAScopedRead:
+      'whether ANY athlete exists (#2784, ADR 0080 D-3): a yes or no, no row of anybody',
+  },
   openAdminSessionWithCode: {
     notAScopedRead:
       'a write: the code is what admits, and the session is opened for the owner the admin layer named (#2641)',

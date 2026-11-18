@@ -72,8 +72,13 @@ export {
   type OperateToolCheckOutcome,
 } from './analysis';
 export {
+  ACCOUNTS_UNREADABLE_TEXT,
+  accountStandingLines,
   MODERATORS_ALWAYS_JOIN,
+  REGISTRATION_CHANGE_HEADING,
+  REGISTRATION_CHANGE_STEPS,
   REGISTRATION_MODE_TEXT,
+  type OperateAccountCounts,
   type OperateRegistrationMode,
 } from './accounts';
 export {
@@ -84,17 +89,24 @@ export {
   BACKUP_WAITING_TEXT,
   BACKUPS_LIST_TEXT,
   BACKUPS_UNREADABLE_TEXT,
+  backupFactRows,
+  backupLine,
   backupsStaleText,
   NO_BACKUP_TEXT,
   NO_SNAPSHOT_TO_RESTORE_TEXT,
   OFF_BOX_FAILED_TEXT,
+  RESTORE_HEADING,
   RESTORE_ONE_OFF_TEXT,
   RESTORE_PREFACE_TEXT,
   RESTORE_WHY_TEXT,
+  restoreSteps,
   snapshotPlace,
+  type OperateBackupFacts,
+  type OperateBackupLine,
 } from './backups';
 export {
   END_ROOM_CONFIRM_TEXT,
+  END_ROOM_REASON_LABEL,
   endRoomTypeText,
   NO_ROOM_TEXT,
   ROOM_END_REASON_TEXT,
@@ -103,6 +115,7 @@ export {
   ROOM_NOT_ENDED_TEXT,
   ROOM_PHASE_TEXT,
   ridersText,
+  roomLine,
   ROOM_UNNAMED_RIDER,
   ROOMS_LIST_TEXT,
   ROOMS_NAMES_ONLY_TEXT,
@@ -110,6 +123,7 @@ export {
   type OperateRoomEndReason,
   type OperateRoomKind,
   type OperateRoomPhase,
+  type OperateRoomVisibility,
 } from './rooms';
 export {
   currentKeyText,
@@ -119,6 +133,7 @@ export {
   KEYS_CLI_TEXT,
   KEYS_FINGERPRINT_TEXT,
   KEYS_UNREADABLE_TEXT,
+  keyFactRows,
   olderHeldText,
   ROTATE_BUSY_TEXT,
   ROTATE_CONFIRM_WORD,
@@ -164,3 +179,4 @@ export {
   type OperateTunnel,
 } from './status';
 export { bytesText, countText, durationText, momentText } from './words';
+export * from './setup';

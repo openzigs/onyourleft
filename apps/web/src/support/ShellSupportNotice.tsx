@@ -23,11 +23,12 @@
  * The browser notice's working-path list is wrong here in both directions:
  * Android needs no press per device, and it *does* need a runtime permission a
  * browser never asks for. The `available` branch below therefore states only
- * what is true of this build on a phone today — and deliberately **not** that
- * sensors reconnect on their own. `ANDROID_TRAITS.canReconnectWithoutUserGesture`
- * is `true` about the platform, and nothing in this client seeds the transport's
- * `seen` set from storage, so there is no automatic reconnection to promise.
- * docs/agents/web-bluetooth.md §8 says not to build one; saying we had would be worse.
+ * what is true of this build on a phone today. ⚠️ Since #2669 the shell DOES
+ * reconnect on its own (`ride/remembered-sensors.ts` seeds the transport), and
+ * the Devices screen says so where it lists the devices — `views/DevicesView.tsx`
+ * §`PHONE_RECONNECTS`, kept visible. Not here: this notice is about the radio
+ * and the permission, and a second copy of the sentence would be a second
+ * place for it to go stale.
  */
 
 import type { JSX } from 'react';

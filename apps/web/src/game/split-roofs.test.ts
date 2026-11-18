@@ -32,6 +32,7 @@ import {
   buildingBeside,
   landBeside,
   mixedTownFixture,
+  plinthTriangles,
   ROOF_SHAPES,
   sawToothYou,
   shapeBeside,
@@ -586,6 +587,9 @@ describe('the caps — #1660', () => {
     const [straight] = plansOf([[sawToothYou(), 1_000, 40, 4]]) as [FootprintPlan];
     expect(rectanglesOf(straight.footprint)).toHaveLength(3);
     expect(straight.roof).not.toBe('flat');
-    expect(straight.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
+    // #2761: the far cap is its walls and roof; its plinth is drawn far too, beside them.
+    expect(straight.farTriangleCount - plinthTriangles(straight)).toBeLessThanOrEqual(
+      FOOTPRINT_MAX_FAR_TRIANGLES,
+    );
   });
 });

@@ -40,6 +40,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CADENCE_HISTORY_SECONDS,
+  CARRY_ON_RAMP_SECONDS,
   createWorkoutSession,
   LARGEST_RAISE_WATTS,
   raiseRefusedText,
@@ -338,6 +339,102 @@ describe('a trainer disconnect pauses the workout and preserves it', () => {
 
     expect(session.state().player.status).toBe('running');
     expect(session.state().player.elapsed).toBe(6);
+  });
+});
+
+/** The `0x05` targets written since `from`, in watts, in order. */
+function targetsWritten(
+  trainer: { readonly wire: readonly { direction: string; bytes: readonly number[] }[] },
+  from = 0,
+): number[] {
+  return trainer.wire
+    .slice(from)
+    .filter((entry) => entry.direction === 'write' && entry.bytes[0] === SET_TARGET_POWER)
+    .map((entry) => (entry.bytes[1] ?? 0) | ((entry.bytes[2] ?? 0) << 8));
+}
+
+describe('a workout carried on after its trainer reconnected eases back up — #2669', () => {
+  const ONE_LONG_BLOCK = () => expandWorkout(workout([steady(600, 0.8)]));
+
+  it('ramps from the trainer’s floor to the block’s target over the ramp, one acknowledged step a tick', async () => {
+    const { trainer, session } = await loop(ONE_LONG_BLOCK, MEASURED_TRAINER());
+    session.start(seconds(0));
+    await ride(session, 0, 3);
+    // The control: before the drop the block's own 200 W went on at once.
+    expect(targetsWritten(trainer)).toStrictEqual([200]);
+    session.linkLost(seconds(4));
+    const before = trainer.wire.length;
+
+    session.carryOn(seconds(50));
+    // Nothing is written by the call itself: the first write is a tick's.
+    expect(targetsWritten(trainer, before)).toStrictEqual([]);
+    const byTick: number[][] = [];
+    for (let second = 50; second <= 50 + CARRY_ON_RAMP_SECONDS + 3; second += 1) {
+      const from = trainer.wire.length;
+      session.tick(seconds(second));
+      await session.settled();
+      byTick.push(targetsWritten(trainer, from));
+    }
+
+    const ramp = byTick.flat();
+    // From the floor, never a step to the block's target, rising every tick…
+    expect(ramp[0]).toBe(FLOOR_WATTS);
+    for (let step = 1; step < ramp.length; step += 1) {
+      expect(ramp[step]).toBeGreaterThan(ramp[step - 1] ?? Infinity);
+    }
+    // …reaching 200 W only once the ramp has run its length, and then held.
+    expect(
+      byTick
+        .slice(0, CARRY_ON_RAMP_SECONDS)
+        .flat()
+        .every((written) => written < 200),
+    ).toBe(true);
+    expect(byTick[CARRY_ON_RAMP_SECONDS]).toStrictEqual([200]);
+    expect(byTick.slice(CARRY_ON_RAMP_SECONDS + 1).flat()).toStrictEqual([]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(200);
+    expect(session.state().holding).toBe(200);
+  });
+
+  it('carries on from where it was, not where the clock is', async () => {
+    const { session } = await loop(ONE_LONG_BLOCK, MEASURED_TRAINER());
+    session.start(seconds(0));
+    await ride(session, 0, 3);
+    session.linkLost(seconds(4));
+
+    session.carryOn(seconds(900));
+    session.tick(seconds(902));
+    await session.settled();
+
+    expect(session.state().player.status).toBe('running');
+    expect(session.state().player.elapsed).toBe(6);
+  });
+
+  it('holds back nothing on a plain resume: only a carry-on ramps', async () => {
+    const { trainer, session } = await loop(ONE_LONG_BLOCK, MEASURED_TRAINER());
+    session.start(seconds(0));
+    await ride(session, 0, 3);
+    session.linkLost(seconds(4));
+    const before = trainer.wire.length;
+
+    session.resume(seconds(50));
+    await ride(session, 50, 51);
+
+    expect(targetsWritten(trainer, before)).toStrictEqual([200]);
+  });
+
+  it('does not ramp the next workout started on the same session', async () => {
+    const { trainer, session } = await loop(ONE_LONG_BLOCK, MEASURED_TRAINER());
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+    session.linkLost(seconds(2));
+    session.carryOn(seconds(10));
+    await ride(session, 10, 11);
+    const before = trainer.wire.length;
+
+    session.start(seconds(12));
+    await ride(session, 12, 12);
+
+    expect(targetsWritten(trainer, before)).toStrictEqual([200]);
   });
 });
 

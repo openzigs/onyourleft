@@ -3,15 +3,12 @@
 import {
   END_ROOM_CONFIRM_TEXT,
   endRoomTypeText,
-  momentText,
   NO_ROOM_TEXT,
   ROOM_END_REASON_TEXT,
+  END_ROOM_REASON_LABEL,
   ROOM_END_REASONS,
-  ROOM_KIND_TEXT,
   ROOM_NOT_ENDED_TEXT,
-  ROOM_PHASE_TEXT,
-  ridersText,
-  ROOM_UNNAMED_RIDER,
+  roomLine,
   ROOMS_LIST_TEXT,
   ROOMS_NAMES_ONLY_TEXT,
   ROOMS_UNREADABLE_TEXT,
@@ -56,8 +53,6 @@ export {
   ROOMS_UNREADABLE_TEXT,
 } from '@onyourleft/operate-text';
 
-const VISIBILITY_TEXT = { private: 'private', public: 'public' } as const;
-
 function Row({
   room,
   onEnd,
@@ -65,12 +60,13 @@ function Row({
   readonly room: OperateRoom;
   readonly onEnd: (room: OperateRoom) => void;
 }): JSX.Element {
+  const line = roomLine(room);
   return (
     <li>
-      <strong>{ROOM_KIND_TEXT[room.kind]}</strong>, {VISIBILITY_TEXT[room.visibility]},{' '}
-      {ROOM_PHASE_TEXT[room.phase]}. Opened {momentText(room.openedAt)} by{' '}
-      {room.host ?? ROOM_UNNAMED_RIDER}. {ridersText(room.riders)} Code{' '}
-      <code>{room.shortCode}</code>.{' '}
+      <strong>{line.kind}</strong>
+      {line.rest.map((part, index) =>
+        typeof part === 'string' ? part : <code key={String(index)}>{part.code}</code>,
+      )}{' '}
       <Button
         variant="secondary"
         onClick={() => {
@@ -192,7 +188,7 @@ export function OperateRoomsPanel({
       >
         <p>{END_ROOM_CONFIRM_TEXT}</p>
         <p className="oyl-field">
-          <label htmlFor={reasonId}>Why</label>{' '}
+          <label htmlFor={reasonId}>{END_ROOM_REASON_LABEL}</label>{' '}
           <select
             id={reasonId}
             className="oyl-input oyl-input--block"

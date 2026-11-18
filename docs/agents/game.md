@@ -1495,7 +1495,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         abutments. ⚠️ The deck is the ROAD, unchanged, and the
                         grade a trainer is sent there is the route's — a test
                         rides the gradient session across it. No culverts and
-                        no tunnels, and the file says why
+                        no tunnels, and the file says why. Since #2658 also
+                        the map's lakes, sea and wetland beside the road, from
+                        the ride's land mask, and no invented lake where the
+                        map was read: `waterways(profile, seed, land)` takes
+                        the mask, and every caller passes the ride's. Since
+                        #2659 a bridge wherever the map's rivers, streams and
+                        canals (the mask's `waterLines`) cross the road, and no
+                        invented one where the map was read.
+                        Since #2754 a mapped lake keeps its run's shores
+                        sample by sample (`LakeShores`, each the middle of
+                        three), its near shore as close as 8 m
+                        (`MAPPED_LAKE_NEAR_METRES`), not its run's medians.
+                        ⚠️ Its drawn water can still lie over the map's land,
+                        so since #2728 `onOpenWater` (the drawn water, not the
+                        mask's) drops a mapped footprint over it and draws
+                        nobody on it
     src/game/settlements.ts
                         places, not houses (#460) — villages and farmsteads on
                         level, low, dry stretches of the route, each building
@@ -1528,7 +1543,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         draws it as (`three-renderer.ts` §`VillageHouseBelt`:
                         one call, in view, nearest first, inside the 23 040
                         term after every structure no model stands for;
-                        `levers=-village-models` is its pair)
+                        `levers=-village-models` is its pair). ⚠️ Since
+                        #2761 no lot where the ground under it falls more
+                        than its 0.6 m foundation (`LOT_MAX_GROUND_RANGE_METRES`),
+                        and every building drawn as its kind is lowered onto
+                        the lowest drawn ground under its corners, by at most
+                        its foundation, or dropped (`landform.ts`
+                        §`standingOnGround`, `groundedFootprintOf`): houses
+                        stood on stilts above falling ground by a shore
     src/game/land-class.ts
                         what the ground is where map data was read (#1546) — a
                         sparse 5 m mask built ONCE at the press from the ride's
@@ -1540,6 +1562,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `NO_LAND_CLASS`, today's world, item for item. Since
                         #1547 it also carries each cell's distance to
                         built-up land, which `landform.ts` levels by.
+                        ⚠️ Since #2728 its polygon pass is budgeted per
+                        covered tile (`LAND_CLASS_WORK_PER_TILE`), not per
+                        corridor: a long coast ride spent the old fixed
+                        budget half way and drew the sea after it as grass.
                         Since #1542 the countryside is read off it: a wood
                         planted throughout with a broadleaf edge, hedgerow
                         trees and open pasture on farmland, specimen trees
@@ -1563,13 +1589,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         of (`BARE_SURFACE_OF_KIND`), and the ground draws
                         it in its own colour, not the grass's
                         (`three-renderer.ts` §`bareGroundTints`): no new
-                        vertex attribute.
+                        vertex attribute. Since #2754 a beach or a pier
+                        outranks a park or a town drawn round it
+                        (`BARE_KINDS_OVER_LAND`), and a footprint on it in
+                        a mapped park (not a protected area's boundary,
+                        #2657) is still dropped (`insidePark`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
                         `-land-planting`, `-land-boundaries`,
                         `-ground-clutter`, `-hedge-breaks`,
                         `-small-stones`, shown on `town=countryside`)
+                        ⚠️ Since #2684 (ADR 0070) `built-up` includes
+                        INFERRED land: unmapped ground within 60 m of a
+                        residential street where the streets are a
+                        suburb's (`inferBuiltUp`), so a suburb mapped by
+                        its streets alone gets lots and no field fences.
     src/game/park-dressing.ts
                         what a golf course and a cemetery are drawn WITH
                         (#2685, the owner's hold of PR #2689 on 2026-11-16:
@@ -1780,7 +1815,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         structures inside the 23 040-triangle term (#1586) —
                         since #2655 not its walls, hedges and fences, which
                         take only what the buildings leave — the far
-                        level past 150 m, in ≤ 6 surfaces; no tree,
+                        level past 150 m (walls, plinth and roof: the plinth
+                        since #2761, or a far house on a slope stood on
+                        nothing), in ≤ 6 surfaces; no tree,
                         shrub or rock on a plan's ground. ⚠️ **One mesh, a
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's
@@ -1949,7 +1986,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         and `DoorPath.walk`) and the mapped footways, never
                         on the carriageway: every line is broken, and every
                         person dropped, within `PERSON_CLEARANCE_METRES`
-                        (3.8) of ANY stretch of the drawn road. Where each is
+                        (3.8) of ANY stretch of the drawn road. ⚠️ Since
+                        #2728 a mapped footway's walkers stand on the drawn
+                        ground (`landform.ts` §`standingOnGround`, as the
+                        scenery does): their `y` from `groundOf` knew nothing
+                        of a seam, a fold or a dip between two far points, and
+                        they walked in the sky. Where each is
                         is a function of the ride's clock, seeded per line and
                         slot; density by village size and land use; runners
                         only on paths and in parks. ≤ 16 bodies within 60 m,
@@ -2010,13 +2052,45 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m
-                        over the road with parapets and an abutment each side;
+                        over the road with parapets and a seat under each end;
                         where one in a tunnel under 80 m long crosses it, a
                         parapet along each edge of the road. ⚠️ **Boxes in
                         `three-renderer.ts` §`BridgeBelt`**, handed in with the
-                        streams' bridges (`scene.ts` §`water`), so no new mesh,
-                        attribute or structure: the belt's 128 boxes bound them
-                        and the streams' come first
+                        streams' bridges (`scene.ts` §`water`), so no new
+                        structure: the belt's 128 boxes bound them and the
+                        streams' come first. ⚠️ **Since #2699 an overpass is
+                        not in the stone**: its deck wears the road's colour,
+                        its edge beams (proud of the deck, hanging below it,
+                        rising as the parapet) and seats a concrete grey,
+                        in the belt's second instanced box
+                        (`BridgeBelt.overpassMesh`), one draw call more on a
+                        frame with one in view. ⚠️ **Since the owner's "there
+                        are no roads connected to it" (#2699) its street runs
+                        on off both ends of the deck**: one strip an overpass in
+                        the side roads' mesh (`SideRoadBelt`, the road's own
+                        material, no draw call more), over the deck's top and
+                        up to 160 m past each end, one straight ramp from the
+                        deck at 6 % or steeper that is on the ground where its
+                        fade begins, then fading into the ground. It follows
+                        the mapped street through the ways meeting it end to
+                        end on the land read only while that street heads away
+                        from the route (a frontage road beside it is not
+                        followed), then its last heading; stops short of the
+                        carriageway and water; and the scenery is kept off it.
+                        ⚠️ **Since #2699's third round, slopes, not walls**:
+                        nothing but the bridge is over a metre up within 15 m
+                        of the carriageway's edge, and the approach stands on a
+                        1 : 2 embankment in the ground's own material
+                        (`TerrainBelt.embankmentMesh`, a normal for each face,
+                        one draw call more on a frame with one in view).
+                        ⚠️ **Since the fourth round, no blocks**: each end of
+                        the deck stands on a seat showing 1.2 m, in a grassy
+                        spill-through bank that comes up under the deck and
+                        wraps round its corners (§`spillThrough`, a height
+                        field in the same mesh); each end reaches as far as
+                        its bank needs to be down to a metre by the verge's
+                        line (about 26 m off the edge on level ground), and an
+                        approach falls no steeper than 1 : 2
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

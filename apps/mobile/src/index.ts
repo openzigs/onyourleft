@@ -25,7 +25,11 @@
  */
 
 export { createCapacitorTransport, INITIALIZE_ANSWER_WINDOW, systemClock } from './ble/transport';
-export type { CapacitorTransportOptions, Schedule } from './ble/transport';
+export type {
+  CapacitorRememberedDevice,
+  CapacitorTransportOptions,
+  Schedule,
+} from './ble/transport';
 export { capacitorBlePort } from './ble/ble-client';
 export { createCapacitorFitnessMachineChannel } from './ble/fitness-machine-channel';
 export { readCapacitorFitnessMachine } from './ble/fitness-machine';

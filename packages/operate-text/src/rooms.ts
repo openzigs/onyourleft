@@ -3,7 +3,8 @@
 /**
  * **Rooms**' words (#2612, ADR 0069 D-7): the sentences the Rooms section
  * says over what `GET /v1/operate/rooms` returns, and what ending a room
- * does. The instance's admin Rooms page (#2649) says the same.
+ * does. The instance's admin Rooms page (#2649) says the same — and since
+ * #2649 each room's line, which both draw from {@link roomLine}.
  *
  * The route names a rider by display name alone — `null` where the owner may
  * not see it — and never by a place, a speed, a power or an id, so nothing
@@ -11,6 +12,8 @@
  *
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
+
+import { momentText } from './words';
 
 /** A room's kind, as the route writes it. */
 export type OperateRoomKind = 'group' | 'race' | 'lap-race';
@@ -92,3 +95,39 @@ export function ridersText(riders: readonly (string | null)[]): string {
       : `${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`;
   return `${String(names.length)} ${names.length === 1 ? 'rider' : 'riders'}: ${listed}.`;
 }
+
+/** Whether a room is listed, as the route writes it. */
+export type OperateRoomVisibility = 'private' | 'public';
+
+const VISIBILITY_TEXT: Readonly<Record<OperateRoomVisibility, string>> = {
+  private: 'private',
+  public: 'public',
+};
+
+/**
+ * One room's line in the list (moved by #2649): its kind, drawn strong, and
+ * the rest — private or public, its phase, when it opened and by whom, who
+ * is in it, and its short code, as code.
+ */
+export function roomLine(room: {
+  readonly kind: OperateRoomKind;
+  readonly visibility: OperateRoomVisibility;
+  readonly phase: OperateRoomPhase;
+  /** ISO 8601, UTC. */
+  readonly openedAt: string;
+  readonly host: string | null;
+  readonly riders: readonly (string | null)[];
+  readonly shortCode: string;
+}): { readonly kind: string; readonly rest: readonly (string | { readonly code: string })[] } {
+  return {
+    kind: ROOM_KIND_TEXT[room.kind],
+    rest: [
+      `, ${VISIBILITY_TEXT[room.visibility]}, ${ROOM_PHASE_TEXT[room.phase]}. Opened ${momentText(room.openedAt)} by ${room.host ?? ROOM_UNNAMED_RIDER}. ${ridersText(room.riders)} Code `,
+      { code: room.shortCode },
+      '.',
+    ],
+  };
+}
+
+/** The end form's two fields' labels. */
+export const END_ROOM_REASON_LABEL = 'Why';

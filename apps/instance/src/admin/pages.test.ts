@@ -14,9 +14,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { sha256Hex } from '../auth/crypto.ts';
 import { startModerationWorld, type ModerationWorld } from '../moderation/moderation-testing.ts';
 import { adminCode } from '../operator/commands.ts';
+import { LOOPBACK_COOKIE } from './admin.ts';
 import { ADMIN_ROUTES } from './admin-routes.ts';
 import {
   adminRequest,
+  cookieOf,
   csrfFrom,
   handlerOver,
   signInWith,
@@ -34,10 +36,41 @@ afterEach(async () => {
   restarted = [];
 });
 
+/** The loopback listener's port (#2643), for the routes served there only (#2781). */
+const PORT = 8788;
+/** The `ClientInfo` the loopback listener's adapter writes. */
+const ON_LOOPBACK = { address: '172.30.87.1', listener: 'loopback' } as const;
+
 async function world(): Promise<ModerationWorld> {
-  const made = await startModerationWorld({ admin: {} });
+  const made = await startModerationWorld({ admin: { loopbackPort: PORT } });
   worlds.push(made);
   return made;
+}
+
+/** A code session on the loopback listener (#2781), and its page's token. */
+async function signedInOnLoopback(
+  made: ModerationWorld,
+): Promise<{ readonly token: string; readonly csrf: string }> {
+  const { code } = await adminCode(
+    { database: made.path, blobs: `${made.path}.blobs` },
+    () => new Date(made.clock.ms),
+  );
+  const handler = made.instance.handler;
+  const answer = await handler(
+    adminRequest('POST', '/admin/sign-in', { form: { code }, loopback: PORT }),
+    ON_LOOPBACK,
+  );
+  const token = cookieOf(answer, LOOPBACK_COOKIE);
+  if (token === undefined) throw new Error('the loopback sign-in set no cookie');
+  const page = await (
+    await handler(
+      adminRequest('GET', '/admin/status', { cookie: token, loopback: PORT }),
+      ON_LOOPBACK,
+    )
+  ).text();
+  const csrf = /name="csrf" value="([0-9a-f]{64})"/.exec(page)?.[1];
+  if (csrf === undefined) throw new Error('the loopback Status page carried no CSRF token');
+  return { token, csrf };
 }
 
 async function signedIn(made: ModerationWorld, address = '203.0.113.7'): Promise<string> {
@@ -64,6 +97,10 @@ const sessionRow = async (made: ModerationWorld, token: string) => {
 const sent = (path: string): string => path.replace('{id}', '0123456789abcdef');
 
 const GETS = ADMIN_ROUTES.filter((route) => route.methods.includes('GET'));
+/** The routes served on the loopback listener only (#2781). */
+const LOOPBACK_ONLY: ReadonlySet<string> = new Set(
+  ADMIN_ROUTES.filter((route) => route.loopbackOnly === true).map((route) => route.path),
+);
 const POSTS = ADMIN_ROUTES.filter((route) => route.methods.includes('POST'));
 /** Every GET that shows the instance's state: everything but the sign-in page and the stylesheet. */
 const SIGNED_IN = GETS.filter((route) => route.kind === 'page' || route.kind === 'redirect');
@@ -95,8 +132,13 @@ describe('the admin route table (#2645)', () => {
     expect(SIGNED_IN.map((route) => route.path)).toEqual([
       '/admin',
       '/admin/status',
+      '/admin/accounts',
+      '/admin/backups',
       '/admin/analysis',
+      '/admin/rooms',
+      '/admin/keys',
       '/admin/log',
+      '/admin/problems',
       '/admin/passkeys',
     ]);
     expect(POSTS.map((route) => route.path)).toEqual([
@@ -104,6 +146,12 @@ describe('the admin route table (#2645)', () => {
       '/admin/sign-in/passkey-options',
       '/admin/sign-in/passkey',
       '/admin/sign-out',
+      '/admin/accounts/approve',
+      '/admin/accounts/refuse',
+      '/admin/backups',
+      '/admin/rooms/end',
+      '/admin/keys/rotate',
+      '/admin/keys/emergency-kit',
       '/admin/analysis/offer',
       '/admin/analysis/check',
       '/admin/analysis/model',
@@ -157,6 +205,35 @@ describe('every /admin route carries the admin headers, signed in or not (#2645,
   });
 });
 
+describe('a route served on the loopback listener only is, through the tunnel, a path with no route (#2781, ADR 0080 D-4)', () => {
+  it('answers every one exactly as an admin path that does not exist, for every method, with and without a session and its token', async () => {
+    expect([...LOOPBACK_ONLY]).toEqual(['/admin/keys/emergency-kit']);
+    const made = await world();
+    const handler = made.instance.handler;
+    const token = await signedIn(made);
+    const csrf = await csrfFrom(handler, token);
+    const answer = async (method: string, path: string, cookie?: string) => {
+      const sent = await handler(
+        adminRequest(method, path, {
+          ...(cookie === undefined ? {} : { cookie }),
+          ...(method === 'POST' ? { form: { csrf } } : {}),
+        }),
+        { address: '198.51.100.3' },
+      );
+      return { status: sent.status, allow: sent.headers.get('allow'), body: await sent.text() };
+    };
+    const missing = await answer('GET', '/admin/no-such-page');
+    expect(missing.status).toBe(404);
+    for (const path of LOOPBACK_ONLY) {
+      for (const method of ['GET', 'POST']) {
+        for (const cookie of [undefined, token]) {
+          expect(await answer(method, path, cookie), `${method} ${path}`).toEqual(missing);
+        }
+      }
+    }
+  });
+});
+
 describe('with no session, every signed-in page goes to sign-in and draws nothing (#2645)', () => {
   it.each(SIGNED_IN.map((route) => route.path))(
     '%s: 303 to /admin/sign-in with no body, for no cookie and for one nobody issued',
@@ -197,16 +274,23 @@ describe('every POST is refused without the session’s token or from a foreign 
   it.each(CASES)('%s with %s: 403, nothing changed, read back', async (path, _name, shape) => {
     const made = await world();
     const handler = made.instance.handler;
-    const token = await signedIn(made);
-    const csrf = await csrfFrom(handler, token);
+    // #2781: a route served on the loopback listener only is held to it there.
+    const onLoopback = LOOPBACK_ONLY.has(path);
+    const { token, csrf } = onLoopback
+      ? await signedInOnLoopback(made)
+      : await (async () => {
+          const tunnelToken = await signedIn(made);
+          return { token: tunnelToken, csrf: await csrfFrom(handler, tunnelToken) };
+        })();
     const before = await ownersLog(made);
     const refused = await handler(
       adminRequest('POST', sent(path), {
         cookie: token,
         ...shape(csrf),
         form: { code: 'x', ...shape(csrf).form },
+        ...(onLoopback ? { loopback: PORT } : {}),
       }),
-      { address: '198.51.100.2' },
+      onLoopback ? ON_LOOPBACK : { address: '198.51.100.2' },
     );
     expect(refused.status).toBe(403);
     expect(refused.headers.get('set-cookie')).toBeNull();
@@ -238,8 +322,8 @@ describe('the owner is asked again on every page (#2645, ADR 0069 D-1)', () => {
   );
 });
 
-describe('the one script is linked only on the pages with a passkey ceremony, and never inline (#2642, #2645, #2648)', () => {
-  it('the sign-in page, Passkeys and the AI backend link /admin/passkey.js; Status and the log link nothing', async () => {
+describe('the one script is linked only on the pages with a passkey ceremony, and never inline (#2642, #2645, #2646, #2647, #2648, #2649, #2650)', () => {
+  it('the sign-in page, Passkeys, Accounts, Backups, the AI backend, Rooms and Keys link /admin/passkey.js; Status, the log and Recent problems link nothing', async () => {
     const made = await world();
     const handler = made.instance.handler;
     const token = await signedIn(made);
@@ -257,8 +341,18 @@ describe('the one script is linked only on the pages with a passkey ceremony, an
     expect(await scripts('/admin/passkeys', token)).toEqual([' src="/admin/passkey.js" defer']);
     // #2648: its changes each ask for a step-up, which the script asks the passkey for.
     expect(await scripts('/admin/analysis', token)).toEqual([' src="/admin/passkey.js" defer']);
+    // #2646: each approval and refusal asks for a step-up.
+    expect(await scripts('/admin/accounts', token)).toEqual([' src="/admin/passkey.js" defer']);
+    // #2647: "back up now" asks for a step-up.
+    expect(await scripts('/admin/backups', token)).toEqual([' src="/admin/passkey.js" defer']);
+    // #2649: End room asks for a step-up.
+    expect(await scripts('/admin/rooms', token)).toEqual([' src="/admin/passkey.js" defer']);
+    // #2650: rotating the encryption key asks for a step-up.
+    expect(await scripts('/admin/keys', token)).toEqual([' src="/admin/passkey.js" defer']);
     expect(await scripts('/admin/status', token)).toEqual([]);
     expect(await scripts('/admin/log', token)).toEqual([]);
+    // #2651: read-only, so no script.
+    expect(await scripts('/admin/problems', token)).toEqual([]);
     const script = await handler(adminRequest('GET', '/admin/passkey.js'));
     expect(script.headers.get('content-type')).toBe('text/javascript; charset=utf-8');
     expect(script.headers.get('content-security-policy')).toContain("script-src 'self'");
