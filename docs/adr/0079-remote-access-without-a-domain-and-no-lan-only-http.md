@@ -124,7 +124,7 @@ Each line is what the page says, not what the author expects:
   supported.
 - **Android's network security configuration** (developer.android.com): an app targeting API 24 or
   later trusts the system CAs only, not user-added ones, unless it opts in with
-  `<certificates src="user"/>`; from API 28 cleartext traffic is off by default.
+  `<certificates src="user"/>`; from API 28 cleartext traffic is off by default. This app's manifest nonetheless allows cleartext app-wide (#553); see D-6.
 
 ### What nobody has verified
 
@@ -191,15 +191,15 @@ test, and D-7's words name only payment.
 
 **The instance is reached at `https://<machine>.<tailnet>.ts.net`**, on port 443, served by
 `tailscale serve` from a `tailscale` container beside it (#2805). **Every device that uses the
-instance joins the owner's tailnet**: the tablet runs the Tailscale app, signed in to the owner's
-tailnet or to a household member's account invited into it. Nothing outside the tailnet can reach
+instance joins the owner's tailnet**: the tablet runs the Tailscale app, signed in to a household member's own account invited into the
+owner's tailnet (not to the owner's account; see the Account row). Nothing outside the tailnet can reach
 the instance at all, which is the home-IP WAF rule's job done by membership instead of by an
 address.
 
 | Test | The tailnet path |
 |---|---|
 | **Paid** | No. The Personal plan is free: 6 users, unlimited devices. |
-| **Account** | One Tailscale account for the owner; each other rider either signs in to it on their device or is one of the 6 users. The plan is for non-commercial use only. |
+| **Account** | One Tailscale account for the owner; each other rider is one of the 6 users, invited into the tailnet, or has a device shared to them. **A rider never signs in to the owner's own account**, because that gives their device the owner's identity across the whole tailnet. #2805 must also set a tailnet access rule (ACL) that lets non-owner devices reach only the instance's port, and documents both. The plan is for non-commercial use only. |
 | **Canonical** | Unchanged: the path is only how an instance is reached. A rider with no tailnet is a rider with no instance, who loses nothing (ADR 0036 D-3(a)). |
 | **Pin** | Never. The card still comes only from the loopback listener or a pinned device (D-9). |
 | **Origin** | Stable while the machine and tailnet names stay the same. Renaming either is an origin change (D-8). |
@@ -242,7 +242,7 @@ it, under a name anybody can find in the Certificate Transparency logs. Today th
 is closed to everyone but the home address. The tailnet keeps that posture, Funnel ends it. The
 tailnet costs one app install on each rider device, and that is the trade this ADR takes.
 
-### D-3 — Funnel is an opt-in, for riders who will not join the tailnet, and the admin pages are off while it is on
+### D-3 — Funnel is an opt-in, for riders who will not join the tailnet, and `/admin` is not served on the public listener while it is on
 
 **The owner may turn Funnel on** for the instance's public listener, so that a rider who is not on
 the tailnet reaches the same `ts.net` origin from anywhere. It is never on by default.
@@ -257,14 +257,19 @@ the tailnet reaches the same `ts.net` origin from anywhere. It is never on by de
 | **Edge** | TLS terminates on the node and relays do not decrypt. **But no edge rule keeps anybody out**: the instance is on the public internet, and its name is in the Certificate Transparency logs. |
 | **SSE** | **Unverified**, as D-2. |
 
-**While Funnel is on, the admin pages are not served on the public listener.** The owner's ruling
+**While Funnel is on, `/admin` is not served on the public listener.** The owner's ruling
 of 2026-11-15 put the remote admin pages *"behind the existing home-IP firewall rule"*. Funnel has
 no such rule. The instance cannot tell a Funnel request from a tailnet one except by the presence of
 a `Tailscale-User-*` header, and ADR 0069 D-5 refuses to decide locality from a header. So #2805
 gives the instance one setting naming the remote path (`tailnet`, `funnel` or `cloudflare`), and
-**the instance refuses to start with `OYL_INSTANCE_ADMIN_PAGES=on` while that setting is `funnel`**,
-naming both settings. The owner still has the loopback pages on the host and the app's sealed
-Operate area. *The author's choice*, D-10 Q-3.
+**while that setting is `funnel` the public listener answers every `/admin` path with 404**, and the
+setting is the only thing that decides it. **Nothing else turns off**: `OYL_INSTANCE_ADMIN_PAGES`
+and the loopback admin listener (`OYL_INSTANCE_ADMIN_LOOPBACK_PORT`, which `server-config.ts` ties to
+admin pages being on) stay as the owner set them, so the owner still has the loopback pages on the
+host, and the loopback card that D-9 names as the server-side pin source is still served. A
+start-up refusal on `OYL_INSTANCE_ADMIN_PAGES=on` is **not** made, because it would remove the
+loopback listener as well, and ADR 0080 (#2795) lifts that tie only until setup is done. The app's
+sealed Operate area is unaffected. *The author's choice*, D-10 Q-3.
 
 **Funnel's bandwidth limit is unknown** and not configurable. A room's upload (ADR 0037 D-8.3) may
 not fit it. #2805 says so where Funnel is offered and does not promise rooms over it.
@@ -310,10 +315,14 @@ The ruling the issue offers, that sealed transport (ADR 0047) makes `http://` on
 acceptable for sealed routes, **is not made**:
 
 1. **The Android app could not use it anyway.** It is served from `https://localhost`, so an
-   `http://` request is mixed content and the WebView refuses it (`address.ts`), and from API 28
-   cleartext is off by default. Allowing it means turning on mixed content in the WebView for every
-   origin, or sending instance traffic around the WebView through a native module. The second is a
-   second network module, which ADR 0036 D-3(a) says is a change to that ADR, not a review note.
+   `http://` request is mixed content and the WebView refuses it (`address.ts`), and the
+   WebView sets `allowMixedContent: false`. Allowing it means turning on mixed content in the WebView
+   for every origin, or sending instance traffic around the WebView through a native module. The
+   second is a second network module, which ADR 0036 D-3(a) says is a change to that ADR, not a
+   review note. **The manifest does allow cleartext app-wide** (`usesCleartextTraffic="true"`, #553),
+   and `apps/mobile/src/http/analysis-http.ts` is a native-HTTP module that `no-network.test.ts`
+   permits for LAN plaintext. That is the #553 precedent, and it is **deliberately not extended** to
+   instance traffic, for reasons 2 to 4.
 2. **Sealing does not cover the session token.** The bearer token rides in the `Authorization`
    header of every request, sealed or not, and until ADR 0047's phase 2 it is a full credential on
    the plaintext routes (D-11). Over `http://`, anybody on the Wi-Fi reads it and can do everything
@@ -370,8 +379,8 @@ whichever path it is setting up (#2791's criterion 4, #2805).
 
 ADR 0047 D-6 takes a pin only *"from a source Cloudflare cannot write"*: the card on the loopback
 listener (ADR 0069 D-5, ADR 0080 in #2795), or a card a pinned device composes from its own pin.
-**For every path here that reads as "a source the path's operator cannot write"**, and those card
-sources meet it on all of them. A `ts.net` name, a Funnel URL, a Cloudflare hostname and an mDNS
+None of the paths here (tailnet, Funnel, Cloudflare, mDNS) can write either of those card sources, so
+each path's operator is excluded from being a pin source. A `ts.net` name, a Funnel URL, a Cloudflare hostname and an mDNS
 answer are each an address and never a pin, and nothing in #2791 or #2805 may fetch the card
 through them.
 
@@ -383,7 +392,7 @@ through them.
 - **Q-2**: is the tailnet, with Funnel off, the right default (D-2), rather than Funnel as the epic
   suggested? **Recorded as a Maintainer decision: the tailnet**, because it keeps the instance
   closed to strangers.
-- **Q-3**: are the admin pages off on the public listener while Funnel is on (D-3)? **Recorded:
+- **Q-3**: is `/admin` not served on the public listener while Funnel is on (D-3)? **Recorded:
   yes.**
 - **Q-4 (the epic's question 4)**: is LAN-only `http://` refused, for sealed routes too (D-6)?
   **Recorded as a Maintainer decision: refused.**
@@ -419,7 +428,7 @@ through them.
 
 | Issue | What it must do |
 |---|---|
-| #2805 | Builds D-1 (the `tunnel` profile), D-2 (the `tailscale` profile and wizard step) and D-3 (the remote-path setting and the Funnel refusal). Measures SSE, WebSocket and the client-address header **first**. Proves the `tailscale` container cannot reach the loopback listener. Documents the tailnet path first in `docs/self-hosting/home-machine.md`. |
+| #2805 | Builds D-1 (the `tunnel` profile), D-2 (the `tailscale` profile and wizard step) and D-3 (the remote-path setting and the `/admin` 404 on the public listener while it reads `funnel`). Measures SSE, WebSocket and the client-address header **first**. Proves the `tailscale` container cannot reach the loopback listener. Documents the tailnet path first in `docs/self-hosting/home-machine.md`. |
 | #2791 | Stands as the domain option (D-4). Is offered beside #2805's step, never ahead of it, and keeps its origin-change warning (D-8). |
 | #2784 | Unchanged by this ADR. Its wizard is where #2805's and #2791's steps go. |
 | `address.ts`, `no-network.test.ts` | Unchanged (D-6). |
