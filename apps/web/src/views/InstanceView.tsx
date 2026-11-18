@@ -5,6 +5,7 @@ import { StatementsPanel } from './StatementsPanel';
 import { ERASE_ACCOUNT_TEXT, EraseAccountPanel } from './EraseAccount';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BlocksPanel } from './BlocksPanel';
+import { parseInstanceCard } from '@onyourleft/domain';
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import type { CameraController } from '../camera/session';
@@ -130,6 +131,12 @@ export const CONNECT_CARD_LABEL = 'The instance’s card (optional)';
 export const CONNECT_WITHOUT_CARD =
   'Without the card this device can sign in to an account it already has, but cannot use ' +
   'anything that needs the card.';
+/**
+ * #2826: a rider invite is the card with a code beside it, and goes in the
+ * same box. Draft wording.
+ */
+export const CONNECT_WITH_INVITE =
+  'If someone invited you, scan the invite or paste its whole line here, then press Connect.';
 
 /** The form that adds this device with another device's code (#773, #1190). Draft. */
 export const LINK_FORM_HEADING = 'Add this device with a code from another of your devices';
@@ -144,13 +151,14 @@ export const CONNECT_SCANNED_TEXT = {
   card: 'The card was read into the box above. Check the address, then press Connect.',
   /**
    * #2823: a card with a code is another device's line, a claim code from the
-   * owner's own server, or an invite — the same line, so it goes in both boxes
-   * and the rider's press says which.
+   * owner's own server, or an invite (#2826) — the same line, so it goes in
+   * every box that takes one and the rider's press says which.
    */
   line:
-    'That card came with a code, now in the boxes under “Add this device with a code from ' +
-    'another of your devices” and “Claim your server”. If your server’s setup page showed it, ' +
-    'press Claim this server. If another of your devices showed it, press Add this device.',
+    'That card came with a code, now in the card box above and in the boxes under “Add this ' +
+    'device with a code from another of your devices” and “Claim your server”. If someone ' +
+    'invited you, press Connect. If your server’s setup page showed it, press Claim this ' +
+    'server. If another of your devices showed it, press Add this device.',
 } as const;
 
 /** The recovery codes, shown once — ruling Q1 of 2026-09-28. */
@@ -438,7 +446,7 @@ export function InstanceView({
             />
           </p>
           <p className="oyl-muted" id={cardHintId}>
-            {CARD_FIELD_HINT} {CONNECT_WITHOUT_CARD}
+            {CARD_FIELD_HINT} {CONNECT_WITHOUT_CARD} {CONNECT_WITH_INVITE}
           </p>
           {camera === undefined ? null : (
             <CardScanner
@@ -446,8 +454,8 @@ export function InstanceView({
               onScanned={(text) => {
                 // #2785: a scan fills a box, as a paste would, and sends
                 // nothing — the press does. A card goes in the card box; a
-                // card with a code is another device's line, which only
-                // "Add this device" uses.
+                // card with a code is another device's line, a claim or an
+                // invite (#2826), so it goes in every box that takes one.
                 setRefusal(undefined);
                 const line = readCodeWithCard(text);
                 if (line === undefined) {
@@ -456,8 +464,14 @@ export function InstanceView({
                   // fills the box as a paste would and Connect says what it is.
                   setScanned(text.trim().startsWith('oyl-instance:') ? 'card' : undefined);
                 } else {
-                  setOffer(codeWithCard(line.card, line.code));
-                  setClaimLine(codeWithCard(line.card, line.code));
+                  const whole = codeWithCard(line.card, line.code);
+                  // An invite's Connect: the box holds the line, and an empty
+                  // address shows the card's, where the press will go.
+                  setCard(whole);
+                  const parsed = parseInstanceCard(line.card);
+                  if (parsed.ok && address.trim() === '') setAddress(parsed.card.origin);
+                  setOffer(whole);
+                  setClaimLine(whole);
                   setScanned('line');
                 }
               }}

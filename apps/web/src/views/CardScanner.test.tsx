@@ -43,7 +43,7 @@ import {
 } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY, readInstanceAccount } from '../instance/sign-in';
 import { LOADED_LOCALLY, scriptedInstance } from '../instance/testing';
-import { mount, settle, typeIntoTextArea, type Mounted } from '../testing/mount';
+import { mount, settle, typeInto, typeIntoTextArea, type Mounted } from '../testing/mount';
 import { CARD_SCAN_TEXT, CardScanner } from './CardScanner';
 import { InstanceKeys } from './InstanceKeys';
 import { OWNER_CLAIM_TEXT } from './OwnerClaim';
@@ -266,15 +266,57 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
     const [claimBox, cardBox, lineBox] = boxes();
     expect(lineBox?.value).toBe(codeWithCard(card, CODE));
-    expect(cardBox?.value).toBe('');
     // #2823: the same line is what the owner's setup page shows as a claim, so
-    // it is in the claim box too, and the press says which it is.
+    // it is in the claim box too, and the press says which it is — and #2826:
+    // it is a rider invite's too, which Connect takes from the card box.
     expect(claimBox?.value).toBe(codeWithCard(card, CODE));
+    expect(cardBox?.value).toBe(codeWithCard(card, CODE));
     // Nothing was sent by the scan: the form's own sentence is kept.
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
     await press('Add this device');
     expect(scripted.calls).toContain(`link ${codeWithCard(card, CODE)}`);
     expect(scripted.held.connected).toBe(true);
+  });
+
+  it('connects with a scanned invite on the press, to the address the invite’s card names (#2826)', async () => {
+    const scripted = scriptedInstance();
+    const pressed: (readonly [string, string, string | undefined])[] = [];
+    const port: InstancePort = {
+      ...scripted.port,
+      connect: (address, name, card) => {
+        pressed.push([address, name, card]);
+        return scripted.port.connect(address, name, card);
+      },
+    };
+    const { card } = await cardOf(SERVED_IDENTITY);
+    const { camera, show } = cameraShowing();
+    mounted = await mount(<InstanceView port={port} camera={agreed(camera)} />);
+    await settle();
+    show(codeWithCard(card, CODE));
+    await press(CARD_SCAN_TEXT.start);
+    await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
+    // The empty address shows where the press will go: the invite card's.
+    expect(mounted.container.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe(
+      ORIGIN,
+    );
+    expect(pressed).toEqual([]);
+    await press('Connect');
+    expect(pressed).toEqual([[ORIGIN, '', codeWithCard(card, CODE)]]);
+    expect(scripted.held.connected).toBe(true);
+  });
+
+  it('keeps an address the rider typed when a scanned invite names another (#2826)', async () => {
+    const scripted = scriptedInstance();
+    const { card } = await cardOf(SERVED_IDENTITY);
+    const { camera, show } = cameraShowing();
+    mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
+    await settle();
+    const address = mounted.container.querySelector<HTMLInputElement>('input[type="url"]')!;
+    await typeInto(address, 'https://typed.example');
+    show(codeWithCard(card, CODE));
+    await press(CARD_SCAN_TEXT.start);
+    await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
+    expect(address.value).toBe('https://typed.example');
   });
 
   it('fills only the claim box from the claim form’s own scanner, and claims on the press (#2823)', async () => {
