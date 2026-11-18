@@ -90,7 +90,12 @@ import {
 } from '@onyourleft/domain';
 
 import { lotPaint } from './building-paint';
-import { BUILDING_VARIANTS, LOT_PORCH_FRONT_METRES } from './buildings';
+import {
+  BUILDING_VARIANTS,
+  FOUNDATION_METRES,
+  LOT_PORCH_FRONT_METRES,
+  isBuiltKind,
+} from './buildings';
 import {
   MAIN_STREET_MODEL,
   plotModelFootprint,
@@ -106,7 +111,12 @@ import {
   type LandClass,
   type LandClassMask,
 } from './land-class';
-import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
+import {
+  ROAD_CLEARANCE_METRES,
+  fieldSpanMetres,
+  terrainHeightAt,
+  type GroundedFootprint,
+} from './landform';
 import {
   SCATTER_VARIANT_SLOTS,
   SETTLEMENT_GRADE_PERCENT,
@@ -144,6 +154,16 @@ export const PLOT_METRES = 18;
 
 /** The share of a village's plots that are built on: **0.8**. */
 export const PLOT_BUILT_SHARE = 0.8;
+
+/**
+ * The share of a plot's candidates that are built on **inferred** built-up
+ * land (`land-class.ts` §`inferBuiltUp`) — #2684, ADR 0070 D-2.1, the owner's
+ * ruling of 2026-11-15: where the map does not mark the houses, do not
+ * over-saturate, but draw some. Under {@link PLOT_BUILT_SHARE}, so gaps stand
+ * between the houses and not a solid row; the same hash, so a plot built here
+ * is built on mapped land too.
+ */
+export const INFERRED_PLOT_BUILT_SHARE = 0.5;
 
 /**
  * How far from the centreline a village's buildings stand, in metres: **15** —
@@ -449,6 +469,21 @@ export const STRUCTURE_FOOTPRINTS: Readonly<
   fence: { x: 0.1, back: -BOUNDARY_PIECE_METRES / 2, front: BOUNDARY_PIECE_METRES / 2 },
   signpost: { x: 0.1, back: -0.95, front: 0.95 },
 };
+
+/**
+ * The outline a structure is set into the ground on — #2761, for
+ * `landform.ts` §`standingOnGround`: a building drawn as its kind
+ * (`buildings.ts` §`BUILT_KINDS`), its {@link STRUCTURE_FOOTPRINTS} outline and
+ * its walls `buildings.ts` §`FOUNDATION_METRES` into the ground. `undefined`
+ * for everything else: a wall, a hedge or a signpost is a short piece that
+ * follows the ground, and a village plot drawn as a house model (#1566) is
+ * stood as its model is, which is not this outline.
+ */
+export function groundedFootprintOf(item: ScatterItem): GroundedFootprint | undefined {
+  if (item.house !== undefined || !isBuiltKind(item.kind)) return undefined;
+  const { x, back, front } = STRUCTURE_FOOTPRINTS[item.kind];
+  return { x, back, front, depth: FOUNDATION_METRES };
+}
 
 /**
  * A lot's farmhouse with its front porch — #1589: the farmhouse's
@@ -1251,9 +1286,12 @@ export function lotsAt(
     for (let side = 1; side >= -1; side -= 2) {
       const hash = slotHash(seed, wrappedPlot, LOT_KEY + (side === 1 ? 1 : 2));
       // Rule 4's share first: it is the cheapest, and it reads no land.
-      if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
+      const share = uniformFrom(hash, STREAM_PLOT);
+      if (share >= PLOT_BUILT_SHARE) continue;
       const x = frame.x + frame.normalX * SETBACK_METRES * side;
       const z = frame.z + frame.normalZ * SETBACK_METRES * side;
+      // #2684: sparser where the land is inferred and not mapped.
+      if (share >= INFERRED_PLOT_BUILT_SHARE && mask.inferredAt(x, z)) continue;
       const shops = wrappedPlot % LOT_SHOP_EVERY === 0 && mapped.commercialAt(x, z);
       const kind: StructureKind = shops ? 'shop-row' : 'building';
       // Facing the road: back along the normal from its side. @see standing
@@ -1280,6 +1318,22 @@ export function lotsAt(
         'road',
         mask,
       );
+      // #2761: and none on ground that falls away under it, which it would stand above.
+      if (
+        item !== undefined &&
+        lotGroundRange(
+          profile,
+          origin,
+          seed,
+          along,
+          SETBACK_METRES * side,
+          STRUCTURE_FOOTPRINTS[kind],
+          mask,
+          item.y,
+        ) > LOT_MAX_GROUND_RANGE_METRES
+      ) {
+        continue;
+      }
       // #1581: painted unlike the lots beside it and across the road; #1588: clad.
       if (item !== undefined) {
         // #1589: a porch where its reach is clear, as the house's is.
@@ -1301,6 +1355,61 @@ export function lotsAt(
 
 /** The lot {@link lotsAt} is deciding, reused between plots. */
 const lotScratch = new Float64Array(LOT_FLOATS);
+
+/**
+ * The most the ground may fall or rise under a lot's house — #2761: **0.6 m**,
+ * `buildings.ts` §`FOUNDATION_METRES`, the depth its walls are set into the
+ * ground.
+ *
+ * A lot's house is an instance of one shape, stood at the ground under its
+ * middle (`landform.ts` §`standingOnGround`), and its walls reach that far
+ * into the ground and no further. On ground falling away more than that
+ * across it — the bank down to a shore, the edge of levelled land — its
+ * downhill side stood in the air: 0.75 m at Rye NH, 1.4 m on a test bank.
+ * An instance cannot be stretched to the ground the way a mapped house's
+ * plinth is (`footprint-buildings.ts` rule 4), and lowering it would bury its
+ * door on the uphill side, so {@link lotsAt} does not build such a lot: the
+ * map marks no house there, and no invented one stands in the air instead.
+ */
+export const LOT_MAX_GROUND_RANGE_METRES = FOUNDATION_METRES;
+
+/**
+ * How far the ground rises and falls under a lot's house — #2761: at its four
+ * corners and at its middle, `centre`, which is what it stands at. The ground
+ * beside a road is piecewise linear across the road and smooth along it, so
+ * on a bank, which falls one way, the corners find its lowest and highest.
+ */
+function lotGroundRange(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  along: number,
+  signedLateral: number,
+  footprint: { readonly x: number; readonly back: number; readonly front: number },
+  land: LandClassMask,
+  centre: number,
+): number {
+  const side = Math.sign(signedLateral);
+  const lateral = Math.abs(signedLateral);
+  let lowest = centre;
+  let highest = centre;
+  // `x` runs along the road, and `front` toward it: the house faces the road.
+  for (const ahead of [footprint.back, footprint.front]) {
+    for (const across of [-footprint.x, footprint.x]) {
+      const height = terrainHeightAt(
+        profile,
+        origin,
+        seed,
+        along + across,
+        side * (lateral - ahead),
+        land,
+      );
+      lowest = Math.min(lowest, height);
+      highest = Math.max(highest, height);
+    }
+  }
+  return highest - lowest;
+}
 
 /**
  * {@link lotsAt}'s rules 1 to 3 for one lot ({@link LOT_FLOATS}): built-up

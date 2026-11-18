@@ -1549,7 +1549,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         draws it as (`three-renderer.ts` §`VillageHouseBelt`:
                         one call, in view, nearest first, inside the 23 040
                         term after every structure no model stands for;
-                        `levers=-village-models` is its pair)
+                        `levers=-village-models` is its pair). ⚠️ Since
+                        #2761 no lot where the ground under it falls more
+                        than its 0.6 m foundation (`LOT_MAX_GROUND_RANGE_METRES`),
+                        and every building drawn as its kind is lowered onto
+                        the lowest drawn ground under its corners, by at most
+                        its foundation, or dropped (`landform.ts`
+                        §`standingOnGround`, `groundedFootprintOf`): houses
+                        stood on stilts above falling ground by a shore
     src/game/land-class.ts
                         what the ground is where map data was read (#1546) — a
                         sparse 5 m mask built ONCE at the press from the ride's
@@ -1599,6 +1606,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `-land-planting`, `-land-boundaries`,
                         `-ground-clutter`, `-hedge-breaks`,
                         `-small-stones`, shown on `town=countryside`)
+                        ⚠️ Since #2684 (ADR 0070) `built-up` includes
+                        INFERRED land: unmapped ground within 60 m of a
+                        residential street where the streets are a
+                        suburb's (`inferBuiltUp`), so a suburb mapped by
+                        its streets alone gets lots and no field fences.
     src/game/park-dressing.ts
                         what a golf course and a cemetery are drawn WITH
                         (#2685, the owner's hold of PR #2689 on 2026-11-16:
@@ -1809,7 +1821,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         structures inside the 23 040-triangle term (#1586) —
                         since #2655 not its walls, hedges and fences, which
                         take only what the buildings leave — the far
-                        level past 150 m, in ≤ 6 surfaces; no tree,
+                        level past 150 m (walls, plinth and roof: the plinth
+                        since #2761, or a far house on a slope stood on
+                        nothing), in ≤ 6 surfaces; no tree,
                         shrub or rock on a plan's ground. ⚠️ **One mesh, a
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's

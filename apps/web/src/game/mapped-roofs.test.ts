@@ -49,6 +49,7 @@ import {
   mappedRoofStreetFixture,
   mixedTownFixture,
   planFingerprint,
+  plinthTriangles,
   rectangleBeside,
   ROOF_SHAPES,
   sawToothYou,
@@ -862,7 +863,10 @@ describe('the caps — #1790', () => {
     expect(rectanglesOf(plain.footprint)).toHaveLength(3);
     expect(plain.roof).toBe('gable');
     expect(plain.roofVariant).toBe('plain');
-    expect(plain.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
+    // #2761: the far cap is its walls and roof; its plinth is drawn far too, beside them.
+    expect(plain.farTriangleCount - plinthTriangles(plain)).toBeLessThanOrEqual(
+      FOOTPRINT_MAX_FAR_TRIANGLES,
+    );
     // Past the plain roof too: flat.
     const flat = toothed(400);
     expect(flat.roof).toBe('flat');

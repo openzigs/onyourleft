@@ -21,8 +21,21 @@ It has the same authority as the root file. Where the text below says "this file
   **0075 is #2600's ADR 0075**, the ride controls' fade, in pull request
   [#2670](https://github.com/openzigs/onyourleft/pull/2670), accepted by the owner. **0077 is
   claimed** by [#2762](https://github.com/openzigs/onyourleft/pull/2762) if it needs one. **0057 and
-  0058 stay claimed** by #1748 and #1752 and 0070 by #2684; 0072 is ADR 0072 (#2712). **The next
+  0058 stay claimed** by #1748 and #1752; 0070 is ADR 0070 (#2684) and 0072 is ADR 0072 (#2712). **The next
   free number is 0078.** A reviewer who remembers this file offering 0075, 0076 or 0077 is reading the old file.
+  ⚠️ **0070 is [ADR 0070](../adr/0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**,
+  taken by [#2684](https://github.com/openzigs/onyourleft/issues/2684) on 2026-11-15 for houses on
+  inferred built-up land in a suburb that OpenStreetMap maps only by its streets, on the owner's
+  ruling of that day on #2684, and claimed from then until its pull request
+  [#2694](https://github.com/openzigs/onyourleft/pull/2694) merged. It was **Proposed**, and the
+  owner accepted it on 2026-11-17 on #2694. It supersedes ADR 0054 D-5.1 in part, as an ADR rather
+  than an amendment, because ADR 0013 D-3 sends a reversed decision to a new ADR; ADR 0054 gained
+  one dated `## Amendments` entry pointing here. 0071 to 0074 are ADRs 0071 to 0074 (below);
+  **0075 is claimed** by the open pull request [#2670](https://github.com/openzigs/onyourleft/pull/2670)
+  (#2600), **0076** by [#2767](https://github.com/openzigs/onyourleft/pull/2767) (#2759) and
+  **0077** by [#2762](https://github.com/openzigs/onyourleft/pull/2762) (#2760); **0057 and 0058
+  stay claimed** by #1748 and #1752. **The next free number is 0078.** A reviewer who remembers
+  this file offering 0071 or 0075 is reading the old file.
   ⚠️ **0074 is [ADR 0074](../adr/0074-a-sprint-instinct-behind-the-models-moves.md)**, taken by
   [#2710](https://github.com/openzigs/onyourleft/issues/2710) in its pull request
   [#2724](https://github.com/openzigs/onyourleft/pull/2724) on 2026-11-16 for a sprint instinct
