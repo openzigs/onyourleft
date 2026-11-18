@@ -1,8 +1,8 @@
 # ADR 0080: First-run setup and the owner's claim, on the loopback listener
 
-- **Status**: **Proposed**, 2026-11-17. It becomes **Accepted** only when the owner approves it, in
-  words, on its pull request. Until then #2781, #2782, #2783 and #2784 stay blocked (the owner's
-  ruling of 2026-11-17 on the epic #2779). Nothing is built by this ADR
+- **Status**: **Accepted**, 2026-11-18, by the owner on #2795, with the answers recorded in D-10.
+  Proposed 2026-11-17. #2781, #2782, #2783 and #2784 are unblocked by it. Nothing is built by this
+  ADR
 - **Date**: 2026-11-17
 - **Deciders**: **the owner**, who asked on 2026-11-17 for setup that a non-technical rider can
   manage and ruled *"Start phase 1 of easy setup"*. **The author** decided everything that ruling
@@ -417,6 +417,25 @@ the pull request decides it.
   is not done and only on loopback? **Recommended: yes.** Otherwise the wizard can make no change
   before a passkey is enrolled and confirmed on the host, and the non-technical owner is back at the
   terminal.
+
+### D-10 — The owner's answers
+
+**Owner ruling, 2026-11-18:** asked Q-1 to Q-7 in plain words, each with its recommendation (*"Do you
+approve 1–7 as recommended?"*), the owner answered *"Approve"*. So:
+
+- **Q-1**: the setup code is not printed to standard output. It goes to `secrets/setup-code`, and
+  standard output says where.
+- **Q-2**: with `OYL_INSTANCE_OWNER_KEY` set, the environment wins, and a claim is refused.
+- **Q-3**: the wizard and `operator registration` may set the registration mode, with the database
+  winning over `.env`. This supersedes in part the 2026-11-14 ruling on #2601; Operate and `/admin`
+  still only show it.
+- **Q-4**: a claim needs the six-digit comparison on both screens.
+- **Q-5**: `instance` mounts `./secrets` read-write; `backup`, `migrate` and `tunnel` do not mount
+  it.
+- **Q-6**: the claimed device confirming a wizard passkey is a follow-up issue, not part of Phase
+  1.
+- **Q-7**: a setup session may make the wizard's changes without a passkey, only while setup is not
+  done and only on loopback.
 
 ## Consequences
 
