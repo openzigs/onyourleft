@@ -120,6 +120,8 @@ interface KeysView {
   readonly keys: unknown;
   readonly card: { readonly card: string; readonly fingerprint: string } | null;
   readonly onServer: boolean;
+  /** #2781: the emergency kit offered, on the server machine. */
+  readonly kit: boolean;
   readonly strength: 'code' | 'passkey';
   readonly csrf: string;
   readonly notice:
@@ -362,6 +364,7 @@ const keysPage = (
       keys: KEY_STATE,
       card: null,
       onServer: false,
+      kit: false,
       strength,
       csrf: 'a'.repeat(64),
       notice: null,
@@ -625,6 +628,15 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       () => keysPage('passkey', {}, AWKWARD_NAME),
     ],
     ['on the server machine: the card', () => keysPage('passkey', { card: CARD, onServer: true })],
+    // #2781: the emergency kit's part, offered, in either session, and with none to offer.
+    [
+      'on the server machine: the emergency kit',
+      () => keysPage('passkey', { card: CARD, onServer: true, kit: true }),
+    ],
+    [
+      'on the server machine: the emergency kit, a code session',
+      () => keysPage('code', { card: CARD, onServer: true, kit: true }),
+    ],
     ['rotated', () => keysPage('passkey', { notice: { kind: 'rotated', ok: true } })],
     ['busy', () => keysPage('passkey', { notice: { kind: 'busy' } })],
     [
