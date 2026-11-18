@@ -1,9 +1,9 @@
 # ADR 0079: Remote access without a domain — the owner's tailnet by default, a domain optional, and no LAN-only `http://`
 
-- **Status**: **Proposed**, 2026-11-18. It becomes **Accepted** only when the owner approves it, in
-  words, on its pull request; until then [#2791](https://github.com/openzigs/onyourleft/issues/2791)
-  and [#2805](https://github.com/openzigs/onyourleft/issues/2805) stay blocked. Nothing is built by
-  this ADR
+- **Status**: **Accepted**, 2026-11-18, by the owner on #2806, with the answers recorded in D-11.
+  Proposed 2026-11-18. [#2791](https://github.com/openzigs/onyourleft/issues/2791) and
+  [#2805](https://github.com/openzigs/onyourleft/issues/2805) are unblocked by it. Nothing is built
+  by this ADR
 - **Date**: 2026-11-18
 - **Deciders**: **the owner**, whose rulings are quoted in Context: that self-hosting never needs a
   paid service (2026-10-27, on #15), and that the easy-setup work goes on (2026-11-17 and
@@ -400,6 +400,20 @@ through them.
 - **Q-6**: is Tailscale's non-commercial term acceptable for the default path? A household fits it.
   A club or business running an instance would need a paid Tailscale plan or the domain path, and
   that is the operator's choice, not a prerequisite an issue takes.
+
+### D-11 — The owner's answers
+
+**Owner ruling, 2026-11-18:** the owner was asked Q-1 to Q-6 in plain words, each with its
+recommendation (*"Do you approve 1–6 as recommended?"*), and answered *"Yes"*. So:
+
+- **Q-1**: a domain is a paid service under ADR 0036 D-7, so no issue may require one. The
+  Cloudflare tunnel stays an option (D-1).
+- **Q-2**: the default is the owner's tailnet with Funnel off (D-2).
+- **Q-3**: `/admin` is not served on the public listener while Funnel is on (D-3).
+- **Q-4**: LAN-only `http://` is refused, sealed routes included (D-6).
+- **Q-5**: mDNS discovery is left unfiled (D-7).
+- **Q-6**: Tailscale's non-commercial term is acceptable for the default path. A club or business
+  chooses a paid plan or the domain path.
 
 ## Consequences
 
