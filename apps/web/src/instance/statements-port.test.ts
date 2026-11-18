@@ -245,8 +245,9 @@ describe('the statements of reasons about this rider (#910)', () => {
       kind: 'filed',
     });
     // Sealed with both sessions (#1382): the appeal never goes in plaintext.
+    // The held session seals to the key its read above verified (#2776), so
+    // only the way-out session reads the keys.
     expect(sent.slice(before)).toEqual([
-      '/v1/instance/keys',
       '/v1/sealed',
       '/v1/instance/keys',
       '/v1/auth/challenge',

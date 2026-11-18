@@ -48,6 +48,8 @@ import {
   checkDisplayName,
   NO_KEY_TRUST,
   parseInstanceCard,
+  STATEMENT_TRUST_CAP_SECONDS,
+  statementId,
   type HpkePrimitives,
   type SealedInstanceKey,
   type Sha256,
@@ -683,6 +685,12 @@ function sealedTransport(sealed: SealedInstance): InstanceTransport {
 interface Judged {
   readonly outcome: KeysOutcome;
   readonly instanceKey?: SealedInstanceKey;
+  /**
+   * With {@link instanceKey}: when this device stops trusting it, Unix
+   * milliseconds — the statement's `notAfter` or 48 hours after the device
+   * first verified it, whichever is earlier (D-5, #2776).
+   */
+  readonly trustedUntil?: number;
 }
 
 /**
@@ -759,13 +767,84 @@ async function judgeAccount(
     case 'expired':
       writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
       return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.expired, pinned } };
-    case 'trusted':
+    case 'trusted': {
       writeInstanceAccount(storage, { ...held, keyTrust: verdict.trust });
+      const seen = verdict.trust.firstVerified[statementId(verdict.statement)];
       return {
         outcome: { kind: 'trusted', pinned, serial: verdict.statement.serial },
         instanceKey: sealedKeyOf(verdict.statement),
+        trustedUntil:
+          seen === undefined
+            ? 0
+            : Math.min(verdict.statement.notAfter, seen.at + STATEMENT_TRUST_CAP_SECONDS) * 1000,
       };
+    }
   }
+}
+
+/**
+ * The judgement a port last made of its instance's keys (#2776), kept in
+ * memory for the sign-in it was made under: the origin, the pin and the
+ * session token.
+ */
+interface HeldJudgement {
+  readonly origin: string;
+  readonly pin: string;
+  readonly token: string;
+  readonly judged: Promise<Judged>;
+}
+
+/**
+ * The key a sealed call from `account`'s sign-in seals to (#2776). Reading
+ * `/v1/instance/keys` before every request made each sealed call two round
+ * trips, so a port keeps the key it last VERIFIED — only a `trusted`
+ * judgement is kept, and the judgement is the pin's, unchanged — and reads
+ * the keys again only when:
+ *
+ * - **the trust runs out** ({@link Judged.trustedUntil}, D-5);
+ * - **the sign-in changed**: another origin, another pin, or another session
+ *   token (a new sign-in). A new card awaited never reaches here: the gate
+ *   every caller asks first closes the session (D-14 Q8);
+ * - **this device has since verified a higher serial** elsewhere (the Keys
+ *   screen), so it never seals below one it has seen (D-5);
+ * - **the instance refused the key** as unknown — `stale` is the key it
+ *   refused, and the transport seals to what comes back only when it differs.
+ *
+ * Callers asking while a read is in flight share it. A judgement that trusts
+ * nothing is never kept: the next call reads again.
+ */
+async function trustedKeyFor(
+  dependencies: SealingDependencies,
+  kit: SealingKit,
+  account: InstanceAccount,
+  pin: string,
+  token: string,
+  stale?: SealedInstanceKey,
+): Promise<Judged> {
+  const held = kit.held.judgement;
+  if (held?.origin === account.origin && held.pin === pin && held.token === token) {
+    const judged = await held.judged;
+    // Shared with the call that read the keys, which kept nothing.
+    if (judged.instanceKey === undefined) return judged;
+    const serial = judged.outcome.kind === 'trusted' ? judged.outcome.serial : undefined;
+    if (
+      kit.crypto.now() < (judged.trustedUntil ?? 0) &&
+      judged.instanceKey.keyId !== stale?.keyId &&
+      (account.keyTrust?.highestSerial ?? null) === serial
+    ) {
+      return judged;
+    }
+  }
+  const judged = judgeAccount(dependencies.storage, account, dependencies, kit.crypto);
+  const judgement: HeldJudgement = { origin: account.origin, pin, token, judged };
+  kit.held.judgement = judgement;
+  const forget = () => {
+    if (kit.held.judgement === judgement) kit.held.judgement = undefined;
+  };
+  judged.then((each) => {
+    if (each.instanceKey === undefined) forget();
+  }, forget);
+  return judged;
 }
 
 /** The sign-in this device holds, sealed — or why a phase-1 feature is not offered now. */
@@ -787,6 +866,8 @@ export type HeldSealedSession =
 interface SealingKit {
   readonly clock: InstanceClock;
   readonly crypto: PinCrypto;
+  /** The keys' judgement this port keeps for its sign-in (#2776, {@link trustedKeyFor}). */
+  readonly held: { judgement?: HeldJudgement | undefined };
 }
 
 function sealingKit(dependencies: SealingDependencies): SealingKit {
@@ -797,6 +878,7 @@ function sealingKit(dependencies: SealingDependencies): SealingKit {
       verifier: dependencies.verifier ?? webCryptoVerifier,
       now: dependencies.now ?? (() => Date.now()),
     },
+    held: {},
   };
 }
 
@@ -805,7 +887,9 @@ function sealingKit(dependencies: SealingDependencies): SealingKit {
  * D-7, D-8, D-11): every phase-1 route goes through this and nothing else.
  * Closed — with the sentence to show — for a copy of the app loaded from a
  * website, a device with no card or waiting for a new one, and keys that do
- * not verify under the pin; nothing is sent then but the keys' read.
+ * not verify under the pin; nothing is sent then but the keys' read. The
+ * key it seals to is the one the port keeps for its sign-in
+ * ({@link trustedKeyFor}, #2776), so the keys are read once, not per call.
  */
 async function sealedSessionOf(
   dependencies: SealingDependencies,
@@ -818,7 +902,7 @@ async function sealedSessionOf(
   }
   const gate = sealedRouteGate(account, dependencies.loadedFrom);
   if (gate.kind !== 'open') return { kind: 'closed', why: 'gate', text: gate.text };
-  const judged = await judgeAccount(dependencies.storage, account, dependencies, kit.crypto);
+  const judged = await trustedKeyFor(dependencies, kit, account, gate.pin, held.token);
   if (judged.instanceKey === undefined) {
     const text = 'text' in judged.outcome ? judged.outcome.text : INSTANCE_KEY_TEXT.unreachable;
     return { kind: 'closed', why: 'keys', text };
@@ -834,6 +918,17 @@ async function sealedSessionOf(
         sha256: kit.crypto.sha256,
         clock: kit.clock,
         ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+        // #2776: the instance refused the kept key — read the keys again, as this sign-in.
+        refreshKey: async (used) => {
+          const now = readInstanceAccount(dependencies.storage);
+          const signedIn = heldInstanceSession(dependencies.storage, dependencies.send);
+          if (now?.origin !== account.origin || now.pin === undefined || signedIn === undefined) {
+            return undefined;
+          }
+          // A new card awaited meanwhile is judged as one: no key, nothing sent (D-14 Q8).
+          return (await trustedKeyFor(dependencies, kit, now, now.pin, signedIn.token, used))
+            .instanceKey;
+        },
       },
       dependencies.send,
     ),

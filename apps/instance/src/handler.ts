@@ -257,8 +257,14 @@ const ALWAYS = {
 /** The request headers a rider's app sends, which a preflight must allow. */
 const PREFLIGHT_HEADERS = 'authorization, content-type';
 
-/** How long a browser may keep a preflight's answer, in seconds. */
-const PREFLIGHT_MAX_AGE_SECONDS = 600;
+/**
+ * How long a browser may keep a preflight's answer, in seconds: two hours,
+ * the most Chromium (and so the Android shell's WebView) honours (#2776). A
+ * sealed call carries `authorization` and a JSON body, so it cannot be a
+ * simple request; this makes its `OPTIONS` one round trip in two hours
+ * rather than one in ten minutes.
+ */
+const PREFLIGHT_MAX_AGE_SECONDS = 2 * 60 * 60;
 
 /** What the log and `/metrics` name every `/admin` request by: the pattern, never the path. */
 const ADMIN_ROUTE = '/admin';

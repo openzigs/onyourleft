@@ -22,6 +22,7 @@ import {
   SEALED_END_KIND,
   unpad,
   utf8Encode,
+  type SealedInstanceKey,
   type SigningKey,
 } from '@onyourleft/domain';
 import { webCryptoHpkePrimitives, webCryptoSha256 } from '@onyourleft/store';
@@ -74,6 +75,8 @@ async function playInstance(
     streamFrames?: (events: readonly string[]) => readonly string[];
     /** #1102: the stream's body sends its frames and then stays open, sending nothing. */
     openEnded?: boolean;
+    /** #2776: every whole call is answered with this body, SEALED, status 400. */
+    sealedRefusal?: unknown;
   } = {},
 ): Promise<Played> {
   const pair = await webCryptoHpkePrimitives.generateX25519KeyPair();
@@ -138,6 +141,7 @@ async function playInstance(
           headers: { 'content-type': 'text/event-stream' },
         });
       }
+      if (options.sealedRefusal !== undefined) return reply(400, options.sealedRefusal);
       return reply(200, { path: header.path });
     }) as InstanceSend & ReturnType<typeof vi.fn>,
   };
@@ -453,5 +457,145 @@ describe('no device secret is kept (D-2)', () => {
     // The ephemeral keys the client generated are not extractable at all.
     const generated = await webCryptoHpkePrimitives.generateX25519KeyPair();
     expect(generated.privateKey.extractable).toBe(false);
+  });
+});
+
+describe('a key the instance no longer holds (#2776)', () => {
+  const KEY_UNKNOWN = { error: { code: 'instance_key_unknown', message: '' } };
+
+  /**
+   * A client that seals to a RETIRED key first: the edge in front of `played`
+   * answers a request sealed to any key but the instance's a plaintext
+   * `instance_key_unknown`, as the instance does past a key's overlap.
+   */
+  async function rekeying(
+    played: Played,
+    refresh: (retired: SealedInstanceKey) => Promise<SealedInstanceKey | undefined>,
+  ) {
+    const retired = {
+      keyId: 'fedcba9876543210',
+      publicKey: (await webCryptoHpkePrimitives.generateX25519KeyPair()).publicKey,
+    };
+    const sealedTo: string[] = [];
+    const refreshed: string[] = [];
+    const send: InstanceSend = async (url, init) => {
+      const keyId = (JSON.parse(init.body as string) as { keyId: string }).keyId;
+      sealedTo.push(keyId);
+      if (keyId !== KEY_ID) return new Response(JSON.stringify(KEY_UNKNOWN), { status: 400 });
+      return played.send(url, init);
+    };
+    const http = sealedInstance(
+      ORIGIN,
+      {
+        instanceKey: retired,
+        signingKey: await deviceKey(),
+        primitives: webCryptoHpkePrimitives,
+        sha256: webCryptoSha256,
+        clock: createInstanceClock(),
+        now: () => T0_SECONDS * 1000,
+        refreshKey: async (used) => {
+          refreshed.push(used.keyId);
+          return refresh(retired);
+        },
+      },
+      send,
+    );
+    return { http, sealedTo, refreshed, retired };
+  }
+
+  it('seals the call again ONCE to the key handed back, and every later call to it', async () => {
+    const played = await playInstance();
+    const { http, sealedTo, refreshed, retired } = await rekeying(played, async () =>
+      Promise.resolve(played.instanceKey),
+    );
+    expect(await http.call('GET', '/v1/auth/session', { token: 't' })).toEqual({
+      status: 200,
+      body: { path: '/v1/auth/session' },
+    });
+    expect(refreshed).toEqual([retired.keyId]);
+    expect(sealedTo).toEqual([retired.keyId, KEY_ID]);
+    sealedTo.length = 0;
+    expect((await http.call('GET', '/v1/auth/session', { token: 't' })).status).toBe(200);
+    expect(sealedTo).toEqual([KEY_ID]);
+    expect(refreshed).toHaveLength(1);
+  });
+
+  it('sends nothing again when the same key, or none, comes back: a forged refusal earns no second copy', async () => {
+    const played = await playInstance();
+    for (const back of ['same', 'none'] as const) {
+      const { http, sealedTo, refreshed, retired } = await rekeying(played, async (retiredKey) =>
+        Promise.resolve(back === 'same' ? retiredKey : undefined),
+      );
+      expect(await http.call('POST', '/v1/x', { token: 't', body: {} }), back).toEqual({
+        status: 400,
+        body: KEY_UNKNOWN,
+      });
+      expect(sealedTo, back).toEqual([retired.keyId]);
+      expect(refreshed, back).toEqual([retired.keyId]);
+    }
+  });
+
+  it('seals a call or a stream again at most once, even when the new key is refused too', async () => {
+    const played = await playInstance();
+    const other = {
+      keyId: '0000000000000001',
+      publicKey: (await webCryptoHpkePrimitives.generateX25519KeyPair()).publicKey,
+    };
+    const { http, sealedTo, retired } = await rekeying(played, async () => Promise.resolve(other));
+    expect((await http.call('GET', '/v1/x', { token: 't' })).status).toBe(400);
+    expect(sealedTo).toEqual([retired.keyId, other.keyId]);
+    const streamed = await rekeying(played, async () => Promise.resolve(other));
+    const result = await streamed.http.stream('/v1/stream', {
+      token: 't',
+      onEvent: () => undefined,
+    });
+    expect(result).toMatchObject({ outcome: 'cut', refused: { status: 400 } });
+    expect(streamed.sealedTo).toEqual([streamed.retired.keyId, other.keyId]);
+  });
+
+  it('never acts on a SEALED `instance_key_unknown`: only a plaintext one is that refusal', async () => {
+    const played = await playInstance({ sealedRefusal: KEY_UNKNOWN });
+    const refreshKey = vi.fn(async () => Promise.resolve(played.instanceKey));
+    const http = sealedInstance(
+      ORIGIN,
+      {
+        instanceKey: played.instanceKey,
+        signingKey: await deviceKey(),
+        primitives: webCryptoHpkePrimitives,
+        sha256: webCryptoSha256,
+        clock: createInstanceClock(),
+        now: () => T0_SECONDS * 1000,
+        refreshKey,
+      },
+      played.send,
+    );
+    expect((await http.call('GET', '/v1/x', { token: 't' })).status).toBe(400);
+    expect(refreshKey).not.toHaveBeenCalled();
+    expect(played.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('seals a stream again once to the key handed back, and it finishes', async () => {
+    const played = await playInstance();
+    const { http, sealedTo, retired } = await rekeying(played, async () =>
+      Promise.resolve(played.instanceKey),
+    );
+    const events: string[] = [];
+    const result = await http.stream('/v1/stream', {
+      token: 't',
+      onEvent: (event) => events.push(event.id),
+    });
+    expect(result).toEqual({ outcome: 'finished', lastEventId: '3' });
+    expect(events).toEqual(['1', '2', '3']);
+    expect(sealedTo).toEqual([retired.keyId, KEY_ID]);
+  });
+
+  it('ends a stream cut with the refusal when no other key comes back', async () => {
+    const played = await playInstance();
+    const { http, sealedTo, retired } = await rekeying(played, async (retiredKey) =>
+      Promise.resolve(retiredKey),
+    );
+    const result = await http.stream('/v1/stream', { token: 't', onEvent: () => undefined });
+    expect(result).toEqual({ outcome: 'cut', refused: { status: 400, body: KEY_UNKNOWN } });
+    expect(sealedTo).toEqual([retired.keyId]);
   });
 });
