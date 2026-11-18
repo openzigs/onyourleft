@@ -1032,6 +1032,12 @@
     "Add this device with a code from another of your devices",
     "The line your other device shows",
     "Add this device",
+    "Claim your server",
+    "Setting up your own server?",
+    "Scan the claim code its setup page shows, or paste the line under it.",
+    "The claim code from your server’s setup page",
+    "Scan the claim code with the camera",
+    "Claim this server",
     "Your rides stay on this device."
   ],
   "moderation empty": [

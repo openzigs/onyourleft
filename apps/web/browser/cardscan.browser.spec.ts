@@ -44,7 +44,11 @@ test.describe('#2785 — the instance card’s scanner reads a real QR picture',
     // The pixels went through a `<video>`, a canvas and jsQR: the box holds
     // exactly what the picture says.
     await expect(line).toHaveValue(CARD_QR_TEXT);
-    await expect(page.getByText('That code is from another of your devices')).toBeVisible();
+    await expect(page.getByText('That card came with a code')).toBeVisible();
+    // #2823: the same line is what a server's setup page shows as a claim.
+    await expect(page.getByLabel('The claim code from your server’s setup page')).toHaveValue(
+      CARD_QR_TEXT,
+    );
     await expect(page.locator('video')).toHaveCount(0);
     expect(await page.evaluate(() => window.__oylCardScan?.tracks())).toEqual(['ended', 'ended']);
     expect(await page.evaluate(() => window.__oylCardScan?.asked())).toBe(2);
@@ -70,4 +74,57 @@ test.describe('#2785 — the instance card’s scanner reads a real QR picture',
     await page.keyboard.press('Shift+Tab');
     await expect(page.getByLabel('The instance’s card (optional)')).toBeFocused();
   });
+});
+
+/**
+ * #2823: the owner's claim, read by its own scanner, and the six digits it
+ * then shows. The fixture is a card and a code, which is the shape of the
+ * setup page's claim QR too (#2783). The port is the scripted one, so the
+ * digits are `instance/testing.ts` §`SCRIPTED_COMPARISON_CODE`; what is
+ * measured is what jsdom cannot: that they are drawn large and that the screen
+ * still fits a 320 px window with them on it.
+ */
+test.describe('#2823 — the owner’s claim QR and its six digits', () => {
+  for (const viewport of [
+    { width: 320, height: 640 },
+    { width: 1280, height: 800 },
+  ]) {
+    test(`reads the claim QR, then shows the digits large without a sideways scroll at ${String(viewport.width)} px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      const requests: string[] = [];
+      page.on('request', (request) => {
+        if (!request.url().startsWith(HARNESS_ORIGIN)) requests.push(request.url());
+      });
+      await open(page);
+      const box = page.getByLabel('The claim code from your server’s setup page');
+      await page.getByRole('button', { name: 'Scan the claim code with the camera' }).click();
+      await expect(box).toHaveValue(CARD_QR_TEXT);
+      // Only the claim box: the other boxes are for other things.
+      await expect(page.getByLabel('The line your other device shows')).toHaveValue('');
+      await expect(page.locator('video')).toHaveCount(0);
+
+      await page.getByRole('button', { name: 'Claim this server' }).click();
+      const digits = page.locator('.oyl-instance__compare');
+      await expect(digits).toHaveText('482 913');
+      await expect(page.getByRole('button', { name: 'Sign in as the owner' })).toBeFocused();
+      const drawn = await digits.evaluate((element) => {
+        const groups = [...element.querySelectorAll('strong')].map((each) =>
+          each.getBoundingClientRect(),
+        );
+        return {
+          fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+          right: Math.max(...groups.map((each) => each.right)),
+          inner: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        };
+      });
+      // Large: well over twice the body text, as the setup page draws them.
+      expect(drawn.fontSize).toBeGreaterThanOrEqual(48);
+      expect(drawn.right).toBeLessThanOrEqual(drawn.inner);
+      expect(drawn.scrollWidth).toBeLessThanOrEqual(drawn.inner);
+      expect(requests, 'the claim sent something off the page').toEqual([]);
+    });
+  }
 });

@@ -28,6 +28,7 @@ import { InstanceDevices } from './InstanceDevices';
 import { CHANGE_NAME_TEXT, InstanceNamePanel } from './InstanceName';
 import { CardScanner } from './CardScanner';
 import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
+import { OWNER_CLAIM_TEXT, OwnerClaim } from './OwnerClaim';
 import { SyncPanel } from './SyncPanel';
 
 /**
@@ -141,9 +142,15 @@ export const LINK_FIELD_LABEL = 'The line your other device shows';
  */
 export const CONNECT_SCANNED_TEXT = {
   card: 'The card was read into the box above. Check the address, then press Connect.',
+  /**
+   * #2823: a card with a code is another device's line, a claim code from the
+   * owner's own server, or an invite — the same line, so it goes in both boxes
+   * and the rider's press says which.
+   */
   line:
-    'That code is from another of your devices, so it is in the box under “Add this device with ' +
-    'a code from another of your devices”. Press Add this device to use it.',
+    'That card came with a code, now in the boxes under “Add this device with a code from ' +
+    'another of your devices” and “Claim your server”. If your server’s setup page showed it, ' +
+    'press Claim this server. If another of your devices showed it, press Add this device.',
 } as const;
 
 /** The recovery codes, shown once — ruling Q1 of 2026-09-28. */
@@ -250,6 +257,10 @@ export function InstanceView({
   const [name, setName] = useState('');
   const [card, setCard] = useState('');
   const [offer, setOffer] = useState('');
+  /** The owner's claim line (#2823): its own box, which the Connect form's scanner fills too. */
+  const [claimLine, setClaimLine] = useState('');
+  /** This screen signed in after a claim (#2823): the connected screen says whether it owns the server. */
+  const [claimed, setClaimed] = useState(false);
   /** Which box a scan just filled (#2785), said until the rider changes either. */
   const [scanned, setScanned] = useState<keyof typeof CONNECT_SCANNED_TEXT | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -333,6 +344,7 @@ export function InstanceView({
     setDevices(undefined);
     setChanges(undefined);
     setRevoked(undefined);
+    setClaimed(false);
     await read();
   }
 
@@ -428,6 +440,7 @@ export function InstanceView({
                   setScanned(text.trim().startsWith('oyl-instance:') ? 'card' : undefined);
                 } else {
                   setOffer(codeWithCard(line.card, line.code));
+                  setClaimLine(codeWithCard(line.card, line.code));
                   setScanned('line');
                 }
               }}
@@ -480,6 +493,21 @@ export function InstanceView({
             {refusal}
           </StatusMessage>
         )}
+        <OwnerClaim
+          port={port}
+          camera={camera}
+          line={claimLine}
+          onLineChange={(text) => {
+            setClaimLine(text);
+            setScanned(undefined);
+          }}
+          onSignedIn={(outcome) => {
+            setClaimLine('');
+            setClaimed(true);
+            setRecoveryCodes(outcome.recoveryCodes);
+            void read();
+          }}
+        />
         {/* #1195: with no instance on this device the panel draws nothing at
             all; it is here so that only its own availability decides. */}
         {sync === undefined ? null : <SyncPanel port={sync} />}
@@ -522,6 +550,16 @@ export function InstanceView({
             <dt>Your name there</dt>
             <dd>{state.displayName}</dd>
           </dl>
+          {/* #2823: after a claim, whether the server now says this device owns it. */}
+          {claimed && ownership === 'owner' ? (
+            <StatusMessage tone="success" label="Claimed" live>
+              {OWNER_CLAIM_TEXT.owned}
+            </StatusMessage>
+          ) : claimed && ownership === 'not-owner' ? (
+            <StatusMessage tone="warning" label="Not the owner yet" live>
+              {OWNER_CLAIM_TEXT['not-owner']}
+            </StatusMessage>
+          ) : null}
           {/* Controls first (#666): the one action on this state is here, not
               under the device list. */}
           {disconnectControl}

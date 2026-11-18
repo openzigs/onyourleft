@@ -68,8 +68,14 @@ export function CardScanner({
   controller,
   onScanned,
   every,
+  startLabel = CARD_SCAN_TEXT.start,
 }: {
   readonly controller: CameraController;
+  /**
+   * The start button's name, where a screen has two scanners for two things
+   * (#2823: the owner's claim code beside the Connect form's card).
+   */
+  readonly startLabel?: string;
   /** The text of the code read, once: the scanner has already closed. */
   readonly onScanned: (text: string) => void;
   /** How the reads are timed: `usePairingScan`'s own timer unless a test owns it. */
@@ -205,7 +211,7 @@ export function CardScanner({
         </>
       ) : (
         <Button variant="secondary" onClick={start} ref={startButton}>
-          {CARD_SCAN_TEXT.start}
+          {startLabel}
         </Button>
       )}
       {problem === undefined ? null : (
