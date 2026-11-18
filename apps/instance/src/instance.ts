@@ -167,6 +167,8 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
+  /** A new room's id: `rooms.ts`'s, from the CSPRNG, unless a test's (#2702). */
+  readonly roomId?: () => string;
   /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
   readonly hostedFetch?: typeof globalThis.fetch;
   /** The `fetch` Discord is reached through, for voice (#874): the platform's unless a test's. */
@@ -732,6 +734,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           return held.ok && held.value.publicRooms.eligible;
         },
         ...(roomsVoice === undefined ? {} : { voice: roomsVoice }),
+        ...(options.roomId === undefined ? {} : { roomId: options.roomId }),
       });
       // #2612: the owner's Rooms, from the workers, ended through the router.
       operateRooms = {
