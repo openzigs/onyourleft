@@ -99,11 +99,13 @@ container but `instance` mounts and no route serves.
   `Host` check is exact. A request for `127.0.0.1:8788` gets D-4's page saying which address to
   open. The epic's sequence diagram and #2784's description say `127.0.0.1:8788/setup`; this
   corrects them.
-- **On a fresh instance the loopback listener runs even with `OYL_INSTANCE_ADMIN_PAGES` off**, and
+- **While the setup is not done the loopback listener runs even with `OYL_INSTANCE_ADMIN_PAGES` off**, and
   serves `/setup` alone. *The author's choice*: the wizard exists so that nobody has to edit `.env`
   first. #2784 makes the home compose file's `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` default `8788` to
-  match the `ports:` line, which already defaults to it. "Fresh" means D-3's *unclaimed*. Once
-  setup is done the listener serves `/admin` only when the admin pages are on, as today.
+  match the `ports:` line, which already defaults to it. "Not done" is D-7's state, which
+  covers *unclaimed* and *claimed, setup open*, so the wizard's steps after the claim still run.
+  An instance whose owner key is set in the environment starts in *done* (D-3). Once setup is
+  done the listener serves `/admin` only when the admin pages are on, as today.
 - **Not on the Durable Object adapter** (ADR 0037 D-2), which has no loopback listener and no
   operator command. There the owner is set by `OYL_INSTANCE_OWNER_KEY` alone.
 
@@ -187,8 +189,8 @@ D-7 says what the session may do.
   and a reset (below) ends it at once. This is what #2782's round-trip test reads back.
 - **Precedence: the environment wins, and a claim is refused while `OYL_INSTANCE_OWNER_KEY` is set.**
   **Maintainer decision**, answering the epic's open question 2 (D-9 Q-2). With the variable set,
-  the instance is **claimed** from its first start: no setup code is minted, `/setup` is
-  `not_found`, and the claim route gives its one refusal. *Why the environment wins here, when
+  the instance is **claimed** and its setup **done** from its first start (D-7): no setup code is
+  minted, `/setup` is `not_found`, and the claim route gives its one refusal. *Why the environment wins here, when
   #2609's analysis settings let the database win*: an owner key in `.env` is an expert's deliberate
   choice, and every existing install has one. If the database won, a claim could replace an owner
   that the operator had named, and no existing install would notice. If the environment wins, no
@@ -203,6 +205,12 @@ D-7 says what the session may do.
   an owner who lost the claimed device, and for a claim taken by the wrong device after the setup
   was done. Recovering the athlete with a recovery code gives the device a new key, so that owner
   resets and claims again, just as they would edit `.env` today. Nothing else reopens a claim.
+- **The edge can starve the limiters, and this ADR accepts it.** On Docker Desktop the edge's
+  traffic and the owner's browser can arrive from one gateway address, so the edge can use up ADR
+  0069 D-4's per-address and instance-wide budgets and delay a sign-in, a setup-code redemption or
+  a tunnel-carried claim redemption. It is a denial of availability only, with no disclosure, and
+  the owner retries a minute later. D-2 refuses the "new code" button for the same kind of denial;
+  this one is accepted in writing and not given a separate limiter.
 - **Refusals are one sentence**: a used code, an expired code, an unknown code, and a claim when the
   instance is already claimed all get the same status and the same bytes (#2782). Redemptions are
   rate-limited as ADR 0069 D-4 limits sign-ins.
@@ -327,6 +335,7 @@ mode only through the loopback setup session or the host's command. Neither is r
   setup code can be minted and redeemed in the first two. `/setup` is `not_found` in the third.
   #2784's acceptance criterion *"`not_found` on loopback once the owner is claimed"* means
   **done**: the wizard's steps after the claim run while the owner is claimed and the setup is open.
+  An instance started with `OYL_INSTANCE_OWNER_KEY` set begins in *done*.
 - **What a setup session may change, and only while the setup is not done**: mint the claim code
   and confirm or discard a pending claim (D-3, D-5), download the emergency kit once (D-4), set the
   registration mode (D-6), mint **one** rider invite shown as a loopback QR (#2783), and finish.
