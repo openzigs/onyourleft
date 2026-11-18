@@ -74,6 +74,7 @@ function json(body: unknown, status = 200): Response {
 function realPort(
   signedIn: boolean,
   sessionStatus = 200,
+  sessionBody: unknown = {},
 ): { port: InstancePort; reads: Promise<unknown>[]; sent: string[] } {
   const sent: string[] = [];
   const reads: Promise<unknown>[] = [];
@@ -88,7 +89,7 @@ function realPort(
       sent.push(path);
       if (path === '/v1/auth/session') {
         return Promise.resolve(
-          sessionStatus === 200 ? json({ displayName: RIDER }) : json({}, sessionStatus),
+          sessionStatus === 200 ? json({ displayName: RIDER }) : json(sessionBody, sessionStatus),
         );
       }
       if (path === '/instance') return Promise.resolve(json({ name: 'Lanes' }));
@@ -197,6 +198,28 @@ describe('#2756 — the Connect and keep card says whether this device is connec
 
     expect(line()).toBe(
       'See this device’s connection and your devices there, or connect to an instance to ride with other people.',
+    );
+    expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
+  });
+
+  it('with an instance that cannot be reached, says so with the same sentence and links to the connection', async () => {
+    const { port, reads } = realPort(true, 500);
+    mounted = await mount(<Settings instance={port} />);
+    await readsDone(reads);
+
+    expect(line()).toBe(
+      `This device holds a sign-in for ${ORIGIN}, which did not answer as connected just now. See this device’s connection for why.`,
+    );
+    expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
+  });
+
+  it('with a sign-in this device cannot read, does not say "Connect to an instance"', async () => {
+    const { port, reads } = realPort(true, 403, { error: { code: 'sealed_required' } });
+    mounted = await mount(<Settings instance={port} />);
+    await readsDone(reads);
+
+    expect(line()).toBe(
+      `This device holds a sign-in for ${ORIGIN}, which did not answer as connected just now. See this device’s connection for why.`,
     );
     expect(link().getAttribute('href')).toBe(hrefFor(routeById('instance')));
   });
