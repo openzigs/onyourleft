@@ -1,27 +1,43 @@
 # Running the instance on a home Windows machine
 
-The project's first instance runs on the owner's own Windows machine, in Docker, reached from the
-internet **only** through a Cloudflare Tunnel
-([#807](https://github.com/openzigs/onyourleft/issues/807), ADR 0037 D-8). This guide is written so
-that **somebody who has never seen this repository** can follow it on their own Windows machine.
-Everything after setup is in [`operating-an-instance.md`](../operating-an-instance.md).
+The project's first instance runs on the owner's own Windows machine, in Docker
+([#807](https://github.com/openzigs/onyourleft/issues/807), ADR 0037 D-8). Riders reach it in one of
+two ways, and **neither needs a port opened on the router** (ADR 0079,
+[#2790](https://github.com/openzigs/onyourleft/issues/2790)):
+
+- **Your tailnet (no domain, the default).** The instance is served by `tailscale serve` at
+  `https://<machine>.<tailnet>.ts.net`, and only devices on your tailnet can reach it
+  ([#2805](https://github.com/openzigs/onyourleft/issues/2805), ADR 0079 D-2). It needs a free
+  Tailscale account and nothing you pay for.
+- **A Cloudflare tunnel (if you have a domain).** `cloudflared` serves a hostname on a domain you
+  own on Cloudflare (ADR 0079 D-4). A domain is a yearly bill, so this is the option, never the
+  requirement (D-1).
+
+This guide is written so that **somebody who has never seen this repository** can follow it on
+their own Windows machine. Everything after setup is in
+[`operating-an-instance.md`](../operating-an-instance.md).
 
 ```mermaid
 graph LR
-    R[Riders: web + Android] -->|wss / https| CF[Cloudflare edge]
+    R[Riders: web + Android] -->|https, on the tailnet| TS[tailscale container]
+    R2[Riders: web + Android] -->|wss / https| CF[Cloudflare edge]
     CF <-->|outbound tunnel| CD[cloudflared container]
     subgraph Home["The Windows machine: WSL 2 / Docker Desktop"]
-        CD --> I[instance container]
+        TS --> I[instance container]
+        CD --> I
         I --> V[(volume: SQLite + blobs)]
         V -.->|every 6 h| B[(OYL_BACKUP_DIR)]
     end
     B -.->|copied| O[(OYL_OFFBOX_DIR: off this machine's disk)]
 ```
 
+One machine runs **one** of the two, never both: an instance has one address, and every card,
+passkey and device statement names it (ADR 0079 D-8). `deploy.sh` refuses both at once.
+
 **What you need**: Windows 10 22H2 or 11 with virtualisation enabled; about 4 GB of memory to spare;
-a Cloudflare account (free) with a domain on it; and — for the off-box backup, which the deploy
-requires — a drive that is not this machine's own disk, and **not a removable USB stick** (see
-[Backups](#backups)). **The router opens no port**: `cloudflared` dials out.
+a Tailscale account (free), **or** a Cloudflare account (free) with a domain on it; and — for the
+off-box backup, which the deploy requires — a drive that is not this machine's own disk, and **not
+a removable USB stick** (see [Backups](#backups)).
 
 ## 1. Install Docker Desktop, with the WSL 2 backend
 
@@ -49,7 +65,92 @@ git clone https://github.com/openzigs/onyourleft.git
 cd onyourleft
 ```
 
-## 3. Create the tunnel and its public hostname
+## 3. Choose how riders reach it
+
+Do **one** of [3a](#3a-your-tailnet-no-domain) or [3b](#3b-a-cloudflare-tunnel-you-have-a-domain).
+
+### 3a. Your tailnet (no domain)
+
+1. **Make a Tailscale account** at tailscale.com (the Personal plan: free, up to 6 users, unlimited
+   devices, and for non-commercial use only). In the admin console, **DNS**: turn on **MagicDNS** and
+   **HTTPS Certificates**, and note your **tailnet name** (`your-tailnet.ts.net`).
+2. **Set the tailnet's access rule** (*Access controls*) before the machine joins. It lets your own
+   devices reach everything, and every other rider's device reach the instance's port and nothing
+   else (ADR 0079 D-2). If you have never edited the policy, replace it with this; if you have, add
+   these entries to yours:
+
+   ```json
+   {
+     "tagOwners": { "tag:onyourleft": ["autogroup:owner"] },
+     "grants": [
+       { "src": ["autogroup:owner"], "dst": ["*"], "ip": ["*"] },
+       {
+         "src": ["autogroup:member", "autogroup:shared"],
+         "dst": ["tag:onyourleft"],
+         "ip": ["tcp:443"]
+       }
+     ]
+   }
+   ```
+
+   The instance's container joins as `tag:onyourleft` (`compose.yaml` asks for it), so the second
+   grant names it. A tagged machine's key does not expire, so the instance does not drop off the
+   tailnet every 180 days.
+3. **Name the machine.** It is `onyourleft` unless you set `TAILSCALE_HOSTNAME` in `.env`, so the
+   instance's address is `https://onyourleft.your-tailnet.ts.net`. That is `OYL_INSTANCE_ORIGIN` in
+   step 4. If the tailnet already has a machine of that name, Tailscale calls this one
+   `onyourleft-1`; `deploy.sh` notices and tells you (step 5).
+4. **How each rider joins**: invite them into your tailnet (*Users → Invite users*, each on their
+   own Tailscale account; the free plan has 6 users), or share the machine with them (*Machines →
+   onyourleft → Share*). Each rider installs the Tailscale app on their tablet or phone and signs in
+   **as themselves**. Sharing a *tagged* machine has not been tried here: if the console does not
+   offer it, invite the rider.
+   ⚠️ **Never sign a rider's device in to your own account**: that gives it your identity across the
+   whole tailnet, past the access rule above.
+
+**What to know before you choose it:**
+
+- ⚠️ **The machine's name and your tailnet's name are public.** The certificate that makes
+  `https://` work is a public one, and every public certificate's name is published in the
+  Certificate Transparency logs. Choose `TAILSCALE_HOSTNAME` with that in mind: it is not your
+  name or your street.
+- **Who could still get in.** TLS ends on your machine, with a key Tailscale never sees, and
+  Tailscale's relays carry only encrypted traffic. Tailscale, the company, could still add a device
+  to your tailnet or obtain a certificate for your name, both by an active attack that would be
+  logged (ADR 0079 D-2). **Tailnet Lock** (*Settings → Device management*) is the defence against
+  the first. It is optional, and this deployment does not need it.
+- **The admin pages work on the tailnet** at `https://onyourleft.your-tailnet.ts.net/admin`, with a
+  passkey for that host, and the access rule keeps everybody else out.
+- **A tailnet request is not the home network.** A rider at home on the tailnet is a rider like any
+  other to the instance (ADR 0046's ruling of 2026-10-07).
+
+**Measured on 2026-11-18** ([#2805](https://github.com/openzigs/onyourleft/issues/2805)): through
+`tailscale serve`, a `text/event-stream` framed as the analysis write-up's stream arrived event by
+event, one a second as they were written rather than together at the end, and a WebSocket stayed
+open for the 2.5 minutes watched with a keepalive, and for 3.5 minutes with no traffic at all. `serve` writes the rider's tailnet address into `X-Forwarded-For` and **replaces** any
+copy the rider sent, so the instance's rate limits count each rider by that address. Those figures
+are from a local test tailnet over `http`, not from Tailscale's own service and certificates: check
+yours with step 5's **Check it from a rider's device**.
+
+#### Funnel: riders who will not join the tailnet (optional)
+
+**Funnel** puts the same address on the public internet, so a rider needs no Tailscale app (ADR
+0079 D-3). It is off unless you turn it on, and it changes what the instance is:
+
+- ⚠️ **Anybody can reach it**, under a name anybody can find in the Certificate Transparency logs.
+  No access rule is in front of it.
+- **The admin pages are not served there.** While `OYL_INSTANCE_REMOTE_PATH=funnel`, every `/admin`
+  path answers `404` to everybody, on the tailnet too. The admin pages on the server machine
+  (`http://localhost:8788`) and the card on them are unchanged.
+- **Funnel's bandwidth is limited** by Tailscale, by an amount it does not publish, so a room may
+  not fit through it. Nobody has measured a room or a write-up through Funnel yet.
+
+To turn it on: add the `funnel` attribute for the tag to the access rule (`"nodeAttrs": [{ "target":
+["tag:onyourleft"], "attr": ["funnel"] }]`), set `OYL_INSTANCE_REMOTE_PATH=funnel` in `.env`, and
+deploy again. `deploy.sh` then serves `tailscale/serve-funnel.json` in place of
+`tailscale/serve-tailnet.json`. The address does not change, so no device needs a new card.
+
+### 3b. A Cloudflare tunnel (you have a domain)
 
 1. In the Cloudflare dashboard: **Zero Trust → Networks → Tunnels → Create a tunnel**, type
    **Cloudflared**. Name it (`onyourleft`).
@@ -84,6 +185,14 @@ cd onyourleft
 ⚠️ **The token is a secret.** It goes in `.env` in step 4 and nowhere else — not a commit, not a
 chat, not a screenshot. Anybody holding it can serve your hostname.
 
+### Changing from one to the other later
+
+The address changes, so **every rider's device must scan the instance's new card, and every admin
+passkey made for the old address stops working** until you make one for the new address (ADR 0069
+D-1, ADR 0079 D-8). The instance's identity and its data stay the same. Change
+`OYL_INSTANCE_ORIGIN`, `COMPOSE_PROFILES`, `OYL_INSTANCE_REMOTE_PATH` and
+`OYL_INSTANCE_CLIENT_ADDRESS_HEADER` together in `.env`, then deploy.
+
 ## 4. Fill in `.env`
 
 ```bash
@@ -95,11 +204,16 @@ Edit `.env`:
 
 | Variable | Set it to |
 |---|---|
-| `OYL_INSTANCE_ORIGIN` | `https://` and the public hostname from step 3 |
+| `COMPOSE_PROFILES` | `tailscale` for 3a, `cloudflare` for 3b (add `history` or `analysis` with a comma if you use those) |
+| `OYL_INSTANCE_REMOTE_PATH` | `tailnet` for 3a (or `funnel`, if you turned it on), `cloudflare` for 3b |
+| `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` | `x-forwarded-for` for 3a; `cf-connecting-ip` for 3b, which is also what empty means. The instance refuses to start with the other path's |
+| `OYL_INSTANCE_ORIGIN` | `https://` and the address from step 3: `https://onyourleft.your-tailnet.ts.net`, or the tunnel's public hostname |
 | `OYL_INSTANCE_REGISTRATION` | `approval` (you approve each new account; the default, and what an empty value means), `invite`, `open`, or `closed` — see [`docs/moderation.md`](../moderation.md). Your own device registers active in every mode once its key is in `OYL_INSTANCE_OWNER_KEY`. ⚠️ `closed` turns away **your other** devices too: the app says the instance is not taking new riders. Link them to your account from the app instead, or approve them |
 | `OYL_INSTANCE_OWNER_KEY` | your device key, which the app shows: you are the instance's moderator. Empty names nobody |
 | `OYL_INSTANCE_DEPUTY_KEY` | leave it **empty**. An instance has one moderator ([`docs/moderation.md`](../moderation.md)); this names a second only if you want one |
-| `CLOUDFLARE_TUNNEL_TOKEN` | the token from step 3 |
+| `CLOUDFLARE_TUNNEL_TOKEN` | 3b only: the token from step 3b |
+| `TAILSCALE_HOSTNAME` | 3a only, optional: the machine's name on the tailnet, `onyourleft` when empty. It is public (step 3a) |
+| `TAILSCALE_AUTH_KEY` | 3a only, optional: empty, and the first deploy prints a sign-in link instead. A key from *Settings → Keys* (tagged `tag:onyourleft`) signs the machine in by itself; it is a secret, like the tunnel token |
 | `OYL_INSTANCE_SECRET_KEY` | **leave it empty.** The instance makes it on its first start in the `secrets/` folder beside `compose.yaml`, owner-only, and reads it there on every later start (#2781). Setting it yourself with `openssl rand -base64 32` is optional, for an existing install. It is what a hosted model key and the instance's own keys are encrypted under, so download the **emergency kit** from the admin pages on this machine once they are on, and keep it away from both backup folders ([`operating-an-instance.md`](../operating-an-instance.md#the-instances-secrets)) |
 | `OYL_INSTANCE_NAME` | optional: the name the app shows for this instance, at most 64 characters |
 | `OYL_BACKUP_DIR` | a folder on this machine for snapshots, e.g. `C:/onyourleft/backups` |
@@ -108,18 +222,21 @@ Edit `.env`:
 
 `.env` is ignored by git, so `git pull` never overwrites it and never uploads it.
 
-**The rider's address, and why `compose.yaml` fixes the tunnel's.** Every connection reaches the
-instance from `cloudflared`, so the per-address rate limits read the rider's own address from the
-`cf-connecting-ip` header Cloudflare writes (`OYL_INSTANCE_CLIENT_ADDRESS_HEADER`). The instance
-believes that header only from a proxy it trusts — loopback, or an address in
-`OYL_INSTANCE_TRUSTED_PROXIES` — so `compose.yaml` gives `cloudflared` the fixed address
-`172.30.87.10` on the project's own network, and `172.30.88.10` on `tunnel_metrics`, the internal
-network only it and the instance share for the tunnel's readiness (#2604), and names exactly those
-two addresses. You do not set either in `.env`. If `172.30.87.0/24` or `172.30.88.0/24` is already
-in use on this machine, change that subnet, the tunnel's address on it and
-`OYL_INSTANCE_TRUSTED_PROXIES` in `compose.yaml` together; for `172.30.88.0/24`, also the
-`--metrics` address in the tunnel's command and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network,
-or a port published for local debugging, is counted as itself, whatever header it sends.
+**The rider's address, and why `compose.yaml` fixes the proxies' addresses.** Every connection
+reaches the instance from `cloudflared` or from the `tailscale` container, so the per-address rate
+limits read the rider's own address from the header that proxy writes
+(`OYL_INSTANCE_CLIENT_ADDRESS_HEADER`): `cf-connecting-ip` behind Cloudflare, `x-forwarded-for`
+behind `tailscale serve`. The instance believes that header only from a proxy it trusts — loopback,
+or an address in `OYL_INSTANCE_TRUSTED_PROXIES` — so `compose.yaml` gives `cloudflared` the fixed
+address `172.30.87.10` on the project's own network, and `172.30.88.10` on `tunnel_metrics`, the
+internal network only it and the instance share for the tunnel's readiness (#2604), gives
+`tailscale` `172.30.87.11`, and names exactly those three addresses. You do not set them in `.env`.
+The same list is what makes the admin pages' loopback listener close a connection from either proxy
+unread (ADR 0069 D-5). If `172.30.87.0/24` or `172.30.88.0/24` is already in use on this machine,
+change that subnet, the proxies' addresses on it and `OYL_INSTANCE_TRUSTED_PROXIES` in
+`compose.yaml` together; for `172.30.88.0/24`, also the `--metrics` address in the tunnel's command
+and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network, or a port published
+for local debugging, is counted as itself, whatever header it sends.
 
 ## 5. Deploy — one command
 
@@ -127,14 +244,23 @@ or a port published for local debugging, is counted as itself, whatever header i
 bash apps/instance/deploy/home/deploy.sh
 ```
 
-It builds the image from this checkout (tagged with the commit), runs the database's migrate step,
-starts the instance, waits until `/ready` says ready, then starts the tunnel and the scheduled
+It checks that `.env` names one remote path and the settings it needs, builds the image from this
+checkout (tagged with the commit), runs the database's migrate step, starts the instance, waits
+until `/ready` says ready, then starts the remote path (`tailscale` or `tunnel`) and the scheduled
 backup. It prints how long it took. If the new build never becomes ready it puts the previous one
 back by itself, with the data as it was — see
 [`operating-an-instance.md` → Upgrading](../operating-an-instance.md#upgrading).
 
-**Check it from outside**: `https://rides.example.org/health` answers `{"status":"ok",…}` and
-`/ready` answers `{"status":"ready",…}`.
+**On the tailnet (3a)** it then waits for Tailscale to be signed in. The first time, with no
+`TAILSCALE_AUTH_KEY`, it prints a link: open it, sign in as yourself, and the deploy carries on.
+Then it reads `OYL_INSTANCE_ORIGIN` back from the running instance and compares it with the name
+`tailscale serve` answers on. If they differ it says both and exits 1: set `OYL_INSTANCE_ORIGIN` to
+the name it printed and deploy again, because every card the instance draws would name the wrong
+address.
+
+**Check it from a rider's device** (on the tailnet for 3a, on mobile data for 3b):
+`https://onyourleft.your-tailnet.ts.net/health` or `https://rides.example.org/health` answers
+`{"status":"ok",…}` and `/ready` answers `{"status":"ready",…}`.
 
 ## 6. A room to ride in
 
@@ -399,6 +525,10 @@ bash apps/instance/deploy/home/deploy.sh
 A snapshot is taken first; the database is migrated as its own step before the new build starts;
 and a build that does not become ready is replaced by the previous one, with the snapshot restored.
 To go back by hand: `bash apps/instance/deploy/home/deploy.sh --rollback`.
+
+**A `.env` from before the tunnel was a profile** (#2805) has `CLOUDFLARE_TUNNEL_TOKEN` and no
+`COMPOSE_PROFILES`. `deploy.sh` still starts its tunnel, and says to add `cloudflare` to
+`COMPOSE_PROFILES`. Do that, so that a `docker compose up` by hand starts it too.
 
 ## Backups
 

@@ -30,6 +30,7 @@ describe('readConfig', () => {
         publicRooms: { minimumAccountDays: 7, minimumCompletedRides: 3 },
         clientAddressHeader: null,
         trustedProxies: [],
+        remotePath: null,
         history: {
           kind: 'off',
           code: 'not-set',
@@ -187,6 +188,51 @@ describe('readConfig', () => {
       expect(refused.ok ? '' : refused.problems.join(' '), bad).toContain(
         'OYL_INSTANCE_TRUSTED_PROXIES',
       );
+    }
+  });
+});
+
+describe('the remote path (#2805, ADR 0079)', () => {
+  it('reads each path ADR 0079 names, with the one header its proxy writes', () => {
+    for (const [path, header] of [
+      ['tailnet', 'x-forwarded-for'],
+      ['funnel', 'X-Forwarded-For'],
+      [' Cloudflare ', 'cf-connecting-ip'],
+    ] as const) {
+      const read = readConfig({ commit: COMMIT, remotePath: path, clientAddressHeader: header });
+      if (!read.ok) throw new Error(read.problems.join(' '));
+      expect(read.config.remotePath).toBe(path.trim().toLowerCase());
+    }
+  });
+
+  it('names none when it is unset, and asks nothing of the header then', () => {
+    const read = readConfig({ commit: COMMIT, clientAddressHeader: 'x-forwarded-for' });
+    expect(read.ok && read.config.remotePath).toBeNull();
+  });
+
+  it('refuses a path it does not know', () => {
+    const read = readConfig({
+      commit: COMMIT,
+      remotePath: 'lan',
+      clientAddressHeader: 'x-forwarded-for',
+    });
+    expect(read.ok ? [] : read.problems).toEqual([
+      'OYL_INSTANCE_REMOTE_PATH must be one of tailnet, funnel or cloudflare.',
+    ]);
+  });
+
+  it('refuses a path with another proxy’s header, or none, naming the header it needs', () => {
+    // Behind Cloudflare X-Forwarded-For is appended to, so a client could pick its own
+    // rate-limit bucket; tailscale serve passes a client's CF-Connecting-IP through untouched.
+    for (const [path, header, wanted] of [
+      ['tailnet', 'cf-connecting-ip', 'x-forwarded-for'],
+      ['funnel', undefined, 'x-forwarded-for'],
+      ['cloudflare', 'x-forwarded-for', 'cf-connecting-ip'],
+    ] as const) {
+      const read = readConfig({ commit: COMMIT, remotePath: path, clientAddressHeader: header });
+      expect(read.ok ? [] : read.problems, path).toEqual([
+        `OYL_INSTANCE_REMOTE_PATH=${path} needs OYL_INSTANCE_CLIENT_ADDRESS_HEADER=${wanted}: that is the header its proxy writes the rider's address in.`,
+      ]);
     }
   });
 });

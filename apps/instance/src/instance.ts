@@ -503,12 +503,23 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   // Until the store is open the handler has no accounts; it is replaced, not
   // mutated, once it does, so no request ever sees half of either.
   let handler: Handler = createHandler(handlerOptions);
-  const listening = await listen((request, client) => handler(request, client), {
-    host: options.config.host,
-    port: options.config.port,
-    clientAddressHeader: options.config.clientAddressHeader,
-    trustedProxies: options.config.trustedProxies,
-  });
+  // #2805 (ADR 0079 D-3): with Funnel on, the public listener is on the
+  // internet with no edge rule in front of it, so it answers every `/admin`
+  // path `not_found` — and this setting alone decides it, never a header. The
+  // loopback listener below calls the handler itself and is not asked.
+  const hideAdmin = options.config.remotePath === 'funnel';
+  const listening = await listen(
+    (request, client) =>
+      hideAdmin && isAdminPath(new URL(request.url).pathname)
+        ? Promise.resolve(errorResponse('not_found'))
+        : handler(request, client),
+    {
+      host: options.config.host,
+      port: options.config.port,
+      clientAddressHeader: options.config.clientAddressHeader,
+      trustedProxies: options.config.trustedProxies,
+    },
+  );
   // #2643 (ADR 0069 D-5): the admin pages' loopback listener, when the
   // operator set its port. It answers `/admin` and nothing else, marks every
   // request it reads `loopback` itself, believes no client-address header,
