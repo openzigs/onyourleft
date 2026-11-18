@@ -166,7 +166,7 @@ describe('deploy/home/compose.yaml — the tailscale service (#2805, ADR 0079 D-
 
   it('serves the configuration OYL_INSTANCE_REMOTE_PATH names, from a directory mounted read-only', () => {
     expect(lines).toContain(
-      'TS_SERVE_CONFIG: /config/serve-${OYL_INSTANCE_REMOTE_PATH:-tailnet}.json',
+      'TS_SERVE_CONFIG: /config/serve-${OYL_INSTANCE_REMOTE_PATH:-unset}.json',
     );
     expect(lines).toMatch(/^ {6}- \.\/tailscale:\/config:ro$/m);
     expect(COMPOSE).toMatch(/OYL_INSTANCE_REMOTE_PATH: \$\{OYL_INSTANCE_REMOTE_PATH:-\}$/m);

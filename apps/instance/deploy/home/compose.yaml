@@ -231,7 +231,8 @@ services:
   #
   # The serve configuration is the file in `tailscale/` beside this one that
   # OYL_INSTANCE_REMOTE_PATH names, read-only: `serve-tailnet.json` (Funnel
-  # off, the default) or `serve-funnel.json` (D-3). Kept on the box, never in
+  # off) or `serve-funnel.json` (D-3); unset names no file, so the profile
+  # cannot start with no remote path to cross-check the client header against. Kept on the box, never in
   # a dashboard. Tailscale's state — this machine's node key — is the
   # `tailscale` volume, so a restart is the same machine and the same name.
   #
@@ -254,7 +255,7 @@ services:
       # The tag the documented tailnet rule lets riders reach on 443 alone
       # (home-machine.md, "The tailnet's access rule").
       TS_EXTRA_ARGS: --advertise-tags=tag:onyourleft
-      TS_SERVE_CONFIG: /config/serve-${OYL_INSTANCE_REMOTE_PATH:-tailnet}.json
+      TS_SERVE_CONFIG: /config/serve-${OYL_INSTANCE_REMOTE_PATH:-unset}.json
     volumes:
       - tailscale:/var/lib/tailscale
       # A directory, not a file: Tailscale's docs say the serve file must be
