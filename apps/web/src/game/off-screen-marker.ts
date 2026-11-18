@@ -283,12 +283,17 @@ function clearAlong(
 
 /**
  * The HUD's panels a marker keeps clear of: every direct child of `.oyl-hud`
- * but its visually hidden live region — what `browser/ride-harness.tsx`
- * §`measure` counts as a panel — and the two rows a short phone lifts out of
- * the actions panel into panels of their own.
+ * but its visually hidden live region and #2600's `.oyl-hud__tabs` — what
+ * `browser/ride-harness.tsx` §`measure` counts as a panel — and the two rows a
+ * short phone lifts out of the actions panel into panels of their own.
+ *
+ * ⚠️ **`.oyl-hud__tabs` is a layer over the whole stage on a tablet**, which a
+ * panel's keyboard control stands on, and it covers nothing. Taken for a
+ * panel it covered every place on every ray, so no marker was laid: the
+ * owner's tablet on 2026-11-17, *Pacer 4 s behind you* and no marker.
  */
 export const HUD_PANELS_SELECTOR =
-  '.oyl-hud > :not([data-oyl-announcer]), .oyl-hud__side-camera-row, .oyl-hud__actions > .oyl-sound';
+  '.oyl-hud > :not([data-oyl-announcer], .oyl-hud__tabs), .oyl-hud__side-camera-row, .oyl-hud__actions > .oyl-sound';
 
 /**
  * Where each of `covers` is on the page, as a {@link PageBox} from the top left
