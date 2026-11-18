@@ -26,7 +26,10 @@
  *   words. Any other row says it could not be shown, and shows nothing of
  *   itself — so a row that somehow held a key or a coordinate is not drawn.
  *
- * Nothing here renders a token, a code, a key or a coordinate.
+ * Nothing here renders a token, a code, a key or a coordinate — with one
+ * exception, ADR 0080 D-3 and D-7's: {@link cardCodePart} draws a claim or an
+ * invite code beside the card, as a QR and as text, for a page on the
+ * loopback listener only (#2783).
  *
  * ⚠️ The log's action labels are the app's (`apps/web/src/views/OperateView.tsx`
  * §`ACTION_LABEL`), restated: `apps/instance` may not import `apps/web`.
@@ -158,6 +161,7 @@ import {
   type OperatorSource,
 } from '../store/sql-store.ts';
 import { sectionLinks } from './admin-routes.ts';
+import { cardWithCode, qrSvg } from './qr.ts';
 
 /** The one script, linked on the pages with a passkey ceremony; never inline. */
 export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></script>\n';
@@ -560,6 +564,7 @@ const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   admin_passkey_confirmed: 'Admin passkey confirmed on the host',
   room_ended: 'Room ended',
   registration_decided: 'Registration decided',
+  emergency_kit_downloaded: 'Emergency kit downloaded',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */
@@ -1473,6 +1478,11 @@ export interface KeysView {
   readonly card: KeysCardView | null;
   /** Drawn on the loopback listener, where the card may be shown. */
   readonly onServer: boolean;
+  /**
+   * Whether the emergency kit is offered (#2781, ADR 0080 D-4): on the
+   * loopback listener, when a secret came from the secrets folder.
+   */
+  readonly kit: boolean;
   readonly strength: 'code' | 'passkey';
   readonly csrf: string;
   readonly notice: KeysNotice | null;
@@ -1501,6 +1511,42 @@ function cardPart(shown: KeysCardView | null, onServer: boolean): string {
 <p><code class="card">${escapeHtml(shown.card)}</code></p>
 <p>${escapeHtml(KEYS_FINGERPRINT_TEXT)}</p>
 <p><code class="fingerprint">${escapeHtml(shown.fingerprint)}</code></p>`);
+}
+
+/** What the emergency kit is, said beside its button (#2781). Draft wording, for the owner's approval. */
+export const KIT_TEXT =
+  'The emergency kit is one text file holding this instance’s secrets, its address and its card. Keep it in a password manager or on paper, never beside your backups: with it, a backup can be restored on a new machine and every device keeps trusting the instance. Without it, a restore makes new keys and every device has to connect again.';
+
+export const KIT_BUTTON = 'Download the emergency kit';
+
+/** Said in a code session in place of the kit's button (ADR 0069 Q-A). */
+export const KIT_READS_ONLY_TEXT =
+  'A one-time code’s session downloads nothing. Sign in with a passkey to download the emergency kit: it asks your passkey again.';
+
+/** Said on the server machine when every secret is in `.env`. */
+export const KIT_NONE_TEXT =
+  'There is no emergency kit to download: every secret this instance uses is set in .env, so keep a copy of that file’s secret lines safe, away from your backups.';
+
+/** The emergency kit's part of the Keys page: on the loopback listener only. */
+function kitPart(view: KeysView): string {
+  if (!view.onServer) return '';
+  if (!view.kit)
+    return card(`<h2>Emergency kit</h2>
+<p>${escapeHtml(KIT_NONE_TEXT)}</p>`);
+  const form =
+    view.strength === 'passkey'
+      ? stepUpForm(
+          '/admin/keys/emergency-kit',
+          'emergency_kit',
+          view.csrf,
+          KIT_BUTTON,
+          '',
+          KIT_BUTTON,
+        )
+      : `<p>${escapeHtml(KIT_READS_ONLY_TEXT)}</p>`;
+  return card(`<h2>Emergency kit</h2>
+<p>${escapeHtml(KIT_TEXT)}</p>
+${form}`);
 }
 
 function rotatePart(view: KeysView): string {
@@ -1553,11 +1599,85 @@ export function keysBody(view: KeysView): string {
   ).join('\n');
   return `${card(`<dl class="facts">
 ${keyFactRows(view.keys).map(fact).join('\n')}
-</dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
+</dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${kitPart(view)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
 <p>${escapeHtml(KEYS_CLI_TEXT)}</p>
 <ul class="cli">
 ${cli}
 </ul>`)}`;
+}
+
+/**
+ * What a card-and-code QR is for (#2783, ADR 0080): the owner's claim code on
+ * the setup wizard's claim step (D-3), or the one rider invite the setup
+ * session may mint (D-7).
+ */
+export type CardCodePurpose = 'claim' | 'invite';
+
+/**
+ * A card and a single-use code to draw as one QR, with the same line beside
+ * it. ⚠️ **Handed to the renderer on the LOOPBACK listener only**, as
+ * {@link KeysCardView} is: the tunnel's pages are never drawn with one.
+ */
+export interface CardCodeView {
+  readonly purpose: CardCodePurpose;
+  /** `oyl-instance:<origin>#<52 characters>`, whole. */
+  readonly card: string;
+  /** The code as the instance minted it: four groups of four. */
+  readonly code: string;
+  /** When the code stops working: ISO 8601, UTC. */
+  readonly expiresAt: string;
+}
+
+/**
+ * Each purpose's heading, what to do, and the QR's accessible name. Draft
+ * wording, for the owner's approval.
+ */
+export const CARD_CODE_TEXT: Readonly<
+  Record<
+    CardCodePurpose,
+    { readonly heading: string; readonly lead: string; readonly label: string }
+  >
+> = {
+  claim: {
+    heading: 'Claim this instance with your tablet',
+    lead: 'On the tablet you ride with, open On Your Left, go to Instance and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so the tablet checks the instance’s key before it sends anything, and a code that makes that tablet this instance’s owner.',
+    label: 'The instance’s card and a claim code, for the app’s scanner',
+  },
+  invite: {
+    heading: 'Invite a rider',
+    lead: 'Ask the rider to open On Your Left, go to Instance and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so their app checks the instance’s key before it sends anything, and an invitation to join.',
+    label: 'The instance’s card and an invitation, for the app’s scanner',
+  },
+};
+
+/** Above the line beside the QR. Draft. */
+export const CARD_CODE_LINE_TEXT =
+  'Or paste this line into the app’s Instance screen. It is what the code carries, whole:';
+
+/** When the code stops working, with the moment drawn by {@link readableMoment}. Draft. */
+export const CARD_CODE_UNTIL_TEXT = 'It works once, until';
+
+/**
+ * A card and a single-use code as one QR, server-drawn SVG (`qr.ts`), with
+ * the same line beside it as text a person can select and copy: the QR is
+ * named for what it is for and described by that line, which is its
+ * alternative. Throws unless the card is whole and the code is one the
+ * instance mints (`qr.ts` §`cardWithCode`).
+ */
+export function cardCodePart(view: CardCodeView): string {
+  const line = cardWithCode(view.card, view.code);
+  const text = CARD_CODE_TEXT[view.purpose];
+  const lineId = `${view.purpose}-code-line`;
+  return card(`<h2>${escapeHtml(text.heading)}</h2>
+<p>${escapeHtml(text.lead)}</p>
+<figure class="qr-figure">
+${qrSvg(line, text.label, lineId)}
+<figcaption>
+<p>${escapeHtml(CARD_CODE_LINE_TEXT)}</p>
+<p><code class="card" id="${escapeHtml(lineId)}">${escapeHtml(line)}</code></p>
+</figcaption>
+</figure>
+<p>${escapeHtml(CARD_CODE_UNTIL_TEXT)} ${readableMoment(view.expiresAt)}.</p>`);
 }
 
 /** One problem line as `GET /v1/operate/logs` answers it (#2651): already through the log's redaction. */

@@ -367,3 +367,32 @@ describe('deploy/home/compose.yaml — the admin pages’ loopback listener (#26
     expect(off.ok).toBe(false);
   });
 });
+
+describe('deploy/home/compose.yaml — the secrets folder (#2781, ADR 0080 D-4)', () => {
+  const block = /^services:\n([\s\S]*?)(?=^[a-z])/m.exec(COMPOSE)?.[1] ?? '';
+  const services = [...block.matchAll(/^ {2}([a-z][a-z0-9_-]*):\s*$/gm)].map(
+    (match) => match[1] ?? '',
+  );
+  /** A service's lines that are not comments. */
+  const lines = (name: string): string[] =>
+    service(name)
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line));
+
+  it('mounts ./secrets into the instance alone, writable, where OYL_INSTANCE_SECRETS_DIR names it', () => {
+    const mounting = services.filter((name) =>
+      lines(name).some((line) => line.includes('./secrets')),
+    );
+    expect(mounting).toEqual(['instance']);
+    const mount = lines('instance').find((line) => line.includes('./secrets')) ?? '';
+    expect(mount.trim()).toBe('- ./secrets:/run/secrets/onyourleft');
+    expect(setting('OYL_INSTANCE_SECRETS_DIR')).toBe('/run/secrets/onyourleft');
+  });
+
+  it('names a folder outside the data volume the backups copy', () => {
+    expect(lines('instance').map((line) => line.trim())).toContain('- data:/data');
+    expect(setting('OYL_INSTANCE_SECRETS_DIR')?.startsWith('/data')).toBe(false);
+    const image = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+    expect(image).toMatch(/OYL_INSTANCE_DATABASE=\/data\//);
+  });
+});

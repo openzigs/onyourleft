@@ -389,6 +389,25 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   day: `node:sqlite` loads, the types are still stripped from `src/main.ts` with no flag, and
   `node:quic` is still not a built-in (`ERR_UNKNOWN_BUILTIN_MODULE`), so the WebTransport row's
   reason holds. The body above is not edited.
+- **2026-11-18** — **D-9 gains a row: `uqr`, which draws the loopback setup pages' QR codes**
+  ([#2783](https://github.com/openzigs/onyourleft/issues/2783),
+  ADR 0080 D-3 and D-7, accepted on [#2795](https://github.com/openzigs/onyourleft/pull/2795)). In
+  D-9's shape, read on 2026-11-18 with `npm view uqr@0.1.3 license dependencies` and from the
+  installed package's own `LICENSE`:
+
+  | Package | Version read | SPDX, read 2026-11-18 | Lands in | Closure | `DEP001` / `DEP002` prediction | Install script |
+  |---|---|---|---|---|---|---|
+  | `uqr` | 0.1.3 | `MIT` | `apps/instance` | distributed | permissive: passes both | none |
+
+  It has no dependency, and it is the library `apps/web` already draws its codes with
+  (`camera/side-link-qr.ts`, #529), so the app and the instance encode a card the same way. One
+  module imports it, `apps/instance/src/admin/qr.ts`, which turns a card and a code into an SVG the
+  admin pages' policy admits with no script. `jsqr` 1.4.0 (`Apache-2.0`, no dependency) is added
+  beside it as a **devDependency** of `apps/instance` only, to read the drawn code back in tests; it
+  is not distributed. `check:licences` and `check:notices` passed on the install, and
+  `apps/instance/third-party.txt` carries `uqr`'s licence text. **D-2 is kept**: nothing in the
+  room core or the Durable Object adapter imports it. The body above is not edited.
+
 - **2026-11-18** — **D-8's Docker image is now published, signed, for two platforms.**
   [#2786](https://github.com/openzigs/onyourleft/issues/2786) adds
   `.github/workflows/instance-image.yml`: on a `v*` release tag it builds `apps/instance/Dockerfile`

@@ -121,6 +121,8 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['room_ended', 'Room ended'],
   // #2646: a registration decided from the instance's admin Accounts page.
   ['registration_decided', 'Registration decided'],
+  // #2781: the emergency kit, downloaded from the server machine's admin pages.
+  ['emergency_kit_downloaded', 'Emergency kit downloaded'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */

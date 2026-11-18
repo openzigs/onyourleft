@@ -997,6 +997,8 @@ export const OPERATOR_ACTIONS = [
   'room_ended',
   // #2646 (ADR 0069 D-8, D-9): a registration approved or refused from the admin Accounts page.
   'registration_decided',
+  // #2781 (ADR 0080 D-4, D-7): the emergency kit, downloaded on the server machine.
+  'emergency_kit_downloaded',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1111,6 +1113,7 @@ export const OPERATOR_DETAILS: {
   room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
   // #2646 (ADR 0069 D-8): the decision, never the rider, their name or the reason.
   registration_decided: { words: ['approved', 'refused'], counts: [] },
+  emergency_kit_downloaded: { words: [], counts: [] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */

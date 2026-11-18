@@ -137,6 +137,9 @@ export type ServerConfigResult =
 export const DEFAULT_DATABASE_PATH = 'data/instance.sqlite';
 export const DEFAULT_BLOBS_PATH = 'data/blobs';
 
+/** What `OYL_INSTANCE_METRICS_TOKEN` must be; `setup/secrets.ts` holds a made one's file to it too (#2781). */
+export const METRICS_TOKEN = /^[A-Za-z0-9._~-]{32,256}$/;
+
 const present = (value: string | undefined): value is string =>
   value !== undefined && value.trim() !== '';
 
@@ -255,7 +258,7 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
   let metricsToken: string | undefined;
   if (present(raw.metricsToken)) {
     const text = raw.metricsToken.trim();
-    if (/^[A-Za-z0-9._~-]{32,256}$/.test(text)) metricsToken = text;
+    if (METRICS_TOKEN.test(text)) metricsToken = text;
     else {
       problems.push(
         'OYL_INSTANCE_METRICS_TOKEN must be at least 32 letters, digits, dots, dashes, underscores or tildes.',
