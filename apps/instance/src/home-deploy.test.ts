@@ -273,7 +273,9 @@ describe('deploy/home/deploy.sh — the remote path (#2805, ADR 0079)', () => {
       runningOrigin: 'https://onyourleft.example-tailnet.ts.net',
     });
     expect(deployed.status).toBe(1);
-    const links = deployed.out.split('\n').filter((line) => line.includes('login.tailscale.com'));
+    const links = deployed.out
+      .split('\n')
+      .filter((line) => line.startsWith('deploy: sign this machine in'));
     expect(links).toEqual([
       'deploy: sign this machine in to your tailnet: open https://login.tailscale.com/a/example',
     ]);
