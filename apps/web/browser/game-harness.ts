@@ -8212,14 +8212,11 @@ const SWEEP_STEP_METRES = 3.7;
 /**
  * How many frames each of the harness's frame-cost means is taken over: **60**
  * — the water's, the realistic world's and the rest, but since #2775 not the
- * `?shadow-map` load's, which take {@link SHADOW_MAP_LOAD_FRAMES}. As written
- * for #286's two:
+ * `?shadow-map` load's, which take {@link SHADOW_MAP_LOAD_FRAMES}.
  *
  * Two seconds of riding at 30 fps (`QUALITY_LADDER`'s first capped rung — level
  * 2 since #482; the top two rungs draw at the display's rate), which is long
- * enough that one slow frame is a sixtieth of the answer and short enough that
- * the whole measurement — four sweeps, two at each shading — is under a second
- * on top of a gate that already runs for twenty.
+ * enough that one slow frame is a sixtieth of the answer.
  */
 const SHADING_FRAMES = 60;
 
@@ -8309,8 +8306,8 @@ function awaitTheGpu(gl: WebGL2RenderingContext | WebGLRenderingContext | null):
 }
 
 /**
- * Drives `frames` frames — {@link SHADING_FRAMES} unless the caller says — and
- * returns the mean milliseconds each.
+ * Drives `frames` frames — a required count, so that what a caller reports and
+ * what it timed cannot drift apart (#2775) — and returns the mean milliseconds each.
  *
  * ⚠️ The GPU is synchronised **once, at the end**, rather than after every
  * frame: a per-frame stall would measure the round trip as well as the work,
@@ -8322,7 +8319,7 @@ function timeFrames(
   view: { render: (frame: SceneFrame) => void },
   frameAt: (at: number, build: FrameBuild) => SceneFrame,
   gl: WebGL2RenderingContext | WebGLRenderingContext | null,
-  frames: number = SHADING_FRAMES,
+  frames: number,
 ): number {
   const started = performance.now();
   for (let index = 1; index <= frames; index += 1) {
@@ -13217,8 +13214,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
 
   const frameAt = (distance: number, build: FrameBuild): SceneFrame =>
     riding(valleyRoute(), 800 + distance, build);
-  const realisticFrameMs = timeFrames(view, frameAt, gl);
-  const stylisedFrameMs = timeFrames(plain, frameAt, plainGl);
+  const realisticFrameMs = timeFrames(view, frameAt, gl, SHADING_FRAMES);
+  const stylisedFrameMs = timeFrames(plain, frameAt, plainGl, SHADING_FRAMES);
   phaseEnds('realistic: budget and frame timing');
   // #475: each view's last frame was its own world's. @see waterSkyOf
   const waterSkyRealistic = waterSkyOf(view);
