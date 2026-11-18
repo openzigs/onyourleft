@@ -91,7 +91,7 @@ const SEALS: Readonly<Record<string, string>> = {
   '2': 'b2aa7e152fc7194801420f8e75fcc878bb8fe070d45bdcf4a481f13796d3dc80',
   '3': '786f7d2ec42b745b9de1ac60e6dc6b9ce7b8843eb9109c5838f987b5574fc146',
   '4': '8c3056a68b988cb9fcadb98d3a62b4b7c41319da6a2cacfadad843d9a45de705',
-  '5': '901e9c09049bdb2331bafa806771315cbdb6c82cdf98dc62f16f9ff3f25490df',
+  '5': '7a7cde094331f5d9a25b357a965a32c03a91e50fc9a47455685255dcf903a1e9',
 };
 
 afterEach(() => {
@@ -150,7 +150,18 @@ function scripted(
   };
 }
 
-const riderWatts = (atMs: number): number => 200 + 80 * Math.sin(atMs / 9_000);
+/**
+ * The rider's power: 200 W, 80 W either side on a 56 s triangle wave. Since
+ * version 5 (#2759) a triangle, not `Math.sin`: `Math.sin` is not exact in
+ * IEEE 754, and at one instant of the flat circuit under seed 1 CI's x64 and an
+ * arm64 Mac gave a bot following the rider powers one bit apart, so the golden
+ * digest differed. A triangle is the four operations alone, the same on every
+ * machine. Versions 1 to 4 were recorded with the sine.
+ */
+const riderWatts = (atMs: number): number => {
+  const phase = ((atMs + 14_000) % 56_000) / 56_000;
+  return 200 + 80 * (phase < 0.5 ? 4 * phase - 1 : 3 - 4 * phase);
+};
 
 /** Ride the race, 100 ms frames, its asks answered by `model` (none: a replay, which asks nothing). */
 function ride(
