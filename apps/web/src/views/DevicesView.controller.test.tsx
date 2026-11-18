@@ -9,6 +9,7 @@
  */
 
 import { seconds } from '@onyourleft/domain';
+import { deviceId, SensorError } from '@onyourleft/sensors';
 import { OPEN_BIKE_CONTROL_SERVICE } from '@onyourleft/sensors/protocol';
 import { openSimulatedController } from '@onyourleft/sensors/protocol/testing';
 import { steeringController } from '@onyourleft/sensors/simulator';
@@ -26,6 +27,7 @@ import {
   FORGET_UNNAMED_CONTROLLER,
   PAIR_CONTROLLER,
 } from '../ride/ControllerPairing';
+import { createRememberedSensors } from '../ride/remembered-sensors';
 import { createSteeringController, STEERING_CONTROLLER_BUTTONS } from '../ride/steering-controller';
 import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -228,5 +230,56 @@ describe('the steering controller on the Devices screen', () => {
     mounted = await mount(<DevicesView capabilities={CAPABLE} controller={stub.controller} />);
     await settle();
     expect(hasButton(PAIR_CONTROLLER)).toBe(false);
+  });
+});
+
+describe('#2672 — a remembered steering controller on the Devices screen', () => {
+  /** A steering controller remembering one controller that is not there yet. */
+  function remembered(name: string) {
+    const memory = createRememberedSensors(undefined);
+    memory.remember({ id: deviceId('D1:0B:1C:00:4E:21'), name, role: 'controller' });
+    const waits: Array<() => void> = [];
+    const steering = createSteeringController(
+      { requestAndConnect: async () => Promise.reject(new Error('no chooser in a test')) },
+      {
+        remembered: memory,
+        connectKnown: async () => Promise.reject(new SensorError('not-connected', 'not there')),
+        hasRoom: () => true,
+        schedule: (run) => {
+          waits.push(run);
+          return () => {
+            waits.splice(waits.indexOf(run), 1);
+          };
+        },
+      },
+    );
+    return { memory, steering, waits };
+  }
+
+  it('lists it as reconnecting, with its Forget button, and Forget stops the tries', async () => {
+    const { memory, steering, waits } = remembered('Ctrl 4E21');
+    await screenWith(steering);
+    await steering.restoreRemembered();
+    await settle();
+    expect(rowState()).toBe('Ctrl 4E21: Reconnecting…');
+    expect(hasButton(PAIR_CONTROLLER)).toBe(false);
+    expect(waits).toHaveLength(1);
+
+    await activateWithKeyboard(button('Forget Ctrl 4E21'));
+    await settle();
+    expect(rowState()).toBe('Not paired');
+    // Focus is handed to the Pair button that replaced the pressed Forget.
+    expect(document.activeElement).toBe(button(PAIR_CONTROLLER));
+    expect(waits).toHaveLength(0);
+    expect(memory.list()).toEqual([]);
+  });
+
+  it('says only Reconnecting… for one remembered with no name', async () => {
+    const { steering } = remembered('');
+    await screenWith(steering);
+    await steering.restoreRemembered();
+    await settle();
+    expect(rowState()).toBe('Reconnecting…');
+    expect(hasButton(FORGET_UNNAMED_CONTROLLER)).toBe(true);
   });
 });

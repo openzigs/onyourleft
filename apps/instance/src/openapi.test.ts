@@ -22,6 +22,16 @@ import { createStoreHarness, type StoreHarness } from './store/testing/index.ts'
 import { base64Of, testPicture } from './camera/picture-testing.ts';
 import { SEGMENT_HAPPY_CALLS } from './segments/segments-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
+import {
+  asksForPacer,
+  ATTACK,
+  chatServer,
+  consentToTactics,
+  OFFERED,
+  PACER_ANSWER,
+  PACER_INPUT,
+  TACTICS_INPUT,
+} from './analysis/tactics-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import {
   adultIn,
@@ -35,6 +45,7 @@ import { jobBody } from './analysis/jobs-testing.ts';
 import { replanBody } from './analysis/replan-testing.ts';
 import type { AnalysisEngine } from './analysis/jobs.ts';
 import type { ScreenedWriteUp } from '@onyourleft/analysis';
+import { logEvent } from './log.ts';
 import { openApiDocument, openApiText } from './openapi.ts';
 import { roomShortCode } from './operate/operate.ts';
 import { fakeRoomRouter } from './operate/rooms-testing.ts';
@@ -583,6 +594,21 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       { reason: 'other', confirm: roomShortCode(room.roomId) },
     );
   },
+  // #2613: the keys, read after a rotation so an older key is held too.
+  getOperateKeys: async (world) => {
+    const token = await moderatorToken(world);
+    await send(world, 'POST', '/v1/operate/keys/rotate', token, { confirm: 'rotate' });
+    return send(world, 'GET', '/v1/operate/keys', token);
+  },
+  rotateOperateKey: async (world) =>
+    send(world, 'POST', '/v1/operate/keys/rotate', await moderatorToken(world), {
+      confirm: 'rotate',
+    }),
+  // #2614: a problem line written through the handler's own sink, so a row has every field.
+  getOperateLogs: async (world) => {
+    logEvent(world.instance.log, 'room-worker-died', { worker: 0, code: 1, roomsLost: 2 });
+    return send(world, 'GET', '/v1/operate/logs', await moderatorToken(world));
+  },
   // #2609: the operator's analysis settings, read, saved and cleared.
   getOperateAnalysis: async (world) =>
     send(world, 'GET', '/v1/operate/analysis', await moderatorToken(world)),
@@ -908,6 +934,61 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await hostedBoth(world, token);
     return send(world, 'DELETE', '/v1/analysis/hosted/consent', token);
   },
+  // #2709: a local model offered to every rider, and one that answers at once.
+  // A race that takes the one model slot lets it go again, so the next call's
+  // rider is not `tactics_busy`.
+  getBotTactics: async (world) =>
+    send(world, 'GET', '/v1/analysis/tactics', (await signedIn(world)).token),
+  recordBotTacticsConsent: async (world) => {
+    const { token } = await signedIn(world);
+    const status = (await (await send(world, 'GET', '/v1/analysis/tactics', token)).json()) as {
+      instance: string;
+      modelAddress: string;
+    };
+    return send(world, 'POST', '/v1/analysis/tactics/consent', token, {
+      instance: status.instance,
+      modelAddress: status.modelAddress,
+    });
+  },
+  withdrawBotTacticsConsent: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    return send(world, 'DELETE', '/v1/analysis/tactics/consent', token);
+  },
+  startBotTacticsRace: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    const started = await send(world, 'POST', '/v1/analysis/tactics/start', token);
+    await send(world, 'POST', '/v1/analysis/tactics/end', token);
+    await world.tactics.idle();
+    return started;
+  },
+  decideBotTactics: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    const decided = await send(world, 'POST', '/v1/analysis/tactics/decide', token, {
+      input: TACTICS_INPUT,
+    });
+    await send(world, 'POST', '/v1/analysis/tactics/end', token);
+    return decided;
+  },
+  // #2712: the AI pacer's one decision, under the same consent and slot.
+  decidePacer: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    const decided = await send(world, 'POST', '/v1/analysis/pacer/decide', token, {
+      input: PACER_INPUT,
+    });
+    await send(world, 'POST', '/v1/analysis/tactics/end', token);
+    return decided;
+  },
+  endBotTacticsRace: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    await send(world, 'POST', '/v1/analysis/tactics/start', token);
+    await world.tactics.idle();
+    return send(world, 'POST', '/v1/analysis/tactics/end', token);
+  },
   // #1251: nothing is held, so the answer is `not-ready` and nothing is sent
   // anywhere — still the route's own 200 and its declared shape.
   sendHostedTestQuestion: async (world) => {
@@ -983,6 +1064,11 @@ describe('every route answers with the shape its entry declares', () => {
       },
       // #1106: a picture model that answers at once, as the engine above does.
       pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
+      // #2709: a local model offered to every rider, answering every call with a decision.
+      tactics: {
+        local: OFFERED,
+        fetch: chatServer((body) => (asksForPacer(body) ? PACER_ANSWER : ATTACK)).fetch,
+      },
     });
   });
   afterAll(async () => {

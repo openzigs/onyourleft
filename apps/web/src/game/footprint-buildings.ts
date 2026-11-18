@@ -27,10 +27,14 @@
  *    mapped wood, water or park, and it is dropped — `on-excluded-land`. A
  *    building inside a mapped park is dropped deliberately: the owner's rule
  *    (ADR 0054 D-5.2) is categorical, and D-5.2's one possible exception is
- *    not taken. Since #2754 a beach or pier inside a park reads as `bare`
- *    (`land-class.ts` §`BARE_KINDS_OVER_LAND`), and is still inside it
- *    (`insidePark`). ⚠️ Since #2728 also any of them over the open water the
- *    scene DRAWS (`waterways.ts` §`onOpenWater`), which a mapped lake's
+ *    not taken. #2657: a protected area's boundary (`land-class.ts`
+ *    §`PROTECTED_AREA_KINDS`, a national forest drawn round a whole town)
+ *    is not a wood or a park, and a footprint on it is built. Since #2754 a
+ *    beach or pier inside a park reads as `bare` (`land-class.ts`
+ *    §`BARE_KINDS_OVER_LAND`), and is still inside it (`insidePark`, a
+ *    mapped park's polygon, not a protected area's), so it is dropped.
+ *    ⚠️ Since #2728 also any of them over the open water the scene
+ *    DRAWS (`waterways.ts` §`onOpenWater`), which a mapped lake's
  *    shores can lay over mapped land: tested once rule 4 has found the road
  *    each point is beside.
  * 3. **The road** (D-5.4): any edge within `landform.ts`
@@ -5848,6 +5852,10 @@ function paintTown(
  * `urban`, since #1637, is the ride's urban class, built at the press beside
  * the plans: carried on the town for `settlements.ts` §`lotsAt` and
  * `streets.ts` (`MappedTown.urban`).
+ *
+ * #2660: `overlaps` also meets mapped `railway` land, so no lot stands on a
+ * railway. The land stays built-up to the mask, so nothing grows there and
+ * no field boundary runs across it; only the lots keep off it.
  */
 export function mappedTown(
   corridor: WorldCorridor,
@@ -5858,6 +5866,14 @@ export function mappedTown(
   const index = footprintIndexOf(
     plans.flatMap((plan) =>
       plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
+    ),
+  );
+  // #2660: railway land, which is built-up but no place for a house.
+  const railways = footprintIndexOf(
+    corridor.landUse.flatMap((feature) =>
+      feature.layer === 'landuse' && feature.kind === 'railway' && feature.rings[0] !== undefined
+        ? [feature.rings[0]]
+        : [],
     ),
   );
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
@@ -5871,7 +5887,7 @@ export function mappedTown(
   const town: MappedTown = {
     // #1637: the ride's urban class, which the lots and the streets read.
     ...(urban === undefined ? {} : { urban }),
-    overlaps: (lot) => index.overlaps(lot),
+    overlaps: (lot) => index.overlaps(lot) || railways.overlaps(lot),
     chainLinkAt(profile, origin, seed, land) {
       const known = chainLinks.get(profile);
       if (known !== undefined) return known;
@@ -6187,16 +6203,14 @@ function measureFootprint(
   if (outer === undefined || outer.length < 6) return 'too-small';
   const centroid = centroidOf(outer);
 
-  // 2. The land: the centroid and every vertex the map drew.
+  // 2. The land: the centroid and every vertex the map drew. #2657: a
+  // protected area's boundary (a national forest round a whole town) is not
+  // a wood, so a footprint on it is built — ADR 0054's 2026-11-15 amendment.
   // #2754: a beach inside a park is a beach, and still inside the park.
   const excluded = (x: number, z: number): boolean => {
     const here = land.classAt(x, z);
-    return (
-      here === 'wood' ||
-      here === 'water' ||
-      here === 'park' ||
-      (here === 'bare' && insidePark(corridor, x, z))
-    );
+    if (here === 'bare') return insidePark(corridor, x, z);
+    return (here === 'wood' || here === 'water' || here === 'park') && !land.protectedArea(x, z);
   };
   if (excluded(centroid.x, centroid.z)) return 'on-excluded-land';
   for (let i = 0; i + 1 < outer.length; i += 2) {

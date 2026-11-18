@@ -29,6 +29,8 @@ import {
   kilograms,
   metres,
   metresPerSecond,
+  MODEL_PACER_CODE_VERSION,
+  wind,
   powerZones,
   routeProfile,
   revolutionsPerMinute,
@@ -146,6 +148,7 @@ import {
   pairedAgainBeforeForgetLanded,
   RIDE_NOTIFICATION_REFUSED,
   RIDE_REPLAN_RECORDS_LIMIT,
+  type PacerRideFacts,
   type RideController,
   type RideSavePort,
   type RideWorkoutSnapshot,
@@ -10341,6 +10344,19 @@ describe('#567 — a hand-set ERG target gets the workout’s stall rescue', () 
   });
 });
 
+/** What a directed game ride hands beside each record — #2712's review. */
+const PACER_RIDE: PacerRideFacts = {
+  pacerWPerKg: 2.9,
+  routeId: 'route-rolling',
+  position: 'hoods',
+};
+const WINDY_RIDE: PacerRideFacts = {
+  pacerWPerKg: 3.4,
+  routeId: 'route-hilly',
+  position: 'drops',
+  wind: wind(4.5, 270),
+};
+
 describe('#1042 — the saved ride the result card states, and the game’s outcome it carries', () => {
   it('states the activity the save WROTE, and nothing for a save that failed', async () => {
     const written: NewActivity[] = [];
@@ -10639,6 +10655,115 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
     expect(after?.rideFacts?.drafted).toBeUndefined();
     expect(after?.rideFacts?.draftSpans).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('saves the AI pacer’s decision log with the ride, read back from the store — #2712, ADR 0072 D-5', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    // A decision logged before the recording began is not kept.
+    rig.controller.notePacerDecision({ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' }, PACER_RIDE);
+    await rig.controller.start();
+    await ride(rig, 2);
+    const applied = {
+      askedAtS: 5,
+      arrivedAtS: 6.5,
+      outcome: 'applied',
+      plan: 'climber',
+      intent: 'lift',
+    } as const;
+    rig.controller.notePacerDecision(applied, PACER_RIDE);
+    rig.controller.notePacerDecision({ askedAtS: 10, arrivedAtS: 16, outcome: 'late' }, PACER_RIDE);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = rig.controller.getSnapshot().savedRide?.activityId;
+    const read = await harness.read(async (store) => store.getActivity(ATHLETE_A, saved!));
+    // #2712's review: with what it replays with, and the game ride's start on
+    // the recording's clock — the clock when the first kept record arrived,
+    // two seconds in, less the 6.5 s ridden it arrived at.
+    expect(read?.rideFacts?.pacerModel).toStrictEqual({
+      version: MODEL_PACER_CODE_VERSION,
+      decisions: [applied, { askedAtS: 10, arrivedAtS: 16, outcome: 'late' }],
+      ...PACER_RIDE,
+      startedAt: read!.startedAt + 2 - 6.5,
+    });
+
+    // A second game ride in one recording: its log replaces the first's.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 1);
+    rig.controller.notePacerDecision(
+      { askedAtS: 20, arrivedAtS: 21, outcome: 'invalid' },
+      PACER_RIDE,
+    );
+    rig.controller.notePacerDecision(
+      { askedAtS: 0, arrivedAtS: 1, outcome: 'refused' },
+      WINDY_RIDE,
+    );
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const next = rig.controller.getSnapshot().savedRide?.activityId;
+    const after = await harness.read(async (store) => store.getActivity(ATHLETE_A, next!));
+    expect(after?.rideFacts?.pacerModel).toStrictEqual({
+      version: MODEL_PACER_CODE_VERSION,
+      decisions: [{ askedAtS: 0, arrivedAtS: 1, outcome: 'refused' }],
+      ...WINDY_RIDE,
+      startedAt: after!.startedAt + 1 - 1,
+    });
+
+    // And a ride with no AI pacer carries none.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const plain = rig.controller.getSnapshot().savedRide?.activityId;
+    const none = await harness.read(async (store) => store.getActivity(ATHLETE_A, plain!));
+    expect(none?.rideFacts?.pacerModel).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('saves a pacer log only with its start on the recording’s clock, never the last recording’s — #2712’s review', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.notePacerDecision({ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' }, PACER_RIDE);
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const placed = rig.controller.getSnapshot().savedRide?.activityId;
+    const first = await harness.read(async (store) => store.getActivity(ATHLETE_A, placed!));
+    expect(first?.rideFacts?.pacerModel).toStrictEqual({
+      version: MODEL_PACER_CODE_VERSION,
+      decisions: [{ askedAtS: 0, arrivedAtS: 1, outcome: 'failed' }],
+      ...PACER_RIDE,
+      startedAt: first!.startedAt + 3 - 1,
+    });
+
+    // The next recording's first record is asked later than the last one
+    // kept, and logged while paused, when the recording's clock is not
+    // running: nothing says where in THIS recording its ride began, and the
+    // last recording's start is not this one's. The ride is saved without it.
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 2);
+    await rig.controller.pause();
+    rig.controller.notePacerDecision(
+      { askedAtS: 5, arrivedAtS: 6, outcome: 'invalid' },
+      PACER_RIDE,
+    );
+    await rig.controller.resume();
+    await ride(rig, 1);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const unplaced = rig.controller.getSnapshot().savedRide?.activityId;
+    expect(unplaced).not.toBe(placed);
+    const second = await harness.read(async (store) => store.getActivity(ATHLETE_A, unplaced!));
+    expect(second?.id).toBe(unplaced);
+    expect(second?.rideFacts?.pacerModel).toBeUndefined();
     rig.controller.dispose();
   });
 

@@ -472,6 +472,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         paid in `three-renderer.ts` §`prepare`, which draws the
                         first frame into one pixel before any is shown. Part
                         T5 (20 minutes with the map on) is still owed.
+                        ⚠️ **Since #2663 the realistic world's arrival is
+                        prepared too**: `GameView` prepares the view again
+                        when it hands it the realistic rung and draws nothing
+                        until that settles, because drawn at once the swap's
+                        first frame built every realistic program in a lap
+                        race's countdown (`realistic-arrival-wiring.test.tsx`).
                         ⚠️ **Since #620 its sun projection is SHARED**:
                         `sunThrowPerMetre` is the one place `world.ts`'s sun
                         becomes a shadow on the ground, and the scenery's
@@ -960,7 +966,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         through the countdown, #2546) and as a race with items off and
                         on (the rider hit), and holds every write and its time
                         equal, and the recorded ride's channels and laps. ⚠️
-                        The bots ride still air on a windy ride: stated
+                        The bots ride still air on a windy ride: stated.
+                        Since #2665 the bots ride a line, not a weave: a
+                        lane is kept 10 s and a misjudged one held 60 s
+                        (domain `strategy.ts`), a bot leaves a rival's line
+                        only for a gust held behind it, and the pack layout
+                        (`pack-layout.ts`) moves a bot across at 1.4 m/s,
+                        eased at 1.75 m/s², every racer drawn between its
+                        last two ticks across as well as along;
+                        `lap-race/bot-weave.test.ts` is the gate, read at
+                        60 fps through `lapRaceDrawing` and the scene's
+                        markers
     src/game/lap-race/room-race.ts
                         a lap race in a ROOM (#1911, ADR 0060 D-5.4): from
                         the room's first frame of a room whose welcome says
@@ -976,6 +992,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `room-lap-race-wiring.test.tsx` holds every write
                         equal to a solo race with items off while the room
                         overrules three predictions
+    src/game/lap-race/model-race.ts, model-tactics-port.ts
+                        AI bots in a solo lap race (#2710, ADR 0071): the
+                        option and its consent in the chooser only while the
+                        instance offers its local model; the race asks every
+                        4 s of race time through the tactics port (sealed, the
+                        one instance module), logs each reply at the race
+                        time it arrives, and rides a decision through domain
+                        `lap-race/model-race.ts` §`applyModelMoves` (the
+                        body's limits outside; ADR 0073's strategy, which
+                        lifts ADR 0071 D-3.6's rules, with ADR 0074's sprint
+                        backstop, behind the `ModelMoveStrategy` seam). Any miss rides seeded. The record goes to `RideFacts.lapRaces`.
+                        ⚠️ Raise `LAP_RACE_BOT_CODE_VERSION` and APPEND a key
+                        to `model-race-golden.json` for any change to bot
+                        output; never edit an old one
     src/game/lap-race/race-input.ts, item-input.ts, item-input-port.ts
                         a lap race's lanes and item use (#1901, ADR 0060
                         D-5.4, D-13): race INPUTS only, a lane and "use the
@@ -1177,7 +1207,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `steeredLateral`, so nothing the obstacles, race or
                         trainer read changes. A standstill still yaws a
                         little (the turn rate floors the speed at 10 m/s) but
-                        does not lean. ⚠️ **Since #2494 the BARS turn too**:
+                        does not lean; a lap-race bot is turned at its own
+                        speed, floored at 3 m/s (#2665,
+                        §`BOT_TURN_SPEED_FLOOR`). ⚠️ **Since #2494 the BARS turn too**:
                         `scene.ts` §`drawnSteer` gives each marker the
                         kinematic steer (`bicycle.ts` §`steerAngle`, clamped
                         at 20°) of the drawn heading's turn rate (from
@@ -1447,7 +1479,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         out-and-back's turn changes no hill in view; the other
                         pass's ground is sunk out of sight with the turning
                         point closed round the road's end (§`retracedRoles`),
-                        or drawn a metre under where it only lies alongside.
+                        or drawn 1.5 m under where it only lies alongside
+                        (#2469).
                         ⚠️ Since #2149 a sharp bend's inside, where the fold
                         stops the rows short of the bend's centre, is closed
                         on one point (`closeFans`): within the clear band
@@ -1466,7 +1499,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the map's lakes, sea and wetland beside the road, from
                         the ride's land mask, and no invented lake where the
                         map was read: `waterways(profile, seed, land)` takes
-                        the mask, and every caller passes the ride's.
+                        the mask, and every caller passes the ride's. Since
+                        #2659 a bridge wherever the map's rivers, streams and
+                        canals (the mask's `waterLines`) cross the road, and no
+                        invented one where the map was read.
                         Since #2754 a mapped lake keeps its run's shores
                         sample by sample (`LakeShores`, each the middle of
                         three), its near shore as close as 8 m
@@ -1540,6 +1576,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         The roadside hedge on mapped farmland is low and
                         broken (`settlements.ts` §`roadsidePiece`), rocks
                         small and set back (`scatter.ts` §`STONE_SCALE`).
+                        Since #2685 a park is planted by the kind that made
+                        it park (`land-class.ts` §`ParkLook`, a second
+                        sparse layer, not a class): a golf course's trees
+                        in stands, a few on a cemetery or playground, none
+                        on a pitch, meadow on a nature reserve.
                         Since #2662 a seventh class, `bare` (sand, rock,
                         ice, an airfield, a pier), between built-up and
                         farmland: nothing grows on it and no field is
@@ -1551,13 +1592,41 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         vertex attribute. Since #2754 a beach or a pier
                         outranks a park or a town drawn round it
                         (`BARE_KINDS_OVER_LAND`), and a footprint on it in
-                        a park is still dropped (`insidePark`).
+                        a mapped park (not a protected area's boundary,
+                        #2657) is still dropped (`insidePark`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
                         `-land-planting`, `-land-boundaries`,
                         `-ground-clutter`, `-hedge-breaks`,
                         `-small-stones`, shown on `town=countryside`)
+    src/game/park-dressing.ts
+                        what a golf course and a cemetery are drawn WITH
+                        (#2685, the owner's hold of PR #2689 on 2026-11-16:
+                        each must read from the bike). On the ground, in the
+                        photographic ground's own call: a window of the mask's
+                        park looks round the rider (`ParkGround`, an 800 m
+                        RGBA texture, `three-renderer.ts` §`ParkGroundPaint`)
+                        that §`PARK_GROUND_MIX` paints a course's striped
+                        fairway lanes and rough, greens, fringes and bunkers
+                        (seeded, and mapped `sand` inside a course) and a
+                        cemetery's kept grass and narrow gravel paths from,
+                        the paths only past `CEMETERY_PATH_ROAD_CLEARANCE_METRES`
+                        (the window's alpha) — no triangle, no call. A flag
+                        stands at every green the window paints, scaled past
+                        `FLAG_TRUE_SIZE_METRES` (§`flagScaleAt`), the owner's
+                        ruling of 2026-11-16 that golf read from a public road.
+                        Standing on it: headstones in rows (the paths' grid is
+                        the shader's twin, §`isPathRow`), a low wall along a
+                        cemetery's outline open at the road, and a flag at
+                        each green, every one a box in ONE instanced call
+                        (§`ParkDressingBelt`, built on the first realistic
+                        frame that carries one), ≤ `PARK_DRESSING_CAPACITY`
+                        (512) nearest first, inside `realistic-budget.ts`
+                        §`REALISTIC_PARK_DRESSING_TRIANGLES`. A green is kept
+                        off the road and off every stand of trees
+                        (`scatter.ts` §`golfStandAt`). `SceneFrame.parkDressing`;
+                        lever `-park-dressing`, page `town=parks`
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
@@ -1738,7 +1807,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         counts why each kind is not drawn) — ≤ 36 (ADR 0054
                         D-5.6's cap, the owner's ruling), ranked by distance
                         with the frame's procedural
-                        structures inside the 23 040-triangle term (#1586), the far
+                        structures inside the 23 040-triangle term (#1586) —
+                        since #2655 not its walls, hedges and fences, which
+                        take only what the buildings leave — the far
                         level past 150 m (walls, plinth and roof: the plinth
                         since #2761, or a far house on a slope stood on
                         nothing), in ≤ 6 surfaces; no tree,
@@ -1936,6 +2007,26 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reads: without one, three compiles a standard material
                         FLAT_SHADED and every triangle is lit as a facet
                         (the owner's look of PR #1615)
+    src/game/scenery-cyclists.ts
+                        other cyclists on the road (#2722) — oncoming, slower
+                        (caught) and faster (overtaking), a few a ride, more on
+                        a town's road, seeded from the route. Where each is is
+                        a function of the rider's DRAWN distance, so every
+                        encounter happens at its meeting point. Each kind has
+                        its lane (`LANES`); level with the rider it moves
+                        clear by 1.2 m (`clearLateral`), never into the other
+                        half. ⚠️ SCENERY ONLY (the owner's ruling): not
+                        markers, no draft, no race standing, no trainer —
+                        `scenery-cyclists.test.ts` holds who may import it and
+                        `scenery-cyclists-trainer.test.tsx` the trainer's
+                        writes on and off. Placed only when `GameView` says
+                        `sceneryCyclists` (a free ride or a workout) AND the
+                        rung draws people, never beside a pacer, ghost, room,
+                        race or Delivery round. Drawn as instances: the
+                        people's body seated by `RealisticRiderBelt`
+                        §`ridingPose` and baked into the people's texture
+                        (`people-body.ts` §`RIDE_PHASES`), on the riders'
+                        bicycle meshes — no call of their own beside people
     src/game/cross-streets.ts
                         cross streets (#1565) — a side road 60 m off the
                         route at each junction where a mapped street
@@ -1953,6 +2044,48 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
                         is broken at its crossroads with dropped kerbs
+    src/game/overpasses.ts
+                        overpasses and underpasses (#2661) — where a mapped
+                        street on a bridge crosses the route, a level deck 5 m
+                        over the road with parapets and a seat under each end;
+                        where one in a tunnel under 80 m long crosses it, a
+                        parapet along each edge of the road. ⚠️ **Boxes in
+                        `three-renderer.ts` §`BridgeBelt`**, handed in with the
+                        streams' bridges (`scene.ts` §`water`), so no new
+                        structure: the belt's 128 boxes bound them and the
+                        streams' come first. ⚠️ **Since #2699 an overpass is
+                        not in the stone**: its deck wears the road's colour,
+                        its edge beams (proud of the deck, hanging below it,
+                        rising as the parapet) and seats a concrete grey,
+                        in the belt's second instanced box
+                        (`BridgeBelt.overpassMesh`), one draw call more on a
+                        frame with one in view. ⚠️ **Since the owner's "there
+                        are no roads connected to it" (#2699) its street runs
+                        on off both ends of the deck**: one strip an overpass in
+                        the side roads' mesh (`SideRoadBelt`, the road's own
+                        material, no draw call more), over the deck's top and
+                        up to 160 m past each end, one straight ramp from the
+                        deck at 6 % or steeper that is on the ground where its
+                        fade begins, then fading into the ground. It follows
+                        the mapped street through the ways meeting it end to
+                        end on the land read only while that street heads away
+                        from the route (a frontage road beside it is not
+                        followed), then its last heading; stops short of the
+                        carriageway and water; and the scenery is kept off it.
+                        ⚠️ **Since #2699's third round, slopes, not walls**:
+                        nothing but the bridge is over a metre up within 15 m
+                        of the carriageway's edge, and the approach stands on a
+                        1 : 2 embankment in the ground's own material
+                        (`TerrainBelt.embankmentMesh`, a normal for each face,
+                        one draw call more on a frame with one in view).
+                        ⚠️ **Since the fourth round, no blocks**: each end of
+                        the deck stands on a seat showing 1.2 m, in a grassy
+                        spill-through bank that comes up under the deck and
+                        wraps round its corners (§`spillThrough`, a height
+                        field in the same mesh); each end reaches as far as
+                        its bank needs to be down to a metre by the verge's
+                        line (about 26 m off the edge on level ground), and an
+                        approach falls no steeper than 1 : 2
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

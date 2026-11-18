@@ -78,13 +78,19 @@
  * drives the second one only, and the first belongs to the workout session.
  */
 
-import type { TimeInZones, Watts, WorkoutRescue } from '@onyourleft/domain';
+import type {
+  LapRaceModelRecord,
+  PacerDecisionRecord,
+  TimeInZones,
+  Watts,
+  WorkoutRescue,
+} from '@onyourleft/domain';
 import type { RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
 import type { CourseLineEvent, LapFigures } from '../recording/laps';
 import type { RideTotals } from '../recording/totals';
-import { rideInProgress, type RidePhase } from '../ride/controller';
+import { rideInProgress, type PacerRideFacts, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
 import type { SoloDraftState } from './solo-draft';
@@ -371,6 +377,20 @@ export interface GameTrainerPort {
    */
   soloDraftStepped?(draft: SoloDraftState): void;
   /**
+   * The AI pacer logged one ask — #2712, ADR 0072 D-5: kept by the ride
+   * controller (`notePacerDecision`) so the saved ride carries the pacer's
+   * decision log. ⚠️ Not about the trainer, which no pacer decision reaches
+   * (D-6): a closed-list record of the pacer's plan and intent and the times,
+   * on this port for {@link gameRideEnded}'s reason, and named so nothing
+   * else in production calls a method of that name. Optional, as
+   * {@link soloDraftStepped} is; `gameTrainerPortOver` always supplies it.
+   *
+   * `ride` (#2712's review): what the log replays with beside it — the
+   * pacer's W/kg, the route, the position and the wind — the same on every
+   * record of one game ride.
+   */
+  pacerDecided?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
+  /**
    * A ride in a room is starting: make sure it is recorded — #785, the
    * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
    * ride controller's `recordForRoom`). Answers whether a recording is
@@ -419,6 +439,13 @@ export interface GameTrainerPort {
    */
   roomRaceEnded?(race: RoomRaceFact): void;
   /**
+   * A ride's race with AI bots ended, and this is its record — #2710, ADR
+   * 0071 D-4.4: kept with the recording and saved with the ride
+   * (`RideFacts.lapRaces`), on this device only. Data only: nothing in it is
+   * a trainer command, and this port writes it to no trainer.
+   */
+  lapRaceEnded?(race: LapRaceModelRecord): void;
+  /**
    * Whether the recording under this ride is PAUSED by the rider — #1360's
    * review (N1): the game says so while it rides in a room, and resumes
    * nothing (#516). `false` with nothing recording. Read through
@@ -426,6 +453,40 @@ export interface GameTrainerPort {
    * {@link recordRoomRide} is; `gameTrainerPortOver` always says.
    */
   recordingPaused?(): boolean;
+  /**
+   * The HUD's *Pause* pausing the recording under the ride — #2656. The ride
+   * controller's own `pause()`, the one the Ride screen's *Pause* calls, so a
+   * pause in the game is the same pause: *Moving* stops, the engine takes no
+   * reading until it resumes, and the saved ride carries the pause as paused
+   * time rather than as the trainer's zeros.
+   *
+   * Answers whether it paused one: `false` with nothing recording, and with
+   * a recording already paused — by the rider on the Ride screen, by the
+   * engine's auto-pause, or after a recovery — which it leaves as it was, so
+   * {@link resumeRecording} is called only for a pause made here (#516: a
+   * pause somebody else made is not resumed for them).
+   *
+   * ⚠️ **What it sends the trainer is what the Ride screen's *Pause* sends.**
+   * On a ride with no workout, nothing: the controller's `pause()` writes no
+   * target, and the game's own loop, which drives the gradient, stops with
+   * the game as it did before #2656. Under a running workout the workout
+   * pauses with the ride, so the next tick eases the machine to its floor and
+   * {@link resumeRecording} writes the interval's target again
+   * (`ride/controller.ts` §`tick`, `workout/session.ts` §`pause`, #441's
+   * ease) — the owner's ruling on #2667, 2026-11-15, and pinned write for
+   * write against the Ride screen's in `pause-clocks-wiring.test.tsx`.
+   * Optional, as {@link recordingPaused} is;
+   * `gameTrainerPortOver` always supplies it, and `WIRE003` goes red if
+   * `GameView` stops calling it.
+   */
+  pauseRecording?(): Promise<boolean>;
+  /**
+   * The HUD's *Resume* resuming the recording that {@link pauseRecording}
+   * paused — #2656. The controller's own `resume()`; nothing when the
+   * recording is not paused. `GameView` calls it only for a pause its own
+   * *Pause* made.
+   */
+  resumeRecording?(): Promise<void>;
   /**
    * The moving time of the ride being RECORDED, in seconds — or `undefined`
    * when no ride is in progress (recording or paused) — #1111.
@@ -438,11 +499,15 @@ export interface GameTrainerPort {
    * that is not being recorded has none, and the HUD says so with a dash
    * rather than inventing one from the simulation's clock.
    *
-   * ⚠️ The game's own *Pause* pauses the SIMULATION; the recording is the
-   * Ride screen's (`RideSession`, above the router), and its auto-pause is
-   * what stops this figure when the rider stops. So this is the time the
-   * saved ride will say, which is the point of reading it — and why the HUD
-   * does not read it on the frame alone: see {@link watchRide}.
+   * ⚠️ The game's own *Pause* pauses the simulation AND, since #2656, the
+   * recording ({@link pauseRecording}): until then it paused the simulation
+   * only, a trainer's flywheel still turning counted as movement, and this
+   * figure ran on through the pause. The recording is still the Ride
+   * screen's (`RideSession`, above the router), and its auto-pause is what
+   * stops this figure when the rider stops without pressing anything. So
+   * this is the time the saved ride will say, which is the point of reading
+   * it — and why the HUD does not read it on the frame alone: see
+   * {@link watchRide}.
    *
    * A snapshot read, a property access. On the port for
    * {@link recordingMayStop}'s reason — `WIRE003` goes red if `GameView` stops
@@ -486,8 +551,8 @@ export interface GameTrainerPort {
    * ⚠️ **What keeps the moving time current while the GAME is paused.** The
    * render loop does not run while the game is paused, so a figure read only
    * during the tick's render froze at the press — while the recording, which
-   * the game's Pause does not pause, went on counting until its own
-   * auto-pause, or for as long as the rider kept pedalling. `GameView` reads
+   * the game's Pause did not pause before #2656, went on counting until its
+   * own auto-pause, or for as long as the rider kept pedalling. `GameView` reads
    * {@link rideMovingSeconds} through `useSyncExternalStore` over this, so the
    * HUD re-renders on the controller's own tick (once a second, on the ride's
    * clock) whatever the game is doing. A notification, not a clock: the
@@ -631,6 +696,8 @@ interface GameTrainerSource {
   noteGameRideEnded(outcome: GhostOutcome | undefined, drafted?: boolean): void;
   /** #2451. @see GameTrainerPort.soloDraftStepped. Optional for a source with no recording. */
   noteSoloDraft?(reading: SoloDraftState): void;
+  /** #2712. @see GameTrainerPort.pacerDecided. Optional for a source with no recording. */
+  notePacerDecision?(record: PacerDecisionRecord, ride: PacerRideFacts): void;
   /**
    * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
    * Optional only so a double with no recording need not say; the ride
@@ -638,6 +705,14 @@ interface GameTrainerSource {
    */
   recordForRoom?(): Promise<boolean>;
   noteRoomRace?(race: RoomRaceFact): void;
+  /** #2710. @see GameTrainerPort.lapRaceEnded */
+  noteLapRace?(race: LapRaceModelRecord): void;
+  /**
+   * #2656. @see GameTrainerPort.pauseRecording, GameTrainerPort.resumeRecording.
+   * Optional for {@link recordForRoom}'s reason; the ride controller has both.
+   */
+  pause?(): Promise<void>;
+  resume?(): Promise<void>;
   /**
    * #1312. @see GameTrainerPort.courseLine. Optional for
    * {@link GameTrainerSource.getSnapshot}'s `keepAliveFailed` reason: a source
@@ -794,6 +869,9 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     soloDraftStepped: (draft) => {
       controller?.noteSoloDraft?.(draft);
     },
+    pacerDecided: (record, ride) => {
+      controller?.notePacerDecision?.(record, ride);
+    },
     recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
     // #1221, #2381: present only where something can record. @see GameTrainerPort.recordGameRide
     ...(recordFor === undefined ? {} : { recordGameRide: () => recordFor() }),
@@ -805,7 +883,25 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);
     },
+    lapRaceEnded: (race) => {
+      controller?.noteLapRace?.(race);
+    },
     recordingPaused: () => controller?.getSnapshot().phase === 'paused',
+    pauseRecording: async () => {
+      // Only a recording that is recording: one already paused is left as
+      // whoever paused it left it. @see GameTrainerPort.pauseRecording
+      if (controller?.pause === undefined || controller.getSnapshot().phase !== 'recording') {
+        return false;
+      }
+      await controller.pause();
+      return true;
+    },
+    resumeRecording: async () => {
+      if (controller?.resume === undefined || controller.getSnapshot().phase !== 'paused') {
+        return;
+      }
+      await controller.resume();
+    },
     watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
     courseLine: (event) => controller?.noteCourseLine?.(event),
     rideLapSeconds: () => {

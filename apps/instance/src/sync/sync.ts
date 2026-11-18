@@ -361,6 +361,12 @@ export interface AccountExport {
    * it names and when it was recorded (Unix seconds), or `null`.
    */
   readonly hostedConsent: { readonly origin: string; readonly recordedAt: number } | null;
+  /**
+   * The athlete's recorded consent to model-chosen lap-race bot tactics
+   * (#2709, ADR 0071 D-5.2): the local model address it names and when
+   * (Unix seconds), or `null`.
+   */
+  readonly tacticsConsent: { readonly modelAddress: string; readonly recordedAt: number } | null;
   /** What is on the instance and deliberately NOT in this file, and why. */
   readonly notIncluded: readonly string[];
 }
@@ -689,6 +695,12 @@ export function createSync(options: SyncOptions): Sync {
             return consent === undefined
               ? null
               : { origin: consent.origin, recordedAt: consent.recordedAt };
+          })(),
+          tacticsConsent: await (async () => {
+            const consent = await store.getTacticsConsent(caller.athleteId);
+            return consent === undefined
+              ? null
+              : { modelAddress: consent.modelAddress, recordedAt: consent.recordedAt };
           })(),
           notIncluded: EXPORT_LEAVES_OUT,
         },

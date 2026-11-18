@@ -557,6 +557,9 @@ describe('what a side road is — #1565', () => {
       bareSurfaceAt: () => undefined,
       covered: () => true,
       wetlandAt: () => false,
+      waterLines: [],
+      protectedArea: () => false,
+      parkLookAt: () => 'mown',
       builtUpDistances: (_points, count, into) => {
         into.fill(0, 0, count);
       },

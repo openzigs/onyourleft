@@ -56,6 +56,9 @@ importers:
       '@onyourleft/fit':
         specifier: workspace:*
         version: link:../../packages/fit
+      '@onyourleft/operate-text':
+        specifier: workspace:*
+        version: link:../../packages/operate-text
       '@onyourleft/physics':
         specifier: workspace:*
         version: link:../../packages/physics

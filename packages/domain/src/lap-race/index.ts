@@ -89,6 +89,7 @@ export type {
 export {
   BOT_FINISH_WINDOW_METRES,
   BOT_LANE_DWELL_MS,
+  BOT_LANE_JUDGEMENT_MS,
   BOT_LANE_STAY_METRES,
   BOT_LAST_CALL_METRES,
   BOT_MEMORY_AT_START,
@@ -146,7 +147,7 @@ export {
 // Each bot's race-aware tactics (#2462, ADR 0067 D-0, D-1, D-7): utility over
 // seven states, chosen once per decision window, telling the power model how
 // hard to ride inside a capacity it never changes. Wired into the race by #2463.
-export type { BotTactic, RaceView, TacticDecision, TacticMemory } from './tactics';
+export type { BotEffort, BotTactic, RaceView, TacticDecision, TacticMemory } from './tactics';
 export {
   BOT_TACTIC_ATTACK_MS,
   BOT_TACTIC_ATTACK_SURGE,
@@ -166,6 +167,8 @@ export {
   BOT_TACTIC_RECOVER_CP_SHARE,
   BOT_TACTIC_RECOVER_SHARE,
   BOT_TACTIC_UTILITY,
+  BOT_EFFORTS,
+  BOT_EFFORT_CP_SHARE,
   BOT_TACTIC_WBAL_FLOOR,
   BOT_TACTIC_WHEEL_CLOSING_GAIN,
   BOT_TACTIC_WHEEL_EASE,
@@ -183,6 +186,32 @@ export {
   decideTactic,
   TACTIC_MEMORY_AT_START,
 } from './tactics';
+
+// A language model's bot tactics (#2709, ADR 0071 D-3): the race state it is
+// shown and the answer it may give, each checked field by field. No power field.
+export type {
+  ModelTacticsAnswer,
+  ModelTacticsBotView,
+  ModelTacticsInput,
+  ModelTacticsInputProblem,
+  ModelTacticsInputRead,
+  ModelTacticsInvalid,
+  ModelRacingStyle,
+  ModelTacticsMove,
+  ModelTacticsRiderView,
+  ModelTacticsTarget,
+} from './model-tactics';
+export {
+  MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
+  MODEL_TACTICS_INPUT_MOST_CHARACTERS,
+  MODEL_RACING_STYLES,
+  MODEL_TACTICS_MOST_SEATS,
+  modelRacingStyles,
+  modelTacticsAnswerSchema,
+  modelTacticsSeats,
+  readModelTacticsAnswer,
+  readModelTacticsInput,
+} from './model-tactics';
 
 export type { BotPlanInput, BotPlanStep, BotPlanTactic, BotRacePlan } from './plan';
 export {
@@ -206,3 +235,37 @@ export {
   spendableWatts,
   stepWbal,
 } from './wbal';
+
+// A lap race whose bots' moves a model picks (#2710, ADR 0071 D-3.6, D-4, D-7):
+// the decision log, the moves in force, the adapter and its one strategy seam.
+export type {
+  AppliedModelMoves,
+  ModelMoveAsk,
+  ModelMoveOutcome,
+  ModelMoveRide,
+  ModelMoveStrategy,
+  ModelMoveStrategyRefusal,
+  LapRaceModelRecord,
+  ModelRaceBot,
+  ModelTacticsLogEntry,
+  ModelTacticsLogOutcome,
+  ModelTacticsLogReason,
+} from './model-race';
+export {
+  ADR_0071_MOVE_STRATEGY,
+  ADR_0073_MOVE_STRATEGY,
+  ADR_0074_MOVE_STRATEGY,
+  applyModelMoves,
+  LAP_RACE_BOT_CODE_VERSION,
+  LAP_RACE_MODEL_MOST_TICKS,
+  MODEL_TACTICS_ASK_EVERY_MS,
+  MODEL_TACTICS_HOLD_MS,
+  MODEL_TACTICS_LATE_MS,
+  MODEL_TACTICS_LOG_OUTCOMES,
+  MODEL_TACTICS_LOG_REASONS,
+  modelMovesInForce,
+  modelTacticsAppliedAtMs,
+  modelTacticsNextAskAtMs,
+  readLapRaceModelRecord,
+  readModelTacticsLogEntry,
+} from './model-race';

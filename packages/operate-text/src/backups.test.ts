@@ -5,9 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { MODERATORS_ALWAYS_JOIN, REGISTRATION_MODE_TEXT } from './accounts';
 import {
   BACK_UP_NOW_CONFIRM_TEXT,
+  backupFactRows,
+  backupLine,
   BACKUP_OFF_BOX_TEXT,
   backupsStaleText,
   RESTORE_ONE_OFF_TEXT,
+  restoreSteps,
   snapshotPlace,
 } from './backups';
 import * as everything from './index';
@@ -86,5 +89,71 @@ describe('the package’s sentences (ADR 0004 D)', () => {
       expect(sentence, name).not.toMatch(/\d+\.\d+/);
       expect(sentence, name).not.toMatch(/=/);
     }
+  });
+});
+
+describe('a record’s line, its facts and the restore steps (#2647)', () => {
+  const text = (line: readonly (string | { readonly code: string })[]): string =>
+    line.map((part) => (typeof part === 'string' ? part : part.code)).join('');
+
+  it('says a snapshot’s age, size, counts and off-box copy, and a failed run’s code', () => {
+    const done = backupLine({
+      outcome: 'done',
+      at: '2026-11-14T18:00:00.000Z',
+      ageSeconds: 3 * HOUR,
+      snapshot: 'snapshot-a',
+      rows: 1,
+      blobs: 2,
+      sizeBytes: 48_000_000,
+      offBox: 'failed',
+      intervalSeconds: null,
+      requested: true,
+    });
+    expect(done.moment).toBe('2026-11-14 18:00 UTC');
+    expect(text(done.rest)).toBe(
+      ', 3 hours ago, asked for from the app, a one-off: 48 MB, 1 row, 2 blobs; off-box copy FAILED. snapshot-a',
+    );
+    const failed = backupLine({
+      outcome: 'failed',
+      at: '2026-11-14T18:00:00.000Z',
+      ageSeconds: 60,
+      error: 'ENOSPC',
+      intervalSeconds: 3600,
+      requested: false,
+    });
+    expect(failed.rest).toEqual([
+      ', 1 minute ago: no snapshot was made (',
+      { code: 'ENOSPC' },
+      ').',
+    ]);
+  });
+
+  it('writes the restore steps for the snapshot’s own place, a one-off under pre-deploy', () => {
+    const steps = restoreSteps({
+      snapshot: 'snapshot-b',
+      intervalSeconds: null,
+      rows: 3,
+      blobs: 1,
+    });
+    expect(steps).toHaveLength(5);
+    expect(text(steps[1] ?? [])).toContain('restore /backups/pre-deploy/snapshot-b --force');
+    expect(text(steps[3] ?? [])).toContain('it should say 3 rows and 1 blob.');
+  });
+
+  it('lists the facts the line does not say, a missing one as not recorded', () => {
+    expect(
+      backupFactRows({
+        databaseSha256: 'ab',
+        removed: null,
+        freeBytes: { backups: 2_000_000_000, offBox: null },
+        intervalSeconds: 6 * HOUR,
+      }).map((row) => [row.label, row.value]),
+    ).toEqual([
+      ['Database SHA-256', 'ab'],
+      ['Old snapshots removed', 'not recorded'],
+      ['Where snapshots go', '2.0 GB free'],
+      ['Where off-box copies go', 'not recorded'],
+      ['Backup interval', 'every 6 hours'],
+    ]);
   });
 });

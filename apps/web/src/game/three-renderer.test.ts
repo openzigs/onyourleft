@@ -88,6 +88,7 @@ import {
   REALISTIC_STRUCTURE_MESHES,
 } from './realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../net/interest';
+import { emptyRiderFadeLine, riderFadeLine } from './rider-fade';
 import { BUILDING_ROLES, BUILDING_VARIANTS, BUILT_KINDS, buildingPlan } from './buildings';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
@@ -123,6 +124,7 @@ import {
   realisticStructureGeometry,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
+  fadesRiders,
   realisticRemoteSplit,
   STYLISED_RIDER_SLOTS,
   gpuFinished,
@@ -1702,6 +1704,7 @@ function frameWithScatter(): SceneFrame {
           NO_LAND_CLASS,
         ),
         horizon: horizonRelief(profile, origin, 7),
+        embankments: [],
       };
     })(),
     water: {
@@ -2890,6 +2893,8 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     const shader = {
       vertexShader:
         '#include <common>\nvoid main() {\n#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <color_vertex>\n}',
+      // #2596: and the chunks the rider fade is spliced after.
+      fragmentShader: '#include <common>\nvoid main() {\n#include <clipping_planes_fragment>\n}',
       uniforms: {},
     };
     material.onBeforeCompile(shader);
@@ -2919,8 +2924,8 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     };
     // Each instance is told its own steer: the rider's, and the bot's straight bars.
     for (const mesh of [bodies, torsos]) {
-      expect(at(mesh, 'oylInstanceSteer')(0)).toBeCloseTo(0.25, 6);
-      expect(at(mesh, 'oylInstanceSteer')(1)).toBe(0);
+      expect(at(mesh, 'oylRiderInstance')(0)).toBeCloseTo(0.25, 6);
+      expect(at(mesh, 'oylRiderInstance')(1)).toBe(0);
     }
     // What turns on the bicycle: the front — the fork, the front wheel and the
     // bar, all ahead of the seat — wholly, and nothing behind the bottom bracket.
@@ -2959,6 +2964,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       const shader = {
         vertexShader:
           '#include <common>\nvoid main() {\n#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <color_vertex>\n}',
+        fragmentShader: '#include <common>\nvoid main() {\n#include <clipping_planes_fragment>\n}',
         uniforms: {},
       };
       material.onBeforeCompile(shader);
@@ -2976,6 +2982,141 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     // No new mesh: the same four.
     expect(belt.group.children).toHaveLength(4);
     belt.dispose();
+  });
+
+  describe('#2596 — fades a rider between the camera and the rider, never the rider', () => {
+    /** The camera behind the rider at the origin, looking north. */
+    const POSE: CameraPose = {
+      x: 0,
+      y: 0,
+      z: 0,
+      headingX: 0,
+      headingZ: 1,
+      targetAheadMetres: 25,
+      eyeRoadY: 0,
+      targetRoadY: 0,
+    };
+    const fadedOf = (mesh: { geometry: RiderBelt['meshes']['bodies']['geometry'] }) => {
+      const attribute = mesh.geometry.getAttribute('oylRiderInstance');
+      return (index: number): number => attribute.getY(index);
+    };
+
+    it('writes each rider’s fade into every mesh it is drawn by: the bot behind gone, the rider and the bot ahead whole', () => {
+      const belt = new RiderBelt();
+      const markers = [
+        riderAt(),
+        riderAt({ z: -2.05 }, {}, undefined, 'bot'),
+        riderAt({ z: 6 }, {}, undefined, 'bot'),
+      ];
+      belt.place(markers, riderFadeLine(POSE, markers, emptyRiderFadeLine()));
+      const { bodies, torsos, cranksets, limbs } = belt.meshes;
+      for (const mesh of [bodies, torsos, cranksets]) {
+        expect(fadedOf(mesh)(0)).toBe(0);
+        expect(fadedOf(mesh)(1)).toBe(1);
+        expect(fadedOf(mesh)(2)).toBe(0);
+      }
+      for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
+        expect(fadedOf(limbs)(bone)).toBe(0);
+        expect(fadedOf(limbs)(LEG_BONE_COUNT + bone)).toBe(1);
+        expect(fadedOf(limbs)(2 * LEG_BONE_COUNT + bone)).toBe(0);
+      }
+      // A bot that moves out of the space is drawn whole again on the next frame.
+      const moved = [markers[0] as RiderMarker, riderAt({ z: 3 }, {}, undefined, 'bot')];
+      belt.place(moved, riderFadeLine(POSE, moved, emptyRiderFadeLine()));
+      expect(fadedOf(bodies)(1)).toBe(0);
+      expect(fadedOf(limbs)(LEG_BONE_COUNT)).toBe(0);
+      belt.dispose();
+    });
+
+    it('never fades the rider’s own avatar, even standing on the line', () => {
+      const belt = new RiderBelt();
+      const own = riderAt({ z: -2.05 });
+      const markers = [own, riderAt({ z: -2.05 }, {}, undefined, 'ghost')];
+      // The line is the camera's: the rider here stands where the ghost is.
+      belt.place(markers, riderFadeLine(POSE, [riderAt()], emptyRiderFadeLine()));
+      const { bodies, torsos, cranksets, limbs } = belt.meshes;
+      for (const mesh of [bodies, torsos, cranksets]) {
+        expect(fadedOf(mesh)(0)).toBe(0);
+        expect(fadedOf(mesh)(1)).toBe(1);
+      }
+      for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) expect(fadedOf(limbs)(bone)).toBe(0);
+      belt.dispose();
+    });
+
+    it('marks no rider buffer for upload on a frame where no fade and no steer changed', () => {
+      // Review of #2620: three uploads a whole buffer whenever it is marked,
+      // so an unchanged frame must mark none. `version` counts the marks.
+      const belt = new RiderBelt();
+      const steering = (marker: RiderMarker, steer: number): RiderMarker => ({ ...marker, steer });
+      const markers = [
+        steering(riderAt(), 0.2),
+        riderAt({ z: -2.05 }, {}, undefined, 'bot'),
+        steering(riderAt({ x: 0.25, z: -2.05 }, {}, undefined, 'bot'), -0.1),
+        riderAt({ z: 6 }, {}, undefined, 'bot'),
+      ];
+      const line = riderFadeLine(POSE, markers, emptyRiderFadeLine());
+      belt.place(markers, line);
+      const versions = (): number[] =>
+        Object.values(belt.meshes).map(
+          (mesh) =>
+            (mesh.geometry.getAttribute('oylRiderInstance') as unknown as { version: number })
+              .version,
+        );
+      const first = versions();
+      belt.place(markers, line);
+      expect(versions()).toEqual(first);
+      // The control: a bot coming nearer the line marks its buffers again.
+      const nearer = [
+        ...markers.slice(0, 2),
+        steering(riderAt({ x: 0.2, z: -2.05 }, {}, undefined, 'bot'), -0.1),
+        markers[3] as RiderMarker,
+      ];
+      belt.place(nearer, line);
+      const after = versions();
+      expect(after.every((version, index) => version > (first[index] as number))).toBe(true);
+      belt.dispose();
+    });
+
+    it('draws every rider whole when handed no line — the control', () => {
+      const belt = new RiderBelt();
+      belt.place([riderAt(), riderAt({ z: -2.05 }, {}, undefined, 'bot')]);
+      expect(fadedOf(belt.meshes.bodies)(1)).toBe(0);
+      belt.dispose();
+    });
+
+    it('discards that share of each rider’s pixels in the shader, in both of the belt’s materials and no new mesh', () => {
+      const belt = new RiderBelt();
+      for (const shading of ['lit', 'flat'] as const) {
+        belt.setShading(shading);
+        const material = belt.meshes.bodies.material as unknown as Parameters<
+          typeof fadesRiders
+        >[0];
+        expect(fadesRiders(material)).toBe(true);
+        const shader = {
+          vertexShader:
+            '#include <common>\nvoid main() {\n#include <beginnormal_vertex>\n#include <begin_vertex>\n#include <color_vertex>\n}',
+          fragmentShader:
+            '#include <common>\nvoid main() {\n#include <clipping_planes_fragment>\n}',
+          uniforms: {},
+        };
+        (material as unknown as { onBeforeCompile: (s: typeof shader) => void }).onBeforeCompile(
+          shader,
+        );
+        expect(shader.vertexShader).toContain('attribute vec2 oylRiderInstance;');
+        expect(shader.vertexShader).toContain('vOylRiderFade = oylRiderInstance.y;');
+        expect(shader.fragmentShader).toContain('if (oylRiderDither < vOylRiderFade) discard;');
+        // After the clipping planes, inside main.
+        expect(shader.fragmentShader.indexOf('discard')).toBeGreaterThan(
+          shader.fragmentShader.indexOf('void main()'),
+        );
+      }
+      // Every mesh carries the channel, so no part of a faded rider is left drawn.
+      for (const mesh of Object.values(belt.meshes)) {
+        expect(mesh.geometry.getAttribute('oylRiderInstance').itemSize).toBe(2);
+      }
+      expect(belt.group.children).toHaveLength(4);
+      belt.dispose();
+    });
   });
 
   it('draws nothing until a frame carries a rider', () => {

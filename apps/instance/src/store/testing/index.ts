@@ -469,6 +469,12 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       origin: `https://models-of-${athlete}.example`,
       recordedAt: 1_790_000_560,
     });
+    // Migration 0046's (#2709): a consent to model-chosen bot tactics each.
+    await store.putTacticsConsent({
+      athleteId: athlete,
+      modelAddress: `http://ollama-of-${athlete}:11434/v1`,
+      recordedAt: 1_790_000_565,
+    });
     // Migration 0044's (#2641): an admin session each, opened with a code.
     await store.mintAdminCode({
       codeSha256: hexOf(`admin-code-${athlete}`),

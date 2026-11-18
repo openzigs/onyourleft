@@ -31,8 +31,10 @@
  * and — the stronger half — §"every pause and resume in the client" does not
  * depend on vocabulary at all: it enumerates every production call of
  * `.pause(` and `.resume(`, file by file, and requires the ride controller's
- * own `pause()` to have exactly one caller, the rider's Pause button. A second
- * pauser anywhere, whatever it is named after, is a new entry in that table.
+ * own `pause()` to be reached from a rider's Pause button and from nothing
+ * else — the Ride screen's, and since #2656 the game HUD's, through the
+ * game's trainer port. A second pauser anywhere, whatever it is named after,
+ * is a new entry in that table.
  *
  * ⚠️ **The line-by-line allowlists below are a TRIPWIRE, not a proof.** They
  * pin exact source lines of `ride/controller.ts` and `recording/recorder.ts`
@@ -141,10 +143,17 @@ const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: n
   // The controller's own pause() delegating to the recorder, and `tick`
   // pausing the WORKOUT when the phase already says paused.
   [join('ride', 'controller.ts')]: { pause: 2, resume: 2 },
-  // The workout session delegating to its player.
-  [join('workout', 'session.ts')]: { pause: 1, resume: 1 },
+  // The workout session delegating to its player — and since #2669 its
+  // `carryOn` resuming the player too, after a trainer reconnected. That is
+  // the WORKOUT, not the ride, called only from `ride/controller.ts`
+  // §`carryOnWorkout` on a cadence reading; nothing presence reaches it.
+  [join('workout', 'session.ts')]: { pause: 1, resume: 2 },
   // The rider's Pause and Resume buttons — the ONLY callers of the ride's.
   [join('views', 'RideView.tsx')]: { pause: 1, resume: 1 },
+  // #2656: the game HUD's Pause and Resume, which reach the same two through
+  // the game's trainer port (`pauseRecording`, `resumeRecording`), called
+  // only from the HUD's press (below).
+  [join('game', 'trainer-port.ts')]: { pause: 1, resume: 1 },
 };
 
 describe('every pause and resume in the client — #516', () => {
@@ -161,14 +170,29 @@ describe('every pause and resume in the client — #516', () => {
     expect(found).toStrictEqual(PAUSE_AND_RESUME_CALLS);
   });
 
-  it('gives the ride controller’s pause() exactly one caller: the rider’s own Pause button', () => {
+  it('gives the ride controller’s pause() no caller but a rider’s own Pause button', () => {
     const callers = sources().filter((path) => /\bcontroller\.pause\s*\(/.test(code(path)));
-    expect(callers).toStrictEqual([join('views', 'RideView.tsx')]);
-    // Inside the button's press, and nowhere else in that file.
+    expect([...callers].sort()).toStrictEqual([
+      join('game', 'trainer-port.ts'),
+      join('views', 'RideView.tsx'),
+    ]);
+    // The Ride screen's: inside the button's press, and nowhere else in that file.
     const view = code(join('views', 'RideView.tsx'));
     expect(view).toMatch(
       /onClick=\{\(\)\s*=>\s*\{\s*void controller\.pause\(\);\s*\}\}\s*>\s*Pause\s*</,
     );
+    // #2656, the game HUD's: once in the port, inside `pauseRecording`…
+    const port = code(join('game', 'trainer-port.ts'));
+    expect(port.match(/\bcontroller\.pause\s*\(/g)).toHaveLength(1);
+    expect(port).toMatch(
+      /pauseRecording: async \(\) => \{[^{}]*\{[^{}]*\}\s*await controller\.pause\(\);/,
+    );
+    // …which nothing calls but the HUD's Pause press, in `GameView`.
+    const portCallers = sources().filter((path) => /\.pauseRecording\b/.test(code(path)));
+    expect(portCallers).toStrictEqual([join('game', 'GameView.tsx')]);
+    const game = code(join('game', 'GameView.tsx'));
+    expect(game.match(/\.pauseRecording\b/g)).toHaveLength(1);
+    expect(game).toMatch(/onPause=\{\(\) => \{[^]*?trainer\?\.pauseRecording\?\.\(\)[^]*?\}\}\n/);
   });
 });
 

@@ -242,7 +242,9 @@ const STREAM_VARIANT = 4;
  * stands, {@link lotsAt} fills the street frontage with procedural lots, after
  * the settlements and before the field boundaries. {@link NO_MAPPED_TOWN}, the
  * default, is a town with no footprints at all; `null` builds no lots — the
- * browser gate's `-lots` control (`scene.ts` §`SceneInput.lotsOff`).
+ * browser gate's `-lots` control (`scene.ts` §`SceneInput.lotsOff`). Since
+ * #2655 no procedural field boundary stands beside its footprints either
+ * ({@link BOUNDARY_HOUSE_CLEARANCE_METRES}); `null` keeps them all.
  */
 export function structuresAt(
   profile: RouteProfile,
@@ -261,7 +263,18 @@ export function structuresAt(
   settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages, footprints, land);
   if (town !== null) lotsAt(profile, origin, seed, fromMetres, toMetres, land, town, found);
   const edges: { readonly item: ScatterItem; readonly along: number }[] = [];
-  fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges, land, countryside);
+  fieldEdgesAt(
+    profile,
+    origin,
+    seed,
+    fromMetres,
+    toMetres,
+    villages,
+    edges,
+    land,
+    countryside,
+    town,
+  );
   // #1274: and the chain-link beside the mapped grounds, as boundaries are.
   const fenced = town?.chainLinkAt?.(profile, origin, seed, land);
   if (fenced !== undefined) chainLinkEdgesAt(profile, fromMetres, toMetres, fenced, found, edges);
@@ -1130,7 +1143,8 @@ export function placeLot(
 export interface MappedFootprintIndex {
   /**
    * Whether a lot ({@link LOT_FLOATS}), grown by
-   * {@link BUILDING_CLEARANCE_METRES} all round, meets any kept footprint.
+   * {@link BUILDING_CLEARANCE_METRES} all round, meets any kept footprint —
+   * and, for a {@link MappedTown}, mapped `railway` land (#2660).
    */
   overlaps(lot: Float64Array): boolean;
 }
@@ -1206,6 +1220,8 @@ export function lotSpacing(profile: RouteProfile): {
  *    ({@link MappedFootprintIndex}).
  * 3. **Never on wood, water or park** (P-9, the owner's rule): rule 1's
  *    corners already exclude them, since those classes are not `built-up`.
+ *    #2660: **nor on railway land**, which is `built-up` — rule 2's
+ *    {@link MappedTown.overlaps} meets it as it meets a footprint.
  * 4. {@link PLOT_BUILT_SHARE} of candidates are built, by a hash of the plot.
  *    The kind is a house, with a row of shops every {@link LOT_SHOP_EVERY}th
  *    plot where the land is mapped `commercial`. No church and no signpost: a
@@ -1627,6 +1643,13 @@ function ringHoldsLot(ring: Float32Array, lot: Float64Array): boolean {
  * With `countryside['hedge-breaks']` on (the owner's ruling of 2026-10-24)
  * that roadside hedge is low and broken up, {@link roadsidePiece}; a wall is
  * not.
+ *
+ * ⚠️ **No procedural piece beside a mapped house, since #2655**
+ * ({@link besideMappedHouse}): many US suburbs map every footprint and no
+ * `landuse=residential`, so their ground reads `other`, which `fieldGround`
+ * admits, and the fields ran fences along the road and out through the house
+ * lots. `houses` is the corridor's kept footprints; `null` keeps every piece.
+ * Mapped farmland's own pieces (#1542's) are the map's and keep their places.
  */
 function fieldEdgesAt(
   profile: RouteProfile,
@@ -1638,6 +1661,7 @@ function fieldEdgesAt(
   found: { item: ScatterItem; along: number }[],
   land: LandClassMask,
   countryside: Countryside,
+  houses: MappedFootprintIndex | null,
 ): void {
   const total = profile.totalDistance;
   // The ground's own field grid, so the patchwork and the walls agree (#425).
@@ -1728,8 +1752,15 @@ function fieldEdgesAt(
           }
           continue;
         }
-        // #1546: no boundary across built-up land, water, a wood or a park.
-        if (enclosed && fieldGround(land, item.x, item.z)) found.push({ item, along });
+        // #1546: no boundary across built-up land, water, a wood or a park;
+        // #2655: nor beside a mapped house, whatever the land under it reads.
+        if (
+          enclosed &&
+          fieldGround(land, item.x, item.z) &&
+          !besideMappedHouse(houses, item.x, item.z)
+        ) {
+          found.push({ item, along });
+        }
       }
       if (mapped) {
         // The road's frames at the pieces' centres, the last field's last one
@@ -1758,7 +1789,9 @@ function fieldEdgesAt(
         const x = frame.x + frame.normalX * lateral * side;
         const z = frame.z + frame.normalZ * lateral * side;
         // #1542: a mapped field's sides are its own edges, not this grid's.
-        if (!fieldGround(land, x, z) || onFarmland(x, z)) continue;
+        if (!fieldGround(land, x, z) || onFarmland(x, z) || besideMappedHouse(houses, x, z)) {
+          continue;
+        }
         found.push({
           item: {
             kind,
@@ -1775,6 +1808,38 @@ function fieldEdgesAt(
       }
     }
   }
+}
+
+/**
+ * How near a mapped footprint no procedural field boundary stands, metres:
+ * **31** — #2655, the issue's 30 to 40 m, a suburban front garden and the
+ * house's depth. Measured as {@link besideMappedHouse} reads it: straight
+ * across, 31 m; on the diagonal of its square, up to 40 m.
+ */
+export const BOUNDARY_HOUSE_CLEARANCE_METRES = 31;
+
+/** The query {@link besideMappedHouse} hands the index, reused between pieces. @see LOT_FLOATS */
+const boundaryScratch = new Float64Array(LOT_FLOATS);
+
+/**
+ * Whether a field boundary at `(x, z)` would stand beside a mapped footprint
+ * (or its driveway, which the index files with it) — #2655: within
+ * {@link BOUNDARY_HOUSE_CLEARANCE_METRES}. One overlap query of the index the
+ * lots keep off the footprints by, for a square about `(x, z)` whose
+ * half-side, grown by {@link BUILDING_CLEARANCE_METRES} as every lot is,
+ * reaches the clearance. Allocation-free. `null`, no index: never.
+ */
+function besideMappedHouse(houses: MappedFootprintIndex | null, x: number, z: number): boolean {
+  if (houses === null) return false;
+  const half = BOUNDARY_HOUSE_CLEARANCE_METRES - BUILDING_CLEARANCE_METRES;
+  boundaryScratch[0] = x;
+  boundaryScratch[1] = z;
+  boundaryScratch[2] = 1;
+  boundaryScratch[3] = 0;
+  boundaryScratch[4] = half;
+  boundaryScratch[5] = -half;
+  boundaryScratch[6] = half;
+  return houses.overlaps(boundaryScratch);
 }
 
 /**
@@ -2041,6 +2106,13 @@ function farmlandEdge(a: LandClass, b: LandClass): LandClass | undefined {
  * nothing about villages, so a tree could otherwise stand in a kitchen.
  */
 export const BUILDING_CLEARANCE_METRES = 9;
+
+/**
+ * The field boundaries' kinds — a wall, a hedge and a fence, the chain-link
+ * among the fences (#1274). #2655: `three-renderer.ts`
+ * §`refillMappedBuildings` gives these only what the mapped buildings leave.
+ */
+export const BOUNDARY_KINDS: ReadonlySet<StructureKind> = new Set(['wall', 'hedge', 'fence']);
 
 /** The kinds that are buildings, which the natural scenery keeps clear of. */
 const BUILDINGS: ReadonlySet<StructureKind> = new Set([

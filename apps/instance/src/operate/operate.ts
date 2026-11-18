@@ -42,6 +42,27 @@
  * by (`rooms/rooms.ts` §`end`), written with its `room_ended` entry in one
  * transaction while the router places no socket in it; then the worker
  * closes every socket `4005 room-closed`. Nothing here reaches a trainer.
+ *
+ * ## Keys: the card, and the routine rotation
+ *
+ * The owner is shown the instance's card and its identity key's fingerprint
+ * whole — what `instance-key show` prints, public material only — and the
+ * current encryption key's serial, age and next rotation (#2613). **Rotate
+ * the encryption key** is what `instance-key rotate` does, no more: it takes
+ * the same key lease, so while the instance's own maintenance pass holds it
+ * the answer is `busy` and nothing is written; and it runs over the operator
+ * log's transaction, so a rotation is logged `instance_key_rotate` or not
+ * made. Devices pick the new key up from `GET /v1/instance/keys` by
+ * themselves, and nobody pins again. `--drop-old`, `rotate-identity` and
+ * `reset` make devices pin again, or answer a leak: they stay on the CLI.
+ *
+ * ## Recent problems: the log's own redacted lines, in memory
+ *
+ * The owner reads the instance's last problem lines (#2614) — exactly the
+ * lines standard output got, after `log.ts` §`redacted` — from the ring the
+ * instance's sink keeps (`log.ts` §`keepProblems`). Memory only: a restart
+ * empties it, and nothing of it is in the database or a backup. Reading it
+ * changes nothing and logs nothing.
  */
 
 import {
@@ -65,9 +86,11 @@ import { analysisModelNameProblem, type AnalysisModelOffCode } from '../config.t
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { RoomPhase } from '../room/core/room.ts';
 import type { Rooms } from '../rooms/rooms.ts';
+import type { RecentProblem, RecentProblems } from '../log.ts';
 import type { Resolver } from '../history/address.ts';
 import { encodeCursor, parsePageRequest, type Page } from '../pagination.ts';
 import type {
+  AdminSource,
   AnalysisJobStatus,
   BackupRecord,
   BackupRequestOutcome,
@@ -77,7 +100,12 @@ import type {
   SqlStore,
 } from '../store/sql-store.ts';
 import { ROOM_END_REASONS } from '../store/sql-store.ts';
-import type { DiskSpace, KeysState, StatusSources, TunnelState } from './status.ts';
+import {
+  ENCRYPTION_KEY_LIFE_SECONDS,
+  InstanceKeysUnavailable,
+  type InstanceKeys,
+} from '../keys/instance-keys.ts';
+import { type DiskSpace, type KeysState, type StatusSources, type TunnelState } from './status.ts';
 
 export type OperateResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -242,6 +270,50 @@ const PHASE_SHOWN: Readonly<Record<RoomPhase, OperateRoomPhase>> = {
 /** The fields `POST /v1/operate/rooms/{roomId}/end` takes, and no other. */
 const END_FIELDS = new Set(['reason', 'confirm']);
 
+/**
+ * The instance's keys as the owner reads them (#2613): public material only.
+ * Never a private half, nor anything derived from `OYL_INSTANCE_SECRET_KEY`.
+ */
+export interface KeysView {
+  /** `ready`, or why the keys cannot be read now (`status.ts` §`KeysState`). */
+  readonly state: KeysState;
+  /** The identity key's SHA-256 fingerprint as a rider's device shows it, 52 base32 characters; `null` unless `ready`. */
+  readonly fingerprint: string | null;
+  /** `oyl-instance:<origin>#<52 characters>`, whole; `null` unless `ready`. */
+  readonly card: string | null;
+  /** The current encryption key, or `null`. */
+  readonly current: {
+    readonly serial: number;
+    /** Unix seconds. */
+    readonly createdAt: number;
+    /** When the instance rotates it by itself, Unix seconds. */
+    readonly rotatesAt: number;
+  } | null;
+  /** How many superseded encryption keys are still held, each for 7 days after its successor. */
+  readonly olderHeld: number;
+}
+
+/**
+ * What the owner's Keys reads and rotates with (#2613). Absent — a world
+ * handed none — both Keys routes answer `unavailable`.
+ */
+export interface OperateKeySources {
+  /** The instance's own keys: what is shown, and their state. */
+  readonly keys: Pick<InstanceKeys, 'show'>;
+  /**
+   * The same keys over `store` — the operator log's transaction — for a
+   * rotation that is logged or not made: the CLI's `withInstanceKeys` does
+   * the same.
+   */
+  readonly over: (store: SqlStore) => Pick<InstanceKeys, 'rotate'>;
+}
+
+/** What `POST /v1/operate/keys/rotate` came to (#2613). */
+export type KeyRotation =
+  | { readonly outcome: 'rotated'; readonly serial: number }
+  /** The key lease is held — the instance's own maintenance pass — and nothing was written. */
+  | { readonly outcome: 'busy' };
+
 /** What the analysis settings are read and written with (#2609). */
 export interface OperateAnalysisSources {
   readonly environment: AnalysisEnvironment;
@@ -262,6 +334,15 @@ export interface OperateAnalysisSources {
   readonly localModel: (target: ToolCheckTarget) => ModelConnection;
 }
 
+/**
+ * The owner as an Operate change is logged under (ADR 0069 D-8): from the
+ * app, or since #2648 from the instance's own admin pages on one listener.
+ */
+export interface OperateOwner {
+  readonly source: 'app' | AdminSource;
+  readonly athleteId: string;
+}
+
 export interface Operate {
   /** The instance's own state, read-only (#2604). Writes nothing, logs nothing. */
   status(): Promise<InstanceStatus>;
@@ -270,30 +351,31 @@ export interface Operate {
   /** The newest backup records and any waiting request (#2606). Writes nothing, logs nothing. */
   backups(): Promise<BackupsView>;
   /**
-   * "Back up now" (#2606), as the owner `athleteId`: the request and its
-   * `backup_requested` entry in ONE transaction, or `too_many` — logged
-   * `refused` — while one waits or a backup ran in the last 15 minutes.
-   * Answers when it was asked, Unix seconds.
+   * "Back up now" (#2606), as `owner`: the request and its
+   * `backup_requested` entry, under the owner's source (the app, or since
+   * #2647 the admin pages' listener), in ONE transaction, or `too_many` —
+   * logged `refused` — while one waits or a backup ran in the last 15
+   * minutes. Answers when it was asked, Unix seconds.
    */
-  requestBackup(athleteId: string): Promise<OperateResult<{ readonly requestedAt: number }>>;
+  requestBackup(owner: OperateOwner): Promise<OperateResult<{ readonly requestedAt: number }>>;
   /** The analysis settings (#2609), for the owner `athleteId`. Writes nothing. */
   analysisSettings(athleteId: string): Promise<AnalysisSettingsView>;
-  /** Save the fields `body` names, checked first; logged either way. */
+  /** Save the fields `body` names, checked first; logged either way, under `owner`'s source. */
   setAnalysisSettings(
-    athleteId: string,
+    owner: OperateOwner,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<AnalysisSettingsView>>;
-  /** Back to `.env` for every field, logged. */
-  clearAnalysisSettings(athleteId: string): Promise<AnalysisSettingsView>;
+  /** Back to `.env` for every field, logged under `owner`'s source. */
+  clearAnalysisSettings(owner: OperateOwner): Promise<AnalysisSettingsView>;
   /** What the configured local server offers (#2610). Writes nothing, logs nothing. */
   localModels(): Promise<LocalServerRead>;
   /**
    * Whether the model `body.model` on the configured local server calls
-   * tools (#2610), as the owner `athleteId`: logged `analysis_model_checked`
-   * with the outcome. `validation_failed` for a body that names no model.
+   * tools (#2610), as `owner`: logged `analysis_model_checked` with the
+   * outcome. `validation_failed` for a body that names no model.
    */
   checkModel(
-    athleteId: string,
+    owner: OperateOwner,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<{ readonly outcome: ToolCheckOutcome }>>;
   /** The analysis queue and the newest jobs, for the owner `athleteId` (#2610). Writes nothing. */
@@ -304,17 +386,69 @@ export interface Operate {
    */
   rooms(athleteId: string): Promise<OperateResult<readonly OperateRoomView[]>>;
   /**
-   * End `roomId` as the owner `athleteId` (#2612): `body.reason` one of
+   * End `roomId` as `owner` (#2612; logged under its source since #2649): `body.reason` one of
    * `ROOM_END_REASONS`, and `body.confirm` the room's short code — else
    * `validation_failed`, with nothing changed and nothing logged. `not_found`
    * for a room that is not an open rider's room. Closed and logged
    * `room_ended` in one transaction, then every socket in it closed.
    */
   endRoom(
-    athleteId: string,
+    owner: OperateOwner,
     roomId: string,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<{ readonly endedAt: number }>>;
+  /** The card, the fingerprint and the encryption keys (#2613). Writes nothing. `unavailable` with no keys source. */
+  keys(): Promise<OperateResult<KeysView>>;
+  /**
+   * Rotate the encryption key as `owner` (#2613; logged under its source since #2650): `body` must
+   * be `{ confirm: 'rotate' }`, else `validation_failed` and nothing is
+   * written or logged. Logged `instance_key_rotate` — `refused` with `busy`
+   * while the key lease is held — in the same transaction as the rotation.
+   */
+  rotateKey(
+    owner: OperateOwner,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<OperateResult<KeyRotation>>;
+  /**
+   * The instance's recent problem lines, newest first, and when this process
+   * started (#2614). Writes nothing, logs nothing. `unavailable` where the
+   * instance keeps none.
+   */
+  problems(): OperateResult<{ readonly lines: readonly RecentProblem[]; readonly since: number }>;
+}
+
+/**
+ * The instance's keys as Operate shows them (#2613): ONE read of `show()` —
+ * a second could meet keys changed from the CLI in between — or, when they
+ * cannot be read, why, with nothing else. Since #2650 the admin Keys page
+ * reads them here too, and draws the card and the fingerprint only on the
+ * loopback listener.
+ */
+export async function keysView(keys: Pick<InstanceKeys, 'show'>): Promise<KeysView> {
+  let shown: Awaited<ReturnType<typeof keys.show>>;
+  try {
+    shown = await keys.show();
+  } catch (error) {
+    const state: KeysState = error instanceof InstanceKeysUnavailable ? error.code : 'unreadable';
+    return { state, fingerprint: null, card: null, current: null, olderHeld: 0 };
+  }
+  const current = shown.encryptionKeys
+    .filter((key) => key.supersededAt === null)
+    .sort((a, b) => b.serial - a.serial)[0];
+  return {
+    state: 'ready',
+    fingerprint: shown.fingerprintBase32,
+    card: shown.card,
+    current:
+      current === undefined
+        ? null
+        : {
+            serial: current.serial,
+            createdAt: current.createdAt,
+            rotatesAt: current.createdAt + ENCRYPTION_KEY_LIFE_SECONDS,
+          },
+    olderHeld: shown.encryptionKeys.filter((key) => key.supersededAt !== null).length,
+  };
 }
 
 /** What `unavailable` says on an instance with no keys. Names the variable, never a value. */
@@ -337,9 +471,15 @@ export function createOperate(options: {
   readonly analysis: OperateAnalysisSources;
   /** The room router and the rooms (#2612); absent where there is no router. */
   readonly rooms?: OperateRoomSources;
+  /** The instance's keys (#2613); absent, the Keys routes answer `unavailable`. */
+  readonly keys?: OperateKeySources;
+  /** The problem lines the instance's own sink keeps (#2614); absent, none are kept. */
+  readonly problems?: RecentProblems;
 }): Operate {
   const { store, status, analysis } = options;
   const roomSources = options.rooms;
+  const keySources = options.keys;
+  const recent = options.problems;
   const seconds = (): number => Math.floor(status.now() / 1000);
   // #2610: ONE check for the instance, so a second while one is out is `busy`.
   const toolCheck = createToolCheck({
@@ -439,7 +579,7 @@ export function createOperate(options: {
       shown.sort((a, b) => b.openedAt - a.openedAt || a.roomId.localeCompare(b.roomId));
       return { ok: true, value: shown };
     },
-    async endRoom(athleteId, roomId, body) {
+    async endRoom(owner, roomId, body) {
       if (roomSources === undefined) return { ok: false, code: 'unavailable' };
       const fields: FieldProblem[] = [];
       for (const name of Object.keys(body)) {
@@ -479,7 +619,7 @@ export function createOperate(options: {
       const ended = await sources.end(roomId, () =>
         sources.rooms.end(roomId, async (close) => {
           const { value } = await store.recordOperatorAction(
-            { actor: { source: 'app', athleteId }, action: 'room_ended', at },
+            { actor: owner, action: 'room_ended', at },
             async (inside) => {
               const closed = await close(inside);
               return {
@@ -494,6 +634,41 @@ export function createOperate(options: {
       );
       return ended ? { ok: true, value: { endedAt: at } } : { ok: false, code: 'not_found' };
     },
+    async keys() {
+      if (keySources === undefined) return { ok: false, code: 'unavailable' };
+      return { ok: true, value: await keysView(keySources.keys) };
+    },
+    async rotateKey(owner, body) {
+      if (keySources === undefined) return { ok: false, code: 'unavailable' };
+      const fields: FieldProblem[] = [];
+      for (const name of Object.keys(body)) {
+        if (name !== 'confirm')
+          fields.push({ field: name, problem: 'is not a field of this request' });
+      }
+      if (body.confirm !== 'rotate') fields.push({ field: 'confirm', problem: 'must be rotate' });
+      if (fields.length > 0) return { ok: false, code: 'validation_failed', fields };
+      const sources = keySources;
+      const { value } = await store.recordOperatorAction<KeyRotation>(
+        { actor: owner, action: 'instance_key_rotate', at: seconds() },
+        async (inside) => {
+          try {
+            // No `dropOld`, no `serialAbove`: the routine rotation, and only it.
+            const rotated = await sources.over(inside).rotate();
+            return { outcome: 'done', value: { outcome: 'rotated', serial: rotated.serial } };
+          } catch (error) {
+            if (error instanceof InstanceKeysUnavailable && error.code === 'busy') {
+              return { outcome: 'refused', detail: 'busy', value: { outcome: 'busy' } };
+            }
+            throw error;
+          }
+        },
+      );
+      return { ok: true, value };
+    },
+    problems() {
+      if (recent === undefined) return { ok: false, code: 'unavailable' };
+      return { ok: true, value: { lines: recent.list(), since: status.startedAt } };
+    },
     analysisSettings: analysisView,
     async localModels() {
       const server = await localServer();
@@ -506,7 +681,7 @@ export function createOperate(options: {
       }
       return readLocalServer(server.baseUrl, { resolve: analysis.resolve });
     },
-    async checkModel(athleteId, body) {
+    async checkModel(owner, body) {
       const fields: FieldProblem[] = [];
       for (const name of Object.keys(body)) {
         if (name !== 'model')
@@ -537,7 +712,7 @@ export function createOperate(options: {
       const sent = outcome !== 'busy' && outcome !== 'no-address' && outcome !== 'not-local';
       await store.recordOperatorAction(
         {
-          actor: { source: 'app', athleteId },
+          actor: owner,
           action: 'analysis_model_checked',
           at: Math.floor(analysis.now() / 1000),
         },
@@ -565,19 +740,19 @@ export function createOperate(options: {
         })),
       };
     },
-    async setAnalysisSettings(athleteId, body) {
-      const saved = await saveAnalysisSettings(store, { source: 'app', athleteId }, body, {
+    async setAnalysisSettings(owner, body) {
+      const saved = await saveAnalysisSettings(store, owner, body, {
         resolve: analysis.resolve,
         now: analysis.now,
       });
       if (!saved.ok) return { ok: false, code: 'validation_failed', fields: saved.fields };
       await told();
-      return { ok: true, value: await analysisView(athleteId) };
+      return { ok: true, value: await analysisView(owner.athleteId) };
     },
-    async clearAnalysisSettings(athleteId) {
-      await clearAnalysisSettings(store, { source: 'app', athleteId }, analysis.now);
+    async clearAnalysisSettings(owner) {
+      await clearAnalysisSettings(store, owner, analysis.now);
       await told();
-      return analysisView(athleteId);
+      return analysisView(owner.athleteId);
     },
     async status() {
       const [counts, disk, tunnel, keys, backup] = await Promise.all([
@@ -610,10 +785,10 @@ export function createOperate(options: {
       ]);
       return { records, pendingSince: pending?.requestedAt ?? null, now: seconds() };
     },
-    async requestBackup(athleteId) {
+    async requestBackup(owner) {
       const at = seconds();
       const { value } = await store.recordOperatorAction<BackupRequestOutcome>(
-        { actor: { source: 'app', athleteId }, action: 'backup_requested', at },
+        { actor: owner, action: 'backup_requested', at },
         async (inside) => {
           const asked = await inside.requestBackup(at);
           return asked.outcome === 'requested'

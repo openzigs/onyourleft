@@ -105,6 +105,7 @@ async function openPort(): Promise<TransferPort> {
     instance: { forget: () => forgotten.push('instance') },
     instanceAnalysis: { forget: () => forgotten.push('instance-analysis') },
     trainerTargets: { forget: () => forgotten.push('trainer-targets') },
+    rememberedSensors: { forget: () => forgotten.push('remembered-sensors') },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 }
@@ -1028,6 +1029,8 @@ describe('TransferView — what it may say about another platform', () => {
       'draft',
       'instance',
       'instance-analysis',
+      // #2669: the sensors the shell remembers go through the same port.
+      'remembered-sensors',
       'retired-hosted-key',
       'theme',
       'trainer-targets',

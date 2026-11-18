@@ -74,7 +74,10 @@
  * Drawn once at the press from the platform's cryptographic source, handed
  * to the race and to the bots' decisions, and never stored, as Delivery's
  * (`delivery/targets.ts` §`drawRoundSeed`), restated here because the lap
- * race reaches none of Delivery's modules.
+ * race reaches none of Delivery's modules. ⚠️ **Except a race with AI bots**
+ * (#2710, ADR 0071 D-4.4): its seed, decision log, bot-code version and the
+ * rider's input at every tick are kept with the ride (`model-race.ts`,
+ * {@link lapRaceRideFact}), so it replays under the version it was ridden with.
  *
  * ## The bots ride still air
  *
@@ -97,6 +100,7 @@ import {
   type BotPersonality,
   type BotSkill,
   type ItemRaceState,
+  type LapRaceModelRecord,
   type RouteProfile,
 } from '@onyourleft/domain';
 import {
@@ -116,7 +120,7 @@ import {
   type LapRaceOwed,
 } from '../hud/lap-race-announce';
 import { botName, riderEntry, type LapRaceEntrant, type LapRaceHud } from '../hud/lap-race-hud';
-import { sidewaysSpeedOf, type SteerIntent } from '../lanes';
+import { LANE_OFFSETS_METRES, sidewaysSpeedOf, type SteerIntent } from '../lanes';
 import type { LapRaceInView, RaceHitLook } from '../port';
 import type { RaceBotInput } from '../scene';
 
@@ -125,7 +129,21 @@ import { LAP_RACE_ASSIST_PARTS, readLapRaceAssist, type LapRaceAssist } from './
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
 import { hitLook, laneLateral, lapRaceInView } from './in-view';
 import {
+  answerLapRaceModel,
+  applyLapRaceModel,
+  askLapRaceModel,
+  lapRaceModelFact,
+  noteLapRaceModelTick,
+  startedLapRaceModel,
+  startLapRaceModel,
+  type LapRaceModel,
+  type LapRaceModelAsk,
+  type ModelTacticsReply,
+} from './model-race';
+import {
+  drawnLateral,
   drawnShift,
+  drawnSway,
   gridPackLayout,
   stepPackLayout,
   type PackLayout,
@@ -188,10 +206,32 @@ export interface LapRaceRide {
    */
   readonly pack: PackLayout;
   /**
+   * How fast each bot's race offset moved over the last tick, metres a second,
+   * by id (#2665): what an item's effect, or the drift back, is moving it at.
+   * Drawing only: a frame between two ticks draws a bot back along its effort
+   * speed and this, so a bot an item moves is drawn moving smoothly, never a
+   * tick's worth of offset at a time. Absent before the first tick: nought.
+   */
+  readonly offsetRates: ReadonlyMap<string, number>;
+  /**
+   * Where the rider was steered across the road a tick before, metres
+   * (#2665): a frame between two ticks draws the rider between there and
+   * where they are now, as it draws the bots, so the rider and a bot moving
+   * across beside them are drawn on the same frames.
+   */
+  readonly steeredBefore: number;
+  /**
    * How much of the countdown is left, ms of the ride's unpaused frames: the
    * rider is held on the line until it is nought (#2546). @see countLapRaceDown
    */
   readonly countdownLeftMs: number;
+  /**
+   * The AI side of a race the rider chose to ride with AI bots (#2710, ADR
+   * 0071): its decision log and the rider's own input, or `undefined` for a
+   * seeded race, which is the race before #2710 to the bit (D-1.4).
+   * @see model-race.ts
+   */
+  readonly model: LapRaceModel | undefined;
 }
 
 /** What a race needs at the press. */
@@ -217,6 +257,12 @@ export interface LapRaceRideStart {
    * (#2463, ADR 0067 D-0), as the standings show it. Absent, they read none.
    */
   readonly riderMassKilograms?: number | undefined;
+  /**
+   * Whether the rider chose AI bots and consented (#2710, ADR 0071 D-1): the
+   * race then keeps a decision log, and the bots ride the moves in it. Absent,
+   * a seeded race.
+   */
+  readonly model?: boolean | undefined;
 }
 
 /**
@@ -321,17 +367,21 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   // A mixed field: the three personalities, the three skills and the five
   // pacing styles (each its archetype, #2459) in turn, and an ability each,
   // from the race's seed.
-  const bots = ids.map((id, index) =>
-    lapRaceBot(
+  const bots = ids.map((id, index) => {
+    const bot = lapRaceBot(
       id,
       tier,
       {
         personality: personalities[index] as BotPersonality,
         skill: skills[index] as BotSkill,
       },
-      paces[index] as BotPace,
-    ),
-  );
+      paces[index],
+    );
+    // #2665: the field rolls off its grid in the lanes it stands in, each bot
+    // holding its lane for a dwell from Go as if it had just moved into it, so
+    // nobody crosses the grid's rows, or the rider's line, while it gets going.
+    return { ...bot, memory: { ...bot.memory, laneSinceMs: race.atMs } };
+  });
   const riderInput = startRiderInput(input.lineOffset);
   return {
     race,
@@ -352,28 +402,57 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     // The owner's ruling of 2026-11-13 on #2544: the pack forms on the line.
     // Every bot stands in its place on the grid through the countdown, so the
     // field rolls off together at Go (`pack-layout.ts` §"On the grid").
-    pack: gridPackLayout(packField(race, bots, riderInput, 0), LAP_RACE_RIDER_ID),
+    pack: gridPackLayout(packField(race, bots, riderInput, 0, NO_RATES), LAP_RACE_RIDER_ID),
+    offsetRates: NO_RATES,
+    steeredBefore: riderInput.steer.offset,
     countdownLeftMs: LAP_RACE_COUNTDOWN_MS,
+    model: input.model === true ? startLapRaceModel() : undefined,
   };
+}
+
+/** No race offset moving: before the first tick. */
+const NO_RATES: ReadonlyMap<string, number> = new Map();
+
+/**
+ * How fast a bot's race place moves, metres a second: its effort speed, and
+ * the rate its race offset moved at over the last tick (#2665).
+ */
+function drawnSpeed(bot: LapRaceBot, offsetRates: ReadonlyMap<string, number>): number {
+  return (bot.ride.speed as number) + (offsetRates.get(bot.id) ?? 0);
 }
 
 /**
  * The field as the pack layout reads it (#2544): every racer's race place and
- * lane, the rider where they steered, and each bot's speed.
+ * lane, the rider where they steered, and each bot's speed along the race,
+ * its race offset's rate with it (#2665), and that rate alone (#2636).
  */
 function packField(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
   input: RiderRaceInput,
   riderSpeed: number,
+  offsetRates: ReadonlyMap<string, number>,
+  steeredBefore: number = input.steer.offset,
+  raceBefore?: ItemRaceState,
 ): PackRacer[] {
-  const speeds = new Map(bots.map((bot) => [bot.id, bot.ride.speed as number]));
+  const speeds = new Map(bots.map((bot) => [bot.id, drawnSpeed(bot, offsetRates)]));
   speeds.set(LAP_RACE_RIDER_ID, riderSpeed);
+  const before = new Map(
+    (raceBefore?.racers ?? []).map((entry) => [entry.racer.id, racePosition(entry.racer)]),
+  );
   return race.racers.map((entry) => ({
     id: entry.racer.id,
     along: racePosition(entry.racer),
+    // #2665: how far it truly went over the tick.
+    ...(before.has(entry.racer.id) ? { alongBefore: before.get(entry.racer.id) } : {}),
     lateral: entry.racer.id === LAP_RACE_RIDER_ID ? input.steer.offset : laneLateral(entry.lane),
     speed: speeds.get(entry.racer.id) ?? 0,
+    // #2636: an item's push, which a bot's row step counts toward its own.
+    ...(offsetRates.has(entry.racer.id) ? { offsetRate: offsetRates.get(entry.racer.id) } : {}),
+    // #2665: where the rider is steering to, which the bots look to.
+    ...(entry.racer.id === LAP_RACE_RIDER_ID
+      ? { heading: LANE_OFFSETS_METRES[input.steer.lane], lateralBefore: steeredBefore }
+      : {}),
   }));
 }
 
@@ -461,20 +540,14 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
   const from = ride.along;
   // Never backwards: a race runs on a solo ride, where no room corrects the rider.
   const to = Math.max(from, step.along);
-  const mass = ride.riderMassKilograms;
-  // A mass that is not above 0 would turn the watts into Infinity or NaN for
-  // the bots to read, so the bots read no W/kg then: this is the boundary
-  // of an optional field, not a case the rider's own mass reaches.
-  const riderWattsPerKilogram =
-    step.riderWatts === undefined || mass === undefined || !(mass > 0)
-      ? undefined
-      : step.riderWatts / mass;
-  let { race, bots, input, owed, riderDraft, pack } = ride;
+  const riderWattsPerKilogram = wattsPerKilogramOf(ride, step.riderWatts);
+  let { race, bots, input, owed, riderDraft, pack, offsetRates, steeredBefore, model } = ride;
   // The rider's speed on effort distance over the step, which the pack layout
   // reads to see a pass coming (#2544).
   const riderSpeed = (to - from) / (ticks * LAP_RACE_TICK_SECONDS);
   for (let tick = 1; tick <= ticks; tick += 1) {
     const at = from + ((to - from) * tick) / ticks;
+    steeredBefore = input.steer.offset;
     input = stepRiderInput(input, LAP_RACE_TICK_SECONDS);
     const asked = riderTick(input, LAP_RACE_RIDER_ID);
     input = asked.next;
@@ -485,7 +558,10 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       uses: asked.uses,
     });
     const before = race;
-    const stepped = stepBotRace(race, bots, {
+    // #2710: the moves in force handed to the bots whose window opens on this
+    // tick, before the step rides them through their own tactics.
+    const riding = model === undefined ? bots : applyLapRaceModel(model, race, bots, ride.seed);
+    const stepped = stepBotRace(race, riding, {
       elapsed: seconds(LAP_RACE_TICK_SECONDS),
       conditions: ride.conditions,
       seed: ride.seed,
@@ -499,15 +575,35 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
     });
     race = stepped.race;
     bots = stepped.bots;
+    // #2665: how fast each bot's race offset moved over the tick, for the drawing.
+    const offsetsBefore = new Map(
+      before.racers.map((entry) => [entry.racer.id, entry.racer.raceOffset]),
+    );
+    offsetRates = new Map(
+      bots.map((bot) => {
+        const now = race.racers.find((entry) => entry.racer.id === bot.id)?.racer.raceOffset ?? 0;
+        return [bot.id, (now - (offsetsBefore.get(bot.id) ?? now)) / LAP_RACE_TICK_SECONDS];
+      }),
+    );
+    if (model !== undefined) {
+      model = noteLapRaceModelTick(model, race, bots, {
+        effortDistance: at - ride.startAlong,
+        wattsPerKilogram: riderWattsPerKilogram ?? null,
+        lane: asked.lanes[LAP_RACE_RIDER_ID] ?? 0,
+        used: (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
+      });
+    }
     // #2461: the rider's `k` from the same call that drafted the bots.
     riderDraft = stepped.draft?.[LAP_RACE_RIDER_ID] ?? 1;
     // #2544: the field laid out for the drawing, a tick on, the rider where
     // they steered.
     pack = stepPackLayout(
-      packField(race, bots, input, riderSpeed),
+      packField(race, bots, input, riderSpeed, offsetRates, steeredBefore, before),
       LAP_RACE_RIDER_ID,
       pack,
       LAP_RACE_TICK_SECONDS,
+      // #2516: a bot a lap apart is drawn beside the rider, so it is kept clear there.
+      race.course.lapLengthMetres,
     );
     owed = oweRaceTick(
       owed,
@@ -517,7 +613,84 @@ export function stepLapRaceRide(ride: LapRaceRide, step: LapRaceRideStep): LapRa
       (rider.uses ?? []).includes(LAP_RACE_RIDER_ID),
     );
   }
-  return { ...ride, race, bots, input, owed, riderDraft, pack, along: to };
+  return {
+    ...ride,
+    race,
+    bots,
+    input,
+    owed,
+    riderDraft,
+    pack,
+    offsetRates,
+    steeredBefore,
+    model,
+    along: to,
+  };
+}
+
+/**
+ * The rider's power as the bots read it, W/kg, or `undefined` with none. A
+ * mass that is not above 0 would turn the watts into Infinity or NaN for the
+ * bots to read, so they read no W/kg then: the boundary of an optional field,
+ * not a case the rider's own mass reaches.
+ */
+function wattsPerKilogramOf(ride: LapRaceRide, riderWatts: number | undefined): number | undefined {
+  const mass = ride.riderMassKilograms;
+  return riderWatts === undefined || mass === undefined || !(mass > 0)
+    ? undefined
+    : riderWatts / mass;
+}
+
+/** What {@link askLapRaceRide} hands `GameView`: the race, and the race state to send with its ask. */
+export interface LapRaceRideAsking {
+  readonly ride: LapRaceRide;
+  readonly send: ReturnType<typeof askLapRaceModel>['send'];
+}
+
+/**
+ * Between frames, for a race with AI bots (#2710): give up a call out too
+ * long, and the race state to ask about when an ask is due. Nothing for a
+ * seeded race. `GameView` sends it through the tactics port and hands the
+ * reply to {@link answerLapRaceRide}; the race never waits for it (D-4.5).
+ */
+export function askLapRaceRide(ride: LapRaceRide, riderWatts?: number): LapRaceRideAsking {
+  if (ride.model === undefined) return { ride, send: undefined };
+  const asking = askLapRaceModel(
+    ride.model,
+    ride.race,
+    ride.bots,
+    ride.conditions.profile,
+    ride.seed,
+    ride.draft,
+    wattsPerKilogramOf(ride, riderWatts) ?? null,
+  );
+  return {
+    ride: asking.model === ride.model ? ride : { ...ride, model: asking.model },
+    send: asking.send,
+  };
+}
+
+/** The race once the reply to `ask` arrived, logged at the race's time now (#2710, D-4.2). */
+export function answerLapRaceRide(
+  ride: LapRaceRide,
+  ask: LapRaceModelAsk,
+  reply: ModelTacticsReply,
+): LapRaceRide {
+  if (ride.model === undefined) return ride;
+  const model = answerLapRaceModel(ride.model, ride.race, ask, reply);
+  return model === ride.model ? ride : { ...ride, model };
+}
+
+/** The race once the instance answered its start (#2710, D-6.3): refused, it rides seeded tactics. */
+export function startedLapRaceRide(ride: LapRaceRide, reply: ModelTacticsReply): LapRaceRide {
+  if (ride.model === undefined) return ride;
+  const model = startedLapRaceModel(ride.model, reply);
+  return model === ride.model ? ride : { ...ride, model };
+}
+
+/** What a race with AI bots keeps with the ride (#2710, D-4.4), or `undefined` for a seeded race. */
+export function lapRaceRideFact(ride: LapRaceRide): LapRaceModelRecord | undefined {
+  return ride.model === undefined ? undefined : lapRaceModelFact(ride.model, ride.seed);
 }
 
 /** What the race offers the HUD's one region at `now`, ride seconds: one event per kind owed. */
@@ -551,7 +724,8 @@ export interface LapRaceDrawing {
  * Where the race draws its racers on a frame. `riderDistance` is the rider's
  * drawn odometer (`simulation.ts` §`drawnAt`, a step behind the newest), and
  * `behindSeconds` how far behind the newest step that is, so each bot is
- * drawn as far back along its own speed and the field moves together.
+ * drawn as far back along its own speed and its race offset's rate, and
+ * across between its last two places (#2665), and the field moves together.
  *
  * ⚠️ **Never behind the ride's start** — #2546. A bot one tick off the line
  * from rest has covered less than a tick at its new speed, so drawn a whole
@@ -568,11 +742,12 @@ export function lapRaceDrawing(
 ): LapRaceDrawing {
   const { race } = ride;
   const rider = riderEntry(race, LAP_RACE_RIDER_ID);
-  const speeds = new Map(ride.bots.map((bot) => [bot.id, bot.ride.speed as number]));
+  const bots = new Map(ride.bots.map((bot) => [bot.id, bot]));
   const raceBots: RaceBotInput[] = [];
   for (const entry of race.racers) {
-    const speed = speeds.get(entry.racer.id);
-    if (speed === undefined) continue;
+    const bot = bots.get(entry.racer.id);
+    if (bot === undefined) continue;
+    const speed = bot.ride.speed as number;
     const hit = hitLook(entry.effects, race.atMs, reducedMotion);
     // #2544: its place in the pack, a bike length a row from the rider's and
     // beside the others in its lane, and on the grid from the press.
@@ -585,18 +760,30 @@ export function lapRaceDrawing(
         ride.startAlong +
           racePosition(entry.racer) +
           (place === undefined ? 0 : drawnShift(place, behindSeconds, LAP_RACE_TICK_SECONDS)) -
-          speed * behindSeconds,
+          // #2665: back along its effort speed and its race offset's rate, so a
+          // bot an item is moving is drawn moving smoothly between ticks.
+          drawnSpeed(bot, ride.offsetRates) * behindSeconds,
       ),
       speedMetresPerSecond: speed,
-      lateralMetres: place?.lateral ?? laneLateral(entry.lane),
-      swayMetresPerSecond: place?.sway ?? 0,
+      // #2665: between the tick before's place across and the newest's, as the
+      // shift, so a move across is drawn on every frame.
+      lateralMetres:
+        place === undefined
+          ? laneLateral(entry.lane)
+          : drawnLateral(place, behindSeconds, LAP_RACE_TICK_SECONDS),
+      swayMetresPerSecond:
+        place === undefined ? 0 : drawnSway(place, behindSeconds, LAP_RACE_TICK_SECONDS),
       laidOut: place !== undefined,
       ...(hit === undefined ? {} : { hit }),
     });
   }
   return {
     riderDistance: riderDistance + rider.racer.raceOffset,
-    steeredLateral: ride.input.steer.offset,
+    // #2665: between the tick before's and the newest's, as the bots are.
+    steeredLateral:
+      ride.input.steer.offset +
+      (ride.steeredBefore - ride.input.steer.offset) *
+        Math.min(1, Math.max(0, behindSeconds / LAP_RACE_TICK_SECONDS)),
     steeringSpeed: sidewaysSpeedOf(ride.input.steer),
     riderHit: hitLook(rider.effects, race.atMs, reducedMotion),
     raceBots,
@@ -642,4 +829,23 @@ export function lapRaceHud(
     riderWattsPerKilogram: rider.wattsPerKilogram,
     speedMetresPerSecond: rider.speed,
   };
+}
+
+/**
+ * What the standings say of a race's AI bots (#2710), or `undefined` for a
+ * seeded race: that they are racing, or — when the instance refused the
+ * race's start — that they are not available now (ADR 0071 D-6.3).
+ * ⚠️ Draft wording for the owner's approval with the screenshots.
+ */
+export const AI_BOTS_RACE_TEXT = {
+  racing: 'AI bots: your instance’s model picks their moves.',
+  unavailable: 'AI bots are not available right now. The bots race on their own.',
+} as const;
+
+/** @see AI_BOTS_RACE_TEXT */
+export function lapRaceModelNote(ride: LapRaceRide): string | undefined {
+  if (ride.model === undefined) return undefined;
+  return ride.model.unavailable === undefined
+    ? AI_BOTS_RACE_TEXT.racing
+    : AI_BOTS_RACE_TEXT.unavailable;
 }

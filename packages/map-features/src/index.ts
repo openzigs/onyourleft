@@ -42,6 +42,7 @@ export {
   ROOF_SHAPES,
   STREET_KINDS,
   WALL_MATERIALS,
+  WATER_LINE_KINDS,
   type BuildingFieldName,
   type BuildingFieldRule,
 } from './schema';
@@ -68,4 +69,5 @@ export type {
   StreetGrade,
   TileId,
   WallMaterial,
+  WaterLineFeature,
 } from './types';

@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { metres } from '@onyourleft/domain';
 
 import { RIDER_HEIGHT_METRES } from './bicycle';
+import { PACK_ABREAST_METRES } from './lap-race/pack-layout';
 import { REFERENCE_ASPECT, cameraRig, projectToFrame } from './camera';
 import {
   MAXIMUM_NAME_TAGS,
@@ -26,6 +27,7 @@ import {
   nameTags,
 } from './name-tags';
 import type { RiderMarker, SceneFrame } from './port';
+import { emptyRiderFadeLine, riderFadeLine, riderFaded } from './rider-fade';
 import { northRoute } from './route-fixtures-testing';
 import type { RemoteRiderInput } from './scene';
 import { sceneFrame } from './scene';
@@ -157,6 +159,28 @@ describe('other riders’ names on the road — #783', () => {
     expect(apart.map((tag) => tag.label)).toEqual(['Farther', 'Nearer']);
     // And a frame with no size names nobody.
     expect(nameTags(frame, { width: 0, height: 0 })).toEqual([]);
+  });
+
+  it('names no rider the renderer is fading out between the camera and the rider — #2596', () => {
+    const frame = frameWith([rider(1, 12, 'R')]);
+    const own = frame.markers[0] as RiderMarker;
+    const remote = (ahead: number, across: number, label: string): RiderMarker => ({
+      ...moved(own, ahead, across, label),
+      kind: 'remote',
+    });
+    const under = remote(-2.05, 0, 'Under');
+    const fading = remote(-2.05, 0.25, 'Fading');
+    // One place across and a little behind: whole, the owner's ruling of 2026-11-15.
+    const beside = remote(-1, PACK_ABREAST_METRES, 'Beside');
+    const ahead = remote(12, 0, 'Ahead');
+    const line = riderFadeLine(frame.camera, frame.markers, emptyRiderFadeLine());
+    // The renderer draws the first gone and the second part gone; the others whole.
+    expect(riderFaded(under, line)).toBe(1);
+    expect(riderFaded(fading, line)).toBeGreaterThan(0);
+    expect(riderFaded(fading, line)).toBeLessThan(1);
+    expect(riderFaded(beside, line)).toBe(0);
+    const tags = nameTags({ ...frame, markers: [own, under, fading, beside, ahead] }, FRAME);
+    expect(tags.map((tag) => tag.label).sort()).toEqual(['Ahead', 'Beside']);
   });
 
   it('keeps the followed rider’s name over a nearer one it would meet', () => {
