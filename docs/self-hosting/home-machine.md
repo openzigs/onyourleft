@@ -100,7 +100,7 @@ Edit `.env`:
 | `OYL_INSTANCE_OWNER_KEY` | your device key, which the app shows: you are the instance's moderator. Empty names nobody |
 | `OYL_INSTANCE_DEPUTY_KEY` | leave it **empty**. An instance has one moderator ([`docs/moderation.md`](../moderation.md)); this names a second only if you want one |
 | `CLOUDFLARE_TUNNEL_TOKEN` | the token from step 3 |
-| `OYL_INSTANCE_SECRET_KEY` | empty to start with. It is what a hosted model key and the instance's own keys are encrypted under — read [`operating-an-instance.md`](../operating-an-instance.md) before setting it, and keep it out of both backup folders |
+| `OYL_INSTANCE_SECRET_KEY` | **leave it empty.** The instance makes it on its first start in the `secrets/` folder beside `compose.yaml`, owner-only, and reads it there on every later start (#2781). Setting it yourself with `openssl rand -base64 32` is optional, for an existing install. It is what a hosted model key and the instance's own keys are encrypted under, so download the **emergency kit** from the admin pages on this machine once they are on, and keep it away from both backup folders ([`operating-an-instance.md`](../operating-an-instance.md#the-instances-secrets)) |
 | `OYL_INSTANCE_NAME` | optional: the name the app shows for this instance, at most 64 characters |
 | `OYL_BACKUP_DIR` | a folder on this machine for snapshots, e.g. `C:/onyourleft/backups` |
 | `OYL_OFFBOX_DIR` | **required — the deploy refuses to start without it.** A folder that is **not** on this machine's own disk. ⚠️ On Windows **a USB stick does not work here**: read [Backups](#backups) first |

@@ -45,6 +45,8 @@ export const ADMIN_CHANGES = {
   room_end: { fields: ['roomId', 'reason', 'confirm'] },
   // #2650: the routine rotation, and the word the owner typed for it.
   key_rotate: { fields: ['confirm'] },
+  // #2781 (ADR 0080 D-4): the emergency kit, which takes no field.
+  emergency_kit: { fields: [] },
 } as const satisfies Readonly<Record<string, { readonly fields: readonly string[] }>>;
 
 export type AdminChange = keyof typeof ADMIN_CHANGES;

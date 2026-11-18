@@ -185,6 +185,18 @@ export const EVENT_KEYS: ReadonlyMap<
       setIn: (value) => value === 'app' || value === 'env' || value === 'none',
     },
   ],
+  // #2781 (ADR 0080 D-4): which secret came from its file in the secrets
+  // folder, whether this start made it, and whether that folder keeps
+  // permission bits at all. Never the secret, and never the file's path.
+  [
+    'secret',
+    {
+      variable: (value) =>
+        value === 'OYL_INSTANCE_SECRET_KEY' || value === 'OYL_INSTANCE_METRICS_TOKEN',
+      from: (value) => value === 'file' || value === 'generated',
+      permissions: (value) => value === 'not-kept',
+    },
+  ],
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */

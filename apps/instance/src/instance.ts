@@ -50,6 +50,7 @@ import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
 import { createRecentProblems, keepProblems, logEvent, logUnhandled, type LogSink } from './log.ts';
+import type { SecretFromFile } from './setup/secrets.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { errorResponse } from './errors.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
@@ -173,6 +174,12 @@ export interface InstanceOptions {
   readonly discordFetch?: typeof globalThis.fetch;
   /** How long a room socket waits for its voice link (#875): {@link VOICE_INVITE_WAIT_MS} unless a test's. */
   readonly voiceInviteWaitMs?: number;
+  /**
+   * The secrets `setup/secrets.ts` read from their files in the secrets folder
+   * (#2781, ADR 0080 D-4): what the loopback Keys page's emergency kit holds.
+   * None when every secret came from the environment.
+   */
+  readonly kitSecrets?: readonly SecretFromFile[];
 }
 
 export interface StartedInstance {
@@ -995,6 +1002,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         addresses: server.adminAddresses,
         // #2650: the Keys page's; the card is drawn on the loopback listener only.
         instanceKeys: keys,
+        // #2781: the emergency kit's, offered on the loopback listener only.
+        kitSecrets: options.kitSecrets ?? [],
       });
       admin = pages;
       // Each minute: the coalesced refusals written, and the sign-in limits'

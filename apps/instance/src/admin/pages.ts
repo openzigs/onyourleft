@@ -564,6 +564,7 @@ const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   admin_passkey_confirmed: 'Admin passkey confirmed on the host',
   room_ended: 'Room ended',
   registration_decided: 'Registration decided',
+  emergency_kit_downloaded: 'Emergency kit downloaded',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */
@@ -1477,6 +1478,11 @@ export interface KeysView {
   readonly card: KeysCardView | null;
   /** Drawn on the loopback listener, where the card may be shown. */
   readonly onServer: boolean;
+  /**
+   * Whether the emergency kit is offered (#2781, ADR 0080 D-4): on the
+   * loopback listener, when a secret came from the secrets folder.
+   */
+  readonly kit: boolean;
   readonly strength: 'code' | 'passkey';
   readonly csrf: string;
   readonly notice: KeysNotice | null;
@@ -1505,6 +1511,42 @@ function cardPart(shown: KeysCardView | null, onServer: boolean): string {
 <p><code class="card">${escapeHtml(shown.card)}</code></p>
 <p>${escapeHtml(KEYS_FINGERPRINT_TEXT)}</p>
 <p><code class="fingerprint">${escapeHtml(shown.fingerprint)}</code></p>`);
+}
+
+/** What the emergency kit is, said beside its button (#2781). Draft wording, for the owner's approval. */
+export const KIT_TEXT =
+  'The emergency kit is one text file holding this instance’s secrets, its address and its card. Keep it in a password manager or on paper, never beside your backups: with it, a backup can be restored on a new machine and every device keeps trusting the instance. Without it, a restore makes new keys and every device has to connect again.';
+
+export const KIT_BUTTON = 'Download the emergency kit';
+
+/** Said in a code session in place of the kit's button (ADR 0069 Q-A). */
+export const KIT_READS_ONLY_TEXT =
+  'A one-time code’s session downloads nothing. Sign in with a passkey to download the emergency kit: it asks your passkey again.';
+
+/** Said on the server machine when every secret is in `.env`. */
+export const KIT_NONE_TEXT =
+  'There is no emergency kit to download: every secret this instance uses is set in .env, so keep a copy of that file’s secret lines safe, away from your backups.';
+
+/** The emergency kit's part of the Keys page: on the loopback listener only. */
+function kitPart(view: KeysView): string {
+  if (!view.onServer) return '';
+  if (!view.kit)
+    return card(`<h2>Emergency kit</h2>
+<p>${escapeHtml(KIT_NONE_TEXT)}</p>`);
+  const form =
+    view.strength === 'passkey'
+      ? stepUpForm(
+          '/admin/keys/emergency-kit',
+          'emergency_kit',
+          view.csrf,
+          KIT_BUTTON,
+          '',
+          KIT_BUTTON,
+        )
+      : `<p>${escapeHtml(KIT_READS_ONLY_TEXT)}</p>`;
+  return card(`<h2>Emergency kit</h2>
+<p>${escapeHtml(KIT_TEXT)}</p>
+${form}`);
 }
 
 function rotatePart(view: KeysView): string {
@@ -1557,7 +1599,7 @@ export function keysBody(view: KeysView): string {
   ).join('\n');
   return `${card(`<dl class="facts">
 ${keyFactRows(view.keys).map(fact).join('\n')}
-</dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
+</dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${kitPart(view)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
 <p>${escapeHtml(KEYS_CLI_TEXT)}</p>
 <ul class="cli">
 ${cli}

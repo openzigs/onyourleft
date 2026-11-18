@@ -115,6 +115,7 @@ describe('a change is drawn with the app’s button kinds; one hard to undo is d
       },
       card: null,
       onServer: false,
+      kit: false,
       csrf,
       notice: null,
     };

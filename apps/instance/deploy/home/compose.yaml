@@ -119,7 +119,14 @@ services:
       # (#1189) are encrypted under: HERE and on no other service. The `backup` service below deliberately does not get
       # it, so nothing that writes a snapshot holds the secret that opens the
       # key in it (docs/operating-an-instance.md, "A hosted model key").
+      # OPTIONAL since #2781, for an existing install: empty, the instance
+      # makes it on its first start in `secrets/instance-secret-key` (below).
       OYL_INSTANCE_SECRET_KEY: ${OYL_INSTANCE_SECRET_KEY:-}
+      # #2781 (ADR 0080 D-4): where a secret .env leaves empty is kept — the
+      # secret key, and the metrics token with metrics on — made there on the
+      # first start, owner-only, and read on every later one. The mount
+      # below, never the `data` volume the backups copy.
+      OYL_INSTANCE_SECRETS_DIR: /run/secrets/onyourleft
       # Voice on Discord (#874): your own bot's token and your own server's id.
       # Both empty is no voice, and nothing else changes; one without the
       # other refuses to start. The token is a secret and is NOT in the
@@ -131,10 +138,13 @@ services:
       OYL_INSTANCE_DISCORD_GUILD_ID: ${OYL_INSTANCE_DISCORD_GUILD_ID:-}
     volumes:
       - data:/data
-      # #2146: this box's secrets for the instance, read-only and on no other
-      # service — the `backup` service below does not mount it, so no snapshot
-      # holds the bot token. Docker makes the directory if it is not there.
-      - ./secrets:/run/secrets/onyourleft:ro
+      # #2146: this box's secrets for the instance, on no other service — the
+      # `backup`, `migrate` and `tunnel` services do not mount it, so no
+      # snapshot holds the bot token or the secret key, and cloudflared cannot
+      # read them. WRITABLE since #2781 (ADR 0080 D-4, Q-5), because the
+      # instance makes its secret key here on its first start. `deploy.sh`
+      # makes the folder first; Docker would make it owned by root on Linux.
+      - ./secrets:/run/secrets/onyourleft
     # Docker waits this long after SIGTERM before it kills the instance: the
     # rooms are told the server is stopping and final results written first.
     stop_grace_period: 20s
