@@ -232,7 +232,8 @@ Copy-Item instance.env.example .env
 notepad .env
 ```
 
-Edit `.env`:
+Edit `.env`. **On a fresh install, leave the owner key, the secret and the registration mode empty**:
+the setup page on this machine sets them up after the deploy, in step 5a, with no copying of keys.
 
 | Variable | Set it to |
 |---|---|
@@ -240,13 +241,13 @@ Edit `.env`:
 | `OYL_INSTANCE_REMOTE_PATH` | `tailnet` for 3a (or `funnel`, if you turned it on), `cloudflare` for 3b |
 | `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` | `x-forwarded-for` for 3a; `cf-connecting-ip` for 3b, which is also what empty means. The instance refuses to start with the other path's |
 | `OYL_INSTANCE_ORIGIN` | `https://` and the address from step 3: `https://onyourleft.your-tailnet.ts.net`, or the tunnel's public hostname |
-| `OYL_INSTANCE_REGISTRATION` | `approval` (you approve each new account; the default, and what an empty value means), `invite`, `open`, or `closed` — see [`docs/moderation.md`](../moderation.md). Your own device registers active in every mode once its key is in `OYL_INSTANCE_OWNER_KEY`. ⚠️ `closed` turns away **your other** devices too: the app says the instance is not taking new riders. Link them to your account from the app instead, or approve them |
-| `OYL_INSTANCE_OWNER_KEY` | your device key, which the app shows: you are the instance's moderator. Empty names nobody |
+| `OYL_INSTANCE_REGISTRATION` | **leave it empty** on a fresh install, and choose on the setup page (step 5a), which wins over this line. Otherwise `approval` (you approve each new account; the default, and what an empty value means), `invite`, `open`, or `closed` — see [`docs/moderation.md`](../moderation.md). Your own device registers active in every mode once it is the owner. ⚠️ `closed` turns away **your other** devices too: the app says the instance is not taking new riders. Link them to your account from the app instead, or approve them |
+| `OYL_INSTANCE_OWNER_KEY` | **leave it empty** on a fresh install: you claim the instance with your tablet on the setup page (step 5a). The expert path: your device key, which the app shows — then the instance is yours from its first start and the setup page never opens |
 | `OYL_INSTANCE_DEPUTY_KEY` | leave it **empty**. An instance has one moderator ([`docs/moderation.md`](../moderation.md)); this names a second only if you want one |
 | `CLOUDFLARE_TUNNEL_TOKEN` | 3b only: the token from step 3b |
 | `TAILSCALE_HOSTNAME` | 3a only, optional: the machine's name on the tailnet, `onyourleft` when empty. It is public (step 3a) |
 | `TAILSCALE_AUTH_KEY` | 3a only, optional: empty, and the first deploy prints a sign-in link instead. A key from *Settings → Keys* (tagged `tag:onyourleft`) signs the machine in by itself; it is a secret, like the tunnel token |
-| `OYL_INSTANCE_SECRET_KEY` | **leave it empty.** The instance makes it on its first start in the `secrets/` folder beside `compose.yaml`, owner-only, and reads it there on every later start (#2781). Setting it yourself with `openssl rand -base64 32` is optional, for an existing install. It is what a hosted model key and the instance's own keys are encrypted under, so download the **emergency kit** from the admin pages on this machine once they are on, and keep it away from both backup folders ([`operating-an-instance.md`](../operating-an-instance.md#the-instances-secrets)) |
+| `OYL_INSTANCE_SECRET_KEY` | **leave it empty.** The instance makes it on its first start in the `secrets/` folder beside `compose.yaml`, owner-only, and reads it there on every later start (#2781). Setting it yourself with `openssl rand -base64 32` is optional, for an existing install. It is what a hosted model key and the instance's own keys are encrypted under, so download the **emergency kit** on the setup page (step 5a), or later from the admin pages on this machine, and keep it away from both backup folders ([`operating-an-instance.md`](../operating-an-instance.md#the-instances-secrets)) |
 | `OYL_INSTANCE_NAME` | optional: the name the app shows for this instance, at most 64 characters |
 | `OYL_BACKUP_DIR` | a folder on this machine for snapshots, e.g. `C:/onyourleft/backups` |
 | `OYL_OFFBOX_DIR` | **required — the deploy refuses to start without it.** A folder that is **not** on this machine's own disk. ⚠️ On Windows **a USB stick does not work here**: read [Backups](#backups) first |
@@ -308,6 +309,44 @@ and if they differ says both and exits 1.
 **Check it from a rider's device** (on the tailnet for 3a, on mobile data for 3b):
 `https://onyourleft.your-tailnet.ts.net/health` or `https://rides.example.org/health` answers
 `{"status":"ok",…}` and `/ready` answers `{"status":"ready",…}`.
+
+## 5a. Set it up on this machine
+
+On this machine, open **`http://localhost:8788/setup`** in a browser (type `localhost`, not
+`127.0.0.1`). The page asks for the **setup code**: open the file `setup-code` in the `secrets` folder
+beside `compose.yaml` (`apps/instance/deploy/home/secrets/setup-code`) and type the first line. A code
+works once, for ten minutes; if it has run out, run `docker compose restart instance` in that folder
+and open the file again. The code is never printed in `docker compose logs`, which only say where it
+is.
+
+Then follow the page, step by step. You can leave and come back at any time; it resumes where you
+were.
+
+1. **Claim it with your tablet.** Press *Show the claim code*, open On Your Left on the tablet you ride
+   with, go to *Instance* and scan the code **with the app's own scanner**, then press *I’ve scanned
+   it* on the page. The tablet shows six digits; if the page shows the same six, press *Yes*. The page
+   says your tablet now owns the server.
+2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
+   pages.
+3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
+   beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
+   once you have added a passkey there.
+4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says
+   whether the snapshot reached **both** folders: the one on this computer and the copy kept
+   elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` lines in `.env`
+   (step 4): to change one, edit that line and deploy again. ⚠️ On Windows the copy kept elsewhere
+   cannot be on a USB stick ([Backups](#backups)).
+5. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
+   new*, then *Save and go to the next step*. You can change it later with
+   `docker compose exec instance node src/operator/cli.ts registration set <mode>`.
+6. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
+   has not signed in yet, connect to the instance from the app on the tablet first.
+7. **Finish.** The page lists where the server stands, and the setup page closes for good.
+
+Until the tablet has claimed the instance, nobody can make an account on it. **The expert path**
+still works: with `OYL_INSTANCE_OWNER_KEY` set in `.env` the setup page never opens, and the
+[operating guide](../operating-an-instance.md#the-first-run-setup-page) has the commands behind each
+step.
 
 ## 6. A room to ride in
 

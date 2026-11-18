@@ -66,9 +66,11 @@ services:
       # #2641: the instance's own admin pages at /admin, off unless .env says on.
       OYL_INSTANCE_ADMIN_PAGES: ${OYL_INSTANCE_ADMIN_PAGES:-off}
       # #2643: the admin pages on the server machine, at http://localhost:8788,
-      # on a listener of their own. Empty: nothing listens there. 8788 to turn
-      # it on, with the admin pages on; the `ports:` line below publishes it.
-      OYL_INSTANCE_ADMIN_LOOPBACK_PORT: ${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-}
+      # on a listener of their own; the `ports:` line below publishes it.
+      # #2784 (ADR 0080 D-1): 8788 unless .env says otherwise, the same as that
+      # line, because the first-run setup is served there too, at
+      # http://localhost:8788/setup, while the admin pages are still off.
+      OYL_INSTANCE_ADMIN_LOOPBACK_PORT: ${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-8788}
       # #2643: the only addresses a sign-in THROUGH THE REMOTE PATH is taken
       # from, read from the client-address header below. Empty (the default):
       # any — the WAF rule, or the tailnet, is what keeps others out. Not asked

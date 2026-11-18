@@ -46,7 +46,7 @@ describe('readServerConfig (#780, #791)', () => {
     });
   });
 
-  it('opens no loopback listener unless OYL_INSTANCE_ADMIN_LOOPBACK_PORT names a port, with the admin pages on (#2643)', () => {
+  it('opens no loopback listener unless OYL_INSTANCE_ADMIN_LOOPBACK_PORT names a port (#2643), with the admin pages on or off (#2784)', () => {
     const unset = readServerConfig({ adminPages: 'on' }, 1);
     expect(unset.ok && unset.config.adminLoopbackPort).toBeUndefined();
     const set = readServerConfig({ adminPages: 'on', adminLoopbackPort: ' 8788 ' }, 1);
@@ -57,12 +57,10 @@ describe('readServerConfig (#780, #791)', () => {
         problems: ['OYL_INSTANCE_ADMIN_LOOPBACK_PORT must be a port number from 1 to 65535.'],
       });
     }
-    expect(readServerConfig({ adminLoopbackPort: '8788' }, 1)).toEqual({
-      ok: false,
-      problems: [
-        'OYL_INSTANCE_ADMIN_LOOPBACK_PORT serves the admin pages, so it needs OYL_INSTANCE_ADMIN_PAGES=on.',
-      ],
-    });
+    // #2784 (ADR 0080 D-1): the port is the setup wizard's too, so the admin pages may be off.
+    const setupOnly = readServerConfig({ adminLoopbackPort: '8788' }, 1);
+    expect(setupOnly.ok && setupOnly.config.adminPages).toBe(false);
+    expect(setupOnly.ok && setupOnly.config.adminLoopbackPort).toBe(8788);
   });
 
   it('reads the tunnel sign-in allowlist as addresses, empty by default (#2643)', () => {

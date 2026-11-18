@@ -149,6 +149,11 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   // #2782: a claim code a device redeemed and the owner has not yet decided, and an owner claimed.
   owner_claim_code: `INSERT INTO owner_claim_code VALUES ('${'b1'.repeat(32)}', 45, 645, 46, '${'b2'.repeat(32)}', '012345')`,
   instance_owner: `INSERT INTO instance_owner VALUES (1, '${'b3'.repeat(32)}', 47)`,
+  // #2784: the setup at its backups step, a code, a session, and a mode the database holds.
+  setup_state: `INSERT INTO setup_state VALUES (1, 'backups', NULL, NULL, 48)`,
+  setup_code: `INSERT INTO setup_code VALUES ('${'c1'.repeat(32)}', 48, 648, NULL, 'start')`,
+  setup_session: `INSERT INTO setup_session VALUES ('${'c2'.repeat(32)}', '${'c3'.repeat(32)}', 48, 48, 7248, NULL)`,
+  instance_setting: `INSERT INTO instance_setting VALUES (1, 'closed', 48, 'setup')`,
 };
 
 /**
@@ -454,6 +459,86 @@ describe('the migrations (#769)', () => {
       );
     } finally {
       database.close();
+    }
+  });
+
+  it('widens 0048’s operator log for the setup and the start, naming no athlete, and holds its rows to their CHECKs (#2784)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO operator_log VALUES (1, 48, 'setup', NULL, 'setup_sign_in', NULL, 'done')`,
+      );
+      database.exec(
+        `INSERT INTO operator_log VALUES (2, 48, 'start', NULL, 'secret_generated', 'metrics_token', 'done')`,
+      );
+      for (const refused of [
+        `INSERT INTO operator_log VALUES (3, 48, 'setup', 'a', 'setup_sign_in', NULL, 'done')`,
+        `INSERT INTO operator_log VALUES (3, 48, 'start', 'a', 'secret_generated', NULL, 'done')`,
+        `INSERT INTO operator_log VALUES (3, 48, 'wizard', NULL, 'setup_sign_in', NULL, 'done')`,
+        `INSERT INTO setup_state VALUES (2, 'claim', NULL, NULL, 48)`,
+        `INSERT INTO setup_state VALUES (1, 'welcome', NULL, NULL, 48)`,
+        `INSERT INTO setup_code VALUES ('x', 48, 648, NULL, 'app')`,
+        `INSERT INTO instance_setting VALUES (1, 'everyone', 48, 'setup')`,
+        `INSERT INTO instance_setting VALUES (2, 'open', 48, 'setup')`,
+        `INSERT INTO instance_setting VALUES (1, 'open', 48, 'app')`,
+      ]) {
+        expect(() => database.exec(refused), refused).toThrow(/CHECK constraint failed/);
+      }
+      expect(() => database.exec(`DELETE FROM operator_log WHERE id = 1`)).toThrow(/append-only/);
+      expect(() => database.exec(`UPDATE operator_log SET outcome = 'failed'`)).toThrow(
+        /append-only/,
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it('refuses to undo 0048 while the operator log holds a setup or start entry, and changes nothing; with none it keeps every entry and its id (#2784)', async () => {
+    const path = await freshPath();
+    await migratedThrough(path, '0048-first-run-setup');
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'admin_tunnel', 'a', 'admin_sign_in', 'code', 'done')`,
+      );
+      database.exec(
+        `INSERT INTO operator_log VALUES (9, 48, 'start', NULL, 'setup_code_minted', NULL, 'done')`,
+      );
+    } finally {
+      database.close();
+    }
+    const before = snapshot(path);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /holds entries from the setup wizard/,
+    );
+    expect(snapshot(path)).toEqual(before);
+
+    const other = await freshPath();
+    await migratedThrough(other, '0048-first-run-setup');
+    const seeded = openDatabase(other);
+    try {
+      seeded.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'admin_tunnel', 'a', 'admin_sign_in', 'code', 'done')`,
+      );
+    } finally {
+      seeded.close();
+    }
+    await withKysely(other, (db) => migrateDownOne(db));
+    const after = openDatabase(other);
+    try {
+      expect(after.prepare('SELECT id, source FROM operator_log').all()).toEqual([
+        { id: 7, source: 'admin_tunnel' },
+      ]);
+      expect(() =>
+        after.exec(
+          `INSERT INTO operator_log VALUES (8, 48, 'setup', NULL, 'setup_done', NULL, 'done')`,
+        ),
+      ).toThrow(/CHECK constraint failed/);
+      expect(() => after.exec(`DELETE FROM operator_log`)).toThrow(/append-only/);
+    } finally {
+      after.close();
     }
   });
 

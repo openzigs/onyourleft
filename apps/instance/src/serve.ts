@@ -147,6 +147,10 @@ try {
     log,
     // #2781: what the loopback Keys page's emergency kit holds.
     kitSecrets: secrets.fromFiles,
+    // #2784 (ADR 0080 D-2): where the first-run setup code's file goes.
+    ...(process.env.OYL_INSTANCE_SECRETS_DIR?.trim()
+      ? { secretsDirectory: process.env.OYL_INSTANCE_SECRETS_DIR.trim() }
+      : {}),
   });
 } catch (error) {
   if (error instanceof InstanceRefusal) {

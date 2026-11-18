@@ -492,3 +492,23 @@ approve 1–7 as recommended?"*), the owner answered *"Approve"*. So:
   #2781 measures.
 - **The owner ruling Q-7 no**: then the wizard's later steps need a confirmed passkey, and Q-6 becomes
   part of Phase 1.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-18** — **D-7's finish summary shows where the server stands, not a log of what the
+  setup session changed.** #2784's finish step lists five plain lines, each read from where it is
+  kept: whether the owner is claimed, whether the emergency kit was downloaded in this setup, whether
+  the newest backup reached both folders, the registration mode a new rider meets now, and the
+  invites made. It does not replay the operator log's entries. Three readings differ from D-7's
+  words *"a summary of every change the setup session made"*, on purpose: the mode is the current
+  one even when `.env` set it and the setup never changed it; the backup line is the newest record,
+  whoever asked for it; and a discarded claim or a refused attempt is not listed. **Why:** the reader
+  is a non-technical owner about to leave the page for good, and what they need to know is whether
+  the server is now safe to leave running — owned, backed up off the machine, open to whom — not
+  which forms they submitted. A list of changes would say "registration mode set" without saying
+  what riders now meet, and would say nothing at all about a backup the `backup` service made, which
+  is the one that proves the off-box folder works. Every change is still in the operator log from the
+  source `setup` (D-7's last bullet), where the Operate log shows it. *Maintainer decision on PR
+  #2821 (a dispatched run, no owner present), after review cycle 3 named the difference.*

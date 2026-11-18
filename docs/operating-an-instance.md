@@ -515,9 +515,10 @@ need the old secret to read their key; the rest of a snapshot needs no secret at
 - ⚠️ **Rolling back to an image from before #2781** starts with no secret if the secret is only in
   `secrets/`, because that image reads `.env` alone: no instance keys, no sealed routes. Copy the
   secret into `.env` before rolling back that far.
-- **Not yet.** The setup wizard's one offer of the kit from its setup session (ADR 0080 D-4) is
-  #2784's, and the operator log entry for a secret made at start waits for the log source that
-  issue's migration adds.
+- **The setup page offers the kit once** per setup session, with no passkey (ADR 0080 D-4,
+  [The first-run setup page](#the-first-run-setup-page)), and writes `emergency_kit_downloaded` from
+  the source `setup`. **A secret this start made** is a `secret_generated` entry from the source
+  `start` (#2784's migration 0048), naming which secret and never its value.
 
 ## The instance's keys
 
@@ -1082,13 +1083,85 @@ If the claimed tablet is lost, or the wrong device's claim was confirmed, reset 
 docker compose exec instance node src/operator/cli.ts owner-claim reset
 ```
 
-It clears the claimed owner key, voids every claim code, ends **every admin page session**, and writes
+It clears the claimed owner key, voids every claim code, ends **every admin page session and every
+setup session**, **reopens the first-run setup at its claim step** (#2784), and writes
 `owner_claim_reset` to the operator log, in one transaction. Its report says whether a key was cleared
 (`cleared`), how many admin sessions ended, and `ownerKeyFromEnvironment: true` when
 `OYL_INSTANCE_OWNER_KEY` is set — in which case that variable is still the owner, as it was. The
 instance is then unclaimed, and the owner claims it again from the setup page. A rider who recovered
 their account with a recovery code holds a new device key, so they reset and claim again too, just as
 they would edit `.env`.
+
+## The first-run setup page
+
+A fresh install needs no `.env` edit for its owner, its secret or its registration mode: the instance
+serves a **setup page on the server machine** that walks the owner through them (ADR 0080 D-1, D-2,
+D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
+
+- **Where**: `http://localhost:8788/setup`, on the loopback listener (`OYL_INSTANCE_ADMIN_LOOPBACK_PORT`,
+  8788 in the home deployment), **with the admin pages on or off**. Type `localhost`, not `127.0.0.1`:
+  any other address is told which one to open. Through the tunnel or the tailnet every `/setup` path is
+  `not_found`, as a path with no route is.
+- **The setup code**: the instance makes one at **every start** while the setup is open and writes it
+  to the file `setup-code` in the secrets folder beside `compose.yaml` (`OYL_INSTANCE_SECRETS_DIR`),
+  owner-only. The log says where it is, never what it is:
+  `{"event":"first-run-setup","open":"http://localhost:8788/setup","codeIn":"secrets/setup-code",…}`.
+  A code works once, for ten minutes; restart the instance (`docker compose restart instance`) for a
+  new one, or print one on the host:
+
+  ```bash
+  docker compose exec instance node src/operator/cli.ts setup-code
+  ```
+
+  which writes the file too and voids the code before it. A wrong, used or expired code gets one
+  sentence; ten attempts a minute from one address, thirty from everybody, and the next is refused
+  even with the right code.
+- **The steps**, each of which the operator log records from the source `setup`, naming no athlete:
+  1. **Claim** — a claim code as a QR with the instance card, the tablet's claim, and the six digits
+     compared on both screens ([Claiming the instance from the app](#claiming-the-instance-from-the-app)).
+     Until a tablet scans it the step keeps showing the **same** QR, with an *I’ve scanned it* button
+     that loads the step again; no setup page reloads itself (WCAG 2.2.1), so the code beside the QR
+     stays selectable. The code is held in the instance's memory for the session that asked for it,
+     never in the database, and is no longer drawn once its ten minutes are over. After *Yes* the step says the tablet now owns the
+     server, before the next step.
+  2. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
+     are in a collapsed block for people comfortable with the command line.
+  3. **The emergency kit** — offered **once** per setup session, with no passkey
+     ([The instance's secrets](#the-instances-secrets)).
+  4. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
+     elsewhere"), and **Back up now**; while a backup waits the step has a *Check now* button. The folders
+     are `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`, named only in the step's collapsed command-line
+     block: the `backup` service is started with them, so the page checks and explains and cannot
+     choose them.
+  5. **Who may join** — the registration mode, in plain words (*Anyone can join*, *I approve each new
+     rider*, *Only people I invite*, *Nobody new*; stored as `open`, `approval`, `invite`, `closed`).
+     Its one button saves the choice and moves on. The one chosen here is kept in the database and
+     **wins over `OYL_INSTANCE_REGISTRATION`** until it is cleared (ADR 0080 D-6).
+  6. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
+     the instance. The app does not sign in by itself after the claim, so until it has the step says
+     what to do on the tablet.
+  7. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
+     working or not, who may join, and the invites made. The page is then `not_found` for good, after
+     a restart too; only `owner-claim reset` reopens it. The *Setup is finished* page carries its
+     stylesheet inline, allowed by its hash in that response's CSP, because `/setup/setup.css` has
+     gone with the rest.
+- **Leave whenever you like.** The step is kept in the database, so coming back — after a restart, with
+  the new code — resumes it. A setup session ends after 15 minutes without use and 2 hours after the
+  code was typed.
+- **With `OYL_INSTANCE_OWNER_KEY` set the setup is done from the first start**: no code is made and
+  nothing is served at `/setup`. Every install from before #2784 is unchanged.
+- **While the instance is unclaimed and holds no account, every registration is refused**, whatever the
+  mode, so a stranger who finds the address first gets no account (ADR 0080 D-3).
+
+### The registration mode from the host
+
+```bash
+docker compose exec instance node src/operator/cli.ts registration set approval   # or invite, open, closed
+docker compose exec instance node src/operator/cli.ts registration clear          # back to .env
+```
+
+A new rider meets the mode at once, with no restart, and Status shows it. `clear` returns to
+`OYL_INSTANCE_REGISTRATION`. Each is a `registration_mode_set` entry in the operator log.
 
 ## The Operate area
 

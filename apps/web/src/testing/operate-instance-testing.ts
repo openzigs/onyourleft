@@ -40,7 +40,9 @@ interface OperatorLogWriter {
         | { source: 'app'; athleteId: string }
         | { source: 'cli' }
         // #2641: the instance's own admin pages, by listener.
-        | { source: 'admin_tunnel' | 'admin_loopback'; athleteId: string | null };
+        | { source: 'admin_tunnel' | 'admin_loopback'; athleteId: string | null }
+        // #2784: the setup wizard, and the instance's own start, naming nobody.
+        | { source: 'setup' | 'start' };
       action: string;
       at: number;
     },
