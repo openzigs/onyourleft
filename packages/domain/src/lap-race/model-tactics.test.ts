@@ -14,6 +14,7 @@ import {
   MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
   MODEL_TACTICS_INPUT_MOST_CHARACTERS,
   MODEL_RACING_STYLES,
+  MODEL_STRENGTH_WORDS,
   MODEL_TACTICS_MOST_SEATS,
   modelRacingStyles,
   modelTacticsAnswerSchema,
@@ -34,6 +35,10 @@ const view = (bot: number, over: Partial<Record<keyof ModelTacticsBotView, unkno
   bot,
   style: 'opportunist',
   legs: 'rouleur',
+  flat: 'strong',
+  climb: 'weak',
+  sprint: 'average',
+  punch: 'average',
   rank: bot + 1,
   ahead: bot === 0 ? null : bot - 1,
   aheadMove: bot === 0 ? null : 'sit-in',
@@ -123,6 +128,28 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
     expect(bot({ blown: 'yes' })?.field).toBe('input.bots[0].blown');
   });
 
+  it('reads how each bot compares with the field in a closed word, and refuses any other (#2759, ADR 0076 D-4)', () => {
+    for (const word of MODEL_STRENGTH_WORDS) {
+      for (const key of ['flat', 'climb', 'sprint', 'punch']) {
+        expect(readModelTacticsInput(input({ bots: [view(0, { [key]: word })] })).ok).toBe(true);
+      }
+    }
+    for (const key of ['flat', 'climb', 'sprint', 'punch']) {
+      for (const bad of ['very strong', 1.2, null, true]) {
+        expect(readModelTacticsInput(input({ bots: [view(0, { [key]: bad })] }))).toEqual({
+          ok: false,
+          problem: { field: `input.bots[0].${key}`, problem: 'must be a strength word' },
+        });
+      }
+      const without = { ...view(0) } as Record<string, unknown>;
+      delete without[key];
+      expect(readModelTacticsInput(input({ bots: [without] }))).toEqual({
+        ok: false,
+        problem: { field: `input.bots[0].${key}`, problem: 'is required' },
+      });
+    }
+  });
+
   it('reads the rider’s state, and refuses each of its fields out of range (D-5.2)', () => {
     const leading = {
       rank: 1,
@@ -154,6 +181,10 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
         view(seat, {
           style: 'opportunist',
           legs: 'attacker',
+          flat: 'average',
+          climb: 'average',
+          sprint: 'average',
+          punch: 'average',
           ahead: 'rider',
           aheadMove: 'recover',
           gapAheadM: 99_999.9,

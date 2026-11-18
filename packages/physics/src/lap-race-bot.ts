@@ -98,6 +98,7 @@ import type {
   BotEnergy,
   BotMemory,
   BotPace,
+  BotPacerPlan,
   BotPlanTactic,
   BotRacePlan,
   BotStrategy,
@@ -115,6 +116,8 @@ import {
   BOT_TACTIC_MOVE_SHARE,
   BOT_TACTIC_WHEEL_LOST_METRES,
   BOT_TACTIC_WHEEL_METRES,
+  BOT_TIER_WATTS_PER_KILOGRAM,
+  botPacerPlan,
   botPlanStep,
   botRacePlan,
   botTierPlan,
@@ -331,6 +334,24 @@ export interface BotRaceTick {
 }
 
 /**
+ * The #92 plan a bot rides through the physics: its tier's, at its body's
+ * mass in a race with AI bots (#2759, ADR 0076 D-2), and at
+ * `BOT_MASS_KILOGRAMS` otherwise, as before. Its mass is what the physics
+ * reads of it; its power is its race plan's.
+ */
+export function lapRaceBotPacerPlan(bot: Pick<LapRaceBot, 'tier' | 'pace'>): BotPacerPlan {
+  const body = bot.pace.body;
+  return body === undefined
+    ? botTierPlan(bot.tier)
+    : botPacerPlan(BOT_TIER_WATTS_PER_KILOGRAM[bot.tier], body.massKilograms);
+}
+
+/** What a bot weighs, kilograms: its body's, or `BOT_MASS_KILOGRAMS`. */
+export function lapRaceBotMassKilograms(bot: Pick<LapRaceBot, 'pace'>): number {
+  return bot.pace.body?.massKilograms ?? BOT_MASS_KILOGRAMS;
+}
+
+/**
  * A bot on the start line, with its strength, its way of racing and its pace
  * chosen apart. With no pace, it rides the even plan, a rouleur's (#2459), at its
  * tier's full power.
@@ -407,7 +428,7 @@ export function stepBotRace(
     if (wheelBot !== undefined) {
       return {
         ride: wheelBot.ride,
-        course: { ...step.conditions, plan: botTierPlan(wheelBot.tier) },
+        course: { ...step.conditions, plan: lapRaceBotPacerPlan(wheelBot) },
         power: wheelBot.power,
         k,
         pace: wheelBot.plan?.capacity.cpWatts ?? null,
@@ -421,9 +442,9 @@ export function stepBotRace(
       power:
         riderPerKilogram === null || riderSpeed === undefined
           ? null
-          : riderPerKilogram * BOT_MASS_KILOGRAMS,
+          : riderPerKilogram * reader.plan.massKilograms,
       k,
-      pace: riderPerKilogram === null ? null : (riderPerKilogram * BOT_MASS_KILOGRAMS) / k,
+      pace: riderPerKilogram === null ? null : (riderPerKilogram * reader.plan.massKilograms) / k,
       averaged: riderSpeed !== undefined,
     };
   };
@@ -440,7 +461,8 @@ export function stepBotRace(
     );
     lanes[bot.id] = decision.lane;
     if (decision.use) uses.push(bot.id);
-    const course: BotCourse = { ...step.conditions, plan: botTierPlan(bot.tier) };
+    // #2759: at its own mass, where it has a body (ADR 0076 D-2).
+    const course: BotCourse = { ...step.conditions, plan: lapRaceBotPacerPlan(bot) };
     // Its capacity, once a race (ADR 0067 D-1.1): nothing below changes it.
     const plan = bot.plan ?? botRacePlan(bot.tier, race.course, step.seed, bot.pace);
     // #2463: its tactic, from the race as it stood, while it is still racing.
@@ -481,7 +503,7 @@ export function stepBotRace(
             ? false
             : aheadBot === undefined
               ? riderPerKilogram !== null &&
-                riderPerKilogram * BOT_MASS_KILOGRAMS >
+                riderPerKilogram * course.plan.massKilograms >
                   plan.capacity.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)
               : aheadBot.plan !== undefined && aheadBot.power > aheadBot.plan.capacity.cpWatts,
         riderGapMetres: rider === undefined ? 0 : rider.effortDistance - own.effortDistance,

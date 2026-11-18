@@ -13,7 +13,9 @@
  *
  * {@link ModelTacticsInput}: spike 0039's shape (ADR 0071 D-3.4) as ADR 0073
  * D-5 widened it (#2720, #2710) — seats, racing styles dealt from the seed
- * ({@link modelRacingStyles}) and legs (archetypes), ranks, gaps, W′ shares
+ * ({@link modelRacingStyles}) and legs (archetypes), how each bot compares
+ * with the field on the flat, a climb, a sprint and in punch (#2759, ADR 0076
+ * D-4: {@link MODEL_STRENGTH_WORDS}), ranks, gaps, W′ shares
  * and whether a bot is blown, drafting, current moves, laps and metres to the
  * line as each bot misreads it, launch distance, grade ahead, the rider's gap,
  * and the rider's own state: rank, W/kg, who is ahead of them, their gaps and
@@ -86,8 +88,9 @@ const STYLE_SALT = 0x5717_1e5d;
  * Each of `count` seats its racing style, dealt from the race's `seed` (ADR
  * 0073 D-5.1): every style once before any twice, in an order the seed
  * shuffles, so a field of seven holds all five and the same seed deals the
- * same field. Dealt apart from the bots' archetypes, so a bot may race in a
- * style its legs do not suit (D-9 R-4).
+ * same field. ADR 0073 dealt it apart from the bots' archetypes (D-9 R-4);
+ * since #2759 (ADR 0076 D-3) a race with AI bots deals each bot the pace and
+ * body its style fits on these styles (`model-field.ts` §`modelFieldPaces`).
  */
 export function modelRacingStyles(seed: number, count: number): readonly ModelRacingStyle[] {
   const deck = Array.from(
@@ -105,6 +108,16 @@ export function modelRacingStyles(seed: number, count: number): readonly ModelRa
   return deck;
 }
 
+/**
+ * **How a bot compares with the rest of its field**, in plain words (#2759,
+ * ADR 0076 D-4): on the flat, on a climb, in a sprint and in its punch, each
+ * one of these. `model-field.ts` §`modelFieldStrengths` says which.
+ */
+export const MODEL_STRENGTH_WORDS = ['weak', 'average', 'strong'] as const;
+
+/** One of {@link MODEL_STRENGTH_WORDS}. */
+export type ModelStrengthWord = (typeof MODEL_STRENGTH_WORDS)[number];
+
 /** The most laps a race state may say: far over the app's ten. */
 const MOST_LAPS = 100;
 /** The largest distance a race state may say, metres: a loop of 1 000 km. */
@@ -120,6 +133,14 @@ export interface ModelTacticsBotView {
   readonly style: ModelRacingStyle;
   /** What its legs are good at: its archetype, which sets its sprint and its launch distance. */
   readonly legs: BotArchetype;
+  /** Beside the rest of the field, on the flat: its watts at threshold (ADR 0076 D-4). */
+  readonly flat: ModelStrengthWord;
+  /** Beside the rest of the field, on a climb: its watts per kilogram at threshold. */
+  readonly climb: ModelStrengthWord;
+  /** Beside the rest of the field, in a sprint: its peak watts. */
+  readonly sprint: ModelStrengthWord;
+  /** Beside the rest of the field, its punch: how much it can spend above threshold (W′). */
+  readonly punch: ModelStrengthWord;
   /** Its place in the race, from 1. */
   readonly rank: number;
   /** Who is directly ahead: `"rider"`, another bot's seat, or `null` when it leads (#2708). */
@@ -334,6 +355,10 @@ const VIEW_KEYS = [
   'bot',
   'style',
   'legs',
+  'flat',
+  'climb',
+  'sprint',
+  'punch',
   'rank',
   'ahead',
   'aheadMove',
@@ -393,6 +418,15 @@ function viewProblem(view: unknown, at: string): ModelTacticsInputProblem | unde
       typeof view.legs === 'string' && (BOT_ARCHETYPES as readonly string[]).includes(view.legs),
       'must be an archetype',
     ],
+    ...(['flat', 'climb', 'sprint', 'punch'] as const).map(
+      (key) =>
+        [
+          key,
+          typeof view[key] === 'string' &&
+            (MODEL_STRENGTH_WORDS as readonly string[]).includes(view[key]),
+          'must be a strength word',
+        ] as const,
+    ),
     ['rank', wholeIn(view.rank, 1, MODEL_TACTICS_MOST_SEATS + 1), 'must be a place in the field'],
     [
       'ahead',
