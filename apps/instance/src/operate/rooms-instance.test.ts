@@ -96,10 +96,15 @@ async function signIn(device: TestDevice, displayName: string, address: string):
   return { device, token: body.sessionToken, athleteId: body.athleteId };
 }
 
+/** Every room id the instance answered this file's `made` with, in order. */
+const madeRoomIds: string[] = [];
+
 async function made(who: Session, overrides: Record<string, unknown>) {
   const answer = await sealed(who, 'POST', '/v1/rooms', roomBody(overrides));
   expect(answer.status, JSON.stringify(answer.body)).toBe(200);
-  return answer.body as { roomId: string; code: string };
+  const room = answer.body as { roomId: string; code: string };
+  madeRoomIds.push(room.roomId);
+  return room;
 }
 
 /** `who` on a real socket into `roomId`, with a ticket the instance issued them. */
@@ -238,10 +243,8 @@ describe('the owner’s Rooms on the running instance — #2612', () => {
     // No power (#2726): read field by field, because a room id is random hex
     // and spells `317` by chance about one run in a few hundred. No number is
     // the watt figure, and no string spells it but an id or short code that is
-    // exactly a room's own.
-    const ids = new Set(
-      [race.roomId, ride.roomId].flatMap((roomId) => [roomId, roomShortCode(roomId)]),
-    );
+    // exactly that of a room this file made.
+    const ids = new Set(madeRoomIds.flatMap((roomId) => [roomId, roomShortCode(roomId)]));
     for (const [path, leaf] of leavesOf(listed.body)) {
       if (typeof leaf === 'number') expect(leaf, path).not.toBe(POWER_WATTS);
       if (typeof leaf === 'string' && !ids.has(leaf)) {
