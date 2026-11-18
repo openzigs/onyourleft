@@ -62,6 +62,7 @@ import * as analysisSetting from './0043-analysis-setting.ts';
 import * as adminSignIn from './0044-admin-sign-in.ts';
 import * as adminPasskeys from './0045-admin-passkeys.ts';
 import * as tacticsConsent from './0046-tactics-consent.ts';
+import * as ownerClaim from './0047-owner-claim.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -116,4 +117,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0044-admin-sign-in': adminSignIn,
   '0045-admin-passkeys': adminPasskeys,
   '0046-tactics-consent': tacticsConsent,
+  '0047-owner-claim': ownerClaim,
 };

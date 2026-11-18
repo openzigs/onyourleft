@@ -295,7 +295,10 @@ export interface AdminOptions {
   readonly store: SqlStore;
   /** `OYL_INSTANCE_ORIGIN`, or `null`: no accounts, so no owner. */
   readonly origin: string | null;
-  /** `OYL_INSTANCE_OWNER_KEY`, or `undefined`. */
+  /**
+   * `OYL_INSTANCE_OWNER_KEY`, or `undefined` — and then the key the owner's
+   * claim recorded, read from the store on every request (ADR 0080 D-3).
+   */
   readonly ownerKey: string | undefined;
   /** Whether `OYL_INSTANCE_SECRET_KEY` is set. */
   readonly secretKeySet: boolean;
@@ -390,9 +393,10 @@ const UNAVAILABLE: Readonly<Record<Unavailable, string>> = {
     'OYL_INSTANCE_ORIGIN is not set, so this instance has no accounts, and no owner to sign in.',
   secret:
     'OYL_INSTANCE_SECRET_KEY is not set: the admin pages are served only on an instance that holds keys, as the app’s Operate area is.',
-  'owner-key': 'OYL_INSTANCE_OWNER_KEY is not set, so this instance has no owner to sign in.',
+  'owner-key':
+    'This instance has no owner to sign in: OYL_INSTANCE_OWNER_KEY is not set, and no owner has claimed it from the app.',
   'no-owner':
-    'No account holds the device key OYL_INSTANCE_OWNER_KEY names. Sign in to this instance once from the app on that device, then come back.',
+    'No account holds the device key OYL_INSTANCE_OWNER_KEY names, or the one the owner’s claim recorded. Sign in to this instance once from the app on that device, then come back.',
 };
 
 /** What a signed-in page calls the seam with. */
@@ -823,7 +827,9 @@ export function createAdmin(options: AdminOptions): Admin {
   async function ownerNow(): Promise<Owner | Unavailable> {
     if (expected === null || options.roleOf === undefined) return 'origin';
     if (!options.secretKeySet) return 'secret';
-    const ownerKey = options.ownerKey;
+    // The owner key (ADR 0080 D-3): the environment's, else the claimed one,
+    // read on every request so a claim or a reset applies at once (#2782).
+    const ownerKey = options.ownerKey ?? (await store.claimedOwnerKey());
     if (ownerKey === undefined) return 'owner-key';
     const key = await store.findDeviceKey(ownerKey);
     if (key === undefined) return 'no-owner';

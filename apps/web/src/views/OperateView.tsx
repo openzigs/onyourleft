@@ -123,6 +123,11 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['registration_decided', 'Registration decided'],
   // #2781: the emergency kit, downloaded from the server machine's admin pages.
   ['emergency_kit_downloaded', 'Emergency kit downloaded'],
+  // #2782: the owner's claim of the instance from the app.
+  ['owner_claim_code_minted', 'Owner claim code made'],
+  ['owner_claim_confirmed', 'Owner claim confirmed'],
+  ['owner_claim_discarded', 'Owner claim discarded'],
+  ['owner_claim_reset', 'Owner claim reset on the host'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */
