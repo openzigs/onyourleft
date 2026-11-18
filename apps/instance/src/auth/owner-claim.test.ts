@@ -38,7 +38,12 @@ import {
   type IdentityInstance,
   type TestDevice,
 } from './identity-testing.ts';
-import { createOwnerClaim, OWNER_CLAIM_LIFETIME_SECONDS } from './owner-claim.ts';
+import {
+  createOwnerClaim,
+  DEFAULT_OWNER_CLAIM_LIMITS,
+  OWNER_CLAIM_LIFETIME_SECONDS,
+} from './owner-claim.ts';
+import { createRateLimiter } from './rate-limit.ts';
 
 const CLAIM = '/v1/auth/owner-claim';
 const MINUTE = 60_000;
@@ -491,6 +496,10 @@ describe('the owner’s decision on the loopback page (ADR 0080 D-5)', () => {
         store,
         now: () => w.clock.ms,
         moderators: { owner: 'ab'.repeat(32) },
+        limiters: {
+          perAddress: createRateLimiter(DEFAULT_OWNER_CLAIM_LIMITS.perAddress, () => w.clock.ms),
+          overall: createRateLimiter(DEFAULT_OWNER_CLAIM_LIMITS.overall, () => w.clock.ms),
+        },
       });
       expect(
         await named.confirm(
@@ -658,5 +667,62 @@ describe('operator owner-claim reset (ADR 0080 D-3)', () => {
     const twice = await ownerClaimReset({ database: w.path, blobs: `${w.path}.blobs` });
     expect(twice.cleared).toBe(false);
     expect(rowsOf(w, 'operator_log').at(-1)?.detail).toBe('none_claimed,sessions_ended=0');
+  });
+});
+
+describe('review fixes on #2811', () => {
+  it('holds no client address once the rate-limit window has passed and the sweep has run', async () => {
+    const w = await world();
+    const device = await testDevice();
+    const code = await mint(w);
+    await redeem(w, device, code);
+    expect(w.identity.heldRateLimitKeys()).toBeGreaterThan(0);
+    w.clock.ms += 2 * MINUTE;
+    w.identity.sweepRateLimits();
+    expect(w.identity.heldRateLimitKeys()).toBe(0);
+  });
+
+  it('refuses a signed-in device claiming a key it does not hold, and leaves no pending claim', async () => {
+    const w = await world();
+    const signer = await testDevice();
+    const other = await testDevice();
+    const token = await signedIn(w, signer);
+    const code = await mint(w);
+    const answer = await sealedCall(w, {
+      method: 'POST',
+      path: CLAIM,
+      body: { publicKey: other.publicKey, claimCode: code },
+      token,
+      signer: signer.signingKey,
+    });
+    expect(innerOf(answer).status).toBe(401);
+    expect(await w.identity.ownerClaim.pending()).toBeUndefined();
+  });
+
+  it('lets a signed-in device claim its own key', async () => {
+    const w = await world();
+    const signer = await testDevice();
+    const token = await signedIn(w, signer);
+    const code = await mint(w);
+    const answer = await sealedCall(w, {
+      method: 'POST',
+      path: CLAIM,
+      body: { publicKey: signer.publicKey, claimCode: code },
+      token,
+      signer: signer.signingKey,
+    });
+    expect(innerOf(answer).status).toBe(200);
+  });
+
+  it('lets a pending claim lapse with its code: it is neither shown nor confirmable after ten minutes', async () => {
+    const w = await world();
+    const device = await testDevice();
+    const code = await mint(w);
+    await redeem(w, device, code);
+    const digits = await ownerClaimComparisonCode(sha256, code, device.publicKey);
+    w.clock.ms += 10 * MINUTE + 1000;
+    expect(await w.identity.ownerClaim.pending()).toBeUndefined();
+    expect(await w.identity.ownerClaim.confirm(digits, 'admin_loopback')).toBe('none');
+    expect(await w.freshRead((store) => store.claimedOwnerKey())).toBeUndefined();
   });
 });

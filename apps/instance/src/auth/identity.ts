@@ -108,7 +108,12 @@ import {
   type ModerationLimits,
   type Moderators,
 } from '../moderation/moderation.ts';
-import { createOwnerClaim, type OwnerClaim, type OwnerClaimLimits } from './owner-claim.ts';
+import {
+  createOwnerClaim,
+  DEFAULT_OWNER_CLAIM_LIMITS,
+  type OwnerClaim,
+  type OwnerClaimLimits,
+} from './owner-claim.ts';
 import type { Admit } from '../room/core/room.ts';
 import {
   InviteRefusedError,
@@ -783,11 +788,16 @@ export function createIdentity(options: IdentityOptions): Identity {
     allowNoticeFrom: (address) =>
       noticesPerAddress.allow(address === null ? 'unknown' : addressKey(address)),
   });
+  const ownerClaimLimits = options.ownerClaimLimits ?? DEFAULT_OWNER_CLAIM_LIMITS;
+  const ownerClaimLimiters = {
+    perAddress: createRateLimiter(ownerClaimLimits.perAddress, now),
+    overall: createRateLimiter(ownerClaimLimits.overall, now),
+  };
   const ownerClaim = createOwnerClaim({
     store,
     now,
     ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
-    ...(options.ownerClaimLimits === undefined ? {} : { limits: options.ownerClaimLimits }),
+    limiters: ownerClaimLimiters,
   });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -1061,6 +1071,8 @@ export function createIdentity(options: IdentityOptions): Identity {
     sealedPerSession,
     sessionlessSealed,
     noticesPerAddress,
+    ownerClaimLimiters.perAddress,
+    ownerClaimLimiters.overall,
   ];
 
   return {
@@ -1081,6 +1093,8 @@ export function createIdentity(options: IdentityOptions): Identity {
       limits.sealedPerSession,
       limits.sessionlessSealedPerAddress,
       limits.noticesPerAddress,
+      ownerClaimLimits.perAddress,
+      ownerClaimLimits.overall,
     ]),
 
     sweepRateLimits() {

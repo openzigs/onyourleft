@@ -41,7 +41,7 @@ import type { Moderators } from '../moderation/moderation.ts';
 import { sha256 } from '../sealed/sealed.ts';
 import type { AdminSource, PendingOwnerClaim, SqlStore } from '../store/sql-store.ts';
 import { isPublicKey } from './crypto.ts';
-import { addressKey, createRateLimiter, type RateLimit } from './rate-limit.ts';
+import { addressKey, type RateLimit, type RateLimiter } from './rate-limit.ts';
 
 /** How long a claim code, and so a pending claim, lives: ADR 0069 D-1's ten minutes. */
 export const OWNER_CLAIM_LIFETIME_SECONDS = 10 * 60;
@@ -65,7 +65,17 @@ export interface OwnerClaimOptions {
   readonly now: () => number;
   /** The keys the operator named: an owner key set refuses every claim. */
   readonly moderators?: Moderators;
-  readonly limits?: OwnerClaimLimits;
+  /**
+   * The two limiters, built by the caller so it can sweep them
+   * (`identity.ts`'s `limiters`): a key left in one would hold a client
+   * address past the hour the privacy policy promises.
+   */
+  readonly limiters: OwnerClaimLimiters;
+}
+
+export interface OwnerClaimLimiters {
+  readonly perAddress: RateLimiter;
+  readonly overall: RateLimiter;
 }
 
 type ClaimOutcome<T> =
@@ -103,9 +113,7 @@ const refused: ClaimOutcome<never> = { ok: false, code: 'claim_refused' };
 export function createOwnerClaim(options: OwnerClaimOptions): OwnerClaim {
   const { store, now } = options;
   const named = options.moderators ?? {};
-  const limits = options.limits ?? DEFAULT_OWNER_CLAIM_LIMITS;
-  const perAddress = createRateLimiter(limits.perAddress, now);
-  const overall = createRateLimiter(limits.overall, now);
+  const { perAddress, overall } = options.limiters;
   const seconds = (): number => Math.floor(now() / 1000);
   /** No actor: before the claim there is no owner's athlete to name (migration 0044's rule). */
   const actor = (source: AdminSource) => ({ source, athleteId: null });

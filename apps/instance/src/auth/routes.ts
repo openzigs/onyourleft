@@ -474,6 +474,14 @@ export const IDENTITY_ROUTES: readonly Route[] = [
       // Never unsealed, on an instance with no keys too: unsealed, its
       // signature is nobody's and its code is the edge's to read (ADR 0080 D-3).
       if (!context.sealedRequest) return errorResponse('sealed_required');
+      // A signed-in device's envelope is signed by its session key, not the
+      // body's: only the key that signed may be the one claimed (D-3).
+      const signedIn = await identityOf(context).authenticate(
+        context.request.headers.get('authorization'),
+      );
+      if (signedIn !== undefined && signedIn.deviceKey !== context.json.publicKey) {
+        return errorResponse('claim_refused');
+      }
       return answer(
         await identityOf(context).ownerClaim.redeem(context.json, context.client.address),
       );
