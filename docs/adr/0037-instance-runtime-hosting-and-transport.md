@@ -407,3 +407,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   is not distributed. `check:licences` and `check:notices` passed on the install, and
   `apps/instance/third-party.txt` carries `uqr`'s licence text. **D-2 is kept**: nothing in the
   room core or the Durable Object adapter imports it. The body above is not edited.
+
+- **2026-11-18** — **D-8's Docker image is now published, signed, for two platforms.**
+  [#2786](https://github.com/openzigs/onyourleft/issues/2786) adds
+  `.github/workflows/instance-image.yml`: on a `v*` release tag it builds `apps/instance/Dockerfile`
+  for `linux/amd64` and `linux/arm64` on a standard runner, pushes
+  `ghcr.io/openzigs/onyourleft-instance:<version>`, signs the digest with cosign keyless (Sigstore;
+  chosen over GitHub artifact attestations because an operator verifies it with one command and no
+  GitHub account), and attaches a pull-only bundle to the release: the home deployment's own
+  `compose.yaml`, naming the image **by digest**, its `deploy.sh`, which pulls that digest instead of
+  building, and `instance.env.example`. A release is published only after a job with no checkout has
+  brought the bundle up and seen `deploy.sh` roll a never-ready image back to it. **D-8 is kept**:
+  the first deployment is still this image on the owner's machine behind the tunnel; what changes is
+  that an operator no longer needs git, a build or Git Bash to run it, and building from a checkout
+  stays the contributor's path. Nothing it adds is paid: GHCR serves a public package free, and
+  Sigstore's signing and log are free (ADR 0036 D-7). The body above is not edited.

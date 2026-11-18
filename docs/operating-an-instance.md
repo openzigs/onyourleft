@@ -1021,8 +1021,9 @@ against a database that is **behind** its build and not being migrated, the inst
 start and names this command**. Against one that is **ahead** (a newer build migrated it), it
 refuses too: run the newer build, or restore a snapshot taken before it.
 
-On the home machine, `bash apps/instance/deploy/home/deploy.sh` does all of it: builds this
-checkout, snapshots the data, starts the new build (Compose runs `migrate` first), waits for
+On the home machine, `bash deploy.sh` in a release's folder (or
+`bash apps/instance/deploy/home/deploy.sh` in a checkout) does all of it: pulls the release's image by
+its digest (#2786), or builds the checkout, snapshots the data, starts the new build (Compose runs `migrate` first), waits for
 `/ready`, and **rolls itself back** — the previous build, with the snapshot restored — if the new one
 never becomes ready. `deploy.sh --rollback` does the same by hand. Every migration has a tested
 `down` (ADR 0037 D-6), but a rollback restores a snapshot rather than migrating down, because a

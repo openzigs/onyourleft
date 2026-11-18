@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# deploy.sh — the one command that deploys this checkout to the box (#52, #807).
+# deploy.sh — the one command that deploys to the box (#52, #807).
 #
 #   bash apps/instance/deploy/home/deploy.sh             # deploy this checkout
 #   bash apps/instance/deploy/home/deploy.sh --rollback  # back to the previous deploy
+#   bash deploy.sh                       # in a release bundle: its published image
+#   bash deploy.sh --image REF           # deploy REF, pulled if not held
+#
+# Two ways to have this file (#2786). In a git CHECKOUT it builds the image
+# from the checkout. In a RELEASE BUNDLE — the zip the instance-image workflow
+# attaches to a release, with `release.image` beside this file naming the
+# published image by digest — it pulls that image and needs no git, no
+# checkout and no build. Everything after step 1 is the same either way.
 #
 # What a deploy does, in order, and why:
 #
 #   1. Builds the image from this checkout, tagged with its commit, so the
-#      running build can always say what source it is (GET /source).
+#      running build can always say what source it is (GET /source). From a
+#      bundle, or with --image, pulls the image instead (unless this machine
+#      holds it already: a digest names the same bytes wherever they are).
 #   2. If an instance is already running: takes a snapshot of its data FIRST
 #      (`backup`), into OYL_BACKUP_DIR/pre-deploy. A rollback restores it:
 #      the new build's migrations may have moved the database on, and the old
@@ -34,8 +44,8 @@
 # OYL_INSTANCE_REMOTE_PATH before anything is built. A .env from before #2805,
 # with a tunnel token and no profile, keeps its tunnel, and is told to say so.
 #
-# Needs Docker with Compose, git, and a filled-in .env beside this file
-# (copy instance.env.example). Run from anywhere inside the checkout.
+# Needs Docker with Compose and a filled-in .env beside this file (copy
+# instance.env.example); and git, to build a checkout. Run from anywhere.
 #
 # ⚠️ This is the ONE deploy there is. It runs a single instance on a single
 # box, so there is no second copy to keep serving while the new one starts:
@@ -54,8 +64,9 @@ if [ -n "${MSYSTEM:-}" ]; then
   export MSYS_NO_PATHCONV=1
   HERE="$(cd "${HERE}" && { pwd -W 2>/dev/null || pwd; })"
 fi
-ROOT="$(git -C "${HERE}" rev-parse --show-toplevel)"
 STATE="${HERE}/.deployed"
+# #2786: the published image a release bundle deploys, by digest.
+RELEASE_IMAGE="${HERE}/release.image"
 READY_SECONDS="${OYL_DEPLOY_READY_SECONDS:-120}"
 started_at="$(date +%s)"
 
@@ -207,16 +218,43 @@ if [ "${1:-}" = '--rollback' ]; then
   exit 0
 fi
 
-commit="$(git -C "${ROOT}" rev-parse HEAD)" || die 'could not read the commit.'
-image="onyourleft-instance:${commit}"
-say "building ${image}"
-docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
-  -f "${ROOT}/apps/instance/Dockerfile" -t "${image}" "${ROOT}" >/dev/null ||
-  die 'the image did not build.'
+image=''
+if [ "${1:-}" = '--image' ]; then
+  image="${2:-}"
+  [ -n "${image}" ] || die '--image needs the image to deploy.'
+elif [ -f "${RELEASE_IMAGE}" ]; then
+  image="$(head -n 1 "${RELEASE_IMAGE}" | tr -d '[:space:]')"
+  [ -n "${image}" ] || die "${RELEASE_IMAGE} names no image."
+fi
+
+if [ -n "${image}" ]; then
+  # A digest names the same bytes wherever they are, so an image this machine
+  # already holds is not fetched again.
+  if ! docker image inspect "${image}" >/dev/null 2>&1; then
+    say "pulling ${image}"
+    docker pull --quiet "${image}" >/dev/null || die "${image} could not be pulled."
+  fi
+else
+  ROOT="$(git -C "${HERE}" rev-parse --show-toplevel)" ||
+    die 'this is not a checkout and there is no release.image beside it: download a release bundle, or pass --image.'
+  commit="$(git -C "${ROOT}" rev-parse HEAD)" || die 'could not read the commit.'
+  image="onyourleft-instance:${commit}"
+  say "building ${image}"
+  docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
+    -f "${ROOT}/apps/instance/Dockerfile" -t "${image}" "${ROOT}" >/dev/null ||
+    die 'the image did not build.'
+fi
 
 previous="$(state image)"
 snapshot=''
-if [ -n "${previous}" ] && [ -n "$(compose ps -q instance 2>/dev/null)" ]; then
+running="$(compose ps -q instance 2>/dev/null)"
+# A compose-only install (the guide's step 5) never wrote .deployed, so the
+# first update would take no snapshot and have nothing to roll back to: the
+# image the container is running stands in for it.
+if [ -z "${previous}" ] && [ -n "${running}" ]; then
+  previous="$(docker inspect --format '{{.Config.Image}}' "${running}" 2>/dev/null)" || previous=''
+fi
+if [ -n "${previous}" ] && [ -n "${running}" ]; then
   say 'taking a snapshot before anything changes'
   taken="$(OYL_INSTANCE_IMAGE="${previous}" compose run --rm --no-deps --entrypoint node backup \
     src/operator/cli.ts backup /backups/pre-deploy --keep 3)" ||

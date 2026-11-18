@@ -14,7 +14,10 @@ two ways, and **neither needs a port opened on the router** (ADR 0079,
   requirement (D-1).
 
 This guide is written so that **somebody who has never seen this repository** can follow it on
-their own Windows machine. Everything after setup is in
+their own Windows machine, with **no git, no build and no Git Bash**: you download a release, fill
+in one file, and start it ([#2786](https://github.com/openzigs/onyourleft/issues/2786)). Building
+from a git checkout is still there, [for contributors](#for-contributors-deploying-a-git-checkout).
+Everything after setup is in
 [`operating-an-instance.md`](../operating-an-instance.md).
 
 ```mermaid
@@ -44,26 +47,54 @@ a removable USB stick** (see [Backups](#backups)).
 1. Install **WSL**: in an administrator PowerShell, `wsl --install`, and restart when it asks.
 2. Install **Docker Desktop** from docker.com. In *Settings → General*, tick **Use the WSL 2 based
    engine** and **Start Docker Desktop when you sign in to your computer**.
-3. Install **Git for Windows** (it brings Git Bash, which `deploy.sh` runs in).
-4. In Git Bash: `docker version` answers with a client and a server, and
+3. In PowerShell: `docker version` answers with a client and a server, and
    `docker compose version` with a version.
 
-⚠️ **Git Bash rewrites anything that looks like a path** before `docker` sees it, so a path INSIDE
-a container (`/backups`, `/restore`) arrives as `C:/Program Files/Git/backups`, and the command
-fails with nothing but `the command failed (Error)`. `deploy.sh` turns this off itself. When you type
-a command from this guide that names a path inside a container, start it with
-`MSYS_NO_PATHCONV=1` (the restore drill below does).
+Every command in this guide is typed in **PowerShell** unless it says otherwise.
+
+**Docker Desktop is free for personal use** and for small organisations; a larger company needs a
+paid Docker subscription. Two free alternatives under the Apache-2.0 licence run the same images:
+**Podman Desktop** (podman-desktop.io) and **Rancher Desktop** (rancherdesktop.io, with its
+`dockerd (moby)` engine, which gives you the same `docker` and `docker compose` commands). This
+project tests on Docker Desktop and Docker Engine; with Podman, use `podman compose` where this guide
+says `docker compose`, and check each step's answer yourself.
 
 ⚠️ **Docker Desktop starts when you SIGN IN, not when Windows boots.** After a reboot the instance
 comes back only once somebody has signed in — set Windows to sign in automatically
 (`netplwiz`), or accept that a reboot at night leaves the instance down until morning.
 
-## 2. Get the code
+## 2. Download a release
+
+1. Open the project's [releases page](https://github.com/openzigs/onyourleft/releases) and download
+   **`onyourleft-instance-<version>.zip`** from the newest release.
+2. Extract it into `C:\onyourleft`:
+
+   ```powershell
+   Expand-Archive "$HOME\Downloads\onyourleft-instance-<version>.zip" -DestinationPath C:\onyourleft -Force
+   cd C:\onyourleft\onyourleft-instance
+   ```
+
+   The folder holds `compose.yaml`, `deploy.sh`, `instance.env.example`, `release.image`, and a
+   `tailscale` folder with the two files `tailscale serve` reads on the tailnet (3a).
+   `compose.yaml` names the instance's image **by its digest**, the line in `release.image`, so
+   what Docker downloads is exactly the image this release was tested with.
+
+**Check the image is ours (optional).** Every release's image is signed by this project's own
+release workflow, keyless, with Sigstore's cosign: the signature is tied to that workflow's GitHub
+identity and recorded in Sigstore's public log, and no key is stored anywhere. Install
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/) (free, Apache-2.0; version 3
+or later), then run this, with the digest from `release.image` in place of `sha256:…`:
 
 ```bash
-git clone https://github.com/openzigs/onyourleft.git
-cd onyourleft
+cosign verify ghcr.io/openzigs/onyourleft-instance@sha256:… \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/openzigs/onyourleft/\.github/workflows/instance-image\.yml@refs/tags/v'
 ```
+
+In PowerShell, type it on one line, or end each line with a backtick (`` ` ``) instead of `\`. It
+needs no GitHub account. It prints the signature as JSON when the image is the project's, and fails
+with `no matching signatures` when it is not. The release workflow runs this same command against
+every image it publishes, and fails if it does not verify.
 
 ## 3. Choose how riders reach it
 
@@ -99,7 +130,7 @@ Do **one** of [3a](#3a-your-tailnet-no-domain) or [3b](#3b-a-cloudflare-tunnel-y
 3. **Name the machine.** It is `onyourleft` unless you set `TAILSCALE_HOSTNAME` in `.env`, so the
    instance's address is `https://onyourleft.your-tailnet.ts.net`. That is `OYL_INSTANCE_ORIGIN` in
    step 4. If the tailnet already has a machine of that name, Tailscale calls this one
-   `onyourleft-1`; `deploy.sh` notices and tells you (step 5).
+   `onyourleft-1`; step 5 says how to check, and `deploy.sh` checks it for you.
 4. **How each rider joins**: invite them into your tailnet (*Users → Invite users*, each on their
    own Tailscale account; the free plan has 6 users), or share the machine with them (*Machines →
    onyourleft → Share*). Each rider installs the Tailscale app on their tablet or phone and signs in
@@ -195,9 +226,10 @@ D-1, ADR 0079 D-8). The instance's identity and its data stay the same. Change
 
 ## 4. Fill in `.env`
 
-```bash
-cd apps/instance/deploy/home
-cp instance.env.example .env
+```powershell
+cd C:\onyourleft\onyourleft-instance
+Copy-Item instance.env.example .env
+notepad .env
 ```
 
 Edit `.env`:
@@ -220,7 +252,7 @@ Edit `.env`:
 | `OYL_OFFBOX_DIR` | **required — the deploy refuses to start without it.** A folder that is **not** on this machine's own disk. ⚠️ On Windows **a USB stick does not work here**: read [Backups](#backups) first |
 | `OYL_INSTANCE_WS_COMPRESSION` | `off` unless your upload is the limit — see [Compression](#compression-and-your-upload) |
 
-`.env` is ignored by git, so `git pull` never overwrites it and never uploads it.
+No release contains a `.env`, so extracting the next release over this folder never overwrites it.
 
 **The rider's address, and why `compose.yaml` fixes the proxies' addresses.** Every connection
 reaches the instance from `cloudflared` or from the `tailscale` container, so the per-address rate
@@ -238,25 +270,40 @@ change that subnet, the proxies' addresses on it and `OYL_INSTANCE_TRUSTED_PROXI
 and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network, or a port published
 for local debugging, is counted as itself, whatever header it sends.
 
-## 5. Deploy — one command
+## 5. Start it
 
-```bash
-bash apps/instance/deploy/home/deploy.sh
+```powershell
+cd C:\onyourleft\onyourleft-instance
+docker compose up -d --wait instance
+docker compose up -d
 ```
 
-It checks that `.env` names one remote path and the settings it needs, builds the image from this
-checkout (tagged with the commit), runs the database's migrate step, starts the instance, waits
-until `/ready` says ready, then starts the remote path (`tailscale` or `tunnel`) and the scheduled
-backup. It prints how long it took. If the new build never becomes ready it puts the previous one
-back by itself, with the data as it was — see
-[`operating-an-instance.md` → Upgrading](../operating-an-instance.md#upgrading).
+The first command downloads the image, runs the database's migrate step to completion, then starts
+the instance and waits until it is healthy: it ends with the instance `Healthy`, or names what
+failed. The second starts the remote path `COMPOSE_PROFILES` names (`tailscale` or `tunnel`) and the
+scheduled backup beside it.
 
-**On the tailnet (3a)** it then waits for Tailscale to be signed in. The first time, with no
-`TAILSCALE_AUTH_KEY`, it prints a link: open it, sign in as yourself, and the deploy carries on.
-Then it reads `OYL_INSTANCE_ORIGIN` back from the running instance and compares it with the name
-`tailscale serve` answers on. If they differ it says both and exits 1: set `OYL_INSTANCE_ORIGIN` to
-the name it printed and deploy again, because every card the instance draws would name the wrong
-address.
+**Where this machine has a bash** (macOS, Linux, WSL, or Git Bash on Windows), `bash deploy.sh` in
+this folder does the same in one command, and checks more: before anything starts it refuses a
+`.env` that turns on both remote paths or lacks a setting the one it names needs, and it waits
+until `/ready` says ready. It pulls the image `release.image` names and needs no git.
+
+**On the tailnet (3a)** Tailscale has to be signed in once. With no `TAILSCALE_AUTH_KEY`, the
+`tailscale` container prints a sign-in link: run `docker compose logs tailscale`, open the
+`https://login.tailscale.com/…` link it shows, and sign in as yourself. Then check that the name
+`tailscale serve` answers on is the one in `OYL_INSTANCE_ORIGIN`, because every card the instance
+draws names that address:
+
+```powershell
+docker compose exec tailscale tailscale status --json --peers=false
+```
+
+`Self` → `DNSName` is the machine's name, with a dot at the end (`onyourleft.your-tailnet.ts.net.`).
+If it is not the address in `OYL_INSTANCE_ORIGIN` — Tailscale calls the machine `onyourleft-1` when
+the tailnet already has an `onyourleft` — set `OYL_INSTANCE_ORIGIN` to `https://` and that name,
+without the final dot, and run `docker compose up -d instance`. `bash deploy.sh` does both for you:
+it prints the link while it waits, then compares the origin the running instance has with that name,
+and if they differ says both and exits 1.
 
 **Check it from a rider's device** (on the tailnet for 3a, on mobile data for 3b):
 `https://onyourleft.your-tailnet.ts.net/health` or `https://rides.example.org/health` answers
@@ -267,10 +314,9 @@ address.
 Until riders can make rooms in the app ([#784](https://github.com/openzigs/onyourleft/issues/784),
 [#785](https://github.com/openzigs/onyourleft/issues/785)), the operator opens one:
 
-```bash
-cd apps/instance/deploy/home
-docker compose run --rm --no-deps --entrypoint node migrate \
-  src/operator/cli.ts room-open saturday-ride --kind ride --length 40000
+```powershell
+cd C:\onyourleft\onyourleft-instance
+docker compose run --rm --no-deps --entrypoint node migrate src/operator/cli.ts room-open saturday-ride --kind ride --length 40000
 ```
 
 ## Public rooms: the owner's check
@@ -313,8 +359,8 @@ the instance works exactly as before, and a write-up is written without history.
 1. In `.env`: `COMPOSE_PROFILES=history` and `OYL_INSTANCE_EMBEDDING_URL=http://ollama:11434`.
 2. Start the model server and pull the model once:
 
-   ```bash
-   cd apps/instance/deploy/home
+   ```powershell
+   cd C:\onyourleft\onyourleft-instance
    docker compose up -d ollama
    docker compose exec ollama ollama pull nomic-embed-text
    docker compose up -d instance
@@ -512,23 +558,47 @@ What happens when it sleeps, reboots, or loses its connection anyway:
 To keep a Windows update from rebooting during an evening's rides, set **active hours**
 (*Settings → Windows Update → Advanced options*) to cover them.
 
-Stopping it on purpose: `cd apps/instance/deploy/home && docker compose stop`. Riders are told the
+Stopping it on purpose: `cd C:\onyourleft\onyourleft-instance`, then `docker compose stop`. Riders are told the
 server is stopping (close code 1001) and results already final are written first.
 
 ## Updating
 
+Download the new release's zip and extract it **over the same folder**: it replaces the release's files
+and leaves your `.env`, your `secrets` folder and the record of what is deployed. Then, where this
+machine has a bash (macOS, Linux, WSL, or Git Bash on Windows), one command does the rest:
+
 ```bash
-git pull
-bash apps/instance/deploy/home/deploy.sh
+cd /path/to/onyourleft-instance
+bash deploy.sh
 ```
 
-A snapshot is taken first; the database is migrated as its own step before the new build starts;
-and a build that does not become ready is replaced by the previous one, with the snapshot restored.
-To go back by hand: `bash apps/instance/deploy/home/deploy.sh --rollback`.
+It takes a snapshot of the data first, starts the new image (the database is migrated as its own
+step before it starts), and waits until `/ready` says ready. **A new image that does not become
+ready is replaced by the previous one, with the snapshot restored**, and the command exits 1. It
+needs no git and builds nothing. To go back by hand later: `bash deploy.sh --rollback`. The release
+workflow proves this for every image it publishes: it deploys an image that never becomes ready and
+requires the published digest to be the one running afterwards.
+
+**On Windows with no bash**, the same steps by hand:
+
+```powershell
+cd C:\onyourleft\onyourleft-instance
+docker compose run --rm --no-deps --entrypoint node backup src/operator/cli.ts backup /backups/pre-deploy --keep 3
+Expand-Archive "$HOME\Downloads\onyourleft-instance-<new version>.zip" -DestinationPath C:\onyourleft -Force
+docker compose up -d --wait instance
+docker compose up -d
+```
+
+If `docker compose up -d --wait instance` does not come back healthy, **nothing puts the previous
+version back for you**: extract the previous release's zip over the folder again, restore the
+snapshot the first command printed ([Restore](../operating-an-instance.md#restore)), and run the
+last two commands again. A launcher that does this on Windows without a terminal is
+[#2788](https://github.com/openzigs/onyourleft/issues/2788).
 
 **A `.env` from before the tunnel was a profile** (#2805) has `CLOUDFLARE_TUNNEL_TOKEN` and no
 `COMPOSE_PROFILES`. `deploy.sh` still starts its tunnel, and says to add `cloudflare` to
-`COMPOSE_PROFILES`. Do that, so that a `docker compose up` by hand starts it too.
+`COMPOSE_PROFILES`. Do that before you update, so that a `docker compose up` by hand — the Windows
+steps above — starts it too.
 
 ## Backups
 
@@ -551,8 +621,8 @@ an empty folder inside its own VM instead: every copy fails with *Permission den
 reaches the stick. Measured on the project's Windows box, 2026-10-09
 ([#807](https://github.com/openzigs/onyourleft/issues/807)). Check yours before you trust it:
 
-```bash
-MSYS_NO_PATHCONV=1 docker run --rm -v "E:/onyourleft-backups:/t" alpine sh -c 'mount | grep " /t "'
+```powershell
+docker run --rm -v "E:/onyourleft-backups:/t" alpine sh -c 'mount | grep " /t "'
 ```
 
 A Windows drive shows as `9p` with `aname=drvfs`. `ext4` means Docker made the folder in its VM, so
@@ -563,12 +633,10 @@ that WSL does mount.
 
 1. On the second machine, steps 1, 2 and 4 of this guide.
 2. Copy one `snapshot-…` folder from the off-box drive to it.
-3. `cd apps/instance/deploy/home`, then restore into the deployment's volume and check it:
+3. `cd C:\onyourleft\onyourleft-instance`, then restore into the deployment's volume and check it:
 
-   ```bash
-   docker build --build-arg OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" -f ../../Dockerfile -t onyourleft-instance:local ../../../..
-   MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps -v "C:/path/to/snapshot-…:/restore:ro" --entrypoint node migrate \
-     src/operator/cli.ts restore /restore
+   ```powershell
+   docker compose run --rm --no-deps -v "C:/path/to/snapshot-…:/restore:ro" --entrypoint node migrate src/operator/cli.ts restore /restore
    docker compose run --rm --no-deps --entrypoint node migrate src/operator/cli.ts verify
    ```
 
@@ -608,6 +676,44 @@ Close registration again afterwards.
 On the project's Windows box (2026-10-09, run from a Mac on the same home network), the idle socket
 lived **125 s**, and the 30-minute run had no disconnects, 1,799 frames for each rider and a
 longest silence of 1.3 s. Those are one line's figures, not yours.
+
+## For contributors: deploying a git checkout
+
+The steps above run a published release. To run a change that is not released yet, deploy a
+checkout instead: the same `compose.yaml` and `deploy.sh`, in `apps/instance/deploy/home/`, with the
+image **built** from the checkout and tagged with its commit. It needs git and, on Windows, Git Bash.
+
+1. Install **Git for Windows** (it brings Git Bash, which `deploy.sh` runs in), then in Git Bash
+   clone the repository and make the `.env`, as step 4 says:
+
+   ```bash
+   git clone https://github.com/openzigs/onyourleft.git
+   cd onyourleft/apps/instance/deploy/home
+   cp instance.env.example .env
+   ```
+
+2. Deploy — one command, from anywhere inside the checkout:
+
+   ```bash
+   bash apps/instance/deploy/home/deploy.sh
+   ```
+
+   It checks that `.env` names one remote path and the settings it needs, builds the image from
+   this checkout (tagged with the commit), takes a snapshot, runs the database's migrate step,
+   starts the instance, waits until `/ready` says ready, then starts the remote path (`tailscale`
+   or `tunnel`) and the scheduled backup, and prints how long it took. On the tailnet it then does
+   step 5's sign-in and origin check itself. If the new build never becomes ready it puts the
+   previous one back by itself, with the data as it was — see
+   [`operating-an-instance.md` → Upgrading](../operating-an-instance.md#upgrading). To update:
+   `git pull`, then the same command. To go back by hand:
+   `bash apps/instance/deploy/home/deploy.sh --rollback`. `.env` is ignored by git, so `git pull`
+   never overwrites it and never uploads it.
+
+⚠️ **Git Bash rewrites anything that looks like a path** before `docker` sees it, so a path INSIDE
+a container (`/backups`, `/restore`) arrives as `C:/Program Files/Git/backups`, and the command
+fails with nothing but `the command failed (Error)`. `deploy.sh` turns this off itself. When you type
+a command from this guide in Git Bash and it names a path inside a container, start it with
+`MSYS_NO_PATHCONV=1`. PowerShell does not rewrite paths.
 
 ## What is not here
 
