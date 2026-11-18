@@ -1,14 +1,17 @@
 # ADR 0070: Houses on inferred built-up land — a suburb mapped only by its streets, superseding ADR 0054 D-5.1 in part
 
-- **Status**: **Proposed, 2026-11-15.** The direction is the owner's ruling of that day on
-  [#2684](https://github.com/openzigs/onyourleft/issues/2684) (quoted in Context). The rule's numbers
-  in D-1 are the author's, measured as D-5 records, and are accepted only on the owner's approval on
-  this ADR's pull request (the cues' thresholds and the 0.5 share are the author's, measured as D-5
-  records), after the owner-approved screenshots and the moving-ride tablet frame
-  check #2684 asks for
+- **Status**: **Accepted**, 2026-11-17, by the owner on
+  [#2694](https://github.com/openzigs/onyourleft/pull/2694), as written. Proposed 2026-11-15. Asked
+  _"Should I merge #2694 now, or hold it for another ride?"_, the owner answered _"Merge now"_
+  (2026-11-17), after approving the pull request's before/after screenshots on 2026-11-16
+  (_"Agree with your thoughts on pictures"_) and riding builds that carried it on the tablet on
+  2026-11-16 and 2026-11-17. That acceptance covers the rule's numbers in D-1, which are the
+  author's, measured as D-5 records (the cues' thresholds and the 0.5 share). The direction is the
+  owner's ruling of 2026-11-15 on [#2684](https://github.com/openzigs/onyourleft/issues/2684)
+  (quoted in Context)
 - **Date**: 2026-11-15
-- **Deciders**: **the owner**, in the ruling quoted in Context and on this ADR's pull request.
-  Drafted by the author for that approval
+- **Deciders**: **the owner**, in the ruling quoted in Context and on this ADR's pull request,
+  where the owner accepted it on 2026-11-17. Drafted by the author for that approval
 - **Issue**: [#2684](https://github.com/openzigs/onyourleft/issues/2684), after
   [#2655](https://github.com/openzigs/onyourleft/issues/2655) (the same suburbs where OSM maps the
   footprints)
