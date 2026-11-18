@@ -736,6 +736,17 @@ async function rideOnce(
 /** How long the drafted rides of #2461 ride after the countdown: 40 s, a lap and a half of the loop. */
 const DRAFTED_FRAMES = 80;
 
+/**
+ * How long D-3.6's draft-on case rides after the countdown (#2773): 20 s,
+ * most of a lap, in which the grades written climb past 3 % and fall past
+ * −5 %, as the whole trace's do. Profiled under --coverage at
+ * {@link DRAFTED_FRAMES}, the case's drawn race took 1.1 s of its 1.8 s, the
+ * blind race 0.45 s and the replay 0.19 s; at this, the drawn race 0.70 s of
+ * 1.1 to 1.2 s. The rider sat in a bot's draft for 30 of its calls, and it
+ * wrote the trainer 18 times.
+ */
+const DRAFT_ON_FRAMES = 40;
+
 /** The three shared rides, each ridden once by the first case that asks. */
 let plainRide: Promise<RideResult> | undefined;
 let offRide: Promise<RideResult> | undefined;
@@ -870,8 +881,9 @@ describe('a solo lap race inside a game ride — #1906', () => {
 
   it('with the draft on, sends the trainer the same writes, each grade at the same time, as an ordinary ride ridden at the race’s k step for step, items off and on (ADR 0067 D-3.6)', async () => {
     // The device's default, the switch on: every racer drafts, the rider
-    // included. Over the first lap and a half, which is cheaper than the whole
-    // trace and still writes every grade the loop has (#1688: no timeout).
+    // included. Over the first twenty seconds after Go, which is cheaper than
+    // the whole trace and still writes grades that climb and fall (#1688,
+    // #2773: no timeout; DRAFT_ON_FRAMES says what it cost).
     // The items-off race draws; the items-on race and the replay ride blind,
     // as #2524 rides the cases that read no frame. The drawn ride is this draft
     // source's drawing-view check (`blind-view-wiring.test.tsx`'s header): a
@@ -884,7 +896,7 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // stands still on the line at 0 W (`standingAt`) and is advanced on every
     // frame. So the replay rides alone (`k` 1) through the countdown's frames
     // before Go's, then the race's trace from Go's frame on, call for call.
-    const frames = COUNTDOWN_FRAMES + DRAFTED_FRAMES;
+    const frames = COUNTDOWN_FRAMES + DRAFT_ON_FRAMES;
     const off = await rideOnce(ITEMS_OFF, { drafted: true, frames });
     const on = await rideOnce(RACE, { drafted: true, frames, blind: true });
     // Items move race offsets and never effort distances, which is all the
@@ -901,7 +913,8 @@ describe('a solo lap race inside a game ride — #1906', () => {
     // the replay rode at it, and the road's grades climb and fall.
     expect(off.trace.filter((k) => k < 0.9).length).toBeGreaterThan(20);
     expect(replay.trace).toStrictEqual(aligned);
-    expect(off.writes.length).toBeGreaterThan(30);
+    // A write about every 1.1 s ridden: 18 over DRAFT_ON_FRAMES.
+    expect(off.writes.length).toBeGreaterThan(15);
     const grades = off.writes.map((each) => each.parameters.grade);
     expect(Math.max(...grades)).toBeGreaterThan(1);
     expect(Math.min(...grades)).toBeLessThan(-1);
