@@ -91,6 +91,7 @@ const SEALS: Readonly<Record<string, string>> = {
   '2': 'b2aa7e152fc7194801420f8e75fcc878bb8fe070d45bdcf4a481f13796d3dc80',
   '3': '786f7d2ec42b745b9de1ac60e6dc6b9ce7b8843eb9109c5838f987b5574fc146',
   '4': '8c3056a68b988cb9fcadb98d3a62b4b7c41319da6a2cacfadad843d9a45de705',
+  '5': '901e9c09049bdb2331bafa806771315cbdb6c82cdf98dc62f16f9ff3f25490df',
 };
 
 afterEach(() => {
@@ -124,7 +125,11 @@ function startRace(circuit: Circuit, seed: number, model: boolean): LapRaceRide 
   return { ...ride, countdownLeftMs: 0 };
 }
 
-/** The scripted model: each bot a move by its seat and the ask, and a latency that varies, some late. */
+/**
+ * The scripted model: each bot a move by its seat and the ask, and a latency
+ * that varies, some late. Since version 5 (#2759, ADR 0076 D-11) one answer in
+ * six takes 6.8 s, applied under the 8 s limit, and one 8.6 s, late.
+ */
 function scripted(
   input: ModelTacticsInput,
   ask: number,
@@ -141,7 +146,7 @@ function scripted(
           })),
       },
     },
-    afterMs: [1_900, 2_600, 3_300, 5_600][ask % 4] as number,
+    afterMs: [1_900, 2_600, 3_300, 5_600, 6_800, 8_600][ask % 6] as number,
   };
 }
 

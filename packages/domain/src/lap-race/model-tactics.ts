@@ -13,13 +13,18 @@
  *
  * {@link ModelTacticsInput}: spike 0039's shape (ADR 0071 D-3.4) as ADR 0073
  * D-5 widened it (#2720, #2710) — seats, racing styles dealt from the seed
- * ({@link modelRacingStyles}) and legs (archetypes), how each bot compares
+ * ({@link modelRacingStyles}), how each bot compares
  * with the field on the flat, a climb, a sprint and in punch (#2759, ADR 0076
  * D-4: {@link MODEL_STRENGTH_WORDS}), ranks, gaps, W′ shares
  * and whether a bot is blown, drafting, current moves, laps and metres to the
  * line as each bot misreads it, launch distance, grade ahead, the rider's gap,
  * and the rider's own state: rank, W/kg, who is ahead of them, their gaps and
  * whether they draft. There is no code-computed attack gate (D-5.3).
+ * **Trimmed for latency (#2759, ADR 0076 D-11):** a bot's archetype (its
+ * "legs") is not sent, because since ADR 0076 D-3 its racing style decides
+ * it, nor the count of racers, which the prompt never reads; the device
+ * rounds every gap to whole metres, the grade to a whole percent and a W′
+ * share to a tenth.
  * **Every field is a number, a boolean, or a word from a closed list**: there
  * is no field a coordinate, a place name, a rider's name, a date or an
  * identifier could be written into as text, and {@link readModelTacticsInput}
@@ -41,7 +46,6 @@
  * `apps/web/tools/model-tactics-spike/` is not moved.
  */
 
-import { BOT_ARCHETYPES, type BotArchetype } from './archetype';
 import { nextUnit, raceRandom } from './random';
 import { BOT_EFFORTS, BOT_TACTICS, type BotEffort, type BotTactic } from './tactics';
 
@@ -129,10 +133,12 @@ const MOST_WATTS_PER_KILOGRAM = 40;
 export interface ModelTacticsBotView {
   /** The bot's seat, from 0: its place in the ride's bots. */
   readonly bot: number;
-  /** How it likes to race, dealt from the race's seed (ADR 0073 D-5.1). */
+  /**
+   * How it likes to race, dealt from the race's seed (ADR 0073 D-5.1). Since
+   * ADR 0076 D-3 it also decides the bot's legs, its archetype, which is
+   * therefore not sent (D-11).
+   */
   readonly style: ModelRacingStyle;
-  /** What its legs are good at: its archetype, which sets its sprint and its launch distance. */
-  readonly legs: BotArchetype;
   /** Beside the rest of the field, on the flat: its watts at threshold (ADR 0076 D-4). */
   readonly flat: ModelStrengthWord;
   /** Beside the rest of the field, on a climb: its watts per kilogram at threshold. */
@@ -147,11 +153,11 @@ export interface ModelTacticsBotView {
   readonly ahead: 'rider' | number | null;
   /** The move of the bot directly ahead, or `null` when that is the rider or nobody (#2708). */
   readonly aheadMove: BotTactic | null;
-  /** Metres to the racer directly ahead, or `null` when it leads. */
+  /** Metres to the racer directly ahead, or `null` when it leads: whole metres from the device. */
   readonly gapAheadM: number | null;
-  /** Metres to the racer directly behind, or `null` when it is last. */
+  /** Metres to the racer directly behind, or `null` when it is last: whole metres from the device. */
   readonly gapBehindM: number | null;
-  /** Its W′ balance as a share of its W′, 0 to 1. */
+  /** Its W′ balance as a share of its W′, 0 to 1: to a tenth from the device. */
   readonly wbal: number;
   /** Whether it is blown (ADR 0073 D-5.4): its W′ ran out, and it rides no harder than CP until it has refilled. */
   readonly blown: boolean;
@@ -170,17 +176,15 @@ export interface ModelTacticsBotView {
   readonly toLineM: number;
   /** Where its legs would usually launch the sprint, metres to the line: a guide, not a rule (D-3.5). */
   readonly launchM: number;
-  /** The grade 50 m up the road, percent. */
+  /** The grade 50 m up the road, percent: a whole percent from the device. */
   readonly gradeAheadPct: number;
-  /** Metres the rider is ahead of the bot, below 0 behind it. */
+  /** Metres the rider is ahead of the bot, below 0 behind it: whole metres from the device. */
   readonly riderGapM: number;
 }
 
 /** The race as the model is shown it at one instant. */
 export interface ModelTacticsInput {
   readonly laps: number;
-  /** How many racers are still racing, the rider included. */
-  readonly field: number;
   /** Whole seconds since any bot was last attacking or on a flyer, or since the start (#2708). */
   readonly quietS: number;
   /** The rider's state (ADR 0073 D-5.2), so a bot can mark them. */
@@ -252,6 +256,9 @@ export function modelTacticsSeats(input: ModelTacticsInput): readonly number[] {
   return input.bots.map((view) => view.bot);
 }
 
+/** The two moves that read a target (`model-race.ts` §`ADR_0073_MOVE_STRATEGY`): every other ignores one. */
+const TARGETED_MOVES: readonly BotTactic[] = ['follow', 'chase'];
+
 /**
  * The answer's JSON Schema for a field of `seats`, which a local model
  * server's structured output holds the model to — the target offered again
@@ -259,30 +266,52 @@ export function modelTacticsSeats(input: ModelTacticsInput): readonly number[] {
  * optional effort (D-2.5) — and which
  * {@link readModelTacticsAnswer} checks again, because a schema a server
  * enforces is not one its caller may trust.
+ *
+ * **Shaped for latency** (#2759, ADR 0076 D-11): a move is one of two shapes,
+ * a `follow` or `chase` that may name a target and every other move, which
+ * may not, because no other move reads one and each target the model writes
+ * is tokens it spends time on; and the list holds at most one move a seat, so
+ * a model that repeats itself stops at the end of the field instead of
+ * writing to its token cap. The reader is unchanged: a target on another
+ * move, were one to arrive, is still read and still ignored.
  */
 export function modelTacticsAnswerSchema(
   seats: readonly number[],
 ): Readonly<Record<string, unknown>> {
-  return {
+  const move = (moves: readonly BotTactic[], targeted: boolean) => ({
     type: 'object',
     properties: {
-      bots: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            bot: { type: 'integer', enum: [...seats] },
-            move: { type: 'string', enum: [...BOT_TACTICS] },
-            effort: { type: 'string', enum: [...BOT_EFFORTS] },
+      bot: { type: 'integer', enum: [...seats] },
+      move: { type: 'string', enum: [...moves] },
+      effort: { type: 'string', enum: [...BOT_EFFORTS] },
+      ...(targeted
+        ? {
             target: {
               anyOf: [
                 { type: 'string', enum: ['rider'] },
                 { type: 'integer', enum: [...seats] },
               ],
             },
-          },
-          required: ['bot', 'move'],
-          additionalProperties: false,
+          }
+        : {}),
+    },
+    required: ['bot', 'move'],
+    additionalProperties: false,
+  });
+  return {
+    type: 'object',
+    properties: {
+      bots: {
+        type: 'array',
+        maxItems: seats.length,
+        items: {
+          anyOf: [
+            move(
+              BOT_TACTICS.filter((tactic) => !TARGETED_MOVES.includes(tactic)),
+              false,
+            ),
+            move(TARGETED_MOVES, true),
+          ],
         },
       },
     },
@@ -354,7 +383,6 @@ export function readModelTacticsAnswer(text: string, seats: readonly number[]): 
 const VIEW_KEYS = [
   'bot',
   'style',
-  'legs',
   'flat',
   'climb',
   'sprint',
@@ -375,7 +403,7 @@ const VIEW_KEYS = [
   'gradeAheadPct',
   'riderGapM',
 ] as const;
-const INPUT_KEYS = ['laps', 'field', 'quietS', 'rider', 'bots'] as const;
+const INPUT_KEYS = ['laps', 'quietS', 'rider', 'bots'] as const;
 /** The most seconds a race state may say: a day. */
 const MOST_SECONDS = 86_400;
 const RIDER_KEYS = ['rank', 'wPerKg', 'ahead', 'gapAheadM', 'gapBehindM', 'drafting'] as const;
@@ -412,11 +440,6 @@ function viewProblem(view: unknown, at: string): ModelTacticsInputProblem | unde
       typeof view.style === 'string' &&
         (MODEL_RACING_STYLES as readonly string[]).includes(view.style),
       'must be a racing style',
-    ],
-    [
-      'legs',
-      typeof view.legs === 'string' && (BOT_ARCHETYPES as readonly string[]).includes(view.legs),
-      'must be an archetype',
     ],
     ...(['flat', 'climb', 'sprint', 'punch'] as const).map(
       (key) =>
@@ -487,9 +510,6 @@ export function readModelTacticsInput(value: unknown): ModelTacticsInputRead {
   const keys = keyProblem(value, INPUT_KEYS, 'input');
   if (keys !== undefined) return { ok: false, problem: keys };
   if (!wholeIn(value.laps, 1, MOST_LAPS)) return refuse('input.laps', 'must be a number of laps');
-  if (!wholeIn(value.field, 1, MODEL_TACTICS_MOST_SEATS + 1)) {
-    return refuse('input.field', 'must be how many are racing');
-  }
   if (!wholeIn(value.quietS, 0, MOST_SECONDS)) {
     return refuse('input.quietS', 'must be a whole number of seconds');
   }

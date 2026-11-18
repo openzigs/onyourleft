@@ -231,6 +231,48 @@ agree with all your recommendations"*. So:
   margin.
 - **R-6**: the seeded race keeps its one-body field for now.
 
+### D-11 — The cadence and the call, after the first tablet race (2026-11-17)
+
+**Recorded 2026-11-17, after D-10, as a decision of this build** (*the author's choice*): ADR 0071
+D-7 leaves the cadence to the build, so none of this is an owner ruling, and D-1 to D-10 are
+unchanged by it.
+
+- **Why.** On the owner's tablet, 2026-11-17 (ride build `fec90720`, the PC on a preview of this
+  branch), **41 of 46 asks were given up as late** at 5 s, each booked at 5 050 ms, while the PC's
+  own log gave the model a median 3.9 s and at most 4.5 s. The round trip through the instance's
+  Cloudflare tunnel adds more than a second, and the race rode almost entirely on seeded tactics.
+  Every earlier figure (ADR 0071's, spike 0039's and this ADR's "What was measured") was server
+  time on the PC.
+- **D-11.1 — Late at 8 s.** `MODEL_TACTICS_LATE_MS` is **8 000 ms** of race time from the ask: an
+  answer that arrives later is logged `late` and never applied, and a call still out that long is
+  given up and the next one asked. **The race never waits on the model**: asks still go out only
+  between frames, one at a time, and a tick never waits for one.
+- **D-11.2 — A decision holds 10 s.** `MODEL_TACTICS_HOLD_MS` is **10 000 ms** from the window it
+  applies in. A decision still applies from the next 1 s tactics window after it arrives, and the
+  next ask still goes out at the next 4 s mark after a call settles (`MODEL_TACTICS_ASK_EVERY_MS`
+  stays 4 000 ms). So a call of more than 4 s, the tablet's every call, brings decisions about 8 s
+  apart, and 10 s holds one until the next lands with 2 s for a slower successor. The old 5 s hold
+  left a 3 s gap of seeded tactics between two such decisions. A late or missing answer still lets
+  the field fall back to its seeded tactics, after 10 s.
+- **D-11.3 — Bot-code version 5.** The hold changes which moves are in force for a logged race, so
+  `LAP_RACE_BOT_CODE_VERSION` rises to **5** and `model-race-golden.json` gains a `"5"` key (D-7).
+  A log recorded under version 4 is not replayed under 5.
+- **D-11.4 — A shorter call.** The input drops each bot's `legs`, which its style decides since D-3,
+  and the count of racers, which the prompt never read; gaps are whole metres, the grade a whole
+  percent and W′ a tenth. Every other key and its meaning stand, and the device and the instance
+  still read the input with the one reader, so the two cannot disagree. The answer's schema lets
+  only a `follow` or a `chase` name a `target` (no other move reads one, and the model wrote one on
+  most `sit-in`s) and lists at most one move a seat, so a model that repeats itself stops at the
+  end of the field. The instance caps an answer at **256 tokens** (it was 400): the longest answer
+  the schema admits for seven bots is about 180. `think: false` stays. The prompt is `tactics-6`:
+  it names the style where it named the legs, and says that only `follow` and `chase` read a
+  target. Nothing in it about racing changes.
+- **D-11.5 — What it does not reach.** The aim was a median under 3 s of server time on the PC. It
+  is not reached: see "What was measured", 2026-11-17 (evening). What remains is the ~1 550-token
+  system prompt, read in full on every call, and some 85 to 100 tokens of answer at about 21 ms
+  each. Neither moves without shortening the approved prompt or changing the model server's
+  settings, which this build does not do.
+
 ## Consequences
 
 ### What this enables
@@ -321,6 +363,58 @@ Read plainly:
   margins.
 - **The longer prompt did not slow the call past its limit**: no answer was late, but the highest,
   4.93 s, is close to the 5 s late limit (ADR 0071 D-7).
+
+### 2026-11-17 (evening): the call's latency and the tablet's round trip (D-11)
+
+On the owner's PC (`ssh zigs`, straight to Ollama on loopback as above, `gemma4:12b`, `think:false`,
+Ollama's settings unchanged and the PC not redeployed), through the same harness. **Server time**
+is Ollama's own `total_duration`.
+
+| | Before D-11 (`tactics-5`, 400 tokens) | After D-11 (`tactics-6`, 256 tokens, the schema) |
+|---|---|---|
+| Calls, in races | 40 (flat 1, hilly 2), all valid | 60 (flat 3, hilly 3), all valid, none late |
+| Server time | median 4.02 s, p90 5.07 s, highest 5.48 s | median 4.00 s, p90 4.58 s, highest 5.62 s |
+| Reading the prompt | 1.36 s, 2 201 tokens | 1.28 s, 2 136 tokens |
+| Writing the answer | 2.40 s, 117 tokens | 2.19 s, 105 tokens |
+| Neither (queue, sampler) | 0.05 s | 0.73 s |
+| A target on a move that reads none | 217 of 268 moves | 0 of 418 |
+
+The two columns ran half an hour apart, and in between the PC took on other work: its GPU was at
+about 50 % with no call of this measurement out, and the time outside reading and writing rose
+from 0.05 s to 0.6 to 0.7 s a call in every run after. So the columns do not compare by
+themselves. **The comparison is an interleaved one**: 28 race states, each asked of both
+versions in the same minute, in alternating order. Paired, D-11 saved a median **0.36 s** of server
+time (14 states read cold by both), 0.28 s of writing and 9.5 tokens of answer (all 28), and 0.05 s
+of reading. Ollama re-reads nearly the whole prompt whenever any of it changes, so trimming the
+input buys little: an identical prompt read in 0.2 to 0.45 s, one with only its last field changed
+in 1.0 s, and one changed at its first key in 1.35 s, as long as a new one.
+
+**The target of a median under 3 s is not met** (D-11.5). About 1 550 of the 2 136 prompt tokens
+are the system text, and the answer is 85 to 105 tokens at about 21 ms each.
+
+**One answer ran away**, without the schema's `maxItems`: it named seat 6 again and again until the
+256-token cap ended it at 6.9 s, where 400 would have run past 9 s. With `maxItems` the schema
+admits no eighth move; no runaway happened in the 60 calls after, so that is not seen working,
+only held by the schema.
+
+**The tablet's round trip** was not measured from a sealed client. The instance's own tool for that
+(`apps/instance/tools/replan-round-trip.ts`) signs throwaway accounts up, which on the owner's
+instance needs open registration and the operator's switch for other riders, and the tactics
+route a consent and the model race slot: changes to the owner's live instance this build does
+not make. So it is estimated, from `curl -w` of `/health` at `https://onyourleft-win.openzigs.com`
+from the build machine on the same evening: **0.44 s** a request on a connection already open
+(0.39 to 0.48 s, 11 requests) and **1.9 s** on a new one (0.96 to 2.44 s, 10). Added to each
+measured server time, with 0.1 s for the frame that books the answer:
+
+| Device round trip, estimated | Median | p90 | Late at 5 s | Late at 8 s |
+|---|---|---|---|---|
+| Before D-11, a new connection each call | 6.0 s | 7.1 s | 86 % | 0.25 % |
+| After D-11, a new connection each call | 5.8 s | 6.8 s | 83 % | 0.5 % |
+| After D-11, one connection kept open | 4.5 s | 5.1 s | 20 % | 0 |
+
+The tablet's own race, 41 late of 46 (89 %), is what a new connection each call predicts (86 %),
+so **expect about 0.5 % of asks late at 8 s**, the highest estimate 8.15 s, and none on a
+connection kept open.
 
 ## What would make this ADR wrong
 

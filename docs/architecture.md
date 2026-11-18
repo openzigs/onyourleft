@@ -2206,8 +2206,8 @@ every 4 s of race time, between frames and one call at a time, the race state
 (`modelTacticsInputOf`, checked first by the instance's own reader) goes out through
 `game/lap-race/model-tactics-port.ts`, over the sealed session and the one instance module. The
 reply is logged at the race time it comes back and checked again on the device
-(`readModelTacticsAnswer`); a decision applies from the next tactics window and lapses after 5 s.
-Late (over 5 s of race time, or still out that long), invalid, refused, failed or unreachable, it
+(`readModelTacticsAnswer`); a decision applies from the next tactics window and lapses after 10 s.
+Late (over 8 s of race time, or still out that long), invalid, refused, failed or unreachable, it
 applies nothing and the bots ride their seeded choice. A refused start means AI bots are not
 available for that race, which the standings say. The race never waits.
 
@@ -2223,9 +2223,17 @@ sitting in, ADR 0073 D-3), with a sprint backstop: a bot the model has not sent 
 time it reads itself inside its launch rides its own kick, and a kick near the line holds to it
 (ADR 0074). ADR 0073's and ADR 0071 D-3.6's rules stay behind the seam as `ADR_0073_MOVE_STRATEGY`
 and `ADR_0071_MOVE_STRATEGY`, used by no race. The model is shown the line as each bot misreads it, the reading seeded `decideTactic`
-launches on (#2705, D-3.5), each bot's racing style dealt from the seed, its legs, whether it is
+launches on (#2705, D-3.5), each bot's racing style dealt from the seed, whether it is
 blown, and the rider's own state (D-5); the instance's prompt is guidance, not rules
-(`tactics-prompt.ts`, `tactics-5`).
+(`tactics-prompt.ts`, `tactics-6`).
+
+**Since bot-code version 5 the cadence is the tablet's** (ADR 0076 D-11, #2759): an answer is late
+past 8 s of race time and a decision holds 10 s, because the round trip through the instance's
+tunnel put 41 of 46 answers past the old 5 s on the owner's tablet. The input is trimmed for the
+model's latency: no `legs` (the style decides them since ADR 0076 D-3) and no count of racers, gaps
+in whole metres, the grade in whole percent and W′ to a tenth; the answer's schema lets only a
+`follow` or a `chase` name a `target` and lists at most one move a seat, and the instance caps an
+answer at 256 tokens.
 
 **Since bot-code version 4 a model race deals its own field** ([ADR 0076](adr/0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md), #2759;
 `@onyourleft/domain` §`lap-race/model-field.ts`). Each racing style brings the pace whose legs fit

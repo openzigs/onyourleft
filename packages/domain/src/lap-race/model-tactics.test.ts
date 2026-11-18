@@ -34,7 +34,6 @@ const read = (value: unknown, seats: readonly number[] = SEATS) =>
 const view = (bot: number, over: Partial<Record<keyof ModelTacticsBotView, unknown>> = {}) => ({
   bot,
   style: 'opportunist',
-  legs: 'rouleur',
   flat: 'strong',
   climb: 'weak',
   sprint: 'average',
@@ -61,7 +60,6 @@ const RIDER = { rank: 4, wPerKg: 3.1, ahead: 2, gapAheadM: 1.5, gapBehindM: 0.8,
 
 const input = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   laps: 3,
-  field: 8,
   quietS: 40,
   rider: RIDER,
   bots: SEATS.map((seat) => view(seat)),
@@ -99,6 +97,20 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
     expect(top({ quietS: -1 })).toBe('input.quietS');
   });
 
+  it('round-trips the trimmed state, and refuses the legs and the count of racers it no longer carries (#2759, ADR 0076 D-11)', () => {
+    const trimmed = input();
+    const got = readModelTacticsInput(JSON.parse(JSON.stringify(trimmed)) as unknown);
+    expect(got).toEqual({ ok: true, value: trimmed });
+    expect(readModelTacticsInput(input({ field: 8 }))).toEqual({
+      ok: false,
+      problem: { field: 'input', problem: 'has a field this race state does not' },
+    });
+    expect(readModelTacticsInput(input({ bots: [{ ...view(0), legs: 'rouleur' }] }))).toEqual({
+      ok: false,
+      problem: { field: 'input.bots[0]', problem: 'has a field this race state does not' },
+    });
+  });
+
   it('has no attack gate: a state that still carries one is refused (D-5.3)', () => {
     expect(readModelTacticsInput(input({ attackOpen: true }))).toEqual({
       ok: false,
@@ -106,7 +118,7 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
     });
   });
 
-  it('reads each bot’s racing style apart from its legs, and whether it is blown (D-5.1, D-5.4)', () => {
+  it('reads each bot’s racing style, and whether it is blown (D-5.1, D-5.4)', () => {
     for (const style of MODEL_RACING_STYLES) {
       expect(readModelTacticsInput(input({ bots: [view(0, { style, blown: true })] })).ok).toBe(
         true,
@@ -116,14 +128,10 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
       const got = readModelTacticsInput(input({ bots: [view(0, over)] }));
       return got.ok ? undefined : got.problem;
     };
-    // An archetype is legs, not a style; a style is not legs.
+    // An archetype is legs, not a style.
     expect(bot({ style: 'attacker' })).toEqual({
       field: 'input.bots[0].style',
       problem: 'must be a racing style',
-    });
-    expect(bot({ legs: 'breakaway' })).toEqual({
-      field: 'input.bots[0].legs',
-      problem: 'must be an archetype',
     });
     expect(bot({ blown: 'yes' })?.field).toBe('input.bots[0].blown');
   });
@@ -180,7 +188,6 @@ describe('the race state ADR 0073 D-5 shows (#2710)', () => {
       bots: SEATS.map((seat) =>
         view(seat, {
           style: 'opportunist',
-          legs: 'attacker',
           flat: 'average',
           climb: 'average',
           sprint: 'average',
@@ -345,17 +352,51 @@ describe('a model tactics answer (#2709, ADR 0071 D-3.2)', () => {
 
   it('has a schema with no power field: a seat, a move and a target, and nothing else', () => {
     const schema = modelTacticsAnswerSchema([0, 2]) as {
-      properties: { bots: { items: { properties: Record<string, unknown> } } };
+      properties: {
+        bots: {
+          maxItems: number;
+          items: {
+            anyOf: {
+              properties: { move: { enum: string[] } } & Record<string, unknown>;
+              additionalProperties: boolean;
+            }[];
+          };
+        };
+      };
       additionalProperties: boolean;
     };
-    expect(Object.keys(schema.properties.bots.items.properties)).toEqual([
-      'bot',
-      'move',
-      'effort',
-      'target',
-    ]);
+    const [plain, targeted] = schema.properties.bots.items.anyOf;
+    expect(Object.keys(plain?.properties ?? {})).toEqual(['bot', 'move', 'effort']);
+    expect(Object.keys(targeted?.properties ?? {})).toEqual(['bot', 'move', 'effort', 'target']);
+    expect(plain?.additionalProperties).toBe(false);
+    expect(targeted?.additionalProperties).toBe(false);
     expect(schema.additionalProperties).toBe(false);
     expect(JSON.stringify(schema)).toContain('"enum":[0,2]');
+    expect(JSON.stringify(schema)).not.toMatch(/watt|power/i);
+  });
+
+  it('lets only a follow or a chase name a target, and lists at most one move a seat (#2759, ADR 0076 D-11)', () => {
+    const schema = modelTacticsAnswerSchema(SEATS) as {
+      properties: {
+        bots: {
+          maxItems: number;
+          items: { anyOf: { properties: { move: { enum: string[] } } }[] };
+        };
+      };
+    };
+    const [plain, targeted] = schema.properties.bots.items.anyOf;
+    expect(targeted?.properties.move.enum).toEqual(['follow', 'chase']);
+    // Every move is in exactly one shape: none lost, none in both.
+    expect(
+      [...(plain?.properties.move.enum ?? []), ...(targeted?.properties.move.enum ?? [])].sort(),
+    ).toEqual([...BOT_TACTICS].sort());
+    expect(schema.properties.bots.maxItems).toBe(SEATS.length);
+    expect((modelTacticsAnswerSchema([1, 4]) as typeof schema).properties.bots.maxItems).toBe(2);
+    // The reader still reads a target on another move, and the race ignores it.
+    expect(read({ bots: [{ bot: 0, move: 'sit-in', target: 'rider' }] })).toEqual({
+      ok: true,
+      moves: [{ bot: 0, move: 'sit-in', target: 'rider' }],
+    });
   });
 });
 
@@ -400,10 +441,10 @@ describe('a model tactics race state (#2709, ADR 0071 D-3.4)', () => {
   });
 
   it('refuses text where a word from a closed list goes, and never echoes the value', () => {
-    const named = readModelTacticsInput(input({ bots: [view(0, { legs: '51.5072,-0.1276' })] }));
+    const named = readModelTacticsInput(input({ bots: [view(0, { style: '51.5072,-0.1276' })] }));
     expect(named).toEqual({
       ok: false,
-      problem: { field: 'input.bots[0].legs', problem: 'must be an archetype' },
+      problem: { field: 'input.bots[0].style', problem: 'must be a racing style' },
     });
     expect(JSON.stringify(named)).not.toContain('51.5072');
     expect(readModelTacticsInput(input({ bots: [view(0, { move: 'erg' })] }))).toEqual({

@@ -14,13 +14,11 @@ import type { TacticsLocal } from './tactics.ts';
 /** Seven bots three laps out, the rider fourth: spike 0039's shape, with no coordinate or name. */
 export const TACTICS_INPUT: ModelTacticsInput = {
   laps: 3,
-  field: 8,
   quietS: 40,
   rider: { rank: 4, wPerKg: 3.1, ahead: 2, gapAheadM: 4.2, gapBehindM: 3.4, drafting: true },
   bots: [0, 1, 2, 3, 4, 5, 6].map((seat) => ({
     bot: seat,
     style: (['breakaway', 'sprinter', 'climber', 'rouleur', 'opportunist'] as const)[seat % 5]!,
-    legs: 'rouleur' as const,
     flat: 'average' as const,
     climb: (['strong', 'average', 'weak'] as const)[seat % 3]!,
     sprint: 'average' as const,

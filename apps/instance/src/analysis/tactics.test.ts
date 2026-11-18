@@ -108,6 +108,8 @@ describe('a bot-tactics decision, read back as the app reads it (#2709)', () => 
     expect(body.think).toBe(false);
     expect(body.stream).toBe(false);
     expect(body.model).toBe(TEST_TACTICS_MODEL.model);
+    // #2759, ADR 0076 D-11: capped at what seven bots' longest answer needs, with a margin.
+    expect(body.options).toEqual({ temperature: 0.6, num_predict: 256 });
     expect(body.messages).toEqual([
       { role: 'system', content: TACTICS_SYSTEM },
       { role: 'user', content: JSON.stringify(TACTICS_INPUT) },
@@ -169,22 +171,33 @@ describe('the race state and the answer, as the spike builds and reads them (#27
     await consentToTactics(w, riders[0]!.token);
     expect((await decide(w, riders[0]!.token)).status).toBe(200);
     const body = server.requests[0]?.body as {
-      format: { properties: { bots: { items: { properties: Record<string, unknown> } } } };
+      format: {
+        properties: { bots: { items: { anyOf: { properties: Record<string, unknown> }[] } } };
+      };
       messages: { content: string }[];
     };
-    expect(Object.keys(body.format.properties.bots.items.properties)).toEqual([
-      'bot',
-      'move',
-      'effort',
-      'target',
+    // #2759, ADR 0076 D-11: a target only on a follow or a chase.
+    expect(
+      body.format.properties.bots.items.anyOf.map((shape) => Object.keys(shape.properties)),
+    ).toEqual([
+      ['bot', 'move', 'effort'],
+      ['bot', 'move', 'effort', 'target'],
     ]);
-    for (const field of ['quietS', 'legs', 'blown', 'style', 'secondsInMove', 'riderGapM']) {
+    for (const field of ['quietS', 'blown', 'style', 'secondsInMove', 'riderGapM']) {
       expect(body.messages[1]?.content).toContain(`"${field}"`);
     }
     // The prompt reads the fields it is guidance about, and no gate.
-    for (const field of ['wbal', 'blown', 'legs', 'style', 'target', 'effort', 'toLineM']) {
+    for (const field of ['wbal', 'blown', 'style', 'target', 'effort', 'toLineM']) {
       expect(body.messages[0]?.content).toContain(`"${field}"`);
     }
+    // #2759, ADR 0076 D-11: the legs and the count of racers are not sent, so
+    // the prompt names neither, and it asks for a target only where one is read.
+    expect(body.messages[1]?.content).not.toContain('"legs"');
+    expect(body.messages[1]?.content).not.toContain('"field"');
+    expect(body.messages[0]?.content).not.toContain('"legs"');
+    expect(body.messages[0]?.content).toContain(
+      'Only "follow" and "chase" read a "target": leave it out of every other move.',
+    );
     expect(body.messages[0]?.content).not.toContain('attackOpen');
     expect(body.messages[1]?.content).not.toContain('attackOpen');
   });

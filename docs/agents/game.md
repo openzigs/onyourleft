@@ -1007,6 +1007,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         its own field, domain `lap-race/model-field.ts`: each
                         style its legs and a body (mass, strength around the
                         tier); the seeded race keeps its one-body field
+                        Since version 5 (ADR 0076 D-11) late is past 8 s
+                        and a decision holds 10 s
                         ⚠️ Raise `LAP_RACE_BOT_CODE_VERSION` and APPEND a key
                         to `model-race-golden.json` for any change to bot
                         output; never edit an old one

@@ -248,10 +248,35 @@ describe('a decision applies, and every miss falls back to the seeded choice (D-
     expect(missed.drawn).toStrictEqual(seeded.drawn);
   });
 
+  it('applies an answer 6 to 8 s after its ask, and logs one past 8 s late (#2759, ADR 0076 D-11)', () => {
+    expect(MODEL_TACTICS_LATE_MS).toBe(8_000);
+    const seeded = ride(seededOnTheModelField(), 30, undefined);
+    for (const afterMs of [6_000, 6_500, 7_000, 8_000]) {
+      const slow = ride(startRace(true), 30, (input) => ({ reply: ALL_ATTACK(input), afterMs }));
+      const log = slow.ride.model?.log ?? [];
+      expect(log.length, `${String(afterMs)} ms`).toBeGreaterThan(0);
+      for (const entry of log) {
+        expect(entry.outcome, `${String(afterMs)} ms`).toBe('decision');
+        expect(entry.arrivedAtMs - entry.askedAtMs).toBe(afterMs);
+      }
+      // Applied: the field is moved off its seeded race.
+      expect(slow.drawn).not.toStrictEqual(seeded.drawn);
+    }
+    for (const afterMs of [8_100, 9_000]) {
+      const late = ride(startRace(true), 30, (input) => ({ reply: ALL_ATTACK(input), afterMs }));
+      const log = late.ride.model?.log ?? [];
+      expect(log.length).toBeGreaterThan(0);
+      expect(log.every((entry) => entry.outcome === 'late' && entry.reason === 'no-answer')).toBe(
+        true,
+      );
+      expect(late.drawn).toStrictEqual(seeded.drawn);
+    }
+  });
+
   it('logs each miss with its closed reason, never the answer', () => {
     const late = ride(startRace(true), 30, (input) => ({
       reply: ALL_ATTACK(input),
-      afterMs: 5_400,
+      afterMs: 8_400,
     }));
     expect(late.ride.model?.log[0]).toMatchObject({ outcome: 'late', reason: 'no-answer' });
     const invalid = ride(startRace(true), 30, () => ({
@@ -326,14 +351,14 @@ describe('a decision applies, and every miss falls back to the seeded choice (D-
     expect(send).toBeDefined();
     // The race runs on past the late limit, and the answer is handed in
     // before anything asks again: late, by race time alone.
-    race = stepLapRaceRide(first.ride, { ticks: 120, along: 90, riderWatts: 150 });
+    race = stepLapRaceRide(first.ride, { ticks: 200, along: 126, riderWatts: 150 });
     race = answerLapRaceRide(
       race,
       send?.ask as LapRaceModelAsk,
       ALL_ATTACK(send?.input as ModelTacticsInput),
     );
     expect(race.model?.log).toEqual([
-      { askedAtMs: 4_000, arrivedAtMs: 10_000, outcome: 'late', reason: 'no-answer' },
+      { askedAtMs: 4_000, arrivedAtMs: 14_000, outcome: 'late', reason: 'no-answer' },
     ]);
     expect(race.model?.asked).toBeUndefined();
   });
@@ -350,7 +375,7 @@ describe('a decision applies, and every miss falls back to the seeded choice (D-
     race = first.ride;
     expect(first.send).toBeDefined();
     const ask = first.send?.ask as LapRaceModelAsk;
-    step(120);
+    step(200);
     race = askLapRaceRide(race, 240).ride;
     expect(race.model?.log).toHaveLength(1);
     const before = race;
@@ -436,7 +461,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     })).ride;
   }
 
-  it('deals each bot its racing style from the seed, with the legs that fit it (D-5.1, ADR 0076 D-3)', () => {
+  it('deals each bot its racing style from the seed, which decides its legs, so they are not sent (D-5.1, ADR 0076 D-3, D-11)', () => {
     const race = raceAt30();
     const input = modelTacticsInputOf(
       race.race,
@@ -450,17 +475,18 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const dealt = modelRacingStyles(SEED, race.bots.length);
     expect(input.bots.map((view) => view.style)).toEqual(input.bots.map((view) => dealt[view.bot]));
     expect(new Set(input.bots.map((view) => view.style)).size).toBe(MODEL_RACING_STYLES.length);
-    expect(input.bots.map((view) => view.legs)).toEqual(
-      input.bots.map((view) => race.bots[view.bot]?.plan?.archetype),
-    );
-    // #2759: a climber has a climber's legs, a sprinter a sprinter's.
+    // #2759: a climber has a climber's legs, a sprinter a sprinter's, so the
+    // style says the legs and they are not sent (ADR 0076 D-11).
     for (const view of input.bots) {
+      const legs = race.bots[view.bot]?.plan?.archetype;
       if (view.style === 'climber' || view.style === 'sprinter' || view.style === 'rouleur') {
-        expect(view.legs).toBe(view.style);
-      } else expect(view.legs).toBe('attacker');
+        expect(legs).toBe(view.style);
+      } else expect(legs).toBe('attacker');
+      expect(Object.keys(view)).not.toContain('legs');
     }
-    // No gate: the model reads the lull, never a yes or no computed from it (D-5.3).
-    expect(Object.keys(input)).toEqual(['laps', 'field', 'quietS', 'rider', 'bots']);
+    // No gate: the model reads the lull, never a yes or no computed from it
+    // (D-5.3); and no count of racers, which the prompt never reads (D-11).
+    expect(Object.keys(input)).toEqual(['laps', 'quietS', 'rider', 'bots']);
   });
 
   it('says how each bot compares with the whole field, finished bots included, in plain words (ADR 0076 D-4)', () => {
@@ -635,21 +661,51 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     expect(input.rider.ahead).toBe(
       ahead === undefined ? null : race.bots.findIndex((bot) => bot.id === ahead.id),
     );
+    // Whole metres (ADR 0076 D-11): the rider 0.6 m behind the fourth bot reads 1.
     expect(input.rider.gapAheadM).toBe(
-      ahead === undefined
-        ? null
-        : Math.round((ahead.effortDistance - rider.effortDistance) * 10) / 10,
+      ahead === undefined ? null : Math.round(ahead.effortDistance - rider.effortDistance),
     );
+    expect(input.rider.gapAheadM).toBe(1);
     expect(input.rider.gapBehindM).toBe(
-      behind === undefined
-        ? null
-        : Math.round((rider.effortDistance - behind.effortDistance) * 10) / 10,
+      behind === undefined ? null : Math.round(rider.effortDistance - behind.effortDistance),
     );
     expect(typeof input.rider.drafting).toBe('boolean');
     // Non-vacuity: bots ahead and behind, and the rider on the fourth bot's wheel.
     expect(input.rider.ahead).not.toBeNull();
     expect(input.rider.gapBehindM).not.toBeNull();
     expect(input.rider.drafting).toBe(true);
+  });
+
+  it('rounds what it shows: gaps to whole metres, the grade to a whole percent, W′ to a tenth (#2759, ADR 0076 D-11)', () => {
+    const race = raceAt30();
+    const input = modelTacticsInputOf(
+      race.race,
+      race.bots,
+      race.conditions.profile,
+      race.seed,
+      true,
+      2,
+      0,
+    )!;
+    const distance = new Map(race.race.racers.map((entry) => [entry.racer.id, entry.racer]));
+    const rider = distance.get(LAP_RACE_RIDER_ID)!.effortDistance;
+    let fractional = false;
+    for (const view of input.bots) {
+      const bot = race.bots[view.bot]!;
+      const own = distance.get(bot.id)!.effortDistance;
+      if (!Number.isInteger(rider - own)) fractional = true;
+      expect(view.riderGapM).toBe(Math.round(rider - own));
+      for (const gap of [view.gapAheadM, view.gapBehindM]) {
+        if (gap !== null) expect(Number.isInteger(gap)).toBe(true);
+      }
+      expect(Number.isInteger(view.gradeAheadPct)).toBe(true);
+      const share = bot.energy.wbalJoules / bot.plan!.capacity.wPrimeJoules;
+      expect(view.wbal).toBe(Math.round(Math.min(1, Math.max(0, share)) * 10) / 10);
+    }
+    // Non-vacuity: the race's own distances are not whole metres.
+    expect(fractional).toBe(true);
+    // The trimmed state still passes the instance's own reader (D-3.4).
+    expect(readModelTacticsInput(input).ok).toBe(true);
   });
 });
 
@@ -759,7 +815,7 @@ describe('what is kept with the ride (D-4.4)', () => {
     }));
     const fact = lapRaceRideFact(model.ride);
     expect(fact?.seed).toBe(SEED);
-    expect(fact?.version).toBe(4);
+    expect(fact?.version).toBe(5);
     expect(fact?.log).toEqual(model.ride.model?.log);
     const ticks = Math.round(30 / LAP_RACE_TICK_SECONDS);
     expect(fact?.rider.effortDistances).toHaveLength(ticks);
