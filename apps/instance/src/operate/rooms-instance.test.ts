@@ -52,6 +52,24 @@ let cal: Session;
 /** Ann's race, which Bea joined, and Cal's group ride: on two different workers. */
 let race: { readonly roomId: string; readonly code: string };
 let ride: { readonly roomId: string };
+/**
+ * The ids the instance gives the rooms this file makes, in order (#2702). A
+ * room is placed by `roomHash` of its id over the live workers, so the ride's
+ * id is chosen to hash to the other worker from the race's: drawn at random,
+ * the two shared a worker one run in two, and five tries all missed one run
+ * in 32.
+ */
+const roomIds: string[] = [];
+
+/** The first id after `roomId`, in counting order, that two workers place apart from it. */
+function placedApartFrom(roomId: string): string {
+  for (let n = Number.parseInt(roomId, 16) + 1; n < Number.MAX_SAFE_INTEGER; n += 1) {
+    const candidate = n.toString(16).padStart(32, '0');
+    if (roomHash(candidate) % 2 !== roomHash(roomId) % 2) return candidate;
+  }
+  throw new Error('no id is placed apart');
+}
+
 let annSocket: RoomClient;
 let beaSocket: RoomClient;
 let calSocket: RoomClient;
@@ -156,6 +174,11 @@ beforeAll(async () => {
     notices: '',
     log: () => undefined,
     defaultCountdownMs: 0,
+    roomId: () => {
+      const next = roomIds.shift();
+      if (next === undefined) throw new Error('no room id left for this file');
+      return next;
+    },
   });
   await running.opened;
   await running.keysMaintained;
@@ -164,16 +187,14 @@ beforeAll(async () => {
   bea = await signIn(await testDevice(), 'Bea', '192.0.2.3');
   cal = await signIn(await testDevice(), 'Cal', '192.0.2.4');
 
-  // A room is placed by a hash of its id over the live workers: Cal makes
-  // group rides until one lands on the other worker from Ann's race.
+  // A room is placed by a hash of its id over the live workers: Cal's group
+  // ride is given an id that lands on the other worker from Ann's race.
+  const raceId = '1'.padStart(32, '0');
+  const rideId = placedApartFrom(raceId);
+  roomIds.push(raceId, rideId);
   race = await made(ann, { kind: 'race' });
-  let found: { roomId: string } | undefined;
-  for (let attempt = 0; attempt < 5 && found === undefined; attempt += 1) {
-    const candidate = await made(cal, { kind: 'group' });
-    if (roomHash(candidate.roomId) % 2 !== roomHash(race.roomId) % 2) found = candidate;
-  }
-  if (found === undefined) throw new Error('every group ride hashed to the race’s worker');
-  ride = found;
+  ride = await made(cal, { kind: 'group' });
+  expect([race.roomId, ride.roomId]).toEqual([raceId, rideId]);
   expect((await sealed(bea, 'POST', '/v1/rooms/join', { code: race.code })).status).toBe(200);
   annSocket = await socketInto(ann, race.roomId);
   beaSocket = await socketInto(bea, race.roomId);
