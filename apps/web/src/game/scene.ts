@@ -539,7 +539,11 @@ export interface RaceBotInput {
 export interface RemoteRiderInput {
   /** The room's id for them, which decides their side of the road when level with another. */
   readonly riderId: number;
-  /** Along the route, the room's odometer, in metres. */
+  /**
+   * Along the route, the room's odometer, in metres. On a loop, a rider a lap
+   * or more from this one is drawn on the lap of the road the frame built
+   * (#2529, `onTheCorridorsLap`).
+   */
   readonly distanceMetres: number;
   readonly speedMetresPerSecond: number;
   /** What to write over them on the road, if anything. @see RiderMarker.label */
@@ -1765,18 +1769,22 @@ function ridersOnTheRoad(
   const last = corridor.centre[corridor.centre.length - 1];
   for (const remote of input.remoteRiders ?? []) {
     if (first === undefined || last === undefined) break;
+    // #2529: on the lap of the corridor they stand on, as a race's bots are
+    // (#2516), so a rider a lap down or a lap up is drawn where they are on
+    // the road. Ordered by it too (#2427), for the bots' reason.
+    const odometer = onTheCorridorsLap(input.profile, remote.distanceMetres, first.along);
     // #1998: on the corridor by where they are DRAWN, which is where `markerAt` puts them.
     // The drawn place is never ahead of the odometer, so a rider whose odometer
     // is behind the corridor is behind it drawn too: skipped before the easing,
     // which is the cost of a frame in a crowded room.
-    if (remote.distanceMetres < first.along) continue;
-    const place = ease(remote.distanceMetres, remote.speedMetresPerSecond);
+    if (odometer < first.along) continue;
+    const place = ease(odometer, remote.speedMetresPerSecond);
     // #2427: whether it is on the corridor is decided where it is drawn IN
     // ORDER, below, which may be a little further back or on than `place`.
     riders.push({
       kind: 'remote',
       distance: place.distance,
-      odometer: remote.distanceMetres,
+      odometer,
       speed: place.speed,
       ownSpeed: remote.speedMetresPerSecond,
       // ⚠️ From their own odometer at a fixed gear, never an invented rate: a
@@ -1887,6 +1895,7 @@ function ridersOnTheRoad(
  * no move it is never on the corridor, and the rider lapping the field rode
  * up to an empty road. On a loop longer than the corridor a bot stands on it
  * once at most; on a shorter one it is drawn once, at its first place on it.
+ * #2529: a room's riders are moved by the same rule, for the same reason.
  *
  * Its cranks still turn from its own odometer (`ridersOnTheRoad`), so a move
  * by a lap never jumps them. Unmoved on a road that is not a loop, and when
