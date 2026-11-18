@@ -8,6 +8,7 @@ import { readConfig } from './config.ts';
 import { InstanceRefusal, startInstance } from './instance.ts';
 import { logEvent, type LogSink } from './log.ts';
 import { readDiscordTokenFile, readServerConfig } from './server-config.ts';
+import { resolveSecrets } from './setup/secrets.ts';
 
 /**
  * What `main.ts` starts, once the resolve hook is registered (#767, #780).
@@ -45,6 +46,7 @@ const http = readConfig({
   publicRoomMinRides: process.env.OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES,
   clientAddressHeader: process.env.OYL_INSTANCE_CLIENT_ADDRESS_HEADER,
   trustedProxies: process.env.OYL_INSTANCE_TRUSTED_PROXIES,
+  remotePath: process.env.OYL_INSTANCE_REMOTE_PATH,
   embeddingUrl: process.env.OYL_INSTANCE_EMBEDDING_URL,
   embeddingModel: process.env.OYL_INSTANCE_EMBEDDING_MODEL,
   embeddingDocumentPrefix: process.env.OYL_INSTANCE_EMBEDDING_DOCUMENT_PREFIX,
@@ -64,6 +66,25 @@ const http = readConfig({
   termsVersion: process.env.OYL_INSTANCE_TERMS_VERSION,
   termsFileUnreadable,
 });
+// #2781 (ADR 0080 D-4): the secrets from the environment, else from their
+// files in the secrets folder, made there on the first start. Refused whole
+// before anything else starts, naming a file and never what it holds.
+const secrets = await resolveSecrets(
+  {
+    directory: process.env.OYL_INSTANCE_SECRETS_DIR,
+    secretKey: process.env.OYL_INSTANCE_SECRET_KEY,
+    metricsToken: process.env.OYL_INSTANCE_METRICS_TOKEN,
+    metrics: process.env.OYL_INSTANCE_METRICS,
+    database: process.env.OYL_INSTANCE_DATABASE,
+    blobs: process.env.OYL_INSTANCE_BLOBS,
+  },
+  { log },
+);
+if (!secrets.ok) {
+  for (const problem of secrets.problems) process.stderr.write(`instance: ${problem}\n`);
+  process.exit(1);
+}
+
 const server = readServerConfig(
   {
     database: process.env.OYL_INSTANCE_DATABASE,
@@ -73,8 +94,8 @@ const server = readServerConfig(
     compression: process.env.OYL_INSTANCE_WS_COMPRESSION,
     metrics: process.env.OYL_INSTANCE_METRICS,
     pingIntervalMs: process.env.OYL_INSTANCE_PING_INTERVAL_MS,
-    metricsToken: process.env.OYL_INSTANCE_METRICS_TOKEN,
-    secretKey: process.env.OYL_INSTANCE_SECRET_KEY,
+    metricsToken: secrets.metricsToken,
+    secretKey: secrets.secretKey,
     analysisHeartbeatMs: process.env.OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS,
     // #2146: from a file, read once here, and never from the environment.
     discordBotTokenFile: readDiscordTokenFile(
@@ -124,6 +145,8 @@ try {
     version: manifest.version,
     notices,
     log,
+    // #2781: what the loopback Keys page's emergency kit holds.
+    kitSecrets: secrets.fromFiles,
   });
 } catch (error) {
   if (error instanceof InstanceRefusal) {

@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# deploy.sh — the one command that deploys this checkout to the box (#52, #807).
+# deploy.sh — the one command that deploys to the box (#52, #807).
 #
 #   bash apps/instance/deploy/home/deploy.sh             # deploy this checkout
 #   bash apps/instance/deploy/home/deploy.sh --rollback  # back to the previous deploy
+#   bash deploy.sh                       # in a release bundle: its published image
+#   bash deploy.sh --image REF           # deploy REF, pulled if not held
+#
+# Two ways to have this file (#2786). In a git CHECKOUT it builds the image
+# from the checkout. In a RELEASE BUNDLE — the zip the instance-image workflow
+# attaches to a release, with `release.image` beside this file naming the
+# published image by digest — it pulls that image and needs no git, no
+# checkout and no build. Everything after step 1 is the same either way.
 #
 # What a deploy does, in order, and why:
 #
 #   1. Builds the image from this checkout, tagged with its commit, so the
-#      running build can always say what source it is (GET /source).
+#      running build can always say what source it is (GET /source). From a
+#      bundle, or with --image, pulls the image instead (unless this machine
+#      holds it already: a digest names the same bytes wherever they are).
 #   2. If an instance is already running: takes a snapshot of its data FIRST
 #      (`backup`), into OYL_BACKUP_DIR/pre-deploy. A rollback restores it:
 #      the new build's migrations may have moved the database on, and the old
@@ -20,13 +30,22 @@
 #      OYL_DEPLOY_READY_SECONDS (default 120).
 #   5. Not ready: ROLLS BACK by itself (the previous image, the pre-deploy
 #      snapshot restored), and exits 1. A failing deploy does not stay up.
-#   6. Ready: starts the tunnel and the scheduled backup, tags the image
+#   6. Ready: starts the remote path and the scheduled backup, tags the image
 #      `onyourleft-instance:local` (what a hand-run `docker compose` uses),
 #      records what is deployed in .deployed beside this file, and prints how
 #      long it took.
+#   7. On the tailnet (#2805): waits for Tailscale to be signed in — printing
+#      its sign-in link if it asks for one — and checks that the origin the
+#      RUNNING instance has is the name `tailscale serve` answers on. A
+#      mismatch is said, with both, and exits 1: every card would be wrong.
 #
-# Needs Docker with Compose, git, and a filled-in .env beside this file
-# (copy instance.env.example). Run from anywhere inside the checkout.
+# The remote path is the compose profile `.env` turns on (ADR 0079): `tailscale`
+# or `cloudflare`, never both (D-8, one origin), and checked against
+# OYL_INSTANCE_REMOTE_PATH before anything is built. A .env from before #2805,
+# with a tunnel token and no profile, keeps its tunnel, and is told to say so.
+#
+# Needs Docker with Compose and a filled-in .env beside this file (copy
+# instance.env.example); and git, to build a checkout. Run from anywhere.
 #
 # ⚠️ This is the ONE deploy there is. It runs a single instance on a single
 # box, so there is no second copy to keep serving while the new one starts:
@@ -45,8 +64,9 @@ if [ -n "${MSYSTEM:-}" ]; then
   export MSYS_NO_PATHCONV=1
   HERE="$(cd "${HERE}" && { pwd -W 2>/dev/null || pwd; })"
 fi
-ROOT="$(git -C "${HERE}" rev-parse --show-toplevel)"
 STATE="${HERE}/.deployed"
+# #2786: the published image a release bundle deploys, by digest.
+RELEASE_IMAGE="${HERE}/release.image"
 READY_SECONDS="${OYL_DEPLOY_READY_SECONDS:-120}"
 started_at="$(date +%s)"
 
@@ -56,6 +76,50 @@ die() { printf 'deploy: %s\n' "$1" >&2; exit 1; }
 compose() { docker compose --project-directory "${HERE}" -f "${HERE}/compose.yaml" "$@"; }
 
 state() { [ -f "${STATE}" ] && sed -n "s/^$1=//p" "${STATE}" | head -n 1; }
+
+# A setting as compose reads it: this shell's, or the last line of .env.
+setting() {
+  if [ -n "${!1:-}" ]; then
+    printf '%s' "${!1}"
+  else
+    sed -n "s/^$1=//p" "${HERE}/.env" | tail -n 1 | tr -d '\r' | sed "s/^[\"']\(.*\)[\"']$/\1/"
+  fi
+}
+
+# Which remote paths the profiles turn on: `tailscale`, `tunnel`, both or neither.
+remote_services() {
+  compose config --services 2>/dev/null | grep -xE 'tailscale|tunnel' | tr '\n' ' ' | sed 's/ $//'
+}
+
+# The name `tailscale serve` answers on, `https://` and no trailing dot, once
+# Tailscale is signed in. Prints its sign-in link once if it asks for one.
+tailnet_origin() {
+  local waited=0 status name link asked=''
+  while [ "${waited}" -lt "${READY_SECONDS}" ]; do
+    status="$(compose exec -T tailscale tailscale status --json --peers=false 2>/dev/null)"
+    if grep -q '"BackendState": *"Running"' <<< "${status}"; then
+      name="$(printf '%s' "${status}" | sed -n 's/.*"DNSName": *"\([^"]*\)".*/\1/p' | head -n 1)"
+      if [ -n "${name}" ]; then
+        printf 'https://%s' "${name%.}"
+        return 0
+      fi
+    fi
+    link="$(printf '%s' "${status}" | sed -n 's/.*"AuthURL": *"\(https:[^"]*\)".*/\1/p' | head -n 1)"
+    if [ -n "${link}" ] && [ -z "${asked}" ]; then
+      # To the terminal, not into the caller's $(…).
+      say "sign this machine in to your tailnet: open ${link}" >&2
+      asked=1
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  return 1
+}
+
+# The origin the running instance was started with, read back from it.
+running_origin() {
+  compose exec -T instance node -e "process.stdout.write(process.env.OYL_INSTANCE_ORIGIN ?? '')" 2>/dev/null
+}
 
 ready() {
   compose exec -T instance node -e \
@@ -101,7 +165,8 @@ rollback() {
       say 'the encryption key was not rotated after the restore (no keys, or no secret): see docs/operating-an-instance.md, "The instance'"'"'s keys".'
   fi
   start "${image}" || die "${image} did not come back ready either: see docker compose logs instance."
-  OYL_INSTANCE_IMAGE="${image}" compose up -d tunnel backup
+  # shellcheck disable=SC2086 # the remote services are words: none, or one name
+  OYL_INSTANCE_IMAGE="${image}" compose up -d ${REMOTE} backup
   docker tag "${image}" onyourleft-instance:local
   printf 'image=%s\nprevious=\nsnapshot=\n' "${image}" > "${STATE}"
   say "rolled back to ${image} in $(($(date +%s) - started_at)) s."
@@ -109,21 +174,87 @@ rollback() {
 
 [ -f "${HERE}/.env" ] || die "there is no .env beside compose.yaml: copy instance.env.example and fill it in."
 
+# #2781 (ADR 0080 D-4): the folder the instance makes its secret key in on
+# its first start. Made here, by the user who deploys, because Docker would
+# make a missing one owned by root on Linux, where the instance (uid 1000)
+# could not write it. Owner-only; an existing one is left as it is.
+if [ ! -d "${HERE}/secrets" ]; then
+  mkdir -p "${HERE}/secrets" && chmod 700 "${HERE}/secrets" ||
+    die 'could not make the secrets folder beside compose.yaml.'
+fi
+
+# The remote path (#2805, ADR 0079), checked before anything changes.
+compose config --quiet || die 'compose.yaml and .env do not make a configuration: the line above says what is missing.'
+REMOTE="$(remote_services)"
+if [ -z "${REMOTE}" ] && [ -n "$(setting CLOUDFLARE_TUNNEL_TOKEN)" ]; then
+  # A .env from before the tunnel was a profile: it keeps its tunnel.
+  say 'a tunnel token and no remote path profile: starting the tunnel as before. Add cloudflare to COMPOSE_PROFILES in .env to say so.'
+  profiles="$(setting COMPOSE_PROFILES)"
+  export COMPOSE_PROFILES="${profiles:+${profiles},}cloudflare"
+  REMOTE="$(remote_services)"
+fi
+path="$(setting OYL_INSTANCE_REMOTE_PATH)"
+case "${REMOTE}" in
+  *tailscale*tunnel* | *tunnel*tailscale*)
+    die 'COMPOSE_PROFILES turns on both tailscale and cloudflare: an instance has one origin, so choose one (docs/self-hosting/home-machine.md).' ;;
+  tailscale)
+    case "${path}" in
+      tailnet | funnel) ;;
+      *) die 'the tailscale profile needs OYL_INSTANCE_REMOTE_PATH=tailnet (or funnel) in .env.' ;;
+    esac ;;
+  tunnel)
+    [ -n "$(setting CLOUDFLARE_TUNNEL_TOKEN)" ] ||
+      die 'the cloudflare profile needs CLOUDFLARE_TUNNEL_TOKEN in .env beside compose.yaml.'
+    case "${path}" in
+      '' | cloudflare) ;;
+      *) die "the cloudflare profile needs OYL_INSTANCE_REMOTE_PATH=cloudflare, or empty, in .env." ;;
+    esac ;;
+  '')
+    say 'no remote path profile in COMPOSE_PROFILES: the instance is reachable on this machine only.' ;;
+esac
+
 if [ "${1:-}" = '--rollback' ]; then
   rollback "$(state previous)" "$(state snapshot)"
   exit 0
 fi
 
-commit="$(git -C "${ROOT}" rev-parse HEAD)" || die 'could not read the commit.'
-image="onyourleft-instance:${commit}"
-say "building ${image}"
-docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
-  -f "${ROOT}/apps/instance/Dockerfile" -t "${image}" "${ROOT}" >/dev/null ||
-  die 'the image did not build.'
+image=''
+if [ "${1:-}" = '--image' ]; then
+  image="${2:-}"
+  [ -n "${image}" ] || die '--image needs the image to deploy.'
+elif [ -f "${RELEASE_IMAGE}" ]; then
+  image="$(head -n 1 "${RELEASE_IMAGE}" | tr -d '[:space:]')"
+  [ -n "${image}" ] || die "${RELEASE_IMAGE} names no image."
+fi
+
+if [ -n "${image}" ]; then
+  # A digest names the same bytes wherever they are, so an image this machine
+  # already holds is not fetched again.
+  if ! docker image inspect "${image}" >/dev/null 2>&1; then
+    say "pulling ${image}"
+    docker pull --quiet "${image}" >/dev/null || die "${image} could not be pulled."
+  fi
+else
+  ROOT="$(git -C "${HERE}" rev-parse --show-toplevel)" ||
+    die 'this is not a checkout and there is no release.image beside it: download a release bundle, or pass --image.'
+  commit="$(git -C "${ROOT}" rev-parse HEAD)" || die 'could not read the commit.'
+  image="onyourleft-instance:${commit}"
+  say "building ${image}"
+  docker build --quiet --build-arg "OYL_INSTANCE_COMMIT=${commit}" \
+    -f "${ROOT}/apps/instance/Dockerfile" -t "${image}" "${ROOT}" >/dev/null ||
+    die 'the image did not build.'
+fi
 
 previous="$(state image)"
 snapshot=''
-if [ -n "${previous}" ] && [ -n "$(compose ps -q instance 2>/dev/null)" ]; then
+running="$(compose ps -q instance 2>/dev/null)"
+# A compose-only install (the guide's step 5) never wrote .deployed, so the
+# first update would take no snapshot and have nothing to roll back to: the
+# image the container is running stands in for it.
+if [ -z "${previous}" ] && [ -n "${running}" ]; then
+  previous="$(docker inspect --format '{{.Config.Image}}' "${running}" 2>/dev/null)" || previous=''
+fi
+if [ -n "${previous}" ] && [ -n "${running}" ]; then
   say 'taking a snapshot before anything changes'
   taken="$(OYL_INSTANCE_IMAGE="${previous}" compose run --rm --no-deps --entrypoint node backup \
     src/operator/cli.ts backup /backups/pre-deploy --keep 3)" ||
@@ -140,8 +271,20 @@ if ! start "${image}"; then
   exit 1
 fi
 
-OYL_INSTANCE_IMAGE="${image}" compose up -d tunnel backup
+# shellcheck disable=SC2086 # the remote services are words: none, or one name
+OYL_INSTANCE_IMAGE="${image}" compose up -d ${REMOTE} backup
 # The tag a hand-run `docker compose …` uses when OYL_INSTANCE_IMAGE is not set.
 docker tag "${image}" onyourleft-instance:local
 printf 'image=%s\nprevious=%s\nsnapshot=%s\n' "${image}" "${previous}" "${snapshot}" > "${STATE}"
 say "${image} is ready, in $(($(date +%s) - started_at)) s."
+
+# The round trip (#2805): the origin read back from the running instance is
+# the name serve answers on, or every card the instance draws names another.
+if [ "${REMOTE}" = 'tailscale' ]; then
+  served="$(tailnet_origin)" ||
+    die 'Tailscale did not sign in: see docker compose logs tailscale, then run this again.'
+  origin="$(running_origin)"
+  [ "${origin}" = "${served}" ] ||
+    die "the instance's origin is ${origin:-not set}, and tailscale serve answers on ${served}: set OYL_INSTANCE_ORIGIN=${served} in .env and run this again. Every device then scans the new card."
+  say "reached on your tailnet at ${served}"
+fi

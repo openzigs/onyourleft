@@ -733,3 +733,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   its /64, as the rate limits do, so an entry admits its whole /64. Q-C's answer is therefore
   withdrawn for the loopback listener: a passkey enrolled on either listener reads and changes
   nothing until it is confirmed on the host. (3) and (4) are recorded here, not ruled on.
+- **2026-11-17** — **Once [ADR 0080](0080-first-run-setup-and-owner-claim-on-the-loopback-listener.md)
+  is Accepted, it supersedes in part D-5's *"nothing else"* and *"exactly one thing"*, and D-1's
+  naming of `OYL_INSTANCE_OWNER_KEY` as the owner's key.** The loopback listener also serves the
+  first-run setup at `/setup`, until setup is done. That covers the claim QR, one rider invite QR
+  during setup, and the emergency kit, and the listener runs on a fresh instance even with the admin
+  pages off. An admin session is bound to "the owner key", which is the variable when it is set and
+  otherwise the key claimed from the app. A setup code is D-1's code, redeemed on the loopback
+  listener only. A passkey enrolled during setup is unconfirmed until it is confirmed on the host,
+  as the entry above says. D-3, D-4 and the ban on an address or header check for locality stand.
+  This entry only points there. The body above is not edited. (#2780)

@@ -4198,6 +4198,84 @@
         }
       }
     },
+    "/v1/auth/owner-claim": {
+      "post": {
+        "operationId": "claimInstanceOwner",
+        "summary": "Claim this instance’s owner with the claim code its setup page on the server machine showed (#2782, ADR 0080 D-3), sealed and signed by the key `publicKey` names. The claim waits until the owner confirms it there, comparing six digits both screens derive from the code and the key; it never makes the device the owner on its own. Refused — with one answer, whatever the reason — for an unknown, used or expired code, while another claim waits, and on an instance with an owner key already, `OYL_INSTANCE_OWNER_KEY` included. Never answered in plaintext, on an instance with no keys too.",
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publicKey": {
+                    "type": "string"
+                  },
+                  "claimCode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "publicKey",
+                  "claimCode"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "claim": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "claim"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/claim_refused"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/auth/recover": {
       "post": {
         "operationId": "recoverAccount",
@@ -9483,7 +9561,12 @@
                               "admin_passkey_revoked",
                               "admin_passkey_confirmed",
                               "room_ended",
-                              "registration_decided"
+                              "registration_decided",
+                              "emergency_kit_downloaded",
+                              "owner_claim_code_minted",
+                              "owner_claim_confirmed",
+                              "owner_claim_discarded",
+                              "owner_claim_reset"
                             ]
                           },
                           "detail": {
@@ -13594,6 +13677,7 @@
                   "code_used",
                   "code_expired",
                   "address_unbound",
+                  "claim_refused",
                   "registration_closed",
                   "sealed_required",
                   "account_suspended",
@@ -13829,6 +13913,16 @@
       },
       "address_unbound": {
         "description": "`address_unbound` (401), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "claim_refused": {
+        "description": "`claim_refused` (401), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

@@ -42,6 +42,9 @@
  * - `redirect: 'error'` — a redirect would carry a session token somewhere the
  *   rider did not type. `credentials: 'omit'`, `referrerPolicy: 'no-referrer'`,
  *   `cache: 'no-store'`: nothing ambient rides along, and nothing is kept.
+ *   ⚠️ **Except a sealed call's `cache`, since #2796**: see
+ *   {@link SEALED_CALL_CACHE}, which says why `no-store` cost every sealed
+ *   call a second round trip and kept nothing.
  * - **A time limit** ({@link INSTANCE_TIMEOUT_MILLISECONDS}), because an
  *   instance that never answers must not leave the screen waiting for ever.
  * - **A size limit on the answer** ({@link MAXIMUM_INSTANCE_ANSWER_BYTES}),
@@ -577,6 +580,36 @@ function keyUnknown(body: unknown): boolean {
 }
 
 /**
+ * A sealed call's fetch cache mode (#2796): `default`, where every other call
+ * here says `no-store`.
+ *
+ * ⚠️ **`no-store` made the browser ask a CORS preflight before EVERY sealed
+ * call.** The `POST /v1/sealed` carries `content-type: application/json` (and
+ * `Authorization` when signed in), so it is preflighted, and the instance
+ * allows the preflight to be cached for ten minutes
+ * (`apps/instance/src/handler.ts` §`PREFLIGHT_MAX_AGE_SECONDS`). Chromium,
+ * which is the Android WebView, never stores a preflight's result for a
+ * request whose cache mode is `no-store` (`LOAD_DISABLE_CACHE`, in
+ * `services/network/cors/preflight_controller.cc`), and skips the lookup for
+ * `no-cache` too — measured on 2026-11-17 against the owner's tunnel, one
+ * `OPTIONS` per call with either and one per ten minutes with `default`. So
+ * every AI decision of a race paid a second round trip through the tunnel to
+ * the instance before its own (about 0.5 s on that tunnel), on top of the
+ * model's time and inside the pacer's five-second limit.
+ *
+ * And `no-store` kept nothing here that `default` keeps: a sealed call is
+ * always a `POST`, and a browser's HTTP cache answers no `fetch` `POST` from
+ * the cache; the instance says `cache-control: no-store` on every answer; and
+ * a sealed reply opens only under the HPKE context this call drops with the
+ * call (D-2), so a copy of it is ciphertext to everybody. What IS kept is the
+ * preflight's answer — the methods and the two header names the instance
+ * allows on `/v1/sealed`, which is what the cache is for. Nothing else
+ * changes: no credentials, no referrer, no redirect, and the same one `fetch`
+ * (`privacy/no-network.test.ts`).
+ */
+export const SEALED_CALL_CACHE: RequestCache = 'default';
+
+/**
  * Sealed calls to the instance at `origin` (#1191). Throws
  * {@link InstanceUnreachableError} at once, having sent nothing, for an
  * origin `address.ts` refuses or a path {@link isPlainPath} refuses.
@@ -638,7 +671,7 @@ export function sealedInstance(
         redirect: 'error',
         credentials: 'omit',
         referrerPolicy: 'no-referrer',
-        cache: 'no-store',
+        cache: SEALED_CALL_CACHE,
         signal:
           stop === undefined
             ? AbortSignal.timeout(timeout)

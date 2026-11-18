@@ -50,6 +50,7 @@ import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
 import { createRecentProblems, keepProblems, logEvent, logUnhandled, type LogSink } from './log.ts';
+import type { SecretFromFile } from './setup/secrets.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { errorResponse } from './errors.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
@@ -167,12 +168,20 @@ export interface InstanceOptions {
    * same code at either length.
    */
   readonly defaultCountdownMs?: number;
+  /** A new room's id: `rooms.ts`'s, from the CSPRNG, unless a test's (#2702). */
+  readonly roomId?: () => string;
   /** The `fetch` the hosted model is reached through: the platform's unless a test's. */
   readonly hostedFetch?: typeof globalThis.fetch;
   /** The `fetch` Discord is reached through, for voice (#874): the platform's unless a test's. */
   readonly discordFetch?: typeof globalThis.fetch;
   /** How long a room socket waits for its voice link (#875): {@link VOICE_INVITE_WAIT_MS} unless a test's. */
   readonly voiceInviteWaitMs?: number;
+  /**
+   * The secrets `setup/secrets.ts` read from their files in the secrets folder
+   * (#2781, ADR 0080 D-4): what the loopback Keys page's emergency kit holds.
+   * None when every secret came from the environment.
+   */
+  readonly kitSecrets?: readonly SecretFromFile[];
 }
 
 export interface StartedInstance {
@@ -494,12 +503,23 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   // Until the store is open the handler has no accounts; it is replaced, not
   // mutated, once it does, so no request ever sees half of either.
   let handler: Handler = createHandler(handlerOptions);
-  const listening = await listen((request, client) => handler(request, client), {
-    host: options.config.host,
-    port: options.config.port,
-    clientAddressHeader: options.config.clientAddressHeader,
-    trustedProxies: options.config.trustedProxies,
-  });
+  // #2805 (ADR 0079 D-3): with Funnel on, the public listener is on the
+  // internet with no edge rule in front of it, so it answers every `/admin`
+  // path `not_found` — and this setting alone decides it, never a header. The
+  // loopback listener below calls the handler itself and is not asked.
+  const hideAdmin = options.config.remotePath === 'funnel';
+  const listening = await listen(
+    (request, client) =>
+      hideAdmin && isAdminPath(new URL(request.url).pathname)
+        ? Promise.resolve(errorResponse('not_found'))
+        : handler(request, client),
+    {
+      host: options.config.host,
+      port: options.config.port,
+      clientAddressHeader: options.config.clientAddressHeader,
+      trustedProxies: options.config.trustedProxies,
+    },
+  );
   // #2643 (ADR 0069 D-5): the admin pages' loopback listener, when the
   // operator set its port. It answers `/admin` and nothing else, marks every
   // request it reads `loopback` itself, believes no client-address header,
@@ -732,6 +752,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           return held.ok && held.value.publicRooms.eligible;
         },
         ...(roomsVoice === undefined ? {} : { voice: roomsVoice }),
+        ...(options.roomId === undefined ? {} : { roomId: options.roomId }),
       });
       // #2612: the owner's Rooms, from the workers, ended through the router.
       operateRooms = {
@@ -995,6 +1016,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         addresses: server.adminAddresses,
         // #2650: the Keys page's; the card is drawn on the loopback listener only.
         instanceKeys: keys,
+        // #2781: the emergency kit's, offered on the loopback listener only.
+        kitSecrets: options.kitSecrets ?? [],
       });
       admin = pages;
       // Each minute: the coalesced refusals written, and the sign-in limits'

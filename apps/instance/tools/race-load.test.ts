@@ -74,6 +74,7 @@ async function instanceWithRace(
   keyed = false,
   loadAccounts: readonly string[] = [],
   clientAddressHeader: string | null = null,
+  now?: () => number,
 ) {
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-race-load-'));
   const path = join(directory, 'instance.sqlite');
@@ -96,6 +97,7 @@ async function instanceWithRace(
     version: '0',
     notices: '',
     log: () => undefined,
+    ...(now === undefined ? {} : { now }),
   });
   if (keyed) await running.keysMaintained;
   return origin;
@@ -227,6 +229,20 @@ function throughATunnel(
   return { refusals: () => refusals };
 }
 
+/**
+ * The instance's clock for the sign-in limit's case (#2690): real time, read
+ * from the opening of a window of `windowMs`. The limit counts in fixed windows
+ * of the clock (`src/auth/rate-limit.ts`), so a field whose sign-ins straddled
+ * a window's end had its count start again partway through, met no refusal and
+ * failed `expected +0 to be 1`, in the few runs that began in a minute's last
+ * seconds. From a window's opening, the case is over long before it ends.
+ */
+function clockFromAWindowsOpening(windowMs: number): () => number {
+  const realStart = Date.now();
+  const opening = Math.floor(realStart / windowMs) * windowMs;
+  return () => opening + (Date.now() - realStart);
+}
+
 describe('a rider says hello before anything else, and only then reports — #1400', () => {
   it('sends nothing but its hello until the room answers it, however slow the ticket and the answer', async () => {
     const url = await instanceWithRace(ONE_TICK_METRES, 'open', true);
@@ -315,6 +331,7 @@ describe('a rider says hello before anything else, and only then reports — #14
       true,
       keys.map((key) => key.publicKey),
       ADDRESS_HEADER,
+      clockFromAWindowsOpening(DEFAULT_LIMITS.sessionlessSealedPerAddress.windowMs),
     );
     // Every ticket comes late; the start, the session call after them, does not.
     // The refusal is the instance's own; the address moving on after it stands

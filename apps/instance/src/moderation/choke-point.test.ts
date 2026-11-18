@@ -234,6 +234,7 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   recoveryCode: 'one of the CALLER’s own recovery codes',
   through: 'the last of the CALLER’s own account changes they have read',
   linkCode: 'a link code the caller’s own account minted',
+  claimCode: 'the instance’s claim code, which names no athlete (#2782)',
   emailToken: 'a token mailed to the CALLER’s own recovery address',
   reset: 'whether the caller replaces their own recovery codes',
   revokeOtherKeys: 'whether the caller revokes their own other device keys',
