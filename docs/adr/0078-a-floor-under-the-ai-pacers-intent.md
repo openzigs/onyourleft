@@ -1,8 +1,8 @@
 # ADR 0078: A floor under the AI pacer's intent — superseding in part ADR 0072 D-2 and D-5.1
 
-- **Status**: **Proposed**, 2026-11-17. The owner's answer to R-1 (D-5) is needed before the build
-  merges, as [#2777](https://github.com/openzigs/onyourleft/issues/2777) asks (*"ask the owner if it
-  changes a decision"*). It does: see *Supersedes, in part*
+- **Status**: **Accepted**, 2026-11-17, by the owner on #2793 (D-6). Proposed the same day, as
+  [#2777](https://github.com/openzigs/onyourleft/issues/2777) asks (*"ask the owner if it changes a
+  decision"*). It does: see *Supersedes, in part*
 - **Date**: 2026-11-17
 - **Deciders**: **the owner**, who decides R-1. **The author** chose the figures, marked *the
   author's choice* where they are made
@@ -94,6 +94,12 @@ a log written with the floor replays with or without it.
 | # | Question | Recommendation |
 |---|---|---|
 | **R-1** | Approve the floor: with the rider more than 2 s ahead for 10 s, the model's `ease` is ridden as `hold` (never as `lift`), superseding in part ADR 0072 D-2 and D-5.1 | **Approve.** On the measured ride it did not fire under `pacer-4`, and would have fired on 11 of the old prompt's 60 asks; it is a net under the model, not a second director |
+
+### D-6 — The owner's answer
+
+**Owner ruling, 2026-11-17:** asked in plain words whether, with the rider more than 2 s ahead for
+10 s, the app should ride the model's `ease` as `hold` (never as `lift`), the owner answered *"I
+approve"*. R-1 is approved, and ADR 0078 is accepted.
 
 ## Consequences
 
