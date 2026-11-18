@@ -44,6 +44,9 @@
 
 import {
   beatsPerMinute,
+  COURSE_ROUNDING_METRES,
+  courseClimbing,
+  courseHillsAhead,
   distanceOnRoute,
   flooredDirection,
   gapTrendOf,
@@ -62,6 +65,7 @@ import {
   zoneOf,
   type BotPacerPlan,
   type ModelPacerAnswer,
+  type ModelPacerCourse,
   type ModelPacerInput,
   type PacerDecisionRecord,
   type PacerDirection,
@@ -108,10 +112,10 @@ const tenth = (value: number): number => Math.round(value * 10) / 10;
  * The pacer state as the model is shown it (ADR 0072 D-3), from the ride's
  * own state: the pacer's W/kg, its direction now, the rider's gap and W/kg,
  * the draft, the grade 100 m ahead of the pacer, the metres to the finish
- * (none on a loop) and the seconds ridden, and with `sensors`, what the
- * rider's own sensors say (§`modelPacerSensorFields`, #2760). **No
- * coordinate, no name**: the route enters as a grade and a distance, never a
- * position.
+ * (none on a loop) and the seconds ridden, the course ahead
+ * (§`modelPacerCourse`, #2794), and with `sensors`, what the rider's own
+ * sensors say (§`modelPacerSensorFields`, #2760). **No coordinate, no
+ * name**: the route enters as grades and distances, never a position.
  */
 export function modelPacerInput(options: {
   readonly state: Pick<GameState, 'ride' | 'bot' | 'ridden' | 'input' | 'soloDraft'>;
@@ -144,6 +148,26 @@ export function modelPacerInput(options: {
     rideS: Math.max(0, Math.floor(state.ridden)),
     ...(sensors === undefined ? {} : modelPacerSensorFields(sensors, options.riderMassKilograms)),
     ...(place === undefined ? {} : { riderPlace: place }),
+    course: modelPacerCourse(profile, pacerAt),
+  };
+}
+
+/**
+ * The course ahead of a pacer `pacerAt` metres along `profile` (#2794): the
+ * next climb and descent (`@onyourleft/domain` §`courseHillsAhead`, within
+ * 5 km and, on a route with a finish, before it), and the climbing left to
+ * the finish or, on a loop, to the end of the lap, with the lap's metres.
+ */
+export function modelPacerCourse(profile: RouteProfile, pacerAt: number): ModelPacerCourse {
+  const left = profile.loop
+    ? profile.totalDistance - distanceOnRoute(profile, pacerAt)
+    : Math.max(0, profile.totalDistance - pacerAt);
+  return {
+    ...courseHillsAhead(profile, pacerAt),
+    lapLeftM: profile.loop
+      ? Math.round(left / COURSE_ROUNDING_METRES) * COURSE_ROUNDING_METRES
+      : null,
+    climbLeftM: courseClimbing(profile, pacerAt, left),
   };
 }
 

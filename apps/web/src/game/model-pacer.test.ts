@@ -24,6 +24,7 @@ import type { TraceSample } from './hud/recent-trace';
 import {
   heartRateTrend,
   ModelPacer,
+  modelPacerCourse,
   modelPacerInput,
   modelPacerSensorFields,
   powerTrend,
@@ -32,7 +33,7 @@ import {
   type ModelPacerLink,
   type ModelPacerSensors,
 } from './model-pacer';
-import { rollingRoute } from './route-fixtures-testing';
+import { circuitRoute, northRoute, rollingRoute } from './route-fixtures-testing';
 
 /** `length` seconds of trace, each sample from `at(index)`. */
 const traceOf = (length: number, at: (index: number) => TraceSample): TraceSample[] =>
@@ -265,6 +266,86 @@ describe('the pacer state the model is shown — #2712, ADR 0072 D-3', () => {
     });
     expect(input).toMatchObject({ rider3sWPerKg: 2.8, cadenceRpm: 72, heartRateBpm: 148 });
     expect(readModelPacerInput(input)).toEqual({ ok: true, value: input });
+  });
+});
+
+describe('the course ahead the model is shown — #2794', () => {
+  /** 3 km to a finish: flat, 500 m up at 6 %, flat, 400 m down at 5 %, flat. */
+  const finish = northRoute(3_000, (along) =>
+    along < 800
+      ? 100
+      : along < 1_300
+        ? 100 + (along - 800) * 0.06
+        : along < 1_800
+          ? 130
+          : along < 2_200
+            ? 130 - (along - 1_800) * 0.05
+            : 110,
+  );
+  /** A 1 885 m loop: flat, 400 m up at 6 % from 200 m, 400 m down, flat to the line. */
+  const loop = circuitRoute(300, (along) =>
+    along < 200
+      ? 100
+      : along < 600
+        ? 100 + (along - 200) * 0.06
+        : along < 1_000
+          ? 124 - (along - 600) * 0.06
+          : 100,
+  );
+  const nearly = (got: number | undefined, want: number) => {
+    expect(got).toBeDefined();
+    // The profile's grade is smoothed over 50 m, so a pitch's ends move by a cell or two.
+    expect(Math.abs((got as number) - want)).toBeLessThanOrEqual(30);
+  };
+
+  it('shows the next climb and descent and the climbing left to the finish, in the state it sends', () => {
+    const input = modelPacerInput({
+      state: {
+        ride: { speed: metresPerSecond(8), distance: metres(240) },
+        bot: {
+          state: { speed: metresPerSecond(8), distance: metres(250) },
+          distanceOnRoute: metres(250),
+          grade: 0 as never,
+          power: watts(190),
+        },
+        ridden: seconds(60),
+        input: { power: watts(180), live: true },
+        soloDraft: undefined,
+      },
+      plan: botPacerPlan(2.5),
+      profile: finish,
+      riderMassKilograms: 75,
+      inForce: { direction: UNDIRECTED, since: 0 },
+    });
+    const course = input.course;
+    nearly(course?.climb?.inM, 800 - 250);
+    nearly(course?.climb?.lengthM, 500);
+    expect(course?.climb).toMatchObject({ avgPct: 6, maxPct: 6 });
+    nearly(course?.descent?.inM, 1_800 - 250);
+    expect(course?.descent).toMatchObject({ avgPct: -5, maxPct: -5 });
+    expect(course?.lapLeftM).toBeNull();
+    nearly(course?.climbLeftM, 30);
+    expect(readModelPacerInput(input)).toEqual({ ok: true, value: input });
+  });
+
+  it('says nothing ahead past the last hill of a route with a finish', () => {
+    expect(modelPacerCourse(finish, 2_500)).toEqual({
+      climb: null,
+      descent: null,
+      lapLeftM: null,
+      climbLeftM: 0,
+    });
+  });
+
+  it('on a loop, shows the metres left in the lap, its climbing, and the climb after the line', () => {
+    const total = loop.totalDistance as number;
+    const course = modelPacerCourse(loop, 1_500);
+    expect(course.lapLeftM).toBe(Math.round((total - 1_500) / 10) * 10);
+    expect(course.climbLeftM).toBe(0);
+    nearly(course.climb?.inM, total - 1_500 + 200);
+    // A pacer in its second lap reads the lap it is in.
+    expect(modelPacerCourse(loop, total + 1_500)).toEqual(course);
+    nearly(modelPacerCourse(loop, 100).climbLeftM, 24);
   });
 });
 

@@ -15,7 +15,9 @@
  * {@link ModelPacerInput}: the pacer's advertised W/kg, its plan and intent
  * now and how long it has held the intent, where the rider is against it, the
  * rider's W/kg and whether they are in its draft, the grade ahead, the metres
- * to the finish and the seconds ridden. **Every field is a number, a boolean
+ * to the finish and the seconds ridden; since #2794, the course ahead
+ * ({@link ModelPacerCourse}: the next climb and descent, and the climbing
+ * left). **Every field is a number, a boolean
  * or a word from a closed list**, except `recentLines` (#2760): the model's
  * own last lines, screened free text (§`pacerSayProblem`: no digit but a
  * cadence or power target, no symbol, and a length), written by the model from a state that holds no
@@ -64,6 +66,7 @@
 
 import { HEART_RATE_ZONE_NAMES, POWER_ZONE_NAMES } from '../analysis/zones';
 import type { GradePercent, Watts } from '../quantities';
+import { isCourseHill, type CourseHill } from '../route/course-ahead';
 import { watts } from '../quantities';
 import {
   flatPowerWatts,
@@ -230,6 +233,27 @@ export interface ModelPacerInput {
    * `rider-losing` (dropping back, or being caught). Absent on the first ask.
    */
   readonly gapTrend?: PacerGapTrend;
+  /**
+   * The road ahead of the pacer (#2794): the next climb and descent, and the
+   * climbing left. Optional, so a device from before it still asks; every
+   * device since sends it.
+   */
+  readonly course?: ModelPacerCourse;
+}
+
+/**
+ * **The course ahead of the pacer**, as the model is shown it (#2794), from
+ * `route/course-ahead.ts`. Metres to 10 m, grades to a whole percent.
+ */
+export interface ModelPacerCourse {
+  /** The next climb (at least 3 % for at least 200 m, within 5 km and before the finish), or `null`. */
+  readonly climb: CourseHill | null;
+  /** The next descent, by the same rule downhill, or `null`. */
+  readonly descent: CourseHill | null;
+  /** On a loop, metres to the end of this lap; `null` on a route with a finish (`toFinishM`). */
+  readonly lapLeftM: number | null;
+  /** Metres of climbing left to the finish, or on a loop to the end of the lap. */
+  readonly climbLeftM: number;
 }
 
 /** Where the rider is against the pacer. A closed list (#2777). */
@@ -370,6 +394,7 @@ const OPTIONAL_INPUT_KEYS = [
   'recentLines',
   'riderPlace',
   'gapTrend',
+  'course',
 ] as const;
 
 const KNOWN_INPUT_KEYS: readonly string[] = [...INPUT_KEYS, ...OPTIONAL_INPUT_KEYS];
@@ -478,10 +503,23 @@ export function readModelPacerInput(value: unknown): ModelPacerInputRead {
     ['recentLines', recentLinesOk, 'must be up to three lines the pacer may say'],
     ['riderPlace', (v) => oneOf(RIDER_PLACES, v), 'must be one of the three places'],
     ['gapTrend', (v) => oneOf(PACER_GAP_TRENDS, v), 'must be one of the three trends'],
+    ['course', courseOk, 'must be the course ahead: two hills or null, and metres'],
   ];
   const sensorFailed = sensorChecks.find(([key, ok]) => key in value && !ok(value[key]));
   if (sensorFailed !== undefined) return refuse(`input.${sensorFailed[0]}`, sensorFailed[2]);
   return { ok: true, value: value as unknown as ModelPacerInput };
+}
+
+/** Exactly {@link ModelPacerCourse}'s shape, every number in range (#2794). */
+function courseOk(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (Object.keys(value).sort().join() !== 'climb,climbLeftM,descent,lapLeftM') return false;
+  return (
+    (value.climb === null || isCourseHill(value.climb)) &&
+    (value.descent === null || isCourseHill(value.descent)) &&
+    (value.lapLeftM === null || numberIn(value.lapLeftM, 0, MOST_METRES)) &&
+    numberIn(value.climbLeftM, 0, MOST_METRES)
+  );
 }
 
 /** One to {@link MODEL_PACER_RECENT_LINES} lines, each non-empty and one the screen passes. */

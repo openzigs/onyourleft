@@ -137,7 +137,6 @@ describe('an AI-pacer decision, read back as the app reads it (#2712)', () => {
     expect((await pace(w, riders[0]!.token, { input: placed })).status).toBe(200);
     const body = server.requests[0]?.body as { messages: { content: string }[] };
     expect(JSON.parse(body.messages[1]!.content)).toEqual(placed);
-    expect(PACER_PROMPT_VERSION).toBe('pacer-4');
     for (const field of ['riderPlace', 'gapTrend', 'rider-gaining', 'rider-losing']) {
       expect(PACER_SYSTEM).toContain(`"${field}"`);
     }
@@ -170,6 +169,38 @@ describe('an AI-pacer decision, read back as the app reads it (#2712)', () => {
       expect(codeOf(decided)).toBe('tactics_invalid');
       expect(JSON.stringify(decided.body)).not.toMatch(/push|come|easing/);
     }
+  });
+
+  it('passes the course ahead to the model, and asks it to pace the terrain where the gap leaves a choice — #2794', async () => {
+    const server = chatServer(() => PACER_ANSWER);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    expect((await pace(w, riders[0]!.token)).status).toBe(200);
+    const body = server.requests[0]?.body as { messages: { content: string }[] };
+    expect((JSON.parse(body.messages[1]!.content) as { course?: unknown }).course).toEqual(
+      PACER_INPUT.course,
+    );
+    expect(PACER_PROMPT_VERSION).toBe('pacer-5');
+    for (const field of ['course', 'climb', 'descent', 'inM', 'lengthM', 'avgPct', 'maxPct']) {
+      expect(PACER_SYSTEM).toContain(`"${field}"`);
+    }
+    for (const field of ['climbLeftM', 'lapLeftM']) expect(PACER_SYSTEM).toContain(`"${field}"`);
+    expect(PACER_SYSTEM).toMatch(/"ease" in the last 300 m before a climb/);
+    expect(PACER_SYSTEM).toMatch(/"lift" on a descent/);
+    // The gap rules still come first: the terrain only chooses where they leave a choice.
+    expect(PACER_SYSTEM).toMatch(/Where these rules leave a choice, pace the terrain/);
+  });
+
+  it('refuses a course ahead that carries anything but its numbers, before a model is called — #2794', async () => {
+    const server = chatServer(() => PACER_ANSWER);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    const placed = await pace(w, riders[0]!.token, {
+      input: { ...PACER_INPUT, course: { ...PACER_INPUT.course, name: 'Box Hill' } },
+    });
+    expect(codeOf(placed)).toBe('validation_failed');
+    expect(JSON.stringify(placed.body)).not.toContain('Box Hill');
+    expect(server.requests).toEqual([]);
   });
 
   it('refuses a state whose last lines carry what the screen stops, before a model is called — #2760', async () => {

@@ -21,6 +21,11 @@
  * Since #2777 (`pacer-4`) the intent is asked to follow the gap, read from
  * `riderPlace` and `gapTrend` as well as the signed metres, and the line to
  * match the intent, which `readModelPacerAnswer` holds it to.
+ * Since #2794 (`pacer-5`) the state carries the course ahead
+ * (`@onyourleft/domain` §`ModelPacerCourse`), and the words say what it
+ * means and ask the pacer to pace it where the gap rules leave a choice:
+ * ease a little before a climb so it can hold the pace up it, and lift on a
+ * descent or as a climb ends into the flat.
  * The line is screened on the instance and again on the device
  * (§`pacerSayProblem`): what the prompt asks is a request, the screen is the
  * rule. Nothing here names a rider, a place or a model (ADR 0031 D-4).
@@ -32,7 +37,7 @@ import { modelPacerAnswerSchema, type ModelPacerInput } from '@onyourleft/domain
 import { TACTICS_KEEP_ALIVE } from './tactics-prompt.ts';
 
 /** Which prompt this is, for a measurement to name: raised with every change to the words below. */
-export const PACER_PROMPT_VERSION = 'pacer-4';
+export const PACER_PROMPT_VERSION = 'pacer-5';
 
 /**
  * The most a decision may write, tokens: **120**. Spike 0039 §7 estimated a
@@ -63,6 +68,8 @@ export const PACER_SYSTEM = [
   '- "riderPlace" "behind" and "gapTrend" "rider-losing" (losing ground): "ease", so they can come back.',
   '- "riderPlace" "behind" otherwise: the player behind and coming back: "hold" or "ease", never "lift".',
   '- "riderPlace" "level", or in your draft ("riderInDraft"): "hold".',
+  '"course" is the road ahead of you: "climb" and "descent" are the next climb and descent, each 3 % or steeper for 200 m or more, or null: "inM" to its start, "lengthM", "avgPct" and the steepest "maxPct". "climbLeftM" is the climbing left to the finish or, on a loop, in this lap ("lapLeftM").',
+  'Where these rules leave a choice, pace the terrain as a good partner does: "ease" in the last 300 m before a climb ("climb" "inM" under 300), so you can hold the pace up it, and "lift" on a descent ("descent" "inM" 0) or where a climb ends into the flat. With the player level or in your draft, the terrain is the one reason not to "hold".',
   'The ride may also carry the player\'s own sensor readings, each only when its sensor is there: "rider3sWPerKg" and "riderMinuteWPerKg" (their power per kilogram over three seconds and over the last minute), "powerZone" (of their own threshold), "powerTrend" ("rising", "steady" or "fading" over the last minute), "aboveThresholdS" (seconds they have held at or above their threshold), "cadenceRpm", "heartRateBpm", "heartRateZone" and "heartRateTrend" ("rising", "steady" or "falling"). Never assume a reading that is not there.',
   'Coach from what the player is doing right now, specifically and kindly, picking the one thing that matters most, in this order. Held at or above threshold for about a minute or more: suggest easing to recover. A cadence below about seventy on a climb: suggest an easier, lighter gear and a quicker spin, never a bigger or higher gear. Power fading while heart rate holds or climbs: a pacing note, such as settling into an effort they can hold to the top. Heart rate climbing fast: you may name it as effort, as in "your heart rate is climbing, ease a little", never as a health matter. Otherwise, riding steady: encourage them, about the road ahead, the gap or the draft.',
   '"recentLines" are your own last lines. Never repeat one, never start the same way twice in a row, and vary your words: tie each line to this moment, such as the road ahead, the gap, the draft, their legs, their breathing or the finish.',
