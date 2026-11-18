@@ -52,8 +52,10 @@ test.describe('#2785 — the instance card’s scanner reads a real QR picture',
     await expect(page.locator('video')).toHaveCount(0);
     expect(await page.evaluate(() => window.__oylCardScan?.tracks())).toEqual(['ended', 'ended']);
     expect(await page.evaluate(() => window.__oylCardScan?.asked())).toBe(2);
-    // The card box is untouched: a line from another device is for "Add this device".
-    await expect(page.getByLabel('The instance’s card (optional)')).toHaveValue('');
+    // #2826: the same line is a rider invite's too, which Connect takes from
+    // the card box, and the empty address shows the card's own.
+    await expect(page.getByLabel('The instance’s card (optional)')).toHaveValue(CARD_QR_TEXT);
+    await expect(page.getByLabel('Instance address')).toHaveValue('https://instance.example.org');
     expect(requests, 'the scan sent something off the page').toEqual([]);
   });
 

@@ -1007,6 +1007,7 @@
     "Paste the whole card, starting oyl-instance:.",
     "Get it from the instance’s operator, or from the Instance screen of another of your devices.",
     "Without the card this device can sign in to an account it already has, but cannot use anything that needs the card.",
+    "If someone invited you, scan the invite or paste its whole line here, then press Connect.",
     "Scan the card with the camera",
     "What the instance receives from this app",
     "This device’s public key, which is how the instance knows it is you.",

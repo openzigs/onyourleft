@@ -297,6 +297,12 @@ export interface InstancePort {
    * before it is sent one, so the app cannot send the name only then (#892's
    * review). The policy and the screen say exactly this. An address
    * {@link instanceAddress} refuses sends nothing.
+   *
+   * `card` may be a rider invite (#2826): the instance's card with an invite
+   * code beside it, the line `moderation-port.ts` §`mintInvite` makes. The
+   * card is checked and pinned as any card is, `address` may be left blank
+   * for the card's own, and the code goes to `POST /v1/auth/session` only
+   * SEALED to the key the card vouches for — never in plaintext.
    */
   connect(address: string, displayName: string, card?: string): Promise<ConnectOutcome>;
   /**
@@ -469,6 +475,34 @@ export const CLAIM_REFUSAL_TEXT = {
     'This device could not prepare its key, so nothing was sent and your claim code is still good: try again.',
 } as const;
 
+/**
+ * What a new rider is told when an invite did not let them in (#2826): one
+ * plain sentence each, and never the code. ⚠️ Draft wording for the owner to
+ * approve.
+ */
+export const INVITE_REFUSAL_TEXT = {
+  code_unknown:
+    'That invite is not one this server made, so check you have the whole line, or ask whoever invited you for a new invite.',
+  code_used: 'That invite has been used already, so ask whoever invited you for a new one.',
+  code_expired: 'That invite has expired, so ask whoever invited you for a new one.',
+  /** An invite-only instance, and no invite was given (`validation_failed` on `inviteCode`). */
+  required:
+    'This server lets in only riders it invites, so ask whoever runs it for an invite, then scan it or paste its whole line in the card box.',
+} as const;
+
+/** The instance's refusal of a spent, unknown or expired invite, in its own sentence (#2826). */
+function inviteRefusal(error: unknown): string | undefined {
+  if (!(error instanceof InstanceSignInError)) return undefined;
+  switch (error.code) {
+    case 'code_unknown':
+    case 'code_used':
+    case 'code_expired':
+      return INVITE_REFUSAL_TEXT[error.code];
+    default:
+      return undefined;
+  }
+}
+
 /** What the link-code screen says when no code can be shown. Draft wording (#880). */
 export const LINK_CODE_UNAVAILABLE_TEXT = {
   'signed-out':
@@ -552,7 +586,10 @@ function refusalFor(error: unknown, sealedRequired?: string): string {
       case 'wrong_instance':
         return CONNECT_REFUSAL_TEXT[error.code];
       case 'validation_failed':
-        return CONNECT_REFUSAL_TEXT['bad-name'];
+        // #2826: an invite-only instance names the invite, not the name.
+        return error.field === 'inviteCode'
+          ? INVITE_REFUSAL_TEXT.required
+          : CONNECT_REFUSAL_TEXT['bad-name'];
       case PIN_DIFFERS:
         return CONNECT_REFUSAL_TEXT.pin_differs;
       default:
@@ -1268,11 +1305,21 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
     card: string | undefined,
     afterClaim: boolean,
   ): Promise<ConnectOutcome> {
-    const decision = instanceAddress(address);
+    // #2826: a rider invite is the card with an invite code beside it. The
+    // card is checked as any card is; the code is sent only sealed, below.
+    // An address left blank is the invite's own card's.
+    const invite = readCodeWithCard(card ?? '');
+    let target = address;
+    if (invite !== undefined && address.trim() === '') {
+      const parsed = parseInstanceCard(invite.card);
+      if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
+      target = parsed.card.origin;
+    }
+    const decision = instanceAddress(target);
     if (decision.kind === 'refused') {
       return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
     }
-    const cardText = card?.trim() ?? '';
+    const cardText = invite?.card ?? card?.trim() ?? '';
     if (cardText !== '') {
       const parsed = parseInstanceCard(cardText, decision.origin);
       if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
@@ -1305,13 +1352,22 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
           sealed = sealedFor(decision.origin, checked.instanceKey);
         }
       }
+      // #2826: an instance with a card registers only sealed (ADR 0047 D-7),
+      // so an invite that cannot be sealed is not sent at all: in plaintext it
+      // would cross the edge, and be refused `sealed_required` anyway.
+      if (invite !== undefined && sealed === undefined) {
+        return { kind: 'refused', text: sealedRequired };
+      }
       const signedIn = await signInToInstance(
         {
           ...signIn(decision.origin, http),
           ...(pin === undefined ? {} : { pin }),
           ...(sealed === undefined ? {} : { sealed }),
         },
-        name === undefined ? {} : { displayName: name },
+        {
+          ...(name === undefined ? {} : { displayName: name }),
+          ...(invite === undefined ? {} : { inviteCode: invite.code }),
+        },
       );
       storage.setItem(
         INSTANCE_SESSION_STORAGE_KEY,
@@ -1331,7 +1387,8 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       ) {
         return { kind: 'refused', text: CLAIM_REFUSAL_TEXT['not-confirmed'] };
       }
-      return { kind: 'refused', text: refusalFor(error, sealedRequired) };
+      const refusedInvite = invite === undefined ? undefined : inviteRefusal(error);
+      return { kind: 'refused', text: refusedInvite ?? refusalFor(error, sealedRequired) };
     }
   }
 

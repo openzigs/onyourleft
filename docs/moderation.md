@@ -87,7 +87,7 @@ an unset mode was `closed`. The project's own image sets `approval` too (#16, Q5
 | Mode | A device key the instance has never seen… |
 |---|---|
 | `approval` (the default, and the project's image) | registers an account that **waits** for a moderator. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
-| `invite` | registers only with a single-use invitation a moderator minted (`POST /v1/moderation/invites`, good for seven days). The invitation is spent in the same transaction that registers the account. |
+| `invite` | registers only with a single-use invitation a moderator minted (`POST /v1/moderation/invites`, good for seven days). The invitation is spent in the same transaction that registers the account. The new rider scans or pastes the invitation line (the instance's card with the code beside it) into the card box on the app's Connect screen, and the code goes only sealed to the key that card vouches for (#2826). |
 | `open` | registers an active account at once. |
 | `closed` | is refused. |
 
