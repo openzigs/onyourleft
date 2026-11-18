@@ -456,6 +456,10 @@ export const CONNECT_REFUSAL_TEXT = {
  * What the owner is told when a claim did not go through (#2823, ADR 0080
  * D-3): one plain sentence each, and never the code — the instance's own
  * refusal is one answer whatever the reason, so the app's is one too.
+ * The setup page's buttons are written out, not imported from
+ * `@onyourleft/operate-text`, because this directory reaches no other package
+ * (`instance-transport.test.ts`); `ConnectFlow.test.tsx` holds each quoted name
+ * to that package's constant.
  * ⚠️ Draft wording for the owner to approve.
  */
 export const CLAIM_REFUSAL_TEXT = {
@@ -470,7 +474,7 @@ export const CLAIM_REFUSAL_TEXT = {
   'no-answer':
     'Your server did not answer, so nothing was claimed: check that it is running and try again.',
   'not-confirmed':
-    'Your server has not confirmed the claim yet, so press “Yes” on its setup page and then sign in again. If that page no longer shows the claim, show a new claim code there and scan it.',
+    'Your server has not confirmed the claim yet, so press “Yes, it shows the same number” on its setup page and then sign in again. If that page no longer shows the claim, show a new claim code there and scan it.',
   'this-device':
     'This device could not prepare its key, so nothing was sent and your claim code is still good: try again.',
 } as const;

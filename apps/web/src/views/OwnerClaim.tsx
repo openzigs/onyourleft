@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { CLAIM_NO_BUTTON, CLAIM_YES_BUTTON, SETUP_NEXT_BUTTON } from '@onyourleft/operate-text';
 import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
@@ -41,22 +42,23 @@ export const OWNER_CLAIM_TEXT = {
   /** Before the press (#2828): the claim sends nothing until it. */
   nothingSent: 'Nothing is sent until you press “Claim this server”.',
   compare: 'Check that your server’s setup page shows the same number:',
+  /** The setup page's buttons by their own names (`@onyourleft/operate-text` §setup). */
   then:
-    'If it does, press “Yes” on the setup page, then “Sign in as the owner” here. If it does not, ' +
-    'press “No” there, then “It shows another number” here.',
+    `If it does, press “${CLAIM_YES_BUTTON}” on the setup page, then “Sign in as the owner” here. ` +
+    `If it does not, press “${CLAIM_NO_BUTTON}” there, then “It shows another number” here.`,
   signIn: 'Sign in as the owner',
   differs: 'It shows another number',
   mismatch:
-    'Then press “No” on your server’s setup page if you have not yet, show a new claim code there ' +
-    'and scan it again.',
+    `Then press “${CLAIM_NO_BUTTON}” on your server’s setup page if you have not yet, show a new ` +
+    'claim code there and scan it again.',
   /** What the code was spent on, said where the screen starts again (#2828). */
   mismatchLabel: 'Not claimed',
   /** Once signed in, and the server says this device owns it. */
-  owned: 'This device now owns your server, so go back to its setup page and press “Next step”.',
+  owned: `This device now owns your server, so go back to its setup page and press “${SETUP_NEXT_BUTTON}”.`,
   /** Once signed in, but the server does not say this device owns it. */
   'not-owner':
-    'This device is signed in, but your server has not made it the owner yet: press “Yes” on its ' +
-    'setup page, then come back to this screen.',
+    `This device is signed in, but your server has not made it the owner yet: press “${CLAIM_YES_BUTTON}” ` +
+    'on its setup page, then come back to this screen.',
 } as const;
 
 /** The six digits as the setup page draws them: two groups of three. */

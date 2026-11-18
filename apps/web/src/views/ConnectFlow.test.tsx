@@ -8,6 +8,7 @@
  * and `ConnectFlow.a11y.test.tsx` audits every state.
  */
 
+import * as operateText from '@onyourleft/operate-text';
 import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -16,7 +17,11 @@ import { CameraController } from '../camera/session';
 import { scriptedCamera } from '../camera/testing';
 import { codeWithCard, INSTANCE_KEY_TEXT } from '../instance/instance-pin';
 import { SCRIPTED_FINGERPRINT, scriptedInstance } from '../instance/testing';
-import type { ClaimOutcome, ConnectOutcome } from '../instance/instance-port';
+import {
+  CLAIM_REFUSAL_TEXT,
+  type ClaimOutcome,
+  type ConnectOutcome,
+} from '../instance/instance-port';
 import {
   answer,
   buttonNamed,
@@ -311,13 +316,21 @@ describe('the Connect flow’s words — #2828', () => {
 
   it('quotes each button it names inside a sentence', async () => {
     let checked = 0;
+    const appButtons = new Set<string>();
+    // The claim's sentences for states no step here reaches, as well as every one drawn.
+    const sentences: string[] = [
+      ...Object.values(OWNER_CLAIM_TEXT),
+      ...Object.values(CLAIM_REFUSAL_TEXT),
+    ];
     await eachStep((step, shown) => {
       const names = [...shown.querySelectorAll('button')]
         .map((button) => button.textContent ?? '')
         .filter((name) => name !== '');
+      for (const name of names) appButtons.add(name);
       for (const sentence of shown.querySelectorAll('p')) {
         if (sentence.querySelector('button') !== null) continue;
         const said = sentence.textContent ?? '';
+        sentences.push(said);
         for (const name of names) {
           if (!said.includes(name)) continue;
           checked += 1;
@@ -327,5 +340,27 @@ describe('the Connect flow’s words — #2828', () => {
     });
     // The claim's two sentences, the device's, the card's and the invite's at least.
     expect(checked).toBeGreaterThanOrEqual(5);
+
+    // A quoted name that is not one of the app's own buttons is the setup page's,
+    // so it is that button's whole name as the setup page draws it, never a prefix.
+    const setupButtons = Object.entries(operateText)
+      .filter(([name, value]) => name.endsWith('_BUTTON') && typeof value === 'string')
+      .map(([, value]) => value);
+    const quotedOnSetupPage = new Set<string>();
+    for (const sentence of sentences) {
+      for (const [, quoted = ''] of sentence.matchAll(/“([^”]+)”/g)) {
+        if (appButtons.has(quoted)) continue;
+        expect(setupButtons, `“${quoted}” in: ${sentence}`).toContain(quoted);
+        quotedOnSetupPage.add(quoted);
+      }
+    }
+    expect([...quotedOnSetupPage].sort()).toEqual(
+      [
+        operateText.CLAIM_NO_BUTTON,
+        operateText.CLAIM_SHOW_BUTTON,
+        operateText.CLAIM_YES_BUTTON,
+        operateText.SETUP_NEXT_BUTTON,
+      ].sort(),
+    );
   });
 });
