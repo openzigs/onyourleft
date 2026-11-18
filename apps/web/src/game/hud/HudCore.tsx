@@ -900,6 +900,14 @@ function hasContent(node: ReactNode): boolean {
  *   arrives without a severity, so the hold cannot tell them apart. A ride
  *   where one stays up the whole time keeps the controls drawn all of it.
  * - **The rider has finished a lap race**: what is left is to end the ride.
+ * - **The rider holds an item in a lap race** and *Use item* is drawn: the
+ *   owner's report of 2026-11-17 from the tablet (*"the pause menu fading
+ *   away that has the use item for lap race"*), read by the maintainer as
+ *   *Use item* staying shown while an item is held, so that no first touch is
+ *   ever spent bringing it back. It is held with the panel it is drawn in —
+ *   *Pause* and *End ride* stay too — because hidden, that panel is clipped
+ *   to the trainer's line, and a *Use item* left drawn below the line would
+ *   be clipped away with it. With nothing held they hide as on any ride.
  *
  * A lap's notice does not hold them: it is nothing to act on. Nor does it
  * decide the two `HudCore` and `HudPanel` add beside it: a Delivery round's
@@ -915,7 +923,8 @@ function controlsHeld(props: HudCoreProps, asking: boolean): boolean {
     asking ||
     hasContent(props.notices) ||
     props.standingNotice !== undefined ||
-    (props.lapRace !== undefined && riderFinished(props.lapRace))
+    (props.lapRace !== undefined && riderFinished(props.lapRace)) ||
+    (props.items !== undefined && props.lapRace !== undefined && riderHolds(props.lapRace))
   );
 }
 

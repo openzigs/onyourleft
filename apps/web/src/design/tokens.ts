@@ -861,7 +861,27 @@ export const MOTION_TOKENS = {
   short: '120ms',
   medium: '200ms',
   easeStandard: 'cubic-bezier(0.2, 0, 0, 1)',
+  hudFadeOut: '800ms',
+  hudFadeIn: '250ms',
 } as const satisfies Record<string, string>;
+
+/**
+ * #2600: the ride controls' fade, in milliseconds — `--oyl-motion-hud-fade-out`
+ * and `--oyl-motion-hud-fade-in` in {@link MOTION_TOKENS}. The owner's report
+ * of 2026-11-17 from the tablet, *"Not a fade just a pop"*: faded over
+ * `medium`, Pause and End ride read as gone at once.
+ *
+ * ⚠️ **The only durations above {@link MOTION_DURATION_MS}' `medium`**, by
+ * [ADR 0075](../../../../docs/adr/0075-the-ride-controls-fade-slower-than-the-menus-motion-cap.md),
+ * which lifts ADR 0041 D-5's cap for these two and nothing else. They are not
+ * in {@link MOTION_DURATION_MS} or {@link MOTION_FOR_SCRIPT}: no script animates
+ * with them, and `theme.a11y.test.ts` admits them only where `theme.css`
+ * §"#2600" reads them, under `.oyl-hud[data-oyl-controls…]`.
+ */
+export const HUD_CONTROLS_FADE_MS = {
+  out: 800,
+  in: 250,
+} as const satisfies Record<string, number>;
 
 /**
  * The same motion as Motion reads it: `duration` in SECONDS and `ease` as the
