@@ -99,8 +99,11 @@
  *   plaintext `instance_key_unknown` the call asks it for the key to seal to
  *   now and is sent again ONCE, and only to a DIFFERENT key. The refusal is
  *   plaintext, so the edge could write it; given the same verified key back,
- *   nothing is sent again, and a forged refusal earns no second copy of the
- *   request.
+ *   nothing is sent again. That is the whole guarantee: an edge that forwards
+ *   a request and then forges the refusal, after the instance has rotated,
+ *   makes the device seal the request again to the new key (a new nonce, so
+ *   replay protection does not catch it), and a non-idempotent route may run
+ *   twice. An active edge can already do as much by dropping the answer.
  *
  * The instance key is the caller's: from a statement verified under the
  * identity key the device pinned (#1190). Which routes are called sealed is

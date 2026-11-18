@@ -257,6 +257,24 @@ describe('what the kept key does not change (#2776)', () => {
     expect(seen.slice(from)).toEqual([]);
   });
 
+  it('reads the keys again once a new card is confirmed, though the session token is kept (D-10)', async () => {
+    const { w, send, seen } = await world();
+    const { ask, instance, sealing } = await connected(send, w);
+    expect(await ask()).toBe(200);
+    const token = sealing.storage.getItem(INSTANCE_SESSION_STORAGE_KEY);
+    await w.instanceKeys.rotateIdentity({ compromised: false });
+    expect(await instance.keys()).toMatchObject({ kind: 'needs-new-card' });
+    const next = (await w.instanceKeys.show()).card;
+    expect(await instance.offerCard(next)).toMatchObject({ kind: 'confirm' });
+    expect(await instance.confirmCard(next)).toEqual({ kind: 'pinned' });
+    // Only the pin changed: the sign-in's session token is the same one.
+    expect(sealing.storage.getItem(INSTANCE_SESSION_STORAGE_KEY)).toBe(token);
+    const from = seen.length;
+    expect(await ask()).toBe(200);
+    // The key kept under the OLD identity key is not sealed to again unread.
+    expect(count(seen, KEYS, from)).toBe(1);
+  });
+
   it('shares one refused read between calls asked at once, and keeps nothing of it', async () => {
     const { w, send, seen, edge } = await world();
     const { ask } = await connected(send, w);
