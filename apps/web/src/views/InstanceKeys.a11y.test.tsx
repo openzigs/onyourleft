@@ -22,6 +22,9 @@ import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
+import { browserSecureWindow } from '../camera/secure-window-testing';
+import { CameraController } from '../camera/session';
+import { scriptedCamera } from '../camera/testing';
 import {
   SCRIPTED_FINGERPRINT,
   SCRIPTED_NEW_FINGERPRINT,
@@ -30,6 +33,7 @@ import {
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, queryAll, settle, typeIntoTextArea, type Mounted } from '../testing/mount';
+import { CARD_SCAN_TEXT } from './CardScanner';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -122,5 +126,67 @@ describe('the card-entry and confirm-new-card screens (#1190)', () => {
     expect(document.body.textContent).toContain('Confirm the new card');
     expectClean('Instance, confirm-new-card');
     expectTargets('Instance, confirm-new-card');
+  });
+});
+
+/**
+ * #2785: the card's scanner, open. Its close button is a named `Button`, and
+ * the paste box stays in the tab order beside the camera's picture — on the
+ * connected screen and on the Connect form.
+ */
+describe('the instance card’s scanner, open (#2785)', () => {
+  async function openWithCamera(
+    scripted: ReturnType<typeof scriptedInstance>,
+  ): Promise<ReturnType<typeof scriptedCamera>> {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
+      port: camera.port,
+      schedule: () => () => undefined,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
+    globalThis.location.hash = '#/settings/instance';
+    mounted = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} instance={scripted.port} camera={controller} />,
+    );
+    await settle();
+    const scan = queryAll<HTMLButtonElement>(document.body, 'button').find(
+      (each) => each.textContent === CARD_SCAN_TEXT.start,
+    );
+    expect(scan, 'no scan button').toBeDefined();
+    await act(async () => {
+      scan!.click();
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
+    await settle();
+    return camera;
+  }
+
+  function expectScannerReachable(where: string): void {
+    const close = queryAll<HTMLButtonElement>(document.body, 'button').find(
+      (each) => each.textContent === CARD_SCAN_TEXT.close,
+    );
+    expect(close, `${where}: no close button`).toBeDefined();
+    expect(close!.classList.contains('oyl-button'), where).toBe(true);
+    const box = queryAll<HTMLTextAreaElement>(document.body, 'textarea.oyl-instance__card-box')[0];
+    expect(box, `${where}: no card box`).toBeDefined();
+    expect(box!.disabled || box!.tabIndex < 0, `${where}: the box left the tab order`).toBe(false);
+  }
+
+  it('passes the audit connected, with the scanner open beside the paste box', async () => {
+    const camera = await openWithCamera(scriptedInstance({ connected: true }));
+    expect(camera.liveStreams()).toBe(1);
+    expectClean('Instance, connected, scanning');
+    expectTargets('Instance, connected, scanning');
+    expectScannerReachable('Instance, connected, scanning');
+  });
+
+  it('passes the audit on the Connect form, with the scanner open', async () => {
+    const camera = await openWithCamera(scriptedInstance());
+    expect(camera.liveStreams()).toBe(1);
+    expectClean('Connect, scanning');
+    expectScannerReachable('Connect, scanning');
   });
 });

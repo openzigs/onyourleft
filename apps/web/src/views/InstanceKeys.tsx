@@ -3,15 +3,17 @@
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import { PairingCode } from '../camera/PairingCode';
+import type { CameraController } from '../camera/session';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
-import { groupedFingerprint } from '../instance/instance-pin';
+import { groupedFingerprint, readCodeWithCard } from '../instance/instance-pin';
 import type {
   CardOutcome,
   InstancePort,
   KeysOutcome,
   LinkCodeOutcome,
 } from '../instance/instance-port';
+import { CardScanner } from './CardScanner';
 
 /**
  * **The instance's key, on the Instance screen** — #1190, ADR 0047 D-5, D-6.
@@ -46,6 +48,15 @@ export const CARD_FIELD_LABEL = 'The instance’s card';
 export const CARD_FIELD_HINT =
   'Paste the whole card, starting oyl-instance:. Get it from the instance’s operator, or from the ' +
   'Instance screen of another of your devices.';
+
+/**
+ * The card in what a scan read (#2785): a code beside it — another device's
+ * *Add another device* line, `codeWithCard` — is dropped, and the card is
+ * then read by the same function a pasted card is.
+ */
+export function scannedCard(text: string): string {
+  return readCodeWithCard(text)?.card ?? text.trim();
+}
 
 /** Under the link code. Draft. */
 export const LINK_CODE_LEAD =
@@ -110,9 +121,12 @@ export function ConfirmNewCard({
 export function CardEntry({
   busy,
   onOffer,
+  camera,
 }: {
   readonly busy: boolean;
   readonly onOffer: (card: string) => void;
+  /** The device's camera, to scan the card with (#2785); without one the box is paste-only. */
+  readonly camera?: CameraController | undefined;
 }): JSX.Element {
   const [card, setCard] = useState('');
   const fieldId = useId();
@@ -148,6 +162,20 @@ export function CardEntry({
       <p className="oyl-muted" id={hintId}>
         {CARD_FIELD_HINT}
       </p>
+      {camera === undefined ? null : (
+        <CardScanner
+          controller={camera}
+          onScanned={(text) => {
+            // #2785: what a scan read is offered as a press of "Use this card"
+            // would offer it, from the same box: the port reads it and keeps
+            // nothing unless it verifies, and a different card still waits for
+            // "Confirm the new card".
+            const scanned = scannedCard(text);
+            setCard(scanned);
+            if (!busy) onOffer(scanned);
+          }}
+        />
+      )}
       <Button type="submit" variant="secondary" disabled={busy}>
         Use this card
       </Button>
@@ -180,8 +208,11 @@ function LinkCode({ outcome }: { readonly outcome: LinkCodeOutcome }): JSX.Eleme
 export function InstanceKeys({
   port,
   onChange,
+  camera,
 }: {
   readonly port: InstancePort;
+  /** The device's camera, to scan a card with (#2785). */
+  readonly camera?: CameraController | undefined;
   /** Called once a card is pinned or confirmed (#1210): the screen re-reads the sign-in it opens. */
   readonly onChange?: () => void;
 }): JSX.Element {
@@ -303,6 +334,7 @@ export function InstanceKeys({
       )}
       <CardEntry
         busy={busy}
+        camera={camera}
         onOffer={(text) => {
           void offer(text);
         }}
