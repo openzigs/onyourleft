@@ -12,6 +12,18 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0079 is [ADR 0079](../adr/0079-remote-access-without-a-domain-and-no-lan-only-http.md)**,
+  taken by [#2790](https://github.com/openzigs/onyourleft/issues/2790) on 2026-11-18 for remote
+  access without a domain (the owner's tailnet by default, a domain optional) and the refusal of
+  LAN-only `http://`, on the owner's ruling of 2026-10-27 on #15 and the lane note of 2026-11-18 on
+  #2790. It is **Proposed** until the owner approves it on its pull request, and it supersedes
+  nothing. #2790's title claimed 0079, and the open pull request
+  [#2795](https://github.com/openzigs/onyourleft/pull/2795) (#2780) recorded it as reserved for
+  #2790 while writing 0080. It skipped **0078**, which the open pull request
+  [#2793](https://github.com/openzigs/onyourleft/pull/2793) (#2777) writes; **0075, 0076 and 0077
+  stay claimed** by #2670, #2767 and #2762, **0080** by #2795, and **0057 and 0058** by #1748 and
+  #1752. The lane note expected 0081, which is the next free number **after** this ADR. **The next
+  free number is 0081.** A reviewer who remembers this file offering 0078 is reading the old file.
   ⚠️ **0070 is [ADR 0070](../adr/0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**,
   taken by [#2684](https://github.com/openzigs/onyourleft/issues/2684) on 2026-11-15 for houses on
   inferred built-up land in a suburb that OpenStreetMap maps only by its streets, on the owner's
@@ -23,7 +35,7 @@ It has the same authority as the root file. Where the text below says "this file
   **0075 is claimed** by the open pull request [#2670](https://github.com/openzigs/onyourleft/pull/2670)
   (#2600), **0076** by [#2767](https://github.com/openzigs/onyourleft/pull/2767) (#2759) and
   **0077** by [#2762](https://github.com/openzigs/onyourleft/pull/2762) (#2760); **0057 and 0058
-  stay claimed** by #1748 and #1752. **The next free number is 0078.** A reviewer who remembers
+  stay claimed** by #1748 and #1752. The next free number was then 0078. A reviewer who remembers
   this file offering 0071 or 0075 is reading the old file.
   ⚠️ **0074 is [ADR 0074](../adr/0074-a-sprint-instinct-behind-the-models-moves.md)**, taken by
   [#2710](https://github.com/openzigs/onyourleft/issues/2710) in its pull request
