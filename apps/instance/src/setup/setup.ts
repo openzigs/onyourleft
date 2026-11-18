@@ -78,7 +78,6 @@ import { emergencyKitText, EMERGENCY_KIT_FILE_NAME } from './emergency-kit.ts';
 import {
   backupsBody,
   claimBody,
-  claimWaits,
   finishBody,
   FINISHED_PAGE_STYLE,
   finishedPage,
@@ -424,13 +423,7 @@ export function createSetup(options: SetupOptions): Setup {
           return page(stepPage(frame, claimBody({ kind: 'claimed' }, csrf), { next: true }), 200);
         }
         const view = await claimView(url, session);
-        return page(
-          stepPage(frame, claimBody(view, csrf), {
-            next: false,
-            ...(claimWaits(view) ? { refresh: stepPath('claim') } : {}),
-          }),
-          200,
-        );
+        return page(stepPage(frame, claimBody(view, csrf), { next: false }), 200);
       }
       case 'passkey':
         return page(stepPage(frame, passkeyBody(`${origin}/admin`), { next: true }), 200);
@@ -449,14 +442,13 @@ export function createSetup(options: SetupOptions): Setup {
           store.pendingBackupRequest(),
         ]);
         const newest = records[0];
-        const waiting = pending !== undefined;
         const body = backupsBody(
           {
             last:
               newest === undefined
                 ? null
                 : { at: iso(newest.at), outcome: newest.outcome, offBox: newest.offBox },
-            waiting,
+            waiting: pending !== undefined,
             notice: url.searchParams.has('too-soon')
               ? 'too-soon'
               : url.searchParams.has('asked')
@@ -465,13 +457,7 @@ export function createSetup(options: SetupOptions): Setup {
           },
           csrf,
         );
-        return page(
-          stepPage(frame, body, {
-            next: true,
-            ...(waiting ? { refresh: stepPath('backups') } : {}),
-          }),
-          200,
-        );
+        return page(stepPage(frame, body, { next: true }), 200);
       }
       case 'registration': {
         // One button saves the choice and moves on: no "Next step" to leave a choice unsaved.
@@ -612,7 +598,6 @@ export function createSetup(options: SetupOptions): Setup {
             ? await options.ownerClaim.confirm(comparison, 'setup')
             : 'none';
         if (confirmed !== 'confirmed') return seeOther('/setup/claim?unconfirmed');
-        shownClaim = undefined;
         await store.setSetupStep('passkey', at);
         // The claim step, now saying the tablet owns the server, before the next step.
         return seeOther('/setup/claim');
@@ -674,8 +659,10 @@ export function createSetup(options: SetupOptions): Setup {
             return { outcome: 'done', detail: mode, value: undefined };
           },
         );
-        // Saved, and on: the step's one button does both.
-        if (now === 'registration') await store.setSetupStep('invite', at);
+        // Saved, and on: the step's one button does both. Reached again from a
+        // later step, it goes back to where the setup is, not to the invite.
+        if (now !== 'registration') return seeOther(stepPath(now));
+        await store.setSetupStep('invite', at);
         return seeOther(stepPath('invite'));
       }
       case '/setup/invite/code': {

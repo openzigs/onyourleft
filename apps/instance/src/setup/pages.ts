@@ -11,8 +11,10 @@
  *   after it (`style.ts`), linked at `/setup/setup.css` — inline on the
  *   finished page only, which answers after that address has gone — and no
  *   script at all: every step works with a keyboard and plain forms. A page
- *   that waits for the tablet or the backup service loads itself again with
- *   a `meta` refresh.
+ *   that waits for the tablet or the backup service never loads itself again
+ *   (WCAG 2.2.1, technique F41: a reload drops a selection of the code beside
+ *   the QR and sends a screen reader back to the top); it carries a button
+ *   that loads it again when the owner presses it.
  * - A skip link, one `h1`, and the banner, navigation and main landmarks; the
  *   progress bar marks the current step `aria-current="step"`, a done one with
  *   a tick and words, never by colour alone.
@@ -49,6 +51,7 @@ import {
   CLAIM_NOT_CONFIRMED_TEXT,
   CLAIM_PENDING_LABEL,
   CLAIM_PENDING_LEAD,
+  CLAIM_SCANNED_BUTTON,
   CLAIM_SHOW_BUTTON,
   CLAIM_WAITING_TEXT,
   CLAIM_YES_BUTTON,
@@ -82,7 +85,7 @@ import {
   REGISTRATION_SAVE_BUTTON,
   REGISTRATION_STEP_LEAD,
   REGISTRATION_STEP_LEGEND,
-  SETUP_CHECK_NOW_LINK,
+  SETUP_CHECK_NOW_BUTTON,
   SETUP_CODE_LABEL,
   SETUP_CODE_REFUSED_TEXT,
   SETUP_EXPERT_SUMMARY,
@@ -90,16 +93,15 @@ import {
   SETUP_LOCKED_LEAD,
   SETUP_NEW_CODE_TEXT,
   SETUP_NEXT_BUTTON,
-  SETUP_REFRESH_SECONDS,
   SETUP_REGISTRATION_MODE_TEXT,
   SETUP_SESSION_TEXT,
-  SETUP_STEP_DONE_TEXT,
   SETUP_STEP_NAMES,
   SETUP_STEP_SHORT_NAMES,
   SETUP_STEPS_LABEL,
   SETUP_TITLE,
   SETUP_TOO_MANY_TEXT,
   SETUP_WRONG_ADDRESS_TEXT,
+  setupStepNumberText,
   setupSummaryLines,
   type OperateRegistrationMode,
   type SetupSummary,
@@ -257,17 +259,17 @@ ${inner}
 /**
  * The progress bar: every step in one row, each the same box whether it is a
  * link or not. A step before the furthest reached is done and carries a tick
- * (read as "Done:"); the current one is marked `aria-current="step"`; a step
- * not reached yet is not a link. The mark is never colour alone.
+ * (read as "done"); the current one is marked `aria-current="step"`; a step
+ * not reached yet is not a link. The mark is never colour alone. Each step's
+ * name starts with its number, "Step 5: Who may join", because the number is
+ * all a narrow screen shows of it (WCAG 2.5.3, label in name).
  */
 function stepsNav(frame: SetupFrame): string {
   const reached = SETUP_STEPS.indexOf(frame.reached);
   const items = SETUP_STEPS.map((step, index) => {
     const done = index < reached;
     const mark = `<span class="step-mark" aria-hidden="true">${done ? '✓' : String(index + 1)}</span>`;
-    const said = done
-      ? `<span class="visually-hidden">${escapeHtml(SETUP_STEP_DONE_TEXT)} </span>`
-      : '';
+    const said = `<span class="visually-hidden">${escapeHtml(setupStepNumberText(index + 1, done))} </span>`;
     const name = `<span class="step-name">${escapeHtml(SETUP_STEP_SHORT_NAMES[step])}</span>`;
     const inner = `${mark}${said}${name}`;
     if (step === frame.step) {
@@ -289,12 +291,6 @@ ${items}
 export interface StepPageOptions {
   /** The form that moves on to the next step. */
   readonly next: boolean;
-  /**
-   * The page waits for something outside this browser — the tablet's scan,
-   * the backup service — and loads `refresh` again by itself every
-   * {@link SETUP_REFRESH_SECONDS} seconds: a `meta` refresh, so no script.
-   */
-  readonly refresh?: string;
 }
 
 /**
@@ -313,10 +309,6 @@ ${stepsNav(frame)}</div>
   const moveOn = options.next
     ? `${buttonForm('/setup/next', frame.csrf, SETUP_NEXT_BUTTON, { from: frame.step })}\n`
     : '';
-  const head =
-    options.refresh === undefined
-      ? ''
-      : `<meta http-equiv="refresh" content="${String(SETUP_REFRESH_SECONDS)}; url=${escapeHtml(options.refresh)}">\n`;
   return adminPage(
     titleOf(heading),
     `<h1>${escapeHtml(heading)}</h1>
@@ -326,12 +318,18 @@ ${moveOn}<p class="hint">${escapeHtml(SETUP_SESSION_TEXT)}</p>`,
     false,
     false,
     SETUP_STYLESHEET,
-    head,
   );
 }
 
-/** A link that checks again now, for whoever does not wait for the page to. */
-const checkNow = (path: string, text = SETUP_CHECK_NOW_LINK): string =>
+/**
+ * A button that loads `path` again, for a page that waits for something outside
+ * this browser: a `GET` form, so no script, and pressed only by the owner.
+ */
+const checkAgain = (path: string, label: string): string =>
+  `<form method="get" action="${escapeHtml(path)}" aria-label="${escapeHtml(label)}"><button type="submit">${escapeHtml(label)}</button></form>`;
+
+/** A link that checks again now. */
+const checkNow = (path: string, text: string): string =>
   `<a href="${escapeHtml(path)}">${escapeHtml(text)}</a>`;
 
 // --- claim
@@ -355,9 +353,6 @@ export type ClaimView =
       readonly secondsLeft: number;
     };
 
-/** The claim step's page waits for the tablet while it shows a code. */
-export const claimWaits = (view: ClaimView): boolean => view.kind === 'code';
-
 export function claimBody(view: ClaimView, csrf: string): string {
   switch (view.kind) {
     case 'claimed':
@@ -378,7 +373,8 @@ ${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p cla
       return `${cardCodePart(
         { purpose: 'claim', card: view.card, code: view.code, expiresAt: view.expiresAt },
         { lead: CLAIM_CODE_LEAD, until: codeWorksOnceText(view.secondsLeft) },
-      )}<p class="notice">${escapeHtml(CLAIM_WAITING_TEXT)} ${checkNow('/setup/claim')}.</p>`;
+      )}<p class="notice">${escapeHtml(CLAIM_WAITING_TEXT)}</p>
+${checkAgain('/setup/claim', CLAIM_SCANNED_BUTTON)}`;
   }
 }
 
@@ -422,7 +418,7 @@ export interface BackupStepRecord {
 export interface BackupsStepView {
   /** The newest record, or `null`: none yet. */
   readonly last: BackupStepRecord | null;
-  /** A "back up now" waits for the backup service: the page says so, and checks again by itself. */
+  /** A "back up now" waits for the backup service: the page says so, with the button that checks again. */
   readonly waiting: boolean;
   /** What the last "back up now" here came to. */
   readonly notice: 'asked' | 'too-soon' | null;
@@ -445,7 +441,7 @@ export function backupsBody(view: BackupsStepView, csrf: string): string {
   const button = buttonForm('/setup/backups/now', csrf, BACK_UP_NOW_STEP_BUTTON);
   // While a backup waits, the wait is the whole state: no "none yet", no button.
   const state = view.waiting
-    ? `<p class="notice">${escapeHtml(BACKUPS_WAITING_TEXT)} ${checkNow('/setup/backups')}.</p>`
+    ? `<p class="notice">${escapeHtml(BACKUPS_WAITING_TEXT)}</p>\n${checkAgain('/setup/backups', SETUP_CHECK_NOW_BUTTON)}`
     : view.last === null
       ? `<p>${escapeHtml(BACKUPS_NONE_YET_TEXT)}</p>\n${button}`
       : `<p>${escapeHtml(BACKUPS_LAST_AT_TEXT)} <time datetime="${escapeHtml(view.last.at)}">${escapeHtml(momentText(view.last.at))}</time>.</p>

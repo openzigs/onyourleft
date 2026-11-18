@@ -276,15 +276,15 @@ Then follow the page, step by step. You can leave and come back at any time; it 
 were.
 
 1. **Claim it with your tablet.** Press *Show the claim code*, open On Your Left on the tablet you ride
-   with, go to *Instance* and scan the code **with the app's own scanner**. The page waits for the scan
-   by itself. The tablet then shows six digits; if the page shows the same six, press *Yes*. The page
+   with, go to *Instance* and scan the code **with the app's own scanner**, then press *I’ve scanned
+   it* on the page. The tablet shows six digits; if the page shows the same six, press *Yes*. The page
    says your tablet now owns the server.
 2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
 3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
    beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
    once you have added a passkey there.
-4. **Backups**: press *Back up now*; the page checks again by itself until the backup has run. It says
+4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says
    whether the snapshot reached **both** folders: the one on this computer and the copy kept
    elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` lines in `.env`
    (step 4): to change one, edit that line and deploy again. ⚠️ On Windows the copy kept elsewhere

@@ -480,7 +480,11 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(waiting.body).toContain('<p class="notice">Waiting for the backup to run.');
     expect(waiting.body).not.toContain('No backup has run yet');
     expect(waiting.body).not.toContain('Back up now</button>');
-    expect(waiting.body).toContain('<meta http-equiv="refresh" content="5; url=/setup/backups">');
+    // No reload under the owner (WCAG 2.2.1): a button checks again when pressed.
+    expect(waiting.body).not.toContain('http-equiv="refresh"');
+    expect(waiting.body).toContain(
+      '<form method="get" action="/setup/backups" aria-label="Check now"><button type="submit">Check now</button></form>',
+    );
     const stop = new AbortController();
     await backupLoop({ database: at.path, blobs: join(at.path, '..', 'blobs') }, backups, {
       intervalSeconds: 21_600,
@@ -495,11 +499,11 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     const copied = await readdir(offBox);
     expect(copied.filter((name) => name.startsWith('snapshot-'))).toHaveLength(1);
     const read = await browser.get('/setup/backups');
-    // A success, naming both folders in plain words, and the page no longer checks by itself.
+    // A success, naming both folders in plain words, and no button to check again.
     expect(read.body).toContain(
       '<p class="notice" role="status">Both folders work: the last backup was saved on this computer, and copied to the copy kept elsewhere.</p>',
     );
-    expect(read.body).not.toContain('http-equiv="refresh"');
+    expect(read.body).not.toContain('action="/setup/backups"');
     expect(read.body).not.toContain('MARKER-offbox-2784');
     {
       const store = await openSqlStore(at.path);
@@ -583,9 +587,11 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     for (const code of codes) expect(everything).not.toContain(code);
     expect(everything).not.toContain(KIT_SECRET.text);
     expect(at.lines.join('\n')).not.toContain(claim);
+    // WCAG 2.2.1: no page the setup served reloads itself, so none restarts the idle limit unasked.
+    expect(at.pages.join('\n')).not.toMatch(/http-equiv="?refresh/i);
   });
 
-  it('keeps the same claim QR while the tablet has not scanned it, checking by itself, then says the tablet owns the server', async () => {
+  it('keeps the same claim QR while the tablet has not scanned it, checking again when asked, then says the tablet owns the server', async () => {
     const at = await world();
     const browser = new Browser(at);
     await browser.signIn(await codeInFile(at));
@@ -594,12 +600,16 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(shown.status).toBe(303);
     expect(shown.headers.location).toBe('/setup/claim');
 
-    // "Compare the number" before the scan: the same code, still waiting, and the page reloads itself.
+    // "Compare the number" before the scan: the same code, still waiting, and NO reload under the
+    // owner (WCAG 2.2.1, F41): the code beside the QR stays selectable until they press the button.
     const waiting = await browser.get('/setup/claim');
     const claim = CARD_LINE.exec(waiting.body)?.[1] ?? '';
     expect(claim).toMatch(/^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/);
     expect(waiting.body).toContain('Waiting for your tablet to scan the code.');
-    expect(waiting.body).toContain('<meta http-equiv="refresh" content="5; url=/setup/claim">');
+    expect(waiting.body).not.toContain('http-equiv="refresh"');
+    expect(waiting.body).toContain(
+      '<form method="get" action="/setup/claim" aria-label="I’ve scanned it"><button type="submit">I’ve scanned it</button></form>',
+    );
     expect(waiting.body).toMatch(/It works once, and stops working in (9|10) minutes\./);
     expect(waiting.body).not.toContain('UTC');
     expect(waiting.body).not.toContain('Show the claim code');
@@ -624,7 +634,7 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(pending.body).toContain(
       `<p class="compare"><strong>${comparison.slice(0, 3)}</strong> <strong>${comparison.slice(3)}</strong></p>`,
     );
-    expect(pending.body).not.toContain('http-equiv="refresh"');
+    expect(pending.body).not.toContain('I’ve scanned it');
 
     // Yes: the claim step says so plainly, with the way on, before the next step.
     const confirmed = await browser.post('/setup/claim/confirm', { comparison });
@@ -676,6 +686,36 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
       'Who may join: Only people I invite.',
       'Invites made: none.',
     ]);
+
+    // Who may join, changed from the finish: saved, and back to the finish, not on to the invite.
+    const changed = await browser.post('/setup/registration/mode', { mode: 'closed' });
+    expect(changed.headers.location).toBe('/setup/finish');
+    expect(summaryOf((await browser.get('/setup/finish')).body)).toContain(
+      'Who may join: Nobody new.',
+    );
+  });
+
+  it('stops showing a claim code once its ten minutes are over, and offers a new one', async () => {
+    const at = await world();
+    at.clock = Date.now();
+    await restart(at);
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const shown = await showClaim(browser);
+    const claim = CARD_LINE.exec(shown.body)?.[1] ?? '';
+    expect(claim).toMatch(/^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/);
+    // Nine minutes on, inside the code's ten and the session's fifteen idle: still the same code.
+    at.clock += 9 * 60 * 1000;
+    expect(CARD_LINE.exec((await browser.get('/setup/claim')).body)?.[1]).toBe(claim);
+    // Past ten minutes the code is dead on the server, so the page no longer draws it.
+    at.clock += 2 * 60 * 1000;
+    const expired = await browser.get('/setup/claim');
+    expect(expired.status).toBe(200);
+    expect(expired.body).toContain('Show the claim code');
+    expect(expired.body).not.toContain(claim);
+    expect(expired.body).not.toContain('I’ve scanned it');
+    expect(expired.body).not.toContain('http-equiv="refresh"');
   });
 
   it('is done from the first start when OYL_INSTANCE_OWNER_KEY is set: no code, no listener with the admin pages off, nothing served', async () => {

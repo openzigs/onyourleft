@@ -45,11 +45,7 @@ interface SetupPages {
   formRefusedPage(): string;
   messagePage(heading: string, text: string): string;
   finishedPage(name: string | null): string;
-  stepPage(
-    frame: Frame,
-    body: string,
-    options: { readonly next: boolean; readonly refresh?: string },
-  ): string;
+  stepPage(frame: Frame, body: string, options: { readonly next: boolean }): string;
   claimBody(view: unknown, csrf: string): string;
   passkeyBody(adminAddress: string): string;
   secretsBody(view: 'offer' | 'taken' | 'none', csrf: string): string;
@@ -103,12 +99,9 @@ const frame = (step: Step, reached: Step = 'finish', name: string | null = null)
 });
 
 const step =
-  (step: Step, body: () => string, next = true, reached: Step = 'finish', refresh?: string) =>
+  (step: Step, body: () => string, next = true, reached: Step = 'finish') =>
   () =>
-    pages.stepPage(frame(step, reached, AWKWARD_NAME), body(), {
-      next,
-      ...(refresh === undefined ? {} : { refresh }),
-    });
+    pages.stepPage(frame(step, reached, AWKWARD_NAME), body(), { next });
 
 const record = (offBox: string | null, outcome = 'done') => ({
   at: '2026-11-18T09:00:00.000Z',
@@ -173,7 +166,6 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
           ),
         false,
         'claim',
-        '/setup/claim',
       ),
     ],
   ],
@@ -204,16 +196,8 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     ],
     [
       'no off-box folder, waiting',
-      step(
-        'backups',
-        () =>
-          pages.backupsBody(
-            { last: record('not-configured'), waiting: true, notice: 'asked' },
-            CSRF,
-          ),
-        true,
-        'finish',
-        '/setup/backups',
+      step('backups', () =>
+        pages.backupsBody({ last: record('not-configured'), waiting: true, notice: 'asked' }, CSRF),
       ),
     ],
     [
@@ -418,13 +402,13 @@ describe('the setup’s progress bar (#2784)', () => {
       said: item.querySelector('.step')?.textContent,
     }));
     expect(steps).toEqual([
-      { link: true, current: false, mark: '✓', said: '✓Done: Claim' },
-      { link: true, current: false, mark: '✓', said: '✓Done: Passkey' },
-      { link: true, current: false, mark: '✓', said: '✓Done: Emergency kit' },
-      { link: true, current: true, mark: '✓', said: '✓Done: Backups' },
-      { link: true, current: false, mark: '5', said: '5Who may join' },
-      { link: false, current: false, mark: '6', said: '6Invite' },
-      { link: false, current: false, mark: '7', said: '7Finish' },
+      { link: true, current: false, mark: '✓', said: '✓Step 1, done: Claim' },
+      { link: true, current: false, mark: '✓', said: '✓Step 2, done: Passkey' },
+      { link: true, current: false, mark: '✓', said: '✓Step 3, done: Emergency kit' },
+      { link: true, current: true, mark: '✓', said: '✓Step 4, done: Backups' },
+      { link: true, current: false, mark: '5', said: '5Step 5: Who may join' },
+      { link: false, current: false, mark: '6', said: '6Step 6: Invite' },
+      { link: false, current: false, mark: '7', said: '7Step 7: Finish' },
     ]);
     // The tick and the number are drawn, not read: the words are.
     for (const mark of doc.querySelectorAll('.step-mark')) {
@@ -432,14 +416,48 @@ describe('the setup’s progress bar (#2784)', () => {
     }
   });
 
-  it('reloads only a page that waits, and to its own step', () => {
-    const waits = (path: string, state: string): string | null | undefined =>
-      parse((PAGES[path]?.find(([name]) => name === state)?.[1] ?? (() => ''))())
-        .querySelector('meta[http-equiv="refresh"]')
-        ?.getAttribute('content');
-    expect(waits('/setup/claim', 'the claim QR')).toBe('5; url=/setup/claim');
-    expect(waits('/setup/backups', 'no off-box folder, waiting')).toBe('5; url=/setup/backups');
-    expect(waits('/setup/claim', 'a claim to compare')).toBeUndefined();
-    expect(waits('/setup/backups', 'copied')).toBeUndefined();
+  it('names each step by the number a narrow screen shows of it (WCAG 2.5.3, label in name)', () => {
+    const doc = parse(
+      pages.stepPage(
+        frame('registration', 'registration'),
+        pages.registrationBody({ mode: 'approval' }, CSRF),
+        { next: false },
+      ),
+    );
+    const names = [...doc.querySelectorAll('header nav .step')].map((item) => accessibleName(item));
+    expect(names).toEqual([
+      'Step 1, done: Claim',
+      'Step 2, done: Passkey',
+      'Step 3, done: Emergency kit',
+      'Step 4, done: Backups',
+      'Step 5: Who may join',
+      'Step 6: Invite',
+      'Step 7: Finish',
+    ]);
+    // On a narrow screen the number is the visible label: the name holds it, and the name too.
+    for (const item of doc.querySelectorAll('header nav .step')) {
+      const mark = item.querySelector('.step-mark')?.textContent ?? '';
+      const shortName = item.querySelector('.step-name')?.textContent ?? '';
+      if (mark !== '✓') expect(accessibleName(item)).toContain(mark);
+      expect(accessibleName(item)).toContain(shortName);
+    }
+  });
+
+  it('never reloads a page by itself (WCAG 2.2.1, F41): a page that waits has a button that checks again', () => {
+    for (const [path, states] of Object.entries(PAGES)) {
+      for (const [state, render] of states) {
+        const doc = parse(render());
+        expect(doc.querySelector('meta[http-equiv="refresh" i]'), `${path} ${state}`).toBeNull();
+      }
+    }
+    const again = (path: string, state: string): string | undefined => {
+      const doc = parse((PAGES[path]?.find(([name]) => name === state)?.[1] ?? (() => ''))());
+      const form = doc.querySelector(`main form[method="get"][action="${path}"]`);
+      return form?.querySelector('button[type=submit]')?.textContent ?? undefined;
+    };
+    expect(again('/setup/claim', 'the claim QR')).toBe('I’ve scanned it');
+    expect(again('/setup/backups', 'no off-box folder, waiting')).toBe('Check now');
+    expect(again('/setup/claim', 'a claim to compare')).toBeUndefined();
+    expect(again('/setup/backups', 'copied')).toBeUndefined();
   });
 });

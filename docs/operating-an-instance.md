@@ -1118,16 +1118,17 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
 - **The steps**, each of which the operator log records from the source `setup`, naming no athlete:
   1. **Claim** — a claim code as a QR with the instance card, the tablet's claim, and the six digits
      compared on both screens ([Claiming the instance from the app](#claiming-the-instance-from-the-app)).
-     Until a tablet scans it the step keeps showing the **same** QR and loads itself again every five
-     seconds (a `meta` refresh, no script); the code is held in the instance's memory for the session
-     that asked for it, never in the database. After *Yes* the step says the tablet now owns the
+     Until a tablet scans it the step keeps showing the **same** QR, with an *I’ve scanned it* button
+     that loads the step again; no setup page reloads itself (WCAG 2.2.1), so the code beside the QR
+     stays selectable. The code is held in the instance's memory for the session that asked for it,
+     never in the database, and is no longer drawn once its ten minutes are over. After *Yes* the step says the tablet now owns the
      server, before the next step.
   2. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
      are in a collapsed block for people comfortable with the command line.
   3. **The emergency kit** — offered **once** per setup session, with no passkey
      ([The instance's secrets](#the-instances-secrets)).
   4. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
-     elsewhere"), and **Back up now**; while a backup waits the step loads itself again. The folders
+     elsewhere"), and **Back up now**; while a backup waits the step has a *Check now* button. The folders
      are `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`, named only in the step's collapsed command-line
      block: the `backup` service is started with them, so the page checks and explains and cannot
      choose them.

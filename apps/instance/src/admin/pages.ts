@@ -173,10 +173,10 @@ export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></scrip
  * the admin pages' own address unless a caller serves the same sheet at its
  * own: the setup wizard's pages (#2784) link `/setup/setup.css`, because
  * `/admin` is not served while the admin pages are off. `head` is markup
- * the caller wrote, put in the `head` after the link: the setup's pages that
- * wait use it for a `meta` refresh, and its finished page, which answers
- * when `/setup/setup.css` no longer does, for its stylesheet inline, with
- * `stylesheet` `null` (the response carries that sheet's hash in its CSP).
+ * the caller wrote, put in the `head` after the link: the setup's finished
+ * page, which answers when `/setup/setup.css` no longer does, uses it for its
+ * stylesheet inline, with `stylesheet` `null` (the response carries that
+ * sheet's hash in its CSP).
  */
 export function adminPage(
   title: string,

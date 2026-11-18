@@ -44,8 +44,14 @@ export const SETUP_STEP_SHORT_NAMES: Readonly<Record<OperateSetupStep, string>> 
   finish: 'Finish',
 };
 
-/** Read out before a step in the progress bar that is done (the tick is drawn, not read). */
-export const SETUP_STEP_DONE_TEXT = 'Done:';
+/**
+ * Read out before a step's name in the progress bar: its number, which is what
+ * a narrow screen shows of it (WCAG 2.5.3, label in name), and whether it is
+ * done (the tick is drawn, not read). "Step 5:", "Step 1, done:".
+ */
+export function setupStepNumberText(number: number, done: boolean): string {
+  return `Step ${String(number)}${done ? ', done' : ''}:`;
+}
 
 /** The title every setup page carries. */
 export const SETUP_TITLE = 'Set up this instance';
@@ -89,11 +95,11 @@ export const SETUP_STEPS_LABEL = 'Setup steps';
 /** The heading of every collapsed block that holds commands and settings names. */
 export const SETUP_EXPERT_SUMMARY = 'For people comfortable with the command line';
 
-/** How often a page that waits for something checks again by itself, in seconds. */
-export const SETUP_REFRESH_SECONDS = 5;
-
-/** The link on a page that checks again by itself, for whoever does not want to wait. */
-export const SETUP_CHECK_NOW_LINK = 'Check now';
+/**
+ * The button on a page that waits for something outside this browser: pressed,
+ * it loads the page again. No page reloads by itself (WCAG 2.2.1, F41).
+ */
+export const SETUP_CHECK_NOW_BUTTON = 'Check now';
 
 /**
  * When a code stops working, from the seconds it has left: "in 10 minutes",
@@ -124,7 +130,9 @@ export const CLAIM_CODE_LEAD =
   'Scan this with the On Your Left app on your tablet. In the app, go to Instance and use its own scanner, not the camera app. Your tablet then shows a six-digit number.';
 /** Below the claim QR, while no tablet has scanned it. */
 export const CLAIM_WAITING_TEXT =
-  'Waiting for your tablet to scan the code. This page checks again by itself every few seconds, and shows the number to compare as soon as the tablet has scanned it.';
+  'Waiting for your tablet to scan the code. Once it has, press I’ve scanned it, and this page shows the number to compare.';
+/** The claim step's button once the tablet has scanned the code: it loads the step again. */
+export const CLAIM_SCANNED_BUTTON = 'I’ve scanned it';
 export const CLAIM_PENDING_LEAD =
   'A tablet has scanned the code. Does your tablet show this number?';
 export const CLAIM_PENDING_LABEL = 'The number on this screen';
@@ -192,7 +200,7 @@ export const BACKUPS_LAST_FAILED_TEXT =
   'The last backup failed: it could not be saved on this computer.';
 export const BACKUPS_LAST_AT_TEXT = 'The last backup ran at';
 export const BACKUPS_WAITING_TEXT =
-  'Waiting for the backup to run. It usually starts within 30 seconds, and this page checks again by itself.';
+  'Waiting for the backup to run. It usually starts within 30 seconds: press Check now to see whether it has.';
 export const BACKUPS_TOO_SOON_TEXT =
   'A backup ran in the last 15 minutes, or one is already waiting, so no new one was asked for.';
 export const BACK_UP_NOW_STEP_BUTTON = 'Back up now';
