@@ -262,13 +262,21 @@ jobs:
       # The guide's own step: copy the template and fill it in. The backup
       # folders are written by the container's `node` user, so they are made
       # writable; the tunnel's token is a placeholder, and the tunnel is left
-      # to fail on it -- nothing here needs Cloudflare.
+      # to fail on it -- nothing here needs Cloudflare. Since #2781 (ADR 0080
+      # D-4) the instance makes its secret key in `secrets/` on its first start,
+      # so that folder is made first, owner-only and owned by the image's uid
+      # 1000, as the guide says ("The instance's secrets"): compose alone would
+      # make a missing one owned by root, and the runner's user is not uid 1000.
+      # deploy.sh, below, leaves an existing folder as it is.
       - name: Fill in .env from the bundle's template
         working-directory: ${{ env.BUNDLE }}
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/backups" "${RUNNER_TEMP}/offbox"
           chmod 0777 "${RUNNER_TEMP}/backups" "${RUNNER_TEMP}/offbox"
+          mkdir secrets
+          chmod 700 secrets
+          sudo chown 1000 secrets
           sed \
             -e 's|^OYL_INSTANCE_ORIGIN=.*|OYL_INSTANCE_ORIGIN=https://instance.example.invalid|' \
             -e 's|^CLOUDFLARE_TUNNEL_TOKEN=.*|CLOUDFLARE_TUNNEL_TOKEN=not-a-token|' \
