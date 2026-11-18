@@ -508,9 +508,19 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     await back.post('/setup/next', { from: 'invite' });
 
     // Finish: a summary of this session's changes, then gone.
+    // The whole setup's changes, the first session's (before the restart) among them.
     const summary = await back.get('/setup/finish');
-    expect(summary.body).toContain('Registration mode set: closed');
-    expect(summary.body).toContain('Rider invite made');
+    const listed = [...summary.body.matchAll(/<li>([^<]*)<\/li>/g)].map((match) => match[1]);
+    expect(listed).toEqual(
+      expect.arrayContaining([
+        'Owner claim code made',
+        'Owner claim confirmed',
+        'Emergency kit downloaded',
+        'Backup asked for',
+        'Registration mode set: closed',
+        'Rider invite made',
+      ]),
+    );
     const done = await back.post('/setup/finish/done');
     expect(done.status).toBe(200);
     expect(done.body).toContain('Setup is finished');
@@ -660,8 +670,23 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const again = new Browser(at);
     expect((await again.signIn(printed.code)).headers.location).toBe('/setup/claim');
     expect((await again.get('/setup/secrets')).headers.location).toBe('/setup/claim');
+    // Claimed again, and walked to the finish: the summary is this setup's, not the one before the reset.
+    await again.get('/setup/claim');
+    const reclaim = CARD_LINE.exec((await again.post('/setup/claim/code')).body)?.[1] ?? '';
+    expect((await tabletRedeems(at, tablet, reclaim)).status).toBe(200);
+    const twice = await again.get('/setup/claim');
+    const digits = /name="comparison" value="([0-9]{6})"/.exec(twice.body)?.[1] ?? '';
+    expect((await again.post('/setup/claim/confirm', { comparison: digits })).status).toBe(303);
+    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite']) {
+      await again.post('/setup/next', { from });
+    }
+    const summary = await again.get('/setup/finish');
+    expect([...summary.body.matchAll(/<li>([^<]*)<\/li>/g)].map((match) => match[1])).toEqual([
+      'Owner claim code made',
+      'Owner claim confirmed',
+    ]);
     // A reset ends a setup session too, as it ends an admin one.
-    expect(await ownerClaimReset(paths)).toMatchObject({ cleared: false, adminSessionsEnded: 1 });
+    expect(await ownerClaimReset(paths)).toMatchObject({ cleared: true, adminSessionsEnded: 1 });
     expect((await again.get('/setup/claim')).headers.location).toBe('/setup');
   });
 

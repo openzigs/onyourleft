@@ -435,7 +435,7 @@ ${notInvite(view.inviteMode)}`;
 
 // --- finish
 
-/** `changes`: what this setup session changed, oldest first, each in the operator log's words. */
+/** `changes`: what this setup changed, oldest first, each in the operator log's words. */
 export function finishBody(changes: readonly string[], csrf: string): string {
   const list =
     changes.length === 0

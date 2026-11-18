@@ -449,7 +449,7 @@ export function createSetup(options: SetupOptions): Setup {
       case 'invite':
         return page(stepPage(frame, inviteBody(await inviteView(), csrf), true), 200);
       case 'finish':
-        return page(stepPage(frame, finishBody(await changesOf(session), csrf), false), 200);
+        return page(stepPage(frame, finishBody(await changesOf(), csrf), false), 200);
     }
   }
 
@@ -464,23 +464,27 @@ export function createSetup(options: SetupOptions): Setup {
     return { kind: 'offer', inviteMode: (await modeNow()) === 'invite' };
   }
 
-  /** What this session changed, oldest first: the operator log's own entries, in its words. */
-  async function changesOf(session: Session): Promise<readonly string[]> {
-    const entries = await store.listOperatorLogPage(undefined, 200);
-    return entries
-      .filter(
-        (entry) =>
-          entry.source === 'setup' &&
-          entry.outcome === 'done' &&
-          entry.at >= session.record.createdAt &&
-          entry.action !== 'setup_sign_in',
-      )
-      .reverse()
-      .map((entry) =>
+  /**
+   * What this setup changed, oldest first, in the operator log's own words:
+   * every `done` entry from the `setup` source since the setup last began —
+   * across the sessions and restarts a resumed setup took (D-7's summary is
+   * of the wizard's changes, and a resumed setup is one wizard) — stopping
+   * at the newest `owner_claim_reset`, which reopened the setup and began a
+   * new one.
+   */
+  async function changesOf(): Promise<readonly string[]> {
+    const changes: string[] = [];
+    for (const entry of await store.listOperatorLogPage(undefined, 200)) {
+      if (entry.action === 'owner_claim_reset') break;
+      if (entry.source !== 'setup' || entry.outcome !== 'done') continue;
+      if (entry.action === 'setup_sign_in') continue;
+      changes.push(
         entry.detail === null
           ? ACTION_LABEL[entry.action]
           : `${ACTION_LABEL[entry.action]}: ${entry.detail.replaceAll('_', ' ')}`,
       );
+    }
+    return changes.reverse();
   }
 
   /** One change, by its form's target, in a session the origin and token checks admitted. */

@@ -170,7 +170,7 @@ export const INVITE_NOT_INVITE_MODE_TEXT =
 
 export const FINISH_LEAD =
   'Finishing closes this setup page for good: it will not open again, even after a restart. What this setup changed:';
-export const FINISH_NOTHING_TEXT = 'This setup session changed nothing.';
+export const FINISH_NOTHING_TEXT = 'This setup has changed nothing yet.';
 export const FINISH_BUTTON = 'Finish setup';
 export const FINISHED_HEADING = 'Setup is finished';
 export const FINISHED_TEXT =
