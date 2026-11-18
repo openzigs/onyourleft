@@ -119,8 +119,10 @@ export interface ServerConfig {
    * `OYL_INSTANCE_ADMIN_LOOPBACK_PORT` (#2643, ADR 0069 D-5): the port of a
    * SECOND listener that serves `/admin` and nothing else, at
    * `http://localhost:<port>` — or `undefined`, and nothing listens. Off
-   * unless set, and it needs the admin pages on. The home compose file
-   * publishes it on the host's loopback only.
+   * unless set. The home compose file publishes it on the host's loopback
+   * only. Since #2784 (ADR 0080 D-1) it no longer needs the admin pages on:
+   * while the first-run setup is open the listener serves `/setup` with the
+   * admin pages off, and `/admin` only ever with them on.
    */
   readonly adminLoopbackPort: number | undefined;
   /**
@@ -202,10 +204,6 @@ export function readServerConfig(raw: RawServerConfig, cores: number): ServerCon
     const value = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
     if (!Number.isInteger(value) || value < 1 || value > 65_535) {
       problems.push('OYL_INSTANCE_ADMIN_LOOPBACK_PORT must be a port number from 1 to 65535.');
-    } else if (!adminPages) {
-      problems.push(
-        'OYL_INSTANCE_ADMIN_LOOPBACK_PORT serves the admin pages, so it needs OYL_INSTANCE_ADMIN_PAGES=on.',
-      );
     } else {
       adminLoopbackPort = value;
     }

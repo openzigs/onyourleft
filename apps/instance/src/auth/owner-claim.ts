@@ -39,7 +39,12 @@ import { adminCodeSha256, newAdminCode } from '../admin/code.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { Moderators } from '../moderation/moderation.ts';
 import { sha256 } from '../sealed/sealed.ts';
-import type { AdminSource, PendingOwnerClaim, SqlStore } from '../store/sql-store.ts';
+import type {
+  AdminSource,
+  OperatorActor,
+  PendingOwnerClaim,
+  SqlStore,
+} from '../store/sql-store.ts';
 import { isPublicKey } from './crypto.ts';
 import { addressKey, type RateLimit, type RateLimiter } from './rate-limit.ts';
 
@@ -78,6 +83,12 @@ export interface OwnerClaimLimiters {
   readonly overall: RateLimiter;
 }
 
+/**
+ * Where a mint, a confirmation or a discard was made: the admin pages by
+ * listener, or since #2784 the setup wizard on the loopback listener.
+ */
+export type ClaimSource = AdminSource | 'setup';
+
 type ClaimOutcome<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly code: ErrorCode; readonly fields?: readonly FieldProblem[] };
@@ -89,7 +100,7 @@ export interface OwnerClaim {
    * an owner key. Logged as `owner_claim_code_minted` from `source`.
    */
   mint(
-    source: AdminSource,
+    source: ClaimSource,
   ): Promise<{ readonly code: string; readonly expiresAt: number } | 'claimed'>;
   /** `POST /v1/auth/owner-claim`'s body, from a sealed request signed by its `publicKey`. */
   redeem(
@@ -103,9 +114,9 @@ export interface OwnerClaim {
    * it becomes the owner key. `none` when there is no such claim. Logged as
    * `owner_claim_confirmed` from `source` when it is done.
    */
-  confirm(comparisonCode: string, source: AdminSource): Promise<'confirmed' | 'none'>;
+  confirm(comparisonCode: string, source: ClaimSource): Promise<'confirmed' | 'none'>;
   /** The owner said it does not match: the pending claim and its code are void. */
-  discard(source: AdminSource): Promise<boolean>;
+  discard(source: ClaimSource): Promise<boolean>;
 }
 
 const refused: ClaimOutcome<never> = { ok: false, code: 'claim_refused' };
@@ -116,7 +127,8 @@ export function createOwnerClaim(options: OwnerClaimOptions): OwnerClaim {
   const { perAddress, overall } = options.limiters;
   const seconds = (): number => Math.floor(now() / 1000);
   /** No actor: before the claim there is no owner's athlete to name (migration 0044's rule). */
-  const actor = (source: AdminSource) => ({ source, athleteId: null });
+  const actor = (source: ClaimSource): OperatorActor =>
+    source === 'setup' ? { source } : { source, athleteId: null };
 
   return {
     async mint(source) {

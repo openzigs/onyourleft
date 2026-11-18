@@ -496,9 +496,10 @@ describe('deploy/home/compose.yaml — the admin pages’ loopback listener (#26
     expect(lines().join('\n')).not.toMatch(/0\.0\.0\.0|\[::\]|:8787:/);
   });
 
-  it('leaves it off unless .env turns it on, and passes the tunnel sign-in allowlist through empty', () => {
+  it('listens on 8788 unless .env says otherwise, the published port, and passes the tunnel sign-in allowlist through empty (#2784)', () => {
+    // ADR 0080 D-1: the first-run setup is served there on a fresh install, with no .env edit.
     expect(setting('OYL_INSTANCE_ADMIN_LOOPBACK_PORT')).toBe(
-      '${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-}',
+      '${OYL_INSTANCE_ADMIN_LOOPBACK_PORT:-8788}',
     );
     expect(setting('OYL_INSTANCE_ADMIN_ADDRESSES')).toBe('${OYL_INSTANCE_ADMIN_ADDRESSES:-}');
     const example = readFileSync(
@@ -509,11 +510,13 @@ describe('deploy/home/compose.yaml — the admin pages’ loopback listener (#26
     expect(example).toMatch(/^OYL_INSTANCE_ADMIN_ADDRESSES=$/m);
   });
 
-  it('is a configuration the instance accepts with the admin pages on, and refuses without them', () => {
+  it('is a configuration the instance accepts with the admin pages on, and off (#2784)', () => {
     const on = readServerConfig({ adminPages: 'on', adminLoopbackPort: '8788' }, 1);
     expect(on.ok && on.config.adminLoopbackPort).toBe(8788);
+    // The compose file's own default, admin pages off: the setup wizard's listener.
     const off = readServerConfig({ adminPages: 'off', adminLoopbackPort: '8788' }, 1);
-    expect(off.ok).toBe(false);
+    expect(off.ok && off.config.adminLoopbackPort).toBe(8788);
+    expect(off.ok && off.config.adminPages).toBe(false);
   });
 });
 

@@ -323,6 +323,16 @@ export interface IdentityOptions {
   readonly moderationLimits?: ModerationLimits;
   /** How often a claim code may be tried (#2782): ADR 0069 D-4's sign-in limits unless a test sets its own. */
   readonly ownerClaimLimits?: OwnerClaimLimits;
+  /**
+   * ADR 0080 D-3 (#2784): while the instance is UNCLAIMED — no owner key in
+   * the environment or the database — and holds no athlete, every
+   * registration is refused, whatever the mode. Only where the owner can
+   * claim it: the Node adapter with the setup wizard's loopback listener
+   * (`instance.ts`). Elsewhere, the Durable Object adapter and an instance
+   * with no loopback port, nothing could ever claim it, so the rule would
+   * refuse every rider for good, and it is not applied.
+   */
+  readonly refuseWhileUnclaimed?: boolean;
 }
 
 export type Outcome<T> =
@@ -474,6 +484,13 @@ export interface Identity {
   /** The owner's claim (#2782, ADR 0080 D-3), over the same store, clock and named keys. */
   readonly ownerClaim: OwnerClaim;
   readonly emailRecoveryEnabled: boolean;
+  /**
+   * The registration mode a new rider meets now (#2784, ADR 0080 D-6): the
+   * database's, which the setup wizard or `operator registration set` wrote,
+   * else `OYL_INSTANCE_REGISTRATION`'s. Read on every registration, so a
+   * change applies without a restart.
+   */
+  registrationMode(): Promise<RegistrationMode>;
   challenge(
     publicKey: unknown,
     address: string | null,
@@ -755,7 +772,10 @@ export function createIdentity(options: IdentityOptions): Identity {
   /** Now less the hold: an address confirmed after this is still held (#1194). */
   const heldSince = (): number => seconds() - RECOVERY_ADDRESS_HOLD_SECONDS;
   const limits = options.limits ?? DEFAULT_LIMITS;
-  const registration = options.registration ?? DEFAULT_REGISTRATION;
+  const environmentRegistration = options.registration ?? DEFAULT_REGISTRATION;
+  /** The database wins while it holds a mode (ADR 0080 D-6); clearing it returns to the environment. */
+  const registrationMode = async (): Promise<RegistrationMode> =>
+    (await store.registrationSetting()) ?? environmentRegistration;
   const publicRooms = options.publicRooms ?? DEFAULT_PUBLIC_ROOM_THRESHOLDS;
   // ⚠️ In memory, like every limit below and unlike the report limit
   // (`moderation.ts`, counted from the store): a restart — or, under the
@@ -965,6 +985,16 @@ export function createIdentity(options: IdentityOptions): Identity {
     fields: RegistrationFields,
     address: string | null,
   ): Promise<Outcome<SessionGranted>> {
+    // ADR 0080 D-3: a stranger who finds the instance before its owner has
+    // claimed it gets no account. Unclaimed, there is no owner's key to admit.
+    if (
+      options.refuseWhileUnclaimed === true &&
+      (await moderation.ownerKey()) === undefined &&
+      !(await store.anyAthlete())
+    ) {
+      return refuse('registration_closed');
+    }
+    const registration = await registrationMode();
     const moderator = await moderatorKey(publicKey);
     if (!moderator && registration === 'closed') return refuse('registration_closed');
     const invited = !moderator && registration === 'invite';
@@ -1080,6 +1110,7 @@ export function createIdentity(options: IdentityOptions): Identity {
     moderation,
     ownerClaim,
     emailRecoveryEnabled: mailer !== undefined,
+    registrationMode,
     rateLimitSweepPeriodMs: sweepPeriodMs([
       limits.registrationPerAddress,
       limits.challengePerKey,

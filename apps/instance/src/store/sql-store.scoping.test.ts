@@ -385,6 +385,32 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   resetOwnerClaim: {
     notAScopedRead: 'a write, instance-wide: the operator’s reset of the claim (#2782)',
   },
+  setupState: {
+    notAScopedRead: 'the instance’s ONE setup state (#2784): a step and two moments, no athlete',
+  },
+  setSetupStep: { notAScopedRead: 'a write, instance-wide: the setup’s step (#2784)' },
+  mintSetupCode: { notAScopedRead: 'a write; a setup code names no athlete (#2784)' },
+  openSetupSessionWithCode: {
+    notAScopedRead:
+      'a write: the code is what admits, and a setup session names no athlete (#2784)',
+  },
+  findSetupSession: {
+    notAScopedRead:
+      'authentication: the setup cookie’s token, and a setup session names no athlete (#2784)',
+  },
+  touchSetupSession: { notAScopedRead: 'a write, by the token (#2784)' },
+  endSetupSession: { notAScopedRead: 'a write, by the token (#2784)' },
+  takeSetupKit: { notAScopedRead: 'a write, by the token (#2784)' },
+  takeSetupInvite: { notAScopedRead: 'a write, instance-wide: the setup’s one invite (#2784)' },
+  finishSetup: { notAScopedRead: 'a write, instance-wide: the setup done (#2784)' },
+  registrationSetting: {
+    notAScopedRead: 'the instance’s ONE registration mode setting (#2784): no athlete',
+  },
+  putRegistrationSetting: { notAScopedRead: 'a write, instance-wide (#2784)' },
+  anyAthlete: {
+    notAScopedRead:
+      'whether ANY athlete exists (#2784, ADR 0080 D-3): a yes or no, no row of anybody',
+  },
   openAdminSessionWithCode: {
     notAScopedRead:
       'a write: the code is what admits, and the session is opened for the owner the admin layer named (#2641)',

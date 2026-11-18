@@ -9531,7 +9531,9 @@
                               "app",
                               "cli",
                               "admin_tunnel",
-                              "admin_loopback"
+                              "admin_loopback",
+                              "setup",
+                              "start"
                             ]
                           },
                           "action": {
@@ -9566,7 +9568,14 @@
                               "owner_claim_code_minted",
                               "owner_claim_confirmed",
                               "owner_claim_discarded",
-                              "owner_claim_reset"
+                              "owner_claim_reset",
+                              "setup_code_minted",
+                              "setup_sign_in",
+                              "setup_refused",
+                              "secret_generated",
+                              "registration_mode_set",
+                              "invite_minted",
+                              "setup_done"
                             ]
                           },
                           "detail": {

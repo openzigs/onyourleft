@@ -14,6 +14,7 @@ import {
   isProblem,
   logUnhandled,
   REDACTED,
+  redacted,
 } from './log.ts';
 import * as closeCodes from './room/close-codes.ts';
 
@@ -284,5 +285,37 @@ describe('which written lines are problems (#2614)', () => {
 
   it.each(cases)('%s', (_name, line, expected) => {
     expect(isProblem(line)).toBe(expected);
+  });
+});
+
+describe('the first-run setup’s start line (#2784, ADR 0080 D-2)', () => {
+  it('keeps where the setup is, where its code is and when it ends, and nothing else of any shape', () => {
+    expect(
+      redacted({
+        event: 'first-run-setup',
+        open: 'http://localhost:8788/setup',
+        codeIn: 'secrets/setup-code',
+        validUntil: '2026-11-18T14:05:00.000Z',
+      }),
+    ).toEqual({
+      event: 'first-run-setup',
+      open: 'http://localhost:8788/setup',
+      codeIn: 'secrets/setup-code',
+      validUntil: '2026-11-18T14:05:00.000Z',
+    });
+    // A code, an address that is not the loopback page, a path on the host: redacted whole.
+    expect(
+      redacted({
+        event: 'first-run-setup',
+        open: 'http://127.0.0.1:8788/setup?code=k7mq-x3ra-p9tz-wc4e',
+        codeIn: '/run/secrets/onyourleft/setup-code',
+        validUntil: 'k7mq-x3ra-p9tz-wc4e',
+      }),
+    ).toEqual({
+      event: 'first-run-setup',
+      open: REDACTED,
+      codeIn: REDACTED,
+      validUntil: REDACTED,
+    });
   });
 });

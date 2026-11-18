@@ -61,7 +61,8 @@ export const REGISTRATION_CHANGE_HEADING = 'Changing the mode';
 
 /**
  * The steps to change the mode on the host (#2605; moved by #2646, ADR 0069
- * D-7): the mode is shown, never changed at runtime (#2601's decision 2).
+ * D-7): the mode is shown, never changed at runtime here (#2601's decision 2;
+ * since ADR 0080 D-6 the setup wizard and `operator registration` may set it).
  * Each step one line, its file names, variable, modes and commands as code.
  */
 export const REGISTRATION_CHANGE_STEPS: readonly OperateLine[] = [
@@ -85,6 +86,18 @@ export const REGISTRATION_CHANGE_STEPS: readonly OperateLine[] = [
     ' does not read ',
     { code: '.env' },
     ' again.',
+  ],
+  // #2784 (ADR 0080 D-6): a mode the setup page or the command chose wins over `.env`.
+  [
+    'If the setup page or ',
+    { code: 'operator registration set' },
+    ' chose the mode, the instance holds it over ',
+    { code: '.env' },
+    ': run ',
+    { code: 'operator registration clear' },
+    ' too, or set the new mode with ',
+    { code: 'operator registration set' },
+    ' instead.',
   ],
 ];
 
