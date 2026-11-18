@@ -487,7 +487,7 @@ export const INVITE_REFUSAL_TEXT = {
   code_expired: 'That invite has expired, so ask whoever invited you for a new one.',
   /** An invite-only instance, and no invite was given (`validation_failed` on `inviteCode`). */
   required:
-    'This server lets in only riders it invites, so ask whoever runs it for an invite, then scan it or paste its whole line in the card box.',
+    'This server lets in only riders it invites, so ask whoever runs it for an invite, then scan it or paste its whole line on the Connect screen.',
 } as const;
 
 /** The instance's refusal of a spent, unknown or expired invite, in its own sentence (#2826). */

@@ -5,8 +5,7 @@ import { StatementsPanel } from './StatementsPanel';
 import { ERASE_ACCOUNT_TEXT, EraseAccountPanel } from './EraseAccount';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BlocksPanel } from './BlocksPanel';
-import { parseInstanceCard } from '@onyourleft/domain';
-import { useCallback, useEffect, useId, useState, type JSX } from 'react';
+import { useCallback, useEffect, useState, type JSX } from 'react';
 
 import type { CameraController } from '../camera/session';
 import { Button } from '../design/Button';
@@ -18,7 +17,6 @@ import type {
   InstancePort,
   InstanceState,
 } from '../instance/instance-port';
-import { codeWithCard, readCodeWithCard } from '../instance/instance-pin';
 import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
 import type { OperatePort, OperateStanding } from '../instance/operate-port';
 import type { SyncPort } from '../instance/sync-port';
@@ -27,9 +25,9 @@ import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import { hrefFor, routeById } from '../shell/routes';
 import { InstanceDevices } from './InstanceDevices';
 import { CHANGE_NAME_TEXT, InstanceNamePanel } from './InstanceName';
-import { CardScanner } from './CardScanner';
-import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
-import { OWNER_CLAIM_TEXT, OwnerClaim } from './OwnerClaim';
+import { ConnectFlow } from './ConnectFlow';
+import { InstanceKeys } from './InstanceKeys';
+import { OWNER_CLAIM_TEXT } from './OwnerClaim';
 import { SyncPanel } from './SyncPanel';
 
 /**
@@ -40,11 +38,18 @@ import { SyncPanel } from './SyncPanel';
  * ## Before anything is sent, the rider is told what will be
  *
  * #778's criterion: before sign-in the screen lists what the instance will
- * receive, and that list is **kept visible** — never in a `<details>` — because
- * it says what leaves the device and to whom (#666's ruling). It stays on the
- * screen once connected too, as what the instance goes on receiving.
- * {@link INSTANCE_KEPT_VISIBLE} is the list, and
- * `a11y/kept-visible.a11y.test.tsx` holds it to this route.
+ * receive, and that list is **kept visible** because it says what leaves the
+ * device and to whom (#666's ruling). It stays on the screen once connected
+ * too, as what the instance goes on receiving. {@link INSTANCE_KEPT_VISIBLE}
+ * is the list, and `a11y/kept-visible.a11y.test.tsx` holds it to this route.
+ *
+ * ⚠️ **Since #2828 it is a disclosure before sign-in, drawn OPEN.** The
+ * owner's ruling of 2026-11-18 moved it out from between *Scan* and *Connect*
+ * into "a disclosure that is visible before anything is sent"
+ * ({@link ReceivesBeforeConnect}): under the flow's controls, open on every
+ * step, so it is on the screen before any press without the rider opening
+ * anything — and the kept-visible gate, which fails a closed `<details>` above
+ * it, still holds it there. A rider may fold it; nothing opens it closed.
  *
  * ## What is shown is what the instance says
  *
@@ -81,9 +86,6 @@ export const INSTANCE_BELONGS_TO_ITS_OPERATOR =
   'An instance belongs to whoever runs it, and they decide how long it keeps what it receives. ' +
   'The project’s own instance runs on its maintainer’s computer at home, and its traffic passes ' +
   'through Cloudflare, which decrypts it on the way.';
-
-/** Nothing leaves until the press. */
-export const NOTHING_SENT_UNTIL_CONNECT = 'Nothing is sent until you press Connect.';
 
 /** Public rooms — ruling Q5 of 2026-09-28. Kept visible. */
 export const PUBLIC_ROOMS_ADULTS_ONLY =
@@ -126,50 +128,14 @@ export const INSTANCE_NO_PORT =
   'This app cannot connect to an instance here, because this browser has no local store to ' +
   'keep a sign-in in.';
 
-/** Beside the card box on the Connect form (#1190, D-14 Q1). Draft. */
-export const CONNECT_CARD_LABEL = 'The instance’s card (optional)';
-export const CONNECT_WITHOUT_CARD =
-  'Without the card this device can sign in to an account it already has, but cannot use ' +
-  'anything that needs the card.';
-/**
- * #2826: a rider invite is the card with a code beside it, and goes in the
- * same box. Draft wording.
- */
-export const CONNECT_WITH_INVITE =
-  'If someone invited you, scan the invite or paste its whole line here, then press Connect.';
-
-/** The form that adds this device with another device's code (#773, #1190). Draft. */
-export const LINK_FORM_HEADING = 'Add this device with a code from another of your devices';
-export const LINK_FIELD_LABEL = 'The line your other device shows';
-
-/**
- * What the Connect form says once a scan has filled a box (#2785). Nothing is
- * sent by a scan: the rider still presses, as the form's own sentence says.
- * Draft wording.
- */
-export const CONNECT_SCANNED_TEXT = {
-  card: 'The card was read into the box above. Check the address, then press Connect.',
-  /**
-   * #2823: a card with a code is another device's line, a claim code from the
-   * owner's own server, or an invite (#2826) — the same line, so it goes in
-   * every box that takes one and the rider's press says which.
-   */
-  line:
-    'That card came with a code, now in the card box above and in the boxes under “Add this ' +
-    'device with a code from another of your devices” and “Claim your server”. If someone ' +
-    'invited you, press Connect. If your server’s setup page showed it, press Claim this ' +
-    'server. If another of your devices showed it, press Add this device.',
-} as const;
-
 /** The recovery codes, shown once — ruling Q1 of 2026-09-28. */
 export const RECOVERY_CODES_LEAD =
   'Write these recovery codes down and keep them somewhere safe. Each one adds a new device to ' +
   'your account once, if you ever lose every device you have. They are shown only now.';
 
-function Receives(): JSX.Element {
+function ReceivesList(): JSX.Element {
   return (
-    <KeptVisible>
-      <h2>{INSTANCE_RECEIVES_LEAD}</h2>
+    <>
       <ul>
         {INSTANCE_RECEIVES.map((sentence) => (
           <li key={sentence}>{sentence}</li>
@@ -178,6 +144,35 @@ function Receives(): JSX.Element {
       <p>{INSTANCE_BELONGS_TO_ITS_OPERATOR}</p>
       <p>{PUBLIC_ROOMS_ADULTS_ONLY}</p>
       <p>{VOICE_CHAT_IS_DISCORD}</p>
+    </>
+  );
+}
+
+/** Once connected: what the instance goes on receiving, as a section of its own. */
+function Receives(): JSX.Element {
+  return (
+    <KeptVisible>
+      <h2>{INSTANCE_RECEIVES_LEAD}</h2>
+      <ReceivesList />
+    </KeptVisible>
+  );
+}
+
+/**
+ * Before sign-in (#2828): the same sentences in a disclosure drawn OPEN, under
+ * the flow's controls on every step, so they are on the screen before any
+ * press. Its summary is the lead, which a summary may hold and a heading may
+ * not (`a11y/kept-visible.a11y.test.tsx`, N5).
+ */
+function ReceivesBeforeConnect(): JSX.Element {
+  return (
+    // The mark holds the whole disclosure, summary and all: a `div` may not
+    // sit in a `<summary>`, and the lead is one of the sentences it marks.
+    <KeptVisible>
+      <details className="oyl-details" open>
+        <summary>{INSTANCE_RECEIVES_LEAD}</summary>
+        <ReceivesList />
+      </details>
     </KeptVisible>
   );
 }
@@ -261,26 +256,12 @@ export function InstanceView({
   const [changes, setChanges] = useState<AccountChangesOutcome | undefined>(undefined);
   /** The key this screen revoked (#1208): the list is shown marked after it. */
   const [revoked, setRevoked] = useState<string | undefined>(undefined);
-  const [address, setAddress] = useState('');
-  const [name, setName] = useState('');
-  const [card, setCard] = useState('');
-  const [offer, setOffer] = useState('');
-  /** The owner's claim line (#2823): its own box, which the Connect form's scanner fills too. */
-  const [claimLine, setClaimLine] = useState('');
   /** This screen signed in after a claim (#2823): the connected screen says whether it owns the server. */
   const [claimed, setClaimed] = useState(false);
-  /** Which box a scan just filled (#2785), said until the rider changes either. */
-  const [scanned, setScanned] = useState<keyof typeof CONNECT_SCANNED_TEXT | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [recoveryCodes, setRecoveryCodes] = useState<readonly string[] | undefined>(undefined);
   /** This screen deleted the account on the instance (#906): said once the device is disconnected. */
   const [erased, setErased] = useState(false);
-  const addressId = useId();
-  const nameId = useId();
-  const cardId = useId();
-  const cardHintId = useId();
-  const offerId = useId();
 
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
@@ -314,35 +295,6 @@ export function InstanceView({
     );
   }
 
-  async function connect(): Promise<void> {
-    if (port === undefined) return;
-    setBusy(true);
-    setRefusal(undefined);
-    setErased(false);
-    const outcome = await port.connect(address, name, card);
-    setBusy(false);
-    if (outcome.kind === 'refused') {
-      setRefusal(outcome.text);
-      return;
-    }
-    setRecoveryCodes(outcome.recoveryCodes);
-    // ⚠️ What the screen now shows is READ BACK from the instance, not the form.
-    await read();
-  }
-
-  async function link(): Promise<void> {
-    if (port === undefined) return;
-    setBusy(true);
-    setRefusal(undefined);
-    const outcome = await port.link(offer);
-    setBusy(false);
-    if (outcome.kind === 'refused') {
-      setRefusal(outcome.text);
-      return;
-    }
-    await read();
-  }
-
   async function disconnect(): Promise<void> {
     if (port === undefined) return;
     setBusy(true);
@@ -369,161 +321,19 @@ export function InstanceView({
             {ERASE_ACCOUNT_TEXT.erased}
           </StatusMessage>
         ) : null}
-        {/* Owner ruling of 2026-11-18 (#2823): a new owner finds the claim at the
-            top, above what the instance receives and the Connect button. */}
-        <OwnerClaim
+        {/* #2828: one scan, then one question about where the code came from. */}
+        <ConnectFlow
           port={port}
           camera={camera}
-          line={claimLine}
-          onLineChange={(text) => {
-            setClaimLine(text);
-            setScanned(undefined);
-          }}
-          onSignedIn={(outcome) => {
-            setClaimLine('');
-            setClaimed(true);
+          onConnected={(outcome, byClaim) => {
+            setErased(false);
+            setClaimed(byClaim);
             setRecoveryCodes(outcome.recoveryCodes);
+            // ⚠️ What the screen now shows is READ BACK from the instance, not the form.
             void read();
           }}
         />
-        <form
-          className="oyl-trainer__form"
-          // #2785: two forms on one screen are two form landmarks, so each is
-          // named (`a11y/audit.ts` §`landmarksAreDistinguishable`).
-          aria-label="Connect"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void connect();
-          }}
-        >
-          <p>
-            <label htmlFor={addressId}>Instance address</label>{' '}
-            <input
-              className="oyl-input"
-              id={addressId}
-              type="url"
-              inputMode="url"
-              autoComplete="url"
-              placeholder="https://ride.example"
-              value={address}
-              onChange={(event) => {
-                setAddress(event.target.value);
-                setRefusal(undefined);
-              }}
-            />
-          </p>
-          <p>
-            <label htmlFor={nameId}>The name other riders will see (optional)</label>{' '}
-            <input
-              className="oyl-input"
-              id={nameId}
-              autoComplete="nickname"
-              maxLength={64}
-              value={name}
-              onChange={(event) => {
-                setName(event.target.value);
-                setRefusal(undefined);
-              }}
-            />
-          </p>
-          <p>
-            <label htmlFor={cardId}>{CONNECT_CARD_LABEL}</label>
-            <br />
-            <textarea
-              className="oyl-input oyl-instance__card-box"
-              id={cardId}
-              rows={3}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoComplete="off"
-              aria-describedby={cardHintId}
-              value={card}
-              onChange={(event) => {
-                setCard(event.target.value);
-                setRefusal(undefined);
-                setScanned(undefined);
-              }}
-            />
-          </p>
-          <p className="oyl-muted" id={cardHintId}>
-            {CARD_FIELD_HINT} {CONNECT_WITHOUT_CARD} {CONNECT_WITH_INVITE}
-          </p>
-          {camera === undefined ? null : (
-            <CardScanner
-              controller={camera}
-              onScanned={(text) => {
-                // #2785: a scan fills a box, as a paste would, and sends
-                // nothing — the press does. A card goes in the card box; a
-                // card with a code is another device's line, a claim or an
-                // invite (#2826), so it goes in every box that takes one.
-                setRefusal(undefined);
-                const line = readCodeWithCard(text);
-                if (line === undefined) {
-                  setCard(text.trim());
-                  // Only a card-shaped read is called a card: any other code
-                  // fills the box as a paste would and Connect says what it is.
-                  setScanned(text.trim().startsWith('oyl-instance:') ? 'card' : undefined);
-                } else {
-                  const whole = codeWithCard(line.card, line.code);
-                  // An invite's Connect: the box holds the line, and an empty
-                  // address shows the card's, where the press will go.
-                  setCard(whole);
-                  const parsed = parseInstanceCard(line.card);
-                  if (parsed.ok && address.trim() === '') setAddress(parsed.card.origin);
-                  setOffer(whole);
-                  setClaimLine(whole);
-                  setScanned('line');
-                }
-              }}
-            />
-          )}
-          {scanned === undefined ? null : (
-            <StatusMessage tone="info" label="Scanned" live>
-              {CONNECT_SCANNED_TEXT[scanned]}
-            </StatusMessage>
-          )}
-          <Receives />
-          <p className="oyl-muted">{NOTHING_SENT_UNTIL_CONNECT}</p>
-          <Button type="submit" disabled={busy}>
-            Connect
-          </Button>
-        </form>
-        <h3>{LINK_FORM_HEADING}</h3>
-        <form
-          className="oyl-trainer__form"
-          aria-label={LINK_FORM_HEADING}
-          onSubmit={(event) => {
-            event.preventDefault();
-            void link();
-          }}
-        >
-          <p>
-            <label htmlFor={offerId}>{LINK_FIELD_LABEL}</label>
-            <br />
-            <textarea
-              className="oyl-input oyl-instance__card-box"
-              id={offerId}
-              rows={3}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoComplete="off"
-              value={offer}
-              onChange={(event) => {
-                setOffer(event.target.value);
-                setRefusal(undefined);
-                setScanned(undefined);
-              }}
-            />
-          </p>
-          <Button type="submit" variant="secondary" disabled={busy}>
-            Add this device
-          </Button>
-        </form>
-        {refusal === undefined ? null : (
-          <StatusMessage tone="danger" label="Not connected" live>
-            {refusal}
-          </StatusMessage>
-        )}
+        <ReceivesBeforeConnect />
         {/* #1195: with no instance on this device the panel draws nothing at
             all; it is here so that only its own availability decides. */}
         {sync === undefined ? null : <SyncPanel port={sync} />}

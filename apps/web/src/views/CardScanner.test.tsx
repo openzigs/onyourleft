@@ -47,7 +47,8 @@ import { mount, settle, typeInto, typeIntoTextArea, type Mounted } from '../test
 import { CARD_SCAN_TEXT, CardScanner } from './CardScanner';
 import { InstanceKeys } from './InstanceKeys';
 import { OWNER_CLAIM_TEXT } from './OwnerClaim';
-import { CONNECT_SCANNED_TEXT, InstanceView, LINK_FIELD_LABEL } from './InstanceView';
+import { CONNECT_FLOW_TEXT } from './ConnectFlow';
+import { InstanceView } from './InstanceView';
 
 let mounted: Mounted | undefined;
 afterEach(() => {
@@ -255,30 +256,29 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     expect(camera.liveStreams()).toBe(0);
   });
 
-  it('fills the line box with the card and its code on the Connect form, and links from it on the press', async () => {
+  it('reads a scanned card and code once, asks where it came from, and adds this device on that answer and the press (#2828)', async () => {
     const scripted = scriptedInstance();
     const { card } = await cardOf(SERVED_IDENTITY);
     const { camera, show } = cameraShowing();
     mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
     await settle();
     show(`  ${codeWithCard(card, CODE.toUpperCase())}\n`);
-    await press(CARD_SCAN_TEXT.start);
-    await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
-    const [claimBox, cardBox, lineBox] = boxes();
-    expect(lineBox?.value).toBe(codeWithCard(card, CODE));
-    // #2823: the same line is what the owner's setup page shows as a claim, so
-    // it is in the claim box too, and the press says which it is — and #2826:
-    // it is a rider invite's too, which Connect takes from the card box.
-    expect(claimBox?.value).toBe(codeWithCard(card, CODE));
-    expect(cardBox?.value).toBe(codeWithCard(card, CODE));
-    // Nothing was sent by the scan: the form's own sentence is kept.
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.question));
+    // One question, and the card's own address; no box was filled.
+    expect(text()).toContain(CONNECT_FLOW_TEXT.codeFor(ORIGIN));
+    expect(boxes()).toEqual([]);
+    expect(camera.liveStreams()).toBe(0);
+    // Nothing was sent by the scan, nor by the answer: the press sends.
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
-    await press('Add this device');
+    await press(CONNECT_FLOW_TEXT.choices.device);
+    expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
+    await press(CONNECT_FLOW_TEXT.deviceButton);
     expect(scripted.calls).toContain(`link ${codeWithCard(card, CODE)}`);
     expect(scripted.held.connected).toBe(true);
   });
 
-  it('connects with a scanned invite on the press, to the address the invite’s card names (#2826)', async () => {
+  it('connects with a scanned invite on that answer and the press, to the address the invite’s card names (#2826, #2828)', async () => {
     const scripted = scriptedInstance();
     const pressed: (readonly [string, string, string | undefined])[] = [];
     const port: InstancePort = {
@@ -293,72 +293,69 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     mounted = await mount(<InstanceView port={port} camera={agreed(camera)} />);
     await settle();
     show(codeWithCard(card, CODE));
-    await press(CARD_SCAN_TEXT.start);
-    await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
-    // The empty address shows where the press will go: the invite card's.
-    expect(mounted.container.querySelector<HTMLInputElement>('input[type="url"]')?.value).toBe(
-      ORIGIN,
-    );
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.question));
+    await press(CONNECT_FLOW_TEXT.choices.invite);
+    // The address is the card's, in the expert's disclosure, which stays shut.
+    const address = mounted.container.querySelector<HTMLInputElement>('input[type="url"]')!;
+    expect(address.value).toBe(ORIGIN);
+    expect(address.closest('details')?.open).toBe(false);
     expect(pressed).toEqual([]);
     await press('Connect');
     expect(pressed).toEqual([[ORIGIN, '', codeWithCard(card, CODE)]]);
     expect(scripted.held.connected).toBe(true);
   });
 
-  it('keeps an address the rider typed when a scanned invite names another (#2826)', async () => {
+  it('sends an invite to the address an expert typed in place of the card’s (#2826, #2828)', async () => {
     const scripted = scriptedInstance();
     const { card } = await cardOf(SERVED_IDENTITY);
     const { camera, show } = cameraShowing();
     mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
     await settle();
+    show(codeWithCard(card, CODE));
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.question));
+    await press(CONNECT_FLOW_TEXT.choices.invite);
     const address = mounted.container.querySelector<HTMLInputElement>('input[type="url"]')!;
     await typeInto(address, 'https://typed.example');
-    show(codeWithCard(card, CODE));
-    await press(CARD_SCAN_TEXT.start);
-    await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
-    expect(address.value).toBe('https://typed.example');
+    await press('Connect');
+    expect(scripted.calls).toContain('connect https://typed.example');
   });
 
-  it('fills only the claim box from the claim form’s own scanner, and claims on the press (#2823)', async () => {
+  it('claims a scanned line on the answer “My server’s setup page” and the press (#2823, #2828)', async () => {
     const scripted = scriptedInstance();
     const { card } = await cardOf(SERVED_IDENTITY);
     const { camera, show } = cameraShowing();
     mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
     await settle();
     show(`  ${codeWithCard(card, CODE)}\n`);
-    await press(OWNER_CLAIM_TEXT.scan);
-    await until(() => boxes()[0]?.value !== '');
-    const [claimBox, cardBox, lineBox] = boxes();
-    expect(claimBox?.value).toBe(codeWithCard(card, CODE));
-    expect(cardBox?.value).toBe('');
-    expect(lineBox?.value).toBe('');
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.question));
     expect(camera.liveStreams()).toBe(0);
+    await press(CONNECT_FLOW_TEXT.choices.claim);
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
     await press(OWNER_CLAIM_TEXT.claim);
     expect(scripted.calls).toContain(`claimOwner ${codeWithCard(card, CODE)}`);
   });
 
-  it('puts a scanned card alone in the card box on the Connect form, and sends nothing', async () => {
+  it('goes straight to Connect for a scanned card alone, sends nothing, and connects to its address on the press (#2828)', async () => {
     const scripted = scriptedInstance();
     const { card } = await cardOf(SERVED_IDENTITY);
     const { camera, show } = cameraShowing();
     mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
     await settle();
     show(card);
-    await press(CARD_SCAN_TEXT.start);
-    await until(() => text().includes(CONNECT_SCANNED_TEXT.card));
-    const [claimBox, cardBox, lineBox] = boxes();
-    expect(cardBox?.value).toBe(card);
-    expect(lineBox?.value).toBe('');
-    expect(claimBox?.value).toBe('');
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.cardHeading));
+    // No question: a card with no code can only be connected to.
+    expect(text()).not.toContain(CONNECT_FLOW_TEXT.question);
+    expect(text()).toContain(CONNECT_FLOW_TEXT.cardFor(ORIGIN));
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
-    // A rider's own edit takes the sentence away: it described the scan.
-    await typeIntoTextArea(cardBox!, `${card} `);
-    expect(text()).not.toContain(CONNECT_SCANNED_TEXT.card);
-    expect(text()).toContain(LINK_FIELD_LABEL);
+    await press('Connect');
+    expect(scripted.calls).toContain(`connect ${ORIGIN}`);
   });
 
-  it('takes a refusal from an earlier press away when a scan fills a box', async () => {
+  it('takes a refusal from an earlier press away when a scan reads a code', async () => {
     const scripted = scriptedInstance({
       connectAnswer: { kind: 'refused', text: 'The instance would not have you.' },
     });
@@ -369,22 +366,26 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     await press('Connect');
     await until(() => text().includes('The instance would not have you.'));
     show(card);
-    await press(CARD_SCAN_TEXT.start);
-    await until(() => text().includes(CONNECT_SCANNED_TEXT.card));
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.cardHeading));
     expect(text()).not.toContain('The instance would not have you.');
   });
 
-  it('does not say a card was read when the code is not card-shaped', async () => {
+  it('refuses a code that is not a card under the scan button, and sends nothing', async () => {
     const scripted = scriptedInstance();
     const { camera, show } = cameraShowing();
     mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
     await settle();
     show('https://example.org/wifi');
-    await press(CARD_SCAN_TEXT.start);
-    await until(() => boxes()[1]?.value === 'https://example.org/wifi');
-    await settle();
-    expect(text()).not.toContain(CONNECT_SCANNED_TEXT.card);
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.unreadable));
+    // Directly under the scanner whose button was pressed (#2828).
+    const scanner = button(CONNECT_FLOW_TEXT.scan).closest('[data-oyl-card-scan]');
+    expect(scanner?.nextElementSibling?.textContent).toContain(CONNECT_FLOW_TEXT.unreadable);
+    expect(text()).not.toContain(CONNECT_FLOW_TEXT.question);
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
+    // The scan button is still the way on, and focus came back to it.
+    expect(document.activeElement).toBe(button(CONNECT_FLOW_TEXT.scan));
   });
 
   it('keeps the pin and says what paste says, for a card with a different fingerprint', async () => {
@@ -697,9 +698,10 @@ describe('when the camera cannot scan, the paste box is what is left (#2785)', (
     const scripted = scriptedInstance();
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
-    expect(() => button(CARD_SCAN_TEXT.start)).toThrow();
-    expect(() => button(OWNER_CLAIM_TEXT.scan)).toThrow();
-    // The card, the other device's line and the owner's claim (#2823): each pasted.
-    expect(boxes().length).toBe(3);
+    expect(() => button(CONNECT_FLOW_TEXT.scan)).toThrow();
+    expect(() => button(CONNECT_FLOW_TEXT.pasteInstead)).toThrow();
+    // #2828: the one paste box is open, and is the way in.
+    expect(boxes().length).toBe(1);
+    expect(text()).toContain(CONNECT_FLOW_TEXT.pasteLabel);
   });
 });

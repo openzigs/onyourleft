@@ -64,13 +64,29 @@ export const CARD_SCAN_TEXT = {
  */
 const SCAN_FACING: CameraFacing = 'environment';
 
+/**
+ * A large button the width of its column (#2828): the Connect screen's *Scan a
+ * code* and its three answers to where a code came from. Layout only
+ * (`theme.css` §`.oyl-connect__choice`).
+ */
+export const CONNECT_CHOICE_CLASS = 'oyl-connect__choice';
+
 export function CardScanner({
   controller,
   onScanned,
   every,
   startLabel = CARD_SCAN_TEXT.start,
+  primary = false,
+  focusOnMount = false,
 }: {
   readonly controller: CameraController;
+  /**
+   * The start button as the screen's one primary action (#2828: the Connect
+   * screen opens on *Scan a code*). Secondary otherwise, beside a paste box.
+   */
+  readonly primary?: boolean;
+  /** Focus the start button as it first appears: it replaced the control just pressed (#557). */
+  readonly focusOnMount?: boolean;
   /**
    * The start button's name, where a screen has two scanners for two things
    * (#2823: the owner's claim code beside the Connect form's card).
@@ -210,7 +226,13 @@ export function CardScanner({
           </Button>
         </>
       ) : (
-        <Button variant="secondary" onClick={start} ref={startButton}>
+        <Button
+          variant={primary ? 'primary' : 'secondary'}
+          {...(primary ? { className: CONNECT_CHOICE_CLASS } : {})}
+          onClick={start}
+          ref={startButton}
+          focusOnMount={focusOnMount}
+        >
           {startLabel}
         </Button>
       )}

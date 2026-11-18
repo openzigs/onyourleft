@@ -9,7 +9,6 @@
  * large, the press that signs in, and one sentence for each refusal.
  */
 
-import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { codeWithCard } from '../instance/instance-pin';
@@ -21,13 +20,15 @@ import {
   scriptedOperate,
 } from '../instance/testing';
 import {
-  mount,
-  queryAll,
-  settle,
-  submitForm,
-  typeIntoTextArea,
-  type Mounted,
-} from '../testing/mount';
+  answer,
+  buttonNamed,
+  fieldLabelled,
+  pasteCode,
+  pressNamed,
+  saidUnder,
+} from '../testing/connect-flow';
+import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { CONNECT_FLOW_TEXT } from './ConnectFlow';
 import { InstanceView, RECOVERY_CODES_LEAD } from './InstanceView';
 import { comparisonGroups, OWNER_CLAIM_TEXT } from './OwnerClaim';
 
@@ -45,43 +46,16 @@ function text(): string {
   return (mounted?.container.textContent ?? '').replace(/\s+/g, ' ');
 }
 
-function button(name: string): HTMLButtonElement {
-  const found = queryAll<HTMLButtonElement>(document.body, 'button').find(
-    (each) => each.textContent === name,
-  );
-  if (found === undefined) throw new Error(`no ${name} button`);
-  return found;
-}
+const button = buttonNamed;
+const press = pressNamed;
 
-function claimBox(): HTMLTextAreaElement {
-  const label = queryAll<HTMLLabelElement>(document.body, 'label').find(
-    (each) => each.textContent === OWNER_CLAIM_TEXT.label,
-  );
-  const box = document.getElementById(label?.htmlFor ?? '');
-  if (!(box instanceof HTMLTextAreaElement)) throw new Error('no claim box');
-  return box;
-}
-
-function claimForm(): HTMLFormElement {
-  const form = claimBox().closest('form');
-  if (form === null) throw new Error('no claim form');
-  return form;
-}
-
-async function press(name: string): Promise<void> {
-  await act(async () => {
-    button(name).click();
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-  });
-  await settle();
-}
-
+/** Since #2828: paste the line, say a setup page showed it, and press Claim this server. */
 async function claim(line: string): Promise<void> {
-  await typeIntoTextArea(claimBox(), line);
-  await submitForm(claimForm());
-  await settle();
+  await pasteCode(line);
+  await answer('claim');
+  // The claim step takes the focus from the answer it replaced.
+  expect(document.activeElement?.textContent).toBe(OWNER_CLAIM_TEXT.heading);
+  await press(OWNER_CLAIM_TEXT.claim);
 }
 
 describe('the owner’s claim on the Connect screen — #2823', () => {
@@ -89,8 +63,13 @@ describe('the owner’s claim on the Connect screen — #2823', () => {
     const scripted = scriptedInstance();
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
+    await pasteCode(LINE);
+    await answer('claim');
     expect(text()).toContain(OWNER_CLAIM_TEXT.lead);
-    await claim(LINE);
+    // Nothing was sent by the paste or the answer: the press sends.
+    expect(scripted.calls).toEqual(['current']);
+    expect(text()).toContain(OWNER_CLAIM_TEXT.nothingSent);
+    await press(OWNER_CLAIM_TEXT.claim);
     expect(scripted.calls).toContain(`claimOwner ${LINE}`);
 
     const digits = mounted.container.querySelector('.oyl-instance__compare');
@@ -104,22 +83,23 @@ describe('the owner’s claim on the Connect screen — #2823', () => {
     expect(document.activeElement).toBe(button(OWNER_CLAIM_TEXT.signIn));
   });
 
-  it('shows one sentence for a refusal, keeps the box, and shows no digits', async () => {
+  it('shows one sentence for a refusal under Claim this server, stays on the step, and shows no digits', async () => {
     const scripted = scriptedInstance({
       claimAnswer: { kind: 'refused', text: CLAIM_REFUSAL_TEXT.refused },
     });
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
     await claim(LINE);
-    expect(text()).toContain(CLAIM_REFUSAL_TEXT.refused);
+    // #2828: directly under the button that was pressed.
+    expect(saidUnder(OWNER_CLAIM_TEXT.claim)).toContain(CLAIM_REFUSAL_TEXT.refused);
     expect(mounted.container.querySelector('.oyl-instance__compare')).toBeNull();
-    expect(claimBox().value).toBe(LINE);
-    // Typing again clears the old sentence.
-    await typeIntoTextArea(claimBox(), CARD);
-    expect(text()).not.toContain(CLAIM_REFUSAL_TEXT.refused);
+    expect(text()).not.toContain(CODE);
+    // Pressing again takes the old sentence away until the new answer.
+    await press(OWNER_CLAIM_TEXT.claim);
+    expect(scripted.calls.filter((call) => call === `claimOwner ${LINE}`)).toHaveLength(2);
   });
 
-  it('on “another number”, forgets the digits and the line, says what to do, and gives the box the focus', async () => {
+  it('on “another number”, forgets the digits and the line, says what to do, and starts again with the focus on the paste box', async () => {
     const scripted = scriptedInstance();
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
@@ -128,8 +108,10 @@ describe('the owner’s claim on the Connect screen — #2823', () => {
     expect(mounted.container.querySelector('.oyl-instance__compare')).toBeNull();
     expect(text()).toContain(OWNER_CLAIM_TEXT.mismatch);
     expect(text()).not.toContain(SCRIPTED_COMPARISON_CODE.slice(0, 3));
-    expect(claimBox().value).toBe('');
-    expect(document.activeElement).toBe(claimBox());
+    // The screen starts again: this device has no camera, so the paste box, empty.
+    const box = fieldLabelled<HTMLTextAreaElement>(CONNECT_FLOW_TEXT.pasteLabel);
+    expect(box.value).toBe('');
+    expect(document.activeElement).toBe(box);
     // Nothing was signed in.
     expect(scripted.calls.some((call) => call.startsWith('signInAsOwner'))).toBe(false);
   });
@@ -169,7 +151,7 @@ describe('the owner’s claim on the Connect screen — #2823', () => {
     await settle();
     await claim(LINE);
     await press(OWNER_CLAIM_TEXT.signIn);
-    expect(text()).toContain(CLAIM_REFUSAL_TEXT['not-confirmed']);
+    expect(saidUnder(OWNER_CLAIM_TEXT.signIn)).toContain(CLAIM_REFUSAL_TEXT['not-confirmed']);
     expect(mounted.container.querySelector('.oyl-instance__compare')?.textContent).toBe('482 913');
     expect(text()).not.toContain('Connected');
   });
