@@ -423,7 +423,9 @@ export function InstanceView({
                 const line = readCodeWithCard(text);
                 if (line === undefined) {
                   setCard(text.trim());
-                  setScanned('card');
+                  // Only a card-shaped read is called a card: any other code
+                  // fills the box as a paste would and Connect says what it is.
+                  setScanned(text.trim().startsWith('oyl-instance:') ? 'card' : undefined);
                 } else {
                   setOffer(codeWithCard(line.card, line.code));
                   setScanned('line');

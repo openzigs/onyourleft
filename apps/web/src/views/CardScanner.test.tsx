@@ -28,7 +28,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CameraController } from '../camera/session';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 import { pairingCodeModules } from '../camera/side-link-qr';
-import { photographedCode, scriptedCamera, type ScriptedCamera } from '../camera/testing';
+import {
+  manualSchedule,
+  photographedCode,
+  scriptedCamera,
+  type ScriptedCamera,
+} from '../camera/testing';
 import { codeWithCard, INSTANCE_KEY_TEXT, sealedRouteGate } from '../instance/instance-pin';
 import {
   createInstancePort,
@@ -286,6 +291,35 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     expect(text()).toContain(LINK_FIELD_LABEL);
   });
 
+  it('takes a refusal from an earlier press away when a scan fills a box', async () => {
+    const scripted = scriptedInstance({
+      connectAnswer: { kind: 'refused', text: 'The instance would not have you.' },
+    });
+    const { card } = await cardOf(SERVED_IDENTITY);
+    const { camera, show } = cameraShowing();
+    mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
+    await settle();
+    await press('Connect');
+    await until(() => text().includes('The instance would not have you.'));
+    show(card);
+    await press(CARD_SCAN_TEXT.start);
+    await until(() => text().includes(CONNECT_SCANNED_TEXT.card));
+    expect(text()).not.toContain('The instance would not have you.');
+  });
+
+  it('does not say a card was read when the code is not card-shaped', async () => {
+    const scripted = scriptedInstance();
+    const { camera, show } = cameraShowing();
+    mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
+    await settle();
+    show('https://example.org/wifi');
+    await press(CARD_SCAN_TEXT.start);
+    await until(() => boxes()[0]?.value === 'https://example.org/wifi');
+    await settle();
+    expect(text()).not.toContain(CONNECT_SCANNED_TEXT.card);
+    expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
+  });
+
   it('keeps the pin and says what paste says, for a card with a different fingerprint', async () => {
     const pinned = await cardOf(SERVED_IDENTITY);
     const other = await cardOf(OTHER_IDENTITY);
@@ -530,6 +564,31 @@ describe('when the camera cannot scan, the paste box is what is left (#2785)', (
     expect(text()).toContain(CARD_SCAN_TEXT.stopped);
     expect(text()).not.toContain(CARD_SCAN_TEXT.looking);
     expect(timer.running()).toBe(0);
+    expect(camera.liveStreams()).toBe(0);
+  });
+
+  it('does not ask for the rider’s earlier camera again once the camera stopped under the scan', async () => {
+    const { camera } = cameraShowing();
+    const polling = manualSchedule();
+    const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
+      port: camera.port,
+      schedule: polling.schedule,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
+    await controller.turnOn('user');
+    await scanner(controller, ownedTicks());
+    await press(CARD_SCAN_TEXT.start);
+    // The track ends under the scan, as the OS camera indicator's revoke does;
+    // the liveness poll is what hears it.
+    await act(async () => {
+      camera.endTheTrack();
+      polling.fire();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text()).toContain(CARD_SCAN_TEXT.stopped);
+    expect(camera.facings).toEqual(['user', 'environment']);
     expect(camera.liveStreams()).toBe(0);
   });
 

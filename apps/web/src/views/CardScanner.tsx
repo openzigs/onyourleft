@@ -112,6 +112,10 @@ export function CardScanner({
     if (!scanning) return undefined;
     return controller.subscribe(() => {
       if (looking.current && !controller.state().live) {
+        // The camera is already off, and the rider (or the OS) turned it
+        // off: nothing is given back, so no earlier camera is asked for again.
+        turnedOn.current = false;
+        restore.current = undefined;
         close();
         setProblem(CARD_SCAN_TEXT.stopped);
       }
