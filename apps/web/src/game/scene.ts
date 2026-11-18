@@ -112,6 +112,7 @@ import {
   STRUCTURE_MAX_ITEMS,
   clearOfBuildings,
   clearOfSettlements,
+  groundedFootprintOf,
   structuresAt,
   type MappedTown,
   type SettlementFootprint,
@@ -657,7 +658,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // #2099: and only where this frame's ground is drawn. The scenery is
     // placed from the route and the ground's reach is the frame's, which a
     // sharp bend tapers in before and after it. @see standingOnGround
-    scatter: standingOnGround(items, ground),
+    // #2761: and no building whose ground falls away under it further than its walls reach.
+    scatter: standingOnGround(items, ground, groundedFootprintOf),
     // #966: the billboards in view, out of the structures' budget.
     billboards,
     sideRoads,

@@ -61,6 +61,7 @@ import {
   buildingBeside,
   landBeside,
   mixedTownFixture,
+  plinthTriangles,
   polygonBeside,
   rectangleBeside,
   starBeside,
@@ -462,8 +463,13 @@ describe('a main street — #1590, over the mixed town', () => {
   it('adds nothing to the far level, and keeps every plan inside its budgets', () => {
     for (const plan of town) {
       expect(plan.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
-      expect(plan.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
-      expect(plan.farTriangleCount).toBe(trianglesOf(plan, 'wall') + trianglesOf(plan, 'roof'));
+      expect(plan.farTriangleCount - plinthTriangles(plan)).toBeLessThanOrEqual(
+        FOOTPRINT_MAX_FAR_TRIANGLES,
+      );
+      // #2761: the far level is the walls, the plinth and the roof.
+      expect(plan.farTriangleCount).toBe(
+        trianglesOf(plan, 'wall') + trianglesOf(plan, 'plinth') + trianglesOf(plan, 'roof'),
+      );
     }
   });
 });

@@ -52,6 +52,7 @@ import {
   footprintFixture,
   mixedTownFixture,
   landBeside,
+  plinthTriangles,
   rectangleBeside,
   starBeside,
   type FootprintFixtureName,
@@ -384,7 +385,7 @@ describe('nothing on any stretch of the road — rule 3, #468', () => {
 });
 
 describe('at most 640 triangles a plan — the budget', () => {
-  it('holds every plan of the fixture to its triangles, and its far level to 200', () => {
+  it('holds every plan of the fixture to its triangles, and its far walls and roof to 200', () => {
     const { plans } = footprintPlans(fixture.corridor, mask, fixture.profile, fixture.origin);
     expect(FOOTPRINT_MAX_TRIANGLES).toBe(REALISTIC_TRIANGLES.structure);
     for (const plan of plans) {
@@ -394,7 +395,10 @@ describe('at most 640 triangles a plan — the budget', () => {
       );
       expect(plan.triangleCount).toBe(counted);
       expect(plan.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
-      expect(plan.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
+      // #2761: the far level draws the plinth beside the walls and roof the cap holds.
+      expect(plan.farTriangleCount - plinthTriangles(plan)).toBeLessThanOrEqual(
+        FOOTPRINT_MAX_FAR_TRIANGLES,
+      );
     }
     // The heavy cases are in it: 48 vertices with two holes, the 200-vertex star, 19 600 m².
     expect(planned('courtyard').triangleCount).toBeGreaterThan(300);
