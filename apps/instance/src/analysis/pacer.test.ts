@@ -189,6 +189,11 @@ describe('an AI-pacer decision, read back as the app reads it (#2712)', () => {
     expect(PACER_SYSTEM).toMatch(/"lift" on a descent/);
     // The gap rules still come first: the terrain only chooses where they leave a choice.
     expect(PACER_SYSTEM).toMatch(/Where these rules leave a choice, pace the terrain/);
+    expect(PACER_SYSTEM).toMatch(
+      /in your draft \("riderInDraft"\): "hold", except on the terrain below/,
+    );
+    // Measured on the owner's PC: easing lines quoted the gap in metres, which the screen voids.
+    expect(PACER_SYSTEM).toMatch(/distance \(not the gap, not the road ahead\)/);
   });
 
   it('refuses a course ahead that carries anything but its numbers, before a model is called — #2794', async () => {

@@ -456,6 +456,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   refuses any key it does not name; the field is optional, so a device from before it still asks.
   The prompt is `pacer-5`: where the gap rules (`pacer-4`) leave a choice, ease a little in the
   last 300 m before a climb so the pacer can hold its pace up it, and lift on a descent or where a
-  climb ends into the flat. **What does not move**: the envelope (D-2.2), the trainer (D-6), the
+  climb ends into the flat, and it names the gap and the road ahead among the distances a line
+  may not write, because on the owner's PC easing lines quoted the gap in metres, which the screen
+  voids. **What does not move**: the envelope (D-2.2), the trainer (D-6), the
   fallback (D-7), the log and `MODEL_PACER_CODE_VERSION` (D-5), the screen (D-4.2) and the gap
   rules, which still come first.
