@@ -1,0 +1,391 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Publish the instance's image, signed, for amd64 and arm64, and the pull-only
+# bundle that deploys it with no git checkout and no build (#2786).
+#
+#   publish   builds apps/instance/Dockerfile for both platforms and pushes it
+#             as ghcr.io/openzigs/onyourleft-instance:sha-<commit>; signs the
+#             digest with cosign, keyless; runs the verify command
+#             docs/self-hosting/home-machine.md gives an operator against that
+#             digest; reads every layer of each platform for an env file or a
+#             secret (scripts/check-image-layers.sh); and makes the bundle
+#             (scripts/make-instance-bundle.sh), whose compose.yaml names the
+#             image BY DIGEST.
+#   pull-only takes the bundle into an empty directory on a runner that has
+#             never checked the repository out, brings the instance up from
+#             it (its migrate step first, then ready), and then deploys an
+#             image that never becomes ready and requires deploy.sh to have put
+#             the published digest back: #2786's proof that no file from the
+#             checkout is needed and that the rollback survives the pull path.
+#   promote   on a release tag only, once both have passed: tags the same
+#             digest `<version>` and attaches the bundle to the GitHub Release.
+#
+# ⚠️ Signing: cosign keyless (Sigstore), not GitHub artifact attestations.
+# Both are free. Cosign's check is one command an operator runs with no GitHub
+# account and no token (`cosign verify`), against the public Sigstore log;
+# `gh attestation verify` needs the gh CLI signed in to GitHub. An operator
+# with no account to sign in with is who this bundle is for (ADR 0036 D-7).
+#
+# ⚠️ Standard runner label only (CLAUDE.md section 8): arm64 is built under
+# QEMU on ubuntu-latest, slower and free. Every third-party action is pinned to
+# a commit, and the two images the build tooling itself runs (binfmt, BuildKit)
+# by digest. WF001 holds: no trigger that runs with secrets on a fork's code.
+#
+# ⚠️ A pull request runs publish and pull-only, like mirror-base-image.yml, so
+# the pipeline is proven on the change that alters it; it pushes only a
+# `sha-` candidate tag and promotes nothing. A fork's pull request has a
+# read-only token and no OIDC token, so it is skipped rather than failing.
+#
+# ⚠️ GHCR makes a new package PRIVATE until its owner changes that once, by
+# hand, in the package's settings (there is no API for it). Until then this
+# workflow passes -- it signs in -- and an operator's anonymous pull is refused.
+
+name: Instance image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - .github/workflows/instance-image.yml
+      - apps/instance/Dockerfile
+      - apps/instance/deploy/home/deploy.sh
+      - scripts/check-image-layers.sh
+      - scripts/make-instance-bundle.sh
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: instance-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/openzigs/onyourleft-instance
+
+jobs:
+  publish:
+    name: Build, sign and check the image
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      # Cosign's keyless signature: the run's own OIDC identity, no stored key.
+      id-token: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      version: ${{ steps.version.outputs.version }}
+      reference: ${{ steps.push.outputs.reference }}
+    steps:
+      - name: Check out the repository
+        #   gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Name the version
+        id: version
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF}" in
+            refs/tags/v*) version="${GITHUB_REF_NAME#v}" ;;
+            *) version="commit-${GITHUB_SHA}" ;;
+          esac
+          if ! [[ "${version}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::${GITHUB_REF} does not name a version a tag can carry."
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Script tests
+        run: |
+          bash scripts/check-image-layers.test.sh
+          bash scripts/make-instance-bundle.test.sh
+
+      # The emulator arm64 is built under. Its image by digest:
+      #   docker buildx imagetools inspect tonistiigi/binfmt:qemu-v10.2.3, read 2026-11-18.
+      #   gh api repos/docker/setup-qemu-action/commits/v4.4.0 --jq .sha
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+
+      # A BuildKit builder, which a multi-platform push needs. Its image by digest:
+      #   docker buildx imagetools inspect moby/buildkit:v0.35.0, read 2026-11-18.
+      #   gh api repos/docker/setup-buildx-action/commits/v4.4.1 --jq .sha
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Build and push both platforms
+        id: push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg "OYL_INSTANCE_COMMIT=${GITHUB_SHA}" \
+            --file apps/instance/Dockerfile \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --label 'org.opencontainers.image.licenses=AGPL-3.0-or-later' \
+            --tag "${IMAGE}:sha-${GITHUB_SHA}" \
+            --metadata-file "${RUNNER_TEMP}/metadata.json" \
+            --push \
+            .
+          digest="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/metadata.json")"
+          if ! [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The build reported no digest: ${digest}"
+            exit 1
+          fi
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "reference=${IMAGE}@${digest}" >> "${GITHUB_OUTPUT}"
+          echo "Pushed ${IMAGE}@${digest}"
+
+      #   gh api repos/sigstore/cosign-installer/commits/v4.1.3 --jq .sha
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v3.1.4
+
+      - name: Sign the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # ⚠️ THE COMMAND docs/self-hosting/home-machine.md gives an operator,
+      # "Check the image is ours", run against the digest just pushed, and red
+      # if it does not verify. A release tag runs it exactly as written there;
+      # any other run is signed from its own ref, so the identity names that
+      # ref instead. apps/instance/src/instance-image-workflow.test.ts holds the
+      # two copies to each other.
+      - name: Verify the signature as an operator would
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF}" in
+            refs/tags/v*) ref='refs/tags/v' ;;
+            *) ref="${GITHUB_REF}" ;;
+          esac
+          cosign verify "${IMAGE}@${DIGEST}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp "^https://github\.com/openzigs/onyourleft/\.github/workflows/instance-image\.yml@${ref}" \
+            > /dev/null
+          echo "${IMAGE}@${DIGEST} is signed by this workflow at ${GITHUB_REF}."
+
+      # Every layer of each platform, read from the registry: what an operator
+      # pulls, not what this runner built. skopeo is on the runner image and
+      # reads the docker login above.
+      - name: No env file and no secret in any layer
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            archive="${RUNNER_TEMP}/image-${arch}.tar"
+            skopeo copy --quiet --override-os linux --override-arch "${arch}" \
+              "docker://${IMAGE}@${DIGEST}" "docker-archive:${archive}:${IMAGE}:${arch}"
+            bash scripts/check-image-layers.sh --archive "${archive}"
+            rm -f "${archive}"
+          done
+
+      - name: Make the pull-only bundle
+        env:
+          REFERENCE: ${{ steps.push.outputs.reference }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash scripts/make-instance-bundle.sh "${REFERENCE}" "${VERSION}" "${RUNNER_TEMP}/bundle"
+
+      #   gh api repos/actions/upload-artifact/commits/v7.0.2 --jq .sha
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: instance-bundle
+          path: ${{ runner.temp }}/bundle/onyourleft-instance-${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+
+      - name: Log out of GHCR
+        if: always()
+        run: docker logout ghcr.io || true
+
+  pull-only:
+    name: Deploy from the bundle, with no checkout
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      packages: read
+    env:
+      REFERENCE: ${{ needs.publish.outputs.reference }}
+      VERSION: ${{ needs.publish.outputs.version }}
+    # ⚠️ NO actions/checkout in this job, on purpose: the workspace stays
+    # empty, and the first step proves it.
+    steps:
+      #   gh api repos/actions/download-artifact/commits/v8.0.2 --jq .sha
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: instance-bundle
+          path: ${{ runner.temp }}/download
+
+      - name: Unpack into an empty directory, with no checkout anywhere
+        run: |
+          set -euo pipefail
+          if [ -n "$(ls -A "${GITHUB_WORKSPACE}")" ]; then
+            echo "::error::The workspace is not empty: something checked the repository out."
+            exit 1
+          fi
+          mkdir "${RUNNER_TEMP}/clean"
+          cd "${RUNNER_TEMP}/clean"
+          unzip -q "${RUNNER_TEMP}/download/onyourleft-instance-${VERSION}.zip"
+          cd onyourleft-instance
+          ls -la
+          if git rev-parse --git-dir > /dev/null 2>&1; then
+            echo "::error::The bundle is inside a git repository."
+            exit 1
+          fi
+          echo "BUNDLE=${PWD}" >> "${GITHUB_ENV}"
+
+      # The guide's own step: copy the template and fill it in. The backup
+      # folders are written by the container's `node` user, so they are made
+      # writable; the tunnel's token is a placeholder, and the tunnel is left
+      # to fail on it -- nothing here needs Cloudflare.
+      - name: Fill in .env from the bundle's template
+        working-directory: ${{ env.BUNDLE }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/backups" "${RUNNER_TEMP}/offbox"
+          chmod 0777 "${RUNNER_TEMP}/backups" "${RUNNER_TEMP}/offbox"
+          sed \
+            -e 's|^OYL_INSTANCE_ORIGIN=.*|OYL_INSTANCE_ORIGIN=https://instance.example.invalid|' \
+            -e 's|^CLOUDFLARE_TUNNEL_TOKEN=.*|CLOUDFLARE_TUNNEL_TOKEN=not-a-token|' \
+            -e "s|^OYL_BACKUP_DIR=.*|OYL_BACKUP_DIR=${RUNNER_TEMP}/backups|" \
+            -e "s|^OYL_OFFBOX_DIR=.*|OYL_OFFBOX_DIR=${RUNNER_TEMP}/offbox|" \
+            instance.env.example > .env
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      # The guide's plain path, which needs no bash script: compose alone, which
+      # runs the migrate step to completion and then waits for the instance.
+      - name: Bring it up with docker compose alone
+        working-directory: ${{ env.BUNDLE }}
+        run: |
+          set -euo pipefail
+          docker compose up -d --wait --wait-timeout 120 instance
+          migrate="$(docker compose ps -a -q migrate)"
+          [ "$(docker inspect --format '{{.State.ExitCode}}' "${migrate}")" = 0 ] || {
+            echo "::error::The migrate step did not exit 0."
+            exit 1
+          }
+          docker compose exec -T instance node -e \
+            "fetch('http://127.0.0.1:8787/ready').then(async (r) => { console.log(await r.text()); process.exit(r.ok ? 0 : 1) }, () => process.exit(1))"
+          expected="$(docker image inspect --format '{{.Id}}' "${REFERENCE}")"
+          actual="$(docker inspect --format '{{.Image}}' "$(docker compose ps -q instance)")"
+          [ "${actual}" = "${expected}" ] || {
+            echo "::error::The instance runs ${actual}, not the bundle's ${REFERENCE} (${expected})."
+            exit 1
+          }
+
+      - name: Deploy with the bundle's deploy.sh
+        working-directory: ${{ env.BUNDLE }}
+        run: |
+          set -euo pipefail
+          bash deploy.sh
+          grep -qxF "image=${REFERENCE}" .deployed
+
+      # #2786: the rollback, for real. An image built FROM the published one
+      # whose server never starts: its migrate step works (compose gives it the
+      # migrate command), its instance never becomes healthy, so deploy.sh must
+      # snapshot, give up, restore, and put the published digest back.
+      - name: A deploy that never becomes ready is rolled back to the published digest
+        working-directory: ${{ env.BUNDLE }}
+        run: |
+          set -uo pipefail
+          printf 'FROM %s\nCMD ["node", "-e", "setInterval(() => {}, 1 << 30)"]\n' "${REFERENCE}" |
+            docker build --quiet --tag onyourleft-instance:never-ready - > /dev/null
+          OYL_DEPLOY_READY_SECONDS=30 bash deploy.sh --image onyourleft-instance:never-ready
+          status=$?
+          if [ "${status}" -ne 1 ]; then
+            echo "::error::deploy.sh exited ${status} on an image that never became ready; it must exit 1."
+            exit 1
+          fi
+          set -e
+          expected="$(docker image inspect --format '{{.Id}}' "${REFERENCE}")"
+          actual="$(docker inspect --format '{{.Image}}' "$(docker compose ps -q instance)")"
+          [ "${actual}" = "${expected}" ] || {
+            echo "::error::After the rollback the instance runs ${actual}, not the published ${REFERENCE}."
+            exit 1
+          }
+          grep -qxF "image=${REFERENCE}" .deployed
+          docker compose exec -T instance node -e \
+            "fetch('http://127.0.0.1:8787/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+          ls "${RUNNER_TEMP}/backups/pre-deploy"
+          echo "Rolled back to ${REFERENCE}, ready, with the pre-deploy snapshot taken."
+
+      - name: What the containers said
+        if: failure()
+        working-directory: ${{ env.BUNDLE }}
+        run: docker compose logs --no-color migrate instance backup || true
+
+      - name: Take it down
+        if: always()
+        working-directory: ${{ env.BUNDLE }}
+        run: |
+          docker compose down --volumes --remove-orphans || true
+          docker logout ghcr.io || true
+
+  promote:
+    name: Tag the version and attach the bundle to the release
+    needs: [publish, pull-only]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: write
+    env:
+      DIGEST: ${{ needs.publish.outputs.digest }}
+      VERSION: ${{ needs.publish.outputs.version }}
+    steps:
+      # The same bytes under a second name: --preserve-digests, so the version
+      # tag and the bundle's digest are one image, and the signature (stored
+      # against the digest) covers both.
+      - name: Tag the digest with the version
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" | skopeo login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          skopeo copy --all --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:${VERSION}"
+          tagged="sha256:$(skopeo inspect --raw "docker://${IMAGE}:${VERSION}" | sha256sum | cut -d' ' -f1)"
+          [ "${tagged}" = "${DIGEST}" ] || {
+            echo "::error::${IMAGE}:${VERSION} is ${tagged}, not ${DIGEST}."
+            exit 1
+          }
+          skopeo logout ghcr.io || true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: instance-bundle
+          path: ${{ runner.temp }}/bundle
+
+      # The same pinned action release.yml publishes the APK with: it creates
+      # the release for this tag, or adds to the one already there.
+      #   gh api repos/softprops/action-gh-release/commits/v3.0.4 --jq .sha
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          files: ${{ runner.temp }}/bundle/onyourleft-instance-${{ needs.publish.outputs.version }}.zip
+          fail_on_unmatched_files: true
