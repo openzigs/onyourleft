@@ -108,6 +108,7 @@ export interface RawConfig extends RawLegalSettings, RawTermsSettings {
   readonly publicRoomMinRides?: string | undefined;
   readonly clientAddressHeader?: string | undefined;
   readonly trustedProxies?: string | undefined;
+  readonly remotePath?: string | undefined;
   readonly embeddingUrl?: string | undefined;
   readonly embeddingModel?: string | undefined;
   readonly embeddingDocumentPrefix?: string | undefined;
@@ -224,6 +225,13 @@ export interface Config {
    * `client-address.ts` §`normalisedAddress` writes it. Empty: loopback only.
    */
   readonly trustedProxies: readonly string[];
+  /**
+   * How riders reach this instance from outside the machine (#2805, ADR 0079),
+   * as `OYL_INSTANCE_REMOTE_PATH` names it, or `null` when the operator named
+   * none. `funnel` is the one that changes what is served: the public listener
+   * answers every `/admin` path `not_found` (ADR 0079 D-3).
+   */
+  readonly remotePath: RemotePath | null;
   /** The history index's embedding model, or why there is none (#835). */
   readonly history: HistorySettings;
   /** The analysis agent's model, or why there is none (#1096). */
@@ -255,6 +263,27 @@ export interface Config {
    */
   readonly terms: TermsSettings | null;
 }
+
+/**
+ * The remote paths ADR 0079 names: the owner's tailnet through `tailscale
+ * serve` (D-2), the same with Funnel on (D-3), or a Cloudflare named tunnel
+ * for an owner with a domain (D-4).
+ */
+export type RemotePath = 'tailnet' | 'funnel' | 'cloudflare';
+
+/**
+ * The header each path's proxy puts the rider's address in (#2805). `tailscale
+ * serve` REPLACES `X-Forwarded-For` with the address the connection came from
+ * — measured on 2026-11-18: a copy the client sent did not survive — and
+ * Cloudflare writes `CF-Connecting-IP`. Behind Cloudflare `X-Forwarded-For` is
+ * appended to, not replaced, so a client could choose its start: each path has
+ * exactly one header, and the other is refused.
+ */
+export const REMOTE_PATH_ADDRESS_HEADER: Readonly<Record<RemotePath, string>> = {
+  tailnet: 'x-forwarded-for',
+  funnel: 'x-forwarded-for',
+  cloudflare: 'cf-connecting-ip',
+};
 
 export type ConfigResult =
   | { readonly ok: true; readonly config: Config }
@@ -389,6 +418,22 @@ export function readConfig(raw: RawConfig): ConfigResult {
     }
   }
 
+  let remotePath: RemotePath | null = null;
+  if (present(raw.remotePath)) {
+    const value = raw.remotePath.trim().toLowerCase();
+    if (value === 'tailnet' || value === 'funnel' || value === 'cloudflare') {
+      remotePath = value;
+      const wanted = REMOTE_PATH_ADDRESS_HEADER[value];
+      if (clientAddressHeader !== wanted) {
+        problems.push(
+          `OYL_INSTANCE_REMOTE_PATH=${value} needs OYL_INSTANCE_CLIENT_ADDRESS_HEADER=${wanted}: that is the header its proxy writes the rider's address in.`,
+        );
+      }
+    } else {
+      problems.push('OYL_INSTANCE_REMOTE_PATH must be one of tailnet, funnel or cloudflare.');
+    }
+  }
+
   let instanceName: string | null = null;
   if (present(raw.name)) {
     const value = raw.name.trim();
@@ -426,6 +471,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       publicRooms,
       clientAddressHeader,
       trustedProxies,
+      remotePath,
       history,
       analysis,
       analysisEnv: {

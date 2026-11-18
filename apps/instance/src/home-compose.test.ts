@@ -15,8 +15,14 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { clientAddress } from './client-address.ts';
-import { readAnalysisModelSettings, readConfig, readHistorySettings } from './config.ts';
+import { clientAddress, isLoopbackAddress } from './client-address.ts';
+import {
+  DEFAULT_PORT,
+  readAnalysisModelSettings,
+  readConfig,
+  readHistorySettings,
+  REMOTE_PATH_ADDRESS_HEADER,
+} from './config.ts';
 import { readServerConfig } from './server-config.ts';
 
 const COMPOSE = readFileSync(new URL('../deploy/home/compose.yaml', import.meta.url), 'utf8');
@@ -39,20 +45,24 @@ describe('deploy/home/compose.yaml — registration (#775)', () => {
   });
 });
 
+/** Every fixed address a service has, one per network it is on. */
+const fixedAddresses = (name: string): string[] =>
+  [...service(name).matchAll(/ipv4_address: (\S+)/g)].map((match) => match[1] ?? '');
+
 describe('deploy/home/compose.yaml — the rider’s address behind the tunnel', () => {
-  const header = setting('OYL_INSTANCE_CLIENT_ADDRESS_HEADER');
+  // `${…:-cf-connecting-ip}`: Cloudflare's unless .env names the tailnet's (#2805).
+  const header = /^\$\{OYL_INSTANCE_CLIENT_ADDRESS_HEADER:-(\S+)\}$/.exec(
+    setting('OYL_INSTANCE_CLIENT_ADDRESS_HEADER') ?? '',
+  )?.[1];
   const trusted = setting('OYL_INSTANCE_TRUSTED_PROXIES');
-  /** Every fixed address the tunnel has, one per network it is on. */
-  const tunnelAddresses = [...service('tunnel').matchAll(/ipv4_address: (\S+)/g)].map(
-    (match) => match[1] ?? '',
-  );
+  const tunnelAddresses = fixedAddresses('tunnel');
   const subnets = [...COMPOSE.matchAll(/- subnet: (\S+)/g)].map((match) => match[1] ?? '');
 
-  it('names the header, and trusts exactly the addresses it gives cloudflared, each in a subnet the file declares', () => {
+  it('names the header, and trusts exactly the addresses it gives cloudflared and tailscale, each in a subnet the file declares', () => {
     expect(header).toBe('cf-connecting-ip');
     // #2604: two networks, two addresses — Docker may answer `instance` with either.
     expect(tunnelAddresses).toHaveLength(2);
-    expect(trusted?.split(',')).toEqual(tunnelAddresses);
+    expect(trusted?.split(',')).toEqual([...tunnelAddresses, ...fixedAddresses('tailscale')]);
     for (const address of tunnelAddresses) {
       expect(address).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
       const prefix = address.split('.').slice(0, 3).join('.');
@@ -86,6 +96,119 @@ function service(name: string): string {
   const end = rest.search(/^ {2}[a-z#]|^[a-z]/m);
   return end < 0 ? rest : rest.slice(0, end);
 }
+
+describe('deploy/home/compose.yaml — the remote path is a profile (#2805, ADR 0079 D-1)', () => {
+  /** A service's uncommented lines. */
+  const code = (name: string): string =>
+    service(name)
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+
+  it('runs cloudflared only with the cloudflare profile, and tailscale only with its own', () => {
+    expect(code('tunnel')).toMatch(/^ {4}profiles: \['cloudflare'\]$/m);
+    expect(code('tailscale')).toMatch(/^ {4}profiles: \['tailscale'\]$/m);
+  });
+
+  it('needs no setting of either path to read the file: compose interpolates every service, profile on or not', () => {
+    // A `:?` anywhere in them would stop `docker compose config` with neither profile on.
+    for (const name of ['tunnel', 'tailscale']) expect(code(name), name).not.toContain(':?');
+    expect(code('tunnel')).toContain('TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}');
+    expect(code('tailscale')).toContain('TS_AUTHKEY: ${TAILSCALE_AUTH_KEY:-}');
+  });
+
+  it('keeps the tunnel as it was when its profile is on: the same image, command and addresses', () => {
+    expect(code('tunnel')).toContain(
+      "command: ['tunnel', '--no-autoupdate', '--metrics', '172.30.88.10:20241', 'run']",
+    );
+    expect(fixedAddresses('tunnel')).toEqual(['172.30.87.10', '172.30.88.10']);
+  });
+});
+
+describe('deploy/home/compose.yaml — the tailscale service (#2805, ADR 0079 D-2, D-3)', () => {
+  const tailscale = service('tailscale');
+  const lines = tailscale
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const serveFile = (path: string): unknown =>
+    JSON.parse(
+      readFileSync(new URL(`../deploy/home/tailscale/serve-${path}.json`, import.meta.url), 'utf8'),
+    );
+
+  it('is pinned by digest, publishes and exposes nothing, and is on the project network alone', () => {
+    expect(lines).toMatch(/image: tailscale\/tailscale:v[0-9.]+@sha256:[0-9a-f]{64}/);
+    expect(lines).not.toMatch(/^\s*(ports|expose|network_mode|cap_add|devices|privileged):/m);
+    expect(lines).not.toContain('tunnel_metrics');
+    expect(lines).toMatch(/TS_USERSPACE: 'true'/);
+    const [address, ...more] = fixedAddresses('tailscale');
+    expect(more).toEqual([]);
+    expect(address).toMatch(/^172\.30\.87\.\d+$/);
+    expect(fixedAddresses('tunnel')).not.toContain(address);
+  });
+
+  it('is a proxy whose connections the admin pages’ loopback listener closes unread (ADR 0069 D-5)', () => {
+    // instance.ts passes config.trustedProxies to the loopback listener as `refusePeers`.
+    const read = readConfig({
+      commit: '0'.repeat(40),
+      clientAddressHeader: 'x-forwarded-for',
+      trustedProxies: setting('OYL_INSTANCE_TRUSTED_PROXIES'),
+      remotePath: 'tailnet',
+    });
+    if (!read.ok) throw new Error(read.problems.join(' '));
+    expect(read.config.trustedProxies).toContain(fixedAddresses('tailscale')[0]);
+  });
+
+  it('serves the configuration OYL_INSTANCE_REMOTE_PATH names, from a directory mounted read-only', () => {
+    expect(lines).toContain(
+      'TS_SERVE_CONFIG: /config/serve-${OYL_INSTANCE_REMOTE_PATH:-tailnet}.json',
+    );
+    expect(lines).toMatch(/^ {6}- \.\/tailscale:\/config:ro$/m);
+    expect(COMPOSE).toMatch(/OYL_INSTANCE_REMOTE_PATH: \$\{OYL_INSTANCE_REMOTE_PATH:-\}$/m);
+  });
+
+  it.each([
+    ['tailnet', false],
+    ['funnel', true],
+  ] as const)(
+    'serve-%s.json answers HTTPS on 443 alone, proxies to the public listener alone, and Funnel is %s',
+    (path, funnel) => {
+      expect(serveFile(path)).toStrictEqual({
+        TCP: { '443': { HTTPS: true } },
+        Web: {
+          '${TS_CERT_DOMAIN}:443': {
+            Handlers: { '/': { Proxy: `http://instance:${String(DEFAULT_PORT)}` } },
+          },
+        },
+        AllowFunnel: { '${TS_CERT_DOMAIN}:443': funnel },
+      });
+    },
+  );
+
+  it('has no serve configuration for the cloudflare path, so the two never serve one instance', () => {
+    expect(() => serveFile('cloudflare')).toThrow(/ENOENT/);
+  });
+
+  it('under the tailnet path, believes the address serve writes from it alone, and never as loopback', () => {
+    const read = readConfig({
+      commit: '0'.repeat(40),
+      clientAddressHeader: REMOTE_PATH_ADDRESS_HEADER.tailnet,
+      trustedProxies: setting('OYL_INSTANCE_TRUSTED_PROXIES'),
+      remotePath: 'tailnet',
+    });
+    if (!read.ok) throw new Error(read.problems.join(' '));
+    const { clientAddressHeader, trustedProxies } = read.config;
+    const proxy = fixedAddresses('tailscale')[0] ?? '';
+    // What serve sent for a rider at 100.64.0.1, measured: it replaces a copy the client sent.
+    const sent = new Headers({ 'x-forwarded-for': '100.64.0.1' });
+    const rider = clientAddress(proxy, sent, clientAddressHeader, trustedProxies);
+    expect(rider).toBe('100.64.0.1');
+    // A tailnet address is a rider's, never the server machine's (ADR 0046, 2026-10-07).
+    expect(isLoopbackAddress(rider ?? '')).toBe(false);
+    const neighbour = proxy.replace(/\.\d+$/, '.3');
+    expect(clientAddress(neighbour, sent, clientAddressHeader, trustedProxies)).toBe(neighbour);
+  });
+});
 
 describe('deploy/home/compose.yaml — the embedding model (#835, ADR 0040 D-6)', () => {
   const ollama = service('ollama');
@@ -224,7 +347,7 @@ describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => 
     expect(address.split('.').slice(0, 3).join('.')).toBe(subnet);
     // Exactly the instance and the tunnel are on it, of every service in the file.
     expect(SERVICES).toEqual(
-      expect.arrayContaining(['migrate', 'instance', 'tunnel', 'ollama', 'backup']),
+      expect.arrayContaining(['migrate', 'instance', 'tunnel', 'tailscale', 'ollama', 'backup']),
     );
     expect(SERVICES.filter((name) => service(name).includes('tunnel_metrics'))).toEqual([
       'instance',
