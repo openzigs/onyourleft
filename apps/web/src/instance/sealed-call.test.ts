@@ -33,6 +33,7 @@ import {
   INSTANCE_TIMEOUT_MILLISECONDS,
   InstanceUnreachableError,
   MAXIMUM_SEALED_CALL_MILLISECONDS,
+  SEALED_CALL_CACHE,
   sealedInstance,
   type InstanceSend,
 } from './instance-transport';
@@ -177,6 +178,28 @@ describe('a sealed call — #1191', () => {
     expect(init.method).toBe('POST');
     expect(init.redirect).toBe('error');
     expect(init.body as string).not.toContain('auth/session');
+  });
+
+  it('lets the browser keep the instance’s preflight answer, and nothing ambient rides along (#2796)', async () => {
+    // `no-store` (or `no-cache`) makes Chromium ask a CORS preflight before
+    // every sealed call: one more round trip through the tunnel per AI
+    // decision. A plaintext call keeps `no-store` (instance-transport.test.ts).
+    const played = await playInstance();
+    const { http } = await client(played);
+    await http.call('POST', '/v1/analysis/pacer/decide', { token: 't', body: { a: 1 } });
+    await http.stream('/v1/stream', { token: 't', onEvent: () => undefined });
+    expect(SEALED_CALL_CACHE).toBe('default');
+    const inits = played.send.mock.calls.map(([, init]) => init as RequestInit);
+    expect(inits).toHaveLength(2);
+    for (const init of inits) {
+      expect(init).toMatchObject({
+        method: 'POST',
+        cache: 'default',
+        redirect: 'error',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+      });
+    }
   });
 
   it('refuses a path it would not send in plaintext, having sent nothing', async () => {

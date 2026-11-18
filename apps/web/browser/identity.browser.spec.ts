@@ -202,6 +202,14 @@ test.describe('the production transport, from the browser to the Node instance (
         if (request.url().startsWith(own.url))
           requests.push(`${request.method()} ${request.url()}`);
       });
+      // #2796: what Chromium itself sent, preflights included, which the
+      // page's `request` events do not show.
+      const sent: string[] = [];
+      const cdp = await page.context().newCDPSession(page);
+      cdp.on('Network.requestWillBeSent', (event) => {
+        if (event.request.url === `${own.url}/v1/sealed`) sent.push(event.request.method);
+      });
+      await cdp.send('Network.enable');
       // The instance's card, as its operator hands it over (#1190, #1192).
       const card = (await own.instanceKeys.show()).card;
       const result = await page.evaluate(
@@ -238,6 +246,11 @@ test.describe('the production transport, from the browser to the Node instance (
         instanceName: 'Lanes by the old quarry',
         displayName: 'Anna',
       });
+      // #2796: the instance's preflight answer was kept, so a run of sealed
+      // calls asked it once rather than before every call — an AI race's
+      // decisions are a sealed call every five seconds through the tunnel.
+      expect(sent.filter((method) => method === 'POST').length, sent.join()).toBeGreaterThan(2);
+      expect(sent.filter((method) => method === 'OPTIONS').length, sent.join()).toBe(1);
     } finally {
       await own.close();
     }
