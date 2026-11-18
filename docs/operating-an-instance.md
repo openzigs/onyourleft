@@ -1222,6 +1222,11 @@ so the instance gains no new login. The server half is [#2602](https://github.co
 
 ## Admin pages
 
+**With Funnel on** (`OYL_INSTANCE_REMOTE_PATH=funnel`, #2805, ADR 0079 D-3), the instance's public
+listener answers every `/admin` path with `404`, whatever the request carries: Funnel puts that
+listener on the internet with no rule in front of it. The pages on the server machine, below, and
+the card on them are unchanged, and `OYL_INSTANCE_ADMIN_PAGES` stays as you set it.
+
 The instance can also serve **admin pages of its own**, at `/admin`, for an owner who wants to run
 it from a browser without the app ([ADR 0069](adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md),
 [#2639](https://github.com/openzigs/onyourleft/issues/2639)). What exists so far is the sign-in and
@@ -1402,6 +1407,12 @@ has the instance's name, how you signed in and through which listener, the secti
   cloudflared's fixed addresses (`OYL_INSTANCE_TRUSTED_PROXIES`), which closes the direct path. It
   **cannot** tell cloudflared from your browser on the `host.docker.internal` path. So an edge that
   rewrote the tunnel's ingress could reach the loopback pages.
+  - **The same holds for the `tailscale` container** (#2805, ADR 0079 D-2). Its fixed address
+    `172.30.87.11` is in the same list, and on 2026-11-18 (Docker 29.5.3, macOS) a request from it
+    to `instance:8788` was reset unread while one to `instance:8787` was answered. Through
+    `host.docker.internal:8788` it got `421`, because it sent that name as `Host`; a client that
+    sent `Host: localhost:8788` would not. The serve file names `instance:8787` and nothing else,
+    and it lives on the box.
   - ADR 0069 names this as a condition that makes the ADR wrong ("Docker networking that cannot
     keep the tunnel container off the second listener"). Until the owner rules on it, **this
     listener grants nothing the tunnel does not**. In particular, a passkey added here also needs

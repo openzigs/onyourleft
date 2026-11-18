@@ -117,6 +117,11 @@ describe('deploy/home/compose.yaml — the remote path is a profile (#2805, ADR 
     expect(code('tailscale')).toContain('TS_AUTHKEY: ${TAILSCALE_AUTH_KEY:-}');
   });
 
+  it('is read by the server, under the key readConfig takes', () => {
+    const serve = readFileSync(new URL('./serve.ts', import.meta.url), 'utf8');
+    expect(serve).toContain('  remotePath: process.env.OYL_INSTANCE_REMOTE_PATH,\n');
+  });
+
   it('keeps the tunnel as it was when its profile is on: the same image, command and addresses', () => {
     expect(code('tunnel')).toContain(
       "command: ['tunnel', '--no-autoupdate', '--metrics', '172.30.88.10:20241', 'run']",
@@ -184,6 +189,27 @@ describe('deploy/home/compose.yaml — the tailscale service (#2805, ADR 0079 D-
       });
     },
   );
+
+  it('starts from a template whose remote path, header and origin the instance accepts together', () => {
+    const env = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    const value = (key: string): string | undefined =>
+      new RegExp(`^${key}=(.*)$`, 'm').exec(env)?.[1];
+    expect(value('COMPOSE_PROFILES')).toBe('tailscale');
+    const read = readConfig({
+      commit: '0'.repeat(40),
+      remotePath: value('OYL_INSTANCE_REMOTE_PATH'),
+      clientAddressHeader: value('OYL_INSTANCE_CLIENT_ADDRESS_HEADER'),
+    });
+    expect(read.ok && read.config.remotePath).toBe('tailnet');
+    expect(value('OYL_INSTANCE_ORIGIN')).toMatch(/^https:\/\/onyourleft\.[a-z0-9-]+\.ts\.net$/);
+    // One line each: compose and deploy.sh read the last, and a second would hide the first.
+    for (const key of ['COMPOSE_PROFILES', 'OYL_INSTANCE_REMOTE_PATH', 'OYL_INSTANCE_ORIGIN']) {
+      expect(env.match(new RegExp(`^${key}=`, 'gm')), key).toHaveLength(1);
+    }
+  });
 
   it('has no serve configuration for the cloudflare path, so the two never serve one instance', () => {
     expect(() => serveFile('cloudflare')).toThrow(/ENOENT/);

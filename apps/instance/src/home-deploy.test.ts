@@ -83,7 +83,7 @@ describe('deploy/home/deploy.sh — container paths under Git Bash (#807)', () =
 interface Deployed {
   readonly status: number | null;
   readonly out: string;
-  /** Every `docker` call, as its arguments. */
+  /** Every `docker` call, as `<the profiles compose saw>|<its arguments>`. */
   readonly calls: readonly string[];
 }
 
@@ -124,8 +124,8 @@ function deployWith(options: {
   executable(
     join(bin, 'docker'),
     [
-      'printf "%s\\n" "$*" >> "${OYL_TEST_LOG}"',
-      'profiles="${COMPOSE_PROFILES-$(sed -n "s/^COMPOSE_PROFILES=//p" .env | tail -n 1)}"',
+      'profiles="${COMPOSE_PROFILES-$(sed -n "s/^COMPOSE_PROFILES=//p" .env | tail -n 1 | tr -d "\\r")}"',
+      'printf "%s|%s\\n" "${profiles}" "$*" >> "${OYL_TEST_LOG}"',
       'case "$*" in',
       `  *" config --services"*) cat "${answers}/services-\${profiles}" ;;`,
       `  *" exec -T tailscale "*) cat "${answers}/status" ;;`,
@@ -153,12 +153,13 @@ function deployWith(options: {
   };
 }
 
+/** Each `up -d` after the instance's own: the profiles compose saw, and the services named. */
 const ups = (deployed: Deployed): string[] =>
   deployed.calls
     .filter((call) => / up -d (?!--wait)/.test(call))
-    .map((call) => call.replace(/.* up -d /, ''));
+    .map((call) => call.replace(/\|.* up -d /, ': '));
 const built = (deployed: Deployed): boolean =>
-  deployed.calls.some((call) => call.startsWith('build '));
+  deployed.calls.some((call) => call.includes('|build '));
 
 /** What each profile turns on, as compose.yaml says. */
 const PROFILE_SERVICES = (profiles: string): string[] => [
@@ -180,7 +181,7 @@ describe('deploy/home/deploy.sh — the remote path (#2805, ADR 0079)', () => {
       services: PROFILE_SERVICES,
     });
     expect(deployed.status, deployed.out).toBe(0);
-    expect(ups(deployed)).toEqual(['tunnel backup']);
+    expect(ups(deployed)).toEqual(['cloudflare: tunnel backup']);
   });
 
   it('keeps the tunnel of a .env from before the profile, with whatever profiles it had, and says to name it', () => {
@@ -189,14 +190,15 @@ describe('deploy/home/deploy.sh — the remote path (#2805, ADR 0079)', () => {
       services: PROFILE_SERVICES,
     });
     expect(deployed.status, deployed.out).toBe(0);
-    expect(ups(deployed)).toEqual(['tunnel backup']);
+    // Its own profiles kept beside the tunnel's: `--profile` would have replaced them.
+    expect(ups(deployed)).toEqual(['history,cloudflare: tunnel backup']);
     expect(deployed.out).toContain('Add cloudflare to COMPOSE_PROFILES in .env');
   });
 
   it('starts no remote path with neither profile and no token, and says the instance is this machine’s only', () => {
     const deployed = deployWith({ env: '', services: PROFILE_SERVICES });
     expect(deployed.status, deployed.out).toBe(0);
-    expect(ups(deployed)).toEqual(['backup']);
+    expect(ups(deployed)).toEqual([': backup']);
     expect(deployed.out).toContain('reachable on this machine only');
   });
 
@@ -235,13 +237,14 @@ describe('deploy/home/deploy.sh — the remote path (#2805, ADR 0079)', () => {
 
   it('on the tailnet: starts tailscale, and reads back from the running instance the origin serve answers on', () => {
     const deployed = deployWith({
-      env: 'COMPOSE_PROFILES=tailscale\nOYL_INSTANCE_REMOTE_PATH="tailnet"\n',
+      // As Notepad saves it: CRLF, and the value quoted.
+      env: 'COMPOSE_PROFILES=tailscale\r\nOYL_INSTANCE_REMOTE_PATH="tailnet"\r\n',
       services: PROFILE_SERVICES,
       tailscaleStatus: RUNNING('onyourleft.example-tailnet.ts.net.'),
       runningOrigin: 'https://onyourleft.example-tailnet.ts.net',
     });
     expect(deployed.status, deployed.out).toBe(0);
-    expect(ups(deployed)).toEqual(['tailscale backup']);
+    expect(ups(deployed)).toEqual(['tailscale: tailscale backup']);
     expect(deployed.out).toContain(
       'reached on your tailnet at https://onyourleft.example-tailnet.ts.net',
     );

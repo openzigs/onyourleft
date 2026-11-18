@@ -86,7 +86,7 @@ tailnet_origin() {
   local waited=0 status name link asked=''
   while [ "${waited}" -lt "${READY_SECONDS}" ]; do
     status="$(compose exec -T tailscale tailscale status --json --peers=false 2>/dev/null)"
-    if printf '%s' "${status}" | grep -q '"BackendState": *"Running"'; then
+    if grep -q '"BackendState": *"Running"' <<< "${status}"; then
       name="$(printf '%s' "${status}" | sed -n 's/.*"DNSName": *"\([^"]*\)".*/\1/p' | head -n 1)"
       if [ -n "${name}" ]; then
         printf 'https://%s' "${name%.}"
