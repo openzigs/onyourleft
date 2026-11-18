@@ -51,6 +51,9 @@ on:
       - .github/workflows/instance-image.yml
       - apps/instance/Dockerfile
       - apps/instance/deploy/home/deploy.sh
+      - apps/instance/deploy/home/compose.yaml
+      - apps/instance/deploy/home/instance.env.example
+      - apps/instance/Dockerfile.dockerignore
       - scripts/check-image-layers.sh
       - scripts/make-instance-bundle.sh
   workflow_dispatch:

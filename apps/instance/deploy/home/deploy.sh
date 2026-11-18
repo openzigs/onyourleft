@@ -154,7 +154,14 @@ fi
 
 previous="$(state image)"
 snapshot=''
-if [ -n "${previous}" ] && [ -n "$(compose ps -q instance 2>/dev/null)" ]; then
+running="$(compose ps -q instance 2>/dev/null)"
+# A compose-only install (the guide's step 5) never wrote .deployed, so the
+# first update would take no snapshot and have nothing to roll back to: the
+# image the container is running stands in for it.
+if [ -z "${previous}" ] && [ -n "${running}" ]; then
+  previous="$(docker inspect --format '{{.Config.Image}}' "${running}" 2>/dev/null)" || previous=''
+fi
+if [ -n "${previous}" ] && [ -n "${running}" ]; then
   say 'taking a snapshot before anything changes'
   taken="$(OYL_INSTANCE_IMAGE="${previous}" compose run --rm --no-deps --entrypoint node backup \
     src/operator/cli.ts backup /backups/pre-deploy --keep 3)" ||

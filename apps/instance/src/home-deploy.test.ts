@@ -140,6 +140,7 @@ function bundle(options: {
       '  pull) is "${@: -1}" missing && exit 1; printf "%s\\n" "${@: -1}" >> "${fake}/held" ;;',
       '  build) exit 1 ;;',
       '  tag) exit 0 ;;',
+      '  inspect) cat "${fake}/running" ;;',
       '  compose)',
       '    case "$*" in',
       '      *" ps -q "*) [ -f "${fake}/running" ] && echo container ;;',
@@ -233,6 +234,21 @@ describe('deploy/home/deploy.sh — from a release bundle, with no checkout (#27
     expect(snapshot).toBeGreaterThanOrEqual(0);
     expect(snapshot).toBeLessThan(failed);
     expect(failed).toBeLessThan(restore);
+  });
+
+  it('first update after a compose-only install (no .deployed): snapshots, and rolls back to the running image', () => {
+    const where = bundle({
+      releaseImage: NEXT,
+      running: PREVIOUS,
+      held: [PREVIOUS],
+      broken: [NEXT],
+    });
+    const { status, output } = deploy(where);
+    expect(status).toBe(1);
+    expect(output).toContain(`rolled back to ${PREVIOUS}`);
+    expect(running(where)).toBe(PREVIOUS);
+    expect(deployedImage(where)).toBe(PREVIOUS);
+    expect(calls(where).some((call) => call.includes('backup /backups/pre-deploy'))).toBe(true);
   });
 
   it('--image deploys the image it names, over the one release.image names', () => {
