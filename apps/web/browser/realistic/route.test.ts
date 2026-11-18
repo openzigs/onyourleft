@@ -20,6 +20,7 @@ import { scatterSeed } from '../../src/game/scatter';
 import { structuresAt } from '../../src/game/settlements';
 import { FURNITURE_KINDS, streetsAt } from '../../src/game/streets';
 import { corridorOrigin } from '../../src/game/terrain';
+import { NO_LAND_CLASS } from '../../src/game/land-class';
 import { waterways } from '../../src/game/waterways';
 import { auditWetGround } from '../../src/game/wet-ground-testing';
 import { mixedTownFixture } from '../../src/game/footprint-fixtures-testing';
@@ -54,11 +55,11 @@ function partZ(profile: ReturnType<typeof realisticRoute>): void {
   const seed = scatterSeed(profile);
 
   it('crosses a stream on a bridge — Z10', () => {
-    expect(waterways(profile, seed).crossings.length).toBeGreaterThanOrEqual(1);
+    expect(waterways(profile, seed, NO_LAND_CLASS).crossings.length).toBeGreaterThanOrEqual(1);
   });
 
   it('lays a lake beside its valley floor — Z10', () => {
-    const { lakes } = waterways(profile, seed);
+    const { lakes } = waterways(profile, seed, NO_LAND_CLASS);
     expect(lakes.length).toBeGreaterThanOrEqual(1);
     // On the floor, which is level and at the route's lowest.
     for (const lake of lakes) {

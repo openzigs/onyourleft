@@ -35,6 +35,7 @@ import type {
   Kilograms,
   LapRaceModelRecord,
   Metres,
+  PacerDecisionRecord,
   ReplanRecord,
   RevolutionsPerMinute,
   Seconds,
@@ -42,6 +43,7 @@ import type {
   SegmentVisibility,
   UnixSeconds,
   Watts,
+  Wind,
   GeographicPosition,
   Workout,
   WorkoutBlock,
@@ -603,7 +605,70 @@ export interface RideFacts {
    * {@link workoutBlocks} is. @see DraftSpan
    */
   readonly draftSpans?: readonly DraftSpan[];
+  /**
+   * The AI pacer's decision log for this ride — #2712, ADR 0072 D-5: every
+   * ask, oldest first, with the seconds ridden it was asked and answered at
+   * and what became of it, and the pacer-code version it was ridden under
+   * (`@onyourleft/domain` §`MODEL_PACER_CODE_VERSION`), with the pacer's
+   * W/kg, the route, the air and position, and the game ride's start on the
+   * recording's clock (#2712's review): the whole of what the pacer did, so
+   * the pacer replays from it (§`pacerDirectionAt`). Known only while riding, like
+   * {@link workoutFinished}; absent for a ride with no AI pacer.
+   *
+   * It holds a plan and an intent from two closed lists and no text: **the
+   * lines of feedback the rider was shown are not kept.** The instance keeps
+   * no copy (ADR 0036 D-3 (c)).
+   *
+   * ⚠️ **A log that does not read is dropped whole, never the ride**, as
+   * {@link draftSpans} is: a decision missing from the middle would replay a
+   * different pacer.
+   */
+  readonly pacerModel?: PacerModelFact;
 }
+
+/**
+ * @see RideFacts.pacerModel
+ *
+ * The log, and what replaying it needs beside the log (#2712's review): the
+ * pacer's W/kg, the road, and the air and position the pacer is ridden in,
+ * and where the directed game ride began on the recording's clock. Every
+ * field is required but {@link wind}: a log missing any of them does not
+ * replay, and is dropped whole.
+ */
+export interface PacerModelFact {
+  readonly version: number;
+  readonly decisions: readonly PacerDecisionRecord[];
+  /**
+   * The pacer's advertised W/kg, the rider's choice (`@onyourleft/domain`
+   * §`BotPacerPlan.intensityWattsPerKilogram`). Its mass is the code's
+   * `BOT_MASS_KILOGRAMS`, fixed under {@link version}.
+   */
+  readonly pacerWPerKg: number;
+  /**
+   * Where the directed game ride began, on the recording's own clock — the
+   * clock its samples and `draftSpans` are stamped by: the instant its
+   * seconds ridden (`askedAtS`, `arrivedAtS`) count from. A decision's
+   * instant in the recording is this plus its seconds ridden.
+   */
+  readonly startedAt: UnixSeconds;
+  /**
+   * The route the game ride was ridden on (`RidableRoute.id`): a saved
+   * route's id or a built-in's, never a position. The pacer's grade is read
+   * off this route's profile.
+   */
+  readonly routeId: string;
+  /**
+   * The riding position the game ride was ridden in. The pacer's drag area is
+   * the rider's position's (`apps/web` §`rideConditionsFor`), so it moves the
+   * pacer's speed and with it where on the road each decision lands.
+   */
+  readonly position: PacerRidingPosition;
+  /** The wind the game ride was ridden in; absent for still air, as `SimulationSetup.wind` is. */
+  readonly wind?: Wind;
+}
+
+/** `@onyourleft/physics` §`RidingPosition`, which this package does not depend on. */
+export type PacerRidingPosition = 'upright' | 'hoods' | 'drops';
 
 /**
  * One stretch of a ride the rider spent in the draft — #2451. Two instants on
@@ -1924,7 +1989,8 @@ export type WorldCorridorTileState =
  * D-3.2), which is why it is its own store and never fields on
  * {@link RouteRecord} (ADR 0012 D-3.1). What it holds, in ADR 0054 D-3.3's one
  * sentence: building footprint polygons with `kind`, `height` and
- * `min_height`; land-use polygons with `kind`; water polygons; footway lines
+ * `min_height`; land-use polygons with `kind`; water polygons; water lines
+ * with `kind`, a river, a stream or a canal (#2659, proposed); footway lines
  * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and
  * whether each is a bridge or a tunnel; place points with `kind`, `kind_detail`
  * and `population_rank` (ADR 0055 D-6.1, #1632); and which tiles were read and

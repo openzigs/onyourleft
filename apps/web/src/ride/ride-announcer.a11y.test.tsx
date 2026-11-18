@@ -528,3 +528,48 @@ describe('a hand-set ERG target that is eased is said, as the workout’s is —
     expect(document.body.textContent).toContain('Pedalling has stopped');
   });
 });
+
+describe('a workout carried across a trainer reconnect is said, stage by stage — #2669', () => {
+  it('says each stage as it comes, through the one region, and shows it without a second voice', async () => {
+    let now = 100;
+    const trainer = ridingSnapshot().trainer;
+    const panel = (w: RideWorkoutSnapshot) => (
+      <WorkoutPanel
+        trainer={trainer}
+        workout={w}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        announcerClock={() => now}
+      />
+    );
+    mounted = await mount(panel(workout()));
+    await mounted.rerender(panel(workout({ status: 'paused', carryOn: 'reconnecting' })));
+    expect(region()).toMatch(/^Trainer disconnected\. Reconnecting…/);
+
+    now = 110;
+    await mounted.rerender(panel(workout({ status: 'paused', carryOn: 'pedal' })));
+    expect(region()).toMatch(/^Trainer reconnected\. Start pedalling/);
+
+    now = 120;
+    await mounted.rerender(panel(workout({ carryOn: 'resumed' })));
+    expect(region()).toBe('Trainer reconnected, workout resumed.');
+    expect(
+      voices().filter((each) => (each.textContent ?? '').includes('workout resumed')),
+      'said by more than one region',
+    ).toHaveLength(1);
+    const shown = [...document.querySelectorAll('.oyl-status')].find((each) =>
+      (each.textContent ?? '').includes('Trainer reconnected, workout resumed.'),
+    );
+    expect(shown, 'a sighted rider cannot see that the workout resumed').toBeDefined();
+  });
+
+  it('is not announced again on a screen that appears with the workout already carried on', async () => {
+    const stub = stubRideController({
+      ...ridingSnapshot(),
+      workout: workout({ carryOn: 'resumed' }),
+    });
+    mounted = await mount(<RideView controller={stub.controller} />);
+    await settle();
+    expect(region()).toBe('');
+  });
+});

@@ -81,6 +81,7 @@ import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { isNativeShell, platformCapacitor } from '../support/capacitor';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
+import type { PacerStatus } from '../instance/pacer-port';
 import type { PacerChoice } from './pacer-choice';
 import { REALISTIC_DOWNLOAD_SIZE_TEXT, realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
@@ -472,6 +473,11 @@ interface RoutePickerProps {
   readonly intensity: string;
   readonly onIntensity: (value: string) => void;
   readonly choice: PacerChoice;
+  /**
+   * The AI pacer — #2712, ADR 0072: offered only where this device's
+   * instance can be sealed to. Absent, never drawn.
+   */
+  readonly aiPacer?: AiPacerControl | undefined;
   readonly withWind: boolean;
   readonly onWind: (value: boolean) => void;
   readonly windSpeed: string;
@@ -945,6 +951,7 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
             intensity={props.intensity}
             onIntensity={props.onIntensity}
             problem={props.choice.problem}
+            aiPacer={props.aiPacer}
           />
         )}
         <PositionControl position={props.position} onPosition={props.onPosition} />
@@ -1999,6 +2006,7 @@ function PacerControls(props: {
   readonly intensity: string;
   readonly onIntensity: (value: string) => void;
   readonly problem: string | undefined;
+  readonly aiPacer?: AiPacerControl | undefined;
 }): JSX.Element {
   return (
     <div className="oyl-game__pacer tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
@@ -2072,7 +2080,94 @@ function PacerControls(props: {
           {props.problem}
         </p>
       )}
+      {props.withPacer && props.aiPacer !== undefined ? (
+        <AiPacerControls control={props.aiPacer} />
+      ) : null}
     </div>
+  );
+}
+
+/** What the chooser draws the AI pacer from — #2712. @see AiPacerControls */
+interface AiPacerControl {
+  readonly on: boolean;
+  readonly onChange: (value: boolean) => void;
+  /** What the instance last said, `'asking'` while it is asked, `undefined` before. */
+  readonly status: PacerStatus | 'asking' | undefined;
+  readonly onConsent: () => void;
+  readonly onWithdraw: () => void;
+}
+
+/**
+ * The AI pacer's switch and its consent — #2712, ADR 0072 D-1.
+ *
+ * The consent names the place, as ADR 0071 D-5.2 has it: the rider's
+ * instance and its local model's address, both as the instance said them.
+ * It says what is sent and what is not, and that the trainer is never
+ * steered by it. Until the rider agrees, the pacer rides as it always has
+ * (D-1.4): the switch alone sends nothing but the status question.
+ */
+function AiPacerControls(props: { readonly control: AiPacerControl }): JSX.Element {
+  const { control } = props;
+  const status = control.status;
+  return (
+    <div className="oyl-game__ai-pacer tw:flex tw:flex-col tw:items-start tw:gap-xs">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={control.on}
+          onChange={(event) => {
+            control.onChange(event.target.checked);
+          }}
+        />
+        {AI_PACER_TEXT.switch}
+      </label>
+      {!control.on ? null : status === 'asking' || status === undefined ? (
+        <p className="tw:m-0">{AI_PACER_TEXT.asking}</p>
+      ) : status.kind === 'unavailable' ? (
+        <p className="tw:m-0">{AI_PACER_TEXT.unavailable}</p>
+      ) : status.kind === 'not-offered' ? (
+        <p className="tw:m-0">{AI_PACER_TEXT.notOffered}</p>
+      ) : status.consented ? (
+        <>
+          <p className="tw:m-0">{AI_PACER_TEXT.consented}</p>
+          <Button variant="secondary" onClick={control.onWithdraw}>
+            {AI_PACER_TEXT.withdraw}
+          </Button>
+        </>
+      ) : (
+        <>
+          <p className="tw:m-0">{aiPacerConsentText(status.instance, status.modelAddress)}</p>
+          <Button onClick={control.onConsent}>{AI_PACER_TEXT.consent}</Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The AI pacer's words on the chooser — #2712. Draft wording, for the owner's screenshots. */
+const AI_PACER_TEXT = {
+  switch: 'Let the AI on your instance steer the pacer and cheer you on',
+  asking: 'Asking your instance…',
+  unavailable: 'Your instance could not be reached. The pacer rides as usual.',
+  notOffered: 'Your instance offers you no AI model now. The pacer rides as usual.',
+  consented:
+    'The AI will steer the pacer on this ride. Write-ups on your instance wait until the ride ends.',
+  consent: 'Allow the AI pacer',
+  withdraw: 'Withdraw consent',
+} as const;
+
+/**
+ * What the rider agrees to, naming the place: the instance and its model's
+ * address, as the instance said them (ADR 0071 D-5.2, applied by ADR 0072 D-1.3).
+ */
+function aiPacerConsentText(instance: string, modelAddress: string): string {
+  return (
+    `Every few seconds this ride sends your gap to the pacer, your power per kilogram, ` +
+    `whether you are in its draft and the grade ahead to the AI model at ${modelAddress}, ` +
+    `run by your instance ${instance}. No place, no name and nothing of your trainer is sent. ` +
+    `The AI picks how the pacer rides and writes a short line for you; it never sets your ` +
+    `trainer. The same consent lets AI bots race you. You can withdraw it here at any time.`
   );
 }
 

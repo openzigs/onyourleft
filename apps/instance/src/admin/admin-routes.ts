@@ -59,6 +59,8 @@ export const ADMIN_SECTIONS = [
   'Rooms',
   'Keys',
   'Log',
+  // #2651: beside the operator log, the instance's own recent problem lines.
+  'Recent problems',
   'Passkeys',
 ] as const;
 
@@ -73,13 +75,25 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   { path: '/admin/admin.css', methods: ['GET'], kind: 'stylesheet' },
   { path: '/admin/passkey.js', methods: ['GET'], kind: 'script' },
   { path: '/admin/status', methods: ['GET'], kind: 'page', section: 'Status' },
+  { path: '/admin/accounts', methods: ['GET'], kind: 'page', section: 'Accounts' },
+  { path: '/admin/accounts/approve', methods: ['POST'], kind: 'action' },
+  { path: '/admin/accounts/refuse', methods: ['POST'], kind: 'action' },
+  // #2647: the page, and its one change, "back up now", posted to the page's own address.
+  { path: '/admin/backups', methods: ['GET', 'POST'], kind: 'page', section: 'Backups' },
   { path: '/admin/analysis', methods: ['GET'], kind: 'page', section: 'AI backend' },
+  // #2649: the page, and ending a room, the room named by a form field.
+  { path: '/admin/rooms', methods: ['GET'], kind: 'page', section: 'Rooms' },
+  { path: '/admin/rooms/end', methods: ['POST'], kind: 'action' },
+  // #2650: the page — the card on the loopback listener only — and rotating the encryption key.
+  { path: '/admin/keys', methods: ['GET'], kind: 'page', section: 'Keys' },
+  { path: '/admin/keys/rotate', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/offer', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/check', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/model', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/address', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/clear', methods: ['POST'], kind: 'action' },
   { path: '/admin/log', methods: ['GET'], kind: 'page', section: 'Log' },
+  { path: '/admin/problems', methods: ['GET'], kind: 'page', section: 'Recent problems' },
   { path: '/admin/passkeys', methods: ['GET'], kind: 'page', section: 'Passkeys' },
   { path: '/admin/passkeys/options', methods: ['POST'], kind: 'action' },
   { path: '/admin/passkeys/add', methods: ['POST'], kind: 'action' },

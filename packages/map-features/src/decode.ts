@@ -32,7 +32,7 @@ import {
   KEY_MIN_HEIGHT,
   KEY_POPULATION_RANK,
   LAYER_GEOMETRY_TYPES,
-  LAYER_KEPT_GEOMETRY,
+  LAYER_KEPT_GEOMETRIES,
   MAX_EXTENT,
   MAX_HEIGHT_METRES,
   MAX_KIND_LENGTH,
@@ -46,6 +46,7 @@ import {
   PLACE_KINDS,
   READ_LAYERS,
   STREET_KINDS,
+  WATER_LINE_KINDS,
   GEOMETRY_LINE,
   type BuildingFieldRule,
   type ReadLayer,
@@ -63,6 +64,7 @@ import type {
   StreetFeature,
   StreetGrade,
   TileId,
+  WaterLineFeature,
 } from './types';
 
 /**
@@ -241,6 +243,7 @@ function decodeChecked(
   const paths: PathFeature[] = [];
   const streets: StreetFeature[] = [];
   const places: PlaceFeature[] = [];
+  const waterLines: WaterLineFeature[] = [];
   for (const layer of framed) {
     state.layer = layer.name;
     const project = new Projector(tile, origin, layer.extent);
@@ -256,12 +259,12 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths, streets, places },
+        { landUse, buildings, paths, streets, places, waterLines },
       );
     }
   }
   state.layer = null;
-  return { tile, landUse, buildings, paths, streets, places };
+  return { tile, landUse, buildings, paths, streets, places, waterLines };
 }
 
 /** The layer's name if it is one this package reads or checks for, else `null`. Never decodes it. */
@@ -457,6 +460,7 @@ interface Sinks {
   readonly paths: PathFeature[];
   readonly streets: StreetFeature[];
   readonly places: PlaceFeature[];
+  readonly waterLines: WaterLineFeature[];
 }
 
 /**
@@ -511,7 +515,7 @@ function decodeFeature(
   if (type === 0) return; // UNKNOWN: the spec lets a decoder ignore it.
   if (!LAYER_GEOMETRY_TYPES[layer.name].includes(type))
     throw new Refused({ reason: 'wrong-schema' });
-  if (type !== LAYER_KEPT_GEOMETRY[layer.name]) return;
+  if (!LAYER_KEPT_GEOMETRIES[layer.name].includes(type)) return;
 
   const attributes = readTags(bytes, layer, tags);
   if (layer.name === 'places') {
@@ -523,6 +527,9 @@ function decodeFeature(
     return;
   }
   const kind = attributes.kind;
+  // #2659: a water line is a river, a stream or a canal, or it is not read.
+  const waterLine = layer.name === 'water' && type === GEOMETRY_LINE;
+  if (waterLine && !(WATER_LINE_KINDS as readonly (string | null)[]).includes(kind)) return;
   if (kind === null && layer.name !== 'water') return;
   if (layer.name === 'buildings' && !(BUILDING_KINDS as readonly string[]).includes(kind ?? '')) {
     return;
@@ -533,8 +540,18 @@ function decodeFeature(
   if (geometry === null) throw new Malformed();
   const parts = decodeGeometry(bytes, geometry, type, layer, project, limits, state);
   switch (layer.name) {
-    case 'landuse':
     case 'water':
+      if (waterLine) {
+        for (const line of parts as Float32Array[]) {
+          sinks.waterLines.push({ kind: kind as WaterLineFeature['kind'], line });
+        }
+        return;
+      }
+      for (const rings of parts as Ring[][]) {
+        sinks.landUse.push({ layer: layer.name, kind: kind ?? '', rings });
+      }
+      return;
+    case 'landuse':
       for (const rings of parts as Ring[][]) {
         sinks.landUse.push({ layer: layer.name, kind: kind ?? '', rings });
       }

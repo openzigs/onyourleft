@@ -119,6 +119,8 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['admin_passkey_confirmed', 'Admin passkey confirmed on the host'],
   // #2612: the Rooms section's.
   ['room_ended', 'Room ended'],
+  // #2646: a registration decided from the instance's admin Accounts page.
+  ['registration_decided', 'Registration decided'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */

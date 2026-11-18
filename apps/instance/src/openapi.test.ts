@@ -23,10 +23,13 @@ import { base64Of, testPicture } from './camera/picture-testing.ts';
 import { SEGMENT_HAPPY_CALLS } from './segments/segments-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import {
+  asksForPacer,
   ATTACK,
   chatServer,
   consentToTactics,
   OFFERED,
+  PACER_ANSWER,
+  PACER_INPUT,
   TACTICS_INPUT,
 } from './analysis/tactics-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
@@ -969,6 +972,16 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await send(world, 'POST', '/v1/analysis/tactics/end', token);
     return decided;
   },
+  // #2712: the AI pacer's one decision, under the same consent and slot.
+  decidePacer: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    const decided = await send(world, 'POST', '/v1/analysis/pacer/decide', token, {
+      input: PACER_INPUT,
+    });
+    await send(world, 'POST', '/v1/analysis/tactics/end', token);
+    return decided;
+  },
   endBotTacticsRace: async (world) => {
     const { token } = await signedIn(world);
     expect((await consentToTactics(world, token)).status).toBe(200);
@@ -1052,7 +1065,10 @@ describe('every route answers with the shape its entry declares', () => {
       // #1106: a picture model that answers at once, as the engine above does.
       pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
       // #2709: a local model offered to every rider, answering every call with a decision.
-      tactics: { local: OFFERED, fetch: chatServer(() => ATTACK).fetch },
+      tactics: {
+        local: OFFERED,
+        fetch: chatServer((body) => (asksForPacer(body) ? PACER_ANSWER : ATTACK)).fetch,
+      },
     });
   });
   afterAll(async () => {

@@ -410,3 +410,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   solo lap race gives and takes a draft by ADR 0038 D-3's model on effort distance, and this ADR's
   switch, off, turns it off for the whole race. D-7 (the trainer never feels a draft) is unchanged
   and binds the lap race. This entry only points there; nothing else in this ADR changes.
+- **2026-11-16** — **Once [ADR 0072](0072-a-model-directs-the-bot-pacer-during-a-ride.md) is
+  Accepted, D-1.1's *"The pacer's plan stays its own"* and its sentence that *"the bot's odometer is
+  bit-identical whether the rider is ahead of it, behind it or absent"* are superseded by it for a
+  solo ride the rider chose to ride with an AI pacer**: a model on the rider's own instance, which
+  reads the rider, picks the pacer's plan and intent inside #92's envelope (its D-2). The owner
+  accepted that patent risk on 2026-11-16 (*"We are fine with the patent. Put it in."*). D-1.1's
+  first sentence, **only the rider takes a draft**, stands for the AI pacer too, and D-7 (the trainer
+  never feels a draft) binds it unchanged. For every other ride D-1.1 stands as written. This entry
+  only points there; nothing else in this ADR changes. (#2712)

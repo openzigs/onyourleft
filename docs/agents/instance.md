@@ -185,6 +185,11 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         while it is held the job worker claims re-plans
                         only, so write-ups wait — docs/architecture.md §"Bot-tactics
                         decisions and the model slot — #2709".
+                        Since #2712 (ADR 0072) `POST /v1/analysis/pacer/decide`
+                        (`tactics.ts` §`pace`, `pacer-prompt.ts`): the AI
+                        pacer's plan, intent and one screened line, under
+                        the same consent, slot and gates — docs/architecture.md
+                        §"AI-pacer decisions — #2712".
                         Since #1251 `src/analysis/hosted-test.ts` is the
                         test question: `POST /v1/analysis/hosted/test`,
                         sealed-only, two fixed sentences on the rider's own
@@ -259,6 +264,24 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         changes), after a step-up, and the seam sets
                         `RouteContext.adminChannel`, from which the route
                         logs `admin_tunnel` or `admin_loopback`, never `app`.
+                        Since #2646 Accounts reaches ADR 0069 D-9's three
+                        moderation routes too (the queue, approve, refuse):
+                        the only non-owner routes with an `admin` marker,
+                        and a decision through them writes its moderation
+                        log row with `registration_decided` in ONE operator
+                        log transaction (`moderation.ts` §`act`'s channel).
+                        Since #2647 Backups' "back up now" is the fourth
+                        `'change'` route; `operate.requestBackup` takes the
+                        `OperateOwner`, so its entry names the channel.
+                        Since #2649 Rooms' End room too (`endRoom` takes
+                        the `OperateOwner`); the room id is a form field,
+                        shape-checked before it goes in `{roomId}`.
+                        Since #2650 Keys reads `operate.keysView` itself
+                        (`GET /v1/operate/keys` stays `never`) and hands
+                        the card to the renderer on the LOOPBACK place only.
+                        Since #2651 Recent problems draws `GET
+                        /v1/operate/logs` as given, escaped, with no
+                        redaction of its own and no second source.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

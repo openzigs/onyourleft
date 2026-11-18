@@ -592,6 +592,8 @@ export async function startIdentityInstance(
         ? {}
         : { loopbackPort: adminOptions.loopbackPort }),
       ...(adminOptions.addresses === undefined ? {} : { addresses: adminOptions.addresses }),
+      // #2650: the world's keys, as `instance.ts` hands them.
+      instanceKeys,
     });
     return madeAdmin.value;
   };

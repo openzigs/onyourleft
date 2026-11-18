@@ -993,6 +993,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           ? {}
           : { loopbackPort: server.adminLoopbackPort }),
         addresses: server.adminAddresses,
+        // #2650: the Keys page's; the card is drawn on the loopback listener only.
+        instanceKeys: keys,
       });
       admin = pages;
       // Each minute: the coalesced refusals written, and the sign-in limits'

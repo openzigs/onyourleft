@@ -484,9 +484,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'endOperateRoom',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: #2649's Rooms page ends one, behind a fresh passkey and
+    // the typed code, logged under the channel's own source.
+    admin: 'change',
     summary: `End a rider’s room (#2612): \`confirm\` must be the room’s short code and \`reason\` one of ${ROOM_END_REASONS.map((reason) => `\`${reason}\``).join(', ')}, or it is \`validation_failed\` and nothing changes. The room is over, as a finished one is: its route deleted, every socket in it sent \`refuse room-closed\` and closed \`4005\`, a rejoin refused, its voice channel deleted, and every result already final kept. A rider in it rides on alone; nothing is sent to anybody’s trainer. Logged \`room_ended\` with the reason, its kind and how many riders were in it, in the same transaction as the close. \`not_found\` for a room that is not an open rider’s room. \`unavailable\` where the instance has no room router. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -515,7 +515,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
     },
     handle: async (context) => {
       const ended = await operateOf(context).endRoom(
-        ownerOf(context),
+        ownerActor(context),
         context.params.roomId ?? '',
         context.json,
       );
@@ -597,9 +597,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'rotateOperateKey',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: #2650's Keys page rotates it, behind a fresh passkey and
+    // the typed word, logged under the channel's own source.
+    admin: 'change',
     summary: `Rotate the encryption key (#2613), with \`{ confirm: 'rotate' }\` — else \`validation_failed\` and nothing is written: what \`instance-key rotate\` does, with no \`--drop-old\` and no \`--serial-above\`. The old key keeps opening requests for 7 days, devices pick the new one up from \`GET /v1/instance/keys\` by themselves, and nobody pins again. It takes the key lease: while the instance’s own maintenance pass holds it the answer is \`busy\` and nothing is written. Logged \`instance_key_rotate\` (\`refused\` with \`busy\`) in the same transaction as the rotation. \`rotate --drop-old\`, \`rotate-identity\` and \`reset\` stay on the CLI. ${ANALYSIS_SUMMARY_TAIL}`,
     identity: true,
     operate: true,
@@ -625,7 +625,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
       },
     },
     handle: async (context) => {
-      const rotated = await operateOf(context).rotateKey(ownerOf(context), context.json);
+      const rotated = await operateOf(context).rotateKey(ownerActor(context), context.json);
       if (!rotated.ok) {
         return errorResponse(
           rotated.code,
@@ -990,9 +990,9 @@ export const OPERATE_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'requestOperateBackup',
     reaches: 'owner',
-    // ADR 0069 D-2: a change, which needs #2642's fresh passkey and the
-    // channel's own log source before the admin pages may make it.
-    admin: 'never',
+    // ADR 0069 D-2: #2647's Backups page asks for one, behind a fresh
+    // passkey, logged under the channel's own source.
+    admin: 'change',
     summary:
       '“Back up now” (#2606): asks the `backup` service for a snapshot, which it takes within 30 seconds; answers 202 at once — the instance itself takes none, holding neither the backup folders nor a reason to. The request and its `backup_requested` entry in the operator log are written in one transaction. Refused `too_many`, and logged `refused`, while a request already waits or a backup was made in the last 15 minutes: each extra backup with `--keep` removes an older one, and shortens how far back a restore can go. The owner’s alone: anybody else, the deputy included, is answered as though there were no such route. `unavailable` on an instance with no `OYL_INSTANCE_SECRET_KEY`.',
     identity: true,
@@ -1013,9 +1013,7 @@ export const OPERATE_ROUTES: readonly Route[] = [
       },
     },
     handle: async (context) => {
-      // The handler has answered anybody but the signed-in owner already.
-      if (context.caller === undefined) throw new Error('owner route called without a caller');
-      const asked = await operateOf(context).requestBackup(context.caller.athleteId);
+      const asked = await operateOf(context).requestBackup(ownerActor(context));
       if (!asked.ok) return errorResponse(asked.code);
       return json({ requestedAt: isoOf(asked.value.requestedAt) }, 202);
     },

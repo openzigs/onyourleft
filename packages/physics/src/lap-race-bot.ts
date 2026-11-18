@@ -176,8 +176,11 @@ export interface LapRaceBot {
   readonly power: Watts | 0;
 }
 
-/** The course a race's bots ride: #92's {@link BotCourse}, with the plan left to each bot's tier. */
-export type LapRaceBotConditions = Omit<BotCourse, 'plan'>;
+/**
+ * The course a race's bots ride: #92's {@link BotCourse}, with the plan left to each bot's tier,
+ * and never an AI pacer's direction (#2712, ADR 0072): that is the pacer's alone.
+ */
+export type LapRaceBotConditions = Omit<BotCourse, 'plan' | 'direction'>;
 
 /** One tick of a solo race. */
 export interface BotRaceStep {

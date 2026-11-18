@@ -399,7 +399,7 @@ describe('what a pavement may never stand on — #1535', () => {
     const profile = valleyRoute();
     const origin = corridorOrigin(profile);
     const seed = scatterSeed(profile);
-    const ways = waterways(profile, seed);
+    const ways = waterways(profile, seed, NO_LAND_CLASS);
     const middle = KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES / 2;
     const wet = (along: number): boolean => inWater(ways, profile, metres(along), middle);
     // Non-vacuity: the stretch crosses the stream, and has dry road both sides.
@@ -636,7 +636,7 @@ describe('the street furniture — #1536', () => {
       ofKind(furnitureAlong(hairpin, hairpinOrigin, seed, -1, 20, 360), 'lamp-post').length,
     ).toBeGreaterThan(10);
     const valley = valleyRoute();
-    const ways = waterways(valley, scatterSeed(valley));
+    const ways = waterways(valley, scatterSeed(valley), NO_LAND_CLASS);
     const pieces = furnitureAlong(
       valley,
       corridorOrigin(valley),
@@ -926,7 +926,7 @@ describe('a path to each front door — #1564', () => {
   it('never runs through water or over a bank', () => {
     const profile = valleyRoute();
     const valleySeed = scatterSeed(profile);
-    const ways = waterways(profile, valleySeed);
+    const ways = waterways(profile, valleySeed, NO_LAND_CLASS);
     // Non-vacuity: the stream crosses the road at 1 000 m, and 850 m is dry.
     expect(inWater(ways, profile, metres(1_000), 8)).toBe(true);
     expect(inWater(ways, profile, metres(850), 8)).toBe(false);

@@ -101,6 +101,7 @@ import { frameRider, lapFrameRider, ScriptedRoom, standingsRider } from '../src/
 import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { ModelTacticsPort, TacticsStatus } from '../src/game/lap-race/model-tactics-port';
+import type { PacerPort, PacerStatus } from '../src/instance/pacer-port';
 import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
 import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
@@ -638,7 +639,42 @@ const CIRCUITS =
  */
 const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 'lost';
 
+/**
+ * `ride.html?picker=chooser&aipacer=offered` — #2712's AI pacer on the
+ * chooser, with a stand-in instance that offers a model and records consent
+ * in memory (the double `ai-pacer-chooser.a11y.test.tsx` uses). No instance is
+ * contacted: `pre-ride.browser.spec.ts` §"#2723" measures the switch, the
+ * consent and its button as the owner's ruling on PR #2723 asks.
+ */
+const AI_PACER = new URLSearchParams(window.location.search).get('aipacer') === 'offered';
+
+function aiPacerStandIn(): PacerPort {
+  let consented = false;
+  const status = (): PacerStatus => ({
+    kind: 'offered',
+    instance: 'https://ride.example',
+    modelAddress: 'http://192.168.1.10:11434/v1',
+    consented,
+  });
+  return {
+    offered: () => true,
+    pacerStatus: () => Promise.resolve(status()),
+    consentToPacer: () => {
+      consented = true;
+      return Promise.resolve(status());
+    },
+    withdrawPacerConsent: () => {
+      consented = false;
+      return Promise.resolve(status());
+    },
+    startPacerRide: () => Promise.resolve(false),
+    decidePacer: () => Promise.resolve({ kind: 'failed' }),
+    endPacerRide: () => Promise.resolve(),
+  };
+}
+
 const GAME: GamePort = {
+  ...(AI_PACER ? { aiPacer: aiPacerStandIn() } : {}),
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
   // `attempts: 1`, so the picker offers the ghost — see this file's header.

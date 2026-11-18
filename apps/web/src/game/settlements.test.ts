@@ -48,6 +48,7 @@ import {
   drawnRoadPosition,
   localGroundPosition,
 } from './terrain';
+import { NO_LAND_CLASS } from './land-class';
 import { inWater, waterways } from './waterways';
 
 const BUILDINGS = new Set(['building', 'barn', 'church', 'shop-row', 'shed']);
@@ -162,7 +163,7 @@ describe('buildings stand in groups, not one by one — #460', () => {
     });
     let buildingsBesideWater = 0;
     for (const profile of [valleyRoute(), lakeValleyRoute(), lakeside]) {
-      const ways = waterways(profile, scatterSeed(profile));
+      const ways = waterways(profile, scatterSeed(profile), NO_LAND_CLASS);
       // ⚠️ `z` is NOT route distance, quite: the route's length is measured
       // along the ground and the projection is equirectangular, and the two
       // part by about a metre a kilometre — enough to put a fence the wrong
@@ -186,7 +187,9 @@ describe('buildings stand in groups, not one by one — #460', () => {
       }
     }
     // Non-vacuity: somewhere a settlement stands by a lake — on the dry side.
-    expect(waterways(lakeside, scatterSeed(lakeside)).lakes.length).toBeGreaterThan(2);
+    expect(waterways(lakeside, scatterSeed(lakeside), NO_LAND_CLASS).lakes.length).toBeGreaterThan(
+      2,
+    );
     expect(buildingsBesideWater).toBeGreaterThan(0);
   });
 });

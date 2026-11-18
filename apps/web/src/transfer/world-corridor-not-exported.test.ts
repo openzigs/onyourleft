@@ -16,6 +16,9 @@
  *
  * #1789 (ADR 0054 D-3.5): the same holds for a corridor whose footprints carry
  * every building field, decoded and packed by the product.
+ *
+ * #2659 (ADR 0054's entry of 2026-11-15): and for one that holds the rivers,
+ * streams and canals the product decoded and packed.
  */
 
 import {
@@ -36,6 +39,7 @@ import {
   FIXTURE_TILE,
   PLACE_SENTINEL,
   placesTile,
+  waterLinesTile,
 } from '@onyourleft/map-features/testing';
 import { TABLE, type WorldCorridorRecord } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -139,6 +143,28 @@ async function packedBuildingFields(): Promise<Blob> {
   });
 }
 
+/** A corridor's features as the product packs them, holding its decoded water lines (#2659). */
+async function packedWaterLines(): Promise<Blob> {
+  const decoded = decodeTile(waterLinesTile(), FIXTURE_TILE, FIXTURE_FRAME);
+  if ('reason' in decoded) throw new Error(decoded.reason);
+  expect(decoded.waterLines.length).toBeGreaterThan(0);
+  return packCorridorFeatures({
+    landUse: [],
+    buildings: [],
+    paths: [],
+    streets: [],
+    places: [],
+    waterLines: decoded.waterLines,
+  });
+}
+
+/** The decoded features a case packs into the corridor it exports. */
+const PACKED = {
+  'decoded places': packedPlaces,
+  'decoded building fields': packedBuildingFields,
+  'decoded water lines': packedWaterLines,
+} as const;
+
 describe('the account export carries no world corridor — #1545', () => {
   it.each([
     ['fit', 'fixture'],
@@ -146,6 +172,7 @@ describe('the account export carries no world corridor — #1545', () => {
     ['tcx', 'fixture'],
     ['fit', 'decoded places'],
     ['gpx', 'decoded building fields'],
+    ['tcx', 'decoded water lines'],
   ] as const)(
     'finds no trace of one in any file of a %s export, its features the %s',
     async (format, features) => {
@@ -155,12 +182,7 @@ describe('the account export carries no world corridor — #1545', () => {
       const corridor = await worldCorridorFor(
         ATHLETE_A,
         route.id,
-        features === 'fixture'
-          ? {}
-          : {
-              features:
-                features === 'decoded places' ? await packedPlaces() : await packedBuildingFields(),
-            },
+        features === 'fixture' ? {} : { features: await PACKED[features]() },
       );
       await harness.write(async (store) => {
         await store.putRoute(route);

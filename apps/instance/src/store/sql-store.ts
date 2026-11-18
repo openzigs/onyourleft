@@ -995,6 +995,8 @@ export const OPERATOR_ACTIONS = [
   'admin_passkey_revoked',
   'admin_passkey_confirmed',
   'room_ended',
+  // #2646 (ADR 0069 D-8, D-9): a registration approved or refused from the admin Accounts page.
+  'registration_decided',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1107,6 +1109,8 @@ export const OPERATOR_DETAILS: {
   // #2612: why the owner ended a room, what kind it was and how many riders
   // were in it — never the room's id, a rider or a place.
   room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
+  // #2646 (ADR 0069 D-8): the decision, never the rider, their name or the reason.
+  registration_decided: { words: ['approved', 'refused'], counts: [] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */

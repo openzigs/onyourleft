@@ -24,6 +24,7 @@
  * | `TrainerSnapshot.lost`, when it appears or changes | `trainer-lost` | "Control lost: …", the words `TrainerPanel` shows |
  * | `TrainerSnapshot.releaseFault`, likewise | `trainer-lost` | "Not released: …" |
  * | `RideWorkoutSnapshot.fault`, likewise | `workout-fault` | "Heads up: …" |
+ * | `RideWorkoutSnapshot.carryOn`, when it appears or changes (#2669) | `trainer-lost` | `workout/carry-on-text.ts`, the words `WorkoutPanel` shows |
  * | `RideWorkoutSnapshot.rescue`, when it appears or its reason changes (#585) | `workout-fault` | "Eased: …", the words `WorkoutPanel` shows |
  * | `TrainerSnapshot.ergRescue`, when it appears or its reason changes (#598) | `workout-fault` | "Eased: …", the words `TrainerPanel` shows |
  * | `RideWorkoutSnapshot.nowRiding`, when it changes | `interval-now` | "Now: …" (#394) |
@@ -109,6 +110,7 @@ import {
 } from '../workout/hold-text';
 
 import { planChangeAnnouncement, planDiscardedAnnouncement } from '../workout/replan-text';
+import { carryOnSentence } from '../workout/carry-on-text';
 
 import { RIDE_MAY_STOP_SPOKEN, type RideWorkoutSnapshot, type TrainerSnapshot } from './controller';
 import { upcomingBlock } from './lookahead';
@@ -199,6 +201,8 @@ interface Seen {
   readonly lost: TrainerSnapshot['lost'];
   readonly releaseFault: string | undefined;
   readonly fault: string | undefined;
+  /** #2669: where a workout carried across a trainer reconnect stands. */
+  readonly carryOn: RideWorkoutSnapshot['carryOn'];
   /** The workout's eased sentence (#585), so a change of REASON is a change. */
   readonly eased: string | undefined;
   /**
@@ -232,6 +236,7 @@ function seenIn(
     lost: trainer.lost,
     releaseFault: trainer.releaseFault,
     fault: workout?.fault,
+    carryOn: workout?.carryOn,
     eased:
       workout?.rescue === undefined ? undefined : workoutRescueText(workout.rescue, 'ride-screen'),
     manualReason: trainer.ergRescue?.reason,
@@ -279,6 +284,11 @@ function changes(before: Seen, now: Seen): AnnouncementEvent[] {
   // waiting one is withdrawn by the same rule when it clears.
   if (now.manualReason !== before.manualReason && now.manualEased !== undefined) {
     events.push({ kind: 'workout-fault', text: `${EASED_SPOKEN_PREFIX}${now.manualEased}` });
+  }
+  // #2669: `trainer-lost`, rank and all — it is the trainer under the rider
+  // going, coming back, and taking a target again.
+  if (now.carryOn !== before.carryOn && now.carryOn !== undefined) {
+    events.push({ kind: 'trainer-lost', text: carryOnSentence(now.carryOn) });
   }
   if (now.releaseFault !== before.releaseFault && now.releaseFault !== undefined) {
     events.push({ kind: 'trainer-lost', text: `Not released: ${now.releaseFault}` });
@@ -452,6 +462,7 @@ export function RideAnnouncer({
     lost,
     releaseFault,
     fault,
+    carryOn,
     eased,
     manualReason,
     manualEased,
@@ -465,6 +476,7 @@ export function RideAnnouncer({
       lost,
       releaseFault,
       fault,
+      carryOn,
       eased,
       manualReason,
       manualEased,
@@ -519,6 +531,7 @@ export function RideAnnouncer({
       lost,
       releaseFault,
       fault,
+      carryOn,
       eased,
       manualReason,
       manualEased,
@@ -591,6 +604,7 @@ export function RideAnnouncer({
     lost,
     releaseFault,
     fault,
+    carryOn,
     eased,
     manualReason,
     manualEased,

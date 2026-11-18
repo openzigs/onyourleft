@@ -213,6 +213,12 @@ instance, and **while it runs, post-ride write-ups wait** (queued, not failed; o
 is not stopped; re-plans do not wait). They start when the race ends, after 30 s with no tactics
 request, or 2 hours after the race began, whichever is first.
 
+**An AI pacer (#2712, ADR 0072).** The same consent lets a rider's pacer be steered by your
+**local** model during a solo ride: every few seconds it picks how the pacer rides and writes one
+short line of encouragement, which the instance screens before it answers. It takes the same slot
+as an AI-bots race, so while such a ride runs, post-ride write-ups wait, and an AI-bots race on the
+instance waits for it. Nothing of it is kept on the instance.
+
 **Back to `.env`.** Clear the settings from the app (`DELETE /v1/operate/analysis`), or on the host:
 
 ```
@@ -1162,7 +1168,41 @@ sign-in lands) and the **operator log** (`/admin/log`, 50 entries a page, newest
 entries* for the next); and since
 [#2648](https://github.com/openzigs/onyourleft/issues/2648) the **AI backend** (`/admin/analysis`): the local model, where it is set and
 whether it is on, the switches for what the instance offers riders, the models on the local server
-with *Check it calls tools*, the queue, and *Return to .env*. Each shows what the app's Operate area
+with *Check it calls tools*, the queue, and *Return to .env*; and since
+[#2646](https://github.com/openzigs/onyourleft/issues/2646) **Accounts** (`/admin/accounts`): how
+many accounts await approval, are approved and are suspended, the registration mode with the steps to
+change it in `.env`, and the riders waiting for approval — each one's display name, account id, when
+they asked and whether they confirmed they are 18 or over, and nothing more (ADR 0069 D-9). A passkey
+session can **approve or refuse** each, with a reason, through the same moderation route the app's
+Moderation screen uses; the decision is written to the moderation log and, as
+`registration_decided`, to the operator log in the same transaction. Suspensions and invitations stay
+on the app's Moderation screen; and since [#2647](https://github.com/openzigs/onyourleft/issues/2647)
+**Backups** (`/admin/backups`): the newest 50 records the backup service wrote, each in the app's
+words with its database SHA-256, the snapshots it removed and the free space where snapshots and
+their off-box copies go, and the steps to restore the newest snapshot on the host. A passkey session
+can **back up now**, through the same route the app uses, so its rule (one waiting, or none in the
+last 15 minutes) and its `backup_requested` entry are the route's own; a one-time code's session
+asks for none on either listener (ADR 0069 Q-A). No page names a host folder. Restore stays on the
+command line. Since [#2649](https://github.com/openzigs/onyourleft/issues/2649) there is also **Rooms**
+(`/admin/rooms`): every open room, its kind, private or public, its phase, when it opened, its
+host's display name and its riders by display name — never where anyone is, how fast or how hard —
+and, in a passkey session, **End room** for each: pick why, type the room's code, and your passkey
+is asked again. The route's own close runs: everyone in it is told the room closed (`4005`), nobody
+can rejoin, results already final are kept and nothing reaches anyone's trainer; the operator log's
+`room_ended` names the admin pages and the listener. Since
+[#2650](https://github.com/openzigs/onyourleft/issues/2650) there is also **Keys** (`/admin/keys`): the keys' state,
+the current encryption key's serial and when it rotates by itself, and the older keys held. **The
+instance card and its fingerprint are shown only on the server machine's listener**
+(`OYL_INSTANCE_ADMIN_LOOPBACK_PORT`), never through the tunnel, because a rider pins the card only
+from a source the edge cannot write (ADR 0047 D-6): through the tunnel the page says to open it on
+the server machine or run `operator instance-key show`. A passkey session can **rotate the
+encryption key** by typing `rotate`; the route's key lease, its `busy` and its
+`instance_key_rotate` entry are its own, the old key keeps working for 7 days and nobody pins again.
+`rotate --drop-old`, `rotate-identity` and `reset` stay on the command line. Since
+[#2651](https://github.com/openzigs/onyourleft/issues/2651) there is also **Recent problems** (`/admin/problems`,
+beside the operator log): the instance's last problem lines since it started, newest first, each in
+the app's words with the line as logged under it — the lines the log's one redaction already wrote,
+so never a token, a key, a name or a coordinate; read-only, and empty again after a restart. Every page shows what the app's Operate area
 shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
 answer. On the AI backend page a passkey session can also change the settings, and **every change
 asks your passkey again** for that one change: the route's own checks run, its local-address rule
