@@ -2305,6 +2305,7 @@ export function nationalForestTownFixture(boundary = 'forest'): {
     },
     named,
   };
+}
 
 /**
  * A plan's plinth, in triangles — #2761: what its far level draws beside the
