@@ -169,7 +169,10 @@ export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></scrip
 /**
  * The frame: the stylesheet linked, never inline, and with `script` the
  * passkey script linked too. `body` and `before` are markup the caller escaped;
- * `signedOut` draws the narrower column of the sign-in page.
+ * `signedOut` draws the narrower column of the sign-in page. `stylesheet` is
+ * the admin pages' own address unless a caller serves the same sheet at its
+ * own: the setup wizard's pages (#2784) link `/setup/setup.css`, because
+ * `/admin` is not served while the admin pages are off.
  */
 export function adminPage(
   title: string,
@@ -177,6 +180,7 @@ export function adminPage(
   before = '',
   script = false,
   signedOut = false,
+  stylesheet = '/admin/admin.css',
 ): string {
   return `<!doctype html>
 <html lang="en">
@@ -184,7 +188,7 @@ export function adminPage(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/admin/admin.css">
+<link rel="stylesheet" href="${escapeHtml(stylesheet)}">
 ${script ? PASSKEY_SCRIPT_TAG : ''}</head>
 <body${signedOut ? ' class="signed-out"' : ''}>
 ${before}<main id="main">
@@ -200,7 +204,7 @@ ${body}
  * than served as the app's image, so the header needs no request of its own.
  * The arrow is decoration; the name is the text.
  */
-const WORDMARK =
+export const WORDMARK =
   '<span class="wordmark"><svg class="mark" viewBox="0 0 28 16" aria-hidden="true" focusable="false"><path d="M0 6h17V0l11 8-11 8v-6H0z"/></svg>On Your Left</span>';
 
 /**
@@ -538,7 +542,7 @@ export type LogView =
   | { readonly kind: 'bad-cursor' };
 
 /** The app's words for each action (`OperateView.tsx` §`ACTION_LABEL`). */
-const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
+export const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   migrate: 'Database migrated',
   backup: 'Backup taken',
   backup_requested: 'Backup asked for',
@@ -569,6 +573,13 @@ const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   owner_claim_confirmed: 'Owner claim confirmed',
   owner_claim_discarded: 'Owner claim discarded',
   owner_claim_reset: 'Owner claim reset on the host',
+  setup_code_minted: 'Setup code made',
+  setup_sign_in: 'Signed in to the setup page',
+  setup_refused: 'Setup sign-in attempts refused',
+  secret_generated: 'Secret made at start',
+  registration_mode_set: 'Registration mode set',
+  invite_minted: 'Rider invite made',
+  setup_done: 'Setup finished',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */
@@ -577,6 +588,8 @@ const SOURCE_TEXT: Readonly<Record<OperatorSource, string>> = {
   cli: 'from the command line on the host',
   admin_tunnel: 'from the admin pages, through the tunnel',
   admin_loopback: 'from the admin pages, on the server machine',
+  setup: 'from the setup page, on the server machine',
+  start: 'by the instance as it started',
 };
 
 const OUTCOMES: readonly unknown[] = ['done', 'refused', 'failed'];

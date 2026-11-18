@@ -158,8 +158,11 @@ async function keepsPermissions(
   }
 }
 
-/** Write `text` to `path`, never in part: a new `0600` file beside it, renamed into place. */
-async function writeWhole(
+/**
+ * Write `text` to `path`, never in part: a new `0600` file beside it, renamed
+ * into place. The setup code's file is written the same way (#2784).
+ */
+export async function writeWhole(
   path: string,
   text: string,
   random: (bytes: number) => Uint8Array,
