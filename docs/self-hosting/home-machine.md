@@ -276,19 +276,25 @@ Then follow the page, step by step. You can leave and come back at any time; it 
 were.
 
 1. **Claim it with your tablet.** Press *Show the claim code*, open On Your Left on the tablet you ride
-   with, go to *Instance* and scan the code **with the app's own scanner**. The tablet shows six digits;
-   if the page shows the same six, press *Yes*. The tablet is now the instance's owner.
-2. **A passkey** for the admin pages: optional, and the page says how to add one later.
+   with, go to *Instance* and scan the code **with the app's own scanner**. The page waits for the scan
+   by itself. The tablet then shows six digits; if the page shows the same six, press *Yes*. The page
+   says your tablet now owns the server.
+2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
+   pages.
 3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
-   beside the backups**.
-4. **Backups**: press *Back up now* and read the page again after half a minute. It says whether the
-   snapshot reached **both** folders. The folders themselves are the `OYL_BACKUP_DIR` and
-   `OYL_OFFBOX_DIR` lines in `.env` (step 4): to change one, edit that line and deploy again. ⚠️ On
-   Windows the off-box folder cannot be a USB stick ([Backups](#backups)).
-5. **Who may join**: approval, invite, open or closed. You can change it later with
+   beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
+   once you have added a passkey there.
+4. **Backups**: press *Back up now*; the page checks again by itself until the backup has run. It says
+   whether the snapshot reached **both** folders: the one on this computer and the copy kept
+   elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` lines in `.env`
+   (step 4): to change one, edit that line and deploy again. ⚠️ On Windows the copy kept elsewhere
+   cannot be on a USB stick ([Backups](#backups)).
+5. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
+   new*, then *Save and go to the next step*. You can change it later with
    `docker compose exec instance node src/operator/cli.ts registration set <mode>`.
-6. **Invite a rider**: one invite, as a code a rider scans in the app.
-7. **Finish.** The setup page closes for good.
+6. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
+   has not signed in yet, connect to the instance from the app on the tablet first.
+7. **Finish.** The page lists where the server stands, and the setup page closes for good.
 
 Until the tablet has claimed the instance, nobody can make an account on it. **The expert path**
 still works: with `OYL_INSTANCE_OWNER_KEY` set in `.env` the setup page never opens, and the

@@ -1118,17 +1118,31 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
 - **The steps**, each of which the operator log records from the source `setup`, naming no athlete:
   1. **Claim** — a claim code as a QR with the instance card, the tablet's claim, and the six digits
      compared on both screens ([Claiming the instance from the app](#claiming-the-instance-from-the-app)).
-  2. **A passkey** — optional: how to add one on the admin pages, and confirm it on the host.
+     Until a tablet scans it the step keeps showing the **same** QR and loads itself again every five
+     seconds (a `meta` refresh, no script); the code is held in the instance's memory for the session
+     that asked for it, never in the database. After *Yes* the step says the tablet now owns the
+     server, before the next step.
+  2. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
+     are in a collapsed block for people comfortable with the command line.
   3. **The emergency kit** — offered **once** per setup session, with no passkey
      ([The instance's secrets](#the-instances-secrets)).
-  4. **Backups** — whether the last backup reached both folders, and **Back up now**. The folders are
-     `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`: the `backup` service is started with them, so the
-     page checks and explains and cannot choose them.
-  5. **Who may join** — the registration mode. The one chosen here is kept in the database and **wins
-     over `OYL_INSTANCE_REGISTRATION`** until it is cleared (ADR 0080 D-6).
-  6. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in.
-  7. **Finish** — a summary of what this setup changed. The page is then `not_found` for good, after a
-     restart too; only `owner-claim reset` reopens it.
+  4. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
+     elsewhere"), and **Back up now**; while a backup waits the step loads itself again. The folders
+     are `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`, named only in the step's collapsed command-line
+     block: the `backup` service is started with them, so the page checks and explains and cannot
+     choose them.
+  5. **Who may join** — the registration mode, in plain words (*Anyone can join*, *I approve each new
+     rider*, *Only people I invite*, *Nobody new*; stored as `open`, `approval`, `invite`, `closed`).
+     Its one button saves the choice and moves on. The one chosen here is kept in the database and
+     **wins over `OYL_INSTANCE_REGISTRATION`** until it is cleared (ADR 0080 D-6).
+  6. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
+     the instance. The app does not sign in by itself after the claim, so until it has the step says
+     what to do on the tablet.
+  7. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
+     working or not, who may join, and the invites made. The page is then `not_found` for good, after
+     a restart too; only `owner-claim reset` reopens it. The *Setup is finished* page carries its
+     stylesheet inline, allowed by its hash in that response's CSP, because `/setup/setup.css` has
+     gone with the rest.
 - **Leave whenever you like.** The step is kept in the database, so coming back — after a restart, with
   the new code — resumes it. A setup session ends after 15 minutes without use and 2 hours after the
   code was typed.
