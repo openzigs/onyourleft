@@ -464,7 +464,9 @@ export const CLAIM_REFUSAL_TEXT = {
   'no-answer':
     'Your server did not answer, so nothing was claimed: check that it is running and try again.',
   'not-confirmed':
-    'Your server has not confirmed the claim yet, so press Yes on its setup page and then sign in again.',
+    'Your server has not confirmed the claim yet, so press Yes on its setup page and then sign in again. If that page no longer shows the claim, show a new claim code there and scan it.',
+  'this-device':
+    'This device could not prepare its key, so nothing was sent and your claim code is still good: try again.',
 } as const;
 
 /** What the link-code screen says when no code can be shown. Draft wording (#880). */
@@ -1472,8 +1474,14 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
         }
         // The key that signs the sealed request is the key the body names, and
         // the one the claim makes the owner's: the local athlete's (#772).
-        await dependencies.ensureLocalAthlete();
-        const publicKey = toHex((await dependencies.signingKey()).publicKey);
+        let publicKey: string;
+        try {
+          await dependencies.ensureLocalAthlete();
+          publicKey = toHex((await dependencies.signingKey()).publicKey);
+        } catch {
+          // A fault on this device, before anything was sent: the code is not spent.
+          return { kind: 'refused', text: CLAIM_REFUSAL_TEXT['this-device'] };
+        }
         const answer = await sealedFor(decision.origin, checked.instanceKey).post(
           '/v1/auth/owner-claim',
           { publicKey, claimCode: read.code },

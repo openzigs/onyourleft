@@ -326,4 +326,23 @@ describe('what a claim refuses, in one sentence that never names the code — #2
     });
     expect(await world.identity.ownerClaim.pending()).toBeUndefined();
   });
+
+  it('says a fault on this device is this device’s, sends nothing, and leaves the code unspent', async () => {
+    const world = await instance();
+    const send = wire(world);
+    const tablet = device(send);
+    const broken = createInstancePort({
+      ...tablet.dependencies,
+      signingKey: () => Promise.reject(new Error('no key store')),
+    });
+    const { line } = await claimLine(world);
+    expect(await broken.claimOwner(line)).toEqual({
+      kind: 'refused',
+      text: CLAIM_REFUSAL_TEXT['this-device'],
+    });
+    expect(send.paths).toEqual(['/v1/instance/keys']);
+    expect(await world.identity.ownerClaim.pending()).toBeUndefined();
+    // The same code still claims from a device that can sign.
+    expect(await tablet.port.claimOwner(line)).toMatchObject({ kind: 'pending' });
+  });
 });
