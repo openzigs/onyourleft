@@ -109,6 +109,15 @@ rollback() {
 
 [ -f "${HERE}/.env" ] || die "there is no .env beside compose.yaml: copy instance.env.example and fill it in."
 
+# #2781 (ADR 0080 D-4): the folder the instance makes its secret key in on
+# its first start. Made here, by the user who deploys, because Docker would
+# make a missing one owned by root on Linux, where the instance (uid 1000)
+# could not write it. Owner-only; an existing one is left as it is.
+if [ ! -d "${HERE}/secrets" ]; then
+  mkdir -p "${HERE}/secrets" && chmod 700 "${HERE}/secrets" ||
+    die 'could not make the secrets folder beside compose.yaml.'
+fi
+
 if [ "${1:-}" = '--rollback' ]; then
   rollback "$(state previous)" "$(state snapshot)"
   exit 0

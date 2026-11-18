@@ -44,6 +44,12 @@ export interface AdminRoute {
   readonly kind: AdminRouteKind;
   /** A `page`'s link in the shell: one of {@link ADMIN_SECTIONS}. */
   readonly section?: AdminSection;
+  /**
+   * Served on the loopback listener only (#2781, ADR 0080 D-4): through the
+   * tunnel it answers as a path with no route does, so the edge learns not
+   * even that it is there.
+   */
+  readonly loopbackOnly?: true;
 }
 
 /**
@@ -87,6 +93,8 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   // #2650: the page — the card on the loopback listener only — and rotating the encryption key.
   { path: '/admin/keys', methods: ['GET'], kind: 'page', section: 'Keys' },
   { path: '/admin/keys/rotate', methods: ['POST'], kind: 'action' },
+  // #2781 (ADR 0080 D-4): the emergency kit, downloaded behind a fresh step-up, on the server machine only.
+  { path: '/admin/keys/emergency-kit', methods: ['POST'], kind: 'action', loopbackOnly: true },
   { path: '/admin/analysis/offer', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/check', methods: ['POST'], kind: 'action' },
   { path: '/admin/analysis/model', methods: ['POST'], kind: 'action' },

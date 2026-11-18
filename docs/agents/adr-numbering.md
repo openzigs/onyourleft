@@ -16,14 +16,28 @@ It has the same authority as the root file. Where the text below says "this file
   taken by [#2790](https://github.com/openzigs/onyourleft/issues/2790) on 2026-11-18 for remote
   access without a domain (the owner's tailnet by default, a domain optional) and the refusal of
   LAN-only `http://`, on the owner's ruling of 2026-10-27 on #15 and the lane note of 2026-11-18 on
-  #2790. It is **Proposed** until the owner approves it on its pull request, and it supersedes
-  nothing. #2790's title claimed 0079, and the open pull request
+  #2790. It was **Accepted** on 2026-11-18 by the owner on its pull request
+  [#2806](https://github.com/openzigs/onyourleft/pull/2806), and it supersedes nothing. #2790's title claimed 0079, and the pull request
   [#2795](https://github.com/openzigs/onyourleft/pull/2795) (#2780) recorded it as reserved for
   #2790 while writing 0080. It skipped **0078**, which the open pull request
   [#2793](https://github.com/openzigs/onyourleft/pull/2793) (#2777) writes; **0075, 0076 and 0077
   stay claimed** by #2670, #2767 and #2762, **0080** by #2795, and **0057 and 0058** by #1748 and
-  #1752. The lane note expected 0081, which is the next free number **after** this ADR. **The next
-  free number is 0081.** A reviewer who remembers this file offering 0078 is reading the old file.
+  #1752. The lane note expected 0081, and 0081 is still free.
+  ⚠️ **0080 is [ADR 0080](../adr/0080-first-run-setup-and-owner-claim-on-the-loopback-listener.md)**,
+  taken by [#2780](https://github.com/openzigs/onyourleft/issues/2780) on 2026-11-17 for first-run
+  setup and the owner's claim on the loopback listener, on the owner's ruling of that day on the epic
+  [#2779](https://github.com/openzigs/onyourleft/issues/2779). It is **Proposed** until the owner
+  approves it on its pull request. It supersedes in part ADR 0069 D-5 and D-1, ADR 0046 D-9 Q9 and
+  the 2026-11-14 ruling on #2601 about the registration mode. ADR 0046, ADR 0047 and ADR 0069 each
+  gained one dated `## Amendments` entry pointing here. ⚠️ **#2780's title names 0078, and 0078 had
+  gone**: the open pull request [#2793](https://github.com/openzigs/onyourleft/pull/2793) (#2777)
+  writes `0078-a-floor-under-the-ai-pacers-intent.md`, and **0079 was claimed by
+  [#2790](https://github.com/openzigs/onyourleft/issues/2790)'s title** (it is ADR 0079 now, above). 0075, 0076 and 0077 are
+  written in the open pull requests [#2670](https://github.com/openzigs/onyourleft/pull/2670),
+  [#2767](https://github.com/openzigs/onyourleft/pull/2767) and
+  [#2762](https://github.com/openzigs/onyourleft/pull/2762), 0070 is ADR 0070 (#2684, below), and **0057 and
+  0058 stay claimed** by #1748 and #1752. **The next free number is 0081**, which no issue or pull request claims; **0082 is claimed** by the open pull request [#2802](https://github.com/openzigs/onyourleft/pull/2802) (#2794), so the number after 0081 is **0083**. A reviewer who remembers
+  this file offering 0075, 0078 or 0079 is reading the old file.
   ⚠️ **0070 is [ADR 0070](../adr/0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**,
   taken by [#2684](https://github.com/openzigs/onyourleft/issues/2684) on 2026-11-15 for houses on
   inferred built-up land in a suburb that OpenStreetMap maps only by its streets, on the owner's

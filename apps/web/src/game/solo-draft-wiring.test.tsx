@@ -192,6 +192,13 @@ const renderer: GameRenderer = {
 };
 
 const FRAME_MS = 250;
+/**
+ * The latch case's time alone (#2770): a hundred seconds in frames of five.
+ * Each is a hundred `SIMULATION_STEP_SECONDS` steps, under
+ * `MAXIMUM_STEPS_PER_ADVANCE`, so the simulation rides all of it.
+ */
+const ALONE_FRAME_MS = 5_000;
+const ALONE_FRAMES = 20;
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
 let mounted: Mounted | undefined;
@@ -605,15 +612,20 @@ describe('“Your best” after a drafted attempt — #2425, ADR 0066 D-5.1, D-5
     expect(field('Your best')).toBe('Finished ahead of you, with its draft');
     // …then a hundred seconds alone, in which the ride's own share in the
     // draft falls far below DRAFTED_SHARE: the attempt's is what was settled.
-    for (let frame = 0; frame < 400; frame += 1) {
+    // #2770: in twenty frames of five seconds rather than 400 of a quarter,
+    // because a frame's cost is the render, not the road. Five seconds is a
+    // hundred steps, inside MAXIMUM_STEPS_PER_ADVANCE, so none is skipped and
+    // the road is all ridden — which the share below reads back.
+    for (let frame = 0; frame < ALONE_FRAMES; frame += 1) {
       const next = pending.shift();
       if (next === undefined) break;
-      nowMs += FRAME_MS;
+      nowMs += ALONE_FRAME_MS;
       await act(async () => {
         next(nowMs);
         await Promise.resolve();
       });
     }
+    expect(draftedRide(stepped.at(-1)), 'the ride’s own share, after the time alone').toBe(false);
     expect(field('Your best')).toBe('Finished ahead of you, with its draft');
   });
 
