@@ -49,8 +49,23 @@ const READY = 'html[data-oyl-shell-ready]';
 /** SC 2.5.5 (AAA). Not SC 2.5.8, which is 24 px. */
 const TOUCH_TARGET_PIXELS = 44;
 
-/** The buttons' own transition is 120 ms; this is what a read waits past. */
-const TRANSITION_WAIT_MS = 400;
+/**
+ * #2509: what every read in this file is about is the colour a state SETTLES
+ * on, so the page under test runs no transition. The buttons ease their fill
+ * and edge over `--oyl-motion-short` (120 ms), and `getComputedStyle` during a
+ * transition returns wherever it has got to. A fixed sleep past 120 ms was a
+ * race against the renderer, not a wait: on a loaded runner no frame came in
+ * the 400 ms it slept, the transition had not started, and the #2063 control
+ * read the primary's own `accent` fill as its start value, once in each
+ * palette. With no transition a new colour lands at the next style recalc,
+ * which `getComputedStyle` itself forces, so a read sees the state it asks
+ * about at once and nothing here sleeps.
+ */
+async function holdStill(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: '*, *::before, *::after { transition: none !important; }',
+  });
+}
 
 /** Every kind and state `shell-harness.tsx` renders, by `data-oyl-kind`. */
 const KINDS = [
@@ -76,6 +91,7 @@ function declared(fg: ColourToken, bg: ColourToken, minimum: number): boolean {
 async function open(page: Page, url = PAGE): Promise<void> {
   await page.goto(url);
   await page.waitForSelector(READY);
+  await holdStill(page);
   const kinds = await page
     .locator('[data-oyl-hierarchy] [data-oyl-kind]')
     .evaluateAll((all) => all.map((element) => (element as HTMLElement).dataset['oylKind']));
@@ -271,7 +287,6 @@ for (const theme of THEMES) {
         await open(page);
         const secondary = kind(page, 'secondary');
         await secondary.hover();
-        await page.waitForTimeout(TRANSITION_WAIT_MS);
         expect(await secondary.evaluate((element) => element.matches(':hover'))).toBe(true);
         const read = await painted(secondary);
         expectLabelPair(read, { fg: 'accentHover', bg: 'selected' }, 'a hovered secondary');
@@ -289,7 +304,6 @@ for (const theme of THEMES) {
         ).toBe('1');
         const secondary = kind(page, 'secondary');
         await secondary.hover();
-        await page.waitForTimeout(TRANSITION_WAIT_MS);
         const read = await painted(secondary);
         expectToken(read.color, 'accentText', 'without the rule, the label');
         expectToken(read.background, 'accentHover', 'without the rule, the fill');
@@ -316,8 +330,6 @@ for (const theme of THEMES) {
         await page.evaluate((value) => {
           document.documentElement.style.setProperty('--oyl-color-accent', value);
         }, STRANGER);
-        // The primary eases its fill over `--oyl-motion-short`.
-        await page.waitForTimeout(TRANSITION_WAIT_MS);
       }
 
       test('a primary is filled with `accent`, and a secondary’s label is `accentText`', async ({
@@ -378,6 +390,7 @@ for (const theme of THEMES) {
         expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
         const seen = await page.evaluate(async () => window.__oylReflow?.visit('#/activities'));
         expect(seen?.h1).toBe('Activities');
+        await holdStill(page);
         for (const selector of [PRIMARY, SECONDARY, TERTIARY]) {
           expect(await page.locator(selector).count(), `${selector} on Activities`).toBeGreaterThan(
             0,
@@ -441,7 +454,6 @@ for (const theme of THEMES) {
             color: var(--oyl-color-accent-text);
           }`,
         });
-        await page.waitForTimeout(TRANSITION_WAIT_MS);
         const kinds = await readKinds(page);
         expect(kinds.primary.fill).toBe(kinds.secondary.fill);
         expect(hierarchyFaults(kinds)).toContain('the primary and the secondary are drawn alike');
@@ -465,7 +477,6 @@ for (const theme of THEMES) {
         );
         expect(await decoration()).toBe('none');
         await link.hover();
-        await page.waitForTimeout(TRANSITION_WAIT_MS);
         expectLabelPair(
           await painted(link),
           { fg: 'accentHover', bg: 'selected' },
@@ -552,7 +563,6 @@ for (const theme of THEMES) {
         // Its label stands on the page behind it, and that is a declared pair.
         expect(declared('accentText', 'canvas', AA_TEXT)).toBe(true);
         await tertiary.hover();
-        await page.waitForTimeout(TRANSITION_WAIT_MS);
         const hovered = await read();
         expect(hovered.background).toBe('rgba(0, 0, 0, 0)');
         expectToken(hovered.color, 'accentHover', 'a hovered tertiary, its label');
@@ -566,10 +576,8 @@ for (const theme of THEMES) {
         for (const [name, expected] of Object.entries(UNDER_A_POINTER)) {
           const button = kind(page, name as (typeof KINDS)[number]);
           await button.hover();
-          await page.waitForTimeout(TRANSITION_WAIT_MS);
           expectLabelPair(await painted(button), expected, `${name} under a pointer`);
           await page.mouse.down();
-          await page.waitForTimeout(TRANSITION_WAIT_MS);
           expect(await button.evaluate((element) => element.matches(':active'))).toBe(true);
           expectLabelPair(await painted(button), expected, `${name} pressed`);
           await page.mouse.up();
