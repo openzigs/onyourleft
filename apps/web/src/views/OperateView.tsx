@@ -121,6 +121,21 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['room_ended', 'Room ended'],
   // #2646: a registration decided from the instance's admin Accounts page.
   ['registration_decided', 'Registration decided'],
+  // #2781: the emergency kit, downloaded from the server machine's admin pages.
+  ['emergency_kit_downloaded', 'Emergency kit downloaded'],
+  // #2782: the owner's claim of the instance from the app.
+  ['owner_claim_code_minted', 'Owner claim code made'],
+  ['owner_claim_confirmed', 'Owner claim confirmed'],
+  ['owner_claim_discarded', 'Owner claim discarded'],
+  ['owner_claim_reset', 'Owner claim reset on the host'],
+  // #2784: the first-run setup wizard on the server machine, and the instance's own start.
+  ['setup_code_minted', 'Setup code made'],
+  ['setup_sign_in', 'Signed in to the setup page'],
+  ['setup_refused', 'Setup sign-in attempts refused'],
+  ['secret_generated', 'Secret made at start'],
+  ['registration_mode_set', 'Registration mode set'],
+  ['invite_minted', 'Rider invite made'],
+  ['setup_done', 'Setup finished'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */
@@ -134,6 +149,9 @@ const SOURCE_TEXT = {
   // #2641 (ADR 0069 D-8): the instance's own admin pages, by listener.
   admin_tunnel: 'from the admin pages, through the tunnel',
   admin_loopback: 'from the admin pages, on the server machine',
+  // #2784 (ADR 0080 D-7): the setup wizard, and the instance's own start.
+  setup: 'from the setup page, on the server machine',
+  start: 'by the instance as it started',
 } as const;
 
 /** A moment, in UTC, so the screen says the same thing wherever it is read. */

@@ -44,7 +44,13 @@ import { readServerConfig } from '../server-config.ts';
 import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { takeLease, type Lease, type LeaseOptions } from './backup-lease.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
-import type { BackupRun, OperatorAction, SqlStore } from '../store/sql-store.ts';
+import type {
+  BackupRun,
+  OperatorAction,
+  RegistrationModeSetting,
+  SqlStore,
+} from '../store/sql-store.ts';
+import { mintSetupCode } from '../setup/setup-code.ts';
 import { createSync } from '../sync/sync.ts';
 
 /**
@@ -64,6 +70,7 @@ import { createSync } from '../sync/sync.ts';
  * | `model-key clear` | the hosted key gone, scrubbed from the database's free pages and its log |
  * | `load-accounts add` | an APPROVED throwaway account, `Load N`, for each public key on standard input — what `tools/race-load.ts keys` printed — marked as the load run's (#1383) |
  * | `load-accounts erase` | every account `load-accounts add` made, erased as a rider's own erasure does it, and how many |
+ * | `owner-claim reset` | the owner key the owner's claim recorded cleared, every claim code voided and every admin session ended (#2782, ADR 0080 D-3): the instance is unclaimed again. `OYL_INSTANCE_OWNER_KEY`, when set, still wins |
  * | `account-erase [--confirm]` | ONE rider's account, found by a recovery code on standard input that the rider emailed: its id and counts, and with `--confirm` erased as their own erasure does it (#1802) |
  *
  * ⚠️ `restore` ends by ROTATING the encryption key (#1189, ADR 0047 D-5),
@@ -1221,14 +1228,15 @@ export async function modelKeySet(
       'OYL_INSTANCE_SECRET_KEY is not set: the key is encrypted under it, so it is needed to hold one.',
     );
   }
-  const ownerKey = options.ownerKey?.trim() ?? '';
-  if (ownerKey === '') {
-    throw new CommandError(
-      'OYL_INSTANCE_OWNER_KEY is not set: the key is held for the operator, the athlete whose device holds it. Nothing was written.',
-    );
-  }
   const store = openServingStore(paths.database);
   try {
+    // The owner key (ADR 0080 D-3): the environment's, else the claimed one (#2782).
+    const ownerKey = options.ownerKey?.trim() || ((await store.claimedOwnerKey()) ?? '');
+    if (ownerKey === '') {
+      throw new CommandError(
+        'OYL_INSTANCE_OWNER_KEY is not set and no owner has claimed this instance: the key is held for the operator, the athlete whose device holds the owner key. Nothing was written.',
+      );
+    }
     await asOperatorAction(
       store,
       'model_key_set',
@@ -1335,6 +1343,124 @@ export async function adminCode(paths: DataPaths, now?: () => Date) {
       code,
       expiresAt: new Date(expiresAt * 1000).toISOString(),
       voidedUnused: voided > 0,
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `owner-claim reset` (#2782, ADR 0080 D-3): the owner key the owner's claim
+ * recorded cleared, every claim code voided and every admin session ended, in
+ * one transaction with its `owner_claim_reset` entry. The recovery for an
+ * owner who lost the claimed device, or whose claim the wrong device took:
+ * the instance is unclaimed again, and a new claim can be made. It changes
+ * nothing about `OYL_INSTANCE_OWNER_KEY`, which wins whenever it is set —
+ * `ownerKeyFromEnvironment` says so, and that a reset then leaves the owner
+ * as the variable names.
+ */
+export async function ownerClaimReset(
+  paths: DataPaths,
+  options: { readonly ownerKey?: string | undefined; readonly now?: () => Date } = {},
+) {
+  const store = openServingStore(paths.database);
+  try {
+    const reset = await asOperatorAction(
+      store,
+      'owner_claim_reset',
+      (inside) => inside.resetOwnerClaim(),
+      (done) =>
+        `${done.claimed ? 'cleared' : 'none_claimed'},sessions_ended=${String(done.sessionsEnded)}`,
+      options.now,
+    );
+    return {
+      command: 'owner-claim reset',
+      cleared: reset.claimed,
+      adminSessionsEnded: reset.sessionsEnded,
+      ownerKeyFromEnvironment: (options.ownerKey?.trim() ?? '') !== '',
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `setup-code` (#2784, ADR 0080 D-2): a new setup code for the first-run
+ * setup at `http://localhost:<port>/setup`, printed ONCE on the terminal that
+ * ran it — the host, not a log — and written to the secrets folder's
+ * `setup-code` file too, so the file never holds a code this one voided.
+ * Minting voids every unused code, and the code and its `setup_code_minted`
+ * entry are written together. Refused once the setup is done, and while
+ * `OYL_INSTANCE_OWNER_KEY` is set, which makes it done from the first start.
+ */
+export async function setupCode(
+  paths: DataPaths,
+  options: {
+    readonly ownerKey?: string | undefined;
+    readonly secretsDirectory?: string | undefined;
+    readonly port?: string | undefined;
+    readonly now?: () => Date;
+  } = {},
+) {
+  if ((options.ownerKey?.trim() ?? '') !== '') {
+    throw new CommandError(
+      'The setup is done: OYL_INSTANCE_OWNER_KEY is set, and it names the owner. No setup code was made.',
+    );
+  }
+  const port = /^[0-9]{1,5}$/.test(options.port?.trim() ?? '') ? Number(options.port) : 8788;
+  const store = openServingStore(paths.database);
+  try {
+    const minted = await mintSetupCode(store, {
+      mintedBy: 'cli',
+      now: () => (options.now ?? (() => new Date()))().getTime(),
+      directory: options.secretsDirectory,
+      port,
+    });
+    if (minted.outcome === 'done') {
+      throw new CommandError(
+        'The setup is done, so there is no setup page to open. No setup code was made.',
+      );
+    }
+    return {
+      command: 'setup-code',
+      code: minted.code,
+      open: `http://localhost:${String(port)}/setup`,
+      expiresAt: new Date(minted.expiresAt * 1000).toISOString(),
+      writtenToFile: minted.written,
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `registration set <mode>` and `registration clear` (#2784, ADR 0080 D-6,
+ * Q-3): the registration mode the instance holds over
+ * `OYL_INSTANCE_REGISTRATION`, which the setup wizard sets too; `clear`
+ * returns to the environment's. A new rider meets it at once, with no
+ * restart. Logged as `registration_mode_set`, with the mode or `cleared`.
+ */
+export async function registrationMode(
+  paths: DataPaths,
+  mode: RegistrationModeSetting | null,
+  now?: () => Date,
+) {
+  const store = openServingStore(paths.database);
+  try {
+    const at = secondsOf(now);
+    await asOperatorAction(
+      store,
+      'registration_mode_set',
+      async (inside) => {
+        await inside.putRegistrationSetting(mode, at, 'cli');
+        return mode;
+      },
+      (held) => held ?? 'cleared',
+      now,
+    );
+    return {
+      command: mode === null ? 'registration clear' : 'registration set',
+      mode: mode ?? 'from OYL_INSTANCE_REGISTRATION',
     };
   } finally {
     await store.close();

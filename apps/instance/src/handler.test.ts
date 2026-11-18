@@ -230,7 +230,7 @@ describe('a rider’s app on another origin — #777', () => {
     expect(response.headers.get('access-control-allow-headers')).toBe(
       'authorization, content-type',
     );
-    expect(response.headers.get('access-control-max-age')).toBe('600');
+    expect(response.headers.get('access-control-max-age')).toBe('7200');
   });
 
   it('does not answer a preflight to a path no route serves', async () => {

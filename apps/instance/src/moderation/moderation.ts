@@ -49,6 +49,11 @@
  * named to decide it. Such an attempt changes nothing and IS logged, as
  * `refused_<action>`, so the owner can see a deputy who tried to act on them.
  *
+ * Since ADR 0080 D-3 (#2782) the owner's key need not be named: with no
+ * `OYL_INSTANCE_OWNER_KEY` it is the key the owner's claim recorded in the
+ * database, read on every check ({@link Moderation.ownerKey}). The
+ * environment wins whenever it is set.
+ *
  * ## A report about the only moderator (#905)
  *
  * With one moderator named, nobody else could ever decide a report about
@@ -195,10 +200,21 @@ export interface Moderation {
   /** The role the athlete holds, if any. */
   roleOf(athleteId: string): Promise<ModeratorRole | undefined>;
   /**
-   * Whether the operator named one moderator only (#905): then a report about
-   * them is theirs to decide, declared and logged as such.
+   * **The owner key** (ADR 0080 D-3): `OYL_INSTANCE_OWNER_KEY` when it is set,
+   * otherwise the key a confirmed claim recorded in the database (#2782),
+   * otherwise none. Read from the database on every call — never a copy made
+   * at start — so a claim takes effect without a restart and a reset ends it
+   * at once. Every owner check goes through it.
    */
-  readonly soleModerator: boolean;
+  ownerKey(): Promise<string | undefined>;
+  /** Whether `publicKey` is the owner key or the deputy's: such a key registers active. */
+  isModeratorKey(publicKey: string): Promise<boolean>;
+  /**
+   * Whether there is one moderator only (#905): then a report about them is
+   * theirs to decide, declared and logged as such. Asked each time, since the
+   * owner may be claimed while the instance runs (#2782).
+   */
+  soleModerator(): Promise<boolean>;
 
   /**
    * `shownName` is the name a race's result showed the caller on the row
@@ -436,13 +452,21 @@ export function createModeration(options: ModerationOptions): Moderation {
   const seconds = (): number => Math.floor(now() / 1000);
   const moderators = options.moderators ?? {};
   const limits = options.limits ?? DEFAULT_MODERATION_LIMITS;
-  const soleModerator = (moderators.owner === undefined) !== (moderators.deputy === undefined);
+  /** The environment wins, and a claim is refused while it is set (ADR 0080 D-3, Q-2). */
+  async function ownerKey(): Promise<string | undefined> {
+    return moderators.owner ?? (await store.claimedOwnerKey());
+  }
+
+  async function soleModerator(): Promise<boolean> {
+    return ((await ownerKey()) === undefined) !== (moderators.deputy === undefined);
+  }
 
   async function roleOf(athleteId: string): Promise<ModeratorRole | undefined> {
     const live = (await store.listDeviceKeys(athleteId))
       .filter((key) => key.revokedAt === null)
       .map((key) => key.publicKey);
-    if (moderators.owner !== undefined && live.includes(moderators.owner)) return 'owner';
+    const owner = await ownerKey();
+    if (owner !== undefined && live.includes(owner)) return 'owner';
     if (moderators.deputy !== undefined && live.includes(moderators.deputy)) return 'deputy';
     return undefined;
   }
@@ -484,6 +508,10 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     roleOf,
+    ownerKey,
+    async isModeratorKey(publicKey) {
+      return publicKey === (await ownerKey()) || publicKey === moderators.deputy;
+    },
     soleModerator,
 
     async block(athleteId, target, shownName) {
@@ -1009,7 +1037,7 @@ export function createModeration(options: ModerationOptions): Moderation {
       // goes on to `moderate`, which answers it is not applicable.
       const report = await store.getReport(Number(reportId));
       if (report?.closedAt === null && report.targetAthleteId === moderatorId) {
-        if (soleModerator) {
+        if (await soleModerator()) {
           return logged(
             await store.moderate({
               action: 'dismiss_own_report',

@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { sha256Hex } from '../auth/crypto.ts';
 import { TEST_ORIGIN } from '../auth/identity-testing.ts';
+import { REMOTE_PATH_ADDRESS_HEADER, type RemotePath } from '../config.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { freeLoopbackPort, testConfig } from '../instance-testing.ts';
 import { secretBytes } from '../keys/instance-keys-testing.ts';
@@ -48,7 +49,11 @@ interface Started {
 }
 
 async function start(
-  options: { loopback?: boolean; trustedProxies?: readonly string[] } = {},
+  options: {
+    loopback?: boolean;
+    trustedProxies?: readonly string[];
+    remotePath?: RemotePath;
+  } = {},
 ): Promise<Started> {
   directory = await mkdtemp(join(tmpdir(), 'oyl-admin-loopback-'));
   const path = join(directory, 'instance.sqlite');
@@ -76,8 +81,12 @@ async function start(
   running = await startInstance({
     config: testConfig({
       moderators: { owner: OWNER_KEY },
-      clientAddressHeader: 'cf-connecting-ip',
+      clientAddressHeader:
+        options.remotePath === undefined
+          ? 'cf-connecting-ip'
+          : REMOTE_PATH_ADDRESS_HEADER[options.remotePath],
       trustedProxies: [...(options.trustedProxies ?? [])],
+      remotePath: options.remotePath ?? null,
     }),
     server,
     version: '9.8.7',
@@ -292,5 +301,74 @@ describe('with the port unset, and against the tunnel container (#2643, ADR 0069
     ).rejects.toThrow(/socket hang up|ECONNRESET/);
     const main = await send(portOf(instance), 'GET', '/admin/sign-in', { host: 'ride.example' });
     expect(main.status).toBe(200);
+  });
+});
+
+describe('with Funnel on, the public listener serves no /admin (#2805, ADR 0079 D-3)', () => {
+  /** A loopback code session's cookie, signed in on the loopback listener. */
+  async function loopbackSession(path: string, loopback: number): Promise<string> {
+    const local = `localhost:${String(loopback)}`;
+    const answer = await send(
+      loopback,
+      'POST',
+      '/admin/sign-in',
+      {
+        host: local,
+        origin: `http://${local}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      `code=${await mint(path)}`,
+    );
+    expect(answer.status).toBe(303);
+    const cookie = /^([^;]+);/.exec(String(answer.headers['set-cookie']))?.[1];
+    expect(cookie?.startsWith(`${LOOPBACK_COOKIE}=`)).toBe(true);
+    return cookie as string;
+  }
+
+  it('answers every /admin path not_found on the public listener, and still serves its other routes', async () => {
+    const { instance, path } = await start({ remotePath: 'funnel' });
+    const main = portOf(instance);
+    const asked = { host: 'ride.example', origin: TEST_ORIGIN };
+    for (const [method, at, body] of [
+      ['GET', '/admin', undefined],
+      ['GET', '/admin/sign-in', undefined],
+      ['GET', '/admin/status', undefined],
+      ['GET', '/admin/keys', undefined],
+      ['POST', '/admin/sign-in', `code=${await mint(path)}`],
+    ] as const) {
+      const answer = await send(
+        main,
+        method,
+        at,
+        body === undefined
+          ? asked
+          : { ...asked, 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+      );
+      expect(answer.status, `${method} ${at}`).toBe(404);
+      expect(JSON.parse(answer.body), at).toMatchObject({ error: { code: 'not_found' } });
+      expect(answer.headers['set-cookie'], at).toBeUndefined();
+    }
+    // The control: everything else on the public listener is still served.
+    expect((await send(main, 'GET', '/health', asked)).status).toBe(200);
+  });
+
+  it('still serves the loopback pages and the card on the server machine, the admin pages left on', async () => {
+    const { instance, path, loopback } = await start({ remotePath: 'funnel' });
+    expect(instance.adminLoopback).toBeDefined();
+    const cookie = await loopbackSession(path, loopback);
+    const keys = await send(loopback, 'GET', '/admin/keys', {
+      host: `localhost:${String(loopback)}`,
+      cookie,
+    });
+    expect(keys.status).toBe(200);
+    expect(keys.body).toContain(`<code class="card">oyl-instance:${TEST_ORIGIN}#`);
+  });
+
+  it('serves /admin on the public listener on the tailnet, where Funnel is off', async () => {
+    const { instance } = await start({ remotePath: 'tailnet' });
+    const page = await send(portOf(instance), 'GET', '/admin/sign-in', { host: 'ride.example' });
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('One-time code');
   });
 });

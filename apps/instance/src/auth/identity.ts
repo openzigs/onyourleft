@@ -108,6 +108,12 @@ import {
   type ModerationLimits,
   type Moderators,
 } from '../moderation/moderation.ts';
+import {
+  createOwnerClaim,
+  DEFAULT_OWNER_CLAIM_LIMITS,
+  type OwnerClaim,
+  type OwnerClaimLimits,
+} from './owner-claim.ts';
 import type { Admit } from '../room/core/room.ts';
 import {
   InviteRefusedError,
@@ -315,6 +321,18 @@ export interface IdentityOptions {
   /** The device keys of the owner and the deputy, who moderate (#83, ruling Q13). */
   readonly moderators?: Moderators;
   readonly moderationLimits?: ModerationLimits;
+  /** How often a claim code may be tried (#2782): ADR 0069 D-4's sign-in limits unless a test sets its own. */
+  readonly ownerClaimLimits?: OwnerClaimLimits;
+  /**
+   * ADR 0080 D-3 (#2784): while the instance is UNCLAIMED — no owner key in
+   * the environment or the database — and holds no athlete, every
+   * registration is refused, whatever the mode. Only where the owner can
+   * claim it: the Node adapter with the setup wizard's loopback listener
+   * (`instance.ts`). Elsewhere, the Durable Object adapter and an instance
+   * with no loopback port, nothing could ever claim it, so the rule would
+   * refuse every rider for good, and it is not applied.
+   */
+  readonly refuseWhileUnclaimed?: boolean;
 }
 
 export type Outcome<T> =
@@ -463,7 +481,16 @@ export interface Identity {
   readonly origin: string;
   /** Blocking, reporting and the moderators' tools (#83), over the same store and clock. */
   readonly moderation: Moderation;
+  /** The owner's claim (#2782, ADR 0080 D-3), over the same store, clock and named keys. */
+  readonly ownerClaim: OwnerClaim;
   readonly emailRecoveryEnabled: boolean;
+  /**
+   * The registration mode a new rider meets now (#2784, ADR 0080 D-6): the
+   * database's, which the setup wizard or `operator registration set` wrote,
+   * else `OYL_INSTANCE_REGISTRATION`'s. Read on every registration, so a
+   * change applies without a restart.
+   */
+  registrationMode(): Promise<RegistrationMode>;
   challenge(
     publicKey: unknown,
     address: string | null,
@@ -745,7 +772,10 @@ export function createIdentity(options: IdentityOptions): Identity {
   /** Now less the hold: an address confirmed after this is still held (#1194). */
   const heldSince = (): number => seconds() - RECOVERY_ADDRESS_HOLD_SECONDS;
   const limits = options.limits ?? DEFAULT_LIMITS;
-  const registration = options.registration ?? DEFAULT_REGISTRATION;
+  const environmentRegistration = options.registration ?? DEFAULT_REGISTRATION;
+  /** The database wins while it holds a mode (ADR 0080 D-6); clearing it returns to the environment. */
+  const registrationMode = async (): Promise<RegistrationMode> =>
+    (await store.registrationSetting()) ?? environmentRegistration;
   const publicRooms = options.publicRooms ?? DEFAULT_PUBLIC_ROOM_THRESHOLDS;
   // ⚠️ In memory, like every limit below and unlike the report limit
   // (`moderation.ts`, counted from the store): a restart — or, under the
@@ -777,6 +807,17 @@ export function createIdentity(options: IdentityOptions): Identity {
     // registration's does: failing closed.
     allowNoticeFrom: (address) =>
       noticesPerAddress.allow(address === null ? 'unknown' : addressKey(address)),
+  });
+  const ownerClaimLimits = options.ownerClaimLimits ?? DEFAULT_OWNER_CLAIM_LIMITS;
+  const ownerClaimLimiters = {
+    perAddress: createRateLimiter(ownerClaimLimits.perAddress, now),
+    overall: createRateLimiter(ownerClaimLimits.overall, now),
+  };
+  const ownerClaim = createOwnerClaim({
+    store,
+    now,
+    ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
+    limiters: ownerClaimLimiters,
   });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -872,10 +913,9 @@ export function createIdentity(options: IdentityOptions): Identity {
     return { sessionToken, expiresAt };
   }
 
-  /** Whether `publicKey` is one the operator named as a moderator's. */
-  function moderatorKey(publicKey: string): boolean {
-    const named = options.moderators ?? {};
-    return publicKey === named.owner || publicKey === named.deputy;
+  /** Whether `publicKey` is the owner key (named or claimed, ADR 0080 D-3) or the deputy's. */
+  function moderatorKey(publicKey: string): Promise<boolean> {
+    return moderation.isModeratorKey(publicKey);
   }
 
   async function account(athleteId: string): Promise<Account | undefined> {
@@ -945,7 +985,17 @@ export function createIdentity(options: IdentityOptions): Identity {
     fields: RegistrationFields,
     address: string | null,
   ): Promise<Outcome<SessionGranted>> {
-    const moderator = moderatorKey(publicKey);
+    // ADR 0080 D-3: a stranger who finds the instance before its owner has
+    // claimed it gets no account. Unclaimed, there is no owner's key to admit.
+    if (
+      options.refuseWhileUnclaimed === true &&
+      (await moderation.ownerKey()) === undefined &&
+      !(await store.anyAthlete())
+    ) {
+      return refuse('registration_closed');
+    }
+    const registration = await registrationMode();
+    const moderator = await moderatorKey(publicKey);
     if (!moderator && registration === 'closed') return refuse('registration_closed');
     const invited = !moderator && registration === 'invite';
     if (invited && typeof fields.inviteCode !== 'string') {
@@ -1051,12 +1101,16 @@ export function createIdentity(options: IdentityOptions): Identity {
     sealedPerSession,
     sessionlessSealed,
     noticesPerAddress,
+    ownerClaimLimiters.perAddress,
+    ownerClaimLimiters.overall,
   ];
 
   return {
     origin,
     moderation,
+    ownerClaim,
     emailRecoveryEnabled: mailer !== undefined,
+    registrationMode,
     rateLimitSweepPeriodMs: sweepPeriodMs([
       limits.registrationPerAddress,
       limits.challengePerKey,
@@ -1070,6 +1124,8 @@ export function createIdentity(options: IdentityOptions): Identity {
       limits.sealedPerSession,
       limits.sessionlessSealedPerAddress,
       limits.noticesPerAddress,
+      ownerClaimLimits.perAddress,
+      ownerClaimLimits.overall,
     ]),
 
     sweepRateLimits() {
@@ -1129,7 +1185,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       // pending — and nobody may approve a moderator, so nothing could ever
       // let them in (#891's review). A key the operator now names activates
       // its pending account at sign-in, logged like any moderator action.
-      if (registrationState === 'pending' && moderatorKey(proof.value)) {
+      if (registrationState === 'pending' && (await moderatorKey(proof.value))) {
         const activated = await store.moderate({
           action: 'activate_moderator_key',
           actorAthleteId: athlete.id,

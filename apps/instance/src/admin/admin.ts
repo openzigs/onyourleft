@@ -150,6 +150,8 @@ import type {
   OperatorChange,
   SqlStore,
 } from '../store/sql-store.ts';
+import { emergencyKitText, EMERGENCY_KIT_FILE_NAME } from '../setup/emergency-kit.ts';
+import type { SecretFromFile } from '../setup/secrets.ts';
 import { ADMIN_LANDING, ADMIN_ROUTES } from './admin-routes.ts';
 import { adminCodeSha256 } from './code.ts';
 import { adminResponse } from './headers.ts';
@@ -293,7 +295,10 @@ export interface AdminOptions {
   readonly store: SqlStore;
   /** `OYL_INSTANCE_ORIGIN`, or `null`: no accounts, so no owner. */
   readonly origin: string | null;
-  /** `OYL_INSTANCE_OWNER_KEY`, or `undefined`. */
+  /**
+   * `OYL_INSTANCE_OWNER_KEY`, or `undefined` — and then the key the owner's
+   * claim recorded, read from the store on every request (ADR 0080 D-3).
+   */
   readonly ownerKey: string | undefined;
   /** Whether `OYL_INSTANCE_SECRET_KEY` is set. */
   readonly secretKeySet: boolean;
@@ -324,6 +329,13 @@ export interface AdminOptions {
    * only (ADR 0047 D-6). Absent, the page says the keys could not be read.
    */
   readonly instanceKeys?: Pick<InstanceKeys, 'show'>;
+  /**
+   * The secrets read from the secrets folder (#2781, ADR 0080 D-4): what the
+   * emergency kit holds, downloaded on the LOOPBACK listener only, behind a
+   * fresh step-up. Absent or empty, no kit is offered: every secret is in
+   * `.env`, which is the operator's copy of it.
+   */
+  readonly kitSecrets?: readonly SecretFromFile[];
 }
 
 export interface Admin {
@@ -381,9 +393,10 @@ const UNAVAILABLE: Readonly<Record<Unavailable, string>> = {
     'OYL_INSTANCE_ORIGIN is not set, so this instance has no accounts, and no owner to sign in.',
   secret:
     'OYL_INSTANCE_SECRET_KEY is not set: the admin pages are served only on an instance that holds keys, as the app’s Operate area is.',
-  'owner-key': 'OYL_INSTANCE_OWNER_KEY is not set, so this instance has no owner to sign in.',
+  'owner-key':
+    'This instance has no owner to sign in: OYL_INSTANCE_OWNER_KEY is not set, and no owner has claimed it from the app.',
   'no-owner':
-    'No account holds the device key OYL_INSTANCE_OWNER_KEY names. Sign in to this instance once from the app on that device, then come back.',
+    'No account holds the device key OYL_INSTANCE_OWNER_KEY names, or the one the owner’s claim recorded. Sign in to this instance once from the app on that device, then come back.',
 };
 
 /** What a signed-in page calls the seam with. */
@@ -484,6 +497,11 @@ const REVOKE_PATH = /^\/admin\/passkeys\/([^/]+)\/revoke$/;
 /** The paths the admin layer answers, and the methods each takes: the admin route table's. */
 const METHODS: ReadonlyMap<string, readonly string[]> = new Map(
   ADMIN_ROUTES.map((route) => [route.path, route.methods]),
+);
+
+/** The paths served on the loopback listener only (#2781): not found through the tunnel. */
+const LOOPBACK_ONLY: ReadonlySet<string> = new Set(
+  ADMIN_ROUTES.filter((route) => route.loopbackOnly === true).map((route) => route.path),
 );
 
 /** A page of the operator log, as the app's Operate area reads one. */
@@ -809,7 +827,9 @@ export function createAdmin(options: AdminOptions): Admin {
   async function ownerNow(): Promise<Owner | Unavailable> {
     if (expected === null || options.roleOf === undefined) return 'origin';
     if (!options.secretKeySet) return 'secret';
-    const ownerKey = options.ownerKey;
+    // The owner key (ADR 0080 D-3): the environment's, else the claimed one,
+    // read on every request so a claim or a reset applies at once (#2782).
+    const ownerKey = options.ownerKey ?? (await store.claimedOwnerKey());
     if (ownerKey === undefined) return 'owner-key';
     const key = await store.findDeviceKey(ownerKey);
     if (key === undefined) return 'no-owner';
@@ -1013,6 +1033,7 @@ export function createAdmin(options: AdminOptions): Admin {
       keys,
       card,
       onServer,
+      kit: onServer && (options.kitSecrets ?? []).length > 0,
       strength,
       csrf: shell.csrf,
       notice: noticeFor(shown?.current?.serial ?? null),
@@ -2268,6 +2289,88 @@ export function createAdmin(options: AdminOptions): Admin {
       return adminResponse(page, done ? 200 : answer.status === 400 ? 400 : 409, HTML);
     }
 
+    /**
+     * The emergency kit (#2781, ADR 0080 D-4), on the loopback listener only
+     * — the route table's `loopbackOnly`, so the tunnel's place never reaches
+     * here: from this origin's page, in a live PASSKEY session carrying its
+     * token, with a fresh step-up made for it. The passkey's counter and the
+     * `emergency_kit_downloaded` entry are written in ONE transaction BEFORE
+     * the kit is handed over, so no kit leaves unlogged and one assertion
+     * downloads it once. `Cache-Control: no-store` is the admin headers'.
+     */
+    async function emergencyKit(
+      request: Request,
+      body: Uint8Array | null,
+      owner: Owner,
+    ): Promise<Response> {
+      const back = { path: '/admin/keys', what: 'Keys' };
+      const form = formOf(body);
+      const session = await signedInPost(request, form, owner);
+      if (session instanceof Response) return session;
+      if (session.record.strength !== 'passkey') {
+        refuse('step_up');
+        return nothingChanged(
+          403,
+          'The emergency kit needs a passkey sign-in: a one-time code’s session downloads nothing.',
+          back,
+        );
+      }
+      const fields = boundFields(ADMIN_CHANGES.emergency_kit.fields, form);
+      if (fields === undefined) {
+        refuse('step_up');
+        return nothingChanged(400, 'That form did not ask for the emergency kit.', back);
+      }
+      const stepped = await steppedUp(owner, session, 'emergency_kit', fields, form);
+      if (stepped === undefined) {
+        return nothingChanged(
+          403,
+          'The passkey check did not pass: the emergency kit needs a fresh check by a confirmed passkey, made for it.',
+          back,
+        );
+      }
+      const secrets = options.kitSecrets ?? [];
+      if (secrets.length === 0) {
+        return nothingChanged(
+          409,
+          'There is no emergency kit: every secret this instance uses is set in .env, which is your copy of it.',
+          back,
+        );
+      }
+      const at = seconds();
+      const { value } = await store.recordOperatorAction(
+        { actor: { source, athleteId: owner.athleteId }, action: 'emergency_kit_downloaded', at },
+        async (inside): Promise<OperatorChange<boolean>> =>
+          (await inside.recordAdminPasskeyUse(
+            stepped.passkey.id,
+            stepped.passkey.signCount,
+            stepped.signCount,
+            at,
+          ))
+            ? { outcome: 'done', detail: null, value: true }
+            : { outcome: 'refused', detail: null, value: false },
+      );
+      if (!value) {
+        refuse('counter');
+        return nothingChanged(409, 'That passkey was just used elsewhere. Try again.', back);
+      }
+      const shown =
+        options.instanceKeys === undefined ? undefined : await keysView(options.instanceKeys);
+      return adminResponse(
+        emergencyKitText({
+          // `OYL_INSTANCE_ORIGIN`, which the keys are bound to — not this listener's.
+          origin: origin.origin,
+          card: shown?.card ?? null,
+          secrets,
+          madeAt: new Date(options.now()),
+        }),
+        200,
+        {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-disposition': `attachment; filename="${EMERGENCY_KIT_FILE_NAME}"`,
+        },
+      );
+    }
+
     return async (request, body, client, seam) => {
       // Against DNS rebinding: the page is this listener's, or it is not served.
       if (request.headers.get('host') !== place.host) {
@@ -2281,7 +2384,9 @@ export function createAdmin(options: AdminOptions): Admin {
       const path = url.pathname;
       const revokeId = REVOKE_PATH.exec(path)?.[1];
       const route = revokeId === undefined ? path : '/admin/passkeys/{id}/revoke';
-      const methods = METHODS.get(route);
+      // #2781: a loopback-only path is, through the tunnel, a path with no route.
+      const methods =
+        listener === 'tunnel' && LOOPBACK_ONLY.has(route) ? undefined : METHODS.get(route);
       if (methods === undefined) {
         return htmlAnswer(
           'Not found',
@@ -2333,6 +2438,7 @@ export function createAdmin(options: AdminOptions): Admin {
         if (route === '/admin/backups') return backupChange(request, body, owner, client, seam);
         if (route === '/admin/rooms/end') return roomChange(request, body, owner, client, seam);
         if (route === '/admin/keys/rotate') return keyChange(request, body, owner, client, seam);
+        if (route === '/admin/keys/emergency-kit') return emergencyKit(request, body, owner);
         const decision = REGISTRATION_ACTIONS.get(route);
         if (decision !== undefined) {
           return registrationChange(request, body, owner, client, seam, decision);

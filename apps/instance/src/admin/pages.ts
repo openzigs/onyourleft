@@ -26,7 +26,10 @@
  *   words. Any other row says it could not be shown, and shows nothing of
  *   itself — so a row that somehow held a key or a coordinate is not drawn.
  *
- * Nothing here renders a token, a code, a key or a coordinate.
+ * Nothing here renders a token, a code, a key or a coordinate — with one
+ * exception, ADR 0080 D-3 and D-7's: {@link cardCodePart} draws a claim or an
+ * invite code beside the card, as a QR and as text, for a page on the
+ * loopback listener only (#2783).
  *
  * ⚠️ The log's action labels are the app's (`apps/web/src/views/OperateView.tsx`
  * §`ACTION_LABEL`), restated: `apps/instance` may not import `apps/web`.
@@ -158,6 +161,7 @@ import {
   type OperatorSource,
 } from '../store/sql-store.ts';
 import { sectionLinks } from './admin-routes.ts';
+import { cardWithCode, qrSvg } from './qr.ts';
 
 /** The one script, linked on the pages with a passkey ceremony; never inline. */
 export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></script>\n';
@@ -165,7 +169,14 @@ export const PASSKEY_SCRIPT_TAG = '<script src="/admin/passkey.js" defer></scrip
 /**
  * The frame: the stylesheet linked, never inline, and with `script` the
  * passkey script linked too. `body` and `before` are markup the caller escaped;
- * `signedOut` draws the narrower column of the sign-in page.
+ * `signedOut` draws the narrower column of the sign-in page. `stylesheet` is
+ * the admin pages' own address unless a caller serves the same sheet at its
+ * own: the setup wizard's pages (#2784) link `/setup/setup.css`, because
+ * `/admin` is not served while the admin pages are off. `head` is markup
+ * the caller wrote, put in the `head` after the link: the setup's finished
+ * page, which answers when `/setup/setup.css` no longer does, uses it for its
+ * stylesheet inline, with `stylesheet` `null` (the response carries that
+ * sheet's hash in its CSP).
  */
 export function adminPage(
   title: string,
@@ -173,6 +184,8 @@ export function adminPage(
   before = '',
   script = false,
   signedOut = false,
+  stylesheet: string | null = '/admin/admin.css',
+  head = '',
 ): string {
   return `<!doctype html>
 <html lang="en">
@@ -180,8 +193,7 @@ export function adminPage(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/admin/admin.css">
-${script ? PASSKEY_SCRIPT_TAG : ''}</head>
+${stylesheet === null ? '' : `<link rel="stylesheet" href="${escapeHtml(stylesheet)}">\n`}${head}${script ? PASSKEY_SCRIPT_TAG : ''}</head>
 <body${signedOut ? ' class="signed-out"' : ''}>
 ${before}<main id="main">
 ${body}
@@ -196,7 +208,7 @@ ${body}
  * than served as the app's image, so the header needs no request of its own.
  * The arrow is decoration; the name is the text.
  */
-const WORDMARK =
+export const WORDMARK =
   '<span class="wordmark"><svg class="mark" viewBox="0 0 28 16" aria-hidden="true" focusable="false"><path d="M0 6h17V0l11 8-11 8v-6H0z"/></svg>On Your Left</span>';
 
 /**
@@ -534,7 +546,7 @@ export type LogView =
   | { readonly kind: 'bad-cursor' };
 
 /** The app's words for each action (`OperateView.tsx` §`ACTION_LABEL`). */
-const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
+export const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   migrate: 'Database migrated',
   backup: 'Backup taken',
   backup_requested: 'Backup asked for',
@@ -560,6 +572,18 @@ const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   admin_passkey_confirmed: 'Admin passkey confirmed on the host',
   room_ended: 'Room ended',
   registration_decided: 'Registration decided',
+  emergency_kit_downloaded: 'Emergency kit downloaded',
+  owner_claim_code_minted: 'Owner claim code made',
+  owner_claim_confirmed: 'Owner claim confirmed',
+  owner_claim_discarded: 'Owner claim discarded',
+  owner_claim_reset: 'Owner claim reset on the host',
+  setup_code_minted: 'Setup code made',
+  setup_sign_in: 'Signed in to the setup page',
+  setup_refused: 'Setup sign-in attempts refused',
+  secret_generated: 'Secret made at start',
+  registration_mode_set: 'Registration mode set',
+  invite_minted: 'Rider invite made',
+  setup_done: 'Setup finished',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */
@@ -568,6 +592,8 @@ const SOURCE_TEXT: Readonly<Record<OperatorSource, string>> = {
   cli: 'from the command line on the host',
   admin_tunnel: 'from the admin pages, through the tunnel',
   admin_loopback: 'from the admin pages, on the server machine',
+  setup: 'from the setup page, on the server machine',
+  start: 'by the instance as it started',
 };
 
 const OUTCOMES: readonly unknown[] = ['done', 'refused', 'failed'];
@@ -1473,6 +1499,11 @@ export interface KeysView {
   readonly card: KeysCardView | null;
   /** Drawn on the loopback listener, where the card may be shown. */
   readonly onServer: boolean;
+  /**
+   * Whether the emergency kit is offered (#2781, ADR 0080 D-4): on the
+   * loopback listener, when a secret came from the secrets folder.
+   */
+  readonly kit: boolean;
   readonly strength: 'code' | 'passkey';
   readonly csrf: string;
   readonly notice: KeysNotice | null;
@@ -1501,6 +1532,42 @@ function cardPart(shown: KeysCardView | null, onServer: boolean): string {
 <p><code class="card">${escapeHtml(shown.card)}</code></p>
 <p>${escapeHtml(KEYS_FINGERPRINT_TEXT)}</p>
 <p><code class="fingerprint">${escapeHtml(shown.fingerprint)}</code></p>`);
+}
+
+/** What the emergency kit is, said beside its button (#2781). Draft wording, for the owner's approval. */
+export const KIT_TEXT =
+  'The emergency kit is one text file holding this instance’s secrets, its address and its card. Keep it in a password manager or on paper, never beside your backups: with it, a backup can be restored on a new machine and every device keeps trusting the instance. Without it, a restore makes new keys and every device has to connect again.';
+
+export const KIT_BUTTON = 'Download the emergency kit';
+
+/** Said in a code session in place of the kit's button (ADR 0069 Q-A). */
+export const KIT_READS_ONLY_TEXT =
+  'A one-time code’s session downloads nothing. Sign in with a passkey to download the emergency kit: it asks your passkey again.';
+
+/** Said on the server machine when every secret is in `.env`. */
+export const KIT_NONE_TEXT =
+  'There is no emergency kit to download: every secret this instance uses is set in .env, so keep a copy of that file’s secret lines safe, away from your backups.';
+
+/** The emergency kit's part of the Keys page: on the loopback listener only. */
+function kitPart(view: KeysView): string {
+  if (!view.onServer) return '';
+  if (!view.kit)
+    return card(`<h2>Emergency kit</h2>
+<p>${escapeHtml(KIT_NONE_TEXT)}</p>`);
+  const form =
+    view.strength === 'passkey'
+      ? stepUpForm(
+          '/admin/keys/emergency-kit',
+          'emergency_kit',
+          view.csrf,
+          KIT_BUTTON,
+          '',
+          KIT_BUTTON,
+        )
+      : `<p>${escapeHtml(KIT_READS_ONLY_TEXT)}</p>`;
+  return card(`<h2>Emergency kit</h2>
+<p>${escapeHtml(KIT_TEXT)}</p>
+${form}`);
 }
 
 function rotatePart(view: KeysView): string {
@@ -1553,11 +1620,100 @@ export function keysBody(view: KeysView): string {
   ).join('\n');
   return `${card(`<dl class="facts">
 ${keyFactRows(view.keys).map(fact).join('\n')}
-</dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
+</dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${kitPart(view)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
 <p>${escapeHtml(KEYS_CLI_TEXT)}</p>
 <ul class="cli">
 ${cli}
 </ul>`)}`;
+}
+
+/**
+ * What a card-and-code QR is for (#2783, ADR 0080): the owner's claim code on
+ * the setup wizard's claim step (D-3), or the one rider invite the setup
+ * session may mint (D-7).
+ */
+export type CardCodePurpose = 'claim' | 'invite';
+
+/**
+ * A card and a single-use code to draw as one QR, with the same line beside
+ * it. ⚠️ **Handed to the renderer on the LOOPBACK listener only**, as
+ * {@link KeysCardView} is: the tunnel's pages are never drawn with one.
+ */
+export interface CardCodeView {
+  readonly purpose: CardCodePurpose;
+  /** `oyl-instance:<origin>#<52 characters>`, whole. */
+  readonly card: string;
+  /** The code as the instance minted it: four groups of four. */
+  readonly code: string;
+  /** When the code stops working: ISO 8601, UTC. */
+  readonly expiresAt: string;
+}
+
+/**
+ * Each purpose's heading, what to do, and the QR's accessible name. Draft
+ * wording, for the owner's approval.
+ */
+export const CARD_CODE_TEXT: Readonly<
+  Record<
+    CardCodePurpose,
+    { readonly heading: string; readonly lead: string; readonly label: string }
+  >
+> = {
+  claim: {
+    heading: 'Claim this instance with your tablet',
+    lead: 'On the tablet you ride with, open On Your Left, go to Instance and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so the tablet checks the instance’s key before it sends anything, and a code that makes that tablet this instance’s owner.',
+    label: 'The instance’s card and a claim code, for the app’s scanner',
+  },
+  invite: {
+    heading: 'Invite a rider',
+    lead: 'Ask the rider to open On Your Left, go to Instance and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so their app checks the instance’s key before it sends anything, and an invitation to join.',
+    label: 'The instance’s card and an invitation, for the app’s scanner',
+  },
+};
+
+/** Above the line beside the QR. Draft. */
+export const CARD_CODE_LINE_TEXT =
+  'Or paste this line into the app’s Instance screen. It is what the code carries, whole:';
+
+/** When the code stops working, with the moment drawn by {@link readableMoment}. Draft. */
+export const CARD_CODE_UNTIL_TEXT = 'It works once, until';
+
+/**
+ * A caller's own words around the QR, in place of {@link CARD_CODE_TEXT}'s
+ * heading and lead and the moment it stops working: the setup wizard's step
+ * already carries the heading as its `h1`, and says when in its own words
+ * (#2784).
+ */
+export interface CardCodeWords {
+  readonly lead: string;
+  /** The whole sentence on when the code stops working. */
+  readonly until: string;
+}
+
+/**
+ * A card and a single-use code as one QR, server-drawn SVG (`qr.ts`), with
+ * the same line beside it as text a person can select and copy: the QR is
+ * named for what it is for and described by that line, which is its
+ * alternative. Throws unless the card is whole and the code is one the
+ * instance mints (`qr.ts` §`cardWithCode`).
+ */
+export function cardCodePart(view: CardCodeView, words?: CardCodeWords): string {
+  const line = cardWithCode(view.card, view.code);
+  const text = CARD_CODE_TEXT[view.purpose];
+  const lineId = `${view.purpose}-code-line`;
+  const until =
+    words === undefined
+      ? `${escapeHtml(CARD_CODE_UNTIL_TEXT)} ${readableMoment(view.expiresAt)}.`
+      : escapeHtml(words.until);
+  return card(`${words === undefined ? `<h2>${escapeHtml(text.heading)}</h2>\n` : ''}<p>${escapeHtml(words?.lead ?? text.lead)}</p>
+<figure class="qr-figure">
+${qrSvg(line, text.label, lineId)}
+<figcaption>
+<p>${escapeHtml(CARD_CODE_LINE_TEXT)}</p>
+<p><code class="card" id="${escapeHtml(lineId)}">${escapeHtml(line)}</code></p>
+</figcaption>
+</figure>
+<p>${until}</p>`);
 }
 
 /** One problem line as `GET /v1/operate/logs` answers it (#2651): already through the log's redaction. */
