@@ -85,21 +85,23 @@ import type { BotEnergy } from './wbal';
 import type { ModelTacticsInvalid, ModelTacticsMove, ModelTacticsTarget } from './model-tactics';
 
 /**
- * **The bot-code version: 5** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074, ADR 0076).
+ * **The bot-code version: 6** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074, ADR 0076).
  * Version 1 rode ADR 0071 D-3.6's strategy rules; version 2 ADR 0073's, with
  * D-5's input; version 3 ADR 0073's with ADR 0074's sprint backstop; version 4
  * a field with bodies that fit their styles and a spread of strength, and an
  * effort that never softens an attack (#2759, ADR 0076); version 5 version 4's
  * race with a decision held {@link MODEL_TACTICS_HOLD_MS} of 10 s, not 5 s
- * (#2759, ADR 0076 D-11), which changes the moves in force for a logged race.
- * Raised by any change that
+ * (#2759, ADR 0076 D-11), which changes the moves in force for a logged race;
+ * version 6 version 5's on the road from the race's line rather than from the
+ * route's start (#2800), which moves every bot on a race started off the
+ * route's 0 over a hill and none started at it. Raised by any change that
  * alters any bot's output for some seed and log — a tactic, a plan, the W′
  * model, the adapter, a seam's rule, a physics step. Stored beside the seed and
  * the log; a log recorded under another version is not replayed.
  * `apps/web` §`model-race-replay.test.ts` holds committed seeds and logs to
  * their outcomes, keyed by this number.
  */
-export const LAP_RACE_BOT_CODE_VERSION = 5;
+export const LAP_RACE_BOT_CODE_VERSION = 6;
 
 /** How often the model is asked, ms of race time: every **4 s**, spike 0039's draft (D-7). */
 export const MODEL_TACTICS_ASK_EVERY_MS = 4_000;

@@ -79,6 +79,18 @@
  * rider's input at every tick are kept with the ride (`model-race.ts`,
  * {@link lapRaceRideFact}), so it replays under the version it was ridden with.
  *
+ * ## The bots ride the road from the line (#2800)
+ *
+ * A bot's odometer is its effort distance, nought at the line, and the race
+ * draws it at {@link LapRaceRide.startAlong} plus that. So its course carries
+ * the line (`physics` §`BotCourse.lineMetres`, where the rider stood at the
+ * press, wrapped onto the lap), and every grade a bot reads is read from
+ * there: the grade under it, the grade ahead its tactics and the model are
+ * shown (`model-race.ts` §`modelTacticsInputOf`), and the road under the
+ * rider as a wheel. A race started anywhere but the route's 0 has its bots on
+ * the hills the rider sees them on. `ride-race.test.ts` holds each bot's felt
+ * grade to the grade where it is drawn on a race started at 300 m.
+ *
  * ## The bots ride still air
  *
  * A bot's course is the rider's road and air ({@link LapRaceRideStart.conditions}),
@@ -92,6 +104,7 @@ import {
   botFieldPersonalities,
   botFieldSkills,
   createItemRace,
+  distanceOnRoute,
   modelFieldPaces,
   racePosition,
   raceCourse,
@@ -395,7 +408,12 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     input: riderInput,
     startAlong: input.riderDistance,
     along: input.riderDistance,
-    conditions: input.conditions,
+    // #2800: the bots ride the road from the line, where the rider stands at
+    // the press, so the grade each feels is the grade where it is drawn.
+    conditions: {
+      ...input.conditions,
+      lineMetres: distanceOnRoute(input.conditions.profile, input.riderDistance),
+    },
     names: Object.fromEntries(
       ids.map((id, index) => [id, botName((paces[index] as BotPace).style, index + 1)]),
     ),
@@ -663,7 +681,7 @@ export function askLapRaceRide(ride: LapRaceRide, riderWatts?: number): LapRaceR
     ride.model,
     ride.race,
     ride.bots,
-    ride.conditions.profile,
+    ride.conditions,
     ride.seed,
     ride.draft,
     wattsPerKilogramOf(ride, riderWatts) ?? null,

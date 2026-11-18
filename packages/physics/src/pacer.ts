@@ -138,6 +138,15 @@ export interface BotCourse {
    * whenever no decision is in force — the bot is #92's to the bit.**
    */
   readonly direction?: PacerDirection;
+  /**
+   * Where on the route the bot's odometer reads nought, metres (#2800): a lap
+   * race's line, which a race started anywhere but the route's start puts off
+   * its 0. Every grade a bot reads is read at its odometer plus this, so it
+   * rides the road it is drawn on and the rider rides. **Absent — #92's pacer,
+   * which starts with the rider at the route's start — the bot is #92's to
+   * the bit.**
+   */
+  readonly lineMetres?: number;
 }
 
 /** What the bot is doing at one instant, for a HUD to render. */
@@ -215,7 +224,8 @@ export function botDemand(
   state: RideState,
   course: BotCourse,
 ): Pick<BotTick, 'distanceOnRoute' | 'grade' | 'power'> {
-  const on = distanceOnRoute(course.profile, state.distance);
+  // #2800: on the road from the course's line, the route's start without one.
+  const on = distanceOnRoute(course.profile, state.distance + (course.lineMetres ?? 0));
   const grade = gradeAt(course.profile, on);
   return {
     distanceOnRoute: metres(on),

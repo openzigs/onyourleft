@@ -467,7 +467,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const input = modelTacticsInputOf(
       race.race,
       race.bots,
-      race.conditions.profile,
+      race.conditions,
       race.seed,
       true,
       2,
@@ -496,7 +496,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const input = modelTacticsInputOf(
       race.race,
       race.bots,
-      race.conditions.profile,
+      race.conditions,
       race.seed,
       true,
       2,
@@ -525,15 +525,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
           : { ...entry, racer: { ...entry.racer, finishedAtMs: 1 } };
       }),
     };
-    const after = modelTacticsInputOf(
-      finished,
-      race.bots,
-      race.conditions.profile,
-      race.seed,
-      true,
-      2,
-      0,
-    )!;
+    const after = modelTacticsInputOf(finished, race.bots, race.conditions, race.seed, true, 2, 0)!;
     expect(after.bots.map((view) => view.bot).sort()).toEqual([...kept].sort());
     for (const view of after.bots) {
       const { flat, climb, sprint, punch } = view;
@@ -578,7 +570,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
       modelTacticsInputOf(
         placed,
         race.bots,
-        race.conditions.profile,
+        race.conditions,
         race.seed,
         true,
         wattsPerKilogram,
@@ -598,15 +590,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const bots = race.bots.map((bot, seat) =>
       seat === blownSeat ? { ...bot, energy: { wbalJoules: 0, exhausted: true } } : bot,
     );
-    const input = modelTacticsInputOf(
-      race.race,
-      bots,
-      race.conditions.profile,
-      race.seed,
-      true,
-      2,
-      0,
-    )!;
+    const input = modelTacticsInputOf(race.race, bots, race.conditions, race.seed, true, 2, 0)!;
     const { laps, lapLengthMetres } = race.race.course;
     let misreadSomewhere = false;
     for (const view of input.bots) {
@@ -646,7 +630,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const input = modelTacticsInputOf(
       race.race,
       race.bots,
-      race.conditions.profile,
+      race.conditions,
       race.seed,
       true,
       2,
@@ -683,7 +667,7 @@ describe('what the model is shown under ADR 0073 (D-5)', () => {
     const input = modelTacticsInputOf(
       race.race,
       race.bots,
-      race.conditions.profile,
+      race.conditions,
       race.seed,
       true,
       2,
@@ -817,7 +801,7 @@ describe('what is kept with the ride (D-4.4)', () => {
     }));
     const fact = lapRaceRideFact(model.ride);
     expect(fact?.seed).toBe(SEED);
-    expect(fact?.version).toBe(5);
+    expect(fact?.version).toBe(6);
     expect(fact?.log).toEqual(model.ride.model?.log);
     const ticks = Math.round(30 / LAP_RACE_TICK_SECONDS);
     expect(fact?.rider.effortDistances).toHaveLength(ticks);
@@ -890,7 +874,7 @@ describe('the course ahead, once for the race from the leading bot (#2794)', () 
     const input = modelTacticsInputOf(
       race.race,
       race.bots,
-      race.conditions.profile,
+      race.conditions,
       race.seed,
       race.draft,
       null,

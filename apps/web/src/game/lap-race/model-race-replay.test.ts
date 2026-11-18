@@ -92,6 +92,10 @@ const SEALS: Readonly<Record<string, string>> = {
   '3': '786f7d2ec42b745b9de1ac60e6dc6b9ce7b8843eb9109c5838f987b5574fc146',
   '4': '8c3056a68b988cb9fcadb98d3a62b4b7c41319da6a2cacfadad843d9a45de705',
   '5': '7a7cde094331f5d9a25b357a965a32c03a91e50fc9a47455685255dcf903a1e9',
+  // #2800: version 6 moves only a bot on a race started off the route's 0 over
+  // a hill, and every golden race is flat and starts at 0 (see GOLDEN_RACES),
+  // so its outcomes, and its seal, are version 5's.
+  '6': '7a7cde094331f5d9a25b357a965a32c03a91e50fc9a47455685255dcf903a1e9',
 };
 
 afterEach(() => {

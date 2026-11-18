@@ -147,7 +147,9 @@ function startField(profile: RouteProfile, seed: number): LapRaceRide {
         profile,
         rideConditionsFor(kilograms(RIDER_KILOGRAMS), DEFAULT_RIDING_POSITION),
       ),
-      riderDistance: 50,
+      // A whole lap into the ride, as #2561's harness presses (#2800): the line
+      // is the route's 0, so the bots ride the road the spike was measured on.
+      riderDistance: profile.totalDistance,
       lineOffset: 0,
       storage: undefined,
       draft: true,
