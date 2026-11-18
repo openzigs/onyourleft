@@ -207,6 +207,7 @@ async function until(done: () => boolean): Promise<void> {
   }
 }
 
+/** In page order; on the Connect screen the owner's claim box comes first (#2823). */
 function boxes(): HTMLTextAreaElement[] {
   return [...(mounted?.container.querySelectorAll('textarea') ?? [])];
 }
@@ -263,7 +264,7 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     show(`  ${codeWithCard(card, CODE.toUpperCase())}\n`);
     await press(CARD_SCAN_TEXT.start);
     await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
-    const [cardBox, lineBox, claimBox] = boxes();
+    const [claimBox, cardBox, lineBox] = boxes();
     expect(lineBox?.value).toBe(codeWithCard(card, CODE));
     // #2823: the same line is what the owner's setup page shows as a claim, so
     // it is in the claim box too, and the press says which it is — and #2826:
@@ -326,8 +327,8 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     await settle();
     show(`  ${codeWithCard(card, CODE)}\n`);
     await press(OWNER_CLAIM_TEXT.scan);
-    await until(() => boxes()[2]?.value !== '');
-    const [cardBox, lineBox, claimBox] = boxes();
+    await until(() => boxes()[0]?.value !== '');
+    const [claimBox, cardBox, lineBox] = boxes();
     expect(claimBox?.value).toBe(codeWithCard(card, CODE));
     expect(cardBox?.value).toBe('');
     expect(lineBox?.value).toBe('');
@@ -346,7 +347,7 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     show(card);
     await press(CARD_SCAN_TEXT.start);
     await until(() => text().includes(CONNECT_SCANNED_TEXT.card));
-    const [cardBox, lineBox, claimBox] = boxes();
+    const [claimBox, cardBox, lineBox] = boxes();
     expect(cardBox?.value).toBe(card);
     expect(lineBox?.value).toBe('');
     expect(claimBox?.value).toBe('');
@@ -380,7 +381,7 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     await settle();
     show('https://example.org/wifi');
     await press(CARD_SCAN_TEXT.start);
-    await until(() => boxes()[0]?.value === 'https://example.org/wifi');
+    await until(() => boxes()[1]?.value === 'https://example.org/wifi');
     await settle();
     expect(text()).not.toContain(CONNECT_SCANNED_TEXT.card);
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);

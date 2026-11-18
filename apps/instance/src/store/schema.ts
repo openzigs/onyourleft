@@ -421,11 +421,15 @@ export interface OperatorLogTable {
   readonly id: Generated<number>;
   /** Unix seconds. */
   readonly at: number;
-  /** Since migration 0044 (#2641) also the admin pages, by listener (ADR 0069 D-8). */
-  readonly source: 'app' | 'cli' | 'admin_tunnel' | 'admin_loopback';
   /**
-   * The owner's athlete for `app`; `NULL` for `cli`, which has none; the
-   * owner's athlete, or `NULL` for an `admin_refused` count, for an admin source.
+   * Since migration 0044 (#2641) also the admin pages, by listener (ADR 0069
+   * D-8); since 0048 (#2784) the setup wizard and the instance's own start.
+   */
+  readonly source: 'app' | 'cli' | 'admin_tunnel' | 'admin_loopback' | 'setup' | 'start';
+  /**
+   * The owner's athlete for `app`; `NULL` for `cli`, `setup` and `start`,
+   * which have none; the owner's athlete, or `NULL` for an `admin_refused`
+   * count, for an admin source.
    */
   readonly actor_athlete_id: string | null;
   readonly action: string;
@@ -837,6 +841,51 @@ export interface OwnerClaimCodeTable {
   readonly comparison_code: string | null;
 }
 
+/**
+ * The first-run setup's state (#2784, migration 0048, ADR 0080 D-7): at most
+ * one row, `slot` 1. No row is the claim step, open.
+ */
+export interface SetupStateTable {
+  readonly slot: number;
+  readonly step: 'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'finish';
+  /** Unix seconds; `NULL` while the setup is open. */
+  readonly done_at: number | null;
+  /** When the setup minted its one rider invite, Unix seconds; `NULL` until then. */
+  readonly invite_minted_at: number | null;
+  readonly updated_at: number;
+}
+
+/** A setup code (#2784, migration 0048, ADR 0080 D-2): only the SHA-256 of its normalised form. */
+export interface SetupCodeTable {
+  readonly code_sha256: string;
+  /** Unix seconds. */
+  readonly minted_at: number;
+  readonly expires_at: number;
+  readonly used_at: number | null;
+  readonly minted_by: 'start' | 'cli';
+}
+
+/** A browser's setup session (#2784, migration 0048): no athlete, only hashes. */
+export interface SetupSessionTable {
+  readonly token_sha256: string;
+  readonly csrf_sha256: string;
+  /** Unix seconds. */
+  readonly created_at: number;
+  readonly last_seen_at: number;
+  readonly expires_at: number;
+  /** When this session downloaded the emergency kit; `NULL` until then (ADR 0080 D-4: once). */
+  readonly kit_downloaded_at: number | null;
+}
+
+/** The settings the database holds over the environment (#2784, migration 0048, ADR 0080 D-6). */
+export interface InstanceSettingTable {
+  readonly slot: number;
+  /** `NULL`: `OYL_INSTANCE_REGISTRATION`'s. */
+  readonly registration: 'open' | 'approval' | 'invite' | 'closed' | null;
+  readonly updated_at: number;
+  readonly updated_by: 'setup' | 'cli';
+}
+
 /** The owner key a confirmed claim set (#2782, migration 0047): at most one row, `slot` 1. */
 export interface InstanceOwnerTable {
   readonly slot: number;
@@ -997,6 +1046,10 @@ export interface InstanceDatabase {
   readonly athlete_tactics_consent: AthleteTacticsConsentTable;
   readonly owner_claim_code: OwnerClaimCodeTable;
   readonly instance_owner: InstanceOwnerTable;
+  readonly setup_state: SetupStateTable;
+  readonly setup_code: SetupCodeTable;
+  readonly setup_session: SetupSessionTable;
+  readonly instance_setting: InstanceSettingTable;
   readonly notice: NoticeTable;
   readonly statement: StatementTable;
   readonly appeal: AppealTable;

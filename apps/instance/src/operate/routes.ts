@@ -37,7 +37,10 @@ const entrySchema: Schema = {
      * host, or the instance's own admin pages through the tunnel or on the
      * server machine (#2641, ADR 0069 D-8).
      */
-    source: { type: 'string', enum: ['app', 'cli', 'admin_tunnel', 'admin_loopback'] },
+    source: {
+      type: 'string',
+      enum: ['app', 'cli', 'admin_tunnel', 'admin_loopback', 'setup', 'start'],
+    },
     action: { type: 'string', enum: OPERATOR_ACTIONS },
     detail: { type: ['string', 'null'] },
     outcome: { type: 'string', enum: ['done', 'refused', 'failed'] },
@@ -873,7 +876,8 @@ export const OPERATE_ROUTES: readonly Route[] = [
         version: context.version,
         commit: context.config.commit,
         upstream: runsUpstreamSource(context.config),
-        registration: context.config.registration,
+        // ADR 0080 D-6 (#2784): the mode a new rider meets, the database's over `.env`'s.
+        registration: (await context.identity?.registrationMode()) ?? context.config.registration,
         uptimeSeconds: status.uptimeSeconds,
         disk: status.disk,
         lastBackup: status.lastBackup,

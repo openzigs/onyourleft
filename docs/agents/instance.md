@@ -288,6 +288,17 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         §`cardCodePart` the line beside it, for ADR 0080's
                         loopback `/setup` steps (#2784 mounts them); its
                         tests read the drawing back with `jsqr`.
+                        Since #2784 `src/setup/setup.ts` is ADR 0080's
+                        first-run setup at `/setup` on the LOOPBACK
+                        listener, with the admin pages off too: the handler
+                        asks it only for `ClientInfo.listener: 'loopback'`,
+                        and it answers `undefined` (so `not_found`) once
+                        migration 0048's `setup_state` says done — read per
+                        request. Its own cookie, CSRF and code limiter;
+                        changes log from the source `setup`. ⚠️ The
+                        registration mode is now `identity.registrationMode()`
+                        (the database's over `.env`'s), never
+                        `config.registration`, wherever a rider meets it.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

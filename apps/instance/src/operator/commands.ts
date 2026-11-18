@@ -44,7 +44,13 @@ import { readServerConfig } from '../server-config.ts';
 import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { takeLease, type Lease, type LeaseOptions } from './backup-lease.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
-import type { BackupRun, OperatorAction, SqlStore } from '../store/sql-store.ts';
+import type {
+  BackupRun,
+  OperatorAction,
+  RegistrationModeSetting,
+  SqlStore,
+} from '../store/sql-store.ts';
+import { mintSetupCode } from '../setup/setup-code.ts';
 import { createSync } from '../sync/sync.ts';
 
 /**
@@ -1372,6 +1378,89 @@ export async function ownerClaimReset(
       cleared: reset.claimed,
       adminSessionsEnded: reset.sessionsEnded,
       ownerKeyFromEnvironment: (options.ownerKey?.trim() ?? '') !== '',
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `setup-code` (#2784, ADR 0080 D-2): a new setup code for the first-run
+ * setup at `http://localhost:<port>/setup`, printed ONCE on the terminal that
+ * ran it — the host, not a log — and written to the secrets folder's
+ * `setup-code` file too, so the file never holds a code this one voided.
+ * Minting voids every unused code, and the code and its `setup_code_minted`
+ * entry are written together. Refused once the setup is done, and while
+ * `OYL_INSTANCE_OWNER_KEY` is set, which makes it done from the first start.
+ */
+export async function setupCode(
+  paths: DataPaths,
+  options: {
+    readonly ownerKey?: string | undefined;
+    readonly secretsDirectory?: string | undefined;
+    readonly port?: string | undefined;
+    readonly now?: () => Date;
+  } = {},
+) {
+  if ((options.ownerKey?.trim() ?? '') !== '') {
+    throw new CommandError(
+      'The setup is done: OYL_INSTANCE_OWNER_KEY is set, and it names the owner. No setup code was made.',
+    );
+  }
+  const port = /^[0-9]{1,5}$/.test(options.port?.trim() ?? '') ? Number(options.port) : 8788;
+  const store = openServingStore(paths.database);
+  try {
+    const minted = await mintSetupCode(store, {
+      mintedBy: 'cli',
+      now: () => (options.now ?? (() => new Date()))().getTime(),
+      directory: options.secretsDirectory,
+      port,
+    });
+    if (minted.outcome === 'done') {
+      throw new CommandError(
+        'The setup is done, so there is no setup page to open. No setup code was made.',
+      );
+    }
+    return {
+      command: 'setup-code',
+      code: minted.code,
+      open: `http://localhost:${String(port)}/setup`,
+      expiresAt: new Date(minted.expiresAt * 1000).toISOString(),
+      writtenToFile: minted.written,
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `registration set <mode>` and `registration clear` (#2784, ADR 0080 D-6,
+ * Q-3): the registration mode the instance holds over
+ * `OYL_INSTANCE_REGISTRATION`, which the setup wizard sets too; `clear`
+ * returns to the environment's. A new rider meets it at once, with no
+ * restart. Logged as `registration_mode_set`, with the mode or `cleared`.
+ */
+export async function registrationMode(
+  paths: DataPaths,
+  mode: RegistrationModeSetting | null,
+  now?: () => Date,
+) {
+  const store = openServingStore(paths.database);
+  try {
+    const at = secondsOf(now);
+    await asOperatorAction(
+      store,
+      'registration_mode_set',
+      async (inside) => {
+        await inside.putRegistrationSetting(mode, at, 'cli');
+        return mode;
+      },
+      (held) => held ?? 'cleared',
+      now,
+    );
+    return {
+      command: mode === null ? 'registration clear' : 'registration set',
+      mode: mode ?? 'from OYL_INSTANCE_REGISTRATION',
     };
   } finally {
     await store.close();

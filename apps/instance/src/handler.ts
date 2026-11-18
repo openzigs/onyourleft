@@ -21,6 +21,8 @@ import { OPERATE_NEEDS_KEYS, type Operate } from './operate/operate.ts';
 import type { Rooms } from './rooms/rooms.ts';
 import type { Sealed } from './sealed/sealed.ts';
 import type { Segments } from './segments/segments.ts';
+import type { Setup } from './setup/setup.ts';
+import { isSetupPath } from './setup/setup-routes.ts';
 import type { Sync } from './sync/sync.ts';
 import { ROUTES, type Route } from './routes.ts';
 import { SEALED_PATH } from '@onyourleft/domain';
@@ -204,6 +206,13 @@ export interface HandlerOptions {
    * `not_found`, as any path with no route is.
    */
   readonly admin?: Admin;
+  /**
+   * The first-run setup wizard (#2784, ADR 0080 D-1): asked only for a
+   * `/setup` path on the LOOPBACK listener, and only while the setup is open.
+   * Through the tunnel, and once the setup is done, `/setup` is `not_found`,
+   * as any path with no route is.
+   */
+  readonly setup?: Setup;
 }
 
 /** A path parameter's value: one segment, of these characters only. */
@@ -268,6 +277,9 @@ const PREFLIGHT_MAX_AGE_SECONDS = 2 * 60 * 60;
 
 /** What the log and `/metrics` name every `/admin` request by: the pattern, never the path. */
 const ADMIN_ROUTE = '/admin';
+
+/** What the log and `/metrics` name every `/setup` request by (#2784). */
+const SETUP_ROUTE = '/setup';
 
 /** Past the limit: the request is refused rather than read further. */
 const TOO_LARGE = Symbol('too large');
@@ -570,9 +582,51 @@ export function createHandler(options: HandlerOptions): Handler {
     return response;
   }
 
+  /**
+   * A `/setup` request on the loopback listener (#2784), while the setup is
+   * open: answered with the admin headers, logged and counted by the
+   * pattern. `undefined` once the setup is done: the route table answers it.
+   */
+  async function answerSetup(
+    setup: Setup,
+    request: Request,
+    client: ClientInfo,
+  ): Promise<Response | undefined> {
+    const started = now();
+    let response: Response | undefined;
+    try {
+      response = await setup.handle(
+        request,
+        async () => {
+          const body = await boundedBody(request, ADMIN_FORM_LIMIT_BYTES);
+          return body === TOO_LARGE ? 'too-large' : body;
+        },
+        client,
+      );
+    } catch (error) {
+      logUnhandled(options.log, SETUP_ROUTE, error);
+      response = adminInternalError();
+    }
+    if (response === undefined) return undefined;
+    logRequest(options.log, {
+      method: request.method,
+      route: SETUP_ROUTE,
+      status: response.status,
+      ms: now() - started,
+    });
+    options.observe?.(SETUP_ROUTE, response.status, undefined);
+    return response;
+  }
+
   return async (request, client = { address: null }) => {
-    if (options.admin !== undefined && isAdminPath(new URL(request.url).pathname)) {
+    const pathname = new URL(request.url).pathname;
+    if (options.admin !== undefined && isAdminPath(pathname)) {
       return answerAdmin(options.admin, request, client);
+    }
+    // The listener is the ADAPTER's word, never a header's (ADR 0069 D-5).
+    if (options.setup !== undefined && client.listener === 'loopback' && isSetupPath(pathname)) {
+      const answered = await answerSetup(options.setup, request, client);
+      if (answered !== undefined) return answered;
     }
     const started = now();
     let route: Route | undefined;

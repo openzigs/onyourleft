@@ -127,6 +127,10 @@ describe('the Accounts section — #2605', () => {
       'Set OYL_INSTANCE_REGISTRATION to approval, invite, open or closed.',
       'In that folder, run docker compose up -d instance, which starts the instance again with ' +
         'the new mode. docker compose restart does not read .env again.',
+      // #2784 (ADR 0080 D-6): a mode the setup page or the command chose wins over .env.
+      'If the setup page or operator registration set chose the mode, the instance holds it over ' +
+        '.env: run operator registration clear too, or set the new mode with operator registration ' +
+        'set instead.',
     ]);
   });
 

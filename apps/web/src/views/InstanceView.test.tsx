@@ -56,6 +56,7 @@ import {
 } from './InstanceView';
 import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
 import { ERASE_ACCOUNT_TEXT } from './EraseAccount';
+import { OWNER_CLAIM_TEXT } from './OwnerClaim';
 import { ERASE_REFUSAL_TEXT, type StatementsPort } from '../instance/statements-port';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BLOCKS_TEXT } from './BlocksPanel';
@@ -83,7 +84,8 @@ async function connectAs(address: string, name: string): Promise<void> {
   const inputs = [...(mounted?.container.querySelectorAll('input') ?? [])];
   await typeInto(inputs[0] as HTMLInputElement, address);
   await typeInto(inputs[1] as HTMLInputElement, name);
-  const form = mounted?.container.querySelector('form');
+  // The Connect form by its name: the owner's claim form is above it (#2823).
+  const form = mounted?.container.querySelector<HTMLFormElement>('form[aria-label="Connect"]');
   if (form === null || form === undefined) throw new Error('no form');
   await submitForm(form);
   await settle();
@@ -111,6 +113,34 @@ describe('the Connect screen — #777, #778', () => {
     ).toBeTruthy();
     // Nothing was asked of the instance but what this device holds.
     expect(scripted.calls).toEqual(['current']);
+  });
+
+  it('puts the owner’s claim at the top, above what the instance receives and Connect — owner ruling 2026-11-18 (#2823)', async () => {
+    const scripted = scriptedInstance();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const headings = [...mounted.container.querySelectorAll('h2, h3')];
+    const claim = headings.find((each) => each.textContent === OWNER_CLAIM_TEXT.heading);
+    const receives = mounted.container.querySelector('[data-oyl-kept-visible]');
+    expect(claim).toBeDefined();
+    expect(receives).not.toBeNull();
+    // Read in DOM order: the screen's own heading, then the claim, then the rest.
+    expect(headings[0]?.textContent).toBe('Connect');
+    expect(headings[1]).toBe(claim);
+    for (const after of [receives as Element, button('Connect'), button('Add this device')]) {
+      expect(
+        (claim as Element).compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it('draws no claim once a server is connected (#2823)', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain('Connected');
+    expect(text()).not.toContain(OWNER_CLAIM_TEXT.heading);
+    expect(() => button(OWNER_CLAIM_TEXT.claim)).toThrow();
   });
 
   it('says when the name is sent and kept, and what a rider asks the operator for — #892 review', () => {

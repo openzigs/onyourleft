@@ -57,14 +57,21 @@ function expectClean(where: string): void {
   expect(violations.length === 0 ? '' : `${where}\n${formatViolations(violations)}`).toBe('');
 }
 
-/** The claim's part of the screen: from its heading to the end of its section. */
+/**
+ * The claim's part of the screen: from its heading to the Connect form, which
+ * follows it since the owner's ruling of 2026-11-18 put the claim at the top.
+ */
 function claimControls(): HTMLElement[] {
   const heading = queryAll<HTMLElement>(document.body, 'h3').find(
     (each) => each.textContent === OWNER_CLAIM_TEXT.heading,
   );
   expect(heading, 'no claim heading').toBeDefined();
+  const connect = document.querySelector('form[aria-label="Connect"]');
+  expect(connect, 'no Connect form').not.toBeNull();
   return queryAll<HTMLElement>(document.body, 'button, textarea, input, select, a[href]').filter(
-    (control) => heading!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING,
+    (control) =>
+      heading!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING &&
+      control.compareDocumentPosition(connect!) & Node.DOCUMENT_POSITION_FOLLOWING,
   );
 }
 

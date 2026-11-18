@@ -335,6 +335,45 @@ describe('the Operate area over a scripted instance — #2603', () => {
     expect(operatorActionLabel(action)).toBe(label);
   });
 
+  it('names the setup wizard and the instance’s own start as an entry’s source, and their actions in words (#2784)', async () => {
+    const scripted = scriptedOperate({
+      entries: [
+        {
+          id: 2,
+          at: '2026-11-18T09:01:00.000Z',
+          source: 'setup',
+          action: 'setup_done',
+          detail: null,
+          outcome: 'done',
+        },
+        {
+          id: 1,
+          at: '2026-11-18T09:00:00.000Z',
+          source: 'start',
+          action: 'secret_generated',
+          detail: 'instance_secret_key',
+          outcome: 'done',
+        },
+      ],
+    });
+    mounted = await mount(<OperateView port={scripted.port} />);
+    await settle();
+    expect([...logLines()].sort()).toEqual([
+      'Secret made at start, 2026-11-18 09:00 UTC, by the instance as it started: done (instance_secret_key).',
+      'Setup finished, 2026-11-18 09:01 UTC, from the setup page, on the server machine: done.',
+    ]);
+  });
+
+  it.each([
+    ['setup_code_minted', 'Setup code made'],
+    ['setup_sign_in', 'Signed in to the setup page'],
+    ['setup_refused', 'Setup sign-in attempts refused'],
+    ['registration_mode_set', 'Registration mode set'],
+    ['invite_minted', 'Rider invite made'],
+  ])('names the setup wizard’s action %s in words (#2784)', (action, label) => {
+    expect(operatorActionLabel(action)).toBe(label);
+  });
+
   it('names “back up now” in the log as the owner asked for it (#2607)', () => {
     expect(operatorActionLabel('backup_requested')).toBe('Backup asked for');
   });
