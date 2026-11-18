@@ -911,6 +911,8 @@ function viewFor(
           riderText={props.riderText}
           workoutGoals={props.workoutGoals}
           soundOutput={props.soundOutput}
+          // #2756: the Instance line says whether this device is connected.
+          instance={props.instance}
         />
       );
     case 'about':

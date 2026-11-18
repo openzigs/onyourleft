@@ -222,6 +222,16 @@
  * bots draft each other and that the switch turns that off for every racer.
  * Nothing is dropped.
  *
+ * ⚠️ **Re-recorded by #2756, with the wording the owner approved in that
+ * pull request on 2026-11-18**, on Settings on both walks, one line each. The
+ * populated walk's fixture is connected to an instance: the *Connect and keep*
+ * card's Instance line said "Connect to an instance, …" on a connected device,
+ * and now says "Connected to your server at https://ride.example as Rider."
+ * and "See this device’s connection and your devices there.". The empty walk,
+ * with nothing connected, now says "Connect to a server, …" in place of
+ * "Connect to an instance, …", and the rest of that line is unchanged. Nothing
+ * is dropped.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`
