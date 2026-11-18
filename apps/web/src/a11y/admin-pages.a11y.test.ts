@@ -46,7 +46,8 @@ import {
   SCRIPTED_MODELS,
   SCRIPTED_STATUS,
 } from '../instance/testing';
-import { auditAccessibility, formatViolations, tabbableElements } from './audit';
+import { codeWithCard, readCodeWithCard } from '../instance/instance-pin';
+import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
 
 interface ShellView {
   readonly name: string | null;
@@ -108,11 +109,21 @@ interface AdminPages {
   backupsBody(view: BackupsView): string;
   roomsBody(view: RoomsView): string;
   keysBody(view: KeysView): string;
+  cardCodePart(view: CardCodeView): string;
+  readonly CARD_CODE_TEXT: Readonly<Record<CardCodeView['purpose'], { readonly label: string }>>;
   problemsBody(view: {
     readonly problems:
       | { readonly since: string; readonly lines: readonly { at: string; line: string }[] }
       | undefined;
   }): string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`CardCodeView` (#2783). */
+interface CardCodeView {
+  readonly purpose: 'claim' | 'invite';
+  readonly card: string;
+  readonly code: string;
+  readonly expiresAt: string;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`KeysView` (#2650). */
@@ -824,6 +835,65 @@ describe.each(Object.entries(PAGES))('the admin page %s (#2645)', (path, states)
     );
   }
 });
+
+/**
+ * A card and a single-use code as one QR (#2783, ADR 0080 D-3, D-7): the part
+ * the setup wizard's claim and invite steps draw on the loopback listener,
+ * audited in the frame of a page on the server machine. It is not a route of
+ * its own, so it is not in {@link PAGES}; #2784's `/setup` pages add their
+ * own entries.
+ */
+describe.each(['claim', 'invite'] as const)(
+  'the %s QR, on the server machine (#2783)',
+  (purpose) => {
+    const CODE = 'k7mq-x3ra-p9tz-wc4e';
+    const render = (): string =>
+      pages.shellPage(
+        { ...shell('/admin/keys', AWKWARD_NAME, 'passkey'), listener: 'loopback' },
+        'Keys',
+        pages.cardCodePart({
+          purpose,
+          card: CARD.card,
+          code: CODE,
+          expiresAt: '2026-11-14T21:10:00.000Z',
+        }),
+      );
+
+    it('no accessibility violation, and no inline script or style', () => {
+      const html = render();
+      const violations = auditAccessibility(parse(html));
+      expect(violations, formatViolations(violations)).toEqual([]);
+      expect(html).not.toMatch(/<style|\sstyle=|\son[a-z]+=|<script/i);
+    });
+
+    it('the QR is an image with a name, and the line beside it, as selectable text, is its alternative', () => {
+      const doc = parse(render());
+      const qr = doc.querySelectorAll('main svg[role="img"]');
+      expect(qr).toHaveLength(1);
+      const svg = qr[0] as Element;
+      expect(accessibleName(svg)).toBe(pages.CARD_CODE_TEXT[purpose].label);
+      const describedBy = svg.getAttribute('aria-describedby') ?? '';
+      const line = doc.getElementById(describedBy);
+      expect(line?.tagName).toBe('CODE');
+      expect(line?.closest('svg')).toBeNull();
+      // The app's own line, whole: what its paste box and its scanner read back.
+      expect(CARD.card.split('#')[1]).toHaveLength(52);
+      expect(line?.textContent).toBe(codeWithCard(CARD.card, CODE));
+      expect(readCodeWithCard(line?.textContent ?? '')).toEqual({ card: CARD.card, code: CODE });
+      expect(line?.textContent?.startsWith('oyl-instance:')).toBe(true);
+      // A picture is not a tab stop.
+      expect(tabbableElements(doc)).not.toContain(svg);
+    });
+
+    it('is drawn black on white, which clears the non-text contrast threshold whatever the theme', () => {
+      const svg = parse(render()).querySelector('main svg[role="img"]');
+      const paper = svg?.querySelector('rect')?.getAttribute('fill') ?? '';
+      const ink = svg?.querySelector('path')?.getAttribute('fill') ?? '';
+      expect(contrastRatio(ink, paper)).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
+      expect([ink, paper]).toEqual(['#000000', '#ffffff']);
+    });
+  },
+);
 
 describe('the Backups page’s Details disclosures (#2771)', () => {
   it('each row’s summary is a tab stop named Details, its facts closed inside it', () => {

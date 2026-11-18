@@ -282,6 +282,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         Since #2651 Recent problems draws `GET
                         /v1/operate/logs` as given, escaped, with no
                         redaction of its own and no second source.
+                        Since #2783 `admin/qr.ts` draws the card and a
+                        claim or invite code as one SVG QR (`uqr`, ADR
+                        0037's 2026-11-18 row) and `pages.ts`
+                        §`cardCodePart` the line beside it, for ADR 0080's
+                        loopback `/setup` steps (#2784 mounts them); its
+                        tests read the drawing back with `jsqr`.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
