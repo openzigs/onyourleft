@@ -108,6 +108,7 @@ import {
   type ModerationLimits,
   type Moderators,
 } from '../moderation/moderation.ts';
+import { createOwnerClaim, type OwnerClaim, type OwnerClaimLimits } from './owner-claim.ts';
 import type { Admit } from '../room/core/room.ts';
 import {
   InviteRefusedError,
@@ -315,6 +316,8 @@ export interface IdentityOptions {
   /** The device keys of the owner and the deputy, who moderate (#83, ruling Q13). */
   readonly moderators?: Moderators;
   readonly moderationLimits?: ModerationLimits;
+  /** How often a claim code may be tried (#2782): ADR 0069 D-4's sign-in limits unless a test sets its own. */
+  readonly ownerClaimLimits?: OwnerClaimLimits;
 }
 
 export type Outcome<T> =
@@ -463,6 +466,8 @@ export interface Identity {
   readonly origin: string;
   /** Blocking, reporting and the moderators' tools (#83), over the same store and clock. */
   readonly moderation: Moderation;
+  /** The owner's claim (#2782, ADR 0080 D-3), over the same store, clock and named keys. */
+  readonly ownerClaim: OwnerClaim;
   readonly emailRecoveryEnabled: boolean;
   challenge(
     publicKey: unknown,
@@ -778,6 +783,12 @@ export function createIdentity(options: IdentityOptions): Identity {
     allowNoticeFrom: (address) =>
       noticesPerAddress.allow(address === null ? 'unknown' : addressKey(address)),
   });
+  const ownerClaim = createOwnerClaim({
+    store,
+    now,
+    ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
+    ...(options.ownerClaimLimits === undefined ? {} : { limits: options.ownerClaimLimits }),
+  });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
   async function proven(statement: unknown, purpose: DevicePurpose): Promise<Outcome<string>> {
@@ -872,10 +883,9 @@ export function createIdentity(options: IdentityOptions): Identity {
     return { sessionToken, expiresAt };
   }
 
-  /** Whether `publicKey` is one the operator named as a moderator's. */
-  function moderatorKey(publicKey: string): boolean {
-    const named = options.moderators ?? {};
-    return publicKey === named.owner || publicKey === named.deputy;
+  /** Whether `publicKey` is the owner key (named or claimed, ADR 0080 D-3) or the deputy's. */
+  function moderatorKey(publicKey: string): Promise<boolean> {
+    return moderation.isModeratorKey(publicKey);
   }
 
   async function account(athleteId: string): Promise<Account | undefined> {
@@ -945,7 +955,7 @@ export function createIdentity(options: IdentityOptions): Identity {
     fields: RegistrationFields,
     address: string | null,
   ): Promise<Outcome<SessionGranted>> {
-    const moderator = moderatorKey(publicKey);
+    const moderator = await moderatorKey(publicKey);
     if (!moderator && registration === 'closed') return refuse('registration_closed');
     const invited = !moderator && registration === 'invite';
     if (invited && typeof fields.inviteCode !== 'string') {
@@ -1056,6 +1066,7 @@ export function createIdentity(options: IdentityOptions): Identity {
   return {
     origin,
     moderation,
+    ownerClaim,
     emailRecoveryEnabled: mailer !== undefined,
     rateLimitSweepPeriodMs: sweepPeriodMs([
       limits.registrationPerAddress,
@@ -1129,7 +1140,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       // pending — and nobody may approve a moderator, so nothing could ever
       // let them in (#891's review). A key the operator now names activates
       // its pending account at sign-in, logged like any moderator action.
-      if (registrationState === 'pending' && moderatorKey(proof.value)) {
+      if (registrationState === 'pending' && (await moderatorKey(proof.value))) {
         const activated = await store.moderate({
           action: 'activate_moderator_key',
           actorAthleteId: athlete.id,

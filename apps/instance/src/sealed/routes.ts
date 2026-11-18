@@ -70,6 +70,9 @@ export const SESSIONLESS_PATHS: ReadonlySet<string> = new Set([
   '/v1/auth/link',
   '/v1/auth/recover',
   '/v1/auth/recover/email',
+  // #2782 (ADR 0080 D-3): the owner's claim, signed by the claiming device's
+  // key — the one its body names — and redeemed before that device has an account.
+  '/v1/auth/owner-claim',
 ]);
 
 /** The one sessionless path that carries no sealed-request statement (D-8). */

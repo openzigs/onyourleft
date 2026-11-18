@@ -748,6 +748,26 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       linkCode: (code.body as { linkCode: string }).linkCode,
     });
   },
+  // #2782: this world names its owner in the environment, which refuses every
+  // claim (ADR 0080 Q-2), so the claim's success is a world of its own.
+  claimInstanceOwner: async () => {
+    const unclaimed = await startIdentityInstance();
+    try {
+      const minted = await unclaimed.identity.ownerClaim.mint('admin_loopback');
+      if (minted === 'claimed') throw new Error('a fresh world is claimed');
+      const device = await testDevice();
+      const answer = await unclaimed.request('POST', '/v1/auth/owner-claim', {
+        body: { publicKey: device.publicKey, claimCode: minted.code },
+        signer: device,
+      });
+      return new Response(await answer.arrayBuffer(), {
+        status: answer.status,
+        headers: answer.headers,
+      });
+    } finally {
+      await unclaimed.close();
+    }
+  },
   recoverAccount: async (world) => {
     const session = await world.signIn(await testDevice());
     const [code] = session.body.recoveryCodes as string[];

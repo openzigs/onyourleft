@@ -20,6 +20,7 @@ import {
   modelKeyClear,
   modelKeySet,
   modelKeyStatus,
+  ownerClaimReset,
   restore,
   roomOpen,
   verify,
@@ -43,6 +44,7 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   analysis-settings clear | others on|off
   admin-code   (a one-time code for the admin pages, valid 10 minutes)
   admin-passkeys list | revoke <id> | confirm <id>   (the owner's passkeys for the admin pages)
+  owner-claim reset   (clear the owner the app claimed, so the instance can be claimed again)
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -261,6 +263,11 @@ export async function runCommand(
         } else {
           throw new CommandError(USAGE);
         }
+        break;
+      }
+      case 'owner-claim': {
+        if (args.length !== 1 || args[0] !== 'reset') throw new CommandError(USAGE);
+        report = await ownerClaimReset(paths, { ownerKey: env.ownerKey });
         break;
       }
       case 'account-erase': {

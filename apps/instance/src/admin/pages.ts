@@ -560,6 +560,10 @@ const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   admin_passkey_confirmed: 'Admin passkey confirmed on the host',
   room_ended: 'Room ended',
   registration_decided: 'Registration decided',
+  owner_claim_code_minted: 'Owner claim code made',
+  owner_claim_confirmed: 'Owner claim confirmed',
+  owner_claim_discarded: 'Owner claim discarded',
+  owner_claim_reset: 'Owner claim reset on the host',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */

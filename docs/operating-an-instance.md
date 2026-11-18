@@ -973,6 +973,57 @@ on disk only for riders who had already finished. A **group ride** has no result
 again, empty, for whoever rejoins it — from the start of the route. Every ride goes on recording on the rider's own
 device, whatever happens to the instance (ADR 0036 D-3).
 
+## Claiming the instance from the app
+
+The instance's **owner** — the operator, who reaches Operate and the admin pages and moderates — is
+whoever holds **the owner key**. There are two ways to set it
+(ADR 0080 D-3, written in [#2795](https://github.com/openzigs/onyourleft/pull/2795);
+[#2782](https://github.com/openzigs/onyourleft/issues/2782)):
+
+- **`OYL_INSTANCE_OWNER_KEY` in `.env`**, the device key copied from the app, as before. **When it is
+  set it always wins**: no claim can be made, and every existing install is unchanged.
+- **A claim from the app**, when `OYL_INSTANCE_OWNER_KEY` is empty. The setup page on the server
+  machine (`http://localhost:8788/setup`, #2784) shows a **claim code** with the instance card as one
+  QR (#2783). The tablet scans it inside the app, pins the card's fingerprint, and sends the code on
+  `POST /v1/auth/owner-claim`, **sealed** to the instance and signed by the tablet's device key, so
+  nobody between them — the tunnel included — can read the code or put another key in its place. The
+  claim then **waits**: the tablet and the setup page each show **six digits** worked out from the code
+  and the tablet's key, and only when you confirm on the setup page that they match does that key
+  become the owner key. A **No** voids the code; make a new one and scan again.
+
+What to know about it:
+
+- **The claimed key is kept in the database** (`instance_owner`, migration 0047), and every owner
+  check reads it there on every request, so a claim and a reset apply at once, with no restart. It is
+  in your backups, like every account.
+- **A claim code** lives ten minutes, is used once, and is kept only as its SHA-256; making a new one
+  voids the last, a waiting claim included. Only one claim can wait at a time.
+- **Every refusal is one sentence**: a wrong, used or expired code, a claim while another waits, the
+  deputy's key, and an instance that already has an owner all get the same answer, so the answer says
+  nothing about which it was. Redemptions are limited to 10 a minute from one address and 30 a minute
+  from everybody, as an admin sign-in is.
+- **The route is never answered in plaintext**, on an instance without `OYL_INSTANCE_SECRET_KEY` too:
+  an unsealed claim is refused `sealed_required` and changes nothing. An instance with no secret has
+  no keys to pin, so it can only take its owner from `.env`.
+- **The operator log** records a code made, a claim confirmed or discarded (from the setup page, naming
+  no athlete), and a reset (from the CLI). No entry names a code, a key or the six digits.
+
+### Resetting the owner from the host
+
+If the claimed tablet is lost, or the wrong device's claim was confirmed, reset the claim on the host:
+
+```bash
+docker compose exec instance node src/operator/cli.ts owner-claim reset
+```
+
+It clears the claimed owner key, voids every claim code, ends **every admin page session**, and writes
+`owner_claim_reset` to the operator log, in one transaction. Its report says whether a key was cleared
+(`cleared`), how many admin sessions ended, and `ownerKeyFromEnvironment: true` when
+`OYL_INSTANCE_OWNER_KEY` is set — in which case that variable is still the owner, as it was. The
+instance is then unclaimed, and the owner claims it again from the setup page. A rider who recovered
+their account with a recovery code holds a new device key, so they reset and claim again too, just as
+they would edit `.env`.
+
 ## The Operate area
 
 The app has an **owner-only area for running the instance** — Operate ([#2601](https://github.com/openzigs/onyourleft/issues/2601)).
@@ -981,7 +1032,7 @@ as everything else ([ADR 0047](adr/0047-end-to-end-encryption-between-the-app-an
 so the instance gains no new login. The server half is [#2602](https://github.com/openzigs/onyourleft/issues/2602):
 
 - **The owner's alone.** Every `/v1/operate/*` route is answered only for the athlete whose device
-  holds `OYL_INSTANCE_OWNER_KEY`. Anybody else — **the deputy included**, and a rider awaiting
+  holds the owner key: `OYL_INSTANCE_OWNER_KEY`, or the key a claim recorded (above). Anybody else — **the deputy included**, and a rider awaiting
   approval or suspended — is answered `not_found`, exactly as an address with no route. The deputy is
   a second moderator, not the operator (ADR 0046 D-9 Q9), and keeps the Moderation screen. The check
   is made by the instance on every request, never only by hiding a button.
@@ -995,7 +1046,7 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   the CLI is run by whoever can reach the data, not by an account. The commands that change state —
   `migrate`, `backup` (each run of `backup-loop` too), `restore`, `room-open`, `model-key set|clear`,
   `instance-key init|rotate|rotate-identity|reset`, `load-accounts add|erase`, `account-erase
-  --confirm`, `analysis-settings clear|others` and `admin-code` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
+  --confirm`, `analysis-settings clear|others`, `admin-code` and `owner-claim reset` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
