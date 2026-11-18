@@ -32,7 +32,7 @@ import { roomShortCode } from './operate.ts';
 /** The bound of a wait inside a case, which has Vitest's 5 s (#2567). */
 const WAIT_MS = 3_000;
 
-/** A power nothing else in a body could be by accident. */
+/** The power Cal reports, which the owner is never shown (#2726: looked for field by field). */
 const POWER_WATTS = 317;
 
 interface Session {
@@ -114,10 +114,15 @@ async function signIn(device: TestDevice, displayName: string, address: string):
   return { device, token: body.sessionToken, athleteId: body.athleteId };
 }
 
+/** Every room id the instance answered this file's `made` with, in order. */
+const madeRoomIds: string[] = [];
+
 async function made(who: Session, overrides: Record<string, unknown>) {
   const answer = await sealed(who, 'POST', '/v1/rooms', roomBody(overrides));
   expect(answer.status, JSON.stringify(answer.body)).toBe(200);
-  return answer.body as { roomId: string; code: string };
+  const room = answer.body as { roomId: string; code: string };
+  madeRoomIds.push(room.roomId);
+  return room;
 }
 
 /** `who` on a real socket into `roomId`, with a ticket the instance issued them. */
@@ -135,6 +140,17 @@ async function socketInto(who: Session, roomId: string): Promise<RoomClient> {
   clients.push(client);
   await until(() => client.messages.some((message) => message.type === 'welcome'), 'a welcome');
   return client;
+}
+
+/** Every leaf of a JSON `value` — a string, number, boolean or `null` — with where it is. */
+function leavesOf(value: unknown, path = '$'): [string, unknown][] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => leavesOf(item, `${path}[${String(index)}]`));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).flatMap(([key, item]) => leavesOf(item, `${path}.${key}`));
+  }
+  return [[path, value]];
 }
 
 async function freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T> {
@@ -242,8 +258,19 @@ describe('the owner’s Rooms on the running instance — #2612', () => {
       riderCount: 1,
     });
     const text = JSON.stringify(listed.body);
-    for (const absent of [String(POWER_WATTS), ann.athleteId, bea.athleteId, cal.athleteId]) {
+    for (const absent of [ann.athleteId, bea.athleteId, cal.athleteId]) {
       expect(text).not.toContain(absent);
+    }
+    // No power (#2726): read field by field, because a room id is random hex
+    // and spells `317` by chance about one run in a few hundred. No number is
+    // the watt figure, and no string spells it but an id or short code that is
+    // exactly that of a room this file made.
+    const ids = new Set(madeRoomIds.flatMap((roomId) => [roomId, roomShortCode(roomId)]));
+    for (const [path, leaf] of leavesOf(listed.body)) {
+      if (typeof leaf === 'number') expect(leaf, path).not.toBe(POWER_WATTS);
+      if (typeof leaf === 'string' && !ids.has(leaf)) {
+        expect(leaf, path).not.toContain(String(POWER_WATTS));
+      }
     }
   });
 
