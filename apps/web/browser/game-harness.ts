@@ -7553,7 +7553,7 @@ async function frozenSourceProbe(): Promise<{ frozen: string; delivering: string
  * It opens Chromium's synthetic camera (`playwright.config.ts` §`LAUNCH_ARGS`)
  * through the **real** `videoLuminanceSampler` — the same `drawImage` into a
  * 32 × 24 canvas and `getImageData` production runs — and times
- * {@link SHADING_FRAMES} frames of the real renderer with and without one
+ * {@link SHADOW_MAP_LOAD_FRAMES} frames of the real renderer with and without one
  * sample in each, alternating the order for `run`'s reason and flushing the
  * GPU before each clock is read. **One sample in every frame** is sixty times
  * the production rate (two samples every two seconds), so the difference is
@@ -7596,14 +7596,14 @@ async function presenceCostProbe(frame: SceneFrame): Promise<PresenceCostMeasure
       for (let index = 0; index < 5; index += 1) view.render(frame);
       awaitTheGpu(gl);
       const started = performance.now();
-      for (let index = 0; index < SHADING_FRAMES; index += 1) {
+      for (let index = 0; index < SHADOW_MAP_LOAD_FRAMES; index += 1) {
         view.render(frame);
         // An `await` in both, so the difference is the sample and not the
         // microtask that carries it.
         await (withSample ? sampler.sample() : Promise.resolve());
       }
       awaitTheGpu(gl);
-      return (performance.now() - started) / SHADING_FRAMES;
+      return (performance.now() - started) / SHADOW_MAP_LOAD_FRAMES;
     };
     const plain: number[] = [];
     const sampled: number[] = [];
@@ -7615,10 +7615,10 @@ async function presenceCostProbe(frame: SceneFrame): Promise<PresenceCostMeasure
     }
     const alone: number[] = [];
     const started = performance.now();
-    for (let index = 0; index < SHADING_FRAMES; index += 1) {
+    for (let index = 0; index < SHADOW_MAP_LOAD_FRAMES; index += 1) {
       await sampler.sample();
     }
-    alone.push((performance.now() - started) / SHADING_FRAMES);
+    alone.push((performance.now() - started) / SHADOW_MAP_LOAD_FRAMES);
 
     const mean = (values: readonly number[]) =>
       values.reduce((total, each) => total + each, 0) / values.length;
@@ -7741,7 +7741,7 @@ function shadowMapProbe(probe: SceneFrame): ShadowMapMeasurement {
 
     for (const settings of [contact, RIDER_SHADOW_MAP_RUNG]) {
       view.setQuality(settings);
-      void timeFrames(view, frameAt, gl);
+      void timeFrames(view, frameAt, gl, SHADOW_MAP_LOAD_FRAMES);
     }
     const contactRounds: number[] = [];
     const mapRounds: number[] = [];
@@ -7750,7 +7750,9 @@ function shadowMapProbe(probe: SceneFrame): ShadowMapMeasurement {
         round % 2 === 0 ? [contact, RIDER_SHADOW_MAP_RUNG] : [RIDER_SHADOW_MAP_RUNG, contact];
       for (const settings of order) {
         view.setQuality(settings);
-        (settings === contact ? contactRounds : mapRounds).push(timeFrames(view, frameAt, gl));
+        (settings === contact ? contactRounds : mapRounds).push(
+          timeFrames(view, frameAt, gl, SHADOW_MAP_LOAD_FRAMES),
+        );
       }
     }
     view.destroy();
@@ -8208,7 +8210,10 @@ function compareRegions(
 const SWEEP_STEP_METRES = 3.7;
 
 /**
- * How many frames each of #286's two frame-cost means is taken over: **60**.
+ * How many frames each of the harness's frame-cost means is taken over: **60**
+ * — the water's, the realistic world's and the rest, but since #2775 not the
+ * `?shadow-map` load's, which take {@link SHADOW_MAP_LOAD_FRAMES}. As written
+ * for #286's two:
  *
  * Two seconds of riding at 30 fps (`QUALITY_LADDER`'s first capped rung — level
  * 2 since #482; the top two rungs draw at the display's rate), which is long
@@ -8217,6 +8222,25 @@ const SWEEP_STEP_METRES = 3.7;
  * on top of a gate that already runs for twenty.
  */
 const SHADING_FRAMES = 60;
+
+/**
+ * How many frames each mean of the `?shadow-map` load's three timings is
+ * taken over — #286's shading, #426's shadow map and #390's presence cost:
+ * **30**, half of {@link SHADING_FRAMES} (#2775).
+ *
+ * ⚠️ **Fewer samples, not a longer wait.** The three are the load's slowest
+ * phases, and every frame of them is a software-rasterised draw: on a slow
+ * runner they took 15.6 s, 13.2 s and 11.4 s (run 44156608009), and the game
+ * run's 85 s (`playwright.config.ts` §`GAME_PART_MS`) ran out before the
+ * suite started. Thirty frames about halves each, and is the floor the shading
+ * case already holds `shadedFrames` to. A mean is still a second of riding at
+ * 30 fps, each shading and rung is still timed {@link SHADING_ROUNDS} or
+ * {@link SHADOW_MAP_ROUNDS} times alternating, and the one bound among them —
+ * `SHADING_CEILING`, a ratio of 1.5 against 1.10 measured — is a ratio of two
+ * means taken alike, which fewer frames widen and do not bias. The other two
+ * are published, never bounded.
+ */
+const SHADOW_MAP_LOAD_FRAMES = 30;
 
 /**
  * How many times each shading is timed, so the two alternate: **4**.
@@ -8285,7 +8309,8 @@ function awaitTheGpu(gl: WebGL2RenderingContext | WebGLRenderingContext | null):
 }
 
 /**
- * Drives {@link SHADING_FRAMES} frames and returns the mean milliseconds each.
+ * Drives `frames` frames — {@link SHADING_FRAMES} unless the caller says — and
+ * returns the mean milliseconds each.
  *
  * ⚠️ The GPU is synchronised **once, at the end**, rather than after every
  * frame: a per-frame stall would measure the round trip as well as the work,
@@ -8297,14 +8322,15 @@ function timeFrames(
   view: { render: (frame: SceneFrame) => void },
   frameAt: (at: number, build: FrameBuild) => SceneFrame,
   gl: WebGL2RenderingContext | WebGLRenderingContext | null,
+  frames: number = SHADING_FRAMES,
 ): number {
   const started = performance.now();
-  for (let index = 1; index <= SHADING_FRAMES; index += 1) {
+  for (let index = 1; index <= frames; index += 1) {
     // Built and drawn in one breath, as `GameView` does: lent, not copied (#473).
     view.render(frameAt(index * SWEEP_STEP_METRES, lentSceneFrame));
   }
   awaitTheGpu(gl);
-  return (performance.now() - started) / SHADING_FRAMES;
+  return (performance.now() - started) / frames;
 }
 
 /**
@@ -13886,7 +13912,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     riderMovePixels: 0,
     litFrameMs: 0,
     flatFrameMs: 0,
-    shadedFrames: SHADING_FRAMES,
+    shadedFrames: SHADOW_MAP_LOAD_FRAMES,
     frameMsNoise: 0,
     litDrawCalls: 0,
     flatDrawCalls: 0,
@@ -14785,7 +14811,7 @@ async function run(): Promise<void> {
         if (SHADOW_MAP_LOAD) {
           for (const settings of [lit, flat]) {
             view.setQuality(settings);
-            void timeFrames(view, frameAt, gl);
+            void timeFrames(view, frameAt, gl, SHADOW_MAP_LOAD_FRAMES);
           }
 
           const litRounds: number[] = [];
@@ -14802,7 +14828,7 @@ async function run(): Promise<void> {
             const flatFirst = round % 2 === 0;
             for (const shading of flatFirst ? ([flat, lit] as const) : ([lit, flat] as const)) {
               view.setQuality(shading);
-              const each = timeFrames(view, frameAt, gl);
+              const each = timeFrames(view, frameAt, gl, SHADOW_MAP_LOAD_FRAMES);
               (shading === lit ? litRounds : flatRounds).push(each);
             }
           }
@@ -15005,7 +15031,7 @@ async function run(): Promise<void> {
     litMarkerDarkest,
     litFrameMs,
     flatFrameMs,
-    shadedFrames: SHADING_FRAMES,
+    shadedFrames: SHADOW_MAP_LOAD_FRAMES,
     frameMsNoise,
     litDrawCalls,
     flatDrawCalls,
