@@ -27,11 +27,13 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type JSX,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
 
@@ -66,7 +68,7 @@ import {
   type ReadingTier,
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
-import { isLapRaceReading, riderHolds } from './lap-race-hud';
+import { isLapRaceReading, riderFinished, riderHolds } from './lap-race-hud';
 import {
   GRADE_BANDS,
   LOOK_AHEAD_METRES,
@@ -98,6 +100,9 @@ import {
   panelShown,
   totalsStripChosen,
 } from './hud-layout-preference';
+import { HIDES_ATTRIBUTE, useControlsReveal } from './controls-reveal';
+import { panelTapped, placeTuck, useTabletStage } from './panel-tabs';
+import type { CollapsiblePanel } from './ride-chrome-preference';
 import { SteerKeys } from './SteerKeys';
 import { ThrowControl } from './ThrowControl';
 import { totalsStripReadings } from './totals-strip';
@@ -193,6 +198,53 @@ export interface HudCoreProps extends SharedProps {
    * for as long as it plays. A rider's ride keeps them.
    */
   readonly withoutTotals?: boolean;
+  /**
+   * #2600: the controls that hide until touched, and the panels a rider
+   * collapses to a tab — `ride-chrome-preference.ts`. `HudPanel` hands it on
+   * every ride, from this device; absent (the demo), the controls are always
+   * drawn and nothing collapses, so the demo's *Pause* and *Play* stay in
+   * view for WCAG 2.2 SC 2.2.2 as {@link withoutEnd} requires.
+   */
+  readonly chrome?:
+    | {
+        readonly autoHide: boolean;
+        readonly collapsed: readonly CollapsiblePanel[];
+        readonly onToggle: (panel: CollapsiblePanel) => void;
+      }
+    | undefined;
+  /**
+   * #2600: the word on the tab of what {@link afterActions} draws — a race's
+   * standings or a loop's lap splits, which share that place.
+   */
+  readonly afterActionsTab?: string | undefined;
+}
+
+/**
+ * #2600: each collapsible panel's word — drawn on its tab when it is tucked
+ * away, and the start of its control's name, which goes on to say which way
+ * it stands ({@link panelToggleName}; SC 2.5.3: the name begins with what is
+ * seen). `standings` takes its word from `HudCoreProps.afterActionsTab`.
+ */
+export const PANEL_TAB_WORDS: Readonly<Record<Exclude<CollapsiblePanel, 'standings'>, string>> = {
+  primary: 'Power',
+  secondary: 'Readings',
+  route: 'Route',
+  trainer: 'Trainer',
+};
+
+/** The custom property `theme.css` clips a hidden actions panel to. @see HudCore */
+const ACTIONS_KEPT_PROPERTY = '--oyl-hud-actions-kept';
+
+/** What follows every panel's word in its control's name. */
+export const PANEL_TAB_SUFFIX = ' panel';
+
+/**
+ * A panel's control's name, which says whether the panel is shown or tucked
+ * away — the owner's ruling of 2026-11-16: *"each panel stays reachable as
+ * one focusable control with an accessible name that says shown or hidden"*.
+ */
+export function panelToggleName(word: string, open: boolean): string {
+  return `${word}${PANEL_TAB_SUFFIX}, ${open ? 'shown' : 'hidden'}`;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -332,10 +384,98 @@ export function HudCore(props: HudCoreProps): JSX.Element {
     }
     wasAsking.current = asking;
   }, [asking]);
+  // #2600: the controls fade after a few seconds with no input, unless one of
+  // `controlsHeld`'s reasons holds them. @see controlsHeld
+  const { chrome } = props;
+  const throwButtons = props.throwing !== undefined && !(padInUse || controllerPaired);
+  const { hidden, returned, reveal, revealingTap } = useControlsReveal(
+    hud,
+    !controlsHeld(props, asking) && !throwButtons,
+  );
+  // Hidden, the controls fade and then the actions panel is clipped to the
+  // trainer's line at its top (`theme.css` §"#2600"): how far down that line
+  // ends, measured as it hides and again while it is hidden if the line
+  // changes size.
+  const actions = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const panel = actions.current;
+    if (!hidden || panel === null) return undefined;
+    const keep = (): void => {
+      const line = panel.querySelector(':scope > .oyl-hud__trainer');
+      const top = panel.getBoundingClientRect().top;
+      const below = line === null ? 0 : line.getBoundingClientRect().bottom - top;
+      const padding = line === null ? 0 : parseFloat(getComputedStyle(panel).paddingTop) || 0;
+      const height = panel.getBoundingClientRect().height;
+      const kept = Math.min(height, Math.max(0, below + padding));
+      panel.style.setProperty(ACTIONS_KEPT_PROPERTY, `${String(kept)}px`);
+    };
+    keep();
+    const line = panel.querySelector(':scope > .oyl-hud__trainer');
+    if (line === null || typeof ResizeObserver === 'undefined') return undefined;
+    const sizes = new ResizeObserver(keep);
+    sizes.observe(line);
+    return () => {
+      sizes.disconnect();
+    };
+  }, [hidden, props.trainer === undefined]);
+  // #2600: the panels a rider collapsed, on a tablet only (`panel-tabs.ts`).
+  const tablet = useTabletStage();
+  const collapsible = chrome !== undefined && tablet;
+  const collapsed = (panel: CollapsiblePanel): boolean =>
+    collapsible && chrome.collapsed.includes(panel);
+  const routeDrawn =
+    !game &&
+    (panelShown(layout, 'route') || (props.recent !== undefined && panelShown(layout, 'graph')));
+  const tabbed: readonly CollapsiblePanel[] = collapsible
+    ? [
+        'primary' as const,
+        ...(focus ? [] : ['secondary' as const]),
+        ...(routeDrawn ? ['route' as const] : []),
+        ...(hasContent(props.afterActions) ? ['standings' as const] : []),
+        ...(props.trainer === undefined ? [] : ['trainer' as const]),
+      ]
+    : [];
+  const open = tabbed.filter((panel) => !collapsed(panel));
+  const layer = useRef<HTMLDivElement>(null);
+  // A press on a panel's control unmounts it — an open panel's is on the
+  // layer, a tucked panel's tab in the panel's place — so focus follows to the
+  // control that took its place rather than falling to the page. A tap on the
+  // panel itself moves no focus: nothing was focused to follow.
+  const toggled = useRef<CollapsiblePanel | undefined>(undefined);
+  useEffect(() => {
+    const panel = toggled.current;
+    if (panel === undefined) return;
+    toggled.current = undefined;
+    hud.current?.querySelector<HTMLElement>(`[data-oyl-tab="${panel}"]`)?.focus();
+  }, [chrome?.collapsed]);
+  const word = (panel: CollapsiblePanel): string =>
+    panel === 'standings' ? (props.afterActionsTab ?? 'Race') : PANEL_TAB_WORDS[panel];
+  const press = (panel: CollapsiblePanel): void => {
+    toggled.current = panel;
+    chrome?.onToggle(panel);
+  };
+  // #2600 "tap out": a tap on an open panel tucks it away (`panel-tabs.ts`).
+  // Not a key's click, which only a control receives, and not the tap that
+  // only brought the hidden ride controls back.
+  const tapOut = (event: ReactMouseEvent<HTMLElement>): void => {
+    if (chrome === undefined || event.detail === 0 || revealingTap(event.nativeEvent)) return;
+    const panel = panelTapped(event.target, event.currentTarget, open);
+    if (panel !== undefined) chrome.onToggle(panel);
+  };
+  const tab = (panel: CollapsiblePanel): JSX.Element => (
+    <PanelTab
+      panel={panel}
+      word={word(panel)}
+      onToggle={() => {
+        press(panel);
+      }}
+    />
+  );
 
   return (
     <section
       ref={hud}
+      onClick={collapsible ? tapOut : undefined}
       className={[
         'oyl-hud',
         ...(layout.textSize === 'normal' ? [] : [`oyl-hud--text-${layout.textSize}`]),
@@ -344,6 +484,11 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         ...(game ? ['oyl-hud--delivery-game'] : []),
       ].join(' ')}
       aria-label="Ride metrics"
+      // #2600: whether the ride controls are faded out (`theme.css` §"#2600").
+      data-oyl-controls={chrome === undefined ? undefined : hidden ? 'hidden' : 'shown'}
+      // Drawn again after a fade, so they fade back in: never on a ride's first
+      // frame, where a fade would paint the controls over a lifted reading.
+      data-oyl-controls-returned={chrome !== undefined && returned ? '' : undefined}
       data-oyl-hud-text={layout.textSize}
       data-oyl-hud-arrangement={focus ? 'focus' : 'full'}
       data-oyl-hud-totals={totals ? 'strip' : undefined}
@@ -363,23 +508,30 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         order, and a sighted rider finds each where `fields.ts` §`ReadingTier`
         says it is.
       */}
-      {focus ? (
+      {collapsed('primary') ? (
+        // #2600: a collapsed panel is its tab, in the panel's own place.
+        <CollapsedPanel className={focus ? 'oyl-hud__focus' : 'oyl-hud__fields--primary'}>
+          {tab('primary')}
+        </CollapsedPanel>
+      ) : focus ? (
         // #2383: one compact readout in place of the two tiers.
         <FocusReadout readings={readings} />
       ) : (
-        <>
-          <FieldList tier="primary" readings={readings} />
-          <FieldList tier="secondary" readings={readings} />
-        </>
+        <FieldList tier="primary" readings={readings} />
+      )}
+      {focus ? null : collapsed('secondary') ? (
+        <CollapsedPanel className="oyl-hud__fields--secondary">{tab('secondary')}</CollapsedPanel>
+      ) : (
+        <FieldList tier="secondary" readings={readings} />
       )}
 
       {/*
         #2079: the route panel holds the strip and the plan, and the recent
         graph; each may be turned off, and with both off there is no panel.
       */}
-      {game ||
-      (!panelShown(layout, 'route') &&
-        (props.recent === undefined || !panelShown(layout, 'graph'))) ? null : (
+      {!routeDrawn ? null : collapsed('route') ? (
+        <CollapsedPanel className="oyl-hud__route">{tab('route')}</CollapsedPanel>
+      ) : (
         <div
           className={`oyl-hud__panel oyl-hud__route${compact ? ' oyl-hud__route--compact' : ''}`}
           data-oyl-route-view={compact ? 'compact' : 'full'}
@@ -417,7 +569,12 @@ export function HudCore(props: HudCoreProps): JSX.Element {
         </div>
       )}
 
-      <div className="oyl-hud__panel oyl-hud__actions">
+      <div
+        ref={actions}
+        // #2600: with no trainer's line to keep, the whole panel fades with
+        // its controls (`theme.css` §"#2600").
+        className={`oyl-hud__panel oyl-hud__actions${props.trainer === undefined ? ' oyl-hud__actions--unlined' : ''}`}
+      >
         {/*
           ⚠️ **Inside a panel, and above the controls** — #373. It used to be a
           `<p className="oyl-muted">` that `GameView` rendered *after* this
@@ -439,13 +596,17 @@ export function HudCore(props: HudCoreProps): JSX.Element {
           *Pause* can see this line — which makes its reachability a consequence
           of something that must already be true, rather than a second rule.
         */}
-        {props.trainer === undefined ? null : (
+        {props.trainer === undefined ? null : collapsed('trainer') ? (
+          // #2600: the line collapsed to its tab, where the line stands.
+          <p className="oyl-hud__trainer oyl-hud__trainer--collapsed">{tab('trainer')}</p>
+        ) : (
           <p className="oyl-hud__trainer">{trainerLine(props.trainer)}</p>
         )}
 
         {props.endQuestion === undefined ? null : props.endQuestion}
         {props.endQuestion !== undefined ? null : (
-          <div className="oyl-hud__controls">
+          // #2600: Pause, End ride, the lock and the notice toggle hide until touched.
+          <div className="oyl-hud__controls" {...{ [HIDES_ATTRIBUTE]: '' }}>
             <button
               type="button"
               className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
@@ -546,6 +707,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             steering={props.steering}
             items={props.items}
             onPadInUse={setPadInUse}
+            // #2600: a pad's press brings the hidden controls back.
+            onPress={reveal}
           />
         )}
         {/* #1827: a paired steering controller's lane changes, lanes and throws, to a round's ports. Nothing drawn. */}
@@ -556,6 +719,8 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             throwing={props.throwing}
             steering={props.steering}
             lanes={props.lanes}
+            // #2600: and so does a paired controller's.
+            onPress={reveal}
           />
         )}
         {asking
@@ -565,7 +730,45 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             : props.moreActions}
       </div>
 
-      {props.afterActions}
+      {hasContent(props.afterActions) && collapsed('standings') ? (
+        // In the class of what it stands for, so it is drawn where that is.
+        <CollapsedPanel
+          className={props.afterActionsTab === 'Laps' ? 'oyl-hud__laps' : 'oyl-hud__standings'}
+        >
+          {tab('standings')}
+        </CollapsedPanel>
+      ) : (
+        props.afterActions
+      )}
+
+      {/*
+        #2600: each open panel's keyboard control, on a layer of its own over
+        the stage, drawn only while focused (`panel-tabs.ts` §"A keyboard and
+        a screen reader"). After the panels in the document, so a screen
+        reader meets every panel first.
+      */}
+      {open.length === 0 ? null : (
+        <div ref={layer} className="oyl-hud__tabs">
+          {open.map((panel) => (
+            <button
+              key={panel}
+              type="button"
+              className="oyl-hud__tuck"
+              data-oyl-tab={panel}
+              onFocus={(event) => {
+                if (hud.current !== null && layer.current !== null) {
+                  placeTuck(event.currentTarget, hud.current, layer.current, panel);
+                }
+              }}
+              onClick={() => {
+                press(panel);
+              }}
+            >
+              {panelToggleName(word(panel), true)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/*
         #2387: the whole ride's totals, after the controls in the document —
@@ -677,6 +880,80 @@ function hasContent(node: ReactNode): boolean {
     return (node as readonly ReactNode[]).some(hasContent);
   }
   return node !== undefined && node !== null && node !== false && node !== '';
+}
+
+/**
+ * Whether the ride controls stay drawn whatever the time since the last
+ * input — #2600's safety ruling, the maintainer's (open to the owner): a way
+ * to stop is never a reveal away while the ride has something to say.
+ *
+ * - **No `chrome`** (the demo), or the rider turned the auto-hide off.
+ * - **Paused**: *Resume* and *End ride* are what a paused rider reaches for.
+ * - **The end-of-ride question is open** (#2349): its answers are the ride's
+ *   next step. They are never faded in any case — only the controls are.
+ * - **A notice stands** — a refused gradient, a lost trainer link, a stall
+ *   rescue, a lost side camera (`HudPanelProps.notices`) — or **the road is
+ *   not reaching the trainer** (`HudPanelProps.standingNotice`): the trainer
+ *   link is what dropped, and the rider may want out at once.
+ *   **Any** notice holds them, an informational one too (the room notice, a
+ *   voice invite, the not-recorded and standard-world notices): the list
+ *   arrives without a severity, so the hold cannot tell them apart. A ride
+ *   where one stays up the whole time keeps the controls drawn all of it.
+ * - **The rider has finished a lap race**: what is left is to end the ride.
+ *
+ * A lap's notice does not hold them: it is nothing to act on. Nor does it
+ * decide the two `HudCore` and `HudPanel` add beside it: a Delivery round's
+ * throw buttons drawn in the actions panel (the round's play — a first press
+ * lost to a reveal is a house missed), and a line in that panel that is read
+ * rather than pressed (`HudPanel`'s `autoHide`).
+ */
+function controlsHeld(props: HudCoreProps, asking: boolean): boolean {
+  return (
+    props.chrome === undefined ||
+    !props.chrome.autoHide ||
+    props.paused ||
+    asking ||
+    hasContent(props.notices) ||
+    props.standingNotice !== undefined ||
+    (props.lapRace !== undefined && riderFinished(props.lapRace))
+  );
+}
+
+/**
+ * #2600: a collapsed panel — its tab, in the panel's own place in the grid,
+ * under the panel's own class so the grid puts it where the panel was.
+ */
+function CollapsedPanel(props: {
+  readonly className: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className={`oyl-hud__panel ${props.className} oyl-hud__panel--collapsed`}>
+      {props.children}
+    </div>
+  );
+}
+
+/**
+ * #2600: a tucked panel's tab, in the panel's own place: the panel's word,
+ * and a name that says it is hidden. One tap brings the panel back.
+ */
+function PanelTab(props: {
+  readonly panel: CollapsiblePanel;
+  readonly word: string;
+  readonly onToggle: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="oyl-hud__tab"
+      data-oyl-tab={props.panel}
+      aria-label={panelToggleName(props.word, false)}
+      onClick={props.onToggle}
+    >
+      {props.word}
+    </button>
+  );
 }
 
 /**

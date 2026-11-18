@@ -113,6 +113,7 @@ import {
   HUD_TEXT_SIZES,
   writeHudLayout,
 } from '../src/game/hud/hud-layout-preference';
+import { COLLAPSIBLE_PANELS, writeRideChrome } from '../src/game/hud/ride-chrome-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
@@ -875,6 +876,12 @@ const REFUSED = new URLSearchParams(window.location.search).get('gradient') === 
  * names, so `ride-targets.browser.spec.ts` measures it in this state too.
  */
 const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'yes';
+/** #2600: `?controls=hide` — the ride controls hide until touched, as on a rider's device. */
+const CONTROLS_HIDE = new URLSearchParams(window.location.search).get('controls') === 'hide';
+/** #2600: `?collapsed=route,trainer` — those panels collapsed to their tabs. */
+const COLLAPSED_ASKED = (new URLSearchParams(window.location.search).get('collapsed') ?? '').split(
+  ',',
+);
 
 /**
  * `ride.html?end=asked` — #2349: *End ride* pressed, so the HUD holds the
@@ -1399,7 +1406,11 @@ function measure(): StageMeasurement {
     panels: [
       // #2387: the totals strip, where it is drawn; where a layout has no room
       // for it, it is not displayed, and `givenWay` says so.
-      ...[...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].filter((each) => {
+      // #2600: the layer a panel's keyboard control stands on spans the stage
+      // and catches nothing; it is `ride-chrome.browser.spec.ts`'s to measure.
+      ...[
+        ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer], .oyl-hud__tabs)'),
+      ].filter((each) => {
         if (!each.classList.contains('oyl-hud__totals')) return true;
         if (window.getComputedStyle(each).display !== 'none') return true;
         givenWay.push('the totals strip');
@@ -1649,6 +1660,14 @@ async function run(): Promise<void> {
       climbCallout: !HUD_CALLOUT_OFF,
     });
   }
+  // #2600: the ride controls DRAWN, as every layout here measures them, unless
+  // `?controls=hide` asks for the auto-hide (`ride-chrome.browser.spec.ts`);
+  // and the panels `?collapsed=` names tucked away to their tabs. Hidden, the
+  // controls are the same layout faded and clipped, which that spec measures.
+  writeRideChrome(localStorage, {
+    autoHide: CONTROLS_HIDE,
+    collapsed: COLLAPSIBLE_PANELS.filter((panel) => COLLAPSED_ASKED.includes(panel)),
+  });
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
   localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);
   if (ALL_NOTICES) {

@@ -14184,3 +14184,214 @@ select.oyl-input {
 .oyl-operate__models label {
   gap: var(--oyl-space-sm);
 }
+
+/*
+ * #2600: THE RIDE CONTROLS FADE UNTIL TOUCHED, AND A PANEL TUCKS AWAY.
+ *
+ * HIDDEN, every control that hides (`controls-reveal.ts` §`HIDES_ATTRIBUTE`)
+ * FADES out over `--oyl-motion-medium`, and fades back in over
+ * `--oyl-motion-short` when the screen is touched (never on the ride's first
+ * frame: an element mid-fade is painted in its own layer, over a reading a
+ * phone lifts beside the controls) — the owner's ruling of
+ * 2026-11-16 on PR #2670, *"Fade out is better"*. With no trainer's line in
+ * it, the actions panel fades with them, its surface too.
+ *
+ * ⚠️ **Opaque or not drawn, never see-through at rest.** `opacity` is admitted
+ * in the HUD here and nowhere else (`hud-surface.a11y.test.ts`, ADR 0063's
+ * amendment of 2026-11-16): `opacity: 0`, under the hidden state alone. #94's
+ * contrast is checked against the panel a rider reads, and a faded control is
+ * not read; while it is drawn it is the opaque control the contrast walk
+ * checks. Between the two there is only the fade itself.
+ *
+ * When the fade has run, the actions panel is CLIPPED to the trainer's line at
+ * its top (`--oyl-hud-actions-kept`, measured by `HudCore.tsx`), or to nothing
+ * with no line: the clip takes the panel's emptied surface below the line
+ * away, and a finger then lands on the road under it rather than on it — the
+ * first touch shows the controls and presses nothing. A clip, like a fade,
+ * leaves a control in the tab order and the accessibility tree. The rider who
+ * asked for less motion sees no fade: the reduced-motion block above collapses
+ * every animation, and the clip comes at once.
+ */
+.oyl-hud[data-oyl-controls='hidden'] [data-oyl-hides],
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions--unlined {
+  animation: oyl-hud-controls-fade-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard);
+  opacity: 0;
+}
+
+.oyl-hud[data-oyl-controls-returned] [data-oyl-hides],
+.oyl-hud[data-oyl-controls-returned] .oyl-hud__actions--unlined {
+  animation: oyl-hud-controls-fade-in var(--oyl-motion-short) var(--oyl-motion-ease-standard);
+}
+
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions {
+  clip-path: inset(0 0 calc(100% - var(--oyl-hud-actions-kept, 0px)) 0);
+}
+
+/* The panel the fade runs in is drawn whole until the fade has run. The
+   unlined panel's own fade is named first, so this one adds the hold to it. */
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions:not(.oyl-hud__actions--unlined) {
+  animation: oyl-hud-actions-hold var(--oyl-motion-medium) step-end;
+}
+
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions.oyl-hud__actions--unlined {
+  animation:
+    oyl-hud-controls-fade-out var(--oyl-motion-medium) var(--oyl-motion-ease-standard),
+    oyl-hud-actions-hold var(--oyl-motion-medium) step-end;
+}
+
+@keyframes oyl-hud-controls-fade-out {
+  from {
+    opacity: 1;
+  }
+}
+
+@keyframes oyl-hud-controls-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes oyl-hud-actions-hold {
+  from,
+  to {
+    clip-path: inset(-100vmax);
+  }
+}
+
+/*
+ * The layer an open panel's keyboard control stands on (`panel-tabs.ts` §"A
+ * keyboard and a screen reader"): the whole stage, and catching no touch
+ * itself, so a finger on the road or on a panel under it reaches what it
+ * always did. `> .oyl-hud__tabs` so it outranks the stage's `.oyl-hud > *`,
+ * which hands every panel the pointer back.
+ */
+.oyl-hud__tabs {
+  display: none;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* Drawn on a tablet only (`panel-tabs.ts` §`PANEL_TABS_MEDIA`), by the
+   stylesheet as well as by the HUD, so a window resized to a phone's draws no
+   control in the frame before the HUD has heard of it. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-hud__tabs {
+    display: block;
+  }
+}
+
+.oyl-game--riding .oyl-hud > .oyl-hud__tabs {
+  pointer-events: none;
+}
+
+/*
+ * A tucked panel's tab, and an open panel's keyboard control while it is
+ * drawn: #669's 48 px both ways, the HUD's own surface and border, the
+ * panel's word. The focus ring is drawn INSIDE, on its own surface (`hudInk`
+ * on `hudSurface`, declared in `tokens.ts`): a ring outside would stand on
+ * a colour nothing checks (#748).
+ */
+.oyl-hud__tab,
+.oyl-hud__tuck {
+  align-items: center;
+  background: var(--oyl-color-hud-surface);
+  border: 2px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-hud-ink);
+  display: inline-flex;
+  font-size: var(--oyl-font-size-sm);
+  justify-content: center;
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0 var(--oyl-space-sm);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.oyl-hud__tab:focus-visible,
+.oyl-hud__tuck:focus-visible {
+  outline: 3px solid var(--oyl-color-hud-ink);
+  outline-offset: -6px;
+}
+
+/*
+ * An open panel's keyboard control: on its layer, at the panel's corner where
+ * `panel-tabs.ts` §`placeTuck` puts it as focus arrives, and clipped to
+ * nothing — undrawn and untouchable, never removed from the tab order — until
+ * the keyboard is on it. A tap on the panel is what a finger presses.
+ */
+.oyl-hud__tuck {
+  position: absolute;
+}
+
+.oyl-hud__tuck:not(:focus-visible) {
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
+/*
+ * A tucked panel is its tab and nothing else, in the panel's own place:
+ * the panel's class keeps its grid area and its corner, and this takes away
+ * its size, its padding and its border, so the tab's own are what is drawn.
+ * On a tablet only, as the tabs are (`panel-tabs.ts` §`PANEL_TABS_MEDIA`).
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud .oyl-hud__panel.oyl-hud__panel--collapsed {
+    border: 0;
+    display: block;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    padding: 0;
+    /* The tab's width, not the grid area's: a panel the grid stretched would
+       keep the panel's whole width and give none of it back. An area aligned
+       to its end keeps the tab at its end (`justify-self: end` stays). */
+    width: max-content;
+  }
+
+  .oyl-game--riding .oyl-hud .oyl-hud__trainer--collapsed {
+    margin: 0;
+    width: max-content;
+  }
+}
+
+/*
+ * A reading one panel lends another goes home when the other is tucked away:
+ * anchored to a tucked panel, it is drawn over the tab, and a tap on the tab
+ * lands on the reading's own panel and tucks that away instead.
+ *
+ * - On every tablet, *Elapsed* and *Clock* are Readings-panel readings drawn
+ *   on the Power panel's last row (§"THE CLOCK ROW", anchored to it). With the
+ *   Power panel tucked away they are readings in the Readings panel's grid.
+ * - On the 4:3 tablet the Gradient is a Power-panel reading drawn in the
+ *   Readings panel (§"the gradient's cell", anchored to it). With the Readings
+ *   panel tucked away it is a fourth reading in the Power panel's row.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__fields--primary.oyl-hud__panel--collapsed)
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--elapsed, .oyl-hud__field--clock) {
+    flex-direction: column;
+    gap: 0;
+    grid-area: auto;
+    position: static;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__fields--secondary.oyl-hud__panel--collapsed)
+    .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) max-content;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__fields--secondary.oyl-hud__panel--collapsed)
+    .oyl-hud__fields--primary
+    > .oyl-hud__field--gradient {
+    grid-area: auto;
+    position: static;
+  }
+}

@@ -36,14 +36,16 @@ export interface ControllerIntentsProps {
   readonly throwing?: ThrowInputPort | undefined;
   readonly steering?: SteerInputPort | undefined;
   readonly lanes?: LaneInputPort | undefined;
+  /** Told of every press the controller sends — #2600: it brings the hidden ride controls back. */
+  readonly onPress?: (() => void) | undefined;
 }
 
 /** @see the module header */
 export function ControllerIntents(props: ControllerIntentsProps): null {
-  const { controller, throwing, steering, lanes } = props;
-  const ports = useRef({ throwing, steering, lanes });
+  const { controller, throwing, steering, lanes, onPress } = props;
+  const ports = useRef({ throwing, steering, lanes, onPress });
   useEffect(() => {
-    ports.current = { throwing, steering, lanes };
+    ports.current = { throwing, steering, lanes, onPress };
   });
   useEffect(() => {
     let state = NO_CONTROLLER_INPUT;
@@ -59,6 +61,7 @@ export function ControllerIntents(props: ControllerIntentsProps): null {
       if (controllerInputWaiting(state)) frame = window.requestAnimationFrame(handOn);
     };
     const stop = controller.onControllerEvents((events) => {
+      if (events.length > 0) ports.current.onPress?.();
       state = takeControllerEvents(state, events);
       if (frame === undefined && controllerInputWaiting(state)) {
         frame = window.requestAnimationFrame(handOn);

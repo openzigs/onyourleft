@@ -48,6 +48,7 @@ import { useEffect, type JSX } from 'react';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { asksForItem } from '../lap-race/item-input';
 import type { ItemInputPort } from '../lap-race/item-input-port';
+import { HIDES_ATTRIBUTE } from './controls-reveal';
 import { CONTROL_MINIMUM_PIXELS } from './HudCore';
 
 /**
@@ -104,7 +105,8 @@ export function ItemControl(props: ItemControlProps): JSX.Element {
       .join(' ') || undefined;
 
   return (
-    <div className="oyl-hud__item">
+    // #2600: *Use item* hides with Pause and End ride until touched (`controls-reveal.ts`).
+    <div className="oyl-hud__item" {...{ [HIDES_ATTRIBUTE]: '' }}>
       <button
         type="button"
         className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}

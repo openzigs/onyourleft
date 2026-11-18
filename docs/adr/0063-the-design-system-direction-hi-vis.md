@@ -316,3 +316,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   still `accentText` on `surfaceOverlay` at 4.52. A primary's edge is `accentText` so that a primary
   standing on the near hill keeps its 3:1 edge (3.16); the brighter fill there is 2.15. The light
   `theme_color` follows `accent`, the fill. `contrast.a11y.test.ts` records each pair.
+- **2026-11-16** — D-2's "the HUD's panels stay **opaque**" is read as *opaque or not drawn*, on
+  the owner's ruling of 2026-11-16 on [#2600](https://github.com/openzigs/onyourleft/issues/2600)
+  via PR #2670 (*"Fade out is better"*): the ride controls that hide until touched fade out, and back
+  in, rather than being clipped away. At rest a HUD control is either drawn on the opaque
+  `hudSurface` the contrast pairs are checked against, or faded to `opacity: 0` and not read at all;
+  it is translucent only for the length of the fade (`--oyl-motion-medium`, none for a rider who
+  asked for less motion). `hud-surface.a11y.test.ts` admits exactly that, `opacity: 0` under
+  `.oyl-hud[data-oyl-controls='hidden']`, and still fails any other `opacity` in the HUD. No panel
+  is ever drawn see-through.
