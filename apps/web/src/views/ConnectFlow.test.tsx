@@ -8,10 +8,15 @@
  * and `ConnectFlow.a11y.test.tsx` audits every state.
  */
 
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { browserSecureWindow } from '../camera/secure-window-testing';
+import { CameraController } from '../camera/session';
+import { scriptedCamera } from '../camera/testing';
 import { codeWithCard, INSTANCE_KEY_TEXT } from '../instance/instance-pin';
 import { SCRIPTED_FINGERPRINT, scriptedInstance } from '../instance/testing';
+import type { ClaimOutcome, ConnectOutcome } from '../instance/instance-port';
 import {
   answer,
   buttonNamed,
@@ -20,7 +25,7 @@ import {
   pressNamed,
   typeName,
 } from '../testing/connect-flow';
-import { mount, settle, typeInto, type Mounted } from '../testing/mount';
+import { mount, settle, submitForm, typeInto, type Mounted } from '../testing/mount';
 import { CONNECT_FLOW_TEXT, readCode } from './ConnectFlow';
 import { InstanceView } from './InstanceView';
 import { OWNER_CLAIM_TEXT } from './OwnerClaim';
@@ -179,6 +184,76 @@ describe('the Connect flow — #2828', () => {
     await pasteCode(LINE);
     await answer('claim');
     expect(document.activeElement?.textContent).toBe(OWNER_CLAIM_TEXT.heading);
+  });
+
+  it('cannot walk away from a claim in flight, and says what to do with the numbers it leaves', async () => {
+    const scripted = scriptedInstance();
+    let finish: (outcome: ClaimOutcome) => void = () => undefined;
+    mounted = await mount(
+      <InstanceView
+        port={{
+          ...scripted.port,
+          claimOwner: () =>
+            new Promise<ClaimOutcome>((resolve) => {
+              finish = resolve;
+            }),
+        }}
+      />,
+    );
+    await settle();
+    await pasteCode(LINE);
+    await answer('claim');
+    await pressNamed(OWNER_CLAIM_TEXT.claim);
+    expect(buttonNamed(CONNECT_FLOW_TEXT.again).disabled).toBe(true);
+    await act(async () => {
+      finish({ kind: 'pending', comparisonCode: '482913', card: CARD });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text()).toContain('482 913');
+    expect(buttonNamed(CONNECT_FLOW_TEXT.again).disabled).toBe(false);
+    await pressNamed(CONNECT_FLOW_TEXT.again);
+    // The claim is pending on the server: the rider is told to press No there.
+    expect(text()).toContain(OWNER_CLAIM_TEXT.mismatch);
+  });
+
+  it('holds Continue and Scan a code while the expert’s Connect is in flight', async () => {
+    const scripted = scriptedInstance();
+    let finish: (outcome: ConnectOutcome) => void = () => undefined;
+    const camera = new CameraController({
+      secureWindow: browserSecureWindow(),
+      port: scriptedCamera().port,
+      schedule: () => () => undefined,
+    });
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true });
+    mounted = await mount(
+      <InstanceView
+        camera={camera}
+        port={{
+          ...scripted.port,
+          connect: () =>
+            new Promise<ConnectOutcome>((resolve) => {
+              finish = resolve;
+            }),
+        }}
+      />,
+    );
+    await settle();
+    await pressNamed(CONNECT_FLOW_TEXT.pasteInstead);
+    const address = fieldLabelled<HTMLInputElement>(CONNECT_FLOW_TEXT.addressLabel);
+    await typeInto(address, ORIGIN);
+    const form = address.closest('form');
+    if (form === null) throw new Error('no expert form');
+    await submitForm(form);
+    expect(buttonNamed(CONNECT_FLOW_TEXT.read).disabled).toBe(true);
+    expect(buttonNamed(CONNECT_FLOW_TEXT.scan).disabled).toBe(true);
+    await act(async () => {
+      finish({ kind: 'refused', text: 'Nothing answered there.' });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(buttonNamed(CONNECT_FLOW_TEXT.read).disabled).toBe(false);
+    expect(buttonNamed(CONNECT_FLOW_TEXT.scan).disabled).toBe(false);
   });
 
   it('takes nothing on focus as the screen first opens', async () => {

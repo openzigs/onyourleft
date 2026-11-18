@@ -278,6 +278,28 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     expect(scripted.held.connected).toBe(true);
   });
 
+  it('draws no refusal from an earlier step under the next scan’s step: Use another code clears it (#2828)', async () => {
+    const refusal = 'This invite was already used.';
+    const scripted = scriptedInstance({ connectAnswer: { kind: 'refused', text: refusal } });
+    const { card } = await cardOf(SERVED_IDENTITY);
+    const { camera, show } = cameraShowing();
+    mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
+    await settle();
+    show(codeWithCard(card, CODE));
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.question));
+    await press(CONNECT_FLOW_TEXT.choices.invite);
+    await press('Connect');
+    expect(text()).toContain(refusal);
+    // A scan types nothing, so only leaving the step can clear what it said.
+    await press(CONNECT_FLOW_TEXT.again);
+    await press(CONNECT_FLOW_TEXT.scan);
+    await until(() => text().includes(CONNECT_FLOW_TEXT.question));
+    await press(CONNECT_FLOW_TEXT.choices.device);
+    expect(text()).toContain(CONNECT_FLOW_TEXT.deviceHeading);
+    expect(text()).not.toContain(refusal);
+  });
+
   it('connects with a scanned invite on that answer and the press, to the address the invite’s card names (#2826, #2828)', async () => {
     const scripted = scriptedInstance();
     const pressed: (readonly [string, string, string | undefined])[] = [];

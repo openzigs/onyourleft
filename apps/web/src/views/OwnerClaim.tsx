@@ -64,12 +64,19 @@ export function comparisonGroups(code: string): readonly [string, string] {
   return [code.slice(0, 3), code.slice(3)];
 }
 
+/** What {@link OwnerClaim} tells the screen around it. */
+export interface ClaimProgress {
+  readonly busy: boolean;
+  readonly pending: boolean;
+}
+
 export function OwnerClaim({
   port,
   line,
   focusHeading,
   onSignedIn,
   onMismatch,
+  onProgress,
 }: {
   readonly port: InstancePort;
   /** The line the rider scanned or pasted, which they said a setup page showed. */
@@ -80,6 +87,11 @@ export function OwnerClaim({
   readonly onSignedIn: (outcome: Extract<ConnectOutcome, { kind: 'connected' }>) => void;
   /** The owner said the numbers differ: the code is spent, and the screen starts again. */
   readonly onMismatch: () => void;
+  /**
+   * Where the claim stands, for a control outside it: a press is in flight, or
+   * the code is spent and its numbers are on the screen waiting for the answer.
+   */
+  readonly onProgress: (progress: ClaimProgress) => void;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
@@ -88,6 +100,10 @@ export function OwnerClaim({
   >(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
+
+  useEffect(() => {
+    onProgress({ busy, pending: pending !== undefined });
+  }, [busy, pending, onProgress]);
 
   // On mount only, as `Button`'s `focusOnMount` (#557): read once, so a
   // later render does not move focus that the rider has moved since.

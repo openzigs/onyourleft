@@ -9,7 +9,7 @@ import { StatusMessage } from '../design/StatusMessage';
 import { cardRefusalText, codeWithCard, readCodeWithCard } from '../instance/instance-pin';
 import type { ConnectOutcome, InstancePort } from '../instance/instance-port';
 import { CardScanner, CONNECT_CHOICE_CLASS } from './CardScanner';
-import { OWNER_CLAIM_TEXT, OwnerClaim } from './OwnerClaim';
+import { type ClaimProgress, OWNER_CLAIM_TEXT, OwnerClaim } from './OwnerClaim';
 
 /**
  * **The Connect screen with no server yet: one scan, then one question** —
@@ -204,6 +204,8 @@ export function ConnectFlow({
   const [address, setAddress] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  /** Where the claim step stands: its own press is in flight, or its numbers are showing. */
+  const [claim, setClaim] = useState<ClaimProgress>({ busy: false, pending: false });
   const [refusal, setRefusal] = useState<
     { readonly at: RefusalAt; readonly text: string } | undefined
   >(undefined);
@@ -219,6 +221,7 @@ export function ConnectFlow({
   function go(next: Step): void {
     setRefusal(undefined);
     setMismatch(false);
+    setClaim({ busy: false, pending: false });
     setMoved(true);
     if (next.kind === 'card' || next.kind === 'invite') setAddress(next.origin);
     setStep(next);
@@ -268,7 +271,16 @@ export function ConnectFlow({
 
   const again = (
     <p>
-      <Button variant="tertiary" disabled={busy} onClick={startAgain}>
+      <Button
+        variant="tertiary"
+        disabled={busy || claim.busy}
+        onClick={() => {
+          const spent = claim.pending;
+          startAgain();
+          // Numbers on the screen mean a claim is waiting on the server's setup page.
+          if (spent) setMismatch(true);
+        }}
+      >
         {CONNECT_FLOW_TEXT.again}
       </Button>
     </p>
@@ -415,6 +427,7 @@ export function ConnectFlow({
             onSignedIn={(outcome) => {
               onConnected(outcome, true);
             }}
+            onProgress={setClaim}
             onMismatch={() => {
               startAgain();
               setMismatch(true);
@@ -440,6 +453,7 @@ export function ConnectFlow({
           <CardScanner
             controller={camera}
             startLabel={CONNECT_FLOW_TEXT.scan}
+            disabled={busy}
             primary={!pasting}
             focusOnMount={moved && !pasting}
             onScanned={(text) => {
@@ -477,7 +491,9 @@ export function ConnectFlow({
               }}
             />
           </p>
-          <Button type="submit">{CONNECT_FLOW_TEXT.read}</Button>
+          <Button type="submit" disabled={busy}>
+            {CONNECT_FLOW_TEXT.read}
+          </Button>
           {refusedAt('paste')}
         </form>
       ) : (
