@@ -675,8 +675,12 @@ describe('review fixes on #2811', () => {
     const w = await world();
     const device = await testDevice();
     const code = await mint(w);
-    await redeem(w, device, code);
-    expect(w.identity.heldRateLimitKeys()).toBeGreaterThan(0);
+    // Straight to the claim, so the only keys held are its own two.
+    await w.identity.ownerClaim.redeem(
+      { publicKey: device.publicKey, claimCode: code },
+      '203.0.113.9',
+    );
+    expect(w.identity.heldRateLimitKeys()).toBe(2);
     w.clock.ms += 2 * MINUTE;
     w.identity.sweepRateLimits();
     expect(w.identity.heldRateLimitKeys()).toBe(0);
@@ -712,6 +716,15 @@ describe('review fixes on #2811', () => {
       signer: signer.signingKey,
     });
     expect(innerOf(answer).status).toBe(200);
+  });
+
+  it('refuses to discard a pending claim after it lapsed', async () => {
+    const w = await world();
+    const device = await testDevice();
+    const code = await mint(w);
+    await redeem(w, device, code);
+    w.clock.ms += 10 * MINUTE + 1000;
+    expect(await w.identity.ownerClaim.discard('admin_loopback')).toBe(false);
   });
 
   it('lets a pending claim lapse with its code: it is neither shown nor confirmable after ten minutes', async () => {
