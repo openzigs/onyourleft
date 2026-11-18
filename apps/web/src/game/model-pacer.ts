@@ -39,7 +39,18 @@
  * the last ask. The director keeps the run of asks with the rider ahead, and
  * an `ease` that answers an ask built after `PACER_AHEAD_FLOOR_S` of it
  * is ridden, and logged, as `hold` (`@onyourleft/domain` §`flooredDirection`,
- * ADR 0078, Proposed).
+ * ADR 0078).
+ *
+ * ## The terrain, with the rider on the wheel (ADR 0082)
+ *
+ * Each ask also keeps where the pacer was on the road (§`ModelPacerFrame`'s
+ * `terrain`, `@onyourleft/domain` §`pacerTerrainAt`). With the rider level or
+ * in the draft, the answer is ridden at `ease` in the last 300 m before a
+ * climb and at `lift` on a descent and for 200 m over a climb's top, whatever
+ * intent the model chose; its plan is kept, and the floor is applied after,
+ * so it wins (§`riddenDirection`). **The log holds the direction ridden**, so
+ * a stored ride replays from the log alone and `MODEL_PACER_CODE_VERSION` is
+ * unchanged; a line that contradicts the intent ridden is not shown.
  */
 
 import {
@@ -48,7 +59,6 @@ import {
   courseClimbing,
   courseHillsAhead,
   distanceOnRoute,
-  flooredDirection,
   gapTrendOf,
   gradeAt,
   heartRateZones,
@@ -58,8 +68,10 @@ import {
   MODEL_PACER_RECENT_LINES,
   MODEL_PACER_SAY_SHOWN_S,
   pacerDecisionRecord,
-  pacerSaysEasing,
+  pacerSayAgainstRidden,
+  pacerTerrainAt,
   powerZones,
+  riddenDirection,
   riderPlaceOf,
   watts,
   zoneOf,
@@ -72,6 +84,8 @@ import {
   type PacerGapReading,
   type PacerHeartRateTrend,
   type PacerPowerTrend,
+  type PacerRuleGround,
+  type PacerTerrain,
   type RouteProfile,
 } from '@onyourleft/domain';
 
@@ -90,6 +104,12 @@ export interface ModelPacerFrame {
     readonly direction: PacerDirection;
     readonly since: number;
   }) => ModelPacerInput;
+  /**
+   * Where the pacer is on the road now, for ADR 0082's rule:
+   * `@onyourleft/domain` §`pacerTerrainAt`, or §`modelPacerTerrain`. Read
+   * only on a frame that asks, beside `input`.
+   */
+  readonly terrain: () => PacerTerrain;
   /** Put `direction` in force from `fromSeconds` ridden: `GameSimulation.directPacer`. */
   readonly direct: (direction: PacerDirection, fromSeconds: number) => void;
 }
@@ -150,6 +170,14 @@ export function modelPacerInput(options: {
     ...(place === undefined ? {} : { riderPlace: place }),
     course: modelPacerCourse(profile, pacerAt),
   };
+}
+
+/** Where the ride's pacer is on `profile`, for ADR 0082's rule: read at the pacer, as the course is. */
+export function modelPacerTerrain(
+  state: Pick<GameState, 'bot'>,
+  profile: RouteProfile,
+): PacerTerrain {
+  return pacerTerrainAt(profile, state.bot?.state.distance ?? 0);
 }
 
 /**
@@ -355,8 +383,8 @@ export class ModelPacer {
   #lastGap: PacerGapReading | undefined;
   /** The seconds ridden of the first ask in this unbroken run of asks with the rider `ahead` (#2777). */
   #aheadSince: number | undefined;
-  /** How long the rider had been ahead when the ask now out was built, for the floor (ADR 0078). */
-  #askedAheadForS: number | undefined;
+  /** What the ask now out was built with, for the terrain rule and the floor (ADR 0082, ADR 0078). */
+  #askedGround: PacerRuleGround | undefined;
 
   constructor(link: ModelPacerLink, onRecord: (record: PacerDecisionRecord) => void) {
     this.#link = link;
@@ -378,7 +406,7 @@ export class ModelPacer {
     if (settled !== undefined && asked !== undefined) {
       this.#settled = undefined;
       this.#asked = undefined;
-      const reply = this.#floored(settled);
+      const reply = this.#ridden(settled);
       const record = pacerDecisionRecord(asked, at, answerOf(reply));
       this.#log.push(record);
       this.#onRecord(record);
@@ -405,7 +433,7 @@ export class ModelPacer {
       this.#log.length < MODEL_PACER_LOG_MOST &&
       (this.#lastAskAt === undefined || at - this.#lastAskAt >= MODEL_PACER_ASK_EVERY_S)
     ) {
-      const input = this.#placed(at, frame.input(this.#inForce));
+      const input = this.#placed(at, frame.input(this.#inForce), frame.terrain());
       this.#ask(at, this.#said.length === 0 ? input : { ...input, recentLines: [...this.#said] });
     }
     if (this.#line !== undefined && at >= this.#line.until) this.#line = undefined;
@@ -428,28 +456,36 @@ export class ModelPacer {
    * asks with the rider ahead kept for the floor. Read off the state the
    * model is shown, so the floor answers what the model saw.
    */
-  #placed(at: number, input: ModelPacerInput): ModelPacerInput {
+  #placed(at: number, input: ModelPacerInput, terrain: PacerTerrain): ModelPacerInput {
     const now: PacerGapReading = { atS: at, riderGapM: input.riderGapM };
     const trend = this.#lastGap === undefined ? undefined : gapTrendOf(this.#lastGap, now);
     this.#lastGap = now;
     if (input.riderPlace === 'ahead') this.#aheadSince ??= at;
     else this.#aheadSince = undefined;
-    this.#askedAheadForS = this.#aheadSince === undefined ? undefined : at - this.#aheadSince;
+    this.#askedGround = {
+      terrain,
+      riderPlace: input.riderPlace,
+      riderInDraft: input.riderInDraft,
+      aheadForS: this.#aheadSince === undefined ? undefined : at - this.#aheadSince,
+    };
     return trend === undefined ? input : { ...input, gapTrend: trend };
   }
 
   /**
-   * The reply as it is ridden: ADR 0078's floor (Proposed), an `ease` ridden
-   * as `hold` once the rider has been ahead for `PACER_AHEAD_FLOOR_S`. The
-   * log records the direction ridden, so the pacer still replays from the
-   * log alone (ADR 0072 D-5.1). A line that says the pacer is easing is not
-   * shown beside a `hold` it does not describe.
+   * The reply as it is ridden (§`riddenDirection`): ADR 0082's terrain rule
+   * with the rider level or in the draft, then ADR 0078's floor, an `ease`
+   * ridden as `hold` once the rider has been ahead for `PACER_AHEAD_FLOOR_S`.
+   * The log records the direction ridden, so the pacer still replays from
+   * the log alone (ADR 0072 D-5.1). A line that contradicts the intent ridden
+   * is not shown beside it (§`pacerSayAgainstRidden`).
    */
-  #floored(reply: PacerReply): PacerReply {
-    if (reply.kind !== 'answer') return reply;
-    const direction = flooredDirection(reply.direction, this.#askedAheadForS);
+  #ridden(reply: PacerReply): PacerReply {
+    const ground = this.#askedGround;
+    if (reply.kind !== 'answer' || ground === undefined) return reply;
+    const direction = riddenDirection(reply.direction, ground);
     if (direction === reply.direction) return reply;
-    return { kind: 'answer', direction, say: pacerSaysEasing(reply.say) ? '' : reply.say };
+    const say = pacerSayAgainstRidden(reply.say, direction.intent) ? '' : reply.say;
+    return { kind: 'answer', direction, say };
   }
 
   #ask(at: number, input: ModelPacerInput): void {

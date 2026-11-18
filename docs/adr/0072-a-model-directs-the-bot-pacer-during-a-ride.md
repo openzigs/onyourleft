@@ -461,3 +461,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   voids. **What does not move**: the envelope (D-2.2), the trainer (D-6), the
   fallback (D-7), the log and `MODEL_PACER_CODE_VERSION` (D-5), the screen (D-4.2) and the gap
   rules, which still come first.
+- **2026-11-18** — **D-2 is superseded in part a second time, by
+  [ADR 0082](0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**, accepted on the
+  owner's *"Yes to pacer rule"* on #2802. With the rider level with the pacer or in its draft, the
+  device rides `ease` in the last 300 m before a climb and `lift` on a descent and for 200 m over a
+  climb's top, whatever intent the model chose; the plan stays the model's. Under `pacer-5` the
+  model held everywhere in those places. ADR 0078's floor is applied after it and wins. **What does
+  not move**: the envelope (D-2.2), the trainer (D-6), the fallback (D-7), and the log and
+  `MODEL_PACER_CODE_VERSION` (D-5): the log records the direction ridden, so a stored ride replays
+  from the log alone.

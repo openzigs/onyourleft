@@ -722,6 +722,19 @@ export type {
   PacerSayProblem,
   RiderPlace,
 } from './pacer/model-pacer';
+
+// ADR 0082: with the rider level or in the draft, the device eases before a
+// climb and lifts on a descent and over the top, under ADR 0078's floor.
+export type { PacerRuleGround, PacerTerrain } from './pacer/terrain-rule';
+export {
+  PACER_BEFORE_CLIMB_M,
+  PACER_OVER_THE_TOP_M,
+  PACER_TERRAINS,
+  pacerSayAgainstRidden,
+  pacerTerrainApplies,
+  pacerTerrainAt,
+  riddenDirection,
+} from './pacer/terrain-rule';
 export {
   CLIMBER_CLIMB_GRADE_PERCENT,
   CLIMBER_DESCENT_GRADE_PERCENT,

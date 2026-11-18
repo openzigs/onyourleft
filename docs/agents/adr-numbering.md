@@ -12,6 +12,13 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0082 is [ADR 0082](../adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**,
+  taken by [#2794](https://github.com/openzigs/onyourleft/issues/2794) on 2026-11-18 for the AI
+  pacer pacing the terrain with the rider on its wheel, **Accepted** on the owner's *"Yes to pacer
+  rule"* on #2802. It supersedes in part ADR 0072 D-2, beside ADR 0078; both gained one dated
+  `## Amendments` entry pointing to it. It skipped 0079 and 0080, claimed by #2779's epic (ADR 0080
+  in #2795), and 0081, claimed by #2790. **The next free number is 0083.** A reviewer who remembers
+  this file offering 0079 is reading the old file.
   ⚠️ **0078 is [ADR 0078](../adr/0078-a-floor-under-the-ai-pacers-intent.md)**, taken by
   [#2777](https://github.com/openzigs/onyourleft/issues/2777) on 2026-11-17 for a floor under the
   AI pacer's intent, **Proposed** for the owner's answer. It supersedes in part ADR 0072 D-2 and
