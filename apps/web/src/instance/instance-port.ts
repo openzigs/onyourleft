@@ -47,9 +47,11 @@
 import {
   checkDisplayName,
   NO_KEY_TRUST,
+  ownerClaimComparisonCode,
   parseInstanceCard,
   STATEMENT_TRUST_CAP_SECONDS,
   statementId,
+  toHex,
   type HpkePrimitives,
   type SealedInstanceKey,
   type Sha256,
@@ -213,6 +215,26 @@ export type CardOutcome =
     }
   | { readonly kind: 'refused'; readonly text: string };
 
+/**
+ * What became of a claim code the owner scanned or pasted (#2823, ADR 0080
+ * D-3, D-5): the instance holds the claim as pending, and the six digits to
+ * compare with its setup page — or why not, in one sentence that never
+ * names the code.
+ */
+export type ClaimOutcome =
+  | {
+      readonly kind: 'pending';
+      /**
+       * The six digits, derived on THIS device from the code and its own key
+       * (`@onyourleft/domain` §`ownerClaimComparisonCode`), never taken from
+       * an answer: the edge cannot write them.
+       */
+      readonly comparisonCode: string;
+      /** The card the claim was checked against, which signing in afterwards uses again. */
+      readonly card: string;
+    }
+  | { readonly kind: 'refused'; readonly text: string };
+
 /** A link code for another device, with THIS device's card beside it (#773, D-6 source 2). */
 export type LinkCodeOutcome =
   | {
@@ -283,6 +305,20 @@ export interface InstancePort {
    * against the instance's keys BEFORE anything is sent, and pinned.
    */
   link(offer: string): Promise<ConnectOutcome>;
+  /**
+   * Claim the instance's owner with `line`, the card and the claim code its
+   * setup page shows as one QR (#2823, ADR 0080 D-3): the card is checked
+   * against the instance's keys BEFORE anything is sent, then the code goes
+   * sealed to the key it vouches for, on `POST /v1/auth/owner-claim`, signed
+   * by this device's key. Nothing is kept: the claim waits on the server.
+   */
+  claimOwner(line: string): Promise<ClaimOutcome>;
+  /**
+   * Sign in once the owner has said Yes on the setup page (#2823, D-5):
+   * {@link connect} to the card's own address with the card, where a
+   * registration the instance refuses means the claim is not confirmed yet.
+   */
+  signInAsOwner(card: string): Promise<ConnectOutcome>;
   /** What this device makes of the instance's keys, judged against its pin (#1190). */
   keys(): Promise<KeysOutcome>;
   /** Offer a card on a device already signed in: pinned if it had none, else asked to confirm. */
@@ -408,6 +444,29 @@ export const CONNECT_REFUSAL_TEXT = {
     'That card has a different key from the one this device already has for this instance. ' +
     'Nothing was sent. If its operator told you the key changed, give the new card on the ' +
     'Instance screen and confirm it there.',
+} as const;
+
+/**
+ * What the owner is told when a claim did not go through (#2823, ADR 0080
+ * D-3): one plain sentence each, and never the code — the instance's own
+ * refusal is one answer whatever the reason, so the app's is one too.
+ * ⚠️ Draft wording for the owner to approve.
+ */
+export const CLAIM_REFUSAL_TEXT = {
+  'not-a-claim':
+    'That is not a claim code, so scan the code on your server’s setup page or paste the whole line under it.',
+  'card-only':
+    'That is your server’s card without a claim code, so press Show the claim code on its setup page and scan that.',
+  refused:
+    'Your server did not take that claim code, so show a new one on its setup page and scan it again.',
+  rate_limited:
+    'Your server has had too many claims in the last minute, so wait a minute and try again.',
+  'no-answer':
+    'Your server did not answer, so nothing was claimed: check that it is running and try again.',
+  'not-confirmed':
+    'Your server has not confirmed the claim yet, so press Yes on its setup page and then sign in again. If that page no longer shows the claim, show a new claim code there and scan it.',
+  'this-device':
+    'This device could not prepare its key, so nothing was sent and your claim code is still good: try again.',
 } as const;
 
 /** What the link-code screen says when no code can be shown. Draft wording (#880). */
@@ -1198,6 +1257,84 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
   const held = (): HeldInstanceSession | undefined =>
     heldInstanceSession(storage, dependencies.send);
 
+  /**
+   * Sign in to `address`, with `card` checked first when there is one
+   * ({@link InstancePort.connect}); `afterClaim` says the owner has just
+   * claimed the instance from this screen (#2823).
+   */
+  async function connectTo(
+    address: string,
+    displayName: string,
+    card: string | undefined,
+    afterClaim: boolean,
+  ): Promise<ConnectOutcome> {
+    const decision = instanceAddress(address);
+    if (decision.kind === 'refused') {
+      return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
+    }
+    const cardText = card?.trim() ?? '';
+    if (cardText !== '') {
+      const parsed = parseInstanceCard(cardText, decision.origin);
+      if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
+    }
+    const typedName = displayName.trim();
+    let name: string | undefined;
+    if (typedName !== '') {
+      const checked = checkDisplayName(typedName);
+      if (!checked.ok) return { kind: 'refused', text: CONNECT_REFUSAL_TEXT['bad-name'] };
+      name = checked.name;
+    }
+    // What a `sealed_required` refusal means here (#1192): a copy of the app
+    // that may not seal (D-11), or no card, or keys that would not seal.
+    let sealedRequired = sealedBuildOffered(dependencies.loadedFrom)
+      ? CONNECT_REFUSAL_TEXT.sealed_required
+      : WEB_BUILD_TEXT;
+    try {
+      const http = instanceHttp(decision.origin, dependencies.send);
+      // The card is checked BEFORE anything else is sent: a mismatch sends
+      // nothing more and keeps nothing (D-6).
+      let pin: SignInDependencies['pin'];
+      let sealed: InstanceTransport | undefined;
+      if (cardText !== '') {
+        const checked = await checkCard(cardText, decision.origin, servedKeysAt(http), crypto);
+        if (checked.kind === 'refused') return checked;
+        pin = { fingerprint: checked.fingerprint, keyTrust: checked.keyTrust };
+        if (checked.instanceKey === undefined) {
+          sealedRequired = checked.sealingText ?? sealedRequired;
+        } else if (sealedBuildOffered(dependencies.loadedFrom)) {
+          sealed = sealedFor(decision.origin, checked.instanceKey);
+        }
+      }
+      const signedIn = await signInToInstance(
+        {
+          ...signIn(decision.origin, http),
+          ...(pin === undefined ? {} : { pin }),
+          ...(sealed === undefined ? {} : { sealed }),
+        },
+        name === undefined ? {} : { displayName: name },
+      );
+      storage.setItem(
+        INSTANCE_SESSION_STORAGE_KEY,
+        JSON.stringify({ origin: decision.origin, token: signedIn.sessionToken }),
+      );
+      return {
+        kind: 'connected',
+        ...(signedIn.recoveryCodes === undefined ? {} : { recoveryCodes: signedIn.recoveryCodes }),
+      };
+    } catch (error) {
+      // #2823: after a claim, a registration the instance refuses is a claim
+      // the owner has not said Yes to yet (ADR 0080 D-3, D-5).
+      if (
+        afterClaim &&
+        error instanceof InstanceSignInError &&
+        error.code === 'registration_closed'
+      ) {
+        return { kind: 'refused', text: CLAIM_REFUSAL_TEXT['not-confirmed'] };
+      }
+      return { kind: 'refused', text: refusalFor(error, sealedRequired) };
+    }
+  }
+
   return {
     current: async () => {
       const connection = held();
@@ -1259,66 +1396,7 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       }
     },
 
-    connect: async (address, displayName, card) => {
-      const decision = instanceAddress(address);
-      if (decision.kind === 'refused') {
-        return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
-      }
-      const cardText = card?.trim() ?? '';
-      if (cardText !== '') {
-        const parsed = parseInstanceCard(cardText, decision.origin);
-        if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
-      }
-      const typedName = displayName.trim();
-      let name: string | undefined;
-      if (typedName !== '') {
-        const checked = checkDisplayName(typedName);
-        if (!checked.ok) return { kind: 'refused', text: CONNECT_REFUSAL_TEXT['bad-name'] };
-        name = checked.name;
-      }
-      // What a `sealed_required` refusal means here (#1192): a copy of the app
-      // that may not seal (D-11), or no card, or keys that would not seal.
-      let sealedRequired = sealedBuildOffered(dependencies.loadedFrom)
-        ? CONNECT_REFUSAL_TEXT.sealed_required
-        : WEB_BUILD_TEXT;
-      try {
-        const http = instanceHttp(decision.origin, dependencies.send);
-        // The card is checked BEFORE anything else is sent: a mismatch sends
-        // nothing more and keeps nothing (D-6).
-        let pin: SignInDependencies['pin'];
-        let sealed: InstanceTransport | undefined;
-        if (cardText !== '') {
-          const checked = await checkCard(cardText, decision.origin, servedKeysAt(http), crypto);
-          if (checked.kind === 'refused') return checked;
-          pin = { fingerprint: checked.fingerprint, keyTrust: checked.keyTrust };
-          if (checked.instanceKey === undefined) {
-            sealedRequired = checked.sealingText ?? sealedRequired;
-          } else if (sealedBuildOffered(dependencies.loadedFrom)) {
-            sealed = sealedFor(decision.origin, checked.instanceKey);
-          }
-        }
-        const signedIn = await signInToInstance(
-          {
-            ...signIn(decision.origin, http),
-            ...(pin === undefined ? {} : { pin }),
-            ...(sealed === undefined ? {} : { sealed }),
-          },
-          name === undefined ? {} : { displayName: name },
-        );
-        storage.setItem(
-          INSTANCE_SESSION_STORAGE_KEY,
-          JSON.stringify({ origin: decision.origin, token: signedIn.sessionToken }),
-        );
-        return {
-          kind: 'connected',
-          ...(signedIn.recoveryCodes === undefined
-            ? {}
-            : { recoveryCodes: signedIn.recoveryCodes }),
-        };
-      } catch (error) {
-        return { kind: 'refused', text: refusalFor(error, sealedRequired) };
-      }
-    },
+    connect: (address, displayName, card) => connectTo(address, displayName, card, false),
 
     link: async (offer) => {
       const read = readCodeWithCard(offer);
@@ -1359,6 +1437,85 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       } catch (error) {
         return { kind: 'refused', text: refusalFor(error) };
       }
+    },
+
+    claimOwner: async (line) => {
+      // A claim QR is `codeWithCard(card, claimCode)`, the same line as a link
+      // or an invite (#2783): the bytes cannot say which, so the owner's box
+      // does, and the instance's answer is what makes it a claim.
+      const read = readCodeWithCard(line);
+      if (read === undefined) {
+        const parsed = parseInstanceCard(line.trim());
+        return {
+          kind: 'refused',
+          text: CLAIM_REFUSAL_TEXT[parsed.ok ? 'card-only' : 'not-a-claim'],
+        };
+      }
+      const parsed = parseInstanceCard(read.card);
+      if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
+      const decision = instanceAddress(parsed.card.origin);
+      if (decision.kind === 'refused') {
+        return { kind: 'refused', text: ADDRESS_REFUSAL_TEXT[decision.why] };
+      }
+      if (decision.origin !== parsed.card.origin) {
+        return { kind: 'refused', text: CLAIM_REFUSAL_TEXT['not-a-claim'] };
+      }
+      // The route is sealed-only (ADR 0080 D-3): a copy of the app that may not seal sends nothing.
+      if (!sealedBuildOffered(dependencies.loadedFrom)) {
+        return { kind: 'refused', text: WEB_BUILD_TEXT };
+      }
+      try {
+        const http = instanceHttp(decision.origin, dependencies.send);
+        // The card first (D-3): a card the served keys do not verify under sends nothing more.
+        const checked = await checkCard(read.card, decision.origin, servedKeysAt(http), crypto);
+        if (checked.kind === 'refused') return checked;
+        if (checked.instanceKey === undefined) {
+          return { kind: 'refused', text: checked.sealingText ?? INSTANCE_KEY_TEXT.unreachable };
+        }
+        // The key that signs the sealed request is the key the body names, and
+        // the one the claim makes the owner's: the local athlete's (#772).
+        let publicKey: string;
+        try {
+          await dependencies.ensureLocalAthlete();
+          publicKey = toHex((await dependencies.signingKey()).publicKey);
+        } catch {
+          // A fault on this device, before anything was sent: the code is not spent.
+          return { kind: 'refused', text: CLAIM_REFUSAL_TEXT['this-device'] };
+        }
+        const answer = await sealedFor(decision.origin, checked.instanceKey).post(
+          '/v1/auth/owner-claim',
+          { publicKey, claimCode: read.code },
+        );
+        if (
+          answer.status === 200 &&
+          (answer.body as { claim?: unknown } | null)?.claim === 'pending'
+        ) {
+          return {
+            kind: 'pending',
+            comparisonCode: await ownerClaimComparisonCode(crypto.sha256, read.code, publicKey),
+            card: read.card,
+          };
+        }
+        const code = (answer.body as { error?: { code?: unknown } } | null)?.error?.code;
+        return {
+          kind: 'refused',
+          text: CLAIM_REFUSAL_TEXT[code === 'rate_limited' ? 'rate_limited' : 'refused'],
+        };
+      } catch (error) {
+        return {
+          kind: 'refused',
+          text:
+            error instanceof InstanceUnreachableError
+              ? CLAIM_REFUSAL_TEXT['no-answer']
+              : CLAIM_REFUSAL_TEXT.refused,
+        };
+      }
+    },
+
+    signInAsOwner: async (card) => {
+      const parsed = parseInstanceCard(card);
+      if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
+      return connectTo(parsed.card.origin, '', card, true);
     },
 
     keys: async () => {

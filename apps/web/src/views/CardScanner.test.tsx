@@ -46,6 +46,7 @@ import { LOADED_LOCALLY, scriptedInstance } from '../instance/testing';
 import { mount, settle, typeIntoTextArea, type Mounted } from '../testing/mount';
 import { CARD_SCAN_TEXT, CardScanner } from './CardScanner';
 import { InstanceKeys } from './InstanceKeys';
+import { OWNER_CLAIM_TEXT } from './OwnerClaim';
 import { CONNECT_SCANNED_TEXT, InstanceView, LINK_FIELD_LABEL } from './InstanceView';
 
 let mounted: Mounted | undefined;
@@ -206,6 +207,7 @@ async function until(done: () => boolean): Promise<void> {
   }
 }
 
+/** In page order; on the Connect screen the owner's claim box comes first (#2823). */
 function boxes(): HTMLTextAreaElement[] {
   return [...(mounted?.container.querySelectorAll('textarea') ?? [])];
 }
@@ -262,14 +264,36 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     show(`  ${codeWithCard(card, CODE.toUpperCase())}\n`);
     await press(CARD_SCAN_TEXT.start);
     await until(() => text().includes(CONNECT_SCANNED_TEXT.line));
-    const [cardBox, lineBox] = boxes();
+    const [claimBox, cardBox, lineBox] = boxes();
     expect(lineBox?.value).toBe(codeWithCard(card, CODE));
     expect(cardBox?.value).toBe('');
+    // #2823: the same line is what the owner's setup page shows as a claim, so
+    // it is in the claim box too, and the press says which it is.
+    expect(claimBox?.value).toBe(codeWithCard(card, CODE));
     // Nothing was sent by the scan: the form's own sentence is kept.
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
     await press('Add this device');
     expect(scripted.calls).toContain(`link ${codeWithCard(card, CODE)}`);
     expect(scripted.held.connected).toBe(true);
+  });
+
+  it('fills only the claim box from the claim form’s own scanner, and claims on the press (#2823)', async () => {
+    const scripted = scriptedInstance();
+    const { card } = await cardOf(SERVED_IDENTITY);
+    const { camera, show } = cameraShowing();
+    mounted = await mount(<InstanceView port={scripted.port} camera={agreed(camera)} />);
+    await settle();
+    show(`  ${codeWithCard(card, CODE)}\n`);
+    await press(OWNER_CLAIM_TEXT.scan);
+    await until(() => boxes()[0]?.value !== '');
+    const [claimBox, cardBox, lineBox] = boxes();
+    expect(claimBox?.value).toBe(codeWithCard(card, CODE));
+    expect(cardBox?.value).toBe('');
+    expect(lineBox?.value).toBe('');
+    expect(camera.liveStreams()).toBe(0);
+    expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
+    await press(OWNER_CLAIM_TEXT.claim);
+    expect(scripted.calls).toContain(`claimOwner ${codeWithCard(card, CODE)}`);
   });
 
   it('puts a scanned card alone in the card box on the Connect form, and sends nothing', async () => {
@@ -281,9 +305,10 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     show(card);
     await press(CARD_SCAN_TEXT.start);
     await until(() => text().includes(CONNECT_SCANNED_TEXT.card));
-    const [cardBox, lineBox] = boxes();
+    const [claimBox, cardBox, lineBox] = boxes();
     expect(cardBox?.value).toBe(card);
     expect(lineBox?.value).toBe('');
+    expect(claimBox?.value).toBe('');
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
     // A rider's own edit takes the sentence away: it described the scan.
     await typeIntoTextArea(cardBox!, `${card} `);
@@ -314,7 +339,7 @@ describe('a scanned card pins exactly as a pasted one (#2785, D-6)', () => {
     await settle();
     show('https://example.org/wifi');
     await press(CARD_SCAN_TEXT.start);
-    await until(() => boxes()[0]?.value === 'https://example.org/wifi');
+    await until(() => boxes()[1]?.value === 'https://example.org/wifi');
     await settle();
     expect(text()).not.toContain(CONNECT_SCANNED_TEXT.card);
     expect(scripted.calls.filter((call) => !call.startsWith('current'))).toEqual([]);
@@ -631,6 +656,8 @@ describe('when the camera cannot scan, the paste box is what is left (#2785)', (
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
     expect(() => button(CARD_SCAN_TEXT.start)).toThrow();
-    expect(boxes().length).toBe(2);
+    expect(() => button(OWNER_CLAIM_TEXT.scan)).toThrow();
+    // The card, the other device's line and the owner's claim (#2823): each pasted.
+    expect(boxes().length).toBe(3);
   });
 });
