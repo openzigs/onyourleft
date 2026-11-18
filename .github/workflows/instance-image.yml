@@ -313,16 +313,17 @@ jobs:
       - name: A deploy that never becomes ready is rolled back to the published digest
         working-directory: ${{ env.BUNDLE }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           printf 'FROM %s\nCMD ["node", "-e", "setInterval(() => {}, 1 << 30)"]\n' "${REFERENCE}" |
             docker build --quiet --tag onyourleft-instance:never-ready - > /dev/null
-          OYL_DEPLOY_READY_SECONDS=30 bash deploy.sh --image onyourleft-instance:never-ready
-          status=$?
+          # `|| status=$?`: the step's shell is `bash -e`, so a bare call that
+          # exits 1 -- the outcome wanted here -- would end the step on it.
+          status=0
+          OYL_DEPLOY_READY_SECONDS=30 bash deploy.sh --image onyourleft-instance:never-ready || status=$?
           if [ "${status}" -ne 1 ]; then
             echo "::error::deploy.sh exited ${status} on an image that never became ready; it must exit 1."
             exit 1
           fi
-          set -e
           expected="$(docker image inspect --format '{{.Id}}' "${REFERENCE}")"
           actual="$(docker inspect --format '{{.Image}}' "$(docker compose ps -q instance)")"
           [ "${actual}" = "${expected}" ] || {
