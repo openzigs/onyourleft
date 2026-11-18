@@ -361,6 +361,23 @@ export function InstanceView({
             {ERASE_ACCOUNT_TEXT.erased}
           </StatusMessage>
         ) : null}
+        {/* Owner ruling of 2026-11-18 (#2823): a new owner finds the claim at the
+            top, above what the instance receives and the Connect button. */}
+        <OwnerClaim
+          port={port}
+          camera={camera}
+          line={claimLine}
+          onLineChange={(text) => {
+            setClaimLine(text);
+            setScanned(undefined);
+          }}
+          onSignedIn={(outcome) => {
+            setClaimLine('');
+            setClaimed(true);
+            setRecoveryCodes(outcome.recoveryCodes);
+            void read();
+          }}
+        />
         <form
           className="oyl-trainer__form"
           // #2785: two forms on one screen are two form landmarks, so each is
@@ -493,21 +510,6 @@ export function InstanceView({
             {refusal}
           </StatusMessage>
         )}
-        <OwnerClaim
-          port={port}
-          camera={camera}
-          line={claimLine}
-          onLineChange={(text) => {
-            setClaimLine(text);
-            setScanned(undefined);
-          }}
-          onSignedIn={(outcome) => {
-            setClaimLine('');
-            setClaimed(true);
-            setRecoveryCodes(outcome.recoveryCodes);
-            void read();
-          }}
-        />
         {/* #1195: with no instance on this device the panel draws nothing at
             all; it is here so that only its own availability decides. */}
         {sync === undefined ? null : <SyncPanel port={sync} />}
