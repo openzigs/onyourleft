@@ -1321,10 +1321,12 @@ export interface OwnerClaimRedemption {
 
 /**
  * The first-run setup wizard's steps, in order (#2784, ADR 0080 D-7; migration
- * 0048's CHECK, which 0049 widened for `ai`, #2792).
+ * 0048's CHECK, which 0049 widened for `ai`, #2792, and 0050 for `tailnet`,
+ * #2817).
  */
 export const SETUP_STEPS = [
   'claim',
+  'tailnet',
   'passkey',
   'secrets',
   'backups',

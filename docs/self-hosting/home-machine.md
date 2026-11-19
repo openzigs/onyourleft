@@ -347,26 +347,35 @@ were.
    it* on the page. The tablet shows six digits; if the page shows the same six, press *Yes*. The page
    says your tablet now owns the server. A code lasts ten minutes: if the page says *That code ran
    out*, press *Show the claim code* again and scan the new one.
-2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
+2. **Tailnet**: how riders reach the server
+   ([#2817](https://github.com/openzigs/onyourleft/issues/2817)). The page shows the address the
+   running server read back from its card, and says whether it is a Tailscale address, as step 3a
+   needs. It repeats how each rider joins (invited into your tailnet or shared the machine, each on
+   their own Tailscale account, never yours) and the access rule from step 3a.2, to copy. It changes
+   nothing itself: the address is `OYL_INSTANCE_ORIGIN` in `.env`. Before it says how to change that,
+   it says what a change costs: **every device scans the new card, and every passkey made for the old
+   address stops working**. After a change and `bash deploy.sh`, press *Check now* to see the address
+   the server came back with. With a Cloudflare tunnel (3b) the page says there is nothing to set up.
+3. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
-3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
+4. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
    beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
    once you have added a passkey there.
-4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
+5. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
    long ago the last backup ran, and whether the snapshot reached **both** folders: the one on this
    computer and the copy kept elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and
    `OYL_OFFBOX_DIR` lines in `.env` (step 4): to change one, edit that line and deploy again. ⚠️ On
    Windows the copy kept elsewhere cannot be on a USB stick ([Backups](#backups)).
-5. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
+6. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
    new*, then *Save and go to the next step*. You can change it later with
    `docker compose exec instance node src/operator/cli.ts registration set <mode>`.
-6. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
+7. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
    has not signed in yet, connect to the instance from the app on the tablet first.
-7. **AI write-ups**: optional. If Ollama is running on this computer, the page lists the models it
+8. **AI write-ups**: optional. If Ollama is running on this computer, the page lists the models it
    has, says how well each fits your graphics card, and can download one whose name you type. Press
    *Use …* beside a model to have ride write-ups made on it. If the page says Ollama was not found,
    press *Next step*: everything else works without it.
-8. **Finish.** The page lists where the server stands, and the setup page closes for good.
+9. **Finish.** The page lists where the server stands, and the setup page closes for good.
 
 Until the tablet has claimed the instance, nobody can make an account on it. **The expert path**
 still works: with `OYL_INSTANCE_OWNER_KEY` set in `.env` the setup page never opens, and the

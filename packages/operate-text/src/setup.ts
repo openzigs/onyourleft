@@ -23,11 +23,20 @@ import { bytesText, durationText } from './words';
 
 /** The wizard's steps, in order: `apps/instance`'s `SETUP_STEPS`, which its tests hold this to. */
 export type OperateSetupStep =
-  'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'ai' | 'finish';
+  | 'claim'
+  | 'tailnet'
+  | 'passkey'
+  | 'secrets'
+  | 'backups'
+  | 'registration'
+  | 'invite'
+  | 'ai'
+  | 'finish';
 
 /** Each step's name, as its page's heading. */
 export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
   claim: 'Claim it with your tablet',
+  tailnet: 'How riders reach it',
   passkey: 'A passkey for the admin pages',
   secrets: 'The emergency kit',
   backups: 'Backups',
@@ -40,6 +49,7 @@ export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
 /** Each step's short name, in the progress bar across the top of every step's page. */
 export const SETUP_STEP_SHORT_NAMES: Readonly<Record<OperateSetupStep, string>> = {
   claim: 'Claim',
+  tailnet: 'Tailnet',
   passkey: 'Passkey',
   secrets: 'Emergency kit',
   backups: 'Backups',
@@ -167,6 +177,82 @@ export const CLAIM_NOT_CONFIRMED_TEXT =
 export const CLAIM_EXPIRED_TEXT = 'That code ran out. Show a new one.';
 export const CLAIM_NO_CARD_TEXT =
   'The instance’s own keys could not be read, so there is no card to claim it with. The instance makes them when it starts with its secret key: restart it, then come back.';
+
+// --- the tailnet (#2817, ADR 0079 D-2, D-3, D-8)
+
+/** Which way in this server's settings name (`OYL_INSTANCE_REMOTE_PATH`), or `null` for none. */
+export type OperateRemotePath = 'tailnet' | 'funnel' | 'cloudflare';
+
+/** What the tailnet step says first, on the tailnet path and on Funnel's. */
+export const TAILNET_STEP_LEAD =
+  'Riders reach this server over your Tailscale network, called your tailnet. Only devices you let on to it can reach the server; nothing else on the internet can.';
+/** Before the address the running server read back, which the page draws after it. */
+export const TAILNET_ADDRESS_LEAD = 'This server is running with this address:';
+/** The address is a Tailscale name, as the tailnet path needs. */
+export const TAILNET_ADDRESS_OK_TEXT =
+  'That is a Tailscale address, so a device on your tailnet can reach it.';
+/** The tailnet path is chosen, but the address is not a Tailscale name: no device will reach it. */
+export const TAILNET_ADDRESS_WRONG_TEXT =
+  'That is not a Tailscale address, but this server is set up to be reached over your tailnet, so no tablet or phone will reach it. Set the address to this machine’s Tailscale name, as the steps below say.';
+/** Funnel is on: what that changes (ADR 0079 D-3). */
+export const TAILNET_FUNNEL_TEXT =
+  'Funnel is on, so this address is on the public internet too: anybody can reach it, and the admin pages are not served there. Riders do not need the Tailscale app.';
+/** The server is set up for a Cloudflare tunnel: nothing for this step to do. */
+export const TAILNET_CLOUDFLARE_TEXT =
+  'This server is reached through a Cloudflare tunnel on your own domain, not a tailnet, so there is nothing to set up here. Press Next step.';
+/** The settings name no way in for other devices. */
+export const TAILNET_NO_PATH_TEXT =
+  'This server’s settings do not say how other devices reach it, so this step cannot check your tailnet. The guide’s step 3 says how to choose; you can carry on and come back.';
+/** No card can be drawn (no keys opened): no device can be pointed at the address yet. */
+export const TAILNET_NO_CARD_TEXT =
+  'The server’s keys could not be read, so it cannot draw a card for this address and no device can be pointed at it yet. The server makes its keys when it starts with its secret key: restart it, then press Check now.';
+
+/** How riders join the tailnet (ADR 0079 D-2): never as the owner. */
+export const TAILNET_RIDERS_HEADING = 'How each rider joins';
+export const TAILNET_RIDERS_TEXT: readonly string[] = [
+  'Invite each rider into your tailnet from the Tailscale admin console (Users, then Invite users), or share this machine with them (Machines, then this machine, then Share).',
+  'Each rider installs the Tailscale app on their tablet or phone and signs in with their own Tailscale account.',
+];
+/** The one rule a rider must never break. */
+export const TAILNET_NEVER_YOURS_TEXT =
+  'Never sign a rider’s device in to your own Tailscale account: that gives it your identity across your whole tailnet, past the access rule below.';
+
+/** Before the access rule, which the page draws after it in a block to copy. */
+export const TAILNET_ACL_LEAD =
+  'The access rule lets your own devices reach everything, and every other rider’s device reach this server’s port and nothing else. Paste it in the Tailscale admin console, under Access controls, if you have not already:';
+
+/**
+ * The tailnet access rule (ADR 0079 D-2), as `docs/self-hosting/home-machine.md`
+ * step 3a.2 gives it: the owner reaches everything, every other member's or
+ * shared device only `tcp:443` on the instance's tag.
+ */
+export const TAILNET_ACL = `{
+  "tagOwners": { "tag:onyourleft": ["autogroup:owner"] },
+  "grants": [
+    { "src": ["autogroup:owner"], "dst": ["*"], "ip": ["*"] },
+    {
+      "src": ["autogroup:member", "autogroup:shared"],
+      "dst": ["tag:onyourleft"],
+      "ip": ["tcp:443"]
+    }
+  ]
+}`;
+
+/** The heading over changing the address. */
+export const TAILNET_CHANGE_HEADING = 'Changing this server’s address';
+/**
+ * Said BEFORE anything about how to change an address that is already set
+ * (ADR 0079 D-8, ADR 0069 D-1): what every device and every passkey loses.
+ */
+export const TAILNET_CHANGE_WARNING =
+  'Before you change it: every device that uses this server, your tablet too, must scan the server’s new card afterwards, and every passkey made for the old address stops working until you make one for the new address.';
+/** How to change it, for whoever wants the setting's name and the command. */
+export const TAILNET_CHANGE_EXPERT_LINES: readonly string[] = [
+  'Set OYL_INSTANCE_ORIGIN in .env to https:// and this machine’s Tailscale name, for example https://onyourleft.your-tailnet.ts.net with your own tailnet’s name.',
+  'Keep COMPOSE_PROFILES=tailscale and OYL_INSTANCE_REMOTE_PATH=tailnet (or funnel) and OYL_INSTANCE_CLIENT_ADDRESS_HEADER=x-forwarded-for.',
+  'Run bash deploy.sh beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
+  'Then press Check now on this page: it shows the address the running server read back.',
+];
 
 // --- passkey (ADR 0080 D-7, Q-6)
 

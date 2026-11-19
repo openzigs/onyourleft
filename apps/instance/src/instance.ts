@@ -1085,6 +1085,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         now,
         port: loopbackPort,
         origin: server.origin,
+        remotePath: options.config.remotePath,
         name: options.config.name,
         ownerKeyFromEnvironment: false,
         ownerClaim: identity.ownerClaim,

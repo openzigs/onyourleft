@@ -28,6 +28,7 @@ import {
 import { sha256Hex } from '../auth/crypto.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from '../auth/identity-testing.ts';
 import type { Caller } from '../auth/identity.ts';
+import type { RemotePath } from '../config.ts';
 import type { Resolver } from '../history/address.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { freeLoopbackPort, testConfig } from '../instance-testing.ts';
@@ -40,7 +41,7 @@ import { registrationFixture } from '../store/testing/index.ts';
 import type { SecretFromFile } from './secrets.ts';
 import { SETUP_CODE_FILE } from './setup-code.ts';
 import { SETUP_ROUTES } from './setup-routes.ts';
-import { SETUP_COOKIE } from './setup.ts';
+import { cardOrigin, isTailscaleName, SETUP_COOKIE } from './setup.ts';
 
 let running: StartedInstance | undefined;
 let directory: string | undefined;
@@ -78,10 +79,19 @@ interface World {
    */
   readonly ollama: readonly string[];
   readonly resolve: Resolver | undefined;
+  /** `OYL_INSTANCE_ORIGIN`, moved by a test that changes the address (#2817). */
+  origin: string;
+  /** `OYL_INSTANCE_REMOTE_PATH` (#2817): none unless a test names one. */
+  remotePath: RemotePath | null;
 }
 
 async function world(
-  options: { readonly ollama?: readonly string[]; readonly resolve?: Resolver } = {},
+  options: {
+    readonly ollama?: readonly string[];
+    readonly resolve?: Resolver;
+    readonly origin?: string;
+    readonly remotePath?: RemotePath;
+  } = {},
 ): Promise<World> {
   directory = await mkdtemp(join(tmpdir(), 'oyl-setup-'));
   const path = join(directory, 'instance.sqlite');
@@ -98,6 +108,8 @@ async function world(
     clock: undefined,
     ollama: options.ollama ?? [],
     resolve: options.resolve,
+    origin: options.origin ?? TEST_ORIGIN,
+    remotePath: options.remotePath ?? null,
   };
   made.instance = await start(made);
   return made;
@@ -106,12 +118,17 @@ async function world(
 /** Start (or start again) the instance on the world's file, as `serve.ts` does on a fresh install. */
 async function start(
   at: World,
-  options: { readonly ownerKey?: string; readonly adminPages?: boolean } = {},
+  options: {
+    readonly ownerKey?: string;
+    readonly adminPages?: boolean;
+    /** Start with no `OYL_INSTANCE_SECRET_KEY`, so no keys are opened (#2817). */
+    readonly noSecret?: boolean;
+  } = {},
 ): Promise<StartedInstance> {
   const read = readServerConfig(
     {
       database: at.path,
-      origin: TEST_ORIGIN,
+      origin: at.origin,
       roomWorkers: '1',
       adminPages: options.adminPages === true ? 'on' : 'off',
       adminLoopbackPort: String(at.port),
@@ -124,11 +141,12 @@ async function start(
       // `.env`'s mode on a fresh install, which a mode set in the wizard wins over.
       registration: 'approval',
       moderators: options.ownerKey === undefined ? {} : { owner: options.ownerKey },
+      remotePath: at.remotePath,
     }),
     server: {
       ...read.config,
       blobsPath: join(at.path, '..', 'blobs'),
-      secretKey: new Uint8Array(32).fill(9),
+      ...(options.noSecret === true ? {} : { secretKey: new Uint8Array(32).fill(9) }),
     },
     version: '9.8.7',
     notices: 'notices',
@@ -276,7 +294,7 @@ async function expectAllNotFound(port: number): Promise<void> {
 
 /** The tablet: pins nothing here, but redeems the claim on the REAL sealed route. */
 async function tabletRedeems(at: World, device: TestDevice, claimCode: string) {
-  return sealedAt(at.instance.url, TEST_ORIGIN, {
+  return sealedAt(at.instance.url, at.origin, {
     method: 'POST',
     path: '/v1/auth/owner-claim',
     body: { publicKey: device.publicKey, claimCode },
@@ -374,7 +392,7 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     const pending = await browser.get('/setup/claim');
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     expect((await browser.post('/setup/claim/confirm', { comparison })).status).toBe(303);
-    expect((await browser.get('/setup/passkey')).status).toBe(200);
+    expect((await browser.get('/setup/tailnet')).status).toBe(200);
     await expectAllNotFound(portOf(at.instance));
   });
 
@@ -466,12 +484,17 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(owner.status, owner.text).toBe(200);
     expect(JSON.parse(owner.text)).toMatchObject({ registrationState: 'active' });
 
-    // Passkey: optional, explained.
-    expect((await browser.get('/setup/passkey')).body).toContain('admin-passkeys confirm');
+    // The tailnet (#2817): the step after the claim, before the passkey bound to the address.
+    expect((await browser.get('/setup/tailnet')).body).toContain('This server is running with');
     // Next pressed on an earlier step's page does not skip the step the setup has reached.
     const stale = await browser.post('/setup/next', { from: 'claim' });
-    expect(stale.headers.location).toBe('/setup/passkey');
-    expect((await browser.get('/setup/passkey')).status).toBe(200);
+    expect(stale.headers.location).toBe('/setup/tailnet');
+    expect((await browser.get('/setup/passkey')).status).toBe(303);
+    expect((await browser.post('/setup/next', { from: 'tailnet' })).headers.location).toBe(
+      '/setup/passkey',
+    );
+    // Passkey: optional, explained.
+    expect((await browser.get('/setup/passkey')).body).toContain('admin-passkeys confirm');
     expect((await browser.post('/setup/next', { from: 'passkey' })).headers.location).toBe(
       '/setup/secrets',
     );
@@ -674,11 +697,11 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(owned.body).toContain('name="from" value="claim"');
     expect(owned.body).not.toContain(claim);
     expect((await browser.post('/setup/next', { from: 'claim' })).headers.location).toBe(
-      '/setup/passkey',
+      '/setup/tailnet',
     );
 
     // The invite step before the tablet has signed in: an instruction, not a fault.
-    for (const from of ['passkey', 'secrets', 'backups'])
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups'])
       await browser.post('/setup/next', { from });
     await browser.post('/setup/registration/mode', { mode: 'invite' });
     const early = await browser.get('/setup/invite');
@@ -791,7 +814,8 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     const pending = await browser.get('/setup/claim');
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     await browser.post('/setup/claim/confirm', { comparison });
-    for (const from of ['claim', 'passkey', 'secrets']) await browser.post('/setup/next', { from });
+    for (const from of ['claim', 'tailnet', 'passkey', 'secrets'])
+      await browser.post('/setup/next', { from });
 
     const ran = new Date(at.clock);
     const stop = new AbortController();
@@ -961,7 +985,7 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
     const owner = await register(at, tablet);
     expect(owner.status, owner.text).toBe(200);
     let landed: Answer | undefined;
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite']) {
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups', 'registration', 'invite']) {
       landed = await browser.post('/setup/next', { from });
     }
     expect(landed?.headers.location).toBe('/setup/ai');
@@ -1333,6 +1357,207 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
   });
 });
 
+describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
+  const TAILNET_ORIGIN = 'https://onyourleft.tail1a2b.ts.net';
+  const RENAMED_ORIGIN = 'https://onyourleft-1.tail1a2b.ts.net';
+
+  /** Signed in, the claim made and confirmed with a tablet: the setup lands on the tailnet step. */
+  async function claimed(at: World): Promise<{ browser: Browser; card: string }> {
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const shown = await showClaim(browser);
+    const card = /oyl-instance:[^ <]+/.exec(shown.body)?.[0] ?? '';
+    const claim = CARD_LINE.exec(shown.body)?.[1] ?? '';
+    expect((await tabletRedeems(at, await testDevice(), claim)).status).toBe(200);
+    const pending = await browser.get('/setup/claim');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    await browser.post('/setup/claim/confirm', { comparison });
+    expect((await browser.post('/setup/next', { from: 'claim' })).headers.location).toBe(
+      '/setup/tailnet',
+    );
+    return { browser, card };
+  }
+
+  /** The address the step says the running server read back. */
+  const addressOn = (body: string): string | undefined =>
+    /This server is running with this address: <code>([^<]*)<\/code>/.exec(body)?.[1];
+
+  it('comes straight after the claim, shows the address the running server’s card names, how riders join and the access rule, and says what a change costs before how', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const { browser, card } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.status).toBe(200);
+    // Read back from the card the claim QR carried, not from a value the step was handed.
+    expect(card.startsWith(`oyl-instance:${TAILNET_ORIGIN}#`)).toBe(true);
+    expect(addressOn(step.body)).toBe(TAILNET_ORIGIN);
+    expect(step.body).toContain(
+      '<p class="notice">That is a Tailscale address, so a device on your tailnet can reach it.</p>',
+    );
+    expect(step.body).not.toContain('class="problem"');
+    // ADR 0079 D-2: by invitation or sharing, each on their own account, never the owner's.
+    expect(step.body).toContain('Invite each rider into your tailnet');
+    expect(step.body).toContain('share this machine with them');
+    expect(step.body).toContain('signs in with their own Tailscale account');
+    expect(step.body).toContain(
+      '<p class="warning">Never sign a rider’s device in to your own Tailscale account',
+    );
+    // The access rule limiting every other device to the instance's port, to copy.
+    const rule = /<pre class="copy"><code>([\s\S]*?)<\/code><\/pre>/.exec(step.body)?.[1] ?? '';
+    const parsed = JSON.parse(rule.replaceAll('&quot;', '"')) as {
+      tagOwners: Record<string, string[]>;
+      grants: { src: string[]; dst: string[]; ip: string[] }[];
+    };
+    expect(parsed.tagOwners).toEqual({ 'tag:onyourleft': ['autogroup:owner'] });
+    expect(parsed.grants).toContainEqual({
+      src: ['autogroup:member', 'autogroup:shared'],
+      dst: ['tag:onyourleft'],
+      ip: ['tcp:443'],
+    });
+    // ADR 0079 D-8: the cost of a change is read before anything says how to make one.
+    const warning = step.body.indexOf(
+      'every device that uses this server, your tablet too, must scan',
+    );
+    const how = step.body.indexOf('Set OYL_INSTANCE_ORIGIN in .env');
+    expect(warning).toBeGreaterThan(-1);
+    expect(step.body).toContain('every passkey made for the old address stops working');
+    expect(how).toBeGreaterThan(warning);
+    expect(step.body).toContain('Run bash deploy.sh beside compose.yaml');
+    // It changes nothing itself: its one form is the GET that reads the address back again.
+    const forms = [...step.body.matchAll(/<form [^>]*>/g)].map((match) => match[0]);
+    expect(forms.filter((form) => form.includes('method="post"'))).toEqual([
+      expect.stringContaining('action="/setup/next"'),
+    ]);
+    expect(forms).toContainEqual(expect.stringContaining('action="/setup/tailnet"'));
+    // Moving on leads to the passkey, which is bound to the address now settled.
+    expect((await browser.post('/setup/next', { from: 'tailnet' })).headers.location).toBe(
+      '/setup/passkey',
+    );
+  });
+
+  it('reads the address back from the server that is running after a restart, not from what it said before', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const { card: before } = await claimed(at);
+    // The owner changes the address in .env and deploys again: the same database, a new start.
+    at.origin = RENAMED_ORIGIN;
+    await restart(at);
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    const after = await browser.get('/setup/tailnet');
+    expect(after.status).toBe(200);
+    expect(addressOn(after.body)).toBe(RENAMED_ORIGIN);
+    expect(after.body).not.toContain(TAILNET_ORIGIN);
+    // The card every device will now scan names the new address with the same identity
+    // (ADR 0079 D-8): the step reads that card, so it says the new address works.
+    expect(after.body).toContain('so a device on your tailnet can reach it');
+    expect(before.startsWith(`oyl-instance:${TAILNET_ORIGIN}#`)).toBe(true);
+  });
+
+  it('says no card can be drawn, and never that the address works, when the keys cannot be read', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    await claimed(at);
+    // Started again with no secret: the keys are not opened, so there is no card for any address.
+    await restart(at, { noSecret: true });
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    const step = await browser.get('/setup/tailnet');
+    expect(step.status).toBe(200);
+    expect(addressOn(step.body)).toBe(TAILNET_ORIGIN);
+    expect(step.body).toContain(
+      '<p class="problem">The server’s keys could not be read, so it cannot draw a card',
+    );
+    expect(step.body).not.toContain('so a device on your tailnet can reach it');
+  });
+
+  it('is where an owner claimed outside the setup lands too, with the setup still at the claim', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const { browser } = await claimed(at);
+    // An owner claimed from the admin pages, say, leaves the setup's own step at the claim.
+    const store = await openSqlStore(at.path);
+    try {
+      await store.setSetupStep('claim', Math.floor(Date.now() / 1000));
+    } finally {
+      await store.close();
+    }
+    expect((await browser.get('/setup')).headers.location).toBe('/setup/tailnet');
+    expect((await browser.get('/setup/passkey')).headers.location).toBe('/setup/tailnet');
+  });
+
+  it('takes only https://<machine>.<tailnet>.ts.net for a Tailscale name', () => {
+    expect(isTailscaleName(TAILNET_ORIGIN)).toBe(true);
+    expect(isTailscaleName('https://onyourleft.tail1a2b.ts.net.')).toBe(true);
+    for (const not of [
+      'https://tail1a2b.ts.net',
+      'https://a.onyourleft.tail1a2b.ts.net',
+      'http://onyourleft.tail1a2b.ts.net',
+      'https://onyourleft.tail1a2b.ts.net.example.org',
+      'https://rides.example.org',
+      'not an address',
+    ]) {
+      expect(isTailscaleName(not), not).toBe(false);
+    }
+    expect(cardOrigin(`oyl-instance:${TAILNET_ORIGIN}#${'a'.repeat(52)}`)).toBe(TAILNET_ORIGIN);
+  });
+
+  it('says a tailnet server whose address is not a Tailscale name will not be reached', async () => {
+    const at = await world({ origin: 'https://rides.example.org', remotePath: 'tailnet' });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(addressOn(step.body)).toBe('https://rides.example.org');
+    expect(step.body).toContain(
+      '<p class="problem">That is not a Tailscale address, but this server is set up to be reached over your tailnet',
+    );
+  });
+
+  it('says what Funnel changes on the Funnel path, and keeps the riders and the access rule', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'funnel' });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.body).toContain(
+      '<p class="warning">Funnel is on, so this address is on the public internet too',
+    );
+    expect(step.body).toContain('<pre class="copy">');
+    expect(step.body).toContain('Never sign a rider’s device in to your own Tailscale account');
+  });
+
+  it('has nothing to set up on a Cloudflare tunnel: no tailnet words, but the cost of a change still first', async () => {
+    const at = await world({ origin: 'https://rides.example.org', remotePath: 'cloudflare' });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.body).toContain('reached through a Cloudflare tunnel on your own domain');
+    expect(step.body).not.toContain('<pre class="copy">');
+    expect(step.body).not.toContain('Invite each rider into your tailnet');
+    expect(step.body).not.toContain('class="problem"');
+    expect(step.body).not.toContain('That is a Tailscale address');
+    expect(step.body).toContain('every passkey made for the old address stops working');
+  });
+
+  it('says this step cannot check a tailnet when no path is named', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.body).toContain('do not say how other devices reach it');
+    expect(addressOn(step.body)).toBe(TAILNET_ORIGIN);
+  });
+
+  it('is not_found through the public listener, before the claim and at the step', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const tunnel = portOf(at.instance);
+    const missing = await noRoute(tunnel, 'GET');
+    const before = await send(tunnel, 'GET', '/setup/tailnet', {
+      host: `localhost:${String(tunnel)}`,
+    });
+    expect(before.status).toBe(404);
+    expect(before.body).toBe(missing.body);
+    await claimed(at);
+    const during = await send(tunnel, 'GET', '/setup/tailnet', {
+      host: `localhost:${String(tunnel)}`,
+    });
+    expect(during.status).toBe(404);
+    expect(during.body).toBe(missing.body);
+  });
+});
+
 describe('the setup session and its step gate (#2784, ADR 0069 D-4, ADR 0080 D-2)', () => {
   const MINUTE = 60 * 1000;
 
@@ -1442,7 +1667,15 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const pending = await browser.get('/setup/claim');
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     await browser.post('/setup/claim/confirm', { comparison });
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite', 'ai']) {
+    for (const from of [
+      'tailnet',
+      'passkey',
+      'secrets',
+      'backups',
+      'registration',
+      'invite',
+      'ai',
+    ]) {
       await browser.post('/setup/next', { from });
     }
     expect((await browser.get('/setup/finish')).status).toBe(200);
@@ -1474,7 +1707,15 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const twice = await again.get('/setup/claim');
     const digits = /name="comparison" value="([0-9]{6})"/.exec(twice.body)?.[1] ?? '';
     expect((await again.post('/setup/claim/confirm', { comparison: digits })).status).toBe(303);
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite', 'ai']) {
+    for (const from of [
+      'tailnet',
+      'passkey',
+      'secrets',
+      'backups',
+      'registration',
+      'invite',
+      'ai',
+    ]) {
       await again.post('/setup/next', { from });
     }
     // This setup's, not the one before the reset: no kit downloaded since, no invite made.

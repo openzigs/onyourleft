@@ -299,6 +299,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         registration mode is now `identity.registrationMode()`
                         (the database's over `.env`'s), never
                         `config.registration`, wherever a rider meets it.
+                        Since #2817 a `tailnet` step follows the claim
+                        (migration 0050); it reads the address back from
+                        the card and changes no setting.
                         Since #2792 its optional `ai` step (migration 0049)
                         finds Ollama (`analysis/ollama-setup.ts`), downloads
                         a model the owner NAMES and saves the one chosen
