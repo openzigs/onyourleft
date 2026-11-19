@@ -345,17 +345,18 @@ were.
 1. **Claim it with your tablet.** Press *Show the claim code*, open On Your Left on the tablet you ride
    with, go to *Instance* and scan the code **with the app's own scanner**, then press *I’ve scanned
    it* on the page. The tablet shows six digits; if the page shows the same six, press *Yes*. The page
-   says your tablet now owns the server.
+   says your tablet now owns the server. A code lasts ten minutes: if the page says *That code ran
+   out*, press *Show the claim code* again and scan the new one.
 2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
 3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
    beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
    once you have added a passkey there.
-4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says
-   whether the snapshot reached **both** folders: the one on this computer and the copy kept
-   elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` lines in `.env`
-   (step 4): to change one, edit that line and deploy again. ⚠️ On Windows the copy kept elsewhere
-   cannot be on a USB stick ([Backups](#backups)).
+4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
+   long ago the last backup ran, and whether the snapshot reached **both** folders: the one on this
+   computer and the copy kept elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and
+   `OYL_OFFBOX_DIR` lines in `.env` (step 4): to change one, edit that line and deploy again. ⚠️ On
+   Windows the copy kept elsewhere cannot be on a USB stick ([Backups](#backups)).
 5. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
    new*, then *Save and go to the next step*. You can change it later with
    `docker compose exec instance node src/operator/cli.ts registration set <mode>`.

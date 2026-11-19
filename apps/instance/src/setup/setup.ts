@@ -447,7 +447,12 @@ export function createSetup(options: SetupOptions): Setup {
             last:
               newest === undefined
                 ? null
-                : { at: iso(newest.at), outcome: newest.outcome, offBox: newest.offBox },
+                : {
+                    at: iso(newest.at),
+                    secondsAgo: seconds() - newest.at,
+                    outcome: newest.outcome,
+                    offBox: newest.offBox,
+                  },
             waiting: pending !== undefined,
             notice: url.searchParams.has('too-soon')
               ? 'too-soon'
@@ -471,7 +476,10 @@ export function createSetup(options: SetupOptions): Setup {
     }
   }
 
-  /** The claim step with no owner: a claim to compare, the code still waiting for a scan, or the start. */
+  /**
+   * The claim step with no owner: a claim to compare, the code still waiting
+   * for a scan, or the start — which says so when the code it showed ran out.
+   */
   async function claimView(url: URL, session: Session): Promise<ClaimView> {
     const pending = await options.ownerClaim.pending();
     if (pending !== undefined) {
@@ -480,11 +488,12 @@ export function createSetup(options: SetupOptions): Setup {
     }
     const at = seconds();
     const shown = shownClaim;
-    if (
-      shown !== undefined &&
-      shown.expiresAt > at &&
-      shown.sessionSha256 === session.record.tokenSha256
-    ) {
+    const ours = shown !== undefined && shown.sessionSha256 === session.record.tokenSha256;
+    // A code past its ten minutes is dead on the server: dropped where it is found, so memory
+    // holds only a live one, and the session that was shown it is told why the QR went (#2825).
+    const ranOut = shown !== undefined && shown.expiresAt <= at;
+    if (ranOut) shownClaim = undefined;
+    if (shown !== undefined && ours && !ranOut) {
       return {
         kind: 'code',
         card: shown.card,
@@ -497,6 +506,7 @@ export function createSetup(options: SetupOptions): Setup {
       kind: 'open',
       card: (await cardOf()) !== null,
       notConfirmed: url.searchParams.has('unconfirmed'),
+      expired: ours && ranOut,
     };
   }
 
