@@ -12,6 +12,18 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0085 is [ADR 0085](../adr/0085-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md)**,
+  taken by [#2847](https://github.com/openzigs/onyourleft/issues/2847) on 2026-11-19 for GGBotNet's
+  PSX Style Cars as the realistic world's cars, on the owner's rulings on #2847 of 2026-11-18 and
+  2026-11-19, and **Accepted** on them. It supersedes in part ADR 0049 D-10's In table, and ADR 0049
+  gained one dated `## Amendments` entry pointing here. The ADR number note of 2026-11-19 on #2847
+  gave this lane 0085: 0081 is ADR 0081 (#2836, pull request
+  [#2873](https://github.com/openzigs/onyourleft/pull/2873)); 0082 is ADR 0082 (#2794, pull request
+  #2802); 0083 is ADR 0083 (#2835, pull request [#2864](https://github.com/openzigs/onyourleft/pull/2864))
+  and 0084 is ADR 0084 (#2856, pull request [#2863](https://github.com/openzigs/onyourleft/pull/2863)).
+  So the next free number is **0086**. #2847's pull request #2872 first wrote this ADR as 0081 and
+  was renumbered on review, before merge; a reviewer who remembers 0081 meaning the PSX cars is
+  reading that first draft.
   ⚠️ **0084 is [ADR 0084](../adr/0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md)**,
   taken by [#2856](https://github.com/openzigs/onyourleft/issues/2856) on 2026-11-19 for a scan of the
   instance's code agreed to in place by a narrower agreement, **Accepted** the same day on the
@@ -25,7 +37,7 @@ It has the same authority as the root file. Where the text below says "this file
   deciding the AI pacer's intent and the model writing only the line, **Accepted** on
   2026-11-19 on the owner's answers to its D-9 (#2864). It supersedes in part ADR 0072, ADR 0078 and ADR 0082, each of which gained one dated
   `## Amendments` entry pointing to it. **It skipped 0081 on purpose**, leaving it to #2836, which
-  runs beside it and needs an ADR too. 0081 went to #2836 (the entry below). The next free number is the one the 0084 entry states. A reviewer who remembers this file offering 0083 is reading the old file.
+  runs beside it and needs an ADR too. 0081 went to #2836 (the entry below). The next free number is the one the 0085 entry states. A reviewer who remembers this file offering 0083 is reading the old file.
   ⚠️ **0081 is [ADR 0081](../adr/0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md)**,
   taken by [#2836](https://github.com/openzigs/onyourleft/issues/2836) on 2026-11-18 for the AI
   bots asked about one at a time from a menu the device makes, with the model's `sit-in` as no
@@ -33,7 +45,7 @@ It has the same authority as the root file. Where the text below says "this file
   owner's answers to its D-8, all as recommended (its D-9). It supersedes in part ADR 0071
   D-3, D-4.4 and D-7, ADR 0073 D-3, D-4 and D-5, ADR 0074 D-1 and D-2 and ADR 0076 D-11; each gained
   one dated `## Amendments` entry pointing to it. 0083 is ADR 0083 (the entry above), #2835's, in
-  [#2864](https://github.com/openzigs/onyourleft/pull/2864). The next free number is the one the 0084 entry states. A
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864). The next free number is the one the 0085 entry states. A
   reviewer who remembers this file offering 0081 is reading the old file.
   ⚠️ **0082 is [ADR 0082](../adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**,
   taken by [#2794](https://github.com/openzigs/onyourleft/issues/2794) on 2026-11-18 for the AI
