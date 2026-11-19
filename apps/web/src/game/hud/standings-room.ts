@@ -25,6 +25,17 @@
  * 8." — is never in the scroll. Where the room holds every line the list
  * does not scroll: #2328's whole field on a 1280×800 tablet is unchanged.
  *
+ * **And the room the ride controls leave when they hide is the list's** —
+ * #2837, the owner's tablet race of 2026-11-18: *"the position menu should
+ * get bigger when the other one reduces … Can only see 3 people."* Hidden
+ * (#2600), the actions panel is its trainer's line and nothing else, and in a
+ * race that line is drawn at the stage's bottom edge (`theme.css` §"#2837"),
+ * so the room is measured to it there: the list grows by the lines the hidden
+ * controls stood on, and gives them back, before the controls are drawn
+ * again, when a touch returns them. The room is the actions panel's box as it
+ * is DRAWN — a box read off the page carries the move — so nothing here
+ * knows how the panel hides; it only measures again when it has (below).
+ *
  * Display only: nothing here reaches the race, the room or the trainer.
  * `browser/lap-race-hud.browser.spec.ts` §"#2599" measures it.
  */
@@ -45,6 +56,17 @@ export const STANDINGS_CLEARANCE_PIXELS = 16;
  * line, and the list's height jumps by a line each time.
  */
 export const STANDINGS_HYSTERESIS_PIXELS = 4;
+
+/**
+ * The HUD's attribute that says whether the ride controls are faded out
+ * (`HudCore.tsx`, #2600): `hidden` or `shown`, and absent where they never
+ * hide. Named here and not imported: the room is read off the page, and this
+ * is the one thing about the controls it has to hear change (#2837).
+ */
+export const CONTROLS_ATTRIBUTE = 'data-oyl-controls';
+
+/** The events that say a motion of the actions panel's has run to its end. @see useStandingsRoom */
+const MOTION_ENDS = ['animationend', 'transitionend'] as const;
 
 /** Where the standings' list and the actions panel are, in one frame of reference. */
 export interface StandingsRoom {
@@ -95,6 +117,18 @@ export function linesThatFit(room: StandingsRoom, drawn?: number): number {
  * above), when a panel is added to the HUD or its class or style changes —
  * which can move a panel without resizing one — and when the number of
  * lines changes.
+ *
+ * #2837: and when the ride controls hide or return
+ * ({@link CONTROLS_ATTRIBUTE}), and when an animation or a transition of the
+ * actions panel's own ends — hidden, the panel closes to its line over a
+ * moment, and the end of that changes no attribute and resizes nothing. A
+ * transition too, because for a rider who asked for less motion the
+ * stylesheet runs every change as one, 0.01 ms long (`theme.css`
+ * §"Motion is opt-in"): the panel is not yet at its line when the attribute
+ * is heard. ⚠️ **Never on a frame**:
+ * every one of these is an event of the layout's, and a ride that changes
+ * nothing measures nothing (`browser/lap-race-hud.browser.spec.ts` §"#2837"
+ * counts it over a moving ride).
  */
 export function useStandingsRoom(
   panel: RefObject<HTMLElement | null>,
@@ -126,6 +160,8 @@ export function useStandingsRoom(
     sizes.observe(hud);
     for (const child of hud.children) sizes.observe(child);
     const attributes = { attributes: true, attributeFilter: ['class', 'style'] };
+    // #2837: the HUD's own attributes, and whether its controls are hidden.
+    const ofTheHud = { attributes: true, attributeFilter: ['class', 'style', CONTROLS_ATTRIBUTE] };
     const changes = new MutationObserver((records) => {
       for (const record of records) {
         for (const added of record.addedNodes) {
@@ -137,11 +173,18 @@ export function useStandingsRoom(
       }
       measure();
     });
-    changes.observe(hud, { ...attributes, childList: true });
+    changes.observe(hud, { ...ofTheHud, childList: true });
     for (const child of hud.children) changes.observe(child, attributes);
+    // #2837: the actions panel's closing, run to its end. Any other
+    // animation in the HUD — a reading's, a notice's — moves no panel.
+    const closed = (event: Event): void => {
+      if (event.target instanceof Element && event.target.matches('.oyl-hud__actions')) measure();
+    };
+    for (const ended of MOTION_ENDS) hud.addEventListener(ended, closed);
     return () => {
       sizes.disconnect();
       changes.disconnect();
+      for (const ended of MOTION_ENDS) hud.removeEventListener(ended, closed);
     };
   }, [panel, list, lines]);
   return room;

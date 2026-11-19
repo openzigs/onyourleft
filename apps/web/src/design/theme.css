@@ -14453,17 +14453,66 @@ select.oyl-input {
   }
 }
 
+/* #2837: and in its own place, where in a race the rule below moves it. */
 @keyframes oyl-hud-actions-hold {
   from,
   to {
     clip-path: inset(-100vmax);
+    translate: none;
   }
 }
 
-/* From the panel's own box to the rule's clip, which it ends on. */
+/* From the panel's own box to the rule's clip, which it ends on — and, in a
+   race (#2837, below), from its own place to the stage's bottom edge. */
 @keyframes oyl-hud-actions-close {
   from {
     clip-path: inset(0 0 0 0);
+    translate: none;
+  }
+}
+
+/*
+ * #2837: IN A RACE, THE HIDDEN ACTIONS PANEL IS ITS LINE AT THE STAGE'S
+ * BOTTOM EDGE, AND THE STANDINGS TAKE THE ROOM.
+ *
+ * The owner's tablet race of 2026-11-18, seven bots: *"the position menu
+ * should get bigger when the other one reduces or make it bigger to begin
+ * with. Can only see 3 people."* A race's standings hang over the actions
+ * panel and are as tall as the room above it holds (`standings-room.ts`);
+ * hidden, that panel was clipped to the trainer's line at its TOP, so the
+ * line stood where the panel began and the room under it, where *Pause*,
+ * *End ride* and *Use item* had been, was nobody's.
+ *
+ * So where a race's standings are drawn — a tablet, and not tucked away to
+ * their tab — the hidden panel is MOVED down by what the clip takes off it:
+ * the line it keeps is drawn against the stage's bottom edge, the panel's own
+ * bottom, and everything above it is free. The standings measure the room to
+ * the line there and grow into it; a touch brings the controls back where
+ * they were, at once, and the standings give the room back before the
+ * controls are drawn (`standings-room.ts` §`useStandingsRoom`).
+ *
+ * The move is the closing's: as the clip closes, over `--oyl-motion-medium`,
+ * the panel's top edge comes down to the line and the line rides it, the
+ * bottom edge never moving. Until the fade has run the panel is held in its
+ * own place (the two keyframes above), and a rider who asked for less motion
+ * sees it at the bottom edge at once, as the clip is. With no line to keep it
+ * is clipped to nothing, as on any ride, and the room is the whole panel's.
+ *
+ * ⚠️ **What it does not do, recorded as #419 asks.** While the controls are
+ * DRAWN the room is what it was — on the owner's tablet at the large text,
+ * three lines of eight, the rest under a finger's scroll (#2599) — and they
+ * are held drawn while a notice stands, while the rider holds an item (ADR
+ * 0075 D-5) and once the rider has finished. A ride with no race moves
+ * nothing: its line stays where the panel begins.
+ *
+ * `browser/lap-race-hud.browser.spec.ts` §"#2837" measures it grown, given
+ * back, and — with this rule undone — not grown at all.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud[data-oyl-controls='hidden']:has(> .oyl-hud__standings:not(.oyl-hud__panel--collapsed))
+    .oyl-hud__actions {
+    translate: 0 calc(100% - var(--oyl-hud-actions-kept, 0px));
   }
 }
 
