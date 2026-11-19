@@ -2517,7 +2517,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
           file: REALISTIC_DELIVERY_CAR_ATLAS,
           made: DELIVERY_CAR_ATLAS_MADE,
           ktx2: { encoding: 'colour-alpha', origin: 'top-left' },
-          modified: `the cars' one atlas, made in the same run by ${PIPELINE_DIRECTORY}${VEHICLE_SCRIPT}: the pack's own pictures of the saloon (Car 02), the hatchback (Car 03) and the station wagon (Car 01), 128 px each, and a white cell, two by two; in each picture the texels whose colour differs between the pack's paints of that body are its paint, stored as a grey shade (each paint's linear luminance over its own 90th percentile, averaged and kept at most 1) with alpha 1, and every other texel keeps the pack's own colour with alpha 0`,
+          modified: `the cars' one atlas, made in the same run as the cars: the pack's own pictures of the saloon (Car 02), the hatchback (Car 03) and the station wagon (Car 01), 128 px each, and a white cell, two by two; in each picture the texels whose colour differs between the pack's paints of that body are its paint, stored as a grey shade (each paint's linear luminance over its own 90th percentile, averaged and kept at most 1) with alpha 1, and every other texel keeps the pack's own colour with alpha 0`,
         },
       ],
     },
