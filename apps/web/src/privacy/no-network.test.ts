@@ -1865,6 +1865,8 @@ const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
     'and not the time you want to spend in your range, which this app leaves out',
     'no effort check-in is sent',
     'when: during the ride, and only while the switch is on for that ride: as a block begins, and never less than 3 minutes after the last time',
+    // #2841: the warm-up, the owner's ruling of 2026-11-19.
+    'once as the workout starts, it also sends a request that names no ride and carries only which model to use',
     'to whom: the instance you connected',
     'it is never sent in plain text',
     'what your instance keeps: each request',

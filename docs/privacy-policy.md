@@ -757,6 +757,8 @@ with it:
 - **When:** during the ride, and only while the switch is on for that ride: as a block begins, and
   never less than 3 minutes after the last time. Nothing is sent before you switch it on, while the
   ride is paused, or after the ride ends.
+  Once as the workout starts, it also sends a request that names no ride and carries only which
+  model to use, so that the model is ready.
 - **Switching it off:** while the workout runs, *Switch re-plans off* is beside *End workout*. From
   that press nothing more is sent for that workout, a request still out is cancelled, and a change
   that was waiting for the next block is dropped. It stays off for the rest of that workout: you
