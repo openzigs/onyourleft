@@ -528,12 +528,12 @@ ${buttonForm('/setup/claim/discard', csrf, CLAIM_NO_BUTTON, {}, 'secondary')}
 ${reachPart(view.reach)}${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p class="problem">${escapeHtml(CLAIM_NO_CARD_TEXT)}</p>`}`;
     }
     case 'code':
-      return `${cardCodePart(
+      // #2855, owner 2026-11-19: what the tablet needs is read first, above the QR and its button.
+      return `${reachPart(view.reach)}${cardCodePart(
         { purpose: 'claim', card: view.card, code: view.code, expiresAt: view.expiresAt },
         { lead: CLAIM_CODE_LEAD, until: codeWorksOnceText(view.secondsLeft) },
       )}<p class="notice">${escapeHtml(CLAIM_WAITING_TEXT)}</p>
-${checkAgain('/setup/claim', CLAIM_SCANNED_BUTTON)}
-${reachPart(view.reach)}`;
+${checkAgain('/setup/claim', CLAIM_SCANNED_BUTTON)}`;
   }
 }
 

@@ -2299,6 +2299,11 @@ describe('what a device needs before it can reach the server, and an address nev
     expect(shown.body).toMatch(CARD_LINE);
     expect(shown.body).toContain(CLAIM_REACH_TEXT.tailnet);
     expect(shown.body).toContain(`<code>${TEST_ORIGIN}</code>`);
+    // Above the QR and the button, as before the code is shown (owner, 2026-11-19).
+    const needs = shown.body.indexOf('same Tailscale network as this computer');
+    expect(needs).toBeGreaterThan(-1);
+    expect(needs).toBeLessThan(shown.body.indexOf('role="img"'));
+    expect(needs).toBeLessThan(shown.body.indexOf('I’ve scanned it'));
   });
 
   it('says a rider’s device needs the tailnet too, before the invite is made and beside it', async () => {

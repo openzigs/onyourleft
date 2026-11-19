@@ -630,10 +630,14 @@ describe('what a device needs before it can reach the server (#2855)', () => {
     expect(doc.body.textContent).not.toContain('Checked from this computer');
   });
 
-  it('keeps the same words beside the claim code, after it', () => {
+  it('keeps the same words beside the claim code, above the QR and the button, as before it', () => {
     const doc = state('/setup/claim', 'the claim QR');
     const needs = paragraph(doc, /same Tailscale network as this computer/);
-    expect(precedes(doc.querySelector('main svg[role="img"]'), needs)).toBe(true);
+    const scanned = [...doc.querySelectorAll('main button')].find(
+      (each) => each.textContent === 'I’ve scanned it',
+    );
+    expect(precedes(needs, doc.querySelector('main svg[role="img"]'))).toBe(true);
+    expect(precedes(needs, scanned)).toBe(true);
     expect(paragraph(doc, /Your tablet will reach this server/)?.textContent).toContain(ORIGIN);
   });
 
