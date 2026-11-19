@@ -857,6 +857,27 @@ export const BICYCLE_FRONT_METRES = FRONT_HUB_Z + WHEEL_RADIUS;
 export const BICYCLE_LENGTH_METRES = BICYCLE_FRONT_METRES - (REAR_HUB_Z - WHEEL_RADIUS);
 const SADDLE_Y = 0.94;
 const SADDLE_Z = -0.28;
+/**
+ * How high the seat cluster is — where the top tube and the seat stays meet
+ * the seat tube: **0.8 m**, 14 cm under the saddle.
+ *
+ * ⚠️ Both met the seat tube AT the saddle until the modeller's pass of
+ * 2026-11-18, so the frame had no seat post at all: a top tube that climbed to
+ * the saddle and a rear triangle as tall as the rider's hips, which is a
+ * frame two sizes too big for its rider. A road frame's top tube is level or
+ * falls toward the saddle, and a hand's breadth or more of post shows above
+ * it. The seat tube itself still runs on to the saddle, so what is above the
+ * cluster reads as the post and the bicycle costs no part and no triangle
+ * more.
+ */
+const SEAT_CLUSTER_Y = 0.8;
+/** The seat cluster, on the seat tube's own line from the bottom bracket to the saddle. */
+const SEAT_CLUSTER = {
+  y: SEAT_CLUSTER_Y,
+  z:
+    CRANK_AXIS_Z +
+    ((SADDLE_Z - CRANK_AXIS_Z) * (SEAT_CLUSTER_Y - CRANK_AXIS_Y)) / (SADDLE_Y - CRANK_AXIS_Y),
+} as const;
 // ⚠️ `HEAD_TUBE_TOP_Y` and `HEAD_TUBE_TOP_Z` are declared **above**, with the
 // bar, because {@link BAR_Y} and {@link BAR_Z} are derived from them and a
 // module-scope `const` cannot be read before its own line.
@@ -954,7 +975,7 @@ export const RIDER_BICYCLE_PARTS: readonly RiderPart[] = [
     'top tube',
     RIDER_PALETTE.frame,
     0.02,
-    { y: SADDLE_Y, z: SADDLE_Z },
+    { y: SEAT_CLUSTER.y, z: SEAT_CLUSTER.z },
     { y: HEAD_TUBE_TOP_Y, z: HEAD_TUBE_TOP_Z },
   ),
   tube(
@@ -969,7 +990,7 @@ export const RIDER_BICYCLE_PARTS: readonly RiderPart[] = [
       `seat stay ${side}`,
       RIDER_PALETTE.frame,
       0.013,
-      { x: side * 0.045, y: SADDLE_Y - 0.02, z: SADDLE_Z + 0.01 },
+      { x: side * 0.045, y: SEAT_CLUSTER.y - 0.02, z: SEAT_CLUSTER.z + 0.01 },
       { y: WHEEL_RADIUS, z: REAR_HUB_Z },
     ),
     tube(

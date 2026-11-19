@@ -162,8 +162,10 @@ services:
       # `backup`, `migrate` and `tunnel` services do not mount it, so no
       # snapshot holds the bot token or the secret key, and cloudflared cannot
       # read them. WRITABLE since #2781 (ADR 0080 D-4, Q-5), because the
-      # instance makes its secret key here on its first start. `deploy.sh`
-      # makes the folder first; Docker would make it owned by root on Linux.
+      # instance makes its secret key here on its first start. A release
+      # bundle ships the folder (#2818) and `deploy.sh` makes a missing one:
+      # Docker would make it owned by root on Linux, where the instance, uid
+      # 1000, could not write it.
       - ./secrets:/run/secrets/onyourleft
     # Docker waits this long after SIGTERM before it kills the instance: the
     # rooms are told the server is stopping and final results written first.

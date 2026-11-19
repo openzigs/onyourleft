@@ -749,6 +749,9 @@ bash scripts/check-image-layers.test.sh
 # the image BY DIGEST, its deploy.sh, instance.env.example and release.image,
 # zipped. Run by instance-image.yml with the digest it pushed, not by hand.
 bash scripts/make-instance-bundle.sh ghcr.io/openzigs/onyourleft-instance@sha256:<digest> <version> <outdir>
+# #2818: the bundle also holds an EMPTY, owner-only `secrets/`, made and never
+# copied, so Docker does not make it owned by root on Linux. The suite extracts
+# the zip and reads the folder's mode back.
 bash scripts/make-instance-bundle.test.sh
 
 # The mirror's script and its suite (#1231). The script copies Docker Hub's

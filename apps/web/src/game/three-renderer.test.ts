@@ -72,6 +72,7 @@ import {
   BICYCLE_COLOURS,
   BICYCLE_FRONT_METRES,
   BICYCLE_LENGTH_METRES,
+  BICYCLE_REAR_CONTACT_METRES,
   CRANK_AXIS_Y,
   CRANK_AXIS_Z,
   HOUSE_KIT,
@@ -2701,6 +2702,42 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       channels[slot * 3 + 2] ?? NaN,
     ];
   }
+
+  it('draws the wheels round — twenty pieces a wheel for the triangles twelve cost — the modeller’s pass of 2026-11-18', () => {
+    const belt = new RiderBelt();
+    const { bodies, cranksets } = belt.meshes;
+    const position = bodies.geometry.getAttribute('position');
+    // The rear wheel's hub: `bicycle.ts` puts a wheel's radius above the road
+    // at the rear contact, and nothing else of the bicycle is behind it.
+    const radius = BICYCLE_LENGTH_METRES - BICYCLE_FRONT_METRES + BICYCLE_REAR_CONTACT_METRES;
+    const hub = { y: radius, z: BICYCLE_REAR_CONTACT_METRES };
+    expect(radius).toBeGreaterThan(0.3);
+    const outline = new Set<string>();
+    const inside = new Set<string>();
+    let lowest = Number.POSITIVE_INFINITY;
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      lowest = Math.min(lowest, position.getY(vertex));
+      // Behind the hub by more than the saddle or a stay reaches.
+      if (position.getZ(vertex) > hub.z - 0.05) continue;
+      const from = Math.hypot(position.getY(vertex) - hub.y, position.getZ(vertex) - hub.z);
+      const key = `${position.getY(vertex).toFixed(4)} ${position.getZ(vertex).toFixed(4)}`;
+      if (Math.abs(from - radius) < 1e-4) outline.add(key);
+      else inside.add(from.toFixed(3));
+    }
+    // The tyre stands on the road, and its outline is the wheel's radius.
+    expect(lowest).toBeCloseTo(0, 5);
+    // The half of the outline behind the hub: 9 corners of a 20-piece wheel
+    // (a 12-piece one has 5 there).
+    expect(outline.size).toBeGreaterThanOrEqual(9);
+    // And the tyre is as deep as it was: its inner face one tyre's width in.
+    expect([...inside]).toEqual([(radius - 0.056).toFixed(3)]);
+    // The same triangles: two wheels, two bar bends at 120 each, thirteen
+    // six-sided tubes at 24 and three boxes at 12; a chainring, two cranks
+    // and two pedals.
+    expect((bodies.geometry.index?.count ?? 0) / 3).toBe(2 * 120 + 2 * 120 + 13 * 24 + 3 * 12);
+    expect((cranksets.geometry.index?.count ?? 0) / 3).toBe(120 + 4 * 12);
+    belt.dispose();
+  });
 
   it('is four draw calls for three riders, not four each', () => {
     // #240's NFR-2: draw calls are the budget, and `bicycle.ts` describes about

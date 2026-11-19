@@ -280,6 +280,24 @@ for local debugging, is counted as itself, whatever header it sends.
 
 ## 5. Start it
 
+**On Linux only, one command first.** The release's folder holds an empty `secrets` folder that only
+its owner can open: the instance keeps its secret key and the setup code there. Inside its container
+the instance runs as user 1000, so on Linux that user has to own the folder, whoever extracted the
+zip ([#2818](https://github.com/openzigs/onyourleft/issues/2818)):
+
+```bash
+cd /path/to/onyourleft-instance
+sudo chown 1000 secrets
+```
+
+**Windows and macOS skip it**: Docker Desktop maps the folder's owner itself, and on macOS the
+command would hand the folder to a user that is not you. A Linux machine that skips it, where your
+own user is not 1000 (`id -u` says), fails its first start with `OYL_INSTANCE_SECRET_KEY is not set,
+and its file could not be made in /run/secrets/onyourleft`. After it, a user who is not 1000 reads
+the setup code in step 5a with `sudo cat secrets/setup-code`. If there is no `secrets` folder — a git
+checkout has none — make it first, with `mkdir -m 700 secrets`: left to Docker, a missing one is made
+owned by root, which the instance cannot write either.
+
 ```powershell
 cd C:\onyourleft\onyourleft-instance
 docker compose up -d --wait instance
