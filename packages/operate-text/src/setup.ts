@@ -23,11 +23,21 @@ import { bytesText, durationText } from './words';
 
 /** The wizard's steps, in order: `apps/instance`'s `SETUP_STEPS`, which its tests hold this to. */
 export type OperateSetupStep =
-  'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'ai' | 'finish';
+  | 'claim'
+  | 'tailnet'
+  | 'passkey'
+  | 'secrets'
+  | 'backups'
+  | 'registration'
+  | 'invite'
+  | 'ai'
+  | 'finish';
 
 /** Each step's name, as its page's heading. */
 export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
   claim: 'Claim it with your tablet',
+  // Named as the progress bar names it (owner, 2026-11-19): one name for one step.
+  tailnet: 'Tailnet',
   passkey: 'A passkey for the admin pages',
   secrets: 'The emergency kit',
   backups: 'Backups',
@@ -40,6 +50,7 @@ export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
 /** Each step's short name, in the progress bar across the top of every step's page. */
 export const SETUP_STEP_SHORT_NAMES: Readonly<Record<OperateSetupStep, string>> = {
   claim: 'Claim',
+  tailnet: 'Tailnet',
   passkey: 'Passkey',
   secrets: 'Emergency kit',
   backups: 'Backups',
@@ -65,9 +76,39 @@ export const SETUP_TITLE = 'Set up this instance';
 export const SETUP_LOCKED_LEAD =
   'This page sets up the instance, on this machine only. To begin, type the setup code. It is in the file setup-code, in the secrets folder beside compose.yaml. A code works once, for 10 minutes.';
 
+/**
+ * The operator commands the wizard names, whole (#2858): each run on this
+ * machine, in the folder that holds compose.yaml, and shown in a block to copy.
+ */
+export const SETUP_COMMANDS = {
+  setupCode: 'docker compose exec instance node src/operator/cli.ts setup-code',
+  restart: 'docker compose restart instance',
+  ownerClaimReset: 'docker compose exec instance node src/operator/cli.ts owner-claim reset',
+  adminPagesOn: 'docker compose up -d instance',
+  adminCode: 'docker compose exec instance node src/operator/cli.ts admin-code',
+  adminPasskeysList: 'docker compose exec instance node src/operator/cli.ts admin-passkeys list',
+  adminPasskeysConfirm:
+    'docker compose exec instance node src/operator/cli.ts admin-passkeys confirm <id>',
+  backupStatus: 'docker compose ps backup',
+  instanceKeyReset: 'docker compose exec instance node src/operator/cli.ts instance-key reset',
+} as const;
+
+/**
+ * One line of a step's command-line details: what to do, then the commands it
+ * names, whole, which the page draws after it in blocks to copy (#2858).
+ */
+export interface SetupHowLine {
+  readonly text: string;
+  readonly commands: readonly string[];
+}
+
+/** Before the commands that make a new code: in the folder that holds compose.yaml. */
+export const SETUP_COMMANDS_WHERE =
+  'Run it in a terminal on this machine, in the folder that holds compose.yaml.';
+
 /** How to get a new code, without a button the tunnel could press (ADR 0080 D-2). */
 export const SETUP_NEW_CODE_TEXT =
-  'Each start of the instance makes a new code. If yours has run out, restart the instance (docker compose restart instance) and open the file again, or run the setup-code command on this machine.';
+  'Each start of the instance makes a new code, and so does the command below. If yours has run out, run it, then open the file again.';
 
 /** The code's label. */
 export const SETUP_CODE_LABEL = 'Setup code';
@@ -142,7 +183,7 @@ export const CLAIM_LEAD =
 export const CLAIM_SHOW_BUTTON = 'Show the claim code';
 /** Above the claim QR, in place of the admin page's own words (#2783). */
 export const CLAIM_CODE_LEAD =
-  'Scan this with the On Your Left app on your tablet. In the app, go to Instance and use its own scanner, not the camera app. Your tablet then shows a six-digit number.';
+  'Scan this with the On Your Left app on your tablet. In the app, open More, then Instance, and use its own scanner, not the camera app. Your tablet then shows a six-digit number.';
 /** Below the claim QR, while no tablet has scanned it. */
 export const CLAIM_WAITING_TEXT =
   'Waiting for your tablet to scan the code. Once it has, press I’ve scanned it, and this page shows the number to compare.';
@@ -160,13 +201,131 @@ export const CLAIMED_TEXT = 'Your tablet now owns this server.';
 export const CLAIMED_NEXT_TEXT =
   'Nobody else can claim it now. Press Next step to carry on with the setup.';
 export const CLAIMED_WRONG_TEXT =
-  'If the wrong tablet claimed it, run the owner-claim reset command on this machine and claim it again.';
+  'If the wrong tablet claimed it, run this command on this machine, then open this page again and claim it with the right tablet:';
 export const CLAIM_NOT_CONFIRMED_TEXT =
   'That claim could not be confirmed: it ran out, or a new code replaced it. Show a new claim code and scan it again.';
+/**
+ * The claim step after a restart voided the code the server showed before
+ * (#2858): the QR on an old page no longer works.
+ */
+export const CLAIM_RESTARTED_TEXT =
+  'The server restarted, so a claim code it showed before no longer works. Show a new one.';
 /** The claim step once the code it showed has run out: why the QR went, in one sentence (#2825). */
 export const CLAIM_EXPIRED_TEXT = 'That code ran out. Show a new one.';
 export const CLAIM_NO_CARD_TEXT =
   'The instance’s own keys could not be read, so there is no card to claim it with. The instance makes them when it starts with its secret key: restart it, then come back.';
+
+// --- the tailnet (#2817, ADR 0079 D-2, D-3, D-8)
+
+/** Which way in this server's settings name (`OYL_INSTANCE_REMOTE_PATH`), or `null` for none. */
+export type OperateRemotePath = 'tailnet' | 'funnel' | 'cloudflare';
+
+/** What the tailnet step says first, on the tailnet path and on Funnel's. */
+export const TAILNET_STEP_LEAD =
+  'Riders reach this server over your Tailscale network, called your tailnet. Only devices you let on to it can reach the server; nothing else on the internet can.';
+/** Before the address the running server read back, which the page draws after it. */
+export const TAILNET_ADDRESS_LEAD = 'This server is running with this address:';
+/** The address is a Tailscale name, as the tailnet path needs. */
+export const TAILNET_ADDRESS_OK_TEXT =
+  'That is a Tailscale address, so a device on your tailnet can reach it.';
+/** The tailnet path is chosen, but the address is not a Tailscale name: no device will reach it. */
+export const TAILNET_ADDRESS_WRONG_TEXT =
+  'That is not a Tailscale address, but this server is set up to be reached over your tailnet, so no tablet or phone will reach it. Set the address to this machine’s Tailscale name, as the steps below say.';
+/** Funnel is on: what that changes (ADR 0079 D-3). */
+export const TAILNET_FUNNEL_TEXT =
+  'Funnel is on, so this address is on the public internet too: anybody can reach it, and the admin pages are not served there. Riders do not need the Tailscale app.';
+/** The server is set up for a Cloudflare tunnel: nothing for this step to do. */
+export const TAILNET_CLOUDFLARE_TEXT =
+  'Nothing to do here: this server is reached through a Cloudflare tunnel on your own domain, not a tailnet. Press Next step.';
+/** The settings name no way in for other devices. */
+export const TAILNET_NO_PATH_TEXT =
+  'This server’s settings do not say how other devices reach it, so this step cannot check your tailnet. The guide’s step 3 says how to choose; you can carry on and come back.';
+/** No card can be drawn (no keys opened): no device can be pointed at the address yet. */
+export const TAILNET_NO_CARD_TEXT =
+  'The server’s keys could not be read, so it cannot draw a card for this address and no device can be pointed at it yet. The server makes its keys when it starts with its secret key: restart it, then press Check now.';
+/**
+ * The keys are held but do not open at this address (`unreadable`): what a changed
+ * OYL_INSTANCE_ORIGIN leaves, since the keys are wrapped under the address (`keys/wrap.ts`).
+ * A device's first fetch fails, so nothing reaches the server until they are made again.
+ */
+export const TAILNET_KEYS_UNREADABLE_TEXT =
+  'The server cannot open its keys at this address: they were made for another address, or under another secret key, so no tablet or phone can use it yet. Run the instance-key reset command in the steps below, then press Check now. Every device, your tablet too, must then scan the server’s new card.';
+
+/** How riders join the tailnet (ADR 0079 D-2): never as the owner. */
+export const TAILNET_RIDERS_HEADING = 'How each rider joins';
+export const TAILNET_RIDERS_TEXT: readonly string[] = [
+  'Invite each rider into your tailnet from the Tailscale admin console (Users, then Invite users), or share this machine with them (Machines, then this machine, then Share).',
+  'Each rider installs the Tailscale app on their tablet or phone and signs in with their own Tailscale account.',
+];
+/** The one rule a rider must never break. */
+export const TAILNET_NEVER_YOURS_TEXT =
+  'Never sign a rider’s device in to your own Tailscale account: that gives it your identity across your whole tailnet, past the access rule below.';
+
+/** Before the access rule, which the page draws after it in a block to copy. */
+export const TAILNET_ACL_LEAD =
+  'The access rule lets your own devices reach everything, and every other rider’s device reach this server’s port and nothing else. Paste it in the Tailscale admin console, under Access controls, if you have not already:';
+
+/**
+ * The tailnet access rule (ADR 0079 D-2), as `docs/self-hosting/home-machine.md`
+ * step 3a.2 gives it: the owner reaches everything, every other member's or
+ * shared device only `tcp:443` on the instance's tag.
+ */
+export const TAILNET_ACL = `{
+  "tagOwners": { "tag:onyourleft": ["autogroup:owner"] },
+  "grants": [
+    { "src": ["autogroup:owner"], "dst": ["*"], "ip": ["*"] },
+    {
+      "src": ["autogroup:member", "autogroup:shared"],
+      "dst": ["tag:onyourleft"],
+      "ip": ["tcp:443"]
+    }
+  ]
+}`;
+
+/** The heading over changing the address. */
+export const TAILNET_CHANGE_HEADING = 'Changing this server’s address';
+/**
+ * Said BEFORE anything about how to change an address that is already set
+ * (ADR 0079 D-8, ADR 0069 D-1): what every device and every passkey loses.
+ */
+export const TAILNET_CHANGE_WARNING =
+  'Before you change it: the server’s keys belong to its address, so it must make new ones, which gives it a new identity. Every device that uses this server, your tablet too, must scan the server’s new card afterwards, and every passkey made for the old address stops working until you make one for the new address.';
+/** After the restart: the keys are made again for the new address (`unreadable` until then). */
+const TAILNET_CHANGE_RESET_LINE: SetupHowLine = {
+  text: 'Then run this beside compose.yaml: the server cannot open its old keys at the new address, so this makes new ones.',
+  commands: [SETUP_COMMANDS.instanceKeyReset],
+};
+const TAILNET_CHANGE_CHECK_LINE: SetupHowLine = {
+  text: 'Then press Check now on this page: it shows the address the running server read back, and whether a device can fetch its keys there.',
+  commands: [],
+};
+/** How to change it on a tailnet, for whoever wants the setting's name and the command. */
+export const TAILNET_CHANGE_EXPERT_LINES: readonly SetupHowLine[] = [
+  {
+    text: 'Set OYL_INSTANCE_ORIGIN in .env to https:// and this machine’s Tailscale name, for example https://onyourleft.your-tailnet.ts.net with your own tailnet’s name.',
+    commands: [],
+  },
+  {
+    text: 'Keep COMPOSE_PROFILES=tailscale and OYL_INSTANCE_REMOTE_PATH=tailnet (or funnel) and OYL_INSTANCE_CLIENT_ADDRESS_HEADER=x-forwarded-for.',
+    commands: [],
+  },
+  {
+    text: 'Run bash deploy.sh beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
+    commands: [],
+  },
+  TAILNET_CHANGE_RESET_LINE,
+  TAILNET_CHANGE_CHECK_LINE,
+];
+/** The same on a Cloudflare tunnel: an address on the owner's domain, nothing a tailnet needs. */
+export const TAILNET_CHANGE_CLOUDFLARE_LINES: readonly SetupHowLine[] = [
+  {
+    text: 'Set OYL_INSTANCE_ORIGIN in .env to https:// and the new name on your own domain that your Cloudflare tunnel serves, and give the tunnel that name as the guide’s step 3b says.',
+    commands: [],
+  },
+  { text: 'Run bash deploy.sh beside compose.yaml.', commands: [] },
+  TAILNET_CHANGE_RESET_LINE,
+  TAILNET_CHANGE_CHECK_LINE,
+];
 
 // --- passkey (ADR 0080 D-7, Q-6)
 
@@ -175,11 +334,20 @@ export const PASSKEY_STEP_LEAD =
 export const PASSKEY_STEP_LATER =
   'A passkey lets you sign in to the server’s admin pages on this computer without a code. You can add one later, from the admin pages, whenever you want it.';
 /** How to add one, after the setup: `adminAddress` is the admin pages' address on this machine. */
-export function passkeyStepHow(adminAddress: string): readonly string[] {
+export function passkeyStepHow(adminAddress: string): readonly SetupHowLine[] {
   return [
-    'Turn the admin pages on: set OYL_INSTANCE_ADMIN_PAGES=on in .env, then run docker compose up -d instance.',
-    `Run the admin-code command on this machine and sign in at ${adminAddress} with the code it prints.`,
-    'On the Passkeys page, add a passkey. It reads every page, and changes nothing until you confirm it with the admin-passkeys confirm command on this machine.',
+    {
+      text: 'Turn the admin pages on: set OYL_INSTANCE_ADMIN_PAGES=on in .env, then run:',
+      commands: [SETUP_COMMANDS.adminPagesOn],
+    },
+    {
+      text: `Run this on this machine, and sign in at ${adminAddress} with the code it prints:`,
+      commands: [SETUP_COMMANDS.adminCode],
+    },
+    {
+      text: 'On the Passkeys page, add a passkey. It reads every page, and changes nothing until you confirm it: the first command shows its id, the second confirms it.',
+      commands: [SETUP_COMMANDS.adminPasskeysList, SETUP_COMMANDS.adminPasskeysConfirm],
+    },
   ];
 }
 
@@ -191,9 +359,16 @@ export const KIT_KEEP_TEXT =
   'Keep the kit in a password manager, or print it. Never keep it beside the backups: whoever holds the kit and a backup can pretend to be your server.';
 export const KIT_DOWNLOAD_BUTTON = 'Download the emergency kit';
 export const KIT_ONCE_TEXT =
-  'You can download it once during this setup. After setup, you can download it again from the admin pages on this computer, once you have added a passkey there.';
+  'It downloads once in each setup session: when your browser asks, save it. This page does not change after the download. After setup, you can download it again from the admin pages on this computer, once you have added a passkey there.';
 export const KIT_TAKEN_TEXT =
   'The kit was downloaded in this session. Keep it safe, away from the backups.';
+/**
+ * The kit taken (#2858): what to do if the save was cancelled. A new setup
+ * session downloads it again (ADR 0080 D-4's "once" is per session), and the
+ * command that makes the code for one is below this sentence.
+ */
+export const KIT_AGAIN_TEXT =
+  'If you cancelled the save or cannot find the file, start a new setup session: run this command on this machine, then type the new code on this page. A new session can download the kit once more.';
 export const KIT_NONE_TEXT =
   'There is no emergency kit to download: every secret this server uses is in its settings file, .env, which is your copy of it.';
 
@@ -219,14 +394,30 @@ export const BACKUPS_LAST_FAILED_TEXT =
 export const BACKUPS_LAST_RAN_TEXT = 'The last backup ran';
 export const BACKUPS_WAITING_TEXT =
   'Waiting for the backup to run. It usually starts within 30 seconds: press Check now to see whether it has.';
+/**
+ * The newest backup was made before the tablet claimed the server (#2858):
+ * it does not hold the owner's account, so "Back up now" is taken regardless
+ * of the 15-minute gap until a backup made since the claim has run.
+ */
+export const BACKUPS_BEFORE_CLAIM_TEXT =
+  'That backup was made before your tablet claimed this server, so it does not hold your account yet. Back up now to keep it.';
 export const BACKUPS_TOO_SOON_TEXT =
   'A backup ran in the last 15 minutes, or one is already waiting, so no new one was asked for.';
 export const BACK_UP_NOW_STEP_BUTTON = 'Back up now';
 /** The command-line details: what sets the two folders, and how to check the service. */
-export const BACKUPS_EXPERT_LINES: readonly string[] = [
-  'The folder on this computer is OYL_BACKUP_DIR in .env, and the copy kept elsewhere is OYL_OFFBOX_DIR.',
-  'To change one, edit its line in .env and run the deploy again: the backup service is started with them.',
-  'To check the backup service is running: docker compose ps backup.',
+export const BACKUPS_EXPERT_LINES: readonly SetupHowLine[] = [
+  {
+    text: 'The folder on this computer is OYL_BACKUP_DIR in .env, and the copy kept elsewhere is OYL_OFFBOX_DIR.',
+    commands: [],
+  },
+  {
+    text: 'To change one, edit its line in .env and run the deploy again: the backup service is started with them.',
+    commands: [],
+  },
+  {
+    text: 'To check the backup service is running, run this beside compose.yaml:',
+    commands: [SETUP_COMMANDS.backupStatus],
+  },
 ];
 
 // --- registration (ADR 0080 D-6, Q-3)
@@ -274,7 +465,7 @@ export const INVITE_STEP_LEAD =
   'Make one invite for a rider: a code they scan with the On Your Left app. It works once, for seven days.';
 /** Above the invite QR, in place of the admin page's own words (#2783). */
 export const INVITE_CODE_LEAD =
-  'Scan this with the On Your Left app on the new rider’s phone or tablet. In the app, go to Instance and use its own scanner, not the camera app.';
+  'Scan this with the On Your Left app on the new rider’s phone or tablet. In the app, open More, then Instance, and use its own scanner, not the camera app.';
 export const INVITE_MAKE_BUTTON = 'Make an invite';
 export const INVITE_TAKEN_TEXT =
   'This setup has made its one invite. You can make more later, from the app.';
@@ -283,7 +474,7 @@ export const INVITE_TAKEN_TEXT =
  * after the claim, so this is an instruction, not a fault.
  */
 export const INVITE_NO_OWNER_TEXT =
-  'One more thing on your tablet first: an invite is made from your account, and your tablet has not signed in to this server yet. In the On Your Left app on your tablet, go to Instance and connect to this server. Then come back to this page.';
+  'One more thing on your tablet first: an invite is made from your account, and your tablet has not signed in to this server yet. In the On Your Left app on your tablet, open More, then Instance, and connect to this server. Then come back to this page.';
 export const INVITE_CHECK_AGAIN_LINK = 'Check again';
 export const INVITE_NOT_INVITE_MODE_TEXT =
   'You chose to let riders join without an invite. The code still helps: it carries this server’s address and card, so the rider’s app trusts it at once.';

@@ -23,7 +23,13 @@ import { createStoreHarness, type StoreHarness } from '@onyourleft/store/testing
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
-import { codeWithCard, INSTANCE_KEY_TEXT, WEB_BUILD_TEXT } from './instance-pin';
+import {
+  codeWithCard,
+  INSTANCE_KEY_TEXT,
+  UNREACHABLE_HINT_TEXT,
+  unreachableAtText,
+  WEB_BUILD_TEXT,
+} from './instance-pin';
 import {
   CLAIM_REFUSAL_TEXT,
   CONNECT_REFUSAL_TEXT,
@@ -344,5 +350,67 @@ describe('what a claim refuses, in one sentence that never names the code — #2
     expect(await world.identity.ownerClaim.pending()).toBeUndefined();
     // The same code still claims from a device that can sign.
     expect(await tablet.port.claimOwner(line)).toMatchObject({ kind: 'pending' });
+  });
+});
+
+describe('a claim the server never answers says where it tried and why, never the code — #2855', () => {
+  /** The claim line's fingerprint: the 52 characters after the card's `#`. */
+  const fingerprintOf = (card: string): string => card.slice(card.indexOf('#') + 1);
+
+  it.each([
+    ['no answer at all', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['a proxy’s own page', () => Promise.resolve(new Response('Bad gateway', { status: 502 }))],
+  ])(
+    'names the address and the likely cause when the keys get %s, and sends nothing more',
+    async (_name, unanswered) => {
+      const world = await instance();
+      const handed = wire(world);
+      const send = ((url: string, init: RequestInit) => {
+        if (new URL(url).pathname !== '/v1/instance/keys') return handed(url, init);
+        handed.paths.push('/v1/instance/keys');
+        return unanswered();
+      }) as InstanceSend;
+      const tablet = device(send);
+      const { line, card, code } = await claimLine(world);
+      const refused = await tablet.port.claimOwner(line);
+      expect(refused).toEqual({ kind: 'refused', text: unreachableAtText(testing.TEST_ORIGIN) });
+      const text = refused.kind === 'refused' ? refused.text : '';
+      expect(text).toContain(`The instance at ${testing.TEST_ORIGIN} did not answer`);
+      expect(text).toContain(UNREACHABLE_HINT_TEXT.other);
+      expect(text).not.toContain('Tailscale');
+      // ADR 0004 D's spirit, and the issue's rule: the address, never the code or the fingerprint.
+      expect(text).not.toContain(code);
+      expect(text).not.toContain(fingerprintOf(card));
+      // Only the keys were asked for: the code went nowhere, and no claim waits.
+      expect(new Set(handed.paths)).toEqual(new Set(['/v1/instance/keys']));
+      expect(await world.identity.ownerClaim.pending()).toBeUndefined();
+      // The code is unspent: once the server can be reached, the same line claims it.
+      expect(await device(handed).port.claimOwner(line)).toMatchObject({ kind: 'pending' });
+    },
+  );
+
+  it('says a tablet that is not on the tailnet most likely cannot reach a Tailscale address yet', async () => {
+    const world = await instance();
+    const { card, code } = await claimLine(world);
+    // The setup page's QR for an instance on its owner's tailnet, scanned off the tailnet.
+    const tailnet = 'https://onyourleft.tail1a2b.ts.net';
+    const line = codeWithCard(`oyl-instance:${tailnet}#${fingerprintOf(card)}`, code);
+    const asked: string[] = [];
+    const send = ((url: string) => {
+      asked.push(url);
+      return Promise.reject(new TypeError('Failed to fetch'));
+    }) as InstanceSend;
+    const refused = await device(send).port.claimOwner(line);
+    expect(refused).toEqual({ kind: 'refused', text: unreachableAtText(tailnet) });
+    const text = refused.kind === 'refused' ? refused.text : '';
+    expect(text).toContain(`The instance at ${tailnet} did not answer`);
+    expect(text).toContain(UNREACHABLE_HINT_TEXT.tailscale);
+    expect(text).toContain('Tailscale app');
+    expect(text).not.toBe(INSTANCE_KEY_TEXT.unreachable);
+    expect(text).not.toContain(code);
+    expect(text).not.toContain(fingerprintOf(card));
+    // The address in the sentence is the one that was tried, and nothing else was.
+    expect(asked.length).toBeGreaterThan(0);
+    for (const url of asked) expect(url).toBe(`${tailnet}/v1/instance/keys`);
   });
 });

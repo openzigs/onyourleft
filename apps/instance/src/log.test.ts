@@ -264,11 +264,15 @@ describe('which written lines are problems (#2614)', () => {
     ['refusing to serve', { event: 'refusing' }, true],
     ['analysis job failed', { event: 'analysis-job', state: 'failed' }, true],
     ['analysis job done', { event: 'analysis-job', state: 'done' }, false],
-    ['analysis model off', { event: 'analysis-model', state: 'off', code: 'not-set' }, true],
+    // #2859: each is optional — not set is not a problem; set and not working is.
+    ['analysis model not set', { event: 'analysis-model', state: 'off', code: 'not-set' }, false],
+    ['analysis model off', { event: 'analysis-model', state: 'off', code: 'not-local' }, true],
     ['analysis model on', { event: 'analysis-model', state: 'on' }, false],
-    ['picture model off', { event: 'picture-model', state: 'off', code: 'not-set' }, true],
+    ['picture model not set', { event: 'picture-model', state: 'off', code: 'not-set' }, false],
+    ['picture model off', { event: 'picture-model', state: 'off', code: 'no-server' }, true],
     ['picture model on', { event: 'picture-model', state: 'on' }, false],
-    ['history index off', { event: 'history-index', state: 'off', code: 'not-set' }, true],
+    ['history index not set', { event: 'history-index', state: 'off', code: 'not-set' }, false],
+    ['history index off', { event: 'history-index', state: 'off', code: 'bad-model' }, true],
     ['history index on', { event: 'history-index', state: 'on' }, false],
     ['keys not ready', { event: 'instance-keys', state: 'no-secret' }, true],
     ['keys ready', { event: 'instance-keys', state: 'ready' }, false],
@@ -285,6 +289,25 @@ describe('which written lines are problems (#2614)', () => {
 
   it.each(cases)('%s', (_name, line, expected) => {
     expect(isProblem(line)).toBe(expected);
+  });
+});
+
+describe('the line for an address that is still the template’s example (#2855)', () => {
+  it('keeps where the page that says what to set is, and never an address it was given', () => {
+    const line = { event: 'example-address', open: 'http://localhost:8788/setup' };
+    expect(redacted(line)).toEqual(line);
+    expect(
+      redacted({
+        event: 'example-address',
+        open: 'https://onyourleft.your-tailnet.ts.net/setup',
+        origin: 'https://onyourleft.your-tailnet.ts.net',
+      }),
+    ).toEqual({ event: 'example-address', open: REDACTED, origin: REDACTED });
+    // Only `localhost`: the setup's one address (ADR 0080 D-1), never another host's.
+    expect(redacted({ event: 'example-address', open: 'http://127.0.0.1:8788/setup' })).toEqual({
+      event: 'example-address',
+      open: REDACTED,
+    });
   });
 });
 

@@ -382,6 +382,12 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   confirmOwnerClaim: { notAScopedRead: 'a write; the owner key names no athlete (#2782)' },
   discardOwnerClaim: { notAScopedRead: 'a write; a claim names no athlete (#2782)' },
+  voidUnredeemedOwnerClaimCodes: {
+    notAScopedRead: 'a write; a claim code names no athlete (#2858)',
+  },
+  ownerClaimedAt: {
+    notAScopedRead: 'when the instance’s ONE owner key was claimed (#2858): names no athlete',
+  },
   resetOwnerClaim: {
     notAScopedRead: 'a write, instance-wide: the operator’s reset of the claim (#2782)',
   },
