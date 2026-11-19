@@ -265,6 +265,23 @@ function servedFrom(origin: string, read: (path: string) => Uint8Array): () => v
 
 const ORIGIN = 'http://oyl.test';
 const PUBLIC = fileURLToPath(new URL('../../public/', import.meta.url));
+
+/** One fingertip a rider file names — #2839, `process_rider.py` §`grip`. */
+interface NamedFingertip {
+  readonly side: 'L' | 'R';
+  readonly finger: number;
+  readonly vertex: number;
+}
+
+/** The fingertips a committed rider file names in its body mesh's `extras`, as the file holds them. */
+function namedFingertips(file: string): readonly NamedFingertip[] {
+  const json = readGlb(join(PUBLIC, 'realistic', file)).json as unknown as {
+    readonly meshes: readonly { readonly extras?: { readonly fingertips?: unknown } }[];
+    readonly nodes: readonly { readonly name?: string; readonly mesh?: number }[];
+  };
+  const mesh = json.meshes[json.nodes.find((node) => node.name === 'rider')?.mesh ?? -1];
+  return (mesh?.extras?.fingertips ?? []) as readonly NamedFingertip[];
+}
 const WEB = fileURLToPath(new URL('../../', import.meta.url));
 
 /** What a device offers, as `KTX2Loader.detectSupport` asks. */
@@ -823,6 +840,97 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
     const span = (body: 'female' | 'male', slot: number): number =>
       at(body, slot, 'upperarm01.L').distanceTo(at(body, slot, 'upperarm01.R'));
     expect(span('female', 0)).toBeLessThan(span('male', 1) - 0.01);
+    riders.dispose();
+  });
+
+  /**
+   * The owner's ruling of 2026-11-18 ("Yes"): the fingers grip the brake
+   * hoods instead of splaying open, for both bodies. `process_rider.py` closes
+   * them in each file's rest pose (§`grip`) and names, in the body mesh's
+   * `extras`, the vertex at each of MakeHuman's fingertip joints. This reads
+   * those names from the file, poses each body on the hoods through the
+   * product's own belt — cranks level, skinned by three — and measures each
+   * fingertip off the hood box `bicycle.ts` draws.
+   *
+   * A hand is 8 cm across and a hood 2.5 cm, so the index and little fingers
+   * close round it either side and their tips cannot all be on it. What is
+   * held: the middle and ring fingertips on the hood (within
+   * {@link ON_THE_HOOD}), the four fingers' mean within
+   * {@link FINGERS_MEAN_REACH}, and none further than
+   * {@link FINGERS_FURTHEST}. The same pipeline with the fingers left open put
+   * the middle fingertip 4.4 cm off and the four's mean 4.1 cm. The thumb is
+   * not held: closed or open it lies 5 to 7 cm off, inside the bar's bend.
+   */
+  const ON_THE_HOOD = 0.01;
+  const FINGERS_MEAN_REACH = 0.025;
+  const FINGERS_FURTHEST = 0.05;
+  it('closes each hand’s fingertips round its brake hood, for both bodies — the owner’s ruling of 2026-11-18', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    riders.place([marker('rider', 0, 'female'), marker('bot', 0, 'male')]);
+    riders.group.updateMatrixWorld(true);
+    // A world point in the first rider's bicycle's frame: through the frame
+    // mesh's own instance matrix, a turn and a move. Both riders are at the
+    // same place, so slot 0's bicycle is slot 1's too.
+    const frame = riders.group.children[0];
+    if (frame === undefined || !('instanceMatrix' in frame)) throw new Error('no frame');
+    const m = (frame as { instanceMatrix: { array: ArrayLike<number> } }).instanceMatrix.array;
+    const inBicycle = (p: { x: number; y: number; z: number }): readonly number[] => {
+      const d = [p.x - (m[12] ?? 0), p.y - (m[13] ?? 0), p.z - (m[14] ?? 0)];
+      return [0, 1, 2].map(
+        (column) =>
+          (m[column * 4] ?? 0) * (d[0] ?? 0) +
+          (m[column * 4 + 1] ?? 0) * (d[1] ?? 0) +
+          (m[column * 4 + 2] ?? 0) * (d[2] ?? 0),
+      );
+    };
+    // How far a point is outside a hood's box: into the box's own frame (a
+    // turn of `pitch` about `+X`), then past its half-extents.
+    const offHood = (point: readonly number[], side: 1 | -1): number => {
+      const hood = RIDER_BICYCLE_PARTS.find((part) => part.name === `bar hood ${String(side)}`);
+      if (hood?.solid.shape !== 'box') throw new Error(`no hood ${String(side)}`);
+      const dx = (point[0] ?? 0) - hood.x;
+      const dy = (point[1] ?? 0) - hood.y;
+      const dz = (point[2] ?? 0) - hood.z;
+      const c = Math.cos(hood.pitch);
+      const s = Math.sin(hood.pitch);
+      const local = [dx, dy * c + dz * s, -dy * s + dz * c];
+      const half = [hood.solid.width / 2, hood.solid.height / 2, hood.solid.depth / 2];
+      return Math.hypot(
+        ...local.map((value, axis) => Math.max(0, Math.abs(value) - (half[axis] ?? 0))),
+      );
+    };
+    const lines: string[] = [];
+    for (const [body, slot] of [
+      ['female', 0],
+      ['male', 1],
+    ] as const) {
+      const named = namedFingertips(REALISTIC_RIDER_BODIES[body]);
+      // Non-vacuity: five a hand, both hands, each a vertex of the body.
+      expect(named.length, `${body}'s fingertips`).toBe(10);
+      const skinned = riders.bodiesOf(body)[slot];
+      if (skinned === undefined) throw new Error(`no ${body} body in slot ${String(slot)}`);
+      const vertex = riders.group.position.clone();
+      for (const side of ['L', 'R'] as const) {
+        const off = new Map<number, number>();
+        for (const tip of named) {
+          if (tip.side !== side) continue;
+          skinned.getVertexPosition(tip.vertex, vertex).applyMatrix4(skinned.matrixWorld);
+          off.set(tip.finger, offHood(inBicycle(vertex), side === 'L' ? 1 : -1));
+        }
+        const fingers = [2, 3, 4, 5].map((finger) => off.get(finger) ?? Number.NaN);
+        const label = `${body} ${side}`;
+        lines.push(`${label} ${fingers.map((each) => (each * 100).toFixed(1)).join('/')}`);
+        expect(off.get(3), `${label} middle`).toBeLessThan(ON_THE_HOOD);
+        expect(off.get(4), `${label} ring`).toBeLessThan(ON_THE_HOOD);
+        const mean = fingers.reduce((sum, each) => sum + each, 0) / fingers.length;
+        expect(mean, `${label} mean`).toBeLessThan(FINGERS_MEAN_REACH);
+        expect(Math.max(...fingers), `${label} furthest`).toBeLessThan(FINGERS_FURTHEST);
+      }
+    }
+    console.log(
+      `#2839 grip, the index, middle, ring and little fingertips' cm off each hood: ${lines.join(', ')}`,
+    );
     riders.dispose();
   });
 
@@ -2123,7 +2231,16 @@ describe('the realistic rider moves like a rider — #625', () => {
     // "chicken wings" of 2026-11-04 were 68 cm.
     expect(drops.elbows).toBeLessThan(0.55);
   }, 120_000);
-  /** The drawn hand's furthest vertex from its wrist — a fingertip — in the bicycle's frame. */
+  /**
+   * The drawn hand's furthest fingertip from its wrist, in the bicycle's frame.
+   * #2839: the fingers are closed round the bar, so the hand's furthest vertex
+   * from its wrist is now a knuckle, not a fingertip; the file names each
+   * fingertip's vertex (`process_rider.py` §`grip`, the body mesh's `extras`),
+   * and of the index, middle, ring and little fingers' tips this is the one
+   * furthest from the wrist — what the furthest vertex was while the hand was
+   * open.
+   */
+  const fingertips = namedFingertips(REALISTIC_RIDER_BODIES.male);
   const fingertipOf = (
     riders: Riders,
     pose: ReadonlyMap<string, Posed>,
@@ -2131,25 +2248,17 @@ describe('the realistic rider moves like a rider — #625', () => {
   ): readonly number[] => {
     const body = riders.bodies[0];
     if (body === undefined) throw new Error('no body');
-    const wristAt = body.skeleton.bones.findIndex((each) => each.name === wrist);
     const from = at(pose, wrist);
-    const carried = body.geometry.getAttribute('skinIndex');
-    const weights = body.geometry.getAttribute('skinWeight');
+    const side = wrist === 'wristL' ? 'L' : 'R';
+    const named = fingertips.filter((tip) => tip.side === side && tip.finger > 1);
+    if (named.length !== 4)
+      throw new Error(`the rider names ${String(named.length)} ${side} fingertips`);
     const vertex = body.position.clone();
     body.updateMatrixWorld(true);
     let far = 0;
     let tip: readonly number[] = from;
-    for (let at = 0; at < carried.count; at += 1) {
-      let most = 0;
-      let heaviest = -1;
-      for (let slot = 0; slot < 4; slot += 1) {
-        if (weights.getComponent(at, slot) > most) {
-          most = weights.getComponent(at, slot);
-          heaviest = carried.getComponent(at, slot);
-        }
-      }
-      if (heaviest !== wristAt) continue;
-      body.getVertexPosition(at, vertex).applyMatrix4(body.matrixWorld);
+    for (const each of named) {
+      body.getVertexPosition(each.vertex, vertex).applyMatrix4(body.matrixWorld);
       const away = Math.hypot(
         vertex.x - (from[0] ?? 0),
         vertex.y - (from[1] ?? 0),
@@ -2208,8 +2317,11 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(tip.below, name).toBeLessThan(0.05);
       expect(tip.ahead, name).toBeLessThan(0.1);
     }
-    // The tops: the fingers down over the bar, further than in the drops.
-    expect(tops.below).toBeGreaterThan(0.05);
+    // The tops: the fingers down over the bar. #2839, the owner's ruling of
+    // 2026-11-18: closed round it now, so the tips are UNDER it — further
+    // below its top (the grip) than the tube is thick, 2 × `bicycle.ts`
+    // §`BAR_TUBE_RADIUS`'s 12 mm. Until then the fingers hung open, past 5 cm.
+    expect(tops.below).toBeGreaterThan(0.024);
   }, 120_000);
 
   it('PR #2116 — holds every grip below the hips, as a road bicycle’s bar is, so a hand is not drawn on the hip', async () => {

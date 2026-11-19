@@ -866,7 +866,7 @@
       "licence": "CC0-1.0",
       "licencePage": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md",
       "evidence": "These assets have been released under CC0 1.0 Universal",
-      "read": "2026-09-28",
+      "read": "2026-11-19",
       "authors": "The MakeHuman team",
       "files": [
         {
@@ -976,6 +976,126 @@
           "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/macrodetails/caucasian-male-young.target",
           "bytes": 396479,
           "sha256": "70e228ba7164737dae664454394536fc5935fa48d333c1a97d77e2dc6eacc5f5"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-averageweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-averageweight-maxcup-averagefirmness.target",
+          "bytes": 15334,
+          "sha256": "b5aaa1595cf4efcee69022fc60034d93ab6f6fc473e6f8e162e5526803b074bf"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-averageweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-averageweight-maxcup-maxfirmness.target",
+          "bytes": 15581,
+          "sha256": "76737472bf148e69bd5e80da982b88aa0926b51ef9ea1ac6217da88d86cf55cf"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-averageweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-averageweight-averagecup-maxfirmness.target",
+          "bytes": 6193,
+          "sha256": "31f1d91824fcbb98ccf52f2c4d20c8e7c77c77ae596c58d1cf91c34801552b60"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-minweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-minweight-maxcup-averagefirmness.target",
+          "bytes": 15444,
+          "sha256": "bc0653099dc3c7bd490642b0a5e718939bbeec33f86095b69d724567adfba3b6"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-minweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-minweight-maxcup-maxfirmness.target",
+          "bytes": 15446,
+          "sha256": "2e975bc0268147d938198ca76093fdfc44279be08a80052e7e73926ab29e97fb"
+        },
+        {
+          "path": "targets/breast/female-young-averagemuscle-minweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-averagemuscle-minweight-averagecup-maxfirmness.target",
+          "bytes": 4866,
+          "sha256": "cb35d792634d1cba1a532c7e172f44bd6db563ab45b42faa91fe794e8cb1e697"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-averageweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-averageweight-maxcup-averagefirmness.target",
+          "bytes": 15430,
+          "sha256": "ee30c72778b92897da2cb71c65cee08a0f9d299d19d26a99288ad7bf13e5b4b1"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-averageweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-averageweight-maxcup-maxfirmness.target",
+          "bytes": 15460,
+          "sha256": "3a99cd342479e57e1b20aae5515d87cbd17499505dbdffd6346d1d734b250f65"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-averageweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-averageweight-averagecup-maxfirmness.target",
+          "bytes": 6236,
+          "sha256": "2a7f7d1cfeab45fba2b2f89318694c89f7b5afa1ab4395fdf2f5e37c46e6f634"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-minweight-maxcup-averagefirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-minweight-maxcup-averagefirmness.target",
+          "bytes": 15450,
+          "sha256": "1ea8f093dda8a93c04608a4f78bc54898e6979105244f21946e11db3f7514c2a"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-minweight-maxcup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-minweight-maxcup-maxfirmness.target",
+          "bytes": 15400,
+          "sha256": "4a4230c96fbe4d7dc68f6088923c1705d47f81534c50573afd9366e191a96aac"
+        },
+        {
+          "path": "targets/breast/female-young-maxmuscle-minweight-averagecup-maxfirmness.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/breast/female-young-maxmuscle-minweight-averagecup-maxfirmness.target",
+          "bytes": 4866,
+          "sha256": "cb35d792634d1cba1a532c7e172f44bd6db563ab45b42faa91fe794e8cb1e697"
+        },
+        {
+          "path": "targets/torso/torso-scale-horiz-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/torso/torso-scale-horiz-decr.target",
+          "bytes": 116893,
+          "sha256": "8377c248eec6838292f55287b6a399398f7cb88e6d7d0af6781d8e30298e0d6f"
+        },
+        {
+          "path": "targets/hip/hip-scale-horiz-incr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/hip/hip-scale-horiz-incr.target",
+          "bytes": 32914,
+          "sha256": "2863ee4478f548cd2cdd932037fcd21e6b364b9a2d86911d3b603be18f598da7"
+        },
+        {
+          "path": "targets/stomach/stomach-pregnant-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/stomach/stomach-pregnant-decr.target",
+          "bytes": 4957,
+          "sha256": "c312c72444527d7db00e84a144d15ea7a9ebe43dfdd6673936ddac3c46a75e1b"
+        },
+        {
+          "path": "targets/neck/neck-scale-horiz-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/neck/neck-scale-horiz-decr.target",
+          "bytes": 8453,
+          "sha256": "9f63b4b73461064d2f5173eefe7f3929870025b040c2fe70a5508be493067c99"
+        },
+        {
+          "path": "targets/chin/chin-width-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/chin/chin-width-decr.target",
+          "bytes": 2853,
+          "sha256": "ac081bd1652c203fc8973f20988a868a423a49f1fe6449cb974727fd46c26af1"
+        },
+        {
+          "path": "targets/chin/chin-bones-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/chin/chin-bones-decr.target",
+          "bytes": 3902,
+          "sha256": "fc54c1572b2562b095e5a5e48882bab16c1b24e64b106b2d54e6be64ce20121c"
+        },
+        {
+          "path": "targets/chin/chin-prominent-decr.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/chin/chin-prominent-decr.target",
+          "bytes": 3522,
+          "sha256": "071afc623e6feb38afa5dde7abca83710c062bf1281e30a51fa42a6fbacfc00e"
+        },
+        {
+          "path": "targets/eyebrows/eyebrows-trans-backward.target",
+          "url": "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/makehuman/data/targets/eyebrows/eyebrows-trans-backward.target",
+          "bytes": 3863,
+          "sha256": "0ad186047e809629f169c72502b12d95ad64597294ba6553aaafe9b880e19f11"
         }
       ]
     },

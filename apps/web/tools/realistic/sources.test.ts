@@ -682,7 +682,13 @@ describe('MakeHuman’s CC0 system assets — #623, ADR 0026’s 2026-09-28 amen
     const targets = makeHuman.origin.files.filter((file) => file.path.startsWith('targets/'));
     expect(targets.map((file) => file.path.slice('targets/'.length))).toEqual(RIDER_BUILD_TARGETS);
     for (const file of targets) {
-      expect(file.url).toMatch(/\/[0-9a-f]{40}\/makehuman\/data\/targets\/macrodetails\//);
+      // #2839's second round: a target with a directory of its own (the
+      // female figure's breast and shape targets) is fetched from that
+      // directory, and a bare name from the macro targets', at the same commit.
+      const name = file.path.slice('targets/'.length);
+      const directory = name.includes('/') ? '' : 'macrodetails/';
+      expect(file.url).toMatch(/\/[0-9a-f]{40}\/makehuman\/data\/targets\//);
+      expect(file.url.endsWith(`/makehuman/data/targets/${directory}${name}`), file.url).toBe(true);
       expect(file.mustContain).toMatch(/CC0/);
     }
   });

@@ -810,6 +810,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the body toward it by the crash's share whenever a
                         marker carries `crash`, never under reduced motion,
                         and the stylised world keeps #2475's roll alone.
+                        ⚠️ **Since #2839 the HANDS ARE CLOSED round the
+                        hoods** (every body, and the pack's rider): step 9
+                        bends MakeHuman's own finger bones in the rest pose
+                        AFTER the bakes (the maps are unchanged), turns the
+                        forearm palm-down (`GRIP_ROLL`), then carries each
+                        hand back to the open hand's middle, because the
+                        belt puts that middle on the grip and at the hoods
+                        the arm cannot reach further. The body mesh's
+                        `extras.fingertips` names each fingertip's vertex;
+                        `realistic-textures.test.ts` holds them to the hood
+                        through the belt. `rider_female.glb` adds MakeHuman's
+                        breast and shape targets (`FIGURE_TARGETS`) and her
+                        HAIR, a ponytail and a band under the rim in the
+                        helmet's mesh (`rider-gear.test.ts`).
                         #2505: write a lying moment with `on_road`, not in the
                         bicycle's `x`/`y`, and name its `elbows`/`knees`; the
                         test reads the drawn body 3 cm clear of every part of

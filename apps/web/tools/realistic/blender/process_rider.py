@@ -60,7 +60,11 @@ What it does:
    straps, the pockets, the chamois, the folds at hip, knee, elbow and
    shoulder) to the baked normal map, and write the three maps as PNGs for
    `encode-ktx2.ts`.
-9. Export a skinned GLB in MakeHuman's rest pose, the helmet beside the body.
+9. Close the hands round the hoods (#2839, section `grip`) -- after the bakes,
+   so the maps are the open hand's -- and export a skinned GLB in MakeHuman's
+   rest pose, the helmet beside the body, the body naming its fingertips in
+   its `extras`. The female body (#2839) also has her figure's targets in
+   step 2 and her hair in step 5's mesh.
 10. THE CRASH CLIP (#2493): read the GLB back, pose its skeleton at each of
    `rider_crash.py`'s moments from the riding joints and #2475's timeline in
    <crash.json> (`rider-crash.ts`), exactly as the pack's phases are posed, and
@@ -101,8 +105,9 @@ import zlib
 import bmesh
 import bpy
 import numpy as np
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 
 # The kit's numbers, beside this file. ⚠️ No bytecode: Python would otherwise
 # leave a `__pycache__` beside them, a binary `ASSET001` rightly refuses.
@@ -164,6 +169,11 @@ KEEP = [
 # below it, each a little nearer the middle than the male build's, which at
 # the female end of the slider reads as a bodybuilder rather than a cyclist.
 # Both use only the targets `sources.ts` section RIDER_BUILD_TARGETS fetches.
+#
+# #2839's second round (screenshots of 2026-11-19: she "reads as a slimmer
+# version of the same rider, not as a woman"): the female body also takes
+# MakeHuman's breast sliders and a few of its shape targets, `rider_kit.py`'s
+# FIGURE numbers -- see `macro_targets`. The male build takes none of them.
 BUILDS = {
     "male": {"gender": 0.5, "muscle": 0.85, "weight": 0.25},
     "female": {"gender": 0.0, "muscle": 0.7, "weight": 0.3},
@@ -199,7 +209,30 @@ def macro_targets():
                 out.append((f"universal-{sex}-young-{m}-{w}.target", g * mv * wv))
         for ethnic in ETHNIC:
             out.append((f"{ethnic}-{sex}-young.target", g / len(ETHNIC)))
+    if BODY == "female":
+        # #2839's second round: her figure (`rider_kit.py`). A breast target's
+        # weight is its gender, age, muscle and weight values, as above, times
+        # its cup's and its firmness's -- `apps/human.py` §`_setBreastSizeVals`
+        # and §`_setBreastFirmnessVals`; the average cup at the average
+        # firmness is the base mesh, and MakeHuman has no file for it.
+        for m, mv in muscles.items():
+            for w, wv in weights.items():
+                for cup, cv in slider_levels(KIT.BREAST_SIZE, "cup").items():
+                    for firm, fv in slider_levels(KIT.BREAST_FIRMNESS, "firmness").items():
+                        if (cup, firm) != ("averagecup", "averagefirmness"):
+                            out.append((
+                                f"breast/female-young-{m}-{w}-{cup}-{firm}.target",
+                                gender["female"] * mv * wv * cv * fv,
+                            ))
+        out.extend((f"{name}.target", share) for name, share in KIT.FIGURE_TARGETS)
     return [(name, value) for name, value in out if value > 0]
+
+
+def slider_levels(value, unit):
+    """A MakeHuman breast slider's three levels, by its own arithmetic."""
+    high = max(0.0, value * 2 - 1)
+    low = max(0.0, 1 - value * 2)
+    return {f"min{unit}": low, f"average{unit}": 1 - max(high, low), f"max{unit}": high}
 
 
 # The helmet's shell: rings from the crown to the rim, segments round it. The
@@ -684,6 +717,76 @@ for side, eye_helper, eye_bone in (
                 helmet_faces.append((near[segment], near[following], far[following], far[segment]))
                 eye_tris += 2
 
+# #2839's second round: the female rider's HAIR -- a low ponytail out from
+# under the back of the helmet, and a band of hair under its rim between the
+# straps -- in this mesh, on the head bone, as the eyes are: no draw call. The
+# ponytail is a tube laid down the back of the neck, its centre the skin's
+# nearest point stood off by its own radius and a gap, so it lies ON the neck
+# and the upper back rather than through them; it starts under the rim, so no
+# part of it comes out through the shell. `rider-gear.test.ts` holds both.
+hair_tris = 0
+if BODY == "female" and not LOD:
+    back = HELMET_SEGMENTS / 2
+    # The band: under the rim, a segment of it a ribbon.
+    first, last = KIT.HAIR_BAND_SEGMENTS
+    for step in range(round(last - first)):
+        ends = [shell_point(HELMET_RINGS, first + step + k) - Vector((0, 0, KIT.HAIR_BAND_BELOW_RIM)) for k in (0, 1)]
+        ribbon(ends[0], ends[1], 2, KIT.HAIR_BAND_HALF_WIDTH, KIT.HAIR_BAND_LIFT, KIT.HAIR)
+        hair_tris += 4
+    rim_back = shell_point(HELMET_RINGS, back)
+    tie = Vector((0.0, rim_back.y, rim_back.z - 0.004))
+    profile = KIT.PONYTAIL_PROFILE
+
+    def ponytail_radius(t):
+        for (t0, r0), (t1, r1) in zip(profile, profile[1:]):
+            if t <= t1:
+                share = (t - t0) / (t1 - t0)
+                return r0 + (r1 - r0) * (share * share * (3 - 2 * share))
+        return profile[-1][1]
+
+    centres, radii = [], []
+    for ring in range(KIT.PONYTAIL_RINGS + 1):
+        t = ring / KIT.PONYTAIL_RINGS
+        on, normal = on_skin(tie + Vector((0, 0, -KIT.PONYTAIL_LENGTH * t)), 0.0)
+        radius_here = ponytail_radius(t)
+        centres.append(on + normal * (radius_here + KIT.PONYTAIL_STAND_OFF * min(1.0, 0.35 + t)))
+        radii.append(radius_here)
+    rings = []
+    for ring, centre_here in enumerate(centres):
+        along_tail = (centres[min(ring + 1, len(centres) - 1)] - centres[max(ring - 1, 0)]).normalized()
+        side = Vector((1, 0, 0))
+        side = (side - along_tail * side.dot(along_tail)).normalized()
+        out = along_tail.cross(side)
+        indices = []
+        for segment in range(KIT.PONYTAIL_SEGMENTS):
+            around = 2 * math.pi * segment / KIT.PONYTAIL_SEGMENTS
+            indices.append(len(helmet_vertices))
+            helmet_vertices.append(tuple(centre_here + (side * math.cos(around) + out * math.sin(around)) * radii[ring]))
+            helmet_colours.append(KIT.HAIR)
+        rings.append(indices)
+
+    def outward_face(corners, outward):
+        """A face wound so its front -- the side three draws -- turns towards `outward`."""
+        a, b, c = (Vector(helmet_vertices[i]) for i in corners[:3])
+        return tuple(corners) if (b - a).cross(c - a).dot(outward) >= 0 else tuple(corners[::-1])
+
+    for ring in range(KIT.PONYTAIL_RINGS):
+        for segment in range(KIT.PONYTAIL_SEGMENTS):
+            following = (segment + 1) % KIT.PONYTAIL_SEGMENTS
+            quad = (rings[ring][segment], rings[ring][following], rings[ring + 1][following], rings[ring + 1][segment])
+            middle = sum((Vector(helmet_vertices[i]) for i in quad), Vector()) / 4
+            helmet_faces.append(outward_face(quad, middle - (centres[ring] + centres[ring + 1]) / 2))
+            hair_tris += 2
+    # Each end closed: the tie, under the rim, and the tip.
+    for ring, away in ((0, centres[0] - centres[1]), (KIT.PONYTAIL_RINGS, centres[-1] - centres[-2])):
+        cap = len(helmet_vertices)
+        helmet_vertices.append(tuple(centres[ring] + away.normalized() * radii[ring] * 0.5))
+        helmet_colours.append(KIT.HAIR)
+        for segment in range(KIT.PONYTAIL_SEGMENTS):
+            following = (segment + 1) % KIT.PONYTAIL_SEGMENTS
+            helmet_faces.append(outward_face((rings[ring][segment], rings[ring][following], cap), away))
+            hair_tris += 1
+
 helmet_mesh = bpy.data.meshes.new("helmet")
 helmet_mesh.from_pydata(helmet_vertices, [], helmet_faces)
 for polygon in helmet_mesh.polygons:
@@ -720,6 +823,148 @@ if source_tris > body_budget:
 body_tris = len(body.data.polygons)
 if body_tris + helmet_tris > TARGET_TRIS:
     raise RuntimeError(f"the rider is {body_tris} + {helmet_tris} triangles, over {TARGET_TRIS}")
+
+
+# --- the grip (#2839, the owner's ruling of 2026-11-18) -----------------------
+# The hands held the hoods with their fingers splayed open: MakeHuman's rest
+# hand is open, and the reduced skeleton keeps no finger bone to close it. So
+# the fingers are closed HERE, in the rest pose, by MakeHuman's own finger
+# bones and weights: each finger turned towards its palm at its three joints by
+# `rider_kit.py`'s GRIP numbers, the thumb by less, every vertex moved by its own
+# weights (linear blend skinning, as a renderer would). The palm's side is the
+# side the thumb's tip is on. It is done to the CUT body, after the bakes, so
+# the three maps stay the bytes they were: each of its vertices takes the move
+# of the full body's nearest vertex. The renderer then puts that hand's middle
+# on the hood (`RealisticRiderBelt`), and `rider-gear.test.ts` reads the
+# fingers back round the hood from the crash clip's riding pose.
+def grip(target):
+    """Closes the hands of `target`'s mesh round the hoods; returns the furthest
+    a vertex moved, and where each fingertip is: (side, finger, rest point)."""
+    mh_weights = json.load(open(mh("default_weights.mhw")))["weights"]
+    moves = {}
+    for side in "LR":
+        s = f".{side}"
+
+        def head_of(name):
+            return joint(bones[name + s]["head"])
+
+        def tail_of(name):
+            return joint(bones[name + s]["tail"])
+
+        reach = sum((tail_of(f"finger{f}-1") - head_of(f"finger{f}-1") for f in range(2, 6)), Vector())
+        across = head_of("finger2-1") - head_of("finger5-1")
+        palm = reach.cross(across).normalized()
+        if (tail_of("finger1-3") - head_of("finger2-1")).dot(palm) < 0:
+            palm = -palm
+        for finger in range(1, 6):
+            angles = KIT.GRIP_THUMB if finger == 1 else KIT.GRIP_FINGER
+            # About the axis that turns the finger's own line towards the palm.
+            axis = (tail_of(f"finger{finger}-1") - head_of(f"finger{finger}-1")).cross(palm).normalized()
+            chain = np.eye(4)
+            for knuckle, angle in enumerate(angles, start=1):
+                name = f"finger{finger}-{knuckle}"
+                pivot = head_of(name)
+                turn = np.array(
+                    Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(angle), 4, axis) @ Matrix.Translation(-pivot)
+                )
+                chain = chain @ turn
+                moves[name + s] = chain.copy()
+    # Each vertex of the full body: its weights' blend of the finger bones'
+    # moves, and of standing still for the rest of its weight.
+    blended = {}
+    for name, move in moves.items():
+        for vertex, weight in mh_weights.get(name, []):
+            blended.setdefault(vertex, np.zeros((4, 4)))
+            blended[vertex] += weight * (move - np.eye(4))
+    finder = KDTree(len(groups["body"]))
+    for vertex in groups["body"]:
+        finder.insert(positions[vertex], vertex)
+    finder.balance()
+    # Then each forearm turned about its own line, palm towards the hood: the
+    # renderer aims a hand by the least turn from its rest pose, which leaves
+    # MakeHuman's palm facing the bicycle's middle, and fingers closed towards
+    # it closed on air. The turn grows from nothing at the elbow to all of it
+    # at the wrist, as a forearm turns, and is shared by each vertex's weight
+    # on the forearm and the wrist. The right arm is the left's mirror image.
+    roll = math.radians(KIT.GRIP_ROLL)
+    elbow_at, wrist_at = HEAD["lowerarm01.L"], HEAD["wrist.L"]
+    forearm = (wrist_at - elbow_at).normalized()
+    forearm_length = (wrist_at - elbow_at).length
+    index_of = {group.name: group.index for group in target.vertex_groups}
+    arm_groups = {
+        side: {index_of[f"lowerarm01.{side}"], index_of[f"wrist.{side}"]} for side in "LR"
+    }
+
+    def rolled(point, share):
+        mirror = 1 if point[0] > 0 else -1
+        local = Vector((point[0] * mirror, point[1], point[2]))
+        t = min(1.0, max(0.0, (local - elbow_at).dot(forearm) / forearm_length))
+        turned = elbow_at + Matrix.Rotation(roll * share * t * t * (3 - 2 * t), 3, forearm) @ (local - elbow_at)
+        return np.array([turned.x * mirror, turned.y, turned.z, 1.0])
+
+    wrist_group = {side: index_of[f"wrist.{side}"] for side in "LR"}
+
+    def hand_of(vertex):
+        """The side whose wrist is this vertex's heaviest bone -- the renderer's hand -- or None."""
+        if not vertex.groups:
+            return None
+        heaviest = max(vertex.groups, key=lambda element: element.weight).group
+        return next((side for side, group in wrist_group.items() if group == heaviest), None)
+
+    def middles(points):
+        """Each hand's middle, as `RealisticRiderBelt` §`handMiddle` measures it."""
+        found = {}
+        for side in "LR":
+            chosen = [points[v.index] for v in target.data.vertices if hand_of(v) == side]
+            found[side] = sum(chosen, np.zeros(4)) / len(chosen)
+        return found
+
+    open_points = [np.array([*vertex.co, 1.0]) for vertex in target.data.vertices]
+    closed = []
+    for vertex in target.data.vertices:
+        _, nearest, _ = finder.find(vertex.co)
+        change = blended.get(nearest)
+        before = open_points[vertex.index]
+        after = before if change is None else before + change @ before
+        side = "L" if vertex.co.x > 0 else "R"
+        share = sum(element.weight for element in vertex.groups if element.group in arm_groups[side])
+        if share > 0:
+            after = rolled(after, share)
+        closed.append(after)
+    # A closed hand's middle is nearer its wrist than an open one's, and the
+    # renderer puts that middle on the grip and the wrist behind it by that
+    # reach: at the hoods the arm is already nearly straight, and could not
+    # reach the wrist that much further on -- the hand stopped 1 to 1.5 cm short
+    # of its hood. So each hand is carried back to where its middle was: by all
+    # of the difference for a vertex the wrist carries most, and by its wrist
+    # weight's share for the forearm's vertices round it. The arm reaches as far
+    # as it did before #2839, and the closed hand sits where the open one did.
+    was, now = middles(open_points), middles(closed)
+    furthest = 0.0
+    for vertex in target.data.vertices:
+        side = "L" if vertex.co.x > 0 else "R"
+        carried = 1.0 if hand_of(vertex) == side else sum(
+            element.weight for element in vertex.groups if element.group == wrist_group[side]
+        )
+        after = closed[vertex.index] + carried * (was[side] - now[side])
+        furthest = max(furthest, float(np.linalg.norm(after - open_points[vertex.index])))
+        vertex.co = Vector(after[:3])
+    target.data.update()
+    # Where each fingertip went -- MakeHuman's own fingertip joint (the end of
+    # each finger's last bone), carried by the same moves -- as the cut body's
+    # nearest vertex: what `realistic-textures.test.ts` holds to the hood.
+    finder = KDTree(len(target.data.vertices))
+    for vertex in target.data.vertices:
+        finder.insert(vertex.co, vertex.index)
+    finder.balance()
+    tips = []
+    for side in "LR":
+        for finger in range(1, 6):
+            name = f"finger{finger}-3.{side}"
+            tip = moves[name] @ np.array([*joint(bones[name]["tail"]), 1.0])
+            at, _, _ = finder.find(Vector(rolled(tip, 1.0)[:3]))
+            tips.append((side, finger, at))
+    return round(furthest, 4), tips
 
 # --- reading an exported GLB back, and posing its skeleton -------------------
 # Shared by THE PACK (#2485), which poses the body at every crank angle into
@@ -949,6 +1194,8 @@ def point(joint):
 if LOD:
     POSE = json.load(open(POSE_JSON))
     bpy.data.objects.remove(high, do_unlink=True)
+    # #2839: the pack's rider holds the hoods as the rider does.
+    grip(body)
     # Both meshes skinned: the body by its own weights, the helmet wholly by
     # the head -- the bone `RealisticRiderBelt` carries the rider's helmet on.
     helmet.vertex_groups.new(name="head").add(list(range(len(helmet_mesh.vertices))), 1.0, "REPLACE")
@@ -1617,6 +1864,9 @@ flat_texel = texel_nearest(np.array(hip["L"]) * 0.55 + np.array(knee["L"]) * 0.4
 # --- 9. clean up and export --------------------------------------------------
 bpy.data.objects.remove(high, do_unlink=True)
 material.node_tree.nodes.remove(target)
+# #2839: the fingers closed round the hoods -- after the bakes and the kit, so
+# the maps are the ones the open hand made.
+grip_moved, grip_tips = grip(body)
 body.parent = armature
 skin_modifier = body.modifiers.new("skin", "ARMATURE")
 skin_modifier.object = armature
@@ -1647,6 +1897,23 @@ bpy.ops.export_scene.gltf(
 # runtime blends the riding body toward it by `crash-look.ts`' share.
 CRASH = json.load(open(CRASH_JSON))
 document, binary = read_glb(OUT_GLB)
+# #2839: the file names its fingertips -- each one's vertex in the body's
+# primitive, nearest its rest point in the file's own frame (Blender's (x, y, z)
+# is glTF's (x, z, -y)) -- for `realistic-textures.test.ts` to hold to the hood.
+rider_mesh = document["meshes"][next(n["mesh"] for n in document["nodes"] if n.get("name") == "rider")]
+if len(rider_mesh["primitives"]) != 1:
+    raise RuntimeError("the body is one primitive, and its fingertips index it")
+file_rest = read_accessor(document, binary, rider_mesh["primitives"][0]["attributes"]["POSITION"])
+rider_mesh["extras"] = {
+    "fingertips": [
+        {
+            "side": side,
+            "finger": finger,
+            "vertex": int(np.argmin(np.linalg.norm(file_rest - np.array([at.x, at.z, -at.y]), axis=1))),
+        }
+        for side, finger, at in grip_tips
+    ]
+}
 rest, _, vertex_bones, vertex_weights = skinned_vertices(document, binary, ("rider",))
 poser = Poser(CRASH["leg"], rest, vertex_bones, vertex_weights)
 nodes = document["nodes"]
@@ -1787,6 +2054,8 @@ with open(OUT_REPORT, "w") as handle:
             "bodyTriangles": body_tris,
             "helmetTriangles": helmet_tris,
             "eyeTriangles": eye_tris,
+            "hairTriangles": hair_tris,
+            "gripMetres": grip_moved,
             "triangles": body_tris + helmet_tris,
             "heightMetres": height_m,
             "crashMoments": len(crash_times),

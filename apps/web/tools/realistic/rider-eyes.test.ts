@@ -144,9 +144,17 @@ function helmetOf(file: GlbFile): HelmetMesh {
   };
 }
 
-/** A brown: red leading green leading blue, and not a grey. */
+/**
+ * A brown: red leading green leading blue, and not a grey. #2839: and darker
+ * than the female rider's hair (`rider_kit.py` §`HAIR`, red 0.40), which is in
+ * the same mesh and is a brown too — an iris's red is 0.12 at most.
+ */
 const isIris = (colour: Vec3): boolean =>
-  colour[0] > 0.02 && colour[0] > colour[1] && colour[1] > colour[2] && colour[0] > 2 * colour[2];
+  colour[0] > 0.02 &&
+  colour[0] < 0.2 &&
+  colour[0] > colour[1] &&
+  colour[1] > colour[2] &&
+  colour[0] > 2 * colour[2];
 const isPupil = (colour: Vec3): boolean => Math.max(...colour) < 0.02;
 /** A pale colour, nearly grey — the white of an eye. */
 const isWhite = (colour: Vec3): boolean =>

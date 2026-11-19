@@ -185,8 +185,14 @@ describe.each(Object.entries(REALISTIC_RIDER_BODIES))('the %s rider', (_body, fi
   const isLens = ([r, , b]: Vec3): boolean => b < 0.2 && b > 1.3 * r;
   /** A strap or a glasses frame: near black, and grey. */
   const isStrap = (colour: Vec3): boolean => Math.max(...colour) < 0.05 && !isLens(colour);
+  /**
+   * #2839: the female rider's hair (`rider_kit.py` §`HAIR`) — a light brown,
+   * red well over green and green well over blue; no part of the helmet is.
+   */
+  const isHair = ([r, g, b]: Vec3): boolean => r > 0.3 && r > 1.5 * g && g > 1.5 * b;
   /** The shell, and a vent's floor and walls — every part of the helmet itself. */
-  const isShell = (colour: Vec3): boolean => Math.min(...colour) > 0.05 && !isLens(colour);
+  const isShell = (colour: Vec3): boolean =>
+    Math.min(...colour) > 0.05 && !isLens(colour) && !isHair(colour);
   const all = (triangle: Triangle, test: (colour: Vec3) => boolean): boolean =>
     triangle.every((vertex) => test(colourOf(vertex)));
 
@@ -521,5 +527,150 @@ describe.each(Object.entries(REALISTIC_RIDER_BODIES))('the %s rider', (_body, fi
         expect(deepest, foot).toBeLessThan(0.004);
       }
     });
+  });
+});
+
+/**
+ * #2839's second round. The screenshots of 2026-11-19 found the female rider
+ * read "as a slimmer version of the same rider, not as a woman": from the
+ * chase camera she had his bare scalp under the helmet and his outline. Read
+ * back out of both committed files:
+ *
+ * - her HAIR: a ponytail out from under the back of the helmet, hanging well
+ *   below its rim where the chase camera sees it, and no part of her hair
+ *   coming out through the shell; he has none;
+ * - her FIGURE: a bust, and hips wide for her shoulders, by more than his.
+ */
+describe('the female rider reads as a woman from the chase camera — #2839', () => {
+  const files = {
+    female: readGlb(at(REALISTIC_RIDER_BODIES.female)),
+    male: readGlb(at(REALISTIC_RIDER_BODIES.male)),
+  };
+  const colours = (helmet: Mesh): Vec3[] => {
+    const flat = helmet.attribute('COLOR_0');
+    return helmet.positions.map((_, vertex) => [
+      flat.values[vertex * flat.size] as number,
+      flat.values[vertex * flat.size + 1] as number,
+      flat.values[vertex * flat.size + 2] as number,
+    ]);
+  };
+  const isHair = ([r, g, b]: Vec3): boolean => r > 0.3 && r > 1.5 * g && g > 1.5 * b;
+  const isShell = ([r, g, b]: Vec3): boolean =>
+    Math.min(r, g, b) > 0.05 && !(b < 0.2 && b > 1.3 * r) && !isHair([r, g, b]);
+
+  /** A kept bone's rest position: its inverse bind matrix's translation carried back out. */
+  const jointOf = (file: GlbFile, name: string): Vec3 => {
+    const document = file.json as unknown as Document;
+    const skin = document.skins[0];
+    const index = (skin?.joints ?? []).findIndex((node) => document.nodes[node]?.name === name);
+    if (index < 0) throw new Error(`no ${name}`);
+    const m = accessorValues(document, file.binary, skin?.inverseBindMatrices ?? -1).values.slice(
+      index * 16,
+      index * 16 + 16,
+    );
+    const column = (c: number): Vec3 => [
+      m[c * 4] as number,
+      m[c * 4 + 1] as number,
+      m[c * 4 + 2] as number,
+    ];
+    const t = column(3);
+    return [-dot(column(0), t), -dot(column(1), t), -dot(column(2), t)];
+  };
+
+  it('gives her a ponytail out from under the back of the helmet, hanging below its rim, and him none', () => {
+    const his = meshOf(files.male, 'helmet');
+    expect(colours(his).filter(isHair)).toEqual([]);
+
+    const helmet = meshOf(files.female, 'helmet');
+    const paint = colours(helmet);
+    const hair = helmet.positions.filter((_, vertex) => isHair(paint[vertex] as Vec3));
+    // Non-vacuity: a tube's worth of hair.
+    expect(hair.length).toBeGreaterThan(60);
+    const shell = helmet.positions.filter((_, vertex) => isShell(paint[vertex] as Vec3));
+    const head = jointOf(files.female, 'head');
+    // The shell's lowest point behind the head, within 3 cm of the middle.
+    const rim = Math.min(
+      ...shell.filter((p) => p[2] < head[2] && Math.abs(p[0]) < 0.03).map((p) => p[1]),
+    );
+    // The hair behind the head, within 4 cm of the middle: the ponytail.
+    const tail = hair.filter((p) => p[2] < head[2] && Math.abs(p[0]) < 0.04);
+    const lowest = Math.min(...tail.map((p) => p[1]));
+    // It hangs at least 10 cm below the rim — where the chase camera, behind
+    // and above, sees it against the jersey's back.
+    expect(rim - lowest).toBeGreaterThan(0.1);
+    // And it is a ponytail, not a strand: 3 cm across somewhere below the rim.
+    const below = tail.filter((p) => p[1] < rim - 0.03);
+    expect(
+      Math.max(...below.map((p) => p[0])) - Math.min(...below.map((p) => p[0])),
+    ).toBeGreaterThan(0.03);
+  });
+
+  it('brings none of her hair out through the helmet: every hair vertex the shell covers is under it', () => {
+    const helmet = meshOf(files.female, 'helmet');
+    const paint = colours(helmet);
+    const shellTriangles = helmet.triangles.filter((triangle) =>
+      triangle.every((vertex) => isShell(paint[vertex] as Vec3)),
+    );
+    const shell = helmet.positions.filter((_, vertex) => isShell(paint[vertex] as Vec3));
+    const xs = shell.map((p) => p[0]);
+    const zs = shell.map((p) => p[2]);
+    const crown = Math.max(...shell.map((p) => p[1]));
+    const halfWidth = (Math.max(...xs) - Math.min(...xs)) / 2;
+    // Inside the shell, at the height of its widest ring.
+    const inside: Vec3 = [
+      (Math.max(...xs) + Math.min(...xs)) / 2,
+      crown - halfWidth,
+      (Math.max(...zs) + Math.min(...zs)) / 2,
+    ];
+    const hair = helmet.positions.filter((_, vertex) => isHair(paint[vertex] as Vec3));
+    let covered = 0;
+    const through: string[] = [];
+    for (const point of hair) {
+      const out = minus(point, inside);
+      const reach = length(out);
+      const direction = scaled(out, 1 / reach);
+      // The shell, met on the way out from inside towards this hair vertex.
+      const met = shellTriangles
+        .map((triangle) => rayHit(inside, direction, corners(helmet, triangle)))
+        .filter((distance): distance is number => distance !== undefined);
+      if (met.length === 0) continue;
+      covered += 1;
+      if (Math.min(...met) < reach) through.push(point.map((value) => value.toFixed(3)).join(', '));
+    }
+    // Non-vacuity: the band under the rim and the ponytail's tie are covered.
+    expect(covered).toBeGreaterThan(20);
+    expect(through.slice(0, 5)).toEqual([]);
+  });
+
+  /** The body's widest point either side at a height, within a depth of the spine, arms left out. */
+  const figure = (file: GlbFile) => {
+    const body = meshOf(file, 'rider');
+    const shoulders = [jointOf(file, 'upperarm01.L'), jointOf(file, 'upperarm01.R')] as const;
+    const hips = [jointOf(file, 'upperleg01.L'), jointOf(file, 'upperleg01.R')] as const;
+    const shoulderY = (shoulders[0][1] + shoulders[1][1]) / 2;
+    const hipY = (hips[0][1] + hips[1][1]) / 2;
+    const shoulderX = Math.abs(shoulders[0][0] - shoulders[1][0]) / 2;
+    // The torso only: inside the shoulder joints, so an arm is never counted.
+    const torso = body.positions.filter((p) => Math.abs(p[0]) < shoulderX * 0.9);
+    const band = (y: number) => torso.filter((p) => Math.abs(p[1] - y) < 0.015);
+    const front = (y: number) => Math.max(...band(y).map((p) => p[2]));
+    const height = shoulderY - hipY;
+    return {
+      // How far the chest stands out in front of the waist below it.
+      bust: front(shoulderY - 0.3 * height) - front(hipY + 0.45 * height),
+      // The hips across, for the shoulders across.
+      hipsForShoulders:
+        Math.max(
+          ...body.positions.filter((p) => Math.abs(p[1] - hipY) < 0.015).map((p) => Math.abs(p[0])),
+        ) / shoulderX,
+    };
+  };
+
+  it('gives her a bust, and hips wide for her shoulders, by more than his', () => {
+    const hers = figure(files.female);
+    const his = figure(files.male);
+    console.log(`#2839 figure: hers ${JSON.stringify(hers)}, his ${JSON.stringify(his)}`);
+    expect(hers.bust - his.bust).toBeGreaterThan(0.012);
+    expect(hers.hipsForShoulders - his.hipsForShoulders).toBeGreaterThan(0.2);
   });
 });
