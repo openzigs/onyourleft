@@ -193,6 +193,8 @@ function tracePower(atMs: number): number {
 /** What the AI pacer double was asked and did, for one run. */
 interface Asked {
   readonly inputs: ModelPacerInput[];
+  /** #2835: the warm-ups asked for, each with how many rides had started by then. */
+  readonly warms: number[];
   starts: number;
   ends: number;
 }
@@ -217,7 +219,10 @@ function aiPacerPort(asked: Asked): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
-    warmPacer: () => Promise.resolve(true),
+    warmPacer: () => {
+      asked.warms.push(asked.starts);
+      return Promise.resolve(true);
+    },
     startPacerRide: () => {
       asked.starts += 1;
       return Promise.resolve(true);
@@ -362,7 +367,7 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
     await own.start();
     expect(own.startWorkout(intervals, THRESHOLD)).toBe(true);
   }
-  const asked: Asked = { inputs: [], starts: 0, ends: 0 };
+  const asked: Asked = { inputs: [], warms: [], starts: 0, ends: 0 };
   mounted = await mount(
     <GameView
       port={tracedPort(
@@ -481,6 +486,11 @@ function expectDirected(plain: Run, directed: Run): void {
   expect(plain.lineShown).toBe(false);
   expect(directed.asked.starts).toBe(1);
   expect(directed.asked.ends).toBe(1);
+  // #2835, ADR 0083 D-4: the model is warmed once, from the ride menu, when
+  // the AI pacer is on and consented to — before any ride had started — and
+  // never on a ride with no AI pacer.
+  expect(plain.asked.warms).toEqual([]);
+  expect(directed.asked.warms).toEqual([0]);
   expect(directed.asked.inputs.length).toBeGreaterThan(8);
   expect(directed.records.filter((each) => each.outcome === 'applied').length).toBeGreaterThan(8);
   expect(directed.lineShown).toBe(true);
@@ -610,7 +620,7 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
       race: LapRaceChoice | undefined,
       thresholds?: { readonly power: number; readonly heartRate: number },
     ): Promise<Asked> {
-      const asked: Asked = { inputs: [], starts: 0, ends: 0 };
+      const asked: Asked = { inputs: [], warms: [], starts: 0, ends: 0 };
       mounted = await mount(
         <GameView
           port={tracedPort(

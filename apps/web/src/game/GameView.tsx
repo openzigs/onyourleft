@@ -1987,7 +1987,7 @@ function GameScreen({
       void offer.pacerStatus().then((status) => {
         // #2835: the AI pacer is on in the ride menu and consented to, so the
         // model is loaded now and not at "Go". Nothing of the rider's is sent.
-        if (value && status.kind === 'offered' && status.consented) void offer.warmPacer();
+        if (status.kind === 'offered' && status.consented) void offer.warmPacer();
         if (!unmountedRef.current) setAiPacerStatus(status);
       });
     },
