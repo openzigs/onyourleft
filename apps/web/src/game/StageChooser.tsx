@@ -2170,7 +2170,8 @@ function aiPacerConsentText(instance: string, modelAddress: string): string {
     `power per kilogram, cadence and heart rate, with how they are trending and their zones ` +
     `if you set thresholds, to the AI model at ${modelAddress}, run by your instance ` +
     `${instance}. No place, no name and nothing of your trainer is sent. ` +
-    `The AI picks how the pacer rides and writes a short line for you; it never sets your ` +
+    // #2835, ADR 0083: the AI no longer picks how the pacer rides, so the consent stops saying so.
+    `The app picks how the pacer rides; the AI writes a short line for you and never sets your ` +
     `trainer. The same consent lets AI bots race you. You can withdraw it here at any time.`
   );
 }

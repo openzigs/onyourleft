@@ -9,10 +9,12 @@
  * Each run mounts `GameView` with the real picker, a real ride controller
  * over the simulated FTMS trainer, the pacer ticked at one W/kg, and — for the
  * directed run — the AI pacer switched on and consented to, through a
- * `GamePort.aiPacer` double that answers every decision at once with the
- * hardest direction it can name (`climber` and `lift`) and a line. The solo
- * draft is on, so the rider is sheltered by a pacer the model moved: the one
- * way a pacer decision could reach the rider, and it is the draft.
+ * `GamePort.aiPacer` double that answers every ask at once with a line.
+ * Since #2835 (ADR 0083) the pacer's direction is the device's own decision,
+ * from the rider's gap and the road, and the double can answer nothing that
+ * moves it. The solo draft is on, so the rider is sheltered by a pacer those
+ * decisions moved: the one way a pacer decision could reach the rider, and
+ * it is the draft.
  *
  * Each pair is the same picker choice, the same power trace and the same
  * road, with the AI pacer the only difference, and asserts what #2423's gate
@@ -26,10 +28,11 @@
  *   same frame.
  * - **Release**: the same bytes.
  *
- * Each directed run also asserts the model's decisions WERE ridden: the
+ * Each directed run also asserts the pacer's decisions WERE ridden: the
  * double was asked, the ride controller was handed applied records, the line
- * was on the HUD, and the pacer rode further than the same pacer undirected.
- * So no comparison here passes because the AI pacer never took effect.
+ * was on the HUD, and the pacer rode a different distance from the same
+ * pacer undirected. So no comparison here passes because the AI pacer never
+ * took effect.
  */
 
 import { act } from 'react';
@@ -42,6 +45,8 @@ import {
   gradePercent,
   metres,
   PACER_GAP_TRENDS,
+  PACER_REASONS,
+  readModelPacerInput,
   RIDER_PLACES,
   seconds,
   thresholdShare,
@@ -192,7 +197,7 @@ interface Asked {
   ends: number;
 }
 
-/** An instance that offers a local model and answers every decision at once with the hardest direction. */
+/** An instance that offers a local model and answers every ask at once with the same line. */
 function aiPacerPort(asked: Asked): PacerPort {
   let consented = false;
   const status = (): PacerStatus => ({
@@ -212,17 +217,14 @@ function aiPacerPort(asked: Asked): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
+    warmPacer: () => Promise.resolve(true),
     startPacerRide: () => {
       asked.starts += 1;
       return Promise.resolve(true);
     },
     decidePacer: (input) => {
       asked.inputs.push(input);
-      return Promise.resolve({
-        kind: 'answer',
-        direction: { plan: 'climber', intent: 'lift' },
-        say: LINE,
-      });
+      return Promise.resolve({ kind: 'answer', say: LINE });
     },
     endPacerRide: () => {
       asked.ends += 1;
@@ -472,7 +474,7 @@ const DEFAULTS = notTheGrade([
   }),
 ]);
 
-/** The model's decisions were ridden: asked, logged, shown, and the pacer rode further. */
+/** The pacer's decisions were ridden: asked, logged, shown, and the pacer rode a different ride. */
 function expectDirected(plain: Run, directed: Run): void {
   expect(plain.asked.inputs).toEqual([]);
   expect(plain.records).toEqual([]);
@@ -482,7 +484,11 @@ function expectDirected(plain: Run, directed: Run): void {
   expect(directed.asked.inputs.length).toBeGreaterThan(8);
   expect(directed.records.filter((each) => each.outcome === 'applied').length).toBeGreaterThan(8);
   expect(directed.lineShown).toBe(true);
-  expect(directed.pacerDistance).toBeGreaterThan(plain.pacerDistance + 5);
+  // #2835: every record is a decision of the device's, ridden from its ask.
+  expect(directed.records.every((each) => 'reason' in each)).toBe(true);
+  // Not "further", since #2835: the device eases the pacer in at the start
+  // and waits for a rider behind it, so a directed pacer may well ride less.
+  expect(Math.abs(directed.pacerDistance - plain.pacerDistance)).toBeGreaterThan(5);
 }
 
 function expectGradesOnly(plain: Run, directed: Run): void {
@@ -529,13 +535,21 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     // What it sent: the pacer's state, with no coordinate in it.
     expect(JSON.stringify(directed.asked.inputs)).not.toMatch(/latitude|longitude/);
     expect(directed.asked.inputs[0]).toMatchObject({ pacerWPerKg: 2.9, plan: 'rolling' });
-    // The model's plan is ridden, and its `lift`; ADR 0082: with the rider
-    // on the wheel before a climb, the device rides `ease` in its place —
-    // which only the rule can, as the double never says `ease`.
+    // #2835, ADR 0083: the device decides, and tells the model what the pacer
+    // is doing and why. The double answers a line and nothing else, so every
+    // intent here is the rule's: the plan never leaves #92's own, the first
+    // ask is inside the start ramp, and the pacer both holds and, once the
+    // rider has ridden away from its gentle start, chases.
     const intents = directed.asked.inputs.map((each) => each.intent);
-    expect(directed.asked.inputs.at(-1)).toMatchObject({ plan: 'climber' });
+    expect(directed.asked.inputs.every((each) => each.plan === 'rolling')).toBe(true);
+    expect(directed.asked.inputs[0]).toMatchObject({ starting: true });
+    for (const each of directed.asked.inputs) {
+      expect(PACER_REASONS).toContain(each.reason);
+      expect(readModelPacerInput(each).ok).toBe(true);
+    }
+    expect(new Set(intents).size).toBeGreaterThan(1);
+    expect(intents).toContain('hold');
     expect(intents).toContain('lift');
-    expect(intents).toContain('ease');
     // #2760: the consent names the new data, and the state carries the
     // rider's own sensors from the shipped frame loop — cadence and heart
     // rate as the port reads them, the HUD's 3 s power — and the model's own
@@ -544,12 +558,16 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     expect(directed.consentText).toContain('heart rate');
     expect(directed.asked.inputs[0]).not.toHaveProperty('recentLines');
     const last = directed.asked.inputs.at(-1);
-    // The double says the same line every time; the last three are sent back.
+    // The double says the same line every time: since #2835 it is shown
+    // once, a repeat is no new line, and it is sent back once.
     expect(last).toMatchObject({
       cadenceRpm: 88,
       heartRateBpm: 142,
-      recentLines: [LINE, LINE, LINE],
+      recentLines: [LINE],
     });
+    const lines = directed.records.map((each) => ('line' in each ? each.line : undefined));
+    expect(lines.filter((each) => each === 'shown')).toHaveLength(1);
+    expect(lines).toContain('repeat');
     expect(last?.rider3sWPerKg).toBeGreaterThan(0);
     expect(last).not.toHaveProperty('powerZone');
     expect(last).not.toHaveProperty('heartRateZone');

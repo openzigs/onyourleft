@@ -701,12 +701,14 @@ export {
 export type { GapInput, PacerGap } from './pacer/gap';
 export { botIsAhead, gapMagnitudeSeconds, pacerGap } from './pacer/gap';
 
-// --- The AI pacer: a model's plan and intent for the pacer (#2712, ADR 0072) --
+// --- The AI pacer: its direction, and a model's line (#2712, ADR 0072) -------
 //
-// A rider who chose it rides the pacer above with one difference: a model on
-// their own instance picks its plan and intent from two closed lists, and the
-// product is held inside #92's envelope. No power field, no number in the
-// feedback, and never a trainer write (ADR 0072 D-3, D-6).
+// A rider who chose it rides the pacer above with one difference: every few
+// seconds its intent is chosen again from the rider's gap and the road, held
+// inside #92's envelope, and a model on their own instance writes a line.
+// Since #2835 (ADR 0083) the device chooses the intent and the model writes
+// only the line. No power field, no number in the feedback but a cadence or
+// power target (ADR 0077), and never a trainer write (ADR 0072 D-3, D-6).
 
 export type {
   ModelPacerAnswer,
@@ -722,15 +724,18 @@ export type {
   PacerGapTrend,
   PacerHeartRateTrend,
   PacerIntent,
+  PacerLineOutcome,
   PacerPlan,
   PacerPowerTrend,
+  PacerReason,
+  PacerRuleRecord,
   PacerSayProblem,
   RiderPlace,
 } from './pacer/model-pacer';
 
 // ADR 0082: with the rider level or in the draft, the device eases before a
-// climb and lifts on a descent and over the top, under ADR 0078's floor.
-export type { PacerRuleGround, PacerTerrain } from './pacer/terrain-rule';
+// climb and lifts on a descent and over the top, and never with the rider ahead.
+export type { PacerTerrain } from './pacer/terrain-rule';
 export {
   PACER_BEFORE_CLIMB_M,
   PACER_OVER_THE_TOP_M,
@@ -738,14 +743,17 @@ export {
   pacerSayAgainstRidden,
   pacerTerrainApplies,
   pacerTerrainAt,
-  riddenDirection,
+  pacerTerrainIntent,
 } from './pacer/terrain-rule';
+// #2835, ADR 0083: the device decides the intent, from the gap and the
+// terrain; the model writes only the line.
+export type { PacerRuleDecision, PacerRuleGround } from './pacer/device-rule';
+export { PACER_GAP_FULL_S, pacerGapResponse, pacerRuleDecision } from './pacer/device-rule';
 export {
   CLIMBER_CLIMB_GRADE_PERCENT,
   CLIMBER_DESCENT_GRADE_PERCENT,
   directedPacingFactor,
   directedPowerWatts,
-  flooredDirection,
   gapTrendOf,
   MODEL_PACER_ANSWER_MOST_CHARACTERS,
   MODEL_PACER_ASK_EVERY_S,
@@ -758,7 +766,7 @@ export {
   MODEL_PACER_SAY_MOST_CHARACTERS,
   MODEL_PACER_SAY_SHOWN_S,
   modelPacerAnswerSchema,
-  PACER_AHEAD_FLOOR_S,
+  PACER_CHASE_MOST,
   PACER_DECISION_OUTCOMES,
   PACER_EASE,
   PACER_GAP_TREND_METRES_PER_SECOND,
@@ -767,19 +775,25 @@ export {
   PACER_INTENTS,
   PACER_LEVEL_S,
   PACER_LIFT,
+  PACER_LINE_OUTCOMES,
   PACER_PLANS,
   PACER_POWER_TRENDS,
-  pacerDecisionRecord,
+  PACER_REASONS,
+  PACER_START_RAMP_S,
+  PACER_WAIT_MOST,
+  pacerAskOutcome,
   pacerDirectionAt,
-  pacerSayAgainstIntent,
+  pacerSayRepeats,
   pacerSaysEasing,
   pacerSaysPushing,
   pacerSayProblem,
+  pacerStartShare,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
   RIDER_PLACES,
   riderPlaceOf,
+  startRamped,
 } from './pacer/model-pacer';
 
 // --- Racing your own previous attempt (#93) ----------------------------------

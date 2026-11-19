@@ -679,12 +679,11 @@ function aiPacerStandIn(): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
+    warmPacer: () => Promise.resolve(AI_PACER_SAYING),
     startPacerRide: () => Promise.resolve(AI_PACER_SAYING),
     decidePacer: () =>
       Promise.resolve(
-        AI_PACER_SAYING
-          ? { kind: 'answer', direction: { plan: 'even', intent: 'hold' }, say: AI_PACER_LINE }
-          : { kind: 'failed' },
+        AI_PACER_SAYING ? { kind: 'answer', say: AI_PACER_LINE } : { kind: 'failed' },
       ),
     endPacerRide: () => Promise.resolve(),
   };

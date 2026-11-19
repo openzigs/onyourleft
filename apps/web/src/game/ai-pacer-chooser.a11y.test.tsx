@@ -59,6 +59,7 @@ function offering(): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
+    warmPacer: () => Promise.resolve(true),
     startPacerRide: () => Promise.resolve(true),
     decidePacer: () => Promise.resolve({ kind: 'failed' }),
     endPacerRide: () => Promise.resolve(),

@@ -69,9 +69,11 @@
  *
  * ⚠️ **Except an AI pacer's** (#2712, [ADR 0072](../../../docs/adr/0072-a-model-directs-the-bot-pacer-during-a-ride.md),
  * superseding #92 criterion 6 and ADR 0066 D-1.1 for that ride only): its
- * {@link BotCourse.direction} is a model's choice, and the model read the
- * rider. It reaches the bot as two words from closed lists, inside #92's
- * envelope, and still never as a power; with none in force the bot is #92's.
+ * {@link BotCourse.direction} is chosen from the rider's gap to it: by a
+ * model until #2835, and since ADR 0083 by a rule on the device
+ * (`@onyourleft/domain` §`pacerRuleDecision`). It reaches the bot as words
+ * from closed lists and a share, inside #92's envelope, and still never as a
+ * power; with none in force the bot is #92's.
  *
  * ⚠️ **And no recorded ride, which is the patent-posture criterion.** ADR 0007
  * D4 and `pacer/pacing.ts`'s header carry the argument in full; the part that
@@ -131,10 +133,11 @@ export interface BotCourse {
   /** See {@link RideConditions.integrationStepSeconds}. */
   readonly integrationStepSeconds?: number;
   /**
-   * The plan and intent a model chose for an AI pacer (#2712, ADR 0072),
-   * in force for this tick: the pacing rule becomes `@onyourleft/domain`
-   * §`directedPowerWatts`, inside #92's envelope. Two words and never a
-   * power. **Absent — every ride but an AI pacer's, and an AI pacer's
+   * The direction an AI pacer rides (#2712, ADR 0072; chosen on the device
+   * since #2835, ADR 0083), in force for this tick: the pacing rule becomes
+   * `@onyourleft/domain` §`directedPowerWatts`, inside #92's envelope. Two
+   * words, a share and, in a ride's first minute, how far through the start
+   * ramp it is: never a power. **Absent — every ride but an AI pacer's, and an AI pacer's
    * whenever no decision is in force — the bot is #92's to the bit.**
    */
   readonly direction?: PacerDirection;

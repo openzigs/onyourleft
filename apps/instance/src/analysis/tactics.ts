@@ -47,8 +47,16 @@
  * same slot and hold** (write-ups wait while a directed ride runs; `start`
  * and `end` claim and let it go), the same rate limit, the same one call with
  * no tools and reasoning off. The state is `@onyourleft/domain`
- * §`ModelPacerInput`, and the answer a plan, an intent and a line of
- * feedback screened by §`readModelPacerAnswer` — never a power.
+ * §`ModelPacerInput`, and since #2835 (ADR 0083) the answer is **a line of
+ * feedback and nothing else**, screened by §`readModelPacerAnswer` — never a
+ * power, and no longer a plan or an intent: the device decides what the
+ * pacer does and the state says so.
+ *
+ * {@link Tactics.warmPacer} (#2835) loads the model with the pacer's own
+ * words (`pacer-prompt.ts` §`PACER_WARM_UP_INPUT`, nothing of the rider's)
+ * when the rider turns the AI pacer on, before the ride. It passes the same
+ * gate and rate limit and **takes no slot**: a rider reading the ride menu
+ * holds up no write-up and no other rider's race.
  *
  * ## Warm-up (D-6.5)
  *
@@ -66,8 +74,6 @@ import {
   readModelTacticsAnswer,
   readModelTacticsInput,
   type ModelTacticsMove,
-  type PacerIntent,
-  type PacerPlan,
 } from '@onyourleft/domain';
 
 import type { Caller, Outcome } from '../auth/identity.ts';
@@ -76,7 +82,7 @@ import type { FieldProblem } from '../errors.ts';
 import type { Resolver } from '../history/address.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { askLocal } from './local-server.ts';
-import { pacerRequest } from './pacer-prompt.ts';
+import { PACER_WARM_UP_INPUT, pacerRequest } from './pacer-prompt.ts';
 import type { EffectiveAnalysisSettings } from './settings.ts';
 import { tacticsRequest, WARM_UP_INPUT } from './tactics-prompt.ts';
 import type { RaceHold } from './tactics-hold.ts';
@@ -201,17 +207,21 @@ export interface Tactics {
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ readonly bots: readonly ModelTacticsMove[] }>>;
   /**
-   * One AI-pacer decision on the pacer state the body carries (#2712, ADR
-   * 0072): the same gates, consent, slot and call as {@link decide}, one
-   * model call with no tools and reasoning off, and a plan, an intent and a
-   * screened line back — never a power.
+   * One line for the AI pacer on the pacer state the body carries (#2712,
+   * ADR 0072; #2835, ADR 0083): the same gates, consent, slot and call as
+   * {@link decide}, one model call with no tools and reasoning off, and a
+   * screened line back — never a power, a plan or an intent.
    */
   pace(
     caller: Caller,
     body: Readonly<Record<string, unknown>>,
-  ): Promise<
-    Outcome<{ readonly plan: PacerPlan; readonly intent: PacerIntent; readonly say: string }>
-  >;
+  ): Promise<Outcome<{ readonly say: string }>>;
+  /**
+   * The rider turned the AI pacer on (#2835): load the model with the
+   * pacer's own words, and claim no slot. The same gate and rate limit as
+   * {@link start}.
+   */
+  warmPacer(caller: Caller): Promise<Outcome<{ readonly warming: boolean }>>;
   /** The caller's model race ended: their hold ends, and held write-ups start. */
   end(caller: Caller): void;
   /** Resolves once every warm-up call out now has settled. */
@@ -325,14 +335,19 @@ export function createTactics(options: TacticsOptions): Tactics {
     }
   }
 
-  function warmUp(athleteId: string, model: NonNullable<TacticsLocal['model']>): boolean {
+  /** One warm-up call of `body` for `athleteId`, unless one of theirs is out. Whether it went. */
+  function warmUp(
+    athleteId: string,
+    model: NonNullable<TacticsLocal['model']>,
+    body: Readonly<Record<string, unknown>> = tacticsRequest(
+      model.model,
+      WARM_UP_INPUT,
+      WARM_UP_TOKENS,
+    ),
+  ): boolean {
     if (warmingFor.has(athleteId) || stopping.signal.aborted) return false;
     warmingFor.add(athleteId);
-    const call = ask(
-      model,
-      tacticsRequest(model.model, WARM_UP_INPUT, WARM_UP_TOKENS),
-      warmUpWaitMs,
-    )
+    const call = ask(model, body, warmUpWaitMs)
       .then(() => undefined)
       .finally(() => {
         warmingFor.delete(athleteId);
@@ -443,8 +458,17 @@ export function createTactics(options: TacticsOptions): Tactics {
       // Read field by field, and the line screened, before anything goes back (ADR 0072 D-3, D-4).
       const read = readModelPacerAnswer(text);
       return read.ok
-        ? { ok: true, value: { ...read.direction, say: read.say } }
+        ? { ok: true, value: { say: read.say } }
         : { ok: false, code: 'tactics_invalid' };
+    },
+
+    async warmPacer(caller) {
+      const gated = await gate(caller.athleteId);
+      if (!gated.ok) return gated;
+      // It reaches the model, so it counts as a decision does; it claims no slot.
+      if (!decisions.allow(caller.athleteId)) return { ok: false, code: 'rate_limited' };
+      const body = pacerRequest(gated.model.model, PACER_WARM_UP_INPUT, WARM_UP_TOKENS);
+      return { ok: true, value: { warming: warmUp(caller.athleteId, gated.model, body) } };
     },
 
     end(caller) {
