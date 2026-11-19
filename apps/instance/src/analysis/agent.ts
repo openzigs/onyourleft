@@ -441,6 +441,15 @@ interface RunCount {
  * 1 027 tokens, and the system prompt was gone). An answer that runs past it
  * is shifted the same way. So the whole turn must fit, counted pessimistically
  * ({@link estimatedTokens}), and a context that is not known is not checked.
+ *
+ * ⚠️ **Pessimistic only on text like the prompts measured so far.** Against
+ * the committed v2 measurements (`tools/results/write-up/`), the server's
+ * count over the estimate rose from 0.68 to 0.845 as a ride's figures grew,
+ * and the marginal rate was about 1.09 real tokens per estimated one: text
+ * dense with figures runs closer than three characters a token. The guard
+ * holds there because the prose system prompt and tool specs give about 550
+ * tokens of slack, so a conversation grown through JSON-heavy tool results
+ * could pass it and still overrun (review of #2926).
  */
 export function fitsContext(
   sent: number,

@@ -21,7 +21,8 @@ import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { createStoreHarness, registrationFixture } from '../store/testing/index.ts';
 import { syncWorld } from '../sync/sync-testing.ts';
-import { RIDE_INPUT } from './agent-testing.ts';
+import { calls, PASSING_WRITE_UP, RIDE_INPUT, scriptedModel, text } from './agent-testing.ts';
+import { agentEngine } from './engine.ts';
 import {
   createAnalysisJobs,
   DEFAULT_ANALYSIS_STARTS,
@@ -928,6 +929,43 @@ describe('never logged', () => {
     ]);
     // The tool's name is in no log line.
     expect(jobLines.join('\n')).not.toContain('goals');
+  });
+
+  it('logs the run’s figures when the job runs through the production engine (#2840)', async () => {
+    // Through `agentEngine`, as a running instance builds it: the scripted
+    // engine above cannot show that the engine forwards the agent's report.
+    const jobLines: string[] = [];
+    let tick = 0;
+    const { world: w, riders } = await jobsWorld(1, {
+      analysis: {
+        log: (line) => jobLines.push(line),
+        engine: agentEngine({
+          reads: { listLiveSyncItems: () => Promise.resolve([]) },
+          sources: {
+            local: scriptedModel(calls(['goals', {}]), text(PASSING_WRITE_UP)),
+            hostedKey: () => Promise.resolve({ kind: 'none' } as const),
+          },
+          clock: { now: () => (tick += 1_000) },
+        }),
+      },
+    });
+    await started(w, riders[0]!.token);
+    await w.analysis?.idle();
+    const ended = [...w.instance.lines, ...jobLines]
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'analysis-job' && line.state !== 'queued')
+      .filter((line) => line.state !== 'running');
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({
+      event: 'analysis-job',
+      state: 'succeeded',
+      turns: 2,
+      toolCalls: 1,
+      toolsUsed: 1,
+      ms: expect.any(Number) as number,
+    });
+    expect(ended[0]?.tokensIn).toBeGreaterThanOrEqual(1_000);
+    expect(ended[0]?.tokensOut).toBeGreaterThanOrEqual(30);
   });
 
   it('fails a job whose engine rejects, and keeps the error’s text nowhere (#1187)', async () => {
