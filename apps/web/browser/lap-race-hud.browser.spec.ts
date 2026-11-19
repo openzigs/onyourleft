@@ -699,7 +699,8 @@ test('#2599 the corner measurement can fail: the list at its full height is on t
  *   controls are fading, then comes down to its line with no step.
  *
  * The control leaves the hidden panel in its own place, as it was before
- * #2837: the standings then do not grow by a line.
+ * #2837: the standings then do not grow by a line. And on a phone, whose
+ * stage draws no standings, the hidden panel does not move at all.
  */
 
 /** `controls-reveal.ts` §`CONTROLS_HIDE_MILLISECONDS`, and a frame more. */
@@ -974,6 +975,19 @@ test.describe('#2837 a lap race’s standings take the room the hidden controls 
       );
     });
     expect(tops.ended - inPlace, `${where}: down by most of the panel`).toBeGreaterThan(100);
+  });
+
+  test('on a phone, where no standings are drawn, the hidden panel stays where it was', async ({
+    page,
+  }) => {
+    const phone = OVERLAY_VIEWPORTS.find((one) => sized(one) === '844×390');
+    if (phone === undefined) throw new Error('no phone in landscape');
+    await page.clock.install();
+    const drawn = stageOf(await open(page, phone, '?corner=race&controls=hide'), HIDES);
+    expect(laidOut(standingsOf(drawn)), 'no standings on a phone’s stage').toBe(false);
+    await hide(page);
+    const hidden = stageOf(await remeasure(page), HIDES);
+    expect(hidden.actions?.top).toBeCloseTo(drawn.actions?.top ?? Number.NaN, 0);
   });
 
   test('the growth can fail: with the hidden panel left in its own place, the standings gain no line', async ({

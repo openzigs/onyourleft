@@ -688,3 +688,25 @@ test('#2837 a moving lap race measures the standings’ room on no frame', async
   expect(counted.rewrites, 'the HUD rewrote nothing: no ride to count').toBeGreaterThan(10);
   expect(counted.measurements).toBeLessThanOrEqual(MOST_MEASUREMENTS);
 });
+
+/*
+ * #2837 — and a ride with no race moves nothing: hidden, its actions panel is
+ * clipped to the trainer's line where the panel begins, as #2600 left it. The
+ * move to the stage's bottom edge is a race's alone (`theme.css` §"#2837"),
+ * where the standings have a use for the room.
+ */
+test('#2837 with no race, the hidden actions panel stays where it was drawn', async ({
+  browser,
+}) => {
+  const viewport = TABLET_VIEWPORTS.find((each) => each.width === 1280 && each.height === 800);
+  if (viewport === undefined) throw new Error('no 1280×800 tablet');
+  const page = await ride(browser, viewport, '?controls=hide');
+  const top = (): Promise<number> =>
+    page.locator('.oyl-hud__actions').evaluate((panel) => panel.getBoundingClientRect().top);
+  const drawn = await top();
+  await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
+  await expect(page.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'hidden');
+  await settled(page);
+  expect(await top()).toBeCloseTo(drawn, 0);
+  await page.context().close();
+});

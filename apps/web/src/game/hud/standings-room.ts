@@ -31,8 +31,8 @@
  * (#2600), the actions panel is its trainer's line and nothing else, and in a
  * race that line is drawn at the stage's bottom edge (`theme.css` §"#2837"),
  * so the room is measured to it there: the list grows by the lines the hidden
- * controls stood on, and gives them back, before the controls are drawn
- * again, when a touch returns them. The room is the actions panel's box as it
+ * controls stood on, and gives them back when a touch returns the controls.
+ * The room is the actions panel's box as it
  * is DRAWN — a box read off the page carries the move — so nothing here
  * knows how the panel hides; it only measures again when it has (below).
  *

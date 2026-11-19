@@ -14483,13 +14483,14 @@ select.oyl-input {
  * line stood where the panel began and the room under it, where *Pause*,
  * *End ride* and *Use item* had been, was nobody's.
  *
- * So where a race's standings are drawn — a tablet, and not tucked away to
- * their tab — the hidden panel is MOVED down by what the clip takes off it:
- * the line it keeps is drawn against the stage's bottom edge, the panel's own
- * bottom, and everything above it is free. The standings measure the room to
- * the line there and grow into it; a touch brings the controls back where
- * they were, at once, and the standings give the room back before the
- * controls are drawn (`standings-room.ts` §`useStandingsRoom`).
+ * So where a race's standings are drawn — a tablet, the media query their
+ * own (§"A RACE'S STANDINGS"); on a phone they are in the document and not on
+ * the stage, and nothing moves — the hidden panel is MOVED down by what the
+ * clip takes off it: the line it keeps is drawn against the stage's bottom
+ * edge, the panel's own bottom, and everything above it is free. The
+ * standings measure the room to the line there and grow into it; a touch
+ * brings the controls back where they were, and the standings give the room
+ * back as they come (`standings-room.ts` §`useStandingsRoom`).
  *
  * The move is the closing's: as the clip closes, over `--oyl-motion-medium`,
  * the panel's top edge comes down to the line and the line rides it, the
@@ -14506,11 +14507,13 @@ select.oyl-input {
  * nothing: its line stays where the panel begins.
  *
  * `browser/lap-race-hud.browser.spec.ts` §"#2837" measures it grown, given
- * back, and — with this rule undone — not grown at all.
+ * back, and — with this rule undone — not grown at all, and holds a phone's
+ * panel in its place; `ride-chrome.browser.spec.ts` §"#2837" holds a ride's
+ * with no race.
  */
 @media (min-width: 46rem) and (min-height: 47rem) {
   .oyl-game--riding
-    .oyl-hud[data-oyl-controls='hidden']:has(> .oyl-hud__standings:not(.oyl-hud__panel--collapsed))
+    .oyl-hud[data-oyl-controls='hidden']:has(> .oyl-hud__standings)
     .oyl-hud__actions {
     translate: 0 calc(100% - var(--oyl-hud-actions-kept, 0px));
   }

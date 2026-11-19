@@ -133,6 +133,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   part of the same closing, over `--oyl-motion-medium`, after the fade has run, and the panel keeps
   its own place for as long as its controls are fading. D-1, D-2, D-4 and D-5 are unchanged: under
   `prefers-reduced-motion: reduce` and `update: slow` there is no closing and the line is at the
-  bottom edge at once. A ride with no standings moves nothing. *The author's choice*, for the
+  bottom edge at once. A ride with no standings moves nothing, and nor does a phone, whose stage draws none. *The author's choice*, for the
   owner to look at with #2837's screenshots; `lap-race-hud.browser.spec.ts` §"#2837" samples the
   move and fails on the panel leaving its place before the fade has run.
