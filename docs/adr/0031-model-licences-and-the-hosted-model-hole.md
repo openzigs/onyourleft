@@ -508,3 +508,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   condition 2: *"Nothing in this repository names, defaults to or suggests the dependency's guarded
   vendor default."* There is still one code path, taking a URL and a key. The 2026-09-29 entry (the
   embedding default) is unchanged, and so are D-1, D-2, D-3 and D-5. The body above is not edited.
+
+- **2026-11-19** — **Once [ADR 0086](0086-the-setup-wizard-recommends-one-ai-model.md) is
+  Accepted, D-4 condition 2's *"no vendor is named in source"*, which the 2026-09-29 entry keeps
+  *"for the generative model on every path"*, no longer holds for one model on one page**: the
+  setup wizard's AI step on the instance names `qwen3:8b` (Apache-2.0, read 2026-11-19) as its
+  recommended download, on the owner's ruling of 2026-11-19 on #2869. It names a model, not an
+  endpoint or a vendor's service, and sets no default: the download and the choice are each the
+  owner's press. D-2 applies to it as written, and so does ADR 0040 D-5. D-4 conditions 1, 3 and 4
+  and everything the app ships are unchanged. This entry only points there. The body above is not
+  edited. (#2869)

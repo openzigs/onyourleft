@@ -457,6 +457,8 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       'a download done, a model refused',
       ai({ server: { models: LISTED }, pull: { kind: 'done' }, notice: 'refused' }),
     ],
+    // #2869 (ADR 0086 D-4): write-ups off, and a model here that fits, offered first.
+    ['a model here that fits, offered first', ai({ server: { models: LISTED } })],
   ],
   '/setup/finish': [
     [
@@ -860,9 +862,9 @@ describe('the setup’s optional AI step (#2792)', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('names the field a model’s name is typed in, describes it, and names no model itself', () => {
+  it('names the field a model’s name is typed in, describes it, and fills in no model itself', () => {
     const doc = draw({ server: { models: [] } });
-    const field = doc.querySelector('main form[action="/setup/ai/pull"] input[name="model"]');
+    const field = doc.querySelector('main form[action="/setup/ai/pull"] input#model');
     expect(field).not.toBeNull();
     expect(accessibleName(field as Element)).toBe('Model to download');
     expect(doc.getElementById(field?.getAttribute('aria-describedby') ?? '')?.textContent).toMatch(
@@ -870,8 +872,74 @@ describe('the setup’s optional AI step (#2792)', () => {
     );
     expect(field?.getAttribute('value')).toBeNull();
     expect(field?.getAttribute('placeholder')).toBeNull();
-    // ADR 0046's amendment of 2026-11-14, point 8: the page names and recommends no model.
+    // ADR 0086 D-2: the one model the page names of its own is the recommended download's.
     expect(doc.querySelectorAll('main code')).toHaveLength(0);
+  });
+
+  /** The download card's forms, top to bottom: each one's name and the model it sends. */
+  const downloads = (doc: Document) =>
+    [...doc.querySelectorAll('main form[action="/setup/ai/pull"]')].map((form) => ({
+      name: accessibleName(form),
+      sends:
+        form.querySelector('input[type="hidden"][name="model"]')?.getAttribute('value') ?? null,
+    }));
+
+  it('offers the recommended model as one press above the typed field, while write-ups are off and no model here fits (#2869)', () => {
+    for (const models of [
+      [],
+      [model('beta:32b', 'part', 'listed', 62), model('gamma:26b', 'not-loaded', 'not-listed')],
+    ]) {
+      const doc = draw({ server: { models } });
+      expect(downloads(doc)).toEqual([
+        { name: 'Download the recommended model (qwen3:8b, about 5 GB)', sends: 'qwen3:8b' },
+        { name: 'Download this model', sends: null },
+      ]);
+      expect(said(doc)).toContain(
+        'It can call tools, which write-ups need, and fits a graphics card with 8 GB of memory.',
+      );
+      expect(said(doc)).not.toContain('nothing needs downloading');
+    }
+    // With write-ups on, nothing is recommended: the owner has chosen.
+    const on = draw({
+      model: 'beta:32b',
+      server: { models: [model('beta:32b', 'part', 'listed', 62)] },
+    });
+    expect(downloads(on).map((each) => each.name)).toEqual(['Download this model']);
+    // While a download runs there is no form at all, the recommended one included.
+    const running = draw({
+      server: { models: [] },
+      pull: { kind: 'running', completedBytes: 1, totalBytes: 2 },
+    });
+    expect(downloads(running)).toEqual([]);
+  });
+
+  it('offers a model already here that fits first, and no download (#2869, ADR 0086 D-4)', () => {
+    const items = (doc: Document) =>
+      [...doc.querySelectorAll('main ul.models > li')].map(
+        (item) => item.querySelector('code')?.textContent,
+      );
+    // Known to fit: loaded whole in the graphics card, and it can call tools.
+    const fits = draw({ server: { models: LISTED.slice(1).concat(LISTED[0] ?? []) } });
+    expect(said(fits)).toContain(
+      'A model already on this computer can run write-ups, so nothing needs downloading. It is first in the list below.',
+    );
+    expect(items(fits)).toEqual(['alpha:14b', 'beta:32b', 'gamma:26b', 'delta:8b', 'epsilon:4b']);
+    expect(fits.querySelector('main ul.models > li form button')?.textContent).toBe(
+      'Use alpha:14b',
+    );
+    expect(downloads(fits).map((each) => each.name)).toEqual(['Download this model']);
+    // The recommended model, already downloaded and not yet loaded, is offered on its choice alone.
+    const here = draw({
+      server: {
+        models: [model('beta:32b', 'part', 'listed', 62), model('qwen3:8b', 'not-loaded')],
+      },
+    });
+    expect(items(here)).toEqual(['qwen3:8b', 'beta:32b']);
+    expect(downloads(here).map((each) => each.name)).toEqual(['Download this model']);
+    // A model that cannot call tools is never the one offered, however well it fits.
+    const noTools = draw({ server: { models: [model('zeta:7b', 'all', 'not-listed')] } });
+    expect(said(noTools)).not.toContain('nothing needs downloading');
+    expect(downloads(noTools)[0]?.sends).toBe('qwen3:8b');
   });
 
   it('draws a download as numbers and fixed words, with no form for a second while one runs', () => {
