@@ -210,6 +210,15 @@ export const EVENT_KEYS: ReadonlyMap<
         typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]{8,12}Z$/.test(value),
     },
   ],
+  // #2855: the instance's address is still the template's example, and
+  // where the page that says what to set is. Never the address it was given.
+  [
+    'example-address',
+    {
+      open: (value) =>
+        typeof value === 'string' && /^http:\/\/localhost:[0-9]{1,5}\/setup$/.test(value),
+    },
+  ],
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */

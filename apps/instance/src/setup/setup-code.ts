@@ -40,6 +40,14 @@ export const SETUP_CODE_LIFETIME_SECONDS = ADMIN_CODE_LIFETIME_SECONDS;
 /** The log event that says where the code is (`log.ts` §`EVENT_KEYS`). */
 export const SETUP_LOG_EVENT = 'first-run-setup';
 
+/**
+ * The log event for an instance whose address is still the settings
+ * template's example (#2855), with where the page that says what to set is,
+ * when the setup's listener serves it. Written in place of
+ * {@link SETUP_LOG_EVENT}: no code is made. Never the address itself.
+ */
+export const EXAMPLE_ADDRESS_LOG_EVENT = 'example-address';
+
 /** The setup page's address on the loopback listener (ADR 0080 D-1: `localhost`, never `127.0.0.1`). */
 export const setupAddress = (port: number): string => `http://localhost:${String(port)}/setup`;
 

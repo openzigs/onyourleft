@@ -1113,6 +1113,15 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
   8788 in the home deployment), **with the admin pages on or off**. Type `localhost`, not `127.0.0.1`:
   any other address is told which one to open. Through the tunnel or the tailnet every `/setup` path is
   `not_found`, as a path with no route is.
+- **Not while the address is the template's example**
+  ([#2855](https://github.com/openzigs/onyourleft/issues/2855)): an `OYL_INSTANCE_ORIGIN` still on
+  `your-tailnet.ts.net`, as `instance.env.example` ships it, has the right shape, so the instance
+  starts. It is then run as an instance with **no** address: no accounts, and no keys, card or
+  emergency kit made for a name that is not its own (the keys are bound to the origin, so keys made
+  for the example would not open once it is corrected). Every `/setup` address answers one page,
+  *Set this server's address first*, with no box for a code; no setup code is made, and the log says
+  `{"event":"example-address","open":"http://localhost:8788/setup"}`, never the address. Set the
+  origin and start the instance again.
 - **The setup code**: the instance makes one at **every start** while the setup is open and writes it
   to the file `setup-code` in the secrets folder beside `compose.yaml` (`OYL_INSTANCE_SECRETS_DIR`),
   owner-only. The log says where it is, never what it is:
@@ -1130,6 +1139,12 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
 - **The steps**, each of which the operator log records from the source `setup`, naming no athlete:
   1. **Claim** — a claim code as a QR with the instance card, the tablet's claim, and the six digits
      compared on both screens ([Claiming the instance from the app](#claiming-the-instance-from-the-app)).
+     Before the code is shown, and beside it, the step names the address the tablet will use
+     (`OYL_INSTANCE_ORIGIN`) and says what the tablet needs first: on `OYL_INSTANCE_REMOTE_PATH=tailnet`
+     (or, with no path named, a `ts.net` address) the Tailscale app, signed in and on; otherwise, to be
+     online. It gives `<origin>/health` to open in the tablet's browser as the check. On the
+     `cloudflare` path with `OYL_INSTANCE_TUNNEL_READY_URL` set it also says whether the tunnel is
+     connected, asked as Status asks it; on a tailnet the instance cannot tell, and says nothing (#2855).
      Until a tablet scans it the step keeps showing the **same** QR, with an *I’ve scanned it* button
      that loads the step again; no setup page reloads itself (WCAG 2.2.1), so the code beside the QR
      stays selectable. The code is held in the instance's memory for the session that asked for it,

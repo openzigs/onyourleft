@@ -20,6 +20,11 @@
  * - **At `http://localhost:<port>` only**: a passkey's RP ID cannot be an IP
  *   address, and the `Host` check is exact (DNS rebinding), so any other host
  *   — `127.0.0.1:<port>` among them — is told which address to open.
+ * - **Not while the instance's address is the template's example** (#2855):
+ *   `instance.ts` then serves {@link createExampleAddressSetup} here instead,
+ *   whose every page says what to set, with no form — so no code is typed, no
+ *   session is opened and no claim code, invite or kit is drawn for an address
+ *   that is not this instance's.
  *
  * ## The setup session (D-2)
  *
@@ -50,7 +55,7 @@
  * `pages.ts` for ADR 0080's own exceptions).
  */
 
-import type { SetupSummary } from '@onyourleft/operate-text';
+import { reachPathOf, type SetupSummary } from '@onyourleft/operate-text';
 
 import { randomToken, sha256Hex } from '../auth/crypto.ts';
 import { adminCodeSha256 } from '../admin/code.ts';
@@ -63,9 +68,10 @@ import {
   sweepPeriodMs,
   type RateLimit,
 } from '../auth/rate-limit.ts';
-import { REGISTRATION_MODES, type RegistrationMode } from '../config.ts';
+import { REGISTRATION_MODES, type RegistrationMode, type RemotePath } from '../config.ts';
 import type { InstanceKeys } from '../keys/instance-keys.ts';
 import { keysView } from '../operate/operate.ts';
+import type { TunnelState } from '../operate/status.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
   BackupRequestOutcome,
@@ -78,6 +84,7 @@ import { emergencyKitText, EMERGENCY_KIT_FILE_NAME } from './emergency-kit.ts';
 import {
   backupsBody,
   claimBody,
+  exampleAddressPage,
   finishBody,
   FINISHED_PAGE_STYLE,
   finishedPage,
@@ -92,6 +99,7 @@ import {
   wrongAddressPage,
   type ClaimView,
   type InviteView,
+  type ReachView,
   type SetupFrame,
 } from './pages.ts';
 import type { SecretFromFile } from './secrets.ts';
@@ -132,6 +140,14 @@ export interface SetupOptions {
   readonly port: number;
   /** `OYL_INSTANCE_ORIGIN`: what the emergency kit and the card are bound to. */
   readonly origin: string;
+  /** `OYL_INSTANCE_REMOTE_PATH` (#2855): which sentences say what a device needs first. */
+  readonly remotePath: RemotePath | null;
+  /**
+   * The tunnel's readiness, as Status asks it (`operate/status.ts`
+   * §`tunnelReadiness`): the one thing this computer can check of the way in
+   * (#2855). Asked only on the `cloudflare` path, and only by the claim step.
+   */
+  readonly tunnel?: () => Promise<TunnelState>;
   /** What the operator calls the instance, or `null`. */
   readonly name: string | null;
   /** `OYL_INSTANCE_OWNER_KEY` is set: the setup is done from the first start (ADR 0080 D-3, D-7). */
@@ -265,6 +281,40 @@ interface ShownClaim {
   readonly expiresAt: number;
 }
 
+/**
+ * **The setup while the instance's address is still the template's example**
+ * (#2855): the same addresses on the same loopback listener, and every one of
+ * them answers the page that says what to set. It takes no code, reads no
+ * body and no cookie, opens no session and touches no store — `instance.ts`
+ * runs such an instance as one with NO address, so it has made no keys, no
+ * card and no kit for the example either. Setting the address and starting
+ * again is the whole way out, and then {@link createSetup} serves these paths.
+ */
+export function createExampleAddressSetup(options: {
+  readonly port: number;
+  readonly name: string | null;
+}): Setup {
+  const host = `localhost:${String(options.port)}`;
+  return {
+    handle(request) {
+      // The same address rule as the setup itself (D-1): one host, told to any other.
+      if (request.headers.get('host') !== host) {
+        return Promise.resolve(page(wrongAddressPage(setupAddress(options.port)), 421));
+      }
+      const route = new URL(request.url).pathname;
+      if (route === '/setup/setup.css' && request.method === 'GET') {
+        return Promise.resolve(
+          adminResponse(SETUP_STYLE, 200, { 'content-type': 'text/css; charset=utf-8' }),
+        );
+      }
+      return Promise.resolve(page(exampleAddressPage(options.name), 409));
+    },
+    flushRefusals: () => Promise.resolve(),
+    sweepRateLimits: () => undefined,
+    rateLimitSweepPeriodMs: 60_000,
+  };
+}
+
 export function createSetup(options: SetupOptions): Setup {
   const { store } = options;
   const limits = options.limits ?? DEFAULT_SETUP_LIMITS;
@@ -300,6 +350,31 @@ export function createSetup(options: SetupOptions): Setup {
     if (options.instanceKeys === undefined) return null;
     const shown = await keysView(options.instanceKeys);
     return shown.card ?? null;
+  }
+
+  /** How a device gets to this server: the operator's word, else the address's (#2855). */
+  const reachPath = reachPathOf(options.remotePath, options.origin);
+
+  /**
+   * The claim step's address and what the tablet needs first (#2855), with
+   * what this computer could check: the tunnel, on the tunnel's path alone. On
+   * a tailnet nothing here can see the owner's network, so nothing is claimed.
+   */
+  async function reachView(): Promise<ReachView> {
+    const tunnel =
+      options.remotePath === 'cloudflare' && options.tunnel !== undefined
+        ? await options.tunnel()
+        : undefined;
+    return {
+      origin: options.origin,
+      path: reachPath,
+      checked:
+        tunnel === undefined || tunnel.state === 'unknown'
+          ? null
+          : tunnel.state === 'ready'
+            ? 'connected'
+            : 'not-connected',
+    };
   }
 
   /** The owner's athlete, by the claimed key, or `undefined` before that device signs in. */
@@ -491,12 +566,14 @@ export function createSetup(options: SetupOptions): Setup {
         code: shown.code,
         expiresAt: iso(shown.expiresAt),
         secondsLeft: shown.expiresAt - at,
+        reach: await reachView(),
       };
     }
     return {
       kind: 'open',
       card: (await cardOf()) !== null,
       notConfirmed: url.searchParams.has('unconfirmed'),
+      reach: await reachView(),
     };
   }
 
@@ -508,7 +585,7 @@ export function createSetup(options: SetupOptions): Setup {
     if (((await store.setupState())?.inviteMintedAt ?? null) !== null) return { kind: 'taken' };
     if ((await ownerAthlete()) === undefined) return { kind: 'no-owner' };
     if ((await cardOf()) === null) return { kind: 'no-card' };
-    return { kind: 'offer', inviteMode: (await modeNow()) === 'invite' };
+    return { kind: 'offer', inviteMode: (await modeNow()) === 'invite', reach: reachPath };
   }
 
   /**
@@ -693,6 +770,7 @@ export function createSetup(options: SetupOptions): Setup {
           expiresAt: iso(expiresAt),
           secondsLeft: expiresAt - at,
           inviteMode: (await modeNow()) === 'invite',
+          reach: reachPath,
         };
         return page(stepPage(frame, inviteBody(view, frame.csrf), { next: true }), 200);
       }

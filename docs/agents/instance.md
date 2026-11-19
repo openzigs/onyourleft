@@ -299,6 +299,12 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         registration mode is now `identity.registrationMode()`
                         (the database's over `.env`'s), never
                         `config.registration`, wherever a rider meets it.
+                        ⚠️ Since #2855 an `OYL_INSTANCE_ORIGIN` still on the
+                        template's example (`server-config.ts`
+                        §`isTemplateOrigin`) is run as NO origin — no
+                        accounts, no keys (the wrap binds the origin) — and
+                        `/setup` answers one page saying what to set
+                        (`createExampleAddressSetup`), taking no code.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

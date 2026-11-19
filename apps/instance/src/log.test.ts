@@ -288,6 +288,20 @@ describe('which written lines are problems (#2614)', () => {
   });
 });
 
+describe('the line for an address that is still the template’s example (#2855)', () => {
+  it('keeps where the page that says what to set is, and never an address it was given', () => {
+    const line = { event: 'example-address', open: 'http://localhost:8788/setup' };
+    expect(redacted(line)).toEqual(line);
+    expect(
+      redacted({
+        event: 'example-address',
+        open: 'https://onyourleft.your-tailnet.ts.net/setup',
+        origin: 'https://onyourleft.your-tailnet.ts.net',
+      }),
+    ).toEqual({ event: 'example-address', open: REDACTED, origin: REDACTED });
+  });
+});
+
 describe('the first-run setup’s start line (#2784, ADR 0080 D-2)', () => {
   it('keeps where the setup is, where its code is and when it ends, and nothing else of any shape', () => {
     expect(
