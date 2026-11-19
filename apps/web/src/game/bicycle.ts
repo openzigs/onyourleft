@@ -216,7 +216,7 @@
  *   {@link advanceCrank} settles for the rider.
  */
 
-import type { KitColour } from '@onyourleft/store';
+import type { KitColour, RiderBody } from '@onyourleft/store';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 import type { SensorReading } from './hud/fields';
@@ -1092,6 +1092,71 @@ export const RIDER_UPPER_BODY_PARTS: readonly RiderPart[] = [
     z: HELMET_Z,
   }),
 ];
+
+/**
+ * The stylised FEMALE rider's upper body — #2839, the owner's ruling of
+ * 2026-11-18 that the stylised world's rider gets a female shape too.
+ *
+ * The same three solids as {@link RIDER_UPPER_BODY_PARTS}, in the same kit
+ * roles, and one more: narrower across the shoulders (the arms start
+ * {@link FEMALE_SHOULDER_ACROSS} from the bicycle's plane where the other
+ * rider's start {@link SHOULDER_ACROSS}), a slimmer arm and torso, and a
+ * ponytail from under the helmet, lying back along the upper back. At eight
+ * metres behind, on a phone, a rider is a helmet, a back and two arms, so the
+ * outline of exactly those is what can differ; the hips, the legs, the
+ * helmet's place and the hands on the bar are the other rider's, so the legs
+ * (`legBones`), the bars and the camera need no second set of numbers.
+ *
+ * ⚠️ **No taller and no wider than the other rider**: `RIDER_HEIGHT_METRES`
+ * and `RIDER_HALF_WIDTH_METRES` bound both, which `bicycle.test.ts` §"#2839"
+ * holds, so nothing sized from them (the name tags, the camera, a lane) needs
+ * to know which is drawn. The ponytail wears the kit's darker `limb` colour,
+ * as the helmet does — for {@link RIDER_PALETTE}'s reason, no hair colour is
+ * chosen here any more than a skin tone is.
+ */
+const FEMALE_SHOULDER_ACROSS = 0.135;
+export const RIDER_UPPER_BODY_PARTS_FEMALE: readonly RiderPart[] = [
+  ...[-1, 1].map((side) =>
+    steering(
+      tube(
+        `arm ${side}`,
+        RIDER_PALETTE.jersey,
+        0.027,
+        { x: side * FEMALE_SHOULDER_ACROSS, y: SHOULDER_Y, z: SHOULDER_Z },
+        { y: GRIP_Y, z: GRIP_Z },
+      ),
+      'toward-end',
+    ),
+  ),
+  part(
+    'torso',
+    { shape: 'box', width: 0.28, height: TORSO_SPAN.length, depth: 0.19 },
+    RIDER_PALETTE.jersey,
+    { y: TORSO_SPAN.y, z: TORSO_SPAN.z },
+    { pitch: TORSO_SPAN.pitch },
+  ),
+  part('helmet', { shape: 'ball', radius: HELMET_RADIUS }, RIDER_PALETTE.limb, {
+    y: HELMET_Y,
+    z: HELMET_Z,
+  }),
+  // From inside the back of the helmet to a hand's breadth down the back.
+  tube(
+    'ponytail',
+    RIDER_PALETTE.limb,
+    0.03,
+    { y: HELMET_Y - 0.01, z: HELMET_Z - HELMET_RADIUS + 0.02 },
+    { y: SHOULDER_Y + 0.03, z: SHOULDER_Z - 0.17 },
+  ),
+];
+
+/**
+ * The stylised upper body each {@link RiderBody} is drawn with — #2839. A
+ * `Record`, so a body the store accepts with no shape here is a compile error.
+ */
+export const RIDER_UPPER_BODY_PARTS_BY_BODY: Readonly<Record<RiderBody, readonly RiderPart[]>> = {
+  female: RIDER_UPPER_BODY_PARTS_FEMALE,
+  male: RIDER_UPPER_BODY_PARTS,
+};
 
 /**
  * The bicycle and the body together: everything that does not turn with the

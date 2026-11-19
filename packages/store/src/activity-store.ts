@@ -169,6 +169,7 @@ import type {
 } from './records';
 import { isBirthYear, parseCalorieSex, WORLD_CORRIDOR_FEATURES_LIMIT_BYTES } from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
+import { parseRiderBody, type RiderBody } from './rider-body';
 import { parseMaskedWords } from '@onyourleft/analysis';
 import { MAXIMUM_RIDER_DOCUMENTS, riderTextProblem, tidyRiderText } from './rider-text';
 import type { UnitSystem } from './unit-system';
@@ -834,6 +835,40 @@ export class ActivityStore {
       const updated: AthleteRecord = {
         ...fromPersistedAthlete(row),
         kitColour: parseKitColour(kitColour),
+      };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
+    });
+  }
+
+  /**
+   * Replaces which rider the trainer game draws for the athlete, leaving every
+   * other field alone (#2839) — `calorieSex` among them, which this never
+   * reads and never writes (`rider-body.ts`).
+   *
+   * Shaped like {@link setAthleteKitColour}, for its reasons: one of a closed
+   * set, so there is no "clear it" case, and the value goes through
+   * `parseRiderBody` on its way in as well as on its way out, so a caller that
+   * got past the type with a cast writes the default rather than what it was
+   * handed.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error, for {@link setAthleteThresholds}' reason.
+   */
+  async setAthleteRiderBody(
+    id: AthleteId,
+    riderBody: RiderBody,
+  ): Promise<AthleteRecord | undefined> {
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      const updated: AthleteRecord = {
+        ...fromPersistedAthlete(row),
+        riderBody: parseRiderBody(riderBody),
       };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;

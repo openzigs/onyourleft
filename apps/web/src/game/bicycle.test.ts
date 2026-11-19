@@ -52,6 +52,10 @@ import {
   legBones,
   riderJoints,
   RIDER_HALF_WIDTH_METRES,
+  RIDER_HEIGHT_METRES,
+  RIDER_UPPER_BODY_PARTS,
+  RIDER_UPPER_BODY_PARTS_BY_BODY,
+  RIDER_UPPER_BODY_PARTS_FEMALE,
   MAXIMUM_CRANK_STEP_SECONDS,
   RIDER_BODY_PARTS,
   RIDER_CRANK_PARTS,
@@ -1578,5 +1582,68 @@ describe('the bars turn about the head tube — #2494', () => {
     expect(back.x).toBeCloseTo(tip.x, 12);
     expect(back.y).toBeCloseTo(tip.y, 12);
     expect(back.z).toBeCloseTo(tip.z, 12);
+  });
+});
+
+describe('#2839 — the stylised rider has a female shape too', () => {
+  const female = RIDER_UPPER_BODY_PARTS_FEMALE;
+  const male = RIDER_UPPER_BODY_PARTS;
+  const named = (parts: readonly RiderPart[], name: string): RiderPart => {
+    const found = parts.find((each) => each.name === name);
+    if (found === undefined) throw new Error(`no part ${name}`);
+    return found;
+  };
+
+  it('is a shape for each body the store names, and they are two shapes', () => {
+    expect(RIDER_UPPER_BODY_PARTS_BY_BODY.female).toBe(female);
+    expect(RIDER_UPPER_BODY_PARTS_BY_BODY.male).toBe(male);
+    expect(female).not.toEqual(male);
+  });
+
+  it('is narrower across the shoulders, slimmer, and wears a ponytail the other does not', () => {
+    const shoulder = (parts: readonly RiderPart[]): number =>
+      Math.max(...parts.filter((each) => each.name.startsWith('arm ')).map((arm) => arm.x));
+    expect(shoulder(female)).toBeLessThan(shoulder(male));
+    const width = (parts: readonly RiderPart[]): number =>
+      (named(parts, 'torso').solid as { readonly width: number }).width;
+    expect(width(female)).toBeLessThan(width(male));
+    expect(male.some((each) => each.name === 'ponytail')).toBe(false);
+    const ponytail = named(female, 'ponytail');
+    // It hangs BEHIND the helmet and below its top: seen from the chase camera.
+    const helmet = named(female, 'helmet');
+    expect(ponytail.z).toBeLessThan(helmet.z);
+    expect(ponytail.y).toBeLessThan(helmet.y);
+  });
+
+  it('is no taller and no wider than the other rider, so nothing sized from a rider changes', () => {
+    for (const each of female) {
+      expect(each.y + reachOf(each.solid), each.name).toBeLessThanOrEqual(
+        RIDER_HEIGHT_METRES + 1e-9,
+      );
+      for (const point of centreline(each)) {
+        expect(Math.abs(point.x), each.name).toBeLessThanOrEqual(RIDER_HALF_WIDTH_METRES);
+      }
+    }
+  });
+
+  it('keeps the helmet, the hips and the hands where the other rider has them', () => {
+    expect(named(female, 'helmet')).toEqual(named(male, 'helmet'));
+    const arms = female.filter((each) => each.name.startsWith('arm '));
+    expect(arms).toHaveLength(2);
+    for (const arm of arms) {
+      // The hand turns with the bar, as the other rider's does (#2494).
+      expect(arm.steers).toBe('toward-end');
+      const lowest = centreline(arm).reduce((a, b) => (a.y < b.y ? a : b));
+      expect(distanceToBar(lowest, Math.sign(arm.x) as 1 | -1)).toBeLessThan(0.05);
+    }
+    expect(named(female, 'torso').y).toBe(named(male, 'torso').y);
+    expect(named(female, 'torso').z).toBe(named(male, 'torso').z);
+  });
+
+  it('wears the kit in the same roles: a jersey and the darker limb colour, and no third colour', () => {
+    expect(new Set(female.map((each) => each.colour))).toEqual(
+      new Set([RIDER_PALETTE.jersey, RIDER_PALETTE.limb]),
+    );
+    expect(named(female, 'ponytail').colour).toBe(RIDER_PALETTE.limb);
   });
 });

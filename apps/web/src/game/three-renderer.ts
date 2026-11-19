@@ -391,6 +391,7 @@ import {
   LIMB_RADIUS_METRES,
   RIDER_BICYCLE_PARTS,
   RIDER_UPPER_BODY_PARTS,
+  RIDER_UPPER_BODY_PARTS_FEMALE,
   UPPER_BODY_PIVOT,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
@@ -656,6 +657,7 @@ import {
   type RiderFade,
   type RiderFadeLine,
 } from './rider-fade';
+import { riderBodyFor } from './rider-body';
 import {
   directionalFogColour,
   drawnHorizonColour,
@@ -3320,8 +3322,20 @@ export class RiderBelt {
   readonly #bodies: InstancedMesh;
   /** The upper bodies, rolled against the bicycle about the hips — #546. */
   readonly #torsos: InstancedMesh;
+  /**
+   * The female rider's upper body — #2839, `bicycle.ts`
+   * §`RIDER_UPPER_BODY_PARTS_FEMALE`. The same slots as {@link #torsos}: a
+   * rider is drawn in ONE of the two and stood at no size in the other, so
+   * every per-slot channel (kit, tint, fade, steer) is written to both alike
+   * and nothing else here knows which body a slot wears. ⚠️ Not drawn at all
+   * — `visible` false, so no draw call — in a frame with no female rider,
+   * which is every frame before #2839.
+   */
+  readonly #femaleTorsos: InstancedMesh;
   readonly #cranksets: InstancedMesh;
   readonly #limbs: InstancedMesh;
+  /** A matrix that draws nothing: a slot's upper body in the mesh it does not wear. */
+  readonly #nowhere = new Matrix4().makeScale(0, 0, 0);
 
   /**
    * What each occupied slot's legs were last solved *for*: five numbers a slot,
@@ -3393,6 +3407,10 @@ export class RiderBelt {
       new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS), this.#materials.lit, riders),
       riders,
     );
+    this.#femaleTorsos = riderInstanceChannels(
+      new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS_FEMALE), this.#materials.lit, riders),
+      riders,
+    );
     this.#cranksets = riderInstanceChannels(
       new InstancedMesh(mergedParts(RIDER_CRANK_PARTS), this.#materials.lit, riders),
       riders,
@@ -3401,7 +3419,7 @@ export class RiderBelt {
       new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT),
       riders * LEG_BONE_COUNT,
     );
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
+    for (const mesh of this.#all()) {
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
       // ⚠️ **Allocates `instanceColor` while `count` is still the capacity**,
       // because three sizes that buffer from `count` at the moment it is first
@@ -3444,6 +3462,11 @@ export class RiderBelt {
    * submission, so the pass draws the first {@link #casters} riders and the
    * picture draws them all.
    */
+  /** Every mesh a rider is drawn with, the female upper body included (#2839). */
+  #all(): readonly InstancedMesh[] {
+    return [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets, this.#limbs];
+  }
+
   #castersOnly(mesh: InstancedMesh, perRider: number): void {
     let drawn = 0;
     mesh.onBeforeShadow = () => {
@@ -3473,12 +3496,14 @@ export class RiderBelt {
   get meshes(): {
     readonly bodies: InstancedMesh;
     readonly torsos: InstancedMesh;
+    readonly femaleTorsos: InstancedMesh;
     readonly cranksets: InstancedMesh;
     readonly limbs: InstancedMesh;
   } {
     return {
       bodies: this.#bodies,
       torsos: this.#torsos,
+      femaleTorsos: this.#femaleTorsos,
       cranksets: this.#cranksets,
       limbs: this.#limbs,
     };
@@ -3514,7 +3539,9 @@ export class RiderBelt {
       .sort(
         (a, b) => Number(!CASTS_CONTACT_SHADOW[a.kind]) - Number(!CASTS_CONTACT_SHADOW[b.kind]),
       );
-    const layout = drawn.map((marker) => marker.kind).join(',');
+    // #2839: a slot's body is part of what it holds, so a rider who takes
+    // another's slot in a different body is posed afresh.
+    const layout = drawn.map((marker) => `${marker.kind}/${riderBodyFor(marker.body)}`).join(',');
     if (layout !== this.#layout) {
       this.#layout = layout;
       this.#posed.fill(Number.NaN);
@@ -3522,10 +3549,12 @@ export class RiderBelt {
     let slot = 0;
     let casters = 0;
     let posed = false;
+    let female = 0;
     for (const marker of drawn) {
       if (slot >= STYLISED_RIDER_SLOTS) {
         break;
       }
+      if (riderBodyFor(marker.body) === 'female') female += 1;
       posed = this.#placeOne(slot, marker) || posed;
       this.#fadeOne(slot, riderFaded(marker, fade));
       slot += 1;
@@ -3534,13 +3563,17 @@ export class RiderBelt {
       }
     }
     this.#casters = casters;
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets]) {
       mesh.count = slot;
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor !== null) {
         mesh.instanceColor.needsUpdate = true;
       }
     }
+    // #2839: one draw call for a body that is on the road, and none for one
+    // that is not — so a field all of one body costs what it did.
+    this.#femaleTorsos.visible = female > 0;
+    this.#torsos.visible = female < slot;
     this.#limbs.count = slot * LEG_BONE_COUNT;
     // ⚠️ **Only when a leg actually moved, which is what makes the skip a
     // saving.** Without the flag the matrices are re-uploaded on every frame of
@@ -3588,10 +3621,7 @@ export class RiderBelt {
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     const material = this.#materials[shading];
-    this.#bodies.material = material;
-    this.#torsos.material = material;
-    this.#cranksets.material = material;
-    this.#limbs.material = material;
+    for (const mesh of this.#all()) mesh.material = material;
   }
 
   /**
@@ -3600,7 +3630,7 @@ export class RiderBelt {
    * and self-shadowing is a second shadow pass over the same four meshes.
    */
   setCasting(on: boolean): void {
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
+    for (const mesh of this.#all()) {
       mesh.castShadow = on;
     }
   }
@@ -3612,7 +3642,7 @@ export class RiderBelt {
   }
 
   dispose(): void {
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets, this.#limbs]) {
+    for (const mesh of this.#all()) {
       mesh.geometry.dispose();
       mesh.dispose();
     }
@@ -3653,10 +3683,13 @@ export class RiderBelt {
     // #2494: the bars, and the hands on them, turned by this rider's steer.
     steerInstance(this.#bodies, slot, marker.steer ?? 0);
     steerInstance(this.#torsos, slot, marker.steer ?? 0);
+    steerInstance(this.#femaleTorsos, slot, marker.steer ?? 0);
     // #623: the kit this kind wears, under the tint. Written before the tint,
     // because `writeKit` borrows the same scratch colour.
     const kit = this.#kits[marker.kind];
-    for (const mesh of [this.#bodies, this.#torsos]) writeKit(mesh, slot, kit, this.#tint);
+    for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos]) {
+      writeKit(mesh, slot, kit, this.#tint);
+    }
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
       writeKit(this.#limbs, slot * LEG_BONE_COUNT + bone, kit, this.#tint);
     }
@@ -3671,8 +3704,14 @@ export class RiderBelt {
     this.#local.compose(this.#position, this.#turn, this.#stretch);
     this.#matrix.makeTranslation(0, -UPPER_BODY_PIVOT.y, -UPPER_BODY_PIVOT.z);
     this.#local.multiply(this.#matrix);
-    this.#torsos.setMatrixAt(slot, this.#matrix.multiplyMatrices(this.#rider, this.#local));
+    // #2839: the upper body in the mesh of the body this rider is, and
+    // nothing in the other's.
+    const female = riderBodyFor(marker.body) === 'female';
+    this.#matrix.multiplyMatrices(this.#rider, this.#local);
+    this.#torsos.setMatrixAt(slot, female ? this.#nowhere : this.#matrix);
+    this.#femaleTorsos.setMatrixAt(slot, female ? this.#matrix : this.#nowhere);
     this.#torsos.setColorAt(slot, this.#tint);
+    this.#femaleTorsos.setColorAt(slot, this.#tint);
 
     // ⚠️ The crank geometry is written in the bottom bracket's own frame, so
     // the crankset is *mounted* at the axis and turns about its own origin.
@@ -3726,7 +3765,7 @@ export class RiderBelt {
 
   /** How much of the rider in `slot` is faded out, on every mesh it is drawn by — #2596. */
   #fadeOne(slot: number, faded: number): void {
-    for (const mesh of [this.#bodies, this.#torsos, this.#cranksets]) {
+    for (const mesh of [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets]) {
       fadeInstance(mesh, slot, faded);
     }
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
@@ -19451,12 +19490,13 @@ export function realisticBicycleTriangles(): number {
  */
 export function stylisedRiderTriangles(): number {
   const belt = new RiderBelt();
-  const { bodies, torsos, cranksets, limbs } = belt.meshes;
+  const { bodies, torsos, femaleTorsos, cranksets, limbs } = belt.meshes;
   const count = (geometry: BufferGeometry): number =>
     (geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3;
   const total =
     count(bodies.geometry) +
-    count(torsos.geometry) +
+    // #2839: a rider wears one upper body; the budget prices the heavier.
+    Math.max(count(torsos.geometry), count(femaleTorsos.geometry)) +
     count(cranksets.geometry) +
     count(limbs.geometry) * LEG_BONE_COUNT;
   belt.dispose();

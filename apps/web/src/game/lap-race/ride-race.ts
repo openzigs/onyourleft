@@ -122,6 +122,7 @@ import {
 import { botName, riderEntry, type LapRaceEntrant, type LapRaceHud } from '../hud/lap-race-hud';
 import { LANE_OFFSETS_METRES, sidewaysSpeedOf, type SteerIntent } from '../lanes';
 import type { LapRaceInView, RaceHitLook } from '../port';
+import { seededRiderBody } from '../rider-body';
 import type { RaceBotInput } from '../scene';
 
 import { assistedBotTier, assistedRaceSetup, assistedTick } from './assist';
@@ -743,6 +744,9 @@ export function lapRaceDrawing(
   const { race } = ride;
   const rider = riderEntry(race, LAP_RACE_RIDER_ID);
   const bots = new Map(ride.bots.map((bot) => [bot.id, bot]));
+  // #2839: each bot's place in the field as it was made, which no standings
+  // change moves — so a bot keeps one body for the whole race.
+  const fieldOrder = new Map(ride.bots.map((bot, index) => [bot.id, index]));
   const raceBots: RaceBotInput[] = [];
   for (const entry of race.racers) {
     const bot = bots.get(entry.racer.id);
@@ -775,6 +779,11 @@ export function lapRaceDrawing(
         place === undefined ? 0 : drawnSway(place, behindSeconds, LAP_RACE_TICK_SECONDS),
       laidOut: place !== undefined,
       ...(hit === undefined ? {} : { hit }),
+      // #2839: which rider it is drawn as, from the race's own seed and its
+      // place in the field, so a replay draws the same field. Drawing only:
+      // nothing a bot decides or rides reads it, so the bot-code version
+      // (ADR 0071 D-4.4) is as it was.
+      body: seededRiderBody(ride.seed, fieldOrder.get(bot.id) ?? 0),
     });
   }
   return {

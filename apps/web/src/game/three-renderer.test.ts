@@ -2711,7 +2711,10 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     const belt = new RiderBelt();
     const { bodies, torsos, cranksets, limbs } = belt.meshes;
 
-    expect(belt.group.children).toHaveLength(4);
+    // ⚠️ Five children since #2839 — the female rider's upper body is the
+    // fifth — and still FOUR drawn: it is not visible until a frame carries a
+    // female rider (§"#2839" below).
+    expect(belt.group.children).toHaveLength(5);
     expect(new Set([bodies, torsos, cranksets, limbs]).size).toBe(4);
     // One material across all four, which is what the vertex colours buy.
     expect(
@@ -2719,7 +2722,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     ).toBe(1);
     belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), riderAt({ z: 80 }, {}, 0, 'ghost')]);
     // …and still four after a frame carrying all three.
-    expect(belt.group.children).toHaveLength(4);
+    expect(belt.group.children.filter((mesh) => mesh.visible)).toHaveLength(4);
     belt.dispose();
   });
 
@@ -2730,13 +2733,102 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       riderAt({ z: 5 + index }, {}, 0, 'remote'),
     );
     belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), ...room]);
-    expect(belt.group.children).toHaveLength(4);
+    expect(belt.group.children.filter((mesh) => mesh.visible)).toHaveLength(4);
     const { bodies, torsos, cranksets, limbs } = belt.meshes;
     for (const mesh of [bodies, torsos, cranksets]) expect(mesh.count).toBe(2 + MAXIMUM_DRAWN_SET);
     expect(limbs.count).toBe((2 + MAXIMUM_DRAWN_SET) * LEG_BONE_COUNT);
     // A remote rider wears the blue kit untinted: told apart from the pacer.
     expect(tintOf(bodies, 2)).not.toEqual(tintOf(bodies, 1));
     belt.dispose();
+  });
+
+  describe('#2839 — the stylised rider has a female shape too', () => {
+    /** Whether a slot of a mesh is drawn at all: `RiderBelt` stands an unworn upper body at no size. */
+    function drawnAt(
+      mesh: { readonly instanceMatrix: { readonly array: ArrayLike<number> } },
+      slot: number,
+    ): boolean {
+      const m = mesh.instanceMatrix.array;
+      return Math.hypot(m[slot * 16] ?? 0, m[slot * 16 + 1] ?? 0, m[slot * 16 + 2] ?? 0) > 0;
+    }
+    const drawCalls = (belt: RiderBelt): number =>
+      belt.group.children.filter((mesh) => mesh.visible).length;
+
+    it('costs a field with no female rider nothing: four draw calls, as before', () => {
+      const belt = new RiderBelt();
+      belt.place([riderAt(), { ...riderAt({ z: 40 }, {}, 0, 'bot'), body: 'male' }]);
+
+      expect(belt.meshes.femaleTorsos.visible).toBe(false);
+      expect(drawCalls(belt)).toBe(4);
+      belt.dispose();
+    });
+
+    it('draws a female rider in the female upper body and nobody else in it', () => {
+      const belt = new RiderBelt();
+      belt.place([
+        { ...riderAt(), body: 'female' },
+        riderAt({ z: 40 }, {}, 0, 'bot'),
+        { ...riderAt({ z: 80 }, {}, 0, 'remote'), body: 'male' },
+      ]);
+      const { torsos, femaleTorsos } = belt.meshes;
+
+      expect(drawnAt(femaleTorsos, 0)).toBe(true);
+      expect(drawnAt(torsos, 0)).toBe(false);
+      for (const slot of [1, 2]) {
+        expect(drawnAt(femaleTorsos, slot), String(slot)).toBe(false);
+        expect(drawnAt(torsos, slot), String(slot)).toBe(true);
+      }
+      // A mixed field is ONE more draw call, whatever its size.
+      expect(drawCalls(belt)).toBe(5);
+      belt.dispose();
+    });
+
+    it('is four draw calls again for a field that is all female', () => {
+      const belt = new RiderBelt();
+      belt.place([
+        { ...riderAt(), body: 'female' },
+        { ...riderAt({ z: 40 }, {}, 0, 'bot'), body: 'female' },
+      ]);
+
+      expect(belt.meshes.torsos.visible).toBe(false);
+      expect(belt.meshes.femaleTorsos.visible).toBe(true);
+      expect(drawCalls(belt)).toBe(4);
+      belt.dispose();
+    });
+
+    it('draws a body it does not recognise as the default, never as the other', () => {
+      const belt = new RiderBelt();
+      belt.place([{ ...riderAt(), body: 'robot' as 'female' }]);
+
+      expect(drawnAt(belt.meshes.torsos, 0)).toBe(true);
+      expect(belt.meshes.femaleTorsos.visible).toBe(false);
+      belt.dispose();
+    });
+
+    it('follows a rider who changes body between frames, in the same slot', () => {
+      const belt = new RiderBelt();
+      belt.place([{ ...riderAt(), body: 'female' }]);
+      belt.place([riderAt()]);
+
+      expect(drawnAt(belt.meshes.torsos, 0)).toBe(true);
+      expect(drawnAt(belt.meshes.femaleTorsos, 0)).toBe(false);
+      expect(drawCalls(belt)).toBe(4);
+      belt.dispose();
+    });
+
+    it('dresses, steers and fades the female upper body as the other is', () => {
+      const belt = new RiderBelt();
+      const { torsos, femaleTorsos } = belt.meshes;
+      // The same material and the same per-instance channels, so the kit
+      // colour, the bars' steer and the camera's fade reach her too.
+      expect(femaleTorsos.material).toBe(torsos.material);
+      for (const name of Object.keys(torsos.geometry.attributes)) {
+        expect(femaleTorsos.geometry.getAttribute(name), name).toBeDefined();
+      }
+      belt.setCasting(true);
+      expect(femaleTorsos.castShadow).toBe(true);
+      belt.dispose();
+    });
   });
 
   it('draws the nearest remote riders realistically in the realistic world, the next stylised, and no more — #783', () => {
@@ -2979,8 +3071,8 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       expect(shader.vertexShader).toContain(STEERING_AXIS.direction.y.toFixed(9));
       expect(shader.vertexShader).toContain(STEERING_AXIS.point.z.toFixed(9));
     }
-    // No new mesh: the same four.
-    expect(belt.group.children).toHaveLength(4);
+    // No new mesh: the same four, and #2839's female upper body.
+    expect(belt.group.children).toHaveLength(5);
     belt.dispose();
   });
 
@@ -3114,7 +3206,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       for (const mesh of Object.values(belt.meshes)) {
         expect(mesh.geometry.getAttribute('oylRiderInstance').itemSize).toBe(2);
       }
-      expect(belt.group.children).toHaveLength(4);
+      expect(belt.group.children).toHaveLength(5);
       belt.dispose();
     });
   });

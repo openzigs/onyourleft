@@ -64,13 +64,17 @@ import { kilograms, type Kilograms } from '@onyourleft/domain';
 import {
   KIT_COLOURS,
   parseKitColour,
+  RIDER_BODIES,
   UNIT_SYSTEMS,
   type KitColour,
+  type RiderBody,
   type UnitSystem,
 } from '@onyourleft/store';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athlete/mass';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
+import type { AthleteRiderBodyPort } from '../athlete/rider-body-port';
+import { RIDER_BODY_NAMES, riderBodyFor } from '../game/rider-body';
 import {
   MASKED_WORDS_CAVEAT,
   MASKED_WORDS_LEAD,
@@ -394,6 +398,32 @@ export function kitSaveFailure(reason: string): string {
 export const KIT_NO_ATHLETE =
   'there is no athlete row on this device to save it against, so nothing was written';
 
+/** Said when which rider is drawn has been written and read back — #2839. */
+export const RIDER_BODY_SAVED = 'Saved. This is your rider from your next ride.';
+
+/**
+ * Said when there is nothing to write the choice to — #2839. The control is
+ * absent, for {@link KIT_NO_STORE}'s reason, and the rider is told which rider
+ * they are drawn as.
+ */
+export const RIDER_BODY_NO_STORE =
+  'This browser has no local store, so a rider chosen here would be forgotten as soon as the ' +
+  'page reloaded. You are drawn as the male rider.';
+
+/**
+ * What the choice is and is not, said in Your rider's help — #2839. ⚠️ Draft
+ * wording awaiting the owner's approval: the second sentence is the owner's
+ * ruling of 2026-11-18, that how you look never touches a health input.
+ */
+export const RIDER_BODY_IS_A_LOOK =
+  'This is only how your rider is drawn. It is separate from the sex you can give for the ' +
+  'calorie estimate, and neither changes the other.';
+
+/** Said when the write failed — {@link kitSaveFailure}'s shape. */
+export function riderBodySaveFailure(reason: string): string {
+  return `That could not be saved, so your rider is the one you had: ${reason}`;
+}
+
 export interface SettingsViewProps {
   /** `undefined` where this browser has no local store — see {@link UNITS_NO_STORE}. */
   readonly port?: UnitsPort | undefined;
@@ -445,6 +475,12 @@ export interface SettingsViewProps {
    * {@link SettingsViewProps.onUnitsChange}'s reason.
    */
   readonly onKitColourChange?: ((kitColour: KitColour | undefined) => void) | undefined;
+  /** Which rider is drawn: its write (#2839). `undefined` where this browser has no local store — see {@link RIDER_BODY_NO_STORE}. */
+  readonly rider?: AthleteRiderBodyPort | undefined;
+  /** The rider's choice, or `undefined` where they have never chosen — shown as the default, which is what they are drawn as. */
+  readonly riderBody?: RiderBody | undefined;
+  /** Told when the choice should be drawn: only after the store has answered with a written row, for {@link onKitColourChange}'s reason. */
+  readonly onRiderBodyChange?: ((riderBody: RiderBody | undefined) => void) | undefined;
   /**
    * `navigator.storage`, for the panel that says whether this browser may throw
    * a rider's history away (#409).
@@ -526,6 +562,9 @@ export function SettingsView({
   kit,
   kitColour,
   onKitColourChange,
+  rider,
+  riderBody,
+  onRiderBodyChange,
   storage,
   announcements,
   basemap,
@@ -687,6 +726,13 @@ export function SettingsView({
 
         {/* #2432. Beside the weight: the heart-rate calorie estimate needs all three. */}
         <CalorieInputsPanel port={calorieInputs} riderMass={riderMass} />
+
+        {/* #2839. Which rider is drawn, beside the kit they wear: both are how the rider looks. */}
+        <RiderBodyPanel
+          {...(rider === undefined ? {} : { port: rider })}
+          {...(riderBody === undefined ? {} : { riderBody })}
+          {...(onRiderBodyChange === undefined ? {} : { onRiderBodyChange })}
+        />
 
         {/* #623. Beside the weight: both are about the rider, and both are kept on the athlete. */}
         <KitPanel
@@ -2872,6 +2918,111 @@ function KitPanel({
         </StatusMessage>
       ) : (
         <KitChoice current={current} choose={choose} />
+      )}
+
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Which rider the trainer game draws — #2839, the owner's ruling of
+ * 2026-11-18: Female or Male, beside the kit colour.
+ *
+ * ⚠️ **How the rider looks, and never a health input.** This panel is handed
+ * {@link AthleteRiderBodyPort}, which cannot reach `calorieSex`; the calorie
+ * estimate's own panel (`CalorieInputsPanel`) is handed a different port and
+ * cannot reach this. Neither reads the other's value to pre-select its own.
+ *
+ * Two options, so #668's segmented control: native radios in a `fieldset`
+ * whose `legend` is the question. The current choice is always selected — the
+ * default for a rider who never chose, which is the rider they are drawn as
+ * (ADR 0020 D-3: a default the rider can see).
+ */
+function RiderBodyPanel({
+  port,
+  riderBody,
+  onRiderBodyChange,
+}: {
+  readonly port?: AthleteRiderBodyPort | undefined;
+  readonly riderBody?: RiderBody | undefined;
+  readonly onRiderBodyChange?: ((riderBody: RiderBody | undefined) => void) | undefined;
+}): JSX.Element {
+  // What is shown as chosen: the same answer the renderer draws.
+  const current = riderBodyFor(riderBody);
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  async function choose(chosen: RiderBody): Promise<void> {
+    if (port === undefined || chosen === current) {
+      return;
+    }
+    try {
+      // ⚠️ The return is read, not discarded — see {@link KIT_NO_ATHLETE}.
+      const saved = await port.store.setAthleteRiderBody(port.athleteId, chosen);
+      if (saved === undefined) {
+        setMessage({ tone: 'danger', text: riderBodySaveFailure(KIT_NO_ATHLETE) });
+        return;
+      }
+      // What landed, not what was asked for: the store writes one of two words.
+      onRiderBodyChange?.(saved.riderBody);
+      setMessage({ tone: 'success', text: RIDER_BODY_SAVED });
+    } catch (error: unknown) {
+      setMessage({
+        tone: 'danger',
+        text: riderBodySaveFailure(error instanceof Error ? error.message : String(error)),
+      });
+    }
+  }
+
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-rider-body-heading">
+      {/* #1031: the help is offered only where the choice is, as Your kit's is. */}
+      {port === undefined ? (
+        <h3 id="oyl-rider-body-heading">Your rider</h3>
+      ) : (
+        <SectionHeading
+          level={3}
+          id="oyl-rider-body-heading"
+          help={
+            <>
+              <p className="oyl-muted">{RIDER_BODY_IS_A_LOOK}</p>
+              <p className="oyl-muted">{KIT_KEPT}</p>
+            </>
+          }
+        >
+          Your rider
+        </SectionHeading>
+      )}
+      {/* Absent rather than disabled where there is nothing to write to — the kit's rule. */}
+      {port === undefined ? (
+        <StatusMessage tone="warning" label="No local store">
+          {RIDER_BODY_NO_STORE}
+        </StatusMessage>
+      ) : (
+        <fieldset className="oyl-segmented">
+          <legend>Which rider are you in the trainer game?</legend>
+          <div className="oyl-segmented__options">
+            {RIDER_BODIES.map((option) => (
+              <label key={option} htmlFor={`oyl-rider-body-${option}`}>
+                <input
+                  type="radio"
+                  id={`oyl-rider-body-${option}`}
+                  name="oyl-rider-body"
+                  value={option}
+                  checked={current === option}
+                  onChange={() => {
+                    void choose(option);
+                  }}
+                />{' '}
+                {RIDER_BODY_NAMES[option]}
+              </label>
+            ))}
+          </div>
+        </fieldset>
       )}
 
       {message === undefined ? null : (
