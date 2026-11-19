@@ -2145,14 +2145,14 @@ function AiPacerControls(props: { readonly control: AiPacerControl }): JSX.Eleme
   );
 }
 
-/** The AI pacer's words on the chooser — #2712. Draft wording, for the owner's screenshots. */
+/** The AI pacer's words on the chooser — #2712; the switch and the consented line are the owner's of ADR 0083 R-7. */
 const AI_PACER_TEXT = {
-  switch: 'Let the AI on your instance steer the pacer and cheer you on',
+  switch: 'Let the AI on your server coach you through the pacer',
   asking: 'Asking your instance…',
   unavailable: 'Your instance could not be reached. The pacer rides as usual.',
   notOffered: 'Your instance offers you no AI model now. The pacer rides as usual.',
   consented:
-    'The AI will steer the pacer on this ride. Write-ups on your instance wait until the ride ends.',
+    'The AI will coach you on this ride. Write-ups on your instance wait until the ride ends.',
   consent: 'Allow the AI pacer',
   withdraw: 'Withdraw consent',
 } as const;

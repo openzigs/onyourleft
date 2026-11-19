@@ -320,7 +320,7 @@ async function rideAndSave(): Promise<Ridden> {
   await press(toggle('Ride in a wind'));
   await typeInto(labelledStarting('Wind speed'), WIND_SPEED);
   await typeInto(labelledStarting('Wind direction'), WIND_FROM);
-  await press(toggle('Let the AI on your instance steer the pacer'));
+  await press(toggle('Let the AI on your server coach you through the pacer'));
   await press(buttonStarting('Allow the AI pacer'));
   await press(buttonStarting('Ride '));
 

@@ -390,7 +390,7 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
   });
   let consentText: string | undefined;
   if (directed) {
-    await press(toggle('Let the AI on your instance steer the pacer'));
+    await press(toggle('Let the AI on your server coach you through the pacer'));
     consentText = queryAll<HTMLParagraphElement>(mounted.container, '.oyl-game__ai-pacer p')
       .map((each) => each.textContent ?? '')
       .join(' ');
@@ -635,7 +635,7 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
       );
       await settle();
       await press(toggle('Ride against a pacer'));
-      await press(toggle('Let the AI on your instance steer the pacer'));
+      await press(toggle('Let the AI on your server coach you through the pacer'));
       await press(buttonStarting('Allow the AI pacer'));
       await press(buttonStarting('Ride '));
       for (let frame = 0; frame < 60; frame += 1) {

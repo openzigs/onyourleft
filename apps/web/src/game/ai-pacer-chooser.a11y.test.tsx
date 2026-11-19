@@ -110,7 +110,7 @@ async function aiPacerOn(aiPacer?: PacerPort): Promise<Mounted> {
   await settle();
   await activateWithKeyboard(switchNamed(tree.container, 'Ride against a pacer') as HTMLElement);
   await settle();
-  const ai = switchNamed(tree.container, 'Let the AI on your instance steer the pacer');
+  const ai = switchNamed(tree.container, 'Let the AI on your server coach you through the pacer');
   expect(ai).toBeDefined();
   await activateWithKeyboard(ai as HTMLElement);
   await settle();
@@ -142,7 +142,7 @@ describe('the AI pacer on the picker — #2712', () => {
     await activateWithKeyboard(buttonNamed(mounted.container, 'Allow the AI pacer') as HTMLElement);
     await settle();
     await settle();
-    expect(mounted.container.textContent).toContain('The AI will steer the pacer on this ride.');
+    expect(mounted.container.textContent).toContain('The AI will coach you on this ride.');
     const withdraw = buttonNamed(mounted.container, 'Withdraw consent');
     expect(withdraw).toBeDefined();
     expect(keyboardReachableElements(document)).toContain(withdraw);
@@ -160,7 +160,7 @@ describe('the model is warmed from the ride menu, not at “Go” — #2835, ADR
   it('warms it when the switch goes on and the rider had already agreed', async () => {
     const warmed = { count: 0 };
     mounted = await aiPacerOn(offering(true, warmed));
-    expect(mounted.container.textContent).toContain('The AI will steer the pacer on this ride.');
+    expect(mounted.container.textContent).toContain('The AI will coach you on this ride.');
     expect(warmed.count).toBe(1);
   });
 
