@@ -299,6 +299,11 @@ describe('the line for an address that is still the template’s example (#2855)
         origin: 'https://onyourleft.your-tailnet.ts.net',
       }),
     ).toEqual({ event: 'example-address', open: REDACTED, origin: REDACTED });
+    // Only `localhost`: the setup's one address (ADR 0080 D-1), never another host's.
+    expect(redacted({ event: 'example-address', open: 'http://127.0.0.1:8788/setup' })).toEqual({
+      event: 'example-address',
+      open: REDACTED,
+    });
   });
 });
 
