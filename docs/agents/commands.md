@@ -746,8 +746,11 @@ bash scripts/check-image-layers.sh onyourleft-instance
 bash scripts/check-image-layers.test.sh
 
 # #2786: the pull-only release bundle -- the home deployment's compose.yaml with
-# the image BY DIGEST, its deploy.sh, instance.env.example and release.image,
-# zipped. Run by instance-image.yml with the digest it pushed, not by hand.
+# the image BY DIGEST, its deploy.sh, instance.env.example, release.image and
+# the two serve files in `tailscale/` (#2805), zipped. It makes no bundle from
+# an image not named by digest, an image line that moved, a version that is
+# not plain, or a missing serve file (BUNDLE001-004). Run by instance-image.yml
+# with the digest it pushed, not by hand.
 bash scripts/make-instance-bundle.sh ghcr.io/openzigs/onyourleft-instance@sha256:<digest> <version> <outdir>
 bash scripts/make-instance-bundle.test.sh
 

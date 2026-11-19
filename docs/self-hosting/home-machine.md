@@ -75,7 +75,9 @@ comes back only once somebody has signed in — set Windows to sign in automatic
    ```
 
    The folder holds `compose.yaml`, `deploy.sh`, `instance.env.example`, `release.image`, and a
-   `tailscale` folder with the two files `tailscale serve` reads on the tailnet (3a).
+   `tailscale` folder with two serve files. On the tailnet (3a) `tailscale serve` reads one of them,
+   the one `OYL_INSTANCE_REMOTE_PATH` names: `serve-tailnet.json` for `tailnet`, `serve-funnel.json`
+   for `funnel`.
    `compose.yaml` names the instance's image **by its digest**, the line in `release.image`, so
    what Docker downloads is exactly the image this release was tested with.
 

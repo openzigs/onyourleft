@@ -422,3 +422,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   that an operator no longer needs git, a build or Git Bash to run it, and building from a checkout
   stays the contributor's path. Nothing it adds is paid: GHCR serves a public package free, and
   Sigstore's signing and log are free (ADR 0036 D-7). The body above is not edited.
+
+- **2026-11-18** — **The pull-only bundle also holds `release.image` and a `tailscale/` folder,
+  which the entry above leaves out of its list.** That entry names `compose.yaml`, `deploy.sh` and
+  `instance.env.example`. `release.image` was in the bundle from
+  [#2786](https://github.com/openzigs/onyourleft/issues/2786): it names the same digest for
+  `deploy.sh`. Since [#2805](https://github.com/openzigs/onyourleft/issues/2805) (ADR 0079 D-2)
+  `compose.yaml` mounts `./tailscale` into the `tailscale` service, which serves the one file there
+  that `OYL_INSTANCE_REMOTE_PATH` names, so `scripts/make-instance-bundle.sh` copies
+  `tailscale/serve-tailnet.json` and `tailscale/serve-funnel.json` into the bundle unchanged and
+  makes no bundle when either is missing (`BUNDLE004`, beside `BUNDLE001` to `BUNDLE003`). Without
+  them a bundle on the tailnet would mount an empty folder and serve nothing. The list that stays
+  current is the script's own, and its suite `scripts/make-instance-bundle.test.sh` pins the zip's
+  listing: read those, not this section, for what a bundle holds today. Raised in the review of
+  [#2812](https://github.com/openzigs/onyourleft/pull/2812) and tracked as
+  [#2822](https://github.com/openzigs/onyourleft/issues/2822). The entry above is not edited.
