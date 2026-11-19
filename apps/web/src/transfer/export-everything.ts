@@ -586,6 +586,8 @@ export function accountManifest(input: {
         readonly units?: string | undefined;
         /** #623's kit colour: a palette key, on the athlete for ADR 0020 D-2's reason. */
         readonly kitColour?: string | undefined;
+        /** #2839: which rider is drawn, one of two words. How the rider looks, never `calorieSex`. */
+        readonly riderBody?: string | undefined;
       }
     | undefined;
   readonly deviceKey: { readonly algorithm: string; readonly publicKey: string } | undefined;
@@ -642,6 +644,10 @@ export function accountManifest(input: {
       // athlete for the reason `units` is, and named here for the reason every
       // field is.
       kitColour: input.athlete?.kitColour,
+      // #2839. Which rider is drawn — the rider's own appearance, on the
+      // athlete and named here for `kitColour`'s reason. Not `calorieSex`
+      // above: neither is ever derived from the other.
+      riderBody: input.athlete?.riderBody,
     },
     // The public half only. See the file header: the private half is a handle
     // and would serialise to `{}`, which reads as "exported" and is not.

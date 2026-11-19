@@ -181,3 +181,61 @@ CREASES = {
     "elbow": ((0.0, -1.0, 0.0), 0.045, 0.010, 0.0008, 0.0004, 0.05),
     "shoulder": ((0.0, -1.0, 0.0), 0.060, 0.018, 0.0012, 0.0006, 0.07),
 }
+
+# --- the grip on the hoods (#2839, the owner's ruling of 2026-11-18) ---------
+# The fingers close round the brake hood instead of splaying open: each finger
+# turned towards its palm at each of its three joints -- the knuckle, the
+# middle joint and the last -- by MakeHuman's own finger bones and weights, and
+# the thumb by less, round the inside of the hood. Degrees, knuckle first.
+# Every body, and the pack's rider, holds the hoods this way.
+GRIP_FINGER = (30.0, 50.0, 30.0)
+GRIP_THUMB = (35.0, 30.0, 25.0)
+# And the forearm turned about its own line by this, from nothing at the elbow
+# to all of it at the wrist, so the palm is over the hood the fingers close on.
+GRIP_ROLL = 45.0
+# And held by `process_rider.py` §`grip` (review 5975483536): each fingertip it
+# names is within TIP_FROM_END of its finger's own end, and each hand's five
+# named tips are at least TIPS_APART from each other. Metres.
+TIP_FROM_END = 0.01
+TIPS_APART = 0.01
+
+# --- the female rider's hair (#2839) -------------------------------------------
+# A low ponytail out from under the back of the helmet, and a band of hair
+# under its rim between the straps -- in the helmet's mesh, on the head bone,
+# as the eyes are, so it costs no draw call. LINEAR light: a light brown,
+# lighter than an iris (whose red is under 0.2) so the eye tests can tell them
+# apart, and than the jersey's main colour, so the chase camera can.
+HAIR = (0.40, 0.20, 0.08)
+# The ponytail: (share of its length, radius in metres) from the tie down,
+# rings round it, and how long it hangs and how far it stands off the neck.
+PONYTAIL_PROFILE = ((0.0, 0.012), (0.1, 0.024), (0.35, 0.027), (0.7, 0.019), (1.0, 0.005))
+PONYTAIL_RINGS = 9
+PONYTAIL_SEGMENTS = 8
+PONYTAIL_LENGTH = 0.19
+PONYTAIL_STAND_OFF = 0.022
+# The band under the rim, round the back and the sides above the ears from
+# just behind one front strap to the other's (rim segments, `process_rider.py`
+# section shell_point): how far below the rim, how wide, how far off the skin.
+HAIR_BAND_SEGMENTS = (4.5, 17.5)
+HAIR_BAND_BELOW_RIM = 0.010
+HAIR_BAND_HALF_WIDTH = 0.012
+HAIR_BAND_LIFT = 0.004
+
+# --- the female rider's figure (#2839) -----------------------------------------
+# MakeHuman's own breast sliders (0 to 1, 0.5 its average), weighted by
+# MakeHuman's own arithmetic (`apps/human.py` at the pinned commit), and a few
+# of its own shape targets at a share each: narrower shoulders and waist,
+# wider hips, and a softer jaw and brow. Each file is in `sources.ts` section
+# RIDER_BUILD_TARGETS.
+BREAST_SIZE = 0.65
+BREAST_FIRMNESS = 0.6
+FIGURE_TARGETS = (
+    ("torso/torso-scale-horiz-decr", 0.3),
+    ("hip/hip-scale-horiz-incr", 0.4),
+    ("stomach/stomach-pregnant-decr", 0.3),
+    ("neck/neck-scale-horiz-decr", 0.3),
+    ("chin/chin-width-decr", 0.4),
+    ("chin/chin-bones-decr", 0.4),
+    ("chin/chin-prominent-decr", 0.3),
+    ("eyebrows/eyebrows-trans-backward", 0.4),
+)

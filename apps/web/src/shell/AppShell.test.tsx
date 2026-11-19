@@ -23,6 +23,7 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 import { athleteId, type AthleteRecord, type KitColour } from '@onyourleft/store';
+import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { AthleteMassPort } from '../athlete/store-port';
@@ -38,7 +39,7 @@ import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../
 import { idleSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupport } from '../support/shell-support-port';
-import { KIT_SAVED, MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
+import { KIT_SAVED, MASS_CLEARED, MASS_SAVED, RIDER_BODY_SAVED } from '../views/SettingsView';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { stubMapPort } from '../map/testing';
 import { routeStub, stubRouteId } from '../routes/testing';
@@ -958,5 +959,144 @@ describe('the kit colour reaches the ride (#623)', () => {
     expect(handed.every((chosen) => chosen === 'magenta')).toBe(true);
     shell.unmount();
     vi.unstubAllGlobals();
+  });
+});
+
+/**
+ * Which rider is drawn, from the settings screen to the ride and to the disk —
+ * #2839. The kit colour's test above, with two differences that are the point:
+ *
+ * - the port is the REAL store, read back on a fresh connection, so "Saved" is
+ *   held to what a reload would find (docs/agents/quality-gate.md §5);
+ * - the row already holds a calorie sex of the OTHER word, and it is read back
+ *   unchanged: the owner's ruling of 2026-11-18 is that choosing how you look
+ *   does not touch a health input.
+ *
+ * Deleting `riderBody={kit.body}` from the shell's `<GameView>`, or the
+ * settings screen's `onRiderBodyChange`, turns the frame assertion red.
+ */
+describe('the chosen rider reaches the ride (#2839)', () => {
+  it('draws the rider chosen on the settings screen, without a reload, and leaves the calorie sex alone', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    const harness = createStoreHarness();
+    await seedAthletes(harness);
+    await harness.write(async (store) =>
+      store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1985 }),
+    );
+    const drawn: (string | undefined)[] = [];
+    const renderer: GameRenderer = {
+      loadRealisticWorld: () => Promise.reject(new Error('not chosen')),
+      create: () => ({
+        hasContext: true,
+        prepare: () => Promise.resolve(),
+        render: (frame) => {
+          for (const marker of frame.markers) {
+            if (marker.kind === 'rider') drawn.push(marker.body);
+          }
+        },
+        setQuality: () => undefined,
+        setRiderKit: () => undefined,
+        setSeason: () => undefined,
+        resize: () => undefined,
+        destroy: () => undefined,
+      }),
+    };
+    const route: RidableRoute = {
+      id: 'route-1',
+      name: 'Flat',
+      profile: routeProfile(
+        [0, 1, 2].map((index) => ({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (index * 500) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(0),
+        })),
+      ),
+      attempts: 0,
+    };
+    const game: GamePort = {
+      listRoutes: () => Promise.resolve([route]),
+      loadGhost: () => Promise.resolve(undefined),
+      readSensors: () => ({
+        rider: { power: watts(200), live: true, paired: true },
+        cadence: { value: 85, live: true, paired: true },
+        heartRate: { value: 140, live: true, paired: true },
+      }),
+    };
+
+    globalThis.location.hash = '#/settings';
+    const shell = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        game={game}
+        gameRenderer={() => Promise.resolve(renderer)}
+        athleteRider={{
+          athleteId: ATHLETE_A,
+          store: {
+            setAthleteRiderBody: async (id, riderBody) =>
+              harness.write(async (store) => store.setAthleteRiderBody(id, riderBody)),
+          },
+        }}
+      />,
+    );
+    await settle();
+    // A rider who never chose is shown the default, which is what they are drawn as.
+    expect(document.querySelector<HTMLInputElement>('#oyl-rider-body-male')?.checked).toBe(true);
+    await act(async () => {
+      document.querySelector<HTMLInputElement>('#oyl-rider-body-female')?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(document.body.textContent).toContain(RIDER_BODY_SAVED);
+    expect(document.querySelector<HTMLInputElement>('#oyl-rider-body-female')?.checked).toBe(true);
+    // On disk, on a connection that never wrote it — and the health input as it was.
+    const onDisk = await harness.read(async (store) => store.getAthlete(ATHLETE_A));
+    expect(onDisk?.riderBody).toBe('female');
+    expect(onDisk?.calorieSex).toBe('male');
+    expect(onDisk?.birthYear).toBe(1985);
+
+    globalThis.location.hash = '#/game';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await settle();
+    const ride = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await act(async () => {
+      ride?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    let clockMs = 0;
+    for (let index = 0; index < 60 && drawn.length < 5; index += 1) {
+      const next = frames.shift();
+      if (next === undefined) break;
+      clockMs += 250;
+      await act(async () => {
+        next(clockMs);
+        await Promise.resolve();
+      });
+    }
+
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.every((body) => body === 'female')).toBe(true);
+    shell.unmount();
+    await harness.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it('offers no choice where there is no store to keep it in, and says which rider is drawn', async () => {
+    globalThis.location.hash = '#/settings';
+    const shell = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
+    await settle();
+
+    expect(document.querySelector('input[name="oyl-rider-body"]')).toBeNull();
+    expect(document.body.textContent).toContain('You are drawn as the male rider.');
+    shell.unmount();
   });
 });

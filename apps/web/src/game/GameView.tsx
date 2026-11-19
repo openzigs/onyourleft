@@ -37,7 +37,12 @@ import {
   type JSX,
 } from 'react';
 
-import { isCircuitRouteId, isLevelRouteId, type KitColour } from '@onyourleft/store';
+import {
+  isCircuitRouteId,
+  isLevelRouteId,
+  type KitColour,
+  type RiderBody,
+} from '@onyourleft/store';
 
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
@@ -108,6 +113,7 @@ import {
   type GameTrainerPort,
 } from './trainer-port';
 import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from './rider';
+import { pacerBodyFor } from './rider-body';
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { drawnLine } from './drawn-line';
@@ -553,6 +559,14 @@ export interface GameViewProps {
    * opens the game rides in it without a reload.
    */
   readonly kitColour?: KitColour | undefined;
+  /**
+   * Which rider they chose to be drawn as — #2839: the athlete row's
+   * `riderBody`, undefaulted. `undefined` is a rider who has never chosen, and
+   * is drawn as the default by `rider-body.ts` §`riderBodyFor`, which the
+   * renderer calls. A prop from the shell's live value, for
+   * {@link kitColour}'s reason.
+   */
+  readonly riderBody?: RiderBody | undefined;
   /**
    * The trainer this ride may send the road to — #362.
    *
@@ -1531,6 +1545,12 @@ function GameScreen({
    * built after `start`, because `three` arrives asynchronously.
    */
   const kitColourRef = useRef<KitColour | undefined>(undefined);
+  /**
+   * The body THIS ride's rider is drawn as — #2839. Read when the ride starts
+   * and held for it, as {@link kitColourRef} is; every frame's rider marker
+   * carries it (`scene.ts` §`SceneInput.riderBody`).
+   */
+  const riderBodyRef = useRef<RiderBody | undefined>(undefined);
   /**
    * THIS ride's season — #1622. Read once when a live ride starts, from the
    * rider's day and the route, and handed to the view when the view exists,
@@ -2784,6 +2804,8 @@ function GameScreen({
       // dressed now; a view not yet built is dressed when it is.
       kitColourRef.current = props.kitColour;
       viewRef.current?.setRiderKit(props.kitColour);
+      // #2839: and which rider they are drawn as, held for the ride likewise.
+      riderBodyRef.current = props.riderBody;
       // #1622: the rider's own day, read ONCE here at the start of a live ride
       // and held for it — never a ghost's or a past activity's, which carry no
       // date into this line. Holidays follow the rider's day; nature follows
@@ -3231,6 +3253,7 @@ function GameScreen({
       props.screenLock,
       props.riderMass,
       props.kitColour,
+      props.riderBody,
       props.today,
       props.trainer,
       props.room,
@@ -4009,6 +4032,9 @@ function GameScreen({
       }
 
       const origin = corridorOrigin(chosen.profile);
+      // #2839: the pacer's body, seeded by the route so the same route draws
+      // the same pacer on every ride. @see pacerBodyFor
+      const botBody = pacerBodyFor(chosen.id);
       // ⚠️ **Where to DRAW them, which is not where the newest step left them**
       // — #323. The simulation ticks twenty times a second and this loop runs
       // sixty, so reading the state's own distances here drew each position
@@ -4235,6 +4261,9 @@ function GameScreen({
           // nothing on a real 47.53 km route.
           ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
           ghost: ghostRef.current,
+          // #2839: the rider's own body, on their marker and their ghost's.
+          riderBody: riderBodyRef.current,
+          botBody,
           // #245: the rung's scenery budget, so a throttling phone stops
           // *placing* the scenery it is about to stop drawing. @see
           // scatterItemsRef for why this is not read off `quality` here.
