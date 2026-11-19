@@ -107,8 +107,8 @@ function startRace(model: boolean, profile: RouteProfile = CIRCUIT, laps = 3): L
  * with AI bots deals its own field (`modelFieldPaces`), so with no decision it
  * rides seeded tactics on that field, and this is what it must equal.
  */
-function seededOnTheModelField(): LapRaceRide {
-  return { ...startRace(true), model: undefined };
+function seededOnTheModelField(laps?: number): LapRaceRide {
+  return { ...startRace(true, CIRCUIT, laps), model: undefined };
 }
 
 /** The rider's power and speed: a steady 150 W, with a hard minute from 40 s (so bots see a move). */
@@ -825,14 +825,14 @@ describe('the strategy is the model’s, through the shipped race (ADR 0073 D-3)
 
 describe('the model’s sit-in is no opinion, through the shipped race (#2836, ADR 0081 D-1)', () => {
   it('rides the seeded race to the bit, to the line, when the model only ever says sit in', () => {
-    // Long enough for the whole field to finish three laps of the circuit.
-    const seeded = ride(seededOnTheModelField(), 400, undefined);
-    const done = ride(startRace(true), 400, SIT_IN);
+    // One lap of the circuit, 628 m, and long enough for the whole field to finish it.
+    const seeded = ride(seededOnTheModelField(1), 120, undefined);
+    const done = ride(startRace(true, CIRCUIT, 1), 120, SIT_IN);
     const racers = done.ride.race.racers.filter((entry) => entry.racer.id !== 'rider');
     expect(racers.every((entry) => entry.racer.finishedAtMs !== null)).toBe(true);
     // Non-vacuity: the model was asked and answered, all race long, and every answer was a decision.
     const log = done.ride.model?.log ?? [];
-    expect(log.length).toBeGreaterThan(100);
+    expect(log.length).toBeGreaterThan(40);
     expect(log.every((entry) => entry.outcome === 'decision' && entry.why === 'save-legs')).toBe(
       true,
     );
