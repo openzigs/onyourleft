@@ -284,9 +284,10 @@ describe('deploy/home/deploy.sh — from a release bundle, with no checkout (#27
 });
 
 describe('deploy/home/deploy.sh — a release bundle on a remote path (#2786 with #2805)', () => {
-  const upRemote = (where: Bundle, image: string): string =>
-    `docker compose --project-directory ${where.root} -f ${where.root}/compose.yaml up -d tunnel backup|${image}`;
+  const upRemote = (where: Bundle, image: string, remote = 'tunnel'): string =>
+    `docker compose --project-directory ${where.root} -f ${where.root}/compose.yaml up -d ${remote} backup|${image}`;
   const cloudflare = 'COMPOSE_PROFILES=cloudflare\nCLOUDFLARE_TUNNEL_TOKEN=token\n';
+  const tailnet = 'COMPOSE_PROFILES=tailscale\nOYL_INSTANCE_REMOTE_PATH=tailnet\n';
 
   it('pulls, then starts the remote path its profile names and the backup, on the pulled image', () => {
     const where = bundle({
@@ -328,6 +329,28 @@ describe('deploy/home/deploy.sh — a release bundle on a remote path (#2786 wit
     expect(output).toContain(`rolled back to ${PREVIOUS}`);
     expect(calls(where)).toContain(upRemote(where, PREVIOUS));
     expect(calls(where)).not.toContain(upRemote(where, NEXT));
+  });
+
+  // #2822: the rollback above runs on the cloudflare profile alone, so a
+  // rollback that started `tunnel` whatever the profile passed every case. On
+  // the tailnet that is a rollback that leaves the instance up and unreachable.
+  it('a rolled-back bundle deploy on the tailnet starts tailscale again, on the previous image, and no tunnel', () => {
+    const where = bundle({
+      releaseImage: NEXT,
+      deployed: PREVIOUS,
+      running: PREVIOUS,
+      held: [PREVIOUS],
+      broken: [NEXT],
+      env: tailnet,
+      services: ['migrate', 'instance', 'backup', 'tailscale'],
+    });
+    const { status, output } = deploy(where);
+    expect(status).toBe(1);
+    expect(output).toContain(`rolled back to ${PREVIOUS}`);
+    expect(running(where)).toBe(PREVIOUS);
+    // Every `up` after the instance's own: the one the rollback makes, and no other.
+    const ups = calls(where).filter((call) => / up -d (?!--wait)/.test(call));
+    expect(ups).toEqual([upRemote(where, PREVIOUS, 'tailscale')]);
   });
 });
 

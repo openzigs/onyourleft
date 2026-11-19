@@ -75,7 +75,9 @@ comes back only once somebody has signed in — set Windows to sign in automatic
    ```
 
    The folder holds `compose.yaml`, `deploy.sh`, `instance.env.example`, `release.image`, and a
-   `tailscale` folder with the two files `tailscale serve` reads on the tailnet (3a).
+   `tailscale` folder with two serve files. On the tailnet (3a) `tailscale serve` reads one of them,
+   the one `OYL_INSTANCE_REMOTE_PATH` names: `serve-tailnet.json` for `tailnet`, `serve-funnel.json`
+   for `funnel`.
    `compose.yaml` names the instance's image **by its digest**, the line in `release.image`, so
    what Docker downloads is exactly the image this release was tested with.
 
@@ -241,6 +243,7 @@ the setup page on this machine sets them up after the deploy, in step 5a, with n
 | `OYL_INSTANCE_REMOTE_PATH` | `tailnet` for 3a (or `funnel`, if you turned it on), `cloudflare` for 3b |
 | `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` | `x-forwarded-for` for 3a; `cf-connecting-ip` for 3b, which is also what empty means. The instance refuses to start with the other path's |
 | `OYL_INSTANCE_ORIGIN` | `https://` and the address from step 3: `https://onyourleft.your-tailnet.ts.net`, or the tunnel's public hostname |
+| `OYL_INSTANCE_CONTACT_EMAIL` | **required — nothing starts without it.** An email address **you** read. Your server's own page at `/legal`, which the app's *About* links to, tells your riders — and anybody with a complaint about what is on your server — to write to it. The template leaves it empty on purpose: the address is yours, never the project's and never an example ([#2857](https://github.com/openzigs/onyourleft/issues/2857)). It is published, so use one you are content for your riders to see |
 | `OYL_INSTANCE_REGISTRATION` | **leave it empty** on a fresh install, and choose on the setup page (step 5a), which wins over this line. Otherwise `approval` (you approve each new account; the default, and what an empty value means), `invite`, `open`, or `closed` — see [`docs/moderation.md`](../moderation.md). Your own device registers active in every mode once it is the owner. ⚠️ `closed` turns away **your other** devices too: the app says the instance is not taking new riders. Link them to your account from the app instead, or approve them |
 | `OYL_INSTANCE_OWNER_KEY` | **leave it empty** on a fresh install: you claim the instance with your tablet on the setup page (step 5a). The expert path: your device key, which the app shows — then the instance is yours from its first start and the setup page never opens |
 | `OYL_INSTANCE_DEPUTY_KEY` | leave it **empty**. An instance has one moderator ([`docs/moderation.md`](../moderation.md)); this names a second only if you want one |
@@ -343,23 +346,28 @@ were.
 1. **Claim it with your tablet.** Press *Show the claim code*, open On Your Left on the tablet you ride
    with, go to *Instance* and scan the code **with the app's own scanner**, then press *I’ve scanned
    it* on the page. The tablet shows six digits; if the page shows the same six, press *Yes*. The page
-   says your tablet now owns the server.
+   says your tablet now owns the server. A code lasts ten minutes: if the page says *That code ran
+   out*, press *Show the claim code* again and scan the new one.
 2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
 3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
    beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
    once you have added a passkey there.
-4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says
-   whether the snapshot reached **both** folders: the one on this computer and the copy kept
-   elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` lines in `.env`
-   (step 4): to change one, edit that line and deploy again. ⚠️ On Windows the copy kept elsewhere
-   cannot be on a USB stick ([Backups](#backups)).
+4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
+   long ago the last backup ran, and whether the snapshot reached **both** folders: the one on this
+   computer and the copy kept elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and
+   `OYL_OFFBOX_DIR` lines in `.env` (step 4): to change one, edit that line and deploy again. ⚠️ On
+   Windows the copy kept elsewhere cannot be on a USB stick ([Backups](#backups)).
 5. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
    new*, then *Save and go to the next step*. You can change it later with
    `docker compose exec instance node src/operator/cli.ts registration set <mode>`.
 6. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
    has not signed in yet, connect to the instance from the app on the tablet first.
-7. **Finish.** The page lists where the server stands, and the setup page closes for good.
+7. **AI write-ups**: optional. If Ollama is running on this computer, the page lists the models it
+   has, says how well each fits your graphics card, and can download one whose name you type. Press
+   *Use …* beside a model to have ride write-ups made on it. If the page says Ollama was not found,
+   press *Next step*: everything else works without it.
+8. **Finish.** The page lists where the server stands, and the setup page closes for good.
 
 Until the tablet has claimed the instance, nobody can make an account on it. **The expert path**
 still works: with `OYL_INSTANCE_OWNER_KEY` set in `.env` the setup page never opens, and the
@@ -656,6 +664,12 @@ last two commands again. A launcher that does this on Windows without a terminal
 `COMPOSE_PROFILES`. `deploy.sh` still starts its tunnel, and says to add `cloudflare` to
 `COMPOSE_PROFILES`. Do that before you update, so that a `docker compose up` by hand — the Windows
 steps above — starts it too.
+
+**A `.env` copied from a template older than #2857** may name an address at the project's own domain
+in `OYL_INSTANCE_CONTACT_EMAIL`: the template shipped the project's by mistake. Your `/legal` page is
+then telling your riders to write to somebody who does not run your server. Change the line to an
+address you read (step 4) before you update. A `.env` with that line empty or missing no longer
+starts: `docker compose` and `deploy.sh` both stop before anything changes, and name the line.
 
 ## Backups
 

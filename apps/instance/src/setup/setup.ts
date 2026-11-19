@@ -41,9 +41,12 @@
  * Only while the setup is open, and without a passkey: mint the claim code and
  * confirm or discard a pending claim (D-3, D-5), download the emergency kit
  * ONCE (D-4), ask for a backup and show what the backup folders did (D-6), set
- * the registration mode (D-6), mint ONE rider invite (D-7), and finish. Every
- * change writes the operator log in the same transaction, from the source
- * `setup`, naming no athlete. The step the setup is on is kept in the database,
+ * the registration mode (D-6), mint ONE rider invite (D-7), and finish. Since
+ * #2792 (ADR 0080's amendment of 2026-11-18) also the optional AI step: ask
+ * the Ollama found on this machine to download a model whose name the owner
+ * types, and choose one it lists as the local model (`analysis/settings.ts`,
+ * the row a job reads). Every change writes the operator log in the same
+ * transaction, from the source `setup`, naming no athlete. The step the setup is on is kept in the database,
  * so leaving and coming back — after a restart, with a new code — resumes it.
  *
  * Nothing here renders the setup code, a secret, a token or a coordinate (see
@@ -53,6 +56,20 @@
 import type { SetupSummary } from '@onyourleft/operate-text';
 
 import { randomToken, sha256Hex } from '../auth/crypto.ts';
+import {
+  createModelPull,
+  findOllama,
+  loadModel,
+  OLLAMA_ADDRESSES,
+  type FoundOllama,
+} from '../analysis/ollama-setup.ts';
+import {
+  effectiveAnalysisSettings,
+  localServerOf,
+  saveAnalysisSettings,
+  type AnalysisEnvironment,
+  type EffectiveAnalysisSettings,
+} from '../analysis/settings.ts';
 import { adminCodeSha256 } from '../admin/code.ts';
 import { ADMIN_CONTENT_SECURITY_POLICY, adminResponse } from '../admin/headers.ts';
 import { INVITE_LIFETIME_SECONDS, readableCode } from '../auth/identity.ts';
@@ -63,7 +80,8 @@ import {
   sweepPeriodMs,
   type RateLimit,
 } from '../auth/rate-limit.ts';
-import { REGISTRATION_MODES, type RegistrationMode } from '../config.ts';
+import { analysisModelNameProblem, REGISTRATION_MODES, type RegistrationMode } from '../config.ts';
+import type { Resolver } from '../history/address.ts';
 import type { InstanceKeys } from '../keys/instance-keys.ts';
 import { keysView } from '../operate/operate.ts';
 import type { ClientInfo } from '../route-kit.ts';
@@ -76,6 +94,7 @@ import type {
 } from '../store/sql-store.ts';
 import { emergencyKitText, EMERGENCY_KIT_FILE_NAME } from './emergency-kit.ts';
 import {
+  aiBody,
   backupsBody,
   claimBody,
   finishBody,
@@ -124,6 +143,19 @@ export const DEFAULT_SETUP_LIMITS: SetupLimits = {
 /** What a refusal is counted as, in its `setup_refused` entry. */
 export type SetupRefusal = 'code' | 'csrf' | 'origin' | 'rate_limited';
 
+/** What the optional AI step finds Ollama through, and reads and writes the local model with (#2792). */
+export interface SetupAnalysisSources {
+  /** `.env`'s analysis lines, which the operator's row is read over (`analysis/settings.ts`). */
+  readonly environment: AnalysisEnvironment;
+  readonly resolve: Resolver;
+  /** Where Ollama is looked for after the address already set: {@link OLLAMA_ADDRESSES} unless a test's. */
+  readonly addresses?: readonly string[];
+  /** Told the settings after a save, as the Operate area's save tells them. */
+  readonly changed?: (settings: EffectiveAnalysisSettings) => void;
+  /** Aborted when the instance stops: a download that is running ends. */
+  readonly stopped?: AbortSignal;
+}
+
 export interface SetupOptions {
   readonly store: SqlStore;
   /** Unix milliseconds. */
@@ -146,6 +178,8 @@ export interface SetupOptions {
   readonly environmentRegistration: RegistrationMode;
   /** `OYL_INSTANCE_SECRETS_DIR`: where the setup code's file is removed from. */
   readonly secretsDirectory: string | undefined;
+  /** The AI step's (#2792). */
+  readonly analysis: SetupAnalysisSources;
   readonly limits?: SetupLimits;
 }
 
@@ -232,6 +266,8 @@ const ACTION_STEP: ReadonlyMap<string, SetupStep> = new Map([
   ['/setup/backups/now', 'backups'],
   ['/setup/registration/mode', 'registration'],
   ['/setup/invite/code', 'invite'],
+  ['/setup/ai/pull', 'ai'],
+  ['/setup/ai/use', 'ai'],
   ['/setup/finish/done', 'finish'],
 ]);
 
@@ -278,6 +314,13 @@ export function createSetup(options: SetupOptions): Setup {
   const CLEARED = `${SETUP_COOKIE}=; ${attributes}; Max-Age=0`;
   const refused = new Map<SetupRefusal, number>();
   let shownClaim: ShownClaim | undefined;
+  const { analysis } = options;
+  const localServer = { resolve: analysis.resolve };
+  // #2792: the instance's one download, in memory: lost at a restart, as the model it left is not.
+  const modelPull = createModelPull({
+    ...localServer,
+    ...(analysis.stopped === undefined ? {} : { stopped: analysis.stopped }),
+  });
   const refuse = (kind: SetupRefusal): void => {
     refused.set(kind, (refused.get(kind) ?? 0) + 1);
   };
@@ -308,6 +351,26 @@ export function createSetup(options: SetupOptions): Setup {
     if (key === undefined) return undefined;
     const held = await store.findDeviceKey(key);
     return held === undefined || held.revokedAt !== null ? undefined : held.athleteId;
+  }
+
+  /** The Ollama on this machine: at the address the settings name, then where one is usually found. */
+  async function ollama(): Promise<FoundOllama | undefined> {
+    const set = localServerOf(await store.getAnalysisSetting(), analysis.environment.analysisEnv);
+    return findOllama(
+      [...(set.ok ? [set.baseUrl.href] : []), ...(analysis.addresses ?? OLLAMA_ADDRESSES)],
+      localServer,
+    );
+  }
+
+  /** The settings a job would run under now: the row over `.env`, as the job engine reads them. */
+  async function analysisNow(): Promise<EffectiveAnalysisSettings> {
+    return effectiveAnalysisSettings(await store.getAnalysisSetting(), analysis.environment);
+  }
+
+  /** The local model a write-up would run on now, or `null`: none, or the local source is off. */
+  async function writeUpModel(): Promise<string | null> {
+    const now = await analysisNow();
+    return now.offerLocal && now.local.kind === 'on' ? now.local.model : null;
   }
 
   interface Session {
@@ -447,7 +510,12 @@ export function createSetup(options: SetupOptions): Setup {
             last:
               newest === undefined
                 ? null
-                : { at: iso(newest.at), outcome: newest.outcome, offBox: newest.offBox },
+                : {
+                    at: iso(newest.at),
+                    secondsAgo: seconds() - newest.at,
+                    outcome: newest.outcome,
+                    offBox: newest.offBox,
+                  },
             waiting: pending !== undefined,
             notice: url.searchParams.has('too-soon')
               ? 'too-soon'
@@ -466,12 +534,33 @@ export function createSetup(options: SetupOptions): Setup {
       }
       case 'invite':
         return page(stepPage(frame, inviteBody(await inviteView(), csrf), { next: true }), 200);
+      case 'ai': {
+        const [found, model] = await Promise.all([ollama(), writeUpModel()]);
+        const body = aiBody(
+          {
+            model,
+            server: found === undefined ? null : { models: found.read.models },
+            pull: modelPull.state(),
+            notice: url.searchParams.has('bad-name')
+              ? 'bad-name'
+              : url.searchParams.has('refused')
+                ? 'refused'
+                : null,
+          },
+          csrf,
+        );
+        // Optional: "Next step" is there whatever this page found.
+        return page(stepPage(frame, body, { next: true }), 200);
+      }
       case 'finish':
         return page(stepPage(frame, finishBody(await summaryOf(), csrf), { next: false }), 200);
     }
   }
 
-  /** The claim step with no owner: a claim to compare, the code still waiting for a scan, or the start. */
+  /**
+   * The claim step with no owner: a claim to compare, the code still waiting
+   * for a scan, or the start — which says so when the code it showed ran out.
+   */
   async function claimView(url: URL, session: Session): Promise<ClaimView> {
     const pending = await options.ownerClaim.pending();
     if (pending !== undefined) {
@@ -480,11 +569,12 @@ export function createSetup(options: SetupOptions): Setup {
     }
     const at = seconds();
     const shown = shownClaim;
-    if (
-      shown !== undefined &&
-      shown.expiresAt > at &&
-      shown.sessionSha256 === session.record.tokenSha256
-    ) {
+    const ours = shown !== undefined && shown.sessionSha256 === session.record.tokenSha256;
+    // A code past its ten minutes is dead on the server: dropped where it is found, so memory
+    // holds only a live one, and the session that was shown it is told why the QR went (#2825).
+    const ranOut = shown !== undefined && shown.expiresAt <= at;
+    if (ranOut) shownClaim = undefined;
+    if (shown !== undefined && ours && !ranOut) {
       return {
         kind: 'code',
         card: shown.card,
@@ -497,6 +587,7 @@ export function createSetup(options: SetupOptions): Setup {
       kind: 'open',
       card: (await cardOf()) !== null,
       notConfirmed: url.searchParams.has('unconfirmed'),
+      expired: ours && ranOut,
     };
   }
 
@@ -529,11 +620,12 @@ export function createSetup(options: SetupOptions): Setup {
 
   /** Where the server stands at the finish (D-7's summary), each read from where it is kept. */
   async function summaryOf(): Promise<SetupSummary> {
-    const [owner, records, state, mode] = await Promise.all([
+    const [owner, records, state, mode, model] = await Promise.all([
       store.claimedOwnerKey(),
       store.listBackupRecords(1),
       store.setupState(),
       modeNow(),
+      writeUpModel(),
     ]);
     const newest = records[0];
     return {
@@ -554,6 +646,7 @@ export function createSetup(options: SetupOptions): Setup {
               : 'this-computer-only',
       mode,
       invites: (state?.inviteMintedAt ?? null) === null ? 0 : 1,
+      ai: model === null ? 'off' : 'on',
     };
   }
 
@@ -695,6 +788,48 @@ export function createSetup(options: SetupOptions): Setup {
           inviteMode: (await modeNow()) === 'invite',
         };
         return page(stepPage(frame, inviteBody(view, frame.csrf), { next: true }), 200);
+      }
+      case '/setup/ai/pull': {
+        const model = (single(form, 'model') ?? '').trim();
+        const named = analysisModelNameProblem(model) === undefined;
+        const found = named ? await ollama() : undefined;
+        const refusal = !named
+          ? 'bad_model'
+          : found === undefined
+            ? 'no_server'
+            : modelPull.state().kind === 'running'
+              ? 'busy'
+              : null;
+        // Logged before the download starts: never the model's name.
+        await store.recordOperatorAction({ actor, action: 'analysis_model_pull', at }, () =>
+          refusal === null
+            ? { outcome: 'done', value: undefined }
+            : { outcome: 'refused', detail: refusal, value: undefined },
+        );
+        if (refusal === null && found !== undefined) modelPull.start(found.baseUrl, model);
+        return seeOther(refusal === 'bad_model' ? '/setup/ai?bad-name' : '/setup/ai');
+      }
+      case '/setup/ai/use': {
+        const model = (single(form, 'model') ?? '').trim();
+        const found = await ollama();
+        // Only a model the Ollama found lists NOW — so only a name the settings accept
+        // (`local-server.ts` §`nameOf`) — and not one it says cannot call tools.
+        const listed = found?.read.models.find((each) => each.name === model);
+        if (found === undefined || listed === undefined || listed.tools === 'not-listed') {
+          return seeOther('/setup/ai?refused');
+        }
+        const saved = await saveAnalysisSettings(
+          store,
+          actor,
+          { localUrl: found.baseUrl.href, localModel: model, offerLocal: true },
+          { resolve: analysis.resolve, now: options.now },
+        );
+        if (!saved.ok) return seeOther('/setup/ai?refused');
+        analysis.changed?.(await analysisNow());
+        // Loaded once, so the step can say how much of it is in the graphics
+        // card's memory: Ollama reports that of a loaded model only.
+        await loadModel(found.baseUrl, model, localServer);
+        return seeOther('/setup/ai');
       }
       default: {
         // '/setup/finish/done' (D-7): the setup done, every code and session gone, and the file.

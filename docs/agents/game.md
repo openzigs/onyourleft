@@ -112,6 +112,25 @@ Supported Power Range **minimum** through the ERG writer — never a Stop — an
 trainer lets go or eases** — every test asserts what is sent. Validation 0002 L5, L7, Part R and
 Part S are the hardware steps.
 
+⚠️ **Before any change to a prompt, a schema or the model for the AI bots or the AI pacer, run the
+scoring harness** ([#2838](https://github.com/openzigs/onyourleft/issues/2838)), and again after it,
+before the owner's tablet ride: `node tools/model-tactics-spike/run-harness.mjs all` from `apps/web`,
+on a machine with Ollama on its loopback, or with `--host <ssh host>` for the instance PC. It sends
+**the instance's own prompt and request** (`apps/instance/src/analysis/tactics-prompt.ts`,
+`pacer-prompt.ts`; it keeps no copy) through the shipped race and the shipped pacer director: six
+fixed AI-bot races and one scripted pacer ride, with seeds fixed in the harness only. It prints the
+scores, writes them, numbers only, under `apps/web/tools/model-tactics-spike/results/scores/`, and
+**exits 1 below a pass mark**. The marks and the reason for each are in `harness/bot-score.ts` and
+`harness/pacer-score.ts`; `harness/main.ts` has the commands. It is **not a CI gate**, because CI has
+no model: CI runs only its scoring tests, which ride recorded answers (`harness/recorded/`), and a
+change to the bots' code or the pacer's rules that moves those scores means recording again. **Run it
+three times and take the worst**: a seed fixes the field and each question, but the model's latency
+is booked into race time, so two runs ask at different instants and differ (on 2026-11-18 the same
+prompt rode the flat race to a 16 s quiet run and to a 73 s one). Compare
+timings only between runs on one machine, and score the bots on the instance PC: a machine that
+answers a seven-bot call past the race's 8 s limit (the development Mac took 10.6 s on 2026-11-18)
+rides the seeded race and fails on late answers.
+
 From the layout tree of CLAUDE.md §2, under `apps/web/`:
 
 ```

@@ -847,7 +847,9 @@ export interface OwnerClaimCodeTable {
  */
 export interface SetupStateTable {
   readonly slot: number;
-  readonly step: 'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'finish';
+  /** Migration 0049 added `ai` (#2792). */
+  readonly step:
+    'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'ai' | 'finish';
   /** Unix seconds; `NULL` while the setup is open. */
   readonly done_at: number | null;
   /** When the setup minted its one rider invite, Unix seconds; `NULL` until then. */

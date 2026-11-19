@@ -548,3 +548,45 @@ describe('deploy/home/compose.yaml — the secrets folder (#2781, ADR 0080 D-4)'
     expect(image).toMatch(/OYL_INSTANCE_DATABASE=\/data\//);
   });
 });
+
+/**
+ * #2857: the template shipped the project's own contact address, the release
+ * bundle copied it, and every new server's `/legal` page told its riders, and
+ * anybody with a complaint, to write to the maintainer. The address is the
+ * operator's own or there is none: the template names nobody, and compose
+ * starts nothing until `.env` names somebody.
+ */
+describe('deploy/home — the contact address is the operator’s own (#2857)', () => {
+  const file = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const template = file('../deploy/home/instance.env.example');
+
+  it('starts nothing until .env names a contact address: compose requires the line, once, in the instance', () => {
+    const lines = COMPOSE.match(/^.*\bOYL_INSTANCE_CONTACT_EMAIL:.*$/gm) ?? [];
+    expect(lines).toHaveLength(1);
+    expect(service('instance')).toContain(lines[0]);
+    // `:?` refuses an unset line and an empty one alike. A `$` or a brace in
+    // the message would end the interpolation before the sentence did.
+    const message =
+      /^ {6}OYL_INSTANCE_CONTACT_EMAIL: \$\{OYL_INSTANCE_CONTACT_EMAIL:\?([^${}]+)\}$/.exec(
+        lines[0] ?? '',
+      )?.[1];
+    expect(message).toContain('set OYL_INSTANCE_CONTACT_EMAIL in .env');
+    // A plain YAML scalar ends at a colon followed by a space.
+    expect(message).not.toMatch(/: /);
+  });
+
+  it('offers the line in the template once, and empty: it names nobody to write to', () => {
+    expect(template.match(/^OYL_INSTANCE_CONTACT_EMAIL=.*$/gm)).toEqual([
+      'OYL_INSTANCE_CONTACT_EMAIL=',
+    ]);
+  });
+
+  it.each([
+    '../deploy/home/instance.env.example',
+    '../deploy/home/compose.yaml',
+    '../deploy/home/deploy.sh',
+    '../../../.env.example',
+  ])('names no address at the project’s own domain in %s, a setting or a comment', (path) => {
+    expect(file(path)).not.toMatch(/[a-z0-9._%+-]+@([a-z0-9-]+\.)*openzigs\.[a-z]/i);
+  });
+});

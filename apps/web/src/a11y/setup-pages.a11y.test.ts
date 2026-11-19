@@ -29,7 +29,8 @@ import { SCRIPTED_KEYS } from '../instance/testing';
 import { codeWithCard, readCodeWithCard } from '../instance/instance-pin';
 import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
 
-type Step = 'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'finish';
+type Step =
+  'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'ai' | 'finish';
 
 interface Frame {
   readonly name: string | null;
@@ -52,6 +53,7 @@ interface SetupPages {
   backupsBody(view: unknown, csrf: string): string;
   registrationBody(view: unknown, csrf: string): string;
   inviteBody(view: unknown, csrf: string): string;
+  aiBody(view: unknown, csrf: string): string;
   finishBody(summary: unknown, csrf: string): string;
   readonly FINISHED_PAGE_STYLE: string;
 }
@@ -105,9 +107,37 @@ const step =
 
 const record = (offBox: string | null, outcome = 'done') => ({
   at: '2026-11-18T09:00:00.000Z',
+  secondsAgo: 14 * 60,
   outcome,
   offBox,
 });
+
+/** A model as the AI step lists it (#2792): what Ollama reports, by `analysis/local-server.ts`. */
+const model = (name: string, gpu: string, tools = 'listed', gpuPercent: number | null = null) => ({
+  name,
+  sizeBytes: 9_000_000_000,
+  parameters: '14.8B',
+  quantisation: 'Q4_K_M',
+  tools,
+  gpu,
+  gpuPercent,
+});
+
+const LISTED = [
+  model('alpha:14b', 'all'),
+  model('beta:32b', 'part', 'listed', 62),
+  model('gamma:26b', 'not-loaded', 'not-listed'),
+  model('delta:8b', 'none', 'not-reported'),
+  model('epsilon:4b', 'not-reported'),
+];
+
+const ai = (view: Record<string, unknown>) =>
+  step('ai', () =>
+    pages.aiBody(
+      { model: null, server: null, pull: { kind: 'idle' }, notice: null, ...view },
+      CSRF,
+    ),
+  );
 
 /** Every setup page, by its route, in each state it can be drawn in. */
 const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[]>> = {
@@ -135,7 +165,8 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       'open',
       step(
         'claim',
-        () => pages.claimBody({ kind: 'open', card: true, notConfirmed: false }, CSRF),
+        () =>
+          pages.claimBody({ kind: 'open', card: true, notConfirmed: false, expired: false }, CSRF),
         false,
         'claim',
       ),
@@ -144,7 +175,18 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       'not confirmed, no card',
       step(
         'claim',
-        () => pages.claimBody({ kind: 'open', card: false, notConfirmed: true }, CSRF),
+        () =>
+          pages.claimBody({ kind: 'open', card: false, notConfirmed: true, expired: false }, CSRF),
+        false,
+        'claim',
+      ),
+    ],
+    [
+      'the code ran out',
+      step(
+        'claim',
+        () =>
+          pages.claimBody({ kind: 'open', card: true, notConfirmed: false, expired: true }, CSRF),
         false,
         'claim',
       ),
@@ -246,6 +288,27 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       ),
     ],
   ],
+  '/setup/ai': [
+    ['no Ollama found', ai({})],
+    ['no Ollama found, write-ups already on', ai({ model: 'served-model' })],
+    ['Ollama with no models', ai({ server: { models: [] } })],
+    ['models listed, one in use', ai({ model: 'alpha:14b', server: { models: LISTED } })],
+    [
+      'a download running',
+      ai({
+        server: { models: LISTED },
+        pull: { kind: 'running', completedBytes: 1_000_000_000, totalBytes: 4_000_000_000 },
+      }),
+    ],
+    [
+      'a download failed, a name refused',
+      ai({ server: { models: [] }, pull: { kind: 'failed' }, notice: 'bad-name' }),
+    ],
+    [
+      'a download done, a model refused',
+      ai({ server: { models: LISTED }, pull: { kind: 'done' }, notice: 'refused' }),
+    ],
+  ],
   '/setup/finish': [
     [
       'all done',
@@ -259,6 +322,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
               backups: 'working',
               mode: 'invite',
               invites: 1,
+              ai: 'on',
             },
             CSRF,
           ),
@@ -277,6 +341,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
               backups: 'none-yet',
               mode: 'approval',
               invites: 0,
+              ai: 'off',
             },
             CSRF,
           ),
@@ -346,7 +411,7 @@ describe.each(Object.entries(PAGES))('the setup page %s (#2784)', (path, states)
         // Never colour alone: a done step says so in words beside its tick, and each step's box
         // is the same element class whether it is a link or not, so no row changes height.
         const items = [...(nav?.querySelectorAll('li') ?? [])];
-        expect(items).toHaveLength(7);
+        expect(items).toHaveLength(8);
         for (const item of items) expect(item.firstElementChild?.className).toBe('step');
         // Every form is reached by Tab, and each is operated by its button.
         for (const form of doc.querySelectorAll('main form')) {
@@ -384,6 +449,28 @@ describe.each([
   });
 });
 
+describe('the claim step’s one problem sentence (#2825)', () => {
+  const alerts = (view: { notConfirmed: boolean; expired: boolean }): (string | null)[] =>
+    [
+      ...parse(pages.claimBody({ kind: 'open', card: true, ...view }, CSRF)).querySelectorAll(
+        '[role="alert"]',
+      ),
+    ].map((alert) => alert.textContent);
+
+  it('says a code ran out, as an alert, and nothing when none did', () => {
+    expect(alerts({ notConfirmed: false, expired: true })).toEqual([
+      'That code ran out. Show a new one.',
+    ]);
+    expect(alerts({ notConfirmed: false, expired: false })).toEqual([]);
+  });
+
+  it('says one sentence, the fuller one, when a claim could not be confirmed either', () => {
+    const said = alerts({ notConfirmed: true, expired: true });
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/^That claim could not be confirmed/);
+  });
+});
+
 describe('the setup’s progress bar (#2784)', () => {
   it('ticks and names each done step, marks the current one, and draws later steps as plain items', () => {
     const doc = parse(
@@ -408,7 +495,8 @@ describe('the setup’s progress bar (#2784)', () => {
       { link: true, current: true, mark: '✓', said: '✓Step 4, done: Backups' },
       { link: true, current: false, mark: '5', said: '5Step 5: Who may join' },
       { link: false, current: false, mark: '6', said: '6Step 6: Invite' },
-      { link: false, current: false, mark: '7', said: '7Step 7: Finish' },
+      { link: false, current: false, mark: '7', said: '7Step 7: AI' },
+      { link: false, current: false, mark: '8', said: '8Step 8: Finish' },
     ]);
     // The tick and the number are drawn, not read: the words are.
     for (const mark of doc.querySelectorAll('.step-mark')) {
@@ -432,7 +520,8 @@ describe('the setup’s progress bar (#2784)', () => {
       'Step 4, done: Backups',
       'Step 5: Who may join',
       'Step 6: Invite',
-      'Step 7: Finish',
+      'Step 7: AI',
+      'Step 8: Finish',
     ]);
     // On a narrow screen the number is the visible label: the name holds it, and the name too.
     for (const item of doc.querySelectorAll('header nav .step')) {
@@ -459,5 +548,107 @@ describe('the setup’s progress bar (#2784)', () => {
     expect(again('/setup/backups', 'no off-box folder, waiting')).toBe('Check now');
     expect(again('/setup/claim', 'a claim to compare')).toBeUndefined();
     expect(again('/setup/backups', 'copied')).toBeUndefined();
+    // #2792: a download that runs, and an Ollama not found yet.
+    expect(again('/setup/ai', 'a download running')).toBe('Check now');
+    expect(again('/setup/ai', 'no Ollama found')).toBe('Look again');
+    expect(again('/setup/ai', 'models listed, one in use')).toBeUndefined();
+  });
+});
+
+describe('the setup’s optional AI step (#2792)', () => {
+  const draw = (view: Record<string, unknown>): Document => parse(ai(view)());
+  const said = (doc: Document): string => doc.querySelector('main')?.textContent ?? '';
+
+  it('says in one sentence that no Ollama was found, and is skipped with Next step', () => {
+    const doc = draw({});
+    const notices = [...doc.querySelectorAll('main p.notice')].map((each) => each.textContent);
+    expect(notices).toEqual(['Ollama was not found on this computer, so AI write-ups stay off.']);
+    expect(doc.querySelector('main form[action="/setup/next"] button')?.textContent).toBe(
+      'Next step',
+    );
+    expect(doc.querySelector('main form[action="/setup/ai/pull"]')).toBeNull();
+  });
+
+  it('lists each model with how it fits, a button for each that can be used, and none for the one in use or one that cannot call tools', () => {
+    const doc = draw({ model: 'alpha:14b', server: { models: LISTED } });
+    const items = [...doc.querySelectorAll('main ul.models > li')].map((item) => ({
+      name: item.querySelector('code')?.textContent,
+      fit: item.querySelector('p')?.textContent,
+      button: item.querySelector('form[action="/setup/ai/use"] button')?.textContent ?? null,
+      sends: item.querySelector('form input[name="model"]')?.getAttribute('value') ?? null,
+    }));
+    expect(items).toEqual([
+      {
+        name: 'alpha:14b',
+        fit: 'alpha:14b: 9.0 GB. It fits in the graphics card’s memory, so it runs at full speed.',
+        button: null,
+        sends: null,
+      },
+      {
+        name: 'beta:32b',
+        fit: 'beta:32b: 9.0 GB. Only 62 % of it fits in the graphics card’s memory, so it runs slowly. A smaller model would be faster.',
+        button: 'Use beta:32b',
+        sends: 'beta:32b',
+      },
+      {
+        name: 'gamma:26b',
+        fit: 'gamma:26b: 9.0 GB. How well it fits the graphics card is not known until it has been loaded.',
+        button: null,
+        sends: null,
+      },
+      {
+        name: 'delta:8b',
+        fit: 'delta:8b: 9.0 GB. None of it is in a graphics card’s memory, so it runs on the processor, slowly.',
+        button: 'Use delta:8b',
+        sends: 'delta:8b',
+      },
+      {
+        name: 'epsilon:4b',
+        fit: 'epsilon:4b: 9.0 GB. Ollama did not say how well it fits the graphics card.',
+        button: 'Use epsilon:4b',
+        sends: 'epsilon:4b',
+      },
+    ]);
+    expect(said(doc)).toContain('AI write-ups are on. They run on this model: alpha:14b');
+    // Each form on the page has a name of its own (`audit.ts` §`landmarks-are-distinguishable`).
+    const names = [...doc.querySelectorAll('main form')].map((form) => accessibleName(form));
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('names the field a model’s name is typed in, describes it, and names no model itself', () => {
+    const doc = draw({ server: { models: [] } });
+    const field = doc.querySelector('main form[action="/setup/ai/pull"] input[name="model"]');
+    expect(field).not.toBeNull();
+    expect(accessibleName(field as Element)).toBe('Model to download');
+    expect(doc.getElementById(field?.getAttribute('aria-describedby') ?? '')?.textContent).toMatch(
+      /^Type a model’s name as Ollama’s library lists it/,
+    );
+    expect(field?.getAttribute('value')).toBeNull();
+    expect(field?.getAttribute('placeholder')).toBeNull();
+    // ADR 0046's amendment of 2026-11-14, point 8: the page names and recommends no model.
+    expect(doc.querySelectorAll('main code')).toHaveLength(0);
+  });
+
+  it('draws a download as numbers and fixed words, with no form for a second while one runs', () => {
+    const running = draw({
+      server: { models: [] },
+      pull: { kind: 'running', completedBytes: 1_000_000_000, totalBytes: 4_000_000_000 },
+    });
+    expect(said(running)).toContain('Downloading the model: 25 % so far, 1.0 GB of 4.0 GB.');
+    expect(running.querySelector('main form[action="/setup/ai/pull"]')).toBeNull();
+    const started = draw({
+      server: { models: [] },
+      pull: { kind: 'running', completedBytes: 0, totalBytes: 0 },
+    });
+    expect(said(started)).toContain('Downloading the model: it has just started.');
+    const failed = draw({ server: { models: [] }, pull: { kind: 'failed' } });
+    expect([...failed.querySelectorAll('[role="alert"]')].map((each) => each.textContent)).toEqual([
+      'The download did not finish. Check that the name is spelled as Ollama lists it, that this computer is online and that its disk has room, then try again.',
+    ]);
+    expect(failed.querySelector('main form[action="/setup/ai/pull"]')).not.toBeNull();
+    const done = draw({ server: { models: [] }, pull: { kind: 'done' } });
+    expect(done.querySelector('main [role="status"]')?.textContent).toBe(
+      'The download finished. The model is in the list on this page.',
+    );
   });
 });
