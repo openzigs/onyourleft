@@ -330,6 +330,22 @@ riders analyse.
 **Off unless there is a model.** With no analysis model and no hosted key held, every start answers
 `analysis_off` (503) and nothing else changes; the instance starts and serves as usual.
 
+**A re-plan during a workout ride** (ADR 0048) is a job of the same table. ⚠️ **The trainer
+rule: no model output sets a target.** A re-plan's model answers one word from a closed list — a
+move and a reason, or *keep* — and on a model on this machine its answer is held to a JSON Schema of
+exactly those lists (#2841), so it cannot write a watt, a share or a sentence; the instance reads it
+again and copies nothing else. The rider's device alone turns that word into a target, inside its
+own bounds — +5 % a move, +10 % in total, never above the workout's own peak, and one press to undo
+(`@onyourleft/domain` §`validateProposal`) — and nothing on the instance can reach a trainer.
+
+As a workout ride with re-plans on starts, the device asks `POST /v1/analysis/replans/warm`, and the
+instance sends the model one call shaped as a re-plan's first, about a fixed workout nobody rode, so
+the ride's first re-plan does not wait for the model to load: measured on the owner's box, a
+re-plan took 14.6 s with the model unloaded and 2.3 to 3.7 s with it loaded. It sends nothing of
+the rider's, runs no tool and keeps nothing, at most six an hour a rider. A re-plan's budgets
+were measured the same day (`apps/instance/tools/replan-measure.ts`): 4 turns, 3 tool calls,
+45 s, 16 000 tokens and 128 an answer.
+
 **What is kept, and for how long.**
 
 | What | Kept until |

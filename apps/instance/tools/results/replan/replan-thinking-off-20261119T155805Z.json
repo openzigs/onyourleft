@@ -1,0 +1,479 @@
+{
+  "measuredAt": "2026-11-19T15:58:05.739Z",
+  "model": "gemma4:12b",
+  "ollama": "0.40.16",
+  "label": "thinking-off",
+  "summaries": [
+    {
+      "fixture": "replan-request",
+      "runs": 20,
+      "valid": 20,
+      "moves": {
+        "end-main-set": 19,
+        "shorten-block": 1
+      },
+      "failures": {},
+      "milliseconds": {
+        "median": 2415,
+        "p90": 2541,
+        "most": 2805
+      }
+    },
+    {
+      "fixture": "replan-request-long",
+      "runs": 20,
+      "valid": 20,
+      "moves": {
+        "end-main-set": 20
+      },
+      "failures": {},
+      "milliseconds": {
+        "median": 3620,
+        "p90": 3672,
+        "most": 3698
+      }
+    }
+  ],
+  "runs": [
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2805
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3611
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2541
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3660
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "shorten-block",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 40,
+      "milliseconds": 2683
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3672
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2388
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3586
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2415
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3635
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2336
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3581
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2417
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3536
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2430
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3652
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2377
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3620
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2435
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3597
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2480
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3604
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2326
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3655
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2425
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3597
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2366
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3600
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2442
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3576
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2366
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3681
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2388
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3662
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2472
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3698
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2355
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3658
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1045,
+      "outputTokensTotal": 29,
+      "milliseconds": 2405
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2557,
+      "outputTokensTotal": 27,
+      "milliseconds": 3645
+    }
+  ]
+}

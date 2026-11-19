@@ -14,7 +14,7 @@
 
 import { runAnalysisAgent, type AgentClock } from './agent.ts';
 import type { AnalysisEngine, ReplanEngine } from './jobs.ts';
-import { runReplanAgent } from './replan-agent.ts';
+import { runReplanAgent, warmReplanModel } from './replan-agent.ts';
 import { modelForSource, type SourceOptions } from './source.ts';
 import type { AnalysisHistory, AnalysisReads } from './tools/reads.ts';
 
@@ -79,6 +79,13 @@ export function replanEngine(
         waitedMilliseconds: job.waitedMilliseconds,
       });
       return outcome.kind === 'kept' ? { kind: 'proposed', proposal: null } : outcome;
+    },
+    // #2841: the rider's own local model only, as a re-plan from them would ask it.
+    async warm(athleteId, signal) {
+      const chosen = await modelForSource('instance-local', athleteId, options.sources);
+      if (!chosen.ok) return false;
+      await warmReplanModel(chosen.model, signal);
+      return true;
     },
   };
 }

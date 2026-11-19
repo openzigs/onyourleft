@@ -145,6 +145,13 @@ export const ANALYSIS_SWEEP_PERIOD_MS = DEFAULT_ANALYSIS_STARTS.windowMs;
  */
 export const DEFAULT_REPLAN_STARTS: RateLimit = { limit: 24, windowMs: 60 * 60 * 1000 };
 
+/**
+ * How many warm-ups an athlete may ask for (#2841): one a workout ride, and
+ * six an hour is more rides than an hour holds. Each is one model call, so it
+ * has a limit of its own rather than one of the hour's re-plans.
+ */
+export const DEFAULT_REPLAN_WARMS: RateLimit = { limit: 6, windowMs: 60 * 60 * 1000 };
+
 /** How many events a stream reads from the store at once. */
 const EVENT_PAGE = 100;
 
@@ -235,6 +242,12 @@ export interface ReplanEngine {
     signal: AbortSignal,
     emit: (event: Extract<AgentEvent, { readonly type: 'progress' }>) => void,
   ): Promise<ReplanEnding>;
+  /**
+   * Load the athlete's local model for the re-plans of a ride starting now
+   * (#2841): `false` when there is none to load. Never throws for a model's
+   * doing; nothing it hears is kept.
+   */
+  warm?(athleteId: string, signal: AbortSignal): Promise<boolean>;
 }
 
 /** Timers the heartbeat runs on: the platform's unless a test's fake clock. */
@@ -335,6 +348,15 @@ export interface AnalysisJobs {
     caller: Caller,
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ jobId: string }>>;
+  /**
+   * A workout ride with re-plans on is starting (#2841): load the caller's
+   * local model, in the background, for its first re-plan. `{ warming }` says
+   * a call went out; it is answered before the model is loaded.
+   */
+  warmReplan(
+    caller: Caller,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<{ warming: boolean }>>;
   /** The caller's job, or `undefined`. */
   read(caller: Caller, jobId: string): Promise<JobView | undefined>;
   /** The caller's job's stream after `lastEventId`, or `undefined` when it is not theirs. */
@@ -492,6 +514,9 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
   const retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
   const starts = createRateLimiter(options.starts ?? DEFAULT_ANALYSIS_STARTS, now);
   const replanStarts = createRateLimiter(options.replanStarts ?? DEFAULT_REPLAN_STARTS, now);
+  const replanWarms = createRateLimiter(DEFAULT_REPLAN_WARMS, now);
+  /** The athletes whose warm-up is in flight, and how to stop each: one at a time an athlete. */
+  const warming = new Map<string, AbortController>();
 
   /** Who is waiting on each job's stream. */
   const listeners = new Map<string, Set<() => void>>();
@@ -867,6 +892,37 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       return { ok: true, value: { jobId: id } };
     },
 
+    async warmReplan(caller, body) {
+      const engine = options.replan;
+      if (engine === undefined || !(await options.available())) {
+        return { ok: false, code: 'analysis_off' };
+      }
+      for (const key of Object.keys(body)) {
+        if (key !== 'source')
+          return refused([{ field: key, problem: 'is not a field of a warm-up' }]);
+      }
+      if (body.source !== 'instance-local' && body.source !== 'instance-hosted') {
+        return refused([{ field: 'source', problem: 'must be instance-local or instance-hosted' }]);
+      }
+      const notOffered = await refusedSource(caller.athleteId, body.source);
+      if (notOffered !== undefined) return notOffered;
+      // A hosted model is never loaded by anyone but its service; one in flight is enough.
+      if (body.source !== 'instance-local' || engine.warm === undefined || stopping) {
+        return { ok: true, value: { warming: false } };
+      }
+      if (warming.has(caller.athleteId)) return { ok: true, value: { warming: true } };
+      if (!replanWarms.allow(caller.athleteId)) return { ok: false, code: 'rate_limited' };
+      const controller = new AbortController();
+      warming.set(caller.athleteId, controller);
+      void engine
+        .warm(caller.athleteId, controller.signal)
+        .catch(() => false)
+        .finally(() => {
+          if (warming.get(caller.athleteId) === controller) warming.delete(caller.athleteId);
+        });
+      return { ok: true, value: { warming: true } };
+    },
+
     async read(caller, id) {
       const job = await store.getAnalysisJob(caller.athleteId, id);
       return job === undefined
@@ -928,6 +984,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     async stop() {
       stopping = true;
       for (const controller of running.values()) controller.abort();
+      for (const controller of warming.values()) controller.abort();
       for (const finish of [...streams]) finish();
       while (working !== undefined) await working;
     },

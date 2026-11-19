@@ -225,8 +225,9 @@ export const INSTANCE_FAILURE_TEXT = {
   'model-no-answer':
     'The model used up what your instance allows for one answer before it wrote any of it, so nothing was kept. A model that reasons before it answers can do this; one that reasons less may do better.',
   'model-malformed': 'The model server sent an answer this app cannot read, so nothing was kept.',
+  // #2634: the model may be there and not opened to this rider; the sentence is true either way.
   local_unavailable:
-    'Your instance has no model of its own set up, so nothing was sent and nothing was kept.',
+    'Whoever runs your instance has not made its own model available to you, so nothing was sent and nothing was kept.',
   hosted_unavailable:
     'The service your instance sends write-ups to is not available to you now, so nothing was sent and nothing was kept.',
   interrupted:

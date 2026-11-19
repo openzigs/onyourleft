@@ -911,22 +911,28 @@ describe('every failure is the plan already on the device', () => {
     expect(r.session.records()).toEqual([]);
   });
 
-  it.each(['rate_limited', 'analysis_off', 'validation_failed', 'unauthenticated'])(
-    'asks nothing more for this workout once the instance refuses with %s',
-    async (code) => {
-      const r = rig();
-      r.scripted.startAnswer = { status: 429, body: { error: { code } } };
-      await r.ride(300);
-      expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
-      r.scripted.startAnswer = undefined;
-      await r.ride(1300);
-      expect(r.scripted.starts()).toHaveLength(1);
-    },
-  );
+  it.each([
+    'rate_limited',
+    'analysis_off',
+    'validation_failed',
+    'unauthenticated',
+    'local_unavailable',
+    'hosted_unavailable',
+  ])('asks nothing more for this workout once the instance refuses with %s', async (code) => {
+    const r = rig();
+    r.scripted.startAnswer = { status: 429, body: { error: { code } } };
+    await r.ride(300);
+    expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
+    r.scripted.startAnswer = undefined;
+    await r.ride(1300);
+    expect(r.scripted.starts()).toHaveLength(1);
+  });
 
   it('ends the asking for exactly the refusals the instance’s start names as permanent', () => {
     expect([...PERMANENT_REFUSALS].sort()).toEqual([
       'analysis_off',
+      'hosted_unavailable',
+      'local_unavailable',
       'rate_limited',
       'unauthenticated',
       'validation_failed',

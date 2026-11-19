@@ -68,6 +68,18 @@ export interface ModelTurnRequest {
    * spelling of "do not reason" is its own, and none is assumed.
    */
   readonly thinking?: 'off';
+  /**
+   * The JSON Schema the answer is held to (#2841), on a model on the rider's
+   * own box: Ollama's structured output admits nothing else. A grammar held
+   * answer cannot also be a native tool call (measured on Ollama 0.40.16: with
+   * a schema set, a model told to call a tool answered the schema instead), so
+   * the local connection lets the model call any of `tools` that takes no
+   * argument by answering `{"look":"<its name>"}`, and hands that back as the
+   * tool call it is. A hosted connection sends nothing for it, and offers
+   * `tools` as tools: whether a service holds an answer to a schema is its own.
+   * The agent reads the answer again either way.
+   */
+  readonly answerSchema?: Readonly<Record<string, unknown>>;
   /** How long this turn may take before it is given up as `timed-out`. */
   readonly timeoutMilliseconds: number;
   /** The job's signal: an abort here aborts the request on the wire. */
@@ -134,6 +146,19 @@ export function isReasoningTokens(value: unknown): value is number {
     value <= MAXIMUM_REASONING_TOKENS
   );
 }
+
+/**
+ * How a turn whose answer is a choice from closed lists is sampled (#2841,
+ * the re-plan): at **0.2**, low because the answer is a pick and not prose,
+ * and not nought, so a run asked again is not bound to the same pick; and,
+ * on a model on the rider's own box, with no reasoning first. Here and not in
+ * the re-plan's modules, which name no environment figure (spike 0022 R4,
+ * `replan-input.test.ts`), and a sampling setting shares a word with one.
+ *
+ * ## Provenance — ⚠️ the author's figure; #2841's measurement ran at it and
+ * at no other
+ */
+export const CLOSED_LIST_TURN = { temperature: 0.2, thinking: 'off' } as const;
 
 /** A model, one turn at a time. */
 export interface ModelConnection {

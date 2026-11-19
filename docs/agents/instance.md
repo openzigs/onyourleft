@@ -109,7 +109,11 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         under `tools/results/write-up/` and exits 1 below
                         the set's pass mark — run it before and after any
                         change to the write-up's prompt, tools, budgets or
-                        model; it is no CI gate. Since #881 it also holds `src/sync/` —
+                        model; it is no CI gate. `tools/replan-measure.ts`
+                        (#2841) does the same for a re-plan over the
+                        device's two golden requests (`--looks` makes each
+                        run read the tools first), a measurement with no
+                        pass mark. Since #881 it also holds `src/sync/` —
                         ingestion of a signed record and its original file
                         (#37), the athlete's own rides, detail and streams
                         (#38, never a position), the sync manifest, items and
