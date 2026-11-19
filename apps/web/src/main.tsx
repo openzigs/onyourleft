@@ -170,6 +170,7 @@ import { forgettingOnDelete, type LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
+import type { AthleteRiderBodyPort } from './athlete/rider-body-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { CalorieInputsPort } from './athlete/calorie-inputs-port';
 import { calorieRiderFor } from './athlete/calorie-inputs';
@@ -1104,6 +1105,14 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
 }
 
 /**
+ * The settings screen's write of which rider is drawn (#2839), over the same
+ * connection and separate for the reason `athlete/rider-body-port.ts` gives.
+ */
+function buildAthleteRiderBodyPort(): AthleteRiderBodyPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * The rider's words to mask (#839), over the same connection. A hosted
  * write-up sends the instance the same row before every job (#1251).
  */
@@ -1958,6 +1967,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // substituted, and a default applied here would be a second.
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
+          athleteRider={buildAthleteRiderBodyPort()}
           maskedWords={buildMaskedWordsPort()}
           calorieInputs={buildCalorieInputsPort()}
           riderText={buildRiderTextPort()}
@@ -1975,6 +1985,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}
+          // #2839: which rider is drawn, undefaulted likewise — `game/rider-body.ts`
+          // §`riderBodyFor` is the one place a missing one becomes the default.
+          {...(athlete?.riderBody === undefined ? {} : { riderBody: athlete.riderBody })}
           // ⚠️ The **stored** preference, read before the first paint. The
           // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
           // place — `AppShell`'s own default — so "a row with no setting" and

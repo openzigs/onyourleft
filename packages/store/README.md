@@ -262,6 +262,15 @@ on the way in and on the way out, so neither a cast at a call site nor a hand-ed
 anything but a key on the record. `misfiledKitColourStoreFactory` is its fake — the right row, a key
 the reader does not use — and `activity-store.kit-colour.test.ts` holds the red/green pair.
 
+`setAthleteRiderBody(id, riderBody)` ([#2839](https://github.com/openzigs/onyourleft/issues/2839)) is
+the same shape for which rider the trainer game draws: one of two words, `female` or `male`
+(`rider-body.ts`), through `parseRiderBody` on the way in and on the way out, and absent on a row
+nobody has chosen for — the client draws that as `male`, the rider every athlete had before.
+⚠️ **It is how the rider looks and never a health input**: it is not read from `calorieSex` and
+never writes it (the owner's ruling of 2026-11-18). `healthCoupledRiderBodyStoreFactory` is its
+fake — a store that keeps the two "in step" — and `activity-store.rider-body.test.ts` holds the
+red/green pair, from a row whose calorie sex is the other word.
+
 `setActivityLoadSummary(owner, id, summary)` (#77) is the same shape again, for a ride: it writes
 the threshold-independent half of a ride's load and touches nothing else, and it is **athlete-scoped**
 — a ride id alone must never be enough to modify a row (CLAUDE.md §6). ⚠️ The *load* is deliberately

@@ -131,6 +131,11 @@ export {
 
 export type { KitColour } from './kit-colour';
 export { DEFAULT_KIT_COLOUR, isKitColour, KIT_COLOURS, parseKitColour } from './kit-colour';
+
+// --- Which rider is drawn (#2839) -------------------------------------------
+
+export type { RiderBody } from './rider-body';
+export { DEFAULT_RIDER_BODY, isRiderBody, parseRiderBody, RIDER_BODIES } from './rider-body';
 export {
   MAXIMUM_MASKED_WORD_LENGTH,
   MAXIMUM_MASKED_WORDS,

@@ -67,6 +67,7 @@ import {
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_PEOPLE,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_FEMALE,
   REALISTIC_DELIVERY_CAR,
   REALISTIC_DELIVERY_CAR_ATLAS,
   REALISTIC_DELIVERY_CAR_BODIES,
@@ -692,7 +693,13 @@ describe('MakeHuman’s CC0 system assets — #623, ADR 0026’s 2026-09-28 amen
     const targets = makeHuman.origin.files.filter((file) => file.path.startsWith('targets/'));
     expect(targets.map((file) => file.path.slice('targets/'.length))).toEqual(RIDER_BUILD_TARGETS);
     for (const file of targets) {
-      expect(file.url).toMatch(/\/[0-9a-f]{40}\/makehuman\/data\/targets\/macrodetails\//);
+      // #2839's second round: a target with a directory of its own (the
+      // female figure's breast and shape targets) is fetched from that
+      // directory, and a bare name from the macro targets', at the same commit.
+      const name = file.path.slice('targets/'.length);
+      const directory = name.includes('/') ? '' : 'macrodetails/';
+      expect(file.url).toMatch(/\/[0-9a-f]{40}\/makehuman\/data\/targets\//);
+      expect(file.url.endsWith(`/makehuman/data/targets/${directory}${name}`), file.url).toBe(true);
       expect(file.mustContain).toMatch(/CC0/);
     }
   });
@@ -727,12 +734,14 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
     // #2485: and the pack's rider, whose texture's shape is held too; #2495:
     // and the rider, whose eyes' cost is; and #2540's car, and since #2847
     // the three cars that replaced it.
+    // #2839: and the female rider, held to the rider's own figures.
     expect(files.sort()).toEqual(
       [
         REALISTIC_DELIVERY_CAR,
         'island_tree_02-middle.glb',
         'island_tree_02.glb',
         REALISTIC_RIDER,
+        REALISTIC_RIDER_FEMALE,
         REALISTIC_RIDER_PACK.lod,
       ].sort(),
     );
