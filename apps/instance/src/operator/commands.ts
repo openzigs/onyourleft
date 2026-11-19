@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import {
@@ -14,6 +15,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
 
@@ -285,6 +287,75 @@ export interface BackupOptions {
   readonly requestId?: number;
   /** The folder leases' clock and heartbeat (`backup-lease.ts`): a test's. */
   readonly lease?: LeaseOptions;
+  /** The off-box copy's watchdog (#2626): {@link OFF_BOX_WATCHDOG} unless a test's. */
+  readonly offBoxWatchdog?: OffBoxWatchdog;
+}
+
+/**
+ * How long the off-box copy may run before its watchdog kills it (#2626):
+ * the snapshot's size at {@link OffBoxWatchdog.bytesPerSecond}, and never less
+ * than {@link OffBoxWatchdog.floorMs}.
+ */
+export interface OffBoxWatchdog {
+  readonly floorMs: number;
+  readonly bytesPerSecond: number;
+  /** The copier's command line, before `<from> <to>`: {@link COPIER} unless a test's. */
+  readonly copier?: readonly string[];
+}
+
+/**
+ * The watchdog's defaults: 1 MB/s, far below any share that is answering,
+ * and a floor of 15 minutes, so a small snapshot on a slow share is not cut
+ * short.
+ */
+export const OFF_BOX_WATCHDOG: OffBoxWatchdog = { floorMs: 15 * 60_000, bytesPerSecond: 1_000_000 };
+
+/** The copier: `copy-snapshot.ts` under this Node, in a process of its own. */
+export const COPIER: readonly string[] = [
+  process.execPath,
+  fileURLToPath(new URL('./copy-snapshot.ts', import.meta.url)),
+];
+
+/** The watchdog's limit for a snapshot of `bytes`, in milliseconds. */
+export function offBoxLimitMs(bytes: number, watchdog: OffBoxWatchdog): number {
+  return Math.max(watchdog.floorMs, Math.ceil((bytes / watchdog.bytesPerSecond) * 1000));
+}
+
+/**
+ * Copies `from` to `to` in a child process, and kills it with SIGKILL once
+ * `limitMs` has passed (#2626): `copied` when it exited 0, `stopped` when the
+ * watchdog killed it, `failed` otherwise. Answers only once the child has
+ * EXITED, so the run — and the folder's lease it holds — outlasts the copy: a
+ * second copy is never started into the place while this one is alive. A
+ * child stuck in an uninterruptible wait may outlive SIGKILL, and the run
+ * waits on with it; `docs/operating-an-instance.md` says so.
+ */
+async function copyOffBox(
+  from: string,
+  to: string,
+  limitMs: number,
+  copier: readonly string[],
+): Promise<'copied' | 'stopped' | 'failed'> {
+  const [command = process.execPath, ...args] = copier;
+  // No output: the copier's errors would name paths (`log.ts`'s rule).
+  const child = spawn(command, [...args, from, to], { stdio: 'ignore' });
+  return new Promise((resolve) => {
+    let stopped = false;
+    const watchdog = setTimeout(() => {
+      stopped = true;
+      child.kill('SIGKILL');
+    }, limitMs);
+    child.once('error', () => {
+      // Only a child that never started ends here; a running one ends at `exit`.
+      if (child.pid !== undefined) return;
+      clearTimeout(watchdog);
+      resolve('failed');
+    });
+    child.once('exit', (code) => {
+      clearTimeout(watchdog);
+      resolve(stopped ? 'stopped' : code === 0 ? 'copied' : 'failed');
+    });
+  });
 }
 
 /**
@@ -532,11 +603,12 @@ async function bytesUnder(root: string): Promise<number> {
  * the old snapshots `--keep` would remove, and `backup` removes them once the
  * run is recorded.
  *
- * ⚠️ The off-box copy has no time limit. A share that stops answering blocks
- * the copy inside a file-system call, which Node cannot cancel, and the loop
- * waits with it; the snapshot on the box is already complete. Watch
- * `docker compose logs backup` and the age of the last backup in Status;
- * #2626 is the child-process watchdog that would stop it.
+ * The off-box copy runs in a child process under a watchdog (#2626,
+ * {@link copyOffBox}): a share that stops answering blocks the child, not this
+ * run, and the watchdog kills it. A copy the watchdog stopped is an off-box
+ * `failed`, and the run touches that place no more: its partial copy is left
+ * for a later run's cleanup ({@link removePartials}), and its free space is
+ * not read.
  */
 async function takeBackup(
   paths: DataPaths,
@@ -581,21 +653,34 @@ async function takeBackup(
   // A copy that fails leaves the snapshot taken and recorded (#2606): the
   // record says `failed`, and the off-box place's older copies are not
   // pruned, so a drive that is full or gone keeps what it had.
+  const sizeBytes = await bytesUnder(snapshot);
   let copiedTo: string | null = null;
   let offBox: 'copied' | 'failed' | 'not-configured' = 'not-configured';
+  let offBoxHung = false;
   if (options.copyTo !== undefined) {
     const copy = join(options.copyTo, name);
     const partialCopy = join(options.copyTo, `${PARTIAL}${name}`);
+    const watchdog = options.offBoxWatchdog ?? OFF_BOX_WATCHDOG;
     try {
       if (!offBoxHeld) throw new Error('the off-box place is not this run’s');
       await removePartials(options.copyTo, `${PARTIAL}${name}`);
-      await cp(snapshot, partialCopy, { recursive: true });
+      const copied = await copyOffBox(
+        snapshot,
+        partialCopy,
+        offBoxLimitMs(sizeBytes, watchdog),
+        watchdog.copier ?? COPIER,
+      );
+      if (copied === 'stopped') offBoxHung = true;
+      if (copied !== 'copied') throw new Error('the off-box copy did not finish');
       await renameRetrying(partialCopy, copy);
       copiedTo = copy;
       offBox = 'copied';
     } catch {
       offBox = 'failed';
-      await rm(partialCopy, { recursive: true, force: true }).catch(() => undefined);
+      // A share that hung is not touched again: its partial copy is a later run's to remove.
+      if (!offBoxHung) {
+        await rm(partialCopy, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
   }
   const prune: string[] = [];
@@ -621,11 +706,12 @@ async function takeBackup(
     rows: Object.values(manifest.rows).reduce((sum, n) => sum + n, 0),
     blobs: manifest.blobs,
     databaseSha256: manifest.databaseSha256,
-    sizeBytes: await bytesUnder(snapshot),
+    sizeBytes,
     offBox,
     removed: prune.length,
     backupsFreeBytes: await freeBytesAt(destination),
-    offBoxFreeBytes: options.copyTo === undefined ? null : await freeBytesAt(options.copyTo),
+    offBoxFreeBytes:
+      options.copyTo === undefined || offBoxHung ? null : await freeBytesAt(options.copyTo),
     intervalSeconds: options.intervalSeconds ?? null,
   };
   return {
@@ -891,6 +977,9 @@ export async function backupLoop(
           await backup(paths, destination, {
             ...(options.keep === undefined ? {} : { keep: options.keep }),
             ...(options.copyTo === undefined ? {} : { copyTo: options.copyTo }),
+            ...(options.offBoxWatchdog === undefined
+              ? {}
+              : { offBoxWatchdog: options.offBoxWatchdog }),
             now: clock,
             intervalSeconds: options.intervalSeconds,
             ...(served === undefined ? {} : { requestId: served }),

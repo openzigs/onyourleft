@@ -957,10 +957,17 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
 - **On a rollback** to an image from before `backup-loop` existed, the service checks whether the
   image has the command. If it does not, it runs the old shell loop, so backups carry on. That loop
   now stops on `docker compose stop` between runs.
-- ⚠️ **The off-box copy has no time limit.** A share that stops answering blocks the copy inside a
-  file-system call, which Node cannot cancel, and the service waits with it. The snapshot on the box
-  is already complete by then. If the Status shows the last backup getting old, check
-  `docker compose logs backup` and the share. A watchdog for this is [#2626](https://github.com/openzigs/onyourleft/issues/2626).
+- **The off-box copy has a watchdog** (#2626). The copy runs in a process of its own, and if it has
+  not finished in 15 minutes, or in the snapshot's size at 1 MB/s when that is longer, it is killed.
+  A share that stops answering then costs one run's copy, not the service: the run's record says
+  off-box `failed`, the snapshot on the box is kept, nothing off the box is pruned, and the
+  `.partial-snapshot-…` copy is left there for a later run to remove (it removes partials older
+  than six hours). The run does not touch that share again, not even to read its free space.
+- ⚠️ **A copy stuck in an uninterruptible wait can outlive the kill.** A process blocked in some
+  kernel file-system calls does not die until the call returns, whatever signal it is sent. The run
+  waits until the copy has exited, holding the off-box folder's lease, so no second copy is ever
+  started into that folder alongside it, and that run is then as stuck as the copy. If the Status
+  shows the last backup getting old, check `docker compose logs backup` and the share.
 
 ⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
 the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an

@@ -29,6 +29,8 @@ import {
   backup,
   BACKUP_POLL_SECONDS,
   backupLoop,
+  OFF_BOX_WATCHDOG,
+  offBoxLimitMs,
   PARTIAL_AGE_MS,
   renameRetrying,
   UNRECORDED_ALLOWANCE,
@@ -944,5 +946,114 @@ describe('backup-loop on the command line (#2606)', () => {
     } finally {
       child.kill('SIGKILL');
     }
+  });
+});
+
+describe('backup: a hung off-box copy is stopped by its watchdog (#2626)', () => {
+  /**
+   * A copier that never finishes: what a share that stopped answering does to
+   * a copy. It starts the copy it was given, and writes its pid beside it, so
+   * the test can see it is gone once the run ends.
+   */
+  const HUNG = [
+    process.execPath,
+    '-e',
+    "const fs = require('node:fs'); fs.mkdirSync(process.argv[2]); fs.writeFileSync(process.argv[2] + '.pid', String(process.pid)); setInterval(() => {}, 1 << 30);",
+  ];
+  /** A limit of 200 ms, whatever the snapshot's size: the watchdog's parameter, not a test timeout. */
+  const QUICK = { floorMs: 200, bytesPerSecond: Number.MAX_SAFE_INTEGER, copier: HUNG };
+
+  it('ends the run, records off-box failed, keeps the snapshot on the box and prunes nothing off it', async () => {
+    const { world: on, paths, backups } = await started();
+    const offBox = join(directory ?? '', 'off-box');
+    const older = await restorePoints(offBox);
+    const stop = new AbortController();
+    const reports: unknown[] = [];
+    const result = await backupLoop(paths, backups, {
+      intervalSeconds: 3600,
+      keep: 1,
+      copyTo: offBox,
+      offBoxWatchdog: QUICK,
+      now: () => new Date(on.clock.ms),
+      signal: stop.signal,
+      wait: (ms) => {
+        on.clock.ms += ms;
+        stop.abort();
+        return Promise.resolve();
+      },
+      report: (line) => reports.push(line),
+    });
+    expect(result.runs).toBe(1);
+    expect(reports).toEqual([expect.objectContaining({ offBox: 'failed', recorded: true })]);
+    // Read back as the owner reads it: the run is done, and its copy failed.
+    const body = await backupsOf(on);
+    expect(body.backups[0]).toMatchObject({ outcome: 'done', offBox: 'failed' });
+    const status = await on.as(on.owner, 'GET', '/v1/operate/status');
+    expect((status.body as { lastBackup: { offBox: string } }).lastBackup.offBox).toBe('failed');
+    // The snapshot on the box is whole: its manifest is there and names its database.
+    const [snapshot] = await readdir(backups);
+    expect(snapshot).toBe(body.backups[0]?.snapshot);
+    const manifest = JSON.parse(
+      await readFile(join(backups, snapshot ?? '', 'manifest.json'), 'utf8'),
+    ) as Manifest;
+    expect(manifest.databaseSha256).toMatch(/^[0-9a-f]{64}$/);
+    // Off the box: every older restore point kept, no copy made, and the
+    // partial copy left for a later run's cleanup, untouched.
+    const there = await readdir(offBox);
+    expect(there.filter((name) => name.startsWith('snapshot-')).sort()).toEqual(older);
+    expect(there).toContain(`.partial-${snapshot ?? ''}`);
+    const pidFile = there.find((name) => name.endsWith('.pid'));
+    expect(pidFile).toBe(`.partial-${snapshot ?? ''}.pid`);
+    // And the copier is gone: the run waited for it to exit. (Were it alive,
+    // it is killed here, so a failing case leaves no process behind.)
+    const pid = Number(await readFile(join(offBox, pidFile ?? ''), 'utf8'));
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+      process.kill(pid, 'SIGKILL');
+    } catch (error) {
+      alive = (error as { readonly code?: unknown }).code !== 'ESRCH';
+    }
+    expect(alive).toBe(false);
+  });
+
+  it('records off-box failed and removes the partial copy when the copier exits with an error', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const offBox = join(paths.root, 'off-box');
+    const older = await restorePoints(offBox);
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const taken = await backup(paths, onBox, {
+        keep: 1,
+        copyTo: offBox,
+        now: () => new Date('2026-09-01T00:00:00Z'),
+        offBoxWatchdog: {
+          ...OFF_BOX_WATCHDOG,
+          // Makes a partial copy, then fails.
+          copier: [
+            process.execPath,
+            '-e',
+            "require('node:fs').mkdirSync(process.argv[2]); process.exit(3);",
+          ],
+        },
+      });
+      expect(taken).toMatchObject({ offBox: 'failed', recorded: true, copiedTo: null });
+    } finally {
+      quiet.mockRestore();
+    }
+    expect((await readdir(offBox)).sort()).toEqual(older);
+    expect(await readdir(onBox)).toEqual(['snapshot-2026-09-01T00-00-00-000Z']);
+  });
+
+  it('gives the copy the snapshot’s size at the watchdog’s rate, and never less than its floor', () => {
+    const watchdog = { floorMs: 1000, bytesPerSecond: 1_000_000 };
+    expect(offBoxLimitMs(0, watchdog)).toBe(1000);
+    expect(offBoxLimitMs(500_000, watchdog)).toBe(1000);
+    expect(offBoxLimitMs(5_000_000, watchdog)).toBe(5000);
+    expect(offBoxLimitMs(5_000_001, watchdog)).toBe(5001);
+    // The defaults: a 15-minute floor, and 1 MB/s past it.
+    expect(offBoxLimitMs(0, OFF_BOX_WATCHDOG)).toBe(15 * 60_000);
+    expect(offBoxLimitMs(2_000_000_000, OFF_BOX_WATCHDOG)).toBe(2_000_000);
   });
 });
