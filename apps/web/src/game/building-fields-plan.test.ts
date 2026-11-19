@@ -97,7 +97,11 @@ function plansDigest(
     function (this: unknown, key: string, value: unknown) {
       return key === 'inferred' ||
         key === 'steeple' ||
-        (key === 'spire' && ArrayBuffer.isView(value) && (value as Float32Array).length === 0)
+        // #2848 added the `apron` outline and role to every plan; an empty one is left
+        // out of the record, which predates it, as an empty `spire` is.
+        ((key === 'spire' || key === 'apron') &&
+          ArrayBuffer.isView(value) &&
+          (value as Float32Array).length === 0)
         ? undefined
         : key === 'farTriangleCount'
           ? (value as number) - plinthTriangles(this as FootprintPlan)
