@@ -6,6 +6,7 @@ import { REGISTRATION_MODE_TEXT } from './accounts';
 import {
   BACKUPS_EXPERT_LINES,
   expiresInText,
+  ranAgoText,
   SETUP_EXPERT_SUMMARY,
   SETUP_REGISTRATION_MODE_TEXT,
   setupSummaryLines,
@@ -17,6 +18,7 @@ describe('the setup wizard’s words (#2784)', () => {
     expect(
       [0, 59, 60, 61, 119, 120, 599, 600, 7199, 7200, 47 * 3600, 48 * 3600, 7 * 86_400].map(
         expiresInText,
+        ranAgoText,
       ),
     ).toEqual([
       'in less than a minute',
@@ -32,6 +34,18 @@ describe('the setup wizard’s words (#2784)', () => {
       'in 47 hours',
       'in 2 days',
       'in 7 days',
+    ]);
+  });
+
+  it('says how long ago something ran, never as a UTC moment, and never a time yet to come (#2825)', () => {
+    expect([-30, 0, 59, 60, 14 * 60, 3 * 3600 + 5 * 60, 2 * 86_400].map(ranAgoText)).toEqual([
+      'less than a minute ago',
+      'less than a minute ago',
+      'less than a minute ago',
+      '1 minute ago',
+      '14 minutes ago',
+      '3 hours 5 minutes ago',
+      '2 days ago',
     ]);
   });
 

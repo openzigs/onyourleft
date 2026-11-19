@@ -105,6 +105,7 @@ const step =
 
 const record = (offBox: string | null, outcome = 'done') => ({
   at: '2026-11-18T09:00:00.000Z',
+  secondsAgo: 14 * 60,
   outcome,
   offBox,
 });
@@ -135,7 +136,8 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       'open',
       step(
         'claim',
-        () => pages.claimBody({ kind: 'open', card: true, notConfirmed: false }, CSRF),
+        () =>
+          pages.claimBody({ kind: 'open', card: true, notConfirmed: false, expired: false }, CSRF),
         false,
         'claim',
       ),
@@ -144,7 +146,18 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       'not confirmed, no card',
       step(
         'claim',
-        () => pages.claimBody({ kind: 'open', card: false, notConfirmed: true }, CSRF),
+        () =>
+          pages.claimBody({ kind: 'open', card: false, notConfirmed: true, expired: false }, CSRF),
+        false,
+        'claim',
+      ),
+    ],
+    [
+      'the code ran out',
+      step(
+        'claim',
+        () =>
+          pages.claimBody({ kind: 'open', card: true, notConfirmed: false, expired: true }, CSRF),
         false,
         'claim',
       ),
@@ -381,6 +394,28 @@ describe.each([
     expect(line?.textContent).toBe(codeWithCard(CARD, CODE));
     expect(readCodeWithCard(line?.textContent ?? '')).toEqual({ card: CARD, code: CODE });
     expect(tabbableElements(doc)).not.toContain(svg);
+  });
+});
+
+describe('the claim step’s one problem sentence (#2825)', () => {
+  const alerts = (view: { notConfirmed: boolean; expired: boolean }): (string | null)[] =>
+    [
+      ...parse(pages.claimBody({ kind: 'open', card: true, ...view }, CSRF)).querySelectorAll(
+        '[role="alert"]',
+      ),
+    ].map((alert) => alert.textContent);
+
+  it('says a code ran out, as an alert, and nothing when none did', () => {
+    expect(alerts({ notConfirmed: false, expired: true })).toEqual([
+      'That code ran out. Show a new one.',
+    ]);
+    expect(alerts({ notConfirmed: false, expired: false })).toEqual([]);
+  });
+
+  it('says one sentence, the fuller one, when a claim could not be confirmed either', () => {
+    const said = alerts({ notConfirmed: true, expired: true });
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/^That claim could not be confirmed/);
   });
 });
 

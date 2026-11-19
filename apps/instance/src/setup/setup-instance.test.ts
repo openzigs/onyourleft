@@ -716,6 +716,83 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(expired.body).not.toContain(claim);
     expect(expired.body).not.toContain('I’ve scanned it');
     expect(expired.body).not.toContain('http-equiv="refresh"');
+    // And it says why the QR went (#2825), once: the dead code is dropped where it is found.
+    const ranOut = '<p class="problem" role="alert">That code ran out. Show a new one.</p>';
+    expect(expired.body).toContain(ranOut);
+    const after = await browser.get('/setup/claim');
+    expect(after.body).toContain('Show the claim code');
+    expect(after.body).not.toContain('That code ran out.');
+    // A new code is a new ten minutes, with no word about the old one.
+    const fresh = await showClaim(browser);
+    expect(CARD_LINE.exec(fresh.body)?.[1]).toMatch(/^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/);
+    expect(CARD_LINE.exec(fresh.body)?.[1]).not.toBe(claim);
+    expect(fresh.body).not.toContain('That code ran out.');
+  });
+
+  it('says a claim code ran out only to the session that was shown it (#2825)', async () => {
+    const at = await world();
+    at.clock = Date.now();
+    await restart(at);
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    await showClaim(browser);
+    const printed = await setupCode(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port), now: () => new Date(at.clock ?? 0) },
+    );
+    const other = new Browser(at);
+    await other.signIn(printed.code);
+    at.clock += 11 * 60 * 1000;
+    // Never shown the code, so told nothing about it.
+    const elsewhere = await other.get('/setup/claim');
+    expect(elsewhere.body).toContain('Show the claim code');
+    expect(elsewhere.body).not.toContain('That code ran out.');
+  });
+
+  it('says how long ago the last backup ran, never a UTC moment (#2825)', async () => {
+    const at = await world();
+    at.clock = Date.now();
+    await restart(at);
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const claim = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    expect((await tabletRedeems(at, await testDevice(), claim)).status).toBe(200);
+    const pending = await browser.get('/setup/claim');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    await browser.post('/setup/claim/confirm', { comparison });
+    for (const from of ['claim', 'passkey', 'secrets']) await browser.post('/setup/next', { from });
+
+    const ran = new Date(at.clock);
+    const stop = new AbortController();
+    await backupLoop(
+      { database: at.path, blobs: join(at.path, '..', 'blobs') },
+      join(at.path, '..', 'backups-dir'),
+      {
+        intervalSeconds: 21_600,
+        signal: stop.signal,
+        now: () => ran,
+        wait: () => {
+          stop.abort();
+          return Promise.resolve();
+        },
+        report: () => undefined,
+      },
+    );
+    const stamp = `datetime="${ran.toISOString().slice(0, 19)}.000Z"`;
+    const justNow = await browser.get('/setup/backups');
+    expect(justNow.body).toContain(
+      `<p>The last backup ran <time ${stamp}>less than a minute ago</time>.</p>`,
+    );
+    // Fourteen minutes on, inside the session's fifteen idle: the page counts from the server's clock.
+    at.clock += 14 * 60 * 1000;
+    const later = await browser.get('/setup/backups');
+    expect(later.body).toContain(
+      `<p>The last backup ran <time ${stamp}>14 minutes ago</time>.</p>`,
+    );
+    expect(later.body).not.toContain('UTC');
+    expect(later.body).not.toContain('The last backup ran at');
   });
 
   it('is done from the first start when OYL_INSTANCE_OWNER_KEY is set: no code, no listener with the admin pages off, nothing served', async () => {

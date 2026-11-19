@@ -18,6 +18,8 @@
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
 
+import { durationText } from './words';
+
 /** The wizard's steps, in order: `apps/instance`'s `SETUP_STEPS`, which its tests hold this to. */
 export type OperateSetupStep =
   'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'finish';
@@ -115,6 +117,16 @@ export function expiresInText(seconds: number): string {
   return `in ${String(Math.floor(hours / 24))} days`;
 }
 
+/**
+ * How long ago something ran, from the seconds since: "less than a minute
+ * ago", "14 minutes ago", "3 hours 5 minutes ago". Relative, for
+ * {@link expiresInText}'s reason: a moment in UTC is not the owner's time
+ * (#2825). A clock that stepped back reads as "less than a minute ago".
+ */
+export function ranAgoText(seconds: number): string {
+  return `${durationText(seconds)} ago`;
+}
+
 /** A code shown on a step's page: it works once, and stops working {@link expiresInText}. */
 export function codeWorksOnceText(seconds: number): string {
   return `It works once, and stops working ${expiresInText(seconds)}.`;
@@ -148,6 +160,8 @@ export const CLAIMED_WRONG_TEXT =
   'If the wrong tablet claimed it, run the owner-claim reset command on this machine and claim it again.';
 export const CLAIM_NOT_CONFIRMED_TEXT =
   'That claim could not be confirmed: it ran out, or a new code replaced it. Show a new claim code and scan it again.';
+/** The claim step once the code it showed has run out: why the QR went, in one sentence (#2825). */
+export const CLAIM_EXPIRED_TEXT = 'That code ran out. Show a new one.';
 export const CLAIM_NO_CARD_TEXT =
   'The instance’s own keys could not be read, so there is no card to claim it with. The instance makes them when it starts with its secret key: restart it, then come back.';
 
@@ -198,7 +212,8 @@ export const BACKUPS_LAST_NOT_CONFIGURED_TEXT =
   'The last backup was saved on this computer only: no place for the copy kept elsewhere has been set.';
 export const BACKUPS_LAST_FAILED_TEXT =
   'The last backup failed: it could not be saved on this computer.';
-export const BACKUPS_LAST_AT_TEXT = 'The last backup ran at';
+/** Before {@link ranAgoText}: "The last backup ran 14 minutes ago." */
+export const BACKUPS_LAST_RAN_TEXT = 'The last backup ran';
 export const BACKUPS_WAITING_TEXT =
   'Waiting for the backup to run. It usually starts within 30 seconds: press Check now to see whether it has.';
 export const BACKUPS_TOO_SOON_TEXT =

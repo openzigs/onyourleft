@@ -34,16 +34,17 @@ import {
   BACK_UP_NOW_STEP_BUTTON,
   BACKUPS_EXPERT_LINES,
   BACKUPS_FOLDERS_TEXT,
-  BACKUPS_LAST_AT_TEXT,
   BACKUPS_LAST_COPIED_TEXT,
   BACKUPS_LAST_COPY_FAILED_TEXT,
   BACKUPS_LAST_FAILED_TEXT,
   BACKUPS_LAST_NOT_CONFIGURED_TEXT,
+  BACKUPS_LAST_RAN_TEXT,
   BACKUPS_NONE_YET_TEXT,
   BACKUPS_STEP_LEAD,
   BACKUPS_TOO_SOON_TEXT,
   BACKUPS_WAITING_TEXT,
   CLAIM_CODE_LEAD,
+  CLAIM_EXPIRED_TEXT,
   CLAIM_LEAD,
   CLAIM_NO_BUTTON,
   CLAIM_NO_CARD_TEXT,
@@ -77,11 +78,11 @@ import {
   KIT_ONCE_TEXT,
   KIT_STEP_LEAD,
   KIT_TAKEN_TEXT,
-  momentText,
   OFFBOX_RULE_TEXT,
   PASSKEY_STEP_LATER,
   PASSKEY_STEP_LEAD,
   passkeyStepHow,
+  ranAgoText,
   REGISTRATION_SAVE_BUTTON,
   REGISTRATION_STEP_LEAD,
   REGISTRATION_STEP_LEGEND,
@@ -340,8 +341,16 @@ export type ClaimView =
   | { readonly kind: 'claimed' }
   /** A tablet redeemed the code: its six-digit comparison number (ADR 0080 D-5). */
   | { readonly kind: 'pending'; readonly comparisonCode: string }
-  /** No claim in flight: the button that shows a code, or why there is none. */
-  | { readonly kind: 'open'; readonly card: boolean; readonly notConfirmed: boolean }
+  /**
+   * No claim in flight: the button that shows a code, or why there is none.
+   * `expired`: the code this session was shown has just run out (#2825).
+   */
+  | {
+      readonly kind: 'open';
+      readonly card: boolean;
+      readonly notConfirmed: boolean;
+      readonly expired: boolean;
+    }
   /** A code minted and not yet scanned: the card and it, as a QR and as text, and the wait. */
   | {
       readonly kind: 'code';
@@ -366,9 +375,16 @@ export function claimBody(view: ClaimView, csrf: string): string {
 ${buttonForm('/setup/claim/confirm', csrf, CLAIM_YES_BUTTON, { comparison: view.comparisonCode })}
 ${buttonForm('/setup/claim/discard', csrf, CLAIM_NO_BUTTON, {}, 'secondary')}
 <p class="hint">${escapeHtml(CLAIM_NO_TEXT)}</p>`);
-    case 'open':
-      return `${view.notConfirmed ? `<p class="problem" role="alert">${escapeHtml(CLAIM_NOT_CONFIRMED_TEXT)}</p>\n` : ''}<p>${escapeHtml(CLAIM_LEAD)}</p>
+    case 'open': {
+      // One sentence at most: a claim that could not be confirmed says more than a code that ran out.
+      const problem = view.notConfirmed
+        ? CLAIM_NOT_CONFIRMED_TEXT
+        : view.expired
+          ? CLAIM_EXPIRED_TEXT
+          : null;
+      return `${problem === null ? '' : `<p class="problem" role="alert">${escapeHtml(problem)}</p>\n`}<p>${escapeHtml(CLAIM_LEAD)}</p>
 ${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p class="problem">${escapeHtml(CLAIM_NO_CARD_TEXT)}</p>`}`;
+    }
     case 'code':
       return `${cardCodePart(
         { purpose: 'claim', card: view.card, code: view.code, expiresAt: view.expiresAt },
@@ -409,8 +425,10 @@ ${action}`;
 
 /** The newest backup, as the backups step reads it from its record. */
 export interface BackupStepRecord {
-  /** ISO 8601, UTC. */
+  /** ISO 8601, UTC: the `time` element's `datetime`, never what the page says. */
   readonly at: string;
+  /** How long ago it ran, in seconds, by the server's clock: what the page says (#2825). */
+  readonly secondsAgo: number;
   readonly outcome: 'done' | 'failed';
   readonly offBox: 'copied' | 'failed' | 'not-configured' | null;
 }
@@ -444,7 +462,7 @@ export function backupsBody(view: BackupsStepView, csrf: string): string {
     ? `<p class="notice">${escapeHtml(BACKUPS_WAITING_TEXT)}</p>\n${checkAgain('/setup/backups', SETUP_CHECK_NOW_BUTTON)}`
     : view.last === null
       ? `<p>${escapeHtml(BACKUPS_NONE_YET_TEXT)}</p>\n${button}`
-      : `<p>${escapeHtml(BACKUPS_LAST_AT_TEXT)} <time datetime="${escapeHtml(view.last.at)}">${escapeHtml(momentText(view.last.at))}</time>.</p>
+      : `<p>${escapeHtml(BACKUPS_LAST_RAN_TEXT)} <time datetime="${escapeHtml(view.last.at)}">${escapeHtml(ranAgoText(view.last.secondsAgo))}</time>.</p>
 ${lastBackupResult(view.last)}
 ${button}`;
   const tooSoon =
