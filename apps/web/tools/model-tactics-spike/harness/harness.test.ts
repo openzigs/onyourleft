@@ -4,9 +4,9 @@
  * #2838: the scoring harness, end to end with **recorded answers** and no
  * model: the instance's own prompt modules loaded as `run-harness.mjs` loads
  * them, the shipped race and the shipped pacer director ridden from answers
- * gemma4:12b gave on the owner's PC (`recorded/`: the bots' of 2026-11-18,
- * the pacer's of 2026-11-19 under `pacer-6`), the scores of each, the results
- * file, and the exit code.
+ * gemma4:12b gave on the owner's PC (`recorded/`: the bots' `tactics-8` of
+ * 2026-11-18 and 2026-11-19, the pacer's of 2026-11-19 under `pacer-6`), the
+ * scores of each, the results file, and the exit code.
  *
  * `apps/instance` is imported by a computed path, as
  * `src/game/lap-race/model-tactics-port.test.ts` does it: it is not a
@@ -14,8 +14,9 @@
  *
  * ## The recorded answers, and when they go red
  *
- * `recorded/bots-flat-tactics-7.jsonl` is the first twelve answers of the
- * `flat` race and `recorded/pacer-pacer-6.jsonl` the whole scripted ride, as
+ * `recorded/bots-flat-tactics-8.jsonl` is the answers of the `flat` race's
+ * first minute, one bot a call (#2836, ADR 0081), and
+ * `recorded/pacer-pacer-6.jsonl` the whole scripted ride, as
  * `--record` wrote them. The scores below are what those answers come to
  * through the code as it stands. **A change to the bots' code, the pacer's
  * rules, a race or the script moves them**, and that is the point: record
@@ -40,7 +41,9 @@ import {
   readModelPacerInput,
   readModelTacticsInput,
   type ModelPacerInput,
+  type ModelTacticsFieldView,
   type ModelTacticsInput,
+  type ModelTacticsYou,
 } from '@onyourleft/domain';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -105,6 +108,48 @@ interface ChatBody {
   readonly messages: readonly { readonly role: string; readonly content: string }[];
 }
 
+/** The JSON after `name: ` on one line of a tactics ask, as `tacticsUserContent` writes it. */
+function lineJson(line: string | undefined, name: string): unknown {
+  const prefix = `${name}: `;
+  if (line?.startsWith(prefix) !== true) throw new Error(`a "${name}" line`);
+  return JSON.parse(line.slice(prefix.length));
+}
+
+/** The bot a tactics call is about: its "You" line, the last. */
+const youOf = (body: ChatBody): ModelTacticsYou =>
+  lineJson(body.messages[1]?.content.split('\n').at(-1), 'You') as ModelTacticsYou;
+
+/** An ask of the shipped shape, for the parts of a request that are not the race. */
+const WARM_UP_SHAPE: ModelTacticsInput = {
+  laps: 2,
+  rider: { rank: 1, wPerKg: null, ahead: 0, gapAheadM: null, gapBehindM: 1, drafting: false },
+  field: [{ bot: 0, style: 'rouleur', rank: 2, move: 'sit-in', gapAheadM: 1 }],
+  story: { raceS: 0, lapsLeft: 2, quietS: 0, moved: false, away: null, bunch: 'fresh' },
+  you: {
+    bot: 0,
+    style: 'rouleur',
+    flat: 'strong',
+    climb: 'average',
+    sprint: 'weak',
+    punch: 'weak',
+    sinceMoveS: null,
+    move: 'sit-in',
+    secondsInMove: 0,
+    rank: 2,
+    gapAheadM: 1,
+    gapBehindM: null,
+    riderGapM: 1,
+    wbal: 1,
+    drafting: true,
+    lapsLeft: 2,
+    toLineM: 2_000,
+    gradeAheadPct: 0,
+    climbInM: null,
+    cues: ['fresh'],
+    menu: [{ move: 'attack' }, { move: 'sit-in' }],
+  },
+};
+
 describe('the instance’s own prompt and request', () => {
   it('are the modules the harness sends, and name their versions', () => {
     expect(production.tactics.TACTICS_PROMPT_VERSION).toMatch(/^tactics-\d+$/u);
@@ -134,57 +179,66 @@ describe('a bot race, ridden with the instance’s request', () => {
     // Fixed seeds, in the harness only: the instance's own request carries none.
     expect(first.options.seed).toBe(FLAT.seed * 1_000 + 1);
     expect(second.options.seed).toBe(FLAT.seed * 1_000 + 2);
-    const input = JSON.parse(first.messages[1]?.content ?? '') as ModelTacticsInput;
-    expect(readModelTacticsInput(input).ok).toBe(true);
-    expect(input.bots).toHaveLength(7);
-    // The field is the one the race's own seed deals, every time.
-    expect(input.bots.map((view) => view.style)).toEqual(modelRacingStyles(FLAT.seed, 7));
-    const own = production.tactics.tacticsRequest('a-model', input) as unknown as ChatBody;
+    // One bot at a time (ADR 0081 D-2): the race, the story, then the bot, each on its own line.
+    const [raceLine, storyLine, youLine] = (first.messages[1]?.content ?? '').split('\n');
+    expect(raceLine).toMatch(/^Race: \{/u);
+    expect(storyLine).toMatch(/^Story so far: /u);
+    const race = lineJson(raceLine, 'Race') as { readonly field: readonly ModelTacticsFieldView[] };
+    // The whole field is shown before the bot, the one the race's own seed deals, every time.
+    expect(race.field.map((view) => view.style)).toEqual(modelRacingStyles(FLAT.seed, 7));
+    const you = lineJson(youLine, 'You') as ModelTacticsYou;
+    expect(youOf(second).bot).not.toBe(you.bot);
+    // Everything but the race and the seed is the instance's own request, as it wrote it.
+    expect(readModelTacticsInput(WARM_UP_SHAPE)).toMatchObject({ ok: true });
+    const own = production.tactics.tacticsRequest('a-model', {
+      ...WARM_UP_SHAPE,
+      you: { ...WARM_UP_SHAPE.you, menu: you.menu },
+    }) as unknown as ChatBody & { readonly format: unknown };
     expect(own.options.seed).toBeUndefined();
-    expect(first).toEqual({ ...own, options: { ...own.options, seed: first.options.seed } });
+    expect({ ...first, messages: [first.messages[0]] }).toEqual({
+      ...own,
+      messages: [own.messages[0]],
+      options: { ...own.options, seed: first.options.seed },
+    });
     expect(first.tools).toBeUndefined();
     expect(first.messages[0]?.role).toBe('system');
   });
 
   it('rides an answer from the race time it would have arrived, and never a late one', async () => {
-    const attack = (input: ModelTacticsInput): string =>
+    // Each bot's most active pick off its menu: an attack where it is offered one.
+    const attack = (you: ModelTacticsYou): string =>
       JSON.stringify({
-        bots: input.bots.map((view) => ({ bot: view.bot, move: 'attack', effort: 'all-out' })),
+        reason: 'my-terrain',
+        move: you.menu.some((entry) => entry.move === 'attack')
+          ? 'attack'
+          : (you.menu.find((entry) => entry.move !== 'sit-in')?.move ?? 'sit-in'),
       });
     const answering =
       (latencyMs: number): Ask =>
       (body) =>
-        Promise.resolve({
-          text: attack(
-            JSON.parse(
-              (body as unknown as ChatBody).messages[1]?.content ?? '',
-            ) as ModelTacticsInput,
-          ),
-          latencyMs,
-        });
+        Promise.resolve({ text: attack(youOf(body as unknown as ChatBody)), latencyMs });
     const rider = { model: 'a-model', prompt: production.tactics };
     const prompt = await rideBotRace(FLAT, { ...rider, ask: answering(2_000) }, 12);
-    // Asked at 4 s, arrived at 6 s: nobody attacks before, everybody after.
-    const attacking = prompt.samples.map(
-      (sample) => sample.tactics.filter((tactic) => tactic === 'attack').length,
-    );
-    expect(attacking.slice(0, 6)).toEqual([0, 0, 0, 0, 0, 0]);
-    expect(attacking[7]).toBe(7);
-    expect(prompt.log[0]).toMatchObject({
-      askedAtMs: 4_000,
-      arrivedAtMs: 6_000,
-      outcome: 'decision',
-    });
+    // Asked at 4 s about one bot, arrived at 6 s: that bot rides its pick from
+    // the next window, and not before.
+    const first = prompt.log[0];
+    expect(first).toMatchObject({ askedAtMs: 4_000, arrivedAtMs: 6_000, outcome: 'decision' });
+    const seat = first?.bot as number;
+    const picked = first?.moves?.[0]?.move;
+    expect(picked).toBe('attack');
+    const riding = prompt.samples.map((sample) => sample.tactics[seat]);
+    expect(riding.slice(0, 6)).not.toContain(picked);
+    expect(riding[7]).toBe(picked);
     // The same answer 9 s after its ask is past the race's limit: never ridden.
     const late = await rideBotRace(FLAT, { ...rider, ask: answering(9_000) }, 20);
-    expect(late.log[0]).toMatchObject({ askedAtMs: 4_000, outcome: 'late' });
-    expect(
-      late.samples.some((sample) => sample.tactics.filter((t) => t === 'attack').length === 7),
-    ).toBe(false);
+    expect(late.log[0]).toMatchObject({ askedAtMs: 4_000, outcome: 'late', bot: seat });
+    expect(late.log.some((entry) => entry.outcome === 'decision')).toBe(false);
+    expect(late.samples.map((sample) => sample.tactics[seat])).not.toContain(picked);
   });
 
   it('reads a text that is no decision as the instance does: invalid, and nothing ridden', async () => {
-    const ask: Ask = () => Promise.resolve({ text: '{"bots":"all of them"}', latencyMs: 1_000 });
+    const ask: Ask = () =>
+      Promise.resolve({ text: '{"reason":"my-terrain","move":"all of them"}', latencyMs: 1_000 });
     const ridden = await rideBotRace(
       FLAT,
       { ask, model: 'a-model', prompt: production.tactics },
@@ -205,7 +259,7 @@ describe('the flat race from recorded answers', () => {
       '--seconds',
       '60',
       '--replay',
-      RECORDED('bots-flat-tactics-7.jsonl'),
+      RECORDED('bots-flat-tactics-8.jsonl'),
     ]);
   });
 
@@ -222,13 +276,13 @@ describe('the flat race from recorded answers', () => {
     expect(result.races[0]?.score).toEqual(FLAT_FIRST_MINUTE);
   });
 
-  it('exits 0: six of seven bots moved, with no quiet second, and every answer was a decision', () => {
+  it('exits 0: every bot moved, with no quiet second, and every answer was a decision', () => {
     expect(ridden.code).toBe(0);
     const [result] = ridden.results as [HarnessResult];
     expect(result.passed).toBe(true);
     if (result.kind !== 'bots') throw new Error('a bots result');
     expect(result.races[0]).toMatchObject({ passed: true, shortfalls: [] });
-    expect(ridden.printed[0]).toMatch(/^bots flat: 6 of 7 bots moved \(4 told to\), .*: pass$/u);
+    expect(ridden.printed[0]).toMatch(/^bots flat: 7 of 7 bots moved \(6 told to\), .*: pass$/u);
     expect(ridden.printed.at(-1)).toBe('PASS');
   });
 
@@ -261,28 +315,28 @@ describe('the flat race from recorded answers', () => {
   });
 });
 
-/** What `recorded/bots-flat-tactics-7.jsonl` comes to over the flat race's first minute. */
+/** What `recorded/bots-flat-tactics-8.jsonl` comes to over the flat race's first minute. */
 const FLAT_FIRST_MINUTE = {
   bots: 7,
   seconds: 60,
-  scoredFromS: 8,
-  botsMoved: 6,
-  botsToldToMove: 4,
+  scoredFromS: 7,
+  botsMoved: 7,
+  botsToldToMove: 6,
   climbers: 1,
   attacksOnClimbsByClimbers: 0,
   sprinters: 2,
   sprintersKicked: 0,
   longestQuietRunS: 0,
   blownBots: 0,
-  leadChanges: 13,
-  answers: 12,
-  decisions: 12,
+  leadChanges: 14,
+  answers: 47,
+  decisions: 47,
   lateAnswers: 0,
   invalidAnswers: 0,
   failedAnswers: 0,
-  answerMs: { median: 3_555, p90: 4_420, most: 4_447 },
-  promptTokens: { median: 2_353, p90: 2_359, most: 2_362 },
-  outputTokens: { median: 72, p90: 107, most: 107 },
+  answerMs: { median: 1_077, p90: 1_289, most: 2_066 },
+  promptTokens: { median: 1_633, p90: 1_649, most: 1_651 },
+  outputTokens: { median: 16, p90: 17, most: 21 },
 };
 
 /** A pacer's line for the `at`th ask: sixty-four of them, no two alike, and none that names a move. */

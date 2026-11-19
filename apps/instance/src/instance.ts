@@ -924,6 +924,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         hold,
         resolve,
         now,
+        // #2836 (ADR 0081 D-5.2): one line a bot decision, figures and closed words only.
+        logCall: (line) => {
+          logEvent(log, 'tactics-call', { ...line });
+        },
       });
       // #1106: a side-camera picture, shown to the local model the operator
       // named for pictures or to the hosted service the rider's OWN key is

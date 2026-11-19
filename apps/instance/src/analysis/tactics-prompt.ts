@@ -1,42 +1,55 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * **What the local model is told, and asked, for one bot-tactics decision** —
- * #2709, ADR 0071 D-3 and D-5.7, and ADR 0073 D-5 (#2710).
+ * **What the local model is told, and asked, for one bot's tactics** —
+ * #2709, ADR 0071 D-3 and D-5.7, ADR 0073 D-5 (#2710), and since #2836 ADR
+ * 0081: one bot a call, picking from a menu the device made.
  *
- * The prompt is spike 0039's as #2720 wrote it for ADR 0073
- * (`apps/web/tools/model-tactics-spike/ollama.ts` §`MODEL_TACTICS_SYSTEM`):
- * **guidance, not rules**. The strategy is the model's, so it says what each
- * move and racing style is for and, plainly, what spending W′ costs, and it
- * gives no condition a move must meet and no attack gate (D-5.3, D-5.4). One
- * sentence is #2710's own: the effort (D-2.5). #2710 measured four sentences
- * about the finish (ADR 0073 R-5) and kept none: gemma4:12b answered each
- * bot's current `move` back whatever they said. Three are #2759's (ADR 0076
- * D-4 and D-6), still guidance: what the strength words mean, that an attack
- * is a hard effort, and that riders attack where their strengths pay and let
- * a stronger rival go. Two are #2759's latency fix (ADR 0076 D-11): a bot's
- * legs are no longer sent, because its style decides them, so the words name
- * its style where they named its legs; and a target is asked for only on the
- * two moves that read one, which the schema now holds the model to
- * (`modelTacticsAnswerSchema`), so the answer it writes is shorter.
- * Two are #2794's (`tactics-7`): what the course ahead in the state means
- * (`@onyourleft/domain` §`ModelTacticsCourse`), and that riders race the
- * terrain, still guidance: climbers save for a climb and attack on it,
- * sprinters cover moves before a flat finish, rouleurs push on the flat and
- * descents, and every bot recovers before a hard section.
- * {@link TACTICS_PROMPT_VERSION} is raised with every change to its words.
- * The answer is asked for **with a target again** (D-3.4: a `follow` or
- * `chase` may name any racer) and an optional effort.
- * Nothing in it names a rider, a place or a model (ADR 0031 D-4).
+ * ## `tactics-8` (#2836, ADR 0081 D-4)
+ *
+ * `tactics-7` asked for every bot's move at once and said *"Most bots sit in
+ * most of the time"*. On the owner's race of 2026-11-18 the model answered
+ * `sit-in` for five of seven bots in all 32 answers. So the words are new:
+ *
+ * - **the goal is stated**: a lively, believable race for the human, and a
+ *   race where nothing happens is a failure; the sentence about sitting in is
+ *   gone;
+ * - **one bot a call**: the race is shared and short, and the bot's own part
+ *   comes last with its **cue words** and its **menu**, which the device
+ *   worked out (`@onyourleft/domain` §`modelTacticsOffer`). The words say
+ *   what each cue means; the model picks from the menu and nowhere else;
+ * - **a "story so far" line**, written here from the numbers and closed words
+ *   the device sent (`@onyourleft/domain` §`modelTacticsStoryLine`);
+ * - **the seconds since the bot last made a move** come before its current
+ *   move, so the model reads how long it has waited, not what it answered
+ *   last time;
+ * - **a reason word first** in the answer, from a closed list, and **no
+ *   effort on `sit-in` or `recover`**, which the schema holds it to
+ *   (`modelTacticsAnswerSchema`);
+ * - **four worked examples**, four bots of different styles in one race, each
+ *   doing a different thing true to its style.
+ *
+ * Still guidance and not rules (ADR 0073 D-5.4): what each move, style and
+ * cue is for, and plainly what spending W′ costs. {@link TACTICS_PROMPT_VERSION}
+ * is raised with every change to its words. Nothing in it names a rider, a
+ * place or a model (ADR 0031 D-4).
+ *
+ * ## Shared first, the bot last (ADR 0081 D-2.4)
+ *
+ * {@link tacticsUserContent} writes three lines in a fixed order: the race,
+ * the story, then the bot. The system text and the start of the race line are
+ * the same from one call to the next, so a model server that keeps the start
+ * of its last prompt reads only what changed. It is written from the ask
+ * **after** it was read field by field (`tactics.ts`), key by key in an order
+ * fixed here, so neither a key nor an order a device chose reaches the model.
  *
  * The request is Ollama's own `/api/chat` (spike 0039 §2), because it is the
  * one spelling the spike measured of the two rules a tactics call needs:
  *
  * - **Reasoning off**: `think: false` (D-5.7). With it on, 3 of 3 spike calls
  *   spent every output token and returned no decision.
- * - **Held to the schema** by `format`, the answer's JSON Schema with its
- *   target and effort (`@onyourleft/domain` §`modelTacticsAnswerSchema`), and
- *   read again on arrival, field by field (`tactics.ts`).
+ * - **Held to the schema** by `format`, the answer's JSON Schema for the
+ *   bot's menu, and read again on arrival, field by field (`tactics.ts`).
  *
  * And **no `tools` field** (D-3.3): one call, no agent loop, nothing the model
  * can call. A local server that is not Ollama answers it 404, and the race
@@ -45,101 +58,174 @@
 
 import {
   modelTacticsAnswerSchema,
-  modelTacticsSeats,
+  modelTacticsStoryLine,
   type ModelTacticsInput,
 } from '@onyourleft/domain';
 
 /** Which prompt this is, for a measurement to name: raised with every change to the words below. */
-export const TACTICS_PROMPT_VERSION = 'tactics-7';
+export const TACTICS_PROMPT_VERSION = 'tactics-8';
 
 /**
- * The most a decision may write, tokens: **256** (#2759, ADR 0076 D-11). The
- * longest answer the schema admits for seven bots, each with a seat, the
- * longest move, an effort and a target, is 465 characters; on the owner's PC
- * the model wrote at most 0.38 tokens a character under the schema, so about
- * 180 tokens, and the longest of 40 measured answers was 150. 256 is that with
- * a margin, so no answer is cut off; a model that writes past it has written
- * no decision, and the call ends there instead of at 400.
+ * The most a decision may write, tokens: **48** (#2836, ADR 0081 D-2; 256 for
+ * a whole field's answer until `tactics-8`). The longest answer the schema
+ * admits, a reason, a move and an effort, is 59 characters; at the 0.38
+ * tokens a character #2759 measured under a schema that is 23 tokens, and 48
+ * is that twice over. Five answers of a reason and a move, measured from
+ * gemma4:12b on a Mac on 2026-11-18, were 12 to 15 tokens. A model that
+ * writes past it has written no decision.
  */
-export const TACTICS_MOST_TOKENS = 256;
+export const TACTICS_MOST_TOKENS = 48;
 
 /** How long the model stays loaded after a call: spike 0039's 30 minutes, so a race never reloads it. */
 export const TACTICS_KEEP_ALIVE = '30m';
 
-/**
- * What the model is told, once per call, before the race: spike 0039's #2720
- * words under ADR 0073 (guidance, not rules), with #2710's sentence on the
- * effort.
- */
+/** What the model is told, once per call, before the race: `tactics-8`. See the file comment. */
 export const TACTICS_SYSTEM = [
-  'You choose race tactics for the computer-controlled bots in a cycling lap race in a video game.',
-  'Every few seconds you get the race as JSON, and you answer with one move for each bot. Each move is ridden for the next few seconds.',
-  'Race like real amateur racers. Most bots sit in most of the time, but a good race has moves: attacks, breakaways, counter-attacks and chases, made by different bots at different times, each true to its style. These are guides, not rules: read the race and choose.',
-  'A race changes, so answer what just happened, not what you answered last time. A move has a life ("secondsInMove"): an attack lasts 10 to 30 seconds, a breakaway 30 to 90 seconds, and then the bot sits up and sits in, or is caught. When a bot goes up the road, the others choose: go with it, chase it down, or let it go and wait. When a move is caught or a rival tires, that is the moment for another bot to counter. A bot that has rested can go again later.',
-  'The body has limits, and they are real:',
-  '- "wbal" is the share of a bot\'s reserve left, from 1 (full) to 0 (empty). Every effort above sitting in spends it: the kick fastest, then an attack, then a chase, a follow across a gap and a flyer. It refills only while the bot rides easy, sitting in on a wheel or recovering. What a bot spends now it does not have later.',
-  '- A bot whose "blown" is true has emptied it. It can ride no harder than steady until it has refilled, and it loses the wheel of any group going fast. A bot that attacks with little "wbal" left can blow up.',
+  'You are the racing brain of ONE computer-controlled rider (a "bot") in a cycling lap race in a video game. A human is racing against the bots.',
+  'The goal is a lively, believable race for the human: attacks, breakaways, chases and counter-attacks, made by different bots at different times, each true to its style. A race where nothing happens is a failure.',
+  'Each call is about one bot. You get three lines: "Race" is the race as JSON; "Story so far" is what has happened; "You" is the bot you decide for now, as JSON. You answer with one move for that bot. It is ridden for the next few seconds, and you are asked about the bot again soon.',
+  '"You" ends with "cues" and "menu". The menu is the moves that make sense for this bot right now: pick one of them. The cues say what the bot can see:',
+  '- "on-your-terrain": this is where the bot\'s style pays: a climber on a climb, a rouleur or a breakaway rider on the flat or a descent, a sprinter near the finish, an opportunist just after a move was caught. This is its moment to move.',
+  '- "climb-soon": a climb starts soon. A climber gets ready for it; the others save something.',
+  '- "fresh": the bot has plenty in reserve. "tiring": its reserve is low.',
+  '- "move-ahead": the racer just ahead is making a move. Cover it, or let it go.',
+  '- "move-just-caught": an attack has just ended. This is the moment for a counter-attack.',
+  '- "race-quiet": nobody has attacked for a while. Somebody should.',
+  '- "last-lap" and "finish-near": the race is nearly over, and nothing is worth saving.',
   'The moves:',
-  '- "sit-in": ride on the wheel ahead, saving energy.',
-  '- "follow": go with a move and hold the wheel of the racer in "target": "rider", or a bot\'s seat. With no target, the racer directly ahead. A bot can mark a rival or the rider this way.',
-  '- "chase": bridge a gap hard, to the racer in "target" or to the one ahead.',
-  '- "attack": a hard surge to get clear or to break a group, short and sharp or held as long as the bot can. Climbers attack on climbs, and breakaway riders and opportunists attack to get clear before a flyer or to counter.',
-  '- "flyer": a long, steady effort off the front: a breakaway, on any lap.',
-  '- "recover": ease off to refill "wbal".',
-  '- "kick": the all-out sprint for the line. "toLineM" is how far the bot thinks the line is, and "launchM" is where it usually launches. Go too long and it fades before the line; wait too long and it runs out of road.',
-  'Only "follow" and "chase" read a "target": leave it out of every other move.',
-  'Each move may also carry an "effort", how hard the bot rides it: "easy", "tempo", "threshold" or "all-out". Leave it out to ride the move as it is. An effort changes nothing on "sit-in" or "follow" behind a wheel, or on "recover". "all-out" spends "wbal" fastest; "easy" and "tempo" save it.',
-  'Attacks are hard, as they are in a real race: ride an "attack" or a "chase" at "threshold" or "all-out", a "flyer" at "threshold", and a "kick" "all-out". An attack at "easy" or "tempo" is no attack. "easy" and "tempo" are for riding on the front or saving energy.',
-  'Every bot has its own body. "flat", "climb", "sprint" and "punch" say how it compares with the other bots: "strong", "average" or "weak". "flat" is its power on the flat, "climb" its power for its weight on a climb, "sprint" its speed in a sprint, and "punch" how much it can spend above its steady pace before it blows.',
-  'Race to the strengths, as real riders do. Attack where the bot is strong and its rivals are not: a strong climber where "gradeAheadPct" is 3 or more, a strong rouleur or breakaway rider on the flat, a sprinter only at the finish. When a strong rival attacks where a bot is weak, that bot usually lets it go and rides its own pace rather than blow up chasing; a bot as strong covers the move with "follow", or chases it down. A bot that goes too hard for too long empties "wbal", is dropped and loses; a well-timed attack wins the race.',
-  'Styles ("style"): a "breakaway" rider attacks and goes up the road on a flyer once or twice a race and sits in between; a "sprinter" sits on wheels, saves everything, and kicks; a "climber" attacks on the climbs; a "rouleur" rides hard on the flat and chases down a move that has been away a while, naming it in "target"; an "opportunist" follows other bots\' moves and counter-attacks when a move is caught. A bot\'s body goes with its style, and its strengths say how.',
-  '"course" is the road ahead of the leading bot (a bot behind it is its gap further from each): "climb" and "descent" are the next climb and descent before the line, each 3 % or steeper for 200 m or more, or null: "inM" to its start, "lengthM", "avgPct" and the steepest "maxPct". "lapLeftM" and "lapClimbM" are the metres and the climbing left in the lap, and "finishPct" the grade of the last 500 m to the line. "lapsLeft" 1 is the last lap.',
-  'Race the terrain as riders do: a climber saves itself before a climb and attacks on it; a sprinter sits in and covers moves before a flat finish; a rouleur or breakaway rider pushes on the flat and on descents; and any bot recovers before a hard section it knows is coming.',
-  '"rider" is the human racing the bots, and each bot\'s "riderGapM" is how far the rider is ahead of it (below 0, behind). Bots may mark the rider, sit on the rider\'s wheel, or attack when the rider is tired. "quietS" is how long since any bot attacked or went on a flyer.',
-  'Answer with JSON only, in the schema given.',
+  '- "attack": a hard surge to get clear or to break a group.',
+  '- "flyer": a long, steady effort off the front: a breakaway.',
+  '- "chase": bridge the gap, hard, to the racer the menu names in "target".',
+  '- "follow": go with the move of the racer in "target" and hold the wheel.',
+  '- "kick": the all-out sprint for the line.',
+  '- "recover": ease off to refill the reserve.',
+  '- "sit-in": no move now. The bot rides on the wheels and its own instincts decide. Choose it to save the legs for a better moment, never out of habit.',
+  '"sinceMoveS" is the seconds since this bot last made a move of its own, or null when it has made none yet. A bot that has waited a long time and is on its terrain should go. A bot in a move ("move", "secondsInMove") may hold it: an attack lasts 10 to 30 seconds and a flyer 30 to 90, and then the bot sits in or is caught.',
+  'The body has limits, and they are real. "wbal" is the share of the bot\'s reserve left, from 1 (full) to 0 (empty). Every hard move spends it, and it refills only while the bot rides easy. A bot that empties it is dropped. "flat", "climb", "sprint" and "punch" say how the bot compares with the other bots: "strong", "average" or "weak".',
+  'Styles ("style"): a "breakaway" rider attacks and goes up the road on a flyer; a "sprinter" sits on wheels, covers moves, and kicks; a "climber" attacks on the climbs; a "rouleur" rides hard on the flat and chases moves down; an "opportunist" follows moves and counter-attacks when one is caught.',
+  'In "Race": "field" is every bot, with its style, its place ("rank"), its move and the metres to the racer ahead; "rider" is the human; "course" is the road ahead of the leading bot: the next "climb" and "descent" (or null), the metres and the climbing left in the lap, and "finishPct", the grade of the last 500 m.',
+  'Answer with JSON only. First "reason", why: "my-terrain", "cover-move", "counter", "save-legs" or "finish-near". Then "move", one from the menu. Any move but "sit-in" and "recover" may add "effort", how hard to ride it: "easy", "tempo", "threshold" or "all-out". Leave it out to ride the move as it is; an attack is hard whatever the effort.',
+  'Examples: four bots in one race, each doing what suits it.',
+  '- A climber, "sinceMoveS" 95, cues ["on-your-terrain","fresh"], menu attack, sit-in: {"reason":"my-terrain","move":"attack","effort":"all-out"}',
+  '- A sprinter, cues ["move-ahead"], menu follow, sit-in. The move ahead could win the race: {"reason":"cover-move","move":"follow"}',
+  '- An opportunist, cues ["on-your-terrain","fresh","move-just-caught"], menu attack, sit-in: {"reason":"counter","move":"attack"}',
+  '- A rouleur, cues ["tiring","move-ahead"], menu follow, recover, sit-in. It is tiring and cannot hold that move: {"reason":"save-legs","move":"recover"}',
 ].join('\n');
 
 /**
  * The race the warm-up call asks about (ADR 0071 D-6.5): two bots on the line
- * of a three-lap race. Fixed, so **nothing of the rider's is in it**, and of
- * the same shape as every decision, so the model is loaded and its system
- * text read before the first real one.
+ * of a three-lap race, the first asked about. Fixed, so **nothing of the
+ * rider's is in it**, and of the same shape as every decision, so the model
+ * is loaded and its system text read before the first real one.
  */
 export const WARM_UP_INPUT: ModelTacticsInput = {
   laps: 3,
-  quietS: 0,
-  rider: { rank: 2, wPerKg: null, ahead: 0, gapAheadM: 0.5, gapBehindM: 0.5, drafting: true },
-  bots: [0, 1].map((seat) => ({
-    bot: seat,
-    style: seat === 0 ? 'rouleur' : 'sprinter',
-    flat: seat === 0 ? 'strong' : 'average',
-    climb: 'average',
-    sprint: seat === 0 ? 'weak' : 'strong',
-    punch: seat === 0 ? 'weak' : 'strong',
-    rank: seat === 0 ? 1 : 3,
-    ahead: seat === 0 ? null : 'rider',
-    aheadMove: null,
-    gapAheadM: seat === 0 ? null : 0.5,
-    gapBehindM: seat === 0 ? 0.5 : null,
-    wbal: 1,
-    blown: false,
-    drafting: seat !== 0,
-    move: 'sit-in',
-    secondsInMove: 0,
-    lapsLeft: 3,
-    toLineM: 1_800,
-    launchM: 250,
-    gradeAheadPct: 0,
-    riderGapM: seat === 0 ? -0.5 : 0.5,
-  })),
   // #2794: a flat lap with nothing ahead, so the warm-up reads the course's shape too.
   course: { climb: null, descent: null, lapLeftM: 600, lapClimbM: 0, finishPct: 0 },
+  rider: { rank: 2, wPerKg: null, ahead: 0, gapAheadM: 1, gapBehindM: 1, drafting: true },
+  field: [
+    { bot: 0, style: 'rouleur', rank: 1, move: 'sit-in', gapAheadM: null },
+    { bot: 1, style: 'sprinter', rank: 3, move: 'sit-in', gapAheadM: 1 },
+  ],
+  story: { raceS: 0, lapsLeft: 3, quietS: 0, moved: false, away: null, bunch: 'fresh' },
+  you: {
+    bot: 0,
+    style: 'rouleur',
+    flat: 'strong',
+    climb: 'average',
+    sprint: 'weak',
+    punch: 'weak',
+    sinceMoveS: null,
+    move: 'sit-in',
+    secondsInMove: 0,
+    rank: 1,
+    gapAheadM: null,
+    gapBehindM: 1,
+    riderGapM: -1,
+    wbal: 1,
+    drafting: false,
+    lapsLeft: 3,
+    toLineM: 1_800,
+    gradeAheadPct: 0,
+    climbInM: null,
+    cues: ['on-your-terrain', 'fresh'],
+    menu: [{ move: 'attack' }, { move: 'sit-in' }],
+  },
 };
+
+/**
+ * What the model reads of one ask: the race, the story so far, then the bot,
+ * each on its own line. Written key by key from an ask already read field by
+ * field, in the order fixed here. See the file comment.
+ */
+export function tacticsUserContent(input: ModelTacticsInput): string {
+  const { rider, you } = input;
+  const race = {
+    laps: input.laps,
+    ...(input.course === undefined
+      ? {}
+      : {
+          course: {
+            climb: input.course.climb,
+            descent: input.course.descent,
+            lapLeftM: input.course.lapLeftM,
+            lapClimbM: input.course.lapClimbM,
+            finishPct: input.course.finishPct,
+          },
+        }),
+    rider: {
+      rank: rider.rank,
+      wPerKg: rider.wPerKg,
+      ahead: rider.ahead,
+      gapAheadM: rider.gapAheadM,
+      gapBehindM: rider.gapBehindM,
+      drafting: rider.drafting,
+    },
+    field: input.field.map((each) => ({
+      bot: each.bot,
+      style: each.style,
+      rank: each.rank,
+      move: each.move,
+      gapAheadM: each.gapAheadM,
+    })),
+  };
+  const bot = {
+    bot: you.bot,
+    style: you.style,
+    flat: you.flat,
+    climb: you.climb,
+    sprint: you.sprint,
+    punch: you.punch,
+    sinceMoveS: you.sinceMoveS,
+    move: you.move,
+    secondsInMove: you.secondsInMove,
+    rank: you.rank,
+    gapAheadM: you.gapAheadM,
+    gapBehindM: you.gapBehindM,
+    riderGapM: you.riderGapM,
+    wbal: you.wbal,
+    drafting: you.drafting,
+    lapsLeft: you.lapsLeft,
+    toLineM: you.toLineM,
+    gradeAheadPct: you.gradeAheadPct,
+    climbInM: you.climbInM,
+    cues: [...you.cues],
+    menu: you.menu.map((entry) => ({
+      move: entry.move,
+      ...(entry.target === undefined ? {} : { target: entry.target }),
+    })),
+  };
+  return [
+    `Race: ${JSON.stringify(race)}`,
+    `Story so far: ${modelTacticsStoryLine(input.story)}`,
+    `You: ${JSON.stringify(bot)}`,
+  ].join('\n');
+}
 
 /**
  * The `/api/chat` body for one decision on `input` by `model`, writing at
  * most `mostTokens`. No `tools` field, reasoning off, the answer held to the
- * schema of `input`'s seats.
+ * schema of the bot's menu.
  */
 export function tacticsRequest(
   model: string,
@@ -150,12 +236,12 @@ export function tacticsRequest(
     model,
     stream: false,
     think: false,
-    format: modelTacticsAnswerSchema(modelTacticsSeats(input)),
+    format: modelTacticsAnswerSchema(input.you.menu),
     keep_alive: TACTICS_KEEP_ALIVE,
     options: { temperature: 0.6, num_predict: mostTokens },
     messages: [
       { role: 'system', content: TACTICS_SYSTEM },
-      { role: 'user', content: JSON.stringify(input) },
+      { role: 'user', content: tacticsUserContent(input) },
     ],
   };
 }

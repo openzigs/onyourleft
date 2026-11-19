@@ -17,16 +17,23 @@ It has the same authority as the root file. Where the text below says "this file
   deciding the AI pacer's intent and the model writing only the line, **Accepted** on
   2026-11-19 on the owner's answers to its D-9 (#2864). It supersedes in part ADR 0072, ADR 0078 and ADR 0082, each of which gained one dated
   `## Amendments` entry pointing to it. **It skipped 0081 on purpose**, leaving it to #2836, which
-  runs beside it and needs an ADR too. **The next free number is 0081**, and the number after it is
-  **0084**. A reviewer who remembers this file offering 0083 is reading the old file.
+  runs beside it and needs an ADR too. 0081 went to #2836 (the entry below). **The next free number is 0084.** A reviewer who remembers this file offering 0083 is reading the old file.
+  ⚠️ **0081 is [ADR 0081](../adr/0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md)**,
+  taken by [#2836](https://github.com/openzigs/onyourleft/issues/2836) on 2026-11-18 for the AI
+  bots asked about one at a time from a menu the device makes, with the model's `sit-in` as no
+  opinion, Proposed on the owner's ruling of that day on #2836 and **Accepted** on 2026-11-19 on the
+  owner's answers to its D-8, all as recommended (its D-9). It supersedes in part ADR 0071
+  D-3, D-4.4 and D-7, ADR 0073 D-3, D-4 and D-5, ADR 0074 D-1 and D-2 and ADR 0076 D-11; each gained
+  one dated `## Amendments` entry pointing to it. 0083 is ADR 0083 (the entry above), #2835's, in
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864). **The next free number is 0084.** A
+  reviewer who remembers this file offering 0081 is reading the old file.
   ⚠️ **0082 is [ADR 0082](../adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**,
   taken by [#2794](https://github.com/openzigs/onyourleft/issues/2794) on 2026-11-18 for the AI
   pacer pacing the terrain with the rider on its wheel, **Accepted** on the owner's *"Yes to pacer
   rule"* on #2802. It supersedes in part ADR 0072 D-2, beside ADR 0078; both gained one dated
   `## Amendments` entry pointing to it. It skipped 0079 (ADR 0079, #2790) and 0080 (ADR 0080,
-  #2780), both written, and 0081, which no issue or pull request claims. The next free number was
-  then 0081, with 0083 after it, which is ADR 0083 now (the entry above). A reviewer who remembers
-  this file offering 0082 is reading the old file.
+  #2780), both written, and 0081, which no issue or pull request claimed then (the entry above). A
+  reviewer who remembers this file offering 0082 is reading the old file.
   ⚠️ **0078 is [ADR 0078](../adr/0078-a-floor-under-the-ai-pacers-intent.md)**, taken by
   [#2777](https://github.com/openzigs/onyourleft/issues/2777) on 2026-11-17 for a floor under the
   AI pacer's intent, **Proposed** for the owner's answer. It supersedes in part ADR 0072 D-2 and
@@ -77,7 +84,7 @@ It has the same authority as the root file. Where the text below says "this file
   written in the open pull requests [#2670](https://github.com/openzigs/onyourleft/pull/2670),
   [#2767](https://github.com/openzigs/onyourleft/pull/2767) and
   [#2762](https://github.com/openzigs/onyourleft/pull/2762), 0070 is ADR 0070 (#2684, below), and **0057 and
-  0058 stay claimed** by #1748 and #1752. **The next free number is 0081**, which no issue or pull request claims; **0082 is ADR 0082** (#2794, in its pull request [#2802](https://github.com/openzigs/onyourleft/pull/2802), the entry above), so the number after 0081 is **0083**. A reviewer who remembers
+  0058 stay claimed** by #1748 and #1752. 0081 is ADR 0081 (#2836, the entry at the top), **0082 is ADR 0082** (#2794, in its pull request [#2802](https://github.com/openzigs/onyourleft/pull/2802), the entry above), and the next free number is the one the top entry states. A reviewer who remembers
   this file offering 0075, 0078 or 0079 is reading the old file.
   ⚠️ **0070 is [ADR 0070](../adr/0070-houses-on-inferred-built-up-land-in-a-suburb-mapped-only-by-its-streets.md)**,
   taken by [#2684](https://github.com/openzigs/onyourleft/issues/2684) on 2026-11-15 for houses on

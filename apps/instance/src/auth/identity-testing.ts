@@ -322,7 +322,14 @@ export async function startIdentityInstance(
     tactics?: Partial<
       Pick<
         TacticsOptions,
-        'local' | 'fetch' | 'resolve' | 'hold' | 'decisions' | 'answerWaitMs' | 'warmUpWaitMs'
+        | 'local'
+        | 'fetch'
+        | 'resolve'
+        | 'hold'
+        | 'decisions'
+        | 'answerWaitMs'
+        | 'warmUpWaitMs'
+        | 'logCall'
       >
     >;
     /**
