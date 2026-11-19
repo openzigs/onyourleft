@@ -45,6 +45,13 @@
  * (ADR 0046 D-1): a hosted model is now agreed to on the rider's instance,
  * naming its address (`ride-analysis/hosted-consent.ts`), and is no camera
  * answer at all. Nothing in this answer permits third-party egress.
+ *
+ * ## And one narrower agreement, for reading a code
+ *
+ * Since #2856 a scan of the instance's code asks where the rider pressed it
+ * ({@link SCAN_CONSENT_STATEMENT}, {@link cameraMayOpen}). It is not a member
+ * of {@link CameraConsent} and never becomes one: it admits the camera coming
+ * on to read a code, and none of what this answer admits.
  */
 
 /**
@@ -189,3 +196,60 @@ export const CONSENT_REFUSAL_TEXT: Readonly<Record<ConsentRefusal, string>> = {
     'Tick the box to say you have read what happens to anyone else in the room, then turn the camera on.',
   'nothing-agreed': 'The camera stays off until you say it may be on.',
 };
+
+/**
+ * What a camera is being turned on FOR, which decides the agreement that
+ * admits it — #2856.
+ *
+ * - **`camera`** — anything the Camera screen or the side camera does. Only
+ *   {@link CameraConsent.local} admits it.
+ * - **`scan`** — reading one code (the instance's card, a link code or the
+ *   owner's claim, `views/CardScanner.tsx`). {@link CameraConsent.local} admits
+ *   it, as it always has (ADR 0033 D-4: *"scanning counts as camera use"*), and
+ *   so does the narrower agreement a scan asks for in place,
+ *   {@link SCAN_CONSENT_STATEMENT}.
+ */
+export type CameraUse = 'camera' | 'scan';
+
+/**
+ * What a rider reads, where they pressed *Scan a code*, before this device's
+ * camera reads a code for the first time — #2856.
+ *
+ * ⚠️ **A second, NARROWER agreement, and not {@link CameraConsent}.** It admits
+ * one thing: the camera coming on to read a code ({@link cameraMayOpen}). It
+ * never sets `local`, so everything the Camera screen and the side camera do
+ * stays refused by `session.ts` exactly as on a device nobody agreed on, and
+ * the second sentence says so. It is asked in place because the code a rider
+ * scans may be one that runs out in ten minutes (the owner's claim, ADR 0080),
+ * and the Camera screen's agreement is about being filmed while riding, which
+ * a scan is not.
+ *
+ * ⚠️ **{@link BYSTANDER_SENTENCE} is not shown for it**, which departs from
+ * ADR 0029 D-5's *"before the camera is ever turned on"* and ADR 0033 D-4's
+ * *"ADR 0029's consent flow is shown before the first camera use"*. Both ADRs
+ * carry an entry of 2026-11-18 that is **PROPOSED, for the owner to rule on**,
+ * with the reason: no picture is taken, kept, sent or analysed for a scan, so
+ * the sentence's remedy has nothing to act on.
+ *
+ * ⚠️ **Draft wording for the owner to approve**, and quoted word for word in
+ * `docs/privacy-policy.md` §"Scanning a code with this device's camera":
+ * `consent.test.ts` reads the policy and compares.
+ */
+export const SCAN_CONSENT_STATEMENT =
+  'The camera is used only to read this code, and it goes off as soon as the code is read or ' +
+  'you close the scanner. No picture is kept or sent anywhere, and nothing on the Camera screen ' +
+  'is switched on.';
+
+/**
+ * Whether the camera may be opened for `use`, given what the rider agreed to.
+ *
+ * `scan` is the narrower agreement of {@link SCAN_CONSENT_STATEMENT}. It
+ * admits a scan and nothing else: with `local` false, `camera` is refused
+ * whatever `scan` says.
+ */
+export function cameraMayOpen(
+  use: CameraUse,
+  agreed: { readonly consent: CameraConsent; readonly scan: boolean },
+): boolean {
+  return agreed.consent.local || (use === 'scan' && agreed.scan);
+}

@@ -12,7 +12,8 @@
  * nothing was sent, that the camera's stream ended, and — at 320 and 1280 px —
  * what jsdom cannot measure: the large buttons, no sideways scroll on any
  * step, each refusal under the button pressed, and what the instance receives
- * on the screen before any press.
+ * on the screen before any press. Since #2856 a fresh device (`?fresh`) is
+ * asked for the scan in place, and that question is measured here too.
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -317,4 +318,88 @@ test.describe('#2823 — the owner’s claim QR and its six digits', () => {
       expect(requests, 'the claim sent something off the page').toEqual([]);
     });
   }
+});
+
+/**
+ * #2856: on a device nobody has agreed anything on, *Scan a code* asks for the
+ * camera where it was pressed, for the scan alone, and one yes reads the code.
+ * The harness's `?fresh` is that device. What is measured is what jsdom
+ * cannot: that no camera was asked for before the yes, that the question and
+ * its two answers fit a 320 px window at a size a thumb can press, and that
+ * the real decoder then reads the picture. Each run attaches a screenshot of
+ * the question, for the owner to read the draft wording in place.
+ */
+test.describe('#2856 — a fresh device is asked in place, for the scan alone', () => {
+  const STATEMENT =
+    'The camera is used only to read this code, and it goes off as soon as the code is read or ' +
+    'you close the scanner. No picture is kept or sent anywhere, and nothing on the Camera screen ' +
+    'is switched on.';
+
+  for (const viewport of VIEWPORTS) {
+    const at = `${String(viewport.width)} px`;
+
+    test(`asks before any camera is asked for, and one yes reads the code, at ${at}`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize(viewport);
+      const requests = offPage(page);
+      await open(page, '?fresh');
+      await page.getByRole('button', { name: 'Scan a code' }).click();
+
+      const statement = page.getByText(STATEMENT);
+      await expect(statement).toBeVisible();
+      const yes = page.getByRole('button', { name: 'Use the camera' });
+      const no = page.getByRole('button', { name: 'Not now' });
+      // It replaced the button pressed: it has the focus, and says what it is the yes to.
+      await expect(yes).toBeFocused();
+      await expect(yes).toHaveAccessibleDescription(STATEMENT);
+      // The press alone asked the platform for no camera, and drew no picture.
+      expect(await page.evaluate(() => window.__oylCardScan?.asked())).toBe(0);
+      await expect(page.locator('video')).toHaveCount(0);
+
+      const said = await statement.boundingBox();
+      const yesBox = await yes.boundingBox();
+      const noBox = await no.boundingBox();
+      // Read first, then the yes, then the no, down the page, and all above the fold.
+      expect(said!.y + said!.height, at).toBeLessThanOrEqual(yesBox!.y + 1);
+      expect(yesBox!.y + yesBox!.height, at).toBeLessThanOrEqual(noBox!.y + 1);
+      expect(noBox!.y + noBox!.height, at).toBeLessThanOrEqual(viewport.height);
+      // The yes is as large as the button it replaced; the no is a full target.
+      expect(yesBox!.height, at).toBeGreaterThanOrEqual(56);
+      expect(noBox!.height, at).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(noBox!.width, at).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      for (const box of [said!, yesBox!, noBox!]) {
+        expect(box.x, at).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, at).toBeLessThanOrEqual(viewport.width);
+      }
+      await expect(page.getByRole('button', { name: 'Paste a code instead' })).toBeVisible();
+      await expectFits(page, `the scan’s question at ${at}`);
+      await testInfo.attach(`scan-question-${String(viewport.width)}`, {
+        body: await page.screenshot(),
+        contentType: 'image/png',
+      });
+
+      await yes.click();
+      await expect(
+        page.getByRole('heading', { name: 'Where did this code come from?' }),
+      ).toBeVisible();
+      await expect(page.locator('video')).toHaveCount(0);
+      expect(await page.evaluate(() => window.__oylCardScan?.tracks())).toEqual(['ended', 'ended']);
+      expect(requests, 'the scan sent something off the page').toEqual([]);
+    });
+  }
+
+  test('Not now asks for no camera, and the focus is back on Scan a code', async ({ page }) => {
+    await open(page, '?fresh&blank');
+    await page.getByRole('button', { name: 'Scan a code' }).click();
+    await page.getByRole('button', { name: 'Not now' }).click();
+    await expect(page.getByText(STATEMENT)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Scan a code' })).toBeFocused();
+    expect(await page.evaluate(() => window.__oylCardScan?.asked())).toBe(0);
+    // Asked again the next time, and one yes then opens the scanner.
+    await page.getByRole('button', { name: 'Scan a code' }).click();
+    await page.getByRole('button', { name: 'Use the camera' }).click();
+    await expect(page.getByText('Looking for the card’s code…')).toBeVisible();
+    await expect(page.locator('video')).toHaveCount(1);
+  });
 });
