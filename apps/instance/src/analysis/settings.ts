@@ -274,15 +274,18 @@ export type SaveOutcome =
 
 /**
  * Who may write the settings: the owner's Operate area — the app, or since
- * #2648 the instance's own admin pages — or the CLI. The operator log entry
+ * #2648 the instance's own admin pages — the CLI, or since #2792 the
+ * first-run setup's AI step on the server machine. The operator log entry
  * written in the same transaction names which, the admin pages' listener
  * included (ADR 0069 D-8). The row's `updated_by` keeps migration 0043's two
- * words: `app` for the owner's Operate area by either channel, `cli` for the
- * host. Nothing reads it but a test; the log is the record of who.
+ * words: `app` for a page of the owner's by any channel, the setup's
+ * included, `cli` for the host's command line. Nothing reads it but a test;
+ * the log is the record of who.
  */
 type SettingsActor =
   | Extract<OperatorActor, { readonly source: 'app' | 'cli' }>
-  | { readonly source: AdminSource; readonly athleteId: string };
+  | { readonly source: AdminSource; readonly athleteId: string }
+  | { readonly source: 'setup' };
 
 /**
  * Check `body` and, if every field passes, write the row over what it held,

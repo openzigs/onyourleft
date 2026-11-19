@@ -136,6 +136,8 @@ const ACTION_LABEL: ReadonlyMap<string, string> = new Map([
   ['registration_mode_set', 'Registration mode set'],
   ['invite_minted', 'Rider invite made'],
   ['setup_done', 'Setup finished'],
+  // #2792: the setup's AI step asked the local model server to download a model.
+  ['analysis_model_pull', 'Model download asked for'],
 ]);
 
 /** An action in words; one this build does not know — a newer instance's — is shown by its own name. */

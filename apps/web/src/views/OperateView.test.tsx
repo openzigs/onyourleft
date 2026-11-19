@@ -323,7 +323,8 @@ describe('the Operate area over a scripted instance — #2603', () => {
     ['analysis_settings_set', 'AI settings changed'],
     ['analysis_settings_cleared', 'AI settings returned to .env'],
     ['analysis_model_checked', 'Model checked for tool calling'],
-  ])('names the AI backend’s action %s in words (#2611)', (action, label) => {
+    ['analysis_model_pull', 'Model download asked for'],
+  ])('names the AI backend’s action %s in words (#2611, #2792)', (action, label) => {
     expect(operatorActionLabel(action)).toBe(label);
   });
 

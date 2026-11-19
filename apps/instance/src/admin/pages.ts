@@ -584,6 +584,7 @@ export const ACTION_LABEL: Readonly<Record<OperatorAction, string>> = {
   registration_mode_set: 'Registration mode set',
   invite_minted: 'Rider invite made',
   setup_done: 'Setup finished',
+  analysis_model_pull: 'Model download asked for',
 };
 
 /** The app's words for each source (`OperateView.tsx` §`SOURCE_TEXT`). */

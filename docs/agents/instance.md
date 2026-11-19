@@ -299,6 +299,13 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         registration mode is now `identity.registrationMode()`
                         (the database's over `.env`'s), never
                         `config.registration`, wherever a rider meets it.
+                        Since #2792 its optional `ai` step (migration 0049)
+                        finds Ollama (`analysis/ollama-setup.ts`), downloads
+                        a model the owner NAMES and saves the one chosen
+                        through `saveAnalysisSettings`. ⚠️ It names no
+                        model, and draws nothing Ollama said of a download
+                        but byte counts. ⚠️ A test passes `ollamaAddresses`,
+                        so a developer's own Ollama is never asked.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or
