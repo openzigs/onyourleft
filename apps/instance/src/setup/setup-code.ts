@@ -118,6 +118,13 @@ export async function mintSetupCode(
     readonly port: number;
   },
 ): Promise<SetupCodeMinted> {
+  // A start after Finish asks for no code, so it writes no "refused" entry on every restart
+  // (owner, 2026-11-19). `operator setup-code` still asks, and its refusal is logged: the
+  // operator ran it. The transaction below still refuses a setup done in between.
+  if (options.mintedBy === 'start' && ((await store.setupState())?.doneAt ?? null) !== null) {
+    await removeSetupCodeFile(options.directory);
+    return { outcome: 'done' };
+  }
   const { code, sha256 } = await newAdminCode();
   const mintedAt = Math.floor(options.now() / 1000);
   const expiresAt = mintedAt + SETUP_CODE_LIFETIME_SECONDS;

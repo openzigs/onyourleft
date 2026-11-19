@@ -697,8 +697,21 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     // Done is the database's: a restart neither reopens it nor writes a code.
     at.lines.length = 0;
     await restart(at);
+    await restart(at);
     expect(await fileThere(at)).toBe(false);
     expect(at.lines.join('\n')).not.toContain('first-run-setup');
+    // Nor does a start after Finish leave a "setup code made: refused" entry in the operator
+    // log each time (owner, 2026-11-19): it asks for no code once the setup is done.
+    const logged = await openSqlStore(at.path);
+    try {
+      const minted = (await logged.listOperatorLogPage(undefined, 200))
+        .filter((entry) => entry.action === 'setup_code_minted')
+        .map((entry) => entry.outcome);
+      expect(minted.length).toBeGreaterThan(0);
+      expect(minted).not.toContain('refused');
+    } finally {
+      await logged.close();
+    }
     await expectAllNotFound(at.port, { finishedHere: true });
     await expect(
       setupCode({ database: at.path, blobs: `${at.path}.blobs` }, { secretsDirectory: at.secrets }),
