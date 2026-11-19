@@ -2160,12 +2160,16 @@ const AI_PACER_TEXT = {
 /**
  * What the rider agrees to, naming the place: the instance and its model's
  * address, as the instance said them (ADR 0071 D-5.2, applied by ADR 0072 D-1.3).
+ * #2760 widened what is sent to cadence and heart rate: draft wording, for the
+ * owner to approve from screenshots.
  */
 function aiPacerConsentText(instance: string, modelAddress: string): string {
   return (
-    `Every few seconds this ride sends your gap to the pacer, your power per kilogram, ` +
-    `whether you are in its draft and the grade ahead to the AI model at ${modelAddress}, ` +
-    `run by your instance ${instance}. No place, no name and nothing of your trainer is sent. ` +
+    `Every few seconds this ride sends your gap to the pacer, whether you are in its draft, ` +
+    `the grade ahead, the pacer's last few lines and, from the sensors you have paired, your ` +
+    `power per kilogram, cadence and heart rate, with how they are trending and their zones ` +
+    `if you set thresholds, to the AI model at ${modelAddress}, run by your instance ` +
+    `${instance}. No place, no name and nothing of your trainer is sent. ` +
     `The AI picks how the pacer rides and writes a short line for you; it never sets your ` +
     `trainer. The same consent lets AI bots race you. You can withdraw it here at any time.`
   );

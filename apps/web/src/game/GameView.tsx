@@ -340,6 +340,7 @@ import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
   ghostDistanceAt,
   pacerGap,
+  type BeatsPerMinute,
   type BotPacerPlan,
   type GhostTrack,
   type Kilograms,
@@ -439,6 +440,12 @@ export interface GamePort {
    * as the game opens. Absent, there is no zone indicator.
    */
   ownThresholdPower?(): Promise<Watts | undefined>;
+  /**
+   * The rider's OWN threshold heart rate, or `undefined` when they have set
+   * none — #2760: the AI pacer is told the heart-rate zone only of a
+   * threshold the rider set, never a default. Read once as the game opens.
+   */
+  ownThresholdHeartRate?(): Promise<BeatsPerMinute | undefined>;
   /**
    * ONE other rider's consented attempt on a route, as a ghost — #331, ADR
    * 0039. Fetched from the instance by the route's digest
@@ -928,6 +935,30 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
   );
   const read = useCallback(() => trainer?.rideLapSeconds?.(), [trainer]);
   return useSyncExternalStore(watch, read);
+}
+
+/**
+ * The rider's own threshold heart rate, read once as the game opens — #2760,
+ * for the AI pacer's heart-rate zone. `undefined` while it is read and when
+ * none is set: the zone is then left out. @see GamePort.ownThresholdHeartRate
+ */
+function useOwnThresholdHeartRate(port: GamePort | undefined): BeatsPerMinute | undefined {
+  const [threshold, setThreshold] = useState<BeatsPerMinute | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void port
+      ?.ownThresholdHeartRate?.()
+      .then((found) => {
+        if (live) setThreshold(found);
+      })
+      .catch(() => {
+        // A store that cannot be read leaves no threshold, and so no zone.
+      });
+    return () => {
+      live = false;
+    };
+  }, [port]);
+  return threshold;
 }
 
 /**
@@ -1728,6 +1759,14 @@ function GameScreen({
   const rideTotals = useRideTotals(props.trainer);
   /** @see useOwnThresholdPower */
   const thresholdPower = useOwnThresholdPower(props.port);
+  /** @see useOwnThresholdHeartRate */
+  const thresholdHeartRate = useOwnThresholdHeartRate(props.port);
+  /** Both thresholds, for the AI pacer's ask in the frame loop (#2760). */
+  const ownThresholdsRef = useRef<{
+    readonly power: Watts | undefined;
+    readonly heartRate: BeatsPerMinute | undefined;
+  }>({ power: undefined, heartRate: undefined });
+  ownThresholdsRef.current = { power: thresholdPower, heartRate: thresholdHeartRate };
   /** @see useRidePowerZoneTime */
   const powerZoneTime = useRidePowerZoneTime(props.trainer, thresholdPower);
   /** @see useRecordingPaused */
@@ -3551,6 +3590,19 @@ function GameScreen({
               profile: chosen.profile,
               riderMassKilograms: directed.riderMassKilograms,
               inForce,
+              // #2760: what the rider's own sensors say, each left out when
+              // it is not live, and a zone only of a threshold they set.
+              sensors: {
+                power3s: powerAverageRef.current.average,
+                trace: recentTraceRef.current.read(),
+                cadenceRpm: turningCadence(sensors.cadence),
+                heartRateBpm:
+                  sensors.heartRate.live && sensors.heartRate.value !== undefined
+                    ? sensors.heartRate.value
+                    : undefined,
+                thresholdPower: ownThresholdsRef.current.power,
+                thresholdHeartRate: ownThresholdsRef.current.heartRate,
+              },
             }),
           direct: (direction, from) => {
             simulation.directPacer(direction, from);
@@ -5439,7 +5491,15 @@ function GameScreen({
           // of ride and then gone. Not `live`: the HUD's one region says it,
           // with announcements on (`announce.ts` rank 5i).
           pacerSay === undefined ? undefined : (
-            <StatusMessage key="pacer-say" tone="info" label={PACER_SAY_LABEL}>
+            <StatusMessage
+              key="pacer-say"
+              tone="info"
+              label={PACER_SAY_LABEL}
+              // #2760's review, the owner's 2026-11-17: "it can be hard to
+              // see". Larger than the other notices (`theme.css`
+              // §`.oyl-hud__pacer-say`).
+              className={PACER_SAY_CLASS}
+            >
               {pacerSay}
             </StatusMessage>
           ),
@@ -5466,6 +5526,8 @@ function GameScreen({
 
 /** The label of the AI pacer's line on the HUD — #2712. */
 const PACER_SAY_LABEL = 'Your pacer';
+/** The class that sets the AI pacer's line larger than a notice — #2760's review. */
+const PACER_SAY_CLASS = 'oyl-hud__pacer-say';
 
 /** The simulation's start for a simulated ride, or nothing: the start line. */
 function startOf(

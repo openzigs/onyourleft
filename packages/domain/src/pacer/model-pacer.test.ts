@@ -10,6 +10,7 @@ import {
   MODEL_PACER_INPUT_MOST_CHARACTERS,
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
+  MODEL_PACER_RECENT_LINES,
   MODEL_PACER_SAY_MOST_CHARACTERS,
   modelPacerAnswerSchema,
   PACER_INTENTS,
@@ -167,6 +168,80 @@ describe('the pacer state the model is shown — ADR 0072 D-3', () => {
   });
 });
 
+/** The same state with every sensor live and three lines said — #2760. */
+const SENSED: ModelPacerInput = {
+  ...STATE,
+  rider3sWPerKg: 2.6,
+  riderMinuteWPerKg: 2.4,
+  powerZone: 'Tempo',
+  powerTrend: 'fading',
+  aboveThresholdS: 0,
+  cadenceRpm: 62,
+  heartRateBpm: 151,
+  heartRateZone: 'Endurance',
+  heartRateTrend: 'rising',
+  recentLines: ['Nice and steady.', 'Find a lighter gear here.', 'Stay with me.'],
+};
+
+describe('the rider’s own sensors, in the state — #2760', () => {
+  it('reads a state with every sensor, and one with none of them', () => {
+    expect(readModelPacerInput(SENSED)).toEqual({ ok: true, value: SENSED });
+    expect(readModelPacerInput({ ...STATE, cadenceRpm: 90 })).toEqual({
+      ok: true,
+      value: { ...STATE, cadenceRpm: 90 },
+    });
+    expect(readModelPacerInput(STATE).ok).toBe(true);
+  });
+
+  it.each([
+    ['rider3sWPerKg', 41],
+    ['rider3sWPerKg', null],
+    ['riderMinuteWPerKg', -0.1],
+    ['powerZone', 'Zone 9'],
+    ['powerZone', 'Threshold heart'],
+    ['powerTrend', 'falling'],
+    ['aboveThresholdS', 2.5],
+    ['cadenceRpm', 88.5],
+    ['cadenceRpm', 251],
+    ['heartRateBpm', 19],
+    ['heartRateBpm', null],
+    ['heartRateZone', 'Sprint'],
+    ['heartRateTrend', 'fading'],
+    ['recentLines', []],
+    ['recentLines', 'Nice and steady.'],
+    ['recentLines', ['']],
+    ['recentLines', ['Hold 3000 watts.']],
+    ['recentLines', ['Lat 51.5074 is home.']],
+    ['recentLines', ['a', 'b', 'c', 'd']],
+    ['recentLines', [7]],
+  ])('refuses a bad %s (%j), naming the field and never the value', (field, value) => {
+    const read = readModelPacerInput({ ...SENSED, [field]: value });
+    expect(read.ok).toBe(false);
+    expect(read.ok ? undefined : read.problem.field).toBe(`input.${field}`);
+    expect(JSON.stringify(read)).not.toContain('51.5074');
+  });
+
+  it('fits a state with every sensor and the longest lines inside the cap', () => {
+    const longest = '"'.repeat(MODEL_PACER_SAY_MOST_CHARACTERS - 1) + 'a';
+    expect(pacerSayProblem(longest)).toBeUndefined();
+    const widest: ModelPacerInput = {
+      ...SENSED,
+      riderGapM: -999_999.9,
+      gradeAheadPct: -99.9,
+      toFinishM: 999_999,
+      rideS: 86_399,
+      secondsInIntent: 86_399,
+      aboveThresholdS: 86_399,
+      riderWPerKg: 39.9,
+      rider3sWPerKg: 39.9,
+      riderMinuteWPerKg: 39.9,
+      recentLines: Array.from({ length: MODEL_PACER_RECENT_LINES }, () => longest),
+    };
+    expect(JSON.stringify(widest).length).toBeLessThanOrEqual(MODEL_PACER_INPUT_MOST_CHARACTERS);
+    expect(readModelPacerInput(widest).ok).toBe(true);
+  });
+});
+
 describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
   it('reads a plan, an intent and a line', () => {
     expect(readModelPacerAnswer(answer({}))).toEqual({
@@ -195,7 +270,8 @@ describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
     ['bad-plan', answer({ plan: 'sprint' })],
     ['bad-intent', answer({ intent: 'wait' })],
     ['bad-say', answer({ say: 7 })],
-    ['bad-say', answer({ say: 'Hold 250 watts.' })],
+    ['bad-say', answer({ say: 'Hold 9000 watts.' })],
+    ['bad-say', answer({ say: 'Your heart rate is 150.' })],
     ['too-long', answer({ say: 'a'.repeat(MODEL_PACER_ANSWER_MOST_CHARACTERS) })],
   ])('reads %s as no decision', (reason, text) => {
     expect(readModelPacerAnswer(text)).toEqual({ ok: false, reason });
@@ -230,7 +306,8 @@ describe('the line of feedback — ADR 0072 D-4', () => {
     ['not-a-line', 'Nice.\nNow harder.'],
     ['markup', '<b>Go</b>'],
     ['markup', 'Read more at www.example.org'],
-    ['markup', 'Push to 2 W/kg'],
+    ['markup', 'Push to 2 W/kg / 3 W/kg'],
+    ['number', 'Push to 20 W/kg'],
     ['number', 'Hold three hundred and 5 more.'],
     ['number', 'We are at 51.5074 north.'],
     ['number', 'Two ٣ go'],
@@ -252,6 +329,94 @@ describe('the line of feedback — ADR 0072 D-4', () => {
 
   it('lets the empty line through: it shows nothing', () => {
     expect(pacerSayProblem('')).toBeUndefined();
+  });
+});
+
+describe('a cadence or power figure in the line — ADR 0077 (owner ruling 2026-11-17)', () => {
+  it.each([
+    'Aim for 90 rpm.',
+    'Hold 200 watts.',
+    'Hold around 200 W up this rise.',
+    'Try 3 W/kg up this rise.',
+    'Easy for a minute, stay in this zone with me.',
+    'Settle at 2.8 W/kg, then spin at 95rpm.',
+    'Spin it up to ９０ rpm.',
+    'Hold 30 watts, then 2000 watts, at 30 rpm or 150 rpm.',
+    'Ease to 0.5 W/kg, or ride 10 W/kg.',
+    'One more push at 250 watt.',
+  ])('shows “%s”', (say) => {
+    expect(pacerSayProblem(say)).toBeUndefined();
+  });
+
+  it.each([
+    ['number', 'Your heart rate is 150.'],
+    ['number', 'Heart rate 150 bpm, ease a little.'],
+    ['number', 'Five more, then 5 minutes easy.'],
+    ['number', 'Only 20 km to go.'],
+    ['number', 'Hold 35 km an hour here.'],
+    ['number', 'Stay in zone 4.'],
+    ['markup', 'You are at 90% of threshold.'],
+    ['number', 'Hold 9000 watts.'],
+    ['number', 'Hold 29 watts.'],
+    ['number', 'Hold 2001 W.'],
+    ['number', 'Spin at 5 rpm.'],
+    ['number', 'Spin at 151 rpm.'],
+    ['number', 'Push 11 W/kg.'],
+    ['number', 'Ease to 0.4 W/kg.'],
+    ['number', 'Hold 3.25 W/kg.'],
+    ['number', 'Hold 0.5074 W/kg.'],
+    ['number', 'Hold 200.5 watts.'],
+    ['number', 'Spin at 90.5 rpm.'],
+    ['number', 'Hold 0200 watts.'],
+    ['number', 'Hold 1,200 watts.'],
+    ['number', 'Hold 200-250 watts.'],
+    ['number', 'Hold -200 watts.'],
+    ['number', 'Hold 200 wattage.'],
+    ['number', 'Hold 200 W2.'],
+    ['number', 'Hold a200 W.'],
+    ['number', 'Spin at 90 rpm for 5 more.'],
+    ['number', 'Spin at ٩٠ rpm.'],
+    // A Unicode sign touches the number (review of #2762, finding 1).
+    ['number', 'Hold \u2212200 watts.'],
+    ['number', 'Hold \u00b1200 watts.'],
+    ['number', 'Hold \u2013200 watts.'],
+    ['number', 'Hold \u00d7200 W.'],
+    // The figure in a sentence about something else (finding 2).
+    ['number', 'Heart rate 150 W, ease a little.'],
+    ['number', 'Hold 200 W, keep your BPM steady.'],
+    ['number', 'Hold 200 W while your pulse settles.'],
+    ['number', 'Hold 200 watts for a minute.'],
+    ['number', 'Hold 200 watts for ten more seconds.'],
+    ['number', 'Hold 200 W for an hour.'],
+    ['number', 'Hold 200 W to the next km.'],
+    ['number', 'Hold 200 W for a mile.'],
+    ['number', 'Hold 200 W for one more kilometre.'],
+    ['number', 'Hold 200 W for a few hundred Metres.'],
+    ['number', 'Hold 200 W for a few hundred meters.'],
+    ['number', 'Hold 90 rpm in this zone.'],
+    ['number', 'Hold 200 W in this ＺＯＮＥ.'],
+    // A Roman numeral, which NFKC would turn into letters (finding 3).
+    ['number', 'Stay in zone \u2163.'],
+    ['number', 'Stay in zone \u2173 now.'],
+    ['number', 'Keep it at \u2182.'],
+    ['number', 'Only \u216b more to go.'],
+    ['number', 'Push for \u2172 more.'],
+    ['number', 'Stay in zone IV.'],
+    ['number', 'Stay in zone ii for now.'],
+    ['trademark', 'Hold 200 watts and keep your TSS low.'],
+    ['trademark', 'Aim for 90 rpm, good normalized power.'],
+    ['health-claim', 'Hold 200 watts if you feel no pain.'],
+    ['too-long', `Hold 200 watts ${'a'.repeat(MODEL_PACER_SAY_MOST_CHARACTERS)}`],
+  ])('refuses %s: “%s”', (problem, say) => {
+    expect(pacerSayProblem(say)).toBe(problem);
+  });
+
+  it('reads a cadence or power line as a decision, as the device and the instance do', () => {
+    expect(readModelPacerAnswer(answer({ say: 'Aim for 90 rpm.' }))).toEqual({
+      ok: true,
+      direction: { plan: 'even', intent: 'lift' },
+      say: 'Aim for 90 rpm.',
+    });
   });
 });
 

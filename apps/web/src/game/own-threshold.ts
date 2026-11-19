@@ -19,7 +19,7 @@
  * parameter, so no caller can hand it another rider's id.
  */
 
-import type { Watts } from '@onyourleft/domain';
+import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
 import type { ActivityStore } from '@onyourleft/store';
 
 import { LOCAL_ATHLETE } from '../local-athlete';
@@ -29,4 +29,14 @@ export function ownThresholdPowerFrom(
   store: Pick<ActivityStore, 'getAthlete'>,
 ): () => Promise<Watts | undefined> {
   return async () => (await store.getAthlete(LOCAL_ATHLETE))?.thresholdPower;
+}
+
+/**
+ * `GamePort.ownThresholdHeartRate` over a store — #2760, for the AI pacer's
+ * heart-rate zone: `undefined` when none is set. The local athlete's row only.
+ */
+export function ownThresholdHeartRateFrom(
+  store: Pick<ActivityStore, 'getAthlete'>,
+): () => Promise<BeatsPerMinute | undefined> {
+  return async () => (await store.getAthlete(LOCAL_ATHLETE))?.thresholdHeartRate;
 }
