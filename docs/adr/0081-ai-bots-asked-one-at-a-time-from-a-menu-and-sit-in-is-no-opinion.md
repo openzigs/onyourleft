@@ -1,6 +1,7 @@
 # ADR 0081: The AI bots are asked about one at a time, from a menu the device makes, and the model's sit-in is no opinion — superseding in part ADR 0071 D-3, D-4.4 and D-7, ADR 0073 D-3, D-4 and D-5, ADR 0074 D-1 and D-2, and ADR 0076 D-11
 
-- **Status**: **Proposed**, 2026-11-18. The design is the owner's ruling of that day on
+- **Status**: **Accepted**, 2026-11-19, on the owner's answers to D-8, all as recommended
+  (D-9). Proposed 2026-11-18. The design is the owner's ruling of that day on
   [#2836](https://github.com/openzigs/onyourleft/issues/2836), quoted in Context. What the ruling
   leaves open is the author's, marked *the author's choice*, and D-8 puts it to the owner as
   questions. **The build is in #2836's pull request**, behind bot-code version 7; it merges after
@@ -221,6 +222,26 @@ reader.
 | **R-6** | An older app against a newer instance, or the reverse, rides the seeded race (D-2.8) | **Approve** |
 | **R-7** | The model can no longer launch a kick from anywhere, send any bot on a flyer, or gamble under the W′ floor (ADR 0073 D-3): only what the menu offers | **Approve.** It is what "the model picks from that menu only" means |
 | **R-8** | 90 tactics calls a minute for one athlete (D-2.7) | **Approve** |
+
+### D-9 — The owner's answers
+
+The owner answered D-8 on 2026-11-19, on [#2873](https://github.com/openzigs/onyourleft/pull/2873),
+asked with the scores of #2838's harness. Every question was approved as recommended, so the
+author's choices marked in D-1 and D-2 stand as written.
+
+| | The owner's answer | What it settles |
+|---|---|---|
+| **R-1** | *"Approve (Recommended)"* | ADR 0081 as built: `sit-in` is no opinion, one bot a call from a device-made menu, a reason word first, `tactics-8`, and the two logs |
+| **R-2** | *"Approve all (Recommended)"* | The menu's figures in D-2.3 and D-2.4 are starting values, to tune on #2838's harness |
+| **R-3** | *"Approve all (Recommended)"* | A model `sit-in` inside the launch leaves the sprint to the seeded tactics, without ADR 0074's hold (D-1.3) |
+| **R-4** | *"Approve all (Recommended)"* | The 10 s hold stays, for each bot (D-2.6), set against the round measured on the tablet |
+| **R-5** | *"Approve all (Recommended)"* | The shared race is sent fresh with every call |
+| **R-6** | *"Approve all (Recommended)"* | An older app against a newer instance, or the reverse, rides the seeded race (D-2.8) |
+| **R-7** | *"Approve (Recommended)"* | The model picks only what the menu offers: no kick from anywhere, no flyer for any bot, no gamble under the W′ floor |
+| **R-8** | *"Approve all (Recommended)"* | 90 tactics calls a minute for one athlete (D-2.7) |
+
+The owner's next step is a race on the tablet, which is still owed before #2836's pull request
+merges (Status).
 
 ---
 

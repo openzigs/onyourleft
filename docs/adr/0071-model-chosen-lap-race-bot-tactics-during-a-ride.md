@@ -453,3 +453,7 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
   asks about one bot a second at most, where D-7's draft was a call every 4 s. **D-3.2, D-3.3,
   D-3.5, D-5, D-6, D-7's fallback and D-8 are unchanged**, and so is D-1.4. Read ADR 0081 for the
   rule. This entry only points there; nothing else in this ADR changes. (#2836)
+
+- **2026-11-19** — **[ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted**, on the owner's answers
+  to its D-8 (its D-9), so the entry above is in force. This entry only records that; nothing else in
+  this ADR changes. (#2836)

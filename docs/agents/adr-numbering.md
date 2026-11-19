@@ -15,7 +15,8 @@ It has the same authority as the root file. Where the text below says "this file
   ⚠️ **0081 is [ADR 0081](../adr/0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md)**,
   taken by [#2836](https://github.com/openzigs/onyourleft/issues/2836) on 2026-11-18 for the AI
   bots asked about one at a time from a menu the device makes, with the model's `sit-in` as no
-  opinion, **Proposed** on the owner's ruling of that day on #2836. It supersedes in part ADR 0071
+  opinion, Proposed on the owner's ruling of that day on #2836 and **Accepted** on 2026-11-19 on the
+  owner's answers to its D-8, all as recommended (its D-9). It supersedes in part ADR 0071
   D-3, D-4.4 and D-7, ADR 0073 D-3, D-4 and D-5, ADR 0074 D-1 and D-2 and ADR 0076 D-11; each gained
   one dated `## Amendments` entry pointing to it. 0083 is claimed by #2835's open pull request
   [#2864](https://github.com/openzigs/onyourleft/pull/2864). **The next free number is 0084.** A

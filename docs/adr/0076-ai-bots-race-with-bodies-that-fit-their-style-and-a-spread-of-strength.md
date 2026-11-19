@@ -434,3 +434,7 @@ connection kept open.
   late limit and the 10 s hold are unchanged**, the hold now for each bot. D-1 to D-10 are
   unchanged. Read ADR 0081 for the rule. This entry only points there; nothing else in this ADR
   changes. (#2836)
+
+- **2026-11-19** — **[ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted**, on the owner's answers
+  to its D-8 (its D-9), so the entry above is in force. This entry only records that; nothing else in
+  this ADR changes. (#2836)
