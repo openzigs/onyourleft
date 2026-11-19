@@ -1247,8 +1247,9 @@ describe('the lap splits panel — #2080', () => {
         {hud}
       </main>
     );
-    // A HUD panel adds no tab stop to a ride: the same HUD with no laps handed
-    // to it draws no splits, and has exactly as many tab stops.
+    // A HUD panel adds no tab stop to a ride but its collapse tab (#2600): the
+    // same HUD with no laps handed to it draws no splits, and has exactly one
+    // tab stop fewer.
     mounted = await mount(onAPage(<HudPanel {...base} profile={loop} lapSeconds={75} />));
     expect(mounted.container.querySelector('.oyl-hud__laps')).toBeNull();
     const withoutSplits = tabbableElements(document).length;
@@ -1257,7 +1258,7 @@ describe('the lap splits panel — #2080', () => {
       onAPage(<HudPanel {...base} profile={loop} laps={laps} lapSeconds={75} />),
     );
     expect(mounted.container.querySelector('.oyl-hud__laps')).not.toBeNull();
-    expect(tabbableElements(document)).toHaveLength(withoutSplits);
+    expect(tabbableElements(document)).toHaveLength(withoutSplits + 1);
     const alone = auditAccessibility(document);
     expect(alone, formatViolations(alone)).toEqual([]);
     mounted.unmount();

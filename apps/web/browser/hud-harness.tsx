@@ -174,6 +174,7 @@ import type { RideTotals } from '../src/recording/totals';
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
+import { writeRideChrome } from '../src/game/hud/ride-chrome-preference';
 
 /** One measured value element. Serialisable, so it survives `page.evaluate`. */
 export interface ValueMeasurement {
@@ -1165,6 +1166,9 @@ async function run(): Promise<void> {
   // measured. `createRoot().render` is asynchronous, and a measurement taken
   // against an empty container is the vacuous pass this whole page exists to
   // rule out.
+  // #2600: the ride controls drawn and every panel open, as this page
+  // measures them; `ride-chrome.browser.spec.ts` measures them hidden.
+  writeRideChrome(localStorage, { autoHide: false, collapsed: [] });
   flushSync(() => {
     createRoot(container).render(
       <StrictMode>

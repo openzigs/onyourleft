@@ -212,8 +212,9 @@ for (const viewport of [
     );
     // Four panels, three sizes, the two arrangements (#2383), the two route
     // panels (#2385), the totals strip (#2387), the two ways to show power
-    // (#2420), the two Delivery layouts (#2514) and the climb callout (#2593).
-    expect(choices).toHaveLength(17);
+    // (#2420), the two Delivery layouts (#2514), the climb callout (#2593)
+    // and the ride controls' auto-hide (#2600).
+    expect(choices).toHaveLength(18);
     for (const choice of choices) {
       expect(choice.height, choice.text).toBeGreaterThanOrEqual(48);
       expect(choice.width, choice.text).toBeGreaterThanOrEqual(48);

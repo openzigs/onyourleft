@@ -9,12 +9,14 @@
  *
  * Four panels, by name ({@link HUD_PANELS}): the **secondary readings**, the
  * **route panel** (the elevation strip and the plan), the **recent graph**
- * (#2078) and a race's **standings**. ⚠️ **Never the primary readings, the
- * ride controls or the notices**, and there is no key here that could name
- * them: the notices cell is where the HUD's safety sentences stand (an eased
- * workout target, a recording that may stop with the screen off —
- * `a11y/kept-visible.a11y.test.tsx` §`GAME_RIDING_KEPT_VISIBLE`), and a
- * rider who has hidden everything they may still sees every one of them.
+ * (#2078) and a race's **standings**. ⚠️ **Never the notices**, and there is
+ * no key here that could name them: the notices cell is where the HUD's safety
+ * sentences stand (an eased workout target, a recording that may stop with the
+ * screen off — `a11y/kept-visible.a11y.test.tsx` §`GAME_RIDING_KEPT_VISIBLE`),
+ * and a rider who has hidden everything they may still sees every one of them.
+ * Nor the primary readings or the ride controls, here: #2600 lets a rider
+ * collapse a panel to a tab and hides the controls until touched, and that is
+ * `ride-chrome-preference.ts`'s, under its own key.
  *
  * One exception, by design (#2514): a Delivery round's game strip draws cadence,
  * heart rate and gradient only when the rider asks for them (`delivery: 'game'`),
