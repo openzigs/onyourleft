@@ -618,3 +618,28 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   on 2026-11-17 on its pull request [#2694](https://github.com/openzigs/onyourleft/pull/2694).
   What still holds, unchanged: D-5.2, D-5.4 to D-5.7, and the rest of D-5.1. This entry is a
   pointer and changes nothing else here.
+- **2026-11-19** — **PROPOSED, pending the owner's ruling on
+  [#2660](https://github.com/openzigs/onyourleft/issues/2660): railway lines are a new kind of
+  record in `worldCorridors`, and the world draws a level crossing where one crosses the route at
+  grade.** The decoder dropped every `roads` line whose `kind` is `rail`, so no track and no level
+  crossing reached the world. From this date `packages/map-features` (`schema.ts` §`RAIL_KIND`,
+  §`RAIL_KIND_DETAILS`) keeps a `rail` line whose `kind_detail` (its OSM `railway` value) is `rail`,
+  `light_rail`, `narrow_gauge`, `preserved` or `disused`, as `RailFeature`: that detail, whether it
+  is on a bridge or in a tunnel (`is_bridge`, `is_tunnel`, as a street's grade), and its line, and
+  nothing else: no name, no operator, no OSM identifier. A `subway`, a `monorail`, a `funicular`, a
+  `tram` (which runs in a street rather than across it) and a `miniature` line are dropped at decode.
+  `apps/web/src/game/world-data/corridor.ts` packs them into the store (packed version 6,
+  `CORRIDOR_READER_VERSION` 6, so a row of either build is read again by the other and no Dexie
+  schema changes), and `cross-streets.ts` §`levelCrossings` finds where one crosses the drawn road
+  at grade, as a mapped junction is found, and draws ballast with two rails on it a short way off
+  each side and the rails across the carriageway, in the side roads' one mesh and under their
+  frame bound. D-3.3's sentence reads, from this entry, as the 2026-11-15 entry left it, with
+  *"water lines with `kind` (river, stream or canal)"* followed by *"; railway lines with
+  `kind_detail` and whether each is a bridge or a tunnel"*. What still stands, unchanged: D-2.3's
+  corridor and the tiles read, D-3.1 to D-3.6, including that the store never leaves the device
+  (D-3.5; `apps/web/src/transfer/world-corridor-not-exported.test.ts` now packs decoded railway
+  lines too), D-4, D-5 (#2693 already keeps procedural lots off railway land), and the gradient a
+  trainer is sent, which is the route's own over a crossing as anywhere else. **Status: proposed,
+  in force only when the owner rules on #2660 and approves its screenshots and a moving-ride
+  tablet frame check**; the PR is not to be merged before that, and this entry is to be corrected
+  or struck there if the ruling differs.

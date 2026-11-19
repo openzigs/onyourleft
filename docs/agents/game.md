@@ -2097,7 +2097,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
-                        is broken at its crossroads with dropped kerbs
+                        is broken at its crossroads with dropped kerbs.
+                        ⚠️ **Since #2660 a level crossing** wherever a mapped
+                        railway (`WorldCorridor.rails`) crosses the route at
+                        grade (§`levelCrossings`): ballast and two rails a
+                        side road's length off each side, the rails carried
+                        across the carriageway, in the same mesh under the
+                        same frame bound — no crossbuck, signal or barrier
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

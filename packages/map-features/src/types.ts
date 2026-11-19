@@ -14,6 +14,7 @@
 import type {
   BUILDING_TYPES,
   LANDMARKS,
+  RAIL_KIND_DETAILS,
   ROOF_MATERIALS,
   ROOF_ORIENTATIONS,
   ROOF_SHAPES,
@@ -125,6 +126,19 @@ export interface StreetFeature {
 }
 
 /**
+ * A `roads` line that is a railway kept as track (#2660): `kind`
+ * {@link RAIL_KIND} with a `kind_detail` in {@link RAIL_KIND_DETAILS}. Its
+ * detail, its grade and its line; never a name, an operator or an id.
+ */
+export interface RailFeature {
+  readonly kindDetail: (typeof RAIL_KIND_DETAILS)[number];
+  /** From `is_bridge` and `is_tunnel`, as a street's. */
+  readonly grade: StreetGrade;
+  /** `x0, z0, x1, z1, …` in local metres. */
+  readonly line: Float32Array;
+}
+
+/**
  * A point from `places` (#1632, ADR 0055 D-2): what kind of settlement stands
  * there and roughly how big, **never which one** — no name, no `wikidata`, no
  * `population`, no id is ever decoded (D-3).
@@ -151,6 +165,8 @@ export interface DecodedTile {
   readonly places: readonly PlaceFeature[];
   /** #2659: the rivers, streams and canals, for where they cross the route. */
   readonly waterLines: readonly WaterLineFeature[];
+  /** #2660: the railway lines, for the level crossings where they cross the route. */
+  readonly rails: readonly RailFeature[];
 }
 
 /**

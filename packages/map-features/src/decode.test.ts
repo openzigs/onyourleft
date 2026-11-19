@@ -207,11 +207,12 @@ describe('decodeTile on the named fixtures', () => {
     });
   });
 
-  it('streets — #1565: highway, major and minor roads, and `other` where it is a street; never rail, ferry or a footway', () => {
+  it('streets — #1565: highway, major and minor roads, and `other` where it is a street; never rail, ferry or a footway; #2660: rail kept as track apart', () => {
     const tile = decoded(streetsTile());
     const sinkOf = (kind: string, detail: string): string | null => {
       if (tile.streets.some((f) => f.kind === kind && f.kindDetail === detail)) return 'streets';
       if (tile.paths.some((f) => f.kind === kind && f.kindDetail === detail)) return 'paths';
+      if (kind === 'rail' && tile.rails.some((f) => f.kindDetail === detail)) return 'rails';
       return null;
     };
     for (const road of STREET_FIXTURE_ROADS) {
@@ -234,6 +235,13 @@ describe('decodeTile on the named fixtures', () => {
         road.kindDetail,
         road.grade ?? 'ground',
       ]);
+    }
+    // #2660: a railway kept as track carries its grade as a street does, and nothing else.
+    expect(tile.rails).toHaveLength(STREET_FIXTURE_ROADS.filter((r) => r.sink === 'rails').length);
+    for (const road of STREET_FIXTURE_ROADS.filter((r) => r.sink === 'rails')) {
+      const rail = tile.rails.find((f) => f.kindDetail === road.kindDetail);
+      expect([road.kindDetail, rail?.grade]).toEqual([road.kindDetail, road.grade ?? 'ground']);
+      expect(Object.keys(rail ?? {}).sort()).toEqual(['grade', 'kindDetail', 'line']);
     }
     // Along its line, in the corridor frame: the minor road's two ends.
     const minor = tile.streets.find((f) => f.kind === 'minor_road');
@@ -309,6 +317,8 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'populationRank',
         // #2659.
         'waterLines',
+        // #2660.
+        'rails',
         // #1789: the building fields, from the one list.
         ...BUILDING_FIELD_NAMES,
       ];

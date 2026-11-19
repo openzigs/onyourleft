@@ -139,6 +139,27 @@ export const FOOTWAY_KIND_DETAILS = [
  */
 export const STREET_KINDS = ['highway', 'major_road', 'minor_road'] as const;
 
+/** The `roads.kind` of a railway line in Protomaps v4 (#2660). */
+export const RAIL_KIND = 'rail';
+
+/**
+ * The `kind_detail` values that make a {@link RAIL_KIND} line a railway kept
+ * as track — #2660, read from docs.protomaps.com/basemaps/layers on
+ * 2026-11-19, where a line's `kind_detail` is its OSM `railway` value: a main
+ * line (`rail`), light rail, narrow gauge, a preserved line and a disused one,
+ * which keeps its rails. **Not** a `subway`, which runs underground, a
+ * `monorail` or a `funicular`, which are not ballasted track, a `tram`, which
+ * runs in a street rather than across it, or a `miniature` park railway. Any
+ * other detail, or none, drops the line unread.
+ */
+export const RAIL_KIND_DETAILS = [
+  'rail',
+  'light_rail',
+  'narrow_gauge',
+  'preserved',
+  'disused',
+] as const;
+
 /** The `roads.kind` kept only where its `kind_detail` says it is a street (#1565). */
 export const OTHER_ROAD_KIND = 'other';
 

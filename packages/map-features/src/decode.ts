@@ -45,6 +45,8 @@ import {
   PLACE_KIND_DETAILS,
   PLACE_KINDS,
   READ_LAYERS,
+  RAIL_KIND,
+  RAIL_KIND_DETAILS,
   STREET_KINDS,
   WATER_LINE_KINDS,
   GEOMETRY_LINE,
@@ -60,6 +62,7 @@ import type {
   LandUseFeature,
   PathFeature,
   PlaceFeature,
+  RailFeature,
   Ring,
   StreetFeature,
   StreetGrade,
@@ -244,6 +247,7 @@ function decodeChecked(
   const streets: StreetFeature[] = [];
   const places: PlaceFeature[] = [];
   const waterLines: WaterLineFeature[] = [];
+  const rails: RailFeature[] = [];
   for (const layer of framed) {
     state.layer = layer.name;
     const project = new Projector(tile, origin, layer.extent);
@@ -259,12 +263,12 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths, streets, places, waterLines },
+        { landUse, buildings, paths, streets, places, waterLines, rails },
       );
     }
   }
   state.layer = null;
-  return { tile, landUse, buildings, paths, streets, places, waterLines };
+  return { tile, landUse, buildings, paths, streets, places, waterLines, rails };
 }
 
 /** The layer's name if it is one this package reads or checks for, else `null`. Never decodes it. */
@@ -461,13 +465,15 @@ interface Sinks {
   readonly streets: StreetFeature[];
   readonly places: PlaceFeature[];
   readonly waterLines: WaterLineFeature[];
+  readonly rails: RailFeature[];
 }
 
 /**
  * Which sink a `roads` feature goes to (#1565): a footway first - #1551's
- * set, unchanged - then a street, else none, and its geometry is never read.
+ * set, unchanged - then a street, then (#2660) a railway kept as track, else
+ * none, and its geometry is never read.
  */
-function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | null {
+function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | 'rails' | null {
   if (kind === FOOTWAY_KIND || (FOOTWAY_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
     return 'paths';
   }
@@ -477,6 +483,9 @@ function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' 
     (OTHER_STREET_KIND_DETAILS as readonly string[]).includes(kindDetail)
   ) {
     return 'streets';
+  }
+  if (kind === RAIL_KIND && (RAIL_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
+    return 'rails';
   }
   return null;
 }
@@ -570,7 +579,13 @@ function decodeFeature(
     case 'roads':
       for (const line of parts as Float32Array[]) {
         if (road === 'paths') sinks.paths.push({ kind: kind as string, kindDetail, line });
-        else
+        else if (road === 'rails') {
+          sinks.rails.push({
+            kindDetail: kindDetail as RailFeature['kindDetail'],
+            grade: gradeOf(attributes),
+            line,
+          });
+        } else
           sinks.streets.push({
             kind: kind as string,
             kindDetail,
