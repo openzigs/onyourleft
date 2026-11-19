@@ -29,6 +29,7 @@
 import { localAddressesOnly, type Resolver } from '../history/address.ts';
 import { InstanceKeysUnavailable, type InstanceKeys } from '../keys/instance-keys.ts';
 import type { InstanceKeysProblem } from '../keys/instance-keys.ts';
+import type { RemotePath } from '../config.ts';
 import type { ServerConfig } from '../server-config.ts';
 
 /** One disk's space, in bytes. */
@@ -204,6 +205,13 @@ export function keysState(keys: Pick<InstanceKeys, 'show'>): () => Promise<KeysS
  */
 export function statusSources(options: {
   readonly server: Pick<ServerConfig, 'databasePath' | 'blobsPath' | 'tunnelReadyUrl'>;
+  /**
+   * `OYL_INSTANCE_REMOTE_PATH` (#2859): on the tailnet or Funnel no
+   * `cloudflared` runs, so its address — which the home template sets
+   * whatever the path — is not asked, and the tunnel is `unknown`, never
+   * `not_ready` on a healthy install.
+   */
+  readonly remotePath: RemotePath | null;
   readonly keys: Pick<InstanceKeys, 'show'>;
   /** Unix milliseconds. */
   readonly now: () => number;
@@ -221,7 +229,10 @@ export function statusSources(options: {
       options.disk,
     ),
     tunnel: tunnelReadiness({
-      url: server.tunnelReadyUrl,
+      url:
+        options.remotePath === 'tailnet' || options.remotePath === 'funnel'
+          ? undefined
+          : server.tunnelReadyUrl,
       resolve: options.resolve,
       fetch: options.fetch,
     }),

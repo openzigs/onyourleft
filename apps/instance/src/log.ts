@@ -276,7 +276,8 @@ const SERVER_SIDE_CLOSES: ReadonlySet<string> = new Set(['room-lost']);
  *   write, a rooms sweep or a history catch-up that failed, a voice request
  *   that failed;
  * - an analysis job that failed; the analysis model, the picture model or
- *   the history index off; the instance keys not `ready`; a hosted model key
+ *   the history index off for a reason other than not being set (#2859: each
+ *   is optional, and not set is not a problem); the instance keys not `ready`; a hosted model key
  *   held with no secret or one that will not open; voice turned off by a
  *   refusal (not merely unset); a refusal to serve over migrations;
  * - a room socket closed for a server-side reason (`room-lost`).
@@ -301,7 +302,8 @@ export function isProblem(line: Readonly<Record<string, unknown>>): boolean {
     case 'analysis-model':
     case 'picture-model':
     case 'history-index':
-      return state === 'off';
+      // #2859: each is optional, and not set is not a problem — only one set and not working.
+      return state === 'off' && code !== 'not-set';
     case 'instance-keys':
       return state !== 'ready';
     case 'hosted-model-key':

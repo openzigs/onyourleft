@@ -1662,12 +1662,12 @@ export const CARD_CODE_TEXT: Readonly<
 > = {
   claim: {
     heading: 'Claim this instance with your tablet',
-    lead: 'On the tablet you ride with, open On Your Left, go to Instance and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so the tablet checks the instance’s key before it sends anything, and a code that makes that tablet this instance’s owner.',
+    lead: 'On the tablet you ride with, open On Your Left, then More, then Instance, and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so the tablet checks the instance’s key before it sends anything, and a code that makes that tablet this instance’s owner.',
     label: 'The instance’s card and a claim code, for the app’s scanner',
   },
   invite: {
     heading: 'Invite a rider',
-    lead: 'Ask the rider to open On Your Left, go to Instance and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so their app checks the instance’s key before it sends anything, and an invitation to join.',
+    lead: 'Ask the rider to open On Your Left, then More, then Instance, and scan this code with the app’s own scanner, not the camera app. It carries the instance’s card, so their app checks the instance’s key before it sends anything, and an invitation to join.',
     label: 'The instance’s card and an invitation, for the app’s scanner',
   },
 };

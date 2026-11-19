@@ -172,7 +172,7 @@ export const CLAIM_LEAD =
 export const CLAIM_SHOW_BUTTON = 'Show the claim code';
 /** Above the claim QR, in place of the admin page's own words (#2783). */
 export const CLAIM_CODE_LEAD =
-  'Scan this with the On Your Left app on your tablet. In the app, go to Instance and use its own scanner, not the camera app. Your tablet then shows a six-digit number.';
+  'Scan this with the On Your Left app on your tablet. In the app, open More, then Instance, and use its own scanner, not the camera app. Your tablet then shows a six-digit number.';
 /** Below the claim QR, while no tablet has scanned it. */
 export const CLAIM_WAITING_TEXT =
   'Waiting for your tablet to scan the code. Once it has, press I’ve scanned it, and this page shows the number to compare.';
@@ -431,7 +431,7 @@ export const INVITE_STEP_LEAD =
   'Make one invite for a rider: a code they scan with the On Your Left app. It works once, for seven days.';
 /** Above the invite QR, in place of the admin page's own words (#2783). */
 export const INVITE_CODE_LEAD =
-  'Scan this with the On Your Left app on the new rider’s phone or tablet. In the app, go to Instance and use its own scanner, not the camera app.';
+  'Scan this with the On Your Left app on the new rider’s phone or tablet. In the app, open More, then Instance, and use its own scanner, not the camera app.';
 export const INVITE_MAKE_BUTTON = 'Make an invite';
 export const INVITE_TAKEN_TEXT =
   'This setup has made its one invite. You can make more later, from the app.';
@@ -440,7 +440,7 @@ export const INVITE_TAKEN_TEXT =
  * after the claim, so this is an instruction, not a fault.
  */
 export const INVITE_NO_OWNER_TEXT =
-  'One more thing on your tablet first: an invite is made from your account, and your tablet has not signed in to this server yet. In the On Your Left app on your tablet, go to Instance and connect to this server. Then come back to this page.';
+  'One more thing on your tablet first: an invite is made from your account, and your tablet has not signed in to this server yet. In the On Your Left app on your tablet, open More, then Instance, and connect to this server. Then come back to this page.';
 export const INVITE_CHECK_AGAIN_LINK = 'Check again';
 export const INVITE_NOT_INVITE_MODE_TEXT =
   'You chose to let riders join without an invite. The code still helps: it carries this server’s address and card, so the rider’s app trusts it at once.';

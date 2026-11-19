@@ -8,13 +8,44 @@
  * name a page differently from the section row or the page's own title line,
  * and a link always goes to the page it names. `routes.ts` §`moreMenuRoutes`
  * says which pages and in what order.
+ *
+ * **Except the Instance line once this device holds a connection** (#2859):
+ * it said "Sign in to an instance with this device" on a connected tablet, as
+ * Settings' card did before #2756. It now says what Settings says, in the
+ * wording the owner approved there: connected, the server's address and the
+ * rider's name as the instance answered them; holding a sign-in the instance
+ * did not answer as connected, that the server is not answering. With nothing
+ * connected, or before the port answers, it is the route's own line.
  */
 
 import type { JSX } from 'react';
 
-import { hrefFor, moreMenuRoutes } from '../shell/routes';
+import type { InstancePort, InstanceState } from '../instance/instance-port';
+import { hrefFor, moreMenuRoutes, type RouteDefinition } from '../shell/routes';
+import { useInstanceState } from './SettingsView';
 
-export function MoreView(): JSX.Element {
+/** The Instance line for a device that holds a connection, or `undefined` for the route's own. */
+export function instanceLine(state: InstanceState | undefined): string | undefined {
+  switch (state?.kind) {
+    case 'connected':
+      return `Connected to your server at ${state.origin} as ${state.displayName}.`;
+    case 'signed-out':
+    case 'unreadable':
+    case 'unreachable':
+      return `Your server at ${state.origin} is not answering right now.`;
+    default:
+      return undefined;
+  }
+}
+
+export function MoreView({
+  instance,
+}: {
+  readonly instance?: InstancePort | undefined;
+}): JSX.Element {
+  const state = useInstanceState(instance);
+  const summary = (route: RouteDefinition): string =>
+    (route.id === 'instance' ? instanceLine(state) : undefined) ?? route.summary;
   return (
     // #2067: a screen of sections, one page to a cell, in rows on a tablet.
     <ul className="oyl-more oyl-sections">
@@ -24,7 +55,7 @@ export function MoreView(): JSX.Element {
             {route.navLabel}
           </a>
           <p id={`oyl-more-${route.id}`} className="oyl-muted">
-            {route.summary}
+            {summary(route)}
           </p>
         </li>
       ))}

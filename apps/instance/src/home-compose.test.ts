@@ -39,7 +39,10 @@ describe('deploy/home/compose.yaml — registration (#775)', () => {
       new URL('../deploy/home/instance.env.example', import.meta.url),
       'utf8',
     );
-    expect(example).toMatch(/^OYL_INSTANCE_REGISTRATION=approval$/m);
+    // #2859: the template leaves it empty, as the guide says, and the setup page chooses.
+    expect(example).toMatch(/^OYL_INSTANCE_REGISTRATION=$/m);
+    const empty = readConfig({ commit: 'a'.repeat(40), registration: '' });
+    expect(empty.ok && empty.config.registration).toBe('approval');
     const configured = readConfig({ commit: 'a'.repeat(40), registration: 'approval' });
     expect(configured.ok && configured.config.registration).toBe('approval');
   });

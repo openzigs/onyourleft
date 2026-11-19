@@ -64,7 +64,8 @@ line standard output got, after that one redaction, so it never holds what stand
 A line is a problem when it is one of a closed list (`log.ts` §`isProblem`): a request answered
 `5xx`, an `unhandled` exception, `room-worker-died`, `room-write-failed`, `rooms-sweep-failed`,
 `history-index-failed`, `voice-failed`, `refusing`, an `analysis-job` that `failed`, the
-`analysis-model`, `picture-model` or `history-index` `off`, `instance-keys` not `ready`, a
+`analysis-model`, `picture-model` or `history-index` `off` for a reason other than `not-set` (each is
+optional, so one never set is not a problem, #2859), `instance-keys` not `ready`, a
 `hosted-model-key` that is `no-secret` or `unreadable`, `voice` off for a reason other than
 `not-set`, and a `room-socket-closed` for `room-lost`. Every other line, a `200` request included, is
 not kept. They are **gone when the instance restarts**, and are never written to the database or a
@@ -1499,12 +1500,16 @@ has the instance's name, how you signed in and through which listener, the secti
 - **Off unless you turn them on.** Set `OYL_INSTANCE_ADMIN_PAGES=on` in the `.env` beside
   `compose.yaml` and run `docker compose up -d instance`. Off, `/admin` answers as any address with
   no route. On, the pages also need `OYL_INSTANCE_ORIGIN`, `OYL_INSTANCE_SECRET_KEY` (as Operate
-  does) and `OYL_INSTANCE_OWNER_KEY`, and an account holding that key: without any of them the page
-  says it is unavailable and names the variable, never its value.
-- **The owner only.** A sign-in opens a session for the athlete whose device holds
-  `OYL_INSTANCE_OWNER_KEY`, and nobody else; there is no name to type. The deputy has no admin
-  sign-in. The instance asks again on every request: change `OYL_INSTANCE_OWNER_KEY` and every admin
-  session ends on its next request.
+  does) and an **owner**: the one the setup page's claim made, or `OYL_INSTANCE_OWNER_KEY` on the
+  expert path, which wins over the claim (ADR 0080 D-3), and an account holding that key. Without
+  any of them the page says it is unavailable and names what is missing, never a value. Since
+  [#2784](https://github.com/openzigs/onyourleft/issues/2784) a claimed owner needs no
+  `OYL_INSTANCE_OWNER_KEY` (corrected by #2859: this line used to say it did).
+- **The owner only.** A sign-in opens a session for the athlete whose device holds the owner key —
+  the claimed one, or `OYL_INSTANCE_OWNER_KEY` when it is set — and nobody else; there is no name to
+  type. The deputy has no admin sign-in. The instance asks again on every request: change the owner
+  (a reset and a new claim, or `OYL_INSTANCE_OWNER_KEY`) and every admin session ends on its next
+  request.
 - **`operator admin-code`.** On the server machine, run
   `docker compose exec instance node src/operator/cli.ts admin-code` (or
   `node src/operator/cli.ts admin-code` beside the data). It prints a one-time code, four groups of
