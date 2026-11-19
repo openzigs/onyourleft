@@ -13,6 +13,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { BOT_LANE_DWELL_MS, decideTactic } from '@onyourleft/domain';
 
 import type {
+  BotBody,
   BotPace,
   BotPacingStyle,
   BotStrategy,
@@ -68,6 +69,8 @@ import { DRAFT_REACH_METRES, fieldDraftFactors } from './draft';
 import lapRaceBotSource from './lap-race-bot.ts?raw';
 import {
   lapRaceBot,
+  lapRaceBotMassKilograms,
+  lapRaceBotPacerPlan,
   lapRaceDraftFactors,
   stepBotRace,
   type BotRaceStep,
@@ -247,6 +250,87 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
     });
     expect(bots[0]?.energy).toEqual({ wbalJoules: botWPrimeJoules('hard'), exhausted: false });
   });
+
+  it('rides a bot with a body at its own mass, and its W/kg, not its watts, decides a climb (#2759, ADR 0076 D-2)', () => {
+    const body = (massKilograms: number): BotPace => ({
+      style: 'climber',
+      ability: 1,
+      body: { massKilograms, strength: 1 },
+    });
+    expect(lapRaceBotPacerPlan(lapRaceBot('b', 'hard', STRATEGY, body(62))).massKilograms).toBe(62);
+    expect(lapRaceBotPacerPlan(lapRaceBot('b', 'hard', STRATEGY)).massKilograms).toBe(75);
+    expect(lapRaceBotMassKilograms(lapRaceBot('b', 'hard', STRATEGY, body(62)))).toBe(62);
+    expect(lapRaceBotMassKilograms(lapRaceBot('b', 'hard', STRATEGY))).toBe(BOT_MASS_KILOGRAMS);
+    vi.mocked(advance).mockClear();
+    const start = createItemRace({
+      course: raceCourse(FLAT.totalDistance, 3),
+      seed: 1,
+      itemsOn: false,
+      racerIds: ['light'],
+      startMs: 0,
+    });
+    stepBotRace(start, [lapRaceBot('light', 'hard', STRATEGY, body(62))], {
+      elapsed: seconds(1),
+      conditions: conditions(FLAT),
+      seed: 1,
+    });
+    expect(vi.mocked(advance).mock.calls[0]?.[2]?.totalMass).toBe(62);
+    // Two climbers of one strength, 60 and 90 kg: the heavy one has half as
+    // many watts again. Up the steep loop's climb, at one W/kg, they climb
+    // together; at one mass the heavy one's watts would ride away.
+    const run = race(
+      STEEP,
+      [
+        { id: 'light', tier: 'hard', pace: body(60) },
+        { id: 'heavy', tier: 'hard', pace: body(90) },
+      ],
+      1,
+      false,
+      40,
+    );
+    const last = run.races.at(-1);
+    const along = (id: string) =>
+      last?.racers.find((entry) => entry.racer.id === id)?.racer.effortDistance ?? Number.NaN;
+    expect(along('heavy') / along('light')).toBeGreaterThan(0.9);
+    expect(along('heavy') / along('light')).toBeLessThan(1.1);
+  });
+
+  it('reads the grade under it and ahead of it from the course’s line (#2800)', () => {
+    // 100 m from a line 250 m round the loop: on the descent at 350 m, where
+    // its odometer alone would put it on the climb at 100 m.
+    const line = 250;
+    const odometer = 100;
+    const start = createItemRace({
+      course: raceCourse(HILLY.totalDistance, 3),
+      seed: 1,
+      itemsOn: false,
+      racerIds: ['bot'],
+      startMs: 0,
+    });
+    const bot = lapRaceBot('bot', 'hard', STRATEGY);
+    const tickFrom = (course: LapRaceBotConditions) => {
+      vi.mocked(advance).mockClear();
+      vi.mocked(decideTactic).mockClear();
+      stepBotRace(
+        start,
+        [{ ...bot, ride: { speed: metresPerSecond(9), distance: metres(odometer) } }],
+        { elapsed: seconds(1), conditions: course, seed: 1 },
+      );
+      const [, step] = vi.mocked(advance).mock.calls[0] ?? [];
+      const [view] = vi.mocked(decideTactic).mock.calls[0] ?? [];
+      return { grade: step?.grade, ahead: view?.gradeAheadPercent };
+    };
+    const fromLine = tickFrom({ ...conditions(HILLY), lineMetres: line });
+    expect(fromLine.grade).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer + line)));
+    expect(fromLine.ahead).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer + line + 50)));
+    // Non-vacuity: the road from the route's start is another road here, and
+    // a course with no line is the route's start to the bit.
+    const fromStart = tickFrom(conditions(HILLY));
+    expect(fromStart.grade).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer)));
+    expect(fromStart.ahead).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer + 50)));
+    expect(fromLine.grade).toBeLessThan(0);
+    expect(fromStart.grade).toBeGreaterThan(0);
+  });
 });
 
 describe('the travel it hands the bot decision', () => {
@@ -315,15 +399,22 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
       | 'power'
     >();
     // #2455: a pace is a style key and a number, with nowhere for a recorded ride.
-    expectTypeOf<keyof BotPace>().toEqualTypeOf<'style' | 'ability'>();
+    // #2759: and, in a race with AI bots, a body of two numbers (ADR 0076 D-2).
+    expectTypeOf<keyof BotPace>().toEqualTypeOf<'style' | 'ability' | 'body'>();
     expectTypeOf<BotPace['ability']>().toEqualTypeOf<number>();
+    expectTypeOf<keyof BotBody>().toEqualTypeOf<'massKilograms' | 'strength'>();
+    expectTypeOf<BotBody['massKilograms']>().toEqualTypeOf<number>();
+    expectTypeOf<BotBody['strength']>().toEqualTypeOf<number>();
     expectTypeOf<keyof LapRaceBotConditions>().toEqualTypeOf<
       | 'profile'
       | 'airDensityKilogramsPerCubicMetre'
       | 'headwindMetresPerSecond'
       | 'coefficients'
       | 'integrationStepSeconds'
+      | 'lineMetres'
     >();
+    // #2800: the line is a distance along the route, a number: nowhere for a recorded ride.
+    expectTypeOf<LapRaceBotConditions['lineMetres']>().toEqualTypeOf<number | undefined>();
     // A recorded ride is not a bot, nor a step, nor a course.
     expectTypeOf<GhostTrack>().not.toMatchTypeOf<LapRaceBot>();
     expectTypeOf<GhostSamples>().not.toMatchTypeOf<BotRaceStep>();
@@ -371,9 +462,12 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
         'BOT_TACTIC_MOVE_SHARE',
         'BOT_TACTIC_WHEEL_LOST_METRES',
         'BOT_TACTIC_WHEEL_METRES',
+        // #2759: a body's mass, ridden through #92's plan at the tier's W/kg.
+        'BOT_TIER_WATTS_PER_KILOGRAM',
         'BotEnergy',
         'BotMemory',
         'BotPace',
+        'BotPacerPlan',
         'BotPlanTactic',
         'BotRacePlan',
         'BotStrategy',
@@ -385,6 +479,7 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
         'TACTIC_MEMORY_AT_START',
         'TacticMemory',
         'Watts',
+        'botPacerPlan',
         'botPlanStep',
         'botRacePlan',
         'botTierPlan',
@@ -1508,6 +1603,88 @@ describe('bots draft each other on effort distance (#2460, ADR 0067 D-3)', () =>
     const done = view({ aheadPower: 0, finished: 'ahead' });
     expect([done.rank, done.fieldSize, done.gapAheadMetres]).toEqual([1, 2, null]);
     expect(done.gapBehindMetres).toBe(30);
+  });
+
+  it('reads the rider and a wheel at each bot’s own mass where it has a body (#2759, ADR 0076 D-2.5)', () => {
+    const course = raceCourse(HILLY.totalDistance, 3);
+    const body = (massKilograms: number): BotPace => ({
+      style: 'climber',
+      ability: 1,
+      body: { massKilograms, strength: 1 },
+    });
+    const planned = (id: string, distance: number, pace?: BotPace): LapRaceBot => {
+      const bot = lapRaceBot(id, 'brisk', STRATEGY, pace);
+      const plan = botRacePlan('brisk', course, 4, bot.pace);
+      return {
+        ...bot,
+        plan,
+        // One power for every bot, so a wheel differs only by its mass.
+        power: watts(220),
+        ride: { speed: metresPerSecond(6), distance: metres(distance) },
+      };
+    };
+    /** The view the bot at 100 m decides on: the rider or a bot 2 m ahead of it, on the climb. */
+    const view = (opts: {
+      readonly own?: BotPace;
+      readonly ahead?: BotPace;
+      readonly riderAhead: boolean;
+      readonly riderPerKilogram?: number;
+    }) => {
+      const start = createItemRace({
+        course,
+        seed: 4,
+        itemsOn: false,
+        racerIds: ['bot', 'ahead', 'rider'],
+        startMs: 0,
+      });
+      const distances: Record<string, number> = {
+        bot: 100,
+        ahead: opts.riderAhead ? 60 : 102,
+        rider: opts.riderAhead ? 102 : 60,
+      };
+      const race: ItemRaceState = {
+        ...start,
+        racers: start.racers.map((entry) => ({
+          ...entry,
+          racer: { ...entry.racer, effortDistance: distances[entry.racer.id] as number },
+        })),
+      };
+      const decisions = vi.mocked(decideTactic);
+      decisions.mockClear();
+      stepBotRace(
+        race,
+        [planned('bot', 100, opts.own), planned('ahead', distances.ahead as number, opts.ahead)],
+        {
+          elapsed: seconds(1),
+          conditions: conditions(HILLY),
+          seed: 4,
+          riderWattsPerKilogram: opts.riderPerKilogram,
+          rider: { effortDistances: { rider: (distances.rider as number) + 6 } },
+        },
+      );
+      vi.mocked(advance).mockClear();
+      const [read] = decisions.mock.calls.find(([each]) => each.botIndex === 0) ?? [];
+      if (read === undefined) throw new Error('the bot decided nothing');
+      return read;
+    };
+    // The rider's pace, as the bot behind reads it: their W/kg at the bot's own 60 kg.
+    expect(
+      view({ own: body(60), riderAhead: true, riderPerKilogram: 3 }).wheelPaceWatts,
+    ).toBeCloseTo(180, 9);
+    expect(view({ riderAhead: true, riderPerKilogram: 3 }).wheelPaceWatts).toBeCloseTo(225, 9);
+    // A rider in a move is one over the bot's own CP per kilogram, at its own mass.
+    const cp = planned('bot', 0, body(60)).plan?.capacity.cpWatts as number;
+    const needed = (cp * (1 + BOT_TACTIC_MOVE_SHARE)) / 60;
+    expect(
+      view({ own: body(60), riderAhead: true, riderPerKilogram: needed * 1.02 }).aheadInMove,
+    ).toBe(true);
+    expect(
+      view({ own: body(60), riderAhead: true, riderPerKilogram: needed * 0.98 }).aheadInMove,
+    ).toBe(false);
+    // A heavy wheel ahead on the climb is held at its own mass, not at 75 kg.
+    const heavy = view({ ahead: body(95), riderAhead: false }).holdWatts as number;
+    const standard = view({ ahead: body(75), riderAhead: false }).holdWatts as number;
+    expect(Math.abs(heavy - standard)).toBeGreaterThan(1);
   });
 
   it('hands back the rider’s k from that one call, beside the bots’ (#2461), and none with the draft off', () => {

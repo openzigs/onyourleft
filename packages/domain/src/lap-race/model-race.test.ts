@@ -122,9 +122,35 @@ describe('a logged decision in force (D-4.2)', () => {
     ];
     expect(modelMovesInForce(log, 7_999)).toEqual([{ bot: 0, move: 'attack' }]);
     expect(modelMovesInForce(log, 8_000)).toEqual([{ bot: 1, move: 'chase' }]);
-    expect(modelMovesInForce(log, 12_999)).toEqual([{ bot: 1, move: 'chase' }]);
-    expect(modelMovesInForce(log, 13_000)).toBeUndefined();
+    // #2759, ADR 0076 D-11: held 10 s from the window it applied in.
+    expect(modelMovesInForce(log, 17_999)).toEqual([{ bot: 1, move: 'chase' }]);
+    expect(modelMovesInForce(log, 18_000)).toBeUndefined();
     expect(modelMovesInForce([], 8_000)).toBeUndefined();
+  });
+
+  it('holds a decision 10 s, long enough to meet the next one a slow call brings (#2759, ADR 0076 D-11)', () => {
+    expect(MODEL_TACTICS_HOLD_MS).toBe(10_000);
+    // Asked at 4 s and answered at 9.6 s (a 5.6 s round trip): in force from
+    // 10 s. The next ask goes out at 12 s and, as slow, lands at 17.6 s and
+    // applies from 18 s: the first still holds until then, so no window
+    // between the two rides seeded tactics.
+    const first: ModelTacticsLogEntry = {
+      askedAtMs: 4_000,
+      arrivedAtMs: 9_600,
+      outcome: 'decision',
+      moves: [{ bot: 0, move: 'flyer' }],
+    };
+    expect(modelTacticsNextAskAtMs(first.arrivedAtMs)).toBe(12_000);
+    expect(modelMovesInForce([first], 17_999)).toEqual([{ bot: 0, move: 'flyer' }]);
+    const second: ModelTacticsLogEntry = {
+      askedAtMs: 12_000,
+      arrivedAtMs: 17_600,
+      outcome: 'decision',
+      moves: [{ bot: 0, move: 'sit-in' }],
+    };
+    expect(modelMovesInForce([first, second], 18_000)).toEqual([{ bot: 0, move: 'sit-in' }]);
+    // With no next decision it lapses 10 s after it applied: seeded tactics again.
+    expect(modelMovesInForce([first], 20_000)).toBeUndefined();
   });
 
   it('asks again at the next 4 s mark after a call settles', () => {

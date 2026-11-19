@@ -24,6 +24,15 @@
  *
  * `apps/instance` is imported by a computed PATH (under jsdom a URL resolved
  * here is `http:`, which the loader refuses — `operate-instance-testing.ts`).
+ *
+ * ⚠️ **No case ends with an answer still on its way to the screen** (#2851).
+ * A case is done once it has read what it came for, which is sooner than the
+ * screen is: `InstanceView` goes on to ask for the devices, the notices and
+ * the standings, each real cryptography against the real instance. Left
+ * running, one of those answered after this file's jsdom was torn down, its
+ * `setState` threw `window is not defined`, and the job failed with every test
+ * passed. So the screen's ports are {@link watched}, and {@link leave} takes
+ * the screen down and waits for the answers themselves — never for a time.
  */
 
 import { dirname, join } from 'node:path';
@@ -99,9 +108,43 @@ beforeAll(async () => {
   testing = (await import(/* @vite-ignore */ INSTANCE_TESTING)) as IdentityTesting;
 });
 
-afterEach(async () => {
+/** Every answer a port has promised a screen in this case — #2851. */
+const promised: Promise<unknown>[] = [];
+
+/** `port` as the screen is given it: the same port, with each promise it hands back kept in {@link promised}. */
+function watched<Port extends object>(port: Port): Port {
+  return new Proxy(port, {
+    get(target, name, receiver): unknown {
+      const member: unknown = Reflect.get(target, name, receiver);
+      if (typeof member !== 'function') return member;
+      return (...given: unknown[]): unknown => {
+        const answer: unknown = Reflect.apply(member, target, given);
+        if (answer instanceof Promise) promised.push(answer);
+        return answer;
+      };
+    },
+  });
+}
+
+/**
+ * Take the screen down, and wait for every answer it was still promised
+ * (#2851). ⚠️ The instance and the stores are closed only after this, and the
+ * file's jsdom is torn down only after that.
+ */
+async function leave(): Promise<void> {
   mounted?.unmount();
   mounted = undefined;
+  // What an answer started is promised by the time the wait for it returns
+  // (it was awaited first), so this is done when a pass finds nothing new.
+  for (let waitedFor = 0; waitedFor < promised.length;) {
+    waitedFor = promised.length;
+    await Promise.allSettled(promised);
+  }
+  promised.length = 0;
+}
+
+afterEach(async () => {
+  await leave();
   for (const world of worlds.splice(0)) await world.close();
   for (const harness of harnesses.splice(0)) await harness.destroy();
 });
@@ -142,7 +185,7 @@ async function instance(options: Parameters<IdentityTesting['startIdentityInstan
 /** The Connect screen on `on`, read once. */
 async function screen(on: ReturnType<typeof device>): Promise<void> {
   mounted = await mount(
-    <InstanceView port={on.port} operate={createOperatePort(on.dependencies)} />,
+    <InstanceView port={watched(on.port)} operate={watched(createOperatePort(on.dependencies))} />,
   );
   await until(() => text().includes(CONNECT_FLOW_TEXT.pasteLabel));
 }
@@ -219,7 +262,7 @@ describe('the Connect flow against a real instance — #2828', () => {
     expect(mounted?.container.querySelector('#oyl-instance-recovery')).not.toBeNull();
 
     // The same invite again, on a new device, is refused under Connect.
-    mounted?.unmount();
+    await leave();
     const second = device(send, clock);
     await screen(second);
     await pasteCode(minted.invite);

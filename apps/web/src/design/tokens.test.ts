@@ -31,6 +31,7 @@ import {
   ELEVATION_SURFACES,
   FONT_SIZE_TOKENS,
   HEART_RATE_BAND_TOKENS,
+  HUD_CONTROLS_FADE_MS,
   ILLUSTRATION_DEPTH,
   ILLUSTRATION_TOKENS,
   MAXIMUM_ELEVATION_STEP,
@@ -284,6 +285,20 @@ describe('the motion tokens (#936)', () => {
       expect(script.duration * 1000).toBeCloseTo(ms, 9);
       expect(script.ease).toEqual(MOTION_EASING.standard);
     }
+  });
+
+  it('declares the ride controls’ fade for CSS as the milliseconds it names (#2600)', () => {
+    expect(MOTION_TOKENS.hudFadeOut).toBe(`${String(HUD_CONTROLS_FADE_MS.out)}ms`);
+    expect(MOTION_TOKENS.hudFadeIn).toBe(`${String(HUD_CONTROLS_FADE_MS.in)}ms`);
+  });
+
+  it('fades the ride controls out slower than the menus move, and back in quicker than out (#2600)', () => {
+    // The owner's report of 2026-11-17: over `medium` the fade read as a pop.
+    expect(HUD_CONTROLS_FADE_MS.out).toBeGreaterThan(MOTION_DURATION_MS.medium);
+    expect(HUD_CONTROLS_FADE_MS.in).toBeLessThan(HUD_CONTROLS_FADE_MS.out);
+    // And neither is a script's: Motion never takes the ride's fade.
+    expect(Object.keys(MOTION_FOR_SCRIPT)).not.toContain('hudFadeOut');
+    expect(Object.keys(MOTION_DURATION_MS)).not.toContain('hudFadeOut');
   });
 
   it('keeps short under medium, and short at a press’s feedback (120 ms or less)', () => {

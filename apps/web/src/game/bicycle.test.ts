@@ -487,6 +487,44 @@ describe('the rider sits on the bicycle — #369', () => {
     expect(top - tops.y).toBeGreaterThan(0.06);
   });
 
+  it('joins the top tube and the seat stays to the seat tube under the saddle, leaving a seat post — the modeller’s pass of 2026-11-18', () => {
+    // Both met the seat tube AT the saddle: a top tube that climbed to it and
+    // a rear triangle as tall as the rider's hips, the frame of a bicycle two
+    // sizes too big. `from` is the end a tube is drawn from.
+    const named = (name: string): RiderPart => {
+      const found = RIDER_BODY_PARTS.find((each) => each.name === name);
+      if (found === undefined) throw new Error(`no ${name}`);
+      return found;
+    };
+    const ends = (tube: RiderPart): { from: [number, number]; to: [number, number] } => {
+      const half = (tube.solid as { readonly length: number }).length / 2;
+      const [dy, dz] = [half * Math.cos(tube.pitch), half * Math.sin(tube.pitch)];
+      return { from: [tube.y - dy, tube.z - dz], to: [tube.y + dy, tube.z + dz] };
+    };
+    const saddle = named('saddle');
+    const under = saddle.y - (saddle.solid as { readonly height: number }).height / 2;
+    const seatTube = ends(named('seat tube'));
+    const topTube = ends(named('top tube'));
+    // A hand's breadth of post, at least, shows between the two.
+    expect(under - topTube.from[0]).toBeGreaterThan(0.1);
+    // The top tube is level or falls toward the saddle; it never climbs to it.
+    expect(topTube.from[0]).toBeLessThanOrEqual(topTube.to[0]);
+    // And it leaves the seat tube's own line — no gap, no tube in mid-air.
+    const [by, bz] = seatTube.from;
+    const [sy, sz] = seatTube.to;
+    const offLine = (y: number, z: number): number =>
+      Math.abs((sz - bz) * (y - by) - (sy - by) * (z - bz)) / Math.hypot(sy - by, sz - bz);
+    expect(offLine(...topTube.from)).toBeLessThan(1e-9);
+    expect(topTube.from[0]).toBeGreaterThan(by);
+    // The seat stays leave the same cluster, either side, down to the rear hub.
+    for (const side of [-1, 1]) {
+      const stay = ends(named(`seat stay ${String(side)}`));
+      expect(offLine(...stay.from)).toBeLessThan(0.02);
+      expect(Math.abs(stay.from[0] - topTube.from[0])).toBeLessThan(0.03);
+      expect(stay.to[0]).toBeLessThan(stay.from[0]);
+    }
+  });
+
   it('gets lower with every position the drag table charges less air for', () => {
     // `rider.ts` orders the three most-air-pushed first and charges 0.42, 0.36
     // and 0.31 m² for them. A bar whose drops were ABOVE its tops would make

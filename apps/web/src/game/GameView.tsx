@@ -72,7 +72,7 @@ import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
-import { ModelPacer, modelPacerInput } from './model-pacer';
+import { ModelPacer, modelPacerInput, modelPacerTerrain } from './model-pacer';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
   ARRIVING_REALISTIC_QUALITY,
@@ -3665,6 +3665,8 @@ function GameScreen({
                 thresholdHeartRate: ownThresholdsRef.current.heartRate,
               },
             }),
+          // ADR 0082: where the pacer is on the road, for the terrain rule.
+          terrain: () => modelPacerTerrain(simulation.state, chosen.profile),
           direct: (direction, from) => {
             simulation.directPacer(direction, from);
           },

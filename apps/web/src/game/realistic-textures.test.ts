@@ -40,8 +40,10 @@ import { KIT_COLOURS } from '@onyourleft/store';
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
 
 import {
+  emptyRiderJoints,
   handPosition,
   MAXIMUM_STEER_RADIANS,
+  riderJoints,
   steeredPoint,
   KIT_PALETTE,
   PACER_KIT,
@@ -774,7 +776,6 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
     // A vector of the renderer's own three, without importing three here.
     type Point = Belt['group']['position'];
     const point = (): Point => riders.group.position.clone();
-    riders.addBody('female', female);
     // The two bodies in two slots at the same place, the cranks level.
     const at = (body: 'female' | 'male', slot: number, bone: string): Point => {
       const skinned = riders.bodiesOf(body)[slot];
@@ -786,7 +787,22 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
       riders.group.updateMatrixWorld(true);
       return found.getWorldPosition(point());
     };
+    // Where his ankles are while his is the only body: the modeller's pass of
+    // 2026-11-18 puts the BALL of each foot on the pedal, measured off the
+    // body's own rest pose, so an ankle is where its own foot's ball puts it.
+    const ankles = (body: 'female' | 'male', slot: number): Point[] =>
+      ['foot.L', 'foot.R'].map((bone) => at(body, slot, bone));
+    riders.place([marker('bot', 0, 'male'), marker('bot', 0, 'male')]);
+    const hisAlone = ankles('male', 1);
+    riders.addBody('female', female);
     riders.place([marker('rider', 0, 'female'), marker('bot', 0, 'male')]);
+
+    // Her body's feet are hers and his are still his: with one measurement
+    // for both bodies his ankles move 6 mm when her body is added. Half a
+    // millimetre is the bound; they do not move at all.
+    for (const [index, ankle] of ankles('male', 1).entries()) {
+      expect(ankle.distanceTo(hisAlone[index] as Point), `his ankle ${index}`).toBeLessThan(0.0005);
+    }
 
     // She is a smaller body at rest (1.59 m to his 1.67 m): posed with HIS
     // scale her feet would hang short of the pedals by centimetres.
@@ -1417,9 +1433,12 @@ describe('the realistic rider moves like a rider — #625', () => {
     for (const name of ['root', 'pelvisL', 'pelvisR', 'spine05', 'neck01', 'head']) {
       expect(turned(bone(a, name), bone(b, name)), name).toBeLessThan(1e-4);
     }
-    // No ankling: each foot keeps its rest turn against its shin.
+    // No ankling: each foot lies as it does at every crank angle — on the
+    // bicycle, not against its shin, since the modeller's pass of 2026-11-18
+    // (the shin slopes one way at the front of the stroke and another at the
+    // back; the foot on the pedal does not follow it).
     for (const name of ['footL', 'footR']) {
-      expect(bone(a, name).local, name).toEqual(bone(b, name).local);
+      expect(turned(bone(a, name), bone(b, name)), name).toBeLessThan(1e-4);
     }
     // …where pedalling turns every one of them.
     const c = posed(riders, HALF_PI, 1, 0);
@@ -1431,7 +1450,7 @@ describe('the realistic rider moves like a rider — #625', () => {
     // roll only because the two heads are one point: the body's middle.
     expect(distance(at(c, 'pelvisL'), at(c, 'pelvisR'))).toBeLessThan(0.01);
     for (const name of ['footL', 'footR']) {
-      expect(bone(c, name).local, name).not.toEqual(bone(d, name).local);
+      expect(turned(bone(c, name), bone(d, name)), name).toBeGreaterThan(2);
     }
   }, 120_000);
 
@@ -1462,8 +1481,14 @@ describe('the realistic rider moves like a rider — #625', () => {
             distance(stillHands[index] ?? [], handOf(riders, name)),
           );
         }
-        for (const name of ['footL', 'footR']) {
-          furthestFoot = Math.max(furthestFoot, distance(at(still, name), at(moving, name)));
+        // ⚠️ The ball of the drawn foot, not the ankle bone, since the
+        // modeller's pass of 2026-11-18: the ball is on the pedal, so the
+        // ankle above it moves with the ankling while the ball stays.
+        posed(riders, crank, 0, 0);
+        const stillFeet = riders.footBalls;
+        posed(riders, crank, 1, breath);
+        for (const [index, ball] of riders.footBalls.entries()) {
+          furthestFoot = Math.max(furthestFoot, distance(stillFeet[index] ?? [], ball));
         }
         headTurn = Math.max(headTurn, turned(bone(still, 'head'), bone(moving, 'head')));
         backTurn = Math.max(backTurn, turned(bone(still, 'spine05'), bone(moving, 'spine05')));
@@ -1480,6 +1505,63 @@ describe('the realistic rider moves like a rider — #625', () => {
     expect(headTurn).toBeLessThan(0.5);
     expect(backTurn).toBeGreaterThan(2);
   }, 120_000);
+
+  describe('the feet on the pedals — the modeller’s pass of 2026-11-18', () => {
+    /**
+     * The world loaded once, in a hook, as the crash clip's cases below have it
+     * (owner ruling #1688: no per-case timeout — a slow case is made cheaper).
+     * The load is nearly all of what a case of this file costs; what is left
+     * to the case is thirty-two poses of one rider.
+     */
+    let renderer: Renderer;
+    beforeAll(async () => {
+      const undoing = served();
+      try {
+        renderer = await loadedOn(TABLET);
+      } finally {
+        for (const each of undoing.reverse()) each();
+      }
+    });
+
+    it('puts the ball of each foot on its pedal all round the stroke, the shoe on top of it — the modeller’s pass of 2026-11-18', () => {
+      const riders = renderer.realisticRidersOfLoadedWorld();
+      if (riders === undefined) throw new Error('no world');
+      const joints = emptyRiderJoints();
+      let furthest = 0;
+      let lowestAnkle = Number.POSITIVE_INFINITY;
+      let leastAhead = Number.POSITIVE_INFINITY;
+      for (let step = 0; step < 16; step += 1) {
+        const crank = (step * Math.PI) / 8;
+        // Still, and pedalling hard with the ankles working (#625).
+        for (const pedalling of [0, 1]) {
+          const pose = posed(riders, crank, pedalling, 0);
+          riderJoints(crank, joints, 0);
+          for (const [index, ball] of riders.footBalls.entries()) {
+            const pedal = joints.foot[index as 0 | 1];
+            // The pedal in the bicycle's frame, the ball in the world's: the
+            // rider is at the origin facing +Z, and a still bicycle is upright.
+            if (pedalling === 0) {
+              furthest = Math.max(furthest, distance(ball, [pedal.x, pedal.y, pedal.z]));
+            }
+            const ankle = at(pose, index === 0 ? 'footL' : 'footR');
+            lowestAnkle = Math.min(lowestAnkle, (ankle[1] ?? 0) - ball[1]);
+            leastAhead = Math.min(leastAhead, ball[2] - (ankle[2] ?? 0));
+          }
+        }
+      }
+      console.log(
+        `modeller's pass: the ball of the foot at most ${(furthest * 1000).toFixed(2)} mm off its pedal; ` +
+          `the ankle at least ${(lowestAnkle * 100).toFixed(1)} cm over the ball and ` +
+          `${(leastAhead * 100).toFixed(1)} cm behind it`,
+      );
+      // On the pedal: the second solve leaves it within a few millimetres.
+      expect(furthest).toBeLessThan(0.004);
+      // And the shoe is ON the pedal, never hung under it: the ankle is over
+      // the ball and behind it at every crank angle.
+      expect(lowestAnkle).toBeGreaterThan(0.03);
+      expect(leastAhead).toBeGreaterThan(0.03);
+    });
+  });
 
   it('is posed from the ride’s clock, never the wall’s — the same ride time at two wall times is the same body', async () => {
     const renderer = await loadedOn(TABLET);
@@ -1567,11 +1649,14 @@ describe('the realistic rider moves like a rider — #625', () => {
     let forward = Number.POSITIVE_INFINITY;
     for (const crank of [0, HALF_PI, Math.PI, 3 * HALF_PI]) {
       const seated = ridden(riders, ORDINARY, crank, 0);
+      // The ball of each foot, which is what is on the pedal — the modeller's
+      // pass of 2026-11-18; the ankle above it is wherever the leg puts it.
+      const seatedFeet = riders.footBalls;
       const standing = ridden(riders, CLIMBING, crank, 0);
       // The bicycle faces +Z: forward of the saddle is +Z.
       forward = Math.min(forward, (hips(standing)[2] ?? 0) - (hips(seated)[2] ?? 0));
-      for (const name of ['footL', 'footR']) {
-        furthestFoot = Math.max(furthestFoot, distance(at(seated, name), at(standing, name)));
+      for (const [index, ball] of riders.footBalls.entries()) {
+        furthestFoot = Math.max(furthestFoot, distance(seatedFeet[index] ?? [], ball));
       }
     }
     console.log(

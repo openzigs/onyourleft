@@ -433,3 +433,11 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
   choice records it (ADR 0072 D-1.3). D-2 stands for the rider's own ghost, a cross-rider ghost, a
   room and every announcement and HUD text but the AI pacer's own screened line. Everything else in
   this ADR is unchanged. This entry only points there. (#2712)
+
+- **2026-11-17** — **Once [ADR 0076](0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-1.3 is superseded by it in part.** A model
+  race deals its own field from its seed: each bot's racing style brings a pace whose legs fit it
+  and a body, a mass and a strength around the tier, with the field's mean CP in W/kg held to the
+  tier. So a model race no longer differs from a seeded one only in its moves; with no decision in
+  force it rides seeded tactics on that field. **D-1.4 is unchanged**: a rider with no instance or
+  no consent rides the seeded race, to the bit. Read ADR 0076 for the rule. This entry only points
+  there; nothing else in this ADR changes. (#2759)

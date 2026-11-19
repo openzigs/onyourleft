@@ -111,9 +111,11 @@ export {
 // 0067 D-2), a capacity fixed at the start that no rank or gap changes.
 // Each bot's own pace (#2455): an ability at or under its tier and a pacing
 // style read off the course, dealt from the race's seed before the start.
-export type { BotPace, BotPacingStyle } from './pace';
+export type { BotBody, BotPace, BotPacingStyle } from './pace';
 export {
   BOT_ABILITY_SPREAD,
+  BOT_BODY_MASS_RANGE_KILOGRAMS,
+  BOT_BODY_STRENGTH_RANGE,
   BOT_EVEN_PACE,
   BOT_PACING_STYLES,
   BOT_STYLE_EASING,
@@ -169,6 +171,7 @@ export {
   BOT_TACTIC_UTILITY,
   BOT_EFFORTS,
   BOT_EFFORT_CP_SHARE,
+  BOT_HARD_TACTICS,
   BOT_TACTIC_WBAL_FLOOR,
   BOT_TACTIC_WHEEL_CLOSING_GAIN,
   BOT_TACTIC_WHEEL_EASE,
@@ -192,6 +195,7 @@ export {
 export type {
   ModelTacticsAnswer,
   ModelTacticsBotView,
+  ModelTacticsCourse,
   ModelTacticsInput,
   ModelTacticsInputProblem,
   ModelTacticsInputRead,
@@ -200,8 +204,10 @@ export type {
   ModelTacticsMove,
   ModelTacticsRiderView,
   ModelTacticsTarget,
+  ModelStrengthWord,
 } from './model-tactics';
 export {
+  MODEL_STRENGTH_WORDS,
   MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
   MODEL_TACTICS_INPUT_MOST_CHARACTERS,
   MODEL_RACING_STYLES,
@@ -212,6 +218,21 @@ export {
   readModelTacticsAnswer,
   readModelTacticsInput,
 } from './model-tactics';
+
+// The field of a race with AI bots (#2759, ADR 0076): each racing style its
+// pace and body, a spread of strength whose middle is the tier, and how each
+// bot compares with the field in plain words.
+export type { ModelBotStrengths, ModelStyleBody } from './model-field';
+export {
+  MODEL_FIELD_MASS_JITTER_KILOGRAMS,
+  MODEL_FIELD_STRENGTH_SPREAD,
+  MODEL_STRENGTH_MARGIN,
+  MODEL_STYLE_BODY,
+  MODEL_STYLE_PACE,
+  modelFieldPaces,
+  modelFieldStrengths,
+  modelRacingStyleOf,
+} from './model-field';
 
 export type { BotPlanInput, BotPlanStep, BotPlanTactic, BotRacePlan } from './plan';
 export {
@@ -229,6 +250,7 @@ export {
 export type { BotCapacity, BotEnergy } from './wbal';
 export {
   BOT_CEILING_WATTS,
+  botCeilingWatts,
   BOT_WBAL_REENTRY_FRACTION,
   BOT_WBAL_TICK_TOLERANCE,
   fullBotEnergy,

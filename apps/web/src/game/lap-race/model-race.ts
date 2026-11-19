@@ -18,9 +18,10 @@
  * Ticks run at the race's rate whatever the model does. An ask goes out only
  * between frames, and only one at a time; its answer is logged on the first
  * frame after it settles, at that frame's race time, and applies from the next
- * tactics window. An answer more than `MODEL_TACTICS_LATE_MS` after its ask,
- * of race time, is logged late and never applied; a call still out that long
- * is given up as late, and the next ask goes out. **An invalid answer, a
+ * tactics window. An answer more than `MODEL_TACTICS_LATE_MS` (8 s since
+ * #2759, ADR 0076 D-11) after its ask, of race time, is logged late and never
+ * applied; a call still out that long is given up as late, and the next ask
+ * goes out. **An invalid answer, a
  * refusal, a failure and an instance that cannot be reached all apply
  * nothing**, so the bots ride their seeded choice — and a race that loses its
  * instance mid-race finishes on seeded tactics. Nothing retries in a loop, and
@@ -30,17 +31,24 @@
  *
  * {@link modelTacticsInputOf}: `@onyourleft/domain` §`ModelTacticsInput`, read
  * off the race on effort distance — seats, each bot's racing style dealt from
- * the race's seed (`modelRacingStyles`) and its legs (its archetype), ranks,
+ * the race's seed (`modelRacingStyles`), which since #2759 decides its legs
+ * (so they are not sent: ADR 0076 D-11), and how it compares with the field on the flat,
+ * a climb, a sprint and in punch (`modelFieldStrengths`, ADR 0076 D-4), ranks,
  * who is ahead and its move, gaps, W′ shares and whether a bot is blown,
  * drafting, moves and the seconds held, the lull, laps and metres to the line
  * **as each bot misreads them** (`botTacticsMisjudgement`, the reading seeded
  * `decideTactic` launches on: ADR 0073 D-3.5), launch distance, grade ahead,
  * each bot's gap to the rider, and the rider's own state: rank, W/kg, who is
  * ahead of them, their gaps and whether they draft (D-5.2). There is no attack
- * gate (D-5.3). **No coordinate, no place name, no rider name, no date and no
+ * gate (D-5.3). **The course ahead (#2794)**, once for the race from the
+ * leading bot: the next climb and descent before the line, the lap's metres
+ * and climbing left, and the grade of the last 500 m (§`lapRaceCourseAhead`).
+ * **No coordinate, no place name, no rider name, no date and no
  * identifier**: every field is a number, a boolean or a word from a closed
  * list, and the device checks it with the instance's own reader before it is
- * sent. **The rider's state (#2715):** where the racer directly ahead of a bot
+ * sent. **Rounded for latency** (#2759, ADR 0076 D-11): every gap to whole
+ * metres, the grade to a whole percent and a W′ share to a tenth, because
+ * each digit is a token the model reads and none of them moves a decision. **The rider's state (#2715):** where the racer directly ahead of a bot
  * is the rider, that bot's `aheadMove` is the rider's move as the seeded race
  * reads it — `attack` while the rider pushes over the bot's critical power by
  * `BOT_TACTIC_MOVE_SHARE` (`physics` §`stepBotRace`'s `aheadInMove`), `sit-in`
@@ -58,11 +66,14 @@
 
 import {
   applyModelMoves,
-  BOT_MASS_KILOGRAMS,
   BOT_TACTIC_MOVE_SHARE,
   BOT_TACTICS_WINDOW_MS,
   botLaunchMetres,
   botTacticsMisjudgement,
+  COURSE_ROUNDING_METRES,
+  courseAverageGrade,
+  courseClimbing,
+  courseHillsAhead,
   distanceOnRoute,
   gradeAt,
   LAP_RACE_BOT_CODE_VERSION,
@@ -70,23 +81,65 @@ import {
   MODEL_TACTICS_LATE_MS,
   MODEL_TACTICS_LOG_REASONS,
   modelMovesInForce,
-  modelRacingStyles,
+  modelFieldStrengths,
+  modelRacingStyleOf,
   modelTacticsNextAskAtMs,
   readModelTacticsAnswer,
   readModelTacticsInput,
+  type BotRacePlan,
   type ItemRaceState,
   type LapRaceModelRecord,
+  type ModelBotStrengths,
   type ModelTacticsBotView,
+  type ModelTacticsCourse,
   type ModelTacticsInput,
   type ModelTacticsLogEntry,
   type ModelTacticsLogReason,
-  type ModelRacingStyle,
-  type RouteProfile,
 } from '@onyourleft/domain';
-import { lapRaceDraftFactors, type LapRaceBot } from '@onyourleft/physics';
+import {
+  lapRaceBotMassKilograms,
+  lapRaceDraftFactors,
+  type LapRaceBot,
+  type LapRaceBotConditions,
+} from '@onyourleft/physics';
 
 /** How far up the road a bot's grade ahead is read, metres: the bots' own look-ahead (`physics` §`BOT_GRADE_AHEAD_METRES`). */
 const GRADE_AHEAD_METRES = 50;
+
+/** The road the bots ride, as the model is shown it: the route and the line (#2800). */
+export type BotRoad = Pick<LapRaceBotConditions, 'profile' | 'lineMetres'>;
+
+/** The stretch before the line whose grade is the finish's, metres: **500** (#2794). */
+const FINISH_STRETCH_METRES = 500;
+
+/**
+ * The course ahead of `leader` (#2794): its next climb and descent before the
+ * line, what is left of its lap and the climbing in it, and the grade of the
+ * last {@link FINISH_STRETCH_METRES} to the line. Read on the road the bots
+ * ride, `bot.ride.distance` from the race's line on the route (#2800), as their
+ * grade ahead is, so the summary is the road they will feel; the lap and the
+ * line are on effort distance, as every other distance the model is shown.
+ */
+function lapRaceCourseAhead(
+  race: ItemRaceState,
+  leader: LapRaceBot,
+  effortDistance: number,
+  road: BotRoad,
+): ModelTacticsCourse {
+  const { profile } = road;
+  const { laps, lapLengthMetres } = race.course;
+  const from = (leader.ride.distance as number) + (road.lineMetres ?? 0);
+  const toLine = Math.max(0, laps * lapLengthMetres - effortDistance);
+  const intoLap = effortDistance - Math.floor(effortDistance / lapLengthMetres) * lapLengthMetres;
+  const lapLeft = Math.min(toLine, lapLengthMetres - intoLap);
+  const finish = Math.min(FINISH_STRETCH_METRES, lapLengthMetres);
+  return {
+    ...courseHillsAhead(profile, from, toLine),
+    lapLeftM: Math.round(lapLeft / COURSE_ROUNDING_METRES) * COURSE_ROUNDING_METRES,
+    lapClimbM: courseClimbing(profile, from, lapLeft),
+    finishPct: courseAverageGrade(profile, from + toLine - finish, from + toLine),
+  };
+}
 
 /**
  * The rider's own input at every race tick, appended in place, one entry a
@@ -160,22 +213,31 @@ const round = (value: number, places: number): number => {
   return Math.round(value * scale) / scale;
 };
 
+/** A gap that cannot be below nought, in whole metres (#2759, ADR 0076 D-11). */
+const wholeMetres = (metres: number): number => round(Math.max(0, metres), 0);
+
 /**
  * The race at `race.atMs` as the model is shown it (D-3.4), or `undefined`
  * when no bot is still racing. See the file comment.
  *
- * @param seed - the race's own seed: the styles' deal and each bot's misread of the line.
+ * @param road - the road the bots ride (`ride-race.ts` §`LapRaceRide.conditions`):
+ * the route, and the line their odometers read nought at (#2800), so the grade
+ * ahead and the course ahead the model is shown are the road each bot reads,
+ * where it is drawn.
+ * @param seed - the race's own seed: each bot's misread of the line.
  * @param riderWattsPerKilogram - the rider's power as the bots read it, or `null`.
  */
 export function modelTacticsInputOf(
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
-  profile: RouteProfile,
+  road: BotRoad,
   seed: number,
   draft: boolean,
   riderWattsPerKilogram: number | null,
   quietSinceMs: number,
 ): ModelTacticsInput | undefined {
+  const { profile } = road;
+  const line = road.lineMetres ?? 0;
   const racing = race.racers
     .filter((entry) => entry.racer.finishedAtMs === null)
     .map((entry) => entry.racer)
@@ -185,7 +247,14 @@ export function modelTacticsInputOf(
   const rider = race.racers.find((entry) => !seats.has(entry.racer.id))?.racer;
   const factors = draft ? lapRaceDraftFactors(race) : undefined;
   const { laps, lapLengthMetres } = race.course;
-  const styles = modelRacingStyles(seed, bots.length);
+  // #2759, ADR 0076 D-4: how each bot compares with the whole field, every
+  // bot that has its capacity, racing or finished, so the words hold all race.
+  const planned = bots.flatMap((bot) => (bot.plan === undefined ? [] : [bot]));
+  const strengths = new Map(
+    modelFieldStrengths(planned.map((bot) => (bot.plan as BotRacePlan).capacity)).map(
+      (words, at) => [(planned[at] as LapRaceBot).id, words],
+    ),
+  );
   const views: ModelTacticsBotView[] = [];
   bots.forEach((bot, seat) => {
     const at = rank.get(bot.id);
@@ -197,15 +266,17 @@ export function modelTacticsInputOf(
     const riderMove =
       riderWattsPerKilogram === null
         ? null
-        : riderWattsPerKilogram * BOT_MASS_KILOGRAMS >
+        : riderWattsPerKilogram * lapRaceBotMassKilograms(bot) >
             bot.plan.capacity.cpWatts * (1 + BOT_TACTIC_MOVE_SHARE)
           ? 'attack'
           : 'sit-in';
     const misread = botTacticsMisjudgement(seed, seat, bot.strategy.skill, race.atMs).lineMetres;
     views.push({
       bot: seat,
-      style: styles[seat] as ModelRacingStyle,
-      legs: bot.plan.archetype,
+      // #2759, ADR 0076 D-3: the style its pace was dealt for, so style, legs
+      // and body never drift apart.
+      style: modelRacingStyleOf(bot.pace.style),
+      ...(strengths.get(bot.id) as ModelBotStrengths),
       rank: at + 1,
       ahead: ahead === undefined ? null : (aheadSeat ?? 'rider'),
       aheadMove:
@@ -215,16 +286,12 @@ export function modelTacticsInputOf(
             ? riderMove
             : (bots[aheadSeat] as LapRaceBot).tactics.tactic,
       gapAheadM:
-        ahead === undefined
-          ? null
-          : round(Math.max(0, ahead.effortDistance - own.effortDistance), 1),
+        ahead === undefined ? null : wholeMetres(ahead.effortDistance - own.effortDistance),
       gapBehindM:
-        behind === undefined
-          ? null
-          : round(Math.max(0, own.effortDistance - behind.effortDistance), 1),
+        behind === undefined ? null : wholeMetres(own.effortDistance - behind.effortDistance),
       wbal: round(
         Math.min(1, Math.max(0, bot.energy.wbalJoules / bot.plan.capacity.wPrimeJoules)),
-        2,
+        1,
       ),
       blown: bot.energy.exhausted,
       drafting: (factors?.[bot.id] ?? 1) < 1,
@@ -237,36 +304,39 @@ export function modelTacticsInputOf(
       toLineM: Math.round(laps * lapLengthMetres - own.effortDistance + misread),
       launchM: Math.round(botLaunchMetres(bot.plan.archetype)),
       gradeAheadPct: round(
-        gradeAt(profile, distanceOnRoute(profile, bot.ride.distance + GRADE_AHEAD_METRES)),
-        1,
+        gradeAt(profile, distanceOnRoute(profile, bot.ride.distance + line + GRADE_AHEAD_METRES)),
+        0,
       ),
-      riderGapM: rider === undefined ? 0 : round(rider.effortDistance - own.effortDistance, 1),
+      riderGapM: rider === undefined ? 0 : round(rider.effortDistance - own.effortDistance, 0),
     });
   });
   if (views.length === 0) return undefined;
+  // #2794: the course ahead once for the race, from the bot at its head.
+  const head = views.reduce((best, view) => (view.rank < best.rank ? view : best));
   const riderAt = rider === undefined ? undefined : rank.get(rider.id);
   const riderAhead = riderAt === undefined ? undefined : racing[riderAt - 1];
   const riderBehind = riderAt === undefined ? undefined : racing[riderAt + 1];
   const riderDistance = rider?.effortDistance ?? 0;
   return {
     laps,
-    field: racing.length,
     quietS: Math.max(0, Math.floor((race.atMs - quietSinceMs) / 1_000)),
     rider: {
       rank: riderAt === undefined ? 0 : riderAt + 1,
       wPerKg: riderWattsPerKilogram === null ? null : round(riderWattsPerKilogram, 1),
       ahead: riderAhead === undefined ? null : (seats.get(riderAhead.id) ?? null),
       gapAheadM:
-        riderAhead === undefined
-          ? null
-          : round(Math.max(0, riderAhead.effortDistance - riderDistance), 1),
+        riderAhead === undefined ? null : wholeMetres(riderAhead.effortDistance - riderDistance),
       gapBehindM:
-        riderBehind === undefined
-          ? null
-          : round(Math.max(0, riderDistance - riderBehind.effortDistance), 1),
+        riderBehind === undefined ? null : wholeMetres(riderDistance - riderBehind.effortDistance),
       drafting: rider !== undefined && riderAt !== undefined && (factors?.[rider.id] ?? 1) < 1,
     },
     bots: views,
+    course: lapRaceCourseAhead(
+      race,
+      bots[head.bot] as LapRaceBot,
+      (racing[head.rank - 1] as (typeof racing)[number]).effortDistance,
+      road,
+    ),
   };
 }
 
@@ -349,7 +419,7 @@ export function askLapRaceModel(
   model: LapRaceModel,
   race: ItemRaceState,
   bots: readonly LapRaceBot[],
-  profile: RouteProfile,
+  road: BotRoad,
   seed: number,
   draft: boolean,
   riderWattsPerKilogram: number | null,
@@ -370,7 +440,7 @@ export function askLapRaceModel(
   const input = modelTacticsInputOf(
     race,
     bots,
-    profile,
+    road,
     seed,
     draft,
     riderWattsPerKilogram,

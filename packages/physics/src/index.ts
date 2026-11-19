@@ -122,7 +122,13 @@ export { advanceBot, BOT_AT_START_LINE, botDemand, createBotPacer } from './pace
 // deliberately not exported here: see `pacer.ts`'s header.
 
 export type { BotRaceStep, BotRaceTick, LapRaceBot, LapRaceBotConditions } from './lap-race-bot';
-export { lapRaceBot, lapRaceDraftFactors, stepBotRace } from './lap-race-bot';
+export {
+  lapRaceBot,
+  lapRaceBotMassKilograms,
+  lapRaceBotPacerPlan,
+  lapRaceDraftFactors,
+  stepBotRace,
+} from './lap-race-bot';
 
 // --- The coefficient set a ride runs, and the version of the answer (#487) --
 //

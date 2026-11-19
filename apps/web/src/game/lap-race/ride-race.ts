@@ -79,6 +79,18 @@
  * rider's input at every tick are kept with the ride (`model-race.ts`,
  * {@link lapRaceRideFact}), so it replays under the version it was ridden with.
  *
+ * ## The bots ride the road from the line (#2800)
+ *
+ * A bot's odometer is its effort distance, nought at the line, and the race
+ * draws it at {@link LapRaceRide.startAlong} plus that. So its course carries
+ * the line (`physics` §`BotCourse.lineMetres`, where the rider stood at the
+ * press, wrapped onto the lap), and every grade a bot reads is read from
+ * there: the grade under it, the grade ahead its tactics and the model are
+ * shown (`model-race.ts` §`modelTacticsInputOf`), and the road under the
+ * rider as a wheel. A race started anywhere but the route's 0 has its bots on
+ * the hills the rider sees them on. `ride-race.test.ts` holds each bot's felt
+ * grade to the grade where it is drawn on a race started at 300 m.
+ *
  * ## The bots ride still air
  *
  * A bot's course is the rider's road and air ({@link LapRaceRideStart.conditions}),
@@ -88,11 +100,12 @@
  */
 
 import {
-  BOT_MASS_KILOGRAMS,
   botFieldPaces,
   botFieldPersonalities,
   botFieldSkills,
   createItemRace,
+  distanceOnRoute,
+  modelFieldPaces,
   racePosition,
   raceCourse,
   seconds,
@@ -105,6 +118,7 @@ import {
 } from '@onyourleft/domain';
 import {
   lapRaceBot,
+  lapRaceBotMassKilograms,
   stepBotRace,
   type LapRaceBot,
   type LapRaceBotConditions,
@@ -350,8 +364,11 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   // field misjudges the race by different amounts, and is never all of one.
   const skills = botFieldSkills(seed, ids.length);
   // #2455: each bot its own ability and pacing style, from the race's seed,
-  // so the field spreads into a race rather than riding as one.
-  const paces = botFieldPaces(seed, ids.length);
+  // so the field spreads into a race rather than riding as one. #2759, ADR
+  // 0076: in a race with AI bots, each its racing style's pace and a body to
+  // match, with a spread of strength whose middle is the tier.
+  const paces =
+    input.model === true ? modelFieldPaces(seed, ids.length) : botFieldPaces(seed, ids.length);
   const race = createItemRace(
     assistedRaceSetup(
       assist,
@@ -392,7 +409,12 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
     input: riderInput,
     startAlong: input.riderDistance,
     along: input.riderDistance,
-    conditions: input.conditions,
+    // #2800: the bots ride the road from the line, where the rider stands at
+    // the press, so the grade each feels is the grade where it is drawn.
+    conditions: {
+      ...input.conditions,
+      lineMetres: distanceOnRoute(input.conditions.profile, input.riderDistance),
+    },
     names: Object.fromEntries(
       ids.map((id, index) => [id, botName((paces[index] as BotPace).style, index + 1)]),
     ),
@@ -660,7 +682,7 @@ export function askLapRaceRide(ride: LapRaceRide, riderWatts?: number): LapRaceR
     ride.model,
     ride.race,
     ride.bots,
-    ride.conditions.profile,
+    ride.conditions,
     ride.seed,
     ride.draft,
     wattsPerKilogramOf(ride, riderWatts) ?? null,
@@ -818,7 +840,8 @@ export function lapRaceFrame(
 
 /**
  * The race as the HUD reads it: the standings' names and each bot's W/kg at
- * its fixed mass (never watts, ADR 0060 D-12.2), and the rider's.
+ * its own mass (never watts, ADR 0060 D-12.2): 75 kg in a seeded race, its
+ * body's in a race with AI bots (#2759) — and the rider's.
  */
 export function lapRaceHud(
   ride: LapRaceRide,
@@ -828,7 +851,9 @@ export function lapRaceHud(
   for (const bot of ride.bots) {
     entrants[bot.id] = {
       name: ride.names[bot.id] ?? bot.id,
-      wattsPerKilogram: bot.power > 0 ? (bot.power as number) / BOT_MASS_KILOGRAMS : undefined,
+      // #2759: at its own mass, where it has a body (ADR 0076 D-2).
+      wattsPerKilogram:
+        bot.power > 0 ? (bot.power as number) / lapRaceBotMassKilograms(bot) : undefined,
     };
   }
   return {

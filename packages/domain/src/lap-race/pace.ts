@@ -74,12 +74,44 @@ export const BOT_PACING_STYLES: readonly BotPacingStyle[] = [
   'sprinter',
 ];
 
+/**
+ * A bot's own body, in a race with AI bots (#2759, ADR 0076 D-2): what it
+ * weighs and how strong it is beside the tier. Dealt with its pace from the
+ * race's seed (`model-field.ts` §`modelFieldPaces`), so fixed at the start
+ * (ADR 0067 D-1.1). A seeded race's bots have none, and ride at
+ * `BOT_MASS_KILOGRAMS` and their ability, as before #2759.
+ */
+export interface BotBody {
+  /** What it weighs, kilograms. */
+  readonly massKilograms: number;
+  /**
+   * How strong it is beside the tier, as a multiple of the tier's W/kg: its
+   * CP, W′ and peak all scale with it, over its style's own profile. Dealt
+   * around 1, so the field's middle is the tier the rider chose.
+   */
+  readonly strength: number;
+}
+
 /** One bot's pace for one race: fixed at the start, from the race's seed. */
 export interface BotPace {
   readonly style: BotPacingStyle;
   /** Its share of its tier's power: from 1 − {@link BOT_ABILITY_SPREAD} to 1. */
   readonly ability: number;
+  /** Its own body (#2759, ADR 0076): only in a race with AI bots. */
+  readonly body?: BotBody;
 }
+
+/**
+ * The lightest and heaviest a bot's body may be, kilograms: **50** and **100**.
+ * Far outside what `model-field.ts` deals; a check, not a deal.
+ */
+export const BOT_BODY_MASS_RANGE_KILOGRAMS = Object.freeze({ least: 50, most: 100 });
+
+/**
+ * The least and most a bot body's strength may be: **0.5** and **1.5** of the
+ * tier. Far outside what `model-field.ts` deals; a check, not a deal.
+ */
+export const BOT_BODY_STRENGTH_RANGE = Object.freeze({ least: 0.5, most: 1.5 });
 
 /** The pace of a bot nothing has dealt one: a rouleur's plan (#2459), at its tier's full power. */
 export const BOT_EVEN_PACE: BotPace = Object.freeze({ style: 'even', ability: 1 });
@@ -103,22 +135,30 @@ export const BOT_STYLE_EASING = 0.04;
 /** Keys the field's deal apart from the race's item draws and the personalities' deal. */
 const PACE_SALT = 0x2455_b07e;
 
+const within = (value: number, range: { readonly least: number; readonly most: number }) =>
+  Number.isFinite(value) && value >= range.least && value <= range.most;
+
 /**
- * Check a pace: a style this module names, and an ability inside its band.
+ * Check a pace: a style this module names, an ability inside its band, and a
+ * body, where it has one, inside {@link BOT_BODY_MASS_RANGE_KILOGRAMS} and
+ * {@link BOT_BODY_STRENGTH_RANGE}.
  *
- * @throws {LapRaceError} `pace-out-of-range` for either.
+ * @throws {LapRaceError} `pace-out-of-range` for any of them.
  */
 export function checkBotPace(pace: BotPace): void {
-  const { ability } = pace;
+  const { ability, body } = pace;
   if (
     !BOT_PACING_STYLES.includes(pace.style) ||
     !Number.isFinite(ability) ||
     ability < 1 - BOT_ABILITY_SPREAD ||
-    ability > 1
+    ability > 1 ||
+    (body !== undefined &&
+      (!within(body.massKilograms, BOT_BODY_MASS_RANGE_KILOGRAMS) ||
+        !within(body.strength, BOT_BODY_STRENGTH_RANGE)))
   ) {
     throw new LapRaceError(
       'pace-out-of-range',
-      'a pace has a known style and an ability from one less the spread to one',
+      'a pace has a known style, an ability from one less the spread to one, and a body inside its ranges',
     );
   }
 }

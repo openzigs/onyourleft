@@ -85,34 +85,53 @@ import type { BotEnergy } from './wbal';
 import type { ModelTacticsInvalid, ModelTacticsMove, ModelTacticsTarget } from './model-tactics';
 
 /**
- * **The bot-code version: 3** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074).
+ * **The bot-code version: 6** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074, ADR 0076).
  * Version 1 rode ADR 0071 D-3.6's strategy rules; version 2 ADR 0073's, with
- * D-5's input; version 3 ADR 0073's with ADR 0074's sprint backstop. Raised by any change that
+ * D-5's input; version 3 ADR 0073's with ADR 0074's sprint backstop; version 4
+ * a field with bodies that fit their styles and a spread of strength, and an
+ * effort that never softens an attack (#2759, ADR 0076); version 5 version 4's
+ * race with a decision held {@link MODEL_TACTICS_HOLD_MS} of 10 s, not 5 s
+ * (#2759, ADR 0076 D-11), which changes the moves in force for a logged race;
+ * version 6 version 5's on the road from the race's line rather than from the
+ * route's start (#2800), which moves every bot on a race started off the
+ * route's 0 over a hill and none started at it. Raised by any change that
  * alters any bot's output for some seed and log — a tactic, a plan, the W′
  * model, the adapter, a seam's rule, a physics step. Stored beside the seed and
  * the log; a log recorded under another version is not replayed.
  * `apps/web` §`model-race-replay.test.ts` holds committed seeds and logs to
  * their outcomes, keyed by this number.
  */
-export const LAP_RACE_BOT_CODE_VERSION = 3;
+export const LAP_RACE_BOT_CODE_VERSION = 6;
 
 /** How often the model is asked, ms of race time: every **4 s**, spike 0039's draft (D-7). */
 export const MODEL_TACTICS_ASK_EVERY_MS = 4_000;
 
 /**
  * An answer that arrives more than this after it was asked is **late**, ms of
- * race time: **5 s**, spike 0039's figure (D-7). It is logged and never
- * applied: it describes a race that has moved on. A call still out this long
- * is given up as late too, so a call that never settles cannot stop the next.
+ * race time: **8 s** (#2759, ADR 0076 D-11; ADR 0071 D-7 leaves the figure to
+ * the build). It is logged and never applied: it describes a race that has
+ * moved on. A call still out this long is given up as late too, so a call that
+ * never settles cannot stop the next, and the race never waits on it.
+ *
+ * Spike 0039's 5 s was server time on the owner's PC. On the owner's tablet,
+ * 2026-11-17, the round trip through the instance's tunnel added more than a
+ * second to a median 3.9 s of server time, and 41 of 46 asks were given up at
+ * 5 s: the race rode seeded tactics. 8 s holds the measured device round trip
+ * with room, and an answer up to 8 s old still describes a race whose moves
+ * last 10 s and more.
  */
-export const MODEL_TACTICS_LATE_MS = 5_000;
+export const MODEL_TACTICS_LATE_MS = 8_000;
 
 /**
  * How long an applied decision holds, ms, unless the next replaces it first:
- * **5 s**, spike 0039's figure (D-4.2, D-7). So a late or missing answer lets
- * the field fall back to its seeded tactics rather than ride a stale move on.
+ * **10 s** (#2759, ADR 0076 D-11; spike 0039 drafted 5 s against a 5 s late
+ * limit). A call that takes more than 4 s is followed by the next ask at the
+ * next 4 s mark, so decisions arrive about 8 s apart; 10 s holds one until the
+ * next lands, with 2 s for a slower one, and a late or missing answer still
+ * lets the field fall back to its seeded tactics rather than ride a stale move
+ * on.
  */
-export const MODEL_TACTICS_HOLD_MS = 5_000;
+export const MODEL_TACTICS_HOLD_MS = 10_000;
 
 /** What one model call came to (D-4.2). */
 export type ModelTacticsLogOutcome = 'decision' | 'late' | 'invalid' | 'refused' | 'failed';
