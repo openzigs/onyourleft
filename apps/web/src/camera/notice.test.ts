@@ -13,7 +13,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { CameraProblemKind } from './camera-port';
 import {
+  CAMERA_NOTICE_SENTENCES,
   CAMERA_NOTICES,
+  CAMERA_OFF_AFTER_A_SCAN,
   cameraNotice,
   cameraProblemMessage,
   frameLeaksIn,
@@ -93,6 +95,20 @@ describe('the D-8 scan', () => {
     expect(
       frameLeaksIn('The camera could not be opened. Close anything else using it.'),
     ).toStrictEqual([]);
+  });
+
+  it('holds the sentence for a camera that has been on only to read a code to the same rules — #2856', () => {
+    // Not a kind of its own (`session.ts` §`notice` answers `no-consent`
+    // with it), so the walks over KINDS above do not reach it.
+    const notice = CAMERA_OFF_AFTER_A_SCAN;
+    expect(notice.title).toBe(cameraNotice('no-consent').title);
+    expect(notice.instruction).toBeNull();
+    expect(notice.recoverable).toBe(true);
+    for (const text of [notice.title, notice.explanation]) {
+      expect(frameLeaksIn(text), text).toStrictEqual([]);
+    }
+    // The Camera screen keeps a notice on the screen whole, bounded by this list.
+    expect(CAMERA_NOTICE_SENTENCES).toContain(notice.explanation);
   });
 
   it('finds nothing in any message this module produces', () => {
