@@ -23,6 +23,7 @@ import { ODBL_LICENCE_URL, ODBL_NOTICE } from '../../../map/basemap';
 import { modulesUnder } from '../../cannot-reach-trainer-testing';
 import { SHIPPED_LEVEL_FILES, SHIPPED_LEVELS } from '../../shipped-levels';
 import { roundHousesOn } from '../courses';
+import { DEFAULT_THROW_WINDOW } from '../throw';
 import { LEVEL_HOUSE_MARGIN } from '../../../../tools/delivery-levels/author-level';
 import { levelFileSizes, levelSizeFindings } from '../../../../tools/delivery-levels/level-sizes';
 import { LEVEL_CATALOGUE, type LevelListing } from './catalogue';
@@ -396,6 +397,18 @@ describe('the progression: each level no easier than the one before — #2367, A
           total(now.round) > total(was.round),
         `${step} is no harder in houses, window or hazards`,
       ).toBe(true);
+    }
+  });
+
+  it('narrows the throw window from level 3, each of levels 3 to 6 narrower than the one before — #2931', () => {
+    const levels = inUnlockOrder();
+    // Levels 1 and 2 throw in the throw's own window, the widest a level may.
+    for (const file of levels.slice(0, 2)) {
+      expect(file.round.throwWindow, file.id).toStrictEqual(DEFAULT_THROW_WINDOW);
+    }
+    for (let at = 2; at < levels.length; at += 1) {
+      const [was, now] = [levels[at - 1] as LevelFile, levels[at] as LevelFile];
+      expect(width(now.round), `${was.id} → ${now.id}`).toBeLessThan(width(was.round));
     }
   });
 

@@ -12,8 +12,8 @@
   "round": {
     "houses": 8,
     "throwWindow": {
-      "beforeMetres": 20,
-      "afterMetres": 1
+      "beforeMetres": 17,
+      "afterMetres": 0.75
     },
     "hazardsPerKilometre": {
       "static": 2,

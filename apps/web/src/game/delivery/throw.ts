@@ -77,6 +77,14 @@
  * clear before each house, so a wider one would reach into the window of the
  * house before. The setting itself is `assist-preference.ts`'.
  *
+ * ## A level's own window (#2931, ADR 0065 D-4.1)
+ *
+ * A built-in level's file states its own window, no wider than
+ * {@link DEFAULT_THROW_WINDOW} (`levels/level-file.ts`), and a level round
+ * hands it over as {@link ThrowInput.window}; a rider's own route hands none
+ * and keeps the default. The assist's wider windows scale a level's closing
+ * edge as they scale the default's, and leave its opening edge as it is.
+ *
  * ## A mailbox, and a house that must not get a parcel (#2365, ADR 0065 D-10.3)
  *
  * A mailbox ({@link ThrowTarget.mailbox}) catches a parcel only within
@@ -182,6 +190,23 @@ export const THROW_WINDOW_AFTER_METRES = 1;
 export const ASSISTED_THROW_SCALE = 3;
 
 /**
+ * Where a house's throw window opens before it and closes past it, metres:
+ * {@link THROW_WINDOW_BEFORE_METRES} and {@link THROW_WINDOW_AFTER_METRES}, or
+ * a built-in level's own, narrower (#2931). The closing edge here is before
+ * the assist widens it.
+ */
+export interface ThrowWindow {
+  readonly beforeMetres: number;
+  readonly afterMetres: number;
+}
+
+/** The window every round on a rider's own route throws in, and the widest a level may state. */
+export const DEFAULT_THROW_WINDOW: ThrowWindow = Object.freeze({
+  beforeMetres: THROW_WINDOW_BEFORE_METRES,
+  afterMetres: THROW_WINDOW_AFTER_METRES,
+});
+
+/**
  * How long after a throw the next one is refused, in seconds. This project's
  * own number, for the owner's approval in #1809's pull request.
  */
@@ -271,6 +296,8 @@ export interface ThrowInput {
    * its place in this list, not a round position. None unless given.
    */
   readonly noDelivery?: readonly ThrowTarget[];
+  /** A built-in level's own window (#2931). {@link DEFAULT_THROW_WINDOW} unless given. */
+  readonly window?: ThrowWindow;
 }
 
 export interface ThrowStep {
@@ -293,11 +320,19 @@ function scaleFor(widerWindows: boolean | undefined): number {
   return widerWindows === true ? ASSISTED_THROW_SCALE : 1;
 }
 
-/** The throw left the rider inside the target's window. */
-function windowOpen(parcel: ParcelInFlight, target: ThrowTarget, scale: number): boolean {
+/**
+ * A throw from `launchAlong` left the rider inside `target`'s window, its
+ * closing edge widened by `scale`. `ride-round.ts` counts a miss by it too.
+ */
+export function insideThrowWindow(
+  launchAlong: number,
+  target: Pick<ThrowTarget, 'along'>,
+  window: ThrowWindow,
+  scale: number,
+): boolean {
   return (
-    parcel.launchAlong >= target.along - THROW_WINDOW_BEFORE_METRES &&
-    parcel.launchAlong <= target.along + THROW_WINDOW_AFTER_METRES * scale
+    launchAlong >= target.along - window.beforeMetres &&
+    launchAlong <= target.along + window.afterMetres * scale
   );
 }
 
@@ -313,6 +348,7 @@ function landingOn(
   round: Round,
   scale: number,
   noDelivery: readonly ThrowTarget[],
+  window: ThrowWindow,
 ): Landing | undefined {
   const flown = tick - parcel.launchTick;
   const from = acrossAfter(flown - 1);
@@ -322,7 +358,12 @@ function landingOn(
   const meets = (
     target: ThrowTarget,
   ): { readonly along: number; readonly across: number } | undefined => {
-    if (target.side !== parcel.side || !windowOpen(parcel, target, scale)) return undefined;
+    if (
+      target.side !== parcel.side ||
+      !insideThrowWindow(parcel.launchAlong, target, window, scale)
+    ) {
+      return undefined;
+    }
     const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
     if (across <= from || across > to) return undefined;
     if (caught !== undefined && across >= caught.across) return undefined;
@@ -388,7 +429,15 @@ export function stepThrows(state: ThrowState, input: ThrowInput): ThrowStep {
     tick += 1;
     const flying: ParcelInFlight[] = [];
     for (const parcel of inFlight) {
-      const landing = landingOn(parcel, tick, input.targets, round, scale, input.noDelivery ?? []);
+      const landing = landingOn(
+        parcel,
+        tick,
+        input.targets,
+        round,
+        scale,
+        input.noDelivery ?? [],
+        input.window ?? DEFAULT_THROW_WINDOW,
+      );
       if (landing === undefined) {
         flying.push(parcel);
         continue;
@@ -407,6 +456,8 @@ export interface ThrowSideInput {
   readonly round: Round;
   /** The rider's simulated distance along the route, in metres. */
   readonly along: number;
+  /** A built-in level's own window (#2931): where a house is behind. {@link DEFAULT_THROW_WINDOW} unless given. */
+  readonly window?: ThrowWindow;
 }
 
 /**
@@ -423,7 +474,7 @@ export function throwSideFor(intent: ThrowIntent, input: ThrowSideInput): ThrowS
   let next: ThrowTarget | undefined;
   for (const target of input.targets) {
     if (input.round.houses[target.position] !== 'expecting') continue;
-    if (target.along + THROW_WINDOW_AFTER_METRES < input.along) continue;
+    if (target.along + (input.window ?? DEFAULT_THROW_WINDOW).afterMetres < input.along) continue;
     if (next === undefined || target.along < next.along) next = target;
   }
   return next?.side;
