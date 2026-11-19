@@ -127,7 +127,7 @@ export function linesThatFit(room: StandingsRoom, drawn?: number): number {
  * §"Motion is opt-in"): the panel is not yet at its line when the attribute
  * is heard. ⚠️ **Never on a frame**:
  * every one of these is an event of the layout's, and a ride that changes
- * nothing measures nothing (`browser/lap-race-hud.browser.spec.ts` §"#2837"
+ * nothing measures nothing (`browser/ride-chrome.browser.spec.ts` §"#2837"
  * counts it over a moving ride).
  */
 export function useStandingsRoom(

@@ -965,18 +965,33 @@ test.describe('#2837 a lap race’s standings take the room the hidden controls 
     if (inPlace === undefined) throw new Error('no actions panel');
     const out = HUD_CONTROLS_FADE_MS.out;
     const close = MOTION_DURATION_MS.medium;
-    await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
     const stage = page.locator(`[data-oyl-lap-race-stage="${HIDES}"]`);
+    // The page's own clock runs the animations, not `page.clock`, and the hold
+    // lasts 800 ms of it: a runner that stalls that long between the attribute
+    // and the sampling would find the hold over. So the panel's animations are
+    // paused in the mutation's own microtask, before a frame has been drawn
+    // (reading the style forces them into being), and nothing here races.
+    await stage.locator('.oyl-hud').evaluate((hud) => {
+      new MutationObserver((_records, observer) => {
+        if (hud.getAttribute('data-oyl-controls') !== 'hidden') return;
+        const panel = hud.querySelector('.oyl-hud__actions');
+        if (panel === null) return;
+        getComputedStyle(panel).getPropertyValue('animation-name');
+        for (const animation of panel.getAnimations()) animation.pause();
+        observer.disconnect();
+      }).observe(hud, { attributes: true, attributeFilter: ['data-oyl-controls'] });
+    });
+    await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
     await expect(stage.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'hidden');
-    // The panel's own animations held at each moment in turn, as
-    // `ride-chrome.browser.spec.ts` §`sampleFade` holds the fade: they run on
-    // the page's clock, not `page.clock`'s.
+    // The panel's own animations, already held, are set to each moment in turn,
+    // as `ride-chrome.browser.spec.ts` §`sampleFade` does for the fade.
     const fading = [0, out / 2, out - 1];
     const closing = [out + close / 4, out + close / 2, out + (3 * close) / 4];
     const tops = await stage.locator('.oyl-hud__actions').evaluate(
       (panel, times) => {
         const origin = panel.closest('[data-oyl-lap-race-stage]')?.getBoundingClientRect().top ?? 0;
         const animations = panel.getAnimations();
+        if (animations.length < 2) throw new Error(`${String(animations.length)} animations held`);
         for (const animation of animations) animation.pause();
         const sampled = times.map((atMs) => {
           for (const animation of animations) animation.currentTime = atMs;

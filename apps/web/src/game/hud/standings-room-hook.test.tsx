@@ -209,4 +209,17 @@ describe('useStandingsRoom — the room the hidden ride controls leave (#2837)',
     });
     expect(boxesRead).toBe(measured);
   });
+
+  it.each(['animationend', 'transitionend'])(
+    'stops listening for a %s once the HUD is unmounted',
+    async (ended) => {
+      const { actions } = await short();
+      mounted?.unmount();
+      mounted = undefined;
+      const measured = boxesRead;
+      actions.dispatchEvent(new Event(ended, { bubbles: true }));
+      await Promise.resolve();
+      expect(boxesRead).toBe(measured);
+    },
+  );
 });
