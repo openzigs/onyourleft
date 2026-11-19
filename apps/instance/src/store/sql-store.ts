@@ -2820,6 +2820,8 @@ export interface SqlStore {
   }): Promise<'taken' | 'busy'>;
   /** The holder's heartbeat: `false` when the lease is no longer `token`'s. */
   heartbeatBackupLease(place: string, token: string, now: number): Promise<boolean>;
+  /** Whether the lease's row is still `token`'s, read (#2627). */
+  holdsBackupLease(place: string, token: string): Promise<boolean>;
   /** Give the lease up, if it is still `token`'s. */
   releaseBackupLease(place: string, token: string): Promise<void>;
   /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
@@ -7427,6 +7429,17 @@ function storeOver(
           .executeTakeFirst();
         return beat.numUpdatedRows > 0n;
       }),
+
+    holdsBackupLease: (place, token) =>
+      exclusive(
+        async () =>
+          (await db
+            .selectFrom('backup_lease')
+            .select('token')
+            .where('place', '=', place)
+            .where('token', '=', token)
+            .executeTakeFirst()) !== undefined,
+      ),
 
     releaseBackupLease: (place, token) =>
       exclusive(async () => {

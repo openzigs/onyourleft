@@ -582,14 +582,17 @@ describe('backup: the folders’ leases (#2606, third review)', () => {
     }
   });
 
-  it('stops before recording or pruning when its heartbeat cannot be written', async () => {
+  it('stops before recording or pruning when another run has taken its folder’s lease (#2627)', async () => {
     const paths = await migratedAlone();
     const onBox = join(paths.root, 'on-box');
     const older = await restorePoints(onBox);
     const opened = openDatabase(paths.database);
     try {
-      opened.exec(`create trigger backup_lease_refuses_test before update on backup_lease
-        begin select raise(abort, 'the heartbeat was refused'); end`);
+      // The run's first heartbeat — the one `confirm` writes — hands the row
+      // to another run, as a taker that judged it stale would.
+      opened.exec(`create trigger backup_lease_taken_test after update on backup_lease
+        when new.token <> 'elsewhere'
+        begin update backup_lease set token = 'elsewhere' where place = new.place; end`);
     } finally {
       opened.close();
     }
@@ -679,24 +682,65 @@ describe('backup: past the bound, the newest unrecorded snapshot is kept (#2606,
   });
 });
 
-describe('backup: a snapshot carries no lease of the run that took it (#2606, fourth review)', () => {
-  it("leaves no backup_lease row in the snapshot's database, so a restored one is not busy", async () => {
+describe('backup: past the bound, a snapshot named after now is left out (#2627)', () => {
+  it('still holds --keep + the allowance while records fail, beside a recorded snapshot a fast clock named', async () => {
     const paths = await migratedAlone();
     const onBox = join(paths.root, 'on-box');
     const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     try {
-      await backup(paths, onBox, { keep: 3, now: () => new Date('2026-09-01T00:00:00Z') });
+      // A recorded restore point, then one recorded while the clock ran a day ahead.
+      await backup(paths, onBox, { keep: 2, now: () => new Date('2026-09-01T00:00:00Z') });
+      await backup(paths, onBox, { keep: 2, now: () => new Date('2026-09-02T00:00:00Z') });
+      refuseEveryRecord(paths.database);
+      for (const hour of ['01', '02', '03', '04', '05']) {
+        await backup(paths, onBox, {
+          keep: 2,
+          now: () => new Date(`2026-09-01T${hour}:00:00Z`),
+        });
+      }
     } finally {
       quiet.mockRestore();
     }
-    const opened = openDatabase(
-      join(onBox, 'snapshot-2026-09-01T00-00-00-000Z', 'instance.sqlite'),
-    );
+    // --keep 2 + 2 = 4 of the snapshots named up to now: the recorded one and
+    // the newest unrecorded ones. The future-named one is neither counted nor removed.
+    expect((await readdir(onBox)).sort()).toEqual([
+      'snapshot-2026-09-01T00-00-00-000Z',
+      'snapshot-2026-09-01T03-00-00-000Z',
+      'snapshot-2026-09-01T04-00-00-000Z',
+      'snapshot-2026-09-01T05-00-00-000Z',
+      'snapshot-2026-09-02T00-00-00-000Z',
+    ]);
+  });
+});
+
+describe('backup: a snapshot carries no lease of the run that took it (#2606, fourth review)', () => {
+  it('leaves no lease in the snapshot, so a backup into the same folder after restoring it is not busy', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     try {
-      expect(opened.prepare('SELECT count(*) AS n FROM backup_lease').get()).toEqual({ n: 0 });
+      // Taken while this run held the folder's lease, with a fresh heartbeat.
+      await backup(paths, onBox, { keep: 3, now: () => new Date('2026-09-01T00:00:00Z') });
+      // As an operator restores it (#2627: through the path a real consumer uses).
+      expect(
+        await runCommand(
+          ['restore', join(onBox, 'snapshot-2026-09-01T00-00-00-000Z'), '--force'],
+          paths,
+        ),
+      ).toBe(0);
+      // And the next backup, into the same folder, minutes later: not refused as busy.
+      const taken = await backup(paths, onBox, {
+        keep: 3,
+        now: () => new Date('2026-09-01T00:05:00Z'),
+      });
+      expect(taken.recorded).toBe(true);
     } finally {
-      opened.close();
+      quiet.mockRestore();
     }
+    expect((await readdir(onBox)).sort()).toEqual([
+      'snapshot-2026-09-01T00-00-00-000Z',
+      'snapshot-2026-09-01T00-05-00-000Z',
+    ]);
   });
 });
 

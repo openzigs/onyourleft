@@ -8,7 +8,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -147,18 +147,64 @@ describe('a backup folder’s lease (#2606)', () => {
     await taker?.release();
   });
 
-  it('is lost when its heartbeat cannot be written, and says so before anything is recorded', async () => {
+  it('is not lost to a heartbeat that could not be written: the next beat tries again, and confirm reads the row (#2627)', async () => {
     const database = await migrated();
-    const holder = await takeLease(connection(database), FOLDER, { now: () => T });
+    let now = T;
+    const holder = await takeLease(connection(database), FOLDER, { now: () => now });
     const opened = openDatabase(database);
     try {
       opened.exec(`create trigger backup_lease_refuses_test before update on backup_lease
         begin select raise(abort, 'the heartbeat was refused'); end`);
+      now += HEARTBEAT_MS;
+      await holder?.beat();
+      // Nobody took the row, so the run still holds its folder.
+      await holder?.confirm();
+      opened.exec('drop trigger backup_lease_refuses_test');
+      now += HEARTBEAT_MS;
+      await holder?.beat();
+      expect(
+        opened
+          .prepare('SELECT heartbeat_at FROM backup_lease WHERE place = ?')
+          .get(placeOf(FOLDER)),
+      ).toEqual({ heartbeat_at: T + 2 * HEARTBEAT_MS });
+      await holder?.confirm();
+    } finally {
+      opened.close();
+    }
+    await holder?.release();
+    expect(tokenHolding(database)).toBeUndefined();
+  });
+
+  it('is lost once its row is another run’s, and says so before anything is recorded', async () => {
+    const database = await migrated();
+    const holder = await takeLease(connection(database), FOLDER, { now: () => T });
+    const opened = openDatabase(database);
+    try {
+      opened
+        .prepare('UPDATE backup_lease SET token = ?, holder = ? WHERE place = ?')
+        .run('another', 'elsewhere:1', placeOf(FOLDER));
     } finally {
       opened.close();
     }
     await expect(holder?.confirm()).rejects.toBeInstanceOf(BackupLeaseLost);
     await holder?.release();
+    expect(tokenHolding(database)).toBe('another');
+  });
+
+  it('is one lease for a folder and a symlink to it, and keyed by the resolved path before the folder exists (#2627)', async () => {
+    const database = await migrated();
+    const real = join(directory ?? '', 'real-backups');
+    const link = join(directory ?? '', 'linked-backups');
+    // Not made yet: keyed by the path as given, resolved.
+    expect(placeOf(join(directory ?? '', 'x', '..', 'real-backups'))).toBe(placeOf(real));
+    await mkdir(real);
+    await symlink(real, link);
+    expect(placeOf(link)).toBe(placeOf(real));
+    const held = await takeLease(connection(database), real, { now: () => T });
+    await expect(takeLease(connection(database), link, { now: () => T })).rejects.toBeInstanceOf(
+      BackupFolderBusy,
+    );
+    await held?.release();
   });
 
   it('is no lease at all on a database from before migration 0042', async () => {
