@@ -1516,6 +1516,20 @@ function timeGap(key: string, label: string, gap: PacerGap): HudReading {
 const LEVEL = 'Level';
 
 /**
+ * A live chased rider's gap as its HUD field writes it, value and unit — `3 s`,
+ * `Level`, or the dash — for the marker at the frame's edge that points to a
+ * pacer or a ghost out of view (#2755, `off-screen-marker.ts`). The same
+ * {@link timeGap}, so the edge and the HUD cannot disagree. `undefined` once
+ * the race against the attempt is settled (#259): the field shows a result
+ * then, and there is no gap to carry.
+ */
+export function chasedGapText(chase: ChasedGap): string | undefined {
+  if (chase.outcome !== undefined) return undefined;
+  const reading = timeGap('', '', chase.gap);
+  return reading.unit === '' ? reading.value : `${reading.value} ${reading.unit}`;
+}
+
+/**
  * What the field says once the race against the attempt is settled — #259.
  *
  * ⚠️ **A word where the number was, and that is the point rather than a

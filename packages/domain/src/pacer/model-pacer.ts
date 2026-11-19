@@ -16,8 +16,11 @@
  * now and how long it has held the intent, where the rider is against it, the
  * rider's W/kg and whether they are in its draft, the grade ahead, the metres
  * to the finish and the seconds ridden. **Every field is a number, a boolean
- * or a word from a closed list**: there is no field a coordinate, a place
- * name, a rider's name, a date or an identifier could be written into, and
+ * or a word from a closed list**, except `recentLines` (#2760): the model's
+ * own last lines, screened free text (§`pacerSayProblem`: no digit but a
+ * cadence or power target, no symbol, and a length), written by the model from a state that holds no
+ * name or place. There is no other field a coordinate, a place name, a rider's name,
+ * a date or an identifier could be written into, and
  * {@link readModelPacerInput} refuses any key it does not name. A problem
  * names the field and the rule, never the value (ADR 0004 D).
  *
@@ -54,6 +57,7 @@
  * ride began on the recording's clock.
  */
 
+import { HEART_RATE_ZONE_NAMES, POWER_ZONE_NAMES } from '../analysis/zones';
 import type { GradePercent, Watts } from '../quantities';
 import { watts } from '../quantities';
 import {
@@ -182,7 +186,44 @@ export interface ModelPacerInput {
   readonly toFinishM: number | null;
   /** Whole seconds ridden. */
   readonly rideS: number;
+  // --- #2760: the rider's own sensors. Each is ABSENT when the sensor is not live. ---
+  /** The rider's W/kg over the last 3 s, as the HUD shows it. */
+  readonly rider3sWPerKg?: number;
+  /** The rider's average W/kg over the last minute of riding. */
+  readonly riderMinuteWPerKg?: number;
+  /** The zone of the 3 s power, of the rider's own threshold, by its name (`POWER_ZONE_NAMES`); absent with none set. */
+  readonly powerZone?: string;
+  /** Whether power is rising, steady or fading over the last minute. */
+  readonly powerTrend?: PacerPowerTrend;
+  /** Whole seconds power has stayed at or above the rider's own threshold, unbroken, until now. */
+  readonly aboveThresholdS?: number;
+  /** Cadence now, whole revolutions a minute. */
+  readonly cadenceRpm?: number;
+  /** Heart rate now, whole beats a minute. */
+  readonly heartRateBpm?: number;
+  /** The zone of the heart rate, of the rider's own threshold heart rate, by its name (`HEART_RATE_ZONE_NAMES`); absent with none set. */
+  readonly heartRateZone?: string;
+  /** Whether heart rate is rising, steady or falling over the last minute. */
+  readonly heartRateTrend?: PacerHeartRateTrend;
+  /**
+   * The model's own last lines this ride, oldest first, so it does not say
+   * them again: at most {@link MODEL_PACER_RECENT_LINES}, each one that
+   * {@link pacerSayProblem} passed. Absent before the first. Held in memory
+   * on the device for the ride and never stored (ADR 0072 D-4.4).
+   */
+  readonly recentLines?: readonly string[];
 }
+
+/** How power moved over the last minute. A closed list. */
+export const PACER_POWER_TRENDS = ['rising', 'steady', 'fading'] as const;
+export type PacerPowerTrend = (typeof PACER_POWER_TRENDS)[number];
+
+/** How heart rate moved over the last minute. A closed list. */
+export const PACER_HEART_RATE_TRENDS = ['rising', 'steady', 'falling'] as const;
+export type PacerHeartRateTrend = (typeof PACER_HEART_RATE_TRENDS)[number];
+
+/** How many of its own last lines the model is shown: **3**. */
+export const MODEL_PACER_RECENT_LINES = 3;
 
 /** A state refused: the field, and the rule it broke. Never the value. */
 export interface ModelPacerInputProblem {
@@ -194,8 +235,11 @@ export type ModelPacerInputRead =
   | { readonly ok: true; readonly value: ModelPacerInput }
   | { readonly ok: false; readonly problem: ModelPacerInputProblem };
 
-/** The longest pacer state accepted, characters of its JSON: **1 024**. One is about 250. */
-export const MODEL_PACER_INPUT_MOST_CHARACTERS = 1_024;
+/**
+ * The longest pacer state accepted, characters of its JSON: **2 048**. One
+ * with every sensor and three lines is about 615; 1 024 until #2760 widened it.
+ */
+export const MODEL_PACER_INPUT_MOST_CHARACTERS = 2_048;
 
 const INPUT_KEYS = [
   'pacerWPerKg',
@@ -209,6 +253,28 @@ const INPUT_KEYS = [
   'toFinishM',
   'rideS',
 ] as const;
+
+/** The fields a state may leave out: each a sensor the rider may not have (#2760). */
+const OPTIONAL_INPUT_KEYS = [
+  'rider3sWPerKg',
+  'riderMinuteWPerKg',
+  'powerZone',
+  'powerTrend',
+  'aboveThresholdS',
+  'cadenceRpm',
+  'heartRateBpm',
+  'heartRateZone',
+  'heartRateTrend',
+  'recentLines',
+] as const;
+
+const KNOWN_INPUT_KEYS: readonly string[] = [...INPUT_KEYS, ...OPTIONAL_INPUT_KEYS];
+
+/** The highest cadence a state may say, rpm: well over any rider's. */
+const MOST_CADENCE_RPM = 250;
+/** The heart rates a state may say, bpm: wider than any rider's. */
+const LEAST_HEART_RATE_BPM = 20;
+const MOST_HEART_RATE_BPM = 250;
 
 /** The largest distance a state may say, metres: a route of 1 000 km. */
 const MOST_METRES = 1_000_000;
@@ -247,7 +313,7 @@ export function readModelPacerInput(value: unknown): ModelPacerInputRead {
       `must be at most ${String(MODEL_PACER_INPUT_MOST_CHARACTERS)} characters`,
     );
   }
-  if (Object.keys(value).some((key) => !(INPUT_KEYS as readonly string[]).includes(key))) {
+  if (Object.keys(value).some((key) => !KNOWN_INPUT_KEYS.includes(key))) {
     return refuse('input', 'has a field this pacer state does not');
   }
   const missing = INPUT_KEYS.find((key) => !(key in value));
@@ -282,7 +348,47 @@ export function readModelPacerInput(value: unknown): ModelPacerInputRead {
   ];
   const failed = checks.find(([, ok]) => !ok);
   if (failed !== undefined) return refuse(`input.${failed[0]}`, failed[2]);
+  // #2760: a sensor field is absent or valid; `null` is not "absent".
+  const sensorChecks: readonly (readonly [string, (field: unknown) => boolean, string])[] = [
+    ['rider3sWPerKg', (v) => numberIn(v, 0, MOST_WATTS_PER_KILOGRAM), 'must be watts per kilogram'],
+    [
+      'riderMinuteWPerKg',
+      (v) => numberIn(v, 0, MOST_WATTS_PER_KILOGRAM),
+      'must be watts per kilogram',
+    ],
+    ['powerZone', (v) => oneOf(POWER_ZONE_NAMES, v), 'must be one of the power zones'],
+    ['powerTrend', (v) => oneOf(PACER_POWER_TRENDS, v), 'must be one of the three trends'],
+    ['aboveThresholdS', (v) => wholeIn(v, 0, MOST_SECONDS), 'must be a whole number of seconds'],
+    ['cadenceRpm', (v) => wholeIn(v, 0, MOST_CADENCE_RPM), 'must be whole revolutions a minute'],
+    [
+      'heartRateBpm',
+      (v) => wholeIn(v, LEAST_HEART_RATE_BPM, MOST_HEART_RATE_BPM),
+      'must be whole beats a minute',
+    ],
+    [
+      'heartRateZone',
+      (v) => oneOf(HEART_RATE_ZONE_NAMES, v),
+      'must be one of the heart-rate zones',
+    ],
+    ['heartRateTrend', (v) => oneOf(PACER_HEART_RATE_TRENDS, v), 'must be one of the three trends'],
+    ['recentLines', recentLinesOk, 'must be up to three lines the pacer may say'],
+  ];
+  const sensorFailed = sensorChecks.find(([key, ok]) => key in value && !ok(value[key]));
+  if (sensorFailed !== undefined) return refuse(`input.${sensorFailed[0]}`, sensorFailed[2]);
   return { ok: true, value: value as unknown as ModelPacerInput };
+}
+
+/** One to {@link MODEL_PACER_RECENT_LINES} lines, each non-empty and one the screen passes. */
+function recentLinesOk(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= MODEL_PACER_RECENT_LINES &&
+    value.every(
+      (line: unknown) =>
+        typeof line === 'string' && line !== '' && pacerSayProblem(line) === undefined,
+    )
+  );
 }
 
 // --- What the model may answer ---------------------------------------------
@@ -305,11 +411,67 @@ const NOT_A_LINE = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 /** Markup, code, a link or an address: none of it is a sentence. */
 const MARKUP = /[<>{}[\]`*_#|\\~^=@/$%&+]|:\/\/|\bwww\./i;
 /**
- * A digit of any script. No number at all: so no figure the pacer could be
- * read as asking the rider to hold, and no coordinate (CLAUDE.md §6) — the
- * input holds none, and this makes it impossible rather than unlikely.
+ * A digit of any script, once the cadence and power figures are taken out
+ * ({@link CADENCE_OR_POWER}). No other number: so no heart rate, time,
+ * distance, speed, zone or share the pacer could be read as asking the rider
+ * to hold, and no coordinate (CLAUDE.md §6) — the input holds none, and this
+ * makes it impossible rather than unlikely.
  */
 const NUMBER = /\p{N}/u;
+/**
+ * A number written as a number form — a letter-like numeral (`\p{Nl}`) or a
+ * Roman numeral, U+2160 to U+2188 — read before NFKC, which turns `Ⅳ` into
+ * the letters `IV` that {@link NUMBER} cannot see.
+ */
+const NUMBER_FORM = /[\p{Nl}\u2160-\u2188]/u;
+/** A zone named by a bare Roman numeral in ASCII letters: `zone IV`. */
+const ZONE_NUMERAL = /\bzones?\s+[ivxlcdm]+\b/i;
+/**
+ * Words for a quantity that is not a cadence or a power. A line that carries
+ * an admitted figure may name none of them, so the figure is admitted only in
+ * a cadence or power sentence: `Heart rate 150 W` is refused.
+ */
+const OTHER_QUANTITY =
+  /\b(?:heart\s*rates?|bpm|pulses?|minutes?|seconds?|km|miles?|(?:kilo)?met(?:re|er)s?|hours?|zones?)\b|%/i;
+/**
+ * The one kind of figure a line may carry (ADR 0077, the owner's ruling of
+ * 2026-11-17): a cadence or a power target, its number in ASCII digits
+ * (after NFKC) **immediately followed by its unit**, with one space allowed —
+ * `rpm`, `watt`/`watts`, `W` or `W/kg`. No sign, no thousands separator, no
+ * range and no other digit may touch it — a sign of any script, so no
+ * dash (`\p{Pd}`) and no mathematical symbol (`\p{Sm}`: `−`, `±`, `+`) — and
+ * nothing but a non-letter may follow the unit. {@link plausible} then bounds the value; an implausible
+ * one leaves its number behind, so the line is refused as a number.
+ */
+const CADENCE_OR_POWER =
+  /(?<![\p{L}\p{N}\p{Pd}\p{Sm}.,])(\d+(?:\.\d+)?) ?(rpm|watts?|W\/kg|W)(?![\p{L}\p{N}/])/giu;
+/**
+ * The values a cadence or power target may name, inclusive (ADR 0077 D-1):
+ * cadence 30 to 150 rpm and power 30 to 2 000 W, in whole numbers; 0.5 to 10
+ * W/kg, with at most one decimal place. No leading zero.
+ */
+function plausible(value: string, unit: string): boolean {
+  const perKg = unit.toLowerCase() === 'w/kg';
+  if (!(perKg ? /^(?:0|[1-9]\d*)(?:\.\d)?$/ : /^[1-9]\d*$/).test(value)) return false;
+  const n = Number(value);
+  if (perKg) return n >= 0.5 && n <= 10;
+  if (unit.toLowerCase() === 'rpm') return n >= 30 && n <= 150;
+  return n >= 30 && n <= 2000;
+}
+/**
+ * `visible` with each plausible cadence or power target replaced by a space,
+ * and each implausible one by its bare number, which {@link NUMBER} refuses;
+ * and whether any figure was admitted.
+ */
+function withoutCadenceOrPower(visible: string): { rest: string; admitted: boolean } {
+  let admitted = false;
+  const rest = visible.replace(CADENCE_OR_POWER, (_figure: string, value: string, unit: string) => {
+    if (!plausible(value, unit)) return value;
+    admitted = true;
+    return ' ';
+  });
+  return { rest, admitted };
+}
 /**
  * The load-metric trademarks (CLAUDE.md §6, `docs/agents/scope-and-ip.md`):
  * the abbreviations in capitals as words, and the names in any case.
@@ -338,9 +500,12 @@ export function pacerSayProblem(say: string): PacerSayProblem | undefined {
   if (say.length > MODEL_PACER_SAY_MOST_CHARACTERS) return 'too-long';
   if (say === '') return undefined;
   if (NOT_A_LINE.test(say)) return 'not-a-line';
-  const visible = say.replace(INVISIBLE, '').normalize('NFKC');
-  if (MARKUP.test(visible)) return 'markup';
-  if (NUMBER.test(visible)) return 'number';
+  const shown = say.replace(INVISIBLE, '');
+  const visible = shown.normalize('NFKC');
+  const { rest, admitted } = withoutCadenceOrPower(visible);
+  if (MARKUP.test(rest)) return 'markup';
+  if (NUMBER.test(rest) || NUMBER_FORM.test(shown) || ZONE_NUMERAL.test(visible)) return 'number';
+  if (admitted && OTHER_QUANTITY.test(visible)) return 'number';
   if (TRADEMARK_ABBREVIATION.test(visible) || TRADEMARK_NAME.test(visible)) return 'trademark';
   if (MEDICAL.test(visible)) return 'health-claim';
   if (!A_LETTER.test(visible)) return 'no-words';

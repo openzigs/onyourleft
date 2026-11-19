@@ -6152,6 +6152,62 @@ select.oyl-input {
 }
 
 /*
+ * A PACER OR A GHOST OUT OF VIEW — #2755 (`game/off-screen-marker.ts`).
+ *
+ * A marker at the edge of the world nearest to where the pacer is, laid over
+ * the world as the names above are and by the same rule: `layOffScreenMarkers`
+ * puts this layer exactly over `.oyl-game__world`, it is zero-sized until
+ * then, and it is before the HUD in the document, so a panel is over it.
+ * `off-screen-marker.ts` keeps each marker clear of the HUD's panels besides,
+ * and `browser/off-screen-marker.browser.spec.ts` measures that. Never a
+ * target and never read: the HUD's gap field says it as text.
+ */
+.oyl-game__off-screens {
+  height: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 0;
+}
+
+/*
+ * One marker: the HUD's own surface and ink, as a name is, with a border and
+ * an arrow in the colour of whom it points to — set per marker as
+ * `--oyl-off-screen-colour` from `off-screen-marker.ts` §`OFF_SCREEN_COLOURS`,
+ * each held there to 3 : 1 on this surface. Its size is set from there too, so
+ * the box kept clear of the HUD is the box drawn.
+ */
+.oyl-game__off-screen {
+  align-items: center;
+  background: var(--oyl-color-hud-surface);
+  border: 2px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  border-radius: var(--oyl-radius);
+  box-sizing: border-box;
+  color: var(--oyl-color-hud-ink);
+  display: flex;
+  font-size: var(--oyl-font-size-sm);
+  gap: var(--oyl-space-xs);
+  justify-content: center;
+  left: 0;
+  line-height: 1;
+  overflow: hidden;
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+/* A chevron: two sides of a square, turned to point the marker's way. */
+.oyl-game__off-screen-arrow {
+  border-right: 3px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  border-top: 3px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  flex: none;
+  height: 0.55em;
+  width: 0.55em;
+}
+
+/*
  * THE STAGE — a ride has the screen (#423).
  *
  * `GameView` puts this class on its root for exactly as long as a ride is
@@ -9477,6 +9533,31 @@ select.oyl-input {
  */
 .oyl-hud__notices:has(> .oyl-status + .oyl-status) > .oyl-status {
   padding-block: var(--oyl-space-xs);
+}
+
+/*
+ * The AI pacer's line, larger than any other notice — #2760's review, on the
+ * owner's word of 2026-11-17: "Might need to make the feedback a bit larger.
+ * I noticed it can be hard to see." It is the one notice meant to be read
+ * at a glance while pedalling, and the only one that changes every few
+ * seconds, so it alone is set at 1.5 times a notice's size (0.8 rem to
+ * 1.2 rem), in the HUD numerals' face and weight, Barlow at 700. The face is
+ * bundled, so the line wraps the same on every device: in the body's
+ * `system-ui` it took three lines on a Mac and four on the CI runner's
+ * DejaVu Sans (run 44099666536). Its colours are the info
+ * tone's declared pair, unchanged. A line is at most 80 characters (ADR 0072
+ * D-4); in the notices cell's 22 rem, at 1024×600 and 1280×800, about 45 of
+ * them fit on two lines and all 80 on three, measured in the pinned Chromium.
+ * `ride-notices.browser.spec.ts` §"the AI pacer's line" measures the size,
+ * the lines, the contrast and that it covers no panel or control, and goes
+ * red at the old size. Only this notice grows: the shared rule above is
+ * untouched.
+ */
+.oyl-hud__notices .oyl-status.oyl-hud__pacer-say {
+  font-family: var(--oyl-font-family-display);
+  font-size: calc(var(--oyl-font-size-sm) * 1.5);
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 /*
