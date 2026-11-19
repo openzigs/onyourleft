@@ -277,10 +277,15 @@ internal network only it and the instance share for the tunnel's readiness (#260
 `tailscale` `172.30.87.11`, and names exactly those three addresses. You do not set them in `.env`.
 The same list is what makes the admin pages' loopback listener close a connection from either proxy
 unread (ADR 0069 D-5). If `172.30.87.0/24` or `172.30.88.0/24` is already in use on this machine,
-change that subnet, the proxies' addresses on it and `OYL_INSTANCE_TRUSTED_PROXIES` in
-`compose.yaml` together; for `172.30.88.0/24`, also the `--metrics` address in the tunnel's command
-and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network, or a port published
-for local debugging, is counted as itself, whatever header it sends.
+set **`OYL_NETWORK_PREFIX`** or **`OYL_TUNNEL_METRICS_PREFIX`** in `.env` to the first three numbers
+of a free `/24`, such as `10.77.1`, and run `bash deploy.sh` again
+([#2918](https://github.com/openzigs/onyourleft/issues/2918)). `compose.yaml` writes every address
+that depends on it from that setting: the proxies' fixed addresses, `OYL_INSTANCE_TRUSTED_PROXIES`,
+the tunnel's `--metrics` address and its readiness address. Being in `.env`, the change survives
+every update of `compose.yaml`. A `.env` from before #2918 may still name
+`OYL_INSTANCE_TUNNEL_READY_URL=http://172.30.88.10:20241/ready`: delete that line when you change
+`OYL_TUNNEL_METRICS_PREFIX`. Anything else on that network, or a port published for local
+debugging, is counted as itself, whatever header it sends.
 
 ## 5. Start it
 
