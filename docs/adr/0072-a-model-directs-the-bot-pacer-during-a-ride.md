@@ -444,3 +444,29 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     [ADR 0078](0078-a-floor-under-the-ai-pacers-intent.md), **Proposed** for the owner's answer.
   - **What does not move**: the envelope (D-2.2), the trainer (D-6), the fallback (D-7), the log and
     `MODEL_PACER_CODE_VERSION` (D-5), and the screen's other rules.
+- **2026-11-17** — **D-3.4's input gains the course ahead
+  ([#2794](https://github.com/openzigs/onyourleft/issues/2794)).** The owner asked that the AI
+  take the terrain into account when it changes pace. The pacer state may carry `course`, read
+  from the pacer's place on the route (`@onyourleft/domain` §`ModelPacerCourse`,
+  `route/course-ahead.ts`): the next climb and the next descent (each 3 % or steeper for 200 m or
+  more, looked for 5 km ahead at most and never past the finish: metres to its start, its length,
+  its average and steepest grade), the climbing left to the finish or, on a loop, in the lap, and
+  on a loop the metres left in the lap. Every field is a number or `null`, so D-3.4's *no
+  coordinate, no place name, no rider name, no date, no identifier* still holds, and the reader
+  refuses any key it does not name; the field is optional, so a device from before it still asks.
+  The prompt is `pacer-5`: where the gap rules (`pacer-4`) leave a choice, ease a little in the
+  last 300 m before a climb so the pacer can hold its pace up it, and lift on a descent or where a
+  climb ends into the flat, and it names the gap and the road ahead among the distances a line
+  may not write, because on the owner's PC easing lines quoted the gap in metres, which the screen
+  voids. **What does not move**: the envelope (D-2.2), the trainer (D-6), the
+  fallback (D-7), the log and `MODEL_PACER_CODE_VERSION` (D-5), the screen (D-4.2) and the gap
+  rules, which still come first.
+- **2026-11-18** — **D-2 is superseded in part a second time, by
+  [ADR 0082](0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**, accepted on the
+  owner's *"Yes to pacer rule"* on #2802. With the rider level with the pacer or in its draft, the
+  device rides `ease` in the last 300 m before a climb and `lift` on a descent and for 200 m over a
+  climb's top, whatever intent the model chose; the plan stays the model's. Under `pacer-5` the
+  model held everywhere in those places. ADR 0078's floor is applied after it and wins. **What does
+  not move**: the envelope (D-2.2), the trainer (D-6), the fallback (D-7), and the log and
+  `MODEL_PACER_CODE_VERSION` (D-5): the log records the direction ridden, so a stored ride replays
+  from the log alone.

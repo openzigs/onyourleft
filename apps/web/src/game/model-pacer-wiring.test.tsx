@@ -529,7 +529,13 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     // What it sent: the pacer's state, with no coordinate in it.
     expect(JSON.stringify(directed.asked.inputs)).not.toMatch(/latitude|longitude/);
     expect(directed.asked.inputs[0]).toMatchObject({ pacerWPerKg: 2.9, plan: 'rolling' });
-    expect(directed.asked.inputs.at(-1)).toMatchObject({ plan: 'climber', intent: 'lift' });
+    // The model's plan is ridden, and its `lift`; ADR 0082: with the rider
+    // on the wheel before a climb, the device rides `ease` in its place —
+    // which only the rule can, as the double never says `ease`.
+    const intents = directed.asked.inputs.map((each) => each.intent);
+    expect(directed.asked.inputs.at(-1)).toMatchObject({ plan: 'climber' });
+    expect(intents).toContain('lift');
+    expect(intents).toContain('ease');
     // #2760: the consent names the new data, and the state carries the
     // rider's own sensors from the shipped frame loop — cadence and heart
     // rate as the port reads them, the HUD's 3 s power — and the model's own

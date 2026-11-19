@@ -247,6 +247,13 @@ describe('the rider’s own sensors, in the state — #2760', () => {
       rider3sWPerKg: 39.9,
       riderMinuteWPerKg: 39.9,
       recentLines: Array.from({ length: MODEL_PACER_RECENT_LINES }, () => longest),
+      // #2794: the course ahead at its widest.
+      course: {
+        climb: { inM: 5_000, lengthM: 5_000, avgPct: -100, maxPct: -100 },
+        descent: { inM: 5_000, lengthM: 5_000, avgPct: -100, maxPct: -100 },
+        lapLeftM: 999_999,
+        climbLeftM: 999_999,
+      },
     };
     expect(JSON.stringify(widest).length).toBeLessThanOrEqual(MODEL_PACER_INPUT_MOST_CHARACTERS);
     expect(readModelPacerInput(widest).ok).toBe(true);
@@ -545,6 +552,42 @@ describe('where the rider is, in words — #2777', () => {
   it('reads a state that carries both, as the device sends it', () => {
     const placed: ModelPacerInput = { ...STATE, riderPlace: 'ahead', gapTrend: 'rider-gaining' };
     expect(readModelPacerInput(placed)).toEqual({ ok: true, value: placed });
+  });
+});
+
+describe('the course ahead, in the state — #2794', () => {
+  const course = {
+    climb: { inM: 300, lengthM: 800, avgPct: 5, maxPct: 8 },
+    descent: null,
+    lapLeftM: null,
+    climbLeftM: 120,
+  };
+
+  it('reads a state with the course ahead, and one from before it with none', () => {
+    const shown: ModelPacerInput = { ...STATE, course };
+    expect(readModelPacerInput(JSON.parse(JSON.stringify(shown)) as unknown)).toEqual({
+      ok: true,
+      value: shown,
+    });
+    expect(readModelPacerInput({ ...STATE, course: { ...course, lapLeftM: 1_250 } }).ok).toBe(true);
+    expect(readModelPacerInput(STATE).ok).toBe(true);
+  });
+
+  it.each([
+    ['null', null],
+    ['a name', { ...course, name: 'Box Hill' }],
+    ['no climbing', { climb: null, descent: null, lapLeftM: null }],
+    ['a hill with a place', { ...course, climb: { ...course.climb, at: 'Box Hill' } }],
+    [
+      'a hill out of reach',
+      { ...course, descent: { inM: 9_000, lengthM: 300, avgPct: -4, maxPct: -6 } },
+    ],
+    ['negative climbing', { ...course, climbLeftM: -1 }],
+    ['a lap as text', { ...course, lapLeftM: '1 km' }],
+  ])('refuses a course with %s, naming the field and never the value', (_, value) => {
+    const read = readModelPacerInput({ ...STATE, course: value });
+    expect(read.ok ? undefined : read.problem.field).toBe('input.course');
+    expect(JSON.stringify(read)).not.toContain('Box Hill');
   });
 });
 

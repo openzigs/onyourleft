@@ -134,6 +134,13 @@ export const PACER_INPUT: ModelPacerInput = {
   gradeAheadPct: 3.5,
   toFinishM: 6_000,
   rideS: 240,
+  // #2794: the rise ahead is the start of a climb, with a descent after it.
+  course: {
+    climb: { inM: 100, lengthM: 900, avgPct: 5, maxPct: 8 },
+    descent: { inM: 1_400, lengthM: 600, avgPct: -4, maxPct: -6 },
+    lapLeftM: null,
+    climbLeftM: 85,
+  },
 };
 
 /** A model's valid pacer answer (#2712). */

@@ -122,3 +122,13 @@ owner's ride (*"I am ahead and never see it taking over"*) cannot repeat with th
   floor is directing the pacer, which ADR 0072 gave to the model.
 - **A pacer at `hold` behind a rider who is ahead is the wrong pace for a training partner**, on the
   owner's rides: then the floor should be `lift`, and that is a new decision, not this one.
+
+## Amendments
+
+- **2026-11-18** — **A second device rule sits beside the floor:
+  [ADR 0082](0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**, which, with the
+  rider level or in the draft, rides `ease` before a climb and `lift` on a descent and over a
+  climb's top. The floor is applied after it (`@onyourleft/domain` §`riddenDirection`), so **the
+  floor wins** wherever both could act. They cannot both act on one ask today, because ADR 0082 never
+  acts with the rider `ahead`. This ADR's D-1.3 line rule is now read through
+  `pacerSayAgainstRidden`, which refuses the same lines beside a floored `hold`.

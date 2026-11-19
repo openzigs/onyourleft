@@ -6,14 +6,18 @@ import {
   metresPerSecond,
   MODEL_PACER_ASK_EVERY_S,
   MODEL_PACER_LATE_S,
+  MODEL_PACER_CODE_VERSION,
   MODEL_PACER_SAY_SHOWN_S,
   PACER_AHEAD_FLOOR_S,
+  pacerDirectionAt,
   readModelPacerInput,
+  readPacerDecisionRecord,
   seconds,
   watts,
   type ModelPacerInput,
   type PacerDecisionRecord,
   type PacerDirection,
+  type PacerTerrain,
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
@@ -24,15 +28,17 @@ import type { TraceSample } from './hud/recent-trace';
 import {
   heartRateTrend,
   ModelPacer,
+  modelPacerCourse,
   modelPacerInput,
   modelPacerSensorFields,
+  modelPacerTerrain,
   powerTrend,
   secondsAtOrAbove,
   UNDIRECTED,
   type ModelPacerLink,
   type ModelPacerSensors,
 } from './model-pacer';
-import { rollingRoute } from './route-fixtures-testing';
+import { circuitRoute, northRoute, rollingRoute } from './route-fixtures-testing';
 
 /** `length` seconds of trace, each sample from `at(index)`. */
 const traceOf = (length: number, at: (index: number) => TraceSample): TraceSample[] =>
@@ -95,6 +101,7 @@ function ride(link: ModelPacerLink) {
         intent: inForce.direction.intent,
         rideS: Math.floor(at),
       }),
+      terrain: () => 'none',
       direct: (direction, from) => applied.push({ direction, from }),
     });
   return { pacer, records, applied, frame };
@@ -268,6 +275,86 @@ describe('the pacer state the model is shown — #2712, ADR 0072 D-3', () => {
   });
 });
 
+describe('the course ahead the model is shown — #2794', () => {
+  /** 3 km to a finish: flat, 500 m up at 6 %, flat, 400 m down at 5 %, flat. */
+  const finish = northRoute(3_000, (along) =>
+    along < 800
+      ? 100
+      : along < 1_300
+        ? 100 + (along - 800) * 0.06
+        : along < 1_800
+          ? 130
+          : along < 2_200
+            ? 130 - (along - 1_800) * 0.05
+            : 110,
+  );
+  /** A 1 885 m loop: flat, 400 m up at 6 % from 200 m, 400 m down, flat to the line. */
+  const loop = circuitRoute(300, (along) =>
+    along < 200
+      ? 100
+      : along < 600
+        ? 100 + (along - 200) * 0.06
+        : along < 1_000
+          ? 124 - (along - 600) * 0.06
+          : 100,
+  );
+  const nearly = (got: number | undefined, want: number) => {
+    expect(got).toBeDefined();
+    // The profile's grade is smoothed over 50 m, so a pitch's ends move by a cell or two.
+    expect(Math.abs((got as number) - want)).toBeLessThanOrEqual(30);
+  };
+
+  it('shows the next climb and descent and the climbing left to the finish, in the state it sends', () => {
+    const input = modelPacerInput({
+      state: {
+        ride: { speed: metresPerSecond(8), distance: metres(240) },
+        bot: {
+          state: { speed: metresPerSecond(8), distance: metres(250) },
+          distanceOnRoute: metres(250),
+          grade: 0 as never,
+          power: watts(190),
+        },
+        ridden: seconds(60),
+        input: { power: watts(180), live: true },
+        soloDraft: undefined,
+      },
+      plan: botPacerPlan(2.5),
+      profile: finish,
+      riderMassKilograms: 75,
+      inForce: { direction: UNDIRECTED, since: 0 },
+    });
+    const course = input.course;
+    nearly(course?.climb?.inM, 800 - 250);
+    nearly(course?.climb?.lengthM, 500);
+    expect(course?.climb).toMatchObject({ avgPct: 6, maxPct: 6 });
+    nearly(course?.descent?.inM, 1_800 - 250);
+    expect(course?.descent).toMatchObject({ avgPct: -5, maxPct: -5 });
+    expect(course?.lapLeftM).toBeNull();
+    nearly(course?.climbLeftM, 30);
+    expect(readModelPacerInput(input)).toEqual({ ok: true, value: input });
+  });
+
+  it('says nothing ahead past the last hill of a route with a finish', () => {
+    expect(modelPacerCourse(finish, 2_500)).toEqual({
+      climb: null,
+      descent: null,
+      lapLeftM: null,
+      climbLeftM: 0,
+    });
+  });
+
+  it('on a loop, shows the metres left in the lap, its climbing, and the climb after the line', () => {
+    const total = loop.totalDistance as number;
+    const course = modelPacerCourse(loop, 1_500);
+    expect(course.lapLeftM).toBe(Math.round((total - 1_500) / 10) * 10);
+    expect(course.climbLeftM).toBe(0);
+    nearly(course.climb?.inM, total - 1_500 + 200);
+    // A pacer in its second lap reads the lap it is in.
+    expect(modelPacerCourse(loop, total + 1_500)).toEqual(course);
+    nearly(modelPacerCourse(loop, 100).climbLeftM, 24);
+  });
+});
+
 describe('where the rider is, and the floor under the intent — #2777, ADR 0078', () => {
   const profile = rollingRoute();
   const at = (riderDistance: number, riderSpeed: number) => ({
@@ -308,7 +395,11 @@ describe('where the rider is, and the floor under the intent — #2777, ADR 0078
   });
 
   /** A director whose state at each second ridden is `stateAt`'s. */
-  function placedRide(link: ModelPacerLink, stateAt: (at: number) => Partial<ModelPacerInput>) {
+  function placedRide(
+    link: ModelPacerLink,
+    stateAt: (at: number) => Partial<ModelPacerInput>,
+    terrainAt: (at: number) => PacerTerrain = () => 'none',
+  ) {
     const records: PacerDecisionRecord[] = [];
     const applied: PacerDirection[] = [];
     const pacer = new ModelPacer(link, (record) => records.push(record));
@@ -322,6 +413,7 @@ describe('where the rider is, and the floor under the intent — #2777, ADR 0078
           rideS: Math.floor(seconds),
           ...stateAt(seconds),
         }),
+        terrain: () => terrainAt(seconds),
         direct: (direction) => applied.push(direction),
       });
     return { records, applied, frame };
@@ -405,6 +497,145 @@ describe('where the rider is, and the floor under the intent — #2777, ADR 0078
     ];
     await rideAsks(frame, asked, [0, 5, 10, 15], (index) => replies[index] ?? ease(''));
     expect(applied.map((each) => each.intent)).toEqual(['ease', 'ease', 'lift', 'hold']);
+  });
+
+  // --- ADR 0082: the terrain, with the rider on the wheel ---------------------
+
+  const TERRAIN_ASKS = [0, 5, 10, 15] as const;
+  const terrainOf = (seconds: number): PacerTerrain =>
+    (['before-climb', 'descent', 'over-the-top', 'none'] as const)[seconds / 5] ?? 'none';
+  const holdSaying = (say: string): PacerReply => ({
+    kind: 'answer',
+    direction: { plan: 'even', intent: 'hold' },
+    say,
+  });
+
+  it('with the rider level, eases before a climb and lifts on a descent and over the top, and logs what it rode', async () => {
+    const { link, asked } = heldLink();
+    const { frame, records, applied } = placedRide(
+      link,
+      () => ({ riderGapM: 5, riderPlace: 'level', riderInDraft: false }),
+      terrainOf,
+    );
+    await rideAsks(frame, asked, TERRAIN_ASKS, () => holdSaying('Stay smooth.'));
+    expect(applied).toEqual([
+      { plan: 'even', intent: 'ease' },
+      { plan: 'even', intent: 'lift' },
+      { plan: 'even', intent: 'lift' },
+      { plan: 'even', intent: 'hold' },
+    ]);
+    expect(
+      records.map((each) => (each.outcome === 'applied' ? each.intent : each.outcome)),
+    ).toEqual(['ease', 'lift', 'lift', 'hold']);
+  });
+
+  it('does the same with the rider in the draft, though the gap says behind', async () => {
+    const { link, asked } = heldLink();
+    const { frame, applied } = placedRide(
+      link,
+      () => ({ riderGapM: -25, riderPlace: 'behind', riderInDraft: true }),
+      terrainOf,
+    );
+    await rideAsks(frame, asked, TERRAIN_ASKS, () => holdSaying(''));
+    expect(applied.map((each) => each.intent)).toEqual(['ease', 'lift', 'lift', 'hold']);
+  });
+
+  it.each([
+    ['ahead', 40, true],
+    ['ahead', 40, false],
+    ['behind', -40, false],
+  ] as const)(
+    'with the rider %s (in the draft: %s), rides the model’s intent on every terrain',
+    async (riderPlace, riderGapM, riderInDraft) => {
+      const { link, asked } = heldLink();
+      const { frame, applied } = placedRide(
+        link,
+        () => ({ riderGapM, riderPlace, riderInDraft }),
+        terrainOf,
+      );
+      await rideAsks(frame, asked, TERRAIN_ASKS, () => holdSaying(''));
+      expect(applied.map((each) => each.intent)).toEqual(['hold', 'hold', 'hold', 'hold']);
+    },
+  );
+
+  it('shows no line that contradicts the intent it rode, and still rides and logs it', async () => {
+    const { link, asked } = heldLink();
+    const { frame, records } = placedRide(
+      link,
+      () => ({ riderGapM: 5, riderPlace: 'level' }),
+      (seconds) => (seconds < 5 ? 'before-climb' : 'descent'),
+    );
+    const replies: PacerReply[] = [
+      {
+        kind: 'answer',
+        direction: { plan: 'rolling', intent: 'lift' },
+        say: 'I am going to push on now.',
+      },
+      {
+        kind: 'answer',
+        direction: { plan: 'rolling', intent: 'ease' },
+        say: 'I will ease off here.',
+      },
+      { kind: 'answer', direction: { plan: 'rolling', intent: 'hold' }, say: 'Stay on my wheel.' },
+    ];
+    const shown = await rideAsks(
+      frame,
+      asked,
+      [0, 5, 10],
+      (index) => replies[index] ?? holdSaying(''),
+    );
+    expect(shown[0]).toEqual({});
+    expect(shown[1]).toEqual({});
+    expect(shown[2]).toEqual({ arrived: 'Stay on my wheel.', showing: 'Stay on my wheel.' });
+    expect(
+      records.map((each) => (each.outcome === 'applied' ? each.intent : each.outcome)),
+    ).toEqual(['ease', 'lift', 'lift']);
+  });
+
+  it('replays from its log alone: the decision in force read off the log is what was ridden', async () => {
+    const { link, asked } = heldLink();
+    const ridden: { direction: PacerDirection; from: number }[] = [];
+    const records: PacerDecisionRecord[] = [];
+    const pacer = new ModelPacer(link, (record) => records.push(record));
+    const frame = (seconds: number) =>
+      pacer.frame({
+        riddenSeconds: seconds,
+        input: (inForce) => ({
+          ...STATE,
+          plan: inForce.direction.plan,
+          intent: inForce.direction.intent,
+          riderPlace: 'level',
+        }),
+        terrain: () => terrainOf(seconds),
+        direct: (direction, from) => ridden.push({ direction, from }),
+      });
+    await rideAsks(frame, asked, TERRAIN_ASKS, () => holdSaying(''));
+    expect(MODEL_PACER_CODE_VERSION).toBe(1);
+    const stored = JSON.parse(JSON.stringify(pacer.log())) as unknown[];
+    const log = stored.map((each) => readPacerDecisionRecord(each) as PacerDecisionRecord);
+    for (const [index, each] of ridden.entries()) {
+      const until = ridden[index + 1]?.from ?? each.from + 3;
+      for (let at = each.from; at < until; at += 0.5) {
+        expect(pacerDirectionAt(log, at)).toEqual(each.direction);
+      }
+    }
+    expect(ridden.map((each) => each.direction.intent)).toEqual(['ease', 'lift', 'lift', 'hold']);
+  });
+
+  it('reads the terrain at the pacer, not the rider', () => {
+    // Flat to 1 km, then 600 m at 6 %.
+    const road = northRoute(2_000, (along) => (along < 1_000 ? 100 : 100 + (along - 1_000) * 0.06));
+    const state = (pacerAt: number) => ({
+      bot: {
+        state: { speed: metresPerSecond(8), distance: metres(pacerAt) },
+        distanceOnRoute: metres(pacerAt),
+        grade: 0 as never,
+        power: watts(190),
+      },
+    });
+    expect(modelPacerTerrain(state(800), road)).toBe('before-climb');
+    expect(modelPacerTerrain(state(400), road)).toBe('none');
+    expect(modelPacerTerrain({ bot: undefined }, road)).toBe('none');
   });
 });
 
