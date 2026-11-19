@@ -345,4 +345,16 @@ describe('the session', () => {
       text: 'Not here.',
     });
   });
+
+  it('says a session closed because nobody answered is a passing fact, and refused keys are not (#2104)', () => {
+    expect(jobSessionOf({ kind: 'closed', why: 'unreachable', text: 'No answer.' })).toStrictEqual({
+      kind: 'closed',
+      text: 'No answer.',
+      unreachable: true,
+    });
+    expect(jobSessionOf({ kind: 'closed', why: 'keys', text: 'Not the card.' })).toStrictEqual({
+      kind: 'closed',
+      text: 'Not the card.',
+    });
+  });
 });
