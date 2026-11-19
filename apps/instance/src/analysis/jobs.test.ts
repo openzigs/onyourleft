@@ -890,6 +890,46 @@ describe('never logged', () => {
     expect(logged).toContain('"event":"analysis-job","state":"failed","code":"model-error"');
   });
 
+  it('logs what a write-up’s run came to on its last line, numbers only (#2840)', async () => {
+    const jobLines: string[] = [];
+    const {
+      world: w,
+      engine,
+      riders,
+    } = await jobsWorld(1, { analysis: { log: (line) => jobLines.push(line) } });
+    await started(w, riders[0]!.token);
+    const run = await engine.next();
+    run.emit({ type: 'progress', step: 1, tool: 'goals' });
+    run.report({
+      turns: 3,
+      toolCalls: 2,
+      toolsUsed: 1,
+      tokensIn: 4_812,
+      tokensOut: 1_377,
+      milliseconds: 61_250,
+    });
+    run.finish({ kind: 'failed', why: 'model-cut-off' });
+    await w.analysis?.idle();
+    const ended = [...w.instance.lines, ...jobLines]
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === 'analysis-job' && line.state === 'failed');
+    expect(ended).toStrictEqual([
+      {
+        event: 'analysis-job',
+        state: 'failed',
+        code: 'model-cut-off',
+        turns: 3,
+        toolCalls: 2,
+        toolsUsed: 1,
+        tokensIn: 4_812,
+        tokensOut: 1_377,
+        ms: 61_250,
+      },
+    ]);
+    // The tool's name is in no log line.
+    expect(jobLines.join('\n')).not.toContain('goals');
+  });
+
   it('fails a job whose engine rejects, and keeps the error’s text nowhere (#1187)', async () => {
     // A tool's `run` that rejects — a store error — propagates out of
     // `runAnalysisAgent` (agent.ts §`runAnalysisAgent`): this is where it lands.

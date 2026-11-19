@@ -374,6 +374,27 @@ describe('the analysis model’s settings (#1096, ADR 0046 D-9)', () => {
     }
   });
 
+  it('takes the model’s context the operator states, and turns analysis off for one it cannot read (#2840)', () => {
+    const base = { analysisModelUrl: 'http://ollama:11434/v1', analysisModel: 'm' };
+    const said = readAnalysisModelSettings({ ...base, analysisModelContextTokens: ' 16384 ' });
+    expect(said.kind === 'on' && said.contextTokens).toBe(16_384);
+    const both = readAnalysisModelSettings({
+      ...base,
+      analysisModelContextTokens: '2048',
+      analysisModelReasoningTokens: '512',
+    });
+    expect(both).toMatchObject({ kind: 'on', contextTokens: 2_048, reasoningTokens: 512 });
+    const none = readAnalysisModelSettings({ ...base, analysisModelContextTokens: ' ' });
+    expect(none.kind === 'on' && 'contextTokens' in none).toBe(false);
+    for (const bad of ['0', '2047', '-4', '8192.5', 'many', '1048577', '16k']) {
+      const settings = readAnalysisModelSettings({ ...base, analysisModelContextTokens: bad });
+      expect(settings, bad).toMatchObject({ kind: 'off', code: 'bad-context' });
+      expect(settings.kind === 'off' && settings.reason).toContain(
+        'OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS',
+      );
+    }
+  });
+
   it('refuses a public name and a .local name at reading, and says why', () => {
     for (const url of [
       'https://models.example.com/v1',

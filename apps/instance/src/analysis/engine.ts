@@ -33,7 +33,7 @@ export interface AgentEngineOptions {
 
 export function agentEngine(options: AgentEngineOptions): AnalysisEngine {
   return {
-    async run(job, signal, emit) {
+    async run(job, signal, emit, report) {
       const chosen = await modelForSource(job.source, job.athleteId, options.sources);
       if (!chosen.ok) return { kind: 'failed', why: chosen.failure };
       return runAnalysisAgent({
@@ -48,6 +48,7 @@ export function agentEngine(options: AgentEngineOptions): AnalysisEngine {
         clock: options.clock,
         signal,
         emit,
+        ...(report === undefined ? {} : { report }),
       });
     },
   };

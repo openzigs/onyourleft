@@ -40,3 +40,4 @@ export {
   HISTORY_FENCE_END,
   type AgentTemplate,
 } from './template/agent-v1';
+export { AGENT_V2_TEMPERATURE, ANALYSIS_AGENT_TEMPLATE_V2 } from './template/agent-v2';

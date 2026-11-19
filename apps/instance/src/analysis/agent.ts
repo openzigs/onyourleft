@@ -45,7 +45,7 @@
  */
 
 import {
-  ANALYSIS_AGENT_TEMPLATE_V1,
+  ANALYSIS_AGENT_TEMPLATE_V2,
   fenceData,
   passedScreen,
   RUN_BUDGET_MILLISECONDS,
@@ -67,6 +67,18 @@ import type {
 } from './model-turn.ts';
 import type { AnalysisHistory, AnalysisReads } from './tools/reads.ts';
 import { AGENT_TOOLS, type AgentTool, type ToolContext } from './tools/tools.ts';
+
+/**
+ * The template every write-up runs (#2840): version 2, which names all five
+ * tools, gives one worked paragraph, and asks a low temperature and no
+ * reasoning. Over #2840's scored set on the owner's box it wrote 12 of 12
+ * rides in 3 to 13 s each, where version 1 wrote 8 of 12 in 16 to 98 s (the
+ * other four reasoned to their limit and answered nothing). ⚠️ **A job's
+ * `templateVersion` is still `1`**: it names the request a device sends —
+ * version 1's input, which version 2 reads unchanged (it sends version 1's
+ * first message) — and a device that sends it is not refused.
+ */
+export const AGENT_TEMPLATE = ANALYSIS_AGENT_TEMPLATE_V2;
 
 /** The most model turns one run may take (ADR 0046 D-7). */
 export const AGENT_MODEL_CALLS = 24;
@@ -147,6 +159,7 @@ export type AgentFailure =
   | 'out-of-tool-calls'
   | 'out-of-time'
   | 'out-of-tokens'
+  | 'out-of-context'
   | 'model-without-tools'
   | 'model-not-local'
   | 'model-unreachable'
@@ -170,6 +183,8 @@ export const AGENT_FAILURE_TEXT: Readonly<Record<AgentFailure, string>> = {
     'The model took too long, so the write-up was stopped and nothing was kept. A smaller or faster model may finish in time.',
   'out-of-tokens':
     'The write-up would have sent the model more text than this app allows, so it was stopped and nothing was kept.',
+  'out-of-context':
+    'The write-up would have given the model more than it can read at once, so it was stopped before any of it was lost and nothing was kept. Whoever runs the instance can give the model a longer context.',
   'model-without-tools':
     'The model on your instance cannot use tools, which this write-up needs, so nothing was written. Choose a model that supports tool calling.',
   'model-not-local':
@@ -229,7 +244,7 @@ export interface AgentOptions {
   /** The job's: aborting it cancels the run. */
   readonly signal: AbortSignal;
   readonly emit: (event: AgentEvent) => void;
-  /** {@link ANALYSIS_AGENT_TEMPLATE_V1} unless a test says otherwise. */
+  /** {@link AGENT_TEMPLATE} unless a test or a measurement says otherwise. */
   readonly template?: AgentTemplate;
   /**
    * ADR 0046 D-7's figures ({@link AGENT_BUDGETS}) unless a test lowers one —
@@ -237,6 +252,26 @@ export interface AgentOptions {
    * the tool-call budget binds first (see {@link AGENT_BUDGETS}).
    */
   readonly budgets?: Partial<AgentBudgets>;
+  /**
+   * Told once, when the run ends however it ends, what it came to (#2840):
+   * numbers only, for the job engine to log. Never the model's text.
+   */
+  readonly report?: (usage: AgentUsage) => void;
+}
+
+/**
+ * What one run came to (#2840): its model turns, its tool calls and how many
+ * of the tools it used, the tokens sent and answered (as the server reported
+ * them, or the estimate where it reported none, as the budget counts them),
+ * and its time. Numbers only: no tool's name, nothing the model wrote.
+ */
+export interface AgentUsage {
+  readonly turns: number;
+  readonly toolCalls: number;
+  readonly toolsUsed: number;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly milliseconds: number;
 }
 
 /** A run's walls. */
@@ -373,8 +408,51 @@ export async function runCall<C = ToolContext>(
  * the job engine must do the same.
  */
 export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutcome> {
+  const started = options.clock.now();
+  const usage = { turns: 0, toolCalls: 0, tokensIn: 0, tokensOut: 0, used: new Set<string>() };
+  try {
+    return await agentLoop(options, usage);
+  } finally {
+    options.report?.({
+      turns: usage.turns,
+      toolCalls: usage.toolCalls,
+      toolsUsed: usage.used.size,
+      tokensIn: usage.tokensIn,
+      tokensOut: usage.tokensOut,
+      milliseconds: Math.max(0, options.clock.now() - started),
+    });
+  }
+}
+
+/** What {@link agentLoop} counts as it goes, for {@link AgentOptions.report}. */
+interface RunCount {
+  turns: number;
+  toolCalls: number;
+  tokensIn: number;
+  tokensOut: number;
+  readonly used: Set<string>;
+}
+
+/**
+ * Whether a turn of `sent` tokens and `allowance` more fits the model's
+ * context (#2840). Ollama does not refuse a conversation longer than its
+ * context: it drops the oldest text and says nothing (measured 2026-11-19,
+ * Ollama 0.40.16: a 4 220-token prompt at a 1 024-token context was read as
+ * 1 027 tokens, and the system prompt was gone). An answer that runs past it
+ * is shifted the same way. So the whole turn must fit, counted pessimistically
+ * ({@link estimatedTokens}), and a context that is not known is not checked.
+ */
+export function fitsContext(
+  sent: number,
+  allowance: number,
+  contextTokens: number | undefined,
+): boolean {
+  return contextTokens === undefined || sent + allowance <= contextTokens;
+}
+
+async function agentLoop(options: AgentOptions, count: RunCount): Promise<AgentOutcome> {
   const { job, model, reads, history, clock, signal, emit } = options;
-  const template = options.template ?? ANALYSIS_AGENT_TEMPLATE_V1;
+  const template = options.template ?? AGENT_TEMPLATE;
   const budgets: AgentBudgets = { ...AGENT_BUDGETS, ...options.budgets };
   const tools = new Map(AGENT_TOOLS.map((tool) => [tool.spec.name, tool] as const));
   const specs = AGENT_TOOLS.map((tool) => tool.spec);
@@ -411,14 +489,18 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
     );
     const allowance = AGENT_TURN_OUTPUT_TOKENS + (reasoningModel ? reasoningAllowance : 0);
     if (tokens + sent + allowance > budgets.tokens) return failed('out-of-tokens');
+    if (!fitsContext(sent, allowance, model.contextTokens)) return failed('out-of-context');
 
     modelCalls += 1;
+    count.turns = modelCalls;
     emit({ type: 'progress', step: modelCalls });
     const turn = await model.turn({
       system: template.system,
       messages: [...messages],
       tools: specs,
       maxOutputTokens: allowance,
+      ...(template.temperature === undefined ? {} : { temperature: template.temperature }),
+      ...(template.thinking === undefined ? {} : { thinking: template.thinking }),
       timeoutMilliseconds: Math.min(AGENT_TURN_MILLISECONDS, left),
       signal,
     });
@@ -429,6 +511,8 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
     if (signal.aborted) return { kind: 'cancelled' };
     // What the turn cost, as the server reports it; where it reports nothing,
     // the estimate of what was sent and every token the turn could answer.
+    count.tokensIn += turn.usage.inputTokens ?? sent;
+    count.tokensOut += turn.usage.outputTokens ?? allowance;
     tokens += (turn.usage.inputTokens ?? sent) + (turn.usage.outputTokens ?? allowance);
     const allowedToReason = reasoningModel;
     if (turn.reasoning !== undefined) reasoningModel = true;
@@ -443,7 +527,9 @@ export async function runAnalysisAgent(options: AgentOptions): Promise<AgentOutc
         if (clock.now() - started >= budgets.milliseconds) return failed('out-of-time');
         if (toolCalls >= budgets.toolCalls) return failed('out-of-tool-calls');
         toolCalls += 1;
+        count.toolCalls = toolCalls;
         const { text, known } = await runCall(call, tools, context, called);
+        if (known !== undefined) count.used.add(known.spec.name);
         emit(
           known === undefined
             ? { type: 'progress', step: modelCalls }

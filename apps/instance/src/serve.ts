@@ -54,6 +54,7 @@ const http = readConfig({
   analysisModelUrl: process.env.OYL_INSTANCE_ANALYSIS_MODEL_URL,
   analysisModel: process.env.OYL_INSTANCE_ANALYSIS_MODEL,
   analysisModelReasoningTokens: process.env.OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS,
+  analysisModelContextTokens: process.env.OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS,
   pictureModel: process.env.OYL_INSTANCE_PICTURE_MODEL,
   name: process.env.OYL_INSTANCE_NAME,
   contactEmail: process.env.OYL_INSTANCE_CONTACT_EMAIL,

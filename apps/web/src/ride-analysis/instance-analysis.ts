@@ -210,6 +210,8 @@ export const INSTANCE_FAILURE_TEXT = {
     'The model took too long, so the write-up was stopped and nothing was kept. A smaller or faster model may finish in time.',
   'out-of-tokens':
     'The write-up would have sent the model more text than your instance allows, so it was stopped and nothing was kept.',
+  'out-of-context':
+    'The write-up would have given the model more than it can read at once, so it was stopped before any of it was lost and nothing was kept. Whoever runs your instance can give the model a longer context.',
   'model-without-tools':
     'The model on your instance cannot use tools, which this write-up needs, so nothing was written. Whoever runs it can choose a model that supports tool calling.',
   'model-not-local':

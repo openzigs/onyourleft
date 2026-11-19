@@ -346,6 +346,7 @@ describe('failures are sentences', () => {
     'out-of-tool-calls',
     'out-of-time',
     'out-of-tokens',
+    'out-of-context',
     'model-without-tools',
     'model-cut-off',
     'model-no-answer',

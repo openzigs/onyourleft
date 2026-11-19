@@ -110,6 +110,8 @@ export interface AnalysisModelSettings {
   readonly model: string;
   /** What the operator says a turn may spend reasoning (#1268), when they did. */
   readonly reasoningTokens?: number;
+  /** The context the operator says the server loads the model with (#2840), when they did. */
+  readonly contextTokens?: number;
 }
 
 export interface LocalModelOptions {
@@ -293,6 +295,7 @@ export function createLocalModel(options: LocalModelOptions): ModelConnection {
     ...(settings.reasoningTokens === undefined
       ? {}
       : { reasoningTokens: settings.reasoningTokens }),
+    ...(settings.contextTokens === undefined ? {} : { contextTokens: settings.contextTokens }),
     async turn(request: ModelTurnRequest): Promise<ModelTurn> {
       if (request.signal.aborted) return { ok: false, failure: 'aborted' };
       const checked = await localAddressesOnly(settings.baseUrl.hostname, resolve);
@@ -303,10 +306,19 @@ export function createLocalModel(options: LocalModelOptions): ModelConnection {
         baseURL: base,
         fetch: pinnedTo(base, send),
       });
-      return oneTurn(provider, settings.model, request);
+      return oneTurn(provider, settings.model, request, LOCAL_THINKING_OFF);
     },
   };
 }
+
+/**
+ * What a local turn sends for {@link ModelTurnRequest.thinking} `'off'`
+ * (#2840): `reasoning_effort: "none"`, which Ollama's `/v1` reads as
+ * `think: false`. Measured on the owner's box (Ollama 0.40.16, 2026-11-19):
+ * the same two-sentence question to a Gemma model reasoned for 1 520
+ * characters and 437 tokens without it, and for none, in 50 tokens, with it.
+ */
+const LOCAL_THINKING_OFF = { local: { reasoningEffort: 'none' } } as const;
 
 /** The hosted service the instance holds a key for (#1097): `analysis/hosted-key.ts`. */
 export interface HostedModelOptions {
@@ -352,16 +364,21 @@ export function createHostedModel(options: HostedModelOptions): ModelConnection 
     ...(options.reasoningTokens === undefined ? {} : { reasoningTokens: options.reasoningTokens }),
     async turn(request: ModelTurnRequest): Promise<ModelTurn> {
       if (request.signal.aborted) return { ok: false, failure: 'aborted' };
-      return oneTurn(provider, options.model, request);
+      return oneTurn(provider, options.model, request, undefined);
     },
   };
 }
 
-/** One model step through `provider`, with every rule the file comment states. */
+/**
+ * One model step through `provider`, with every rule the file comment states.
+ * `thinkingOff` is what the connection sends for a request's `thinking: 'off'`,
+ * or `undefined` for a connection that sends nothing for it.
+ */
 async function oneTurn(
   provider: ReturnType<typeof createOpenAICompatible>,
   model: string,
   request: ModelTurnRequest,
+  thinkingOff: typeof LOCAL_THINKING_OFF | undefined,
 ): Promise<ModelTurn> {
   const tools: ToolSet = Object.fromEntries(
     request.tools.map((spec) => [
@@ -380,6 +397,10 @@ async function oneTurn(
       messages: sdkMessages(request.messages),
       ...(request.tools.length === 0 ? {} : { tools }),
       maxOutputTokens: request.maxOutputTokens,
+      ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+      ...(request.thinking === 'off' && thinkingOff !== undefined
+        ? { providerOptions: thinkingOff }
+        : {}),
       maxRetries: 0,
       abortSignal: AbortSignal.any([request.signal, timeout]),
     });

@@ -101,7 +101,15 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel
                         measurement, and `tools/replan-round-trip.ts` #1235's
                         (an analysis job timed start to decrypted result;
-                        spike 0023). Since #881 it also holds `src/sync/` —
+                        spike 0023); `tools/write-up-measure.ts` (#2840)
+                        runs the shipped write-up agent over the twelve
+                        fixed rides of `tools/write-up-set.ts` against
+                        Ollama (loopback, or `--host` over SSH), books each
+                        turn's tokens and the loaded context, writes numbers
+                        under `tools/results/write-up/` and exits 1 below
+                        the set's pass mark — run it before and after any
+                        change to the write-up's prompt, tools, budgets or
+                        model; it is no CI gate. Since #881 it also holds `src/sync/` —
                         ingestion of a signed record and its original file
                         (#37), the athlete's own rides, detail and streams
                         (#38, never a position), the sync manifest, items and

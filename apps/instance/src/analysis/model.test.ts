@@ -209,6 +209,22 @@ describe('one turn through the fake server', () => {
   });
 });
 
+describe('a local turn that asks the model not to reason (#2840)', () => {
+  it('sends Ollama’s reasoning_effort "none", and a turn that does not ask sends none', async () => {
+    const model = await fake(
+      { kind: 'text', text: 'A steady ride.' },
+      { kind: 'text', text: 'A steady ride.' },
+    );
+    const connection = createLocalModel({
+      settings: { baseUrl: model.baseUrl, model: 'scripted' },
+      resolve: LOOPBACK,
+    });
+    expect((await connection.turn(request({ thinking: 'off' }))).ok).toBe(true);
+    expect((await connection.turn(request())).ok).toBe(true);
+    expect(model.requests.map((body) => body.reasoning_effort)).toStrictEqual(['none', undefined]);
+  });
+});
+
 describe('errors are a closed enumeration, never the server’s words', () => {
   const MARKER = 'PLANTED-SERVER-TEXT-7f3a';
   it.each([
@@ -413,6 +429,15 @@ describe('the hosted model on the instance’s key (#1097)', () => {
       'hosted-model',
       'hosted-model',
     ]);
+  });
+
+  it('sends nothing for a turn that asks the model not to reason (#2840)', async () => {
+    const model = await fake({ kind: 'text', text: 'A steady ride.' });
+    const { fetch } = hostedFetch(model);
+    const connection = createHostedModel({ baseUrl: HOSTED, model: 'm', apiKey: KEY, fetch });
+    expect((await connection.turn(request({ thinking: 'off', temperature: 0.3 }))).ok).toBe(true);
+    expect(model.requests[0]).not.toHaveProperty('reasoning_effort');
+    expect(model.requests[0]?.temperature).toBe(0.3);
   });
 
   it('answers in the same closed failures, never the server’s words', async () => {

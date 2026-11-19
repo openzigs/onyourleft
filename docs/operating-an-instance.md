@@ -165,6 +165,12 @@ room on the turns after (ADR 0046, Amendments, #1268). To say so up front, set
 off with `"code":"bad-reasoning"`. A rider sets the same for their own hosted key with the
 `reasoningTokens` field of `POST /v1/analysis/hosted/key`.
 
+**Since #2840 a write-up asks the local model not to reason at all** (version 2 of its template:
+`reasoning_effort: "none"`, which Ollama reads as `think: false`), at a low temperature. Left to
+reason, the model on the owner's box spent its whole allowance reasoning and answered nothing on 4
+of 12 fixed rides; told not to, it wrote all 12, in 3 to 13 s each. A model that reasons anyway is
+still found out and given the room above. A hosted service is sent nothing for it.
+
 **No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
 default, and an address with no model name leaves analysis off and says so. Two things to check of
 the model you choose. **It must support tool calling**: the agent lets the model choose its tools,
@@ -174,6 +180,18 @@ ADR 0040 D-5 requires of any model these documents would name. And give Ollama a
 larger than its default of 4 096 tokens (its `OLLAMA_CONTEXT_LENGTH`): a tool-calling run re-sends
 the whole conversation every turn, and Ollama cuts an over-long prompt silently, from the front,
 where the instructions are.
+
+**Tell the instance the same length** (#2840): `OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS`, a whole
+number from 2048 to 1048576. The agent then stops a write-up, with `out-of-context` and a sentence
+saying the model cannot read that much at once, **before** a turn would pass it, so nothing is lost
+silently; empty, and no turn is checked. The home Compose file sets both from this one variable,
+16384 unless you say otherwise, so they cannot disagree. Measured on 2026-11-19 (Ollama 0.40.16): a
+4 220-token prompt at a 1 024-token context was read as 1 027 tokens, with no error, and the system
+prompt was gone. A write-up's first turn is 1 000 to 2 300 tokens, and a model that reasons may
+then write 3 000 more in one turn, so 4 096 does not hold one write-up of a long ride; 16 384 holds
+every ride of the scored set with room for its tools. Anything else turns analysis off with
+`"code":"bad-context"`. It is `.env` only: the context is the model server's, which the app does
+not set.
 
 **The address rule** is the history index's (ADR 0040 D-6, `history/address.ts`): loopback,
 `localhost`, a private, link-local, shared or unique-local address, or a single-label name such as a
@@ -189,7 +207,7 @@ it**: its API has no authentication.
 | `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
 | `…"code":"tls-by-name"` | an `https:` address by a name was refused: each request goes to the checked address, so a certificate issued to the name cannot verify. Use `http:` on the private network, or `https:` at the address itself |
 | `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
-| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"` | the setting is malformed; standard error says which |
+| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"`, `"bad-context"` | the setting is malformed; standard error says which |
 
 **Setting it from the app** (#2609, ADR 0046's amendment of 2026-11-14). The owner — the athlete
 of `OYL_INSTANCE_OWNER_KEY`, never the deputy — can set the local model's address, its name and its
@@ -328,7 +346,10 @@ and may start twelve an hour. There is one worker for the whole instance, so a j
 another athlete's, for up to the agent's run budget.
 
 **What the log says.** One line per change of status, `"event":"analysis-job"` with `state` (and
-`code`, the failure, when it failed). Never a job's id, its input, a tool name or any of the
+`code`, the failure, when it failed). A write-up's last line also says what its run came to
+(#2840): `turns` (model turns), `toolCalls`, `toolsUsed` (how many of the tools), `tokensIn` and
+`tokensOut` (as the model server reported them, or the instance's estimate where it reported
+none) and `ms`, whole numbers all. Never a job's id, its input, a tool name or any of the
 write-up.
 
 **How it is erased.** Erasing an account (`DELETE /v1/account`) deletes every job and event of the

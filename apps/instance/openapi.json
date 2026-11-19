@@ -1971,7 +1971,7 @@
     "/v1/analysis/jobs/{jobId}": {
       "get": {
         "operationId": "getAnalysisJob",
-        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-no-answer`, `model-malformed`, `not-a-proposal`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
+        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `out-of-context`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-no-answer`, `model-malformed`, `not-a-proposal`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
         "parameters": [
           {
             "name": "jobId",
@@ -8224,7 +8224,8 @@
                             "tls-by-name",
                             "no-model",
                             "bad-model",
-                            "bad-reasoning"
+                            "bad-reasoning",
+                            "bad-context"
                           ]
                         }
                       },
@@ -8416,7 +8417,8 @@
                             "tls-by-name",
                             "no-model",
                             "bad-model",
-                            "bad-reasoning"
+                            "bad-reasoning",
+                            "bad-context"
                           ]
                         }
                       },
@@ -8561,7 +8563,8 @@
                             "tls-by-name",
                             "no-model",
                             "bad-model",
-                            "bad-reasoning"
+                            "bad-reasoning",
+                            "bad-context"
                           ]
                         }
                       },

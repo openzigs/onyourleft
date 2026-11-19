@@ -74,9 +74,12 @@
  * - **No event carries a tool's arguments or its results**: progress names a
  *   tool by name alone, and only a name of the tool-name shape
  *   ({@link TOOL_NAME}). A section is screened text, and nothing else is text.
- * - **Nothing about a job is logged but its status and failure code**: every
- *   line goes through `log.ts` §`redacted`, and a job's input, id, write-up
- *   and tool names are never handed to it (`jobs.test.ts` plants markers).
+ * - **Nothing about a job is logged but its status and failure code**, and
+ *   on a write-up's last line what its run came to (#2840): turns, tool calls,
+ *   how many tools it used, tokens in and out, and time, whole numbers all.
+ *   Every line goes through `log.ts` §`redacted`, and a job's input, id,
+ *   write-up and tool names are never handed to it (`jobs.test.ts` plants
+ *   markers).
  * - **The athlete is always the session's** (ADR 0040 D-3): every store call
  *   names the caller's athlete, so another athlete's job is `not_found`.
  */
@@ -101,7 +104,7 @@ import type {
   AnalysisJobStatus,
   SqlStore,
 } from '../store/sql-store.ts';
-import type { AgentEvent, AgentFailure } from './agent.ts';
+import type { AgentEvent, AgentFailure, AgentUsage } from './agent.ts';
 import { pictureFaults, readRideInput } from './job-input.ts';
 import type { ReplanFailure } from './replan-agent.ts';
 import { readReplanInput, type ReplanInput } from './replan-input.ts';
@@ -158,6 +161,7 @@ export const JOB_FAILURES: readonly JobFailure[] = [
   'out-of-tool-calls',
   'out-of-time',
   'out-of-tokens',
+  'out-of-context',
   'model-without-tools',
   'model-not-local',
   'model-unreachable',
@@ -213,6 +217,8 @@ export interface AnalysisEngine {
     job: EngineJob,
     signal: AbortSignal,
     emit: (event: AgentEvent) => void,
+    /** Told what the run came to, numbers only, for the job's log line (#2840). */
+    report?: (usage: AgentUsage) => void,
   ): Promise<WriteUpEnding>;
 }
 
@@ -503,10 +509,21 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     for (const listener of [...(listeners.get(id) ?? [])]) listener();
   };
 
-  const logged = (status: AnalysisJobStatus, failure?: string | null): void => {
+  const logged = (status: AnalysisJobStatus, failure?: string | null, usage?: AgentUsage): void => {
     logEvent(log, 'analysis-job', {
       state: status,
       ...(failure === null || failure === undefined ? {} : { code: failure }),
+      // What a write-up's run came to (#2840): numbers only, never a tool's name or the model's text.
+      ...(usage === undefined
+        ? {}
+        : {
+            turns: usage.turns,
+            toolCalls: usage.toolCalls,
+            toolsUsed: usage.toolsUsed,
+            tokensIn: usage.tokensIn,
+            tokensOut: usage.tokensOut,
+            ms: usage.milliseconds,
+          }),
     });
   };
 
@@ -535,6 +552,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
         .catch(() => undefined);
     };
     let outcome: EngineEnding;
+    let usage: AgentUsage | undefined;
     try {
       // Read again on the way out of the table: what is stored is what was checked.
       const stored = JSON.parse(job.inputJson) as unknown;
@@ -565,6 +583,9 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
               },
               controller.signal,
               emit,
+              (reported) => {
+                usage = reported;
+              },
             )
           : { kind: 'failed', why: 'engine-error' };
       }
@@ -578,7 +599,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     if (stopping) return;
     const ended = ending(controller.signal.aborted ? { kind: 'cancelled' } : outcome, now());
     if ((await store.endAnalysisJob(job.athleteId, job.id, ended)) !== undefined) {
-      logged(ended.status, ended.failure);
+      logged(ended.status, ended.failure, usage);
     }
     notify(job.id);
   }
@@ -744,6 +765,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
           return refused([{ field: key, problem: 'is not a field of a job' }]);
         }
       }
+      // Version 1's input, which the agent's version 2 reads unchanged (#2840, `agent.ts` §`AGENT_TEMPLATE`).
       if (body.templateVersion !== ANALYSIS_AGENT_TEMPLATE_V1.version) {
         return refused([
           { field: 'templateVersion', problem: 'must be a template version this instance runs' },

@@ -59,6 +59,15 @@ export interface ModelTurnRequest {
   readonly messages: readonly AgentMessage[];
   readonly tools: readonly ToolSpec[];
   readonly maxOutputTokens: number;
+  /** The sampling temperature, when the template sets one (#2840); the model's own default otherwise. */
+  readonly temperature?: number;
+  /**
+   * `'off'` asks a model on the rider's own box not to reason before it
+   * answers (#2840): Ollama's `reasoning_effort: "none"` on its `/v1`
+   * address. A hosted connection sends nothing for it: a service's own
+   * spelling of "do not reason" is its own, and none is assumed.
+   */
+  readonly thinking?: 'off';
   /** How long this turn may take before it is given up as `timed-out`. */
   readonly timeoutMilliseconds: number;
   /** The job's signal: an abort here aborts the request on the wire. */
@@ -134,5 +143,12 @@ export interface ModelConnection {
    * this model reasons (#1268). Absent: the agent finds out from the reply.
    */
   readonly reasoningTokens?: number;
+  /**
+   * How many tokens the model reads at once — the context its server loads it
+   * with — when the operator said (#2840). The agent stops a run before a
+   * turn would pass it, because Ollama cuts the oldest text without saying
+   * so. Absent: not known, and not checked.
+   */
+  readonly contextTokens?: number;
   turn(request: ModelTurnRequest): Promise<ModelTurn>;
 }

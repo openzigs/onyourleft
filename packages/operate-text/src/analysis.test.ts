@@ -66,7 +66,7 @@ describe('AI backend’s words — #2611, moved by #2648', () => {
   });
 
   it('names every state, server state and check outcome the instance writes', () => {
-    expect(Object.keys(LOCAL_STATE_TEXT)).toHaveLength(9);
+    expect(Object.keys(LOCAL_STATE_TEXT)).toHaveLength(10);
     expect(Object.keys(SERVER_STATE_TEXT).sort()).toEqual(
       ['no-address', 'not-local', 'openai-compatible', 'unreachable', 'unresolved'].sort(),
     );
