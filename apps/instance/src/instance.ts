@@ -1140,6 +1140,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
               store,
               status: statusSources({
                 server,
+                remotePath: options.config.remotePath,
                 keys,
                 now,
                 startedAt,

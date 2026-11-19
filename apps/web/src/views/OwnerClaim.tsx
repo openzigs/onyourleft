@@ -48,9 +48,13 @@ export const OWNER_CLAIM_TEXT = {
     `If it does not, press “${CLAIM_NO_BUTTON}” there, then “It shows another number” here.`,
   signIn: 'Sign in as the owner',
   differs: 'It shows another number',
+  /**
+   * Said alone, at the start of the screen after "Use another code" (#2859):
+   * so it says what happened before what to do, and never opens with "Then".
+   */
   mismatch:
-    `Then press “${CLAIM_NO_BUTTON}” on your server’s setup page if you have not yet, show a new ` +
-    'claim code there and scan it again.',
+    'The numbers did not match, so this device has not claimed your server. On its setup page, ' +
+    `press “${CLAIM_NO_BUTTON}” if you have not yet, then show a new claim code there and scan it.`,
   /** What the code was spent on, said where the screen starts again (#2828). */
   mismatchLabel: 'Not claimed',
   /** Once signed in, and the server says this device owns it. */

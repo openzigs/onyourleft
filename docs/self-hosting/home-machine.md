@@ -247,6 +247,7 @@ the setup page on this machine sets them up after the deploy, in step 5a, with n
 | `OYL_INSTANCE_REGISTRATION` | **leave it empty** on a fresh install, and choose on the setup page (step 5a), which wins over this line. Otherwise `approval` (you approve each new account; the default, and what an empty value means), `invite`, `open`, or `closed` — see [`docs/moderation.md`](../moderation.md). Your own device registers active in every mode once it is the owner. ⚠️ `closed` turns away **your other** devices too: the app says the instance is not taking new riders. Link them to your account from the app instead, or approve them |
 | `OYL_INSTANCE_OWNER_KEY` | **leave it empty** on a fresh install: you claim the instance with your tablet on the setup page (step 5a). The expert path: your device key, which the app shows — then the instance is yours from its first start and the setup page never opens |
 | `OYL_INSTANCE_DEPUTY_KEY` | leave it **empty**. An instance has one moderator ([`docs/moderation.md`](../moderation.md)); this names a second only if you want one |
+| `OYL_INSTANCE_ADMIN_PAGES` | `off`, as the template ships it. Set `on` (and run `docker compose up -d instance`) to use the admin pages at `http://localhost:8788/admin` on this machine: where the emergency kit can be downloaded again after setup, and where you add a passkey. Once your tablet has claimed the server they need nothing else ([#2859](https://github.com/openzigs/onyourleft/issues/2859)) |
 | `CLOUDFLARE_TUNNEL_TOKEN` | 3b only: the token from step 3b |
 | `TAILSCALE_HOSTNAME` | 3a only, optional: the machine's name on the tailnet, `onyourleft` when empty. It is public (step 3a) |
 | `TAILSCALE_AUTH_KEY` | 3a only, optional: empty, and the first deploy prints a sign-in link instead. A key from *Settings → Keys* (tagged `tag:onyourleft`) signs the machine in by itself; it is a secret, like the tunnel token |
@@ -335,7 +336,7 @@ and if they differ says both and exits 1.
 
 On this machine, open **`http://localhost:8788/setup`** in a browser (type `localhost`, not
 `127.0.0.1`). The page asks for the **setup code**: open the file `setup-code` in the `secrets` folder
-beside `compose.yaml` (`apps/instance/deploy/home/secrets/setup-code`) and type the first line. A code
+beside `compose.yaml` (`secrets/setup-code` in the folder you unpacked, or ran `deploy.sh` from) and type the first line. A code
 works once, for ten minutes; if it has run out, run `docker compose restart instance` in that folder
 and open the file again. The code is never printed in `docker compose logs`, which only say where it
 is.
@@ -344,7 +345,7 @@ Then follow the page, step by step. You can leave and come back at any time; it 
 were.
 
 1. **Claim it with your tablet.** Press *Show the claim code*, open On Your Left on the tablet you ride
-   with, go to *Instance* and scan the code **with the app's own scanner**, then press *I’ve scanned
+   with, go to *More*, then *Instance*, and scan the code **with the app's own scanner**, then press *I’ve scanned
    it* on the page. The tablet shows six digits; if the page shows the same six, press *Yes*. The page
    says your tablet now owns the server. A code lasts ten minutes: if the page says *That code ran
    out*, press *Show the claim code* again and scan the new one.
@@ -352,7 +353,9 @@ were.
    pages.
 3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
    beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
-   once you have added a passkey there.
+   once you have added a passkey there. ⚠️ **The admin pages are off until you turn them on**: set
+   `OYL_INSTANCE_ADMIN_PAGES=on` in `.env`, run `docker compose up -d instance`, then open
+   `http://localhost:8788/admin` ([#2859](https://github.com/openzigs/onyourleft/issues/2859)).
 4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
    long ago the last backup ran, and whether the snapshot reached **both** folders: the one on this
    computer and the copy kept elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and

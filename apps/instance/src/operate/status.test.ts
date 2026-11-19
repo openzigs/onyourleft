@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { InstanceKeysUnavailable } from '../keys/instance-keys.ts';
 import { readServerConfig } from '../server-config.ts';
-import { diskSpace, keysState, tunnelReadiness, type DiskProbe } from './status.ts';
+import { diskSpace, keysState, statusSources, tunnelReadiness, type DiskProbe } from './status.ts';
 
 const PATHS = { databasePath: '/data/instance.sqlite', blobsPath: '/blobs' };
 
@@ -138,6 +138,42 @@ describe('the tunnel (#2604)', () => {
       state: 'not_ready',
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('the tunnel row follows the remote path (#2859)', () => {
+  const sources = (remotePath: 'tailnet' | 'funnel' | 'cloudflare' | null) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(() =>
+      Promise.resolve(Response.json({ status: 200, readyConnections: 2 })),
+    );
+    const built = statusSources({
+      // The home template's address, set whatever the path (`instance.env.example`).
+      server: { ...PATHS, tunnelReadyUrl: new URL('http://172.30.88.10:20241/ready') },
+      remotePath,
+      keys: { show: () => Promise.reject(new Error('not asked here')) },
+      now: () => 0,
+      startedAt: 0,
+      resolve: () => Promise.reject(new Error('an address literal is never looked up')),
+      fetch,
+      disk: disks({}),
+    });
+    return { built, fetch };
+  };
+
+  it('asks no cloudflared on the tailnet or Funnel, so a healthy install is never "not ready"', async () => {
+    for (const path of ['tailnet', 'funnel'] as const) {
+      const { built, fetch } = sources(path);
+      expect(await built.tunnel(), path).toEqual({ state: 'unknown' });
+      expect(fetch, path).not.toHaveBeenCalled();
+    }
+  });
+
+  it('asks it on the Cloudflare path, and with no path named, as before', async () => {
+    for (const path of ['cloudflare', null] as const) {
+      const { built, fetch } = sources(path);
+      expect(await built.tunnel(), String(path)).toEqual({ state: 'ready', connections: 2 });
+      expect(fetch, String(path)).toHaveBeenCalledOnce();
+    }
   });
 });
 
