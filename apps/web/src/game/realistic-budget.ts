@@ -109,6 +109,10 @@ export const REALISTIC_TEXTURE_CEILING_PIXELS = 2048;
  *   at 1K and raise {@link REALISTIC_BUILD_BYTES} rather than take them to
  *   `structure`'s 512. A town's wall fills more of the screen than a
  *   farmstead's, for longer, and is seen from the road at a few metres.
+ * - `people` 1024 — the owner's request of 2026-11-18: the one atlas every
+ *   person wears (`realistic-assets.ts` §`REALISTIC_PEOPLE`), a row of tiles
+ *   a person, the face and each garment 256 px. A person is drawn from 4 m
+ *   and more, where a face is under a hundred pixels tall.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -123,6 +127,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
   bicycle: 256,
   rider: 1024,
   town: 1024,
+  people: 1024,
 } as const;
 
 /**
@@ -1205,7 +1210,9 @@ export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
 /**
  * The most triangles the people may add to a realistic frame — #1541:
  * **32 000**, sixteen bodies (`people.ts` §`PEOPLE_NEAR_MAX`) of at most
- * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call;
+ * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call —
+ * since the owner's request of 2026-11-18 three different MODELS in that one
+ * call, each instance submitting the largest's triangles, 1 800 at most;
  * the impostors beyond add two triangles each, at most 64, in one more.
  *
  * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, and NOT by that
@@ -1214,12 +1221,13 @@ export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
  * row, within this issue's stated budget" — and validation 0002 Part AJ is
  * the tablet's measurement of whether the frame has room for it. If it has
  * not, `quality.ts` §`QualitySettings.people` goes to 0 on the top rung until
- * it has. Their animation texture is 1 MiB at most, made at load and in no
- * committed file (`people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`), and
- * `realistic-budget.test.ts` adds it to the texture estimate.
+ * it has. Their animation and slot textures are 1 MiB at most together, made
+ * at load and in no committed file (`people-body.ts`
+ * §`PERSON_ANIMATION_MAX_BYTES`), and `realistic-budget.test.ts` adds it to
+ * the texture estimate beside their committed atlas.
  *
- * @test-facing held by `people-body.test.ts`, which cuts the committed body
- * sixteen times inside it, and by `game.browser.spec.ts` §"#1541"
+ * @test-facing held by `people-body.test.ts`, which reads the committed
+ * model's bodies inside it, and by `game.browser.spec.ts` §"#1541"
  */
 export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
 
@@ -1512,11 +1520,24 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * As for #1548, the APK carries the same bytes more, and a browser's first
  * download does not move: the files are outside the precache.
  *
+ * ## Raised to 47 MiB for the people's models — the owner's request of 2026-11-18
+ *
+ * **Old ceiling 46 MiB (48 234 496 bytes), new 47 MiB (49 283 072).**
+ * ⚠️ **This rise is the pull request's own and waits on the owner's
+ * confirmation**: asked for "a real model for the pedestrian", the owner
+ * named no figure. Measured on the committed files: the set with its
+ * transcoder was 48 157 070 bytes, 77 426 under the old ceiling; the people's
+ * model and atlas (`realistic-assets.ts` §`REALISTIC_PEOPLE`) add **391 045**
+ * (242 536 and 148 509), so it is **48 548 115**, 734 957 under the new one.
+ * The model ships without normals and the atlas at 1024 px, which is as
+ * small as three dressed people were made; the APK carries the same bytes
+ * more, and a browser's first download does not move.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 46 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 47 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.
