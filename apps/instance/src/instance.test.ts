@@ -8,13 +8,15 @@
  * SIGTERM in the middle of a race.
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createInterface } from 'node:readline';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import { MASK_PLACEHOLDER } from '@onyourleft/analysis';
@@ -644,7 +646,51 @@ describe('a race rider who drops mid-race rejoins it — #895 review B1', () => 
   });
 });
 
+/**
+ * The URL a spawned instance says it is `listening` on (#2774): its own log
+ * record, on its stdout, which `serve.ts` writes once `startInstance` has
+ * returned — the store open at the head and every room worker spawned, so
+ * `/ready` is true from then on. Event-driven, bounded by nothing but the
+ * case's own timeout: a fixed count of polls gave a loaded runner about 3 s.
+ * An instance that exits first rejects, with what it wrote to stderr.
+ */
+function listeningOn(child: ChildProcessByStdio<null, Readable, Readable>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    const lines = createInterface({ input: child.stdout });
+    lines.on('line', (line) => {
+      let record: unknown;
+      try {
+        record = JSON.parse(line);
+      } catch {
+        return;
+      }
+      const { event, url } = record as { event?: unknown; url?: unknown };
+      if (event === 'listening' && typeof url === 'string') resolve(url);
+    });
+    child.once('exit', (code, signal) => {
+      reject(
+        new Error(
+          `the instance exited before it was listening (${String(code ?? signal)}): ${stderr}`,
+        ),
+      );
+    });
+  });
+}
+
 describe('graceful shutdown drains rooms — #780 criterion 6', () => {
+  // A case that times out never reaches its own `finally`: the instance it
+  // spawned is killed here, so no wait left pending outlives the case.
+  let spawned: ChildProcessByStdio<null, Readable, Readable> | undefined;
+  afterEach(() => {
+    if (spawned?.exitCode === null && spawned.signalCode === null) spawned.kill('SIGKILL');
+    spawned = undefined;
+  });
+
   it('on SIGTERM mid-race tells the riders the server is stopping, and the result already final is on disk', async () => {
     const dir = await freshDirectory();
     const path = join(dir, 'instance.sqlite');
@@ -679,16 +725,18 @@ describe('graceful shutdown drains rooms — #780 criterion 6', () => {
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    spawned = child;
     let ann: { athleteId: string; sessionToken: string } | undefined;
     const exited = new Promise<number | null>((done) => child.on('exit', (code) => done(code)));
+    const listening = listeningOn(child);
+    // Handled now, so an exit before the await below is never an unhandled
+    // rejection; the await still throws it.
+    listening.catch(() => undefined);
     try {
       const url = `http://127.0.0.1:${String(port)}`;
-      for (let i = 0; ; i += 1) {
-        const ready = await fetch(`${url}/ready`).catch(() => undefined);
-        if (ready?.status === 200) break;
-        if (i > 60) throw new Error('the instance did not become ready');
-        await new Promise((done) => setTimeout(done, 50));
-      }
+      expect(await listening).toBe(url);
+      const ready = await fetch(`${url}/ready`);
+      expect(ready.status, await ready.text()).toBe(200);
       ann = await signIn(url, 'Ann');
       const bob = await signIn(url, 'Bob');
       const annSocket = await joinRoom(

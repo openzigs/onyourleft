@@ -218,8 +218,19 @@ export function mappedChunk(distanceMetres: number): number {
   return Math.floor(distanceMetres / MAPPED_CHUNK_METRES);
 }
 
-/** The roles a building's far level keeps: its walls and its roof (#1540's `farTriangleCount`). */
-export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'roof', 'spire'];
+/**
+ * The roles a building's far level keeps: its walls, its plinth and its roof
+ * (#1540's `farTriangleCount`).
+ *
+ * ⚠️ **The plinth since #2761.** The walls start at the floor, which stands
+ * over the HIGHEST ground under the footprint (`footprint-buildings.ts` rule
+ * 4); the plinth is what reaches from there down into the lowest. Without it
+ * a far house on falling ground stood on nothing on its downhill side — up to
+ * 2.7 m above the bank at the public coasts #2761 measured, which the owner
+ * saw as a house on stilts by the shore. It is two triangles a ring edge and
+ * wears the walls' surface, so it opens no draw call.
+ */
+export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'plinth', 'roof', 'spire'];
 
 /**
  * The roles a building's near level draws: all of them, #1581's chimney and

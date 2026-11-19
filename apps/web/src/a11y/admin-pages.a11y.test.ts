@@ -30,12 +30,24 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { AA_LARGE_TEXT_OR_NON_TEXT, AA_TEXT, contrastRatio } from '../design/contrast';
 import {
+  COLOUR_TOKENS,
+  DARK_COLOUR_TOKENS,
+  FONT_FAMILY_TOKENS,
+  FONT_SIZE_TOKENS,
+  SPACE_TOKENS,
+} from '../design/tokens';
+import {
   SCRIPTED_ANALYSIS,
+  SCRIPTED_BACKUPS,
+  SCRIPTED_KEYS,
+  SCRIPTED_PROBLEMS,
+  SCRIPTED_ROOMS,
   SCRIPTED_JOBS,
   SCRIPTED_MODELS,
   SCRIPTED_STATUS,
 } from '../instance/testing';
-import { auditAccessibility, formatViolations, tabbableElements } from './audit';
+import { codeWithCard, readCodeWithCard } from '../instance/instance-pin';
+import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
 
 interface ShellView {
   readonly name: string | null;
@@ -93,6 +105,84 @@ interface AdminPages {
   statusBody(status: OperateStatusAnswer | undefined, now: number): string;
   logBody(view: LogView): string;
   analysisBody(view: AnalysisView): string;
+  accountsBody(view: AccountsView): string;
+  backupsBody(view: BackupsView): string;
+  roomsBody(view: RoomsView): string;
+  keysBody(view: KeysView): string;
+  cardCodePart(view: CardCodeView): string;
+  readonly CARD_CODE_TEXT: Readonly<Record<CardCodeView['purpose'], { readonly label: string }>>;
+  problemsBody(view: {
+    readonly problems:
+      | { readonly since: string; readonly lines: readonly { at: string; line: string }[] }
+      | undefined;
+  }): string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`CardCodeView` (#2783). */
+interface CardCodeView {
+  readonly purpose: 'claim' | 'invite';
+  readonly card: string;
+  readonly code: string;
+  readonly expiresAt: string;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`KeysView` (#2650). */
+interface KeysView {
+  readonly keys: unknown;
+  readonly card: { readonly card: string; readonly fingerprint: string } | null;
+  readonly onServer: boolean;
+  /** #2781: the emergency kit offered, on the server machine. */
+  readonly kit: boolean;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice:
+    | { readonly kind: 'rotated'; readonly ok: boolean }
+    | { readonly kind: 'busy' }
+    | { readonly kind: 'not-rotated' }
+    | null;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`RoomsView` (#2649). */
+interface RoomsView {
+  readonly rooms: readonly unknown[] | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: { readonly ended: boolean } | null;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`BackupsView` (#2647), its records as the route answers them. */
+interface BackupsView {
+  readonly backups:
+    { readonly records: readonly unknown[]; readonly pendingSince: string | null } | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice:
+    | { readonly kind: 'asked'; readonly ok: boolean }
+    | { readonly kind: 'refused'; readonly sentence: string }
+    | { readonly kind: 'not-asked' }
+    | null;
+  readonly all: boolean;
+}
+
+/** `apps/instance` §`admin/pages.ts` §`AccountsView` (#2646). */
+interface AccountsView {
+  readonly status: OperateStatusAnswer | undefined;
+  readonly registrations:
+    | readonly {
+        readonly athleteId: string;
+        readonly displayName: string;
+        readonly createdAt: number;
+        readonly adultConfirmed: boolean;
+      }[]
+    | undefined;
+  readonly strength: 'code' | 'passkey';
+  readonly csrf: string;
+  readonly notice: {
+    readonly decision: 'approve' | 'refuse';
+    readonly ok: boolean;
+    readonly problem: 'reason' | 'not-waiting' | null;
+  } | null;
+  readonly reasonLimit: number;
 }
 
 /** `apps/instance` §`admin/pages.ts` §`AnalysisView`, its reads as the routes answer them. */
@@ -118,6 +208,14 @@ interface AdminRoutes {
   }[];
 }
 
+/** `apps/instance` §`admin/tokens.ts`, as far as it is used here. */
+interface AdminTokens {
+  readonly ADMIN_COLOURS: Readonly<Record<'light' | 'dark', Readonly<Record<string, string>>>>;
+  readonly ADMIN_SPACE: Readonly<Record<string, string>>;
+  readonly ADMIN_FONT_SIZE: Readonly<Record<string, string>>;
+  readonly ADMIN_FONT_FAMILY: Readonly<Record<string, string>>;
+}
+
 /** `apps/instance` §`admin/style.ts`, as far as it is used here. */
 interface AdminStyle {
   readonly ADMIN_STYLE: string;
@@ -134,13 +232,15 @@ const ADMIN = join(dirname(fileURLToPath(import.meta.url)), '../../../instance/s
 let pages: AdminPages;
 let routes: AdminRoutes;
 let style: AdminStyle;
+let tokens: AdminTokens;
 
 beforeAll(async () => {
-  [pages, routes, style] = (await Promise.all([
+  [pages, routes, style, tokens] = (await Promise.all([
     import(/* @vite-ignore */ join(ADMIN, 'pages.ts')),
     import(/* @vite-ignore */ join(ADMIN, 'admin-routes.ts')),
     import(/* @vite-ignore */ join(ADMIN, 'style.ts')),
-  ])) as [AdminPages, AdminRoutes, AdminStyle];
+    import(/* @vite-ignore */ join(ADMIN, 'tokens.ts')),
+  ])) as [AdminPages, AdminRoutes, AdminStyle, AdminTokens];
 });
 
 const NOW = Date.parse('2026-11-14T21:00:00.000Z');
@@ -244,7 +344,135 @@ const passkeysPage = (
   );
 
 /** The pages with a passkey ceremony, which link the one script (and only it). */
-const SCRIPTED = new Set(['/admin/sign-in', '/admin/passkeys', '/admin/analysis']);
+const SCRIPTED = new Set([
+  '/admin/sign-in',
+  '/admin/passkeys',
+  '/admin/analysis',
+  '/admin/accounts',
+  '/admin/backups',
+  '/admin/rooms',
+  '/admin/keys',
+]);
+
+/** The keys' state the Keys page draws (#2650), and the card it draws on the server machine only. */
+const KEY_STATE = {
+  state: SCRIPTED_KEYS.state,
+  current: SCRIPTED_KEYS.current,
+  olderHeld: SCRIPTED_KEYS.olderHeld,
+};
+const CARD = { card: SCRIPTED_KEYS.card ?? '', fingerprint: SCRIPTED_KEYS.fingerprint ?? '' };
+
+/** The Keys page (#2650), in a session of `strength`, through the tunnel unless `over` says otherwise. */
+const keysPage = (
+  strength: ShellView['strength'],
+  over: Partial<KeysView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/keys', name, strength),
+    'Keys',
+    pages.keysBody({
+      keys: KEY_STATE,
+      card: null,
+      onServer: false,
+      kit: false,
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      ...over,
+    }),
+    true,
+  );
+
+/** The Rooms page (#2649), in a session of `strength`, over the scripted rooms. */
+const roomsPage = (
+  strength: ShellView['strength'],
+  over: Partial<RoomsView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/rooms', name, strength),
+    'Rooms',
+    pages.roomsBody({
+      rooms: SCRIPTED_ROOMS,
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      ...over,
+    }),
+    true,
+  );
+
+/** The scripted records (#2647) with the route's further facts, one with a SHA-256. */
+const RECORDS = SCRIPTED_BACKUPS.map((record, index) => ({
+  ...record,
+  databaseSha256: index === 0 ? 'ab'.repeat(32) : null,
+  removed: index === 0 ? 1 : null,
+  freeBytes: { backups: 80_000_000_000, offBox: index === 0 ? 900_000_000_000 : null },
+}));
+
+/** Thirty records (#2771): more than the page lists until asked for every one. */
+const MANY_RECORDS = Array.from({ length: 30 }, (_, index) => ({
+  ...RECORDS[index % RECORDS.length]!,
+  id: 30 - index,
+}));
+
+/** The Backups page (#2647), in a session of `strength`, over the scripted records. */
+const backupsPage = (
+  strength: ShellView['strength'],
+  over: Partial<BackupsView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/backups', name, strength),
+    'Backups',
+    pages.backupsBody({
+      backups: { records: RECORDS, pendingSince: null },
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      all: false,
+      ...over,
+    }),
+    true,
+  );
+
+/** Two riders waiting (#2646), one with a name that would break the markup if it were not escaped. */
+const WAITING = [
+  {
+    athleteId: 'a1b2c3d4e5f6',
+    displayName: AWKWARD_NAME,
+    createdAt: 1_763_100_000,
+    adultConfirmed: true,
+  },
+  {
+    athleteId: 'f6e5d4c3b2a1',
+    displayName: 'Sam',
+    createdAt: 1_763_110_000,
+    adultConfirmed: false,
+  },
+];
+
+/** The Accounts page (#2646), in a session of `strength`, over the scripted status. */
+const accountsPage = (
+  strength: ShellView['strength'],
+  over: Partial<AccountsView> = {},
+  name: string | null = null,
+): string =>
+  pages.shellPage(
+    shell('/admin/accounts', name, strength),
+    'Accounts',
+    pages.accountsBody({
+      status: SCRIPTED_STATUS,
+      registrations: WAITING,
+      strength,
+      csrf: 'a'.repeat(64),
+      notice: null,
+      reasonLimit: 1000,
+      ...over,
+    }),
+    true,
+  );
 
 /** The AI backend page (#2648), in a session of `strength`, over the scripted reads. */
 const analysisPage = (
@@ -318,6 +546,154 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     [
       'unreadable',
       () => pages.shellPage(shell('/admin/status'), 'Status', pages.statusBody(undefined, NOW)),
+    ],
+  ],
+  '/admin/accounts': [
+    ['a code session: reads only', () => accountsPage('code')],
+    [
+      'a passkey session: a decision for each rider, an awkward name',
+      () => accountsPage('passkey', {}, AWKWARD_NAME),
+    ],
+    [
+      'approved, nobody left waiting',
+      () =>
+        accountsPage('passkey', {
+          registrations: [],
+          notice: { decision: 'approve', ok: true, problem: null },
+        }),
+    ],
+    [
+      'a refusal with no reason',
+      () =>
+        accountsPage('passkey', { notice: { decision: 'refuse', ok: false, problem: 'reason' } }),
+    ],
+    [
+      'nothing readable',
+      () => accountsPage('passkey', { status: undefined, registrations: undefined }),
+    ],
+    [
+      'the invite mode, the queue unreadable',
+      () =>
+        accountsPage('code', {
+          status: { ...SCRIPTED_STATUS, registration: 'invite' },
+          registrations: undefined,
+        }),
+    ],
+  ],
+  '/admin/backups': [
+    ['a code session: reads only', () => backupsPage('code')],
+    [
+      'a passkey session: back up now, an awkward name',
+      () => backupsPage('passkey', {}, AWKWARD_NAME),
+    ],
+    [
+      'a request waiting',
+      () =>
+        backupsPage('passkey', {
+          backups: { records: RECORDS, pendingSince: '2026-11-14T21:00:00.000Z' },
+          notice: { kind: 'asked', ok: true },
+        }),
+    ],
+    [
+      'a second press refused',
+      () =>
+        backupsPage('passkey', {
+          notice: { kind: 'refused', sentence: 'A backup is already waiting.' },
+        }),
+    ],
+    [
+      'nothing recorded yet',
+      () => backupsPage('passkey', { backups: { records: [], pendingSince: null } }),
+    ],
+    ['unreadable', () => backupsPage('passkey', { backups: undefined })],
+    [
+      'more than 20: the newest, and a link to the rest (#2771)',
+      () => backupsPage('passkey', { backups: { records: MANY_RECORDS, pendingSince: null } }),
+    ],
+    [
+      'more than 20: every one (#2771)',
+      () =>
+        backupsPage('code', { backups: { records: MANY_RECORDS, pendingSince: null }, all: true }),
+    ],
+  ],
+  '/admin/rooms': [
+    ['a code session: reads only', () => roomsPage('code')],
+    [
+      'a passkey session: End room for each, an awkward name',
+      () =>
+        roomsPage(
+          'passkey',
+          { rooms: [{ ...SCRIPTED_ROOMS[0]!, host: AWKWARD_NAME, riders: [AWKWARD_NAME] }] },
+          AWKWARD_NAME,
+        ),
+    ],
+    ['ended', () => roomsPage('passkey', { notice: { ended: true } })],
+    ['not ended', () => roomsPage('passkey', { notice: { ended: false } })],
+    ['no room open', () => roomsPage('passkey', { rooms: [] })],
+    ['unreadable', () => roomsPage('passkey', { rooms: undefined })],
+  ],
+  '/admin/keys': [
+    ['through the tunnel, a code session', () => keysPage('code')],
+    [
+      'through the tunnel, a passkey session, an awkward name',
+      () => keysPage('passkey', {}, AWKWARD_NAME),
+    ],
+    ['on the server machine: the card', () => keysPage('passkey', { card: CARD, onServer: true })],
+    // #2781: the emergency kit's part, offered, in either session, and with none to offer.
+    [
+      'on the server machine: the emergency kit',
+      () => keysPage('passkey', { card: CARD, onServer: true, kit: true }),
+    ],
+    [
+      'on the server machine: the emergency kit, a code session',
+      () => keysPage('code', { card: CARD, onServer: true, kit: true }),
+    ],
+    ['rotated', () => keysPage('passkey', { notice: { kind: 'rotated', ok: true } })],
+    ['busy', () => keysPage('passkey', { notice: { kind: 'busy' } })],
+    [
+      'no keys yet',
+      () => keysPage('passkey', { keys: { state: 'no-keys', current: null, olderHeld: 0 } }),
+    ],
+    ['unreadable', () => keysPage('passkey', { keys: undefined })],
+  ],
+  '/admin/problems': [
+    [
+      'three lines, one holding markup',
+      () =>
+        pages.shellPage(
+          shell('/admin/problems'),
+          'Recent problems',
+          pages.problemsBody({
+            problems: {
+              since: '2026-11-14T08:00:00.000Z',
+              lines: [
+                ...SCRIPTED_PROBLEMS.map(({ at, line }) => ({ at, line })),
+                {
+                  at: '2026-11-14T21:00:00.000Z',
+                  line: '{"event":"request","route":"/v1/<script>x</script>","status":500}',
+                },
+              ],
+            },
+          }),
+        ),
+    ],
+    [
+      'none since the start, an awkward name',
+      () =>
+        pages.shellPage(
+          shell('/admin/problems', AWKWARD_NAME),
+          'Recent problems',
+          pages.problemsBody({ problems: { since: '2026-11-14T08:00:00.000Z', lines: [] } }),
+        ),
+    ],
+    [
+      'unreadable',
+      () =>
+        pages.shellPage(
+          shell('/admin/problems'),
+          'Recent problems',
+          pages.problemsBody({ problems: undefined }),
+        ),
     ],
   ],
   '/admin/analysis': [
@@ -470,6 +846,105 @@ describe.each(Object.entries(PAGES))('the admin page %s (#2645)', (path, states)
       },
     );
   }
+});
+
+/**
+ * A card and a single-use code as one QR (#2783, ADR 0080 D-3, D-7): the part
+ * the setup wizard's claim and invite steps draw on the loopback listener,
+ * audited in the frame of a page on the server machine. It is not a route of
+ * its own, so it is not in {@link PAGES}; #2784's `/setup` pages add their
+ * own entries.
+ */
+describe.each(['claim', 'invite'] as const)(
+  'the %s QR, on the server machine (#2783)',
+  (purpose) => {
+    const CODE = 'k7mq-x3ra-p9tz-wc4e';
+    const render = (): string =>
+      pages.shellPage(
+        { ...shell('/admin/keys', AWKWARD_NAME, 'passkey'), listener: 'loopback' },
+        'Keys',
+        pages.cardCodePart({
+          purpose,
+          card: CARD.card,
+          code: CODE,
+          expiresAt: '2026-11-14T21:10:00.000Z',
+        }),
+      );
+
+    it('no accessibility violation, and no inline script or style', () => {
+      const html = render();
+      const violations = auditAccessibility(parse(html));
+      expect(violations, formatViolations(violations)).toEqual([]);
+      expect(html).not.toMatch(/<style|\sstyle=|\son[a-z]+=|<script/i);
+    });
+
+    it('the QR is an image with a name, and the line beside it, as selectable text, is its alternative', () => {
+      const doc = parse(render());
+      const qr = doc.querySelectorAll('main svg[role="img"]');
+      expect(qr).toHaveLength(1);
+      const svg = qr[0] as Element;
+      expect(accessibleName(svg)).toBe(pages.CARD_CODE_TEXT[purpose].label);
+      const describedBy = svg.getAttribute('aria-describedby') ?? '';
+      const line = doc.getElementById(describedBy);
+      expect(line?.tagName).toBe('CODE');
+      expect(line?.closest('svg')).toBeNull();
+      // The app's own line, whole: what its paste box and its scanner read back.
+      expect(CARD.card.split('#')[1]).toHaveLength(52);
+      expect(line?.textContent).toBe(codeWithCard(CARD.card, CODE));
+      expect(readCodeWithCard(line?.textContent ?? '')).toEqual({ card: CARD.card, code: CODE });
+      expect(line?.textContent?.startsWith('oyl-instance:')).toBe(true);
+      // A picture is not a tab stop.
+      expect(tabbableElements(doc)).not.toContain(svg);
+    });
+
+    it('is drawn black on white, which clears the non-text contrast threshold whatever the theme', () => {
+      const svg = parse(render()).querySelector('main svg[role="img"]');
+      const paper = svg?.querySelector('rect')?.getAttribute('fill') ?? '';
+      const ink = svg?.querySelector('path')?.getAttribute('fill') ?? '';
+      expect(contrastRatio(ink, paper)).toBeGreaterThanOrEqual(AA_LARGE_TEXT_OR_NON_TEXT);
+      expect([ink, paper]).toEqual(['#000000', '#ffffff']);
+    });
+  },
+);
+
+describe('the Backups page’s Details disclosures (#2771)', () => {
+  it('each row’s summary is a tab stop named Details, its facts closed inside it', () => {
+    const doc = parse(backupsPage('passkey'));
+    const summaries = [...doc.querySelectorAll('tbody tr details > summary')];
+    expect(summaries).toHaveLength(RECORDS.length);
+    const tabbable = tabbableElements(doc);
+    for (const summary of summaries) {
+      expect(tabbable).toContain(summary);
+      expect(summary.textContent).toBe('Details');
+      expect(summary.parentElement?.hasAttribute('open')).toBe(false);
+      expect(summary.parentElement?.querySelector('dl')).not.toBeNull();
+    }
+    // Nothing inside a closed disclosure is reachable before it is opened.
+    for (const element of tabbable) {
+      expect(element.closest('details') === null || element.tagName === 'SUMMARY').toBe(true);
+    }
+  });
+});
+
+describe('/admin/admin.css draws the app’s own tokens (#2771, ADR 0063)', () => {
+  it('every colour it mirrors is the app’s, in both themes', () => {
+    const app = { light: COLOUR_TOKENS, dark: DARK_COLOUR_TOKENS } as const;
+    for (const theme of ['light', 'dark'] as const) {
+      const mirrored = tokens.ADMIN_COLOURS[theme];
+      expect(Object.keys(mirrored).length).toBeGreaterThan(20);
+      for (const [name, value] of Object.entries(mirrored)) {
+        expect(value, `${theme} ${name}`).toBe((app[theme] as Record<string, string>)[name]);
+      }
+    }
+  });
+
+  it('its spacing, type steps and faces are the app’s', () => {
+    expect(tokens.ADMIN_SPACE).toEqual(SPACE_TOKENS);
+    for (const [step, value] of Object.entries(tokens.ADMIN_FONT_SIZE)) {
+      expect(value, step).toBe((FONT_SIZE_TOKENS as Record<string, string>)[step]);
+    }
+    expect(tokens.ADMIN_FONT_FAMILY).toEqual(FONT_FAMILY_TOKENS);
+  });
 });
 
 describe('/admin/admin.css meets WCAG 2.2 AA in both schemes (#2645)', () => {

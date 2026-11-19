@@ -264,6 +264,41 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         changes), after a step-up, and the seam sets
                         `RouteContext.adminChannel`, from which the route
                         logs `admin_tunnel` or `admin_loopback`, never `app`.
+                        Since #2646 Accounts reaches ADR 0069 D-9's three
+                        moderation routes too (the queue, approve, refuse):
+                        the only non-owner routes with an `admin` marker,
+                        and a decision through them writes its moderation
+                        log row with `registration_decided` in ONE operator
+                        log transaction (`moderation.ts` §`act`'s channel).
+                        Since #2647 Backups' "back up now" is the fourth
+                        `'change'` route; `operate.requestBackup` takes the
+                        `OperateOwner`, so its entry names the channel.
+                        Since #2649 Rooms' End room too (`endRoom` takes
+                        the `OperateOwner`); the room id is a form field,
+                        shape-checked before it goes in `{roomId}`.
+                        Since #2650 Keys reads `operate.keysView` itself
+                        (`GET /v1/operate/keys` stays `never`) and hands
+                        the card to the renderer on the LOOPBACK place only.
+                        Since #2651 Recent problems draws `GET
+                        /v1/operate/logs` as given, escaped, with no
+                        redaction of its own and no second source.
+                        Since #2783 `admin/qr.ts` draws the card and a
+                        claim or invite code as one SVG QR (`uqr`, ADR
+                        0037's 2026-11-18 row) and `pages.ts`
+                        §`cardCodePart` the line beside it, for ADR 0080's
+                        loopback `/setup` steps (#2784 mounts them); its
+                        tests read the drawing back with `jsqr`.
+                        Since #2784 `src/setup/setup.ts` is ADR 0080's
+                        first-run setup at `/setup` on the LOOPBACK
+                        listener, with the admin pages off too: the handler
+                        asks it only for `ClientInfo.listener: 'loopback'`,
+                        and it answers `undefined` (so `not_found`) once
+                        migration 0048's `setup_state` says done — read per
+                        request. Its own cookie, CSRF and code limiter;
+                        changes log from the source `setup`. ⚠️ The
+                        registration mode is now `identity.registrationMode()`
+                        (the database's over `.env`'s), never
+                        `config.registration`, wherever a rider meets it.
                         ⚠️ Only `src/store/` may
                         import the driver or Kysely (`eslint.config.js`).
                         ⚠️ It must not depend on `apps/web` or

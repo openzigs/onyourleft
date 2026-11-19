@@ -300,6 +300,10 @@ jobs:
       #   nothing else does. An outage of it turns this red as IMG004, which
       #   names the registry rather than the Dockerfile (#841, docs/agents/ci.md
       #   section 4c). Its suite fakes `docker` on PATH and needs no Docker.
+      #   image layer checker and instance bundle script tests -- #2786. The
+      #   suites of the two scripts instance-image.yml runs on the published
+      #   image; plain bash, tar and zip, no Docker. The instance image check
+      #   above runs the layer checker for real, on its own build, as IMG009.
       #   mirror script tests -- #1231. The suite of the script
       #   mirror-base-image.yml runs; a fake `skopeo`, no registry.
       #   basemap build script tests -- #1557. The suite of
@@ -354,6 +358,8 @@ jobs:
           'demo build' 'pnpm --filter @onyourleft/web run build:demo'
           'instance image' 'bash scripts/check-instance-image.sh'
           'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
+          'image layer checker tests' 'bash scripts/check-image-layers.test.sh'
+          'instance bundle script tests' 'bash scripts/make-instance-bundle.test.sh'
           'mirror script tests' 'bash scripts/mirror-base-image.test.sh'
           'basemap build script tests' 'bash apps/web/tools/basemap/build.test.sh'
           'valhalla build script tests' 'bash apps/web/tools/valhalla/build-graph.test.sh'

@@ -58,7 +58,7 @@
  * guess.
  */
 
-import { useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useState, type JSX, type ReactNode } from 'react';
 
 import { kilograms, type Kilograms } from '@onyourleft/domain';
 import {
@@ -89,6 +89,7 @@ import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { GOALS_WORDS } from '../rider-text/words';
 import type { AthleteMassPort } from '../athlete/store-port';
+import type { InstancePort, InstanceState } from '../instance/instance-port';
 import { Button } from '../design/Button';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 // The parts' own files, not the kit's index: the index names every part, and
@@ -506,6 +507,13 @@ export interface SettingsViewProps {
    * until a press asks for sound; a test hands in one over a fake context.
    */
   readonly soundOutput?: CueOutput | undefined;
+  /**
+   * The Connect screen's port (#777), read here only to say whether this
+   * device is connected (#2756) — never to connect, and never with a form.
+   * `undefined` where this browser cannot connect, and the card then says
+   * what it says with nothing connected.
+   */
+  readonly instance?: InstancePort | undefined;
 }
 
 export function SettingsView({
@@ -527,6 +535,7 @@ export function SettingsView({
   riderText,
   workoutGoals,
   soundOutput,
+  instance,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -878,16 +887,86 @@ export function SettingsView({
           server is its own page, with what it sends above its Connect button. */}
         <section className="oyl-panel" aria-labelledby="oyl-instance-link-heading">
           <h3 id="oyl-instance-link-heading">Instance</h3>
-          <p>
-            <a href={hrefFor(routeById('instance'))}>Connect to an instance</a>, to ride with other
-            people, and see this device’s connection and your devices there.
-          </p>
+          <InstanceLink port={instance} />
         </section>
 
         <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
       </SettingsCard>
     </div>
   );
+}
+
+/**
+ * What this device's connection is, as {@link InstancePort.current} reads it:
+ * `undefined` until it answers, and kept with the port it answered for, so a
+ * new port reads as unanswered until it does (`where-rides-are.ts` does the
+ * same for About).
+ */
+function useInstanceState(port: InstancePort | undefined): InstanceState | undefined {
+  const [answer, setAnswer] = useState<
+    { readonly port: InstancePort; readonly state: InstanceState } | undefined
+  >(undefined);
+  useEffect(() => {
+    if (port === undefined) return undefined;
+    let cancelled = false;
+    port
+      .current()
+      .then((state) => {
+        if (!cancelled) setAnswer({ port, state });
+      })
+      // Deliberate: a read that throws leaves the card on its unanswered wording.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [port]);
+  if (port === undefined) return { kind: 'not-connected' };
+  return answer?.port === port ? answer.state : undefined;
+}
+
+/**
+ * The Instance section's line — #2756. It used to say *Connect to an
+ * instance* on a device that was connected, and the owner read a connected
+ * tablet as a disconnected one. Connected, it says so: the instance's ADDRESS
+ * and the rider's name there, both as the instance answered them, never a
+ * position. With nothing connected it offers to connect to a server. A device that
+ * holds a sign-in the instance did not answer as connected (signed out,
+ * unreachable, or a sign-in it cannot read) names the address and sends the
+ * rider to the Instance screen, which says which. Wording approved by the
+ * owner in #2756's pull request (2026-11-18), which says "server" where the
+ * setup screens do.
+ */
+function InstanceLink({ port }: { readonly port: InstancePort | undefined }): JSX.Element {
+  const state = useInstanceState(port);
+  const href = hrefFor(routeById('instance'));
+  const see = <a href={href}>See this device’s connection</a>;
+  if (state === undefined) {
+    return <p>{see} and your devices there, or connect to a server to ride with other people.</p>;
+  }
+  switch (state.kind) {
+    case 'not-connected':
+      return (
+        <p>
+          <a href={href}>Connect to a server</a>, to ride with other people, and see this device’s
+          connection and your devices there.
+        </p>
+      );
+    case 'connected':
+      return (
+        <p>
+          Connected to your server at {state.origin} as {state.displayName}. {see} and your devices
+          there.
+        </p>
+      );
+    case 'signed-out':
+    case 'unreadable':
+    case 'unreachable':
+      return (
+        <p>
+          Your server at {state.origin} is not answering right now. <a href={href}>See why</a>.
+        </p>
+      );
+  }
 }
 
 /**

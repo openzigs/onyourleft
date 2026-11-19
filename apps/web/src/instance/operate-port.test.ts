@@ -218,6 +218,38 @@ describe('the operator log — #2602, #2603', () => {
     ]);
   });
 
+  it('shows the setup wizard’s and the instance’s own start’s entries, which name nobody (#2784)', async () => {
+    const { owner, world } = await operatedWorld();
+    await world.freshRead(async (store) => {
+      await store.recordOperatorAction(
+        { actor: { source: 'start' }, action: 'secret_generated', at: 1_790_004_000 },
+        () => ({ outcome: 'done', detail: 'instance_secret_key', value: undefined }),
+      );
+      await store.recordOperatorAction(
+        { actor: { source: 'setup' }, action: 'registration_mode_set', at: 1_790_004_060 },
+        () => ({ outcome: 'done', detail: 'closed', value: undefined }),
+      );
+    });
+    expect(asPage(await createOperatePort(owner.dependencies).log()).entries).toEqual([
+      {
+        id: 2,
+        at: new Date(1_790_004_060 * 1000).toISOString(),
+        source: 'setup',
+        action: 'registration_mode_set',
+        detail: 'closed',
+        outcome: 'done',
+      },
+      {
+        id: 1,
+        at: new Date(1_790_004_000 * 1000).toISOString(),
+        source: 'start',
+        action: 'secret_generated',
+        detail: 'instance_secret_key',
+        outcome: 'done',
+      },
+    ]);
+  });
+
   it('is never read for the deputy or a rider, whom the instance answers as no route', async () => {
     const { deputy, rider, world, approveRider } = await operatedWorld();
     await writeOperatorEntries(world, 2);

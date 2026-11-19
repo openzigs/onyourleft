@@ -254,6 +254,13 @@ import { levelStanding, readLevelProgress } from './delivery/level-progress';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
+  HUD_PANELS_SELECTOR,
+  boxesOver,
+  layOffScreenMarkers,
+  offScreenMarkers,
+  type PageBox,
+} from './off-screen-marker';
+import {
   endDeliveryRide,
   keepDeliveryWeek,
   keepLevelFinished,
@@ -1127,6 +1134,15 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
 export const DRAWN_LINE_WARM_DELAY_MS = 250;
 
 /**
+ * How long the HUD's panels, read off the page as boxes, are kept for the
+ * markers at the world's edge to stay clear of, in milliseconds: **500** —
+ * #2755. Chosen: a panel moves only when the layout changes, and a read a
+ * frame would be a layout read every frame on the tablet; a changed size of
+ * the world reads them again at once.
+ */
+const HUD_BOXES_MS = 500;
+
+/**
  * Whether a ride on `route`, started from the chooser with these choices, is
  * drawn along the route's drawn path (`drawn-line.ts`) — #2470. The chooser
  * builds the path only for such a ride. A built-in level is always a
@@ -1818,6 +1834,25 @@ function GameScreen({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   /** #783: the other riders' names, laid over the world. @see layNameTags */
   const namesRef = useRef<HTMLDivElement | null>(null);
+  /** #2755: the markers at the world's edge for a pacer or a ghost out of view. @see layOffScreenMarkers */
+  const offScreenRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * #2755: the HUD's panels as boxes over the world, read off the page at
+   * most every {@link HUD_BOXES_MS} and only while a marker is placed, and
+   * the world's size they were read at. @see boxesOver
+   */
+  const worldSizeRef = useRef<{ readonly width: number; readonly height: number } | undefined>(
+    undefined,
+  );
+  const hudBoxesRef = useRef<
+    | {
+        readonly at: number;
+        readonly width: number;
+        readonly height: number;
+        readonly boxes: readonly PageBox[];
+      }
+    | undefined
+  >(undefined);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
   const viewRef = useRef<RendererView | undefined>(undefined);
   /**
@@ -3436,6 +3471,9 @@ function GameScreen({
             // ratio of infinity, which three turns into a NaN projection and a
             // black frame.
             if (canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+              // #2755: the size the off-screen markers are placed from, kept
+              // here so a frame with the pacer in view reads no layout.
+              worldSizeRef.current = { width: canvas.clientWidth, height: canvas.clientHeight };
               viewRef.current?.resize(canvas.clientWidth, canvas.clientHeight);
             }
           });
@@ -4371,6 +4409,46 @@ function GameScreen({
                 : [],
             );
           }
+          // #2755: a marker at the world's edge for the pacer or the ghost
+          // while it is not drawn in view — DOM again, no draw call. Only a
+          // ride with one to chase, and only with a world to lay it over.
+          const edges = offScreenRef.current;
+          const chases =
+            view.hasContext &&
+            (simulation.state.bot !== undefined || ghostRef.current !== undefined)
+              ? chasedGaps(simulation.state, ghostRef.current, outcomeRef.current)
+              : [];
+          if (
+            edges !== null &&
+            world !== null &&
+            (edges.childElementCount > 0 || chases.length > 0)
+          ) {
+            // The observer's size; a layout read only where there is no observer.
+            const { width, height } = worldSizeRef.current ?? {
+              width: world.clientWidth,
+              height: world.clientHeight,
+            };
+            const hud = (): readonly PageBox[] => {
+              const kept = hudBoxesRef.current;
+              if (
+                kept !== undefined &&
+                kept.width === width &&
+                kept.height === height &&
+                at - kept.at < HUD_BOXES_MS
+              ) {
+                return kept.boxes;
+              }
+              const covers = edges.parentElement?.querySelectorAll(HUD_PANELS_SELECTOR) ?? [];
+              const boxes = boxesOver(world, covers);
+              hudBoxesRef.current = { at, width, height, boxes };
+              return boxes;
+            };
+            layOffScreenMarkers(
+              edges,
+              world,
+              offScreenMarkers(frame, { width, height }, chases, hud),
+            );
+          }
         } else {
           preparingViewRef.current = view;
           // The arrival's own bump (above) carries the guarantee that a warm-up it
@@ -4983,6 +5061,10 @@ function GameScreen({
           `name-tags.ts`. Hidden for the world's reason: each is on the HUD as
           text too — the followed rider's, and a race's standings. */}
       <div ref={namesRef} className="oyl-game__names" aria-hidden="true" />
+      {/* #2755: a marker at the world's edge for a pacer or a ghost out of
+          view, laid over the world by `off-screen-marker.ts`. Hidden, with no
+          live region: the HUD's gap field says the same as text. */}
+      <div ref={offScreenRef} className="oyl-game__off-screens" aria-hidden="true" />
       <HudPanel
         profile={chosen.profile}
         announcement={announcement}

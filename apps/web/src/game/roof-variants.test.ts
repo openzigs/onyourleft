@@ -43,6 +43,7 @@ import {
   landBeside,
   mixedTownFixture,
   planFingerprint,
+  plinthTriangles,
   rectangleBeside,
   ROOF_SHAPES,
   sawToothYou,
@@ -804,7 +805,10 @@ describe('the caps — #1785', () => {
     expect(rectanglesOf(plain.footprint)).toHaveLength(3);
     expect(plain.roof).not.toBe('flat');
     expect(plain.roofVariant).toBe('plain');
-    expect(plain.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
+    // #2761: the far cap is its walls and roof; its plinth is drawn far too, beside them.
+    expect(plain.farTriangleCount - plinthTriangles(plain)).toBeLessThanOrEqual(
+      FOOTPRINT_MAX_FAR_TRIANGLES,
+    );
     // Control: fewer of its vertices kept, the gambrel fits and is built.
     const [gambrel] = plansOf([toothed], { roofVariant: 'gambrel' }, 60) as [FootprintPlan];
     expect(gambrel.roofVariant).toBe('gambrel');

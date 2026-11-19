@@ -27,6 +27,7 @@ import {
   type SoleModeratorWorld,
 } from '../moderation/moderation-testing.ts';
 import { runCommand } from '../operator/run.ts';
+import { registrationMode } from '../operator/commands.ts';
 import { roomBody } from '../rooms/rooms-testing.ts';
 import { readServerConfig } from '../server-config.ts';
 import type { OperateCounts } from '../store/sql-store.ts';
@@ -113,6 +114,14 @@ describe('GET /v1/operate/status — what it counts is what is there (#2604)', (
     const body = await statusOf(world);
     expect(body.counts.athletes).toEqual({ active: 3, pending: 1, suspended: 1 });
     expect(body.registration).toBe('approval');
+  });
+
+  it('says the mode a new rider meets: the one the setup or the command chose, over .env’s, until it is cleared (#2784, ADR 0080 D-6)', async () => {
+    const paths = { database: world.path, blobs: `${world.path}.blobs` };
+    await registrationMode(paths, 'closed');
+    expect((await statusOf(world)).registration).toBe('closed');
+    await registrationMode(paths, null);
+    expect((await statusOf(world)).registration).toBe('approval');
   });
 
   it('counts an open room and the jobs waiting and running, and nothing else of them', async () => {

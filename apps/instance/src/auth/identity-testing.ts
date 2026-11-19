@@ -76,6 +76,7 @@ import { sealFor } from '../sealed/sealed-testing.ts';
 import { matchPath } from '../handler.ts';
 import { ROUTES } from '../routes.ts';
 import { createIdentity, DEFAULT_LIMITS, type Identity, type IdentityOptions } from './identity.ts';
+import type { SecretFromFile } from '../setup/secrets.ts';
 
 /** The origin every test instance states. */
 export const TEST_ORIGIN = 'https://ride.example';
@@ -367,6 +368,8 @@ export async function startIdentityInstance(
       readonly loopbackPort?: number;
       /** `OYL_INSTANCE_ADMIN_ADDRESSES` (#2643). */
       readonly addresses?: readonly string[];
+      /** The secrets read from the secrets folder (#2781): the emergency kit's. */
+      readonly kitSecrets?: readonly SecretFromFile[];
     };
   } = {},
 ): Promise<IdentityInstance> {
@@ -592,6 +595,9 @@ export async function startIdentityInstance(
         ? {}
         : { loopbackPort: adminOptions.loopbackPort }),
       ...(adminOptions.addresses === undefined ? {} : { addresses: adminOptions.addresses }),
+      ...(adminOptions.kitSecrets === undefined ? {} : { kitSecrets: adminOptions.kitSecrets }),
+      // #2650: the world's keys, as `instance.ts` hands them.
+      instanceKeys,
     });
     return madeAdmin.value;
   };

@@ -22,7 +22,7 @@ import {
   RENAME_REFUSAL_TEXT,
   type InstancePort,
 } from '../instance/instance-port';
-import { INSTANCE_KEY_TEXT } from '../instance/instance-pin';
+import { codeWithCard, INSTANCE_KEY_TEXT } from '../instance/instance-pin';
 import {
   SCRIPTED_ACCOUNT_CHANGES,
   SCRIPTED_FINGERPRINT,
@@ -32,6 +32,7 @@ import {
 } from '../instance/testing';
 import { createOperatePort } from '../instance/operate-port';
 import { closeOperateWorlds, operatedWorld } from '../testing/operate-instance-testing';
+import { answer, fieldLabelled, pasteCode, saidUnder } from '../testing/connect-flow';
 import {
   activateWithKeyboard,
   mount,
@@ -48,6 +49,7 @@ import {
   INSTANCE_KEPT_VISIBLE,
   INSTANCE_NO_PORT,
   INSTANCE_RECEIVES,
+  INSTANCE_RECEIVES_LEAD,
   InstanceView,
   MODERATE_LINK_TEXT,
   OPERATE_LINK_TEXT,
@@ -56,9 +58,13 @@ import {
 } from './InstanceView';
 import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
 import { ERASE_ACCOUNT_TEXT } from './EraseAccount';
+import { CONNECT_FLOW_TEXT } from './ConnectFlow';
+import { OWNER_CLAIM_TEXT } from './OwnerClaim';
 import { ERASE_REFUSAL_TEXT, type StatementsPort } from '../instance/statements-port';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BLOCKS_TEXT } from './BlocksPanel';
+
+const CODE = 'k7mq-x3ra-p9tz-wc4e';
 
 let mounted: Mounted | undefined;
 
@@ -79,14 +85,33 @@ function button(name: string): HTMLButtonElement {
   return found;
 }
 
+/** Connect by an address alone: the expert's form, in its disclosure since #2828. */
 async function connectAs(address: string, name: string): Promise<void> {
-  const inputs = [...(mounted?.container.querySelectorAll('input') ?? [])];
-  await typeInto(inputs[0] as HTMLInputElement, address);
-  await typeInto(inputs[1] as HTMLInputElement, name);
-  const form = mounted?.container.querySelector('form');
+  await typeInto(fieldLabelled<HTMLInputElement>(CONNECT_FLOW_TEXT.addressLabel), address);
+  await typeInto(fieldLabelled<HTMLInputElement>(CONNECT_FLOW_TEXT.nameLabel), name);
+  const form = mounted?.container.querySelector<HTMLFormElement>(
+    `form[aria-label="${CONNECT_FLOW_TEXT.expert}"]`,
+  );
   if (form === null || form === undefined) throw new Error('no form');
   await submitForm(form);
   await settle();
+}
+
+/**
+ * What the instance receives is on the screen: in the document, and with no
+ * CLOSED disclosure above it — #2828 put it in one drawn open (owner ruling
+ * of 2026-11-18), which the rider may fold and nothing opens closed.
+ */
+function expectReceivesShown(where: string): void {
+  for (const sentence of INSTANCE_KEPT_VISIBLE) expect(text(), where).toContain(sentence);
+  const list = mounted?.container.querySelector('[data-oyl-kept-visible] ul');
+  expect(list, where).not.toBeNull();
+  for (let at = list?.parentElement; at; at = at.parentElement) {
+    if (at instanceof HTMLDetailsElement) expect(at.open, where).toBe(true);
+  }
+  expect(list?.closest('details')?.querySelector('summary')?.textContent, where).toBe(
+    INSTANCE_RECEIVES_LEAD,
+  );
 }
 
 describe('the Connect screen — #777, #778', () => {
@@ -96,21 +121,61 @@ describe('the Connect screen — #777, #778', () => {
     expect(mounted.container.querySelector('button')).toBeNull();
   });
 
-  it('lists what the instance will receive BEFORE sign-in, on the screen, above Connect', async () => {
-    const scripted = scriptedInstance();
+  it('lists what the instance will receive BEFORE sign-in, on the screen at every step, under the controls (#778, #2828)', async () => {
+    const line = codeWithCard(`oyl-instance:https://ride.example#${SCRIPTED_FINGERPRINT}`, CODE);
+    for (const [where, reach] of [
+      ['start', () => Promise.resolve()],
+      ['question', () => pasteCode(line)],
+      [
+        'claim',
+        async () => {
+          await pasteCode(line);
+          await answer('claim');
+        },
+      ],
+      [
+        'invite',
+        async () => {
+          await pasteCode(line);
+          await answer('invite');
+        },
+      ],
+      [
+        'device',
+        async () => {
+          await pasteCode(line);
+          await answer('device');
+        },
+      ],
+      ['card', () => pasteCode(`oyl-instance:https://ride.example#${SCRIPTED_FINGERPRINT}`)],
+    ] as const) {
+      const scripted = scriptedInstance();
+      mounted = await mount(<InstanceView port={scripted.port} />);
+      await settle();
+      await reach();
+      expectReceivesShown(where);
+      // Under every control the step offers (#2828): not between them.
+      const receives = mounted.container.querySelector('[data-oyl-kept-visible]')!;
+      for (const control of mounted.container.querySelectorAll('button, textarea, input')) {
+        expect(
+          control.compareDocumentPosition(receives) & Node.DOCUMENT_POSITION_FOLLOWING,
+          `${where}: ${control.outerHTML}`,
+        ).toBeTruthy();
+      }
+      // Nothing was asked of the instance but what this device holds.
+      expect(scripted.calls, where).toEqual(['current']);
+      mounted.unmount();
+      mounted = undefined;
+    }
+  });
+
+  it('draws no claim once a server is connected (#2823)', async () => {
+    const scripted = scriptedInstance({ connected: true });
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
-    for (const sentence of INSTANCE_KEPT_VISIBLE) expect(text()).toContain(sentence);
-    // Kept visible: no closed disclosure anywhere above it.
-    expect(mounted.container.querySelector('details')).toBeNull();
-    const list = mounted.container.querySelector('[data-oyl-kept-visible] ul');
-    const connect = button('Connect');
-    expect(list).not.toBeNull();
-    expect(
-      (list as Element).compareDocumentPosition(connect) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    // Nothing was asked of the instance but what this device holds.
-    expect(scripted.calls).toEqual(['current']);
+    expect(text()).toContain('Connected');
+    expect(text()).not.toContain(OWNER_CLAIM_TEXT.heading);
+    expect(() => button(OWNER_CLAIM_TEXT.claim)).toThrow();
   });
 
   it('says when the name is sent and kept, and what a rider asks the operator for — #892 review', () => {
@@ -139,9 +204,9 @@ describe('the Connect screen — #777, #778', () => {
     expect(room).toContain('the route of a room you make');
     expect(room).toContain('your power and cadence while you ride in it');
     expect(room).toContain('the weight you declare once as you join');
-    expect(sync).toContain('which needs the instance’s card');
+    expect(sync).toContain('which needs the server’s card');
     expect(sync).toContain('with their positions and heart rate');
-    expect(sync).toContain('sealed on this device for the instance alone');
+    expect(sync).toContain('sealed on this device for the server alone');
     expect(sync).toContain('Nothing is synced until you press Sync now');
     expect(sync).not.toContain('does not offer Sync yet');
     // #1104 (F-3): what a sync also sends since #1100 and #1237.
@@ -165,10 +230,7 @@ describe('the Connect screen — #777, #778', () => {
     const list = mounted.container.querySelector('[data-oyl-kept-visible] ul');
     expect(list?.textContent).toContain(room ?? 'no room line');
     expect(list?.textContent).toContain(sync ?? 'no sync line');
-    expect(
-      (list as Element).compareDocumentPosition(button('Connect')) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expectReceivesShown('not connected');
   });
 
   it('shows the names the instance holds after connecting, not the ones typed', async () => {
@@ -219,9 +281,8 @@ describe('the Connect screen — #777, #778', () => {
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
     await connectAs('http://ride.example', '');
-    expect(mounted.container.querySelector('[role="status"]')?.textContent).toContain(
-      'That address starts with http://.',
-    );
+    // #2828: directly under the button that was pressed.
+    expect(saidUnder('Connect')).toContain('That address starts with http://.');
     expect(button('Connect')).toBeDefined();
   });
 

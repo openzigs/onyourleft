@@ -185,6 +185,31 @@ export const EVENT_KEYS: ReadonlyMap<
       setIn: (value) => value === 'app' || value === 'env' || value === 'none',
     },
   ],
+  // #2781 (ADR 0080 D-4): which secret came from its file in the secrets
+  // folder, whether this start made it, and whether that folder keeps
+  // permission bits at all. Never the secret, and never the file's path.
+  [
+    'secret',
+    {
+      variable: (value) =>
+        value === 'OYL_INSTANCE_SECRET_KEY' || value === 'OYL_INSTANCE_METRICS_TOKEN',
+      from: (value) => value === 'file' || value === 'generated',
+      permissions: (value) => value === 'not-kept',
+    },
+  ],
+  // #2784 (ADR 0080 D-2): where the first-run setup is and where its code
+  // IS — the file in the secrets folder, or the command that prints one —
+  // and when the code ends. Never the code: standard output is not private.
+  [
+    'first-run-setup',
+    {
+      open: (value) =>
+        typeof value === 'string' && /^http:\/\/localhost:[0-9]{1,5}\/setup$/.test(value),
+      codeIn: (value) => value === 'secrets/setup-code' || value === 'operator setup-code',
+      validUntil: (value) =>
+        typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]{8,12}Z$/.test(value),
+    },
+  ],
 ]);
 
 /** A logged string longer than this is cut: a token or a signature is longer. */

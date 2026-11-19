@@ -42,7 +42,9 @@ describe('the binding of a step-up (#2642)', () => {
 
   it('names only the changes the admin pages make, never a property of every object', () => {
     expect(isAdminChange('passkey_revoke')).toBe(true);
-    for (const name of ['backup_now', 'constructor', '__proto__', 'toString']) {
+    // #2647 made back up now a change; restore never is (#2601's decision).
+    expect(isAdminChange('backup_now')).toBe(true);
+    for (const name of ['restore', 'constructor', '__proto__', 'toString']) {
       expect(isAdminChange(name), name).toBe(false);
     }
   });

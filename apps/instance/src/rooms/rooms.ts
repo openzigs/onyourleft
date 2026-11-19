@@ -365,6 +365,12 @@ export interface RoomsOptions {
   /** A new code — `code.ts`'s, from the CSPRNG, unless a test's. */
   readonly code?: () => string;
   /**
+   * A new room's id — 16 bytes from the CSPRNG, in hex, unless a test's. A
+   * test that needs two rooms on two room workers chooses ids that hash apart
+   * (#2702), because a room is placed by a hash of its id.
+   */
+  readonly roomId?: () => string;
+  /**
    * Whether the operator turned public rooms on (#788, `legal.ts`'s
    * `OYL_INSTANCE_PUBLIC_ROOMS`). Absent is OFF: the default an instance starts with.
    */
@@ -489,6 +495,7 @@ export function createRooms(options: RoomsOptions): Rooms {
   const joinsPerAthlete = createRateLimiter(limits.joinsPerAthlete, now);
   const joinsPerAddress = createRateLimiter(limits.joinsPerAddress, now);
   const code = options.code ?? (() => newRoomCode());
+  const newRoomId = options.roomId ?? (() => randomHex(16));
   const seconds = (): number => Math.floor(now() / 1000);
   const publicRooms = options.publicRooms === true;
   const eligible = options.eligible ?? (() => Promise.resolve(false));
@@ -653,7 +660,7 @@ export function createRooms(options: RoomsOptions): Rooms {
       // ending room on the same bytes cannot delete the file between them.
       return onRoute(routeSha256, async (): Promise<Outcome<CreatedRoom>> => {
         await routes.put(bytes, routeSha256);
-        const roomId = randomHex(16);
+        const roomId = newRoomId();
         const createdAt = seconds();
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const drawn = code();

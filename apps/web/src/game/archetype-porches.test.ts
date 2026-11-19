@@ -38,6 +38,7 @@ import {
   landBeside,
   mixedTownFixture,
   planFingerprint,
+  plinthTriangles,
   rectangleBeside,
 } from './footprint-fixtures-testing';
 import { ARCHETYPE_FEATURES, type HouseArchetype } from './house-archetypes';
@@ -425,10 +426,13 @@ describe('the caps — #1784', () => {
     for (const each of plans) {
       expect(each.archetype).toBe('foursquare');
       expect(each.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
-      expect(each.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
-      // The far level is walls and roof alone: no porch in it.
+      expect(each.farTriangleCount - plinthTriangles(each)).toBeLessThanOrEqual(
+        FOOTPRINT_MAX_FAR_TRIANGLES,
+      );
+      // The far level is walls, plinth (#2761) and roof alone: no porch in it.
       expect(each.farTriangleCount).toBe(
-        (each.triangles.wall.length + each.triangles.roof.length) / (3 * FOOTPRINT_VERTEX_FLOATS),
+        (each.triangles.wall.length + each.triangles.plinth.length + each.triangles.roof.length) /
+          (3 * FOOTPRINT_VERTEX_FLOATS),
       );
       if (each.porch && each.dormers === 1 && each.triangles.chimney.length > 0) full += 1;
     }

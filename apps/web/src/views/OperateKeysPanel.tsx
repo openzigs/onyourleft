@@ -1,21 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import {
-  currentKeyText,
   KEYS_CARD_PICTURE_LABEL,
   KEYS_CARD_TEXT,
   KEYS_CLI_COMMANDS,
   KEYS_CLI_TEXT,
   KEYS_FINGERPRINT_TEXT,
-  KEYS_TEXT,
   KEYS_UNREADABLE_TEXT,
-  momentText,
-  olderHeldText,
+  keyFactRows,
   ROTATE_BUSY_TEXT,
   ROTATE_CONFIRM_WORD,
   ROTATE_KEY_TEXT,
   ROTATE_NOT_DONE_TEXT,
   ROTATE_TYPE_TEXT,
+  type OperateRow,
 } from '@onyourleft/operate-text';
 import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
@@ -62,6 +60,16 @@ export {
 } from '@onyourleft/operate-text';
 
 /** The Keys section: the card, the fingerprint, the current key, and the routine rotation. */
+/** One of the keys' facts, as the package words it. */
+function fact(row: OperateRow): JSX.Element {
+  return (
+    <div key={row.label}>
+      <dt>{row.label}</dt>
+      <dd>{row.value}</dd>
+    </div>
+  );
+}
+
 export function OperateKeysPanel({
   port,
 }: {
@@ -132,6 +140,8 @@ export function OperateKeysPanel({
     );
   }
   const ready = read.state === 'ready' && read.card !== null && read.fingerprint !== null;
+  // The state first, then the card and its fingerprint, then the encryption keys.
+  const rows = keyFactRows(read);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-operate-keys">
       {heading}
@@ -153,10 +163,7 @@ export function OperateKeysPanel({
         </StatusMessage>
       )}
       <dl className="oyl-operate__keys">
-        <div>
-          <dt>State</dt>
-          <dd>{KEYS_TEXT[read.state]}</dd>
-        </div>
+        {rows.slice(0, 1).map(fact)}
         {!ready || read.card === null || read.fingerprint === null ? null : (
           <>
             <div>
@@ -187,22 +194,7 @@ export function OperateKeysPanel({
             </div>
           </>
         )}
-        {read.current === null ? null : (
-          <>
-            <div>
-              <dt>Encryption key</dt>
-              <dd>{currentKeyText(read.current.serial, momentText(read.current.createdAt))}</dd>
-            </div>
-            <div>
-              <dt>Rotates by itself</dt>
-              <dd>{momentText(read.current.rotatesAt)}</dd>
-            </div>
-          </>
-        )}
-        <div>
-          <dt>Older keys held</dt>
-          <dd>{olderHeldText(read.olderHeld)}</dd>
-        </div>
+        {rows.slice(1).map(fact)}
       </dl>
       <p>{KEYS_CLI_TEXT}</p>
       <ul className="oyl-operate__keys-cli">

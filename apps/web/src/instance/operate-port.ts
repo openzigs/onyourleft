@@ -69,9 +69,18 @@ import { MAXIMUM_SEALED_CALL_MILLISECONDS, type InstanceAnswer } from './instanc
 export type OperateStanding = 'owner' | 'not-owner' | 'signed-out' | 'unreachable' | 'no-keys';
 
 /** Where an operator log entry was taken. */
-export type OperatorLogSource = 'app' | 'cli' | 'admin_tunnel' | 'admin_loopback';
+export type OperatorLogSource =
+  'app' | 'cli' | 'admin_tunnel' | 'admin_loopback' | 'setup' | 'start';
 
-const SOURCES: readonly string[] = ['app', 'cli', 'admin_tunnel', 'admin_loopback'];
+const SOURCES: readonly string[] = [
+  'app',
+  'cli',
+  'admin_tunnel',
+  'admin_loopback',
+  // #2784 (ADR 0080 D-7): the setup wizard on the server machine, and the instance's own start.
+  'setup',
+  'start',
+];
 
 /** One entry of the operator log, as the instance pages it (#2602). */
 export interface OperatorLogEntry {

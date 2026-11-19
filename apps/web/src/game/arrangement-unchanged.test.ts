@@ -292,7 +292,16 @@ describe('the arrangement a route produces — #341', () => {
     // by millimetres on this fixture's gentle arc and by metres beside a very
     // sharp bend. The plan digest below is unmoved by it, and so are the
     // counts: nothing here stands over no ground, so nothing was dropped.
-    expect(digest(placed.map(serialise))).toBe('c227601d');
+    //
+    // ⚠️ **And regenerated for #2761, and again ONLY the heights moved** —
+    // `c227601d` before it. A building drawn as its kind is lowered until its
+    // foundation meets the lowest drawn ground under its whole outline, not
+    // only under its middle (`landform.ts` §`standingOnGround`): on this
+    // fixture's slopes the villages' churches stood 0.2 m and some houses up
+    // to 0.58 m above the ground at their downhill ends. Each is lowered by
+    // that, none by more than its foundation, so none is dropped: the plan
+    // digest and the counts are unmoved.
+    expect(digest(placed.map(serialise))).toBe('6f3f03dd');
   });
 
   it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
@@ -349,7 +358,9 @@ describe('the arrangement a route produces — #341', () => {
     // by its drawn reach as a radius (`scene.ts` §`sideRoadNaturalMargin`), so
     // with the ground left wooded one tree beside a village's crossroads is
     // cleared, in eight frames. The sweep above is unmoved.
-    expect(digest(wooded.map(serialise))).toBe('53189e8b');
+    // ⚠️ #2761 moved its heights, as above, and nothing else: `53189e8b`
+    // until then, the plan digest and the counts unmoved.
+    expect(digest(wooded.map(serialise))).toBe('230001cd');
     expect(digest(wooded.map(serialisePlan))).toBe('d5ae6e37');
     expect(natural.length).toBe(6960);
     expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1020);

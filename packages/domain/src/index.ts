@@ -284,6 +284,11 @@ export {
   STATEMENT_TRUST_CAP_SECONDS,
   statementId,
 } from './identity/instance-pin';
+export {
+  normalisedClaimCode,
+  OWNER_CLAIM_COMPARISON_LABEL,
+  ownerClaimComparisonCode,
+} from './identity/owner-claim';
 export type { DisplayNameCheck, DisplayNameProblem } from './identity/display-name';
 export { checkDisplayName, MAXIMUM_DISPLAY_NAME_SCALARS } from './identity/display-name';
 

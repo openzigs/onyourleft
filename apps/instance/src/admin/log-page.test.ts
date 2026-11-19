@@ -58,13 +58,18 @@ async function logPage(made: ModerationWorld, token: string, path: string): Prom
   return answer.text();
 }
 
-const itemsOf = (page: string): string[] =>
-  [...page.matchAll(/<li>(.*?)<\/li>/g)]
-    .map((match) => match[1] ?? '')
-    .filter(
-      // The shell's section links are list items too.
-      (item) => !item.startsWith('<a href='),
-    );
+/**
+ * Each row of the log's table (#2771) as its cells' markup — When, Action,
+ * Source, Outcome, Detail — or, for an entry not shown, its one cell.
+ */
+const itemsOf = (page: string): string[][] => {
+  const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(page)?.[1] ?? '';
+  return [...body.matchAll(/<tr>(.*?)<\/tr>/g)].map(([, row]) =>
+    [...(row ?? '').matchAll(/<td[^>]*>(.*?)<\/td>/g)].map(([, cell]) => cell ?? ''),
+  );
+};
+
+const NOT_SHOWN = [LOG_ENTRY_NOT_SHOWN_TEXT];
 
 const olderOf = (page: string): string | undefined =>
   /<a href="(\/admin\/log\?cursor=[^"]+)">Older entries<\/a>/.exec(page)?.[1];
@@ -85,7 +90,7 @@ describe('the operator log, a page at a time, newest first (#2645)', () => {
     const entries = (everything.body as { entries: Entry[] }).entries;
     expect(entries).toHaveLength(120);
 
-    const pages: string[][] = [];
+    const pages: string[][][] = [];
     let path: string | undefined = '/admin/log';
     while (path !== undefined) {
       const page = await logPage(made, token, path);
@@ -97,19 +102,28 @@ describe('the operator log, a page at a time, newest first (#2645)', () => {
     expect(pages.map((page) => page.length)).toEqual([50, 50, 20]);
     const shown = pages.flat();
     // Newest first, each once: the route's own order, entry for entry.
-    expect(shown.map((item) => /\(<code>(.*?)<\/code>\)/.exec(item)?.[1] ?? null)).toEqual(
+    expect(shown.map((row) => /^<code>(.*)<\/code>$/.exec(row[4] ?? '')?.[1] ?? null)).toEqual(
       entries.map((entry) => entry.detail),
     );
-    expect(shown[0]).toContain('<strong>Database migrated</strong>');
-    expect(shown[0]).toContain('(<code>applied=118</code>)');
-    expect(shown[1]).toContain('(<code>applied=117</code>)');
-    expect(shown[0]).toContain('from the command line on the host: done');
-    expect(shown.at(-2)).toContain('<strong>Signed in to the admin pages</strong>');
-    expect(shown.at(-2)).toContain(
-      'from the admin pages, through the tunnel: done (<code>code</code>)',
+    expect(shown[0]?.slice(1)).toEqual([
+      '<strong>Database migrated</strong>',
+      'from the command line on the host',
+      'done',
+      '<code>applied=118</code>',
+    ]);
+    expect(shown[1]?.[4]).toBe('<code>applied=117</code>');
+    expect(shown.at(-2)?.slice(1)).toEqual([
+      '<strong>Signed in to the admin pages</strong>',
+      'from the admin pages, through the tunnel',
+      'done',
+      '<code>code</code>',
+    ]);
+    expect(shown.at(-1)?.[1]).toBe('<strong>Admin sign-in code made</strong>');
+    // Each row carries its moment in operate-text's words, and exact in its <time>.
+    expect(shown[0]?.[0]).toMatch(
+      /^<time datetime="\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z">\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC<\/time>$/,
     );
-    expect(shown.at(-1)).toContain('<strong>Admin sign-in code made</strong>');
-    expect(new Set(shown).size).toBe(120);
+    expect(new Set(shown.map((row) => row.join('|'))).size).toBe(120);
   });
 
   it('says so when nothing older is there, and when the cursor is not one this instance wrote', async () => {
@@ -165,10 +179,10 @@ describe('an entry outside the log’s closed vocabulary is not shown (#2645, OP
       await seedMigrations(made, 1);
       const items = itemsOf(await logPage(made, token, '/admin/log'));
       expect(items).toHaveLength(3);
-      expect(items[0]).toBe(LOG_ENTRY_NOT_SHOWN_TEXT);
-      expect(items[0]).not.toContain(String(detail));
+      expect(items[0]).toEqual(NOT_SHOWN);
+      expect(items[0]?.join('')).not.toContain(String(detail));
       // The rest of the page is drawn as ever.
-      expect(items[1]).toContain('<strong>Signed in to the admin pages</strong>');
+      expect(items[1]?.[1]).toBe('<strong>Signed in to the admin pages</strong>');
     },
   );
 
@@ -177,8 +191,8 @@ describe('an entry outside the log’s closed vocabulary is not shown (#2645, OP
     const token = await signedIn(made);
     await seedMigrations(made, 1);
     const items = itemsOf(await logPage(made, token, '/admin/log'));
-    expect(items[0]).toContain('<strong>Database migrated</strong>');
-    expect(items[0]).toContain('(<code>applied=7</code>)');
+    expect(items[0]?.[1]).toBe('<strong>Database migrated</strong>');
+    expect(items[0]?.[4]).toBe('<code>applied=7</code>');
   });
 
   it('an action this build does not know is not shown either', async () => {
@@ -186,7 +200,7 @@ describe('an entry outside the log’s closed vocabulary is not shown (#2645, OP
     const token = await signedIn(made);
     await seedMigrations(made, 1);
     const items = itemsOf(await logPage(made, token, '/admin/log'));
-    expect(items[0]).toBe(LOG_ENTRY_NOT_SHOWN_TEXT);
+    expect(items[0]).toEqual(NOT_SHOWN);
   });
 });
 
@@ -255,6 +269,6 @@ describe('what the admin layer forwards, and what a failed read says (#2645, ADR
     const token = await signedIn(made);
     await seedMigrations(made, 1);
     const items = itemsOf(await logPage(made, token, '/admin/log'));
-    expect(items[0]).toBe(LOG_ENTRY_NOT_SHOWN_TEXT);
+    expect(items[0]).toEqual(NOT_SHOWN);
   });
 });

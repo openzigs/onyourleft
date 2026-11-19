@@ -58,6 +58,7 @@ import {
 import { cameraRig, horizontalSpread, projectToFrame } from './camera';
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
+import { groundedFootprintOf } from './settlements';
 import { atStartLine } from './simulation';
 import { ROAD_COLUMNS, corridorOrigin, roadCorridor, type RoadCorridor } from './terrain';
 import { waterways } from './waterways';
@@ -744,6 +745,18 @@ describe('the scenery stands on the ground — #458', () => {
         for (const each of frame.scatter) {
           const ground = meshHeightAt(frame.terrain.mesh, each.x, each.z);
           if (ground === undefined) continue;
+          // #2761: a building drawn as its kind is lowered onto the lowest ground
+          // under its corners, by at most its foundation, so it may stand below
+          // the ground at its middle by that, and never above it.
+          const footprint = groundedFootprintOf(each);
+          if (footprint !== undefined) {
+            expect(each.y - ground, `${each.kind} at ${String(at)}`).toBeLessThan(tolerance);
+            expect(ground - each.y, `${each.kind} at ${String(at)}`).toBeLessThan(
+              footprint.depth + tolerance,
+            );
+            stood += 1;
+            continue;
+          }
           expect(Math.abs(each.y - ground), `${each.kind} at ${String(at)}`).toBeLessThan(
             tolerance,
           );
@@ -1024,7 +1037,7 @@ describe('one leg’s ground does not rise through another’s at a very sharp b
       // the road itself must be drawn over it. Out of the camera's view a
       // ray can run on past the other leg's road and the corridor's end,
       // sunk under nothing: measured, 220 m out behind the camera.
-      expect(waterways(profile, scatterSeed(profile)).crossings).toHaveLength(0);
+      expect(waterways(profile, scatterSeed(profile), NO_LAND_CLASS).crossings).toHaveLength(0);
       let sunk = 0;
       for (let at = bend - 150; at <= bend + 60; at += 10) {
         const frame = sceneAt(profile, at);
@@ -1078,7 +1091,7 @@ describe('one leg’s ground does not rise through another’s at a very sharp b
       // reach no lower than `RELIEF_SLOPE` a metre past the clear band, so
       // within 100 m nothing drawn may lie further under the road than that,
       // the verge and the metre `SHALLOW_SINK_METRES` allows.
-      expect(waterways(profile, scatterSeed(profile)).crossings).toHaveLength(0);
+      expect(waterways(profile, scatterSeed(profile), NO_LAND_CLASS).crossings).toHaveLength(0);
       const deepest = 0.18 * (100 - RELIEF_CLEAR_METRES) + VERGE_DROP_METRES + 1;
       let looked = 0;
       for (let at = bend - 150; at <= bend + 60; at += 10) {

@@ -144,6 +144,8 @@ export const ONE_GESTURE_PER_DEVICE =
  *
  * `disconnected` says what to do, because on Web Bluetooth there is no silent
  * reconnect (docs/agents/web-bluetooth.md §8): the rider forgets it and pairs it again.
+ * The Android shell reconnects by itself since #2669, and says *Reconnecting…*
+ * while it does.
  * Since #1435 it is called *link lost* and names the two usual causes first —
  * a device that slept, or one too far away — because pairing it again into the
  * same conditions loses it again.
@@ -155,7 +157,9 @@ export function connectionWords(state: ConnectionState): string {
     case 'connecting':
       return 'Connecting';
     case 'reconnecting':
-      return 'Reconnecting';
+      // #2669: the Android shell's, while it gets a dropped or remembered
+      // device back by itself. Quiet on purpose — nothing for the rider to do.
+      return 'Reconnecting…';
     case 'unavailable':
       return 'Unavailable — Bluetooth is off or blocked';
     case 'disconnected':

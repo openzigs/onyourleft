@@ -297,7 +297,7 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(second)).toStrictEqual(first);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(CORRIDOR_READER_VERSION).toBe(4);
+    expect(CORRIDOR_READER_VERSION).toBe(5);
     // No name, `wikidata` or population reached the store (ADR 0055 D-3).
     const text = await keptText(route);
     expect(text).toContain('"places"');
@@ -389,7 +389,7 @@ describe('#1789 building fields: through the real store and back, and a row with
     expect(handed).toStrictEqual(expectedFields(handed.length));
     expect(handed).toStrictEqual(fieldsHandedToThePlan(first));
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
-    expect(kept?.readerVersion).toBe(4);
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
   });
 
   it('reads again a row kept at reader version 3, whose footprints have no fields, and never hands it to the ride', async () => {
@@ -427,7 +427,8 @@ describe('#1789 building fields: through the real store and back, and a row with
     await keepRow(
       route,
       CORRIDOR_READER_VERSION,
-      await gzipJson({ v: 5, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      // #2659: 6, since 5 is now this reader's own.
+      await gzipJson({ v: 6, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
     );
     const state = await load(portOver(freshStore(), source, on()), route);
     expect(state.kind).toBe('ready');

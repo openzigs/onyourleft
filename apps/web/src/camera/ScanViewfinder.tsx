@@ -34,11 +34,28 @@ import { useEffect, useRef, type JSX } from 'react';
 
 import type { CameraController } from './session';
 
+/** What the side camera's tablet says under its viewfinder (#557). */
+export const SCAN_VIEWFINDER_CAPTION =
+  'What this tablet’s front camera sees. Hold the phone’s code inside it. Nothing here is kept, ' +
+  'and it goes away once the code is read.';
+
 export interface ScanViewfinderProps {
   readonly controller: CameraController;
+  /** What is said under the picture: the side camera's sentence unless a scan of its own names it. */
+  readonly caption?: string | undefined;
+  /**
+   * Whether the picture is drawn as a mirror, as a FRONT camera's is (#557).
+   * The instance card's scanner (#2785) reads with the BACK camera, where a
+   * mirror would move the code the wrong way as the rider aims.
+   */
+  readonly mirrored?: boolean | undefined;
 }
 
-export function ScanViewfinder({ controller }: ScanViewfinderProps): JSX.Element {
+export function ScanViewfinder({
+  controller,
+  caption = SCAN_VIEWFINDER_CAPTION,
+  mirrored = true,
+}: ScanViewfinderProps): JSX.Element {
   const video = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -54,15 +71,16 @@ export function ScanViewfinder({ controller }: ScanViewfinderProps): JSX.Element
       {/* Muted and inline: a picture to aim by, not a film to watch. */}
       <video
         ref={video}
-        className="oyl-scan-viewfinder__video"
+        className={
+          mirrored
+            ? 'oyl-scan-viewfinder__video'
+            : 'oyl-scan-viewfinder__video oyl-scan-viewfinder__video--as-seen'
+        }
         muted
         playsInline
         aria-hidden="true"
       />
-      <figcaption>
-        What this tablet’s front camera sees. Hold the phone’s code inside it. Nothing here is kept,
-        and it goes away once the code is read.
-      </figcaption>
+      <figcaption>{caption}</figcaption>
     </figure>
   );
 }

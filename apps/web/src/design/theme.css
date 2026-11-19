@@ -6148,6 +6148,62 @@ select.oyl-input {
 }
 
 /*
+ * A PACER OR A GHOST OUT OF VIEW — #2755 (`game/off-screen-marker.ts`).
+ *
+ * A marker at the edge of the world nearest to where the pacer is, laid over
+ * the world as the names above are and by the same rule: `layOffScreenMarkers`
+ * puts this layer exactly over `.oyl-game__world`, it is zero-sized until
+ * then, and it is before the HUD in the document, so a panel is over it.
+ * `off-screen-marker.ts` keeps each marker clear of the HUD's panels besides,
+ * and `browser/off-screen-marker.browser.spec.ts` measures that. Never a
+ * target and never read: the HUD's gap field says it as text.
+ */
+.oyl-game__off-screens {
+  height: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 0;
+}
+
+/*
+ * One marker: the HUD's own surface and ink, as a name is, with a border and
+ * an arrow in the colour of whom it points to — set per marker as
+ * `--oyl-off-screen-colour` from `off-screen-marker.ts` §`OFF_SCREEN_COLOURS`,
+ * each held there to 3 : 1 on this surface. Its size is set from there too, so
+ * the box kept clear of the HUD is the box drawn.
+ */
+.oyl-game__off-screen {
+  align-items: center;
+  background: var(--oyl-color-hud-surface);
+  border: 2px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  border-radius: var(--oyl-radius);
+  box-sizing: border-box;
+  color: var(--oyl-color-hud-ink);
+  display: flex;
+  font-size: var(--oyl-font-size-sm);
+  gap: var(--oyl-space-xs);
+  justify-content: center;
+  left: 0;
+  line-height: 1;
+  overflow: hidden;
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+/* A chevron: two sides of a square, turned to point the marker's way. */
+.oyl-game__off-screen-arrow {
+  border-right: 3px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  border-top: 3px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  flex: none;
+  height: 0.55em;
+  width: 0.55em;
+}
+
+/*
  * THE STAGE — a ride has the screen (#423).
  *
  * `GameView` puts this class on its root for exactly as long as a ride is
@@ -6883,6 +6939,79 @@ select.oyl-input {
   min-height: 2.75rem;
   font-family: inherit;
   resize: vertical;
+}
+
+/*
+ * The owner's claim (#2823, ADR 0080 D-5): the six digits to compare with the
+ * server's setup page, large and in two groups of three, as that page draws
+ * them (`apps/instance/src/setup/style.ts` §`.compare`). In `rem`, so the
+ * rider's text size scales them; the groups wrap rather than widen a 320 px page.
+ */
+.oyl-instance__compare {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-lg);
+  margin: var(--oyl-space-md) 0;
+  font-family: var(--oyl-font-family-display);
+  font-size: 3.5rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The Connect screen's large buttons (#2828): *Scan a code*, and the three
+ * answers to where a code came from. Each takes its column's width up to a
+ * reading measure and a taller target than `.oyl-button`'s 44 px floor, so the
+ * one question reads as three plain choices. Layout only: the colour is the
+ * button's own kind (`Button.tsx`).
+ */
+.oyl-connect__choice {
+  width: 100%;
+  max-width: 28rem;
+  min-height: 3.5rem;
+  justify-content: flex-start;
+  text-align: start;
+}
+
+/*
+ * The flow's forms (#2828) are a column, never a row that wraps: a step's
+ * button sits under its fields, and a refusal directly under the button that
+ * was pressed, at every width (`cardscan.browser.spec.ts`).
+ */
+.oyl-connect__form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-connect__form > p,
+.oyl-connect__form > details {
+  align-self: stretch;
+  margin: 0;
+}
+
+/*
+ * A field of the flow (#2828's walkthrough): the label above its box, and the
+ * box the column's width up to a measure, where `.oyl-input`'s 8rem showed
+ * "https://instar" of an address (`cardscan.browser.spec.ts`).
+ */
+.oyl-connect__field > label {
+  display: block;
+  margin-bottom: var(--oyl-space-xs);
+}
+
+.oyl-connect__field > .oyl-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 32rem;
+}
+
+/* The paste box under *Scan a code* stands apart from it. */
+.oyl-card-scan + .oyl-connect__form {
+  margin-top: var(--oyl-space-md);
 }
 
 /*
@@ -13746,6 +13875,12 @@ select.oyl-input {
   max-inline-size: 24rem;
   object-fit: contain;
   transform: scaleX(-1);
+}
+
+/* #2785: the instance card's scanner reads with the BACK camera, whose picture
+   is shown as it is seen, so the code moves the way the rider moves the device. */
+.oyl-scan-viewfinder__video--as-seen {
+  transform: none;
 }
 
 /* =============================================================================

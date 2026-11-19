@@ -54,6 +54,8 @@ const ROOM_MODERATION =
 const SEGMENTS = 'Published segments, the efforts riders share on them, and their leaderboards';
 /** The row ADR 0047's amendment of 2026-11-14 adds (#2602). */
 const OPERATE = 'The owner’s Operate area: running the instance from the app';
+/** ADR 0080 D-3's route (#2782): a claim code and the key that becomes the owner's. */
+const OWNER_CLAIM = 'The owner’s claim: the claim code, and the device key it makes the owner';
 
 export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // Every sign-in, a key the instance holds included; registering a new key
@@ -134,4 +136,7 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/operate/keys/rotate', OPERATE),
   // #2614: the instance's recent problem lines.
   only('GET', '/v1/operate/logs', OPERATE),
+  // #2782, ADR 0080 D-3 (and its amendment of ADR 0047): the owner's claim,
+  // born sealed and sessionless, never answered in plaintext.
+  only('POST', '/v1/auth/owner-claim', OWNER_CLAIM),
 ];

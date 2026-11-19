@@ -222,6 +222,34 @@
  * bots draft each other and that the switch turns that off for every racer.
  * Nothing is dropped.
  *
+ * ⚠️ **Re-recorded by #2756, with the wording the owner approved in that
+ * pull request on 2026-11-18**, on Settings on both walks, one line each. The
+ * populated walk's fixture is connected to an instance: the *Connect and keep*
+ * card's Instance line said "Connect to an instance, …" on a connected device,
+ * and now says "Connected to your server at https://ride.example as Rider."
+ * and "See this device’s connection and your devices there.". The empty walk,
+ * with nothing connected, now says "Connect to a server, …" in place of
+ * "Connect to an instance, …", and the rest of that line is unchanged. Nothing
+ * is dropped.
+ *
+ * ⚠️ **Re-recorded by #2828, the owner's ruling of 2026-11-18, awaiting the
+ * owner's approval with that pull request's wording**, on the Instance
+ * screen's empty walk only. The screen with no server is now one scan, then
+ * one question about where the code came from (`views/ConnectFlow.tsx`), so
+ * the walk sees the flow's first step and no other. It gains the step's lead,
+ * *Scan a code*, *Paste a code instead* and the expert's *Enter the address
+ * yourself*. Fourteen lines went, and none is a lost word. Five are said on
+ * the step the rider's answer opens: "Claim your server" and "Claim this
+ * server" on the claim's step, whose lead replaces "Setting up your own
+ * server? Scan the claim code its setup page shows, or paste the line under
+ * it."; "Add this device" on the add-device step. The rest went with the
+ * three boxes one scan used to fill: the claim box's label and its own scan
+ * button, the card box's label and its hint (both hint sentences still render
+ * under the connected screen's card box, `InstanceKeys.tsx`, on the populated
+ * walk), the invite sentence beside it, which the question's *Someone
+ * invited me* replaces, the card box's scan button, which is *Scan a code*
+ * now, and the add-device form's heading and label.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

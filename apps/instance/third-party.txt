@@ -8,7 +8,7 @@ AGPL-3.0-or-later, and GET /source says where its source is.
 Generated from the installed dependency tree by
 scripts/check-third-party-notices.mjs. Do not edit it by hand.
 
-In the instance (14 packages)
+In the instance (15 packages)
   @ai-sdk/gateway 4.0.106 — Apache-2.0
   @ai-sdk/openai-compatible 3.0.65 — Apache-2.0
   @ai-sdk/provider 4.0.24 — Apache-2.0
@@ -21,6 +21,7 @@ In the instance (14 packages)
   json-schema 0.4.0 — (AFL-2.1 OR BSD-3-Clause)
   kysely 0.29.6 — MIT
   undici 7.30.0 — MIT
+  uqr 0.1.3 — MIT
   ws 8.22.0 — MIT
   zod 4.6.5 — MIT
 
@@ -666,6 +667,37 @@ Part: in the instance
 MIT License
 
 Copyright (c) Matteo Collina and Undici contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+Name: uqr
+Version: 0.1.3
+Licence: MIT
+Part: in the instance
+
+--- LICENSE (from the package) ---
+
+MIT License
+
+Copyright (c) Project Nayuki
+Copyright (c) 2023 Anthony Fu <https://github.com/antfu>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

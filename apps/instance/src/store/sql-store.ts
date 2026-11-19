@@ -995,6 +995,27 @@ export const OPERATOR_ACTIONS = [
   'admin_passkey_revoked',
   'admin_passkey_confirmed',
   'room_ended',
+  // #2646 (ADR 0069 D-8, D-9): a registration approved or refused from the admin Accounts page.
+  'registration_decided',
+  // #2781 (ADR 0080 D-4, D-7): the emergency kit, downloaded on the server machine.
+  'emergency_kit_downloaded',
+  // #2782 (ADR 0080 D-3, D-5, D-7): the owner's claim — a code minted, a
+  // pending claim confirmed or discarded on the loopback page, and the reset.
+  'owner_claim_code_minted',
+  'owner_claim_confirmed',
+  'owner_claim_discarded',
+  'owner_claim_reset',
+  // #2784 (ADR 0080 D-2, D-6, D-7): the first-run setup wizard on the loopback
+  // listener, and the secret the instance's own start generated (#2781's
+  // deferred entry): a setup code minted, a setup session opened, refusals
+  // counted, the registration mode set, the one rider invite, and done.
+  'setup_code_minted',
+  'setup_sign_in',
+  'setup_refused',
+  'secret_generated',
+  'registration_mode_set',
+  'invite_minted',
+  'setup_done',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1015,13 +1036,22 @@ export type OperatorActor =
    * owner's athlete, or `null` for an `admin_refused` count, which counts
    * attempts by unknown parties — naming the owner there would mislead an audit.
    */
-  | { readonly source: AdminSource; readonly athleteId: string | null };
+  | { readonly source: AdminSource; readonly athleteId: string | null }
+  /**
+   * The first-run setup wizard on the loopback listener, and the instance's
+   * own start (#2784, migration 0048): neither has an athlete to name — the
+   * wizard runs before the owner has one.
+   */
+  | { readonly source: SetupSource };
 
 /** The operator log's two admin sources (migration 0044): one per listener (ADR 0069 D-5). */
 export type AdminSource = 'admin_tunnel' | 'admin_loopback';
 
+/** The setup wizard, and the instance's own start (migration 0048, ADR 0080 D-7). */
+export type SetupSource = 'setup' | 'start';
+
 /** Where an operator log entry came from. */
-export type OperatorSource = 'app' | 'cli' | AdminSource;
+export type OperatorSource = 'app' | 'cli' | AdminSource | SetupSource;
 
 /**
  * An entry's `detail`: the CLOSED vocabulary each action may write (#2602).
@@ -1107,6 +1137,30 @@ export const OPERATOR_DETAILS: {
   // #2612: why the owner ended a room, what kind it was and how many riders
   // were in it — never the room's id, a rider or a place.
   room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
+  // #2646 (ADR 0069 D-8): the decision, never the rider, their name or the reason.
+  registration_decided: { words: ['approved', 'refused'], counts: [] },
+  emergency_kit_downloaded: { words: [], counts: [] },
+  // #2782 (ADR 0080 D-7): never a code, a key or a comparison code. Minting
+  // voids every other code, a pending claim's included, and says so.
+  owner_claim_code_minted: { words: ['voided_unused'], counts: [] },
+  owner_claim_confirmed: { words: [], counts: [] },
+  owner_claim_discarded: { words: [], counts: [] },
+  // Whether a claimed key was cleared, and how many admin sessions ended.
+  owner_claim_reset: { words: ['cleared', 'none_claimed'], counts: ['sessions_ended'] },
+  // #2784 (ADR 0080 D-7): never a code, a session, a secret or an address.
+  setup_code_minted: { words: ['voided_unused'], counts: [] },
+  setup_sign_in: { words: [], counts: [] },
+  // At most one a minute per kind, carrying how many were refused (ADR 0069 D-8's coalescing).
+  setup_refused: { words: ['code', 'csrf', 'origin', 'rate_limited'], counts: ['refused'] },
+  // WHICH secret the start made, never the secret (#2781's `secrets.ts` §`SECRET_FILES`).
+  secret_generated: { words: ['instance_secret_key', 'metrics_token'], counts: [] },
+  // The mode chosen, or `cleared`: back to OYL_INSTANCE_REGISTRATION.
+  registration_mode_set: {
+    words: ['open', 'approval', 'invite', 'closed', 'cleared'],
+    counts: [],
+  },
+  invite_minted: { words: [], counts: [] },
+  setup_done: { words: [], counts: [] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
@@ -1238,6 +1292,92 @@ export interface AdminCodeRedemption {
   readonly source: AdminSource;
   /** A session not seen for this long is over: it is pruned as this one is opened. */
   readonly idleSeconds: number;
+}
+
+/** A claim code for the owner, as it is written (#2782, migration 0047, ADR 0080 D-3). */
+export interface OwnerClaimCodeWrite {
+  /** The SHA-256 of the code as `auth/owner-claim.ts` normalises it. */
+  readonly codeSha256: string;
+  /** Unix seconds. */
+  readonly mintedAt: number;
+  readonly expiresAt: number;
+}
+
+/** What redeeming a claim code asks of the store (#2782). */
+export interface OwnerClaimRedemption {
+  readonly codeSha256: string;
+  /** The device key that signed the sealed redemption. */
+  readonly deviceKey: string;
+  /** Six digits, derived from the code and that key (ADR 0080 D-5). */
+  readonly comparisonCode: string;
+  /** Unix seconds: the code must be live then. */
+  readonly at: number;
+}
+
+/** The first-run setup wizard's steps, in order (#2784, ADR 0080 D-7; migration 0048's CHECK). */
+export const SETUP_STEPS = [
+  'claim',
+  'passkey',
+  'secrets',
+  'backups',
+  'registration',
+  'invite',
+  'finish',
+] as const;
+
+export type SetupStep = (typeof SETUP_STEPS)[number];
+
+/** The setup's state, as it is read (#2784, migration 0048). */
+export interface SetupStateRecord {
+  readonly step: SetupStep;
+  /** Unix seconds; `null` while the setup is open. */
+  readonly doneAt: number | null;
+  /** When the setup minted its one rider invite, or `null`. */
+  readonly inviteMintedAt: number | null;
+  readonly updatedAt: number;
+}
+
+/** A setup code, as it is written (#2784, ADR 0080 D-2): only its SHA-256. */
+export interface SetupCodeWrite {
+  readonly codeSha256: string;
+  /** Unix seconds. */
+  readonly mintedAt: number;
+  readonly expiresAt: number;
+  /** A start of the instance, or `operator setup-code`. */
+  readonly mintedBy: 'start' | 'cli';
+}
+
+/** A browser's setup session (#2784): no athlete, only hashes. */
+export interface SetupSessionRecord {
+  readonly tokenSha256: string;
+  readonly csrfSha256: string;
+  /** Unix seconds. */
+  readonly createdAt: number;
+  readonly lastSeenAt: number;
+  readonly expiresAt: number;
+  /** When it downloaded the emergency kit, or `null` (ADR 0080 D-4: once per session). */
+  readonly kitDownloadedAt: number | null;
+}
+
+/** A setup code redeemed for a session (#2784). */
+export interface SetupCodeRedemption {
+  readonly codeSha256: string;
+  /** A session past this many seconds idle is pruned as the new one opens. */
+  readonly idleSeconds: number;
+  readonly session: SetupSessionRecord;
+}
+
+/** A registration mode the database may hold over the environment (ADR 0080 D-6). */
+export type RegistrationModeSetting = 'open' | 'approval' | 'invite' | 'closed';
+
+/** A claim a device redeemed and the owner has not yet confirmed or discarded (ADR 0080 D-5). */
+export interface PendingOwnerClaim {
+  readonly deviceKey: string;
+  readonly comparisonCode: string;
+  /** Unix seconds. */
+  readonly redeemedAt: number;
+  /** The claim code's end, which is the pending claim's too. */
+  readonly expiresAt: number;
 }
 
 /**
@@ -2492,6 +2632,105 @@ export interface SqlStore {
    */
   openAdminSessionWithPasskey(signIn: AdminPasskeySignIn): Promise<'opened' | 'refused'>;
   /**
+   * The owner key a confirmed claim set (#2782, ADR 0080 D-3), or
+   * `undefined`. `OYL_INSTANCE_OWNER_KEY`, when it is set, wins over it
+   * (`moderation/moderation.ts` §`ownerKey`); this is read on every owner
+   * check, so a claim and a reset take effect without a restart.
+   */
+  claimedOwnerKey(): Promise<string | undefined>;
+  /**
+   * Hold a new claim code (#2782, ADR 0080 D-3), DELETING every other one —
+   * unused, pending or dead — so at most one is live and minting ends a
+   * pending claim (D-5's "No … voids the claim code and draws a new QR").
+   * `claimed`, and nothing written, while a claimed owner key is held.
+   * Answers how many live codes it voided.
+   */
+  mintOwnerClaimCode(
+    code: OwnerClaimCodeWrite,
+  ): Promise<
+    { readonly outcome: 'minted'; readonly voided: number } | { readonly outcome: 'claimed' }
+  >;
+  /**
+   * Redeem a claim code (#2782): in ONE statement the code becomes the
+   * pending claim — only while no owner key is claimed, the code is live at
+   * `at` and not redeemed, and no other code holds a live pending claim.
+   * `refused` writes nothing, whichever of those failed.
+   */
+  redeemOwnerClaimCode(redemption: OwnerClaimRedemption): Promise<'pending' | 'refused'>;
+  /** The pending claim that is live at `at`, Unix seconds, or `undefined`. */
+  pendingOwnerClaim(at: number): Promise<PendingOwnerClaim | undefined>;
+  /**
+   * Confirm the pending claim live at `at` whose comparison code is
+   * `comparisonCode` (ADR 0080 D-5): in ONE transaction its device key written
+   * as the owner key and every claim code deleted. `none` writes nothing: no
+   * such claim, or an owner key already claimed.
+   */
+  confirmOwnerClaim(comparisonCode: string, at: number): Promise<'confirmed' | 'none'>;
+  /** Discard the pending claim live at `at`: its code deleted, so it is void. `false` when there was none. */
+  discardOwnerClaim(at: number): Promise<boolean>;
+  /**
+   * `operator owner-claim reset` (ADR 0080 D-3): in ONE transaction the
+   * claimed owner key cleared, every claim code deleted and every admin
+   * session ended. Answers whether a key was claimed and how many sessions ended.
+   */
+  resetOwnerClaim(): Promise<{ readonly claimed: boolean; readonly sessionsEnded: number }>;
+  /**
+   * The first-run setup's state (#2784, ADR 0080 D-7), or `undefined`: open,
+   * at the claim step. Read on every `/setup` request, so a restart neither
+   * reopens a setup that is done nor forgets the step it was on.
+   */
+  setupState(): Promise<SetupStateRecord | undefined>;
+  /** Record the step the open setup is on. `false`, and nothing written, once the setup is done. */
+  setSetupStep(step: SetupStep, at: number): Promise<boolean>;
+  /**
+   * Hold a new setup code (ADR 0080 D-2), VOIDING every unused one and
+   * forgetting every dead one. `done`, and nothing written, once the setup is
+   * done. Called inside {@link recordOperatorAction}, so the code and its
+   * `setup_code_minted` entry are written together.
+   */
+  mintSetupCode(
+    code: SetupCodeWrite,
+  ): Promise<
+    { readonly outcome: 'minted'; readonly voided: number } | { readonly outcome: 'done' }
+  >;
+  /**
+   * Redeem a setup code (#2784): in ONE transaction, the code marked used —
+   * only while the setup is open and the code unused and live at the
+   * session's `createdAt` — the session opened, every session past its ends
+   * pruned, and a `setup_sign_in` entry appended. `refused` writes nothing.
+   */
+  openSetupSessionWithCode(redemption: SetupCodeRedemption): Promise<'opened' | 'refused'>;
+  /** The setup session whose token hashes to `tokenSha256`, ended or not. */
+  findSetupSession(tokenSha256: string): Promise<SetupSessionRecord | undefined>;
+  /** Record that the session was used at `at`: its idle clock starts again. */
+  touchSetupSession(tokenSha256: string, at: number): Promise<void>;
+  /** End a setup session: its row deleted. `false` when there was none. */
+  endSetupSession(tokenSha256: string): Promise<boolean>;
+  /**
+   * Take the session's one emergency kit (ADR 0080 D-4): `true`, and the
+   * moment written, only while it has not taken one — so two downloads
+   * racing take it once.
+   */
+  takeSetupKit(tokenSha256: string, at: number): Promise<boolean>;
+  /** Record the setup's one rider invite (ADR 0080 D-7): `true` only while the setup is open and has minted none. */
+  takeSetupInvite(at: number): Promise<boolean>;
+  /**
+   * Finish the setup (ADR 0080 D-7): in ONE transaction it becomes done,
+   * every setup code is deleted and every setup session ended. `false`, and
+   * nothing written, when it was done already.
+   */
+  finishSetup(at: number): Promise<boolean>;
+  /** The registration mode the database holds over `OYL_INSTANCE_REGISTRATION` (ADR 0080 D-6), or `undefined`. */
+  registrationSetting(): Promise<RegistrationModeSetting | undefined>;
+  /** Hold `mode` over the environment, or with `null` return to it. */
+  putRegistrationSetting(
+    mode: RegistrationModeSetting | null,
+    at: number,
+    by: 'setup' | 'cli',
+  ): Promise<void>;
+  /** Whether the instance holds any athlete at all (ADR 0080 D-3's unclaimed rule). */
+  anyAthlete(): Promise<boolean>;
+  /**
    * One page of the suspended accounts, most recently suspended first (#961):
    * at most `limit` of them after the (suspendedAt, id) position `after`, in
    * that order, or the first when it is `undefined`.
@@ -3088,7 +3327,7 @@ async function appendOperatorLog(
     .values({
       at: entry.at,
       source: entry.actor.source,
-      actor_athlete_id: entry.actor.source === 'cli' ? null : entry.actor.athleteId,
+      actor_athlete_id: 'athleteId' in entry.actor ? entry.actor.athleteId : null,
       action: entry.action,
       detail,
       outcome,
@@ -7734,6 +7973,340 @@ function storeOver(
             : ({ outcome: 'no-athlete' } as const);
         }),
       ),
+
+    claimedOwnerKey: () =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('instance_owner')
+          .select('owner_key')
+          .where('slot', '=', 1)
+          .executeTakeFirst();
+        return row?.owner_key;
+      }),
+
+    mintOwnerClaimCode: (code) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const owner = await trx.selectFrom('instance_owner').select('slot').executeTakeFirst();
+          if (owner !== undefined) return { outcome: 'claimed' } as const;
+          const voided = await trx
+            .deleteFrom('owner_claim_code')
+            .where('expires_at', '>', code.mintedAt)
+            .executeTakeFirst();
+          // Dead codes are kept no longer than they can matter.
+          await trx.deleteFrom('owner_claim_code').execute();
+          await trx
+            .insertInto('owner_claim_code')
+            .values({
+              code_sha256: code.codeSha256,
+              minted_at: code.mintedAt,
+              expires_at: code.expiresAt,
+              redeemed_at: null,
+              device_key: null,
+              comparison_code: null,
+            })
+            .execute();
+          return { outcome: 'minted', voided: Number(voided.numDeletedRows) } as const;
+        }),
+      ),
+
+    redeemOwnerClaimCode: (redemption) =>
+      exclusive(async () => {
+        const at = redemption.at;
+        // ONE statement, so two redemptions at once cannot both find none pending.
+        const taken = await sql`update owner_claim_code
+          set redeemed_at = ${at}, device_key = ${redemption.deviceKey},
+            comparison_code = ${redemption.comparisonCode}
+          where code_sha256 = ${redemption.codeSha256}
+            and redeemed_at is null
+            and expires_at > ${at}
+            and not exists (select 1 from instance_owner)
+            and not exists (select 1 from owner_claim_code as other
+              where other.redeemed_at is not null and other.expires_at > ${at})`.execute(db);
+        return Number(taken.numAffectedRows ?? 0) === 1
+          ? ('pending' as const)
+          : ('refused' as const);
+      }),
+
+    pendingOwnerClaim: (at) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('owner_claim_code')
+          .selectAll()
+          .where('redeemed_at', 'is not', null)
+          .where('expires_at', '>', at)
+          .executeTakeFirst();
+        if (
+          row === undefined ||
+          row.redeemed_at === null ||
+          row.device_key === null ||
+          row.comparison_code === null
+        ) {
+          return undefined;
+        }
+        return {
+          deviceKey: row.device_key,
+          comparisonCode: row.comparison_code,
+          redeemedAt: row.redeemed_at,
+          expiresAt: row.expires_at,
+        };
+      }),
+
+    confirmOwnerClaim: (comparisonCode, at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const owner = await trx.selectFrom('instance_owner').select('slot').executeTakeFirst();
+          if (owner !== undefined) return 'none' as const;
+          const pending = await trx
+            .selectFrom('owner_claim_code')
+            .select('device_key')
+            .where('redeemed_at', 'is not', null)
+            .where('expires_at', '>', at)
+            .where('comparison_code', '=', comparisonCode)
+            .executeTakeFirst();
+          const deviceKey = pending?.device_key;
+          if (deviceKey === null || deviceKey === undefined) return 'none' as const;
+          await trx
+            .insertInto('instance_owner')
+            .values({ slot: 1, owner_key: deviceKey, claimed_at: at })
+            .execute();
+          await trx.deleteFrom('owner_claim_code').execute();
+          return 'confirmed' as const;
+        }),
+      ),
+
+    discardOwnerClaim: (at) =>
+      exclusive(async () => {
+        const discarded = await db
+          .deleteFrom('owner_claim_code')
+          .where('redeemed_at', 'is not', null)
+          .where('expires_at', '>', at)
+          .executeTakeFirst();
+        return Number(discarded.numDeletedRows) > 0;
+      }),
+
+    resetOwnerClaim: () =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const cleared = await trx.deleteFrom('instance_owner').executeTakeFirst();
+          await trx.deleteFrom('owner_claim_code').execute();
+          const ended = await trx.deleteFrom('admin_session').executeTakeFirst();
+          // #2784 (ADR 0080 D-3): the reset reopens the setup at its claim
+          // step, and ends every setup session with the admin ones.
+          await trx.deleteFrom('setup_state').execute();
+          const setupEnded = await trx.deleteFrom('setup_session').executeTakeFirst();
+          return {
+            claimed: Number(cleared.numDeletedRows) > 0,
+            sessionsEnded: Number(ended.numDeletedRows) + Number(setupEnded.numDeletedRows),
+          };
+        }),
+      ),
+
+    setupState: () =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('setup_state')
+          .selectAll()
+          .where('slot', '=', 1)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              step: row.step,
+              doneAt: row.done_at,
+              inviteMintedAt: row.invite_minted_at,
+              updatedAt: row.updated_at,
+            };
+      }),
+
+    setSetupStep: (step, at) =>
+      exclusive(async () => {
+        const written =
+          await sql`insert into setup_state (slot, step, done_at, invite_minted_at, updated_at)
+          values (1, ${step}, null, null, ${at})
+          on conflict (slot) do update set step = excluded.step, updated_at = excluded.updated_at
+          where setup_state.done_at is null
+          returning slot`.execute(db);
+        return written.rows.length > 0;
+      }),
+
+    mintSetupCode: (code) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const state = await trx
+            .selectFrom('setup_state')
+            .select('done_at')
+            .where('slot', '=', 1)
+            .executeTakeFirst();
+          if (state !== undefined && state.done_at !== null) return { outcome: 'done' } as const;
+          const voided = await trx
+            .deleteFrom('setup_code')
+            .where('used_at', 'is', null)
+            .where('expires_at', '>', code.mintedAt)
+            .executeTakeFirst();
+          // Spent and dead codes are kept no longer than they can matter.
+          await trx.deleteFrom('setup_code').execute();
+          await trx
+            .insertInto('setup_code')
+            .values({
+              code_sha256: code.codeSha256,
+              minted_at: code.mintedAt,
+              expires_at: code.expiresAt,
+              used_at: null,
+              minted_by: code.mintedBy,
+            })
+            .execute();
+          return { outcome: 'minted', voided: Number(voided.numDeletedRows) } as const;
+        }),
+      ),
+
+    openSetupSessionWithCode: (redemption) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const session = redemption.session;
+          const at = session.createdAt;
+          const taken = await sql`update setup_code set used_at = ${at}
+            where code_sha256 = ${redemption.codeSha256}
+              and used_at is null
+              and expires_at > ${at}
+              and not exists (select 1 from setup_state where done_at is not null)`.execute(trx);
+          if (Number(taken.numAffectedRows ?? 0) !== 1) return 'refused' as const;
+          await trx
+            .deleteFrom('setup_session')
+            .where((row) =>
+              row.or([
+                row('expires_at', '<=', at),
+                row('last_seen_at', '<=', at - redemption.idleSeconds),
+              ]),
+            )
+            .execute();
+          await trx
+            .insertInto('setup_session')
+            .values({
+              token_sha256: session.tokenSha256,
+              csrf_sha256: session.csrfSha256,
+              created_at: session.createdAt,
+              last_seen_at: session.lastSeenAt,
+              expires_at: session.expiresAt,
+              kit_downloaded_at: null,
+            })
+            .execute();
+          // In the same transaction as the code and the session (ADR 0080 D-7).
+          await appendOperatorLog(
+            trx,
+            { actor: { source: 'setup' }, action: 'setup_sign_in', at },
+            'done',
+            null,
+          );
+          return 'opened' as const;
+        }),
+      ),
+
+    findSetupSession: (tokenSha256) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('setup_session')
+          .selectAll()
+          .where('token_sha256', '=', tokenSha256)
+          .executeTakeFirst();
+        return row === undefined
+          ? undefined
+          : {
+              tokenSha256: row.token_sha256,
+              csrfSha256: row.csrf_sha256,
+              createdAt: row.created_at,
+              lastSeenAt: row.last_seen_at,
+              expiresAt: row.expires_at,
+              kitDownloadedAt: row.kit_downloaded_at,
+            };
+      }),
+
+    touchSetupSession: (tokenSha256, at) =>
+      exclusive(async () => {
+        await db
+          .updateTable('setup_session')
+          .set({ last_seen_at: at })
+          .where('token_sha256', '=', tokenSha256)
+          .execute();
+      }),
+
+    endSetupSession: (tokenSha256) =>
+      exclusive(async () => {
+        const ended = await db
+          .deleteFrom('setup_session')
+          .where('token_sha256', '=', tokenSha256)
+          .executeTakeFirst();
+        return Number(ended.numDeletedRows) > 0;
+      }),
+
+    takeSetupKit: (tokenSha256, at) =>
+      exclusive(async () => {
+        const taken = await db
+          .updateTable('setup_session')
+          .set({ kit_downloaded_at: at })
+          .where('token_sha256', '=', tokenSha256)
+          .where('kit_downloaded_at', 'is', null)
+          .executeTakeFirst();
+        return Number(taken.numUpdatedRows) === 1;
+      }),
+
+    takeSetupInvite: (at) =>
+      exclusive(async () => {
+        const taken =
+          await sql`insert into setup_state (slot, step, done_at, invite_minted_at, updated_at)
+          values (1, 'invite', null, ${at}, ${at})
+          on conflict (slot) do update set invite_minted_at = excluded.invite_minted_at,
+            updated_at = excluded.updated_at
+          where setup_state.done_at is null and setup_state.invite_minted_at is null
+          returning slot`.execute(db);
+        return taken.rows.length > 0;
+      }),
+
+    finishSetup: (at) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const finished =
+            await sql`insert into setup_state (slot, step, done_at, invite_minted_at, updated_at)
+            values (1, 'finish', ${at}, null, ${at})
+            on conflict (slot) do update set step = 'finish', done_at = excluded.done_at,
+              updated_at = excluded.updated_at
+            where setup_state.done_at is null
+            returning slot`.execute(trx);
+          if (finished.rows.length === 0) return false;
+          await trx.deleteFrom('setup_code').execute();
+          await trx.deleteFrom('setup_session').execute();
+          return true;
+        }),
+      ),
+
+    registrationSetting: () =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('instance_setting')
+          .select('registration')
+          .where('slot', '=', 1)
+          .executeTakeFirst();
+        return row?.registration ?? undefined;
+      }),
+
+    putRegistrationSetting: (mode, at, by) =>
+      exclusive(async () => {
+        await db
+          .insertInto('instance_setting')
+          .values({ slot: 1, registration: mode, updated_at: at, updated_by: by })
+          .onConflict((conflict) =>
+            conflict
+              .column('slot')
+              .doUpdateSet({ registration: mode, updated_at: at, updated_by: by }),
+          )
+          .execute();
+      }),
+
+    anyAthlete: () =>
+      exclusive(async () => {
+        const row = await db.selectFrom('athlete').select('id').limit(1).executeTakeFirst();
+        return row !== undefined;
+      }),
 
     getAnalysisSetting: () =>
       exclusive(async () => {

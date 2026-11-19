@@ -10,7 +10,14 @@
  * wrong one here too. It sends nothing anywhere.
  */
 
-import { cardFromPin, codeWithCard, INSTANCE_KEY_TEXT, type LoadedFrom } from './instance-pin';
+import {
+  cardFromPin,
+  codeWithCard,
+  INSTANCE_KEY_TEXT,
+  readCodeWithCard,
+  type LoadedFrom,
+} from './instance-pin';
+import { CLAIM_REFUSAL_TEXT } from './instance-port';
 
 /** A copy of the app opened from this device: sealed features are offered (#1192, ADR 0047 D-11). */
 export const LOADED_LOCALLY: LoadedFrom = { native: false, href: 'http://localhost:5173/' };
@@ -32,6 +39,7 @@ import type { AccountChangeEntry } from './account-change-notices';
 import type {
   AccountChangesOutcome,
   CardOutcome,
+  ClaimOutcome,
   ConnectOutcome,
   DevicesOutcome,
   InstanceDevice,
@@ -195,7 +203,17 @@ export interface ScriptedInstanceOptions {
   readonly cardAnswer?: CardOutcome;
   /** What `rename` answers, when not a plain success; a refusal changes nothing held. */
   readonly renameAnswer?: RenameOutcome;
+  /**
+   * What `claimOwner` answers (#2823), when not what the line implies: a
+   * card and a code are a pending claim with {@link SCRIPTED_COMPARISON_CODE}.
+   */
+  readonly claimAnswer?: ClaimOutcome;
+  /** What `signInAsOwner` answers, when not a plain success (#2823). */
+  readonly ownerSignInAnswer?: ConnectOutcome;
 }
+
+/** The six digits a scripted claim shows (#2823). */
+export const SCRIPTED_COMPARISON_CODE = '482913';
 
 export function scriptedInstance(options: ScriptedInstanceOptions = {}): ScriptedInstance {
   const calls: string[] = [];
@@ -249,6 +267,26 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
       link: (offer) => {
         calls.push(`link ${offer}`);
         const answer = options.connectAnswer ?? { kind: 'connected' };
+        if (answer.kind === 'connected') scripted.held.connected = true;
+        return Promise.resolve(answer);
+      },
+      claimOwner: (line) => {
+        calls.push(`claimOwner ${line}`);
+        if (options.claimAnswer !== undefined) return Promise.resolve(options.claimAnswer);
+        const read = readCodeWithCard(line);
+        return Promise.resolve(
+          read === undefined
+            ? ({ kind: 'refused', text: CLAIM_REFUSAL_TEXT['not-a-claim'] } as const)
+            : ({
+                kind: 'pending',
+                comparisonCode: SCRIPTED_COMPARISON_CODE,
+                card: read.card,
+              } as const),
+        );
+      },
+      signInAsOwner: (card) => {
+        calls.push(`signInAsOwner ${card}`);
+        const answer = options.ownerSignInAnswer ?? { kind: 'connected' };
         if (answer.kind === 'connected') scripted.held.connected = true;
         return Promise.resolve(answer);
       },

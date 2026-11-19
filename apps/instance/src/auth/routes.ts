@@ -460,6 +460,35 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   },
   {
     method: 'POST',
+    path: '/v1/auth/owner-claim',
+    sealed: 'only',
+    operationId: 'claimInstanceOwner',
+    reaches: 'own',
+    summary:
+      'Claim this instance’s owner with the claim code its setup page on the server machine showed (#2782, ADR 0080 D-3), sealed and signed by the key `publicKey` names. The claim waits until the owner confirms it there, comparing six digits both screens derive from the code and the key; it never makes the device the owner on its own. Refused — with one answer, whatever the reason — for an unknown, used or expired code, while another claim waits, and on an instance with an owner key already, `OYL_INSTANCE_OWNER_KEY` included. Never answered in plaintext, on an instance with no keys too.',
+    identity: true,
+    request: object({ publicKey: string, claimCode: string }),
+    errors: ['validation_failed', 'sealed_required', 'claim_refused', 'rate_limited'],
+    response: { contentType: 'application/json', schema: object({ claim: string }) },
+    handle: async (context) => {
+      // Never unsealed, on an instance with no keys too: unsealed, its
+      // signature is nobody's and its code is the edge's to read (ADR 0080 D-3).
+      if (!context.sealedRequest) return errorResponse('sealed_required');
+      // A signed-in device's envelope is signed by its session key, not the
+      // body's: only the key that signed may be the one claimed (D-3).
+      const signedIn = await identityOf(context).authenticate(
+        context.request.headers.get('authorization'),
+      );
+      if (signedIn !== undefined && signedIn.deviceKey !== context.json.publicKey) {
+        return errorResponse('claim_refused');
+      }
+      return answer(
+        await identityOf(context).ownerClaim.redeem(context.json, context.client.address),
+      );
+    },
+  },
+  {
+    method: 'POST',
     path: '/v1/auth/recover',
     sealed: 'only',
     operationId: 'recoverAccount',

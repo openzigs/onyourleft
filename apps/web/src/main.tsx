@@ -38,6 +38,7 @@ import {
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { createShellRideController } from './ride/shell-ride-controller';
+import { createShellSteeringController } from './ride/shell-steering-controller';
 import {
   createSteeringController,
   STEERING_CONTROLLER_BUTTONS,
@@ -48,6 +49,12 @@ import {
   trainerTargetStorage,
   type TrainerTargetMemory,
 } from './ride/trainer-target-memory';
+import {
+  createRememberedSensors,
+  rememberedSensorStorage,
+  transportSeed,
+  type RememberedSensors,
+} from './ride/remembered-sensors';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { ownThresholdHeartRateFrom, ownThresholdPowerFrom } from './game/own-threshold';
@@ -414,10 +421,14 @@ async function buildPlatform(
   if (isNativeShell(platformCapacitor())) {
     const mobile = await import('@onyourleft/mobile');
     const plugin = mobile.capacitorBlePort();
+    // #2669. ONE memory, which the transport asks about, the controller
+    // writes and *Erase everything* forgets (`deviceRememberedSensors`).
+    const rememberedSensors = deviceRememberedSensors();
     const transport = mobile.createCapacitorTransport({
       plugin,
       profiles: rideProfiles(),
       now: browserClock,
+      remembered: transportSeed(rememberedSensors),
     });
     // ⚠️ #284. `permissionNotice` and `mayShowDeviceList` are #87's answer to
     // "what does a rider see when Bluetooth will not work", and until this line
@@ -439,6 +450,7 @@ async function buildPlatform(
     const rideController = createShellRideController(mobile, {
       ...shared,
       transport,
+      remembered: rememberedSensors,
       // ⚠️ The **same** `plugin` object the transport holds, deliberately.
       // Building a second one would give the trainer control path its own
       // subscriptions and its own view of which links are up, and the first
@@ -471,8 +483,15 @@ async function buildPlatform(
     };
     // #1826. The same `plugin`, so the controller's link is one of the
     // links this object holds, against the same connection budget.
-    const steering = createSteeringController(
+    // #2672: remembered in the sensors' memory and reconnected after them,
+    // in what they leave of that budget (`ride/shell-steering-controller.ts`).
+    const steering = createShellSteeringController(
       mobile.createCapacitorOpenBikeControlClient({ plugin, buttons: STEERING_CONTROLLER_BUTTONS }),
+      {
+        remembered: rememberedSensors,
+        ride: rideController,
+        budget: transport.traits.maxConcurrentConnections,
+      },
     );
     // #2073. Its own plugin, `OtherPlayerPlugin.java`, registered beside the
     // others in `MainActivity`: media keys have nothing to do with a link.
@@ -958,6 +977,18 @@ function buildGameTrainerPort(controller: RideController | undefined): GameTrain
 }
 
 let trainerTargetMemory: TrainerTargetMemory | undefined;
+let rememberedSensorMemory: RememberedSensors | undefined;
+
+/**
+ * #2669. ONE memory for the page, for {@link deviceTrainerTargets}' reason:
+ * the shell's controller writes it, its transport reads it and *Erase
+ * everything* forgets it. In a browser only the erase reaches it, and finds
+ * nothing to forget.
+ */
+function deviceRememberedSensors(): RememberedSensors {
+  rememberedSensorMemory ??= createRememberedSensors(rememberedSensorStorage());
+  return rememberedSensorMemory;
+}
 
 /**
  * #1305. ONE memory for the page: the ride controller writes it and *Erase
@@ -996,6 +1027,8 @@ function buildTransferPort(
       typeof localStorage === 'undefined' ? undefined : localStorage,
     ),
     trainerTargets: deviceTrainerTargets(),
+    // #2669: the sensors the shell remembers, by Bluetooth address.
+    rememberedSensors: deviceRememberedSensors(),
     // #1063: snapshots held in memory for a ride not yet saved go with an erase.
     ...(heldSnapshots === undefined ? {} : { heldSnapshots }),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
