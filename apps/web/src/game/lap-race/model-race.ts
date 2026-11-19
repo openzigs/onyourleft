@@ -300,6 +300,12 @@ interface RaceRead {
  * where it is drawn.
  * @param seed - the race's own seed: each bot's misread of the line.
  * @param riderWattsPerKilogram - the rider's power as the bots read it, or `null`.
+ *
+ * @test-facing Until #2836 this was what the ask sent, and production named
+ * it. Since then {@link askLapRaceModel} reads the same race through
+ * `readRace`, which also keeps the effort distances and the gaps to the
+ * leader an ask needs beside the view; this is that read's view alone, which
+ * `model-race.test.ts` and `ride-race.test.ts` hold the race read off to.
  */
 export function modelTacticsRaceOf(
   race: ItemRaceState,
