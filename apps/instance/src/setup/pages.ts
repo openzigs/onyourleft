@@ -126,6 +126,7 @@ import {
   SETUP_EXAMPLE_ADDRESS_HEADING,
   SETUP_EXAMPLE_ADDRESS_TEXT,
   SETUP_EXPERT_SUMMARY,
+  type SetupHowLine,
   SETUP_FORM_REFUSED_TEXT,
   SETUP_LOCKED_LEAD,
   SETUP_COMMANDS,
@@ -334,6 +335,21 @@ function buttonForm(
     .join('');
   // Named, as every form on a page of several must be (`a11y/audit.ts` §`landmarks-are-distinguishable`).
   return `<form method="post" action="${escapeHtml(action)}" aria-label="${escapeHtml(label)}">${csrfField(csrf)}${hidden}<button type="submit"${tone === 'secondary' ? ' class="secondary"' : ''}>${escapeHtml(label)}</button></form>`;
+}
+
+/**
+ * A step's command-line details as a list: each line's words, then each
+ * command it names in its own block to copy (#2858), never inline in a sentence.
+ */
+function howList(lines: readonly SetupHowLine[], list: 'ol' | 'ul'): string {
+  const items = lines
+    .map((line) =>
+      line.commands.length === 0
+        ? `<li>${escapeHtml(line.text)}</li>`
+        : `<li>${escapeHtml(line.text)}\n${line.commands.map((command) => commandBlock(command)).join('\n')}</li>`,
+    )
+    .join('\n');
+  return `<${list}>\n${items}\n</${list}>`;
 }
 
 /** A collapsed block of commands and settings names, for whoever wants them. */
@@ -575,15 +591,14 @@ ${riders}
 <p class="warning">${escapeHtml(TAILNET_NEVER_YOURS_TEXT)}</p>
 <p>${escapeHtml(TAILNET_ACL_LEAD)}</p>
 <pre class="copy"><code>${escapeHtml(TAILNET_ACL)}</code></pre>`;
-  const how = (
-    view.path === 'cloudflare' ? TAILNET_CHANGE_CLOUDFLARE_LINES : TAILNET_CHANGE_EXPERT_LINES
-  )
-    .map((line) => `<li>${escapeHtml(line)}</li>`)
-    .join('\n');
+  const how = howList(
+    view.path === 'cloudflare' ? TAILNET_CHANGE_CLOUDFLARE_LINES : TAILNET_CHANGE_EXPERT_LINES,
+    'ol',
+  );
   // The warning comes first: nothing about HOW is read before what it costs (ADR 0079 D-8).
   const change = `<h2>${escapeHtml(TAILNET_CHANGE_HEADING)}</h2>
 <p class="warning">${escapeHtml(TAILNET_CHANGE_WARNING)}</p>
-${expertDetails(`<ol>\n${how}\n</ol>`)}`;
+${expertDetails(how)}`;
   switch (view.path) {
     case 'cloudflare':
       return `<p>${escapeHtml(TAILNET_CLOUDFLARE_TEXT)}</p>
@@ -603,15 +618,9 @@ ${change}`;
 // --- passkey
 
 export function passkeyBody(adminAddress: string): string {
-  const steps = passkeyStepHow(adminAddress)
-    .map(
-      (line) =>
-        `<li>${escapeHtml(line.text)}\n${line.commands.map((command) => commandBlock(command)).join('\n')}</li>`,
-    )
-    .join('\n');
   return `<p>${escapeHtml(PASSKEY_STEP_LEAD)}</p>
 <p>${escapeHtml(PASSKEY_STEP_LATER)}</p>
-${expertDetails(`<ol>\n${steps}\n</ol>`)}`;
+${expertDetails(howList(passkeyStepHow(adminAddress), 'ol'))}`;
 }
 
 // --- the emergency kit
@@ -682,11 +691,10 @@ ${view.last.beforeClaim ? `<p class="warning">${escapeHtml(BACKUPS_BEFORE_CLAIM_
     view.notice === 'too-soon' && !view.waiting
       ? `<p class="problem" role="alert">${escapeHtml(BACKUPS_TOO_SOON_TEXT)}</p>\n`
       : '';
-  const expert = BACKUPS_EXPERT_LINES.map((line) => `<li>${escapeHtml(line)}</li>`).join('\n');
   return `<p>${escapeHtml(BACKUPS_STEP_LEAD)}</p>
 ${tooSoon}${card(state)}<p>${escapeHtml(BACKUPS_FOLDERS_TEXT)}</p>
 <p class="warning">${escapeHtml(OFFBOX_RULE_TEXT)}</p>
-${expertDetails(`<ul>\n${expert}\n</ul>`)}`;
+${expertDetails(howList(BACKUPS_EXPERT_LINES, 'ul'))}`;
 }
 
 // --- registration

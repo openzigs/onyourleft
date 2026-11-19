@@ -89,7 +89,17 @@ export const SETUP_COMMANDS = {
   adminPasskeysConfirm:
     'docker compose exec instance node src/operator/cli.ts admin-passkeys confirm <id>',
   backupStatus: 'docker compose ps backup',
+  instanceKeyReset: 'docker compose exec instance node src/operator/cli.ts instance-key reset',
 } as const;
+
+/**
+ * One line of a step's command-line details: what to do, then the commands it
+ * names, whole, which the page draws after it in blocks to copy (#2858).
+ */
+export interface SetupHowLine {
+  readonly text: string;
+  readonly commands: readonly string[];
+}
 
 /** Before the commands that make a new code: in the folder that holds compose.yaml. */
 export const SETUP_COMMANDS_WHERE =
@@ -280,22 +290,38 @@ export const TAILNET_CHANGE_HEADING = 'Changing this server’s address';
 export const TAILNET_CHANGE_WARNING =
   'Before you change it: the server’s keys belong to its address, so it must make new ones, which gives it a new identity. Every device that uses this server, your tablet too, must scan the server’s new card afterwards, and every passkey made for the old address stops working until you make one for the new address.';
 /** After the restart: the keys are made again for the new address (`unreadable` until then). */
-const TAILNET_CHANGE_RESET_LINE =
-  'Then run docker compose exec instance node src/operator/cli.ts instance-key reset beside compose.yaml: the server cannot open its old keys at the new address, so this makes new ones.';
-const TAILNET_CHANGE_CHECK_LINE =
-  'Then press Check now on this page: it shows the address the running server read back, and whether a device can fetch its keys there.';
+const TAILNET_CHANGE_RESET_LINE: SetupHowLine = {
+  text: 'Then run this beside compose.yaml: the server cannot open its old keys at the new address, so this makes new ones.',
+  commands: [SETUP_COMMANDS.instanceKeyReset],
+};
+const TAILNET_CHANGE_CHECK_LINE: SetupHowLine = {
+  text: 'Then press Check now on this page: it shows the address the running server read back, and whether a device can fetch its keys there.',
+  commands: [],
+};
 /** How to change it on a tailnet, for whoever wants the setting's name and the command. */
-export const TAILNET_CHANGE_EXPERT_LINES: readonly string[] = [
-  'Set OYL_INSTANCE_ORIGIN in .env to https:// and this machine’s Tailscale name, for example https://onyourleft.your-tailnet.ts.net with your own tailnet’s name.',
-  'Keep COMPOSE_PROFILES=tailscale and OYL_INSTANCE_REMOTE_PATH=tailnet (or funnel) and OYL_INSTANCE_CLIENT_ADDRESS_HEADER=x-forwarded-for.',
-  'Run bash deploy.sh beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
+export const TAILNET_CHANGE_EXPERT_LINES: readonly SetupHowLine[] = [
+  {
+    text: 'Set OYL_INSTANCE_ORIGIN in .env to https:// and this machine’s Tailscale name, for example https://onyourleft.your-tailnet.ts.net with your own tailnet’s name.',
+    commands: [],
+  },
+  {
+    text: 'Keep COMPOSE_PROFILES=tailscale and OYL_INSTANCE_REMOTE_PATH=tailnet (or funnel) and OYL_INSTANCE_CLIENT_ADDRESS_HEADER=x-forwarded-for.',
+    commands: [],
+  },
+  {
+    text: 'Run bash deploy.sh beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
+    commands: [],
+  },
   TAILNET_CHANGE_RESET_LINE,
   TAILNET_CHANGE_CHECK_LINE,
 ];
 /** The same on a Cloudflare tunnel: an address on the owner's domain, nothing a tailnet needs. */
-export const TAILNET_CHANGE_CLOUDFLARE_LINES: readonly string[] = [
-  'Set OYL_INSTANCE_ORIGIN in .env to https:// and the new name on your own domain that your Cloudflare tunnel serves, and give the tunnel that name as the guide’s step 3b says.',
-  'Run bash deploy.sh beside compose.yaml.',
+export const TAILNET_CHANGE_CLOUDFLARE_LINES: readonly SetupHowLine[] = [
+  {
+    text: 'Set OYL_INSTANCE_ORIGIN in .env to https:// and the new name on your own domain that your Cloudflare tunnel serves, and give the tunnel that name as the guide’s step 3b says.',
+    commands: [],
+  },
+  { text: 'Run bash deploy.sh beside compose.yaml.', commands: [] },
   TAILNET_CHANGE_RESET_LINE,
   TAILNET_CHANGE_CHECK_LINE,
 ];
@@ -307,9 +333,7 @@ export const PASSKEY_STEP_LEAD =
 export const PASSKEY_STEP_LATER =
   'A passkey lets you sign in to the server’s admin pages on this computer without a code. You can add one later, from the admin pages, whenever you want it.';
 /** How to add one, after the setup: `adminAddress` is the admin pages' address on this machine. */
-export function passkeyStepHow(
-  adminAddress: string,
-): readonly { readonly text: string; readonly commands: readonly string[] }[] {
+export function passkeyStepHow(adminAddress: string): readonly SetupHowLine[] {
   return [
     {
       text: 'Turn the admin pages on: set OYL_INSTANCE_ADMIN_PAGES=on in .env, then run:',
@@ -380,10 +404,19 @@ export const BACKUPS_TOO_SOON_TEXT =
   'A backup ran in the last 15 minutes, or one is already waiting, so no new one was asked for.';
 export const BACK_UP_NOW_STEP_BUTTON = 'Back up now';
 /** The command-line details: what sets the two folders, and how to check the service. */
-export const BACKUPS_EXPERT_LINES: readonly string[] = [
-  'The folder on this computer is OYL_BACKUP_DIR in .env, and the copy kept elsewhere is OYL_OFFBOX_DIR.',
-  'To change one, edit its line in .env and run the deploy again: the backup service is started with them.',
-  `To check the backup service is running: ${SETUP_COMMANDS.backupStatus}`,
+export const BACKUPS_EXPERT_LINES: readonly SetupHowLine[] = [
+  {
+    text: 'The folder on this computer is OYL_BACKUP_DIR in .env, and the copy kept elsewhere is OYL_OFFBOX_DIR.',
+    commands: [],
+  },
+  {
+    text: 'To change one, edit its line in .env and run the deploy again: the backup service is started with them.',
+    commands: [],
+  },
+  {
+    text: 'To check the backup service is running, run this beside compose.yaml:',
+    commands: [SETUP_COMMANDS.backupStatus],
+  },
 ];
 
 // --- registration (ADR 0080 D-6, Q-3)

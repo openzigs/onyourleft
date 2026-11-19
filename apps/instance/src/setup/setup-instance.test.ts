@@ -1620,7 +1620,11 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     const { browser } = await claimed(at);
     const step = await browser.get('/setup/tailnet');
     expect(step.body).toContain('reached through a Cloudflare tunnel on your own domain');
-    expect(step.body).not.toContain('<pre class="copy">');
+    // No access rule to paste: the one block to copy is the key reset a change of address needs.
+    expect(step.body).not.toContain('tagOwners');
+    expect(
+      [...step.body.matchAll(/<pre class="copy"><code>([^<]*)<\/code>/g)].map((m) => m[1]),
+    ).toEqual(['docker compose exec instance node src/operator/cli.ts instance-key reset']);
     expect(step.body).not.toContain('Invite each rider into your tailnet');
     expect(step.body).not.toContain('class="problem"');
     expect(step.body).not.toContain('That is a Tailscale address');
@@ -1808,6 +1812,10 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
       '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts owner-claim reset</code></pre>',
     );
     await browser.post('/setup/next', { from: 'claim' });
+    const tailnet = (await browser.get('/setup/tailnet')).body;
+    expect(tailnet).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts instance-key reset</code></pre>',
+    );
     await browser.post('/setup/next', { from: 'tailnet' });
     const passkey = (await browser.get('/setup/passkey')).body;
     for (const command of [
@@ -1818,9 +1826,18 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
     ]) {
       expect(passkey).toContain(`<pre class="copy"><code>${command}</code></pre>`);
     }
-    // No plain sentence says "the … command" without the command itself.
+    await browser.post('/setup/next', { from: 'passkey' });
+    await browser.post('/setup/next', { from: 'secrets' });
+    const backups = (await browser.get('/setup/backups')).body;
+    expect(backups).toContain('<pre class="copy"><code>docker compose ps backup</code></pre>');
+    // No plain sentence says "the … command" without the command itself, nor runs one inline.
     expect(locked.body).not.toMatch(/the [a-z]+-[a-z-]+ command/);
     expect(passkey).not.toMatch(/the [a-z]+-[a-z-]+ command/);
+    for (const page of [locked.body, tailnet, passkey, backups]) {
+      expect(page.replaceAll(/<pre class="copy"><code>[^<]*<\/code><\/pre>/g, '')).not.toMatch(
+        /docker compose|operator\/cli/,
+      );
+    }
   });
 
   it('says how to download the kit again after the one download, and a new session can', async () => {
