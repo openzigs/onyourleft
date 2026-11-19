@@ -514,9 +514,13 @@ export function stepBotRace(
           race.course.laps - Math.floor(own.effortDistance / race.course.lapLengthMetres),
         ),
         metresToLine: raceMetres - own.effortDistance,
+        // #2800: up the road from the course's line, as `botDemand` reads the grade under it.
         gradeAheadPercent: gradeAt(
           step.conditions.profile,
-          distanceOnRoute(step.conditions.profile, bot.ride.distance + BOT_GRADE_AHEAD_METRES),
+          distanceOnRoute(
+            step.conditions.profile,
+            bot.ride.distance + (step.conditions.lineMetres ?? 0) + BOT_GRADE_AHEAD_METRES,
+          ),
         ),
         wheelGapMetres: target === undefined ? null : target.effortDistance - own.effortDistance,
         ...wheel,
@@ -540,7 +544,8 @@ export function stepBotRace(
       };
     }
     // The plan reads the bot's own odometer, its effort distance, and the
-    // grade under it there: never the race's view of where the bot is.
+    // grade under it there, from the course's line (#2800): never the race's
+    // view of where the bot is.
     const planned = botPlanStep(plan, bot.energy, {
       effortDistance: bot.ride.distance,
       grade: botDemand(bot.ride, course).grade,

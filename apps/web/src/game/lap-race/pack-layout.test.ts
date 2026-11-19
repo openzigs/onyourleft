@@ -703,7 +703,11 @@ describe('every pass goes round: the rider and the bots never drawn through one 
           profile,
           rideConditionsFor(kilograms(75), DEFAULT_RIDING_POSITION),
         ),
-        riderDistance: 50,
+        // Pressed a whole lap into the ride (#2800): the line is the route's 0,
+        // so the bots ride the road these seeds were found on, and are drawn on
+        // it, clear of the route's start that a grid behind a press at 0 is
+        // clamped to. A race pressed elsewhere is `ride-race.test.ts`' #2800 case.
+        riderDistance: profile.totalDistance,
         lineOffset: 0,
         storage: undefined,
         draft: true,

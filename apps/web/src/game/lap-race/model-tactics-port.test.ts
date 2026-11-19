@@ -160,7 +160,7 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
       model,
       ride.race,
       ride.bots,
-      ride.conditions.profile,
+      ride.conditions,
       ride.seed,
       true,
       220 / 75,
@@ -202,7 +202,7 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
     const input = modelTacticsInputOf(
       ride.race,
       ride.bots,
-      ride.conditions.profile,
+      ride.conditions,
       ride.seed,
       true,
       3,
@@ -229,7 +229,7 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
     const input = modelTacticsInputOf(
       ride.race,
       ride.bots,
-      ride.conditions.profile,
+      ride.conditions,
       ride.seed,
       true,
       3,

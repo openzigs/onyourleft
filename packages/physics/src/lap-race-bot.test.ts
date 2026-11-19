@@ -294,6 +294,43 @@ describe('a lap-race bot is the #92 bot, on the one physics', () => {
     expect(along('heavy') / along('light')).toBeGreaterThan(0.9);
     expect(along('heavy') / along('light')).toBeLessThan(1.1);
   });
+
+  it('reads the grade under it and ahead of it from the course’s line (#2800)', () => {
+    // 100 m from a line 250 m round the loop: on the descent at 350 m, where
+    // its odometer alone would put it on the climb at 100 m.
+    const line = 250;
+    const odometer = 100;
+    const start = createItemRace({
+      course: raceCourse(HILLY.totalDistance, 3),
+      seed: 1,
+      itemsOn: false,
+      racerIds: ['bot'],
+      startMs: 0,
+    });
+    const bot = lapRaceBot('bot', 'hard', STRATEGY);
+    const tickFrom = (course: LapRaceBotConditions) => {
+      vi.mocked(advance).mockClear();
+      vi.mocked(decideTactic).mockClear();
+      stepBotRace(
+        start,
+        [{ ...bot, ride: { speed: metresPerSecond(9), distance: metres(odometer) } }],
+        { elapsed: seconds(1), conditions: course, seed: 1 },
+      );
+      const [, step] = vi.mocked(advance).mock.calls[0] ?? [];
+      const [view] = vi.mocked(decideTactic).mock.calls[0] ?? [];
+      return { grade: step?.grade, ahead: view?.gradeAheadPercent };
+    };
+    const fromLine = tickFrom({ ...conditions(HILLY), lineMetres: line });
+    expect(fromLine.grade).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer + line)));
+    expect(fromLine.ahead).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer + line + 50)));
+    // Non-vacuity: the road from the route's start is another road here, and
+    // a course with no line is the route's start to the bit.
+    const fromStart = tickFrom(conditions(HILLY));
+    expect(fromStart.grade).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer)));
+    expect(fromStart.ahead).toBe(gradeAt(HILLY, distanceOnRoute(HILLY, odometer + 50)));
+    expect(fromLine.grade).toBeLessThan(0);
+    expect(fromStart.grade).toBeGreaterThan(0);
+  });
 });
 
 describe('the travel it hands the bot decision', () => {
@@ -374,7 +411,10 @@ describe('its inputs are a tier, the pacing rule, the course and a seed (ADR 000
       | 'headwindMetresPerSecond'
       | 'coefficients'
       | 'integrationStepSeconds'
+      | 'lineMetres'
     >();
+    // #2800: the line is a distance along the route, a number: nowhere for a recorded ride.
+    expectTypeOf<LapRaceBotConditions['lineMetres']>().toEqualTypeOf<number | undefined>();
     // A recorded ride is not a bot, nor a step, nor a course.
     expectTypeOf<GhostTrack>().not.toMatchTypeOf<LapRaceBot>();
     expectTypeOf<GhostSamples>().not.toMatchTypeOf<BotRaceStep>();
