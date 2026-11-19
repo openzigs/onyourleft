@@ -1189,6 +1189,31 @@ describe('a level’s own throw window — #2931, ADR 0065 D-4.1', () => {
     expect(endDeliveryRide(rideTo(level, first.along + NARROW.afterMetres).ride).missed).toBe(0);
   });
 
+  it('waits for no parcel thrown from outside the level’s window before counting its house missed', () => {
+    const level = onLevel();
+    const first = level.throwTargets[0] as ThrowTarget;
+    const seconds =
+      (CARRIAGEWAY_HALF_WIDTH_METRES + first.clear) / PARCEL_THROW_SPEED_METRES_PER_SECOND;
+    // Thrown half a metre outside the level's opening edge, at a speed that brings it to the
+    // step's depth within the catch radius: inside the throw's own window, it would be caught.
+    const short = NARROW.beforeMetres + 0.5;
+    const speed = (short - 0.5) / seconds;
+    const aimed = rideTo(level, first.along - short).ride;
+    const thrown = rideTo(aimed, first.along + NARROW.afterMetres + 0.2, first.side, speed).ride;
+    // Still in the air past the level's closing edge, and the house is missed now, not when it lands.
+    expect(thrown.throws.inFlight).toHaveLength(1);
+    expect(thrown.round.houses[first.position]).toBe('missed');
+    // The same throw on a rider's own route is a delivery.
+    const own = withoutObstacles(started());
+    const ownFirst = own.throwTargets[0] as ThrowTarget;
+    const ownSpeed =
+      (short - 0.5) /
+      ((CARRIAGEWAY_HALF_WIDTH_METRES + ownFirst.clear) / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+    const ownAimed = rideTo(own, ownFirst.along - short).ride;
+    const ownThrown = rideTo(ownAimed, ownFirst.along + 2, ownFirst.side, ownSpeed).ride;
+    expect(ownThrown.round.houses[ownFirst.position]).toBe('delivered');
+  });
+
   it('counts the next house down to where the level’s window opens, not the throw’s', () => {
     const level = onLevel();
     const first = level.targets[0] as DeliveryTarget;
