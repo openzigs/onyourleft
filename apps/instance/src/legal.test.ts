@@ -6,6 +6,8 @@
  * public rooms with nobody to write to does not start.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { readConfig } from './config.ts';
@@ -166,5 +168,44 @@ describe('the legal settings (#908)', () => {
       'OYL_INSTANCE_PRIVACY_POLICY_URL',
       'OYL_INSTANCE_PUBLIC_ROOMS',
     ]);
+  });
+});
+
+/**
+ * #2857: the home deployment's template is what every new server's `.env` is
+ * copied from, and it once set the project's own contact address. Read here
+ * as a server would read a `.env` copied from it unedited, through the real
+ * listener: the page names nobody, and no placeholder.
+ */
+describe('the legal page of a server whose operator filled in nothing (#2857)', () => {
+  const template = readFileSync(
+    new URL('../deploy/home/instance.env.example', import.meta.url),
+    'utf8',
+  );
+  const value = (key: string): string | undefined =>
+    new RegExp(`^${key}=(.*)$`, 'm').exec(template)?.[1];
+
+  it('tells a rider to write to nobody: the template sets no contact, and no placeholder for one', async () => {
+    const read = readConfig({
+      commit: COMMIT,
+      contactEmail: value('OYL_INSTANCE_CONTACT_EMAIL'),
+      contactLanguages: value('OYL_INSTANCE_CONTACT_LANGUAGES'),
+      accountablePerson: value('OYL_INSTANCE_ACCOUNTABLE_PERSON'),
+      legalRepresentative: value('OYL_INSTANCE_LEGAL_REPRESENTATIVE'),
+      publicRooms: value('OYL_INSTANCE_PUBLIC_ROOMS'),
+    });
+    if (!read.ok) throw new Error(read.problems.join(' '));
+    expect(read.config.legal.contactEmail).toBeNull();
+    const html = await (await page(read.config.legal)).text();
+    expect(html).toContain('has not published a contact address');
+    expect(html).not.toContain('mailto:');
+    expect(html).not.toMatch(/@[a-z0-9.-]*openzigs\./i);
+  });
+
+  it('publishes an address at the project’s own domain when the operator typed it: the owner’s instance keeps its contact', async () => {
+    const read = readConfig({ commit: COMMIT, contactEmail: 'someone@openzigs.ai' });
+    if (!read.ok) throw new Error(read.problems.join(' '));
+    const html = await (await page(read.config.legal)).text();
+    expect(html).toContain('<a href="mailto:someone@openzigs.ai">someone@openzigs.ai</a>');
   });
 });
