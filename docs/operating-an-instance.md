@@ -1581,7 +1581,7 @@ Running an instance for other people is a set of duties as well as a box:
 
   | Setting | What to put |
   |---|---|
-  | `OYL_INSTANCE_CONTACT_EMAIL` | the address you read, for authorities and riders alike (the EU DSA's single point of contact, Arts 11 and 12). A person must read it |
+  | `OYL_INSTANCE_CONTACT_EMAIL` | the address you read, for authorities and riders alike (the EU DSA's single point of contact, Arts 11 and 12). A person must read it. **The home deployment starts nothing without it** (#2857): its template leaves the line empty, and `compose.yaml` requires it |
   | `OYL_INSTANCE_CONTACT_LANGUAGES` | the languages you can be written to in, separated by commas. Empty means English |
   | `OYL_INSTANCE_ACCOUNTABLE_PERSON` | the person accountable for keeping illegal content off the instance (the UK Online Safety Act Codes, ICU A2) |
   | `OYL_INSTANCE_LEGAL_REPRESENTATIVE` | only if you have one: your EU legal representative's name, postal address, email and telephone, on one line (DSA Art. 13(4)) |
