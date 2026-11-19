@@ -3454,6 +3454,11 @@ export class RiderBelt {
     this.#group.visible = false;
   }
 
+  /** Every mesh a rider is drawn with, the female upper body included (#2839). */
+  #all(): readonly InstancedMesh[] {
+    return [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets, this.#limbs];
+  }
+
   /**
    * Draws only the riders that cast into the shadow map's pass — #547, and
    * #93's rule on the map rung: **the ghost casts no shadow there either.**
@@ -3470,11 +3475,6 @@ export class RiderBelt {
    * submission, so the pass draws the first {@link #casters} riders and the
    * picture draws them all.
    */
-  /** Every mesh a rider is drawn with, the female upper body included (#2839). */
-  #all(): readonly InstancedMesh[] {
-    return [this.#bodies, this.#torsos, this.#femaleTorsos, this.#cranksets, this.#limbs];
-  }
-
   #castersOnly(mesh: InstancedMesh, perRider: number): void {
     let drawn = 0;
     mesh.onBeforeShadow = () => {
@@ -6867,7 +6867,8 @@ interface RealisticWorld {
   /**
    * The other rider bodies' models, each once it has been asked for — #2839.
    * Empty until a frame draws a rider of another body; then one promise a
-   * body, joined by every later ask. @see riderBodyOfWorld
+   * body, joined by every later ask, and dropped if its load fails.
+   * @see riderBodyOfWorld
    */
   readonly otherBodies: Map<RiderBody, Promise<Object3D>>;
   /** The rider's kit, skin and relief — #623. */
@@ -8119,10 +8120,15 @@ function releaseRealisticWorld(world: RealisticWorld): void {
  * the loaders are released when it settles, as {@link loadRealisticWorld}
  * releases them.
  *
- * ⚠️ **A load that fails is not retried in this world**: the rider is drawn
- * in the default body instead ({@link RealisticRiderBelt.addBody}), which is a
- * rider in the wrong shape and not a ride that stops. Offline, the file comes
- * from the same cache the rest of the realistic set does.
+ * ⚠️ **A load that fails is forgotten, so the next ride asks again**: the
+ * world is module state that outlives a view, and a failure kept here would
+ * draw her as the default rider on every later ride of the visit, silently.
+ * That is {@link loadRealisticWorldOnce}'s rule — the fallback is per ride,
+ * not per visit — and {@link RealisticRiderBelt.place} asks once a ride, so
+ * the ride that saw the failure does not ask on every frame. Until a load lands
+ * the rider is drawn in the default body ({@link RealisticRiderBelt.addBody}),
+ * which is a rider in the wrong shape and not a ride that stops. Offline, the
+ * file comes from the same cache the rest of the realistic set does.
  *
  * `loaders` are the product's unless a caller hands its own, as
  * {@link loadRealisticWorld}'s are.
@@ -8134,10 +8140,15 @@ export function riderBodyOfWorld(
 ): Promise<Object3D> {
   const asked = world.otherBodies.get(body);
   if (asked !== undefined) return asked;
-  const load = loaders
-    .model(realisticUrl(REALISTIC_RIDER_BODIES[body]))
-    .finally(() => loaders.dispose?.());
+  // `started`: the ask is made while a frame is placed, which a loader that
+  // throws rather than rejecting must not stop.
+  const load = started(() => loaders.model(realisticUrl(REALISTIC_RIDER_BODIES[body]))).finally(
+    () => loaders.dispose?.(),
+  );
   world.otherBodies.set(body, load);
+  load.catch(() => {
+    world.otherBodies.delete(body);
+  });
   return load;
 }
 
@@ -17112,6 +17123,12 @@ export class RealisticRiderBelt {
   readonly #pools: Partial<Record<RiderBody, RealisticRiderPool>> = {};
   /** Which body the per-body fields are currently. @see #use */
   #body: RiderBody = REALISTIC_DEFAULT_BODY;
+  /** The world the other bodies' models are fetched for. @see #want */
+  readonly #otherBodiesOf: { readonly otherBodies: Map<RiderBody, Promise<Object3D>> };
+  /** The bodies {@link #want} has asked for on this ride, landed or not. */
+  readonly #asked = new Set<RiderBody>();
+  /** Whether {@link dispose} has run: a body that lands after it is not added. */
+  #disposed = false;
   readonly #helmetMaterial: MeshStandardMaterial;
   readonly #dressed: RealisticRiderMaps;
   /** A matrix that draws nothing: a slot's helmet in the pool it does not wear. */
@@ -17194,7 +17211,18 @@ export class RealisticRiderBelt {
   #cyclistSlots = { first: 0, count: 0 };
   #shown = true;
 
-  constructor(body: Object3D, maps: RealisticBicycleMaps, dressed: RealisticRiderMaps) {
+  /**
+   * @param world whose other bodies a frame's riders are fetched from
+   *   ({@link riderBodyOfWorld}) — #2839. Not optional, so that no belt a
+   *   ride draws can be built unable to load the rider its athlete chose.
+   */
+  constructor(
+    body: Object3D,
+    maps: RealisticBicycleMaps,
+    dressed: RealisticRiderMaps,
+    world: { readonly otherBodies: Map<RiderBody, Promise<Object3D>> },
+  ) {
+    this.#otherBodiesOf = world;
     // #623: the helmet and glasses are the file's own, coloured per vertex.
     // #2596: faded with the rider who wears it.
     const helmetMaterial = withRiderInstance(
@@ -17224,10 +17252,10 @@ export class RealisticRiderBelt {
 
   /**
    * Makes a pool of riders in one body — #2839: the constructor's own for the
-   * default body, and {@link ThreeGameView} for another once its model has
+   * default body, and {@link #want}'s for another once its model has
    * loaded (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`). Until a body
    * has a pool, a rider who chose it is drawn in the default
-   * ({@link #pooled}). Every pool wears the same three maps.
+   * ({@link #use}). Every pool wears the same three maps.
    *
    * Leaves the default body in use, so {@link silhouette} and
    * {@link ridingPose} read it whatever was added last.
@@ -17364,9 +17392,36 @@ export class RealisticRiderBelt {
     });
   }
 
-  /** Whether `body` has a pool yet — #2839, for the view, which loads one a frame asks for. */
+  /** Whether `body` has a pool yet — #2839. For the tests. */
   hasBody(body: RiderBody): boolean {
     return this.#pools[body] !== undefined;
+  }
+
+  /**
+   * Asks for the model of a body a rider on this frame is drawn in and the
+   * belt has no pool for — #2839. The first frame that draws a female rider
+   * starts the one load ({@link riderBodyOfWorld}); she is drawn in the
+   * default body until it lands, and in her own from the frame after.
+   *
+   * ⚠️ **Asked from {@link place}, at the marker it is about to draw**, so
+   * the rule is `place`'s own and cannot drift from it: a marker that is not
+   * a rider, one past the last slot, and a belt that is not shown ask for
+   * nothing. PR #2845's review: it was a second loop over the markers, in
+   * `RealisticDrawing`, that no test could fail and that asked for more.
+   *
+   * Once a ride: a load that failed is not asked for again on every frame,
+   * and the next ride — the next belt — asks again.
+   */
+  #want(body: RiderBody): void {
+    if (this.#asked.has(body)) return;
+    this.#asked.add(body);
+    void riderBodyOfWorld(this.#otherBodiesOf, body).then(
+      (scene) => {
+        if (!this.#disposed) this.addBody(body, scene);
+      },
+      // Drawn in the default body for the rest of this ride. @see riderBodyOfWorld
+      () => undefined,
+    );
   }
 
   addTo(scene: Scene): void {
@@ -17547,8 +17602,11 @@ export class RealisticRiderBelt {
     for (const marker of markers) {
       if (slot >= REALISTIC_RIDER_SLOTS) break;
       if (!Object.hasOwn(RIDER_TINTS, marker.kind)) continue;
+      // #2839: a body with no pool yet is asked for, and drawn as the default until it lands.
+      const chosen = riderBodyFor(marker.body);
+      if (this.#pools[chosen] === undefined) this.#want(chosen);
       // The slot in the marker's own body's pool, and nothing in any other's.
-      const pool = this.#pools[this.#use(riderBodyFor(marker.body))] as RealisticRiderPool;
+      const pool = this.#pools[this.#use(chosen)] as RealisticRiderPool;
       this.#placeOne(slot, marker);
       this.#fadeOne(slot, riderFaded(marker, fade));
       worn.set(pool, (worn.get(pool) ?? 0) + 1);
@@ -17658,6 +17716,7 @@ export class RealisticRiderBelt {
   }
 
   dispose(): void {
+    this.#disposed = true;
     const pools = this.#everyPool();
     for (const mesh of [
       this.#frame,
@@ -18341,7 +18400,7 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
   const world = realisticWorld;
   return world === undefined
     ? undefined
-    : new RealisticRiderBelt(world.body, world.bicycle, world.rider);
+    : new RealisticRiderBelt(world.body, world.bicycle, world.rider, world);
 }
 
 /** #2722: the vertical, a bicycle's own long axis, and no scale, for {@link cyclistMatrix}. */
@@ -24598,7 +24657,7 @@ class RealisticDrawing {
       skip: REALISTIC_PRIMITIVE_SKIP,
       physical: true,
     });
-    this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider);
+    this.riders = new RealisticRiderBelt(world.body, world.bicycle, world.rider, world);
     this.riders.setRiderKit(riderKit);
     this.silhouette = this.riders.silhouette();
     this.shadows = new RiderSilhouetteBelt(this.silhouette);
@@ -24911,35 +24970,7 @@ class RealisticDrawing {
     );
   }
 
-  /**
-   * Asks for the model of every body this frame's riders are drawn in that
-   * the belt has no riders for yet — #2839. The first frame with a female
-   * rider starts the one load; she is drawn in the default body until it
-   * lands, and in her own from the frame after. Costs a map lookup a rider
-   * on every other frame.
-   */
-  wantBodies(markers: readonly RiderMarker[]): void {
-    for (const marker of markers) {
-      const body = riderBodyFor(marker.body);
-      if (this.riders.hasBody(body) || this.#bodiesAsked.has(body)) continue;
-      this.#bodiesAsked.add(body);
-      void riderBodyOfWorld(this.#world, body).then(
-        (scene) => {
-          if (!this.#disposed) this.riders.addBody(body, scene);
-        },
-        // Drawn in the default body for the rest of this world. @see riderBodyOfWorld
-        () => undefined,
-      );
-    }
-  }
-
-  /** The bodies {@link wantBodies} has asked for, landed or not. */
-  readonly #bodiesAsked = new Set<RiderBody>();
-  /** Whether {@link dispose} has run: a body that lands after it is not added. */
-  #disposed = false;
-
   dispose(): void {
-    this.#disposed = true;
     this.#mapped?.dispose();
     this.vegetation.dispose();
     this.structures.dispose();
@@ -26600,8 +26631,6 @@ class ThreeGameView implements GameView {
     // #2722: and the scenery cyclists' bicycles after them — exactly while
     // their bodies are drawn, which is while the people are.
     const cyclists = this.#realistic?.people.drawing === true ? (frame.cyclists ?? []) : [];
-    // #2839: a body this frame draws and the belt has not loaded is asked for.
-    this.#realistic?.wantBodies(split?.realistic ?? frame.markers);
     this.#realistic?.riders.place(split?.realistic ?? frame.markers, fade, cyclists);
     // #679: the gantries at the lines in reach, and none anywhere else —
     // and since #966 in both worlds, each drawing its own, with the wordmark
