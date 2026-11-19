@@ -40,7 +40,10 @@
  * `decideTactic` launches on: ADR 0073 D-3.5), launch distance, grade ahead,
  * each bot's gap to the rider, and the rider's own state: rank, W/kg, who is
  * ahead of them, their gaps and whether they draft (D-5.2). There is no attack
- * gate (D-5.3). **No coordinate, no place name, no rider name, no date and no
+ * gate (D-5.3). **The course ahead (#2794)**, once for the race from the
+ * leading bot: the next climb and descent before the line, the lap's metres
+ * and climbing left, and the grade of the last 500 m (§`lapRaceCourseAhead`).
+ * **No coordinate, no place name, no rider name, no date and no
  * identifier**: every field is a number, a boolean or a word from a closed
  * list, and the device checks it with the instance's own reader before it is
  * sent. **Rounded for latency** (#2759, ADR 0076 D-11): every gap to whole
@@ -67,6 +70,10 @@ import {
   BOT_TACTICS_WINDOW_MS,
   botLaunchMetres,
   botTacticsMisjudgement,
+  COURSE_ROUNDING_METRES,
+  courseAverageGrade,
+  courseClimbing,
+  courseHillsAhead,
   distanceOnRoute,
   gradeAt,
   LAP_RACE_BOT_CODE_VERSION,
@@ -84,6 +91,7 @@ import {
   type LapRaceModelRecord,
   type ModelBotStrengths,
   type ModelTacticsBotView,
+  type ModelTacticsCourse,
   type ModelTacticsInput,
   type ModelTacticsLogEntry,
   type ModelTacticsLogReason,
@@ -93,6 +101,37 @@ import { lapRaceBotMassKilograms, lapRaceDraftFactors, type LapRaceBot } from '@
 
 /** How far up the road a bot's grade ahead is read, metres: the bots' own look-ahead (`physics` §`BOT_GRADE_AHEAD_METRES`). */
 const GRADE_AHEAD_METRES = 50;
+
+/** The stretch before the line whose grade is the finish's, metres: **500** (#2794). */
+const FINISH_STRETCH_METRES = 500;
+
+/**
+ * The course ahead of `leader` (#2794): its next climb and descent before the
+ * line, what is left of its lap and the climbing in it, and the grade of the
+ * last {@link FINISH_STRETCH_METRES} to the line. Read on the road the bots
+ * ride, `bot.ride.distance` on `profile`, as their grade ahead is, so the
+ * summary is the road they will feel; the lap and the line are on effort
+ * distance, as every other distance the model is shown.
+ */
+function lapRaceCourseAhead(
+  race: ItemRaceState,
+  leader: LapRaceBot,
+  effortDistance: number,
+  profile: RouteProfile,
+): ModelTacticsCourse {
+  const { laps, lapLengthMetres } = race.course;
+  const from = leader.ride.distance as number;
+  const toLine = Math.max(0, laps * lapLengthMetres - effortDistance);
+  const intoLap = effortDistance - Math.floor(effortDistance / lapLengthMetres) * lapLengthMetres;
+  const lapLeft = Math.min(toLine, lapLengthMetres - intoLap);
+  const finish = Math.min(FINISH_STRETCH_METRES, lapLengthMetres);
+  return {
+    ...courseHillsAhead(profile, from, toLine),
+    lapLeftM: Math.round(lapLeft / COURSE_ROUNDING_METRES) * COURSE_ROUNDING_METRES,
+    lapClimbM: courseClimbing(profile, from, lapLeft),
+    finishPct: courseAverageGrade(profile, from + toLine - finish, from + toLine),
+  };
+}
 
 /**
  * The rider's own input at every race tick, appended in place, one entry a
@@ -258,6 +297,8 @@ export function modelTacticsInputOf(
     });
   });
   if (views.length === 0) return undefined;
+  // #2794: the course ahead once for the race, from the bot at its head.
+  const head = views.reduce((best, view) => (view.rank < best.rank ? view : best));
   const riderAt = rider === undefined ? undefined : rank.get(rider.id);
   const riderAhead = riderAt === undefined ? undefined : racing[riderAt - 1];
   const riderBehind = riderAt === undefined ? undefined : racing[riderAt + 1];
@@ -276,6 +317,12 @@ export function modelTacticsInputOf(
       drafting: rider !== undefined && riderAt !== undefined && (factors?.[rider.id] ?? 1) < 1,
     },
     bots: views,
+    course: lapRaceCourseAhead(
+      race,
+      bots[head.bot] as LapRaceBot,
+      (racing[head.rank - 1] as (typeof racing)[number]).effortDistance,
+      profile,
+    ),
   };
 }
 

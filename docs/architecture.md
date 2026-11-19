@@ -2169,8 +2169,8 @@ takes an athlete, and nothing unscreened is streamed or kept.
 [ADR 0071](adr/0071-model-chosen-lap-race-bot-tactics-during-a-ride.md) D-3 to D-7. A device racing "AI bots"
 asks its instance for one decision at a time: `POST /v1/analysis/tactics/decide` with `{ input }`,
 `@onyourleft/domain` §`ModelTacticsInput` (seats, styles, ranks, gaps, W′ shares, drafting, moves,
-laps and metres to the line, launch distance, grade ahead, the rider's gap, rank and W/kg — no
-coordinate, no name, at most 4 096 characters). `analysis/tactics.ts` refuses, before any model is
+laps and metres to the line, launch distance, grade ahead, the course ahead (#2794), the rider's
+gap, rank and W/kg — no coordinate, no name, at most 4 096 characters). `analysis/tactics.ts` refuses, before any model is
 called: a rider the settings do not offer the **local** model to (`local_unavailable`; the switch
 for other riders applies), one with no consent naming the local model address the settings give now
 (`tactics_consent_required`; migration 0046's `athlete_tactics_consent`, so a changed address
@@ -2224,8 +2224,11 @@ time it reads itself inside its launch rides its own kick, and a kick near the l
 (ADR 0074). ADR 0073's and ADR 0071 D-3.6's rules stay behind the seam as `ADR_0073_MOVE_STRATEGY`
 and `ADR_0071_MOVE_STRATEGY`, used by no race. The model is shown the line as each bot misreads it, the reading seeded `decideTactic`
 launches on (#2705, D-3.5), each bot's racing style dealt from the seed, whether it is
-blown, and the rider's own state (D-5); the instance's prompt is guidance, not rules
-(`tactics-prompt.ts`, `tactics-6`).
+blown, and the rider's own state (D-5); since #2794 it is also shown the course ahead of the
+leading bot, once for the race (`@onyourleft/domain` §`ModelTacticsCourse`, read by
+`route/course-ahead.ts`: the next climb and descent before the line, each 3 % or steeper for
+200 m or more within 5 km, the lap's metres and climbing left, and the grade of the last 500 m);
+the instance's prompt is guidance, not rules (`tactics-prompt.ts`, `tactics-7`).
 
 **Since bot-code version 5 the cadence is the tablet's** (ADR 0076 D-11, #2759): an answer is late
 past 8 s of race time and a decision holds 10 s, because the round trip through the instance's

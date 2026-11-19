@@ -19,6 +19,11 @@
  * its style where they named its legs; and a target is asked for only on the
  * two moves that read one, which the schema now holds the model to
  * (`modelTacticsAnswerSchema`), so the answer it writes is shorter.
+ * Two are #2794's (`tactics-7`): what the course ahead in the state means
+ * (`@onyourleft/domain` §`ModelTacticsCourse`), and that riders race the
+ * terrain, still guidance: climbers save for a climb and attack on it,
+ * sprinters cover moves before a flat finish, rouleurs push on the flat and
+ * descents, and every bot recovers before a hard section.
  * {@link TACTICS_PROMPT_VERSION} is raised with every change to its words.
  * The answer is asked for **with a target again** (D-3.4: a `follow` or
  * `chase` may name any racer) and an optional effort.
@@ -45,7 +50,7 @@ import {
 } from '@onyourleft/domain';
 
 /** Which prompt this is, for a measurement to name: raised with every change to the words below. */
-export const TACTICS_PROMPT_VERSION = 'tactics-6';
+export const TACTICS_PROMPT_VERSION = 'tactics-7';
 
 /**
  * The most a decision may write, tokens: **256** (#2759, ADR 0076 D-11). The
@@ -88,6 +93,8 @@ export const TACTICS_SYSTEM = [
   'Every bot has its own body. "flat", "climb", "sprint" and "punch" say how it compares with the other bots: "strong", "average" or "weak". "flat" is its power on the flat, "climb" its power for its weight on a climb, "sprint" its speed in a sprint, and "punch" how much it can spend above its steady pace before it blows.',
   'Race to the strengths, as real riders do. Attack where the bot is strong and its rivals are not: a strong climber where "gradeAheadPct" is 3 or more, a strong rouleur or breakaway rider on the flat, a sprinter only at the finish. When a strong rival attacks where a bot is weak, that bot usually lets it go and rides its own pace rather than blow up chasing; a bot as strong covers the move with "follow", or chases it down. A bot that goes too hard for too long empties "wbal", is dropped and loses; a well-timed attack wins the race.',
   'Styles ("style"): a "breakaway" rider attacks and goes up the road on a flyer once or twice a race and sits in between; a "sprinter" sits on wheels, saves everything, and kicks; a "climber" attacks on the climbs; a "rouleur" rides hard on the flat and chases down a move that has been away a while, naming it in "target"; an "opportunist" follows other bots\' moves and counter-attacks when a move is caught. A bot\'s body goes with its style, and its strengths say how.',
+  '"course" is the road ahead of the leading bot (a bot behind it is its gap further from each): "climb" and "descent" are the next climb and descent before the line, each 3 % or steeper for 200 m or more, or null: "inM" to its start, "lengthM", "avgPct" and the steepest "maxPct". "lapLeftM" and "lapClimbM" are the metres and the climbing left in the lap, and "finishPct" the grade of the last 500 m to the line. "lapsLeft" 1 is the last lap.',
+  'Race the terrain as riders do: a climber saves itself before a climb and attacks on it; a sprinter sits in and covers moves before a flat finish; a rouleur or breakaway rider pushes on the flat and on descents; and any bot recovers before a hard section it knows is coming.',
   '"rider" is the human racing the bots, and each bot\'s "riderGapM" is how far the rider is ahead of it (below 0, behind). Bots may mark the rider, sit on the rider\'s wheel, or attack when the rider is tired. "quietS" is how long since any bot attacked or went on a flyer.',
   'Answer with JSON only, in the schema given.',
 ].join('\n');
@@ -125,6 +132,8 @@ export const WARM_UP_INPUT: ModelTacticsInput = {
     gradeAheadPct: 0,
     riderGapM: seat === 0 ? -0.5 : 0.5,
   })),
+  // #2794: a flat lap with nothing ahead, so the warm-up reads the course's shape too.
+  course: { climb: null, descent: null, lapLeftM: 600, lapClimbM: 0, finishPct: 0 },
 };
 
 /**

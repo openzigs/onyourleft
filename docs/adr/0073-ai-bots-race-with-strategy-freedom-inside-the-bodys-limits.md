@@ -336,3 +336,15 @@ model race, or taking away a body's limit (D-2), needs one.
   own target and the move's, so it never softens the move; D-2.5 stands as written on every other
   move. The body's limits (D-2) and the strategy rules lifted (D-3) are unchanged. Read ADR 0076 for
   the rule. This entry only points there; nothing else in this ADR changes. (#2759)
+
+- **2026-11-17** — **D-5's input gains the course ahead (#2794).** Once for the race, read from
+  the leading bot on the road the bots ride, the race state may carry `course`: the next climb and
+  the next descent before the line (each 3 % or steeper for 200 m or more, looked for 5 km ahead
+  at most: metres to its start, its length, its average and steepest grade), the metres and the
+  climbing left in the lap, and the average grade of the last 500 m to the line
+  (`@onyourleft/domain` §`ModelTacticsCourse`, `route/course-ahead.ts`). Every field is a number
+  or `null`, never a coordinate or a name, and the reader refuses any other key; it is optional,
+  so a device from before it still asks. The prompt (`tactics-7`) says what it means and how riders
+  race terrain, as guidance (D-5): there is still no attack gate (D-5.3), and the body's limits
+  (D-2) and the answer are unchanged. This entry only records the wider input; nothing else in this
+  ADR changes.

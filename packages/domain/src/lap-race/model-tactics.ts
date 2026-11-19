@@ -20,6 +20,11 @@
  * line as each bot misreads it, launch distance, grade ahead, the rider's gap,
  * and the rider's own state: rank, W/kg, who is ahead of them, their gaps and
  * whether they draft. There is no code-computed attack gate (D-5.3).
+ * **The course ahead (#2794):** once for the race, from the leading bot, the
+ * next climb and the next descent, the lap's metres and climbing left, and
+ * the grade of the last 500 m to the line ({@link ModelTacticsCourse}, by
+ * `route/course-ahead.ts`'s stated thresholds), so a bot can plan for a hill
+ * it cannot yet feel.
  * **Trimmed for latency (#2759, ADR 0076 D-11):** a bot's archetype (its
  * "legs") is not sent, because since ADR 0076 D-3 its racing style decides
  * it, nor the count of racers, which the prompt never reads; the device
@@ -46,6 +51,7 @@
  * `apps/web/tools/model-tactics-spike/` is not moved.
  */
 
+import { isCourseHill, type CourseHill } from '../route/course-ahead';
 import { nextUnit, raceRandom } from './random';
 import { BOT_EFFORTS, BOT_TACTICS, type BotEffort, type BotTactic } from './tactics';
 
@@ -190,6 +196,33 @@ export interface ModelTacticsInput {
   /** The rider's state (ADR 0073 D-5.2), so a bot can mark them. */
   readonly rider: ModelTacticsRiderView;
   readonly bots: readonly ModelTacticsBotView[];
+  /**
+   * The road ahead of the leading bot (#2794): once for the race, not once a
+   * bot, to keep the input small. Optional, so a device from before it still
+   * asks; every device since sends it.
+   */
+  readonly course?: ModelTacticsCourse;
+}
+
+/**
+ * **The course ahead of the leading bot**, as the model is shown it (#2794),
+ * from `route/course-ahead.ts`: a bot behind the leader is its gap further
+ * from each place named. Metres to 10 m, grades to a whole percent.
+ */
+export interface ModelTacticsCourse {
+  /** The next climb up the road (at least 3 % for at least 200 m), or `null` with none in 5 km before the line. */
+  readonly climb: CourseHill | null;
+  /** The next descent, by the same rule downhill, or `null`. */
+  readonly descent: CourseHill | null;
+  /** Metres left in the leader's lap. */
+  readonly lapLeftM: number;
+  /** Metres of climbing left in the leader's lap. */
+  readonly lapClimbM: number;
+  /**
+   * The average grade of the last 500 m to the line, whole percent: whether
+   * the finish is flat, up or down. The last lap is a bot's `lapsLeft` of 1.
+   */
+  readonly finishPct: number;
 }
 
 /** The rider as the model is shown them (ADR 0073 D-5.2). */
@@ -404,6 +437,9 @@ const VIEW_KEYS = [
   'riderGapM',
 ] as const;
 const INPUT_KEYS = ['laps', 'quietS', 'rider', 'bots'] as const;
+/** The keys a race state may leave out: each one a device from before it did not send. */
+const OPTIONAL_INPUT_KEYS = ['course'] as const;
+const COURSE_KEYS = ['climb', 'descent', 'lapLeftM', 'lapClimbM', 'finishPct'] as const;
 /** The most seconds a race state may say: a day. */
 const MOST_SECONDS = 86_400;
 const RIDER_KEYS = ['rank', 'wPerKg', 'ahead', 'gapAheadM', 'gapBehindM', 'drafting'] as const;
@@ -490,6 +526,24 @@ function viewProblem(view: unknown, at: string): ModelTacticsInputProblem | unde
   return failed === undefined ? undefined : { field: `${at}.${failed[0]}`, problem: failed[2] };
 }
 
+/** The first problem with the course ahead (#2794), or `undefined`. */
+function courseProblem(course: unknown): ModelTacticsInputProblem | undefined {
+  if (!isRecord(course)) return { field: 'input.course', problem: 'must be an object' };
+  const keys = keyProblem(course, COURSE_KEYS, 'input.course');
+  if (keys !== undefined) return keys;
+  const checks: readonly (readonly [string, boolean, string])[] = [
+    ['climb', course.climb === null || isCourseHill(course.climb), 'must be a hill, or null'],
+    ['descent', course.descent === null || isCourseHill(course.descent), 'must be a hill, or null'],
+    ['lapLeftM', numberIn(course.lapLeftM, 0, MOST_METRES), 'must be metres'],
+    ['lapClimbM', numberIn(course.lapClimbM, 0, MOST_METRES), 'must be metres'],
+    ['finishPct', numberIn(course.finishPct, -100, 100), 'must be a grade in percent'],
+  ];
+  const failed = checks.find(([, ok]) => !ok);
+  return failed === undefined
+    ? undefined
+    : { field: `input.course.${failed[0]}`, problem: failed[2] };
+}
+
 /**
  * Read a race state a device sent, exactly {@link ModelTacticsInput}'s shape
  * and no more than {@link MODEL_TACTICS_INPUT_MOST_CHARACTERS} of JSON: the
@@ -507,7 +561,11 @@ export function readModelTacticsInput(value: unknown): ModelTacticsInputRead {
       `must be at most ${String(MODEL_TACTICS_INPUT_MOST_CHARACTERS)} characters`,
     );
   }
-  const keys = keyProblem(value, INPUT_KEYS, 'input');
+  const keys = keyProblem(
+    value,
+    [...INPUT_KEYS, ...OPTIONAL_INPUT_KEYS.filter((key) => key in value)],
+    'input',
+  );
   if (keys !== undefined) return { ok: false, problem: keys };
   if (!wholeIn(value.laps, 1, MOST_LAPS)) return refuse('input.laps', 'must be a number of laps');
   if (!wholeIn(value.quietS, 0, MOST_SECONDS)) {
@@ -546,6 +604,10 @@ export function readModelTacticsInput(value: unknown): ModelTacticsInputRead {
     if (seats.has(seat))
       return refuse(`input.bots[${String(index)}].bot`, 'must not repeat a seat');
     seats.add(seat);
+  }
+  if ('course' in value) {
+    const problem = courseProblem(value.course);
+    if (problem !== undefined) return { ok: false, problem };
   }
   return { ok: true, value: value as unknown as ModelTacticsInput };
 }

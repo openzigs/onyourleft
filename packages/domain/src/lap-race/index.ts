@@ -195,6 +195,7 @@ export {
 export type {
   ModelTacticsAnswer,
   ModelTacticsBotView,
+  ModelTacticsCourse,
   ModelTacticsInput,
   ModelTacticsInputProblem,
   ModelTacticsInputRead,
