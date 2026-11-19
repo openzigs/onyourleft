@@ -2152,7 +2152,7 @@ const AI_PACER_TEXT = {
   unavailable: 'Your instance could not be reached. The pacer rides as usual.',
   notOffered: 'Your instance offers you no AI model now. The pacer rides as usual.',
   consented:
-    'The AI will coach you on this ride. Write-ups on your instance wait until the ride ends.',
+    'The AI will coach you on this ride. Write-ups on your server wait until the ride ends.',
   consent: 'Allow the AI pacer',
   withdraw: 'Withdraw consent',
 } as const;
