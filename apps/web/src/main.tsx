@@ -57,7 +57,7 @@ import {
 } from './ride/remembered-sensors';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
-import { ownThresholdPowerFrom } from './game/own-threshold';
+import { ownThresholdHeartRateFrom, ownThresholdPowerFrom } from './game/own-threshold';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
 import { platformServiceWorkerContainer, registerServiceWorker } from './offline/register';
 import {
@@ -831,6 +831,10 @@ function buildGamePort(
     // module is what holds it: `game/own-threshold.test.ts` reads it through a
     // real store, and dropping this line is a red `check:wiring` (WIRE001).
     ownThresholdPower: ownThresholdPowerFrom(store),
+    // #2760: the rider's own threshold heart rate, for the AI pacer's
+    // heart-rate zone — the local athlete's row, and only theirs.
+    // `game/own-threshold.test.ts` reads it through a real store.
+    ownThresholdHeartRate: ownThresholdHeartRateFrom(store),
     loadRiderGhost: async (route: string): Promise<RiderGhostLoad> => {
       if (ghosts === undefined) return { kind: 'unavailable' };
       const saved = await store.getRoute(LOCAL_ATHLETE, routeId(route));

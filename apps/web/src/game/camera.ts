@@ -746,12 +746,37 @@ export function projectToFrame(
   aspect: number,
   point: RigPoint,
 ): FramePoint | undefined {
+  if (!(aspect > 0)) return undefined;
+  const seen = fromTheEye(rig, point);
+  if (seen === undefined || !(seen.depth >= NEAR_PLANE_METRES)) return undefined;
+  const t = verticalHalfTangent(aspect);
+  const across = seen.right / (seen.depth * t * aspect);
+  const above = seen.up / (seen.depth * t);
+  return { left: (1 + across) / 2, top: (1 - above) / 2, depth: seen.depth };
+}
+
+/**
+ * A point in the camera's own axes, in metres from the eye: to the frame's
+ * right, up it, and along the view axis — #2755.
+ *
+ * {@link projectToFrame} divides the first two by the third. A point BEHIND
+ * the eye has a negative `depth`, and that division turns it round to the
+ * opposite side of the frame, which is why `projectToFrame` answers nothing
+ * for one; `off-screen-marker.ts` needs to know which side such a point is
+ * on, so it reads the three here and divides for itself. The axes are the ones
+ * `projectToFrame` documents. `undefined` only for a rig that looks at its
+ * own eye or straight up or down, which has no frame.
+ */
+export function fromTheEye(
+  rig: CameraRig,
+  point: RigPoint,
+): { readonly right: number; readonly up: number; readonly depth: number } | undefined {
   const along = Math.hypot(
     rig.target.x - rig.eye.x,
     rig.target.y - rig.eye.y,
     rig.target.z - rig.eye.z,
   );
-  if (!(along > 0) || !(aspect > 0)) return undefined;
+  if (!(along > 0)) return undefined;
   const fx = (rig.target.x - rig.eye.x) / along;
   const fy = (rig.target.y - rig.eye.y) / along;
   const fz = (rig.target.z - rig.eye.z) / along;
@@ -767,10 +792,9 @@ export function projectToFrame(
   const dx = point.x - rig.eye.x;
   const dy = point.y - rig.eye.y;
   const dz = point.z - rig.eye.z;
-  const depth = dx * fx + dy * fy + dz * fz;
-  if (!(depth >= NEAR_PLANE_METRES)) return undefined;
-  const t = verticalHalfTangent(aspect);
-  const across = (dx * rx + dz * rz) / (depth * t * aspect);
-  const above = (dx * ux + dy * uy + dz * uz) / (depth * t);
-  return { left: (1 + across) / 2, top: (1 - above) / 2, depth };
+  return {
+    right: dx * rx + dz * rz,
+    up: dx * ux + dy * uy + dz * uz,
+    depth: dx * fx + dy * fy + dz * fz,
+  };
 }

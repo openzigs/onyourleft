@@ -26,6 +26,7 @@ import {
   ghostFinished,
   placedRiders,
   sceneFrame,
+  type RemoteRiderInput,
   type SceneInput,
 } from './scene';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
@@ -1246,6 +1247,95 @@ describe('a lap race’s bots a lap apart on a loop — #2516', () => {
     // `lapRaceDrawing` holds it at nought since #2544; the scene must not
     // throw on one handed in all the same.
     expect(racersAt(0, -0.01)).toHaveLength(1);
+  });
+});
+
+describe('a room’s riders a lap apart on a loop — #2529', () => {
+  // #2516's loop: about 502 m, longer than the 460 m corridor, so a rider stands on it once at most.
+  const loop = circuitRoute(80);
+  const lap = loop.totalDistance as number;
+  const RIDER = 300;
+  const input = (remoteRiders: readonly RemoteRiderInput[]): SceneInput => ({
+    profile: loop,
+    origin: corridorOrigin(loop),
+    state: {
+      ...atStartLine(loop),
+      ride: { ...atStartLine(loop).ride, distance: metres(RIDER) },
+    },
+    remoteRiders,
+  });
+  // Read back as `sceneFrame` makes them: `placedRiders` on the frame's own corridor.
+  const remotesAt = (distanceMetres: number, label?: string): readonly RiderMarker[] => {
+    const scene = input([
+      {
+        riderId: 3,
+        distanceMetres,
+        speedMetresPerSecond: 9,
+        ...(label === undefined ? {} : { label }),
+      },
+    ]);
+    return placedRiders(scene, sceneFrame(scene).corridor)
+      .map((placed) => placed.marker)
+      .filter((marker) => marker.kind === 'remote');
+  };
+
+  it('draws a rider a lap down or a lap up where they stand on the road, their cranks from their own odometer', () => {
+    const [own] = remotesAt(RIDER + 30);
+    expect(own).toBeDefined();
+    for (const distanceMetres of [RIDER + 30 - lap, RIDER + 30 + lap, RIDER + 30 + 2 * lap]) {
+      const remotes = remotesAt(distanceMetres, 'Bea Ng');
+      const label = `a rider ${String(Math.round((distanceMetres - RIDER - 30) / lap))} laps apart`;
+      expect(remotes, label).toHaveLength(1);
+      expect(remotes[0]?.x, label).toBeCloseTo(own?.x ?? Number.NaN, 6);
+      expect(remotes[0]?.z, label).toBeCloseTo(own?.z ?? Number.NaN, 6);
+      expect(remotes[0]?.label, label).toBe('Bea Ng');
+      // Their cranks turn from their own odometer, so a lap's move never jumps them.
+      expect(remotes[0]?.crankAngle, label).toBeCloseTo(simulatedCrankAngle(distanceMetres), 9);
+    }
+  });
+
+  it('draws one a lap up just behind the rider and one a lap down just ahead as if on the rider’s lap', () => {
+    // Close enough to the rider that the drawn order (#2427) blends their lags
+    // with the standing rider's, and fast enough round the bend to lag by their
+    // own easing: ordered by the raw odometer, a lap off, each is drawn by its own lag.
+    const at = (behind: number, ahead: number): readonly RiderMarker[] =>
+      sceneFrame(
+        input([
+          { riderId: 3, distanceMetres: behind, speedMetresPerSecond: 22 },
+          { riderId: 4, distanceMetres: ahead, speedMetresPerSecond: 22 },
+        ]),
+      ).markers.filter((marker) => marker.kind === 'remote');
+    const own = at(RIDER - 5, RIDER + 5);
+    const lapped = at(RIDER - 5 + lap, RIDER + 5 - lap);
+    expect(own).toHaveLength(2);
+    expect(lapped).toHaveLength(2);
+    own.forEach((marker, index) => {
+      expect(lapped[index]?.x, String(index)).toBeCloseTo(marker.x, 6);
+      expect(lapped[index]?.z, String(index)).toBeCloseTo(marker.z, 6);
+    });
+  });
+
+  it('still draws no rider off the road the frame built, on whichever lap', () => {
+    const built = sceneFrame(input([])).corridor.centre;
+    const reach = (built.at(-1)?.along ?? Number.NaN) - RIDER;
+    // Beyond the road's far end and short of the stretch behind, a lap round.
+    const off = RIDER + (reach + lap - VIEW_BEHIND_METRES) / 2;
+    expect(off - RIDER).toBeGreaterThan(reach);
+    for (const distanceMetres of [off, off - lap, off + lap]) {
+      expect(remotesAt(distanceMetres), String(distanceMetres)).toEqual([]);
+    }
+  });
+
+  it('moves nobody by a lap on a road that is not a loop', () => {
+    const road = northRoute(2_000, () => 10);
+    const frame = sceneFrame({
+      profile: road,
+      origin: corridorOrigin(road),
+      state: { ...atStartLine(road), ride: { ...atStartLine(road).ride, distance: metres(RIDER) } },
+      // As far ahead as a lap of a loop as long as the road: no lap to be on.
+      remoteRiders: [{ riderId: 3, distanceMetres: RIDER + 30 + 2_000, speedMetresPerSecond: 9 }],
+    });
+    expect(frame.markers.map((marker) => marker.kind)).toEqual(['rider']);
   });
 });
 
