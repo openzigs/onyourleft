@@ -88,11 +88,11 @@
  */
 
 import {
-  BOT_MASS_KILOGRAMS,
   botFieldPaces,
   botFieldPersonalities,
   botFieldSkills,
   createItemRace,
+  modelFieldPaces,
   racePosition,
   raceCourse,
   seconds,
@@ -105,6 +105,7 @@ import {
 } from '@onyourleft/domain';
 import {
   lapRaceBot,
+  lapRaceBotMassKilograms,
   stepBotRace,
   type LapRaceBot,
   type LapRaceBotConditions,
@@ -349,8 +350,11 @@ export function startLapRaceRide(input: LapRaceRideStart): LapRaceRide | undefin
   // field misjudges the race by different amounts, and is never all of one.
   const skills = botFieldSkills(seed, ids.length);
   // #2455: each bot its own ability and pacing style, from the race's seed,
-  // so the field spreads into a race rather than riding as one.
-  const paces = botFieldPaces(seed, ids.length);
+  // so the field spreads into a race rather than riding as one. #2759, ADR
+  // 0076: in a race with AI bots, each its racing style's pace and a body to
+  // match, with a spread of strength whose middle is the tier.
+  const paces =
+    input.model === true ? modelFieldPaces(seed, ids.length) : botFieldPaces(seed, ids.length);
   const race = createItemRace(
     assistedRaceSetup(
       assist,
@@ -809,7 +813,8 @@ export function lapRaceFrame(
 
 /**
  * The race as the HUD reads it: the standings' names and each bot's W/kg at
- * its fixed mass (never watts, ADR 0060 D-12.2), and the rider's.
+ * its own mass (never watts, ADR 0060 D-12.2): 75 kg in a seeded race, its
+ * body's in a race with AI bots (#2759) — and the rider's.
  */
 export function lapRaceHud(
   ride: LapRaceRide,
@@ -819,7 +824,9 @@ export function lapRaceHud(
   for (const bot of ride.bots) {
     entrants[bot.id] = {
       name: ride.names[bot.id] ?? bot.id,
-      wattsPerKilogram: bot.power > 0 ? (bot.power as number) / BOT_MASS_KILOGRAMS : undefined,
+      // #2759: at its own mass, where it has a body (ADR 0076 D-2).
+      wattsPerKilogram:
+        bot.power > 0 ? (bot.power as number) / lapRaceBotMassKilograms(bot) : undefined,
     };
   }
   return {

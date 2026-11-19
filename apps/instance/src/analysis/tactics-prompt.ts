@@ -11,7 +11,14 @@
  * gives no condition a move must meet and no attack gate (D-5.3, D-5.4). One
  * sentence is #2710's own: the effort (D-2.5). #2710 measured four sentences
  * about the finish (ADR 0073 R-5) and kept none: gemma4:12b answered each
- * bot's current `move` back whatever they said.
+ * bot's current `move` back whatever they said. Three are #2759's (ADR 0076
+ * D-4 and D-6), still guidance: what the strength words mean, that an attack
+ * is a hard effort, and that riders attack where their strengths pay and let
+ * a stronger rival go. Two are #2759's latency fix (ADR 0076 D-11): a bot's
+ * legs are no longer sent, because its style decides them, so the words name
+ * its style where they named its legs; and a target is asked for only on the
+ * two moves that read one, which the schema now holds the model to
+ * (`modelTacticsAnswerSchema`), so the answer it writes is shorter.
  * {@link TACTICS_PROMPT_VERSION} is raised with every change to its words.
  * The answer is asked for **with a target again** (D-3.4: a `follow` or
  * `chase` may name any racer) and an optional effort.
@@ -38,10 +45,18 @@ import {
 } from '@onyourleft/domain';
 
 /** Which prompt this is, for a measurement to name: raised with every change to the words below. */
-export const TACTICS_PROMPT_VERSION = 'tactics-4';
+export const TACTICS_PROMPT_VERSION = 'tactics-6';
 
-/** The most a decision may write, tokens: seven moves with targets are about 150 (spike 0039: 73 typical). */
-export const TACTICS_MOST_TOKENS = 400;
+/**
+ * The most a decision may write, tokens: **256** (#2759, ADR 0076 D-11). The
+ * longest answer the schema admits for seven bots, each with a seat, the
+ * longest move, an effort and a target, is 465 characters; on the owner's PC
+ * the model wrote at most 0.38 tokens a character under the schema, so about
+ * 180 tokens, and the longest of 40 measured answers was 150. 256 is that with
+ * a margin, so no answer is cut off; a model that writes past it has written
+ * no decision, and the call ends there instead of at 400.
+ */
+export const TACTICS_MOST_TOKENS = 256;
 
 /** How long the model stays loaded after a call: spike 0039's 30 minutes, so a race never reloads it. */
 export const TACTICS_KEEP_ALIVE = '30m';
@@ -66,9 +81,13 @@ export const TACTICS_SYSTEM = [
   '- "attack": a hard surge to get clear or to break a group, short and sharp or held as long as the bot can. Climbers attack on climbs, and breakaway riders and opportunists attack to get clear before a flyer or to counter.',
   '- "flyer": a long, steady effort off the front: a breakaway, on any lap.',
   '- "recover": ease off to refill "wbal".',
-  '- "kick": the all-out sprint for the line. "toLineM" is how far the bot thinks the line is, and "launchM" is where its legs usually launch. Go too long and it fades before the line; wait too long and it runs out of road.',
+  '- "kick": the all-out sprint for the line. "toLineM" is how far the bot thinks the line is, and "launchM" is where it usually launches. Go too long and it fades before the line; wait too long and it runs out of road.',
+  'Only "follow" and "chase" read a "target": leave it out of every other move.',
   'Each move may also carry an "effort", how hard the bot rides it: "easy", "tempo", "threshold" or "all-out". Leave it out to ride the move as it is. An effort changes nothing on "sit-in" or "follow" behind a wheel, or on "recover". "all-out" spends "wbal" fastest; "easy" and "tempo" save it.',
-  'Styles ("style"): a "breakaway" rider attacks and goes up the road on a flyer once or twice a race and sits in between; a "sprinter" sits on wheels, saves everything, and kicks; a "climber" attacks where "gradeAheadPct" is 3 or more; a "rouleur" chases down a move that has been away a while, naming it in "target"; an "opportunist" follows other bots\' moves and counter-attacks when a move is caught. "legs" is what the bot\'s body is good at.',
+  'Attacks are hard, as they are in a real race: ride an "attack" or a "chase" at "threshold" or "all-out", a "flyer" at "threshold", and a "kick" "all-out". An attack at "easy" or "tempo" is no attack. "easy" and "tempo" are for riding on the front or saving energy.',
+  'Every bot has its own body. "flat", "climb", "sprint" and "punch" say how it compares with the other bots: "strong", "average" or "weak". "flat" is its power on the flat, "climb" its power for its weight on a climb, "sprint" its speed in a sprint, and "punch" how much it can spend above its steady pace before it blows.',
+  'Race to the strengths, as real riders do. Attack where the bot is strong and its rivals are not: a strong climber where "gradeAheadPct" is 3 or more, a strong rouleur or breakaway rider on the flat, a sprinter only at the finish. When a strong rival attacks where a bot is weak, that bot usually lets it go and rides its own pace rather than blow up chasing; a bot as strong covers the move with "follow", or chases it down. A bot that goes too hard for too long empties "wbal", is dropped and loses; a well-timed attack wins the race.',
+  'Styles ("style"): a "breakaway" rider attacks and goes up the road on a flyer once or twice a race and sits in between; a "sprinter" sits on wheels, saves everything, and kicks; a "climber" attacks on the climbs; a "rouleur" rides hard on the flat and chases down a move that has been away a while, naming it in "target"; an "opportunist" follows other bots\' moves and counter-attacks when a move is caught. A bot\'s body goes with its style, and its strengths say how.',
   '"rider" is the human racing the bots, and each bot\'s "riderGapM" is how far the rider is ahead of it (below 0, behind). Bots may mark the rider, sit on the rider\'s wheel, or attack when the rider is tired. "quietS" is how long since any bot attacked or went on a flyer.',
   'Answer with JSON only, in the schema given.',
 ].join('\n');
@@ -81,13 +100,15 @@ export const TACTICS_SYSTEM = [
  */
 export const WARM_UP_INPUT: ModelTacticsInput = {
   laps: 3,
-  field: 3,
   quietS: 0,
   rider: { rank: 2, wPerKg: null, ahead: 0, gapAheadM: 0.5, gapBehindM: 0.5, drafting: true },
   bots: [0, 1].map((seat) => ({
     bot: seat,
     style: seat === 0 ? 'rouleur' : 'sprinter',
-    legs: seat === 0 ? 'rouleur' : 'sprinter',
+    flat: seat === 0 ? 'strong' : 'average',
+    climb: 'average',
+    sprint: seat === 0 ? 'weak' : 'strong',
+    punch: seat === 0 ? 'weak' : 'strong',
     rank: seat === 0 ? 1 : 3,
     ahead: seat === 0 ? null : 'rider',
     aheadMove: null,

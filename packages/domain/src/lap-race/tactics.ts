@@ -445,7 +445,8 @@ export function botLaunchMetres(archetype: BotArchetype): number {
 
 /** Whether the rider, ahead and close, is in a move the bot can see. */
 function riderMoving(view: RaceView): boolean {
-  const cpPerKilogram = view.capacity.cpWatts / BOT_MASS_KILOGRAMS;
+  // #2759: at the bot's own mass, where it has a body (ADR 0076 D-2).
+  const cpPerKilogram = view.capacity.cpWatts / (view.capacity.massKilograms ?? BOT_MASS_KILOGRAMS);
   return (
     view.riderWattsPerKilogram !== null &&
     view.riderGapMetres > 0 &&
@@ -548,22 +549,17 @@ function wheelWatts(view: RaceView): number | null {
   );
 }
 
-/** What a state asks for, watts, before the capacity caps it: the wheel's where it holds one. */
-function wanted(
-  tactic: BotTactic,
-  view: RaceView,
-  wheel: number | null,
-  effort: BotEffort | undefined,
-): number {
+/**
+ * The moves a bot makes off its own pace to gain ground: **`attack`, `chase`,
+ * `flyer` and `kick`** (#2759, ADR 0076 D-5). An effort a model names for one
+ * of them is ridden at the harder of the effort's target and the move's own,
+ * so it can make the move harder and never softer.
+ */
+export const BOT_HARD_TACTICS: readonly BotTactic[] = ['attack', 'chase', 'flyer', 'kick'];
+
+/** What a state asks for on its own, watts, with no effort named: the wheel's where it holds one. */
+function ownTarget(tactic: BotTactic, view: RaceView, wheel: number | null): number {
   const cp = view.capacity.cpWatts;
-  // ADR 0073 D-2.5: an effort replaces the target only where the bot sets its
-  // own pace: `attack`, `chase`, `flyer`, `kick`, and a `sit-in` or `follow`
-  // with no wheel to hold (the front: decided, #2710, because the bot is then
-  // setting its own pace). On a wheel the wheel sets it, and `recover`'s
-  // target stands.
-  if (effort !== undefined && tactic !== 'recover' && wheel === null) {
-    return effort === 'all-out' ? view.capacity.peakWatts : cp * BOT_EFFORT_CP_SHARE[effort];
-  }
   switch (tactic) {
     case 'sit-in':
       return wheel ?? cp;
@@ -583,6 +579,29 @@ function wanted(
     case 'kick':
       return view.capacity.peakWatts;
   }
+}
+
+/** What a state asks for, watts, before the capacity caps it: the wheel's where it holds one. */
+function wanted(
+  tactic: BotTactic,
+  view: RaceView,
+  wheel: number | null,
+  effort: BotEffort | undefined,
+): number {
+  const own = ownTarget(tactic, view, wheel);
+  // ADR 0073 D-2.5: an effort replaces the target only where the bot sets its
+  // own pace: `attack`, `chase`, `flyer`, `kick`, and a `sit-in` or `follow`
+  // with no wheel to hold (the front: decided, #2710, because the bot is then
+  // setting its own pace). On a wheel the wheel sets it, and `recover`'s
+  // target stands.
+  if (effort === undefined || tactic === 'recover' || wheel !== null) return own;
+  const asked =
+    effort === 'all-out'
+      ? view.capacity.peakWatts
+      : view.capacity.cpWatts * BOT_EFFORT_CP_SHARE[effort];
+  // #2759, ADR 0076 D-5: an effort never softens a move made to gain ground.
+  // An attack at tempo is no attack: it is ridden at the harder of the two.
+  return BOT_HARD_TACTICS.includes(tactic) ? Math.max(asked, own) : asked;
 }
 
 /**
