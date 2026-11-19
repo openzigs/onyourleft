@@ -12,6 +12,12 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0078 is [ADR 0078](../adr/0078-a-floor-under-the-ai-pacers-intent.md)**, taken by
+  [#2777](https://github.com/openzigs/onyourleft/issues/2777) on 2026-11-17 for a floor under the
+  AI pacer's intent, **Proposed** for the owner's answer. It supersedes in part ADR 0072 D-2 and
+  D-5.1, which gained one dated `## Amendments` entry pointing to it. The next free number
+  was 0079 when it was written, and is **0081** now (the 0080 entry below). A reviewer who remembers
+  this file offering 0078 is reading the old file.
   ⚠️ **0076 is [ADR 0076](../adr/0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md)**, taken by
   [#2759](https://github.com/openzigs/onyourleft/issues/2759) on 2026-11-17 for AI bots racing with
   bodies that fit their style and a spread of strength, on the owner's ruling of that day on #2759.

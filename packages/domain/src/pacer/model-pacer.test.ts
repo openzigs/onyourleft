@@ -6,6 +6,8 @@ import { gradePercent } from '../quantities';
 import {
   directedPacingFactor,
   directedPowerWatts,
+  flooredDirection,
+  gapTrendOf,
   MODEL_PACER_ANSWER_MOST_CHARACTERS,
   MODEL_PACER_INPUT_MOST_CHARACTERS,
   MODEL_PACER_LAPSE_S,
@@ -13,14 +15,19 @@ import {
   MODEL_PACER_RECENT_LINES,
   MODEL_PACER_SAY_MOST_CHARACTERS,
   modelPacerAnswerSchema,
+  PACER_AHEAD_FLOOR_S,
   PACER_INTENTS,
   PACER_PLANS,
   pacerDecisionRecord,
   pacerDirectionAt,
+  pacerSayAgainstIntent,
+  pacerSaysEasing,
+  pacerSaysPushing,
   pacerSayProblem,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
+  riderPlaceOf,
   type ModelPacerInput,
   type PacerDecisionRecord,
 } from './model-pacer';
@@ -214,6 +221,10 @@ describe('the rider’s own sensors, in the state — #2760', () => {
     ['recentLines', ['Lat 51.5074 is home.']],
     ['recentLines', ['a', 'b', 'c', 'd']],
     ['recentLines', [7]],
+    ['riderPlace', 'in front'],
+    ['riderPlace', null],
+    ['gapTrend', 'growing'],
+    ['gapTrend', 0.4],
   ])('refuses a bad %s (%j), naming the field and never the value', (field, value) => {
     const read = readModelPacerInput({ ...SENSED, [field]: value });
     expect(read.ok).toBe(false);
@@ -272,6 +283,7 @@ describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
     ['bad-say', answer({ say: 7 })],
     ['bad-say', answer({ say: 'Hold 9000 watts.' })],
     ['bad-say', answer({ say: 'Your heart rate is 150.' })],
+    ['say-against-intent', answer({ intent: 'ease', say: 'I will push on this climb.' })],
     ['too-long', answer({ say: 'a'.repeat(MODEL_PACER_ANSWER_MOST_CHARACTERS) })],
   ])('reads %s as no decision', (reason, text) => {
     expect(readModelPacerAnswer(text)).toEqual({ ok: false, reason });
@@ -492,5 +504,124 @@ describe('the decision log, and the decision in force — ADR 0072 D-5 and D-7',
     ]) {
       expect(readPacerDecisionRecord(bad)).toBeUndefined();
     }
+  });
+});
+
+describe('where the rider is, in words — #2777', () => {
+  it.each([
+    [25, 10, 'ahead'],
+    [20.1, 10, 'ahead'],
+    [20, 10, 'level'],
+    [-3, 10, 'level'],
+    [-20, 10, 'level'],
+    [-20.1, 10, 'behind'],
+    [-250, 8, 'behind'],
+  ] as const)('reads a rider %s m ahead at %s m/s as %s', (gap, speed, place) => {
+    expect(riderPlaceOf(gap, speed)).toBe(place);
+  });
+
+  it('says no place at a standstill, or from a reading that is not a number', () => {
+    expect(riderPlaceOf(40, 0)).toBeUndefined();
+    expect(riderPlaceOf(Number.NaN, 10)).toBeUndefined();
+    expect(riderPlaceOf(40, Number.POSITIVE_INFINITY)).toBeUndefined();
+  });
+
+  it.each([
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: 2 }, 'rider-gaining'],
+    [{ atS: 0, riderGapM: -10 }, { atS: 5, riderGapM: -7 }, 'rider-gaining'],
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: -2 }, 'rider-losing'],
+    [{ atS: 0, riderGapM: 30 }, { atS: 5, riderGapM: 25 }, 'rider-losing'],
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: 1 }, 'steady'],
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: -1 }, 'steady'],
+  ] as const)('reads the gap from %j to %j as %s', (earlier, later, trend) => {
+    expect(gapTrendOf(earlier, later)).toBe(trend);
+  });
+
+  it('says no trend when no time passed', () => {
+    expect(gapTrendOf({ atS: 5, riderGapM: 0 }, { atS: 5, riderGapM: 9 })).toBeUndefined();
+    expect(gapTrendOf({ atS: 6, riderGapM: 0 }, { atS: 5, riderGapM: 9 })).toBeUndefined();
+  });
+
+  it('reads a state that carries both, as the device sends it', () => {
+    const placed: ModelPacerInput = { ...STATE, riderPlace: 'ahead', gapTrend: 'rider-gaining' };
+    expect(readModelPacerInput(placed)).toEqual({ ok: true, value: placed });
+  });
+});
+
+describe('the floor under the model’s intent — ADR 0078 (Proposed), #2777', () => {
+  it('rides an ease as hold once the rider has been ahead long enough, keeping the plan', () => {
+    expect(flooredDirection({ plan: 'climber', intent: 'ease' }, PACER_AHEAD_FLOOR_S)).toEqual({
+      plan: 'climber',
+      intent: 'hold',
+    });
+    expect(flooredDirection({ plan: 'even', intent: 'ease' }, 60)).toEqual({
+      plan: 'even',
+      intent: 'hold',
+    });
+  });
+
+  it('rides every other direction as the model chose it, and never lifts', () => {
+    const ease = { plan: 'rolling', intent: 'ease' } as const;
+    expect(flooredDirection(ease, PACER_AHEAD_FLOOR_S - 0.1)).toBe(ease);
+    expect(flooredDirection(ease, undefined)).toBe(ease);
+    for (const intent of ['hold', 'lift'] as const) {
+      const direction = { plan: 'rolling', intent } as const;
+      expect(flooredDirection(direction, 600)).toBe(direction);
+    }
+  });
+});
+
+describe('the line says what the pacer does — #2777', () => {
+  it.each([
+    ['I will push on this climb, stay with me.', 'ease'],
+    ['I will push on this climb, stay with me.', 'hold'],
+    ['I’m going to lift the pace now.', 'hold'],
+    ['Here I come, stay sharp.', 'hold'],
+    ['I’ll chase you down on the climb.', 'ease'],
+    ['Coming past you on this rise!', 'hold'],
+    ['Watch me attack this rise.', 'ease'],
+    ['Let’s pick up the pace together.', 'hold'],
+    ['We will push to the top.', 'ease'],
+    ['I am going to catch you on the descent.', 'ease'],
+    ['I will pu​sh now.', 'ease'],
+    ['I am easing off to let you bridge the gap.', 'lift'],
+    ['I am slowing slightly so you can tuck back in behind me.', 'lift'],
+    ['Waiting for you at the top.', 'lift'],
+    ['Sitting up so you can come back to me.', 'lift'],
+    ['I’ll back off a touch for you.', 'lift'],
+  ] as const)('refuses “%s” under %s', (say, intent) => {
+    // The screen passes every one: the refusal is the intent rule's alone.
+    expect(pacerSayProblem(say)).toBeUndefined();
+    expect(pacerSayAgainstIntent(say, intent)).toBe(true);
+    expect(readModelPacerAnswer(answer({ intent, say }))).toEqual({
+      ok: false,
+      reason: 'say-against-intent',
+    });
+  });
+
+  it.each([
+    ['I will push on this climb, stay with me.', 'lift'],
+    ['I am easing off to let you bridge the gap.', 'ease'],
+    // The issue refuses an easing line only beside `lift`.
+    ['I am easing off to let you bridge the gap.', 'hold'],
+    ['Push through this rise, you are flying.', 'ease'],
+    ['I see you pushing hard, lovely work.', 'ease'],
+    ['I won’t push, take your time.', 'hold'],
+    ['I am not going to push yet.', 'ease'],
+    ['Ease a little and spin a lighter gear.', 'lift'],
+    ['You are easing off, stay with me.', 'lift'],
+    ['Lift your cadence to 90 rpm.', 'ease'],
+    ['Nice and steady, stay on my wheel.', 'ease'],
+    ['If you can, come round me on the next rise.', 'hold'],
+  ] as const)('shows “%s” under %s', (say, intent) => {
+    expect(pacerSayAgainstIntent(say, intent)).toBe(false);
+    expect(readModelPacerAnswer(answer({ intent, say }))).toMatchObject({ ok: true, say });
+  });
+
+  it('reads easing and pushing apart, as the floor needs', () => {
+    expect(pacerSaysEasing('I am easing off to let you bridge the gap.')).toBe(true);
+    expect(pacerSaysPushing('I am easing off to let you bridge the gap.')).toBe(false);
+    expect(pacerSaysPushing('I will push on this climb.')).toBe(true);
+    expect(pacerSaysEasing('I will push on this climb.')).toBe(false);
   });
 });

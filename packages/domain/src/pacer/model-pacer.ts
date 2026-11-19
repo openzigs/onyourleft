@@ -32,8 +32,13 @@
  * does not name makes the whole answer invalid, so a model that writes
  * `"watts": 900` has said nothing; so does a plan or intent outside its list,
  * text that is not JSON, an answer longer than
- * {@link MODEL_PACER_ANSWER_MOST_CHARACTERS}, or a line that fails
- * {@link pacerSayProblem}.
+ * {@link MODEL_PACER_ANSWER_MOST_CHARACTERS}, a line that fails
+ * {@link pacerSayProblem}, or since #2777 a line that says the opposite of
+ * the intent beside it ({@link pacerSayAgainstIntent}).
+ *
+ * Since #2777 the device rides one floor under the model's intent:
+ * {@link flooredDirection}, an `ease` ridden as `hold` once the rider has been
+ * ahead for {@link PACER_AHEAD_FLOOR_S} (ADR 0078, Proposed).
  *
  * ## How an answer is ridden
  *
@@ -212,6 +217,103 @@ export interface ModelPacerInput {
    * on the device for the ride and never stored (ADR 0072 D-4.4).
    */
   readonly recentLines?: readonly string[];
+  // --- #2777: where the rider is, in words a model cannot read backwards. ---
+  /**
+   * Where the rider is against the pacer, by the time gap at the rider's own
+   * speed ({@link riderPlaceOf}): `ahead` or `behind` by more than
+   * {@link PACER_LEVEL_S}, else `level`. Absent at a standstill.
+   */
+  readonly riderPlace?: RiderPlace;
+  /**
+   * How the gap moved since the last ask ({@link gapTrendOf}), for the rider:
+   * `rider-gaining` (pulling away, or coming back), `steady`, or
+   * `rider-losing` (dropping back, or being caught). Absent on the first ask.
+   */
+  readonly gapTrend?: PacerGapTrend;
+}
+
+/** Where the rider is against the pacer. A closed list (#2777). */
+export const RIDER_PLACES = ['ahead', 'level', 'behind'] as const;
+export type RiderPlace = (typeof RIDER_PLACES)[number];
+
+/** How the gap moved, for the rider. A closed list (#2777). */
+export const PACER_GAP_TRENDS = ['rider-gaining', 'steady', 'rider-losing'] as const;
+export type PacerGapTrend = (typeof PACER_GAP_TRENDS)[number];
+
+/**
+ * The time gap inside which the rider is `level` with the pacer: **2 s** at
+ * the rider's own speed, either way — a rider in the draft, or about to be.
+ * A feel parameter, the author's choice (#2777).
+ */
+export const PACER_LEVEL_S = 2;
+
+/**
+ * The rate the gap must move at to count as gained or lost: **0.2 m/s**,
+ * about 2 % of a 36 km/h ride. Slower than that is `steady`. The author's
+ * choice (#2777).
+ */
+export const PACER_GAP_TREND_METRES_PER_SECOND = 0.2;
+
+/**
+ * Where a rider `riderGapM` metres ahead of the pacer (below 0, behind) is,
+ * at `riderSpeed` m/s: `undefined` at a standstill, where a time gap is a
+ * division by zero (`pacer/gap.ts`).
+ */
+export function riderPlaceOf(riderGapM: number, riderSpeed: number): RiderPlace | undefined {
+  if (!(riderSpeed > 0) || !Number.isFinite(riderGapM) || !Number.isFinite(riderSpeed)) {
+    return undefined;
+  }
+  const gapSeconds = riderGapM / riderSpeed;
+  if (gapSeconds > PACER_LEVEL_S) return 'ahead';
+  if (gapSeconds < -PACER_LEVEL_S) return 'behind';
+  return 'level';
+}
+
+/** One reading of the gap: the seconds ridden, and the metres the rider is ahead. */
+export interface PacerGapReading {
+  readonly atS: number;
+  readonly riderGapM: number;
+}
+
+/**
+ * How the gap moved from `earlier` to `later`, for the rider, or `undefined`
+ * when no time passed between them.
+ */
+export function gapTrendOf(
+  earlier: PacerGapReading,
+  later: PacerGapReading,
+): PacerGapTrend | undefined {
+  const elapsed = later.atS - earlier.atS;
+  if (!(elapsed > 0)) return undefined;
+  const rate = (later.riderGapM - earlier.riderGapM) / elapsed;
+  if (!Number.isFinite(rate)) return undefined;
+  if (rate > PACER_GAP_TREND_METRES_PER_SECOND) return 'rider-gaining';
+  if (rate < -PACER_GAP_TREND_METRES_PER_SECOND) return 'rider-losing';
+  return 'steady';
+}
+
+/**
+ * How long the rider must have been `ahead` before an `ease` is ridden as
+ * `hold`: **10 s** of riding, three asks in a row (ADR 0078, Proposed).
+ */
+export const PACER_AHEAD_FLOOR_S = 10;
+
+/**
+ * The floor under the model's intent (ADR 0078 D-1, Proposed; #2777): with
+ * the rider `ahead` ({@link riderPlaceOf}, more than {@link PACER_LEVEL_S})
+ * for at least {@link PACER_AHEAD_FLOOR_S}, an `ease` is ridden as `hold`. A
+ * pacer that eases away from a rider who is already ahead never takes over.
+ * Every other direction is ridden as the model chose it, and this never
+ * lifts: the floor stops the wrong way, it does not chase. `aheadForS` is how
+ * long the rider had been ahead when the ask was built, or `undefined` when
+ * they were not.
+ */
+export function flooredDirection(
+  direction: PacerDirection,
+  aheadForS: number | undefined,
+): PacerDirection {
+  if (direction.intent !== 'ease' || aheadForS === undefined) return direction;
+  return aheadForS >= PACER_AHEAD_FLOOR_S ? { plan: direction.plan, intent: 'hold' } : direction;
 }
 
 /** How power moved over the last minute. A closed list. */
@@ -266,6 +368,8 @@ const OPTIONAL_INPUT_KEYS = [
   'heartRateZone',
   'heartRateTrend',
   'recentLines',
+  'riderPlace',
+  'gapTrend',
 ] as const;
 
 const KNOWN_INPUT_KEYS: readonly string[] = [...INPUT_KEYS, ...OPTIONAL_INPUT_KEYS];
@@ -372,6 +476,8 @@ export function readModelPacerInput(value: unknown): ModelPacerInputRead {
     ],
     ['heartRateTrend', (v) => oneOf(PACER_HEART_RATE_TRENDS, v), 'must be one of the three trends'],
     ['recentLines', recentLinesOk, 'must be up to three lines the pacer may say'],
+    ['riderPlace', (v) => oneOf(RIDER_PLACES, v), 'must be one of the three places'],
+    ['gapTrend', (v) => oneOf(PACER_GAP_TRENDS, v), 'must be one of the three trends'],
   ];
   const sensorFailed = sensorChecks.find(([key, ok]) => key in value && !ok(value[key]));
   if (sensorFailed !== undefined) return refuse(`input.${sensorFailed[0]}`, sensorFailed[2]);
@@ -512,9 +618,72 @@ export function pacerSayProblem(say: string): PacerSayProblem | undefined {
   return undefined;
 }
 
+// --- #2777: the line says what the pacer does --------------------------------
+
+/**
+ * The pacer speaking of itself — `I`, `I'm`, `I will`, `let me`, `let's`,
+ * `we` — then up to three words before the verb, none a negation and none
+ * `you`: so "I'm going to push" is the pacer's promise, and "I see you
+ * pushing" and "I won't push" are not.
+ */
+const SELF = String.raw`\b(?:i|i'm|i am|i'll|i will|i'd|i would|let me|let's|let us|we|we're|we are|we'll|we will|watch me)(?:\s+(?!(?:not|never|cannot|no|you|your)\b)[a-z]+){0,3}?\s+`;
+/** What the pacer says when it will push, lift, chase or come past. */
+const PUSH_VERB = String.raw`(?:push\w*|lift\w*|chas\w*|attack\w*|surg\w*|accelerat\w*|speed\w*\s+up|pick\w*\s+(?:it\s+up|up|the\s+pace)|ramp\w*\s+(?:it\s+)?up|go(?:ing)?\s+(?:harder|faster)|rid\w*\s+(?:harder|faster)|up\s+the\s+pace|rais\w*\s+the\s+pace|tak\w*\s+over|overtak\w*|pass\w*\s+you|come\s+(?:past|through|round|around)|coming\s+(?:past|through|round|around)|go(?:ing)?\s+past|catch\w*\s+(?:you|up)|reel\w*\s+you|hunt\w*\s+you|clos\w*\s+(?:the\s+gap|you\s+down|in))`;
+/** What the pacer says when it is easing, slowing, waiting or letting the rider come back. */
+const EASE_VERB = String.raw`(?:eas\w*|slow\w*|back\w*\s+off|sit\w*\s+up|drop\w*\s+back|wait\w*|hold\w*\s+back|soft[-\s]?pedal\w*|tak\w*\s+it\s+easy|go(?:ing)?\s+eas(?:y|ier)|let\w*\s+you\s+(?:catch|come|bridge|get\s+back|close|rejoin|tuck))`;
+/** Letting the rider back, said with no subject: only the pacer can mean it. */
+const LET_BACK = String.raw`(?:catch\s+(?:me|up)|come\s+back|bridge|get\s+back|close|rejoin|tuck)`;
+const PUSHES = new RegExp(
+  String.raw`${SELF}${PUSH_VERB}\b|\bhere\s+i\s+come\b|\bcoming\s+(?:past|through|for\s+you|after\s+you)\b|\b(?:chas|reel|hunt)\w*\s+you\b`,
+  'u',
+);
+const EASES = new RegExp(
+  String.raw`${SELF}${EASE_VERB}\b|\b(?:so|for)\s+you\s+(?:can|to)\s+${LET_BACK}\b|\blet\w*\s+you\s+${LET_BACK}\b|\bwaiting\s+for\s+you\b`,
+  'u',
+);
+
+/** The line as the move rules read it: invisible characters out, NFKC, one case, one apostrophe, one space. */
+function forMoves(say: string): string {
+  return say
+    .replace(INVISIBLE, '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u02bc]/gu, "'")
+    .replace(/\s+/gu, ' ');
+}
+
+/** Whether the line says the pacer is easing, slowing, waiting or letting the rider back (#2777). */
+export function pacerSaysEasing(say: string): boolean {
+  return EASES.test(forMoves(say));
+}
+
+/** Whether the line says the pacer will push, lift, chase or come past (#2777). */
+export function pacerSaysPushing(say: string): boolean {
+  return PUSHES.test(forMoves(say));
+}
+
+/**
+ * Whether `say` contradicts `intent` (#2777, the owner's tablet ride of
+ * 2026-11-17: "It says it will push yet I am ahead and never see it taking
+ * over"): a line that says the pacer will push, lift, chase or come past
+ * under `ease` or `hold`, or one that says it is easing under `lift`. Such an
+ * answer is no decision, as a line the screen stops is (ADR 0072 D-4.2), so
+ * the decision in force stays. Read on the instance and again on the device.
+ */
+export function pacerSayAgainstIntent(say: string, intent: PacerIntent): boolean {
+  return intent === 'lift' ? pacerSaysEasing(say) : pacerSaysPushing(say);
+}
+
 /** Why an answer was read as no decision at all. A closed list. */
 export type ModelPacerInvalid =
-  'too-long' | 'not-json' | 'not-an-object' | 'unknown-key' | 'bad-plan' | 'bad-intent' | 'bad-say';
+  | 'too-long'
+  | 'not-json'
+  | 'not-an-object'
+  | 'unknown-key'
+  | 'bad-plan'
+  | 'bad-intent'
+  | 'bad-say'
+  | 'say-against-intent';
 
 /** An answer, read: a direction and a line to show (`''` for none), or why it is none. */
 export type ModelPacerAnswer =
@@ -559,6 +728,9 @@ export function readModelPacerAnswer(text: string): ModelPacerAnswer {
   if (!oneOf(PACER_INTENTS, intent)) return { ok: false, reason: 'bad-intent' };
   if (typeof say !== 'string' || pacerSayProblem(say) !== undefined) {
     return { ok: false, reason: 'bad-say' };
+  }
+  if (pacerSayAgainstIntent(say, intent as PacerIntent)) {
+    return { ok: false, reason: 'say-against-intent' };
   }
   return {
     ok: true,
