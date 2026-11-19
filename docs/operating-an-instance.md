@@ -142,6 +142,10 @@ reach a model for the post-ride write-up's agent
 ([ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-8, D-9;
 #1096). The agent runs from the job engine, #1095 ("Analysis jobs", below).
 
+**On a fresh install, the setup page can do this for you**: its optional AI step finds Ollama, downloads
+the model you name and saves it ([The first-run setup page](#the-first-run-setup-page), step 7). The
+lines below are the same thing by hand.
+
 **Running Ollama beside the instance, in Compose.** The home deployment's `ollama` service serves
 the history index and the analysis model both. Set `COMPOSE_PROFILES=analysis` (or
 `history,analysis`) in `.env`, start it once with `docker compose up -d ollama`, pull the model you
@@ -1156,11 +1160,25 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
   6. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
      the instance. The app does not sign in by itself after the claim, so until it has the step says
      what to do on the tablet.
-  7. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
-     working or not, who may join, and the invites made. The page is then `not_found` for good, after
-     a restart too; only `owner-claim reset` reopens it. The *Setup is finished* page carries its
-     stylesheet inline, allowed by its hash in that response's CSP, because `/setup/setup.css` has
-     gone with the rest.
+  7. **AI write-ups** — optional ([#2792](https://github.com/openzigs/onyourleft/issues/2792)). The
+     step looks for Ollama at the address in `OYL_INSTANCE_ANALYSIS_MODEL_URL` if one is set, then at
+     `http://ollama:11434` (the Compose `ollama` service), `http://host.docker.internal:11434` and
+     `http://127.0.0.1:11434` (an Ollama installed on the host), each held to the rule for a local
+     model address. With none it says so in one sentence and is skipped with *Next step*. With one it
+     lists the models Ollama has, each with how well it fits the graphics card — read from what
+     Ollama has loaded, never guessed from a file's size — and downloads the model whose name the
+     owner types (`POST /api/pull`), showing how far it has got when *Check now* is pressed. **It
+     names and recommends no model** (ADR 0046's amendment of 2026-11-14, point 8). *Use …* saves
+     that model and its address as the local model, as the app's AI backend section does
+     ([Analysis model](#analysis-model)), so the next write-up runs on it with no restart, and loads
+     the model once so the page can say how it fits. A download is logged `analysis_model_pull` and
+     the choice `analysis_settings_set`, naming no model. Nothing Ollama says about a download is
+     shown or logged, only its byte counts: its words can carry a path under the host user's home.
+  8. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
+     working or not, who may join, the invites made, and whether AI write-ups are on. The page is
+     then `not_found` for good, after a restart too; only `owner-claim reset` reopens it. The *Setup
+     is finished* page carries its stylesheet inline, allowed by its hash in that response's CSP,
+     because `/setup/setup.css` has gone with the rest.
 - **Leave whenever you like.** The step is kept in the database, so coming back — after a restart, with
   the new code — resumes it. A setup session ends after 15 minutes without use and 2 hours after the
   code was typed.

@@ -18,11 +18,12 @@
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
 
-import { durationText } from './words';
+import type { OperateGpuFit } from './analysis';
+import { bytesText, durationText } from './words';
 
 /** The wizard's steps, in order: `apps/instance`'s `SETUP_STEPS`, which its tests hold this to. */
 export type OperateSetupStep =
-  'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'finish';
+  'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'ai' | 'finish';
 
 /** Each step's name, as its page's heading. */
 export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
@@ -32,6 +33,7 @@ export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
   backups: 'Backups',
   registration: 'Who may join',
   invite: 'Invite a rider',
+  ai: 'AI write-ups',
   finish: 'Finish',
 };
 
@@ -43,6 +45,7 @@ export const SETUP_STEP_SHORT_NAMES: Readonly<Record<OperateSetupStep, string>> 
   backups: 'Backups',
   registration: 'Who may join',
   invite: 'Invite',
+  ai: 'AI',
   finish: 'Finish',
 };
 
@@ -285,6 +288,88 @@ export const INVITE_CHECK_AGAIN_LINK = 'Check again';
 export const INVITE_NOT_INVITE_MODE_TEXT =
   'You chose to let riders join without an invite. The code still helps: it carries this server’s address and card, so the rider’s app trusts it at once.';
 
+// --- AI write-ups (#2792, ADR 0046)
+//
+// ⚠️ No model is named or recommended here (ADR 0046's amendment of 2026-11-14,
+// point 8; ADR 0031 D-4): the step lists what the owner's own Ollama reports,
+// and downloads the model whose name the owner types.
+
+export const AI_STEP_LEAD =
+  'This step is optional, and you can skip it. An AI write-up is a short written summary of a ride. It is made on this computer, by a model that a free program called Ollama runs, so nothing about a ride leaves your server for it. Everything else works the same without it.';
+/** Before the model's name: write-ups are on, read as the next write-up will read it. */
+export const AI_ON_TEXT = 'AI write-ups are on. They run on this model:';
+/** No Ollama answered: one sentence, and the step is skipped with Next step. */
+export const AI_NO_SERVER_TEXT = 'Ollama was not found on this computer, so AI write-ups stay off.';
+export const AI_SKIP_TEXT =
+  'Press Next step to carry on without them. If you have just started Ollama, press Look again.';
+/** No Ollama answered, and write-ups already run on a model set elsewhere. */
+export const AI_NO_LIST_TEXT =
+  'Ollama was not found on this computer, so this page cannot list or download models.';
+export const AI_LOOK_AGAIN_BUTTON = 'Look again';
+export const AI_SERVER_TEXT = 'Ollama is running on this computer.';
+/** The command-line details: how to run Ollama beside the server, and where the step looks. */
+export const AI_EXPERT_LINES: readonly string[] = [
+  'To run Ollama beside the server, set COMPOSE_PROFILES=analysis in .env, then run docker compose up -d ollama.',
+  'This step looks at the address in OYL_INSTANCE_ANALYSIS_MODEL_URL if one is set, then at http://ollama:11434, http://host.docker.internal:11434 and http://127.0.0.1:11434.',
+  'Ollama has no sign-in of its own: never open its port to the network.',
+];
+
+export const AI_MODELS_HEADING = 'Models Ollama has on this computer';
+export const AI_NO_MODELS_TEXT = 'Ollama has no models yet. Download one below.';
+/** The button that chooses a listed model: "Use name:tag". */
+export function aiUseButton(model: string): string {
+  return `Use ${model}`;
+}
+export const AI_IN_USE_TEXT = 'Write-ups run on this model.';
+export const AI_NO_TOOLS_TEXT =
+  'Write-ups cannot run on this model: it cannot call tools, which they need.';
+export const AI_USE_HINT =
+  'Using a model loads it once, to see how well it fits your graphics card. That can take a minute: wait for the page.';
+export const AI_USE_REFUSED_TEXT =
+  'That model could not be used: Ollama no longer lists it, or the server did not take the setting. Nothing was changed.';
+
+/**
+ * How well a model fits the graphics card, in plain words: of a model Ollama
+ * has loaded, as it reports it. It is never guessed from the file's size.
+ */
+export function aiFitText(gpu: OperateGpuFit, percent: number | null): string {
+  switch (gpu) {
+    case 'all':
+      return 'It fits in the graphics card’s memory, so it runs at full speed.';
+    case 'part':
+      return `Only ${String(percent ?? 0)} % of it fits in the graphics card’s memory, so it runs slowly. A smaller model would be faster.`;
+    case 'none':
+      return 'None of it is in a graphics card’s memory, so it runs on the processor, slowly.';
+    case 'not-loaded':
+      return 'How well it fits the graphics card is not known until it has been loaded.';
+    case 'not-reported':
+    case 'not-known':
+      return 'Ollama did not say how well it fits the graphics card.';
+  }
+}
+
+export const AI_PULL_HEADING = 'Download a model';
+export const AI_PULL_LABEL = 'Model to download';
+export const AI_PULL_HINT =
+  'Type a model’s name as Ollama’s library lists it: a name, or name:tag. Choose one that can call tools, and that is smaller than your graphics card’s memory. A model is several gigabytes, so the download can take a while.';
+export const AI_PULL_BUTTON = 'Download this model';
+export const AI_BAD_NAME_TEXT =
+  'That is not a model’s name. Type it as Ollama’s library lists it: a name, or name:tag.';
+/**
+ * A download that is running, from the bytes Ollama has counted so far. It
+ * says no name and nothing Ollama said: only how far it has got.
+ */
+export function aiPullRunningText(completedBytes: number, totalBytes: number): string {
+  const checkNow = 'Press Check now to see how far it has got.';
+  if (totalBytes <= 0) return `Downloading the model: it has just started. ${checkNow}`;
+  const percent = Math.min(99, Math.floor((completedBytes / totalBytes) * 100));
+  return `Downloading the model: ${String(percent)} % so far, ${bytesText(completedBytes)} of ${bytesText(totalBytes)}. ${checkNow}`;
+}
+/** One sentence for a download that did not finish, whatever Ollama said of it. */
+export const AI_PULL_FAILED_TEXT =
+  'The download did not finish. Check that the name is spelled as Ollama lists it, that this computer is online and that its disk has room, then try again.';
+export const AI_PULL_DONE_TEXT = 'The download finished. The model is in the list on this page.';
+
 // --- finish (ADR 0080 D-7)
 
 export const FINISH_LEAD = 'Here is where your server stands:';
@@ -305,6 +390,8 @@ export interface SetupSummary {
   readonly mode: 'open' | 'approval' | 'invite' | 'closed';
   /** Invites this setup made. */
   readonly invites: number;
+  /** Whether a write-up would run on this computer's model now (#2792). */
+  readonly ai: 'on' | 'off';
 }
 
 /** The finish step's list: one plain sentence per thing an owner wants to know. */
@@ -328,5 +415,8 @@ export function setupSummaryLines(summary: SetupSummary): readonly string[] {
     }[summary.backups],
     `Who may join: ${SETUP_REGISTRATION_MODE_TEXT[summary.mode].short}.`,
     summary.invites === 0 ? 'Invites made: none.' : `Invites made: ${String(summary.invites)}.`,
+    summary.ai === 'on'
+      ? 'AI write-ups: on, made on this computer.'
+      : 'AI write-ups: off. Everything else works without them.',
   ];
 }

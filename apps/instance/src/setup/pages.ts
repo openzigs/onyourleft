@@ -31,6 +31,30 @@
  */
 
 import {
+  AI_BAD_NAME_TEXT,
+  AI_EXPERT_LINES,
+  AI_IN_USE_TEXT,
+  AI_LOOK_AGAIN_BUTTON,
+  AI_MODELS_HEADING,
+  AI_NO_LIST_TEXT,
+  AI_NO_MODELS_TEXT,
+  AI_NO_SERVER_TEXT,
+  AI_NO_TOOLS_TEXT,
+  AI_ON_TEXT,
+  AI_PULL_BUTTON,
+  AI_PULL_DONE_TEXT,
+  AI_PULL_FAILED_TEXT,
+  AI_PULL_HEADING,
+  AI_PULL_HINT,
+  AI_PULL_LABEL,
+  AI_SERVER_TEXT,
+  AI_SKIP_TEXT,
+  AI_STEP_LEAD,
+  AI_USE_HINT,
+  AI_USE_REFUSED_TEXT,
+  aiFitText,
+  aiPullRunningText,
+  aiUseButton,
   BACK_UP_NOW_STEP_BUTTON,
   BACKUPS_EXPERT_LINES,
   BACKUPS_FOLDERS_TEXT,
@@ -43,6 +67,7 @@ import {
   BACKUPS_STEP_LEAD,
   BACKUPS_TOO_SOON_TEXT,
   BACKUPS_WAITING_TEXT,
+  bytesText,
   CLAIM_CODE_LEAD,
   CLAIM_EXPIRED_TEXT,
   CLAIM_LEAD,
@@ -104,6 +129,7 @@ import {
   SETUP_WRONG_ADDRESS_TEXT,
   setupStepNumberText,
   setupSummaryLines,
+  type OperateLocalModel,
   type OperateRegistrationMode,
   type SetupSummary,
 } from '@onyourleft/operate-text';
@@ -545,6 +571,97 @@ ${notInvite(view.inviteMode)}`;
         { lead: INVITE_CODE_LEAD, until: codeWorksOnceText(view.secondsLeft) },
       )}${notInvite(view.inviteMode)}`;
   }
+}
+
+// --- AI write-ups (#2792)
+
+/** A download as the step draws it: how far it has got, or how the last one ended. */
+export type AiPullView =
+  | { readonly kind: 'idle' | 'done' | 'failed' }
+  | { readonly kind: 'running'; readonly completedBytes: number; readonly totalBytes: number };
+
+export interface AiStepView {
+  /** The model a write-up would run on now, read as a job reads it, or `null`: off. */
+  readonly model: string | null;
+  /** The Ollama found and the models it lists (`analysis/local-server.ts`), or `null`: none answered. */
+  readonly server: { readonly models: readonly OperateLocalModel[] } | null;
+  readonly pull: AiPullView;
+  /** What the last form here came to, when it changed nothing. */
+  readonly notice: 'bad-name' | 'refused' | null;
+}
+
+/** One listed model: its name, its size, how it fits, and the button that chooses it. */
+function aiModelItem(model: OperateLocalModel, inUse: boolean, csrf: string): string {
+  const size = model.sizeBytes === null ? '' : ` ${escapeHtml(bytesText(model.sizeBytes))}.`;
+  const action = inUse
+    ? `<p class="notice">${escapeHtml(AI_IN_USE_TEXT)}</p>`
+    : model.tools === 'not-listed'
+      ? `<p class="hint">${escapeHtml(AI_NO_TOOLS_TEXT)}</p>`
+      : buttonForm('/setup/ai/use', csrf, aiUseButton(model.name), { model: model.name });
+  return `<li><p><code>${escapeHtml(model.name)}</code>:${size} ${escapeHtml(aiFitText(model.gpu, model.gpuPercent))}</p>
+${action}</li>`;
+}
+
+/**
+ * The optional AI step: whether write-ups are on, the Ollama found and what
+ * it lists, and a download by the name the owner types. ⚠️ No model is named
+ * by this page, and nothing Ollama said of a download is drawn: only its
+ * byte counts (`analysis/ollama-setup.ts`).
+ */
+export function aiBody(view: AiStepView, csrf: string): string {
+  const problem =
+    view.notice === 'bad-name'
+      ? AI_BAD_NAME_TEXT
+      : view.notice === 'refused'
+        ? AI_USE_REFUSED_TEXT
+        : null;
+  const head = `<p>${escapeHtml(AI_STEP_LEAD)}</p>
+${problem === null ? '' : `<p class="problem" role="alert">${escapeHtml(problem)}</p>\n`}${
+    view.model === null
+      ? ''
+      : `<p class="notice" role="status">${escapeHtml(AI_ON_TEXT)} <code>${escapeHtml(view.model)}</code></p>\n`
+  }`;
+  const expert = expertDetails(
+    `<ul>\n${AI_EXPERT_LINES.map((line) => `<li>${escapeHtml(line)}</li>`).join('\n')}\n</ul>`,
+  );
+  if (view.server === null) {
+    const none =
+      view.model === null
+        ? `<p class="notice">${escapeHtml(AI_NO_SERVER_TEXT)}</p>\n<p>${escapeHtml(AI_SKIP_TEXT)}</p>`
+        : `<p>${escapeHtml(AI_NO_LIST_TEXT)}</p>`;
+    return `${head}${none}
+${checkAgain('/setup/ai', AI_LOOK_AGAIN_BUTTON)}
+${expert}`;
+  }
+  const models =
+    view.server.models.length === 0
+      ? `<p>${escapeHtml(AI_NO_MODELS_TEXT)}</p>`
+      : `<ul class="models">
+${view.server.models.map((model) => aiModelItem(model, model.name === view.model, csrf)).join('\n')}
+</ul>
+<p class="hint">${escapeHtml(AI_USE_HINT)}</p>`;
+  // While a download runs, the wait is the whole state: no second one can be asked for.
+  const download =
+    view.pull.kind === 'running'
+      ? `<p class="notice">${escapeHtml(aiPullRunningText(view.pull.completedBytes, view.pull.totalBytes))}</p>
+${checkAgain('/setup/ai', SETUP_CHECK_NOW_BUTTON)}`
+      : `${
+          view.pull.kind === 'failed'
+            ? `<p class="problem" role="alert">${escapeHtml(AI_PULL_FAILED_TEXT)}</p>\n`
+            : view.pull.kind === 'done'
+              ? `<p class="notice" role="status">${escapeHtml(AI_PULL_DONE_TEXT)}</p>\n`
+              : ''
+        }<form method="post" action="/setup/ai/pull" aria-label="${escapeHtml(AI_PULL_BUTTON)}">${csrfField(csrf)}
+<label for="model">${escapeHtml(AI_PULL_LABEL)}</label>
+<input type="text" id="model" name="model" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="model-hint">
+<p class="hint" id="model-hint">${escapeHtml(AI_PULL_HINT)}</p>
+<button type="submit">${escapeHtml(AI_PULL_BUTTON)}</button>
+</form>`;
+  return `${head}<p>${escapeHtml(AI_SERVER_TEXT)}</p>
+<h2>${escapeHtml(AI_MODELS_HEADING)}</h2>
+${models}
+<h2>${escapeHtml(AI_PULL_HEADING)}</h2>
+${card(download)}${expert}`;
 }
 
 // --- finish

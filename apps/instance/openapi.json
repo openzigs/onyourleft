@@ -9601,7 +9601,8 @@
                               "secret_generated",
                               "registration_mode_set",
                               "invite_minted",
-                              "setup_done"
+                              "setup_done",
+                              "analysis_model_pull"
                             ]
                           },
                           "detail": {

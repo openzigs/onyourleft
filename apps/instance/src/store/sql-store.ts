@@ -1016,6 +1016,8 @@ export const OPERATOR_ACTIONS = [
   'registration_mode_set',
   'invite_minted',
   'setup_done',
+  // #2792: the setup's AI step asked the local model server to download a model.
+  'analysis_model_pull',
 ] as const;
 
 export type OperatorAction = (typeof OPERATOR_ACTIONS)[number];
@@ -1161,6 +1163,9 @@ export const OPERATOR_DETAILS: {
   },
   invite_minted: { words: [], counts: [] },
   setup_done: { words: [], counts: [] },
+  // #2792: why a download was not asked for — one is running, no Ollama
+  // answered, or the name is not a model's. Never the model's name.
+  analysis_model_pull: { words: ['busy', 'no_server', 'bad_model'], counts: [] },
 };
 
 /** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
@@ -1314,7 +1319,10 @@ export interface OwnerClaimRedemption {
   readonly at: number;
 }
 
-/** The first-run setup wizard's steps, in order (#2784, ADR 0080 D-7; migration 0048's CHECK). */
+/**
+ * The first-run setup wizard's steps, in order (#2784, ADR 0080 D-7; migration
+ * 0048's CHECK, which 0049 widened for `ai`, #2792).
+ */
 export const SETUP_STEPS = [
   'claim',
   'passkey',
@@ -1322,6 +1330,7 @@ export const SETUP_STEPS = [
   'backups',
   'registration',
   'invite',
+  'ai',
   'finish',
 ] as const;
 
