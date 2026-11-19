@@ -448,3 +448,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   source is committed for the game world"* stops being true for those files too. D-1 items 1 and 3,
   every row of D-1's table for the world, and D-3 are unchanged. This entry is a pointer; the
   supersession is ADR 0065's.
+- **2026-11-19** — **D-3 and D-1's Mapterhorn row are superseded in part, for open-world rides only,
+  by [ADR 0087](0087-the-open-world-rides-ground-and-grade-come-from-real-heights.md)**
+  ([#2885](https://github.com/openzigs/onyourleft/issues/2885)), **Proposed**, on the owner's ruling
+  Q7 of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880)
+  (*"Yes, real heights (Recommended)"*). An open-world ride has no route in advance, so its ground
+  and the trainer's grade come from the project's own Mapterhorn extract
+  ([#2013](https://github.com/openzigs/onyourleft/issues/2013)), read while the ride records. What
+  still holds, unchanged: D-3 for every route ride (the hillside is invented from the route's own
+  heights), every other row of D-1's table, D-4's checklist, and D-6's reading. This entry is a
+  pointer and changes nothing here.
