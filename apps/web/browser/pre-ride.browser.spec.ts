@@ -1277,7 +1277,7 @@ async function openAiPacer(page: Page, viewport: ChooserViewport): Promise<void>
   await openChooser(page, viewport, 'chooser', 'promise', '&aipacer=offered');
   await page.getByRole('switch', { name: 'Ride against a pacer' }).check();
   await page
-    .getByRole('switch', { name: 'Let the AI on your instance steer the pacer and cheer you on' })
+    .getByRole('switch', { name: 'Let the AI on your server coach you through the pacer' })
     .check();
   await expect(page.getByRole('button', { name: 'Allow the AI pacer' })).toBeVisible();
 }
@@ -1369,11 +1369,11 @@ test.describe('#2723 — the AI pacer’s controls on the chooser', () => {
         `#2723 ${viewport.name}: ${every.map((each) => `${each.text.slice(0, 24)} ${each.height.toFixed(1)} px (stripped ${each.stripped.toFixed(1)})`).join('; ')}`,
       );
       expect(before.map((each) => each.text)).toEqual([
-        'Let the AI on your instance steer the pacer and cheer you on',
+        'Let the AI on your server coach you through the pacer',
         'Allow the AI pacer',
       ]);
       expect(after.map((each) => each.text)).toEqual([
-        'Let the AI on your instance steer the pacer and cheer you on',
+        'Let the AI on your server coach you through the pacer',
         'Withdraw consent',
       ]);
       for (const each of every) {
@@ -1383,9 +1383,9 @@ test.describe('#2723 — the AI pacer’s controls on the chooser', () => {
         expect(each.declared, each.text).toBe(`${String(AI_PACER_TARGET_PIXELS)}px`);
       }
       // The control: stripped of the floor, each button is under 48 px again
-      // (it shipped at 45). The switch's sentence wraps to two lines in the
-      // loadout at both sizes, about 49.6 px without a floor, so only the
-      // declaration above holds it there.
+      // (it shipped at 45). The switch is left out: since ADR 0083 R-7's
+      // shorter wording it is one line in the loadout at both sizes, about
+      // 24.8 px without a floor, and the declaration above is what holds it.
       for (const each of every.filter((one) => !one.text.startsWith('Let the AI'))) {
         expect(each.stripped, each.text).toBeLessThan(AI_PACER_TARGET_PIXELS);
       }

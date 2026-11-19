@@ -1006,6 +1006,14 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await send(world, 'POST', '/v1/analysis/tactics/end', token);
     return decided;
   },
+  // #2835: the pacer's warm-up, which claims no slot.
+  warmPacer: async (world) => {
+    const { token } = await signedIn(world);
+    expect((await consentToTactics(world, token)).status).toBe(200);
+    const warmed = await send(world, 'POST', '/v1/analysis/pacer/warm', token);
+    await world.tactics.idle();
+    return warmed;
+  },
   endBotTacticsRace: async (world) => {
     const { token } = await signedIn(world);
     expect((await consentToTactics(world, token)).status).toBe(200);

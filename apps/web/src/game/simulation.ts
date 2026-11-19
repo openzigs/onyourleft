@@ -80,6 +80,7 @@ import {
   metres,
   metresPerSecond,
   MODEL_PACER_LAPSE_S,
+  startRamped,
   seconds,
   watts,
   type BotPacerPlan,
@@ -585,7 +586,9 @@ export class GameSimulation {
    * first fixed step whose seconds ridden ({@link GameState.ridden}) are at
    * or past `fromSeconds`, until a newer decision replaces it or
    * {@link MODEL_PACER_LAPSE_S} passes — `@onyourleft/domain`
-   * §`pacerDirectionAt`'s rule, so the ride's stored log replays it.
+   * §`pacerDirectionAt`'s rule, so the ride's stored log replays it. Inside
+   * the first minute it is ridden up the start ramp (#2835, §`startRamped`),
+   * by the same function the replay reads.
    *
    * ⚠️ **Moves the pacer and nothing else.** The rider's physics, the grade
    * and every trainer write are read off the rider's own odometer; the pacer
@@ -948,7 +951,8 @@ export class GameSimulation {
       this.#direction = undefined;
       return undefined;
     }
-    return held.direction;
+    // #2835: a gentle start, as a function of the seconds ridden and nothing else.
+    return startRamped(held.direction, riddenSeconds);
   }
 
   /**

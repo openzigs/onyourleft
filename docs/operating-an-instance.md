@@ -239,11 +239,13 @@ instance, and **while it runs, post-ride write-ups wait** (queued, not failed; o
 is not stopped; re-plans do not wait). They start when the race ends, after 30 s with no tactics
 request, or 2 hours after the race began, whichever is first.
 
-**An AI pacer (#2712, ADR 0072).** The same consent lets a rider's pacer be steered by your
-**local** model during a solo ride: every few seconds it picks how the pacer rides and writes one
-short line of encouragement, which the instance screens before it answers. It takes the same slot
-as an AI-bots race, so while such a ride runs, post-ride write-ups wait, and an AI-bots race on the
-instance waits for it. Nothing of it is kept on the instance.
+**An AI pacer (#2712, ADR 0072; #2835, ADR 0083).** The same consent lets your **local** model
+write for a rider's pacer during a solo ride: every few seconds it is told what the pacer is doing
+and writes one short line of encouragement, which the instance screens before it answers. It no
+longer picks how the pacer rides: the rider's app does. It takes the same slot as an AI-bots race,
+so while such a ride runs, post-ride write-ups wait, and an AI-bots race on the instance waits for
+it. When a rider turns the AI pacer on in the ride menu, one short call loads the model ahead of
+the ride; it takes no slot and holds up nothing. Nothing of it is kept on the instance.
 
 **Back to `.env`.** Clear the settings from the app (`DELETE /v1/operate/analysis`), or on the host:
 

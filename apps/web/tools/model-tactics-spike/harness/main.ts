@@ -128,17 +128,17 @@ async function pacer(
   const score = scorePacerRide(run);
   const shortfalls = pacerShortfalls(score);
   // Each ask in closed words, so a ride can be read without the lines: where
-  // the rider was, what that called for, and what was ridden.
+  // the rider was, what that called for, what the device rode and why, and
+  // what became of the answer and its line.
   for (const step of run.steps) {
     const { ground } = step;
     const called = intentsCalledFor(ground);
-    const ridden = step.ridden ?? '-';
     print(
-      `pacer ${String(step.askedAtS).padStart(5)} s: ${ground.riderPlace ?? 'no-place'} ${ground.gapTrend ?? 'no-trend'}${ground.riderInDraft ? ' in-draft' : ''} ${ground.terrain}: called for ${called.join('|')}, ${step.outcome} ${ridden}${step.ridden !== undefined && !called.includes(step.ridden) ? ' (NOT CALLED FOR)' : ''}, line ${step.line}`,
+      `pacer ${String(step.askedAtS).padStart(5)} s: ${ground.riderPlace ?? 'no-place'} ${ground.gapTrend ?? 'no-trend'}${ground.riderInDraft ? ' in-draft' : ''} ${ground.terrain}: called for ${called.join('|')}, rode ${step.ridden} (${step.reason})${called.includes(step.ridden) ? '' : ' (NOT CALLED FOR)'}, ${step.outcome}, line ${step.line}`,
     );
   }
   print(
-    `pacer: ${String(score.intentsCalledFor)} of ${String(score.applied)} applied decisions rode what the gap called for, ${String(score.easedWithRiderAhead)} eased with the rider ahead; ${String(score.distinctLines)} distinct of ${String(score.linesShown)} lines shown, ${String(score.repeatedLines)} repeated, ${String(score.linesVoided)} voided, ${String(score.linesHidden)} hidden; ${String(score.applied)} of ${String(score.answers)} answers applied, ${String(score.lateAnswers)} late, median ${String(score.answerMs.median)} ms, ${String(score.promptTokens.median)} tokens in, ${String(score.outputTokens.median)} out: ${shortfallLine(shortfalls)}`,
+    `pacer: ${String(score.intentsCalledFor)} of ${String(score.answers)} decisions rode what the gap called for, ${String(score.easedWithRiderAhead)} eased with the rider ahead; ${String(score.distinctLines)} distinct of ${String(score.linesWritten)} lines written, ${String(score.repeatedLines)} repeated, ${String(score.linesShown)} shown, ${String(score.linesHiddenRepeat)} hidden as repeats, ${String(score.linesHiddenAgainst)} hidden as against the intent, ${String(score.linesVoided)} void answers; ${String(score.applied)} of ${String(score.answers)} answers applied, ${String(score.lateAnswers)} late, median ${String(score.answerMs.median)} ms, ${String(score.promptTokens.median)} tokens in, ${String(score.outputTokens.median)} out: ${shortfallLine(shortfalls)}`,
   );
   return {
     kind: 'pacer',

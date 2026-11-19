@@ -6,16 +6,25 @@
  *
  * ## What is scored
  *
+ * Since #2835 (ADR 0083) **the device decides the intent** (`@onyourleft/domain`
+ * §`pacerRuleDecision`) on every ask, and the model writes only the line. So
+ * the intent is scored as the device rode it, and the model is scored on its
+ * line.
+ *
  * - **The intent ridden against what the gap called for**
- *   ({@link intentsCalledFor}): of the decisions applied, the share whose
- *   intent, as the device rode it, is one the rider's place called for.
+ *   ({@link intentsCalledFor}): of every decision, the share whose intent,
+ *   as the device rode it, is one the rider's place called for. Every ask is
+ *   a decision ridden, whatever became of its line.
  * - **Easing with the rider ahead**: decisions ridden as `ease` with the
  *   rider ahead of the pacer, counted on their own because no gap calls for
- *   it and ADR 0078's floor exists to stop it.
- * - **The lines**: how many were shown, how many of those were distinct, how
- *   many repeated an earlier one word for word, and how many the screen
- *   voided (`@onyourleft/domain` §`pacerSayProblem`, or a line against its
- *   own intent) or the device hid for contradicting the intent it rode.
+ *   it.
+ * - **The lines**: how many were shown; of every line the model wrote in time
+ *   that went with the intent (shown, or hidden as a repeat), how many were
+ *   distinct and how many repeated an earlier one word for word; how many the
+ *   device hid for saying one of its last lines again (`repeat`) or the
+ *   opposite of what the pacer was doing (`against`); and how many answers
+ *   were void: a key the answer may not carry (a plan, an intent, a power)
+ *   or a line the screen stops (§`pacerSayProblem`).
  * - **The answers**: how many, how many applied, late, invalid or failed, the
  *   time each took and the tokens read and written.
  *
@@ -39,8 +48,9 @@
  *
  * ## The pass mark, and why ({@link PACER_PASS_MARK})
  *
- * - **At least 8 in 10 applied decisions ride an intent the gap called
- *   for.** The owner's ride of 2026-11-18 (#2835): "saying it is slowing down
+ * - **At least 8 in 10 decisions ride an intent the gap called for.**
+ *   Since #2835 the device's rule rides them, so this holds the rule to the
+ *   table, as it held the model before. The owner's ride of 2026-11-18 (#2835): "saying it is slowing down
  *   when behind me", and 2.5 minutes of `ease`. On the scripted ride of
  *   #2762, the model chose `ease` on 46 of 48 asks whatever the gap was. 8 in
  *   10 leaves room for the asks where the gap is turning and two readings
@@ -48,13 +58,14 @@
  * - **Never eased with the rider ahead.** "It says it will push yet I am
  *   ahead and never see it taking over" (#2777). ADR 0078's floor stops it
  *   once the rider has been ahead for ten seconds, and the script holds them
- *   ahead for a minute, so a count above nought is either the floor failing
- *   or the model easing in those first ten seconds, which #2835 asks to end.
- * - **At least 8 in 10 lines shown are distinct.** The owner's "did not vary
- *   much" (#2760): `pacer-1` said 18 distinct lines in 48, `pacer-2` 46.
- * - **At most 1 answer in 10 has its line voided or hidden.** A voided line
- *   costs the whole answer today, so a prompt that draws the screen often is
- *   a pacer that stops deciding.
+ *   ahead for a minute; since #2835 the device's rule has no `ease` for a
+ *   rider ahead at all, so a count above nought is the rule failing.
+ * - **At least 8 in 10 lines written are distinct.** The owner's "did not
+ *   vary much" (#2760): `pacer-1` said 18 distinct lines in 48, `pacer-2` 46.
+ *   A repeat the device hides still counts against it: the model said it.
+ * - **At most 1 answer in 10 is void or has its line hidden as against the
+ *   intent.** Since #2835 either costs a line, not the pacing, but a prompt
+ *   that draws them often is a pacer that stops talking.
  * - **At least 9 answers in 10 are applied, and none is late.** Every
  *   measured run on the owner's PC had 48 of 48 valid and none past the 5 s
  *   limit at 1.2 to 1.8 s a call.
@@ -65,6 +76,7 @@ import {
   type PacerDecisionOutcome,
   type PacerGapTrend,
   type PacerIntent,
+  type PacerReason,
   type PacerTerrain,
   type RiderPlace,
 } from '@onyourleft/domain';
@@ -95,28 +107,32 @@ export function intentsCalledFor(ground: PacerGround): readonly PacerIntent[] {
   return ANY;
 }
 
-/** What became of an answer's line. */
+/** What became of an answer's line: the director's own word for it, or `voided`. */
 export type PacerLine =
   /** Shown to the rider. */
   | 'shown'
-  /** The model said nothing, or the answer was not applied for another reason. */
+  /** The model said nothing, or the answer was late, failed or not read for another reason. */
   | 'none'
-  /** The screen stopped it, and the answer with it. */
+  /** The answer was void: a key it may not carry, or a line the screen stops. */
   | 'voided'
-  /** The device rode another intent than the model's, and the line contradicted it. */
-  | 'hidden';
+  /** Hidden by the device: one of its last lines said again. */
+  | 'repeat'
+  /** Hidden by the device: the opposite of what the pacer was doing. */
+  | 'against';
 
 /** One ask of a ridden script. */
 export interface PacerStep {
   readonly askedAtS: number;
   readonly ground: PacerGround;
-  /** What the director logged for it. */
+  /** What the director logged for the ask's answer. */
   readonly outcome: PacerDecisionOutcome;
-  /** The intent ridden, for an applied decision. */
-  readonly ridden?: PacerIntent | undefined;
+  /** The intent the device decided and rode from the ask, whatever the answer was. */
+  readonly ridden: PacerIntent;
+  /** Why the device decided it. */
+  readonly reason: PacerReason;
   readonly line: PacerLine;
-  /** The line shown, for a `shown` one. Held for the scores, and never written to a results file. */
-  readonly shown?: string | undefined;
+  /** The line the model wrote, for a `shown` or `repeat` one. Held for the scores, and never written to a results file. */
+  readonly said?: string | undefined;
 }
 
 /** A scripted ride, ridden: what the scores are read off. */
@@ -133,15 +149,22 @@ export interface PacerScore {
   readonly lateAnswers: number;
   readonly invalidAnswers: number;
   readonly failedAnswers: number;
-  /** Applied decisions whose ridden intent the gap called for. */
+  /** Decisions whose ridden intent the gap called for: every answer is one. */
   readonly intentsCalledFor: number;
-  /** Applied decisions ridden as `ease` with the rider ahead. */
+  /** Decisions ridden as `ease` with the rider ahead. */
   readonly easedWithRiderAhead: number;
   readonly linesShown: number;
+  /** Lines the model wrote in time and with the intent: shown, or hidden as a repeat. */
+  readonly linesWritten: number;
+  /** Of {@link linesWritten}, how many are distinct, and how many say an earlier one again. */
   readonly distinctLines: number;
   readonly repeatedLines: number;
+  /** Lines the device hid as one of its last lines again. */
+  readonly linesHiddenRepeat: number;
+  /** Lines the device hid as against what the pacer was doing. */
+  readonly linesHiddenAgainst: number;
+  /** Answers that were void. */
   readonly linesVoided: number;
-  readonly linesHidden: number;
   readonly answerMs: Spread;
   readonly promptTokens: Spread;
   readonly outputTokens: Spread;
@@ -161,11 +184,14 @@ const present = (values: readonly (number | undefined)[]): number[] =>
 export function scorePacerRide(run: PacerRun): PacerScore {
   const { steps, calls } = run;
   const applied = steps.filter((step) => step.outcome === 'applied');
-  const lines = steps.flatMap((step) =>
-    step.line === 'shown' && step.shown !== undefined ? [comparable(step.shown)] : [],
+  const written = steps.flatMap((step) =>
+    (step.line === 'shown' || step.line === 'repeat') && step.said !== undefined
+      ? [comparable(step.said)]
+      : [],
   );
   const count = (outcome: PacerDecisionOutcome): number =>
     steps.filter((step) => step.outcome === outcome).length;
+  const lines = (line: PacerLine): number => steps.filter((step) => step.line === line).length;
   const answered = calls.filter((call) => call.text !== undefined);
   return {
     answers: steps.length,
@@ -173,17 +199,18 @@ export function scorePacerRide(run: PacerRun): PacerScore {
     lateAnswers: count('late'),
     invalidAnswers: count('invalid'),
     failedAnswers: count('failed') + count('refused'),
-    intentsCalledFor: applied.filter(
-      (step) => step.ridden !== undefined && intentsCalledFor(step.ground).includes(step.ridden),
-    ).length,
-    easedWithRiderAhead: applied.filter(
+    intentsCalledFor: steps.filter((step) => intentsCalledFor(step.ground).includes(step.ridden))
+      .length,
+    easedWithRiderAhead: steps.filter(
       (step) => step.ridden === 'ease' && step.ground.riderPlace === 'ahead',
     ).length,
-    linesShown: lines.length,
-    distinctLines: new Set(lines).size,
-    repeatedLines: lines.length - new Set(lines).size,
-    linesVoided: steps.filter((step) => step.line === 'voided').length,
-    linesHidden: steps.filter((step) => step.line === 'hidden').length,
+    linesShown: lines('shown'),
+    linesWritten: written.length,
+    distinctLines: new Set(written).size,
+    repeatedLines: written.length - new Set(written).size,
+    linesHiddenRepeat: lines('repeat'),
+    linesHiddenAgainst: lines('against'),
+    linesVoided: lines('voided'),
     answerMs: spread(answered.map((call) => call.latencyMs)),
     promptTokens: spread(present(answered.map((call) => call.promptTokens))),
     outputTokens: spread(present(answered.map((call) => call.outputTokens))),
@@ -192,13 +219,13 @@ export function scorePacerRide(run: PacerRun): PacerScore {
 
 /** The pass mark for the scripted ride. The reasons are in the file comment. */
 export const PACER_PASS_MARK = {
-  /** At least this share of applied decisions ride an intent the gap called for. */
+  /** At least this share of decisions ride an intent the gap called for. */
   leastIntentShare: 0.8,
   /** At most this many decisions ridden as `ease` with the rider ahead. */
   mostEasedWithRiderAhead: 0,
-  /** At least this share of the lines shown are distinct. */
+  /** At least this share of the lines written are distinct. */
   leastDistinctLineShare: 0.8,
-  /** At most this share of answers have their line voided or hidden. */
+  /** At most this share of answers are void or have their line hidden as against the intent. */
   mostVoidedLineShare: 0.1,
   /** At least this share of answers are applied. */
   leastAppliedShare: 0.9,
@@ -207,8 +234,8 @@ export const PACER_PASS_MARK = {
 } as const;
 
 /**
- * Every mark `score` falls under, none for a pass. A ride with no answers, no
- * decision applied or no line shown fails the share it has nothing for: a
+ * Every mark `score` falls under, none for a pass. A ride with no answers or
+ * no line written fails the share it has nothing for: a
  * harness that reached no model has scored nothing.
  */
 export function pacerShortfalls(score: PacerScore): readonly Shortfall[] {
@@ -222,18 +249,18 @@ export function pacerShortfalls(score: PacerScore): readonly Shortfall[] {
   };
   under(
     'intentShare',
-    share(score.intentsCalledFor, score.applied),
+    share(score.intentsCalledFor, score.answers),
     PACER_PASS_MARK.leastIntentShare,
   );
   over('easedWithRiderAhead', score.easedWithRiderAhead, PACER_PASS_MARK.mostEasedWithRiderAhead);
   under(
     'distinctLineShare',
-    share(score.distinctLines, score.linesShown),
+    share(score.distinctLines, score.linesWritten),
     PACER_PASS_MARK.leastDistinctLineShare,
   );
   over(
     'voidedLineShare',
-    share(score.linesVoided + score.linesHidden, score.answers),
+    share(score.linesVoided + score.linesHiddenAgainst, score.answers),
     PACER_PASS_MARK.mostVoidedLineShare,
   );
   under('appliedShare', share(score.applied, score.answers), PACER_PASS_MARK.leastAppliedShare);
