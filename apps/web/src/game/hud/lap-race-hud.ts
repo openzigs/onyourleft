@@ -205,6 +205,14 @@ export function riderEntry(race: ItemRaceState, riderId: string): LapRacer {
   return entry;
 }
 
+/**
+ * Whether the rider has crossed the line — #2600: from then on the HUD's
+ * controls stay drawn (`HudCore.tsx` §`controlsHeld`).
+ */
+export function riderFinished(hud: LapRaceHud): boolean {
+  return riderEntry(hud.race, hud.riderId).racer.finishedAtMs !== null;
+}
+
 /** Whether the rider holds an item now — the HUD's *Use item* is unavailable without one (#1968). */
 export function riderHolds(hud: LapRaceHud): boolean {
   return riderEntry(hud.race, hud.riderId).held !== null;

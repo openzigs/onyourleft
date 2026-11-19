@@ -25,6 +25,7 @@ import {
   DARK_COLOUR_TOKENS,
   FONT_FAMILY_TOKENS,
   FONT_SIZE_TOKENS,
+  HUD_CONTROLS_FADE_MS,
   MOTION_DURATION_MS,
   MOTION_TOKENS,
   SPACE_TOKENS,
@@ -395,8 +396,17 @@ describe('the route cross-fade (#945)', () => {
  * of 300 ms would otherwise walk round a check that reads only the properties
  * that use it), converted to milliseconds. `var(…)` references are removed
  * first: a token is checked where it is declared, not where it is read.
+ *
+ * `exempt` names a token held to its own number rather than the ceiling —
+ * the ride controls' fade (#2600, ADR 0075), and nothing else: a duration
+ * over the ceiling anywhere else is still found, and so is either token
+ * declared at any number but its own.
  */
-function durationsOver(css: string, ceilingMs: number): string[] {
+function durationsOver(
+  css: string,
+  ceilingMs: number,
+  exempt: Readonly<Record<string, number>> = {},
+): string[] {
   const declarations = css.replaceAll(/\/\*[\s\S]*?\*\//g, '');
   const found: string[] = [];
   for (const [, property, value] of declarations.matchAll(
@@ -405,13 +415,20 @@ function durationsOver(css: string, ceilingMs: number): string[] {
     const name = (property ?? '').toLowerCase();
     if (!/^(?:transition|animation)(?:-duration)?$|^--oyl-motion-/.test(name)) continue;
     const bare = (value ?? '').replaceAll(/var\([^)]*\)/g, '');
+    const own = exempt[name];
     for (const [literal, amount, unit] of bare.matchAll(/(\d*\.?\d+)(ms|s)\b/gi)) {
       const ms = Number(amount) * ((unit ?? '').toLowerCase() === 's' ? 1000 : 1);
-      if (ms > ceilingMs) found.push(`${name}: ${literal}`);
+      if (own === undefined ? ms > ceilingMs : ms !== own) found.push(`${name}: ${literal}`);
     }
   }
   return found;
 }
+
+/** The ride controls' fade, which ADR 0075 holds to its own numbers (#2600). */
+const RIDE_CONTROLS_FADE = {
+  '--oyl-motion-hud-fade-out': HUD_CONTROLS_FADE_MS.out,
+  '--oyl-motion-hud-fade-in': HUD_CONTROLS_FADE_MS.in,
+} as const;
 
 describe('no motion runs longer than 200 ms (#936)', () => {
   const ceiling = MOTION_DURATION_MS.medium;
@@ -423,8 +440,46 @@ describe('no motion runs longer than 200 ms (#936)', () => {
     }
   });
 
-  it('finds no duration literal above it anywhere in theme.css', () => {
-    expect(durationsOver(themeCss, ceiling)).toEqual([]);
+  it('finds no duration literal above it anywhere in theme.css but the ride controls’ fade', () => {
+    expect(durationsOver(themeCss, ceiling, RIDE_CONTROLS_FADE)).toEqual([]);
+  });
+
+  it('finds the ride controls’ fade without its exemption — the exemption is what admits it', () => {
+    // #2600, ADR 0075: the two tokens are over the ceiling, and only the
+    // exemption by name lets them stand.
+    expect(durationsOver(themeCss, ceiling)).toEqual([
+      `--oyl-motion-hud-fade-out: ${String(HUD_CONTROLS_FADE_MS.out)}ms`,
+      `--oyl-motion-hud-fade-in: ${String(HUD_CONTROLS_FADE_MS.in)}ms`,
+    ]);
+  });
+
+  it('holds an exempt token to its own number, and exempts no other', () => {
+    expect(
+      durationsOver(':root {\n  --oyl-motion-hud-fade-out: 2s;\n}', ceiling, RIDE_CONTROLS_FADE),
+    ).toEqual(['--oyl-motion-hud-fade-out: 2s']);
+    expect(
+      durationsOver(':root {\n  --oyl-motion-slow: 800ms;\n}', ceiling, RIDE_CONTROLS_FADE),
+    ).toEqual(['--oyl-motion-slow: 800ms']);
+  });
+
+  it('reads the ride controls’ fade only on the ride HUD’s hiding controls (#2600)', () => {
+    // ADR 0075 lifts the cap for the ride controls' fade and nothing else: a
+    // menu that borrowed either token would walk round the ceiling.
+    const rules = [
+      ...themeCss
+        .replaceAll(/\/\*[\s\S]*?\*\//g, '')
+        .matchAll(/([^{}]+)\{([^{}]*--oyl-motion-hud-fade-[^{}]*)\}/g),
+    ];
+    const readers = rules.filter(([, , body]) => /var\(--oyl-motion-hud-fade-/.test(body ?? ''));
+    expect(readers.length).toBeGreaterThan(0);
+    for (const [, selector] of readers) {
+      const each = (selector ?? '').split(',').map((part) => part.trim());
+      for (const part of each) {
+        expect(part, 'a rule outside the ride HUD’s hiding controls').toMatch(
+          /^\.oyl-hud\[data-oyl-controls(?:='hidden'|-returned)\] /,
+        );
+      }
+    }
   });
 
   it('finds one when there is one — the check can fail', () => {

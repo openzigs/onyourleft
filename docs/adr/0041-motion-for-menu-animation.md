@@ -170,3 +170,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   takes effect the next time a list is opened; the browser gate's reduced-motion case says so.
   Any new Motion surface must therefore carry its own `MotionConfig reducedMotion="user"`, because
   the app root cannot hold one without putting Motion in the entry chunk.
+- **2026-11-17** — D-5's *"nothing runs longer than 200 ms"* and D-3's *"It may not run … on the
+  game route once a ride has started … on or around any control in … `RIDE_TIME_CONTROLS`"* are no
+  longer true for **one** thing: the ride controls that hide until touched
+  ([#2600](https://github.com/openzigs/onyourleft/issues/2600)) fade out over 800 ms and back in over
+  250 ms, on the owner's report of 2026-11-17 from the tablet (*"Not a fade just a pop"*).
+  [ADR 0075](0075-the-ride-controls-fade-slower-than-the-menus-motion-cap.md) supersedes D-3 and D-5
+  in part for that fade and records why. Everything else here, the menus' two durations and the
+  reduced-motion collapse included, is unchanged, and `theme.a11y.test.ts` still holds every other
+  duration to 200 ms.

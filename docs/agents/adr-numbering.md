@@ -71,6 +71,17 @@ It has the same authority as the root file. Where the text below says "this file
   **0077** by [#2762](https://github.com/openzigs/onyourleft/pull/2762) (#2760); **0057 and 0058
   stay claimed** by #1748 and #1752. The next free number was then 0078. A reviewer who remembers
   this file offering 0071 or 0075 is reading the old file.
+  ⚠️ **0075 is [ADR 0075](../adr/0075-the-ride-controls-fade-slower-than-the-menus-motion-cap.md)**,
+  taken by [#2600](https://github.com/openzigs/onyourleft/issues/2600) on 2026-11-17 for the ride
+  controls' fade (800 ms out, 250 ms in), on the owner's report of that day from the tablet. It is
+  **Proposed** until the owner approves #2600's screenshots and tablet check. It supersedes in part
+  ADR 0041 D-3 and D-5 and ADR 0063 D-7, as an ADR rather than an amendment, because ADR 0013 D-3
+  sends a reversed decision to a new ADR; both gained one dated `## Amendments` entry pointing
+  there. ⚠️ **It was written when 0074 was still unmerged** and, after #2724 merged ADR 0074 to `main`,
+  is renumbered on top of it: **0074 is [ADR 0074](../adr/0074-a-sprint-instinct-behind-the-models-moves.md)**
+  ([#2710](https://github.com/openzigs/onyourleft/issues/2710)), described below. **0057 and 0058
+  stay claimed** by #1748 and #1752, 0070 by #2684 and 0072 by #2712. The next free number was
+  then 0076. A reviewer who remembers this file offering 0074 or 0075 is reading the old file.
   ⚠️ **0074 is [ADR 0074](../adr/0074-a-sprint-instinct-behind-the-models-moves.md)**, taken by
   [#2710](https://github.com/openzigs/onyourleft/issues/2710) in its pull request
   [#2724](https://github.com/openzigs/onyourleft/pull/2724) on 2026-11-16 for a sprint instinct
