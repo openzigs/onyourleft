@@ -20,9 +20,9 @@
  * - **No reasoning before the answer**, on a model on the rider's own box
  *   (`thinking: 'off'`). Measured over #2840's scored set on the owner's box
  *   (Gemma 4 12B, Ollama 0.40.16, 2026-11-19): left to reason, the model
- *   called no tool on any ride and spent its whole allowance reasoning, with
- *   no answer, on 4 of 12 rides under version 1's words and 8 of 12 under
- *   these. The tactics and the pacer turn it off for the same reason.
+ *   called no tool on any ride, and used its whole allowance reasoning
+ *   before it finished an answer on 4 of 12 rides under version 1's words
+ *   and 8 of 12 under these. The tactics and the pacer turn it off for the same reason.
  *
  * Everything else is version 1's: the rules, what the figures mean, the fence
  * a tool result sits in, the first message and what a rewrite is told — the

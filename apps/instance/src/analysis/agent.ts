@@ -73,7 +73,7 @@ import { AGENT_TOOLS, type AgentTool, type ToolContext } from './tools/tools.ts'
  * tools, gives one worked paragraph, and asks a low temperature and no
  * reasoning. Over #2840's scored set on the owner's box it wrote 12 of 12
  * rides in 3 to 13 s each, where version 1 wrote 8 of 12 in 16 to 98 s (the
- * other four reasoned to their limit and answered nothing). ⚠️ **A job's
+ * other four reasoned to their limit before an answer was finished). ⚠️ **A job's
  * `templateVersion` is still `1`**: it names the request a device sends —
  * version 1's input, which version 2 reads unchanged (it sends version 1's
  * first message) — and a device that sends it is not refused.

@@ -167,8 +167,8 @@ off with `"code":"bad-reasoning"`. A rider sets the same for their own hosted ke
 
 **Since #2840 a write-up asks the local model not to reason at all** (version 2 of its template:
 `reasoning_effort: "none"`, which Ollama reads as `think: false`), at a low temperature. Left to
-reason, the model on the owner's box spent its whole allowance reasoning and answered nothing on 4
-of 12 fixed rides; told not to, it wrote all 12, in 3 to 13 s each. A model that reasons anyway is
+reason, the model on the owner's box used its whole allowance reasoning before it finished an
+answer on 4 of 12 fixed rides; told not to, it wrote all 12, in 3 to 13 s each. A model that reasons anyway is
 still found out and given the room above. A hosted service is sent nothing for it.
 
 **No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
