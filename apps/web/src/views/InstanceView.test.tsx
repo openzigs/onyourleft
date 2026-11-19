@@ -8,6 +8,7 @@
  * The route is audited, over both walk fixtures, by `a11y/routes.a11y.test.tsx`.
  */
 
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -30,6 +31,7 @@ import {
   scriptedModeration,
   scriptedOperate,
 } from '../instance/testing';
+import type { ModerationPort } from '../instance/moderation-port';
 import { createOperatePort } from '../instance/operate-port';
 import { closeOperateWorlds, operatedWorld } from '../testing/operate-instance-testing';
 import { answer, fieldLabelled, pasteCode, saidUnder } from '../testing/connect-flow';
@@ -1019,4 +1021,122 @@ describe('changing the name other riders see, from the Instance screen — #906 
     await settle();
     expect(text()).not.toContain(CHANGE_NAME_TEXT.heading);
   });
+});
+
+describe('a rider who leaves the screen while it is being read — #2851', () => {
+  const STEPS = ['current', 'devices', 'accountChanges', 'standing'] as const;
+
+  /**
+   * A connected screen whose read is stopped at `step`: that question is
+   * asked, and its answer kept back until {@link finish}.
+   */
+  function readStoppedAt(step: (typeof STEPS)[number]) {
+    const scripted = scriptedInstance({ connected: true });
+    const moderation = scriptedModeration({ standing: 'moderator' });
+    const operate = scriptedOperate({ standing: 'owner' });
+    let answerNow: () => void = () => undefined;
+    const kept = new Promise<void>((resolve) => {
+      answerNow = resolve;
+    });
+    let stopped = 0;
+    /** `ask`, asked when the screen asks it, and answered only once `kept` is. */
+    function at<T>(here: (typeof STEPS)[number], ask: () => Promise<T>): () => Promise<T> {
+      if (here !== step) return ask;
+      return () => {
+        stopped += 1;
+        const answered = ask();
+        return kept.then(() => answered);
+      };
+    }
+    const port: InstancePort = {
+      ...scripted.port,
+      current: at('current', () => scripted.port.current()),
+      devices: at('devices', () => scripted.port.devices()),
+      accountChanges: at('accountChanges', () => scripted.port.accountChanges()),
+    };
+    const moderating: ModerationPort = {
+      ...moderation.port,
+      standing: at('standing', () => moderation.port.standing()),
+    };
+    return {
+      view: <InstanceView port={port} moderation={moderating} operate={operate.port} />,
+      /** How many times the read has reached `step`. */
+      stopped: () => stopped,
+      /** Every question any port has been asked so far, in each port's order. */
+      asked: () => [...scripted.calls, '|', ...moderation.calls, '|', ...operate.calls],
+      /**
+       * Give the answer, and let everything it leads to run. One turn of the
+       * event loop is all of it: every scripted answer is an already-settled
+       * promise, so what follows is microtasks, and they are done before a task.
+       */
+      async finish(): Promise<void> {
+        answerNow();
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      },
+    };
+  }
+
+  /**
+   * How many times the global `window` is read while `during` runs.
+   *
+   * ⚠️ **That is how a state update is seen here, on a view that has gone.**
+   * React says nothing about one — no warning, no render — but react-dom asks
+   * `window.event` for the priority of every `setState`, drawn or not. It is
+   * the read that failed the job with `window is not defined`, the whole suite
+   * having passed, when jsdom was torn down under a read still in flight. So
+   * "nothing was set" is "the window was not read", and the first case below
+   * holds this to counting at all: were React to stop asking, that case would
+   * go red rather than these pass for nothing.
+   */
+  async function windowReadsDuring(during: () => Promise<void>): Promise<number> {
+    const real = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    if (real === undefined) throw new Error('this environment has no window to watch');
+    const held = window;
+    let reads = 0;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      get: () => {
+        reads += 1;
+        return held;
+      },
+    });
+    try {
+      await during();
+    } finally {
+      Object.defineProperty(globalThis, 'window', real);
+    }
+    return reads;
+  }
+
+  it('sets what an answer says while the screen is still drawn, which reads the window', async () => {
+    const read = readStoppedAt('standing');
+    mounted = await mount(read.view);
+    await settle();
+    expect(read.stopped()).toBe(1);
+    expect(text()).not.toContain(MODERATE_LINK_TEXT);
+    const reads = await windowReadsDuring(() => act(() => read.finish()));
+    expect(text()).toContain(MODERATE_LINK_TEXT);
+    expect(reads).toBeGreaterThan(0);
+  });
+
+  it.each(STEPS)(
+    'sets nothing, and asks the instance nothing more, when the answer to %s arrives after the screen has gone',
+    async (step) => {
+      const read = readStoppedAt(step);
+      mounted = await mount(read.view);
+      await settle();
+      // The read is waiting exactly here, and everything else has been drawn.
+      expect(read.stopped()).toBe(1);
+      const askedWhileDrawn = read.asked();
+
+      mounted.unmount();
+      mounted = undefined;
+      const reads = await windowReadsDuring(() => read.finish());
+
+      expect(reads).toBe(0);
+      expect(read.asked()).toEqual(askedWhileDrawn);
+    },
+  );
 });
