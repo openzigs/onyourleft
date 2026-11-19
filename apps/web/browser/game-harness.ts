@@ -3586,6 +3586,12 @@ interface PeopleMeasurement {
   readonly clothesStandOff: number;
   readonly skinStandOff: number;
   /**
+   * The modeller's pass of 2026-11-18, read off the belt: how far a top's hem
+   * over the bottoms strays up and down round the body, metres at a person's
+   * 1.75 m (`three-renderer.ts` §`peopleDrawnOf`).
+   */
+  readonly hemSpread: number;
+  /**
    * How many pixels of a box around the nearest body in frame, and around the
    * nearest impostor, change when the people are switched off: what is drawn
    * is a person, at the place `people.ts` put them.
@@ -3615,6 +3621,7 @@ const NO_PEOPLE_MEASURED: PeopleMeasurement = {
   blendedTriangles: -1,
   clothesStandOff: Number.NaN,
   skinStandOff: Number.NaN,
+  hemSpread: Number.NaN,
   bodyPixels: -1,
   impostorPixels: -1,
   bodyFragments: -1,
@@ -3824,6 +3831,7 @@ function peopleProbe(
     blendedTriangles: belt?.blendedTriangles ?? -1,
     clothesStandOff: (belt?.standOff.clothes ?? Number.NaN) * 1.75,
     skinStandOff: (belt?.standOff.skin ?? Number.NaN) * 1.75,
+    hemSpread: (belt?.hemSpread ?? Number.NaN) * 1.75,
     bodyPixels,
     impostorPixels,
     bodyFragments: fragments.length,
