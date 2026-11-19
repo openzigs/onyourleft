@@ -1693,6 +1693,10 @@ describe('the instance is disclosed, class by class — #778', () => {
     // The row used to say it was SENT only to an instance that had not seen
     // the device.
     expect(section).toContain('each time you press connect with a name typed');
+    // #2878: the owner's claim sends it with the sign-in that follows, never with the claim.
+    expect(section).toContain(
+      'or sign in as the owner with one typed after claiming your own server',
+    );
     expect(section).toContain('keeps it with your account only the first time it sees this device');
     expect(section).not.toContain('when it has not seen this device before');
     // #906 item 2: the rename the Instance screen offers sends it too.

@@ -323,8 +323,10 @@ export interface InstancePort {
    * Sign in once the owner has said Yes on the setup page (#2823, D-5):
    * {@link connect} to the card's own address with the card, where a
    * registration the instance refuses means the claim is not confirmed yet.
+   * `displayName`, optional as {@link connect}'s, is the name the owner's
+   * athlete is registered with (#2878), sent in that sealed registration.
    */
-  signInAsOwner(card: string): Promise<ConnectOutcome>;
+  signInAsOwner(card: string, displayName?: string): Promise<ConnectOutcome>;
   /** What this device makes of the instance's keys, judged against its pin (#1190). */
   keys(): Promise<KeysOutcome>;
   /** Offer a card on a device already signed in: pinned if it had none, else asked to confirm. */
@@ -1573,10 +1575,10 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       }
     },
 
-    signInAsOwner: async (card) => {
+    signInAsOwner: async (card, displayName = '') => {
       const parsed = parseInstanceCard(card);
       if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
-      return connectTo(parsed.card.origin, '', card, true);
+      return connectTo(parsed.card.origin, displayName, card, true);
     },
 
     keys: async () => {
