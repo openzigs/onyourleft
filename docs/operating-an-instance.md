@@ -1315,14 +1315,17 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
-  `logged: false` and prints a line on standard error, and still exits 0, so a log write never stops a
-  deploy whose migrations applied. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
+  `logged: false` and prints a line on standard error naming SQLite's result code, and still exits 0,
+  so a log write never stops a deploy whose migrations applied. Since #2618 such a command never logs
+  `failed` for work that succeeded: a detail outside its vocabulary is not written at all. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
   `admin_tunnel` and `admin_loopback`: see "Admin pages", below), the action, a
   short detail and the outcome: `done`, `refused` or `failed`. The detail is written only from a
   closed list of words and counts **for that action** (`applied=2` for `migrate`, `cleared` for
   `model-key clear`): anything else, including a word another action uses, is refused with the
-  action, so a detail is never free text, a key or a position. The schema also holds it to lower-case
-  letters, digits, `_`, `=` and `,`, at most 200 characters. The owner reads it
+  action, so a detail is never free text, a key or a position. Since #2618 each count is held to a
+  plausible range for what it counts (`blobs` at most 10 000 000, `applied` at most 1 000), and two
+  words that contradict each other (`ride,race`) are refused. The schema also holds it to lower-case
+  letters, digits, `_`, `=` and `,`, at most 200 characters, and no NUL (migration 0051). The owner reads it
   at `GET /v1/operate/log`, newest first (`?limit=` 1–200, `?cursor=`).
 - **What erasure and `migrate … down` do to it.** As with the moderation log
   ([`docs/moderation.md`](moderation.md) §"What the log is, and what erasure does to it"), two SQLite
