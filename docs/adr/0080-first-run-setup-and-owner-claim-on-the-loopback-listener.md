@@ -512,3 +512,20 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   is the one that proves the off-box folder works. Every change is still in the operator log from the
   source `setup` (D-7's last bullet), where the Operate log shows it. *Maintainer decision on PR
   #2821 (a dispatched run, no owner present), after review cycle 3 named the difference.*
+- **2026-11-18** — **A setup session may also choose the local model for AI write-ups, and ask the
+  Ollama on the machine to download one.** D-7 lists what a setup session may change, and #2792 adds
+  an optional step, between the invite and the finish, that does two more things while the setup is
+  open: it asks the Ollama it found on the machine to download the model whose name the owner
+  types, and it saves the model the owner then chooses, with its address, as the local model in the
+  operator's analysis settings (ADR 0046's amendment of 2026-11-14: the one row a job reads). Both
+  write the operator log from the source `setup`, naming no model and no address. Ollama is looked
+  for only at the address already set and at three fixed local addresses, each held to ADR 0040
+  D-6's rule on every request. The step is the loopback listener's alone, as every `/setup` path
+  is, and skipping it changes nothing. **What it does not do:** it names and recommends no model
+  (ADR 0046's amendment of 2026-11-14, point 8), although #2792's description asks for *"a
+  recommended model"*; whether the repository may name one is the owner's to rule, and would be an
+  amendment to ADR 0046, not to this one. **Why this fits D-7:** the row it writes is the one the
+  owner's Operate area already writes, the step runs only where the setup code was read from the
+  host's file system, and without it the owner must set `COMPOSE_PROFILES`, run `ollama pull` and
+  edit `.env` by hand, which is what this ADR exists to remove. *Maintainer decision on the pull
+  request for #2792 (a dispatched run, no owner present); it awaits the owner's acceptance.*

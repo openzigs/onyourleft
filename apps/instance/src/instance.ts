@@ -192,6 +192,11 @@ export interface InstanceOptions {
    */
   readonly kitSecrets?: readonly SecretFromFile[];
   /**
+   * Where the setup's AI step looks for Ollama (#2792): `analysis/ollama-setup.ts`
+   * §`OLLAMA_ADDRESSES` unless a test's, which must never reach a real one.
+   */
+  readonly ollamaAddresses?: readonly string[];
+  /**
    * `OYL_INSTANCE_SECRETS_DIR` (#2784, ADR 0080 D-2): where the setup code's
    * file is written at every start while the first-run setup is open, and
    * removed from once the code is used or the setup is done.
@@ -1126,6 +1131,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         kitSecrets: options.kitSecrets ?? [],
         environmentRegistration: options.config.registration,
         secretsDirectory: options.secretsDirectory,
+        // #2792: the optional AI step's, read and written as Operate's are.
+        analysis: {
+          environment: options.config,
+          resolve: operateAnalysis.resolve,
+          ...(options.ollamaAddresses === undefined ? {} : { addresses: options.ollamaAddresses }),
+          ...(operateAnalysis.changed === undefined ? {} : { changed: operateAnalysis.changed }),
+          stopped: operateStopped.signal,
+        },
       });
       setup = wizard;
       stopSetup = sweepOnBoundaries(
