@@ -911,6 +911,8 @@ function viewFor(
           riderText={props.riderText}
           workoutGoals={props.workoutGoals}
           soundOutput={props.soundOutput}
+          // #2756: the Instance line says whether this device is connected.
+          instance={props.instance}
         />
       );
     case 'about':
@@ -925,6 +927,8 @@ function viewFor(
           hostedSettings={props.hostedSettings}
           statements={props.statements}
           blocks={props.blocks}
+          // #2785: the instance card's scanner reads with the same camera.
+          camera={props.camera}
         />
       );
     case 'moderation':

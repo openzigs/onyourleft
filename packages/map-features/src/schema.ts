@@ -20,6 +20,10 @@
  * for the twelve keys of {@link BUILDING_FIELD_RULES}, and in no other layer;
  * each value is whitelisted or clamped and kept as a constant or a number of
  * the decoder's own, never as the tile's string.
+ *
+ * Since #2659 (ADR 0054's entry of 2026-11-15), `water`'s lines are kept as
+ * well as its polygons, a river's, a stream's or a canal's —
+ * {@link WATER_LINE_KINDS} — by their `kind` alone.
  */
 
 import type { BuildingFields } from './types';
@@ -79,14 +83,30 @@ export const LAYER_GEOMETRY_TYPES: Readonly<Record<ReadLayer, readonly number[]>
   places: [GEOMETRY_POINT, GEOMETRY_LINE, GEOMETRY_POLYGON],
 };
 
-/** The one geometry type kept from each layer; the others are skipped unread. */
-export const LAYER_KEPT_GEOMETRY: Readonly<Record<ReadLayer, number>> = {
-  landuse: GEOMETRY_POLYGON,
-  water: GEOMETRY_POLYGON,
-  buildings: GEOMETRY_POLYGON,
-  roads: GEOMETRY_LINE,
-  places: GEOMETRY_POINT,
+/**
+ * The geometry types kept from each layer; the others are skipped unread. One
+ * a layer, but `water`, whose lines are kept since #2659 (ADR 0054's entry of
+ * 2026-11-15): a stream, a river or a canal, by {@link WATER_LINE_KINDS}.
+ */
+export const LAYER_KEPT_GEOMETRIES: Readonly<Record<ReadLayer, readonly number[]>> = {
+  landuse: [GEOMETRY_POLYGON],
+  water: [GEOMETRY_POLYGON, GEOMETRY_LINE],
+  buildings: [GEOMETRY_POLYGON],
+  roads: [GEOMETRY_LINE],
+  places: [GEOMETRY_POINT],
 };
+
+/**
+ * The `water` line `kind`s kept — #2659. Protomaps v4 writes a waterway line
+ * with its `waterway` tag as its `kind` and no `kind_detail`
+ * (protomaps/basemaps `Water.java`, read 2026-11-15): `river`, `stream`,
+ * `canal`, `ditch` and `drain`. The first three are kept. **A ditch and a
+ * drain are not**: a road crosses one in a culvert, which is invisible from a
+ * bicycle (`apps/web/src/game/waterways.ts` §"What there is not"), and the
+ * archive marks no culvert on a line — so one kept would be a bridge over
+ * every roadside drain. Any other `kind`, or none, drops the line unread.
+ */
+export const WATER_LINE_KINDS = ['river', 'stream', 'canal'] as const;
 
 /** The `buildings.kind` values kept. Address points and anything else are dropped. */
 export const BUILDING_KINDS = ['building', 'building_part'] as const;

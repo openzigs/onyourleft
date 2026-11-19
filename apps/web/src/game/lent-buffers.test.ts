@@ -352,7 +352,7 @@ describe('the lent storage when the size changes — #472', () => {
       // The reference: storage already large enough for both, so neither build
       // grows anything. The first build is only there to size it.
       const sized = await freshBuilders();
-      const sizedWays = sized.waterways.waterways(profile, seed);
+      const sizedWays = sized.waterways.waterways(profile, seed, NO_LAND_CLASS);
       sized.waterways.waterSurface(profile, origin, long, sizedWays);
       const expectedLong = waterOf(sized.waterways.waterSurface(profile, origin, long, sizedWays));
       const expectedShort = waterOf(
@@ -365,7 +365,7 @@ describe('the lent storage when the size changes — #472', () => {
       // Small, then large, then small again, in storage that starts empty — so
       // the large build has to grow in the middle of writing it.
       const growing = await freshBuilders();
-      const growingWays = growing.waterways.waterways(profile, seed);
+      const growingWays = growing.waterways.waterways(profile, seed, NO_LAND_CLASS);
       const first = growing.waterways.waterSurface(profile, origin, short, growingWays);
       expect(waterOf(first)).toEqual(expectedShort);
       const smallBuffers = [first.vertices.buffer, first.indices.buffer];
@@ -379,7 +379,7 @@ describe('the lent storage when the size changes — #472', () => {
       expect(waterOf(shrunk)).toEqual(expectedShort);
 
       // And the lease across the change, through the module the renderer reads.
-      const ways = waterways(profile, seed);
+      const ways = waterways(profile, seed, NO_LAND_CLASS);
       const belt = new WaterBelt();
       const world = worldStyle(profile);
       for (const [before, after] of [

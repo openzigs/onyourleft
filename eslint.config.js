@@ -398,6 +398,10 @@ const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/operator/commands.ts',
   // #2606: the backup folder's lease, naming its holder's host and process.
   'apps/instance/src/operator/backup-lease.ts',
+  // #2781: the secrets folder's files, made on the first start.
+  'apps/instance/src/setup/secrets.ts',
+  // #2784: the setup code's file in the secrets folder, written at a start and removed once used.
+  'apps/instance/src/setup/setup-code.ts',
   'apps/instance/src/store/backup.ts',
   'apps/instance/src/store/serving.ts',
   'apps/instance/src/store/node-sqlite.ts',

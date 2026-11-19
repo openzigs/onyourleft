@@ -94,7 +94,7 @@ export function chainLinkPieces(
   grounds: readonly LandUseFeature[],
   route: ChainLinkRoute,
 ): readonly ChainLinkPiece[] {
-  const ways = waterways(route.profile, route.seed);
+  const ways = waterways(route.profile, route.seed, route.land);
   const pieces: ChainLinkPiece[] = [];
   for (const ground of grounds) {
     const outline = ground.rings[0];

@@ -79,11 +79,13 @@ import {
   headwindOnRoute,
   metres,
   metresPerSecond,
+  MODEL_PACER_LAPSE_S,
   seconds,
   watts,
   type BotPacerPlan,
   type GradePercent,
   type Metres,
+  type PacerDirection,
   type RouteProfile,
   type Seconds,
   type Watts,
@@ -538,6 +540,16 @@ export class GameSimulation {
    */
   #draftFactor = 1;
 
+  /**
+   * The AI pacer's decision in force — #2712, ADR 0072 D-2 and D-5: a plan
+   * and an intent, the seconds ridden it applies from, and the seconds it
+   * lapses at. `undefined` on every other ride, and on an AI pacer's ride
+   * whenever none is in force: the bot is then #92's to the bit.
+   */
+  #direction:
+    | { readonly direction: PacerDirection; readonly from: number; readonly until: number }
+    | undefined;
+
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
     this.#course = botCourseFor(setup);
@@ -566,6 +578,23 @@ export class GameSimulation {
       ...headwindField(this.#headwindAt(start.distance)),
       ...(setup.soloDraft === undefined ? {} : { soloDraft: SOLO_DRAFT_AT_START }),
     };
+  }
+
+  /**
+   * Put an AI pacer's decision in force — #2712, ADR 0072 D-5: from the
+   * first fixed step whose seconds ridden ({@link GameState.ridden}) are at
+   * or past `fromSeconds`, until a newer decision replaces it or
+   * {@link MODEL_PACER_LAPSE_S} passes — `@onyourleft/domain`
+   * §`pacerDirectionAt`'s rule, so the ride's stored log replays it.
+   *
+   * ⚠️ **Moves the pacer and nothing else.** The rider's physics, the grade
+   * and every trainer write are read off the rider's own odometer; the pacer
+   * reaches the rider only through the draft it gives, as riding harder does
+   * (ADR 0072 D-6). A ride with no pacer ignores it.
+   */
+  directPacer(direction: PacerDirection, fromSeconds: number): void {
+    if (this.#course === undefined || !Number.isFinite(fromSeconds)) return;
+    this.#direction = { direction, from: fromSeconds, until: fromSeconds + MODEL_PACER_LAPSE_S };
   }
 
   /**
@@ -798,7 +827,11 @@ export class GameSimulation {
         bot = advanceBot(
           bot.state,
           seconds(SIMULATION_STEP_SECONDS),
-          this.#courseAt(course, bot.state.distance),
+          this.#courseAt(
+            course,
+            bot.state.distance,
+            this.#directionAt((this.#stepsRun + step) * SIMULATION_STEP_SECONDS),
+          ),
         );
       }
       if (soloDraft !== undefined) {
@@ -907,15 +940,35 @@ export class GameSimulation {
     return headwindOnRoute(this.#setup.profile, distance, wind);
   }
 
-  /** The bot's course at one point on the route. @see #conditionsAt */
-  #courseAt(course: BotCourse, distance: number): BotCourse {
+  /** The AI pacer's direction in force at `riddenSeconds`, or `undefined`. @see directPacer */
+  #directionAt(riddenSeconds: number): PacerDirection | undefined {
+    const held = this.#direction;
+    if (held === undefined || riddenSeconds < held.from) return undefined;
+    if (riddenSeconds >= held.until) {
+      this.#direction = undefined;
+      return undefined;
+    }
+    return held.direction;
+  }
+
+  /**
+   * The bot's course at one point on the route, with the AI pacer's
+   * direction when one is in force. @see #conditionsAt
+   *
+   * ⚠️ The course itself, the same object, with neither a wind nor a
+   * direction: a ride with no AI pacer is the ride it was, to the bit.
+   */
+  #courseAt(course: BotCourse, distance: number, direction?: PacerDirection): BotCourse {
     const wind = this.#setup.wind;
-    if (wind === undefined) {
+    if (wind === undefined && direction === undefined) {
       return course;
     }
     return {
       ...course,
-      headwindMetresPerSecond: headwindOnRoute(course.profile, distance, wind),
+      ...(wind === undefined
+        ? {}
+        : { headwindMetresPerSecond: headwindOnRoute(course.profile, distance, wind) }),
+      ...(direction === undefined ? {} : { direction }),
     };
   }
 }

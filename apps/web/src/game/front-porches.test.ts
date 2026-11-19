@@ -56,6 +56,7 @@ import {
   buildingBeside,
   landBeside,
   mixedTownFixture,
+  plinthTriangles,
   rectangleBeside,
 } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
@@ -274,13 +275,15 @@ describe('a front porch on a mapped house — #1589, over the mixed town', () =>
     }
   });
 
-  it('is 75 to 100 triangles, all near: the far level is the walls and the roof alone', () => {
+  it('is 75 to 100 triangles, all near: the far level is the walls, the plinth and the roof alone', () => {
     for (const plan of porched) {
       const own = PORCH_ROLES.reduce((sum, role) => sum + trianglesOf(plan, role), 0);
       expect(own).toBeGreaterThanOrEqual(75);
       expect(own).toBeLessThanOrEqual(100);
       expect(plan.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
-      expect(plan.farTriangleCount).toBe(trianglesOf(plan, 'wall') + trianglesOf(plan, 'roof'));
+      expect(plan.farTriangleCount).toBe(
+        trianglesOf(plan, 'wall') + trianglesOf(plan, 'plinth') + trianglesOf(plan, 'roof'),
+      );
     }
     for (const roof of ['shed', 'hip'] as const) {
       const count = porchTriangles(porchPieces({ ...LOT_PORCH, roof }));
@@ -648,7 +651,10 @@ describe('the most a plan can be, with a porch — #1589', () => {
       expect(plan.footprint.length / 2).toBe(FOOTPRINT_MAX_VERTICES);
       expect(plan.roof).toBe('flat');
       expect(plan.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
-      expect(plan.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
+      // #2761: the far cap is its walls and roof; its plinth is drawn far too, beside them.
+      expect(plan.farTriangleCount - plinthTriangles(plan)).toBeLessThanOrEqual(
+        FOOTPRINT_MAX_FAR_TRIANGLES,
+      );
     }
     const most = plans.filter((plan) => plan.porch && plan.garage);
     expect(most.length).toBeGreaterThan(0);

@@ -39,6 +39,7 @@ import {
   altitudeMetres,
   botPacerPlan,
   degreesCelsius,
+  directedPowerWatts,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -399,6 +400,33 @@ describe('the driver, which takes instants and never a clock', () => {
     expect(() => advanceBot(BOT_AT_START_LINE, Number.NaN as Seconds, courseOn(FLAT))).toThrow(
       /finite number of seconds/,
     );
+  });
+});
+
+describe('an AI pacer’s direction — #2712, ADR 0072 D-2', () => {
+  it('is #92’s pacer to the bit with no direction in force', () => {
+    const plain = courseOn(CLIMB);
+    expect(botDemand(MID_ROUTE, plain)).toEqual(botDemand(MID_ROUTE, { ...plain }));
+    expect(advanceBot(MID_ROUTE, seconds(1), plain)).toEqual(
+      advanceBot(MID_ROUTE, seconds(1), { ...plain, direction: undefined }),
+    );
+  });
+
+  it('rides the direction’s power through the same tick, inside #92’s envelope', () => {
+    const lift = { plan: 'even', intent: 'lift' } as const;
+    const lifted: BotCourse = { ...courseOn(FLAT), direction: lift };
+    const demand = botDemand(MID_ROUTE, lifted);
+    expect(demand.power).toBe(directedPowerWatts(PLAN, demand.grade, lift));
+    expect(demand.power).toBeGreaterThan(pacedPowerWatts(PLAN, demand.grade));
+    let free: RideState = MID_ROUTE;
+    let directed: RideState = MID_ROUTE;
+    for (let tick = 0; tick < 60; tick += 1) {
+      free = advanceBot(free, seconds(1), courseOn(FLAT)).state;
+      directed = advanceBot(directed, seconds(1), lifted).state;
+    }
+    expect(directed.distance).toBeGreaterThan(free.distance);
+    const eased: BotCourse = { ...courseOn(FLAT), direction: { plan: 'even', intent: 'ease' } };
+    expect(botDemand(MID_ROUTE, eased).power).toBeLessThan(pacedPowerWatts(PLAN, 0));
   });
 });
 

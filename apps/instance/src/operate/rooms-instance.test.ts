@@ -32,7 +32,7 @@ import { roomShortCode } from './operate.ts';
 /** The bound of a wait inside a case, which has Vitest's 5 s (#2567). */
 const WAIT_MS = 3_000;
 
-/** A power nothing else in a body could be by accident. */
+/** The power Cal reports, which the owner is never shown (#2726: looked for field by field). */
 const POWER_WATTS = 317;
 
 interface Session {
@@ -52,6 +52,24 @@ let cal: Session;
 /** Ann's race, which Bea joined, and Cal's group ride: on two different workers. */
 let race: { readonly roomId: string; readonly code: string };
 let ride: { readonly roomId: string };
+/**
+ * The ids the instance gives the rooms this file makes, in order (#2702). A
+ * room is placed by `roomHash` of its id over the live workers, so the ride's
+ * id is chosen to hash to the other worker from the race's: drawn at random,
+ * the two shared a worker one run in two, and five tries all missed one run
+ * in 32.
+ */
+const roomIds: string[] = [];
+
+/** The first id after `roomId`, in counting order, that two workers place apart from it. */
+function placedApartFrom(roomId: string): string {
+  for (let n = Number.parseInt(roomId, 16) + 1; n < Number.MAX_SAFE_INTEGER; n += 1) {
+    const candidate = n.toString(16).padStart(32, '0');
+    if (roomHash(candidate) % 2 !== roomHash(roomId) % 2) return candidate;
+  }
+  throw new Error('no id is placed apart');
+}
+
 let annSocket: RoomClient;
 let beaSocket: RoomClient;
 let calSocket: RoomClient;
@@ -96,10 +114,15 @@ async function signIn(device: TestDevice, displayName: string, address: string):
   return { device, token: body.sessionToken, athleteId: body.athleteId };
 }
 
+/** Every room id the instance answered this file's `made` with, in order. */
+const madeRoomIds: string[] = [];
+
 async function made(who: Session, overrides: Record<string, unknown>) {
   const answer = await sealed(who, 'POST', '/v1/rooms', roomBody(overrides));
   expect(answer.status, JSON.stringify(answer.body)).toBe(200);
-  return answer.body as { roomId: string; code: string };
+  const room = answer.body as { roomId: string; code: string };
+  madeRoomIds.push(room.roomId);
+  return room;
 }
 
 /** `who` on a real socket into `roomId`, with a ticket the instance issued them. */
@@ -117,6 +140,17 @@ async function socketInto(who: Session, roomId: string): Promise<RoomClient> {
   clients.push(client);
   await until(() => client.messages.some((message) => message.type === 'welcome'), 'a welcome');
   return client;
+}
+
+/** Every leaf of a JSON `value` — a string, number, boolean or `null` — with where it is. */
+function leavesOf(value: unknown, path = '$'): [string, unknown][] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => leavesOf(item, `${path}[${String(index)}]`));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).flatMap(([key, item]) => leavesOf(item, `${path}.${key}`));
+  }
+  return [[path, value]];
 }
 
 async function freshRead<T>(read: (store: SqlStore) => Promise<T>): Promise<T> {
@@ -156,6 +190,11 @@ beforeAll(async () => {
     notices: '',
     log: () => undefined,
     defaultCountdownMs: 0,
+    roomId: () => {
+      const next = roomIds.shift();
+      if (next === undefined) throw new Error('no room id left for this file');
+      return next;
+    },
   });
   await running.opened;
   await running.keysMaintained;
@@ -164,16 +203,14 @@ beforeAll(async () => {
   bea = await signIn(await testDevice(), 'Bea', '192.0.2.3');
   cal = await signIn(await testDevice(), 'Cal', '192.0.2.4');
 
-  // A room is placed by a hash of its id over the live workers: Cal makes
-  // group rides until one lands on the other worker from Ann's race.
+  // A room is placed by a hash of its id over the live workers: Cal's group
+  // ride is given an id that lands on the other worker from Ann's race.
+  const raceId = '1'.padStart(32, '0');
+  const rideId = placedApartFrom(raceId);
+  roomIds.push(raceId, rideId);
   race = await made(ann, { kind: 'race' });
-  let found: { roomId: string } | undefined;
-  for (let attempt = 0; attempt < 5 && found === undefined; attempt += 1) {
-    const candidate = await made(cal, { kind: 'group' });
-    if (roomHash(candidate.roomId) % 2 !== roomHash(race.roomId) % 2) found = candidate;
-  }
-  if (found === undefined) throw new Error('every group ride hashed to the race’s worker');
-  ride = found;
+  ride = await made(cal, { kind: 'group' });
+  expect([race.roomId, ride.roomId]).toEqual([raceId, rideId]);
   expect((await sealed(bea, 'POST', '/v1/rooms/join', { code: race.code })).status).toBe(200);
   annSocket = await socketInto(ann, race.roomId);
   beaSocket = await socketInto(bea, race.roomId);
@@ -221,8 +258,19 @@ describe('the owner’s Rooms on the running instance — #2612', () => {
       riderCount: 1,
     });
     const text = JSON.stringify(listed.body);
-    for (const absent of [String(POWER_WATTS), ann.athleteId, bea.athleteId, cal.athleteId]) {
+    for (const absent of [ann.athleteId, bea.athleteId, cal.athleteId]) {
       expect(text).not.toContain(absent);
+    }
+    // No power (#2726): read field by field, because a room id is random hex
+    // and spells `317` by chance about one run in a few hundred. No number is
+    // the watt figure, and no string spells it but an id or short code that is
+    // exactly that of a room this file made.
+    const ids = new Set(madeRoomIds.flatMap((roomId) => [roomId, roomShortCode(roomId)]));
+    for (const [path, leaf] of leavesOf(listed.body)) {
+      if (typeof leaf === 'number') expect(leaf, path).not.toBe(POWER_WATTS);
+      if (typeof leaf === 'string' && !ids.has(leaf)) {
+        expect(leaf, path).not.toContain(String(POWER_WATTS));
+      }
     }
   });
 

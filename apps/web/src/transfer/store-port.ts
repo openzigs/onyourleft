@@ -331,6 +331,13 @@ export interface TransferPort {
    */
   readonly trainerTargets: DraftStore;
   /**
+   * The sensors the Android shell remembers (#2669), each by its device id —
+   * on Android its Bluetooth address — with its name and role.
+   * `ride/remembered-sensors.ts`. Required for `theme`'s reason. The same
+   * memory the ride controller writes, so an erase clears the page's copy too.
+   */
+  readonly rememberedSensors: DraftStore;
+  /**
    * The row to recreate after an erase.
    *
    * Erasing removes the athlete row every write path checks, and

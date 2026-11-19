@@ -963,7 +963,7 @@ export const REALISTIC_GROUND_BLOBS =
 
 /**
  * Nearer than this a mapped building is drawn whole; further, at its far
- * level, its walls and roof only — #1549: **150 m**.
+ * level, its walls, plinth (#2761) and roof only — #1549: **150 m**.
  */
 export const MAPPED_BUILDING_NEAR_METRES = 150;
 

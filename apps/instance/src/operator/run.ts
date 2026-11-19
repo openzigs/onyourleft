@@ -20,7 +20,10 @@ import {
   modelKeyClear,
   modelKeySet,
   modelKeyStatus,
+  ownerClaimReset,
+  registrationMode,
   restore,
+  setupCode,
   roomOpen,
   verify,
   type DataPaths,
@@ -43,6 +46,9 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   analysis-settings clear | others on|off
   admin-code   (a one-time code for the admin pages, valid 10 minutes)
   admin-passkeys list | revoke <id> | confirm <id>   (the owner's passkeys for the admin pages)
+  owner-claim reset   (clear the owner the app claimed, so the instance can be claimed again)
+  setup-code   (a code for the first-run setup page on this machine, valid 10 minutes)
+  registration set approval|invite|open|closed | clear   (the mode a new rider meets; clear returns to .env)
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -76,6 +82,10 @@ export async function runCommand(
     readonly readStandardInput?: () => Promise<string>;
     /** What stops `backup-loop` (#2606): `cli.ts` aborts it on SIGTERM or SIGINT. */
     readonly signal?: AbortSignal;
+    /** `OYL_INSTANCE_SECRETS_DIR`: where `setup-code` writes its file (#2784). */
+    readonly secretsDirectory?: string | undefined;
+    /** `OYL_INSTANCE_ADMIN_LOOPBACK_PORT`: the setup page's port, for `setup-code` (#2784). */
+    readonly loopbackPort?: string | undefined;
   },
 ): Promise<number> {
   const paths: DataPaths = {
@@ -258,6 +268,36 @@ export async function runCommand(
           report = await adminPasskeysRevoke(paths, args[0] as string);
         } else if (action === 'confirm' && args.length === 1) {
           report = await adminPasskeysConfirm(paths, args[0] as string);
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'owner-claim': {
+        if (args.length !== 1 || args[0] !== 'reset') throw new CommandError(USAGE);
+        report = await ownerClaimReset(paths, { ownerKey: env.ownerKey });
+        break;
+      }
+      case 'setup-code': {
+        if (args.length > 0) throw new CommandError(USAGE);
+        report = await setupCode(paths, {
+          ownerKey: env.ownerKey,
+          secretsDirectory: env.secretsDirectory,
+          port: env.loopbackPort,
+        });
+        break;
+      }
+      case 'registration': {
+        const action = args.shift();
+        const mode = args[0];
+        if (action === 'clear' && args.length === 0) {
+          report = await registrationMode(paths, null);
+        } else if (
+          action === 'set' &&
+          args.length === 1 &&
+          (mode === 'approval' || mode === 'invite' || mode === 'open' || mode === 'closed')
+        ) {
+          report = await registrationMode(paths, mode);
         } else {
           throw new CommandError(USAGE);
         }

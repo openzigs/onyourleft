@@ -700,7 +700,8 @@ describe('the step-up every change needs (#2642, ADR 0069 D-4)', () => {
     const handler = world.instance.handler;
     const csrf = await csrfOn(handler, token);
     for (const form of [
-      { csrf, action: 'backup_now' } as Record<string, string>,
+      // Restore stays on the CLI (#2601's decision): never a change of the pages. (#2647 made back up now one.)
+      { csrf, action: 'restore' } as Record<string, string>,
       { csrf, action: 'constructor', id: second.id },
       { csrf, action: 'passkey_revoke' },
       { csrf, action: 'passkey_revoke', id: second.id, extra: 'x' },

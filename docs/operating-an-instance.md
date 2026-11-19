@@ -28,8 +28,11 @@ log as `room-worker-died`).
 ## Metrics
 
 `OYL_INSTANCE_METRICS=on` serves `GET /metrics`, and **only to a request carrying
-`OYL_INSTANCE_METRICS_TOKEN`** as `Authorization: Bearer <token>` (32 characters or more —
-`openssl rand -hex 32`; the instance refuses to start with metrics on and no token). Any other
+`OYL_INSTANCE_METRICS_TOKEN`** as `Authorization: Bearer <token>` (32 characters or more). With
+`OYL_INSTANCE_SECRETS_DIR` set, as the home compose file sets it, and the token left empty, the
+instance makes one on its first start in `secrets/metrics-token` ([The instance's
+secrets](#the-instances-secrets)); otherwise make one with `openssl rand -hex 32`, and the instance
+refuses to start with metrics on and no token. Any other
 request gets `404`, as if metrics were off. It names no rider, but it is not for the public: scrape
 it from the box with the token, and keep the token in the box's `.env` beside the tunnel's.
 
@@ -213,6 +216,12 @@ instance, and **while it runs, post-ride write-ups wait** (queued, not failed; o
 is not stopped; re-plans do not wait). They start when the race ends, after 30 s with no tactics
 request, or 2 hours after the race began, whichever is first.
 
+**An AI pacer (#2712, ADR 0072).** The same consent lets a rider's pacer be steered by your
+**local** model during a solo ride: every few seconds it picks how the pacer rides and writes one
+short line of encouragement, which the instance screens before it answers. It takes the same slot
+as an AI-bots race, so while such a ride runs, post-ride write-ups wait, and an AI-bots race on the
+instance waits for it. Nothing of it is kept on the instance.
+
 **Back to `.env`.** Clear the settings from the app (`DELETE /v1/operate/analysis`), or on the host:
 
 ```
@@ -384,7 +393,10 @@ account export says only `"hostedModelKey": "a hosted model key is held"`; anoth
 `null` unless they stored one of their own.
 
 **The secret.** The key is encrypted at rest with AES-256-GCM under `OYL_INSTANCE_SECRET_KEY`, 32
-bytes of base64 that you make once and keep in the deployment's `.env`, beside nothing else:
+bytes of base64. On the home deployment the instance makes it on its first start
+([The instance's secrets](#the-instances-secrets)). Making it yourself is **optional, for an
+existing install** or a deployment with no secrets folder: make it once and keep it in the
+deployment's `.env`, beside nothing else:
 
 ```
 openssl rand -base64 32
@@ -448,6 +460,65 @@ the log over from its start. Neither is the key in clear.
 re-enter: stop the instance, set the new `OYL_INSTANCE_SECRET_KEY`, run `model-key set` again with
 the key (which seals it under the new secret), and start the instance. Snapshots taken before then
 need the old secret to read their key; the rest of a snapshot needs no secret at all.
+
+## The instance's secrets
+
+[#2781](https://github.com/openzigs/onyourleft/issues/2781), ADR 0080 D-4. A fresh install needs no
+`openssl` and no `.env` edit for its secrets.
+
+- **Made on the first start.** With `OYL_INSTANCE_SECRETS_DIR` set (the home compose file sets it
+  to `/run/secrets/onyourleft`, the `secrets/` folder beside `compose.yaml`), a secret that `.env`
+  leaves empty is made there on the first start: `OYL_INSTANCE_SECRET_KEY` in
+  `secrets/instance-secret-key`, and, with metrics on, `OYL_INSTANCE_METRICS_TOKEN` in
+  `secrets/metrics-token`. Each is 32 random bytes, written whole and owner-only (`0600`). Every
+  later start reads the same file and never makes another, and the operator's commands read it
+  too.
+- **`.env` wins.** A secret set in `.env` is used, and no file is read or written for it, so an
+  existing install is unchanged. Making a secret yourself with `openssl` is optional, for an
+  existing install.
+- **Never in the data volume.** The `backup` service copies the database and the blobs off the
+  box. A snapshot holds the instance's keys wrapped under the secret, so a copy with the secret
+  beside it would be the instance's identity. The instance refuses to start if
+  `OYL_INSTANCE_SECRETS_DIR` is inside the database's folder or the blobs. Only the `instance`
+  service mounts `secrets/`, and since #2781 it mounts it writable; `backup`, `migrate` and
+  `tunnel` do not mount it.
+- **Owner-only, or no start.** A file that others than its owner can read stops the instance, with
+  a line that names the file and never its content. Make it `chmod 600` and start again. On Linux
+  the folder must be writable by uid 1000, the image's user; `deploy.sh` makes it if it is missing,
+  because Docker would make it owned by root.
+- ⚠️ **A folder that keeps no permission bits.** A Windows folder bind-mounted by Docker Desktop may
+  report every file as readable by everyone. The instance checks a file that looks open against a
+  probe it makes `0600` in the same folder. If the probe looks open too, the folder cannot show
+  permissions: the instance starts, and logs `"event":"secret",…,"permissions":"not-kept"`. There,
+  the folder's own access on the host is what keeps the secret: keep `secrets/` in your own user
+  folder, not one shared with other accounts. **Not measured on Windows yet** (#2781): until it is,
+  read that log line after the first start on a Windows machine.
+- **The log says where each came from**, and never what it is:
+
+  | You see | It means |
+  |---|---|
+  | `"event":"secret","variable":"OYL_INSTANCE_SECRET_KEY","from":"generated"` | this start made it |
+  | `…"from":"file"` | read from the file an earlier start made |
+
+- **The emergency kit.** Once you are signed in to the admin pages **on the server machine**
+  (`http://localhost:8788`, [below](#admin-pages-on-the-server-machine)) with a passkey, the Keys
+  page offers **Download the emergency kit**. It is one text file holding each secret read from
+  `secrets/`, the `OYL_INSTANCE_ORIGIN` they are bound to, and the instance card. It asks your
+  passkey again, writes `emergency_kit_downloaded` to the operator log, and is never offered
+  through the tunnel, where its address answers as if there were no such page. Keep it in a
+  password manager or on paper, **never beside the backups**. With it, a backup can be restored on
+  a new machine and every device keeps trusting the instance. Without it, a restore makes new keys
+  and every device has to pin again. A secret set in `.env` is not in the kit: `.env` is your copy
+  of it.
+- **Restoring with the kit.** On the new machine, put each secret alone in its file in `secrets/`
+  (or in `.env`), set the same `OYL_INSTANCE_ORIGIN`, then [restore](#restore) the backup.
+- ⚠️ **Rolling back to an image from before #2781** starts with no secret if the secret is only in
+  `secrets/`, because that image reads `.env` alone: no instance keys, no sealed routes. Copy the
+  secret into `.env` before rolling back that far.
+- **The setup page offers the kit once** per setup session, with no passkey (ADR 0080 D-4,
+  [The first-run setup page](#the-first-run-setup-page)), and writes `emergency_kit_downloaded` from
+  the source `setup`. **A secret this start made** is a `secret_generated` entry from the source
+  `start` (#2784's migration 0048), naming which secret and never its value.
 
 ## The instance's keys
 
@@ -667,8 +738,9 @@ voice: nothing else changes.
   refuses to start, naming the variable and nothing the file holds. The environment is not used
   because every child process inherits it and `docker inspect` prints it.
   - **The home deploy** (`apps/instance/deploy/home/compose.yaml`) mounts `secrets/` beside the
-    compose file, read-only, at `/run/secrets/onyourleft/`, on the instance only (the `backup`
-    service does not mount it). Git ignores the directory. On the box, beside the compose file
+    compose file at `/run/secrets/onyourleft/`, on the instance only (the `backup`
+    service does not mount it). It was read-only until #2781, which made it writable so the
+    instance can make its secret key there ([The instance's secrets](#the-instances-secrets)). Git ignores the directory. On the box, beside the compose file
     (the token is typed at a prompt that does not echo it, so it is in no shell history, and the
     file is made readable by you alone before anything is written to it):
 
@@ -950,8 +1022,9 @@ against a database that is **behind** its build and not being migrated, the inst
 start and names this command**. Against one that is **ahead** (a newer build migrated it), it
 refuses too: run the newer build, or restore a snapshot taken before it.
 
-On the home machine, `bash apps/instance/deploy/home/deploy.sh` does all of it: builds this
-checkout, snapshots the data, starts the new build (Compose runs `migrate` first), waits for
+On the home machine, `bash deploy.sh` in a release's folder (or
+`bash apps/instance/deploy/home/deploy.sh` in a checkout) does all of it: pulls the release's image by
+its digest (#2786), or builds the checkout, snapshots the data, starts the new build (Compose runs `migrate` first), waits for
 `/ready`, and **rolls itself back** — the previous build, with the snapshot restored — if the new one
 never becomes ready. `deploy.sh --rollback` does the same by hand. Every migration has a tested
 `down` (ADR 0037 D-6), but a rollback restores a snapshot rather than migrating down, because a
@@ -967,6 +1040,140 @@ on disk only for riders who had already finished. A **group ride** has no result
 again, empty, for whoever rejoins it — from the start of the route. Every ride goes on recording on the rider's own
 device, whatever happens to the instance (ADR 0036 D-3).
 
+## Claiming the instance from the app
+
+The instance's **owner** — the operator, who reaches Operate and the admin pages and moderates — is
+whoever holds **the owner key**. There are two ways to set it
+(ADR 0080 D-3, written in [#2795](https://github.com/openzigs/onyourleft/pull/2795);
+[#2782](https://github.com/openzigs/onyourleft/issues/2782)):
+
+- **`OYL_INSTANCE_OWNER_KEY` in `.env`**, the device key copied from the app, as before. **When it is
+  set it always wins**: no claim can be made, and every existing install is unchanged.
+- **A claim from the app**, when `OYL_INSTANCE_OWNER_KEY` is empty. The setup page on the server
+  machine (`http://localhost:8788/setup`, #2784) shows a **claim code** with the instance card as one
+  QR (#2783). The tablet scans it inside the app, pins the card's fingerprint, and sends the code on
+  `POST /v1/auth/owner-claim`, **sealed** to the instance and signed by the tablet's device key, so
+  nobody between them — the tunnel included — can read the code or put another key in its place. The
+  claim then **waits**: the tablet and the setup page each show **six digits** worked out from the code
+  and the tablet's key, and only when you confirm on the setup page that they match does that key
+  become the owner key. A **No** voids the code; make a new one and scan again.
+
+**In the app** ([#2823](https://github.com/openzigs/onyourleft/issues/2823),
+[#2828](https://github.com/openzigs/onyourleft/issues/2828)): open **Instance**, press **Scan a
+code** (or **Paste a code instead** and paste the line printed under the QR), answer **My server's
+setup page** to *Where did this code come from?*, then press **Claim this server**. The app shows its
+six digits large, in two groups of three as the setup page does. Once you have pressed **Yes** on the
+setup page, press **Sign in as the owner** in the app: it signs the tablet in, says it now owns the
+server, and the setup page's invite step opens. If you press it before the Yes, the app says to
+confirm on the setup page first. The claim QR is the same `<card> <code>` line as a rider invite and
+a code from another of your devices, which is why the app asks where the code came from rather than
+guessing; nothing is sent until you press the button the answer opens.
+
+What to know about it:
+
+- **The claimed key is kept in the database** (`instance_owner`, migration 0047), and every owner
+  check reads it there on every request, so a claim and a reset apply at once, with no restart. It is
+  in your backups, like every account.
+- **A claim code** lives ten minutes, is used once, and is kept only as its SHA-256; making a new one
+  voids the last, a waiting claim included. Only one claim can wait at a time.
+- **Every refusal is one sentence**: a wrong, used or expired code, a claim while another waits, the
+  deputy's key, and an instance that already has an owner all get the same answer, so the answer says
+  nothing about which it was. Redemptions are limited to 10 a minute from one address and 30 a minute
+  from everybody, as an admin sign-in is.
+- **The route is never answered in plaintext**, on an instance without `OYL_INSTANCE_SECRET_KEY` too:
+  an unsealed claim is refused `sealed_required` and changes nothing. An instance with no secret has
+  no keys to pin, so it can only take its owner from `.env`.
+- **The operator log** records a code made, a claim confirmed or discarded (from the setup page, naming
+  no athlete), and a reset (from the CLI). No entry names a code, a key or the six digits.
+
+### Resetting the owner from the host
+
+If the claimed tablet is lost, or the wrong device's claim was confirmed, reset the claim on the host:
+
+```bash
+docker compose exec instance node src/operator/cli.ts owner-claim reset
+```
+
+It clears the claimed owner key, voids every claim code, ends **every admin page session and every
+setup session**, **reopens the first-run setup at its claim step** (#2784), and writes
+`owner_claim_reset` to the operator log, in one transaction. Its report says whether a key was cleared
+(`cleared`), how many admin sessions ended, and `ownerKeyFromEnvironment: true` when
+`OYL_INSTANCE_OWNER_KEY` is set — in which case that variable is still the owner, as it was. The
+instance is then unclaimed, and the owner claims it again from the setup page. A rider who recovered
+their account with a recovery code holds a new device key, so they reset and claim again too, just as
+they would edit `.env`.
+
+## The first-run setup page
+
+A fresh install needs no `.env` edit for its owner, its secret or its registration mode: the instance
+serves a **setup page on the server machine** that walks the owner through them (ADR 0080 D-1, D-2,
+D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
+
+- **Where**: `http://localhost:8788/setup`, on the loopback listener (`OYL_INSTANCE_ADMIN_LOOPBACK_PORT`,
+  8788 in the home deployment), **with the admin pages on or off**. Type `localhost`, not `127.0.0.1`:
+  any other address is told which one to open. Through the tunnel or the tailnet every `/setup` path is
+  `not_found`, as a path with no route is.
+- **The setup code**: the instance makes one at **every start** while the setup is open and writes it
+  to the file `setup-code` in the secrets folder beside `compose.yaml` (`OYL_INSTANCE_SECRETS_DIR`),
+  owner-only. The log says where it is, never what it is:
+  `{"event":"first-run-setup","open":"http://localhost:8788/setup","codeIn":"secrets/setup-code",…}`.
+  A code works once, for ten minutes; restart the instance (`docker compose restart instance`) for a
+  new one, or print one on the host:
+
+  ```bash
+  docker compose exec instance node src/operator/cli.ts setup-code
+  ```
+
+  which writes the file too and voids the code before it. A wrong, used or expired code gets one
+  sentence; ten attempts a minute from one address, thirty from everybody, and the next is refused
+  even with the right code.
+- **The steps**, each of which the operator log records from the source `setup`, naming no athlete:
+  1. **Claim** — a claim code as a QR with the instance card, the tablet's claim, and the six digits
+     compared on both screens ([Claiming the instance from the app](#claiming-the-instance-from-the-app)).
+     Until a tablet scans it the step keeps showing the **same** QR, with an *I’ve scanned it* button
+     that loads the step again; no setup page reloads itself (WCAG 2.2.1), so the code beside the QR
+     stays selectable. The code is held in the instance's memory for the session that asked for it,
+     never in the database, and is no longer drawn once its ten minutes are over. After *Yes* the step says the tablet now owns the
+     server, before the next step.
+  2. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
+     are in a collapsed block for people comfortable with the command line.
+  3. **The emergency kit** — offered **once** per setup session, with no passkey
+     ([The instance's secrets](#the-instances-secrets)).
+  4. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
+     elsewhere"), and **Back up now**; while a backup waits the step has a *Check now* button. The folders
+     are `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`, named only in the step's collapsed command-line
+     block: the `backup` service is started with them, so the page checks and explains and cannot
+     choose them.
+  5. **Who may join** — the registration mode, in plain words (*Anyone can join*, *I approve each new
+     rider*, *Only people I invite*, *Nobody new*; stored as `open`, `approval`, `invite`, `closed`).
+     Its one button saves the choice and moves on. The one chosen here is kept in the database and
+     **wins over `OYL_INSTANCE_REGISTRATION`** until it is cleared (ADR 0080 D-6).
+  6. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
+     the instance. The app does not sign in by itself after the claim, so until it has the step says
+     what to do on the tablet.
+  7. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
+     working or not, who may join, and the invites made. The page is then `not_found` for good, after
+     a restart too; only `owner-claim reset` reopens it. The *Setup is finished* page carries its
+     stylesheet inline, allowed by its hash in that response's CSP, because `/setup/setup.css` has
+     gone with the rest.
+- **Leave whenever you like.** The step is kept in the database, so coming back — after a restart, with
+  the new code — resumes it. A setup session ends after 15 minutes without use and 2 hours after the
+  code was typed.
+- **With `OYL_INSTANCE_OWNER_KEY` set the setup is done from the first start**: no code is made and
+  nothing is served at `/setup`. Every install from before #2784 is unchanged.
+- **While the instance is unclaimed and holds no account, every registration is refused**, whatever the
+  mode, so a stranger who finds the address first gets no account (ADR 0080 D-3).
+
+### The registration mode from the host
+
+```bash
+docker compose exec instance node src/operator/cli.ts registration set approval   # or invite, open, closed
+docker compose exec instance node src/operator/cli.ts registration clear          # back to .env
+```
+
+A new rider meets the mode at once, with no restart, and Status shows it. `clear` returns to
+`OYL_INSTANCE_REGISTRATION`. Each is a `registration_mode_set` entry in the operator log.
+
 ## The Operate area
 
 The app has an **owner-only area for running the instance** — Operate ([#2601](https://github.com/openzigs/onyourleft/issues/2601)).
@@ -975,7 +1182,7 @@ as everything else ([ADR 0047](adr/0047-end-to-end-encryption-between-the-app-an
 so the instance gains no new login. The server half is [#2602](https://github.com/openzigs/onyourleft/issues/2602):
 
 - **The owner's alone.** Every `/v1/operate/*` route is answered only for the athlete whose device
-  holds `OYL_INSTANCE_OWNER_KEY`. Anybody else — **the deputy included**, and a rider awaiting
+  holds the owner key: `OYL_INSTANCE_OWNER_KEY`, or the key a claim recorded (above). Anybody else — **the deputy included**, and a rider awaiting
   approval or suspended — is answered `not_found`, exactly as an address with no route. The deputy is
   a second moderator, not the operator (ADR 0046 D-9 Q9), and keeps the Moderation screen. The check
   is made by the instance on every request, never only by hiding a button.
@@ -989,7 +1196,7 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   the CLI is run by whoever can reach the data, not by an account. The commands that change state —
   `migrate`, `backup` (each run of `backup-loop` too), `restore`, `room-open`, `model-key set|clear`,
   `instance-key init|rotate|rotate-identity|reset`, `load-accounts add|erase`, `account-erase
-  --confirm`, `analysis-settings clear|others` and `admin-code` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
+  --confirm`, `analysis-settings clear|others`, `admin-code` and `owner-claim reset` — are logged; reads are not. From the app, "back up now" is logged as `backup_requested`. A command whose work is files (`migrate`, `backup`, `restore`) logs once the
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
@@ -1151,6 +1358,11 @@ so the instance gains no new login. The server half is [#2602](https://github.co
 
 ## Admin pages
 
+**With Funnel on** (`OYL_INSTANCE_REMOTE_PATH=funnel`, #2805, ADR 0079 D-3), the instance's public
+listener answers every `/admin` path with `404`, whatever the request carries: Funnel puts that
+listener on the internet with no rule in front of it. The pages on the server machine, below, and
+the card on them are unchanged, and `OYL_INSTANCE_ADMIN_PAGES` stays as you set it.
+
 The instance can also serve **admin pages of its own**, at `/admin`, for an owner who wants to run
 it from a browser without the app ([ADR 0069](adr/0069-the-instances-own-admin-pages-and-a-tls-only-admin-channel.md),
 [#2639](https://github.com/openzigs/onyourleft/issues/2639)). What exists so far is the sign-in and
@@ -1162,7 +1374,41 @@ sign-in lands) and the **operator log** (`/admin/log`, 50 entries a page, newest
 entries* for the next); and since
 [#2648](https://github.com/openzigs/onyourleft/issues/2648) the **AI backend** (`/admin/analysis`): the local model, where it is set and
 whether it is on, the switches for what the instance offers riders, the models on the local server
-with *Check it calls tools*, the queue, and *Return to .env*. Each shows what the app's Operate area
+with *Check it calls tools*, the queue, and *Return to .env*; and since
+[#2646](https://github.com/openzigs/onyourleft/issues/2646) **Accounts** (`/admin/accounts`): how
+many accounts await approval, are approved and are suspended, the registration mode with the steps to
+change it in `.env`, and the riders waiting for approval — each one's display name, account id, when
+they asked and whether they confirmed they are 18 or over, and nothing more (ADR 0069 D-9). A passkey
+session can **approve or refuse** each, with a reason, through the same moderation route the app's
+Moderation screen uses; the decision is written to the moderation log and, as
+`registration_decided`, to the operator log in the same transaction. Suspensions and invitations stay
+on the app's Moderation screen; and since [#2647](https://github.com/openzigs/onyourleft/issues/2647)
+**Backups** (`/admin/backups`): the newest 50 records the backup service wrote, each in the app's
+words with its database SHA-256, the snapshots it removed and the free space where snapshots and
+their off-box copies go, and the steps to restore the newest snapshot on the host. A passkey session
+can **back up now**, through the same route the app uses, so its rule (one waiting, or none in the
+last 15 minutes) and its `backup_requested` entry are the route's own; a one-time code's session
+asks for none on either listener (ADR 0069 Q-A). No page names a host folder. Restore stays on the
+command line. Since [#2649](https://github.com/openzigs/onyourleft/issues/2649) there is also **Rooms**
+(`/admin/rooms`): every open room, its kind, private or public, its phase, when it opened, its
+host's display name and its riders by display name — never where anyone is, how fast or how hard —
+and, in a passkey session, **End room** for each: pick why, type the room's code, and your passkey
+is asked again. The route's own close runs: everyone in it is told the room closed (`4005`), nobody
+can rejoin, results already final are kept and nothing reaches anyone's trainer; the operator log's
+`room_ended` names the admin pages and the listener. Since
+[#2650](https://github.com/openzigs/onyourleft/issues/2650) there is also **Keys** (`/admin/keys`): the keys' state,
+the current encryption key's serial and when it rotates by itself, and the older keys held. **The
+instance card and its fingerprint are shown only on the server machine's listener**
+(`OYL_INSTANCE_ADMIN_LOOPBACK_PORT`), never through the tunnel, because a rider pins the card only
+from a source the edge cannot write (ADR 0047 D-6): through the tunnel the page says to open it on
+the server machine or run `operator instance-key show`. A passkey session can **rotate the
+encryption key** by typing `rotate`; the route's key lease, its `busy` and its
+`instance_key_rotate` entry are its own, the old key keeps working for 7 days and nobody pins again.
+`rotate --drop-old`, `rotate-identity` and `reset` stay on the command line. Since
+[#2651](https://github.com/openzigs/onyourleft/issues/2651) there is also **Recent problems** (`/admin/problems`,
+beside the operator log): the instance's last problem lines since it started, newest first, each in
+the app's words with the line as logged under it — the lines the log's one redaction already wrote,
+so never a token, a key, a name or a coordinate; read-only, and empty again after a restart. Every page shows what the app's Operate area
 shows, in the same words: the page asks the instance's own Operate route as the owner, and draws its
 answer. On the AI backend page a passkey session can also change the settings, and **every change
 asks your passkey again** for that one change: the route's own checks run, its local-address rule
@@ -1297,6 +1543,12 @@ has the instance's name, how you signed in and through which listener, the secti
   cloudflared's fixed addresses (`OYL_INSTANCE_TRUSTED_PROXIES`), which closes the direct path. It
   **cannot** tell cloudflared from your browser on the `host.docker.internal` path. So an edge that
   rewrote the tunnel's ingress could reach the loopback pages.
+  - **The same holds for the `tailscale` container** (#2805, ADR 0079 D-2). Its fixed address
+    `172.30.87.11` is in the same list, and on 2026-11-18 (Docker 29.5.3, macOS) a request from it
+    to `instance:8788` was reset unread while one to `instance:8787` was answered. Through
+    `host.docker.internal:8788` it got `421`, because it sent that name as `Host`; a client that
+    sent `Host: localhost:8788` would not. The serve file names `instance:8787` and nothing else,
+    and it lives on the box.
   - ADR 0069 names this as a condition that makes the ADR wrong ("Docker networking that cannot
     keep the tunnel container off the second listener"). Until the owner rules on it, **this
     listener grants nothing the tunnel does not**. In particular, a passkey added here also needs

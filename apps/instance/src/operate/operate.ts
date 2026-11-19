@@ -351,12 +351,13 @@ export interface Operate {
   /** The newest backup records and any waiting request (#2606). Writes nothing, logs nothing. */
   backups(): Promise<BackupsView>;
   /**
-   * "Back up now" (#2606), as the owner `athleteId`: the request and its
-   * `backup_requested` entry in ONE transaction, or `too_many` — logged
-   * `refused` — while one waits or a backup ran in the last 15 minutes.
-   * Answers when it was asked, Unix seconds.
+   * "Back up now" (#2606), as `owner`: the request and its
+   * `backup_requested` entry, under the owner's source (the app, or since
+   * #2647 the admin pages' listener), in ONE transaction, or `too_many` —
+   * logged `refused` — while one waits or a backup ran in the last 15
+   * minutes. Answers when it was asked, Unix seconds.
    */
-  requestBackup(athleteId: string): Promise<OperateResult<{ readonly requestedAt: number }>>;
+  requestBackup(owner: OperateOwner): Promise<OperateResult<{ readonly requestedAt: number }>>;
   /** The analysis settings (#2609), for the owner `athleteId`. Writes nothing. */
   analysisSettings(athleteId: string): Promise<AnalysisSettingsView>;
   /** Save the fields `body` names, checked first; logged either way, under `owner`'s source. */
@@ -385,27 +386,27 @@ export interface Operate {
    */
   rooms(athleteId: string): Promise<OperateResult<readonly OperateRoomView[]>>;
   /**
-   * End `roomId` as the owner `athleteId` (#2612): `body.reason` one of
+   * End `roomId` as `owner` (#2612; logged under its source since #2649): `body.reason` one of
    * `ROOM_END_REASONS`, and `body.confirm` the room's short code — else
    * `validation_failed`, with nothing changed and nothing logged. `not_found`
    * for a room that is not an open rider's room. Closed and logged
    * `room_ended` in one transaction, then every socket in it closed.
    */
   endRoom(
-    athleteId: string,
+    owner: OperateOwner,
     roomId: string,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<{ readonly endedAt: number }>>;
   /** The card, the fingerprint and the encryption keys (#2613). Writes nothing. `unavailable` with no keys source. */
   keys(): Promise<OperateResult<KeysView>>;
   /**
-   * Rotate the encryption key as the owner `athleteId` (#2613): `body` must
+   * Rotate the encryption key as `owner` (#2613; logged under its source since #2650): `body` must
    * be `{ confirm: 'rotate' }`, else `validation_failed` and nothing is
    * written or logged. Logged `instance_key_rotate` — `refused` with `busy`
    * while the key lease is held — in the same transaction as the rotation.
    */
   rotateKey(
-    athleteId: string,
+    owner: OperateOwner,
     body: Readonly<Record<string, unknown>>,
   ): Promise<OperateResult<KeyRotation>>;
   /**
@@ -414,6 +415,40 @@ export interface Operate {
    * instance keeps none.
    */
   problems(): OperateResult<{ readonly lines: readonly RecentProblem[]; readonly since: number }>;
+}
+
+/**
+ * The instance's keys as Operate shows them (#2613): ONE read of `show()` —
+ * a second could meet keys changed from the CLI in between — or, when they
+ * cannot be read, why, with nothing else. Since #2650 the admin Keys page
+ * reads them here too, and draws the card and the fingerprint only on the
+ * loopback listener.
+ */
+export async function keysView(keys: Pick<InstanceKeys, 'show'>): Promise<KeysView> {
+  let shown: Awaited<ReturnType<typeof keys.show>>;
+  try {
+    shown = await keys.show();
+  } catch (error) {
+    const state: KeysState = error instanceof InstanceKeysUnavailable ? error.code : 'unreadable';
+    return { state, fingerprint: null, card: null, current: null, olderHeld: 0 };
+  }
+  const current = shown.encryptionKeys
+    .filter((key) => key.supersededAt === null)
+    .sort((a, b) => b.serial - a.serial)[0];
+  return {
+    state: 'ready',
+    fingerprint: shown.fingerprintBase32,
+    card: shown.card,
+    current:
+      current === undefined
+        ? null
+        : {
+            serial: current.serial,
+            createdAt: current.createdAt,
+            rotatesAt: current.createdAt + ENCRYPTION_KEY_LIFE_SECONDS,
+          },
+    olderHeld: shown.encryptionKeys.filter((key) => key.supersededAt !== null).length,
+  };
 }
 
 /** What `unavailable` says on an instance with no keys. Names the variable, never a value. */
@@ -544,7 +579,7 @@ export function createOperate(options: {
       shown.sort((a, b) => b.openedAt - a.openedAt || a.roomId.localeCompare(b.roomId));
       return { ok: true, value: shown };
     },
-    async endRoom(athleteId, roomId, body) {
+    async endRoom(owner, roomId, body) {
       if (roomSources === undefined) return { ok: false, code: 'unavailable' };
       const fields: FieldProblem[] = [];
       for (const name of Object.keys(body)) {
@@ -584,7 +619,7 @@ export function createOperate(options: {
       const ended = await sources.end(roomId, () =>
         sources.rooms.end(roomId, async (close) => {
           const { value } = await store.recordOperatorAction(
-            { actor: { source: 'app', athleteId }, action: 'room_ended', at },
+            { actor: owner, action: 'room_ended', at },
             async (inside) => {
               const closed = await close(inside);
               return {
@@ -601,40 +636,9 @@ export function createOperate(options: {
     },
     async keys() {
       if (keySources === undefined) return { ok: false, code: 'unavailable' };
-      // One read: a second one could meet keys changed from the CLI in between.
-      let shown: Awaited<ReturnType<typeof keySources.keys.show>>;
-      try {
-        shown = await keySources.keys.show();
-      } catch (error) {
-        const state: KeysState =
-          error instanceof InstanceKeysUnavailable ? error.code : 'unreadable';
-        return {
-          ok: true,
-          value: { state, fingerprint: null, card: null, current: null, olderHeld: 0 },
-        };
-      }
-      const current = shown.encryptionKeys
-        .filter((key) => key.supersededAt === null)
-        .sort((a, b) => b.serial - a.serial)[0];
-      return {
-        ok: true,
-        value: {
-          state: 'ready',
-          fingerprint: shown.fingerprintBase32,
-          card: shown.card,
-          current:
-            current === undefined
-              ? null
-              : {
-                  serial: current.serial,
-                  createdAt: current.createdAt,
-                  rotatesAt: current.createdAt + ENCRYPTION_KEY_LIFE_SECONDS,
-                },
-          olderHeld: shown.encryptionKeys.filter((key) => key.supersededAt !== null).length,
-        },
-      };
+      return { ok: true, value: await keysView(keySources.keys) };
     },
-    async rotateKey(athleteId, body) {
+    async rotateKey(owner, body) {
       if (keySources === undefined) return { ok: false, code: 'unavailable' };
       const fields: FieldProblem[] = [];
       for (const name of Object.keys(body)) {
@@ -645,7 +649,7 @@ export function createOperate(options: {
       if (fields.length > 0) return { ok: false, code: 'validation_failed', fields };
       const sources = keySources;
       const { value } = await store.recordOperatorAction<KeyRotation>(
-        { actor: { source: 'app', athleteId }, action: 'instance_key_rotate', at: seconds() },
+        { actor: owner, action: 'instance_key_rotate', at: seconds() },
         async (inside) => {
           try {
             // No `dropOld`, no `serialAbove`: the routine rotation, and only it.
@@ -781,10 +785,10 @@ export function createOperate(options: {
       ]);
       return { records, pendingSince: pending?.requestedAt ?? null, now: seconds() };
     },
-    async requestBackup(athleteId) {
+    async requestBackup(owner) {
       const at = seconds();
       const { value } = await store.recordOperatorAction<BackupRequestOutcome>(
-        { actor: { source: 'app', athleteId }, action: 'backup_requested', at },
+        { actor: owner, action: 'backup_requested', at },
         async (inside) => {
           const asked = await inside.requestBackup(at);
           return asked.outcome === 'requested'

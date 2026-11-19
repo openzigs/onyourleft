@@ -1285,3 +1285,19 @@ Until 2026-10-07 this section was §"Owner questions left open".
   the rule. For every other job type D-7 and D-9 stand as written, with the entries above; the
   re-plan of the 2026-10-09 entry is unchanged. This entry only points there. The body above is not
   edited. (#2707)
+- **2026-11-16** — **Once [ADR 0072](0072-a-model-directs-the-bot-pacer-during-a-ride.md) is
+  Accepted, it supersedes D-7's *"nothing runs during a ride"* for one more use, the AI pacer**,
+  beside the re-plan of the 2026-10-09 entry and ADR 0071's lap-race bot tactics. A model on the
+  instance may pick the bot pacer's plan and intent, and write one screened line of feedback, during
+  a solo ride the rider chose to ride with an AI pacer, on ADR 0071's terms: the instance's local
+  model only, the rider's consent naming the endpoint, write-ups waiting while the ride runs, no
+  tools, no power field (its D-3, D-4 and D-8). It is the first model text a rider is shown during a
+  ride, and it is screened on the instance and on the device (its D-4). For every other job type D-7
+  and D-9 stand as written, with the entries above. This entry only points there. The body above is
+  not edited. (#2712)
+- **2026-11-17** — **Once [ADR 0080](0080-first-run-setup-and-owner-claim-on-the-loopback-listener.md)
+  is Accepted, D-9 Q9's `OYL_INSTANCE_OWNER_KEY` reads as "the owner key"**: the variable when it is
+  set, and otherwise the device key the owner claimed from the app, recorded in the database (its
+  D-3). The operator is still the athlete of the owner key, and the deputy is still not the operator.
+  Neither the variable nor a claim changes who may ask for analysis. This entry only points there.
+  The body above is not edited. (#2780)

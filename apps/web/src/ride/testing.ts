@@ -264,6 +264,8 @@ export function stubRideController(
       calls.unpair.push(id);
       return Promise.resolve();
     },
+    // #2669: a stub remembers nothing, so there is nothing to reconnect.
+    restoreRemembered: async () => Promise.resolve(),
     refreshRecoverable: () => {
       calls.refreshRecoverable += 1;
       return Promise.resolve();
@@ -312,6 +314,7 @@ export function stubRideController(
       calls.unlockTouch += 1;
     },
     noteSoloDraft: () => undefined,
+    notePacerDecision: () => undefined,
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },

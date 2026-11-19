@@ -49,6 +49,11 @@
  * named to decide it. Such an attempt changes nothing and IS logged, as
  * `refused_<action>`, so the owner can see a deputy who tried to act on them.
  *
+ * Since ADR 0080 D-3 (#2782) the owner's key need not be named: with no
+ * `OYL_INSTANCE_OWNER_KEY` it is the key the owner's claim recorded in the
+ * database, read on every check ({@link Moderation.ownerKey}). The
+ * environment wins whenever it is set.
+ *
  * ## A report about the only moderator (#905)
  *
  * With one moderator named, nobody else could ever decide a report about
@@ -65,6 +70,7 @@
  */
 
 import type { ErrorCode, FieldProblem } from '../errors.ts';
+import type { AdminChannel } from '../route-kit.ts';
 import { encodeCursor, parsePageRequest } from '../pagination.ts';
 import type {
   AthleteRecord,
@@ -194,10 +200,21 @@ export interface Moderation {
   /** The role the athlete holds, if any. */
   roleOf(athleteId: string): Promise<ModeratorRole | undefined>;
   /**
-   * Whether the operator named one moderator only (#905): then a report about
-   * them is theirs to decide, declared and logged as such.
+   * **The owner key** (ADR 0080 D-3): `OYL_INSTANCE_OWNER_KEY` when it is set,
+   * otherwise the key a confirmed claim recorded in the database (#2782),
+   * otherwise none. Read from the database on every call — never a copy made
+   * at start — so a claim takes effect without a restart and a reset ends it
+   * at once. Every owner check goes through it.
    */
-  readonly soleModerator: boolean;
+  ownerKey(): Promise<string | undefined>;
+  /** Whether `publicKey` is the owner key or the deputy's: such a key registers active. */
+  isModeratorKey(publicKey: string): Promise<boolean>;
+  /**
+   * Whether there is one moderator only (#905): then a report about them is
+   * theirs to decide, declared and logged as such. Asked each time, since the
+   * owner may be claimed while the instance runs (#2782).
+   */
+  soleModerator(): Promise<boolean>;
 
   /**
    * `shownName` is the name a race's result showed the caller on the row
@@ -347,6 +364,14 @@ export interface Moderation {
       /** The statement of reasons (#910): required of a restriction ({@link RESTRICTIONS}). */
       readonly statement?: unknown;
     },
+    /**
+     * The admin channel the decision came through (#2646, ADR 0069 D-8, D-9),
+     * set only by the admin seam's marker and only for a registration's
+     * approval or refusal: its moderation log row is then written in ONE
+     * transaction with a `registration_decided` operator log entry under that
+     * channel's source, so the decision is told apart from one made in the app.
+     */
+    channel?: AdminChannel,
   ): Promise<ModerationResult<{ logId: number }>>;
   dismiss(
     moderatorId: string,
@@ -413,20 +438,35 @@ export function checkReason(
   return { ok: true, reason };
 }
 
-const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** An athlete id as the routes take one in `{athleteId}`; the admin Accounts page checks its form against the same. */
+export const ATHLETE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A registration's two decisions, by the word `registration_decided` logs each with (#2646). */
+const REGISTRATION_DECISIONS: ReadonlyMap<AthleteAction, 'approved' | 'refused'> = new Map([
+  ['approve_registration', 'approved'],
+  ['refuse_registration', 'refused'],
+]);
 
 export function createModeration(options: ModerationOptions): Moderation {
   const { store, now } = options;
   const seconds = (): number => Math.floor(now() / 1000);
   const moderators = options.moderators ?? {};
   const limits = options.limits ?? DEFAULT_MODERATION_LIMITS;
-  const soleModerator = (moderators.owner === undefined) !== (moderators.deputy === undefined);
+  /** The environment wins, and a claim is refused while it is set (ADR 0080 D-3, Q-2). */
+  async function ownerKey(): Promise<string | undefined> {
+    return moderators.owner ?? (await store.claimedOwnerKey());
+  }
+
+  async function soleModerator(): Promise<boolean> {
+    return ((await ownerKey()) === undefined) !== (moderators.deputy === undefined);
+  }
 
   async function roleOf(athleteId: string): Promise<ModeratorRole | undefined> {
     const live = (await store.listDeviceKeys(athleteId))
       .filter((key) => key.revokedAt === null)
       .map((key) => key.publicKey);
-    if (moderators.owner !== undefined && live.includes(moderators.owner)) return 'owner';
+    const owner = await ownerKey();
+    if (owner !== undefined && live.includes(owner)) return 'owner';
     if (moderators.deputy !== undefined && live.includes(moderators.deputy)) return 'deputy';
     return undefined;
   }
@@ -468,6 +508,10 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     roleOf,
+    ownerKey,
+    async isModeratorKey(publicKey) {
+      return publicKey === (await ownerKey()) || publicKey === moderators.deputy;
+    },
     soleModerator,
 
     async block(athleteId, target, shownName) {
@@ -729,7 +773,7 @@ export function createModeration(options: ModerationOptions): Moderation {
       };
     },
 
-    async act(moderatorId, action, target, fields) {
+    async act(moderatorId, action, target, fields, channel) {
       const checked = checkReason(fields.reason);
       if (!checked.ok) {
         return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
@@ -757,17 +801,39 @@ export function createModeration(options: ModerationOptions): Moderation {
       if ((await roleOf(target)) !== undefined) {
         return refusedOnModerator(action, moderatorId, target, reportId, checked.reason);
       }
-      return logged(
-        await store.moderate({
-          action,
-          actorAthleteId: moderatorId,
-          targetAthleteId: target,
-          reportId,
-          reason: checked.reason,
-          at: seconds(),
-          ...(statement === undefined ? {} : { statement }),
-        }),
+      const moderated = {
+        action,
+        actorAthleteId: moderatorId,
+        targetAthleteId: target,
+        reportId,
+        reason: checked.reason,
+        at: seconds(),
+        ...(statement === undefined ? {} : { statement }),
+      };
+      const decision = REGISTRATION_DECISIONS.get(action);
+      if (channel === undefined || decision === undefined) {
+        return logged(await store.moderate(moderated));
+      }
+      // ADR 0069 D-9: the moderation log row and the operator log entry together, or neither.
+      const { value } = await store.recordOperatorAction(
+        {
+          actor: {
+            source: channel === 'loopback' ? 'admin_loopback' : 'admin_tunnel',
+            athleteId: moderatorId,
+          },
+          action: 'registration_decided',
+          at: moderated.at,
+        },
+        async (inside) => {
+          const outcome = await inside.moderate(moderated);
+          return {
+            outcome: outcome.outcome === 'applied' ? 'done' : 'refused',
+            detail: decision,
+            value: outcome,
+          };
+        },
       );
+      return logged(value);
     },
 
     statements: (athleteId) => store.listStatements(athleteId),
@@ -971,7 +1037,7 @@ export function createModeration(options: ModerationOptions): Moderation {
       // goes on to `moderate`, which answers it is not applicable.
       const report = await store.getReport(Number(reportId));
       if (report?.closedAt === null && report.targetAthleteId === moderatorId) {
-        if (soleModerator) {
+        if (await soleModerator()) {
           return logged(
             await store.moderate({
               action: 'dismiss_own_report',

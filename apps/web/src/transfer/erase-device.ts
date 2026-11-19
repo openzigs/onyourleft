@@ -178,6 +178,13 @@ export const ERASE_REMOVES: readonly string[] = [
   // Android its Bluetooth address. `deleteAthlete` cannot see it, and
   // {@link eraseDevice}'s `trainerTargets` is what makes the line true.
   'the last power target each trainer you rode on confirmed, when it confirmed it, and which trainer that was',
+  // #2669. Not a store row either: the Android app remembers each sensor the
+  // rider paired — its device id (on Android, its Bluetooth address), its
+  // name and what it was paired as — in `localStorage`
+  // (`ride/remembered-sensors.ts`), so it can reconnect with no chooser.
+  // `deleteAthlete` cannot see it; {@link eraseDevice}'s `rememberedSensors`
+  // is what makes the line true.
+  'the sensors, trainer and steering controller this app remembers you paired, so it can reconnect to them: their names, what each was paired as, and which device each one is',
 ];
 
 /**
@@ -392,6 +399,8 @@ export async function eraseDevice(
     readonly instanceAnalysis?: EraseSideStores | undefined;
     /** The last target each trainer acknowledged, keyed by its device id (#1305) — `ride/trainer-target-memory.ts`. */
     readonly trainerTargets?: EraseSideStores | undefined;
+    /** The sensors the Android shell remembers, by device id (#2669) — `ride/remembered-sensors.ts`. */
+    readonly rememberedSensors?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
@@ -403,6 +412,7 @@ export async function eraseDevice(
   options.instance?.forget();
   options.instanceAnalysis?.forget();
   options.trainerTargets?.forget();
+  options.rememberedSensors?.forget();
   if (options.athlete !== undefined) {
     await store.ensureAthlete(options.athlete);
   }
