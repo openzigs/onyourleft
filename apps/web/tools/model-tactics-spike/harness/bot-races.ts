@@ -48,7 +48,6 @@ import {
   gradePercent,
   kilograms,
   modelRacingStyleOf,
-  modelTacticsSeats,
   readModelTacticsAnswer,
   type ModelTacticsInput,
   type RouteProfile,
@@ -195,14 +194,15 @@ function sampleOf(ride: LapRaceRide): BotRaceSample {
 
 /**
  * What the device is handed for `call`, standing where the instance and the
- * tactics port do: the instance reads the model's text and answers its moves,
- * `tactics_invalid` for a text that is no decision, `tactics_failed` for none.
+ * tactics port do: the instance reads the model's text against the menu the
+ * ask offered and answers the bot's pick (ADR 0081 D-3), `tactics_invalid`
+ * for a text that is no decision, `tactics_failed` for none.
  */
 function replyOf(call: ModelCall, input: ModelTacticsInput): ModelTacticsReply {
   if (call.text === undefined) return { kind: 'refused', code: 'tactics_failed' };
-  const read = readModelTacticsAnswer(call.text, modelTacticsSeats(input));
+  const read = readModelTacticsAnswer(call.text, input.you.menu);
   return read.ok
-    ? { kind: 'answer', body: { bots: read.moves } }
+    ? { kind: 'answer', body: read.pick }
     : { kind: 'refused', code: 'tactics_invalid' };
 }
 

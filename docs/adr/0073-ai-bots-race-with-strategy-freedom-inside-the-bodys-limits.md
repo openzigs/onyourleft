@@ -348,3 +348,14 @@ model race, or taking away a body's limit (D-2), needs one.
   race terrain, as guidance (D-5): there is still no attack gate (D-5.3), and the body's limits
   (D-2) and the answer are unchanged. This entry only records the wider input; nothing else in this
   ADR changes.
+
+- **2026-11-18** — **Once [ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted, D-3, D-4 and D-5.3 are superseded by it in part
+  for a model race.** The model is asked about one bot at a time and picks from a menu of two to
+  four moves the device made for that bot, so the freedoms D-3 gave are the model's only where the
+  menu offers them: no gamble under the W′ floor (D-3.1), a flyer for a breakaway rider or, late, a
+  rouleur (D-3.2), a `follow` or `chase` of the racer directly ahead (D-3.4), and a kick in the
+  finish window (D-3.5). A menu is a code-computed gate, which D-5.3 had none of. D-4 gains a case:
+  a bot the model answers `sit-in` for rides its seeded tactics, exactly as with no decision in
+  force. **D-2, the body's limits, is unchanged**, and so is D-5.4: the prompt is still guidance
+  about what each move is for. Read ADR 0081 for the rule. This entry only points there; nothing
+  else in this ADR changes. (#2836)

@@ -185,6 +185,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         while it is held the job worker claims re-plans
                         only, so write-ups wait — docs/architecture.md §"Bot-tactics
                         decisions and the model slot — #2709".
+                        Since #2836 (ADR 0081) a decision is for ONE bot,
+                        picked from the menu its ask carries (`tactics-8`,
+                        the reason word first), 90 a minute, and each
+                        writes one `tactics-call` log line of figures.
                         Since #2712 (ADR 0072) `POST /v1/analysis/pacer/decide`
                         (`tactics.ts` §`pace`, `pacer-prompt.ts`): the AI
                         pacer's plan, intent and one screened line, under
