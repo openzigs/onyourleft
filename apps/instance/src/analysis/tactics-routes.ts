@@ -3,8 +3,8 @@
 /**
  * **Model-chosen lap-race bot tactics** (#2709, ADR 0071): what this instance
  * offers the rider, their consent, a race's start and end, and one decision —
- * and **one AI-pacer decision** (#2712, ADR 0072), under the same consent,
- * slot and gates.
+ * and **one AI-pacer line** (#2712, ADR 0072; #2835, ADR 0083) and its
+ * warm-up, under the same consent and gates.
  * `tactics.ts` says what each checks, in what order, and why.
  *
  * Every one is `auth: 'session'` and `reaches: 'own'`: the athlete is the
@@ -15,7 +15,7 @@
  * moves answered for it never cross the tunnel's edge readable.
  */
 
-import { MODEL_PACER_SAY_MOST_CHARACTERS, PACER_INTENTS, PACER_PLANS } from '@onyourleft/domain';
+import { MODEL_PACER_SAY_MOST_CHARACTERS } from '@onyourleft/domain';
 
 import { errorResponse } from '../errors.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
@@ -60,13 +60,11 @@ const decision: Schema = {
 
 const pacerDecision: Schema = {
   type: 'object',
-  description: `The AI pacer’s plan and intent from their closed lists, and its line of feedback: at most ${String(MODEL_PACER_SAY_MOST_CHARACTERS)} characters, screened, or "" for none. No other field, and never a power.`,
+  description: `The AI pacer’s line of feedback: at most ${String(MODEL_PACER_SAY_MOST_CHARACTERS)} characters, screened, or "" for none. No other field: never a power, and since #2835 no plan and no intent, which your device decides.`,
   properties: {
-    plan: { type: 'string', enum: [...PACER_PLANS] },
-    intent: { type: 'string', enum: [...PACER_INTENTS] },
     say: { type: 'string' },
   },
-  required: ['plan', 'intent', 'say'],
+  required: ['say'],
   additionalProperties: false,
 };
 
@@ -207,7 +205,7 @@ export const TACTICS_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/analysis/pacer/decide',
     operationId: 'decidePacer',
-    summary: `One decision for your AI pacer (#2712, ADR 0072): \`input\` is the ride as it stands, exactly \`@onyourleft/domain\`’s \`ModelPacerInput\` — the pacer’s W/kg, its plan and intent and the seconds held, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden, and since #2760, each only when its sensor is live, your power over 3 s and the last minute with its zone, trend and time at or above threshold, your cadence, and your heart rate with its zone and trend, and up to three of the pacer’s own last lines, and since #2777 where you are against it (\`ahead\`, \`level\` or \`behind\`) and how the gap is moving, and since #2794 the course ahead of the pacer (the next climb and descent, and the climbing left); no coordinate, no name — at most 2 048 characters. Answers \`plan\` (\`rolling\`, \`even\` or \`climber\`), \`intent\` (\`hold\`, \`lift\` or \`ease\`) and \`say\`, one line of feedback of at most 80 characters with no number, no metric name and no health wording, or "". **No power, ever**, and nothing of it reaches a trainer: the plan and intent move the pacer inside its usual range. The same consent as AI bots, the same model slot (\`POST /v1/analysis/tactics/start\` and \`end\`), the same rate limit and the same model call, with no tools and no reasoning. \`tactics_invalid\` when the model’s answer was not such a decision, its line did not pass, or its line said the opposite of its intent, \`tactics_failed\` when it gave none in time; on either, and on every refusal, the pacer rides its usual rule.`,
+    summary: `One line from your AI pacer (#2712, ADR 0072; #2835, ADR 0083): \`input\` is the ride as it stands, exactly \`@onyourleft/domain\`’s \`ModelPacerInput\` — the pacer’s W/kg, what it is doing (its intent, by how many percent, and the seconds held), why (\`reason\`, one of a closed list your device chose it by) and whether the ride has just started, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden, and since #2760, each only when its sensor is live, your power over 3 s and the last minute with its zone, trend and time at or above threshold, your cadence, and your heart rate with its zone and trend, and up to three of the pacer’s own last lines, and since #2777 where you are against it (\`ahead\`, \`level\` or \`behind\`) and how the gap is moving, and since #2794 the course ahead of the pacer (the next climb and descent, and the climbing left), and since #2835 the gap in seconds, how long you have been where you are, and how the gap, your power, cadence and heart rate have drifted, as numbers; no coordinate, no name — at most 2 048 characters. A state without \`reason\` (a device from before #2835) is \`validation_failed\`. Answers \`say\` and nothing else: one line of feedback of at most 80 characters with no number but a cadence or power target, no metric name and no health wording, or "". **No power, ever, and no plan or intent**: your device decides what the pacer does before it asks, so no answer moves the pacer, and nothing of it reaches a trainer. The same consent as AI bots, the same model slot (\`POST /v1/analysis/tactics/start\` and \`end\`), the same rate limit and the same model call, with no tools and no reasoning. \`tactics_invalid\` when the model’s answer was not such a line or its line did not pass, \`tactics_failed\` when it gave none in time; either costs a line and nothing else.`,
     request: {
       type: 'object',
       properties: { input: { type: 'object', description: 'A `ModelPacerInput` (#2712).' } },
@@ -233,6 +231,36 @@ export const TACTICS_ROUTES: readonly Route[] = [
         outcome.code,
         outcome.fields === undefined ? {} : { fields: outcome.fields },
       );
+    },
+  },
+  {
+    ...COMMON,
+    method: 'POST',
+    path: '/v1/analysis/pacer/warm',
+    operationId: 'warmPacer',
+    summary: `You turned the AI pacer on (#2835, ADR 0083 D-4): a call of the pacer’s own shape about a fixed ride, with nothing of yours in it, goes out to load the model and have it read the pacer’s words, so the first line of your ride is not a cold load. Answers 202 at once; \`warming\` is false when a warm-up of yours is already out. **It takes no model slot**: write-ups do not wait for it and nobody’s race is refused for it. \`local_unavailable\` and \`tactics_consent_required\` before anything is sent. Counted with your decisions against \`rate_limited\`.`,
+    accepted: true,
+    errors: [
+      'unauthenticated',
+      'local_unavailable',
+      'tactics_consent_required',
+      'rate_limited',
+      'unavailable',
+    ],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: { warming: { type: 'boolean' } },
+        required: ['warming'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const got = ready(context);
+      if (got === undefined) return errorResponse('unavailable');
+      const outcome = await got.tactics.warmPacer(got.caller);
+      return outcome.ok ? json(outcome.value, 202) : errorResponse(outcome.code);
     },
   },
   {

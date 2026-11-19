@@ -12,14 +12,21 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0083 is [ADR 0083](../adr/0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md)**,
+  taken by [#2835](https://github.com/openzigs/onyourleft/issues/2835) on 2026-11-18 for the device
+  deciding the AI pacer's intent and the model writing only the line, **Accepted** on
+  2026-11-19 on the owner's answers to its D-9 (#2864). It supersedes in part ADR 0072, ADR 0078 and ADR 0082, each of which gained one dated
+  `## Amendments` entry pointing to it. **It skipped 0081 on purpose**, leaving it to #2836, which
+  runs beside it and needs an ADR too. **The next free number is 0081**, and the number after it is
+  **0084**. A reviewer who remembers this file offering 0083 is reading the old file.
   ⚠️ **0082 is [ADR 0082](../adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**,
   taken by [#2794](https://github.com/openzigs/onyourleft/issues/2794) on 2026-11-18 for the AI
   pacer pacing the terrain with the rider on its wheel, **Accepted** on the owner's *"Yes to pacer
   rule"* on #2802. It supersedes in part ADR 0072 D-2, beside ADR 0078; both gained one dated
   `## Amendments` entry pointing to it. It skipped 0079 (ADR 0079, #2790) and 0080 (ADR 0080,
-  #2780), both written, and 0081, which no issue or pull request claims. **The next free number is
-  0081**, and the number after it is **0083**. A reviewer who remembers this file offering 0082 is
-  reading the old file.
+  #2780), both written, and 0081, which no issue or pull request claims. The next free number was
+  then 0081, with 0083 after it, which is ADR 0083 now (the entry above). A reviewer who remembers
+  this file offering 0082 is reading the old file.
   ⚠️ **0078 is [ADR 0078](../adr/0078-a-floor-under-the-ai-pacers-intent.md)**, taken by
   [#2777](https://github.com/openzigs/onyourleft/issues/2777) on 2026-11-17 for a floor under the
   AI pacer's intent, **Proposed** for the owner's answer. It supersedes in part ADR 0072 D-2 and

@@ -14,23 +14,13 @@ import {
 } from '../quantities';
 import type { RouteProfile } from '../route/profile';
 import {
-  directedPacingFactor,
-  PACER_AHEAD_FLOOR_S,
-  PACER_INTENTS,
-  PACER_PLANS,
-  RIDER_PLACES,
-  type PacerDirection,
-} from './model-pacer';
-import { PACING_FACTOR_CEILING, PACING_FACTOR_FLOOR } from './pacing';
-import {
   PACER_BEFORE_CLIMB_M,
   PACER_OVER_THE_TOP_M,
   PACER_TERRAINS,
   pacerSayAgainstRidden,
   pacerTerrainApplies,
   pacerTerrainAt,
-  riddenDirection,
-  type PacerRuleGround,
+  pacerTerrainIntent,
 } from './terrain-rule';
 
 const STEP = 10;
@@ -72,14 +62,6 @@ function pieces(...stretches: readonly (readonly [number, number])[]): (along: n
 
 /** Flat to 1 km, 500 m at 6 % to 1.5 km, flat to 2.5 km, 400 m at −5 % to 2.9 km, flat to 4 km. */
 const ROAD = profileOf(pieces([1_000, 0], [500, 6], [1_000, 0], [400, -5], [1_100, 0]), 4_000);
-
-const LEVEL: PacerRuleGround = {
-  terrain: 'none',
-  riderPlace: 'level',
-  riderInDraft: false,
-  aheadForS: undefined,
-};
-const HOLD: PacerDirection = { plan: 'climber', intent: 'hold' };
 
 describe('where the pacer is on the road, for the rule — ADR 0082 D-1', () => {
   it('states its figures', () => {
@@ -137,79 +119,14 @@ describe('who the rule is for — ADR 0082 D-1', () => {
   });
 });
 
-describe('the direction ridden — ADR 0082 D-1, D-2', () => {
-  it('eases before a climb and lifts on a descent and over the top, keeping the model’s plan', () => {
-    expect(riddenDirection(HOLD, { ...LEVEL, terrain: 'before-climb' })).toEqual({
-      plan: 'climber',
-      intent: 'ease',
-    });
-    expect(riddenDirection(HOLD, { ...LEVEL, terrain: 'descent' })).toEqual({
-      plan: 'climber',
-      intent: 'lift',
-    });
-    const ease = { plan: 'even', intent: 'ease' } as const;
-    expect(
-      riddenDirection(ease, {
-        ...LEVEL,
-        riderPlace: 'behind',
-        riderInDraft: true,
-        terrain: 'over-the-top',
-      }),
-    ).toEqual({ plan: 'even', intent: 'lift' });
-  });
-
-  it('rides the model’s direction itself where the rule does not act', () => {
-    const lift = { plan: 'rolling', intent: 'lift' } as const;
-    expect(riddenDirection(lift, LEVEL)).toBe(lift);
-    for (const terrain of PACER_TERRAINS) {
-      for (const riderPlace of ['ahead', 'behind'] as const) {
-        expect(riddenDirection(lift, { ...LEVEL, terrain, riderPlace })).toBe(lift);
-      }
-    }
-    expect(
-      riddenDirection(HOLD, {
-        ...LEVEL,
-        terrain: 'before-climb',
-        riderPlace: 'ahead',
-        riderInDraft: true,
-      }),
-    ).toBe(HOLD);
-  });
-
-  it('puts ADR 0078’s floor last, so the floor wins if the two ever meet', () => {
-    // Not reachable from a ride today (the rule refuses `ahead`, which the floor needs):
-    // the ground is built by hand to show the order.
-    expect(
-      riddenDirection(HOLD, {
-        terrain: 'before-climb',
-        riderPlace: 'level',
-        riderInDraft: true,
-        aheadForS: PACER_AHEAD_FLOOR_S,
-      }),
-    ).toEqual({ plan: 'climber', intent: 'hold' });
-  });
-
-  it('never takes the pacer outside #92’s envelope, on any grade, for any answer and ground', () => {
-    const grades = Array.from({ length: 101 }, (_, index) => -25 + index * 0.5);
-    for (const plan of PACER_PLANS) {
-      for (const intent of PACER_INTENTS) {
-        for (const terrain of PACER_TERRAINS) {
-          for (const riderPlace of [...RIDER_PLACES, undefined]) {
-            for (const riderInDraft of [true, false]) {
-              const ridden = riddenDirection(
-                { plan, intent },
-                { terrain, riderPlace, riderInDraft, aheadForS: undefined },
-              );
-              for (const grade of grades) {
-                const factor = directedPacingFactor(ridden, grade);
-                expect(factor).toBeGreaterThanOrEqual(PACING_FACTOR_FLOOR);
-                expect(factor).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
-              }
-            }
-          }
-        }
-      }
-    }
+describe('the intent each terrain is ridden at — ADR 0082 D-1', () => {
+  it('eases before a climb, lifts on a descent and over the top, and says nothing elsewhere', () => {
+    expect(PACER_TERRAINS.map((terrain) => [terrain, pacerTerrainIntent(terrain)])).toEqual([
+      ['before-climb', 'ease'],
+      ['descent', 'lift'],
+      ['over-the-top', 'lift'],
+      ['none', undefined],
+    ]);
   });
 });
 

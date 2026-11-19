@@ -380,7 +380,7 @@ export interface GameTrainerPort {
    * The AI pacer logged one ask — #2712, ADR 0072 D-5: kept by the ride
    * controller (`notePacerDecision`) so the saved ride carries the pacer's
    * decision log. ⚠️ Not about the trainer, which no pacer decision reaches
-   * (D-6): a closed-list record of the pacer's plan and intent and the times,
+   * (D-6): a closed-list record of what the pacer rode, why, and the times,
    * on this port for {@link gameRideEnded}'s reason, and named so nothing
    * else in production calls a method of that name. Optional, as
    * {@link soloDraftStepped} is; `gameTrainerPortOver` always supplies it.

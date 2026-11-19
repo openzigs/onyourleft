@@ -41,9 +41,12 @@ import {
   geographicPosition,
   kilograms,
   MODEL_PACER_LAPSE_S,
+  PACER_START_RAMP_S,
   routeProfile,
   seconds,
+  startRamped,
   watts,
+  type PacerDirection,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -444,11 +447,16 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
   const PLAN = botPacerPlan(2.5);
   const LIFT = { plan: 'climber', intent: 'lift' } as const;
 
-  /** `advanceBot` run directly, one fixed step at a time, with `direction` in force over [from, until). */
+  /**
+   * `advanceBot` run directly, one fixed step at a time, with `direction` in
+   * force over [from, until) — ridden up the start ramp inside the first
+   * minute (#2835), as the simulation and a replay both ride it.
+   */
   function reference(
     setup: SimulationSetup,
     steps: number,
     direction?: { readonly from: number; readonly until: number },
+    ridden: PacerDirection = LIFT,
   ) {
     const plain: BotCourse = {
       profile: setup.profile,
@@ -462,7 +470,7 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
       state = advanceBot(
         state,
         seconds(SIMULATION_STEP_SECONDS),
-        inForce ? { ...plain, direction: LIFT } : plain,
+        inForce ? { ...plain, direction: startRamped(ridden, at) } : plain,
       ).state;
     }
     return state;
@@ -481,13 +489,30 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
   }
 
   it('rides the decision from its seconds ridden, step for step through advanceBot', () => {
+    // Past the start ramp, so the lift is a lift.
+    const from = PACER_START_RAMP_S + 2;
+    const steps = Math.round((from + 8) / SIMULATION_STEP_SECONDS);
     const simulation = ride((it) => {
-      it.directPacer(LIFT, 2);
-    }, 200);
-    const expected = reference(hillyRoute(), 200, { from: 2, until: 2 + MODEL_PACER_LAPSE_S });
+      it.directPacer(LIFT, from);
+    }, steps);
+    const expected = reference(hillyRoute(), steps, { from, until: from + MODEL_PACER_LAPSE_S });
     expect(simulation.state.bot?.state.distance).toBe(expected.distance);
     expect(simulation.state.bot?.state.distance).toBeGreaterThan(
-      reference(hillyRoute(), 200).distance,
+      reference(hillyRoute(), steps).distance,
+    );
+  });
+
+  it('rides a decision made at the line up the start ramp: gently, and step for step as a replay would — #2835', () => {
+    const HOLD = { plan: 'rolling', intent: 'hold' } as const;
+    const steps = Math.round(10 / SIMULATION_STEP_SECONDS);
+    const simulation = ride((it) => {
+      it.directPacer(HOLD, 0);
+    }, steps);
+    const ramped = reference(hillyRoute(), steps, { from: 0, until: MODEL_PACER_LAPSE_S }, HOLD);
+    expect(simulation.state.bot?.state.distance).toBe(ramped.distance);
+    // `{rolling, hold}` is #92's own rule, so the whole difference is the ramp.
+    expect(simulation.state.bot?.state.distance).toBeLessThan(
+      reference(hillyRoute(), steps).distance - 1,
     );
   });
 

@@ -139,3 +139,22 @@ top, whatever the model says, which is what #2794 asked for and the model did no
   `lift` is +5 %, and the pacer also descends faster: then the descent lift should be `hold`.
 - **The model learns to pace the terrain itself** with the rider level, under a later prompt or
   model. Then the rule only repeats the model, and could be removed (D-6).
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-18** — **D-1.5, D-2, D-3's reason and D-4.2 and D-4.3 are superseded in part by
+  [ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md)**, **Proposed**, on the owner's
+  ruling of that day on [#2835](https://github.com/openzigs/onyourleft/issues/2835). **The rule
+  itself, D-1.1 to D-1.4, stands whole**, with its figures: it is now the second step of the one
+  device rule (`pacer/device-rule.ts` §`pacerRuleDecision`), read before the gap. What moves: the
+  device decides every intent, so the rule no longer acts *"on applied answers only"* (D-1.5) and a
+  missed answer no longer leaves an older decision in force; there is no order to keep against ADR
+  0078's floor (D-2), because the rule refuses `ahead` and the gap rule never eases there;
+  `pacerSayAgainstRidden` (D-3) is read on every line; `MODEL_PACER_CODE_VERSION` is 2 (D-4.2); and
+  the log records that the rule set the intent, as `before-climb`, `descent` or `over-the-top`
+  (D-4.3). `riddenDirection` is gone from the code. This ADR's body is unchanged.
+- **2026-11-19** — **[ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md) is Accepted.** The owner answered its D-9 on 2026-11-19, recorded in its
+  D-10 and on [#2864](https://github.com/openzigs/onyourleft/pull/2864), so the previous entry's *"Proposed"* no longer holds. This ADR's body is
+  unchanged.
