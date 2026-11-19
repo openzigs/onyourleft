@@ -137,8 +137,27 @@ import {
   SETUP_WRONG_ADDRESS_TEXT,
   setupStepNumberText,
   setupSummaryLines,
+  TAILNET_ACL,
+  TAILNET_ACL_LEAD,
+  TAILNET_ADDRESS_LEAD,
+  TAILNET_ADDRESS_OK_TEXT,
+  TAILNET_ADDRESS_WRONG_TEXT,
+  TAILNET_CHANGE_CLOUDFLARE_LINES,
+  TAILNET_CHANGE_EXPERT_LINES,
+  TAILNET_CHANGE_HEADING,
+  TAILNET_CHANGE_WARNING,
+  TAILNET_CLOUDFLARE_TEXT,
+  TAILNET_FUNNEL_TEXT,
+  TAILNET_KEYS_UNREADABLE_TEXT,
+  TAILNET_NEVER_YOURS_TEXT,
+  TAILNET_NO_CARD_TEXT,
+  TAILNET_NO_PATH_TEXT,
+  TAILNET_RIDERS_HEADING,
+  TAILNET_RIDERS_TEXT,
+  TAILNET_STEP_LEAD,
   type OperateLocalModel,
   type OperateRegistrationMode,
+  type OperateRemotePath,
   type ReachPath,
   type SetupSummary,
 } from '@onyourleft/operate-text';
@@ -481,6 +500,85 @@ ${reachPart(view.reach)}${view.card ? buttonForm('/setup/claim/code', csrf, CLAI
       )}<p class="notice">${escapeHtml(CLAIM_WAITING_TEXT)}</p>
 ${checkAgain('/setup/claim', CLAIM_SCANNED_BUTTON)}
 ${reachPart(view.reach)}`;
+  }
+}
+
+// --- tailnet
+
+/** What the tailnet step shows (#2817, ADR 0079 D-2, D-3, D-8). */
+export interface TailnetStepView {
+  /** `OYL_INSTANCE_REMOTE_PATH`, or `null` when it names none. */
+  readonly path: OperateRemotePath | null;
+  /**
+   * The address the RUNNING server read back: the one its card names, which
+   * is what every device pins and reaches; `OYL_INSTANCE_ORIGIN` itself only
+   * when there is no card ({@link keys} is then `none`).
+   */
+  readonly origin: string;
+  /** Whether {@link origin} is a Tailscale name, `https://<machine>.<tailnet>.ts.net`. */
+  readonly tailscaleName: boolean;
+  /**
+   * What a device fetching the keys meets (`GET /v1/instance/keys`): `ready`;
+   * `none`, no card can be drawn; `unreadable`, keys held that do not open at
+   * this address — what a changed origin leaves — so nothing reaches it yet.
+   */
+  readonly keys: 'ready' | 'none' | 'unreadable';
+}
+
+/**
+ * The tailnet step (#2817): the address the running server read back and
+ * whether it fits the path, how riders join (never as the owner, ADR 0079
+ * D-2), the access rule to paste, and — said BEFORE how to change the address
+ * — what changing it costs (D-8). Nothing here changes a setting: the address
+ * is `.env`'s alone (ADR 0080's table), so the page says how, and "Check now"
+ * reads it back from the server once it has been started again.
+ */
+export function tailnetBody(view: TailnetStepView): string {
+  const address = (() => {
+    const read = `<p>${escapeHtml(TAILNET_ADDRESS_LEAD)} <code>${escapeHtml(view.origin)}</code></p>`;
+    const tailnetPath = view.path === 'tailnet' || view.path === 'funnel';
+    const verdict =
+      view.keys === 'none'
+        ? `<p class="problem">${escapeHtml(TAILNET_NO_CARD_TEXT)}</p>`
+        : view.keys === 'unreadable'
+          ? `<p class="problem">${escapeHtml(TAILNET_KEYS_UNREADABLE_TEXT)}</p>`
+          : tailnetPath && !view.tailscaleName
+            ? `<p class="problem">${escapeHtml(TAILNET_ADDRESS_WRONG_TEXT)}</p>`
+            : view.tailscaleName
+              ? `<p class="notice">${escapeHtml(TAILNET_ADDRESS_OK_TEXT)}</p>`
+              : '';
+    return card(`${read}\n${verdict}\n${checkAgain('/setup/tailnet', SETUP_CHECK_NOW_BUTTON)}`);
+  })();
+  const riders = TAILNET_RIDERS_TEXT.map((line) => `<li>${escapeHtml(line)}</li>`).join('\n');
+  const joining = `<h2>${escapeHtml(TAILNET_RIDERS_HEADING)}</h2>
+<ul>
+${riders}
+</ul>
+<p class="warning">${escapeHtml(TAILNET_NEVER_YOURS_TEXT)}</p>
+<p>${escapeHtml(TAILNET_ACL_LEAD)}</p>
+<pre class="copy"><code>${escapeHtml(TAILNET_ACL)}</code></pre>`;
+  const how = (
+    view.path === 'cloudflare' ? TAILNET_CHANGE_CLOUDFLARE_LINES : TAILNET_CHANGE_EXPERT_LINES
+  )
+    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .join('\n');
+  // The warning comes first: nothing about HOW is read before what it costs (ADR 0079 D-8).
+  const change = `<h2>${escapeHtml(TAILNET_CHANGE_HEADING)}</h2>
+<p class="warning">${escapeHtml(TAILNET_CHANGE_WARNING)}</p>
+${expertDetails(`<ol>\n${how}\n</ol>`)}`;
+  switch (view.path) {
+    case 'cloudflare':
+      return `<p>${escapeHtml(TAILNET_CLOUDFLARE_TEXT)}</p>
+${address}${change}`;
+    case null:
+      return `<p class="hint">${escapeHtml(TAILNET_NO_PATH_TEXT)}</p>
+${address}${joining}
+${change}`;
+    case 'tailnet':
+    case 'funnel':
+      return `<p>${escapeHtml(TAILNET_STEP_LEAD)}</p>
+${view.path === 'funnel' ? `<p class="warning">${escapeHtml(TAILNET_FUNNEL_TEXT)}</p>\n` : ''}${address}${joining}
+${change}`;
   }
 }
 

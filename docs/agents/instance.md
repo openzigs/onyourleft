@@ -305,6 +305,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         accounts, no keys (the wrap binds the origin) — and
                         `/setup` answers one page saying what to set
                         (`createExampleAddressSetup`), taking no code.
+                        Since #2817 a `tailnet` step follows the claim
+                        (migration 0050); it reads the address back from
+                        the card and changes no setting.
                         Since #2792 its optional `ai` step (migration 0049)
                         finds Ollama (`analysis/ollama-setup.ts`), downloads
                         a model the owner NAMES and saves the one chosen

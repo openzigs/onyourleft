@@ -1158,24 +1158,41 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
      never in the database. Once its ten minutes are over it is dropped from memory and no longer
      drawn, and the step says once, to the session that was shown it, *That code ran out. Show a new
      one.* After *Yes* the step says the tablet now owns the server, before the next step.
-  2. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
+  2. **Tailnet** ([#2817](https://github.com/openzigs/onyourleft/issues/2817), ADR 0079 D-2, D-8) —
+     after the claim and before the passkey, because a passkey is bound to the address. It shows the
+     address the **running** server's card names, read on every load, and whether it is a `ts.net`
+     name, a problem when `OYL_INSTANCE_REMOTE_PATH` is `tailnet` or `funnel` and it is not, and a
+     problem when no card can be drawn (no keys opened) or when the keys held do not open at this
+     address, which is what a changed origin leaves: it asks the keys back as a device's
+     `GET /v1/instance/keys` does, not only the card. It says how riders join (invitation or
+     machine sharing, each on their own Tailscale account, never the owner's) and shows the access
+     rule of [3a.2](self-hosting/home-machine.md#3a-your-tailnet-no-domain) to copy; on `funnel` it
+     says what Funnel changes. **It changes no setting**: `OYL_INSTANCE_ORIGIN` is `.env`'s alone
+     (ADR 0080's table). Before its collapsed block says how to change the address (`.env`, then
+     `bash deploy.sh`, whose round trip checks the running origin against the name `tailscale serve`
+     answers on, then `instance-key reset`, because the keys are wrapped under the origin), it says
+     that the server makes new keys and so a new identity, that every device must scan the new card,
+     and that every passkey bound to the old host stops working. *Check now* reads the address and
+     the keys back after the restart. On `cloudflare` it
+     says there is nothing to set up; with no path named, that it cannot check a tailnet.
+  3. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
      are in a collapsed block for people comfortable with the command line.
-  3. **The emergency kit** — offered **once** per setup session, with no passkey
+  4. **The emergency kit** — offered **once** per setup session, with no passkey
      ([The instance's secrets](#the-instances-secrets)).
-  4. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
+  5. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
      elsewhere"), how long ago it ran by the server's clock ("14 minutes ago", never a UTC time), and
      **Back up now**; while a backup waits the step has a *Check now* button. The folders
      are `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`, named only in the step's collapsed command-line
      block: the `backup` service is started with them, so the page checks and explains and cannot
      choose them.
-  5. **Who may join** — the registration mode, in plain words (*Anyone can join*, *I approve each new
+  6. **Who may join** — the registration mode, in plain words (*Anyone can join*, *I approve each new
      rider*, *Only people I invite*, *Nobody new*; stored as `open`, `approval`, `invite`, `closed`).
      Its one button saves the choice and moves on. The one chosen here is kept in the database and
      **wins over `OYL_INSTANCE_REGISTRATION`** until it is cleared (ADR 0080 D-6).
-  6. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
+  7. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
      the instance. The app does not sign in by itself after the claim, so until it has the step says
      what to do on the tablet.
-  7. **AI write-ups** — optional ([#2792](https://github.com/openzigs/onyourleft/issues/2792)). The
+  8. **AI write-ups** — optional ([#2792](https://github.com/openzigs/onyourleft/issues/2792)). The
      step looks for Ollama at the address in `OYL_INSTANCE_ANALYSIS_MODEL_URL` if one is set, then at
      `http://ollama:11434` (the Compose `ollama` service), `http://host.docker.internal:11434` and
      `http://127.0.0.1:11434` (an Ollama installed on the host), each held to the rule for a local
@@ -1189,7 +1206,7 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
      the model once so the page can say how it fits. A download is logged `analysis_model_pull` and
      the choice `analysis_settings_set`, naming no model. Nothing Ollama says about a download is
      shown or logged, only its byte counts: its words can carry a path under the host user's home.
-  8. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
+  9. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
      working or not, who may join, the invites made, and whether AI write-ups are on. The page is
      then `not_found` for good, after a restart too; only `owner-claim reset` reopens it. The *Setup
      is finished* page carries its stylesheet inline, allowed by its hash in that response's CSP,

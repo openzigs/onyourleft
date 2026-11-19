@@ -13,6 +13,8 @@
  *   carries its number: never colour alone. On a narrow screen only the marks
  *   show, and each name stays for a screen reader.
  * - **The six digits** to compare, large, in two groups of three.
+ * - A block of text to copy (`pre.copy`, #2817): wrapped, never scrolled
+ *   sideways, so it needs no focus to be read with a keyboard.
  * - Spacing: a gap after a button before the next paragraph, a radio button
  *   level with its label, and no extra space above a card's first field.
  */
@@ -48,6 +50,8 @@ fieldset legend { padding: 0 var(--oyl-space-xs); }
 
 .compare { display: flex; flex-wrap: wrap; gap: var(--oyl-space-lg); margin: var(--oyl-space-md) 0; font-family: var(--oyl-font-family-display); font-size: 3.5rem; font-weight: 800; line-height: 1; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
 .summary li { margin: var(--oyl-space-sm) 0; }
+pre.copy { max-width: 68ch; margin: var(--oyl-space-sm) 0; padding: var(--oyl-space-sm); white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 0.2em; background: var(--oyl-color-surface-raised); }
+pre.copy code { padding: 0; background: transparent; }
 `;
 
 /** The whole of `/setup/setup.css`. */

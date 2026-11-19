@@ -54,6 +54,10 @@
  * transaction, from the source `setup`, naming no athlete. The step the setup is on is kept in the database,
  * so leaving and coming back — after a restart, with a new code — resumes it.
  *
+ * The tailnet step (#2817, ADR 0079 D-2, D-8) changes nothing: it reads the
+ * address back from the running server's card, says how riders join and what
+ * an address change costs, and how to make one in `.env` (ADR 0080's table).
+ *
  * Nothing here renders the setup code, a secret, a token or a coordinate (see
  * `pages.ts` for ADR 0080's own exceptions).
  */
@@ -92,7 +96,7 @@ import {
   type RemotePath,
 } from '../config.ts';
 import type { Resolver } from '../history/address.ts';
-import type { InstanceKeys } from '../keys/instance-keys.ts';
+import { type InstanceKeys, InstanceKeysUnavailable } from '../keys/instance-keys.ts';
 import { keysView } from '../operate/operate.ts';
 import type { TunnelState } from '../operate/status.ts';
 import type { ClientInfo } from '../route-kit.ts';
@@ -120,6 +124,7 @@ import {
   registrationBody,
   secretsBody,
   stepPage,
+  tailnetBody,
   wrongAddressPage,
   type ClaimView,
   type InviteView,
@@ -130,6 +135,27 @@ import type { SecretFromFile } from './secrets.ts';
 import { removeSetupCodeFile, setupAddress } from './setup-code.ts';
 import { SETUP_ROUTES, SETUP_STEPS, stepPath, type SetupStep } from './setup-routes.ts';
 import { SETUP_STYLE } from './style.ts';
+
+/** The origin an instance card names: `oyl-instance:<origin>#<fingerprint>` (#2817). */
+export function cardOrigin(card: string): string {
+  return card.slice('oyl-instance:'.length, card.lastIndexOf('#'));
+}
+
+/**
+ * Whether `origin` is a Tailscale name, `https://<machine>.<tailnet>.ts.net`
+ * (#2817): what the tailnet path's address must be (ADR 0079 D-2).
+ */
+export function isTailscaleName(origin: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === 'https:' && /^[^.]+\.[^.]+\.ts\.net$/.test(url.hostname.replace(/\.$/, ''))
+  );
+}
 
 /** The setup session's cookie. */
 export const SETUP_COOKIE = 'oyl-setup';
@@ -177,7 +203,10 @@ export interface SetupOptions {
   readonly port: number;
   /** `OYL_INSTANCE_ORIGIN`: what the emergency kit and the card are bound to. */
   readonly origin: string;
-  /** `OYL_INSTANCE_REMOTE_PATH` (#2855): which sentences say what a device needs first. */
+  /**
+   * `OYL_INSTANCE_REMOTE_PATH`: which sentences say what a device needs first
+   * (#2855), and which way in the tailnet step checks, or `null` (#2817).
+   */
   readonly remotePath: RemotePath | null;
   /**
    * The tunnel's readiness, as Status asks it (`operate/status.ts`
@@ -191,8 +220,11 @@ export interface SetupOptions {
   readonly ownerKeyFromEnvironment: boolean;
   /** The owner's claim (#2782): minted, confirmed and discarded from the setup source. */
   readonly ownerClaim: OwnerClaim;
-  /** The instance's own keys, for the card the claim and the invite carry. */
-  readonly instanceKeys?: Pick<InstanceKeys, 'show'>;
+  /**
+   * The instance's own keys, for the card the claim and the invite carry, and
+   * — `served`, what a device fetches — whether they open at this address (#2817).
+   */
+  readonly instanceKeys?: Pick<InstanceKeys, 'show' | 'served'>;
   /** The secrets read from the secrets folder: what the emergency kit holds. */
   readonly kitSecrets: readonly SecretFromFile[];
   /** `OYL_INSTANCE_REGISTRATION`, which the database's mode wins over (ADR 0080 D-6). */
@@ -390,7 +422,8 @@ export function createSetup(options: SetupOptions): Setup {
   async function reached(): Promise<SetupStep> {
     if ((await store.claimedOwnerKey()) === undefined) return 'claim';
     const state = await store.setupState();
-    return state === undefined || state.step === 'claim' ? 'passkey' : state.step;
+    // The step after the claim (#2817: the tailnet's, before the passkey bound to the address).
+    return state === undefined || state.step === 'claim' ? 'tailnet' : state.step;
   }
 
   /** The instance card, whole, or `null` when the keys cannot be read. */
@@ -423,6 +456,22 @@ export function createSetup(options: SetupOptions): Setup {
             ? 'connected'
             : 'not-connected',
     };
+  }
+
+  /**
+   * Whether a device's `GET /v1/instance/keys` would be served now (#2817): `unreadable`
+   * when this secret and origin cannot unwrap the keys held — what a changed origin leaves.
+   */
+  async function servedKeys(): Promise<'ready' | 'none' | 'unreadable'> {
+    if (options.instanceKeys === undefined) return 'none';
+    try {
+      await options.instanceKeys.served();
+      return 'ready';
+    } catch (error) {
+      return error instanceof InstanceKeysUnavailable && error.code === 'unreadable'
+        ? 'unreadable'
+        : 'none';
+    }
   }
 
   /** The owner's athlete, by the claimed key, or `undefined` before that device signs in. */
@@ -567,6 +616,21 @@ export function createSetup(options: SetupOptions): Setup {
         }
         const view = await claimView(url, session);
         return page(stepPage(frame, claimBody(view, csrf), { next: false }), 200);
+      }
+      case 'tailnet': {
+        // #2817: the address as the RUNNING server's card names it — what every device pins —
+        // read back on every load, so "Check now" after a restart shows the address it came up with.
+        // The card is drawn from the public key alone, so it is no proof the keys open: what a
+        // device fetches first (`GET /v1/instance/keys`) is, and a changed origin fails it.
+        const [card, keys] = await Promise.all([cardOf(), servedKeys()]);
+        const address = card === null ? options.origin : cardOrigin(card);
+        const body = tailnetBody({
+          path: options.remotePath,
+          origin: address,
+          tailscaleName: isTailscaleName(address),
+          keys: card === null ? 'none' : keys,
+        });
+        return page(stepPage(frame, body, { next: true }), 200);
       }
       case 'passkey':
         return page(stepPage(frame, passkeyBody(`${origin}/admin`), { next: true }), 200);
@@ -773,7 +837,8 @@ export function createSetup(options: SetupOptions): Setup {
             ? await options.ownerClaim.confirm(comparison, 'setup')
             : 'none';
         if (confirmed !== 'confirmed') return seeOther('/setup/claim?unconfirmed');
-        await store.setSetupStep('passkey', at);
+        // The step after the claim: the tailnet's (#2817).
+        await store.setSetupStep('tailnet', at);
         // The claim step, now saying the tablet owns the server, before the next step.
         return seeOther('/setup/claim');
       }

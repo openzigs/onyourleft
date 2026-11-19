@@ -30,7 +30,15 @@ import { codeWithCard, readCodeWithCard } from '../instance/instance-pin';
 import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
 
 type Step =
-  'claim' | 'passkey' | 'secrets' | 'backups' | 'registration' | 'invite' | 'ai' | 'finish';
+  | 'claim'
+  | 'tailnet'
+  | 'passkey'
+  | 'secrets'
+  | 'backups'
+  | 'registration'
+  | 'invite'
+  | 'ai'
+  | 'finish';
 
 interface Frame {
   readonly name: string | null;
@@ -49,6 +57,7 @@ interface SetupPages {
   finishedPage(name: string | null): string;
   stepPage(frame: Frame, body: string, options: { readonly next: boolean }): string;
   claimBody(view: unknown, csrf: string): string;
+  tailnetBody(view: unknown): string;
   passkeyBody(adminAddress: string): string;
   secretsBody(view: 'offer' | 'taken' | 'none', csrf: string): string;
   backupsBody(view: unknown, csrf: string): string;
@@ -138,6 +147,16 @@ const LISTED = [
   model('delta:8b', 'none', 'not-reported'),
   model('epsilon:4b', 'not-reported'),
 ];
+
+/** The tailnet step's view (#2817): a Tailscale address on the tailnet path, unless a state says. */
+const TAILNET_ORIGIN = 'https://onyourleft.tail1a2b.ts.net';
+const tailnet = (view: Record<string, unknown>) => ({
+  path: 'tailnet',
+  origin: TAILNET_ORIGIN,
+  tailscaleName: true,
+  keys: 'ready',
+  ...view,
+});
 
 const ai = (view: Record<string, unknown>) =>
   step('ai', () =>
@@ -267,6 +286,44 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
         'claim',
       ),
     ],
+  ],
+  '/setup/tailnet': [
+    ['a Tailscale address', step('tailnet', () => pages.tailnetBody(tailnet({})), true, 'tailnet')],
+    [
+      'Funnel on',
+      step('tailnet', () => pages.tailnetBody(tailnet({ path: 'funnel' })), true, 'tailnet'),
+    ],
+    [
+      'not a Tailscale address',
+      step(
+        'tailnet',
+        () =>
+          pages.tailnetBody(tailnet({ origin: 'https://rides.example.org', tailscaleName: false })),
+        true,
+        'tailnet',
+      ),
+    ],
+    [
+      'no card',
+      step('tailnet', () => pages.tailnetBody(tailnet({ keys: 'none' })), true, 'tailnet'),
+    ],
+    [
+      'keys that do not open at this address',
+      step('tailnet', () => pages.tailnetBody(tailnet({ keys: 'unreadable' })), true, 'tailnet'),
+    ],
+    [
+      'a Cloudflare tunnel',
+      step('tailnet', () =>
+        pages.tailnetBody(
+          tailnet({
+            path: 'cloudflare',
+            origin: 'https://rides.example.org',
+            tailscaleName: false,
+          }),
+        ),
+      ),
+    ],
+    ['no path named', step('tailnet', () => pages.tailnetBody(tailnet({ path: null })))],
   ],
   '/setup/passkey': [
     ['explained', step('passkey', () => pages.passkeyBody('http://localhost:8788/admin'))],
@@ -473,7 +530,7 @@ describe.each(Object.entries(PAGES))('the setup page %s (#2784)', (path, states)
         // Never colour alone: a done step says so in words beside its tick, and each step's box
         // is the same element class whether it is a link or not, so no row changes height.
         const items = [...(nav?.querySelectorAll('li') ?? [])];
-        expect(items).toHaveLength(8);
+        expect(items).toHaveLength(9);
         for (const item of items) expect(item.firstElementChild?.className).toBe('step');
         // Every form is reached by Tab, and each is operated by its button.
         for (const form of doc.querySelectorAll('main form')) {
@@ -642,13 +699,14 @@ describe('the setup’s progress bar (#2784)', () => {
     }));
     expect(steps).toEqual([
       { link: true, current: false, mark: '✓', said: '✓Step 1, done: Claim' },
-      { link: true, current: false, mark: '✓', said: '✓Step 2, done: Passkey' },
-      { link: true, current: false, mark: '✓', said: '✓Step 3, done: Emergency kit' },
-      { link: true, current: true, mark: '✓', said: '✓Step 4, done: Backups' },
-      { link: true, current: false, mark: '5', said: '5Step 5: Who may join' },
-      { link: false, current: false, mark: '6', said: '6Step 6: Invite' },
-      { link: false, current: false, mark: '7', said: '7Step 7: AI' },
-      { link: false, current: false, mark: '8', said: '8Step 8: Finish' },
+      { link: true, current: false, mark: '✓', said: '✓Step 2, done: Tailnet' },
+      { link: true, current: false, mark: '✓', said: '✓Step 3, done: Passkey' },
+      { link: true, current: false, mark: '✓', said: '✓Step 4, done: Emergency kit' },
+      { link: true, current: true, mark: '✓', said: '✓Step 5, done: Backups' },
+      { link: true, current: false, mark: '6', said: '6Step 6: Who may join' },
+      { link: false, current: false, mark: '7', said: '7Step 7: Invite' },
+      { link: false, current: false, mark: '8', said: '8Step 8: AI' },
+      { link: false, current: false, mark: '9', said: '9Step 9: Finish' },
     ]);
     // The tick and the number are drawn, not read: the words are.
     for (const mark of doc.querySelectorAll('.step-mark')) {
@@ -667,13 +725,14 @@ describe('the setup’s progress bar (#2784)', () => {
     const names = [...doc.querySelectorAll('header nav .step')].map((item) => accessibleName(item));
     expect(names).toEqual([
       'Step 1, done: Claim',
-      'Step 2, done: Passkey',
-      'Step 3, done: Emergency kit',
-      'Step 4, done: Backups',
-      'Step 5: Who may join',
-      'Step 6: Invite',
-      'Step 7: AI',
-      'Step 8: Finish',
+      'Step 2, done: Tailnet',
+      'Step 3, done: Passkey',
+      'Step 4, done: Emergency kit',
+      'Step 5, done: Backups',
+      'Step 6: Who may join',
+      'Step 7: Invite',
+      'Step 8: AI',
+      'Step 9: Finish',
     ]);
     // On a narrow screen the number is the visible label: the name holds it, and the name too.
     for (const item of doc.querySelectorAll('header nav .step')) {
