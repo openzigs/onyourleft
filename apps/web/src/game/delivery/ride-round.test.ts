@@ -1189,6 +1189,27 @@ describe('a level’s own throw window — #2931, ADR 0065 D-4.1', () => {
     expect(endDeliveryRide(rideTo(level, first.along + NARROW.afterMetres).ride).missed).toBe(0);
   });
 
+  it('ends a ride past the level’s closing edge with its house missed, a parcel thrown from inside still in the air', () => {
+    const level = onLevel();
+    const first = level.throwTargets[0] as ThrowTarget;
+    const seconds =
+      (CARRIAGEWAY_HALF_WIDTH_METRES + first.clear) / PARCEL_THROW_SPEED_METRES_PER_SECOND;
+    // Thrown from inside the level's window, slowly enough that it is still in the air when the
+    // rider is 0.7 m past the house: past the level's closing edge, inside the throw's own.
+    const short = NARROW.beforeMetres - 0.5;
+    const past = first.along + 0.7;
+    expect(past - first.along).toBeGreaterThan(NARROW.afterMetres);
+    expect(past - first.along).toBeLessThan(THROW_WINDOW_AFTER_METRES);
+    const speed = (short + 2) / seconds;
+    const aimed = rideTo(level, first.along - short).ride;
+    const riding = rideTo(aimed, past, first.side, speed).ride;
+    // The step waits for the parcel thrown from inside the window, so the house is not yet counted.
+    expect(riding.throws.inFlight).toHaveLength(1);
+    expect(riding.round.houses[first.position]).toBe('expecting');
+    // The ride ends here: the parcel cannot land, and the level's window has closed behind it.
+    expect(endDeliveryRide(riding)).toMatchObject({ delivered: 0, missed: 1 });
+  });
+
   it('waits for no parcel thrown from outside the level’s window before counting its house missed', () => {
     const level = onLevel();
     const first = level.throwTargets[0] as ThrowTarget;
