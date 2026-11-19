@@ -75,7 +75,9 @@ comes back only once somebody has signed in — set Windows to sign in automatic
    ```
 
    The folder holds `compose.yaml`, `deploy.sh`, `instance.env.example`, `release.image`, and a
-   `tailscale` folder with the two files `tailscale serve` reads on the tailnet (3a).
+   `tailscale` folder with two serve files. On the tailnet (3a) `tailscale serve` reads one of them,
+   the one `OYL_INSTANCE_REMOTE_PATH` names: `serve-tailnet.json` for `tailnet`, `serve-funnel.json`
+   for `funnel`.
    `compose.yaml` names the instance's image **by its digest**, the line in `release.image`, so
    what Docker downloads is exactly the image this release was tested with.
 
@@ -364,16 +366,18 @@ were.
    says your tablet now owns the server. If the app says the instance **did not answer**, the tablet
    cannot reach the address yet: the app names the address it tried and the likely cause, and the
    code is not spent, so scan it again once the tablet is on the network.
+   A code lasts ten minutes: if the page says *That code ran out*, press *Show the claim code* again
+   and scan the new one.
 2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
 3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
    beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
    once you have added a passkey there.
-4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says
-   whether the snapshot reached **both** folders: the one on this computer and the copy kept
-   elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` lines in `.env`
-   (step 4): to change one, edit that line and deploy again. ⚠️ On Windows the copy kept elsewhere
-   cannot be on a USB stick ([Backups](#backups)).
+4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
+   long ago the last backup ran, and whether the snapshot reached **both** folders: the one on this
+   computer and the copy kept elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and
+   `OYL_OFFBOX_DIR` lines in `.env` (step 4): to change one, edit that line and deploy again. ⚠️ On
+   Windows the copy kept elsewhere cannot be on a USB stick ([Backups](#backups)).
 5. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
    new*, then *Save and go to the next step*. You can change it later with
    `docker compose exec instance node src/operator/cli.ts registration set <mode>`.

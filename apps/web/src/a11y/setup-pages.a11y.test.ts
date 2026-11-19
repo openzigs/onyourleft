@@ -113,6 +113,7 @@ const reach = (
 
 const record = (offBox: string | null, outcome = 'done') => ({
   at: '2026-11-18T09:00:00.000Z',
+  secondsAgo: 14 * 60,
   outcome,
   offBox,
 });
@@ -145,7 +146,10 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       step(
         'claim',
         () =>
-          pages.claimBody({ kind: 'open', card: true, notConfirmed: false, reach: reach() }, CSRF),
+          pages.claimBody(
+            { kind: 'open', card: true, notConfirmed: false, expired: false, reach: reach() },
+            CSRF,
+          ),
         false,
         'claim',
       ),
@@ -160,6 +164,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
               kind: 'open',
               card: true,
               notConfirmed: false,
+              expired: false,
               reach: reach('internet', 'connected'),
             },
             CSRF,
@@ -178,6 +183,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
               kind: 'open',
               card: true,
               notConfirmed: false,
+              expired: false,
               reach: reach('internet', 'not-connected'),
             },
             CSRF,
@@ -191,7 +197,23 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       step(
         'claim',
         () =>
-          pages.claimBody({ kind: 'open', card: false, notConfirmed: true, reach: reach() }, CSRF),
+          pages.claimBody(
+            { kind: 'open', card: false, notConfirmed: true, expired: false, reach: reach() },
+            CSRF,
+          ),
+        false,
+        'claim',
+      ),
+    ],
+    [
+      'the code ran out',
+      step(
+        'claim',
+        () =>
+          pages.claimBody(
+            { kind: 'open', card: true, notConfirmed: false, expired: true, reach: reach() },
+            CSRF,
+          ),
         false,
         'claim',
       ),
@@ -524,6 +546,28 @@ describe('what a device needs before it can reach the server (#2855)', () => {
     expect(expert?.textContent).toContain('OYL_INSTANCE_ORIGIN');
     // The example itself is never shown: the owner's own address goes there.
     expect(doc.body.textContent).not.toContain('your-tailnet');
+  });
+});
+
+describe('the claim step’s one problem sentence (#2825)', () => {
+  const alerts = (view: { notConfirmed: boolean; expired: boolean }): (string | null)[] =>
+    [
+      ...parse(
+        pages.claimBody({ kind: 'open', card: true, reach: reach(), ...view }, CSRF),
+      ).querySelectorAll('[role="alert"]'),
+    ].map((alert) => alert.textContent);
+
+  it('says a code ran out, as an alert, and nothing when none did', () => {
+    expect(alerts({ notConfirmed: false, expired: true })).toEqual([
+      'That code ran out. Show a new one.',
+    ]);
+    expect(alerts({ notConfirmed: false, expired: false })).toEqual([]);
+  });
+
+  it('says one sentence, the fuller one, when a claim could not be confirmed either', () => {
+    const said = alerts({ notConfirmed: true, expired: true });
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/^That claim could not be confirmed/);
   });
 });
 
