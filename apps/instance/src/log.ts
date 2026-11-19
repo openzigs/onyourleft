@@ -208,6 +208,10 @@ export const EVENT_KEYS: ReadonlyMap<
       codeIn: (value) => value === 'secrets/setup-code' || value === 'operator setup-code',
       validUntil: (value) =>
         typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]{8,12}Z$/.test(value),
+      // #2858: the same moment by this machine's clock, its zone named (`localTimeText`).
+      validUntilLocal: (value) =>
+        typeof value === 'string' &&
+        /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} [A-Za-z0-9+:-]{1,12}$/.test(value),
     },
   ],
   // #2855: the instance's address is still the template's example, and

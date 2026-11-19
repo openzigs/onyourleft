@@ -50,7 +50,7 @@ import type {
   RegistrationModeSetting,
   SqlStore,
 } from '../store/sql-store.ts';
-import { mintSetupCode } from '../setup/setup-code.ts';
+import { localTimeText, mintSetupCode } from '../setup/setup-code.ts';
 import { createSync } from '../sync/sync.ts';
 
 /**
@@ -1361,7 +1361,14 @@ export async function adminCode(paths: DataPaths, now?: () => Date) {
  */
 export async function ownerClaimReset(
   paths: DataPaths,
-  options: { readonly ownerKey?: string | undefined; readonly now?: () => Date } = {},
+  options: {
+    readonly ownerKey?: string | undefined;
+    readonly now?: () => Date;
+    /** `OYL_INSTANCE_SECRETS_DIR`: where the new setup code's file goes (#2858). */
+    readonly secretsDirectory?: string | undefined;
+    /** `OYL_INSTANCE_ADMIN_LOOPBACK_PORT`, for the address the code's file names. */
+    readonly port?: string | undefined;
+  } = {},
 ) {
   const store = openServingStore(paths.database);
   try {
@@ -1373,11 +1380,33 @@ export async function ownerClaimReset(
         `${done.claimed ? 'cleared' : 'none_claimed'},sessions_ended=${String(done.sessionsEnded)}`,
       options.now,
     );
+    const ownerKeyFromEnvironment = (options.ownerKey?.trim() ?? '') !== '';
+    // #2858: the reset reopens the setup, so it makes the code that opens it and writes its
+    // file, as a start does: the setup page asks for that file. Not while `.env` names the
+    // owner, which keeps the setup done.
+    const port = /^[0-9]{1,5}$/.test(options.port?.trim() ?? '') ? Number(options.port) : 8788;
+    const minted = ownerKeyFromEnvironment
+      ? undefined
+      : await mintSetupCode(store, {
+          mintedBy: 'cli',
+          now: () => (options.now ?? (() => new Date()))().getTime(),
+          directory: options.secretsDirectory,
+          port,
+        });
     return {
       command: 'owner-claim reset',
       cleared: reset.claimed,
       adminSessionsEnded: reset.sessionsEnded,
-      ownerKeyFromEnvironment: (options.ownerKey?.trim() ?? '') !== '',
+      ownerKeyFromEnvironment,
+      ...(minted?.outcome === 'minted'
+        ? {
+            setupCode: minted.code,
+            open: `http://localhost:${String(port)}/setup`,
+            expiresAt: new Date(minted.expiresAt * 1000).toISOString(),
+            expiresAtLocal: localTimeText(minted.expiresAt),
+            writtenToFile: minted.written,
+          }
+        : {}),
     };
   } finally {
     await store.close();
@@ -1426,6 +1455,7 @@ export async function setupCode(
       code: minted.code,
       open: `http://localhost:${String(port)}/setup`,
       expiresAt: new Date(minted.expiresAt * 1000).toISOString(),
+      expiresAtLocal: localTimeText(minted.expiresAt),
       writtenToFile: minted.written,
     };
   } finally {

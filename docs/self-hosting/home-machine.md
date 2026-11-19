@@ -383,8 +383,10 @@ were.
 3. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
 4. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
-   beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
-   once you have added a passkey there.
+   beside the backups**. The page does not change after the download. If you cancelled the save,
+   the page gives the command for a new setup code: a new setup session can download it once more.
+   After setup it can be downloaded again from the admin pages on this machine, once you have added
+   a passkey there.
 5. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
    long ago the last backup ran, and whether the snapshot reached **both** folders: the one on this
    computer and the copy kept elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and

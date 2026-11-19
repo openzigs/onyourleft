@@ -1106,7 +1106,11 @@ setup session**, **reopens the first-run setup at its claim step** (#2784), and 
 `owner_claim_reset` to the operator log, in one transaction. Its report says whether a key was cleared
 (`cleared`), how many admin sessions ended, and `ownerKeyFromEnvironment: true` when
 `OYL_INSTANCE_OWNER_KEY` is set — in which case that variable is still the owner, as it was. The
-instance is then unclaimed, and the owner claims it again from the setup page. A rider who recovered
+instance is then unclaimed, and the owner claims it again from the setup page. Since
+[#2858](https://github.com/openzigs/onyourleft/issues/2858) the reset also **makes a setup code**,
+writes it to the `setup-code` file in the secrets folder and prints it with the page's address
+(`setupCode`, `open`, `expiresAt` and `expiresAtLocal`), as `setup-code` does, so the setup page's
+file is there at once; not while `OYL_INSTANCE_OWNER_KEY` is set. A rider who recovered
 their account with a recovery code holds a new device key, so they reset and claim again too, just as
 they would edit `.env`.
 
@@ -1133,6 +1137,9 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
   to the file `setup-code` in the secrets folder beside `compose.yaml` (`OYL_INSTANCE_SECRETS_DIR`),
   owner-only. The log says where it is, never what it is:
   `{"event":"first-run-setup","open":"http://localhost:8788/setup","codeIn":"secrets/setup-code",…}`.
+  The file and the log line say when it stops working by this machine's clock with the zone named
+  (`validUntilLocal`, `2026-11-19 05:30 EST`), beside the UTC time (#2858); in a container with no
+  `TZ` that zone is UTC, and it says so.
   A code works once, for ten minutes; restart the instance (`docker compose restart instance`) for a
   new one, or print one on the host:
 
@@ -1178,10 +1185,16 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
   3. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
      are in a collapsed block for people comfortable with the command line.
   4. **The emergency kit** — offered **once** per setup session, with no passkey
-     ([The instance's secrets](#the-instances-secrets)).
+     ([The instance's secrets](#the-instances-secrets)). The page does not change after the download
+     (it carries no script), so it says so before the button. Once taken, it says how to get it again
+     if the save was cancelled: a new setup session, whose code the `setup-code` command shown on the
+     page makes, may download it once more (ADR 0080 D-4's "once" is per session; #2858).
   5. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
      elsewhere"), how long ago it ran by the server's clock ("14 minutes ago", never a UTC time), and
-     **Back up now**; while a backup waits the step has a *Check now* button. The folders
+     **Back up now**; while a backup waits the step has a *Check now* button. A backup made **before
+     the claim** — the backup service's start-up one, on a fresh install — does not hold the owner's
+     account: the step says so, and *Back up now* is taken regardless of the 15-minute gap until a
+     backup made since the claim has run (#2858). The folders
      are `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`, named only in the step's collapsed command-line
      block: the `backup` service is started with them, so the page checks and explains and cannot
      choose them.
@@ -1191,7 +1204,8 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
      **wins over `OYL_INSTANCE_REGISTRATION`** until it is cleared (ADR 0080 D-6).
   7. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
      the instance. The app does not sign in by itself after the claim, so until it has the step says
-     what to do on the tablet.
+     what to do on the tablet. The session that made the invite sees it again on the step until a
+     rider uses it (#2858); it is held in memory only, so after a restart the step says it was made.
   8. **AI write-ups** — optional ([#2792](https://github.com/openzigs/onyourleft/issues/2792)). The
      step looks for Ollama at the address in `OYL_INSTANCE_ANALYSIS_MODEL_URL` if one is set, then at
      `http://ollama:11434` (the Compose `ollama` service), `http://host.docker.internal:11434` and
@@ -1214,6 +1228,14 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
 - **Leave whenever you like.** The step is kept in the database, so coming back — after a restart, with
   the new code — resumes it. A setup session ends after 15 minutes without use and 2 hours after the
   code was typed.
+- **A restart while the claim QR is showing voids that claim code** (#2858): the page that showed
+  it went with the process, so the code is not left working unseen. The claim step then says the
+  server restarted and to show a new code.
+- **Every command a setup page names is written whole, in a block to copy** (#2858): one click
+  selects all of it, since the pages carry no script.
+- **After the finish, `/setup` on the server machine** answers the small *Setup is finished* page
+  (a 404, setting nothing), not the raw `not_found` of a missing route (#2858). Every other setup
+  path, and every path through the tunnel or the tailnet, is still byte-identical to a missing route.
 - **With `OYL_INSTANCE_OWNER_KEY` set the setup is done from the first start**: no code is made and
   nothing is served at `/setup`. Every install from before #2784 is unchanged.
 - **While the instance is unclaimed and holds no account, every registration is refused**, whatever the

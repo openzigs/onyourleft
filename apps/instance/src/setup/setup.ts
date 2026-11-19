@@ -231,6 +231,12 @@ export interface SetupOptions {
   readonly environmentRegistration: RegistrationMode;
   /** `OYL_INSTANCE_SECRETS_DIR`: where the setup code's file is removed from. */
   readonly secretsDirectory: string | undefined;
+  /**
+   * Whether this start voided a claim code the process before it had shown
+   * (#2858): a restart drops the page's QR, so the code it showed is voided
+   * rather than left working unseen, and the claim step says why.
+   */
+  readonly claimCodesVoidedAtStart?: () => boolean;
   /** The AI step's (#2792). */
   readonly analysis: SetupAnalysisSources;
   readonly limits?: SetupLimits;
@@ -346,6 +352,15 @@ async function finishedPagePolicy(): Promise<string> {
  * D-3: the database keeps only the code's hash). Shown only to the session
  * that asked for it, and only until it runs out.
  */
+interface ShownInvite {
+  readonly sessionSha256: string;
+  readonly card: string;
+  readonly code: string;
+  readonly codeSha256: string;
+  /** Unix seconds. */
+  readonly expiresAt: number;
+}
+
 interface ShownClaim {
   readonly sessionSha256: string;
   readonly card: string;
@@ -401,6 +416,14 @@ export function createSetup(options: SetupOptions): Setup {
   const CLEARED = `${SETUP_COOKIE}=; ${attributes}; Max-Age=0`;
   const refused = new Map<SetupRefusal, number>();
   let shownClaim: ShownClaim | undefined;
+  /** Whether this process has shown a claim code since it started (#2858). */
+  let claimShownSinceStart = false;
+  /**
+   * The one invite this setup made (#2858), held in memory for the session
+   * that made it, so its step shows it again until it is used or runs out.
+   * The database keeps only its hash, as it does every invite's.
+   */
+  let shownInvite: ShownInvite | undefined;
   const { analysis } = options;
   const localServer = { resolve: analysis.resolve };
   // #2792: the instance's one download, in memory: lost at a restart, as the model it left is not.
@@ -644,9 +667,10 @@ export function createSetup(options: SetupOptions): Setup {
         return page(stepPage(frame, secretsBody(kit, csrf), { next: true }), 200);
       }
       case 'backups': {
-        const [records, pending] = await Promise.all([
+        const [records, pending, claimedAt] = await Promise.all([
           store.listBackupRecords(1),
           store.pendingBackupRequest(),
+          store.ownerClaimedAt(),
         ]);
         const newest = records[0];
         const body = backupsBody(
@@ -659,6 +683,7 @@ export function createSetup(options: SetupOptions): Setup {
                     secondsAgo: seconds() - newest.at,
                     outcome: newest.outcome,
                     offBox: newest.offBox,
+                    beforeClaim: claimedAt !== undefined && newest.at < claimedAt,
                   },
             waiting: pending !== undefined,
             notice: url.searchParams.has('too-soon')
@@ -677,7 +702,10 @@ export function createSetup(options: SetupOptions): Setup {
         return page(stepPage(frame, body, { next: false }), 200);
       }
       case 'invite':
-        return page(stepPage(frame, inviteBody(await inviteView(), csrf), { next: true }), 200);
+        return page(
+          stepPage(frame, inviteBody(await inviteView(session), csrf), { next: true }),
+          200,
+        );
       case 'ai': {
         const [found, model] = await Promise.all([ollama(), writeUpModel()]);
         const body = aiBody(
@@ -734,6 +762,21 @@ export function createSetup(options: SetupOptions): Setup {
       notConfirmed: url.searchParams.has('unconfirmed'),
       reach: await reachView(),
       expired: ours && ranOut,
+      // #2858: until this process shows a code, a code the one before it showed was voided at start.
+      restarted: !claimShownSinceStart && (options.claimCodesVoidedAtStart?.() ?? false),
+    };
+  }
+
+  /** The invite this session made, as its step draws it (#2858). */
+  async function inviteCodeView(shown: ShownInvite, at: number): Promise<InviteView> {
+    return {
+      kind: 'code',
+      card: shown.card,
+      code: shown.code,
+      expiresAt: iso(shown.expiresAt),
+      secondsLeft: shown.expiresAt - at,
+      inviteMode: (await modeNow()) === 'invite',
+      reach: reachPath,
     };
   }
 
@@ -741,8 +784,26 @@ export function createSetup(options: SetupOptions): Setup {
     return (await store.registrationSetting()) ?? options.environmentRegistration;
   }
 
-  async function inviteView(): Promise<InviteView> {
-    if (((await store.setupState())?.inviteMintedAt ?? null) !== null) return { kind: 'taken' };
+  async function inviteView(session: Session): Promise<InviteView> {
+    if (((await store.setupState())?.inviteMintedAt ?? null) !== null) {
+      // #2858: the invite this session made, again, until it is used or runs out.
+      const shown = shownInvite;
+      const athleteId = await ownerAthlete();
+      if (
+        shown !== undefined &&
+        shown.sessionSha256 === session.record.tokenSha256 &&
+        athleteId !== undefined
+      ) {
+        // Unused: a rider who joined with it spent it. It cannot run out first: an invite lasts
+        // seven days, and a setup session two hours, and only the session that made it sees it.
+        const held = (await store.listInviteCodes(athleteId)).find(
+          (each) => each.codeSha256 === shown.codeSha256,
+        );
+        if (held !== undefined && held.usedAt === null) return inviteCodeView(shown, seconds());
+        shownInvite = undefined;
+      }
+      return { kind: 'taken' };
+    }
     if ((await ownerAthlete()) === undefined) return { kind: 'no-owner' };
     if ((await cardOf()) === null) return { kind: 'no-card' };
     return { kind: 'offer', inviteMode: (await modeNow()) === 'invite', reach: reachPath };
@@ -828,6 +889,7 @@ export function createSetup(options: SetupOptions): Setup {
           code: minted.code,
           expiresAt: minted.expiresAt,
         };
+        claimShownSinceStart = true;
         return seeOther('/setup/claim');
       }
       case '/setup/claim/confirm': {
@@ -874,7 +936,10 @@ export function createSetup(options: SetupOptions): Setup {
         const { value } = await store.recordOperatorAction<BackupRequestOutcome>(
           { actor, action: 'backup_requested', at },
           async (inside) => {
-            const asked = await inside.requestBackup(at);
+            // #2858: a backup made before the claim does not hold the owner's account, so it does
+            // not count against the gap — the setup's one backup regardless of the limit.
+            const since = await inside.ownerClaimedAt();
+            const asked = await inside.requestBackup(at, since === undefined ? {} : { since });
             return asked.outcome === 'requested'
               ? { outcome: 'done', value: asked }
               : { outcome: 'refused', detail: asked.outcome, value: asked };
@@ -925,17 +990,15 @@ export function createSetup(options: SetupOptions): Setup {
           },
         );
         if (!minted) return seeOther('/setup/invite');
-        const frame = await frameOf('invite', session);
-        const view: InviteView = {
-          kind: 'code',
+        shownInvite = {
+          sessionSha256: session.record.tokenSha256,
           card,
           code,
-          expiresAt: iso(expiresAt),
-          secondsLeft: expiresAt - at,
-          inviteMode: (await modeNow()) === 'invite',
-          reach: reachPath,
+          codeSha256,
+          expiresAt,
         };
-        return page(stepPage(frame, inviteBody(view, frame.csrf), { next: true }), 200);
+        // Drawn by the step's own page, which shows it again on every load until it is used.
+        return seeOther('/setup/invite');
       }
       case '/setup/ai/pull': {
         const model = (single(form, 'model') ?? '').trim();
@@ -1001,7 +1064,20 @@ export function createSetup(options: SetupOptions): Setup {
 
   return {
     async handle(request, readBody, client) {
-      if (!(await open())) return undefined;
+      if (!(await open())) {
+        // #2858: `/setup` itself, opened on this machine after the finish, says so in a page
+        // rather than the raw `not_found` of a missing route. Every other setup path, and
+        // every other listener (which never reaches here), still gets that `not_found`.
+        const finishedHere =
+          request.method === 'GET' &&
+          request.headers.get('host') === host &&
+          new URL(request.url).pathname === '/setup' &&
+          !options.ownerKeyFromEnvironment;
+        if (!finishedHere) return undefined;
+        return page(finishedPage(options.name), 404, {
+          'content-security-policy': await finishedPagePolicy(),
+        });
+      }
       // Against DNS rebinding, and the one address a passkey could use (D-1).
       if (request.headers.get('host') !== host) {
         return page(wrongAddressPage(setupAddress(options.port)), 421);

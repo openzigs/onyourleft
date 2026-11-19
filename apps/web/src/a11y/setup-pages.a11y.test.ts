@@ -122,11 +122,12 @@ const reach = (
   checked: 'connected' | 'not-connected' | null = null,
 ) => ({ origin: ORIGIN, path, checked });
 
-const record = (offBox: string | null, outcome = 'done') => ({
+const record = (offBox: string | null, outcome = 'done', beforeClaim = false) => ({
   at: '2026-11-18T09:00:00.000Z',
   secondsAgo: 14 * 60,
   outcome,
   offBox,
+  beforeClaim,
 });
 
 /** A model as the AI step lists it (#2792): what Ollama reports, by `analysis/local-server.ts`. */
@@ -254,6 +255,19 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       ),
     ],
     [
+      'a restart voided the code (#2858)',
+      step(
+        'claim',
+        () =>
+          pages.claimBody(
+            { kind: 'open', card: true, notConfirmed: false, expired: false, restarted: true },
+            CSRF,
+          ),
+        false,
+        'claim',
+      ),
+    ],
+    [
       'the code ran out',
       step(
         'claim',
@@ -342,6 +356,15 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       'copied',
       step('backups', () =>
         pages.backupsBody({ last: record('copied'), waiting: false, notice: null }, CSRF),
+      ),
+    ],
+    [
+      'copied before the claim (#2858)',
+      step('backups', () =>
+        pages.backupsBody(
+          { last: record('copied', 'done', true), waiting: false, notice: null },
+          CSRF,
+        ),
       ),
     ],
     [

@@ -62,6 +62,7 @@ import {
   BACKUPS_LAST_COPY_FAILED_TEXT,
   BACKUPS_LAST_FAILED_TEXT,
   BACKUPS_LAST_NOT_CONFIGURED_TEXT,
+  BACKUPS_BEFORE_CLAIM_TEXT,
   BACKUPS_LAST_RAN_TEXT,
   BACKUPS_NONE_YET_TEXT,
   BACKUPS_STEP_LEAD,
@@ -87,6 +88,7 @@ import {
   CLAIMED_NEXT_TEXT,
   CLAIMED_TEXT,
   CLAIMED_WRONG_TEXT,
+  CLAIM_RESTARTED_TEXT,
   codeWorksOnceText,
   FINISH_BUTTON,
   FINISH_CLOSE_TEXT,
@@ -104,6 +106,7 @@ import {
   KIT_DOWNLOAD_BUTTON,
   KIT_KEEP_TEXT,
   KIT_NONE_TEXT,
+  KIT_AGAIN_TEXT,
   KIT_ONCE_TEXT,
   KIT_STEP_LEAD,
   KIT_TAKEN_TEXT,
@@ -125,6 +128,8 @@ import {
   SETUP_EXPERT_SUMMARY,
   SETUP_FORM_REFUSED_TEXT,
   SETUP_LOCKED_LEAD,
+  SETUP_COMMANDS,
+  SETUP_COMMANDS_WHERE,
   SETUP_NEW_CODE_TEXT,
   SETUP_NEXT_BUTTON,
   SETUP_REGISTRATION_MODE_TEXT,
@@ -219,7 +224,8 @@ ${card(`<form method="post" action="/setup/sign-in">
 ${problem}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${refused ? ' aria-describedby="code-problem"' : ''}>
 <button type="submit">Open the setup</button>
 </form>`)}</div>
-<p class="hint">${escapeHtml(SETUP_NEW_CODE_TEXT)}</p>`,
+<p class="hint">${escapeHtml(SETUP_NEW_CODE_TEXT)} ${escapeHtml(SETUP_COMMANDS_WHERE)}</p>
+${commandBlock(SETUP_COMMANDS.setupCode)}`,
   );
 }
 
@@ -301,6 +307,13 @@ export interface SetupFrame {
   /** The session's synchronizer token, for each form. */
   readonly csrf: string;
 }
+
+/**
+ * A command to run on this machine, whole, in a block to copy (#2858): one
+ * click selects all of it (`style.ts`), since the setup pages carry no script.
+ */
+const commandBlock = (command: string): string =>
+  `<pre class="copy"><code>${escapeHtml(command)}</code></pre>`;
 
 const csrfField = (csrf: string): string =>
   `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">`;
@@ -457,6 +470,8 @@ export type ClaimView =
       readonly notConfirmed: boolean;
       readonly reach: ReachView;
       readonly expired: boolean;
+      /** A restart voided a code the server showed before, and none has been shown since (#2858). */
+      readonly restarted: boolean;
     }
   /** A code minted and not yet scanned: the card and it, as a QR and as text, and the wait. */
   | {
@@ -475,7 +490,8 @@ export function claimBody(view: ClaimView, csrf: string): string {
     case 'claimed':
       return `<p class="notice" role="status">${escapeHtml(CLAIMED_TEXT)}</p>
 <p>${escapeHtml(CLAIMED_NEXT_TEXT)}</p>
-<p class="hint">${escapeHtml(CLAIMED_WRONG_TEXT)}</p>`;
+<p class="hint">${escapeHtml(CLAIMED_WRONG_TEXT)}</p>
+${commandBlock(SETUP_COMMANDS.ownerClaimReset)}`;
     case 'pending':
       return card(`<p>${escapeHtml(CLAIM_PENDING_LEAD)}</p>
 <p>${escapeHtml(CLAIM_PENDING_LABEL)}:</p>
@@ -489,7 +505,9 @@ ${buttonForm('/setup/claim/discard', csrf, CLAIM_NO_BUTTON, {}, 'secondary')}
         ? CLAIM_NOT_CONFIRMED_TEXT
         : view.expired
           ? CLAIM_EXPIRED_TEXT
-          : null;
+          : view.restarted
+            ? CLAIM_RESTARTED_TEXT
+            : null;
       return `${problem === null ? '' : `<p class="problem" role="alert">${escapeHtml(problem)}</p>\n`}<p>${escapeHtml(CLAIM_LEAD)}</p>
 ${reachPart(view.reach)}${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p class="problem">${escapeHtml(CLAIM_NO_CARD_TEXT)}</p>`}`;
     }
@@ -586,7 +604,10 @@ ${change}`;
 
 export function passkeyBody(adminAddress: string): string {
   const steps = passkeyStepHow(adminAddress)
-    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .map(
+      (line) =>
+        `<li>${escapeHtml(line.text)}\n${line.commands.map((command) => commandBlock(command)).join('\n')}</li>`,
+    )
     .join('\n');
   return `<p>${escapeHtml(PASSKEY_STEP_LEAD)}</p>
 <p>${escapeHtml(PASSKEY_STEP_LATER)}</p>
@@ -603,7 +624,9 @@ export function secretsBody(view: KitView, csrf: string): string {
   const action =
     view === 'offer'
       ? `${buttonForm('/setup/secrets/kit', csrf, KIT_DOWNLOAD_BUTTON)}\n<p class="hint">${escapeHtml(KIT_ONCE_TEXT)}</p>`
-      : `<p class="notice" role="status">${escapeHtml(KIT_TAKEN_TEXT)}</p>`;
+      : `<p class="notice" role="status">${escapeHtml(KIT_TAKEN_TEXT)}</p>
+<p class="hint">${escapeHtml(KIT_AGAIN_TEXT)}</p>
+${commandBlock(SETUP_COMMANDS.setupCode)}`;
   return `<p>${escapeHtml(KIT_STEP_LEAD)}</p>
 <p class="warning">${escapeHtml(KIT_KEEP_TEXT)}</p>
 ${action}`;
@@ -619,6 +642,8 @@ export interface BackupStepRecord {
   readonly secondsAgo: number;
   readonly outcome: 'done' | 'failed';
   readonly offBox: 'copied' | 'failed' | 'not-configured' | null;
+  /** Made before the owner was claimed, so it does not hold the owner's account (#2858). */
+  readonly beforeClaim: boolean;
 }
 
 export interface BackupsStepView {
@@ -652,7 +677,7 @@ export function backupsBody(view: BackupsStepView, csrf: string): string {
       ? `<p>${escapeHtml(BACKUPS_NONE_YET_TEXT)}</p>\n${button}`
       : `<p>${escapeHtml(BACKUPS_LAST_RAN_TEXT)} <time datetime="${escapeHtml(view.last.at)}">${escapeHtml(ranAgoText(view.last.secondsAgo))}</time>.</p>
 ${lastBackupResult(view.last)}
-${button}`;
+${view.last.beforeClaim ? `<p class="warning">${escapeHtml(BACKUPS_BEFORE_CLAIM_TEXT)}</p>\n` : ''}${button}`;
   const tooSoon =
     view.notice === 'too-soon' && !view.waiting
       ? `<p class="problem" role="alert">${escapeHtml(BACKUPS_TOO_SOON_TEXT)}</p>\n`
