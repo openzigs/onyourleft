@@ -1,9 +1,10 @@
 # ADR 0083: The device decides the AI pacer's intent, and the model writes the line — superseding in part ADR 0072 D-2, D-3, D-4.2, D-5 and D-7, ADR 0078 D-1 and D-2, and ADR 0082 D-1.5, D-2, D-3 and D-4
 
-- **Status**: **Proposed**, 2026-11-18, for the owner's answers to D-9. The owner's ruling of that
-  day on [#2835](https://github.com/openzigs/onyourleft/issues/2835) accepts the design and that it
-  needs an ADR (*"yes fold these in"*, quoted in Context). The figures and the points that ruling
-  leaves open are the questions in D-9
+- **Status**: **Accepted**, 2026-11-19, on the owner's answers to D-9, recorded in D-10 and in the
+  owner-ruling comment on [#2864](https://github.com/openzigs/onyourleft/pull/2864). Proposed
+  2026-11-18 on the owner's ruling of that day on
+  [#2835](https://github.com/openzigs/onyourleft/issues/2835), which accepts the design and that it
+  needs an ADR (*"yes fold these in"*, quoted in Context)
 - **Date**: 2026-11-18
 - **Deciders**: **the owner**, whose ruling is quoted in Context and who answers D-9. **The
   author** chose the figures, marked *the author's choice* where they are made
@@ -242,6 +243,22 @@ Nothing is lost either way but the AI pacer, and nothing reaches a model. **Upda
 | **R-5** | Should the instance load the model when it starts and keep it loaded (D-4.4)? It holds the model's memory on the PC all the time the instance runs | **Not yet.** Ride with the menu warm-up first; build it if the first line is still slow |
 | **R-6** | The plan is dropped, not chosen by rule (D-1.5) | **Yes** |
 | **R-7** | The switch still reads *"Let the AI on your instance steer the pacer and cheer you on"*, and once agreed *"The AI will steer the pacer on this ride."* Neither is true of the model any more. This change rewords only the consent paragraph's sentence on what the AI does (D-2.9); the switch and the status line are the owner's approved wording (ADR 0072 R-8) and are measured in the browser gate | **Reword both**, for example *"Ride with the AI pacer: it waits for you, and the AI on your instance cheers you on"* and *"The AI pacer is on for this ride."*, in a follow-up with its screenshots |
+
+### D-10 — The owner's answers
+
+The owner answered D-9 on 2026-11-19, each question asked one at a time with its recommendation,
+as recorded in the owner-ruling comment on
+[#2864](https://github.com/openzigs/onyourleft/pull/2864):
+
+| # | The owner's answer | What it settles |
+|---|---|---|
+| **R-1** | *"Approve both (Recommended)"*, given with R-2 | The device decides the pacer's intent by D-1's rule, and the model writes only the line |
+| **R-2** | Approved in R-1's answer | No easing while the rider is ahead, from the first ask. This is the owner's yes that #2835 required before ADR 0078's floor changed |
+| **R-3** | *"Approve (Recommended)"* | The response whole at 10 s, a rider ahead chased by up to 10 %, and the start ramp from 80 % to the target over 60 s, to be felt on the tablet ride |
+| **R-4** | *"Approve both (Recommended)"*, given with R-6 | A refusal ends the ride's decisions, and the pacer rides #92's rule (D-6) |
+| **R-5** | *"Not yet (Recommended)"* | The instance does not keep the model loaded from its start (D-4.4). Ride with the menu warm-up first |
+| **R-6** | Approved in R-4's answer | The plan is dropped, not chosen by rule (D-1.5) |
+| **R-7** | *"Coach wording (Recommended)"* | The consent sentence stands as drafted (*"The app picks how the pacer rides; the AI writes a short line for you and never sets your trainer."*). The switch reads *"Let the AI on your server coach you through the pacer"* and, once agreed, the status line *"The AI will coach you on this ride."*, changed in #2864 with the owner's screenshots. They replace ADR 0072 R-8's switch and status wording |
 
 ## Consequences
 

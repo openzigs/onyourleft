@@ -14,8 +14,8 @@ It has the same authority as the root file. Where the text below says "this file
 
   ⚠️ **0083 is [ADR 0083](../adr/0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md)**,
   taken by [#2835](https://github.com/openzigs/onyourleft/issues/2835) on 2026-11-18 for the device
-  deciding the AI pacer's intent and the model writing only the line, **Proposed** for the owner's
-  answers. It supersedes in part ADR 0072, ADR 0078 and ADR 0082, each of which gained one dated
+  deciding the AI pacer's intent and the model writing only the line, **Accepted** on
+  2026-11-19 on the owner's answers to its D-9 (#2864). It supersedes in part ADR 0072, ADR 0078 and ADR 0082, each of which gained one dated
   `## Amendments` entry pointing to it. **It skipped 0081 on purpose**, leaving it to #2836, which
   runs beside it and needs an ADR too. **The next free number is 0081**, and the number after it is
   **0084**. A reviewer who remembers this file offering 0083 is reading the old file.

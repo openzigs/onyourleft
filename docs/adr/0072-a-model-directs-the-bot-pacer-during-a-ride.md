@@ -486,3 +486,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   (D-2.2), no power and no tools (D-3), the input's *no coordinate, no name* (D-3.4), the line's
   screen and that it is never kept (D-4), the trainer (D-6), the gates and the consent (D-8), and
   the patent posture (D-9). This ADR's body is unchanged.
+- **2026-11-19** — **[ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md) is Accepted.** The owner answered its D-9 on 2026-11-19, recorded in its
+  D-10 and on [#2864](https://github.com/openzigs/onyourleft/pull/2864), so the previous entry's *"Proposed"* no longer holds. Its R-7 also replaces R-8's
+  switch and status wording: the switch reads *"Let the AI on your server coach you through the
+  pacer"* and, once agreed, *"The AI will coach you on this ride."* This ADR's body is unchanged.

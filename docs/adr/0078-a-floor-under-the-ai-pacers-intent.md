@@ -144,3 +144,7 @@ owner's ride (*"I am ahead and never see it taking over"*) cannot repeat with th
   now chases a rider who has pulled away (ADR 0083 R-3). The log now says which rule set the intent
   (D-2.2). `flooredDirection` and `PACER_AHEAD_FLOOR_S` are gone from the code. This ADR's body is
   unchanged.
+- **2026-11-19** — **[ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md) is Accepted, and R-2's yes is given.** The owner answered ADR 0083's D-9 on
+  2026-11-19, recorded in its D-10 and on [#2864](https://github.com/openzigs/onyourleft/pull/2864): R-2, *no easing while the rider is ahead, from the
+  first ask*, was approved with R-1 (*"Approve both (Recommended)"*). The yes the previous entry
+  called still owed is the owner's. This ADR's body is unchanged.
