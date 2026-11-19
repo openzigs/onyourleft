@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-11-15.** This is the policy for the On Your Left Android app
+**Last updated: 2026-11-18.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -396,6 +396,26 @@ devices, change your name there with *Change my name*, remove a hosted model key
 withdraw your agreement to a service (see **Questions your instance sends to a service you agreed
 to** below). The app cannot remove the device you are using from your account, or remove your
 earlier names without erasing your account: ask the instance's operator to do them, as above.
+
+## Scanning a code with this device's camera
+
+When you connect to an instance you can scan its code with this device's camera instead of pasting
+it: the instance's card, an invite, a code that adds this device, or the owner's claim code. The
+first time, where you pressed **Scan a code**, the app says this and asks before any camera is
+asked for:
+
+> The camera is used only to read this code, and it goes off as soon as the code is read or you close the scanner. No picture is kept or sent anywhere, and nothing on the Camera screen is switched on.
+
+- **What the camera is used for:** finding the code in what it sees, on this device. You see what
+  the camera sees while you aim, and the "Camera on" sign shows for as long as it is on.
+- **What is kept or sent:** nothing of the picture. What is read is the code's text, and that is
+  handled exactly as if you had pasted it.
+- **What you agreed to:** reading codes, and nothing else. It is a separate, narrower yes than the
+  one the Camera page asks for. It does not turn on that page's camera, the side camera, keeping
+  pictures or sending them anywhere, and the Camera page still asks before any of those. The app
+  remembers this yes only until you close it or reload the page. If you have already agreed on the
+  Camera page, you are not asked again.
+- **If you say "Not now":** no camera is asked for, and pasting the code works the same.
 
 ## A second phone you pair as a side camera
 

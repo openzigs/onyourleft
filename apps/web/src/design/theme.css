@@ -7019,6 +7019,24 @@ select.oyl-input {
 }
 
 /*
+ * The scan's own question (#2856), where *Scan a code* was pressed: its two
+ * sentences, then the yes, then the no, in a column at every width, so the no
+ * is never beside the yes (`cardscan.browser.spec.ts`). The sentences keep a
+ * reading measure.
+ */
+.oyl-card-scan__ask {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-card-scan__ask > p {
+  margin: 0;
+  max-width: 32rem;
+}
+
+/*
  * The Moderation screen (#955). An account id is one unbroken word of up to
  * 128 characters, and a rider's name and a report's reason come from other
  * riders: each breaks where it must rather than widen a 320 px page
