@@ -10,6 +10,10 @@ Run by `process-assets.ts`, never by hand:
         <makehuman-dir> <out.glb> <report.json> <target-tris> <texture-pixels> \
         <colour.png> <normal.png> <orm.png> <system-assets-dir> <mark.png> <crash.json>
 
+or, for the FEMALE rider (#2839), the same run with the body's name before
+the triangles -- `... <report.json> female <target-tris> ...`. A run with no
+name builds the rider every run before #2839 built, to the byte:
+
 or, for the pack's rider (#2485, the bake half of #681):
 
     Blender -b --factory-startup --python process_rider.py -- \
@@ -109,6 +113,12 @@ import rider_crash as CRASH_KIT  # noqa: E402
 
 args = sys.argv[sys.argv.index("--") + 1 :]
 MH_DIR, OUT_GLB, OUT_REPORT = args[:3]
+# #2839: which body this run builds -- an optional word before everything
+# else. Absent, it is the rider every run before #2839 built, so the recipes
+# that name none reproduce their committed bytes.
+BODY = "male"
+if args[3] in ("female", "male"):
+    BODY = args.pop(3)
 # #2485: the pack's rider, and its vertex-animation texture.
 LOD = args[3] == "lod"
 if LOD:
@@ -144,7 +154,21 @@ KEEP = [
 # who the rider is, which is the owner's to rule on, and #623 rules only on the
 # build. Muscle is raised from MakeHuman's 50 % and weight lowered from its
 # 50 %: an athletic, lean build.
-BUILD = {"gender": 0.5, "muscle": 0.85, "weight": 0.25}
+#
+# #2839, the owner's ruling of 2026-11-18: a rider may choose a FEMALE body.
+# `male` is the build above, unchanged to the last digit -- it is the rider
+# everybody had, the issue records that it reads as male, and "keep today's
+# look until they choose" is kept exactly by not moving it. `female` is
+# MakeHuman's gender slider at its female end (0 %), with the same age and
+# ethnic mix, athletic and lean: muscle above MakeHuman's 50 % and weight
+# below it, each a little nearer the middle than the male build's, which at
+# the female end of the slider reads as a bodybuilder rather than a cyclist.
+# Both use only the targets `sources.ts` section RIDER_BUILD_TARGETS fetches.
+BUILDS = {
+    "male": {"gender": 0.5, "muscle": 0.85, "weight": 0.25},
+    "female": {"gender": 0.0, "muscle": 0.7, "weight": 0.3},
+}
+BUILD = BUILDS[BODY]
 ETHNIC = ("african", "asian", "caucasian")
 
 
@@ -1754,6 +1778,7 @@ with open(OUT_GLB, "wb") as handle:
 with open(OUT_REPORT, "w") as handle:
     json.dump(
         {
+            "body": BODY,
             "build": BUILD,
             "targets": applied,
             "sourceBones": len(bones),

@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { readGlb, type GlbFile } from '../../src/game/model-bytes-testing';
-import { REALISTIC_RIDER, REALISTIC_RIDER_MAP_NAMES } from '../../src/game/realistic-assets';
+import { REALISTIC_RIDER_BODIES, REALISTIC_RIDER_MAP_NAMES } from '../../src/game/realistic-assets';
 import { REALISTIC_TRIANGLES } from '../../src/game/realistic-budget';
 import { modelFacts } from '../../src/game/realistic-bytes-testing';
 
@@ -197,98 +197,100 @@ const offGaze = (eye: Eye, helmet: HelmetMesh, index: number): number => {
   return (Math.acos(Math.min(1, dot(out, eye.gaze) / length(out))) * 180) / Math.PI;
 };
 
-const rider = readGlb(at(REALISTIC_RIDER));
-const helmet = helmetOf(rider);
-const irisVertices = helmet.colours.flatMap((colour, index) => (isIris(colour) ? [index] : []));
-// glTF's frame: +X the rider's left, +Y up, +Z the way they face.
-const eyes = [
-  eyeOf(
-    helmet,
-    irisVertices.filter((index) => (helmet.positions[index] as Vec3)[0] > 0),
-  ),
-  eyeOf(
-    helmet,
-    irisVertices.filter((index) => (helmet.positions[index] as Vec3)[0] < 0),
-  ),
-] as const;
+// #2839: every case below holds for BOTH bodies — the rider and the female
+// rider are one script's run at two builds, and each wears its own gear.
+describe.each(Object.entries(REALISTIC_RIDER_BODIES))('the %s rider', (_body, file) => {
+  const rider = readGlb(at(file));
+  const helmet = helmetOf(rider);
+  const irisVertices = helmet.colours.flatMap((colour, index) => (isIris(colour) ? [index] : []));
+  // glTF's frame: +X the rider's left, +Y up, +Z the way they face.
+  const eyes = [
+    eyeOf(
+      helmet,
+      irisVertices.filter((index) => (helmet.positions[index] as Vec3)[0] > 0),
+    ),
+    eyeOf(
+      helmet,
+      irisVertices.filter((index) => (helmet.positions[index] as Vec3)[0] < 0),
+    ),
+  ] as const;
 
-describe('the realistic rider’s eyes — #2495', () => {
-  it('has two, mirror images, MakeHuman’s eye’s size and a human eye’s spacing apart', () => {
-    // Non-vacuity: an iris each side, and every vertex of each eye found.
-    for (const eye of eyes) {
-      expect(eye.vertices.length).toBeGreaterThan(40);
-      // MakeHuman's own eye: a ball of about 15 mm, a little over a human
-      // eyeball's 12 mm, because MakeHuman's socket is cut for it.
-      expect(eye.radius).toBeGreaterThan(0.012);
-      expect(eye.radius).toBeLessThan(0.017);
-    }
-    const [left, right] = eyes;
-    expect(left.centre[0]).toBeCloseTo(-right.centre[0], 3);
-    expect(left.centre[1]).toBeCloseTo(right.centre[1], 3);
-    expect(left.centre[2]).toBeCloseTo(right.centre[2], 3);
-    // An adult's eyes are 54 to 74 mm apart, centre to centre.
-    expect(left.centre[0] - right.centre[0]).toBeGreaterThan(0.054);
-    expect(left.centre[0] - right.centre[0]).toBeLessThan(0.074);
-  });
-
-  it('looks forward, with a dark pupil in front, a brown iris round it and a white beyond', () => {
-    for (const eye of eyes) {
-      expect(eye.gaze[2]).toBeGreaterThan(0.95);
-      const front = eye.vertices.reduce((best, index) =>
-        offGaze(eye, helmet, index) < offGaze(eye, helmet, best) ? index : best,
-      );
-      expect(offGaze(eye, helmet, front)).toBeLessThan(1);
-      expect(isPupil(helmet.colours[front] as Vec3)).toBe(true);
-      const kinds = { pupil: [] as number[], iris: [] as number[], white: [] as number[] };
-      for (const index of eye.vertices) {
-        const colour = helmet.colours[index] as Vec3;
-        const angle = offGaze(eye, helmet, index);
-        if (isPupil(colour)) kinds.pupil.push(angle);
-        else if (isIris(colour)) kinds.iris.push(angle);
-        else if (isWhite(colour)) kinds.white.push(angle);
-        else throw new Error(`an eye's vertex ${String(index)} is neither pupil, iris nor white`);
+  describe('the realistic rider’s eyes — #2495', () => {
+    it('has two, mirror images, MakeHuman’s eye’s size and a human eye’s spacing apart', () => {
+      // Non-vacuity: an iris each side, and every vertex of each eye found.
+      for (const eye of eyes) {
+        expect(eye.vertices.length).toBeGreaterThan(40);
+        // MakeHuman's own eye: a ball of about 15 mm, a little over a human
+        // eyeball's 12 mm, because MakeHuman's socket is cut for it.
+        expect(eye.radius).toBeGreaterThan(0.012);
+        expect(eye.radius).toBeLessThan(0.017);
       }
-      // Each band ends on the ring the next begins on, to a hundredth of a degree.
-      expect(Math.max(...kinds.pupil)).toBeLessThan(Math.min(...kinds.iris) + 0.01);
-      expect(Math.max(...kinds.iris)).toBeLessThan(Math.min(...kinds.white) + 0.01);
-      // The pupil a few degrees across, the iris a third of the way round to
-      // the side — a human iris is about 12 mm wide on a 24 mm ball.
-      expect(Math.max(...kinds.pupil)).toBeLessThan(12);
-      expect(Math.max(...kinds.iris)).toBeGreaterThan(20);
-      expect(Math.max(...kinds.iris)).toBeLessThan(35);
-    }
-  });
+      const [left, right] = eyes;
+      expect(left.centre[0]).toBeCloseTo(-right.centre[0], 3);
+      expect(left.centre[1]).toBeCloseTo(right.centre[1], 3);
+      expect(left.centre[2]).toBeCloseTo(right.centre[2], 3);
+      // An adult's eyes are 54 to 74 mm apart, centre to centre.
+      expect(left.centre[0] - right.centre[0]).toBeGreaterThan(0.054);
+      expect(left.centre[0] - right.centre[0]).toBeLessThan(0.074);
+    });
 
-  it('faces every triangle out of the ball, so a culled back face never hides an eye', () => {
-    for (const eye of eyes) {
-      const on = new Set(eye.vertices);
-      const own = helmet.triangles.filter((triangle) => triangle.every((index) => on.has(index)));
-      expect(own.length).toBeGreaterThan(0);
-      for (const [a, b, c] of own) {
-        const pa = helmet.positions[a] as Vec3;
-        const facing = cross(
-          minus(helmet.positions[b] as Vec3, pa),
-          minus(helmet.positions[c] as Vec3, pa),
+    it('looks forward, with a dark pupil in front, a brown iris round it and a white beyond', () => {
+      for (const eye of eyes) {
+        expect(eye.gaze[2]).toBeGreaterThan(0.95);
+        const front = eye.vertices.reduce((best, index) =>
+          offGaze(eye, helmet, index) < offGaze(eye, helmet, best) ? index : best,
         );
-        expect(dot(facing, minus(pa, eye.centre))).toBeGreaterThan(0);
+        expect(offGaze(eye, helmet, front)).toBeLessThan(1);
+        expect(isPupil(helmet.colours[front] as Vec3)).toBe(true);
+        const kinds = { pupil: [] as number[], iris: [] as number[], white: [] as number[] };
+        for (const index of eye.vertices) {
+          const colour = helmet.colours[index] as Vec3;
+          const angle = offGaze(eye, helmet, index);
+          if (isPupil(colour)) kinds.pupil.push(angle);
+          else if (isIris(colour)) kinds.iris.push(angle);
+          else if (isWhite(colour)) kinds.white.push(angle);
+          else throw new Error(`an eye's vertex ${String(index)} is neither pupil, iris nor white`);
+        }
+        // Each band ends on the ring the next begins on, to a hundredth of a degree.
+        expect(Math.max(...kinds.pupil)).toBeLessThan(Math.min(...kinds.iris) + 0.01);
+        expect(Math.max(...kinds.iris)).toBeLessThan(Math.min(...kinds.white) + 0.01);
+        // The pupil a few degrees across, the iris a third of the way round to
+        // the side — a human iris is about 12 mm wide on a 24 mm ball.
+        expect(Math.max(...kinds.pupil)).toBeLessThan(12);
+        expect(Math.max(...kinds.iris)).toBeGreaterThan(20);
+        expect(Math.max(...kinds.iris)).toBeLessThan(35);
       }
-    }
-  });
+    });
 
-  it('costs what it states, inside the rider’s own triangles, with no texture or draw call added', () => {
-    const spent = eyes.reduce((sum, eye) => {
-      const on = new Set(eye.vertices);
-      return sum + helmet.triangles.filter((triangle) => triangle.every((i) => on.has(i))).length;
-    }, 0);
-    expect(spent).toBe(RIDER_EYE_TRIANGLES);
-    expect(modelFacts(at(REALISTIC_RIDER)).triangles).toBeLessThanOrEqual(
-      REALISTIC_TRIANGLES.rider,
-    );
-    // In the helmet's one primitive, untextured: the instanced mesh the
-    // helmet already was, and the rider's three maps and no fourth.
-    expect(helmet.primitives).toBe(1);
-    expect(helmet.textured).toBe(false);
-    expect((rider.json as unknown as Document).meshes).toHaveLength(2);
-    expect(REALISTIC_RIDER_MAP_NAMES).toHaveLength(3);
+    it('faces every triangle out of the ball, so a culled back face never hides an eye', () => {
+      for (const eye of eyes) {
+        const on = new Set(eye.vertices);
+        const own = helmet.triangles.filter((triangle) => triangle.every((index) => on.has(index)));
+        expect(own.length).toBeGreaterThan(0);
+        for (const [a, b, c] of own) {
+          const pa = helmet.positions[a] as Vec3;
+          const facing = cross(
+            minus(helmet.positions[b] as Vec3, pa),
+            minus(helmet.positions[c] as Vec3, pa),
+          );
+          expect(dot(facing, minus(pa, eye.centre))).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('costs what it states, inside the rider’s own triangles, with no texture or draw call added', () => {
+      const spent = eyes.reduce((sum, eye) => {
+        const on = new Set(eye.vertices);
+        return sum + helmet.triangles.filter((triangle) => triangle.every((i) => on.has(i))).length;
+      }, 0);
+      expect(spent).toBe(RIDER_EYE_TRIANGLES);
+      expect(modelFacts(at(file)).triangles).toBeLessThanOrEqual(REALISTIC_TRIANGLES.rider);
+      // In the helmet's one primitive, untextured: the instanced mesh the
+      // helmet already was, and the rider's three maps and no fourth.
+      expect(helmet.primitives).toBe(1);
+      expect(helmet.textured).toBe(false);
+      expect((rider.json as unknown as Document).meshes).toHaveLength(2);
+      expect(REALISTIC_RIDER_MAP_NAMES).toHaveLength(3);
+    });
   });
 });

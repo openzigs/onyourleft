@@ -71,6 +71,7 @@ import {
   REALISTIC_BICYCLE_MAPS,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_FEMALE,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_PACK,
   RIDER_PACK_PHASES,
@@ -2115,6 +2116,12 @@ export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, n
   [REALISTIC_RIDER_PACK.lod]: { triangles: 1998, vertices: 1352, moving: 361, phases: 32 },
   // #2495: the rider's eyes, paid for out of the body's share of its 9 000.
   [REALISTIC_RIDER]: { eyeTriangles: RIDER_EYE_TRIANGLES, triangles: 8996, crashMoments: 6 },
+  // #2839: the female rider, held to the same eyes and the same crash clip.
+  [REALISTIC_RIDER_FEMALE]: {
+    eyeTriangles: RIDER_EYE_TRIANGLES,
+    triangles: 8996,
+    crashMoments: 6,
+  },
   // #2540: the car, part by part. A run that cut a wheel differently, or
   // split the paint off another swatch, is not this one.
   [REALISTIC_DELIVERY_CAR]: {
@@ -2311,6 +2318,31 @@ export const OUTPUTS: readonly OutputSpec[] = [
       ],
     },
     modified: `the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses and eyes leave of 8 998 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with closed vents, and straps laid along the head) and glasses (forward-facing lenses, and arms along the temples) built round the head’s own vertices, with an eyeball in each socket (#2495) — the front of a ball at the centre and radius of MakeHuman’s own CC0 eye helper, looking along its own eye bone, drawn in a pupil, an iris and a white from the numbers in ${RIDER_KIT}, ${String(RIDER_EYE_TRIANGLES)} triangles — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493): the skeleton posed at each of the moments in ${RIDER_CRASH} — thrown, landed, down and rising, between the riding pose at the start and the end — on the timeline of src/game/delivery/crash-look.ts and from the riding joints src/game/bicycle.ts gives (read by ${RIDER_CRASH_POSE}), as src/game/three-renderer.ts poses the rider, every bone's rotation and the root's position at each. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is`,
+  },
+  // #2839: the female rider — the same run at `process_rider.py` §`BUILDS`'
+  // female build. It draws and bakes its own three maps into the scratch
+  // stage, as the run always does, and NONE of them ships (no `alsoWrites`):
+  // she wears the rider's, at MakeHuman's own texture coordinates
+  // (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`).
+  {
+    file: REALISTIC_RIDER_FEMALE,
+    from: 'makehuman',
+    recipe: {
+      how: 'blender',
+      script: RIDER_SCRIPT,
+      args: [
+        'female',
+        '8998',
+        String(RIDER_TEXTURE_PIXELS),
+        `female_${RIDER_MADE.colour}`,
+        `female_${RIDER_MADE.normal}`,
+        `female_${RIDER_MADE.orm}`,
+      ],
+      alsoReads: ['makehuman-system-assets'],
+      mark: RIDER_MARK_PIXELS,
+      crash: true,
+    },
+    modified: `the female rider (#2839): the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at the female end of its gender slider, with its default age and ethnic mix, muscle at 70 % and weight at 30 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses and eyes leave of 8 998 triangles, with texture coordinates and tangents and no colour of its own; and the helmet, glasses and an eyeball in each socket (${String(RIDER_EYE_TRIANGLES)} triangles) built round this head’s own vertices exactly as the rider’s are, from the numbers in ${RIDER_KIT} — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493), posed from the moments in ${RIDER_CRASH} on the riding joints read by ${RIDER_CRASH_POSE}, as the rider’s is. It carries no map: it wears the rider’s three at MakeHuman’s own texture coordinates. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is`,
   },
   // #2485: the pack's rider — the bake half of #681. The same body, cut to
   // about 2 000 triangles, and its vertices posed at every phase of a crank

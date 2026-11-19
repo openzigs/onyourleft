@@ -1365,6 +1365,18 @@ script = "apps/web/tools/realistic/blender/process_rider.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
 
 [[asset]]
+path = "apps/web/public/realistic/rider_female.glb"
+source = "MakeHuman, makehuman by The MakeHuman team, and makehuman-system-assets by The MakeHuman team (makehuman_system), its licence read on 2026-09-28 at https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-28"
+sha256 = "b92a2cb3060a894cd932caf13cf79fd303839462cfe0d319f17d9addec361f44"
+modified = "the female rider (#2839): the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at the female end of its gender slider, with its default age and ethnic mix, muscle at 70 % and weight at 30 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses and eyes leave of 8 998 triangles, with texture coordinates and tangents and no colour of its own; and the helmet, glasses and an eyeball in each socket (168 triangles) built round this head’s own vertices exactly as the rider’s are, from the numbers in apps/web/tools/realistic/blender/rider_kit.py — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493), posed from the moments in apps/web/tools/realistic/blender/rider_crash.py on the riding joints read by apps/web/tools/realistic/rider-crash.ts, as the rider’s is. It carries no map: it wears the rider’s three at MakeHuman’s own texture coordinates. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is"
+input = "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md and https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html"
+inputsha256 = "9706190e9fa043bc86070dc7afcb7fcc1a278f67fd4a942ad014ab2a2ad9235e"
+script = "apps/web/tools/realistic/blender/process_rider.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
 path = "apps/web/public/realistic/rider_pack.glb"
 source = "MakeHuman, makehuman by The MakeHuman team; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
 licence = "CC0-1.0"

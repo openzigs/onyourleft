@@ -66,6 +66,7 @@ import {
   REALISTIC_CHAIN_LINK,
   REALISTIC_HOUSE_ATLAS,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_FEMALE,
   REALISTIC_DELIVERY_CAR,
   REALISTIC_RIDER_PACK,
   REALISTIC_STRUCTURE_SURFACES,
@@ -714,13 +715,15 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
   it('names only outputs a Blender run makes, whose script writes the count', () => {
     const files = Object.keys(EXPECTED_REPORTS);
     // #2485: and the pack's rider, whose texture's shape is held too; #2495:
-    // and the rider, whose eyes' cost is; and #2540's car, part by part.
+    // and the rider, whose eyes' cost is; and #2540's car, part by part;
+    // #2839: and the female rider, held to the rider's own figures.
     expect(files.sort()).toEqual(
       [
         REALISTIC_DELIVERY_CAR,
         'island_tree_02-middle.glb',
         'island_tree_02.glb',
         REALISTIC_RIDER,
+        REALISTIC_RIDER_FEMALE,
         REALISTIC_RIDER_PACK.lod,
       ].sort(),
     );

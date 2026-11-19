@@ -110,6 +110,8 @@ import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
+  REALISTIC_RIDER_BODIES,
+  REALISTIC_RIDER_FEMALE,
   REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAP_NAMES,
@@ -527,6 +529,323 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
       expect(texture.format).toBe('BC7');
     }
   }, 120_000);
+});
+
+/* ============================================================================
+ * The female rider — #2839
+ * ========================================================================== */
+
+/**
+ * Both committed rider models, through the real model loader, in a belt built
+ * as a view builds it — with stand-in textures, because nothing here draws a
+ * pixel: what is held is WHICH meshes a frame draws, in which body, and that
+ * each body is posed from its own rest pose. The maps themselves are the
+ * dressed rider's cases below.
+ */
+describe('the realistic world draws the rider each athlete chose — #2839', () => {
+  type Belt = InstanceType<Renderer['RealisticRiderBelt']>;
+  type Scene = Parameters<Belt['addBody']>[1];
+  interface Loaded {
+    readonly renderer: Renderer;
+    readonly three: typeof import('three');
+    readonly male: Scene;
+    readonly female: Scene;
+  }
+  let loading: Promise<Loaded> | undefined;
+
+  /**
+   * The renderer and the two models, loaded by the first case that asks —
+   * inside a case, because this file serves the committed files to `fetch`
+   * from a `beforeEach`.
+   */
+  function models(): Promise<Loaded> {
+    loading ??= (async () => {
+      vi.resetModules();
+      const renderer = await import('./three-renderer');
+      const three = await import('three');
+      const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
+      try {
+        return {
+          renderer,
+          three,
+          male: await inner.model(`${ORIGIN}/realistic/${REALISTIC_RIDER_BODIES.male}`),
+          female: await inner.model(`${ORIGIN}/realistic/${REALISTIC_RIDER_BODIES.female}`),
+        };
+      } finally {
+        inner.dispose?.();
+      }
+    })();
+    return loading;
+  }
+
+  async function belt(): Promise<{
+    readonly riders: Belt;
+    readonly female: Scene;
+    readonly male: Scene;
+    readonly three: Loaded['three'];
+  }> {
+    const { renderer, three, male, female } = await models();
+    const maps = (names: readonly string[]): Record<string, unknown> =>
+      Object.fromEntries(names.map((name) => [name, new three.Texture()]));
+    const riders = new renderer.RealisticRiderBelt(
+      male,
+      maps(REALISTIC_BICYCLE_MAP_NAMES) as never,
+      maps(REALISTIC_RIDER_MAP_NAMES) as never,
+    );
+    return { riders, female, male, three };
+  }
+
+  const marker = (kind: string, z: number, body?: string): never =>
+    ({
+      kind,
+      x: 0,
+      y: 0,
+      z,
+      headingX: 0,
+      headingZ: 1,
+      lean: 0,
+      bodyLean: 0,
+      pedalling: 0,
+      rideSeconds: 0,
+      crankAngle: 0,
+      ...(body === undefined ? {} : { body }),
+    }) as never;
+
+  /** Every mesh under the belt that a frame would submit: visible all the way up, and holding an instance. */
+  function drawn(riders: Belt): string[] {
+    const names: string[] = [];
+    const walk = (node: {
+      visible: boolean;
+      name: string;
+      children: readonly unknown[];
+      isMesh?: boolean;
+      isInstancedMesh?: boolean;
+      count?: number;
+    }): void => {
+      if (!node.visible) return;
+      if (node.isMesh === true && (node.isInstancedMesh !== true || (node.count ?? 0) > 0)) {
+        names.push(node.name);
+      }
+      for (const child of node.children) walk(child as never);
+    };
+    walk(riders.group);
+    return names;
+  }
+
+  /** Whether one instance of a mesh is drawn at any size. */
+  const instanceDrawn = (
+    mesh: { readonly instanceMatrix: { readonly array: ArrayLike<number> } } | undefined,
+    slot: number,
+  ): boolean => {
+    const m = mesh?.instanceMatrix.array ?? [];
+    return Math.hypot(m[slot * 16] ?? 0, m[slot * 16 + 1] ?? 0, m[slot * 16 + 2] ?? 0) > 0;
+  };
+
+  /** Whether a slot's body in one pool is drawn: it and everything above it, up to the belt, visible. */
+  const shown = (riders: Belt, body: 'female' | 'male', slot: number): boolean => {
+    let node: { visible: boolean; parent: unknown } | null | undefined =
+      riders.bodiesOf(body)[slot];
+    if (node === undefined) return false;
+    while (node !== null && node !== undefined && (node as unknown) !== riders.group) {
+      if (!node.visible) return false;
+      node = node.parent as typeof node;
+    }
+    return node !== null && node !== undefined;
+  };
+
+  it('draws a female rider in the default body until her model has loaded, and never nothing', async () => {
+    const { riders } = await belt();
+    expect(riders.hasBody('male')).toBe(true);
+    expect(riders.hasBody('female')).toBe(false);
+    expect(riders.helmetsOf('female')).toBeUndefined();
+
+    riders.place([marker('rider', 0, 'female')]);
+
+    expect(shown(riders, 'male', 0)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('male'), 0)).toBe(true);
+    riders.dispose();
+  });
+
+  it('draws her in her own body and her own helmet once it has, and everybody else in theirs', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    riders.place([marker('rider', 0, 'female'), marker('bot', 10), marker('ghost', 20, 'female')]);
+
+    expect(shown(riders, 'female', 0)).toBe(true);
+    expect(shown(riders, 'male', 0)).toBe(false);
+    expect(shown(riders, 'male', 1)).toBe(true);
+    expect(shown(riders, 'female', 1)).toBe(false);
+    expect(shown(riders, 'female', 2)).toBe(true);
+    expect(shown(riders, 'male', 2)).toBe(false);
+    // A helmet a slot, in the pool of the body that slot wears and no other.
+    expect(instanceDrawn(riders.helmetsOf('female'), 0)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('male'), 0)).toBe(false);
+    expect(instanceDrawn(riders.helmetsOf('male'), 1)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('female'), 1)).toBe(false);
+    expect(instanceDrawn(riders.helmetsOf('female'), 2)).toBe(true);
+    expect(instanceDrawn(riders.helmetsOf('male'), 2)).toBe(false);
+    riders.dispose();
+  });
+
+  it('costs a field of one body the draw calls it cost before, and a mixed field one more', async () => {
+    const { riders, female } = await belt();
+    const field = (bodies: readonly (string | undefined)[]): number => {
+      riders.place(
+        bodies.map((body, index) => marker(index === 0 ? 'rider' : 'bot', index * 10, body)),
+      );
+      return drawn(riders).length;
+    };
+    const before = field([undefined, undefined, undefined]);
+    riders.addBody('female', female);
+
+    // Her model loaded and nobody drawn in it: exactly what it was.
+    expect(field([undefined, 'male', undefined])).toBe(before);
+    // Everybody in it: the other body's helmets are not drawn, so the same again.
+    expect(field(['female', 'female', 'female'])).toBe(before);
+    // Both on the road: her helmets are the one extra call, whatever the field's size.
+    expect(field(['female', 'male', 'male'])).toBe(before + 1);
+    expect(field(['female', 'female', 'male'])).toBe(before + 1);
+    // And back to none of her: back to what it was.
+    expect(field(['male', 'male', 'male'])).toBe(before);
+    riders.dispose();
+  });
+
+  it('wears the rider’s own three maps, and a helmet built round her own head', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    const his = riders.bodiesOf('male')[0]?.material as unknown as Record<string, unknown>;
+    const hers = riders.bodiesOf('female')[0]?.material as unknown as Record<string, unknown>;
+
+    for (const map of ['map', 'normalMap', 'aoMap', 'roughnessMap']) {
+      expect(hers[map], map).toBeTruthy();
+      expect(hers[map], map).toBe(his[map]);
+    }
+    expect(riders.bodiesOf('female')[0]?.geometry).not.toBe(riders.bodiesOf('male')[0]?.geometry);
+    expect(riders.helmetsOf('female')?.geometry).not.toBe(riders.helmetsOf('male')?.geometry);
+    expect(riders.helmetsOf('female')?.material).toBe(riders.helmetsOf('male')?.material);
+    riders.dispose();
+  });
+
+  it('holds her body, helmet and glasses inside the rider’s 8 998 triangles', async () => {
+    const { riders, female } = await belt();
+    riders.addBody('female', female);
+    const trianglesOf = (
+      geometry:
+        | { index: { count: number } | null; getAttribute: (name: 'position') => { count: number } }
+        | undefined,
+    ): number =>
+      geometry === undefined
+        ? Number.NaN
+        : (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
+    const total =
+      trianglesOf(riders.bodiesOf('female')[0]?.geometry) +
+      trianglesOf(riders.helmetsOf('female')?.geometry);
+
+    expect(total).toBeGreaterThan(8_000);
+    expect(total).toBeLessThanOrEqual(8_998);
+    riders.dispose();
+  });
+
+  it('seats her on the same bicycle from her OWN rest pose: her feet and hands are where his are', async () => {
+    const { riders, female, three } = await belt();
+    const { Vector3 } = three;
+    riders.addBody('female', female);
+    // The two bodies in two slots at the same place, the cranks level.
+    const at = (
+      body: 'female' | 'male',
+      slot: number,
+      bone: string,
+    ): InstanceType<typeof Vector3> => {
+      const skinned = riders.bodiesOf(body)[slot];
+      // three's loader drops the dot from a node's name: `foot.L` is `footL`.
+      const found = skinned?.skeleton.bones.find(
+        (each) => each.name.replaceAll('.', '') === bone.replaceAll('.', ''),
+      );
+      if (found === undefined) throw new Error(`no bone ${bone}`);
+      riders.group.updateMatrixWorld(true);
+      return found.getWorldPosition(new Vector3());
+    };
+    riders.place([marker('rider', 0, 'female'), marker('bot', 0, 'male')]);
+
+    // She is a smaller body at rest (1.59 m to his 1.67 m): posed with HIS
+    // scale her feet would hang short of the pedals by centimetres.
+    for (const bone of ['foot.L', 'foot.R']) {
+      expect(at('female', 0, bone).distanceTo(at('male', 1, bone)), bone).toBeLessThan(0.02);
+    }
+    for (const bone of ['wrist.L', 'wrist.R']) {
+      expect(at('female', 0, bone).distanceTo(at('male', 1, bone)), bone).toBeLessThan(0.05);
+    }
+    // And she is not simply him: her shoulders are narrower.
+    const span = (body: 'female' | 'male', slot: number): number =>
+      at(body, slot, 'upperarm01.L').distanceTo(at(body, slot, 'upperarm01.R'));
+    expect(span('female', 0)).toBeLessThan(span('male', 1) - 0.01);
+    riders.dispose();
+  });
+
+  it('adds a body once: a second model for a body that has one is ignored', async () => {
+    const { riders, female, male } = await belt();
+    riders.addBody('female', female);
+    const pool = riders.bodiesOf('female');
+    riders.addBody('female', male);
+
+    expect(riders.bodiesOf('female')).toEqual(pool);
+    riders.dispose();
+  });
+});
+
+describe('another rider body is fetched when a ride first draws it, and once — #2839', () => {
+  it('asks for the body’s own file, joins every later ask, and releases the loaders', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    const { Object3D } = await import('three');
+    const asked: string[] = [];
+    let disposed = 0;
+    const scene = new Object3D();
+    const loaders = {
+      model: (url: string) => {
+        asked.push(url);
+        return Promise.resolve(scene);
+      },
+      texture: () => Promise.reject(new Error('no texture is asked for')),
+      sky: () => Promise.reject(new Error('no sky is asked for')),
+      dispose: () => {
+        disposed += 1;
+      },
+    };
+    const world = { otherBodies: new Map() };
+
+    const first = renderer.riderBodyOfWorld(world, 'female', loaders);
+    const second = renderer.riderBodyOfWorld(world, 'female', loaders);
+
+    expect(second).toBe(first);
+    expect(await first).toBe(scene);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.endsWith(`/${REALISTIC_RIDER_FEMALE}`)).toBe(true);
+    expect(disposed).toBe(1);
+  });
+
+  it('does not ask again in the same world after a load that failed', async () => {
+    vi.resetModules();
+    const renderer = await import('./three-renderer');
+    let asks = 0;
+    const loaders = {
+      model: () => {
+        asks += 1;
+        return Promise.reject(new Error('offline'));
+      },
+      texture: () => Promise.reject(new Error('unused')),
+      sky: () => Promise.reject(new Error('unused')),
+    };
+    const world = { otherBodies: new Map() };
+
+    await expect(renderer.riderBodyOfWorld(world, 'female', loaders as never)).rejects.toThrow(
+      'offline',
+    );
+    await expect(renderer.riderBodyOfWorld(world, 'female', loaders as never)).rejects.toThrow(
+      'offline',
+    );
+    expect(asks).toBe(1);
+  });
 });
 
 /* ============================================================================

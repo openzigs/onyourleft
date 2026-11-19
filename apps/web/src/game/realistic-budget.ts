@@ -1512,11 +1512,31 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * As for #1548, the APK carries the same bytes more, and a browser's first
  * download does not move: the files are outside the precache.
  *
+ * ## Raised to 47 MiB for the female rider — #2839
+ *
+ * **Old ceiling 46 MiB (48 234 496 bytes), new 47 MiB (49 283 072).** #2839
+ * (the owner's request of 2026-11-18) asks for a second rider body through
+ * the pipeline and for its download cost to be stated; this is the statement.
+ * Measured on the committed files: the realistic set with its transcoder was
+ * 48 157 070 bytes, 77 426 under the old ceiling; the female rider's one file
+ * (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`) adds **427 772**,
+ * so it is **48 584 842**, 698 230 under the new one. She ships NO maps of
+ * her own — she wears the rider's three — which is what keeps the cost to
+ * one GLB rather than 1.5 MB. 47 MiB is the smallest whole figure the set
+ * fits under.
+ *
+ * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
+ * and this one has not been ruled on**: the issue asks for the body and its
+ * stated cost, not for a figure. The pull request that made this change says
+ * so and asks. As before, the APK carries the same bytes more, and a
+ * browser's first download does not move: the file is outside the precache,
+ * and a ride fetches it only when it draws a female rider.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 46 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 47 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.
