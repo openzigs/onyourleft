@@ -164,7 +164,8 @@ describe('the setup wizard’s words (#2784)', () => {
       ...setup.TAILNET_CHANGE_CLOUDFLARE_LINES,
       ...setup.passkeyStepHow('http://localhost:8788/admin'),
     ]) {
-      expect(line.text).not.toMatch(/docker compose|operator\/cli/);
+      // #2920: `bash deploy.sh` too, which a sentence once named inline.
+      expect(line.text).not.toMatch(/docker compose|operator\/cli|\bbash\s|deploy\.sh/);
     }
     expect(setup.AI_EXPERT_LINES.join(' ')).toContain('COMPOSE_PROFILES=analysis');
     expect(SETUP_EXPERT_SUMMARY).toBe('For people comfortable with the command line');

@@ -91,6 +91,7 @@ export const SETUP_COMMANDS = {
     'docker compose exec instance node src/operator/cli.ts admin-passkeys confirm <id>',
   backupStatus: 'docker compose ps backup',
   instanceKeyReset: 'docker compose exec instance node src/operator/cli.ts instance-key reset',
+  deploy: 'bash deploy.sh',
 } as const;
 
 /**
@@ -310,8 +311,8 @@ export const TAILNET_CHANGE_EXPERT_LINES: readonly SetupHowLine[] = [
     commands: [],
   },
   {
-    text: 'Run bash deploy.sh beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
-    commands: [],
+    text: 'Then run this beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
+    commands: [SETUP_COMMANDS.deploy],
   },
   TAILNET_CHANGE_RESET_LINE,
   TAILNET_CHANGE_CHECK_LINE,
@@ -322,7 +323,7 @@ export const TAILNET_CHANGE_CLOUDFLARE_LINES: readonly SetupHowLine[] = [
     text: 'Set OYL_INSTANCE_ORIGIN in .env to https:// and the new name on your own domain that your Cloudflare tunnel serves, and give the tunnel that name as the guide’s step 3b says.',
     commands: [],
   },
-  { text: 'Run bash deploy.sh beside compose.yaml.', commands: [] },
+  { text: 'Then run this beside compose.yaml:', commands: [SETUP_COMMANDS.deploy] },
   TAILNET_CHANGE_RESET_LINE,
   TAILNET_CHANGE_CHECK_LINE,
 ];
