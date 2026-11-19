@@ -60,6 +60,7 @@ import {
   LEVEL_PROGRESS_STORAGE_KEY,
   NO_LEVEL_FINISHED,
   readLevelProgress,
+  withLevelFinished,
   writeLevelProgress,
 } from '../level-progress';
 import type { WeekProgress } from '../round';
@@ -81,6 +82,13 @@ function fixtureAs(id: string): LevelFile {
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 const FIRST = SHIPPED_LEVELS.list()[0];
 if (FIRST === undefined) throw new Error('the app ships no level');
+
+/** #2367: every level but the last finished, so every level is open to choose. */
+const ALL_OPEN = {
+  finished: SHIPPED_LEVELS.list()
+    .slice(0, -1)
+    .map((level) => level.id),
+};
 
 /** A week part-way through, so a change to it would show. */
 const WEEK: WeekProgress = { day: 3, houses: 9, score: 7 };
@@ -240,18 +248,18 @@ function stubSeed(seed: number): void {
 
 describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.1', () => {
   it(
-    'with no saved route and no instance, lists both levels, each chosen opens a round, and level 1’s says its first house',
+    'with no saved route and no instance, lists every level, each chosen opens a round, and level 1’s says its first house',
     { timeout: 30_000 },
     async () => {
-      // #2363: level 1 finished on this device, so level 2 is open to choose too.
-      writeLevelProgress(localStorage, { finished: [FIRST.id] });
+      // #2363, #2367: every level but the last finished on this device, so every one is open to choose.
+      writeLevelProgress(localStorage, ALL_OPEN);
       await openPicker();
-      // Both levels are listed, in unlock order, each with a way to choose it.
+      // All six levels are listed, in unlock order, each with a way to choose it.
       const names = [...document.querySelectorAll('[data-level] h3')].map(
         (each) => each.textContent,
       );
       expect(names).toStrictEqual(SHIPPED_LEVELS.list().map((level) => level.name));
-      expect(names).toHaveLength(2);
+      expect(names).toHaveLength(6);
       for (const level of SHIPPED_LEVELS.list()) {
         const href = link(`${GAME_COURSES_TEXT.choose}: ${level.name}`)?.getAttribute('href') ?? '';
         expect(gameRouteFromHash(href)).toBe(levelRouteId(level.id));
@@ -337,7 +345,7 @@ describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.
     const saved = [...document.querySelectorAll('.oyl-game-courses__course')].filter(
       (each) => !each.hasAttribute('data-level'),
     );
-    expect(levels).toHaveLength(2);
+    expect(levels).toHaveLength(SHIPPED_LEVELS.list().length);
     expect(saved.map((each) => each.querySelector('h3')?.textContent)).toStrictEqual(
       routes.map((route) => route.name),
     );
@@ -469,6 +477,28 @@ describe('levels open in order, kept on the device — #2363, ADR 0065 D-9', () 
     expect(read).toStrictEqual([]);
   });
 
+  it('unlocks each of the six levels in turn, the picker reading the device afresh each time — #2367', async () => {
+    const order = SHIPPED_LEVELS.list();
+    expect(order).toHaveLength(6);
+    let progress = NO_LEVEL_FINISHED;
+    for (let at = 0; at <= order.length; at += 1) {
+      writeLevelProgress(localStorage, progress);
+      await openPicker();
+      order.forEach((level, index) => {
+        // Every level before `at` finished and still chosen; the one at `at` open; every later one locked.
+        const want = index < at ? 'finished' : index === at ? 'open' : 'locked';
+        expect(standing(level.id), `${level.id} after ${String(at)} finished`).toBe(want);
+        expect(choose(level.name) !== undefined, level.id).toBe(want !== 'locked');
+      });
+      mounted?.unmount();
+      mounted = undefined;
+      const next = order[at];
+      if (next !== undefined) progress = withLevelFinished(progress, next.id);
+    }
+    // Read back through the device: all six finished, in the order they were.
+    expect(readLevelProgress(localStorage).finished).toStrictEqual(order.map((level) => level.id));
+  });
+
   it('reads and rides no locked level from its address typed by hand', async () => {
     await openSetup(hrefForGamePlay('delivery', levelRouteId(SECOND.id)));
     expect(read).toStrictEqual([]);
@@ -596,8 +626,8 @@ describe('a level rides in the realistic world whatever Settings chose — the o
 
   it('lists the levels on the Delivery picker with the standard world chosen, the routes’ notice under them', async () => {
     writeRealisticWorldChoice(localStorage, false);
-    // #2363: level 1 finished, so every level has a way to choose it.
-    writeLevelProgress(localStorage, { finished: [FIRST.id] });
+    // #2363, #2367: every level but the last finished, so every level has a way to choose it.
+    writeLevelProgress(localStorage, ALL_OPEN);
     const routes: readonly RidableRoute[] = [
       { id: 'saved-0', name: 'First road', profile: northRoute(1_500, () => 0), attempts: 0 },
     ];
