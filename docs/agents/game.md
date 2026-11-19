@@ -1028,6 +1028,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         tier); the seeded race keeps its one-body field
                         Since version 5 (ADR 0076 D-11) late is past 8 s
                         and a decision holds 10 s
+                        Since version 7 (#2836, ADR 0081) the race asks about
+                        ONE bot at a time, round the field, a second apart at
+                        most: domain `lap-race/model-tactics.ts`
+                        §`modelTacticsAsk` makes its cue words and a menu of
+                        two to four moves (§`modelTacticsOffer`), the model
+                        picks from the menu with a reason word first, and a
+                        decision holds for that bot alone. A model `sit-in`
+                        is no opinion (`ADR_0081_MOVE_STRATEGY`): the seeded
+                        tactics decide, so a model that only says `sit-in`
+                        rides the seeded race to the bit. The record also
+                        keeps who each bot is, what each call offered and
+                        who chose each move (`model`, `seeded`, `instinct`)
                         ⚠️ Raise `LAP_RACE_BOT_CODE_VERSION` and APPEND a key
                         to `model-race-golden.json` for any change to bot
                         output; never edit an old one
