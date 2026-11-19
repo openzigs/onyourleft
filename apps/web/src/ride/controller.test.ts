@@ -654,6 +654,9 @@ const metric = (rig: Bench, id: 'power' | 'heartRate' | 'cadence' | 'speed') => 
 
 // --- Pairing and live metrics ------------------------------------------------
 
+/** Where a workout ride with re-plans on asks the instance to load its model (#2841). */
+const WARM_PATH = '/v1/analysis/replans/warm';
+
 describe('what the trainer role asks the chooser for', () => {
   it('names trainer-control rather than arriving at it through the measurements', async () => {
     // #156. The Web Bluetooth adapter grants this origin exactly the services
@@ -12384,8 +12387,12 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
     it('with the switch on, the same ride does ask — the control', async () => {
       const { rig, scripted, calls } = await riding({ replans: true });
       await rideOn(rig, 70);
-      expect(calls.replanSession).toBe(1);
+      // One session for the warm-up as the workout starts (#2841), one for the re-plan.
+      expect(calls.replanSession).toBe(2);
       expect(scripted.starts()).toHaveLength(1);
+      expect(scripted.requests.filter((each) => each.path === WARM_PATH)).toStrictEqual([
+        { method: 'POST', path: WARM_PATH, body: { source: 'instance-local' } },
+      ]);
       rig.controller.dispose();
     });
 
@@ -12941,9 +12948,13 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       const { rig, scripted } = await riding({ replans: true });
       await rideTo(rig, 40);
       await rig.controller.pause();
-      // Two minutes paused: the first block would have ended in them.
+      // Two minutes paused: the first block would have ended in them. The one
+      // call before is the warm-up as the workout started (#2841), which
+      // carries the source and nothing of the ride.
       await rideOn(rig, 120);
-      expect(scripted.requests).toEqual([]);
+      expect(scripted.requests).toEqual([
+        { method: 'POST', path: WARM_PATH, body: { source: 'instance-local' } },
+      ]);
       await rig.controller.resume();
       await rideTo(rig, 62);
       expect(scripted.starts()).toHaveLength(1);

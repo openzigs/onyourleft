@@ -141,6 +141,11 @@ function isRoomId(value: unknown): boolean {
   return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
 }
 
+/** A whole number from nought, as a count is. */
+function isCount(value: unknown): boolean {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
 /**
  * Keys one event may carry beyond {@link LOGGABLE_KEYS}, each with the only
  * value it may hold there. Not on the shared list, because `reason`, `room`
@@ -175,6 +180,19 @@ export const EVENT_KEYS: ReadonlyMap<
         Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 2_147_483_647,
       itemEvent: (value) => typeof value === 'string' && LOGGED_ITEM_EVENTS.has(value),
       item: (value) => typeof value === 'string' && LOGGED_ITEM_KEYS.has(value),
+    },
+  ],
+  // #2840: what one write-up's run came to — its model turns, tool calls,
+  // how many of the tools it used, the tokens sent and answered — beside the
+  // job's state. Whole numbers only: never a tool's name or the model's text.
+  [
+    'analysis-job',
+    {
+      turns: isCount,
+      toolCalls: isCount,
+      toolsUsed: isCount,
+      tokensIn: isCount,
+      tokensOut: isCount,
     },
   ],
   // #2609: where the analysis model's settings come from — the operator's

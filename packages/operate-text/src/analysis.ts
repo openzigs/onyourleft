@@ -26,7 +26,8 @@ export type OperateLocalModelState =
   | 'tls-by-name'
   | 'no-model'
   | 'bad-model'
-  | 'bad-reasoning';
+  | 'bad-reasoning'
+  | 'bad-context';
 
 /** The operator's analysis settings, as `GET /v1/operate/analysis` answers them. Never a key. */
 export interface OperateAnalysisAnswer {
@@ -157,6 +158,7 @@ export const LOCAL_STATE_TEXT: Readonly<Record<OperateLocalModelState, string>> 
   'no-model': 'Off: no model is chosen.',
   'bad-model': 'Off: the model’s name is not one the instance accepts.',
   'bad-reasoning': 'Off: the reasoning allowance in .env is not a whole number in range.',
+  'bad-context': 'Off: the model’s context in .env is not a whole number in range.',
 };
 
 export const OFFER_LOCAL_LABEL = 'A model on this instance';

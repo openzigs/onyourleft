@@ -153,6 +153,12 @@ export const PERMANENT_REFUSALS: readonly string[] = [
   'validation_failed',
   'rate_limited',
   'analysis_off',
+  // #2634, option A: the operator has not opened the model to this rider. Each
+  // refused start still spends one of the hour's re-plan starts, and a switch
+  // turned on mid-ride is rare; asking every block until the hour's starts
+  // were gone helped nobody. The next workout asks again.
+  'local_unavailable',
+  'hosted_unavailable',
 ];
 
 /** The ride as it is now, read by the session whenever it needs it. */

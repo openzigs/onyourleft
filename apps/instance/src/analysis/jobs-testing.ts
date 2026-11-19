@@ -6,7 +6,7 @@
  * sends. Never shipped.
  */
 
-import type { AgentEvent } from './agent.ts';
+import type { AgentEvent, AgentUsage } from './agent.ts';
 import { RIDE_INPUT } from './agent-testing.ts';
 import type { AnalysisEngine, WriteUpEnding, EngineJob, JobTimers } from './jobs.ts';
 
@@ -15,6 +15,8 @@ export interface ScriptedRun {
   readonly job: EngineJob;
   readonly signal: AbortSignal;
   emit(event: AgentEvent): void;
+  /** Tell the job engine what the run came to, as the agent does when it ends (#2840). */
+  report(usage: AgentUsage): void;
   /** End the run with `ending`. */
   finish(ending: WriteUpEnding): void;
   /** End the run by REJECTING with `error`, as a tool's store read that throws does (#1187). */
@@ -37,9 +39,16 @@ export function scriptedEngine(): ScriptedEngine {
   return {
     runs,
     engine: {
-      run: (job, signal, emit) =>
+      run: (job, signal, emit, report) =>
         new Promise<WriteUpEnding>((resolve, reject) => {
-          const run: ScriptedRun = { job, signal, emit, finish: resolve, fail: reject };
+          const run: ScriptedRun = {
+            job,
+            signal,
+            emit,
+            report: (usage) => report?.(usage),
+            finish: resolve,
+            fail: reject,
+          };
           runs.push(run);
           waiting.shift()?.(run);
         }),

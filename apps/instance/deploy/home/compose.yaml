@@ -140,6 +140,8 @@ services:
       OYL_INSTANCE_ANALYSIS_MODEL_URL: ${OYL_INSTANCE_ANALYSIS_MODEL_URL:-}
       OYL_INSTANCE_ANALYSIS_MODEL: ${OYL_INSTANCE_ANALYSIS_MODEL:-}
       OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS: ${OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS:-}
+      # #2840: the context the `ollama` service below loads the model with, from one variable.
+      OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS: ${OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS:-16384}
       OYL_INSTANCE_PICTURE_MODEL: ${OYL_INSTANCE_PICTURE_MODEL:-}
       # The secret a hosted model key (#1097) and the instance's own keys
       # (#1189) are encrypted under: HERE and on no other service. The `backup` service below deliberately does not get
@@ -307,6 +309,12 @@ services:
     # one Ollama serves both.
     profiles: ['history', 'analysis']
     restart: unless-stopped
+    environment:
+      # #2840: Ollama's own default under 24 GiB of GPU is 4 096, too short for
+      # a write-up, and it cuts an over-long one from the front without saying
+      # so. The instance is told the same number, and stops a write-up that
+      # would not fit (docs/operating-an-instance.md, Analysis model).
+      OLLAMA_CONTEXT_LENGTH: ${OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS:-16384}
     volumes:
       - models:/root/.ollama
 
