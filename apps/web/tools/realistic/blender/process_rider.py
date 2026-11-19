@@ -835,8 +835,8 @@ if body_tris + helmet_tris > TARGET_TRIS:
 # side the thumb's tip is on. It is done to the CUT body, after the bakes, so
 # the three maps stay the bytes they were: each of its vertices takes the move
 # of the full body's nearest vertex. The renderer then puts that hand's middle
-# on the hood (`RealisticRiderBelt`), and `rider-gear.test.ts` reads the
-# fingers back round the hood from the crash clip's riding pose.
+# on the hood (`RealisticRiderBelt`), and `realistic-textures.test.ts` reads
+# the fingertips back round the hood through the belt.
 def grip(target):
     """Closes the hands of `target`'s mesh round the hoods; returns the furthest
     a vertex moved, and where each fingertip is: (side, finger, rest point)."""
@@ -921,8 +921,10 @@ def grip(target):
 
     open_points = [np.array([*vertex.co, 1.0]) for vertex in target.data.vertices]
     closed = []
+    nearest_of = []
     for vertex in target.data.vertices:
         _, nearest, _ = finder.find(vertex.co)
+        nearest_of.append(nearest)
         change = blended.get(nearest)
         before = open_points[vertex.index]
         after = before if change is None else before + change @ before
@@ -951,7 +953,8 @@ def grip(target):
         vertex.co = Vector(after[:3])
     target.data.update()
     # Where each fingertip went -- MakeHuman's own fingertip joint (the end of
-    # each finger's last bone), carried by the same moves -- as the cut body's
+    # each finger's last bone), carried by the same moves, the roll and the
+    # carry back that every vertex of its hand took -- as the cut body's
     # nearest vertex: what `realistic-textures.test.ts` holds to the hood.
     finder = KDTree(len(target.data.vertices))
     for vertex in target.data.vertices:
@@ -959,11 +962,50 @@ def grip(target):
     finder.balance()
     tips = []
     for side in "LR":
+        carry = (was[side] - now[side])[:3]
         for finger in range(1, 6):
             name = f"finger{finger}-3.{side}"
             tip = moves[name] @ np.array([*joint(bones[name]["tail"]), 1.0])
-            at, _, _ = finder.find(Vector(rolled(tip, 1.0)[:3]))
+            at, _, _ = finder.find(Vector(rolled(tip, 1.0)[:3] + carry))
             tips.append((side, finger, at))
+    # Review 5975483536: the tips were once named without the carry back, and
+    # the "middle" and "ring" were one ring-finger point 3 mm apart. So each
+    # named tip is held, here, to its finger's own end -- of the cut body's
+    # vertices whose nearest full-body vertex MakeHuman weights heaviest to
+    # that finger's bones, the one furthest from the wrist in the open rest
+    # pose -- and each hand's five to being apart.
+    heaviest = {}
+    for name, pairs in mh_weights.items():
+        for vertex, weight in pairs:
+            if weight > heaviest.get(vertex, ("", 0.0))[1]:
+                heaviest[vertex] = (name, weight)
+    named = {(side, finger): Vector(at) for side, finger, at in tips}
+    for side in "LR":
+        wrist = Vector(joint(bones[f"wrist.{side}"]["head"]))
+        for finger in range(1, 6):
+            members = [
+                index
+                for index, nearest in enumerate(nearest_of)
+                if heaviest.get(nearest, ("", 0.0))[0].startswith(f"finger{finger}-")
+                and heaviest[nearest][0].endswith(f".{side}")
+            ]
+            if not members:
+                raise RuntimeError(f"no vertex of the cut body is on finger {finger}.{side}")
+            end = max(members, key=lambda index: (Vector(open_points[index][:3]) - wrist).length)
+            off = (target.data.vertices[end].co - named[(side, finger)]).length
+            if off > KIT.TIP_FROM_END:
+                raise RuntimeError(
+                    f"the named tip of finger {finger}.{side} is {off:.4f} m from its finger's end, "
+                    f"over {KIT.TIP_FROM_END}"
+                )
+        for first in range(1, 6):
+            for second in range(first + 1, 6):
+                apart = (named[(side, first)] - named[(side, second)]).length
+                if apart < KIT.TIPS_APART:
+                    raise RuntimeError(
+                        f"the named tips of fingers {first} and {second}.{side} are {apart:.4f} m apart, "
+                        f"under {KIT.TIPS_APART}"
+                    )
     return round(furthest, 4), tips
 
 # --- reading an exported GLB back, and posing its skeleton -------------------

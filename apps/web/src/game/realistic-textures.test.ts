@@ -858,9 +858,19 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
    * {@link ON_THE_HOOD}), the four fingers' mean within
    * {@link FINGERS_MEAN_REACH}, and none further than
    * {@link FINGERS_FURTHEST}. The same pipeline with the fingers left open put
-   * the middle fingertip 4.4 cm off and the four's mean 4.1 cm. The thumb is
+   * her left middle fingertip 4.4 cm off, the ring 5.0 cm and the four's mean
+   * 4.6 cm; closed, the middle is 0.2 cm (his 0.6 cm), the ring on the hood
+   * and the four's mean 1.1 cm (his 1.3 cm). The thumb is
    * not held: closed or open it lies 5 to 7 cm off, inside the bar's bend.
+   *
+   * Review 5975483536: the tips were once named off their fingers, the
+   * "middle" and "ring" one ring-finger point 3 mm apart. So each hand's five
+   * named tips are held at least {@link TIPS_APART} from each other —
+   * `rider_kit.py` §`TIPS_APART`, which `process_rider.py` holds them to too,
+   * beside each one's distance from its finger's own end. Correctly named,
+   * neighbouring tips are 2.1 to 2.5 cm apart in the closed hand.
    */
+  const TIPS_APART = 0.01;
   const ON_THE_HOOD = 0.01;
   const FINGERS_MEAN_REACH = 0.025;
   const FINGERS_FURTHEST = 0.05;
@@ -913,11 +923,24 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
       const vertex = riders.group.position.clone();
       for (const side of ['L', 'R'] as const) {
         const off = new Map<number, number>();
+        const points: (readonly number[])[] = [];
         for (const tip of named) {
           if (tip.side !== side) continue;
           skinned.getVertexPosition(tip.vertex, vertex).applyMatrix4(skinned.matrixWorld);
+          points.push(inBicycle(vertex));
           off.set(tip.finger, offHood(inBicycle(vertex), side === 'L' ? 1 : -1));
         }
+        // The five named tips are five fingers' tips, not one finger's twice.
+        let nearest = Number.POSITIVE_INFINITY;
+        for (const [i, a] of points.entries()) {
+          for (const b of points.slice(i + 1)) {
+            nearest = Math.min(
+              nearest,
+              Math.hypot(...a.map((value, axis) => value - (b[axis] ?? 0))),
+            );
+          }
+        }
+        expect(nearest, `${body} ${side} nearest two named tips`).toBeGreaterThan(TIPS_APART);
         const fingers = [2, 3, 4, 5].map((finger) => off.get(finger) ?? Number.NaN);
         const label = `${body} ${side}`;
         lines.push(`${label} ${fingers.map((each) => (each * 100).toFixed(1)).join('/')}`);
@@ -2320,8 +2343,11 @@ describe('the realistic rider moves like a rider — #625', () => {
     // The tops: the fingers down over the bar. #2839, the owner's ruling of
     // 2026-11-18: closed round it now, so the tips are UNDER it — further
     // below its top (the grip) than the tube is thick, 2 × `bicycle.ts`
-    // §`BAR_TUBE_RADIUS`'s 12 mm. Until then the fingers hung open, past 5 cm.
+    // §`BAR_TUBE_RADIUS`'s 12 mm — but curled in under it, not hanging: the
+    // closed hand's furthest named tip is 2.9 cm below, and the same pipeline
+    // with the fingers left open hangs it past 5 cm.
     expect(tops.below).toBeGreaterThan(0.024);
+    expect(tops.below).toBeLessThan(0.05);
   }, 120_000);
 
   it('PR #2116 — holds every grip below the hips, as a road bicycle’s bar is, so a hand is not drawn on the hip', async () => {

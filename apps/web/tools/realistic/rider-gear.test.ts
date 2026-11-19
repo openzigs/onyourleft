@@ -655,13 +655,32 @@ describe('the female rider reads as a woman from the chase camera — #2839', ()
     const band = (y: number) => torso.filter((p) => Math.abs(p[1] - y) < 0.015);
     const front = (y: number) => Math.max(...band(y).map((p) => p[2]));
     const height = shoulderY - hipY;
+    // The hips are wider than the shoulder joints, so they are told from a
+    // hand at their height by bone, not by reach: a vertex an arm bone
+    // carries most is never counted.
+    const document = file.json as unknown as Document;
+    const names = (document.skins[0]?.joints ?? []).map((node) => document.nodes[node]?.name);
+    const joints = body.attribute('JOINTS_0');
+    const weights = body.attribute('WEIGHTS_0');
+    const onArm = (vertex: number): boolean => {
+      let best = 0;
+      for (let slot = 1; slot < 4; slot += 1) {
+        const weight = weights.values[vertex * 4 + slot] as number;
+        if (weight > (weights.values[vertex * 4 + best] as number)) best = slot;
+      }
+      return /^(upperarm|lowerarm|wrist)/.test(
+        names[joints.values[vertex * 4 + best] as number] ?? '',
+      );
+    };
     return {
       // How far the chest stands out in front of the waist below it.
       bust: front(shoulderY - 0.3 * height) - front(hipY + 0.45 * height),
       // The hips across, for the shoulders across.
       hipsForShoulders:
         Math.max(
-          ...body.positions.filter((p) => Math.abs(p[1] - hipY) < 0.015).map((p) => Math.abs(p[0])),
+          ...body.positions
+            .filter((p, vertex) => Math.abs(p[1] - hipY) < 0.015 && !onArm(vertex))
+            .map((p) => Math.abs(p[0])),
         ) / shoulderX,
     };
   };

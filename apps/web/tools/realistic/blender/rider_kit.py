@@ -193,6 +193,11 @@ GRIP_THUMB = (35.0, 30.0, 25.0)
 # And the forearm turned about its own line by this, from nothing at the elbow
 # to all of it at the wrist, so the palm is over the hood the fingers close on.
 GRIP_ROLL = 45.0
+# And held by `process_rider.py` §`grip` (review 5975483536): each fingertip it
+# names is within TIP_FROM_END of its finger's own end, and each hand's five
+# named tips are at least TIPS_APART from each other. Metres.
+TIP_FROM_END = 0.01
+TIPS_APART = 0.01
 
 # --- the female rider's hair (#2839) -------------------------------------------
 # A low ponytail out from under the back of the helmet, and a band of hair
