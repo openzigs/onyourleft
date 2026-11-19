@@ -360,8 +360,18 @@ const CORNER_CASES = [
   ),
 ];
 
-/** What is wrong with the corner of one stage, as sentences. */
-function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: string): string[] {
+/**
+ * What is wrong with the corner of one stage, as sentences. `roomy` is
+ * whether every line must be in view without scrolling: {@link ROOMY}'s
+ * answer, unless the caller draws the corner with less room than that was
+ * measured in (#2837's cases, in the shell or with the AI bots' sentence).
+ */
+function cornerFaults(
+  stage: LapRaceStageMeasurement,
+  viewport: Viewport,
+  text: string,
+  roomy: boolean = ROOMY[text]?.has(sized(viewport)) === true,
+): string[] {
   const faults: string[] = [];
   const say = (box: Box): string =>
     `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
@@ -403,7 +413,7 @@ function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: 
     if (!stage.standingsLines.some((line) => line.you && line.inView)) {
       faults.push('the rider’s own line out of view');
     }
-    if (ROOMY[text]?.has(sized(viewport)) === true && inView.length !== 8) {
+    if (roomy && inView.length !== 8) {
       faults.push(`${String(inView.length)} of 8 lines in view where there is room for all`);
     }
     const swap = stage.swap;
@@ -728,6 +738,19 @@ interface GrowCase {
   readonly short: boolean;
 }
 
+/**
+ * Whether {@link ROOMY} speaks for a case's DRAWN corner: only as it was
+ * measured, with no insets and no sentence under the summary. ⚠️ Measured on
+ * this pull request's first CI run: in the shell at the normal text with the
+ * AI bots' sentence, the runner's fonts hold 7 of the 8 lines where a Mac
+ * holds all 8 — and hidden, both hold 8.
+ */
+function drawnRoomy(each: GrowCase): boolean {
+  return (
+    each.insets === NO_INSETS && !each.note && ROOMY[each.text]?.has(sized(each.viewport)) === true
+  );
+}
+
 function tablet(size: string): Viewport {
   const found = TABLET_VIEWPORTS.find((each) => sized(each) === size);
   if (found === undefined) throw new Error(`no ${size} tablet`);
@@ -862,7 +885,10 @@ test.describe('#2837 a lap race’s standings take the room the hidden controls 
       const at = growName(each);
       const drawn = await openHiding(page, each);
       for (const stage of drawn) {
-        expect(cornerFaults(stage, viewport, text), `${at}, ${stage.stage}, drawn`).toEqual([]);
+        expect(
+          cornerFaults(stage, viewport, text, drawnRoomy(each)),
+          `${at}, ${stage.stage}, drawn`,
+        ).toEqual([]);
       }
       const before = stageOf(drawn, HIDES);
       if (each.short) {
@@ -909,7 +935,9 @@ test.describe('#2837 a lap race’s standings take the room the hidden controls 
         })
         .toBeCloseTo(standingsOf(before).height, 0);
       const returned = stageOf(await remeasure(page), HIDES);
-      expect(cornerFaults(returned, viewport, text), `${at}, returned`).toEqual([]);
+      expect(cornerFaults(returned, viewport, text, drawnRoomy(each)), `${at}, returned`).toEqual(
+        [],
+      );
       expect(linesInView(returned), `${at}, returned`).toBe(linesInView(before));
     });
   }
