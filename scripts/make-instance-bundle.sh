@@ -17,6 +17,12 @@
 # into the `tailscale` service, and the file in it that OYL_INSTANCE_REMOTE_PATH
 # names is what `tailscale serve` serves. Without it a bundle on the tailnet
 # would mount an empty folder and serve nothing.
+# And an EMPTY `secrets/`, owner-only (#2818): compose.yaml mounts it into the
+# instance, which makes its secret key there on its first start. Docker makes a
+# missing bind-mount folder owned by root on Linux, where the instance (uid
+# 1000) cannot write it, and the guide's install is `docker compose up` alone,
+# with no deploy.sh to make it first. It is made here, never copied: a
+# `secrets/` beside the checkout's compose.yaml is the owner's own.
 #
 #   bash scripts/make-instance-bundle.sh IMAGE@sha256:DIGEST VERSION OUTDIR
 #
@@ -94,6 +100,8 @@ zip="${name}-${version}.zip"
 bundle="${out}/${name}"
 rm -rf "${bundle}" "${out:?}/${zip}"
 mkdir -p "${bundle}"
+# #2818: there before Docker could make it, and owner-only before anything is in it.
+mkdir -m 700 "${bundle}/secrets"
 
 # `awk` with the line passed as data, so nothing in the image name is read as
 # a pattern or a replacement.

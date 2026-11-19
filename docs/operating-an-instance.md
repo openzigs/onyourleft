@@ -484,8 +484,11 @@ need the old secret to read their key; the rest of a snapshot needs no secret at
   `tunnel` do not mount it.
 - **Owner-only, or no start.** A file that others than its owner can read stops the instance, with
   a line that names the file and never its content. Make it `chmod 600` and start again. On Linux
-  the folder must be writable by uid 1000, the image's user; `deploy.sh` makes it if it is missing,
-  because Docker would make it owned by root.
+  the folder must be writable by uid 1000, the image's user: `sudo chown 1000 secrets`, once, before
+  the first start (not on macOS or Windows, where Docker Desktop maps the owner itself). A release
+  bundle ships the folder, empty and owner-only, and `deploy.sh` makes a missing one, because a
+  folder Docker makes is owned by root, which the instance cannot write
+  ([#2818](https://github.com/openzigs/onyourleft/issues/2818)).
 - ⚠️ **A folder that keeps no permission bits.** A Windows folder bind-mounted by Docker Desktop may
   report every file as readable by everyone. The instance checks a file that looks open against a
   probe it makes `0600` in the same folder. If the probe looks open too, the folder cannot show

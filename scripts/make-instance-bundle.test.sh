@@ -36,6 +36,10 @@ assert_says() {
   if grep -qF -- "$2" <<< "${out}"; then ok "$1"; else bad "$1 (no '$2')"; fi
 }
 
+# Whether a folder has exactly these permission bits. `find`, because its
+# `-perm` reads the same on Linux and macOS and `stat`'s format does not.
+dir_has_mode() { [ -n "$(find "$1" -maxdepth 0 -type d -perm "$2" 2>/dev/null)" ]; }
+
 IMAGE="ghcr.io/openzigs/onyourleft-instance:1.2.3@sha256:$(printf 'c%.0s' $(seq 1 64))"
 # An email address at the project's own domain, or under it (#2857). Written
 # out here and not read from the script, so the script's own pattern is tested.
@@ -118,11 +122,68 @@ for serve in serve-tailnet.json serve-funnel.json; do
   fi
 done
 listing="$(unzip -Z1 "${tmp}/out/onyourleft-instance-1.2.3.zip" 2>&1 | sort | tr '\n' ' ')"
-if [ "${listing}" = 'onyourleft-instance/ onyourleft-instance/compose.yaml onyourleft-instance/deploy.sh onyourleft-instance/instance.env.example onyourleft-instance/release.image onyourleft-instance/tailscale/ onyourleft-instance/tailscale/serve-funnel.json onyourleft-instance/tailscale/serve-tailnet.json ' ]; then
+if [ "${listing}" = 'onyourleft-instance/ onyourleft-instance/compose.yaml onyourleft-instance/deploy.sh onyourleft-instance/instance.env.example onyourleft-instance/release.image onyourleft-instance/secrets/ onyourleft-instance/tailscale/ onyourleft-instance/tailscale/serve-funnel.json onyourleft-instance/tailscale/serve-tailnet.json ' ]; then
   ok 'the zip holds those files in one unversioned folder and nothing else -- no .env'
 else
   out="${listing}"
   bad 'the zip holds those files in one unversioned folder and nothing else -- no .env'
+fi
+
+# #2818: compose.yaml mounts ./secrets into the instance, which makes its secret
+# key there on its first start. Docker makes a MISSING bind-mount folder owned
+# by root on Linux, where the instance (uid 1000) cannot write it, so the bundle
+# ships the folder: empty, and owner-only before anything is in it.
+if dir_has_mode "${b}/secrets" 700; then
+  ok 'the bundle holds secrets/, owner-only'
+else
+  out="$(ls -ld "${b}/secrets" 2>&1)"
+  bad 'the bundle holds secrets/, owner-only'
+fi
+# Read back the way an operator gets it: the zip, extracted into an empty folder.
+mkdir "${tmp}/install"
+(cd "${tmp}/install" && unzip -q "${tmp}/out/onyourleft-instance-1.2.3.zip")
+if dir_has_mode "${tmp}/install/onyourleft-instance/secrets" 700; then
+  ok 'and the zip extracts it owner-only, before Docker could make it'
+else
+  out="$(ls -ld "${tmp}/install/onyourleft-instance/secrets" 2>&1)"
+  bad 'and the zip extracts it owner-only, before Docker could make it'
+fi
+if [ -z "$(ls -A "${tmp}/install/onyourleft-instance/secrets" 2>&1)" ]; then
+  ok 'and empty'
+else
+  out="$(ls -A "${tmp}/install/onyourleft-instance/secrets" 2>&1)"
+  bad 'and empty'
+fi
+
+# An update: the next release's zip extracted over an install. The operator's
+# secrets folder is theirs -- its files and its mode stay as they were.
+mkdir -p "${tmp}/box/onyourleft-instance/secrets"
+chmod 750 "${tmp}/box/onyourleft-instance/secrets"
+printf 'the-key\n' > "${tmp}/box/onyourleft-instance/secrets/instance-secret-key"
+printf 'OYL_INSTANCE_ORIGIN=https://mine.example\n' > "${tmp}/box/onyourleft-instance/.env"
+(cd "${tmp}/box" && unzip -q -o "${tmp}/out/onyourleft-instance-1.2.3.zip")
+if [ "$(cat "${tmp}/box/onyourleft-instance/secrets/instance-secret-key" 2>&1)" = 'the-key' ] &&
+  dir_has_mode "${tmp}/box/onyourleft-instance/secrets" 750 &&
+  [ -f "${tmp}/box/onyourleft-instance/.env" ] && [ -f "${tmp}/box/onyourleft-instance/compose.yaml" ]; then
+  ok 'extracted over an install, it leaves the secrets already there, and the folder'"'"'s mode'
+else
+  out="$(ls -laR "${tmp}/box" 2>&1)"
+  bad 'extracted over an install, it leaves the secrets already there, and the folder'"'"'s mode'
+fi
+
+# A secrets folder beside the home deployment (the owner's own box) is never
+# copied: the bundle's is made empty, whatever the checkout holds.
+new_fixture
+mkdir "${tmp}/repo/apps/instance/deploy/home/secrets"
+printf 'the-key\n' > "${tmp}/repo/apps/instance/deploy/home/secrets/instance-secret-key"
+run_bundle "${IMAGE}" 1.2.3 "${tmp}/out"
+assert_exit 'a checkout with secrets beside compose.yaml still bundles' 0
+zipped="$(unzip -Z1 "${tmp}/out/onyourleft-instance-1.2.3.zip")"
+if grep -q 'secrets/.' <<< "${zipped}" || [ -n "$(ls -A "${tmp}/out/onyourleft-instance/secrets" 2>&1)" ]; then
+  out="${zipped}"
+  bad 'and nothing in it is in the zip: the bundle'"'"'s secrets/ is empty'
+else
+  ok 'and nothing in it is in the zip: the bundle'"'"'s secrets/ is empty'
 fi
 
 # A .env beside the home deployment (the owner's own box) is not bundled.

@@ -21,7 +21,13 @@ __pycache__/
 # is written down rather than resting on a git behaviour nobody stated, and so
 # that a `git add` of a path inside it has to be forced. Never force it: that
 # commits another branch's whole tree (#148).
-.claude/
+#
+# One file in it is committed: `.claude/delivery.md`, the delivery pipeline's
+# constraints, which every dispatched agent reads from its own worktree and so
+# has to be in the tree. The directory is ignored by its contents rather than
+# by its name, because git cannot un-ignore a file inside an ignored directory.
+.claude/*
+!.claude/delivery.md
 
 # The home deploy's record of what it deployed (#52): a file on the box.
 apps/instance/deploy/home/.deployed

@@ -75,7 +75,9 @@ comes back only once somebody has signed in — set Windows to sign in automatic
    ```
 
    The folder holds `compose.yaml`, `deploy.sh`, `instance.env.example`, `release.image`, and a
-   `tailscale` folder with the two files `tailscale serve` reads on the tailnet (3a).
+   `tailscale` folder with two serve files. On the tailnet (3a) `tailscale serve` reads one of them,
+   the one `OYL_INSTANCE_REMOTE_PATH` names: `serve-tailnet.json` for `tailnet`, `serve-funnel.json`
+   for `funnel`.
    `compose.yaml` names the instance's image **by its digest**, the line in `release.image`, so
    what Docker downloads is exactly the image this release was tested with.
 
@@ -273,6 +275,24 @@ and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network, or
 for local debugging, is counted as itself, whatever header it sends.
 
 ## 5. Start it
+
+**On Linux only, one command first.** The release's folder holds an empty `secrets` folder that only
+its owner can open: the instance keeps its secret key and the setup code there. Inside its container
+the instance runs as user 1000, so on Linux that user has to own the folder, whoever extracted the
+zip ([#2818](https://github.com/openzigs/onyourleft/issues/2818)):
+
+```bash
+cd /path/to/onyourleft-instance
+sudo chown 1000 secrets
+```
+
+**Windows and macOS skip it**: Docker Desktop maps the folder's owner itself, and on macOS the
+command would hand the folder to a user that is not you. A Linux machine that skips it, where your
+own user is not 1000 (`id -u` says), fails its first start with `OYL_INSTANCE_SECRET_KEY is not set,
+and its file could not be made in /run/secrets/onyourleft`. After it, a user who is not 1000 reads
+the setup code in step 5a with `sudo cat secrets/setup-code`. If there is no `secrets` folder — a git
+checkout has none — make it first, with `mkdir -m 700 secrets`: left to Docker, a missing one is made
+owned by root, which the instance cannot write either.
 
 ```powershell
 cd C:\onyourleft\onyourleft-instance
