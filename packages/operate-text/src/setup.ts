@@ -65,9 +65,29 @@ export const SETUP_TITLE = 'Set up this instance';
 export const SETUP_LOCKED_LEAD =
   'This page sets up the instance, on this machine only. To begin, type the setup code. It is in the file setup-code, in the secrets folder beside compose.yaml. A code works once, for 10 minutes.';
 
+/**
+ * The operator commands the wizard names, whole (#2858): each run on this
+ * machine, in the folder that holds compose.yaml, and shown in a block to copy.
+ */
+export const SETUP_COMMANDS = {
+  setupCode: 'docker compose exec instance node src/operator/cli.ts setup-code',
+  restart: 'docker compose restart instance',
+  ownerClaimReset: 'docker compose exec instance node src/operator/cli.ts owner-claim reset',
+  adminPagesOn: 'docker compose up -d instance',
+  adminCode: 'docker compose exec instance node src/operator/cli.ts admin-code',
+  adminPasskeysList: 'docker compose exec instance node src/operator/cli.ts admin-passkeys list',
+  adminPasskeysConfirm:
+    'docker compose exec instance node src/operator/cli.ts admin-passkeys confirm <id>',
+  backupStatus: 'docker compose ps backup',
+} as const;
+
+/** Before the commands that make a new code: in the folder that holds compose.yaml. */
+export const SETUP_COMMANDS_WHERE =
+  'Run it in a terminal on this machine, in the folder that holds compose.yaml.';
+
 /** How to get a new code, without a button the tunnel could press (ADR 0080 D-2). */
 export const SETUP_NEW_CODE_TEXT =
-  'Each start of the instance makes a new code. If yours has run out, restart the instance (docker compose restart instance) and open the file again, or run the setup-code command on this machine.';
+  'Each start of the instance makes a new code, and so does the command below. If yours has run out, run it, then open the file again.';
 
 /** The code's label. */
 export const SETUP_CODE_LABEL = 'Setup code';
@@ -160,9 +180,15 @@ export const CLAIMED_TEXT = 'Your tablet now owns this server.';
 export const CLAIMED_NEXT_TEXT =
   'Nobody else can claim it now. Press Next step to carry on with the setup.';
 export const CLAIMED_WRONG_TEXT =
-  'If the wrong tablet claimed it, run the owner-claim reset command on this machine and claim it again.';
+  'If the wrong tablet claimed it, run this command on this machine, then open this page again and claim it with the right tablet:';
 export const CLAIM_NOT_CONFIRMED_TEXT =
   'That claim could not be confirmed: it ran out, or a new code replaced it. Show a new claim code and scan it again.';
+/**
+ * The claim step after a restart voided the code the server showed before
+ * (#2858): the QR on an old page no longer works.
+ */
+export const CLAIM_RESTARTED_TEXT =
+  'The server restarted, so a claim code it showed before no longer works. Show a new one.';
 /** The claim step once the code it showed has run out: why the QR went, in one sentence (#2825). */
 export const CLAIM_EXPIRED_TEXT = 'That code ran out. Show a new one.';
 export const CLAIM_NO_CARD_TEXT =
@@ -175,11 +201,22 @@ export const PASSKEY_STEP_LEAD =
 export const PASSKEY_STEP_LATER =
   'A passkey lets you sign in to the server’s admin pages on this computer without a code. You can add one later, from the admin pages, whenever you want it.';
 /** How to add one, after the setup: `adminAddress` is the admin pages' address on this machine. */
-export function passkeyStepHow(adminAddress: string): readonly string[] {
+export function passkeyStepHow(
+  adminAddress: string,
+): readonly { readonly text: string; readonly commands: readonly string[] }[] {
   return [
-    'Turn the admin pages on: set OYL_INSTANCE_ADMIN_PAGES=on in .env, then run docker compose up -d instance.',
-    `Run the admin-code command on this machine and sign in at ${adminAddress} with the code it prints.`,
-    'On the Passkeys page, add a passkey. It reads every page, and changes nothing until you confirm it with the admin-passkeys confirm command on this machine.',
+    {
+      text: 'Turn the admin pages on: set OYL_INSTANCE_ADMIN_PAGES=on in .env, then run:',
+      commands: [SETUP_COMMANDS.adminPagesOn],
+    },
+    {
+      text: `Run this on this machine, and sign in at ${adminAddress} with the code it prints:`,
+      commands: [SETUP_COMMANDS.adminCode],
+    },
+    {
+      text: 'On the Passkeys page, add a passkey. It reads every page, and changes nothing until you confirm it: the first command shows its id, the second confirms it.',
+      commands: [SETUP_COMMANDS.adminPasskeysList, SETUP_COMMANDS.adminPasskeysConfirm],
+    },
   ];
 }
 
@@ -191,9 +228,16 @@ export const KIT_KEEP_TEXT =
   'Keep the kit in a password manager, or print it. Never keep it beside the backups: whoever holds the kit and a backup can pretend to be your server.';
 export const KIT_DOWNLOAD_BUTTON = 'Download the emergency kit';
 export const KIT_ONCE_TEXT =
-  'You can download it once during this setup. After setup, you can download it again from the admin pages on this computer, once you have added a passkey there.';
+  'It downloads once in each setup session: when your browser asks, save it. This page does not change after the download. After setup, you can download it again from the admin pages on this computer, once you have added a passkey there.';
 export const KIT_TAKEN_TEXT =
   'The kit was downloaded in this session. Keep it safe, away from the backups.';
+/**
+ * The kit taken (#2858): what to do if the save was cancelled. A new setup
+ * session downloads it again (ADR 0080 D-4's "once" is per session), and the
+ * command that makes the code for one is below this sentence.
+ */
+export const KIT_AGAIN_TEXT =
+  'If you cancelled the save or cannot find the file, start a new setup session: run this command on this machine, then type the new code on this page. A new session can download the kit once more.';
 export const KIT_NONE_TEXT =
   'There is no emergency kit to download: every secret this server uses is in its settings file, .env, which is your copy of it.';
 
@@ -219,6 +263,13 @@ export const BACKUPS_LAST_FAILED_TEXT =
 export const BACKUPS_LAST_RAN_TEXT = 'The last backup ran';
 export const BACKUPS_WAITING_TEXT =
   'Waiting for the backup to run. It usually starts within 30 seconds: press Check now to see whether it has.';
+/**
+ * The newest backup was made before the tablet claimed the server (#2858):
+ * it does not hold the owner's account, so "Back up now" is taken regardless
+ * of the 15-minute gap until a backup made since the claim has run.
+ */
+export const BACKUPS_BEFORE_CLAIM_TEXT =
+  'That backup was made before your tablet claimed this server, so it does not hold your account yet. Back up now to keep it.';
 export const BACKUPS_TOO_SOON_TEXT =
   'A backup ran in the last 15 minutes, or one is already waiting, so no new one was asked for.';
 export const BACK_UP_NOW_STEP_BUTTON = 'Back up now';
@@ -226,7 +277,7 @@ export const BACK_UP_NOW_STEP_BUTTON = 'Back up now';
 export const BACKUPS_EXPERT_LINES: readonly string[] = [
   'The folder on this computer is OYL_BACKUP_DIR in .env, and the copy kept elsewhere is OYL_OFFBOX_DIR.',
   'To change one, edit its line in .env and run the deploy again: the backup service is started with them.',
-  'To check the backup service is running: docker compose ps backup.',
+  `To check the backup service is running: ${SETUP_COMMANDS.backupStatus}`,
 ];
 
 // --- registration (ADR 0080 D-6, Q-3)

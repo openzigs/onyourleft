@@ -53,6 +53,7 @@ import { createRecentProblems, keepProblems, logEvent, logUnhandled, type LogSin
 import type { SecretFromFile } from './setup/secrets.ts';
 import { createSetup, type Setup } from './setup/setup.ts';
 import {
+  localTimeText,
   mintSetupCode,
   SETUP_CODE_FILE,
   SETUP_LOG_EVENT,
@@ -369,6 +370,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     server.origin !== null &&
     options.config.moderators.owner === undefined;
   let setup: Setup | undefined;
+  /** Whether this start voided a claim code the process before it showed (#2858). */
+  let claimCodesVoidedAtStart = false;
   let stopSetup = (): void => undefined;
   /** The start's own operator-log entries and the setup code, written once the store is open. */
   let startWritten: Promise<void> = Promise.resolve();
@@ -1092,6 +1095,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         kitSecrets: options.kitSecrets ?? [],
         environmentRegistration: options.config.registration,
         secretsDirectory: options.secretsDirectory,
+        claimCodesVoidedAtStart: () => claimCodesVoidedAtStart,
         // #2792: the optional AI step's, read and written as Operate's are.
         analysis: {
           environment: options.config,
@@ -1250,6 +1254,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         );
       }
       if (setup === undefined || port === undefined) return;
+      // #2858: the page that showed a claim code went with the process before this one, so the
+      // code is voided rather than left working unseen; the claim step says why its QR went.
+      claimCodesVoidedAtStart = (await opened.voidUnredeemedOwnerClaimCodes()) > 0;
       const minted = await mintSetupCode(opened, {
         mintedBy: 'start',
         now,
@@ -1261,6 +1268,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         open: setupAddress(port),
         codeIn: minted.written ? `secrets/${SETUP_CODE_FILE}` : 'operator setup-code',
         validUntil: new Date(minted.expiresAt * 1000).toISOString(),
+        validUntilLocal: localTimeText(minted.expiresAt),
       });
     } catch (error) {
       logUnhandled(log, null, error);

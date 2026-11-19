@@ -2678,6 +2678,15 @@ export interface SqlStore {
   /** Discard the pending claim live at `at`: its code deleted, so it is void. `false` when there was none. */
   discardOwnerClaim(at: number): Promise<boolean>;
   /**
+   * Every claim code no device has redeemed, deleted (#2858): what a start of
+   * the instance does while the setup is open, since the page that showed the
+   * code is gone with the old process. A redeemed claim waiting for the owner
+   * is kept. Answers how many were voided.
+   */
+  voidUnredeemedOwnerClaimCodes(): Promise<number>;
+  /** When the owner key was claimed, Unix seconds, or `undefined` with none claimed (#2858). */
+  ownerClaimedAt(): Promise<number | undefined>;
+  /**
    * `operator owner-claim reset` (ADR 0080 D-3): in ONE transaction the
    * claimed owner key cleared, every claim code deleted and every admin
    * session ended. Answers whether a key was claimed and how many sessions ended.
@@ -2786,9 +2795,11 @@ export interface SqlStore {
    * Ask for a backup now (#2606), in ONE transaction with the checks:
    * `pending` while a request already waits, `too_soon` when a backup was
    * made within {@link BACKUP_REQUEST_GAP_SECONDS} of `at`; otherwise the
-   * request, written.
+   * request, written. With `since` (#2858, the setup's backup step: when the
+   * owner was claimed), a backup made before it does not count against the
+   * gap: it cannot hold what was made since.
    */
-  requestBackup(at: number): Promise<BackupRequestOutcome>;
+  requestBackup(at: number, options?: { readonly since?: number }): Promise<BackupRequestOutcome>;
   /** Whether a backup record names the snapshot directory `snapshot` (#2606). */
   hasBackupRecord(snapshot: string): Promise<boolean>;
   /**
@@ -7332,7 +7343,7 @@ function storeOver(
         return row === undefined ? undefined : { id: row.id, requestedAt: row.requested_at };
       }),
 
-    requestBackup: (at) =>
+    requestBackup: (at, options) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<BackupRequestOutcome> => {
           const waiting = await trx
@@ -7347,6 +7358,7 @@ function storeOver(
             .select('id')
             .where('outcome', '=', 'done')
             .where('at', '>', at - BACKUP_REQUEST_GAP_SECONDS)
+            .where('at', '>=', options?.since ?? 0)
             .limit(1)
             .executeTakeFirst();
           if (recent !== undefined) return { outcome: 'too_soon' };
@@ -8083,6 +8095,25 @@ function storeOver(
           return 'confirmed' as const;
         }),
       ),
+
+    voidUnredeemedOwnerClaimCodes: () =>
+      exclusive(async () => {
+        const voided = await db
+          .deleteFrom('owner_claim_code')
+          .where('redeemed_at', 'is', null)
+          .executeTakeFirst();
+        return Number(voided.numDeletedRows);
+      }),
+
+    ownerClaimedAt: () =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('instance_owner')
+          .select('claimed_at')
+          .where('slot', '=', 1)
+          .executeTakeFirst();
+        return row?.claimed_at;
+      }),
 
     discardOwnerClaim: (at) =>
       exclusive(async () => {

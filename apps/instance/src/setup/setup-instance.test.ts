@@ -38,7 +38,7 @@ import { openSqlStore } from '../store/open-sql-store.ts';
 import { migrateForDeploy } from '../store/serving.ts';
 import { registrationFixture } from '../store/testing/index.ts';
 import type { SecretFromFile } from './secrets.ts';
-import { SETUP_CODE_FILE } from './setup-code.ts';
+import { localTimeText, SETUP_CODE_FILE, setupCodeFileText } from './setup-code.ts';
 import { SETUP_ROUTES } from './setup-routes.ts';
 import { SETUP_COOKIE } from './setup.ts';
 
@@ -257,8 +257,16 @@ async function noRoute(port: number, method: string): Promise<Answer> {
   return send(port, method, '/no-such-route-2784', { host: `localhost:${String(port)}` });
 }
 
-/** Every setup route, every method it takes and one it does not, answered as a path with no route. */
-async function expectAllNotFound(port: number): Promise<void> {
+/**
+ * Every setup route, every method it takes and one it does not, answered as a
+ * path with no route. With `finishedHere` — the loopback listener once the
+ * setup is done (#2858) — `GET /setup` alone answers the small "Setup is
+ * finished" page, still a 404 and setting no cookie.
+ */
+async function expectAllNotFound(
+  port: number,
+  options: { readonly finishedHere?: boolean } = {},
+): Promise<void> {
   const expected = await noRoute(port, 'GET');
   expect(expected.status).toBe(404);
   for (const route of SETUP_ROUTES) {
@@ -267,6 +275,13 @@ async function expectAllNotFound(port: number): Promise<void> {
         host: `localhost:${String(port)}`,
         origin: `http://localhost:${String(port)}`,
       });
+      if (options.finishedHere === true && method === 'GET' && route.path === '/setup') {
+        expect(answer.status).toBe(404);
+        expect(answer.body).toContain('<h1>Setup is finished</h1>');
+        expect(answer.body).not.toContain('<form');
+        expect(answer.headers['set-cookie']).toBeUndefined();
+        continue;
+      }
       expect(answer.status, `${method} ${route.path}`).toBe(404);
       expect(answer.body, `${method} ${route.path}`).toBe(expected.body);
       expect(answer.headers['set-cookie'], `${method} ${route.path}`).toBeUndefined();
@@ -285,7 +300,7 @@ async function tabletRedeems(at: World, device: TestDevice, claimCode: string) {
 }
 
 /** A device registering over the sealed session route, unauthenticated: what a stranger meets. */
-async function register(at: World, device: TestDevice) {
+async function register(at: World, device: TestDevice, inviteCode?: string) {
   const challenge = (await (
     await fetch(`${at.instance.url}/v1/auth/challenge`, {
       method: 'POST',
@@ -296,7 +311,10 @@ async function register(at: World, device: TestDevice) {
   return sealedAt(at.instance.url, TEST_ORIGIN, {
     method: 'POST',
     path: '/v1/auth/session',
-    body: await device.statement(challenge.nonce, { issuedAt: Math.floor(Date.now() / 1000) }),
+    body: {
+      ...(await device.statement(challenge.nonce, { issuedAt: Math.floor(Date.now() / 1000) })),
+      ...(inviteCode === undefined ? {} : { inviteCode }),
+    },
     signer: device.signingKey,
   });
 }
@@ -329,6 +347,10 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
       open: `http://localhost:${String(at.port)}/setup`,
       codeIn: 'secrets/setup-code',
       validUntil: expect.stringMatching(/Z$/) as unknown,
+      // #2858: the same moment by this machine's clock, its zone named.
+      validUntilLocal: expect.stringMatching(
+        /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} [A-Za-z0-9+:-]+$/,
+      ) as unknown,
     });
     expect(at.lines.join('\n')).not.toContain(code);
     const locked = await new Browser(at).get('/setup');
@@ -564,11 +586,28 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(turnedAway.text).toContain('registration_closed');
 
     // One rider invite, as a QR with the card.
-    const invite = await back.post('/setup/invite/code');
-    expect(invite.status).toBe(200);
+    const made = await back.post('/setup/invite/code');
+    expect(made.headers.location).toBe('/setup/invite');
+    const invite = await back.get('/setup/invite');
     expect(CARD_LINE.exec(invite.body)?.[1]).toMatch(/^[a-z2-9]{4}/);
     expect((await back.post('/setup/invite/code')).status).toBe(303);
-    expect((await back.get('/setup/invite')).body).toContain('made its one invite');
+    // #2858: shown again to the session that made it, until it is used or runs out.
+    expect(CARD_LINE.exec((await back.get('/setup/invite')).body)?.[1]).toBe(
+      CARD_LINE.exec(invite.body)?.[1],
+    );
+    // Another session is told the setup made its one invite, and is never shown it.
+    const other = new Browser(at);
+    await other.signIn(
+      (
+        await setupCode(
+          { database: at.path, blobs: `${at.path}.blobs` },
+          { secretsDirectory: at.secrets, port: String(at.port) },
+        )
+      ).code,
+    );
+    const elsewhere = await other.get('/setup/invite');
+    expect(elsewhere.body).toContain('made its one invite');
+    expect(elsewhere.body).not.toContain(CARD_LINE.exec(invite.body)?.[1] ?? 'none');
     expect((await back.post('/setup/next', { from: 'invite' })).headers.location).toBe('/setup/ai');
 
     // AI write-ups (#2792): optional, and skipped here. Its own tests are further down.
@@ -598,14 +637,16 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     );
     expect(policy).not.toContain("'unsafe-inline'");
     expect(await fileThere(at)).toBe(false);
-    await expectAllNotFound(at.port);
+    await expectAllNotFound(at.port, { finishedHere: true });
+    // #2858: through the tunnel `/setup` stays byte-identical to a missing route.
+    await expectAllNotFound(portOf(at.instance));
 
     // Done is the database's: a restart neither reopens it nor writes a code.
     at.lines.length = 0;
     await restart(at);
     expect(await fileThere(at)).toBe(false);
     expect(at.lines.join('\n')).not.toContain('first-run-setup');
-    await expectAllNotFound(at.port);
+    await expectAllNotFound(at.port, { finishedHere: true });
     await expect(
       setupCode({ database: at.path, blobs: `${at.path}.blobs` }, { secretsDirectory: at.secrets }),
     ).rejects.toThrow(/setup is done/);
@@ -1323,13 +1364,229 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
       'AI write-ups: off. Everything else works without them.',
     );
     expect((await browser.post('/setup/finish/done')).status).toBe(200);
-    await expectAllNotFound(at.port);
+    await expectAllNotFound(at.port, { finishedHere: true });
     // Done with AI off, as a job meets it: the owner's write-up on this computer's model is
     // refused at its start. Every step before this one worked with no model.
     const refused = await at.instance
       .analysisJobs()
       ?.start({ athleteId: ownerId } as Caller, jobBody());
     expect(refused).toMatchObject({ ok: false, code: 'local_unavailable' });
+  });
+});
+
+describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () => {
+  /** Signed in, claimed with a tablet and confirmed: the setup past its claim. */
+  async function claimed(at: World): Promise<{ browser: Browser; tablet: TestDevice }> {
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const claim = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    const tablet = await testDevice();
+    expect((await tabletRedeems(at, tablet, claim)).status).toBe(200);
+    const pending = await browser.get('/setup/claim');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    await browser.post('/setup/claim/confirm', { comparison });
+    return { browser, tablet };
+  }
+
+  /** One backup by the backup service's own loop, at `when`. */
+  async function backUp(at: World, when: Date): Promise<void> {
+    const stop = new AbortController();
+    await backupLoop(
+      { database: at.path, blobs: join(at.path, '..', 'blobs') },
+      join(at.path, '..', 'backups-dir'),
+      {
+        intervalSeconds: 21_600,
+        signal: stop.signal,
+        now: () => when,
+        wait: () => {
+          stop.abort();
+          return Promise.resolve();
+        },
+        report: () => undefined,
+      },
+    );
+  }
+
+  it('takes "Back up now" past the 15-minute gap while the newest backup predates the claim, and says it does not hold the account', async () => {
+    const at = await world();
+    at.clock = Date.now();
+    await restart(at);
+    // The backup service's start-up backup, before anybody claimed the server.
+    await backUp(at, new Date(at.clock));
+    at.clock += 60 * 1000;
+    const { browser } = await claimed(at);
+    for (const from of ['passkey', 'secrets']) await browser.post('/setup/next', { from });
+    const step = await browser.get('/setup/backups');
+    expect(step.body).toContain(
+      '<p class="warning">That backup was made before your tablet claimed this server, so it does not hold your account yet.',
+    );
+    // Asked: one minute after the start-up backup, well inside the 15-minute gap.
+    const asked = await browser.post('/setup/backups/now');
+    expect(asked.headers.location).toBe('/setup/backups?asked');
+    // The backup it asked for runs, after the claim: now the gap holds again, and no warning.
+    at.clock += 60 * 1000;
+    await backUp(at, new Date(at.clock));
+    const after = await browser.get('/setup/backups');
+    expect(after.body).not.toContain('before your tablet claimed this server');
+    at.clock += 60 * 1000;
+    expect((await browser.post('/setup/backups/now')).headers.location).toBe(
+      '/setup/backups?too-soon',
+    );
+  });
+
+  it('voids a claim code a restart took the page of, and says why the QR went', async () => {
+    const at = await world();
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const before = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    expect(before).toMatch(/^[a-z2-9]{4}/);
+    await restart(at);
+    const again = new Browser(at);
+    await again.signIn(await codeInFile(at));
+    const open = await again.get('/setup/claim');
+    expect(open.body).toContain(
+      '<p class="problem" role="alert">The server restarted, so a claim code it showed before no longer works. Show a new one.</p>',
+    );
+    // The tablet that scans the old page's QR now is refused: the code is void, not merely unseen.
+    const late = await tabletRedeems(at, await testDevice(), before);
+    expect(late.status).not.toBe(200);
+    // Once this process has shown a new code, the sentence has done its work, for every session.
+    await showClaim(again);
+    const printed = await setupCode(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    const third = new Browser(at);
+    await third.signIn(printed.code);
+    const elsewhere = await third.get('/setup/claim');
+    expect(elsewhere.body).toContain('Show the claim code');
+    expect(elsewhere.body).not.toContain('The server restarted');
+  });
+
+  it('owner-claim reset makes the setup code and writes its file, which opens the setup', async () => {
+    const at = await world();
+    await claimed(at);
+    await rm(join(at.secrets, SETUP_CODE_FILE), { force: true });
+    const reset = await ownerClaimReset(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    expect(reset).toMatchObject({
+      cleared: true,
+      open: `http://localhost:${String(at.port)}/setup`,
+      writtenToFile: true,
+    });
+    const code = await codeInFile(at);
+    expect(reset).toMatchObject({ setupCode: code });
+    const browser = new Browser(at);
+    expect((await browser.signIn(code)).headers.location).toBe('/setup/claim');
+    // With .env naming the owner the setup stays done: no code, and no file.
+    await rm(join(at.secrets, SETUP_CODE_FILE), { force: true });
+    const named = await ownerClaimReset(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port), ownerKey: 'a-key' },
+    );
+    expect(named).not.toHaveProperty('setupCode');
+    expect(await fileThere(at)).toBe(false);
+  });
+
+  it('writes the whole command wherever a page names one, in a block to copy', async () => {
+    const at = await world();
+    const locked = await new Browser(at).get('/setup');
+    expect(locked.body).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts setup-code</code></pre>',
+    );
+    const { browser } = await claimed(at);
+    expect((await browser.get('/setup/claim')).body).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts owner-claim reset</code></pre>',
+    );
+    await browser.post('/setup/next', { from: 'claim' });
+    const passkey = (await browser.get('/setup/passkey')).body;
+    for (const command of [
+      'docker compose up -d instance',
+      'docker compose exec instance node src/operator/cli.ts admin-code',
+      'docker compose exec instance node src/operator/cli.ts admin-passkeys list',
+      'docker compose exec instance node src/operator/cli.ts admin-passkeys confirm &lt;id&gt;',
+    ]) {
+      expect(passkey).toContain(`<pre class="copy"><code>${command}</code></pre>`);
+    }
+    // No plain sentence says "the … command" without the command itself.
+    expect(locked.body).not.toMatch(/the [a-z]+-[a-z-]+ command/);
+    expect(passkey).not.toMatch(/the [a-z]+-[a-z-]+ command/);
+  });
+
+  it('says how to download the kit again after the one download, and a new session can', async () => {
+    const at = await world();
+    const { browser } = await claimed(at);
+    for (const from of ['passkey']) await browser.post('/setup/next', { from });
+    expect((await browser.post('/setup/secrets/kit')).status).toBe(200);
+    const taken = await browser.get('/setup/secrets');
+    expect(taken.body).toContain('If you cancelled the save or cannot find the file');
+    expect(taken.body).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts setup-code</code></pre>',
+    );
+    // ADR 0080 D-4: once per session — this one downloads nothing more.
+    expect((await browser.post('/setup/secrets/kit')).status).toBe(303);
+    // The command's code opens a new session, which downloads it once more.
+    const printed = await setupCode(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    const fresh = new Browser(at);
+    await fresh.signIn(printed.code);
+    await fresh.get('/setup/secrets');
+    const again = await fresh.post('/setup/secrets/kit');
+    expect(again.status).toBe(200);
+    expect(again.body).toContain(KIT_SECRET.text);
+  });
+
+  it('is shown again by the process that made it only: after a restart, the step says it was made', async () => {
+    const at = await world();
+    const { browser, tablet } = await claimed(at);
+    expect((await register(at, tablet)).status).toBe(200);
+    for (const from of ['passkey', 'secrets', 'backups'])
+      await browser.post('/setup/next', { from });
+    await browser.post('/setup/registration/mode', { mode: 'invite' });
+    await browser.post('/setup/invite/code');
+    const code = CARD_LINE.exec((await browser.get('/setup/invite')).body)?.[1] ?? '';
+    expect(code).toMatch(/^[a-z2-9]{4}/);
+    // The database keeps only the invite's hash, so a new process cannot draw it again.
+    await restart(at);
+    const later = new Browser(at);
+    await later.signIn(await codeInFile(at));
+    const gone = await later.get('/setup/invite');
+    expect(gone.body).toContain('made its one invite');
+    expect(gone.body).not.toContain(code);
+  });
+
+  it('stops showing the invite once a rider has used it', async () => {
+    const at = await world();
+    const { browser, tablet } = await claimed(at);
+    expect((await register(at, tablet)).status).toBe(200);
+    for (const from of ['passkey', 'secrets', 'backups'])
+      await browser.post('/setup/next', { from });
+    await browser.post('/setup/registration/mode', { mode: 'invite' });
+    await browser.post('/setup/invite/code');
+    const code = CARD_LINE.exec((await browser.get('/setup/invite')).body)?.[1] ?? '';
+    const rider = await testDevice();
+    const joined = await register(at, rider, code);
+    expect(joined.status, joined.text).toBe(200);
+    const after = await browser.get('/setup/invite');
+    expect(after.body).toContain('made its one invite');
+    expect(after.body).not.toContain(code);
+  });
+});
+
+describe('local times with the zone named (#2858)', () => {
+  it('reads a moment by a named zone, and the code’s file says it beside UTC', () => {
+    const at = Date.UTC(2026, 10, 19, 10, 30) / 1000;
+    expect(localTimeText(at, 'America/New_York')).toBe('2026-11-19 05:30 EST');
+    expect(localTimeText(at, 'UTC')).toBe('2026-11-19 10:30 UTC');
+    expect(setupCodeFileText('abcd-efgh-jkmn-pqrs', at, 8788, 'America/New_York')).toContain(
+      'It works once, until 2026-11-19 05:30 EST (2026-11-19T10:30:00.000Z).',
+    );
   });
 });
 
@@ -1454,7 +1711,7 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const second = new Browser(at);
     await second.signIn(printedBefore.code);
     expect((await browser.post('/setup/finish/done')).status).toBe(200);
-    await expectAllNotFound(at.port);
+    await expectAllNotFound(at.port, { finishedHere: true });
 
     // The claim taken by the wrong device after the setup was done: reset on the host.
     const paths = { database: at.path, blobs: `${at.path}.blobs` };
