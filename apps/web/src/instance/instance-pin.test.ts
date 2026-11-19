@@ -26,6 +26,7 @@ import {
   type InstanceIdentityRotation,
   type InstanceKeyStatement,
 } from '@onyourleft/domain';
+import { isTailscaleOrigin } from '@onyourleft/operate-text';
 import { ensureDeviceSigningKey, webCryptoSha256 } from '@onyourleft/store';
 import { createStoreHarness, type StoreHarness } from '@onyourleft/store/testing';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,10 +35,15 @@ import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { eraseDevice } from '../transfer/erase-device';
 import {
   cardFromPin,
+  checkCard,
   codeWithCard,
   INSTANCE_KEY_TEXT,
   olderKeyText,
+  readCodeWithCard,
   sealedRouteGate,
+  UNREACHABLE_HINT_TEXT,
+  unreachableAtText,
+  type PinCrypto,
 } from './instance-pin';
 import {
   CONNECT_REFUSAL_TEXT,
@@ -606,7 +612,8 @@ describe('a card offered for an address this build refuses (#1207)', () => {
     const send = wire(await world(), keys);
     const { port } = device(send, storage);
     const card = `oyl-instance:${REFUSED_ORIGIN}#${base32Unpadded(by.fingerprint)}`;
-    const refused = { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable };
+    // #2855: the refusal names the address the card is for, as every card's does.
+    const refused = { kind: 'refused', text: unreachableAtText(REFUSED_ORIGIN) };
     expect(await port.offerCard(card)).toEqual(refused);
     expect(await port.confirmCard(card)).toEqual(refused);
     expect(readInstanceAccount(storage)).toEqual(stored);
@@ -629,5 +636,84 @@ describe('connecting again with a different card (#1207, D-6)', () => {
     expect(keptPin(storage)).toBe(base32Unpadded(old.fingerprint));
     // The card was checked against the keys, and nothing else was sent.
     expect(paths(send)).toEqual(['GET /v1/instance/keys']);
+  });
+});
+
+describe('a card whose instance does not answer says where it tried, and the likely cause (#2855)', () => {
+  const TAILNET = 'https://onyourleft.tail1a2b.ts.net';
+  /** The keys are never read, so nothing is hashed, verified or timed. */
+  const unused = {} as unknown as PinCrypto;
+
+  it('names the address, and Tailscale only for a Tailscale address', () => {
+    expect(unreachableAtText('https://rides.example.org')).toBe(
+      'The instance at https://rides.example.org did not answer, so its keys could not be ' +
+        `checked. Nothing was sent. ${UNREACHABLE_HINT_TEXT.other}`,
+    );
+    expect(unreachableAtText(TAILNET)).toBe(
+      `The instance at ${TAILNET} did not answer, so its keys could not be checked. Nothing was ` +
+        `sent. ${UNREACHABLE_HINT_TEXT.tailscale}`,
+    );
+    expect(UNREACHABLE_HINT_TEXT.other).not.toContain('Tailscale');
+    // A name that only contains ts.net is not a Tailscale address.
+    expect(unreachableAtText('https://ts.net.example.org')).toContain(UNREACHABLE_HINT_TEXT.other);
+  });
+
+  it('reads a Tailscale address exactly as the setup page’s words do', () => {
+    // `instance/` may not import the package the setup's rule lives in, so the rule is
+    // restated there: this holds the two to one answer, address by address.
+    const origins = [
+      TAILNET,
+      'https://onyourleft-1.cat-dog.ts.net',
+      'https://ONYOURLEFT.Tail1a2b.TS.NET',
+      `${TAILNET}:8443`,
+      `${TAILNET}.`,
+      'https://rides.example.org',
+      'https://ts.net',
+      `${TAILNET}.example.org`,
+      'https://example.org/onyourleft.tail1a2b.ts.net',
+      'http://onyourleft.tail1a2b.ts.net',
+      'https://onyourleft.tail1a2b.ts.network',
+    ];
+    expect(origins.filter(isTailscaleOrigin)).toHaveLength(5);
+    for (const origin of origins) {
+      expect(unreachableAtText(origin).endsWith(UNREACHABLE_HINT_TEXT.tailscale), origin).toBe(
+        isTailscaleOrigin(origin),
+      );
+    }
+  });
+
+  it('is what checkCard answers when the keys could not be read, with nothing of the card but its address', async () => {
+    const by = await identity();
+    const card = `oyl-instance:${TAILNET}#${base32Unpadded(by.fingerprint)}`;
+    const checked = await checkCard(card, TAILNET, () => Promise.resolve(undefined), unused);
+    expect(checked).toEqual({ kind: 'refused', text: unreachableAtText(TAILNET) });
+    expect(JSON.stringify(checked)).not.toContain(base32Unpadded(by.fingerprint));
+  });
+
+  it('is what a card typed with an address and a link line answer, and neither names the link code', async () => {
+    clock.s = T0 + HOUR;
+    const by = await identity();
+    const keys = { body: await served(by, [await statement(T0)]) };
+    const send = wire(await world(), keys);
+    const first = device(send);
+    await first.port.connect(ORIGIN, 'Anna', by.card);
+    const shown = await first.port.linkCode();
+    if (shown.kind !== 'shown') throw new Error('no link code');
+    const code = readCodeWithCard(shown.offer)?.code ?? '';
+    expect(code).not.toBe('');
+    // A second device that nothing answers: the keys' read fails, and nothing else is tried.
+    const asked: string[] = [];
+    const cut: InstanceSend = (url) => {
+      asked.push(url);
+      return Promise.reject(new TypeError('Failed to fetch'));
+    };
+    const second = device(cut);
+    const refused = { kind: 'refused', text: unreachableAtText(ORIGIN) };
+    expect(await second.port.link(shown.offer)).toEqual(refused);
+    expect(await second.port.connect(ORIGIN, 'Bea', by.card)).toEqual(refused);
+    expect(refused.text).not.toContain(code);
+    expect(second.storage.map.size).toBe(0);
+    expect(asked.length).toBeGreaterThan(0);
+    for (const url of asked) expect(url).toBe(`${ORIGIN}/v1/instance/keys`);
   });
 });

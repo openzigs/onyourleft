@@ -51,8 +51,9 @@ import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
 import { createRecentProblems, keepProblems, logEvent, logUnhandled, type LogSink } from './log.ts';
 import type { SecretFromFile } from './setup/secrets.ts';
-import { createSetup, type Setup } from './setup/setup.ts';
+import { createExampleAddressSetup, createSetup, type Setup } from './setup/setup.ts';
 import {
+  EXAMPLE_ADDRESS_LOG_EVENT,
   mintSetupCode,
   SETUP_CODE_FILE,
   SETUP_LOG_EVENT,
@@ -70,7 +71,7 @@ import { RoomRouter, type RoomLookup } from './room/node/router.ts';
 import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
 import { NOTICE_RETENTION_SWEEP_PERIOD_MS } from './moderation/notice-retention.ts';
 import { createSealed } from './sealed/sealed.ts';
-import type { ServerConfig } from './server-config.ts';
+import { isTemplateOrigin, type ServerConfig } from './server-config.ts';
 import { MIGRATE_COMMAND, migrationState, openServingStore } from './store/serving.ts';
 import type { SqlStore } from './store/sql-store.ts';
 import {
@@ -78,7 +79,7 @@ import {
   type OperateAnalysisSources,
   type OperateRoomSources,
 } from './operate/operate.ts';
-import { statusSources, type DiskProbe } from './operate/status.ts';
+import { statusSources, tunnelReadiness, type DiskProbe } from './operate/status.ts';
 import { createSegments, type Segments } from './segments/segments.ts';
 import { createSync, type Sync } from './sync/sync.ts';
 import { createDiscordClient } from './voice/discord.ts';
@@ -310,7 +311,17 @@ async function voiceInviteWithin<T>(asked: Promise<T>, waitMs: number): Promise<
 }
 
 export async function startInstance(options: InstanceOptions): Promise<StartedInstance> {
-  const { server, log } = options;
+  const { log } = options;
+  /**
+   * #2855: `.env` was copied from the template and its address never set. An
+   * example address is NO address: the instance runs as it does with none —
+   * no accounts, and no keys, card or emergency kit bound to a name that is
+   * not its own (the keys' wrap binds the origin, so keys made for the
+   * example would be unreadable once the address is corrected). The setup
+   * page says what to set, and takes no code (below).
+   */
+  const exampleOrigin = isTemplateOrigin(options.server.origin);
+  const server: ServerConfig = exampleOrigin ? { ...options.server, origin: null } : options.server;
   const now = options.now ?? (() => Date.now());
   // #2604: what the owner's Status counts its uptime from.
   const startedAt = now();
@@ -368,7 +379,28 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     server.adminLoopbackPort !== undefined &&
     server.origin !== null &&
     options.config.moderators.owner === undefined;
-  let setup: Setup | undefined;
+  /**
+   * #2855: where the setup would have run but the address is the template's
+   * example, its paths answer the page that says what to set, and no setup
+   * code is made. This is the loopback port it is served on, or `undefined`.
+   */
+  const refusedSetupPort =
+    exampleOrigin && options.config.moderators.owner === undefined
+      ? server.adminLoopbackPort
+      : undefined;
+  const setupRefused = refusedSetupPort !== undefined;
+  let setup: Setup | undefined =
+    refusedSetupPort === undefined
+      ? undefined
+      : createExampleAddressSetup({ port: refusedSetupPort, name: options.config.name });
+  if (exampleOrigin) {
+    // Said at every such start, with where the page that explains it is, when there is one.
+    logEvent(
+      log,
+      EXAMPLE_ADDRESS_LOG_EVENT,
+      refusedSetupPort === undefined ? {} : { open: setupAddress(refusedSetupPort) },
+    );
+  }
   let stopSetup = (): void => undefined;
   /** The start's own operator-log entries and the setup code, written once the store is open. */
   let startWritten: Promise<void> = Promise.resolve();
@@ -561,7 +593,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   // setup can run, for `/setup` alone; the handler answers `/admin` there
   // only with the admin pages on, and `/setup` only while the setup is open.
   const adminLoopback =
-    (server.adminPages || setupOn) && server.adminLoopbackPort !== undefined
+    (server.adminPages || setupOn || setupRefused) && server.adminLoopbackPort !== undefined
       ? await listen(
           (request, client) => {
             const pathname = new URL(request.url).pathname;
@@ -1085,6 +1117,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         now,
         port: loopbackPort,
         origin: server.origin,
+        remotePath: options.config.remotePath,
+        // #2855: the one check of the way in this computer can make, as Status makes it.
+        tunnel: tunnelReadiness({
+          url: server.tunnelReadyUrl,
+          resolve: options.resolve ?? systemResolver,
+          fetch: globalThis.fetch,
+        }),
         name: options.config.name,
         ownerKeyFromEnvironment: false,
         ownerClaim: identity.ownerClaim,
@@ -1249,7 +1288,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
           }),
         );
       }
-      if (setup === undefined || port === undefined) return;
+      // #2855: no code for a setup that takes none (the example address's page).
+      if (setup === undefined || setupRefused || port === undefined) return;
       const minted = await mintSetupCode(opened, {
         mintedBy: 'start',
         now,

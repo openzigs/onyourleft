@@ -45,6 +45,7 @@ interface SetupPages {
   wrongAddressPage(address: string): string;
   formRefusedPage(): string;
   messagePage(heading: string, text: string): string;
+  exampleAddressPage(name: string | null): string;
   finishedPage(name: string | null): string;
   stepPage(frame: Frame, body: string, options: { readonly next: boolean }): string;
   claimBody(view: unknown, csrf: string): string;
@@ -105,6 +106,13 @@ const step =
   () =>
     pages.stepPage(frame(step, reached, AWKWARD_NAME), body(), { next });
 
+/** Where the tablet reaches the server and what it needs first (#2855), on each path. */
+const ORIGIN = 'https://onyourleft.tail1a2b.ts.net';
+const reach = (
+  path: 'tailnet' | 'internet' = 'tailnet',
+  checked: 'connected' | 'not-connected' | null = null,
+) => ({ origin: ORIGIN, path, checked });
+
 const record = (offBox: string | null, outcome = 'done') => ({
   at: '2026-11-18T09:00:00.000Z',
   secondsAgo: 14 * 60,
@@ -149,6 +157,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     ['a form refused', () => pages.formRefusedPage()],
     ['not found', () => pages.messagePage('Not found', 'There is no setup page at this address.')],
     ['finished', () => pages.finishedPage(AWKWARD_NAME)],
+    ['the address is still the example', () => pages.exampleAddressPage(AWKWARD_NAME)],
   ],
   '/setup/claim': [
     ['claimed', step('claim', () => pages.claimBody({ kind: 'claimed' }, CSRF))],
@@ -166,7 +175,48 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       step(
         'claim',
         () =>
-          pages.claimBody({ kind: 'open', card: true, notConfirmed: false, expired: false }, CSRF),
+          pages.claimBody(
+            { kind: 'open', card: true, notConfirmed: false, expired: false, reach: reach() },
+            CSRF,
+          ),
+        false,
+        'claim',
+      ),
+    ],
+    [
+      'open, the tunnel connected',
+      step(
+        'claim',
+        () =>
+          pages.claimBody(
+            {
+              kind: 'open',
+              card: true,
+              notConfirmed: false,
+              expired: false,
+              reach: reach('internet', 'connected'),
+            },
+            CSRF,
+          ),
+        false,
+        'claim',
+      ),
+    ],
+    [
+      'open, the tunnel not connected',
+      step(
+        'claim',
+        () =>
+          pages.claimBody(
+            {
+              kind: 'open',
+              card: true,
+              notConfirmed: false,
+              expired: false,
+              reach: reach('internet', 'not-connected'),
+            },
+            CSRF,
+          ),
         false,
         'claim',
       ),
@@ -176,7 +226,10 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       step(
         'claim',
         () =>
-          pages.claimBody({ kind: 'open', card: false, notConfirmed: true, expired: false }, CSRF),
+          pages.claimBody(
+            { kind: 'open', card: false, notConfirmed: true, expired: false, reach: reach() },
+            CSRF,
+          ),
         false,
         'claim',
       ),
@@ -186,7 +239,10 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
       step(
         'claim',
         () =>
-          pages.claimBody({ kind: 'open', card: true, notConfirmed: false, expired: true }, CSRF),
+          pages.claimBody(
+            { kind: 'open', card: true, notConfirmed: false, expired: true, reach: reach() },
+            CSRF,
+          ),
         false,
         'claim',
       ),
@@ -203,6 +259,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
               code: CODE,
               expiresAt: '2026-11-18T09:10:00.000Z',
               secondsLeft: 600,
+              reach: reach(),
             },
             CSRF,
           ),
@@ -262,11 +319,15 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
   '/setup/invite': [
     [
       'offered, invite mode',
-      step('invite', () => pages.inviteBody({ kind: 'offer', inviteMode: true }, CSRF)),
+      step('invite', () =>
+        pages.inviteBody({ kind: 'offer', inviteMode: true, reach: 'tailnet' }, CSRF),
+      ),
     ],
     [
       'offered, another mode',
-      step('invite', () => pages.inviteBody({ kind: 'offer', inviteMode: false }, CSRF)),
+      step('invite', () =>
+        pages.inviteBody({ kind: 'offer', inviteMode: false, reach: 'internet' }, CSRF),
+      ),
     ],
     ['taken', step('invite', () => pages.inviteBody({ kind: 'taken' }, CSRF))],
     ['no owner yet', step('invite', () => pages.inviteBody({ kind: 'no-owner' }, CSRF))],
@@ -282,6 +343,7 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
             expiresAt: '2026-11-25T09:00:00.000Z',
             secondsLeft: 7 * 24 * 60 * 60,
             inviteMode: false,
+            reach: 'tailnet',
           },
           CSRF,
         ),
@@ -449,12 +511,102 @@ describe.each([
   });
 });
 
+describe('what a device needs before it can reach the server (#2855)', () => {
+  const state = (path: string, name: string): Document =>
+    parse((PAGES[path]?.find(([each]) => each === name)?.[1] ?? (() => ''))());
+
+  /** Whether `first` comes before `second` in the page, as it is read and as Tab reaches it. */
+  const precedes = (first: Element | null | undefined, second: Element | null | undefined) =>
+    first != null &&
+    second != null &&
+    (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+  const paragraph = (doc: Document, text: RegExp): Element | undefined =>
+    [...doc.querySelectorAll('main p')].find((each) => text.test(each.textContent));
+
+  it('names the address and what the tablet needs before the button that shows the claim code', () => {
+    const doc = state('/setup/claim', 'open');
+    const button = [...doc.querySelectorAll('main button')].find(
+      (each) => each.textContent === 'Show the claim code',
+    );
+    const address = paragraph(doc, /Your tablet will reach this server at this address/);
+    expect(address?.querySelector('code')?.textContent).toBe(ORIGIN);
+    expect(precedes(address, button)).toBe(true);
+    const needs = paragraph(doc, /same Tailscale network as this computer/);
+    expect(needs?.className).toBe('warning');
+    expect(precedes(needs, button)).toBe(true);
+    const check = paragraph(doc, /open this address in the tablet’s web browser/);
+    expect(check?.querySelector('code')?.textContent).toBe(`${ORIGIN}/health`);
+    // The address is text to read and type on the tablet: this computer may not reach it.
+    expect(doc.querySelector(`main a[href^="${ORIGIN}"]`)).toBeNull();
+    // A tailnet cannot be checked from this computer, so the page claims no check.
+    expect(doc.body.textContent).not.toContain('Checked from this computer');
+  });
+
+  it('keeps the same words beside the claim code, after it', () => {
+    const doc = state('/setup/claim', 'the claim QR');
+    const needs = paragraph(doc, /same Tailscale network as this computer/);
+    expect(precedes(doc.querySelector('main svg[role="img"]'), needs)).toBe(true);
+    expect(paragraph(doc, /Your tablet will reach this server/)?.textContent).toContain(ORIGIN);
+  });
+
+  it('says what this computer checked of a tunnel: connected as a status, not connected as a problem', () => {
+    const connected = state('/setup/claim', 'open, the tunnel connected');
+    const good = paragraph(connected, /Checked from this computer/);
+    expect(good?.className).toBe('notice');
+    expect(good?.getAttribute('role')).toBe('status');
+    expect(good?.textContent).toContain('tunnel is connected');
+    expect(connected.body.textContent).not.toContain('Tailscale');
+    const dropped = state('/setup/claim', 'open, the tunnel not connected');
+    const bad = paragraph(dropped, /Checked from this computer/);
+    expect(bad?.className).toBe('problem');
+    expect(bad?.textContent).toContain('not connected');
+  });
+
+  it('says what a rider’s device needs before the button that makes an invite, and beside the invite', () => {
+    const offer = state('/setup/invite', 'offered, invite mode');
+    const button = [...offer.querySelectorAll('main button')].find(
+      (each) => each.textContent === 'Make an invite',
+    );
+    const needs = paragraph(offer, /must be on your Tailscale network too/);
+    expect(needs?.className).toBe('warning');
+    expect(precedes(needs, button)).toBe(true);
+    expect(
+      paragraph(state('/setup/invite', 'offered, another mode'), /must be online/)?.className,
+    ).toBe('warning');
+    const code = state('/setup/invite', 'the invite QR');
+    expect(
+      precedes(
+        code.querySelector('main svg[role="img"]'),
+        paragraph(code, /must be on your Tailscale network too/),
+      ),
+    ).toBe(true);
+  });
+
+  it('answers an address that is still the example with one sentence, the setting’s name collapsed, and no form', () => {
+    const doc = state('/setup', 'the address is still the example');
+    expect(doc.querySelector('h1')?.textContent).toBe('Set this server’s address first');
+    expect(doc.querySelectorAll('form, input, button')).toHaveLength(0);
+    const said = [...doc.querySelectorAll('main > p')];
+    expect(said).toHaveLength(1);
+    expect(said[0]?.className).toBe('problem');
+    expect(said[0]?.textContent).toContain('still the example from the settings template');
+    // The setting's name and the command are for whoever opens the block, never on the page's face.
+    expect(said[0]?.textContent).not.toMatch(/OYL_|docker/);
+    const expert = doc.querySelector('main details');
+    expect(expert?.hasAttribute('open')).toBe(false);
+    expect(expert?.textContent).toContain('OYL_INSTANCE_ORIGIN');
+    // The example itself is never shown: the owner's own address goes there.
+    expect(doc.body.textContent).not.toContain('your-tailnet');
+  });
+});
+
 describe('the claim step’s one problem sentence (#2825)', () => {
   const alerts = (view: { notConfirmed: boolean; expired: boolean }): (string | null)[] =>
     [
-      ...parse(pages.claimBody({ kind: 'open', card: true, ...view }, CSRF)).querySelectorAll(
-        '[role="alert"]',
-      ),
+      ...parse(
+        pages.claimBody({ kind: 'open', card: true, reach: reach(), ...view }, CSRF),
+      ).querySelectorAll('[role="alert"]'),
     ].map((alert) => alert.textContent);
 
   it('says a code ran out, as an alert, and nothing when none did', () => {

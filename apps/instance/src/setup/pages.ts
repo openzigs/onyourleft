@@ -68,6 +68,7 @@ import {
   BACKUPS_TOO_SOON_TEXT,
   BACKUPS_WAITING_TEXT,
   bytesText,
+  CLAIM_ADDRESS_LEAD,
   CLAIM_CODE_LEAD,
   CLAIM_EXPIRED_TEXT,
   CLAIM_LEAD,
@@ -77,8 +78,10 @@ import {
   CLAIM_NOT_CONFIRMED_TEXT,
   CLAIM_PENDING_LABEL,
   CLAIM_PENDING_LEAD,
+  CLAIM_REACH_TEXT,
   CLAIM_SCANNED_BUTTON,
   CLAIM_SHOW_BUTTON,
+  CLAIM_TABLET_CHECK_LEAD,
   CLAIM_WAITING_TEXT,
   CLAIM_YES_BUTTON,
   CLAIMED_NEXT_TEXT,
@@ -95,6 +98,7 @@ import {
   INVITE_MAKE_BUTTON,
   INVITE_NO_OWNER_TEXT,
   INVITE_NOT_INVITE_MODE_TEXT,
+  INVITE_REACH_TEXT,
   INVITE_STEP_LEAD,
   INVITE_TAKEN_TEXT,
   KIT_DOWNLOAD_BUTTON,
@@ -107,6 +111,7 @@ import {
   PASSKEY_STEP_LATER,
   PASSKEY_STEP_LEAD,
   passkeyStepHow,
+  REACH_CHECKED_TEXT,
   ranAgoText,
   REGISTRATION_SAVE_BUTTON,
   REGISTRATION_STEP_LEAD,
@@ -114,6 +119,9 @@ import {
   SETUP_CHECK_NOW_BUTTON,
   SETUP_CODE_LABEL,
   SETUP_CODE_REFUSED_TEXT,
+  SETUP_EXAMPLE_ADDRESS_EXPERT_LINES,
+  SETUP_EXAMPLE_ADDRESS_HEADING,
+  SETUP_EXAMPLE_ADDRESS_TEXT,
   SETUP_EXPERT_SUMMARY,
   SETUP_FORM_REFUSED_TEXT,
   SETUP_LOCKED_LEAD,
@@ -131,6 +139,7 @@ import {
   setupSummaryLines,
   type OperateLocalModel,
   type OperateRegistrationMode,
+  type ReachPath,
   type SetupSummary,
 } from '@onyourleft/operate-text';
 
@@ -219,6 +228,26 @@ export function messagePage(heading: string, text: string): string {
     null,
     heading,
     `<p>${escapeHtml(text)}</p>\n<p><a href="/setup">Go back to the setup page</a>.</p>`,
+  );
+}
+
+/**
+ * The page every setup address answers with while the instance's address is
+ * still the template's example (#2855): the setup has not opened, why, and
+ * what to set — one plain sentence, and the setting's name for whoever wants
+ * it. No form, so no code is typed and no session is opened: a claim code, an
+ * invite or an emergency kit drawn now would name an address that is not this
+ * instance's. It names the example address nowhere: the owner's own goes there.
+ */
+export function exampleAddressPage(name: string | null): string {
+  const expert = SETUP_EXAMPLE_ADDRESS_EXPERT_LINES.map(
+    (line) => `<li>${escapeHtml(line)}</li>`,
+  ).join('\n');
+  return signedOutPage(
+    name,
+    SETUP_EXAMPLE_ADDRESS_HEADING,
+    `<p class="problem">${escapeHtml(SETUP_EXAMPLE_ADDRESS_TEXT)}</p>
+${expertDetails(`<ul>\n${expert}\n</ul>`)}`,
   );
 }
 
@@ -361,6 +390,38 @@ const checkNow = (path: string, text: string): string =>
 
 // --- claim
 
+/**
+ * Where the tablet reaches this server, and what it needs before it can
+ * (#2855): said before the claim code is shown, and beside it.
+ */
+export interface ReachView {
+  /** `OYL_INSTANCE_ORIGIN`: the address the card names, and so the one the tablet uses. */
+  readonly origin: string;
+  readonly path: ReachPath;
+  /**
+   * What this computer could check by itself: the tunnel connected or not, or
+   * `null` when it cannot tell — on a tailnet it never can, and says nothing.
+   */
+  readonly checked: 'connected' | 'not-connected' | null;
+}
+
+/**
+ * The address, what the tablet needs first, and how to check it from the
+ * tablet: `<origin>/health`, which answers anybody. The address is the
+ * operator's own setting, escaped; it is shown on this loopback page only.
+ */
+function reachPart(reach: ReachView): string {
+  const checked =
+    reach.checked === null
+      ? ''
+      : reach.checked === 'connected'
+        ? `\n<p class="notice" role="status">${escapeHtml(REACH_CHECKED_TEXT.connected)}</p>`
+        : `\n<p class="problem">${escapeHtml(REACH_CHECKED_TEXT['not-connected'])}</p>`;
+  return card(`<p>${escapeHtml(CLAIM_ADDRESS_LEAD)} <code>${escapeHtml(reach.origin)}</code></p>
+<p class="warning">${escapeHtml(CLAIM_REACH_TEXT[reach.path])}</p>
+<p>${escapeHtml(CLAIM_TABLET_CHECK_LEAD)} <code>${escapeHtml(`${reach.origin}/health`)}</code></p>${checked}`);
+}
+
 /** What the claim step shows. */
 export type ClaimView =
   /** The instance has an owner. */
@@ -375,6 +436,7 @@ export type ClaimView =
       readonly kind: 'open';
       readonly card: boolean;
       readonly notConfirmed: boolean;
+      readonly reach: ReachView;
       readonly expired: boolean;
     }
   /** A code minted and not yet scanned: the card and it, as a QR and as text, and the wait. */
@@ -386,6 +448,7 @@ export type ClaimView =
       readonly expiresAt: string;
       /** How long the code has left, in seconds. */
       readonly secondsLeft: number;
+      readonly reach: ReachView;
     };
 
 export function claimBody(view: ClaimView, csrf: string): string {
@@ -409,14 +472,15 @@ ${buttonForm('/setup/claim/discard', csrf, CLAIM_NO_BUTTON, {}, 'secondary')}
           ? CLAIM_EXPIRED_TEXT
           : null;
       return `${problem === null ? '' : `<p class="problem" role="alert">${escapeHtml(problem)}</p>\n`}<p>${escapeHtml(CLAIM_LEAD)}</p>
-${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p class="problem">${escapeHtml(CLAIM_NO_CARD_TEXT)}</p>`}`;
+${reachPart(view.reach)}${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p class="problem">${escapeHtml(CLAIM_NO_CARD_TEXT)}</p>`}`;
     }
     case 'code':
       return `${cardCodePart(
         { purpose: 'claim', card: view.card, code: view.code, expiresAt: view.expiresAt },
         { lead: CLAIM_CODE_LEAD, until: codeWorksOnceText(view.secondsLeft) },
       )}<p class="notice">${escapeHtml(CLAIM_WAITING_TEXT)}</p>
-${checkAgain('/setup/claim', CLAIM_SCANNED_BUTTON)}`;
+${checkAgain('/setup/claim', CLAIM_SCANNED_BUTTON)}
+${reachPart(view.reach)}`;
   }
 }
 
@@ -535,7 +599,7 @@ ${choices}
 // --- invite
 
 export type InviteView =
-  | { readonly kind: 'offer'; readonly inviteMode: boolean }
+  | { readonly kind: 'offer'; readonly inviteMode: boolean; readonly reach: ReachPath }
   | { readonly kind: 'taken' }
   | { readonly kind: 'no-owner' }
   | { readonly kind: 'no-card' }
@@ -547,14 +611,20 @@ export type InviteView =
       /** How long the invite has left, in seconds. */
       readonly secondsLeft: number;
       readonly inviteMode: boolean;
+      /** What the rider's device needs first (#2855). */
+      readonly reach: ReachPath;
     };
 
 export function inviteBody(view: InviteView, csrf: string): string {
   const notInvite = (inviteMode: boolean): string =>
     inviteMode ? '' : `<p class="hint">${escapeHtml(INVITE_NOT_INVITE_MODE_TEXT)}</p>`;
+  // #2855: the rider's device needs the same way in as the owner's tablet did.
+  const needs = (reach: ReachPath): string =>
+    `<p class="warning">${escapeHtml(INVITE_REACH_TEXT[reach])}</p>`;
   switch (view.kind) {
     case 'offer':
       return `<p>${escapeHtml(INVITE_STEP_LEAD)}</p>
+${needs(view.reach)}
 ${buttonForm('/setup/invite/code', csrf, INVITE_MAKE_BUTTON)}
 ${notInvite(view.inviteMode)}`;
     case 'taken':
@@ -569,7 +639,8 @@ ${notInvite(view.inviteMode)}`;
       return `${cardCodePart(
         { purpose: 'invite', card: view.card, code: view.code, expiresAt: view.expiresAt },
         { lead: INVITE_CODE_LEAD, until: codeWorksOnceText(view.secondsLeft) },
-      )}${notInvite(view.inviteMode)}`;
+      )}${needs(view.reach)}
+${notInvite(view.inviteMode)}`;
   }
 }
 
