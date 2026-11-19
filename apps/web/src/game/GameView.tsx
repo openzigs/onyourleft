@@ -260,6 +260,13 @@ import { levelStanding, readLevelProgress } from './delivery/level-progress';
 import { deliveryInView } from './delivery/in-view';
 import { layNameTags, nameTags } from './name-tags';
 import {
+  HUD_PANELS_SELECTOR,
+  boxesOver,
+  layOffScreenMarkers,
+  offScreenMarkers,
+  type PageBox,
+} from './off-screen-marker';
+import {
   endDeliveryRide,
   keepDeliveryWeek,
   keepLevelFinished,
@@ -346,6 +353,7 @@ import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
   ghostDistanceAt,
   pacerGap,
+  type BeatsPerMinute,
   type BotPacerPlan,
   type GhostTrack,
   type Kilograms,
@@ -445,6 +453,12 @@ export interface GamePort {
    * as the game opens. Absent, there is no zone indicator.
    */
   ownThresholdPower?(): Promise<Watts | undefined>;
+  /**
+   * The rider's OWN threshold heart rate, or `undefined` when they have set
+   * none — #2760: the AI pacer is told the heart-rate zone only of a
+   * threshold the rider set, never a default. Read once as the game opens.
+   */
+  ownThresholdHeartRate?(): Promise<BeatsPerMinute | undefined>;
   /**
    * ONE other rider's consented attempt on a route, as a ghost — #331, ADR
    * 0039. Fetched from the instance by the route's digest
@@ -945,6 +959,30 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
 }
 
 /**
+ * The rider's own threshold heart rate, read once as the game opens — #2760,
+ * for the AI pacer's heart-rate zone. `undefined` while it is read and when
+ * none is set: the zone is then left out. @see GamePort.ownThresholdHeartRate
+ */
+function useOwnThresholdHeartRate(port: GamePort | undefined): BeatsPerMinute | undefined {
+  const [threshold, setThreshold] = useState<BeatsPerMinute | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void port
+      ?.ownThresholdHeartRate?.()
+      .then((found) => {
+        if (live) setThreshold(found);
+      })
+      .catch(() => {
+        // A store that cannot be read leaves no threshold, and so no zone.
+      });
+    return () => {
+      live = false;
+    };
+  }, [port]);
+  return threshold;
+}
+
+/**
  * The rider's own threshold power, read once as the game opens — #2077.
  * `undefined` while it is read and when none is set: the zone indicator's
  * answer to both is not to be drawn. @see GamePort.ownThresholdPower
@@ -1108,6 +1146,15 @@ function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
  * enough that it is built before a rider who has chosen reaches Ride.
  */
 export const DRAWN_LINE_WARM_DELAY_MS = 250;
+
+/**
+ * How long the HUD's panels, read off the page as boxes, are kept for the
+ * markers at the world's edge to stay clear of, in milliseconds: **500** —
+ * #2755. Chosen: a panel moves only when the layout changes, and a read a
+ * frame would be a layout read every frame on the tablet; a changed size of
+ * the world reads them again at once.
+ */
+const HUD_BOXES_MS = 500;
 
 /**
  * Whether a ride on `route`, started from the chooser with these choices, is
@@ -1748,6 +1795,14 @@ function GameScreen({
   const rideTotals = useRideTotals(props.trainer);
   /** @see useOwnThresholdPower */
   const thresholdPower = useOwnThresholdPower(props.port);
+  /** @see useOwnThresholdHeartRate */
+  const thresholdHeartRate = useOwnThresholdHeartRate(props.port);
+  /** Both thresholds, for the AI pacer's ask in the frame loop (#2760). */
+  const ownThresholdsRef = useRef<{
+    readonly power: Watts | undefined;
+    readonly heartRate: BeatsPerMinute | undefined;
+  }>({ power: undefined, heartRate: undefined });
+  ownThresholdsRef.current = { power: thresholdPower, heartRate: thresholdHeartRate };
   /** @see useRidePowerZoneTime */
   const powerZoneTime = useRidePowerZoneTime(props.trainer, thresholdPower);
   /** @see useRecordingPaused */
@@ -1799,6 +1854,25 @@ function GameScreen({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   /** #783: the other riders' names, laid over the world. @see layNameTags */
   const namesRef = useRef<HTMLDivElement | null>(null);
+  /** #2755: the markers at the world's edge for a pacer or a ghost out of view. @see layOffScreenMarkers */
+  const offScreenRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * #2755: the HUD's panels as boxes over the world, read off the page at
+   * most every {@link HUD_BOXES_MS} and only while a marker is placed, and
+   * the world's size they were read at. @see boxesOver
+   */
+  const worldSizeRef = useRef<{ readonly width: number; readonly height: number } | undefined>(
+    undefined,
+  );
+  const hudBoxesRef = useRef<
+    | {
+        readonly at: number;
+        readonly width: number;
+        readonly height: number;
+        readonly boxes: readonly PageBox[];
+      }
+    | undefined
+  >(undefined);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
   const viewRef = useRef<RendererView | undefined>(undefined);
   /**
@@ -3420,6 +3494,9 @@ function GameScreen({
             // ratio of infinity, which three turns into a NaN projection and a
             // black frame.
             if (canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+              // #2755: the size the off-screen markers are placed from, kept
+              // here so a frame with the pacer in view reads no layout.
+              worldSizeRef.current = { width: canvas.clientWidth, height: canvas.clientHeight };
               viewRef.current?.resize(canvas.clientWidth, canvas.clientHeight);
             }
           });
@@ -3574,6 +3651,19 @@ function GameScreen({
               profile: chosen.profile,
               riderMassKilograms: directed.riderMassKilograms,
               inForce,
+              // #2760: what the rider's own sensors say, each left out when
+              // it is not live, and a zone only of a threshold they set.
+              sensors: {
+                power3s: powerAverageRef.current.average,
+                trace: recentTraceRef.current.read(),
+                cadenceRpm: turningCadence(sensors.cadence),
+                heartRateBpm:
+                  sensors.heartRate.live && sensors.heartRate.value !== undefined
+                    ? sensors.heartRate.value
+                    : undefined,
+                thresholdPower: ownThresholdsRef.current.power,
+                thresholdHeartRate: ownThresholdsRef.current.heartRate,
+              },
             }),
           direct: (direction, from) => {
             simulation.directPacer(direction, from);
@@ -4348,6 +4438,46 @@ function GameScreen({
                 : [],
             );
           }
+          // #2755: a marker at the world's edge for the pacer or the ghost
+          // while it is not drawn in view — DOM again, no draw call. Only a
+          // ride with one to chase, and only with a world to lay it over.
+          const edges = offScreenRef.current;
+          const chases =
+            view.hasContext &&
+            (simulation.state.bot !== undefined || ghostRef.current !== undefined)
+              ? chasedGaps(simulation.state, ghostRef.current, outcomeRef.current)
+              : [];
+          if (
+            edges !== null &&
+            world !== null &&
+            (edges.childElementCount > 0 || chases.length > 0)
+          ) {
+            // The observer's size; a layout read only where there is no observer.
+            const { width, height } = worldSizeRef.current ?? {
+              width: world.clientWidth,
+              height: world.clientHeight,
+            };
+            const hud = (): readonly PageBox[] => {
+              const kept = hudBoxesRef.current;
+              if (
+                kept !== undefined &&
+                kept.width === width &&
+                kept.height === height &&
+                at - kept.at < HUD_BOXES_MS
+              ) {
+                return kept.boxes;
+              }
+              const covers = edges.parentElement?.querySelectorAll(HUD_PANELS_SELECTOR) ?? [];
+              const boxes = boxesOver(world, covers);
+              hudBoxesRef.current = { at, width, height, boxes };
+              return boxes;
+            };
+            layOffScreenMarkers(
+              edges,
+              world,
+              offScreenMarkers(frame, { width, height }, chases, hud),
+            );
+          }
         } else {
           preparingViewRef.current = view;
           // The arrival's own bump (above) carries the guarantee that a warm-up it
@@ -4960,6 +5090,10 @@ function GameScreen({
           `name-tags.ts`. Hidden for the world's reason: each is on the HUD as
           text too — the followed rider's, and a race's standings. */}
       <div ref={namesRef} className="oyl-game__names" aria-hidden="true" />
+      {/* #2755: a marker at the world's edge for a pacer or a ghost out of
+          view, laid over the world by `off-screen-marker.ts`. Hidden, with no
+          live region: the HUD's gap field says the same as text. */}
+      <div ref={offScreenRef} className="oyl-game__off-screens" aria-hidden="true" />
       <HudPanel
         profile={chosen.profile}
         announcement={announcement}
@@ -5468,7 +5602,15 @@ function GameScreen({
           // of ride and then gone. Not `live`: the HUD's one region says it,
           // with announcements on (`announce.ts` rank 5i).
           pacerSay === undefined ? undefined : (
-            <StatusMessage key="pacer-say" tone="info" label={PACER_SAY_LABEL}>
+            <StatusMessage
+              key="pacer-say"
+              tone="info"
+              label={PACER_SAY_LABEL}
+              // #2760's review, the owner's 2026-11-17: "it can be hard to
+              // see". Larger than the other notices (`theme.css`
+              // §`.oyl-hud__pacer-say`).
+              className={PACER_SAY_CLASS}
+            >
               {pacerSay}
             </StatusMessage>
           ),
@@ -5495,6 +5637,8 @@ function GameScreen({
 
 /** The label of the AI pacer's line on the HUD — #2712. */
 const PACER_SAY_LABEL = 'Your pacer';
+/** The class that sets the AI pacer's line larger than a notice — #2760's review. */
+const PACER_SAY_CLASS = 'oyl-hud__pacer-say';
 
 /** The simulation's start for a simulated ride, or nothing: the start line. */
 function startOf(

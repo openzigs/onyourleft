@@ -12,6 +12,15 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0077 is [ADR 0077](../adr/0077-the-ai-pacers-line-may-name-a-cadence-or-power-target.md)**,
+  taken by [#2760](https://github.com/openzigs/onyourleft/issues/2760) in its pull request
+  [#2762](https://github.com/openzigs/onyourleft/pull/2762) on 2026-11-17 for the AI pacer's line
+  naming a cadence or power target, accepted the same day on the owner's ruling. It supersedes in
+  part ADR 0072 D-4.2 and R-4, which gained one dated `## Amendments` entry pointing to it. It
+  skipped **0074** (ADR 0074, #2710), **0075** (#2670, the ride-controls fade) and **0076** (#2767,
+  AI bots' bodies). **0057 and 0058 stay claimed** by #1748 and #1752, and 0070 by #2684. The
+  next free number was 0078 when it was written, and is **0081** now (the 0080 entry below). A reviewer who remembers this file offering 0074 is reading the old
+  file.
   ⚠️ **0079 is [ADR 0079](../adr/0079-remote-access-without-a-domain-and-no-lan-only-http.md)**,
   taken by [#2790](https://github.com/openzigs/onyourleft/issues/2790) on 2026-11-18 for remote
   access without a domain (the owner's tailnet by default, a domain optional) and the refusal of

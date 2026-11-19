@@ -93,6 +93,12 @@ export interface StatusMessageProps {
   readonly live?: boolean;
   readonly id?: string;
   /**
+   * One more class on the message's box, for a rule that sizes one notice and
+   * not the rest — #2760's review: the AI pacer's line on the HUD
+   * (`theme.css` §`.oyl-hud__pacer-say`). Never a colour: the tone carries it.
+   */
+  readonly className?: string;
+  /**
    * A safety or privacy sentence that must stay on the screen — #666, #1048.
    * Marks the message's sentence `data-oyl-kept-visible`, as `KeptVisible.tsx`
    * does, without a wrapper box around the message: the mark the browser
@@ -131,13 +137,16 @@ export function StatusMessage({
   label,
   live = false,
   id,
+  className,
   kept = false,
   more,
 }: StatusMessageProps): JSX.Element {
   const mark = kept ? { 'data-oyl-kept-visible': '' } : {};
+  const box =
+    className === undefined ? statusSurfaceClass(tone) : `${statusSurfaceClass(tone)} ${className}`;
   if (more !== undefined) {
     return (
-      <div className={statusSurfaceClass(tone)} id={id} {...(live ? { role: 'status' } : {})}>
+      <div className={box} id={id} {...(live ? { role: 'status' } : {})}>
         <span className="oyl-status__glyph" aria-hidden="true">
           {GLYPH[tone]}
         </span>
@@ -155,7 +164,7 @@ export function StatusMessage({
     );
   }
   return (
-    <p className={statusSurfaceClass(tone)} id={id} {...(live ? { role: 'status' } : {})} {...mark}>
+    <p className={box} id={id} {...(live ? { role: 'status' } : {})} {...mark}>
       <span className="oyl-status__glyph" aria-hidden="true">
         {GLYPH[tone]}
       </span>
