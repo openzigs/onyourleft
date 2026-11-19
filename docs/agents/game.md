@@ -1168,14 +1168,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
                         measured 201 356) by the same nightly spec.
-                        ⚠️ **Since #2540 the realistic world's parked car is
-                        Kenney's CC0 sedan** (`public/realistic/car_sedan.glb`,
-                        `tools/realistic/blender/process_vehicle.py`), its
-                        wheels and indicators apart and posed per instance in
-                        the same call (`withDeliveryCarPose`, from
-                        `port.ts` §`DeliveryCarMotion`), its roster
-                        `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES` (1 654), the
-                        frame 203 998; the stylised world keeps its own car
+                        ⚠️ **Since #2847 (ADR 0085) the realistic world's
+                        parked cars are three of GGBotNet's CC0 PSX Style
+                        Cars** — a saloon, a hatchback and a station wagon
+                        (`public/realistic/cars.glb` and one atlas,
+                        `cars_atlas_256.ktx2`, from
+                        `tools/realistic/blender/process_vehicle.py`; #2540's
+                        Kenney sedan until then), their wheels and indicators
+                        apart and posed per instance in the same call
+                        (`withDeliveryCarPose`, from `port.ts`
+                        §`DeliveryCarMotion`). A car's body is chosen by its
+                        place on the round (`deliveryCarBody`), and every
+                        instance submits all three bodies and collapses two:
+                        the roster `DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`
+                        (1 640), the frame 203 263. The atlas's alpha says
+                        which texels wear the instance's paint, and its
+                        coordinate and the body ride in attributes already
+                        bound (14 slots, `DELIVERY_MOST_VERTEX_ATTRIBUTES`);
+                        the stylised world keeps its own car
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and

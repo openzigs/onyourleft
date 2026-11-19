@@ -88,9 +88,12 @@ export function deliveryAhead(
   return {
     parcels: each.map((index) => piece(index, 3, 1.1)),
     markers: each.map((index) => piece(index, 6, 0)),
+    // #2847: each with its place on the round, as a round's obstacles carry
+    // one, so the cars among them wear their bodies and paints, not all the first.
     obstacles: each.map((index) => ({
       ...piece(index, -1.5, 0),
       kind: KINDS[index % KINDS.length] as DeliveryObstacleKind,
+      index,
     })),
   };
 }
