@@ -14,13 +14,15 @@ import type { TacticsLocal } from './tactics.ts';
 /** Seven bots three laps out, the rider fourth: spike 0039's shape, with no coordinate or name. */
 export const TACTICS_INPUT: ModelTacticsInput = {
   laps: 3,
-  field: 8,
   quietS: 40,
   rider: { rank: 4, wPerKg: 3.1, ahead: 2, gapAheadM: 4.2, gapBehindM: 3.4, drafting: true },
   bots: [0, 1, 2, 3, 4, 5, 6].map((seat) => ({
     bot: seat,
     style: (['breakaway', 'sprinter', 'climber', 'rouleur', 'opportunist'] as const)[seat % 5]!,
-    legs: 'rouleur' as const,
+    flat: 'average' as const,
+    climb: (['strong', 'average', 'weak'] as const)[seat % 3]!,
+    sprint: 'average' as const,
+    punch: 'average' as const,
     rank: seat < 3 ? seat + 1 : seat + 2,
     ahead: seat === 0 ? null : seat === 3 ? 'rider' : seat - 1,
     aheadMove: seat === 0 || seat === 3 ? null : ('sit-in' as const),
@@ -37,6 +39,14 @@ export const TACTICS_INPUT: ModelTacticsInput = {
     gradeAheadPct: 1.5,
     riderGapM: seat < 3 ? -4.2 : 3.4,
   })),
+  // #2794: a climb coming, a descent after it, and a flat finish.
+  course: {
+    climb: { inM: 400, lengthM: 600, avgPct: 6, maxPct: 9 },
+    descent: { inM: 1_100, lengthM: 500, avgPct: -5, maxPct: -7 },
+    lapLeftM: 1_800,
+    lapClimbM: 38,
+    finishPct: 0,
+  },
 };
 
 /** The local model a test world offers: a loopback address, so no name is resolved. */
@@ -124,6 +134,13 @@ export const PACER_INPUT: ModelPacerInput = {
   gradeAheadPct: 3.5,
   toFinishM: 6_000,
   rideS: 240,
+  // #2794: the rise ahead is the start of a climb, with a descent after it.
+  course: {
+    climb: { inM: 100, lengthM: 900, avgPct: 5, maxPct: 8 },
+    descent: { inM: 1_400, lengthM: 600, avgPct: -4, maxPct: -6 },
+    lapLeftM: null,
+    climbLeftM: 85,
+  },
 };
 
 /** A model's valid pacer answer (#2712). */

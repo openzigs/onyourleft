@@ -589,6 +589,22 @@ export {
   wind,
 } from './route/wind';
 
+// The course ahead in a few numbers (#2794): the next climb and descent, the
+// climbing left and a stretch's grade, which the AI bots and the AI pacer are
+// both shown. One module, so the two read the road alike.
+
+export type { CourseHill, CourseHills } from './route/course-ahead';
+export {
+  COURSE_AHEAD_MOST_METRES,
+  COURSE_HILL_GRADE_PERCENT,
+  COURSE_HILL_LEAST_METRES,
+  COURSE_ROUNDING_METRES,
+  courseAverageGrade,
+  courseClimbing,
+  courseHillsAhead,
+  isCourseHill,
+} from './route/course-ahead';
+
 // --- Routing (#70) -----------------------------------------------------------
 //
 // The engine-agnostic routing interface, and the one place an engine's numbers
@@ -694,6 +710,7 @@ export { botIsAhead, gapMagnitudeSeconds, pacerGap } from './pacer/gap';
 
 export type {
   ModelPacerAnswer,
+  ModelPacerCourse,
   ModelPacerInput,
   ModelPacerInputProblem,
   ModelPacerInputRead,
@@ -701,17 +718,35 @@ export type {
   PacerDecisionOutcome,
   PacerDecisionRecord,
   PacerDirection,
+  PacerGapReading,
+  PacerGapTrend,
   PacerHeartRateTrend,
   PacerIntent,
   PacerPlan,
   PacerPowerTrend,
   PacerSayProblem,
+  RiderPlace,
 } from './pacer/model-pacer';
+
+// ADR 0082: with the rider level or in the draft, the device eases before a
+// climb and lifts on a descent and over the top, under ADR 0078's floor.
+export type { PacerRuleGround, PacerTerrain } from './pacer/terrain-rule';
+export {
+  PACER_BEFORE_CLIMB_M,
+  PACER_OVER_THE_TOP_M,
+  PACER_TERRAINS,
+  pacerSayAgainstRidden,
+  pacerTerrainApplies,
+  pacerTerrainAt,
+  riddenDirection,
+} from './pacer/terrain-rule';
 export {
   CLIMBER_CLIMB_GRADE_PERCENT,
   CLIMBER_DESCENT_GRADE_PERCENT,
   directedPacingFactor,
   directedPowerWatts,
+  flooredDirection,
+  gapTrendOf,
   MODEL_PACER_ANSWER_MOST_CHARACTERS,
   MODEL_PACER_ASK_EVERY_S,
   MODEL_PACER_CODE_VERSION,
@@ -723,19 +758,28 @@ export {
   MODEL_PACER_SAY_MOST_CHARACTERS,
   MODEL_PACER_SAY_SHOWN_S,
   modelPacerAnswerSchema,
+  PACER_AHEAD_FLOOR_S,
   PACER_DECISION_OUTCOMES,
   PACER_EASE,
+  PACER_GAP_TREND_METRES_PER_SECOND,
+  PACER_GAP_TRENDS,
   PACER_HEART_RATE_TRENDS,
   PACER_INTENTS,
+  PACER_LEVEL_S,
   PACER_LIFT,
   PACER_PLANS,
   PACER_POWER_TRENDS,
   pacerDecisionRecord,
   pacerDirectionAt,
+  pacerSayAgainstIntent,
+  pacerSaysEasing,
+  pacerSaysPushing,
   pacerSayProblem,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
+  RIDER_PLACES,
+  riderPlaceOf,
 } from './pacer/model-pacer';
 
 // --- Racing your own previous attempt (#93) ----------------------------------

@@ -183,6 +183,8 @@ describe('the AI pacer, from the instance (#2712)', () => {
   it('reads an answer the device will not ride as no decision', async () => {
     const answers = [
       JSON.stringify({ plan: 'even', intent: 'lift', say: 'Hold 3000 watts.' }),
+      // #2777: a line that says the opposite of its intent.
+      JSON.stringify({ plan: 'even', intent: 'ease', say: 'I will push on this climb.' }),
       undefined,
     ];
     let next = 0;
@@ -191,6 +193,7 @@ describe('the AI pacer, from the instance (#2712)', () => {
     const status = await pacers.pacerStatus();
     if (status.kind !== 'offered') throw new Error('not offered');
     await pacers.consentToPacer(status);
+    expect(await pacers.decidePacer(tactics.PACER_INPUT as never)).toEqual({ kind: 'invalid' });
     expect(await pacers.decidePacer(tactics.PACER_INPUT as never)).toEqual({ kind: 'invalid' });
     expect(await pacers.decidePacer(tactics.PACER_INPUT as never)).toEqual({ kind: 'failed' });
   });

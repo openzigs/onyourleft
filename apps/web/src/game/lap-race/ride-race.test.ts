@@ -14,13 +14,18 @@ import {
   botArchetype,
   botFieldArchetypes,
   botFieldPaces,
+  modelFieldPaces,
   botFieldPersonalities,
   botFieldSkills,
   BOT_LANE_DWELL_MS,
+  botTierPlan,
+  courseHillsAhead,
+  distanceOnRoute,
+  gradeAt,
   kilograms,
   racePosition,
 } from '@onyourleft/domain';
-import { lapRaceDraftFactors } from '@onyourleft/physics';
+import { botDemand, lapRaceDraftFactors } from '@onyourleft/physics';
 
 import { botName, lapRaceStandings } from '../hud/lap-race-hud';
 
@@ -41,6 +46,7 @@ import {
   type LapRaceRide,
 } from './ride-race';
 import { LAP_RACE_MOST_BOTS, type LapRaceChoice } from './choice';
+import { modelTacticsInputOf } from './model-race';
 import { drawnShift } from './pack-layout';
 
 const LOOP = circuitRoute(40);
@@ -75,6 +81,67 @@ function started(): LapRaceRide {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('a different race every time, and AI bots with bodies of their own (#2759, ADR 0076)', () => {
+  /** A race with AI bots on the loop, from whatever seed the platform draws. */
+  const modelRace = (): LapRaceRide => {
+    const ride = startLapRaceRide({
+      choice: DEFAULT_LAP_RACE,
+      profile: LOOP,
+      conditions: lapRaceBotConditions(
+        LOOP,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance: 0,
+      lineOffset: 0,
+      storage: undefined,
+      model: true,
+    });
+    if (ride === undefined) throw new Error('a loop starts a race');
+    return ride;
+  };
+
+  it('draws a fresh seed at every start, so each race deals a different field', () => {
+    let next = 41;
+    const draw = vi
+      .spyOn(globalThis.crypto, 'getRandomValues')
+      .mockImplementation(<T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = next;
+        next += 1;
+        return array;
+      });
+    const first = modelRace();
+    const second = modelRace();
+    // One draw a start, on the same route: never a seed kept per route.
+    expect(draw).toHaveBeenCalledTimes(2);
+    expect([first.seed, second.seed]).toEqual([41, 42]);
+    expect(second.bots.map((bot) => bot.pace)).not.toEqual(first.bots.map((bot) => bot.pace));
+    expect(first.bots.map((bot) => bot.pace)).toEqual(modelFieldPaces(41, LAP_RACE_MOST_BOTS));
+  });
+
+  it('shows each bot’s W/kg at its own mass in the standings, never at 75 kg', () => {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = 7;
+        return array;
+      },
+    );
+    let ride = modelRace();
+    for (let tick = 1; tick <= 200; tick += 1) {
+      ride = stepLapRaceRide(ride, { ticks: 1, along: tick * LAP_RACE_TICK_SECONDS * 8 });
+    }
+    const hud = lapRaceHud(ride, { wattsPerKilogram: 3, speed: 8 });
+    for (const bot of ride.bots) {
+      const mass = bot.pace.body?.massKilograms;
+      expect(mass, bot.id).toBeDefined();
+      expect(mass, bot.id).not.toBe(75);
+      expect(hud.entrants[bot.id]?.wattsPerKilogram, bot.id).toBeCloseTo(
+        (bot.power as number) / (mass as number),
+        9,
+      );
+    }
+  });
 });
 
 describe('a lap race in a ride — #1906', () => {
@@ -648,4 +715,102 @@ describe('a lap race is drawn between its ticks, across and along, as it moves �
       expect(stepped.race.racers.map((entry) => entry.lane)).toEqual(lanes);
     }
   });
+});
+
+describe('the bots ride the road from the line — #2800', () => {
+  // The issue's circuit: 628 m round, flat for 100 m, 250 m up at 6 %, then
+  // down to the line.
+  const ROUND = 2 * Math.PI * 100;
+  const HILL = circuitRoute(100, (along) =>
+    along < 100 ? 0 : along < 350 ? 0.06 * (along - 100) : 15 * (1 - (along - 350) / (ROUND - 350)),
+  );
+
+  function raceFrom(riderDistance: number): LapRaceRide {
+    const ride = startLapRaceRide({
+      choice: { ...DEFAULT_LAP_RACE, itemsOn: false },
+      profile: HILL,
+      conditions: lapRaceBotConditions(
+        HILL,
+        rideConditionsFor(kilograms(70), DEFAULT_RIDING_POSITION),
+      ),
+      riderDistance,
+      lineOffset: 0,
+      storage: undefined,
+    });
+    if (ride === undefined) throw new Error('a circuit starts a race');
+    return { ...ride, countdownLeftMs: 0 };
+  }
+
+  /** The grade on the road where the race draws `id`: at the line plus its effort distance. */
+  function gradeWhereDrawn(ride: LapRaceRide, id: string, ahead = 0): number {
+    const racer = ride.race.racers.find((entry) => entry.racer.id === id)?.racer;
+    if (racer === undefined) throw new Error('a racer in the race');
+    return gradeAt(HILL, distanceOnRoute(HILL, ride.startAlong + racer.effortDistance + ahead));
+  }
+
+  it.each([
+    ['300 m round the lap', 300],
+    ['300 m round its third lap', 300 + 2 * ROUND],
+  ])(
+    'has each bot feel, and the model read ahead of it, the grade where it is drawn, from %s',
+    (_, line) => {
+      let ride = raceFrom(line);
+      let along = line;
+      let climbed = 0;
+      // About 20 s, as the issue's evidence: 100 ms frames, two ticks a frame.
+      for (let frame = 0; frame < 200; frame += 1) {
+        along += 8 * 2 * LAP_RACE_TICK_SECONDS;
+        ride = stepLapRaceRide(ride, { ticks: 2, along });
+        for (const bot of ride.bots) {
+          // What the bot's tick reads the grade through: its ride and the race's course.
+          const felt = botDemand(bot.ride, { ...ride.conditions, plan: botTierPlan(bot.tier) });
+          const drawn = gradeWhereDrawn(ride, bot.id);
+          expect(felt.grade, `${bot.id} at frame ${String(frame)}`).toBeCloseTo(drawn, 6);
+          if (drawn > 2) climbed += 1;
+        }
+      }
+      // Non-vacuity: the field is on the climb where it is drawn, and the
+      // route's own start is flat for the bots' first 100 m.
+      expect(climbed).toBeGreaterThan(ride.bots.length * 50);
+      // And the model is shown the grade 50 m up the road the bots ride.
+      const input = modelTacticsInputOf(
+        ride.race,
+        ride.bots,
+        ride.conditions,
+        ride.seed,
+        false,
+        3,
+        0,
+      );
+      if (input === undefined) throw new Error('bots still racing');
+      for (const view of input.bots) {
+        const bot = ride.bots[view.bot];
+        if (bot === undefined) throw new Error('a seat in the field');
+        // Shown to a whole per cent (#2759, ADR 0076 D-11): within half of one of the exact grade.
+        const exact = gradeWhereDrawn(ride, bot.id, 50);
+        expect(Math.abs(view.gradeAheadPct - exact), bot.id).toBeLessThanOrEqual(0.5 + 1e-9);
+      }
+      // And the course ahead (#2794) is read on that road too: from where the
+      // bot at the head of the race is drawn, so its next hill is the one the
+      // bot is about to feel.
+      const head = input.bots.reduce((best, view) => (view.rank < best.rank ? view : best));
+      const leader = ride.bots[head.bot];
+      if (leader === undefined) throw new Error('a seat in the field');
+      const effort = ride.race.racers.find((entry) => entry.racer.id === leader.id)?.racer
+        .effortDistance as number;
+      const { laps, lapLengthMetres } = ride.race.course;
+      expect({ climb: input.course?.climb, descent: input.course?.descent }).toEqual(
+        courseHillsAhead(HILL, ride.startAlong + effort, laps * lapLengthMetres - effort),
+      );
+      // Non-vacuity: the leader is over the top and descending where it is
+      // drawn, so the course says the descent is under it now — read from the
+      // route's start it would be on the climb at 100 m to 350 m instead.
+      const felt = botDemand(leader.ride, {
+        ...ride.conditions,
+        plan: botTierPlan(leader.tier),
+      }).grade;
+      expect(felt).toBeLessThan(-3);
+      expect(input.course?.descent?.inM).toBe(0);
+    },
+  );
 });

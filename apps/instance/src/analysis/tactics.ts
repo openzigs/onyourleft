@@ -91,7 +91,9 @@ import type { RaceHold } from './tactics-hold.ts';
  * device (ADR 0071 D-7). Twice that leaves room for the tunnel's two legs, so
  * no answer the device would still apply is cut off here; past it the answer
  * is late anyway, and the request is closed so it stops waiting at the model
- * server behind a write-up (spike 0039 §4: 24 to 30 s).
+ * server behind a write-up (spike 0039 §4: 24 to 30 s). Since #2759 the
+ * device's late limit is 8 s (ADR 0076 D-11), still under this, so this
+ * still cuts off no answer the device would apply.
  */
 export const TACTICS_ANSWER_WAIT_MS = 10_000;
 
