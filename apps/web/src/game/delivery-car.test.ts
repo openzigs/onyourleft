@@ -77,7 +77,7 @@ const PARTS = [
 /** Each body's triangles in the committed file — its body, four wheels and two indicators of 4. */
 const BODY_TRIANGLES = { saloon: 320, hatchback: 456, wagon: 446 } as const;
 
-/** How far past the footprint's side a door mirror may stand, metres — ADR 0081 D-2. */
+/** How far past the footprint's side a door mirror may stand, metres — ADR 0085 D-2. */
 const MIRROR_PAST_METRES = 0.1;
 
 function node(name: string): CarNodeFacts {
@@ -293,7 +293,7 @@ describe('the committed cars, read back off their GLB — #2847', () => {
     }
   });
 
-  it('stands each body on the road at a real car’s length, inside obstacles.ts’ parked car’s footprint but for its mirrors — ADR 0081 D-2', () => {
+  it('stands each body on the road at a real car’s length, inside obstacles.ts’ parked car’s footprint but for its mirrors — ADR 0085 D-2', () => {
     for (const body of REALISTIC_DELIVERY_CAR_BODIES) {
       const points = PARTS.flatMap((part) => placed(node(`${body}-${part}`)));
       const xs = points.map(([x]) => x);
@@ -426,7 +426,7 @@ describe('the cars in Delivery’s belt — #2847', () => {
     // The nightly gate's frame of twenty of each piece measured 202 663 on
     // #2844's branch with Kenney's car (2026-11-19); every instance submits
     // the roster, so the three bodies add twenty times their 30. Measured
-    // after: 203 263, under the owner's limit (ADR 0081 D-4).
+    // after: 203 263, under the owner's limit (ADR 0085 D-4).
     expect(202_663 + 20 * (1_222 - 1_192)).toBe(203_263);
     expect(203_263).toBeLessThan(DELIVERY_VILLAGE_FRAME_TRIANGLES);
   });

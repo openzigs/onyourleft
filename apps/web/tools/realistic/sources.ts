@@ -123,7 +123,7 @@ import {
 /** The licences a realistic asset may carry: the two ADR 0026 D-4 admits under `apps/`. */
 export type KeptLicence = 'CC0-1.0' | 'CC-BY-4.0';
 
-/** One row of ADR 0049 D-10's **In** table, or of a superseding ADR's addition to it (ADR 0081). */
+/** One row of ADR 0049 D-10's **In** table, or of a superseding ADR's addition to it (ADR 0085). */
 export interface AdmittedSource {
   /** The source, as the ADR's table names it. */
   readonly name: string;
@@ -253,12 +253,12 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
     ],
   },
   {
-    // #2847: ADR 0081 adds this row to ADR 0049 D-10's In table, for the
+    // #2847: ADR 0085 adds this row to ADR 0049 D-10's In table, for the
     // realistic world's cars. Its archive is the owner's own download through
     // the pack's page, as Kenney's Car Kit's was (no script fetches it).
     name: 'GGBotNet’s PSX Style Cars',
     licence: 'CC0-1.0',
-    decidedBy: 'ADR 0081 D-1',
+    decidedBy: 'ADR 0085 D-1',
     kind: 'files',
     // The author's own itch.io pages: the pack's page states its licence.
     prefixes: ['https://ggbot.itch.io/'],
@@ -1489,7 +1489,7 @@ export const CHAIN_LINK_SOURCE = {
  * The cars Delivery's parked cars are drawn as in the realistic world —
  * #2847, the owner's rulings of 2026-11-18 (*"PSX Style Cars
  * (Recommended)"*) and 2026-11-19 (*"Saloon, hatchback, station wagon
- * (Recommended)"*), under ADR 0081: three bodies out of GGBotNet's CC0
+ * (Recommended)"*), under ADR 0085: three bodies out of GGBotNet's CC0
  * **PSX Style Cars** pack, its `Car 02` (a 4-door saloon, 312 triangles),
  * `Car 03` (a 3-door hatchback, 448) and `Car 01` (a 5-door station wagon,
  * 438), as its page lists them. None names a maker. It replaces #2540's one
@@ -1771,7 +1771,7 @@ export const SOURCES: readonly AssetSource[] = [
     resolution: '1k',
     maps: [CHAIN_LINK_SOURCE.opacity],
   }),
-  // #2847: the realistic world's cars, placed by the owner (ADR 0081).
+  // #2847: the realistic world's cars, placed by the owner (ADR 0085).
   {
     id: DELIVERY_CAR_SOURCE.id,
     licencePage: DELIVERY_CAR_SOURCE.page,
@@ -2496,7 +2496,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
     },
     modified: `the wire's opacity map (${CHAIN_LINK_SOURCE.id}_${CHAIN_LINK_SOURCE.opacity}_1k.jpg), ${encodingWords({ encoding: 'data', origin: 'top-left' })}`,
   },
-  // #2847: the realistic world's three cars and their one atlas (ADR 0081).
+  // #2847: the realistic world's three cars and their one atlas (ADR 0085).
   {
     file: REALISTIC_DELIVERY_CAR,
     from: DELIVERY_CAR_SOURCE.id,

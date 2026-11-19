@@ -1168,7 +1168,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         is held to `realistic-budget.ts`
                         §`DELIVERY_VILLAGE_FRAME_TRIANGLES` (205 000;
                         measured 201 356) by the same nightly spec.
-                        ⚠️ **Since #2847 (ADR 0081) the realistic world's
+                        ⚠️ **Since #2847 (ADR 0085) the realistic world's
                         parked cars are three of GGBotNet's CC0 PSX Style
                         Cars** — a saloon, a hatchback and a station wagon
                         (`public/realistic/cars.glb` and one atlas,

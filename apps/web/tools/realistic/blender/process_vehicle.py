@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
 The realistic world's cars: three bodies out of GGBotNet's CC0 "PSX Style
-Cars" pack, at real proportions, in one atlas -- #2847, ADR 0081. It made
+Cars" pack, at real proportions, in one atlas -- #2847, ADR 0085. It made
 one Kenney sedan from #2540 until then.
 
 Run by `process-assets.ts`, never by hand:

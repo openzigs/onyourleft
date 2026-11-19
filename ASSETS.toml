@@ -2524,7 +2524,7 @@ inputsha256 = "d55f4dbbe6a5565f585aac6e922509ebb94c2991826917dcaacccaf4a6e90682"
 script = "apps/web/tools/realistic/encode-ktx2.ts"
 tool = "KTX-Software v4.4.2"
 
-# #2847: Delivery's parked cars in the realistic world, three of GGBotNet's CC0 PSX Style Cars, and their atlas (ADR 0081).
+# #2847: Delivery's parked cars in the realistic world, three of GGBotNet's CC0 PSX Style Cars, and their atlas (ADR 0085).
 [[asset]]
 path = "apps/web/public/realistic/cars.glb"
 source = "itch.io (the owner’s download, #2847), ggbot-psx-style-cars by GGBotNet; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"

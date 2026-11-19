@@ -440,12 +440,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-6's bar on a trade mark is kept (ADR 0026's entry says which garments are refused and what is
   painted out), and D-10's two tables stand as written. `sources.ts` §`PEOPLE_GARMENTS` is the list.
 - **2026-11-19** — **D-10's In table gains a row, by
-  [ADR 0081](0081-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md).** Under D-11, a new
-  source is a superseding ADR and not an amendment. ADR 0081 D-1 admits **GGBotNet's PSX Style
+  [ADR 0085](0085-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md).** Under D-11, a new
+  source is a superseding ADR and not an amendment. ADR 0085 D-1 admits **GGBotNet's PSX Style
   Cars** (`CC0-1.0`) for the realistic world's cars, on the owner's rulings of 2026-11-18 (*"PSX
   Style Cars (Recommended)"*) and 2026-11-19 (*"Saloon, hatchback, station wagon (Recommended)"*).
   Its saloon, hatchback and station wagon replace Kenney's sedan as Delivery's parked cars. The
-  tables above are unedited. `admitted-sources.test.ts` reads ADR 0081's row after them, and
+  tables above are unedited. `admitted-sources.test.ts` reads ADR 0085's row after them, and
   `sources.ts` §`ADMITTED_SOURCES` carries it last. The entry of 2026-11-12 above now records
   history: Kenney's row keeps its page among its addresses, and no Kenney file is drawn in the
   realistic world. ([#2847](https://github.com/openzigs/onyourleft/issues/2847))

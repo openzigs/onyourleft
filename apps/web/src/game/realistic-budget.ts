@@ -601,7 +601,7 @@ export const DELIVERY_VILLAGE_FRAME_TRIANGLES = 205_000;
  * 1 268. Kenney's sedan was 1 376; since its PR met #2512's and #2518's
  * pieces on the same frame (204 514 with the stylised car), its wheels were
  * 120 each, not 166, and it was 1 192, so the frame still fit. Since #2847
- * (ADR 0081) the three PSX cars, all three together, are 1 222
+ * (ADR 0085) the three PSX cars, all three together, are 1 222
  * (`tools/realistic/sources.ts` §`DELIVERY_CAR_SOURCE`): every instance
  * submits every body, so this ceiling holds the three as it held the one.
  * ONE level of detail: a second would be more triangles in the roster every

@@ -134,7 +134,7 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // ⚠️ #2540 read Kenney's own page, for its Car Kit: D-4 had admitted
     // Kenney from the start. ⚠️ Since #2847 the cars are GGBotNet's PSX Style
     // Cars, whose page is on its author's itch.io host, and that IS a new
-    // source: ADR 0081 D-1 admits it, superseding ADR 0049 D-10 in part.
+    // source: ADR 0085 D-1 admits it, superseding ADR 0049 D-10 in part.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
         /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|ggbot\.itch\.io)$/,
@@ -1257,7 +1257,7 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
   });
 });
 
-describe('the PSX cars: a placed archive with no Sketchfab record — #2847, ADR 0081', () => {
+describe('the PSX cars: a placed archive with no Sketchfab record — #2847, ADR 0085', () => {
   const source = SOURCES.find((each) => each.id === DELIVERY_CAR_SOURCE.id) as AssetSource;
   const lock = JSON.parse(
     readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'inputs.lock.json'), 'utf8'),

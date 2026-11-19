@@ -825,7 +825,7 @@ export const REALISTIC_CHAIN_LINK = {
 
 /**
  * The cars a Delivery round's parked cars are drawn as in the realistic world
- * — #2847, ADR 0081: three bodies of GGBotNet's CC0 "PSX Style Cars" pack, a
+ * — #2847, ADR 0085: three bodies of GGBotNet's CC0 "PSX Style Cars" pack, a
  * saloon, a hatchback and a station wagon, made by `tools/realistic/blender/
  * process_vehicle.py` into seven named parts a body, each node named
  * `<body>-<part>`: `body`, four wheels (`wheel-front-left` and so on, each

@@ -39,12 +39,12 @@ const ADR = readFileSync(
 );
 
 /**
- * #2847: ADR 0081, which supersedes D-10's In table in part by adding one
+ * #2847: ADR 0085, which supersedes D-10's In table in part by adding one
  * row to it. ADR 0049's own tables are unedited (ADR 0013), so the list is
  * D-10's rows and then each superseding ADR's.
  */
-const ADR_0081 = readFileSync(
-  join(REPOSITORY, 'docs', 'adr', '0081-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md'),
+const ADR_0085 = readFileSync(
+  join(REPOSITORY, 'docs', 'adr', '0085-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md'),
   'utf8',
 );
 
@@ -62,9 +62,9 @@ function rowsAfter(marker: string): readonly (readonly string[])[] {
   return tableRows(section.slice(section.indexOf(marker)));
 }
 
-/** D-10's In table and then ADR 0081 D-1's row, the whole In list since #2847. */
+/** D-10's In table and then ADR 0085 D-1's row, the whole In list since #2847. */
 function admittedRows(): readonly (readonly string[])[] {
-  const added = ADR_0081.slice(ADR_0081.indexOf('### D-1 — '), ADR_0081.indexOf('### D-2 — '));
+  const added = ADR_0085.slice(ADR_0085.indexOf('### D-1 — '), ADR_0085.indexOf('### D-2 — '));
   return [...rowsAfter('**In**'), ...tableRows(added)];
 }
 
@@ -199,7 +199,7 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         'https://static.makehumancommunity.org/assets/assetpacks/poses02.html',
         'https://files.makehumancommunity.org/asset_packs/poses02/',
       ],
-      // #2847, ADR 0081 D-1: the author's own itch.io pages, the pack's among them.
+      // #2847, ADR 0085 D-1: the author's own itch.io pages, the pack's among them.
       'GGBotNet’s PSX Style Cars': ['https://ggbot.itch.io/'],
     });
   });
@@ -235,7 +235,7 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
     }
     // Five sources are used today — ambientCG since #1274, which ADR 0026 D-4
     // had already admitted, since #1585 D-4's individual CC-BY-4.0 models,
-    // and since #2847 GGBotNet's PSX Style Cars (ADR 0081), whose cars
+    // and since #2847 GGBotNet's PSX Style Cars (ADR 0085), whose cars
     // replaced #2540's Kenney sedan — and nothing ADR 0049 admits is adopted
     // by #1275.
     expect([...new Set([...owners.values()].flatMap((names) => [...names]))].sort()).toEqual([
@@ -432,11 +432,11 @@ describe('what a generated tree may wear — ADR 0049 D-1 and its amendment of 2
     );
     expect(body).toContain('repository are **not** taken.');
     // And the ruling added no source: D-10's In table names what it named,
-    // and since #2847 ADR 0081 adds its one row after it.
+    // and since #2847 ADR 0085 adds its one row after it.
     expect(admittedRows().map(([name]) => name)).toEqual(
       ADMITTED_SOURCES.map((source) => plain(source.name)),
     );
-    expect(ADMITTED_SOURCES.at(-1)?.decidedBy).toBe('ADR 0081 D-1');
+    expect(ADMITTED_SOURCES.at(-1)?.decidedBy).toBe('ADR 0085 D-1');
   });
 
   it('lets a generated tree wear ambientCG’s and Poly Haven’s, the two the ADR now names', () => {

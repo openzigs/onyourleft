@@ -1,4 +1,4 @@
-# ADR 0081: GGBotNet's "PSX Style Cars" for the realistic world's cars
+# ADR 0085: GGBotNet's "PSX Style Cars" for the realistic world's cars
 
 - **Status**: **Accepted, 2026-11-19**, on the owner's two rulings quoted in Context: the pack on
   2026-11-18 and its three bodies on 2026-11-19. What the rulings leave open is marked *the
@@ -8,9 +8,10 @@
 - **Deciders**: **the owner**, in the two rulings. **The author** read the pack's own page on
   2026-11-18 and 2026-11-19 and decided the engineering
 - **Issue**: [#2847](https://github.com/openzigs/onyourleft/issues/2847)
-- **Number**: **0081**, which [`docs/architecture.md`](../architecture.md) gave as the next free
-  number on 2026-11-19. The lane note of 2026-11-18 on #2847 named it, and no other issue or pull
-  request claims it: 0082 is ADR 0082 (#2794) and 0083 is claimed by the open pull request #2864
+- **Number**: **0085**, which the ADR number note of 2026-11-19 on #2847 gave this lane: 0081 is
+  claimed by #2836's lane (written in the open pull request #2873), 0082 is ADR 0082 (#2794), 0083
+  is claimed by the open pull request #2864 and 0084 by the open pull request #2863. This ADR was
+  first written as 0081 and renumbered before merge on the review of its pull request #2872
 - **Supersedes, in part**: [ADR 0049](0049-open-asset-sources-for-the-realistic-world.md) **D-10's
   In table**. D-1 below adds one row to it, and nothing else in D-10 changes. ADR 0049 D-11 says
   adding a source *"is a superseding ADR"*, never an amendment, so this is a new ADR. ADR 0049
@@ -66,7 +67,7 @@ This row is added to ADR 0049 D-10's **In** table. It is the whole of what D-10 
 
 | Source | Licence | Decided by | For |
 |---|---|---|---|
-| **GGBotNet's PSX Style Cars** | `CC0-1.0` | ADR 0081 D-1 | the realistic world's cars, from an archive the owner placed |
+| **GGBotNet's PSX Style Cars** | `CC0-1.0` | ADR 0085 D-1 | the realistic world's cars, from an archive the owner placed |
 
 - **The pack, and only the pack.** The row admits the PSX Style Cars pack. The pipeline's address
   for it is the author's own itch.io host, `https://ggbot.itch.io/`, because ADR 0049 D-11's prefix
@@ -137,8 +138,14 @@ components of attributes that are already bound, so neither takes a slot of its 
 ### D-6 — For the owner to confirm or overrule
 
 1. The lengths (4.4 m, 4.2 m, 4.4 m) and the mirrors 0.07 m to 0.09 m past the footprint (D-2).
+   The hatchback's 4.2 m also leaves about 0.1 m of the 4.4 m footprint empty at each end, so a
+   rider can hit that much car they do not see; D-2's "what the rider sees is what the rider hits"
+   holds for the saloon and the station wagon, and for the hatchback only to within that 0.1 m.
 2. Keeping the faint signature (D-5).
 3. The prefix, the author's whole itch.io host (D-1).
+4. The stylised world keeping its code-built car (D-1), on the author's reading of ADR 0049 D-10's
+   *"stays Kenney's alone"*. #2847 asks for the cars in both worlds where cars are drawn today, so
+   this reading leaves that criterion met in the realistic world only.
 
 ## Consequences
 
