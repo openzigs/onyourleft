@@ -3588,12 +3588,6 @@ interface PeopleMeasurement {
   readonly bodies: number;
   readonly bodiesWorn: number;
   /**
-   * The modeller's pass of 2026-11-18, read off the belt: how far a top's hem
-   * over the bottoms strays up and down round the body, metres at a person's
-   * 1.75 m (`three-renderer.ts` §`peopleDrawnOf`).
-   */
-  readonly hemSpread: number;
-  /**
    * How many pixels of a box around the nearest body in frame, and around the
    * nearest impostor, change when the people are switched off: what is drawn
    * is a person, at the place `people.ts` put them.
