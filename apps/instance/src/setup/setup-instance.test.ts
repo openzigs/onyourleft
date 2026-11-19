@@ -1700,7 +1700,8 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
     await backUp(at, new Date(at.clock));
     at.clock += 60 * 1000;
     const { browser } = await claimed(at);
-    for (const from of ['passkey', 'secrets']) await browser.post('/setup/next', { from });
+    for (const from of ['tailnet', 'passkey', 'secrets'])
+      await browser.post('/setup/next', { from });
     const step = await browser.get('/setup/backups');
     expect(step.body).toContain(
       '<p class="warning">That backup was made before your tablet claimed this server, so it does not hold your account yet.',
@@ -1766,7 +1767,7 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     expect(comparison).toMatch(/^[0-9]{6}$/);
     expect((await again.post('/setup/claim/confirm', { comparison })).status).toBe(303);
-    expect((await again.get('/setup/passkey')).status).toBe(200);
+    expect((await again.get('/setup/tailnet')).status).toBe(200);
   });
 
   it('owner-claim reset makes the setup code and writes its file, which opens the setup', async () => {
@@ -1807,6 +1808,7 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
       '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts owner-claim reset</code></pre>',
     );
     await browser.post('/setup/next', { from: 'claim' });
+    await browser.post('/setup/next', { from: 'tailnet' });
     const passkey = (await browser.get('/setup/passkey')).body;
     for (const command of [
       'docker compose up -d instance',
@@ -1824,7 +1826,7 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
   it('says how to download the kit again after the one download, and a new session can', async () => {
     const at = await world();
     const { browser } = await claimed(at);
-    for (const from of ['passkey']) await browser.post('/setup/next', { from });
+    for (const from of ['tailnet', 'passkey']) await browser.post('/setup/next', { from });
     expect((await browser.post('/setup/secrets/kit')).status).toBe(200);
     const taken = await browser.get('/setup/secrets');
     expect(taken.body).toContain('If you cancelled the save or cannot find the file');
@@ -1850,7 +1852,7 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
     const at = await world();
     const { browser, tablet } = await claimed(at);
     expect((await register(at, tablet)).status).toBe(200);
-    for (const from of ['passkey', 'secrets', 'backups'])
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups'])
       await browser.post('/setup/next', { from });
     await browser.post('/setup/registration/mode', { mode: 'invite' });
     await browser.post('/setup/invite/code');
@@ -1869,7 +1871,7 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
     const at = await world();
     const { browser, tablet } = await claimed(at);
     expect((await register(at, tablet)).status).toBe(200);
-    for (const from of ['passkey', 'secrets', 'backups'])
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups'])
       await browser.post('/setup/next', { from });
     await browser.post('/setup/registration/mode', { mode: 'invite' });
     await browser.post('/setup/invite/code');
@@ -2138,7 +2140,7 @@ describe('what a device needs before it can reach the server, and an address nev
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     await browser.post('/setup/claim/confirm', { comparison });
     expect((await register(at, tablet)).status).toBe(200);
-    for (const from of ['passkey', 'secrets', 'backups']) {
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups']) {
       await browser.post('/setup/next', { from });
     }
     const mode = await browser.post('/setup/registration/mode', { mode: 'invite' });
@@ -2288,7 +2290,8 @@ describe('what a device needs before it can reach the server, and an address nev
     await walkToInvite(at, browser);
     const offer = await browser.get('/setup/invite');
     expect(beforeTheButton(offer.body, 'Make an invite')).toContain(INVITE_REACH_TEXT.tailnet);
-    const invite = await browser.post('/setup/invite/code');
+    expect((await browser.post('/setup/invite/code')).headers.location).toBe('/setup/invite');
+    const invite = await browser.get('/setup/invite');
     expect(invite.body).toMatch(CARD_LINE);
     expect(invite.body).toContain(INVITE_REACH_TEXT.tailnet);
     expect(invite.body).toContain('never yours');

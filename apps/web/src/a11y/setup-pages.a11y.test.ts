@@ -260,7 +260,14 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
         'claim',
         () =>
           pages.claimBody(
-            { kind: 'open', card: true, notConfirmed: false, expired: false, restarted: true },
+            {
+              kind: 'open',
+              card: true,
+              notConfirmed: false,
+              expired: false,
+              restarted: true,
+              reach: reach(),
+            },
             CSRF,
           ),
         false,
