@@ -12,12 +12,20 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0084 is [ADR 0084](../adr/0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md)**,
+  taken by [#2856](https://github.com/openzigs/onyourleft/issues/2856) on 2026-11-19 for a scan of the
+  instance's code agreed to in place by a narrower agreement, **Accepted** the same day on the
+  owner's rulings on its pull request [#2863](https://github.com/openzigs/onyourleft/pull/2863). It
+  supersedes in part ADR 0033 D-4 and ADR 0029 D-5; each gained one dated `## Amendments` entry
+  pointing to it. It skipped **0081** (ADR 0081, #2836) and **0083** (ADR 0083, #2835, in
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864)). **The next free number is
+  0085.** A reviewer who remembers this file offering 0081 or 0084 is reading the old file.
   ⚠️ **0083 is [ADR 0083](../adr/0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md)**,
   taken by [#2835](https://github.com/openzigs/onyourleft/issues/2835) on 2026-11-18 for the device
   deciding the AI pacer's intent and the model writing only the line, **Accepted** on
   2026-11-19 on the owner's answers to its D-9 (#2864). It supersedes in part ADR 0072, ADR 0078 and ADR 0082, each of which gained one dated
   `## Amendments` entry pointing to it. **It skipped 0081 on purpose**, leaving it to #2836, which
-  runs beside it and needs an ADR too. 0081 went to #2836 (the entry below). **The next free number is 0084.** A reviewer who remembers this file offering 0083 is reading the old file.
+  runs beside it and needs an ADR too. 0081 went to #2836 (the entry below). The next free number is the one the 0084 entry states. A reviewer who remembers this file offering 0083 is reading the old file.
   ⚠️ **0081 is [ADR 0081](../adr/0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md)**,
   taken by [#2836](https://github.com/openzigs/onyourleft/issues/2836) on 2026-11-18 for the AI
   bots asked about one at a time from a menu the device makes, with the model's `sit-in` as no
@@ -25,7 +33,7 @@ It has the same authority as the root file. Where the text below says "this file
   owner's answers to its D-8, all as recommended (its D-9). It supersedes in part ADR 0071
   D-3, D-4.4 and D-7, ADR 0073 D-3, D-4 and D-5, ADR 0074 D-1 and D-2 and ADR 0076 D-11; each gained
   one dated `## Amendments` entry pointing to it. 0083 is ADR 0083 (the entry above), #2835's, in
-  [#2864](https://github.com/openzigs/onyourleft/pull/2864). **The next free number is 0084.** A
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864). The next free number is the one the 0084 entry states. A
   reviewer who remembers this file offering 0081 is reading the old file.
   ⚠️ **0082 is [ADR 0082](../adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**,
   taken by [#2794](https://github.com/openzigs/onyourleft/issues/2794) on 2026-11-18 for the AI
@@ -38,7 +46,7 @@ It has the same authority as the root file. Where the text below says "this file
   [#2777](https://github.com/openzigs/onyourleft/issues/2777) on 2026-11-17 for a floor under the
   AI pacer's intent, **Proposed** for the owner's answer. It supersedes in part ADR 0072 D-2 and
   D-5.1, which gained one dated `## Amendments` entry pointing to it. The next free number
-  was 0079 when it was written, and is **0081** now (the 0080 entry below). A reviewer who remembers
+  was 0079 when it was written, and is **0085** now (the 0084 entry above). A reviewer who remembers
   this file offering 0078 is reading the old file.
   ⚠️ **0076 is [ADR 0076](../adr/0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md)**, taken by
   [#2759](https://github.com/openzigs/onyourleft/issues/2759) on 2026-11-17 for AI bots racing with
@@ -50,7 +58,7 @@ It has the same authority as the root file. Where the text below says "this file
   [#2670](https://github.com/openzigs/onyourleft/pull/2670), accepted by the owner. **0077 is
   ADR 0077** (#2760, in its pull request [#2762](https://github.com/openzigs/onyourleft/pull/2762), the entry below). **0057 and
   0058 stay claimed** by #1748 and #1752; 0070 is ADR 0070 (#2684) and 0072 is ADR 0072 (#2712). The next
-  free number was 0078 when it was written, and is **0081** now (the 0080 entry below). A reviewer who remembers this file offering 0075, 0076 or 0077 is reading the old file.
+  free number was 0078 when it was written, and is **0085** now (the 0084 entry above). A reviewer who remembers this file offering 0075, 0076 or 0077 is reading the old file.
   ⚠️ **0077 is [ADR 0077](../adr/0077-the-ai-pacers-line-may-name-a-cadence-or-power-target.md)**,
   taken by [#2760](https://github.com/openzigs/onyourleft/issues/2760) in its pull request
   [#2762](https://github.com/openzigs/onyourleft/pull/2762) on 2026-11-17 for the AI pacer's line
@@ -58,7 +66,7 @@ It has the same authority as the root file. Where the text below says "this file
   part ADR 0072 D-4.2 and R-4, which gained one dated `## Amendments` entry pointing to it. It
   skipped **0074** (ADR 0074, #2710), **0075** (#2670, the ride-controls fade) and **0076** (#2767,
   AI bots' bodies). **0057 and 0058 stay claimed** by #1748 and #1752, and 0070 by #2684. The
-  next free number was 0078 when it was written, and is **0081** now (the 0080 entry below). A reviewer who remembers this file offering 0074 is reading the old
+  next free number was 0078 when it was written, and is **0085** now (the 0084 entry above). A reviewer who remembers this file offering 0074 is reading the old
   file.
   ⚠️ **0079 is [ADR 0079](../adr/0079-remote-access-without-a-domain-and-no-lan-only-http.md)**,
   taken by [#2790](https://github.com/openzigs/onyourleft/issues/2790) on 2026-11-18 for remote
@@ -70,7 +78,7 @@ It has the same authority as the root file. Where the text below says "this file
   #2790 while writing 0080. It skipped **0078**, which the open pull request
   [#2793](https://github.com/openzigs/onyourleft/pull/2793) (#2777) writes; **0075, 0076 and 0077
   stay claimed** by #2670, #2767 and #2762, **0080** by #2795, and **0057 and 0058** by #1748 and
-  #1752. The lane note expected 0081, and 0081 is still free.
+  #1752. The lane note expected 0081, and 0081 was then free (it is claimed now: the 0084 entry above).
   ⚠️ **0080 is [ADR 0080](../adr/0080-first-run-setup-and-owner-claim-on-the-loopback-listener.md)**,
   taken by [#2780](https://github.com/openzigs/onyourleft/issues/2780) on 2026-11-17 for first-run
   setup and the owner's claim on the loopback listener, on the owner's ruling of that day on the epic

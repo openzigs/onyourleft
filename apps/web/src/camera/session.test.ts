@@ -13,6 +13,7 @@ import { SecureWindow } from './secure-window';
 import { describe, expect, it } from 'vitest';
 
 import { CameraController } from './session';
+import { CAMERA_NOTICES, CAMERA_OFF_AFTER_A_SCAN } from './notice';
 import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
 import type { CapturedFrame } from './camera-port';
 import { browserSecureWindow } from './secure-window-testing';
@@ -549,5 +550,182 @@ describe('subscribers', () => {
     stop();
     controller.turnOff();
     expect(heard).toBe(before);
+  });
+});
+
+/**
+ * #2856: a scan of the instance's code asks its own, narrower agreement where
+ * the rider pressed it. These hold the two halves of "narrower": it opens the
+ * camera to read a code, and it opens nothing else — each refusal asserted as
+ * a call the port never received, with the camera RUNNING, which is when a
+ * check on the session alone would let it through.
+ */
+describe('the scan’s own agreement — #2856', () => {
+  /** A device whose rider agreed to a scan and to nothing else, its camera on for one. */
+  async function scanning(
+    options: Partial<ConstructorParameters<typeof CameraController>[0]> = {},
+  ): Promise<{ camera: ReturnType<typeof scriptedCamera>; controller: CameraController }> {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      secureWindow: browserSecureWindow(),
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+      ...options,
+    });
+    controller.agreeToScan();
+    await expect(controller.turnOn('environment', 'scan')).resolves.toBeUndefined();
+    return { camera, controller };
+  }
+
+  it('refuses a scan nobody agreed to, WITHOUT TOUCHING THE PORT', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    await expect(controller.turnOn('environment', 'scan')).resolves.toBe('no-consent');
+    expect(camera.calls).toStrictEqual([]);
+    expect(controller.state().scanAgreed).toBe(false);
+  });
+
+  it('opens the camera to read a code once the rider agreed to that, and records no camera consent', async () => {
+    const { camera, controller } = await scanning();
+    expect(camera.calls).toStrictEqual(['availability', 'request', 'start']);
+    expect(controller.state().live).toBe(true);
+    expect(controller.state().scanAgreed).toBe(true);
+    // The camera's own answer is exactly a fresh device's.
+    expect(controller.state().consent).toStrictEqual({ local: false });
+    // And the scan itself works: the viewfinder plays and a code is looked for.
+    const detach = controller.showPreview({
+      srcObject: null,
+      muted: false,
+      playsInline: false,
+      play: async () => Promise.resolve(),
+    });
+    await controller.readPairingCode();
+    detach();
+    expect(camera.calls).toContain('preview');
+    expect(camera.calls).toContain('code');
+  });
+
+  it('does not open the camera for anything but a scan, WITHOUT TOUCHING THE PORT', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agreeToScan();
+    // What the Camera screen and the side camera call: no `use`, so `camera`.
+    await expect(controller.turnOn()).resolves.toBe('no-consent');
+    await expect(controller.turnOn('user')).resolves.toBe('no-consent');
+    expect(camera.calls).toStrictEqual([]);
+    expect(controller.state().problem).toBe('no-consent');
+  });
+
+  it('takes no picture while it reads a code: not for the Camera screen, the side camera or the rider’s computer', async () => {
+    let asked = 0;
+    const { camera, controller } = await scanning({
+      analysis: () => ({
+        askAboutFrame: () => {
+          asked += 1;
+          return {
+            outcome: Promise.resolve({ kind: 'failed', failure: 'cancelled' }),
+            cancel: () => undefined,
+          };
+        },
+      }),
+    });
+    const outcome = await controller.captureOne();
+    expect(outcome.taken).toBe(false);
+    expect(outcome.problem).toBe('no-consent');
+    await expect(controller.captureSideFrame()).resolves.toBeUndefined();
+    expect(await controller.askAboutPicture('connection-check').outcome).toStrictEqual({
+      kind: 'failed',
+      failure: 'no-picture',
+    });
+    expect(asked).toBe(0);
+    expect(camera.calls).not.toContain('capture');
+    expect(camera.calls).not.toContain('side-frame');
+    expect(controller.state().captured).toBe(0);
+  });
+
+  it('arms no keep and no presence watch while it reads a code', async () => {
+    let keeping = false;
+    const timers = manualSchedule();
+    const { camera, controller } = await scanning({
+      schedule: timers.schedule,
+      keep: {
+        get keeping() {
+          return keeping;
+        },
+        setKeeping: (on) => {
+          keeping = on;
+        },
+        accept: async () => Promise.resolve(keeping),
+        count: async () => Promise.resolve(0),
+        countSnapshots: async () => Promise.resolve(0),
+        forget: async () => Promise.resolve(0),
+      },
+    });
+    controller.setKeeping(true);
+    expect(keeping).toBe(false);
+    expect(controller.state().keeping).toBe(false);
+    controller.watchPresence(true);
+    expect(controller.state().watchingPresence).toBe(false);
+    timers.fire();
+    expect(camera.calls).not.toContain('sample');
+    expect(controller.riderPresence()).toBe('unknown');
+  });
+
+  it('is covered by the camera’s own agreement, which asks for no second one', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await expect(controller.turnOn('environment', 'scan')).resolves.toBeUndefined();
+    expect(controller.state().scanAgreed).toBe(false);
+    expect(camera.liveStreams()).toBe(1);
+  });
+
+  it('is taken back with the rest, and the camera it turned on is stopped', async () => {
+    const { camera, controller } = await scanning();
+    controller.revoke();
+    expect(camera.liveStreams()).toBe(0);
+    expect(controller.state().scanAgreed).toBe(false);
+    const before = camera.calls.length;
+    await expect(controller.turnOn('environment', 'scan')).resolves.toBe('no-consent');
+    expect(camera.calls).toHaveLength(before);
+  });
+
+  it('tells its listeners once, so a screen that reads it draws again', () => {
+    const { controller } = controllerFor(scriptedCamera());
+    let heard = 0;
+    controller.subscribe(() => {
+      heard += 1;
+    });
+    controller.agreeToScan();
+    controller.agreeToScan();
+    expect(heard).toBe(1);
+  });
+
+  it('stops the Camera screen saying the camera has never been on, once it has been on for a scan', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    // Agreed and not yet used: it HAS never been on, and the notice says so.
+    controller.agreeToScan();
+    expect(controller.notice()).toBe(CAMERA_NOTICES['no-consent']);
+
+    await controller.turnOn('environment', 'scan');
+    expect(controller.notice()).toBeNull();
+    controller.turnOff();
+
+    // The problem is the one a fresh device has; the sentence is not.
+    expect(controller.state().problem).toBe('no-consent');
+    expect(controller.notice()).toBe(CAMERA_OFF_AFTER_A_SCAN);
+    expect(CAMERA_OFF_AFTER_A_SCAN.explanation).not.toContain('never been on');
+    expect(CAMERA_OFF_AFTER_A_SCAN.explanation).toContain('only to read a code');
+  });
+
+  it('keeps the sentence a fresh device has when the scan’s camera never came on', async () => {
+    const camera = scriptedCamera({ startFails: 'unavailable' });
+    const { controller } = controllerFor(camera);
+    controller.agreeToScan();
+    await expect(controller.turnOn('environment', 'scan')).resolves.toBe('unavailable');
+    controller.revoke();
+    expect(controller.state().problem).toBe('no-consent');
+    expect(controller.notice()).toBe(CAMERA_NOTICES['no-consent']);
   });
 });
