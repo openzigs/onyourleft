@@ -834,6 +834,30 @@ export const REALISTIC_CHAIN_LINK = {
 export const REALISTIC_DELIVERY_CAR = 'car_sedan.glb';
 
 /**
+ * The people on the pavements — the owner's request of 2026-11-18 ("can we
+ * use a real model for the pedestrian"): MakeHuman's CC0 base mesh in three
+ * builds, each dressed in MakeHuman's own CC0 clothes, shoes and hair by
+ * `tools/realistic/blender/process_people.py`.
+ *
+ * - `model` — three skinned meshes, `person-a` to `person-c`, each under its
+ *   own skeleton of the rider's 24 bones and each a primitive a region,
+ *   named by the region (`people-body.ts` §`PersonRegion`). `person-a` is the
+ *   rider's own build, so a scenery cyclist is that body seated by the
+ *   rider's skeleton.
+ * - `atlas` — one picture for all three: each garment's photograph, the face
+ *   and the hair, every part DIVIDED by its own mean colour and halved, so
+ *   the renderer multiplies it by the person's seeded colours
+ *   (`people.ts` §`personLook`) and a street is not three outfits repeated.
+ *   Its alpha is the hair's and the brows' cut-out; everything else is opaque.
+ *
+ * `three-renderer.ts` §`PeopleBelt` draws them, all in one instanced call.
+ */
+export const REALISTIC_PEOPLE = {
+  model: 'people.glb',
+  atlas: 'people_atlas_1024.ktx2',
+} as const;
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -881,6 +905,8 @@ export function realisticFiles(): readonly string[] {
     REALISTIC_CHAIN_LINK.model,
     REALISTIC_CHAIN_LINK.wire,
     REALISTIC_DELIVERY_CAR,
+    REALISTIC_PEOPLE.model,
+    REALISTIC_PEOPLE.atlas,
   ];
 }
 

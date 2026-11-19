@@ -3573,18 +3573,20 @@ interface PeopleMeasurement {
   readonly drawnOff: readonly number[];
   /** The draw calls a frame with bodies and impostors makes, less the same frame with the people switched off. */
   readonly drawCalls: number;
-  /** One body's triangles, as cut, and the animation texture's bytes, read off the belt. */
+  /**
+   * The most triangles one body is — what an instance submits — and the bytes
+   * of the animation and slot textures together, read off the belt.
+   */
   readonly triangles: number;
   readonly animationBytes: number;
   /**
-   * #1618, read off the belt: how many of a body's triangles fade a colour
-   * across them (corners of two regions), and how far its clothes and its skin
-   * stand off the bare body as the animation texture holds them, metres at a
-   * person's 1.75 m.
+   * The owner's request of 2026-11-18, read off the belt: how many different
+   * bodies its model holds, and how many of them the people the view drew
+   * near at the probe's second are between them — a street is not one person
+   * repeated.
    */
-  readonly blendedTriangles: number;
-  readonly clothesStandOff: number;
-  readonly skinStandOff: number;
+  readonly bodies: number;
+  readonly bodiesWorn: number;
   /**
    * How many pixels of a box around the nearest body in frame, and around the
    * nearest impostor, change when the people are switched off: what is drawn
@@ -3612,9 +3614,8 @@ const NO_PEOPLE_MEASURED: PeopleMeasurement = {
   drawCalls: -1,
   triangles: -1,
   animationBytes: -1,
-  blendedTriangles: -1,
-  clothesStandOff: Number.NaN,
-  skinStandOff: Number.NaN,
+  bodies: -1,
+  bodiesWorn: -1,
   bodyPixels: -1,
   impostorPixels: -1,
   bodyFragments: -1,
@@ -3727,10 +3728,13 @@ function peopleProbe(
     }
     return found;
   };
+  // Which of the model's bodies the people drawn near were, over every frame read.
+  const worn = new Set<number>();
   // What the view DREW at a second: its people's least clearance, and how many.
   const drawnAt = (frame: SceneFrame): { clearance: number; drawn: number[] } => {
     view.render(frame);
     const drawn = peopleDrawnOf(view);
+    for (const body of drawn?.worn ?? []) worn.add(body);
     const all = [...(drawn?.near ?? []), ...(drawn?.far ?? [])];
     return {
       clearance: Math.min(...all.map((person) => shoulderClear(person.x, person.z))),
@@ -3821,9 +3825,8 @@ function peopleProbe(
     drawCalls,
     triangles: belt?.triangles ?? -1,
     animationBytes: belt?.animationBytes ?? -1,
-    blendedTriangles: belt?.blendedTriangles ?? -1,
-    clothesStandOff: (belt?.standOff.clothes ?? Number.NaN) * 1.75,
-    skinStandOff: (belt?.standOff.skin ?? Number.NaN) * 1.75,
+    bodies: belt?.bodies.length ?? -1,
+    bodiesWorn: worn.size,
     bodyPixels,
     impostorPixels,
     bodyFragments: fragments.length,

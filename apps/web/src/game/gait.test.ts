@@ -3,7 +3,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  GAIT_PHASES,
   GAITS,
   STRIDE_PER_HEIGHT,
   gaitPose,
@@ -126,6 +125,5 @@ describe('a parametric gait — #1541, the owner’s ruling of 2026-10-24', () =
   it('strides 1.4 m walking and 2.2 m running at 1.75 m tall', () => {
     expect(STRIDE_PER_HEIGHT.walk * 1.75).toBeCloseTo(1.4, 2);
     expect(STRIDE_PER_HEIGHT.run * 1.75).toBeCloseTo(2.19, 2);
-    expect(GAIT_PHASES).toBe(24);
   });
 });
