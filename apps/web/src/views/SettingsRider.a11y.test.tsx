@@ -19,7 +19,12 @@ import { RIDER_BODY_NAMES } from '../game/rider-body';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
-import { RIDER_BODY_IS_A_LOOK, RIDER_BODY_SAVED, riderBodySaveFailure } from './SettingsView';
+import {
+  KIT_NO_ATHLETE,
+  RIDER_BODY_IS_A_LOOK,
+  RIDER_BODY_SAVED,
+  riderBodySaveFailure,
+} from './SettingsView';
 
 const OWNER = toAthleteId('athlete-a');
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
@@ -108,7 +113,9 @@ describe('Settings with a rider-body port — #2839', () => {
 
     await choose('female');
     expect(document.body.textContent).not.toContain(RIDER_BODY_SAVED);
-    expect(document.body.textContent).toContain('That could not be saved');
+    // The reason it gives is that there is no row — not whatever reading a
+    // missing row's field would have thrown.
+    expect(document.body.textContent).toContain(riderBodySaveFailure(KIT_NO_ATHLETE));
     // Nothing landed, so nothing is shown as chosen that is not on disk.
     expect(riderRadios().find((radio) => radio.checked)?.value).toBe('male');
     expectClean('Settings, after a rider-body write that landed nowhere');

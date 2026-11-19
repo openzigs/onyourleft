@@ -390,8 +390,7 @@ import {
   LEG_BONE_COUNT,
   LIMB_RADIUS_METRES,
   RIDER_BICYCLE_PARTS,
-  RIDER_UPPER_BODY_PARTS,
-  RIDER_UPPER_BODY_PARTS_FEMALE,
+  RIDER_UPPER_BODY_PARTS_BY_BODY,
   UPPER_BODY_PIVOT,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
@@ -3405,11 +3404,19 @@ export class RiderBelt {
       riders,
     );
     this.#torsos = riderInstanceChannels(
-      new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS), this.#materials.lit, riders),
+      new InstancedMesh(
+        mergedParts(RIDER_UPPER_BODY_PARTS_BY_BODY.male),
+        this.#materials.lit,
+        riders,
+      ),
       riders,
     );
     this.#femaleTorsos = riderInstanceChannels(
-      new InstancedMesh(mergedParts(RIDER_UPPER_BODY_PARTS_FEMALE), this.#materials.lit, riders),
+      new InstancedMesh(
+        mergedParts(RIDER_UPPER_BODY_PARTS_BY_BODY.female),
+        this.#materials.lit,
+        riders,
+      ),
       riders,
     );
     this.#cranksets = riderInstanceChannels(
@@ -8117,7 +8124,8 @@ function releaseRealisticWorld(world: RealisticWorld): void {
  * rider in the wrong shape and not a ride that stops. Offline, the file comes
  * from the same cache the rest of the realistic set does.
  *
- * @test-facing `loaders` — the product's by default; a test hands its own
+ * `loaders` are the product's unless a caller hands its own, as
+ * {@link loadRealisticWorld}'s are.
  */
 export function riderBodyOfWorld(
   world: { readonly otherBodies: Map<RiderBody, Promise<Object3D>> },

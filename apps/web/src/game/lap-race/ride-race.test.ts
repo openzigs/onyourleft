@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
+import { seededRiderBody } from '../rider-body';
 import { circuitRoute, northRoute } from '../route-fixtures-testing';
 import {
   botArchetype,
@@ -299,6 +300,46 @@ describe('a race counts down on its line before Go — #2546', () => {
     const drawn = lapRaceDrawing(ride, 0, LAP_RACE_TICK_SECONDS, false);
     expect(drawn.raceBots).toHaveLength(ride.bots.length);
     for (const bot of drawn.raceBots) expect(bot.distanceMetres).toBeGreaterThanOrEqual(0);
+  });
+
+  describe('#2839 — the field is a seeded mix of both rider bodies', () => {
+    const bodiesOf = (ride: LapRaceRide): (string | undefined)[] =>
+      lapRaceDrawing(ride, 0, 0, false).raceBots.map((bot) => bot.body);
+
+    it('draws both bodies in a field, each bot the one its race’s seed gives it', () => {
+      const ride = started();
+      const bodies = bodiesOf(ride);
+
+      expect(bodies.length).toBeGreaterThan(1);
+      expect(new Set(bodies)).toEqual(new Set(['female', 'male']));
+      expect(bodies).toEqual(ride.bots.map((_, index) => seededRiderBody(ride.seed, index)));
+    });
+
+    it('keeps each bot its body as the race is ridden and the standings move', () => {
+      let ride = started();
+      const atTheStart = new Map(
+        lapRaceDrawing(ride, 0, 0, false).raceBots.map((bot, index) => [index, bot.body]),
+      );
+      for (let tick = 0; tick < 40; tick += 1) {
+        ride = stepLapRaceRide(ride, { ticks: 1, along: 0.01 * (tick + 1) });
+        const now = bodiesOf(ride);
+        // Non-vacuity: the same field is still drawn.
+        expect(now).toHaveLength(atTheStart.size);
+        now.forEach((body, index) => expect(body, String(tick)).toBe(atTheStart.get(index)));
+      }
+    });
+
+    it('draws the same field again from the same seed, and the other first body from another', () => {
+      const ride = started();
+      const again = { ...ride };
+      expect(bodiesOf(again)).toEqual(bodiesOf(ride));
+      // A seed whose first body is the other one flips the whole field.
+      let other = ride.seed + 1;
+      while (seededRiderBody(other, 0) === seededRiderBody(ride.seed, 0)) other += 1;
+      const flipped = bodiesOf({ ...ride, seed: other });
+      expect(flipped).toHaveLength(bodiesOf(ride).length);
+      flipped.forEach((body, index) => expect(body).not.toBe(bodiesOf(ride)[index]));
+    });
   });
 });
 

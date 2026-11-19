@@ -547,7 +547,6 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
   type Scene = Parameters<Belt['addBody']>[1];
   interface Loaded {
     readonly renderer: Renderer;
-    readonly three: typeof import('three');
     readonly male: Scene;
     readonly female: Scene;
   }
@@ -562,12 +561,10 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
     loading ??= (async () => {
       vi.resetModules();
       const renderer = await import('./three-renderer');
-      const three = await import('three');
       const inner = renderer.compressedRealisticLoaders(device(TABLET), `${ORIGIN}/basis/`);
       try {
         return {
           renderer,
-          three,
           male: await inner.model(`${ORIGIN}/realistic/${REALISTIC_RIDER_BODIES.male}`),
           female: await inner.model(`${ORIGIN}/realistic/${REALISTIC_RIDER_BODIES.female}`),
         };
@@ -578,21 +575,25 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
     return loading;
   }
 
+  /**
+   * A belt of the default body, as a view builds one. The maps are stand-ins
+   * and each its own object — only `three-renderer.ts` may import three
+   * (`three-seam.test.ts`), and nothing here reads a texel.
+   */
   async function belt(): Promise<{
     readonly riders: Belt;
     readonly female: Scene;
     readonly male: Scene;
-    readonly three: Loaded['three'];
   }> {
-    const { renderer, three, male, female } = await models();
+    const { renderer, male, female } = await models();
     const maps = (names: readonly string[]): Record<string, unknown> =>
-      Object.fromEntries(names.map((name) => [name, new three.Texture()]));
+      Object.fromEntries(names.map((name) => [name, { isTexture: true, name }]));
     const riders = new renderer.RealisticRiderBelt(
       male,
       maps(REALISTIC_BICYCLE_MAP_NAMES) as never,
       maps(REALISTIC_RIDER_MAP_NAMES) as never,
     );
-    return { riders, female, male, three };
+    return { riders, female, male };
   }
 
   const marker = (kind: string, z: number, body?: string): never =>
@@ -747,15 +748,13 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
   });
 
   it('seats her on the same bicycle from her OWN rest pose: her feet and hands are where his are', async () => {
-    const { riders, female, three } = await belt();
-    const { Vector3 } = three;
+    const { riders, female } = await belt();
+    // A vector of the renderer's own three, without importing three here.
+    type Point = Belt['group']['position'];
+    const point = (): Point => riders.group.position.clone();
     riders.addBody('female', female);
     // The two bodies in two slots at the same place, the cranks level.
-    const at = (
-      body: 'female' | 'male',
-      slot: number,
-      bone: string,
-    ): InstanceType<typeof Vector3> => {
+    const at = (body: 'female' | 'male', slot: number, bone: string): Point => {
       const skinned = riders.bodiesOf(body)[slot];
       // three's loader drops the dot from a node's name: `foot.L` is `footL`.
       const found = skinned?.skeleton.bones.find(
@@ -763,7 +762,7 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
       );
       if (found === undefined) throw new Error(`no bone ${bone}`);
       riders.group.updateMatrixWorld(true);
-      return found.getWorldPosition(new Vector3());
+      return found.getWorldPosition(point());
     };
     riders.place([marker('rider', 0, 'female'), marker('bot', 0, 'male')]);
 
@@ -775,6 +774,13 @@ describe('the realistic world draws the rider each athlete chose — #2839', () 
     for (const bone of ['wrist.L', 'wrist.R']) {
       expect(at('female', 0, bone).distanceTo(at('male', 1, bone)), bone).toBeLessThan(0.05);
     }
+    // Her hips are on the saddle, where his are — which her OWN scale puts
+    // them: moved by his, they sit centimetres off it.
+    const hips = (body: 'female' | 'male', slot: number): Point =>
+      at(body, slot, 'upperleg01.L')
+        .add(at(body, slot, 'upperleg01.R'))
+        .multiplyScalar(0.5);
+    expect(hips('female', 0).distanceTo(hips('male', 1))).toBeLessThan(0.005);
     // And she is not simply him: her shoulders are narrower.
     const span = (body: 'female' | 'male', slot: number): number =>
       at(body, slot, 'upperarm01.L').distanceTo(at(body, slot, 'upperarm01.R'));
@@ -797,14 +803,13 @@ describe('another rider body is fetched when a ride first draws it, and once —
   it('asks for the body’s own file, joins every later ask, and releases the loaders', async () => {
     vi.resetModules();
     const renderer = await import('./three-renderer');
-    const { Object3D } = await import('three');
     const asked: string[] = [];
     let disposed = 0;
-    const scene = new Object3D();
+    const scene = { name: 'the model' };
     const loaders = {
       model: (url: string) => {
         asked.push(url);
-        return Promise.resolve(scene);
+        return Promise.resolve(scene as never);
       },
       texture: () => Promise.reject(new Error('no texture is asked for')),
       sky: () => Promise.reject(new Error('no sky is asked for')),
