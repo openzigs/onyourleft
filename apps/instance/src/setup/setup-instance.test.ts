@@ -287,6 +287,13 @@ async function expectAllNotFound(
       expect(answer.headers['set-cookie'], `${method} ${route.path}`).toBeUndefined();
     }
   }
+  // Against DNS rebinding: a page on the loopback port under any other name gets the bare
+  // `not_found`, never the finished page and the instance name its banner carries.
+  for (const name of ['rebound.example', '127.0.0.1']) {
+    const rebound = await send(port, 'GET', '/setup', { host: `${name}:${String(port)}` });
+    expect(rebound.status, name).toBe(404);
+    expect(rebound.body, name).toBe(expected.body);
+  }
 }
 
 /** The tablet: pins nothing here, but redeems the claim on the REAL sealed route. */
@@ -1463,6 +1470,26 @@ describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () =
     const elsewhere = await third.get('/setup/claim');
     expect(elsewhere.body).toContain('Show the claim code');
     expect(elsewhere.body).not.toContain('The server restarted');
+  });
+
+  it('keeps a redeemed claim waiting for Yes across a restart, and confirms it after', async () => {
+    const at = await world();
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const claim = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    const tablet = await testDevice();
+    expect((await tabletRedeems(at, tablet, claim)).status).toBe(200);
+    // The owner restarts between the tablet's scan and pressing Yes.
+    await restart(at);
+    const again = new Browser(at);
+    await again.signIn(await codeInFile(at));
+    const pending = await again.get('/setup/claim');
+    expect(pending.body).not.toContain('The server restarted');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    expect(comparison).toMatch(/^[0-9]{6}$/);
+    expect((await again.post('/setup/claim/confirm', { comparison })).status).toBe(303);
+    expect((await again.get('/setup/passkey')).status).toBe(200);
   });
 
   it('owner-claim reset makes the setup code and writes its file, which opens the setup', async () => {
