@@ -1124,18 +1124,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   erase list keeps the two copies a rider may have sent before, in the past tense (owner ruling of
   2026-10-26 on #1104, G-4). The own-computer PICTURE path (D-6, the 2026-09-19 entry's Q1) is not
   changed. The body above is not edited. (#1103)
-- **2026-11-18** — **PROPOSED, pending the owner's ruling on
-  [#2856](https://github.com/openzigs/onyourleft/issues/2856): one use of the camera for which
-  D-5's sentence is not shown first.** D-5 puts the bystander sentence in the consent screen,
-  *"before the camera is ever turned on"*. [ADR 0033](0033-side-camera-link.md)'s entry of this
-  date proposes that a scan of the instance's code be agreed to by two sentences of its own, where
-  the rider pressed *Scan a code*, without this ADR's consent flow. If the owner accepts it, the
-  camera can be on, to read a code and for nothing else, on a device where D-5's sentence has not
-  been shown. What stands: D-5's sentence, word for word, and its place before every use of the
-  camera that takes a picture. The frames a scan reads are camera imagery under D-1 (ADR 0033
-  D-4) and are handled as that decision says: decoded in memory for the code only and discarded,
-  so nothing exists for D-2 to keep, for D-3 to export, for D-8 to name or for D-10 to cache. The
-  indicator D-5 calls *"the bystander's only signal"* shows while a scan's camera is on. The
-  consent this ADR describes is never set by a scan's agreement (`apps/web/src/camera/session.ts`
-  §`agreeToScan`). The question for the owner, and the alternative if the answer is no, are in ADR
-  0033's entry. Until the owner rules, D-5 governs. The body above is not edited. (#2856)
+- **2026-11-19** — D-5's placing of the bystander sentence is superseded in part by
+  [ADR 0084](0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md),
+  for a scan of the instance's code only; the side camera's pairing scans are unchanged. (#2856)

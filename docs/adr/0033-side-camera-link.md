@@ -860,49 +860,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     ahead by more than the offer has left, it refuses the code as run out.
   `apps/web/src/camera/side-link-code.ts` §`e` and `side-link.ts`
   §`PhoneSideLink.waitForTabletRead` are the record. (#1110)
-- **2026-11-18** — **PROPOSED, pending the owner's ruling on
-  [#2856](https://github.com/openzigs/onyourleft/issues/2856): a scan of the instance's code asks
-  its own, narrower agreement, where the rider pressed it.** D-4 says *"ADR 0029's consent flow is
-  shown before the first camera use **on each device**, and scanning counts as camera use. It is
-  the same camera."* That was written for this ADR's two pairing codes. Since #2785 the same camera
-  also reads the instance's codes on the Connect and Instance screens
-  ([ADR 0047](0047-end-to-end-encryption-between-the-app-and-its-instance.md) D-6,
-  [ADR 0080](0080-first-run-setup-and-owner-claim-on-the-loopback-listener.md)), and under D-4 a
-  device nobody had agreed on was sent to the Camera screen first: a long page about being filmed
-  while riding, six taps away, while the ten minutes of the owner's claim code ran. From #2856
-  that scan asks in place, in two sentences (`apps/web/src/camera/consent.ts`
-  §`SCAN_CONSENT_STATEMENT`, draft wording):
-
-  > The camera is used only to read this code, and it goes off as soon as the code is read or you close the scanner. No picture is kept or sent anywhere, and nothing on the Camera screen is switched on.
-
-  - **What changes.** *Use the camera* records a second agreement
-    (`apps/web/src/camera/session.ts` §`agreeToScan`) that admits one thing: the camera coming on
-    to read a code (`turnOn(facing, 'scan')`, `consent.ts` §`cameraMayOpen`).
-    [ADR 0029](0029-camera-imagery-as-a-data-class.md)'s consent flow is not shown for it, and
-    neither is its D-5 bystander sentence. That ADR carries an entry of this date.
-  - **What stands.** Everything D-4 says of the frames a scan reads: decoded in memory for the code
-    only, discarded as soon as a code is read or scanning is cancelled, never sent, never kept and
-    never analysed for anything else, with the live-camera indicator showing. This ADR's own two
-    pairing scans are unchanged: the tablet's and the phone's still need ADR 0029's consent first,
-    on each device. A rider who has given that consent is not asked a second time before a scan.
-  - **What the narrower agreement does not reach.** It never sets ADR 0029's consent. With it
-    alone the controller refuses the Camera screen's and the side camera's turn-on, a capture, a
-    side-camera picture, a picture for the rider's own computer, the per-ride keep and the presence
-    watch. Each is refused with the camera running, and `session.test.ts` §"the scan's own
-    agreement" asserts each as a call the camera never received. It is held in memory, as ADR
-    0029's consent is, so it is asked once each time the app is opened, and it is taken back with
-    that consent. After such a scan the Camera screen no longer says the camera *"has never been
-    on"* (`notice.ts` §`CAMERA_OFF_AFTER_A_SCAN`).
-  - **The question for the owner.** May a scan of the instance's code be agreed to by those two
-    sentences alone, without ADR 0029's consent flow and without the bystander sentence? The case
-    for it: no picture is taken, kept, sent or analysed, so the sentence's remedy, where to point
-    the camera, has nothing to act on; what the camera sees is shown only on the screen of the
-    device being aimed; and the indicator still shows. The alternative, if the answer is no, is
-    ADR 0029's whole flow drawn on the Connect screen, seven sentences and the bystander tick. That
-    records the camera's own consent, so a rider who came to scan a code would leave with the
-    Camera screen's features agreed to. The wording above is also the owner's to approve.
-  - **Why this is an entry and not a decision.** [ADR 0013](0013-adr-amendments.md) D-3 keeps a
-    changed decision for a superseding ADR. #2856 asks for the change to be put here as proposed,
-    with the question. Until the owner rules, D-4's sentence governs, and this entry describes
-    what #2856's pull request builds. If the owner accepts it, a later entry or a superseding ADR
-    records that. The body above is not edited. (#2856)
+- **2026-11-19** — D-4's consent sentence is superseded in part by
+  [ADR 0084](0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md),
+  for a scan of the instance's code only; this ADR's own pairing scans are unchanged. (#2856)
