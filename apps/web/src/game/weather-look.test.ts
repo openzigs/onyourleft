@@ -274,6 +274,14 @@ describe('a frame’s shade and share are held, not worked out again — PR #252
     { dusk: true, rain: false },
     { dusk: true, rain: true },
   ];
+  /** Frames in a measured window. */
+  const WINDOW_FRAMES = 100_000;
+  /** What a window may leave on the heap: ten bytes a frame would be a megabyte. */
+  const WINDOW_BYTES = 64 * 1024;
+  /** Windows a weather is measured over. */
+  const WINDOWS = 8;
+  /** Windows tried before a weather fails, so that a collection may spoil some. */
+  const MAX_ATTEMPTS = 16;
 
   it('allocates nothing on a frame, in every weather', () => {
     for (const weather of WEATHERS) {
@@ -283,27 +291,49 @@ describe('a frame’s shade and share are held, not worked out again — PR #252
       const frames = (count: number): void => {
         for (let i = 0; i < count; i += 1) light.update(DAY, weather);
       };
-      // Warm up, so the measured window runs optimised code as a ride does.
-      frames(300_000);
-      const attempts: string[] = [];
-      let measured = false;
-      for (let attempt = 0; attempt < 8 && !measured; attempt += 1) {
+      /** Heap growth across `count` frames, and the collections that ran meanwhile. */
+      const measure = (count: number): { grew: number; collected: number } => {
         const profiler = new GCProfiler();
         profiler.start();
         const before = getHeapStatistics().used_heap_size;
-        frames(100_000);
+        frames(count);
         const after = getHeapStatistics().used_heap_size;
-        const { statistics } = profiler.stop();
+        return { grew: after - before, collected: profiler.stop().statistics.length };
+      };
+      // Warm up, so the measured windows run optimised code as a ride does.
+      frames(300_000);
+      // The first measurement of anything costs the harness its own first use.
+      measure(0);
+      // #2637: one window was one sample, and on a busy runner it carried
+      // 107 232 bytes the frames did not make (a compiler installing code
+      // late, the harness's own bookkeeping). So the frames are measured over
+      // several windows and the bound is held by the lot of them: what they
+      // left behind together, under the windows' bounds together, which is
+      // the same 64 KiB for 100 000 frames. A one-off is shared with the
+      // windows that carry none. An allocation on every frame is in every
+      // window, or forces a collection that spoils it; growth that comes in
+      // steps (an array whose store is copied as it doubles) is in some
+      // windows only, and is in the sum. Each window is less an empty window
+      // taken just before it, so what the measuring itself costs is taken
+      // off. A window in which the heap shrank (a compiler dropping code)
+      // counts as none, so that it cannot hide what another left behind.
+      const attempts: string[] = [];
+      const leftBehind: number[] = [];
+      for (let attempt = 0; attempt < MAX_ATTEMPTS && leftBehind.length < WINDOWS; attempt += 1) {
+        const empty = measure(0);
+        const run = measure(WINDOW_FRAMES);
         // A collection inside the window would hide an allocation: measure again.
-        if (statistics.length > 0) {
-          attempts.push('collected');
+        if (run.collected > 0 || empty.collected > 0) {
+          attempts.push(`collected ${run.collected + empty.collected}×`);
           continue;
         }
-        measured = true;
-        // Ten bytes a frame would be a megabyte; the window's own bookkeeping is far below this.
-        expect(after - before, JSON.stringify(weather)).toBeLessThan(64 * 1024);
+        attempts.push(`${run.grew - empty.grew} B`);
+        leftBehind.push(Math.max(0, run.grew - empty.grew));
       }
-      expect(measured, `${JSON.stringify(weather)}: ${attempts.join(', ')}`).toBe(true);
+      const said = `${JSON.stringify(weather)}: ${attempts.join(', ')}`;
+      expect(leftBehind.length, said).toBe(WINDOWS);
+      const total = leftBehind.reduce((sum, bytes) => sum + bytes, 0);
+      expect(total, said).toBeLessThan(WINDOWS * WINDOW_BYTES);
       // Non-vacuity: the frames worked out this weather's shade and share.
       expect(light.shade).toEqual(sceneryShadeIn(DAY, weather));
       expect(light.share).toEqual(sunShareIn(DAY.sun, weatheredWorld(DAY, weather).sun, weather));
