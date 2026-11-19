@@ -222,13 +222,24 @@ export function card(inner: string, tone: 'card' | 'danger' = 'card'): string {
 }
 
 /**
+ * The zone every admin page draws a moment in (#2917): UTC, named. The pages
+ * are read on the server machine and through the tunnel, from anywhere, so
+ * neither the reader's zone nor the server's is known to be the reader's; in
+ * the container the server's is UTC anyway unless the owner sets `TZ`. UTC
+ * is the zone the operator log, the backup snapshots' names and Docker's own
+ * log lines are in, so a time here can be matched against them. The app's
+ * Operate panels, read on the owner's own device, draw the device's zone.
+ */
+export const ADMIN_TIME_ZONE = 'UTC';
+
+/**
  * A moment in a table's When column (#2771): operate-text's own words for it
- * (`2026-11-14 09:30 UTC`, the app panels' — ADR 0069 D-7), in a `<time>` that
+ * (`2026-11-14 09:30 UTC`, in {@link ADMIN_TIME_ZONE} — ADR 0069 D-7), in a `<time>` that
  * carries the moment itself for a browser or a reader that wants it. A value
  * that is not a moment is drawn as words alone, escaped.
  */
 export function readableMoment(iso: string): string {
-  const words = escapeHtml(momentText(iso));
+  const words = escapeHtml(momentText(iso, ADMIN_TIME_ZONE));
   return Number.isFinite(Date.parse(iso))
     ? `<time datetime="${escapeHtml(iso)}">${words}</time>`
     : words;
@@ -513,7 +524,7 @@ export function statusBody(status: OperateStatusAnswer | undefined, now: number)
     url === undefined
       ? ''
       : `<p><a href="${escapeHtml(url)}" rel="noreferrer">${escapeHtml(COMPARE_WITH_MAIN_LABEL)}</a></p>\n`;
-  const facts = statusRows(status, now).map(fact).join('\n');
+  const facts = statusRows(status, now, ADMIN_TIME_ZONE).map(fact).join('\n');
   return `${ready}
 ${compare}${card(`<dl class="facts">
 ${facts}
@@ -947,7 +958,7 @@ function jobsPart(jobs: OperateJobsAnswer | undefined): string {
   const recent =
     jobs.recent.length === 0
       ? `<p>${escapeHtml(NO_JOBS_TEXT)}</p>`
-      : `<ol class="log jobs">\n${jobs.recent.map((job) => `<li>${escapeHtml(jobLine(job))}</li>`).join('\n')}\n</ol>`;
+      : `<ol class="log jobs">\n${jobs.recent.map((job) => `<li>${escapeHtml(jobLine(job, ADMIN_TIME_ZONE))}</li>`).join('\n')}\n</ol>`;
   return card(`${heading}<ul class="counts">
 ${counts}
 </ul>
@@ -1245,7 +1256,7 @@ export const BACKUP_DETAILS_LABEL = 'Details';
  * opens and closes it.
  */
 function backupItem(backup: BackupRecordAnswer): string {
-  const { rest } = backupLine(backup);
+  const { rest } = backupLine(backup, ADMIN_TIME_ZONE);
   const warning =
     backup.outcome === 'failed'
       ? `<p class="warning"><strong>Failed:</strong> ${escapeHtml(BACKUP_FAILED_TEXT)}</p>\n`
@@ -1392,13 +1403,13 @@ export const END_ROOM_BUTTON = 'End room';
 
 /** One room's row: what it is, and the rest of its line from operate-text. */
 function roomRow(room: RoomAnswer): string {
-  const { kind, rest } = roomLine(room);
+  const { kind, rest } = roomLine(room, ADMIN_TIME_ZONE);
   return `<tr><td><strong>${escapeHtml(kind)}</strong></td><td>${restHtml(rest)}</td></tr>`;
 }
 
 /** One room's End room form, under the room's kind and code, in the danger card below the table. */
 function roomEndForm(view: RoomsView, room: RoomAnswer, index: number): string {
-  const { kind } = roomLine(room);
+  const { kind } = roomLine(room, ADMIN_TIME_ZONE);
   const reasonId = `room-reason-${String(index)}`;
   const codeId = `room-code-${String(index)}`;
   const options = ROOM_END_REASONS.map(
@@ -1620,7 +1631,7 @@ export function keysBody(view: KeysView): string {
     (each) => `<li>${escapeHtml(each.what)}: <code>${escapeHtml(each.command)}</code></li>`,
   ).join('\n');
   return `${card(`<dl class="facts">
-${keyFactRows(view.keys).map(fact).join('\n')}
+${keyFactRows(view.keys, ADMIN_TIME_ZONE).map(fact).join('\n')}
 </dl>`)}${cardPart(view.keys.state === 'ready' ? view.card : null, view.onServer)}${kitPart(view)}${rotatePart(view)}${card(`<h2>On the host’s command line</h2>
 <p>${escapeHtml(KEYS_CLI_TEXT)}</p>
 <ul class="cli">
@@ -1758,7 +1769,7 @@ export function problemsBody(view: ProblemsView): string {
   if (view.problems === undefined) {
     return `<p class="problem">${escapeHtml(PROBLEMS_UNREADABLE_TEXT)}</p>\n${held}`;
   }
-  const since = momentText(view.problems.since);
+  const since = momentText(view.problems.since, ADMIN_TIME_ZONE);
   if (view.problems.lines.length === 0) {
     return `<p>${escapeHtml(noProblemsText(since))}</p>\n${held}`;
   }

@@ -97,7 +97,7 @@ describe('a record’s line, its facts and the restore steps (#2647)', () => {
     line.map((part) => (typeof part === 'string' ? part : part.code)).join('');
 
   it('says a snapshot’s age, size, counts and off-box copy, and a failed run’s code', () => {
-    const done = backupLine({
+    const doneRecord = {
       outcome: 'done',
       at: '2026-11-14T18:00:00.000Z',
       ageSeconds: 3 * HOUR,
@@ -108,19 +108,41 @@ describe('a record’s line, its facts and the restore steps (#2647)', () => {
       offBox: 'failed',
       intervalSeconds: null,
       requested: true,
-    });
+    } as const;
+    const done = backupLine(
+      {
+        outcome: 'done',
+        at: '2026-11-14T18:00:00.000Z',
+        ageSeconds: 3 * HOUR,
+        snapshot: 'snapshot-a',
+        rows: 1,
+        blobs: 2,
+        sizeBytes: 48_000_000,
+        offBox: 'failed',
+        intervalSeconds: null,
+        requested: true,
+      },
+      'UTC',
+    );
     expect(done.moment).toBe('2026-11-14 18:00 UTC');
+    // #2917: in the zone it is given, named.
+    expect(
+      backupLine({ ...doneRecord, at: '2026-11-14T18:00:00.000Z' }, 'America/New_York').moment,
+    ).toBe('2026-11-14 13:00 EST');
     expect(text(done.rest)).toBe(
       ', 3 hours ago, asked for from the app, a one-off: 48 MB, 1 row, 2 blobs; off-box copy FAILED. snapshot-a',
     );
-    const failed = backupLine({
-      outcome: 'failed',
-      at: '2026-11-14T18:00:00.000Z',
-      ageSeconds: 60,
-      error: 'ENOSPC',
-      intervalSeconds: 3600,
-      requested: false,
-    });
+    const failed = backupLine(
+      {
+        outcome: 'failed',
+        at: '2026-11-14T18:00:00.000Z',
+        ageSeconds: 60,
+        error: 'ENOSPC',
+        intervalSeconds: 3600,
+        requested: false,
+      },
+      'UTC',
+    );
     expect(failed.rest).toEqual([
       ', 1 minute ago: no snapshot was made (',
       { code: 'ENOSPC' },

@@ -223,15 +223,20 @@ export function diskRow(disk: OperateStatusDisk): OperateRow {
  * The last backup's row: when, how long ago, and its off-box copy — with a
  * warning when it is older than two of the backup service's intervals, so at
  * least one run was missed. `now` is Unix milliseconds; a backup dated after
- * it is read as just taken, never as a negative age.
+ * it is read as just taken, never as a negative age. `timeZone` is the zone
+ * its moment is drawn in ({@link momentText}).
  */
-export function lastBackupRow(backup: OperateStatusLastBackup | null, now: number): OperateRow {
+export function lastBackupRow(
+  backup: OperateStatusLastBackup | null,
+  now: number,
+  timeZone: string,
+): OperateRow {
   if (backup === null) return row('Last backup', NOT_RECORDED);
   const ageSeconds = Math.max(0, Math.floor((now - Date.parse(backup.at)) / 1000));
   const stale = ageSeconds > 2 * backup.intervalSeconds;
   return row(
     'Last backup',
-    `${momentText(backup.at)}, ${durationText(ageSeconds)} ago; ${LAST_BACKUP_OFF_BOX_TEXT[backup.offBox]}.`,
+    `${momentText(backup.at, timeZone)}, ${durationText(ageSeconds)} ago; ${LAST_BACKUP_OFF_BOX_TEXT[backup.offBox]}.`,
     stale
       ? {
           label: 'Stale',
@@ -243,9 +248,14 @@ export function lastBackupRow(backup: OperateStatusLastBackup | null, now: numbe
 
 /**
  * Every row of the Status section, in the order it is drawn. `now` is Unix
- * milliseconds, for the last backup's age.
+ * milliseconds, for the last backup's age; `timeZone` the zone its moment is
+ * drawn in ({@link momentText}).
  */
-export function statusRows(status: OperateStatusAnswer, now: number): readonly OperateRow[] {
+export function statusRows(
+  status: OperateStatusAnswer,
+  now: number,
+  timeZone: string,
+): readonly OperateRow[] {
   const { athletes, analysis } = status.counts;
   return [
     row('Version', status.version),
@@ -257,7 +267,7 @@ export function statusRows(status: OperateStatusAnswer, now: number): readonly O
     row('Rooms', okText(status.checks.rooms)),
     row('Up for', durationText(status.uptimeSeconds)),
     ...(status.disk.length === 0 ? [row('Disk', 'not known')] : status.disk.map(diskRow)),
-    lastBackupRow(status.lastBackup, now),
+    lastBackupRow(status.lastBackup, now, timeZone),
     row('Tunnel', tunnelText(status.tunnel)),
     row('Registration', REGISTRATION_MODE_TEXT[status.registration].short),
     row(

@@ -47,7 +47,7 @@ async function open(scripted: ScriptedOperate): Promise<void> {
   mounted = await mount(
     <main>
       <h1>Operate</h1>
-      <OperateAnalysisPanel port={scripted.port} />
+      <OperateAnalysisPanel timeZone="UTC" port={scripted.port} />
     </main>,
   );
   await settle();
@@ -268,7 +268,7 @@ describe('each read is drawn as it answers (#2611)', () => {
     const port = { ...scripted.port, localModels: () => slow.promise };
     mounted = await mount(
       <main>
-        <OperateAnalysisPanel port={port} />
+        <OperateAnalysisPanel timeZone="UTC" port={port} />
       </main>,
     );
     await settle();
@@ -288,7 +288,7 @@ describe('a check answers for the model it was asked about (#2611)', () => {
     const port = { ...scripted.port, checkModel: () => slow.promise };
     mounted = await mount(
       <main>
-        <OperateAnalysisPanel port={port} />
+        <OperateAnalysisPanel timeZone="UTC" port={port} />
       </main>,
     );
     await settle();
@@ -367,7 +367,7 @@ describe('the jobs and the way back to .env (#2611)', () => {
     };
     mounted = await mount(
       <main>
-        <OperateAnalysisPanel port={port} />
+        <OperateAnalysisPanel timeZone="UTC" port={port} />
       </main>,
     );
     await settle();
