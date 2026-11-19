@@ -1851,7 +1851,8 @@ const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
     'this app never asks a hosted service for a re-plan',
     'never a second-by-second recording, a position, a date or a name',
     'your instance keeps each request and its answer for 7 days',
-    'during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on',
+    // #2841: the warm-up as a workout starts, the owner's ruling of 2026-11-19.
+    'during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on, and once as the workout starts, naming no ride',
     'switch it off and nothing more is sent',
   ],
   [REPLAN_SECTION]: [
