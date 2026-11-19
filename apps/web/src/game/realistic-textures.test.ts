@@ -969,45 +969,62 @@ describe('the realistic rider moves like a rider — #625', () => {
     expect(backTurn).toBeGreaterThan(2);
   }, 120_000);
 
-  it('puts the ball of each foot on its pedal all round the stroke, the shoe on top of it — the modeller’s pass of 2026-11-18', async () => {
-    const renderer = await loadedOn(TABLET);
-    const riders = renderer.realisticRidersOfLoadedWorld();
-    if (riders === undefined) throw new Error('no world');
-    const joints = emptyRiderJoints();
-    let furthest = 0;
-    let lowestAnkle = Number.POSITIVE_INFINITY;
-    let leastAhead = Number.POSITIVE_INFINITY;
-    for (let step = 0; step < 16; step += 1) {
-      const crank = (step * Math.PI) / 8;
-      // Still, and pedalling hard with the ankles working (#625).
-      for (const pedalling of [0, 1]) {
-        const pose = posed(riders, crank, pedalling, 0);
-        riderJoints(crank, joints, 0);
-        for (const [index, ball] of riders.footBalls.entries()) {
-          const pedal = joints.foot[index as 0 | 1];
-          // The pedal in the bicycle's frame, the ball in the world's: the
-          // rider is at the origin facing +Z, and a still bicycle is upright.
-          if (pedalling === 0) {
-            furthest = Math.max(furthest, distance(ball, [pedal.x, pedal.y, pedal.z]));
+  describe('the feet on the pedals — the modeller’s pass of 2026-11-18', () => {
+    /**
+     * The world loaded once, in a hook, as the crash clip's cases below have it
+     * (owner ruling #1688: no per-case timeout — a slow case is made cheaper).
+     * The load is nearly all of what a case of this file costs; what is left
+     * to the case is thirty-two poses of one rider.
+     */
+    let renderer: Renderer;
+    beforeAll(async () => {
+      const undoing = served();
+      try {
+        renderer = await loadedOn(TABLET);
+      } finally {
+        for (const each of undoing.reverse()) each();
+      }
+    });
+
+    it('puts the ball of each foot on its pedal all round the stroke, the shoe on top of it — the modeller’s pass of 2026-11-18', () => {
+      const riders = renderer.realisticRidersOfLoadedWorld();
+      if (riders === undefined) throw new Error('no world');
+      const joints = emptyRiderJoints();
+      let furthest = 0;
+      let lowestAnkle = Number.POSITIVE_INFINITY;
+      let leastAhead = Number.POSITIVE_INFINITY;
+      for (let step = 0; step < 16; step += 1) {
+        const crank = (step * Math.PI) / 8;
+        // Still, and pedalling hard with the ankles working (#625).
+        for (const pedalling of [0, 1]) {
+          const pose = posed(riders, crank, pedalling, 0);
+          riderJoints(crank, joints, 0);
+          for (const [index, ball] of riders.footBalls.entries()) {
+            const pedal = joints.foot[index as 0 | 1];
+            // The pedal in the bicycle's frame, the ball in the world's: the
+            // rider is at the origin facing +Z, and a still bicycle is upright.
+            if (pedalling === 0) {
+              furthest = Math.max(furthest, distance(ball, [pedal.x, pedal.y, pedal.z]));
+            }
+            const ankle = at(pose, index === 0 ? 'footL' : 'footR');
+            lowestAnkle = Math.min(lowestAnkle, (ankle[1] ?? 0) - ball[1]);
+            leastAhead = Math.min(leastAhead, ball[2] - (ankle[2] ?? 0));
           }
-          const ankle = at(pose, index === 0 ? 'footL' : 'footR');
-          lowestAnkle = Math.min(lowestAnkle, (ankle[1] ?? 0) - ball[1]);
-          leastAhead = Math.min(leastAhead, ball[2] - (ankle[2] ?? 0));
         }
       }
-    }
-    console.log(
-      `modeller's pass: the ball of the foot at most ${(furthest * 1000).toFixed(2)} mm off its pedal; ` +
-        `the ankle at least ${(lowestAnkle * 100).toFixed(1)} cm over the ball and ` +
-        `${(leastAhead * 100).toFixed(1)} cm behind it`,
-    );
-    // On the pedal: the second solve leaves it within a few millimetres.
-    expect(furthest).toBeLessThan(0.004);
-    // And the shoe is ON the pedal, never hung under it: the ankle is over
-    // the ball and behind it at every crank angle.
-    expect(lowestAnkle).toBeGreaterThan(0.03);
-    expect(leastAhead).toBeGreaterThan(0.03);
-  }, 120_000);
+      console.log(
+        `modeller's pass: the ball of the foot at most ${(furthest * 1000).toFixed(2)} mm off its pedal; ` +
+          `the ankle at least ${(lowestAnkle * 100).toFixed(1)} cm over the ball and ` +
+          `${(leastAhead * 100).toFixed(1)} cm behind it`,
+      );
+      // On the pedal: the second solve leaves it within a few millimetres.
+      expect(furthest).toBeLessThan(0.004);
+      // And the shoe is ON the pedal, never hung under it: the ankle is over
+      // the ball and behind it at every crank angle.
+      expect(lowestAnkle).toBeGreaterThan(0.03);
+      expect(leastAhead).toBeGreaterThan(0.03);
+    });
+  });
 
   it('is posed from the ride’s clock, never the wall’s — the same ride time at two wall times is the same body', async () => {
     const renderer = await loadedOn(TABLET);
