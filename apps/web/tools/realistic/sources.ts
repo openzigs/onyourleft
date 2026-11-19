@@ -83,6 +83,7 @@ import {
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
   REALISTIC_DELIVERY_CAR,
+  REALISTIC_DELIVERY_CAR_ATLAS,
   houseModelFile,
   type HouseModelId,
   type RealisticBicycleMap,
@@ -122,7 +123,7 @@ import {
 /** The licences a realistic asset may carry: the two ADR 0026 D-4 admits under `apps/`. */
 export type KeptLicence = 'CC0-1.0' | 'CC-BY-4.0';
 
-/** One row of ADR 0049 D-10's **In** table. */
+/** One row of ADR 0049 D-10's **In** table, or of a superseding ADR's addition to it (ADR 0081). */
 export interface AdmittedSource {
   /** The source, as the ADR's table names it. */
   readonly name: string;
@@ -250,6 +251,17 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
       'https://static.makehumancommunity.org/assets/assetpacks/poses02.html',
       'https://files.makehumancommunity.org/asset_packs/poses02/',
     ],
+  },
+  {
+    // #2847: ADR 0081 adds this row to ADR 0049 D-10's In table, for the
+    // realistic world's cars. Its archive is the owner's own download through
+    // the pack's page, as Kenney's Car Kit's was (no script fetches it).
+    name: 'GGBotNet’s PSX Style Cars',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0081 D-1',
+    kind: 'files',
+    // The author's own itch.io pages: the pack's page states its licence.
+    prefixes: ['https://ggbot.itch.io/'],
   },
 ];
 
@@ -1474,43 +1486,66 @@ export const CHAIN_LINK_SOURCE = {
 } as const;
 
 /**
- * The car Delivery's parked cars are drawn as in the realistic world — #2540,
- * the owner's rulings of 2026-11-12 on it: Kenney's CC0 **Car Kit** (3.1),
- * its `sedan`, a plain civilian car with no maker's name. The kit's zip is
- * served only from a signed link a browser is handed, so the owner had it
- * downloaded through Kenney's own page and placed under `build/raw/<id>/`
- * (`archive`), as #1585's house archives were; its digest is in the lock.
+ * The cars Delivery's parked cars are drawn as in the realistic world —
+ * #2847, the owner's rulings of 2026-11-18 (*"PSX Style Cars
+ * (Recommended)"*) and 2026-11-19 (*"Saloon, hatchback, station wagon
+ * (Recommended)"*), under ADR 0081: three bodies out of GGBotNet's CC0
+ * **PSX Style Cars** pack, its `Car 02` (a 4-door saloon, 312 triangles),
+ * `Car 03` (a 3-door hatchback, 448) and `Car 01` (a 5-door station wagon,
+ * 438), as its page lists them. None names a maker. It replaces #2540's one
+ * Kenney sedan, a toy stretched to a car's footprint.
  *
- * {@link VEHICLE_SCRIPT} keeps the body whole (704 triangles in the kit),
- * collapses one wheel from the kit's 332 to `wheelTriangles` and draws all
- * four from it (one mesh under four nodes: 55 372 bytes, where four meshes
- * were 90 788 and over `realistic-budget.ts` §`REALISTIC_BUILD_BYTES`), adds two
- * indicator quads a side, and brings it to `obstacles.ts`' parked car's
- * footprint, `lengthMetres` by `widthMetres`, at `heightMetres` tall: 1 376
- * triangles, under `realistic-budget.ts` §`DELIVERY_CAR_TRIANGLES`, the
- * owner's ruling of about 1 450 a car. `paintCell` is the colour map's
- * swatch the kit paints the sedan's body with (`column,row`, 32 by 128 px
- * cells), split off so the renderer paints it per instance.
+ * The pack's zip is served only through itch.io's own download flow, which a
+ * script is not handed, so the owner had it downloaded through the pack's page
+ * and placed under `build/raw/<id>/` (`archive`), unrenamed, as Kenney's Car
+ * Kit was; its digest is in the lock. The pack carries no licence file: its
+ * page states the grant, and the lock records the page's words.
  *
- * Candidates read on 2026-11-12 and not taken, in #2540's pull request:
- * two Sketchfab cars under CC-BY-4.0 (an account to download, and one a
- * third over the budget), Poly Haven's `covered_car` (CC0, but under a dust
- * sheet: no wheels to turn) and Quaternius' cars (CC0, but not a source ADR
- * 0049 D-10 admits).
+ * {@link VEHICLE_SCRIPT} keeps each body whole — its wheels apart, so they
+ * roll and steer — brings it to `lengthMetres`, scaled evenly (the pack's own
+ * proportions; its page warns that "the scale unit between cars is not
+ * correct"), inside `obstacles.ts`' parked car's footprint, `widthMetres`
+ * across but for its mirrors, and lays the three pictures into one atlas,
+ * `atlasPixels` square, so the three are still one call. `paints` are each
+ * body's pictures in the pack's paints, the first the one its model wears:
+ * the texels that differ between them are its paint, which the renderer
+ * paints per instance.
  */
 export const DELIVERY_CAR_SOURCE = {
-  id: 'kenney-car-kit',
-  page: 'https://kenney.nl/assets/car-kit',
-  archive: 'kenney-car-kit.zip',
-  model: 'Models/GLB format/sedan.glb',
-  colourMap: 'Models/GLB format/Textures/colormap.png',
-  licenceFile: 'License.txt',
-  wheelTriangles: 120,
-  lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
+  id: 'ggbot-psx-style-cars',
+  page: 'https://ggbot.itch.io/psx-style-cars',
+  archive: 'PSX_Style_Cars_by_GGBot_(August2023).zip',
+  bodies: [
+    {
+      name: 'saloon',
+      model: 'Car 02/Car2.obj',
+      paints: ['Car 02/car2.png', 'Car 02/car2_black.png', 'Car 02/car2_red.png'],
+      lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
+    },
+    {
+      name: 'hatchback',
+      model: 'Car 03/Car3.obj',
+      paints: ['Car 03/car3.png', 'Car 03/car3_red.png', 'Car 03/car3_yellow.png'],
+      lengthMetres: 4.2,
+    },
+    {
+      name: 'wagon',
+      model: 'Car 01/Car.obj',
+      paints: [
+        'Car 01/car.png',
+        'Car 01/car_blue.png',
+        'Car 01/car_gray.png',
+        'Car 01/car_red.png',
+      ],
+      lengthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfLength,
+    },
+  ],
   widthMetres: 2 * OBSTACLE_KINDS['parked-car'].halfWidth,
-  heightMetres: 1.45,
-  paintCell: '13,1',
+  atlasPixels: 256,
 } as const;
+
+/** The picture {@link VEHICLE_SCRIPT} writes beside the cars' GLB, before `encode-ktx2.ts` — #2847. */
+export const DELIVERY_CAR_ATLAS_MADE = 'cars_atlas.png';
 
 /**
  * What the people on the pavements wear — the owner's request of 2026-11-18,
@@ -1736,28 +1771,23 @@ export const SOURCES: readonly AssetSource[] = [
     resolution: '1k',
     maps: [CHAIN_LINK_SOURCE.opacity],
   }),
-  // #2540: the realistic world's car, placed by the owner.
+  // #2847: the realistic world's cars, placed by the owner (ADR 0081).
   {
     id: DELIVERY_CAR_SOURCE.id,
     licencePage: DELIVERY_CAR_SOURCE.page,
-    licencePhrase: 'Creative Commons CC0',
+    licencePhrase: 'This game assets is licensed under a CC0 1.0 Universal',
     licence: 'CC0-1.0',
-    author: 'Kenney',
+    author: 'GGBotNet',
     origin: {
       from: 'placed',
-      host: 'Kenney',
-      issue: 2540,
+      host: 'itch.io',
+      issue: 2847,
       archive: DELIVERY_CAR_SOURCE.archive,
       page: DELIVERY_CAR_SOURCE.page,
-      members: [
-        { path: DELIVERY_CAR_SOURCE.model },
-        { path: DELIVERY_CAR_SOURCE.colourMap },
-        // The kit's own licence file, which names the grant.
-        {
-          path: DELIVERY_CAR_SOURCE.licenceFile,
-          mustContain: 'License: (Creative Commons Zero, CC0)',
-        },
-      ],
+      members: DELIVERY_CAR_SOURCE.bodies.flatMap((body) => [
+        { path: body.model },
+        ...body.paints.map((path) => ({ path })),
+      ]),
     },
   },
 ];
@@ -2181,16 +2211,17 @@ export const EXPECTED_REPORTS: Readonly<Record<string, Readonly<Record<string, n
   [REALISTIC_RIDER_PACK.lod]: { triangles: 1998, vertices: 1352, moving: 361, phases: 32 },
   // #2495: the rider's eyes, paid for out of the body's share of its 9 000.
   [REALISTIC_RIDER]: { eyeTriangles: RIDER_EYE_TRIANGLES, triangles: 8996, crashMoments: 6 },
-  // #2540: the car, part by part. A run that cut a wheel differently, or
-  // split the paint off another swatch, is not this one.
+  // #2847: the cars. A run that split a wheel off differently, read another
+  // texel as paint, or took another body, is not this one.
   [REALISTIC_DELIVERY_CAR]: {
-    triangles: 1192,
-    bodyTriangles: 570,
-    paintTriangles: 134,
-    glassTriangles: 10,
-    wheelTriangles: 120,
-    wheels: 4,
-    indicatorTriangles: 8,
+    triangles: 1222,
+    sourceTriangles: 1198,
+    bodies: 3,
+    nodes: 21,
+    wheelTriangles: 336,
+    indicatorTriangles: 24,
+    paintTexels: 33_135,
+    atlasPixels: DELIVERY_CAR_SOURCE.atlasPixels,
     levelsOfDetail: 1,
   },
 };
@@ -2246,7 +2277,7 @@ export const ROADSIDE_SCRIPT = 'blender/process_roadside_model.py';
 /** The script that builds the chain-link fence's 8 m piece — #1274. */
 export const CHAIN_LINK_SCRIPT = 'blender/process_chain_link.py';
 
-/** The script that makes the realistic world's car — #2540. */
+/** The script that makes the realistic world's cars — #2540, and since #2847 the three PSX cars and their atlas. */
 export const VEHICLE_SCRIPT = 'blender/process_vehicle.py';
 
 /** What the house models' atlas run writes, before the KTX2 step. */
@@ -2465,7 +2496,7 @@ export const OUTPUTS: readonly OutputSpec[] = [
     },
     modified: `the wire's opacity map (${CHAIN_LINK_SOURCE.id}_${CHAIN_LINK_SOURCE.opacity}_1k.jpg), ${encodingWords({ encoding: 'data', origin: 'top-left' })}`,
   },
-  // #2540: the realistic world's car.
+  // #2847: the realistic world's three cars and their one atlas (ADR 0081).
   {
     file: REALISTIC_DELIVERY_CAR,
     from: DELIVERY_CAR_SOURCE.id,
@@ -2473,15 +2504,25 @@ export const OUTPUTS: readonly OutputSpec[] = [
       how: 'blender',
       script: VEHICLE_SCRIPT,
       args: [
-        String(DELIVERY_CAR_SOURCE.wheelTriangles),
-        String(DELIVERY_CAR_SOURCE.lengthMetres),
+        DELIVERY_CAR_ATLAS_MADE,
+        String(DELIVERY_CAR_SOURCE.atlasPixels),
         String(DELIVERY_CAR_SOURCE.widthMetres),
-        String(DELIVERY_CAR_SOURCE.heightMetres),
-        DELIVERY_CAR_SOURCE.paintCell,
+        ...DELIVERY_CAR_SOURCE.bodies.map(
+          (body) =>
+            `${body.name}|${body.model}|${String(body.lengthMetres)}|${body.paints.join(';')}`,
+        ),
+      ],
+      alsoWrites: [
+        {
+          file: REALISTIC_DELIVERY_CAR_ATLAS,
+          made: DELIVERY_CAR_ATLAS_MADE,
+          ktx2: { encoding: 'colour-alpha', origin: 'top-left' },
+          modified: `the cars' one atlas, made in the same run by ${PIPELINE_DIRECTORY}${VEHICLE_SCRIPT}: the pack's own pictures of the saloon (Car 02), the hatchback (Car 03) and the station wagon (Car 01), 128 px each, and a white cell, two by two; in each picture the texels whose colour differs between the pack's paints of that body are its paint, stored as a grey shade (each paint's linear luminance over its own 90th percentile, averaged and kept at most 1) with alpha 1, and every other texel keeps the pack's own colour with alpha 0`,
+        },
       ],
     },
-    modified: `the kit's sedan: its body kept whole and its front-left wheel collapse-decimated to about ${String(DELIVERY_CAR_SOURCE.wheelTriangles)} triangles and drawn as all four, apart from the body, each at its own hub, the right-hand two turned half a turn; every corner coloured from the kit's colour map read at its own texture coordinates, and the body's paint split off as its own part, and its glass coloured a dark tint in place of the kit's pale swatch; stood on the origin and brought to ${String(DELIVERY_CAR_SOURCE.lengthMetres)} m by ${String(DELIVERY_CAR_SOURCE.widthMetres)} m by ${String(DELIVERY_CAR_SOURCE.heightMetres)} m, each wheel scaled evenly about its hub; an amber indicator added at each corner, under the lamps; its materials, picture and texture coordinates dropped, edges past 35 degrees creased and the rest shaded smooth; geometry and colour a corner only, no picture`,
-    credit: { creator: 'Kenney', url: DELIVERY_CAR_SOURCE.page },
+    modified: `three of the pack's cars, the saloon (Car 02), the hatchback (Car 03) and the station wagon (Car 01), each read from its OBJ: kept whole, its four wheels split off as their own parts at their hubs, scaled evenly to ${DELIVERY_CAR_SOURCE.bodies.map((body) => `${String(body.lengthMetres)} m`).join(', ')} long and stood on the origin, its texture coordinates moved into its cell of the cars' atlas; an amber indicator added at each corner; every corner coloured white (the indicators amber), the pack's own normals kept, and its material and picture dropped; geometry, colour a corner and texture coordinates only, the picture in the atlas`,
+    credit: { creator: 'GGBotNet', url: DELIVERY_CAR_SOURCE.page },
   },
 ];
 

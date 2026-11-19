@@ -68,10 +68,13 @@ import {
   REALISTIC_PEOPLE,
   REALISTIC_RIDER,
   REALISTIC_DELIVERY_CAR,
+  REALISTIC_DELIVERY_CAR_ATLAS,
+  REALISTIC_DELIVERY_CAR_BODIES,
   REALISTIC_RIDER_PACK,
   REALISTIC_STRUCTURE_SURFACES,
   TOWN_STRUCTURE_SURFACES,
 } from '../../src/game/realistic-assets';
+import { OBSTACLE_KINDS } from '../../src/game/delivery/obstacles';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
 const makeHuman = SOURCES.find((source) => source.id === 'makehuman') as AssetSource;
@@ -128,11 +131,13 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // ⚠️ Since #1585 Sketchfab's public model records are read too, and that
     // is no new host either: D-4's "an individual model under CC-BY-4.0" row
     // admits a model wherever it is hosted, verified per asset.
-    // ⚠️ Since #2540 Kenney's own page is read too, for its Car Kit: D-4 has
-    // admitted Kenney from the start, for the stylised world's models.
+    // ⚠️ #2540 read Kenney's own page, for its Car Kit: D-4 had admitted
+    // Kenney from the start. ⚠️ Since #2847 the cars are GGBotNet's PSX Style
+    // Cars, whose page is on its author's itch.io host, and that IS a new
+    // source: ADR 0081 D-1 admits it, superseding ADR 0049 D-10 in part.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|kenney\.nl)$/,
+        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com|ggbot\.itch\.io)$/,
       );
     }
     // Every ambientCG asset is read through ambientCG's OWN origin, whose page
@@ -556,8 +561,12 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
         // #623: the rider's maps are read at the body's own glTF texture
         // coordinates, which `GLTFLoader` never flips, and `process_rider.py`
         // writes them top row first as those coordinates read them.
-        // The people's atlas likewise, at their GLB's own coordinates.
-        const glTF = output.file === REALISTIC_RIDER || output.file === REALISTIC_PEOPLE.model;
+        // The people's atlas likewise, at their GLB's own coordinates, and
+        // since #2847 the cars' atlas, at the cars' GLB's.
+        const glTF =
+          output.file === REALISTIC_RIDER ||
+          output.file === REALISTIC_PEOPLE.model ||
+          output.file === REALISTIC_DELIVERY_CAR;
         for (const also of recipe.alsoWrites ?? []) {
           // #2485: the pack's vertex-animation texture is no picture, and no encoder touches it.
           if (also.ktx2 === undefined) {
@@ -716,7 +725,8 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
   it('names only outputs a Blender run makes, whose script writes the count', () => {
     const files = Object.keys(EXPECTED_REPORTS);
     // #2485: and the pack's rider, whose texture's shape is held too; #2495:
-    // and the rider, whose eyes' cost is; and #2540's car, part by part.
+    // and the rider, whose eyes' cost is; and #2540's car, and since #2847
+    // the three cars that replaced it.
     expect(files.sort()).toEqual(
       [
         REALISTIC_DELIVERY_CAR,
@@ -1247,18 +1257,25 @@ describe('the generated trees in the pipeline’s table — #1283, ADR 0049 D-1'
   });
 });
 
-describe('Kenney’s car: a placed archive with no Sketchfab record — #2540', () => {
+describe('the PSX cars: a placed archive with no Sketchfab record — #2847, ADR 0081', () => {
   const source = SOURCES.find((each) => each.id === DELIVERY_CAR_SOURCE.id) as AssetSource;
   const lock = JSON.parse(
     readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'inputs.lock.json'), 'utf8'),
   ) as InputLock;
 
   it('is held to its own page’s words, never to a Sketchfab record it has not got', () => {
+    expect(
+      licenceVerdict(source, '<p>This game assets is licensed under a CC0 1.0 Universal.</p>'),
+    ).toMatchObject({ kept: true, licence: 'CC0-1.0' });
     expect(licenceVerdict(source, '<span>Creative Commons CC0</span>')).toMatchObject({
-      kept: true,
-      licence: 'CC0-1.0',
+      kept: false,
     });
-    expect(licenceVerdict(source, '<span>CC BY-NC 4.0</span>')).toMatchObject({ kept: false });
+    expect(
+      licenceVerdict(
+        source,
+        '<p>This game assets is licensed under a CC0 1.0 Universal.</p><p>CC BY-NC 4.0</p>',
+      ),
+    ).toMatchObject({ kept: false });
     expect(sketchfabVerdict(source, '{}')).toEqual({
       kept: false,
       reason: `${source.id}: not a Sketchfab model`,
@@ -1266,16 +1283,36 @@ describe('Kenney’s car: a placed archive with no Sketchfab record — #2540', 
   });
 
   it('records where it came from and whom it credits, though CC0 asks for no credit', () => {
-    const record = Object.fromEntries(assetRecord('car_sedan.glb', lock, 'digest'));
-    expect(record.source).toMatch(/^Kenney \(the owner’s download, #2540\), /);
-    expect(record.licence).toBe('CC0-1.0');
-    expect(record.creator).toBe('Kenney');
-    expect(record.url).toBe(DELIVERY_CAR_SOURCE.page);
-    expect(record.script).toBe('apps/web/tools/realistic/blender/process_vehicle.py');
+    for (const file of [REALISTIC_DELIVERY_CAR, REALISTIC_DELIVERY_CAR_ATLAS]) {
+      const record = Object.fromEntries(assetRecord(file, lock, 'digest'));
+      expect(record.source, file).toMatch(/^itch\.io \(the owner’s download, #2847\), /);
+      expect(record.licence, file).toBe('CC0-1.0');
+      expect(record.creator, file).toBe('GGBotNet');
+      expect(record.url, file).toBe(DELIVERY_CAR_SOURCE.page);
+      expect(record.script, file).toBe('apps/web/tools/realistic/blender/process_vehicle.py');
+    }
+    // The atlas is the same run's second file, encoded after it.
+    expect(
+      Object.fromEntries(assetRecord(REALISTIC_DELIVERY_CAR_ATLAS, lock, 'digest')).tool,
+    ).toMatch(/^Blender .*, then KTX-Software /);
     // A Sketchfab house model still says Sketchfab, and a CC0 file with no credit names none.
     const house = Object.fromEntries(assetRecord('rva_duplex_02a.glb', lock, 'digest'));
     expect(house.source).toMatch(/^Sketchfab \(the owner’s download, #1585\), /);
     const lamp = Object.fromEntries(assetRecord('street_lamp_01.glb', lock, 'digest'));
     expect(lamp.creator).toBeUndefined();
+  });
+
+  it('names the bodies the renderer reads, in the atlas’s order, each inside the parked car’s footprint', () => {
+    expect(DELIVERY_CAR_SOURCE.bodies.map((body) => body.name)).toEqual([
+      ...REALISTIC_DELIVERY_CAR_BODIES,
+    ]);
+    for (const body of DELIVERY_CAR_SOURCE.bodies) {
+      // A real car's length, and no longer than the footprint the rider hits.
+      expect(body.lengthMetres, body.name).toBeGreaterThanOrEqual(4.2);
+      expect(body.lengthMetres, body.name).toBeLessThanOrEqual(
+        2 * OBSTACLE_KINDS['parked-car'].halfLength,
+      );
+    }
+    expect(DELIVERY_CAR_SOURCE.widthMetres).toBe(2 * OBSTACLE_KINDS['parked-car'].halfWidth);
   });
 });

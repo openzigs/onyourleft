@@ -12,6 +12,15 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0081 is [ADR 0081](../adr/0081-ggbotnets-psx-style-cars-for-the-realistic-worlds-cars.md)**,
+  taken by [#2847](https://github.com/openzigs/onyourleft/issues/2847) on 2026-11-19 for GGBotNet's
+  PSX Style Cars as the realistic world's cars, on the owner's rulings on #2847 of 2026-11-18 and
+  2026-11-19, and **Accepted** on them. It supersedes in part ADR 0049 D-10's In table, and ADR 0049
+  gained one dated `## Amendments` entry pointing here. The lane note of 2026-11-18 on #2847 named
+  0081, and no issue or pull request claimed it. 0082 is ADR 0082 (#2794, pull request #2802), and
+  **0083 is claimed** by the open pull request [#2864](https://github.com/openzigs/onyourleft/pull/2864),
+  so the next free number is **0084**. A reviewer who remembers the sentences below calling 0081
+  free is reading the old file.
   ⚠️ **0079 is [ADR 0079](../adr/0079-remote-access-without-a-domain-and-no-lan-only-http.md)**,
   taken by [#2790](https://github.com/openzigs/onyourleft/issues/2790) on 2026-11-18 for remote
   access without a domain (the owner's tailnet by default, a domain optional) and the refusal of
