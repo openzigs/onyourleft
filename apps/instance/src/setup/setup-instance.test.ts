@@ -716,6 +716,16 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     await expect(
       setupCode({ database: at.path, blobs: `${at.path}.blobs` }, { secretsDirectory: at.secrets }),
     ).rejects.toThrow(/setup is done/);
+    // #2920: the operator ran `setup-code`, so its refusal IS logged, once, from the CLI.
+    const afterCli = await openSqlStore(at.path);
+    try {
+      const refused = (await afterCli.listOperatorLogPage(undefined, 200))
+        .filter((entry) => entry.action === 'setup_code_minted' && entry.outcome === 'refused')
+        .map((entry) => entry.source);
+      expect(refused).toEqual(['cli']);
+    } finally {
+      await afterCli.close();
+    }
 
     // ADR 0004 D, ADR 0069 D-4: no page and no log line holds a setup code or the secret.
     const everything = [...at.pages, ...at.lines].join('\n');
@@ -1515,7 +1525,12 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
       'the server’s keys belong to its address, so it must make new ones, which gives it a new identity',
     );
     expect(how).toBeGreaterThan(warning);
-    expect(step.body).toContain('Run bash deploy.sh beside compose.yaml');
+    // #2920: the deploy is a block to copy, like every other command, never words in a sentence.
+    expect(step.body).toContain(
+      'Then run this beside compose.yaml. It prints Tailscale’s sign-in link',
+    );
+    expect(step.body).toContain('<pre class="copy"><code>bash deploy.sh</code></pre>');
+    expect(step.body).not.toContain('Run bash deploy.sh');
     expect(step.body.indexOf('instance-key reset')).toBeGreaterThan(warning);
     // It changes nothing itself: its one form is the GET that reads the address back again.
     const forms = [...step.body.matchAll(/<form [^>]*>/g)].map((match) => match[0]);
@@ -1641,11 +1656,15 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     // Still named Tailnet, and the first thing it says is that nothing is needed here.
     expect(step.body).toContain('<h1>Tailnet</h1>');
     expect(step.body).toMatch(/<h1>Tailnet<\/h1>\n<p>Nothing to do here: /);
-    // No access rule to paste: the one block to copy is the key reset a change of address needs.
+    // No access rule to paste: the blocks to copy are what a change of address needs, the
+    // deploy (#2920) and the key reset.
     expect(step.body).not.toContain('tagOwners');
     expect(
       [...step.body.matchAll(/<pre class="copy"><code>([^<]*)<\/code>/g)].map((m) => m[1]),
-    ).toEqual(['docker compose exec instance node src/operator/cli.ts instance-key reset']);
+    ).toEqual([
+      'bash deploy.sh',
+      'docker compose exec instance node src/operator/cli.ts instance-key reset',
+    ]);
     expect(step.body).not.toContain('Invite each rider into your tailnet');
     expect(step.body).not.toContain('class="problem"');
     expect(step.body).not.toContain('That is a Tailscale address');
