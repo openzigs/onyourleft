@@ -4,8 +4,9 @@
  * #2838: the scoring harness, end to end with **recorded answers** and no
  * model: the instance's own prompt modules loaded as `run-harness.mjs` loads
  * them, the shipped race and the shipped pacer director ridden from answers
- * gemma4:12b gave on the owner's PC (2026-11-18, `recorded/`), the scores of
- * each, the results file, and the exit code.
+ * gemma4:12b gave on the owner's PC (`recorded/`: the bots' of 2026-11-18,
+ * the pacer's of 2026-11-19 under `pacer-6`), the scores of each, the results
+ * file, and the exit code.
  *
  * `apps/instance` is imported by a computed path, as
  * `src/game/lap-race/model-tactics-port.test.ts` does it: it is not a
@@ -14,7 +15,7 @@
  * ## The recorded answers, and when they go red
  *
  * `recorded/bots-flat-tactics-7.jsonl` is the first twelve answers of the
- * `flat` race and `recorded/pacer-pacer-5.jsonl` the whole scripted ride, as
+ * `flat` race and `recorded/pacer-pacer-6.jsonl` the whole scripted ride, as
  * `--record` wrote them. The scores below are what those answers come to
  * through the code as it stands. **A change to the bots' code, the pacer's
  * rules, a race or the script moves them**, and that is the point: record
@@ -300,8 +301,10 @@ function line(at: number): string {
   return `${starts[at % 8] as string} ${ends[Math.floor(at / 8) % 8] as string}`;
 }
 
-/** A model that answers the pacer's ask with `intent(input)` and a line of its own, 1.4 s later. */
-function pacerModel(intent: (input: ModelPacerInput) => string): {
+/** A model that answers the pacer's `at`th ask with `answer(at)`, 1.4 s later. */
+function pacerModel(
+  answer: (at: number) => Readonly<Record<string, unknown>> = (at) => ({ say: line(at) }),
+): {
   readonly ask: Ask;
   readonly bodies: ChatBody[];
 } {
@@ -309,11 +312,9 @@ function pacerModel(intent: (input: ModelPacerInput) => string): {
   return {
     bodies,
     ask: (body) => {
-      const chat = body as unknown as ChatBody;
-      bodies.push(chat);
-      const input = JSON.parse(chat.messages[1]?.content ?? '') as ModelPacerInput;
+      bodies.push(body as unknown as ChatBody);
       return Promise.resolve({
-        text: JSON.stringify({ plan: 'rolling', intent: intent(input), say: line(bodies.length) }),
+        text: JSON.stringify(answer(bodies.length)),
         latencyMs: 1_400,
         promptTokens: 1_500,
         outputTokens: 40,
@@ -322,14 +323,6 @@ function pacerModel(intent: (input: ModelPacerInput) => string): {
   };
 }
 
-/** The intent the gap calls for, as far as the model is asked: the terrain is the device's rule. */
-const byTheGap = (input: ModelPacerInput): string =>
-  input.riderPlace === 'ahead'
-    ? 'lift'
-    : input.riderPlace === 'behind' && !input.riderInDraft
-      ? 'ease'
-      : 'hold';
-
 /** `calls` as a file `--replay` reads. */
 function replayFile(name: string, calls: readonly ModelCall[]): string {
   const file = join(scratch, name);
@@ -337,13 +330,35 @@ function replayFile(name: string, calls: readonly ModelCall[]): string {
   return file;
 }
 
+/** Ride the script with `model`, then score it from its recorded answers as `main` does. */
+async function scored(
+  name: string,
+  model: ReturnType<typeof pacerModel>,
+): Promise<{ readonly ridden: Awaited<ReturnType<typeof run>>; readonly result: PacerResult }> {
+  const kept = recording(model.ask);
+  await ridePacerScript({ ask: kept.ask, model: 'a-model', prompt: production.pacer });
+  const ridden = await run(['pacer', '--replay', replayFile(name, kept.calls)]);
+  const [result] = ridden.results as [HarnessResult];
+  if (result.kind !== 'pacer') throw new Error('a pacer result');
+  return { ridden, result };
+}
+
+type PacerResult = Extract<HarnessResult, { kind: 'pacer' }>;
+
 describe('the scripted pacer ride, ridden with the instance’s request', () => {
   it('sends the instance’s body with the script’s seed, and states the instance would read', async () => {
-    const model = pacerModel(byTheGap);
+    const model = pacerModel();
+    // The state each ask was built from, as the instance's request is handed it.
+    const inputs: ModelPacerInput[] = [];
     const ridden = await ridePacerScript({
       ask: model.ask,
       model: 'a-model',
-      prompt: production.pacer,
+      prompt: {
+        pacerRequest: (name, input) => {
+          inputs.push(input);
+          return production.pacer.pacerRequest(name, input);
+        },
+      },
     });
     // One ask every five seconds of the five minutes.
     expect(ridden.steps.map((step) => step.askedAtS)).toEqual(
@@ -352,19 +367,25 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
     const [first, second] = model.bodies as [ChatBody, ChatBody];
     expect(first.options.seed).toBe(PACER_SCRIPT.seed * 1_000);
     expect(second.options.seed).toBe(PACER_SCRIPT.seed * 1_000 + 1);
-    const input = JSON.parse(second.messages[1]?.content ?? '') as ModelPacerInput;
+    const input = inputs[1] as ModelPacerInput;
     expect(readModelPacerInput(input).ok).toBe(true);
     const own = production.pacer.pacerRequest('a-model', input) as unknown as ChatBody;
     expect(own.options.seed).toBeUndefined();
     expect(second).toEqual({ ...own, options: { ...own.options, seed: second.options.seed } });
     expect(second.tools).toBeUndefined();
-    // The rider's sensors and the pacer's own last line are in the state, as on a ride.
-    expect(input).toMatchObject({ cadenceRpm: 88, heartRateBpm: 132, recentLines: [line(1)] });
+    // The rider's sensors, the pacer's own last line and the device's decision are in the state, as on a ride.
+    expect(input).toMatchObject({
+      cadenceRpm: 88,
+      heartRateBpm: 132,
+      recentLines: [line(1)],
+      intent: 'hold',
+      reason: 'rider-level',
+    });
   });
 
   it('puts the rider in every place the script names', async () => {
     const ridden = await ridePacerScript({
-      ask: pacerModel(byTheGap).ask,
+      ask: pacerModel().ask,
       model: 'a-model',
       prompt: production.pacer,
     });
@@ -388,68 +409,124 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
     }
   });
 
-  it('passes a model that rides what the gap calls for with a new line each time: exit 0', async () => {
-    const kept = recording(pacerModel(byTheGap).ask);
-    await ridePacerScript({ ask: kept.ask, model: 'a-model', prompt: production.pacer });
-    const ridden = await run(['pacer', '--replay', replayFile('by-the-gap.jsonl', kept.calls)]);
+  it('rides the device’s decision at every place, the gap’s call, and never an ease with the rider ahead', async () => {
+    const ridden = await ridePacerScript({
+      ask: pacerModel().ask,
+      model: 'a-model',
+      prompt: production.pacer,
+    });
+    const at = (askedAtS: number): string => {
+      const found = ridden.steps.find((step) => step.askedAtS === askedAtS);
+      return `${String(found?.ridden)} ${String(found?.reason)}`;
+    };
+    expect([at(10), at(45), at(110), at(195), at(240), at(275)]).toEqual([
+      'hold rider-level',
+      'ease rider-behind',
+      'lift rider-ahead',
+      'ease before-climb',
+      'hold rider-level',
+      'lift descent',
+    ]);
+    expect(
+      ridden.steps.filter((step) => step.ground.riderPlace === 'ahead').map((step) => step.ridden),
+    ).not.toContain('ease');
+  });
+
+  it('passes a model that writes a new line each time: exit 0', async () => {
+    const { ridden, result } = await scored('new-lines.jsonl', pacerModel());
     expect(ridden.printed.at(-1)).toBe('PASS');
     expect(ridden.code).toBe(0);
-    const [result] = ridden.results as [HarnessResult];
-    if (result.kind !== 'pacer') throw new Error('a pacer result');
     expect(result.passed).toBe(true);
     expect(result.shortfalls).toEqual([]);
     expect(result.score).toMatchObject({
       answers: 60,
       applied: 60,
+      intentsCalledFor: 60,
       easedWithRiderAhead: 0,
       linesShown: 60,
+      linesWritten: 60,
       distinctLines: 60,
       repeatedLines: 0,
+      linesHiddenRepeat: 0,
+      linesHiddenAgainst: 0,
+      linesVoided: 0,
       answerMs: { median: 1_400, p90: 1_400, most: 1_400 },
     });
-    expect(result.score.intentsCalledFor).toBeGreaterThanOrEqual(54);
   });
 
-  it('fails a model that eases whatever the gap is: exit 1', async () => {
-    const kept = recording(pacerModel(() => 'ease').ask);
-    await ridePacerScript({ ask: kept.ask, model: 'a-model', prompt: production.pacer });
-    const ridden = await run(['pacer', '--replay', replayFile('always-ease.jsonl', kept.calls)]);
+  it('voids a model that still names its intent, and the device rides the gap’s call all the same: exit 1', async () => {
+    const { ridden, result } = await scored(
+      'names-intent.jsonl',
+      pacerModel((at) => ({ plan: 'rolling', intent: 'ease', say: line(at) })),
+    );
     expect(ridden.code).toBe(1);
-    const [result] = ridden.results as [HarnessResult];
-    if (result.kind !== 'pacer') throw new Error('a pacer result');
-    expect(result.shortfalls.map((short) => short.mark)).toContain('intentShare');
-    // The first asks with the rider ahead are eased: the floor is not yet in force.
-    expect(result.score.easedWithRiderAhead).toBeGreaterThan(0);
-    expect(result.shortfalls.map((short) => short.mark)).toContain('easedWithRiderAhead');
+    expect(result.score).toMatchObject({
+      answers: 60,
+      applied: 0,
+      invalidAnswers: 60,
+      intentsCalledFor: 60,
+      easedWithRiderAhead: 0,
+      linesShown: 0,
+      linesVoided: 60,
+    });
+    expect(result.shortfalls.map((short) => short.mark)).toEqual([
+      'distinctLineShare',
+      'voidedLineShare',
+      'appliedShare',
+    ]);
   });
 
-  it('counts a line the screen stops as voided, and an answer past the limit as late', async () => {
+  it('hides a line said again and a line against the intent, and fails a model that says them: exit 1', async () => {
+    const { ridden, result } = await scored(
+      'one-line.jsonl',
+      pacerModel(() => ({ say: 'I am easing off so you can catch me.' })),
+    );
+    expect(ridden.code).toBe(1);
+    const { score } = result;
+    // Shown once where the device eased, hidden after as a repeat, and hidden as against wherever it held or lifted.
+    expect(score.linesShown).toBe(1);
+    expect(score.linesHiddenRepeat).toBeGreaterThan(0);
+    expect(score.linesHiddenAgainst).toBeGreaterThan(0);
+    expect(score.linesShown + score.linesHiddenRepeat + score.linesHiddenAgainst).toBe(60);
+    expect(score.linesWritten).toBe(score.linesShown + score.linesHiddenRepeat);
+    expect(score.distinctLines).toBe(1);
+    expect(result.shortfalls.map((short) => short.mark)).toEqual([
+      'distinctLineShare',
+      'voidedLineShare',
+    ]);
+  });
+
+  it('counts a line the screen stops or a key the answer may not carry as voided, and an answer past the limit as late', async () => {
     let asked = 0;
     const ask: Ask = () => {
       asked += 1;
       return Promise.resolve(
         asked === 2
-          ? {
-              text: JSON.stringify({ plan: 'even', intent: 'hold', say: 'Ride for 20 minutes.' }),
-              latencyMs: 1_000,
-            }
+          ? { text: JSON.stringify({ say: 'Ride for 20 minutes.' }), latencyMs: 1_000 }
           : asked === 3
-            ? { text: JSON.stringify({ plan: 'even', intent: 'hold', say: '' }), latencyMs: 6_000 }
+            ? { text: JSON.stringify({ say: '' }), latencyMs: 6_000 }
             : asked === 4
               ? { text: undefined, latencyMs: 1_000 }
-              : {
-                  text: JSON.stringify({ plan: 'even', intent: 'hold', say: '' }),
-                  latencyMs: 1_000,
-                },
+              : asked === 5
+                ? { text: JSON.stringify({ watts: 300, say: 'Good.' }), latencyMs: 1_000 }
+                : asked === 6
+                  ? { text: 'not an answer', latencyMs: 1_000 }
+                  : { text: JSON.stringify({ say: '' }), latencyMs: 1_000 },
       );
     };
     const ridden = await ridePacerScript({ ask, model: 'a-model', prompt: production.pacer });
-    expect(ridden.steps.slice(0, 4).map((step) => [step.outcome, step.line])).toEqual([
+    expect(ridden.steps.slice(0, 6).map((step) => [step.outcome, step.line])).toEqual([
       ['applied', 'none'],
       ['invalid', 'voided'],
       ['late', 'none'],
       ['failed', 'none'],
+      ['invalid', 'voided'],
+      ['invalid', 'none'],
     ]);
+    // Each was ridden as the device decided, whatever the answer.
+    expect(ridden.steps.slice(0, 6).map((step) => step.ridden)).toEqual(
+      Array.from({ length: 6 }, () => 'hold'),
+    );
   });
 });
 
@@ -457,7 +534,7 @@ describe('the scripted pacer ride from recorded answers', () => {
   let ridden: Awaited<ReturnType<typeof run>>;
 
   beforeAll(async () => {
-    ridden = await run(['pacer', '--replay', RECORDED('pacer-pacer-5.jsonl')]);
+    ridden = await run(['pacer', '--replay', RECORDED('pacer-pacer-6.jsonl')]);
   });
 
   it('scores the ride as recorded', () => {
@@ -466,32 +543,34 @@ describe('the scripted pacer ride from recorded answers', () => {
     expect(result.promptVersion).toBe(production.pacer.PACER_PROMPT_VERSION);
     expect(result.score).toEqual({
       answers: 60,
-      applied: 60,
+      applied: 59,
       lateAnswers: 0,
-      invalidAnswers: 0,
+      invalidAnswers: 1,
       failedAnswers: 0,
-      intentsCalledFor: 44,
+      intentsCalledFor: 60,
       easedWithRiderAhead: 0,
-      linesShown: 59,
-      distinctLines: 48,
-      repeatedLines: 11,
-      linesVoided: 0,
-      linesHidden: 1,
-      answerMs: { median: 1_448, p90: 1_614, most: 2_460 },
-      promptTokens: { median: 1_548, p90: 1_558, most: 1_561 },
-      outputTokens: { median: 43, p90: 44, most: 47 },
+      linesShown: 58,
+      linesWritten: 59,
+      distinctLines: 57,
+      repeatedLines: 2,
+      linesHiddenRepeat: 1,
+      linesHiddenAgainst: 0,
+      linesVoided: 1,
+      answerMs: { median: 3_234, p90: 3_761, most: 4_416 },
+      promptTokens: { median: 1_848, p90: 1_872, most: 1_886 },
+      outputTokens: { median: 25, p90: 27, most: 28 },
     });
   });
 
-  it('exits 1: 44 of 60 is under the mark of 8 in 10', () => {
-    expect(ridden.code).toBe(1);
+  it('exits 0: every mark is met', () => {
+    expect(ridden.code).toBe(0);
     const [result] = ridden.results as [HarnessResult];
     if (result.kind !== 'pacer') throw new Error('a pacer result');
-    expect(result.shortfalls).toEqual([{ mark: 'intentShare', scored: 44 / 60, asked: 0.8 }]);
+    expect(result.shortfalls).toEqual([]);
   });
 
   it('writes a results file of numbers only: none of the model’s lines', async () => {
-    const calls = await recordedCalls(RECORDED('pacer-pacer-5.jsonl'));
+    const calls = await recordedCalls(RECORDED('pacer-pacer-6.jsonl'));
     const lines = calls.map((call) => (JSON.parse(call.text ?? '{}') as { say: string }).say);
     expect(lines.filter((said) => said.length > 10).length).toBeGreaterThan(50);
     for (const said of lines) expect(ridden.text).not.toContain(said);
@@ -502,9 +581,13 @@ describe('the scripted pacer ride from recorded answers', () => {
     const asks = ridden.printed.filter((printed) => /^pacer +\d+ s:/u.test(printed));
     expect(asks).toHaveLength(60);
     expect(asks[8]).toBe(
-      'pacer    40 s: behind rider-losing none: called for ease, applied ease, line shown',
+      'pacer    40 s: behind rider-losing none: called for ease, rode ease (rider-behind), applied, line shown',
     );
-    expect(asks.filter((printed) => printed.includes('(NOT CALLED FOR)'))).toHaveLength(16);
+    // The line the screen stopped named a distance; the device rode its decision all the same.
+    expect(asks[39]).toBe(
+      'pacer   195 s: level steady in-draft before-climb: called for ease, rode ease (before-climb), invalid, line voided',
+    );
+    expect(asks.filter((printed) => printed.includes('(NOT CALLED FOR)'))).toHaveLength(0);
   });
 });
 
