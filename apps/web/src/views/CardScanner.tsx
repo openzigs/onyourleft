@@ -36,8 +36,8 @@ import { StatusMessage } from '../design/StatusMessage';
  *   the camera on to read a code and admits nothing else: the Camera screen
  *   still finds this device not agreed. A rider who HAS agreed to the camera
  *   is not asked again (ADR 0033 D-4: *"scanning counts as camera use"*).
- *   ⚠️ The narrower agreement departs from that same D-4 and from ADR 0029
- *   D-5; each carries a PROPOSED entry of 2026-11-18 for the owner to rule on.
+ *   The narrower agreement supersedes that same D-4 and ADR 0029 D-5 in
+ *   part, for this scan only: ADR 0084, Accepted by the owner 2026-11-19.
  * - **No frame outlives the scanner** (ADR 0033 D-4, as the side camera): a
  *   camera this scanner turned on is turned off when it closes, when a code is
  *   read and when the screen goes away — one the rider already had on is

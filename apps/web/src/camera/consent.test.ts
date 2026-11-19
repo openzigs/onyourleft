@@ -180,8 +180,8 @@ describe('the decision', () => {
 
 /**
  * #2856: the scan's own, narrower agreement. Its two sentences are what a
- * rider agrees to, so they are the ones the published policy and the proposed
- * ADR entry quote, and the rule for what they admit is a truth table.
+ * rider agrees to, so they are the ones the published policy and ADR 0084
+ * quote, and the rule for what they admit is a truth table.
  */
 describe('the scan’s own agreement — #2856', () => {
   const AGREED_TO_THE_CAMERA = { local: true };
@@ -211,7 +211,11 @@ describe('the scan’s own agreement — #2856', () => {
       '../../../../docs/privacy-policy.md',
       'Scanning a code with this device',
     ],
-    ['ADR 0033’s proposed entry', '../../../../docs/adr/0033-side-camera-link.md', 'PROPOSED'],
+    [
+      'ADR 0084',
+      '../../../../docs/adr/0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md',
+      'D-1 — The scan asks where it was pressed',
+    ],
   ])('is quoted word for word by %s', (_, path, landmark) => {
     const document = asProse(readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'));
     // The control: a moved or emptied file must not pass for one that agrees.

@@ -226,14 +226,14 @@ export type CameraUse = 'camera' | 'scan';
  *
  * ⚠️ **{@link BYSTANDER_SENTENCE} is not shown for it**, which departs from
  * ADR 0029 D-5's *"before the camera is ever turned on"* and ADR 0033 D-4's
- * *"ADR 0029's consent flow is shown before the first camera use"*. Both ADRs
- * carry an entry of 2026-11-18 that is **PROPOSED, for the owner to rule on**,
+ * *"ADR 0029's consent flow is shown before the first camera use"*. ADR 0084
+ * (Accepted 2026-11-19 by the owner) supersedes both in part for this scan,
  * with the reason: no picture is taken, kept, sent or analysed for a scan, so
  * the sentence's remedy has nothing to act on.
  *
- * ⚠️ **Draft wording for the owner to approve**, and quoted word for word in
- * `docs/privacy-policy.md` §"Scanning a code with this device's camera":
- * `consent.test.ts` reads the policy and compares.
+ * ⚠️ **Wording approved by the owner** (ADR 0084), and quoted word for word in
+ * `docs/privacy-policy.md` §"Scanning a code with this device's camera" and in
+ * ADR 0084: `consent.test.ts` reads both and compares.
  */
 export const SCAN_CONSENT_STATEMENT =
   'The camera is used only to read this code, and it goes off as soon as the code is read or ' +
