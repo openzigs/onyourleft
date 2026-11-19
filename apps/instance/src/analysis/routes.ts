@@ -24,6 +24,7 @@ import {
   DEFAULT_ANALYSIS_STARTS,
   DEFAULT_HEARTBEAT_MS,
   DEFAULT_REPLAN_STARTS,
+  DEFAULT_REPLAN_WARMS,
   JOB_FAILURES,
 } from './jobs.ts';
 import { REPLAN_TEMPLATE } from './replan-template.ts';
@@ -135,6 +136,52 @@ export const ANALYSIS_ROUTES: readonly Route[] = [
       const got = ready(context);
       if (got === undefined) return errorResponse('unavailable');
       const outcome = await got.analysis.startReplan(got.caller, context.json);
+      if (outcome.ok) return json(outcome.value, 202);
+      return errorResponse(
+        outcome.code,
+        outcome.fields === undefined ? {} : { fields: outcome.fields },
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/analysis/replans/warm',
+    sealed: 'only',
+    operationId: 'warmReplanModel',
+    reaches: 'own',
+    summary: `A workout ride of yours with re-plans on is starting (#2841): load this instance's local model now, so the ride's first re-plan does not wait for it to load. \`source\` is the one your re-plans will name. Answers 202 at once, before the model is loaded; \`warming\` says one call went out — shaped as a re-plan's first, about a fixed workout nobody rode, with nothing of yours in it, its answer read by nothing. \`false\` for \`instance-hosted\`, which no instance loads. At most ${String(DEFAULT_REPLAN_WARMS.limit)} an hour (\`rate_limited\`), one at a time. \`analysis_off\`, \`local_unavailable\` and \`hosted_unavailable\` as for a re-plan, and nothing is sent.`,
+    identity: true,
+    auth: 'session',
+    analysis: true,
+    accepted: true,
+    request: {
+      type: 'object',
+      properties: { source: { type: 'string', enum: ['instance-local', 'instance-hosted'] } },
+      required: ['source'],
+      additionalProperties: false,
+    },
+    errors: [
+      'unauthenticated',
+      'validation_failed',
+      'rate_limited',
+      'analysis_off',
+      'local_unavailable',
+      'hosted_unavailable',
+      'unavailable',
+    ],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: { warming: { type: 'boolean' } },
+        required: ['warming'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const got = ready(context);
+      if (got === undefined) return errorResponse('unavailable');
+      const outcome = await got.analysis.warmReplan(got.caller, context.json);
       if (outcome.ok) return json(outcome.value, 202);
       return errorResponse(
         outcome.code,

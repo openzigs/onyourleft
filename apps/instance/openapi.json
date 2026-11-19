@@ -2481,6 +2481,106 @@
         }
       }
     },
+    "/v1/analysis/replans/warm": {
+      "post": {
+        "operationId": "warmReplanModel",
+        "summary": "A workout ride of yours with re-plans on is starting (#2841): load this instance's local model now, so the ride's first re-plan does not wait for it to load. `source` is the one your re-plans will name. Answers 202 at once, before the model is loaded; `warming` says one call went out — shaped as a re-plan's first, about a fixed workout nobody rode, with nothing of yours in it, its answer read by nothing. `false` for `instance-hosted`, which no instance loads. At most 6 an hour (`rate_limited`), one at a time. `analysis_off`, `local_unavailable` and `hosted_unavailable` as for a re-plan, and nothing is sent.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "instance-local",
+                      "instance-hosted"
+                    ]
+                  }
+                },
+                "required": [
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "warming": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "warming"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "description": "One of `hosted_unavailable`, `local_unavailable`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "description": "One of `unavailable`, `analysis_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/analysis/tactics": {
       "get": {
         "operationId": "getBotTactics",

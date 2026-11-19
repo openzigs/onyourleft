@@ -52,7 +52,15 @@
  */
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { APICallError, generateText, jsonSchema, tool, type ModelMessage, type ToolSet } from 'ai';
+import {
+  APICallError,
+  generateText,
+  jsonSchema,
+  Output,
+  tool,
+  type ModelMessage,
+  type ToolSet,
+} from 'ai';
 
 import type {
   PictureConnection,
@@ -305,8 +313,10 @@ export function createLocalModel(options: LocalModelOptions): ModelConnection {
         name: 'local',
         baseURL: base,
         fetch: pinnedTo(base, send),
+        // Ollama's `/v1` holds an answer to a JSON Schema (`response_format`, #2841).
+        supportsStructuredOutputs: true,
       });
-      return oneTurn(provider, settings.model, request, LOCAL_THINKING_OFF);
+      return oneTurn(provider, settings.model, request, true);
     },
   };
 }
@@ -364,22 +374,75 @@ export function createHostedModel(options: HostedModelOptions): ModelConnection 
     ...(options.reasoningTokens === undefined ? {} : { reasoningTokens: options.reasoningTokens }),
     async turn(request: ModelTurnRequest): Promise<ModelTurn> {
       if (request.signal.aborted) return { ok: false, failure: 'aborted' };
-      return oneTurn(provider, options.model, request, undefined);
+      return oneTurn(provider, options.model, request, false);
     },
   };
 }
 
+/** The tools a held answer may call by name (#2841): those that take no argument. */
+function lookable(request: ModelTurnRequest): readonly string[] {
+  return request.tools
+    .filter((spec) => {
+      const properties = spec.parameters.properties;
+      return (
+        typeof properties !== 'object' ||
+        properties === null ||
+        Object.keys(properties).length === 0
+      );
+    })
+    .map((spec) => spec.name);
+}
+
+/**
+ * The schema a local turn's answer is held to (#2841): the request's own, or
+ * `{"look":"<a tool's name>"}` for a tool it may still call. Exported for
+ * `model.test.ts`.
+ */
+export function heldAnswerSchema(
+  answer: Readonly<Record<string, unknown>>,
+  tools: readonly string[],
+): Readonly<Record<string, unknown>> {
+  if (tools.length === 0) return answer;
+  return {
+    anyOf: [
+      answer,
+      {
+        type: 'object',
+        properties: { look: { type: 'string', enum: [...tools] } },
+        required: ['look'],
+        additionalProperties: false,
+      },
+    ],
+  };
+}
+
+/** A held answer that names a tool to call: the tool's name, or `undefined`. */
+function lookedUp(text: string, tools: readonly string[]): string | undefined {
+  let answer: unknown;
+  try {
+    answer = JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (typeof answer !== 'object' || answer === null || Array.isArray(answer)) return undefined;
+  const keys = Object.keys(answer);
+  const look = (answer as { look?: unknown }).look;
+  return keys.length === 1 && typeof look === 'string' && tools.includes(look) ? look : undefined;
+}
+
 /**
  * One model step through `provider`, with every rule the file comment states.
- * `thinkingOff` is what the connection sends for a request's `thinking: 'off'`,
- * or `undefined` for a connection that sends nothing for it.
+ * `local` says the connection is to the rider's own box, which alone is sent
+ * a request's `thinking: 'off'` and `answerSchema`.
  */
 async function oneTurn(
   provider: ReturnType<typeof createOpenAICompatible>,
   model: string,
   request: ModelTurnRequest,
-  thinkingOff: typeof LOCAL_THINKING_OFF | undefined,
+  local: boolean,
 ): Promise<ModelTurn> {
+  const held = local && request.answerSchema !== undefined;
+  const looks = held ? lookable(request) : [];
   const tools: ToolSet = Object.fromEntries(
     request.tools.map((spec) => [
       spec.name,
@@ -395,15 +458,27 @@ async function oneTurn(
       model: provider.chatModel(model),
       system: request.system,
       messages: sdkMessages(request.messages),
-      ...(request.tools.length === 0 ? {} : { tools }),
+      // A held answer is offered no tools: the grammar would admit none of their calls.
+      ...(request.tools.length === 0 || held ? {} : { tools }),
+      ...(held
+        ? {
+            output: {
+              ...Output.text(),
+              responseFormat: Promise.resolve({
+                type: 'json' as const,
+                schema: heldAnswerSchema(request.answerSchema ?? {}, looks),
+              }),
+            },
+          }
+        : {}),
       maxOutputTokens: request.maxOutputTokens,
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-      ...(request.thinking === 'off' && thinkingOff !== undefined
-        ? { providerOptions: thinkingOff }
-        : {}),
+      ...(request.thinking === 'off' && local ? { providerOptions: LOCAL_THINKING_OFF } : {}),
       maxRetries: 0,
       abortSignal: AbortSignal.any([request.signal, timeout]),
     });
+    // A held answer that names a tool is that tool's call, with no argument.
+    const look = held ? lookedUp(result.text, looks) : undefined;
     const calls: ToolCallRequest[] = result.toolCalls.map((call) =>
       call.dynamic === true && call.invalid === true
         ? { callId: call.toolCallId, toolName: call.toolName, invalid: true }
@@ -420,11 +495,14 @@ async function oneTurn(
     // there and dropped.
     const reasoningTokens = result.usage.outputTokenDetails.reasoningTokens ?? 0;
     const reasoned = reasoningTokens > 0 || (result.reasoningText ?? '') !== '';
+    if (look !== undefined) {
+      calls.push({ callId: `look-${String(request.messages.length)}`, toolName: look, input: {} });
+    }
     return {
       ok: true,
-      text: result.text,
+      text: look === undefined ? result.text : '',
       calls,
-      finish: finishOf(result.finishReason),
+      finish: look === undefined ? finishOf(result.finishReason) : 'tool-calls',
       usage: {
         ...(result.usage.inputTokens === undefined
           ? {}

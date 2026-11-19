@@ -350,6 +350,7 @@ describe('failures are sentences', () => {
     'model-without-tools',
     'model-cut-off',
     'model-no-answer',
+    'local_unavailable',
     'hosted_unavailable',
     'interrupted',
   ] as const)('says %s in its own sentence, and saves nothing', async (failure) => {
@@ -362,6 +363,14 @@ describe('failures are sentences', () => {
     );
     expect(outcome).toStrictEqual({ kind: 'failed', text: INSTANCE_FAILURE_TEXT[failure] });
     expect(await saved(id)).toBeUndefined();
+  });
+
+  it('says the local model is not available to the rider, not that the instance has none (#2634)', () => {
+    // The operator may have a model and not have opened it to this rider.
+    expect(INSTANCE_FAILURE_TEXT.local_unavailable).toMatch(
+      /has not made its own model available to you/,
+    );
+    expect(INSTANCE_FAILURE_TEXT.local_unavailable).not.toMatch(/no model of its own/);
   });
 
   it.each(['analysis_off', 'job_running', 'rate_limited'] as const)(

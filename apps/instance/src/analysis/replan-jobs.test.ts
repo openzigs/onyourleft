@@ -27,7 +27,7 @@ import {
   type FakeModelServer,
   type ScriptedReply,
 } from './fake-model-server-testing.ts';
-import type { AnalysisJobsOptions } from './jobs.ts';
+import { DEFAULT_REPLAN_WARMS, type AnalysisJobsOptions } from './jobs.ts';
 import { jobBody, parseStream, scriptedEngine, type ScriptedEngine } from './jobs-testing.ts';
 import { createLocalModel } from './model.ts';
 import {
@@ -542,8 +542,9 @@ describe('scoped to the session’s athlete (three riders)', () => {
       riders,
       asked,
     } = await agentWorld([
-      { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{"athleteId":"someone"}' }] },
-      { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
+      // A local model held to the answer's schema calls a tool by its name, with
+      // no argument: the schema admits none, so no athlete can be named (#2841).
+      { kind: 'text', text: '{"look":"goals"}' },
       { kind: 'text', text: JSON.stringify({ move: MOVE, reason: 'heart-rate-high' }) },
     ]);
     const [anna, ben] = riders;
@@ -586,5 +587,116 @@ describe('a re-plan the operator does not offer the rider (#2609, ADR 0046 2026-
     expect([answer.status, codeOf(answer)]).toStrictEqual([409, 'local_unavailable']);
     expect(offered).toHaveBeenCalledWith(riders[0]!.athleteId, 'instance-local');
     expect(replans.runs).toEqual([]);
+  });
+});
+
+describe('warming the model as a workout ride with re-plans starts (#2841)', () => {
+  const warm = (w: IdentityInstance, token: string, body: unknown = { source: 'instance-local' }) =>
+    w.call('POST', '/v1/analysis/replans/warm', { token, body });
+
+  /** A world whose re-plans run the real agent on a fake model server, as `agentWorld` builds one. */
+  async function warmWorld(script: readonly ScriptedReply[]) {
+    fake = await startFakeModelServer(script);
+    const asked: string[] = [];
+    const setup = await replanWorld(1, {
+      analysis: {
+        replan: replanEngine({
+          reads: {
+            listLiveSyncItems: (athleteId) => {
+              asked.push(athleteId);
+              return Promise.resolve([]);
+            },
+          },
+          sources: {
+            local: createLocalModel({
+              settings: { baseUrl: fake.baseUrl, model: 'scripted' },
+              resolve: LOOPBACK,
+            }),
+            hostedKey: () => Promise.resolve({ kind: 'none' }),
+          },
+          clock: { now: () => Date.now() },
+        }),
+      },
+    });
+    return { ...setup, asked };
+  }
+
+  it('sends one call shaped as a re-plan’s first, about a workout nobody rode, and nothing of the rider', async () => {
+    const { world: w, riders, asked } = await warmWorld([{ kind: 'text', text: '{"keep":true}' }]);
+    const answer = await warm(w, riders[0]!.token);
+    expect([answer.status, answer.body]).toStrictEqual([202, { warming: true }]);
+    await expect.poll(() => fake?.requests.length).toBe(1);
+    const sent = fake?.requests[0] as {
+      messages: { role: string; content: string }[];
+      response_format?: unknown;
+      reasoning_effort?: string;
+    };
+    expect(sent.messages[0]).toStrictEqual({ role: 'system', content: REPLAN_TEMPLATE.system });
+    expect(sent.response_format).toBeDefined();
+    expect(sent.reasoning_effort).toBe('none');
+    // Nothing of the rider: no store read, no athlete, no summary of theirs, no job.
+    expect(asked).toStrictEqual([]);
+    expect(JSON.stringify(sent)).not.toContain(riders[0]!.athleteId);
+    expect(JSON.stringify(sent)).not.toContain('"meanHeartRate"');
+    expect(await w.freshRead((store) => store.claimAnalysisJob())).toBeUndefined();
+  });
+
+  it('loads nothing for a hosted source, and refuses a source the operator does not offer', async () => {
+    const { world: w, riders } = await warmWorld([]);
+    const hosted = await warm(w, riders[0]!.token, { source: 'instance-hosted' });
+    expect([hosted.status, hosted.body]).toStrictEqual([202, { warming: false }]);
+    expect(fake?.requests).toHaveLength(0);
+
+    const offered = vi.fn(() => Promise.resolve(false));
+    const refused = await replanWorld(1, { analysis: { offered } });
+    const answer = await warm(refused.world, refused.riders[0]!.token);
+    expect([answer.status, codeOf(answer)]).toStrictEqual([409, 'local_unavailable']);
+  });
+
+  it('refuses a body with anything but a source in it', async () => {
+    const { world: w, riders } = await warmWorld([]);
+    for (const body of [{}, { source: 'somewhere' }, { source: 'instance-local', input: {} }]) {
+      const answer = await warm(w, riders[0]!.token, body);
+      expect([answer.status, codeOf(answer)], JSON.stringify(body)).toStrictEqual([
+        400,
+        'validation_failed',
+      ]);
+    }
+    expect(fake?.requests).toHaveLength(0);
+  });
+
+  it('warms one at a time a rider, and at most six an hour', async () => {
+    const replans = scriptedReplanEngine();
+    let release: (() => void) | undefined;
+    const warmed = vi.fn(
+      (): Promise<boolean> =>
+        new Promise<boolean>((resolve) => {
+          release = () => {
+            resolve(true);
+          };
+        }),
+    );
+    const { world: w, riders } = await replanWorld(1, {
+      analysis: { replan: { ...replans.engine, warm: warmed } },
+    });
+    const token = riders[0]!.token;
+    // One in flight: a second ask while it runs sends nothing more.
+    expect((await warm(w, token)).body).toStrictEqual({ warming: true });
+    expect((await warm(w, token)).body).toStrictEqual({ warming: true });
+    expect(warmed).toHaveBeenCalledTimes(1);
+    expect(warmed).toHaveBeenCalledWith(riders[0]!.athleteId, expect.any(AbortSignal));
+    for (let index = 2; index <= DEFAULT_REPLAN_WARMS.limit; index += 1) {
+      release?.();
+      // Asked again until the last has ended: an ask while it runs is not counted.
+      await expect
+        .poll(async () => {
+          await warm(w, token);
+          return warmed.mock.calls.length;
+        })
+        .toBe(index);
+    }
+    release?.();
+    await expect.poll(async () => codeOf(await warm(w, token))).toBe('rate_limited');
+    expect(warmed).toHaveBeenCalledTimes(DEFAULT_REPLAN_WARMS.limit);
   });
 });
