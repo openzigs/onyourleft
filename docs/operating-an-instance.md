@@ -1413,10 +1413,11 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:
   an internal network (no route out) that only `instance` and `tunnel` join.
-  `instance.env.example` sets `OYL_INSTANCE_TUNNEL_READY_URL=http://172.30.88.10:20241/ready`. It
-  uses the address, not the name `tunnel`, which resolves on both of the tunnel's networks. If
-  172.30.88.0/24 is already in use on the box, change the subnet, the address in the command and
-  the variable together.
+  `compose.yaml` asks `http://172.30.88.10:20241/ready` unless `.env` sets
+  `OYL_INSTANCE_TUNNEL_READY_URL` (empty asks nothing). It uses the address, not the name `tunnel`,
+  which resolves on both of the tunnel's networks. If 172.30.88.0/24 is already in use on the box,
+  set `OYL_TUNNEL_METRICS_PREFIX` in `.env` (#2918): the subnet, the address in the command and this
+  address all follow it.
   - **Why a network of its own:** cloudflared's metrics server serves more than `/ready`. It also
     serves `/metrics` (connector and edge details), `/config` (the tunnel's ingress: its public
     hostname and the origin it forwards to), `/debug/pprof` (profiling, which costs CPU) and
