@@ -189,9 +189,41 @@ interface FadeSample {
 }
 
 /**
+ * From now on, pause every animation in the actions panel at its start, in the
+ * microtask straight after the HUD's `data-oyl-controls` or
+ * `data-oyl-controls-returned` changes (#2871).
+ *
+ * A CSS animation runs on the page's own clock, which `page.clock` does not
+ * drive, and one with no fill that has run to its end leaves
+ * `getAnimations()`: so a runner stall longer than the fade between the hide
+ * and {@link sampleFade} read the page's resting state, an opacity of 0 at
+ * the fade's start. Held at its start, each animation is still there, at 0 ms,
+ * however long the runner takes to read it. The attribute is set in a task
+ * `page.clock` fires (or a touch), the observer runs before that task ends, and
+ * an animation's time moves only between tasks, at a frame: none can pass
+ * first. `getAnimations()` brings the style up to date, so the animations the
+ * attribute starts exist when it is read (`motion.browser.spec.ts`
+ * §`recordIntro` reads them the same way).
+ */
+async function holdFadesAtStart(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    new MutationObserver(() => {
+      const panel = document.querySelector('.oyl-hud__actions');
+      for (const each of panel?.getAnimations({ subtree: true }) ?? []) each.pause();
+    }).observe(document, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-oyl-controls', 'data-oyl-controls-returned'],
+    });
+  });
+}
+
+/**
  * Hold every animation in the actions panel at each of `atMs` in turn and read
  * what a rider would see then. A CSS animation runs on the page's own clock,
- * not `page.clock`'s, so they are paused and seeked rather than waited for.
+ * not `page.clock`'s, so they are paused and seeked rather than waited for —
+ * and {@link holdFadesAtStart} must have held them first, or one that ran out
+ * before this reads is not there to seek.
  */
 async function sampleFade(page: Page, atMs: readonly number[]): Promise<FadeSample[]> {
   return page.evaluate((times) => {
@@ -279,6 +311,7 @@ for (const viewport of FADE_VIEWPORTS) {
     const page = await ride(browser, viewport, '?controls=hide', true);
     const out = HUD_CONTROLS_FADE_MS.out;
     const close = MOTION_DURATION_MS.medium;
+    await holdFadesAtStart(page);
     await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
     await expect(page.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'hidden');
     // One reading of the page, held at each moment in turn: the fade, and the
