@@ -30,7 +30,7 @@ async function open(status: OperateStatusRead): Promise<void> {
   mounted = await mount(
     <main>
       <h1>Operate</h1>
-      <OperateStatusPanel status={status} now={() => NOW} />
+      <OperateStatusPanel timeZone="UTC" status={status} now={() => NOW} />
     </main>,
   );
 }

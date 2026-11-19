@@ -14,6 +14,8 @@
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval.**
  */
 
+import { momentText } from './words';
+
 /** Why the local model is off, by the instance's own code, or `on`. */
 export type OperateLocalModelState =
   | 'on'
@@ -299,17 +301,13 @@ const STATUS_WORD: Readonly<Record<OperateJobStatus, string>> = {
   withheld: 'withheld',
 };
 
-function when(iso: string): string {
-  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
-}
-
-/** One job's line: never which rider, nor what it said. */
-export function jobLine(job: OperateJob): string {
+/** One job's line, its moment in `timeZone` ({@link momentText}): never which rider, nor what it said. */
+export function jobLine(job: OperateJob, timeZone: string): string {
   const kind = job.kind === 're-plan' ? 'Re-plan' : 'Write-up';
   const source = job.source === 'hosted' ? 'on a hosted service' : 'on this instance’s model';
   const whose = job.whose === 'own' ? 'yours' : 'another rider’s';
   const failure = job.failure === null ? '' : ` (${job.failure})`;
-  return `${kind}, ${source}, ${whose}: ${STATUS_WORD[job.status]}${failure}, ${when(job.createdAt)}`;
+  return `${kind}, ${source}, ${whose}: ${STATUS_WORD[job.status]}${failure}, ${momentText(job.createdAt, timeZone)}`;
 }
 
 /** The queue's counts, as lines: waiting and running, the last seven days, and each failure's code. */

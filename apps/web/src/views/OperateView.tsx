@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX, type Ref } from 'react';
 
+import { momentText } from '@onyourleft/operate-text';
+
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import type {
@@ -156,9 +158,9 @@ const SOURCE_TEXT = {
   start: 'by the instance as it started',
 } as const;
 
-/** A moment, in UTC, so the screen says the same thing wherever it is read. */
-function when(iso: string): string {
-  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+/** The device's IANA zone, which every Operate moment is drawn in, named (#2917). */
+export function deviceTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 /** What the page holds: being read, a standing that sees nothing, or the owner's log. */
@@ -174,14 +176,16 @@ type Shown =
 function LogEntry({
   entry,
   landing,
+  timeZone,
 }: {
   readonly entry: OperatorLogEntry;
+  readonly timeZone: string;
   /** Where focus lands when the last page arrives and *Show older entries* goes. */
   readonly landing?: Ref<HTMLLIElement> | undefined;
 }): JSX.Element {
   return (
     <li {...(landing === undefined ? {} : { ref: landing, tabIndex: -1 })}>
-      <strong>{operatorActionLabel(entry.action)}</strong>, {when(entry.at)},{' '}
+      <strong>{operatorActionLabel(entry.action)}</strong>, {momentText(entry.at, timeZone)},{' '}
       {SOURCE_TEXT[entry.source]}: {entry.outcome}
       {entry.detail === null ? null : (
         <>
@@ -198,10 +202,12 @@ function OperatorLog({
   log,
   moreFailed,
   onMore,
+  timeZone,
 }: {
   readonly log: OperatorLogRead;
   readonly moreFailed: boolean;
   readonly onMore: (cursor: string) => Promise<void>;
+  readonly timeZone: string;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   /**
@@ -249,6 +255,7 @@ function OperatorLog({
             <LogEntry
               key={entry.id}
               entry={entry}
+              timeZone={timeZone}
               landing={index === landingAt ? landing : undefined}
             />
           ))}
@@ -284,7 +291,14 @@ function OperatorLog({
   );
 }
 
-export function OperateView({ port }: { readonly port?: OperatePort | undefined }): JSX.Element {
+export function OperateView({
+  port,
+  timeZone = deviceTimeZone(),
+}: {
+  readonly port?: OperatePort | undefined;
+  /** The IANA zone every moment is drawn in, named (#2917): the device's unless a test names one. */
+  readonly timeZone?: string;
+}): JSX.Element {
   const [shown, setShown] = useState<Shown>({ kind: 'reading' });
   const [moreFailed, setMoreFailed] = useState(false);
   /** Counts the reads begun: a page asked for under an older read is dropped. */
@@ -362,17 +376,18 @@ export function OperateView({ port }: { readonly port?: OperatePort | undefined 
   return (
     <div className="oyl-operate">
       <p>{OPERATE_PURPOSE}</p>
-      <OperateStatusPanel status={shown.status} />
+      <OperateStatusPanel status={shown.status} timeZone={timeZone} />
       <OperateAccountsPanel status={shown.status} />
-      <OperateBackupsPanel port={port} />
-      <OperateAnalysisPanel port={port} />
-      <OperateRoomsPanel port={port} />
-      <OperateKeysPanel port={port} />
-      <OperateProblemsPanel port={port} />
+      <OperateBackupsPanel port={port} timeZone={timeZone} />
+      <OperateAnalysisPanel port={port} timeZone={timeZone} />
+      <OperateRoomsPanel port={port} timeZone={timeZone} />
+      <OperateKeysPanel port={port} timeZone={timeZone} />
+      <OperateProblemsPanel port={port} timeZone={timeZone} />
       <OperatorLog
         log={shown.log}
         moreFailed={moreFailed}
         onMore={async (cursor) => more(cursor)}
+        timeZone={timeZone}
       />
     </div>
   );

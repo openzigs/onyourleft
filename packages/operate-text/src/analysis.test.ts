@@ -100,18 +100,36 @@ describe('AI backend’s words — #2611, moved by #2648', () => {
 
   it('says the jobs without naming a rider', () => {
     expect(
-      jobLine({
-        kind: 're-plan',
-        source: 'hosted',
-        status: 'failed',
-        failure: 'model-without-tools',
-        createdAt: '2026-11-14T09:50:00.000Z',
-        endedAt: null,
-        whose: 'other',
-      }),
+      jobLine(
+        {
+          kind: 're-plan',
+          source: 'hosted',
+          status: 'failed',
+          failure: 'model-without-tools',
+          createdAt: '2026-11-14T09:50:00.000Z',
+          endedAt: null,
+          whose: 'other',
+        },
+        'UTC',
+      ),
     ).toBe(
       'Re-plan, on a hosted service, another rider’s: failed (model-without-tools), 2026-11-14 09:50 UTC',
     );
+    // #2917: in the zone it is given, named.
+    expect(
+      jobLine(
+        {
+          kind: 'write-up',
+          source: 'local',
+          status: 'succeeded',
+          failure: null,
+          createdAt: '2026-11-14T09:50:00.000Z',
+          endedAt: null,
+          whose: 'own',
+        },
+        'America/New_York',
+      ),
+    ).toBe('Write-up, on this instance’s model, yours: done, 2026-11-14 04:50 EST');
     expect(
       jobCountLines({
         counts: { queued: 1, running: 0, succeeded: 4, failed: 1, cancelled: 0, withheld: 2 },

@@ -67,7 +67,7 @@ async function until(done: () => boolean): Promise<void> {
 }
 
 async function show(port: Parameters<typeof OperateRoomsPanel>[0]['port']): Promise<void> {
-  mounted = await mount(<OperateRoomsPanel port={port} />);
+  mounted = await mount(<OperateRoomsPanel timeZone="UTC" port={port} />);
   await until(() => !text().includes('Reading the rooms'));
 }
 
