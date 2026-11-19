@@ -342,7 +342,11 @@ were.
    `docker compose exec instance node src/operator/cli.ts registration set <mode>`.
 6. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
    has not signed in yet, connect to the instance from the app on the tablet first.
-7. **Finish.** The page lists where the server stands, and the setup page closes for good.
+7. **AI write-ups**: optional. If Ollama is running on this computer, the page lists the models it
+   has, says how well each fits your graphics card, and can download one whose name you type. Press
+   *Use …* beside a model to have ride write-ups made on it. If the page says Ollama was not found,
+   press *Next step*: everything else works without it.
+8. **Finish.** The page lists where the server stands, and the setup page closes for good.
 
 Until the tablet has claimed the instance, nobody can make an account on it. **The expert path**
 still works: with `OYL_INSTANCE_OWNER_KEY` set in `.env` the setup page never opens, and the

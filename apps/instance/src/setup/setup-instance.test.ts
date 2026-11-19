@@ -18,8 +18,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { jobBody, parseStream } from '../analysis/jobs-testing.ts';
+import {
+  CURRENT_SERVER,
+  startOllamaStub,
+  type OllamaStub,
+  type OllamaStubOptions,
+} from '../analysis/ollama-stub-testing.ts';
 import { sha256Hex } from '../auth/crypto.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from '../auth/identity-testing.ts';
+import type { Caller } from '../auth/identity.ts';
+import type { Resolver } from '../history/address.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { freeLoopbackPort, testConfig } from '../instance-testing.ts';
 import { backupLoop, ownerClaimReset, registrationMode, setupCode } from '../operator/commands.ts';
@@ -35,9 +44,11 @@ import { SETUP_COOKIE } from './setup.ts';
 
 let running: StartedInstance | undefined;
 let directory: string | undefined;
+const stubs: OllamaStub[] = [];
 afterEach(async () => {
   await running?.stop();
   running = undefined;
+  for (const stub of stubs.splice(0)) await stub.close();
   if (directory !== undefined) await rm(directory, { recursive: true, force: true });
   directory = undefined;
 });
@@ -60,9 +71,18 @@ interface World {
   instance: StartedInstance;
   /** Unix ms, moved by a test that needs a code to run out. */
   clock: number | undefined;
+  /**
+   * Where the AI step looks for Ollama (#2792): nowhere, unless a test names
+   * its stub. ⚠️ Never the real addresses: a developer's own Ollama must not
+   * be found, asked or changed by a test.
+   */
+  readonly ollama: readonly string[];
+  readonly resolve: Resolver | undefined;
 }
 
-async function world(): Promise<World> {
+async function world(
+  options: { readonly ollama?: readonly string[]; readonly resolve?: Resolver } = {},
+): Promise<World> {
   directory = await mkdtemp(join(tmpdir(), 'oyl-setup-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
@@ -76,6 +96,8 @@ async function world(): Promise<World> {
     pages: [],
     instance: undefined as unknown as StartedInstance,
     clock: undefined,
+    ollama: options.ollama ?? [],
+    resolve: options.resolve,
   };
   made.instance = await start(made);
   return made;
@@ -114,6 +136,8 @@ async function start(
     migrationPollMs: 50,
     kitSecrets: [KIT_SECRET],
     secretsDirectory: at.secrets,
+    ollamaAddresses: at.ollama,
+    ...(at.resolve === undefined ? {} : { resolve: at.resolve }),
     ...(at.clock === undefined ? {} : { now: () => at.clock ?? Date.now() }),
   });
   await running.opened;
@@ -545,7 +569,10 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(CARD_LINE.exec(invite.body)?.[1]).toMatch(/^[a-z2-9]{4}/);
     expect((await back.post('/setup/invite/code')).status).toBe(303);
     expect((await back.get('/setup/invite')).body).toContain('made its one invite');
-    await back.post('/setup/next', { from: 'invite' });
+    expect((await back.post('/setup/next', { from: 'invite' })).headers.location).toBe('/setup/ai');
+
+    // AI write-ups (#2792): optional, and skipped here. Its own tests are further down.
+    expect((await back.post('/setup/next', { from: 'ai' })).headers.location).toBe('/setup/finish');
 
     // Finish: where the server stands, in plain words, then gone.
     // The whole setup's, the first session's kit (before the restart) among them.
@@ -555,6 +582,7 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
       'Backups: working, on this computer and in the copy kept elsewhere.',
       'Who may join: Nobody new.',
       'Invites made: 1.',
+      'AI write-ups: off. Everything else works without them.',
     ]);
     const done = await back.post('/setup/finish/done');
     expect(done.status).toBe(200);
@@ -678,13 +706,14 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect((await browser.get('/setup/backups')).body).toContain(
       '<p class="warning">The last backup was saved on this computer only',
     );
-    await browser.post('/setup/next', { from: 'invite' });
+    for (const from of ['invite', 'ai']) await browser.post('/setup/next', { from });
     expect(summaryOf((await browser.get('/setup/finish')).body)).toEqual([
       'Owner: your tablet owns this server.',
       'Emergency kit: not downloaded. You can download it later from the admin pages on this computer, once you have added a passkey there.',
       'Backups: on this computer only. The copy kept elsewhere is not working.',
       'Who may join: Only people I invite.',
       'Invites made: none.',
+      'AI write-ups: off. Everything else works without them.',
     ]);
 
     // Who may join, changed from the finish: saved, and back to the finish, not on to the invite.
@@ -897,6 +926,413 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
   });
 });
 
+describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
+  /** `models-box` is the stub Ollama's loopback; no other name resolves. */
+  const resolve: Resolver = (name) =>
+    name === 'models-box'
+      ? Promise.resolve(['127.0.0.1'])
+      : Promise.reject(new Error('no such name'));
+
+  /** A host's user name, as Ollama's own words about a download can carry it. */
+  const HOST_USER = 'MARKER-hostuser-2792';
+
+  /** A stub Ollama, and a fresh setup that looks for it after an address where nothing is. */
+  async function worldWith(options: OllamaStubOptions): Promise<{ at: World; stub: OllamaStub }> {
+    const stub = await startOllamaStub(options);
+    stubs.push(stub);
+    const at = await world({
+      ollama: ['http://no-such-name:11434/v1', `http://models-box:${String(stub.port)}/v1`],
+      resolve,
+    });
+    return { at, stub };
+  }
+
+  /** The setup walked to its AI step: claimed, the tablet signed in as the owner, each step passed. */
+  async function atAiStep(at: World): Promise<{ browser: Browser; ownerId: string }> {
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const claim = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    const tablet = await testDevice();
+    expect((await tabletRedeems(at, tablet, claim)).status).toBe(200);
+    const pending = await browser.get('/setup/claim');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    await browser.post('/setup/claim/confirm', { comparison });
+    const owner = await register(at, tablet);
+    expect(owner.status, owner.text).toBe(200);
+    let landed: Answer | undefined;
+    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite']) {
+      landed = await browser.post('/setup/next', { from });
+    }
+    expect(landed?.headers.location).toBe('/setup/ai');
+    return { browser, ownerId: (JSON.parse(owner.text) as { athleteId: string }).athleteId };
+  }
+
+  /** The AI step, loaded again until it says `wanted`: a download ends when Ollama ends it. */
+  async function untilAiSays(browser: Browser, wanted: string): Promise<Answer> {
+    for (;;) {
+      const answer = await browser.get('/setup/ai');
+      if (answer.body.includes(wanted)) return answer;
+      await new Promise((settle) => setTimeout(settle, 10));
+    }
+  }
+
+  /** A download Ollama holds half way, and the function that lets it go on. */
+  function held(): { readonly hold: Promise<void>; readonly release: () => void } {
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((settle) => {
+      release = settle;
+    });
+    return { hold, release: () => release() };
+  }
+
+  /** What the setup wrote to the operator log about the model, oldest first. */
+  async function modelLog(at: World): Promise<(string | null)[][]> {
+    const store = await openSqlStore(at.path);
+    try {
+      return (await store.listOperatorLogPage(undefined, 200))
+        .filter((entry) => entry.action.startsWith('analysis_'))
+        .map((entry) => [entry.source, entry.action, entry.outcome, entry.detail])
+        .reverse();
+    } finally {
+      await store.close();
+    }
+  }
+
+  const DOWNLOADING = [
+    { status: 'pulling manifest' },
+    { status: 'pulling aaa', digest: 'sha256:aaa', total: 4_000_000_000, completed: 1_000_000_000 },
+  ];
+  const RUNNING_TEXT =
+    'Downloading the model: 25 % so far, 1.0 GB of 4.0 GB. Press Check now to see how far it has got.';
+
+  it('finds Ollama, says how each model fits, downloads the one the owner names, and after a restart the next write-up runs on the model chosen', async () => {
+    const pulling = held();
+    const { at, stub } = await worldWith({
+      ...CURRENT_SERVER,
+      show: {
+        ...CURRENT_SERVER.show,
+        'delta:8b': { capabilities: ['completion', 'tools'] },
+      },
+      pull: () => ({
+        lines: DOWNLOADING,
+        hold: pulling.hold,
+        then: [{ status: 'success' }],
+        adds: { name: 'delta:8b', model: 'delta:8b', size: 5_200_000_000 },
+      }),
+      // Loaded whole into GPU memory.
+      load: (model) => ({ name: model, model, size: 6_000_000_000, size_vram: 6_000_000_000 }),
+      completions: () => ({
+        id: 'chatcmpl-1',
+        object: 'chat.completion',
+        created: 1_790_000_000,
+        model: 'scripted',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'A steady ride.' },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      }),
+    });
+    const { browser, ownerId } = await atAiStep(at);
+
+    // Found, at the second address looked at, and each model with how it fits — read from
+    // what Ollama has loaded, never guessed from a file's size.
+    const found = await browser.get('/setup/ai');
+    expect(found.status).toBe(200);
+    expect(found.body).toContain('<p>Ollama is running on this computer.</p>');
+    expect(found.body).toContain(
+      '<code>alpha:14b</code>: 9.0 GB. It fits in the graphics card’s memory, so it runs at full speed.',
+    );
+    expect(found.body).toContain(
+      '<code>beta:32b</code>: 20 GB. Only 62 % of it fits in the graphics card’s memory, so it runs slowly.',
+    );
+    expect(found.body).toContain(
+      '<code>gamma:26b</code>: 17 GB. How well it fits the graphics card is not known until it has been loaded.',
+    );
+    // A model Ollama says cannot call tools is listed, with why it has no button.
+    expect(found.body).toContain('<button type="submit">Use alpha:14b</button>');
+    expect(found.body).not.toContain('Use gamma:26b');
+    expect(found.body).toContain('Write-ups cannot run on this model');
+    expect(found.body).not.toContain('two words');
+    expect(found.body).not.toContain('AI write-ups are on.');
+    expect(found.body).not.toContain('Ollama was not found');
+    // Optional whatever it found.
+    expect(found.body).toContain('name="from" value="ai"');
+
+    // The download: asked of Ollama by the name the owner typed, and the page says how far it
+    // has got when the owner asks — it never reloads itself.
+    const asked = await browser.post('/setup/ai/pull', { model: ' delta:8b ' });
+    expect(asked.status).toBe(303);
+    expect(asked.headers.location).toBe('/setup/ai');
+    const midway = await untilAiSays(browser, '25 %');
+    expect(midway.body).toContain(`<p class="notice">${RUNNING_TEXT}</p>`);
+    expect(midway.body).toContain(
+      '<form method="get" action="/setup/ai" aria-label="Check now"><button type="submit">Check now</button></form>',
+    );
+    expect(midway.body).not.toContain('http-equiv="refresh"');
+    // One at a time: no form for a second while one runs.
+    expect(midway.body).not.toContain('action="/setup/ai/pull"');
+    expect(stub.requests.filter((request) => request.path === '/api/pull')).toEqual([
+      { method: 'POST', path: '/api/pull', body: { model: 'delta:8b', stream: true } },
+    ]);
+
+    pulling.release();
+    const downloaded = await untilAiSays(browser, 'The download finished.');
+    expect(downloaded.body).toContain(
+      '<code>delta:8b</code>: 5.2 GB. How well it fits the graphics card is not known until it has been loaded.',
+    );
+    expect(downloaded.body).toContain('action="/setup/ai/pull"');
+    // Downloaded is not chosen: nothing is saved until the owner says which.
+    expect(downloaded.body).not.toContain('AI write-ups are on.');
+
+    // Chosen: saved, loaded once, and the page then says how it fits.
+    const used = await browser.post('/setup/ai/use', { model: 'delta:8b' });
+    expect(used.status).toBe(303);
+    expect(used.headers.location).toBe('/setup/ai');
+    expect(stub.requests.filter((request) => request.path === '/api/generate')).toEqual([
+      { method: 'POST', path: '/api/generate', body: { model: 'delta:8b', stream: false } },
+    ]);
+    const on = await browser.get('/setup/ai');
+    expect(on.body).toContain(
+      '<p class="notice" role="status">AI write-ups are on. They run on this model: <code>delta:8b</code></p>',
+    );
+    expect(on.body).toContain(
+      '<code>delta:8b</code>: 5.2 GB. It fits in the graphics card’s memory, so it runs at full speed.',
+    );
+    expect(on.body).toContain('<p class="notice">Write-ups run on this model.</p>');
+    expect(on.body).not.toContain('Use delta:8b');
+    expect((await browser.post('/setup/next', { from: 'ai' })).headers.location).toBe(
+      '/setup/finish',
+    );
+    expect(summaryOf((await browser.get('/setup/finish')).body).at(-1)).toBe(
+      'AI write-ups: on, made on this computer.',
+    );
+
+    // Logged from the setup, naming which settings changed and never the model or its address.
+    expect(await modelLog(at)).toEqual([
+      ['setup', 'analysis_model_pull', 'done', null],
+      ['setup', 'analysis_settings_set', 'done', 'local_url,local_model,offer_local'],
+    ]);
+    // The instance's own log says where the model is now set, as a save from the app does.
+    expect(at.lines.filter((line) => line.includes('"event":"analysis-model"')).at(-1)).toContain(
+      '"setIn":"app"',
+    );
+    expect(at.lines.join('\n')).not.toContain('delta:8b');
+    expect(at.lines.join('\n')).not.toContain('models-box');
+
+    // Closed and opened again on the same file: the owner's next write-up is built with the
+    // model chosen, read at the request the model server is sent — the job engine's own path.
+    await restart(at);
+    const jobs = at.instance.analysisJobs();
+    if (jobs === undefined) throw new Error('no analysis jobs');
+    const caller = { athleteId: ownerId } as Caller;
+    const started = await jobs.start(caller, jobBody());
+    if (!started.ok) throw new Error(`the job was refused: ${started.code}`);
+    await jobs.idle();
+    const stream = await jobs.events(caller, started.value.jobId, null);
+    expect(parseStream((await stream?.text()) ?? '').events.at(-1)?.data).toEqual({
+      status: 'succeeded',
+      writeUp: 'A steady ride.',
+    });
+    expect(
+      stub.requests
+        .filter((request) => request.path === '/v1/chat/completions')
+        .map((request) => (request.body as { model?: unknown }).model),
+    ).toEqual(['delta:8b']);
+  });
+
+  it('shows a download’s progress and its failure in its own words: never the model’s name, nor a path with the host’s user name', async () => {
+    const pulling = held();
+    const { at, stub } = await worldWith({
+      ...CURRENT_SERVER,
+      pull: () => ({
+        lines: [
+          { status: 'pulling manifest' },
+          {
+            status: `pulling ${HOST_USER}`,
+            digest: `sha256:${HOST_USER}`,
+            total: 4_000_000_000,
+            completed: 1_000_000_000,
+          },
+        ],
+        hold: pulling.hold,
+        then: [
+          {
+            error: `pull model manifest: open /Users/${HOST_USER}/.ollama/models/manifests/registry.ollama.ai/${HOST_USER}/private-model: permission denied`,
+          },
+        ],
+      }),
+    });
+    const { browser } = await atAiStep(at);
+    // A model under the owner's own namespace on Ollama's library: their user name is in it.
+    const model = `${HOST_USER}/private-model`;
+    expect((await browser.post('/setup/ai/pull', { model })).headers.location).toBe('/setup/ai');
+    const midway = await untilAiSays(browser, '25 %');
+    expect(midway.body).toContain(`<p class="notice">${RUNNING_TEXT}</p>`);
+    expect(midway.body).not.toContain(HOST_USER);
+    // A second asked for while one runs is refused, and Ollama is asked nothing more.
+    await browser.post('/setup/ai/pull', { model: 'other:1b' });
+    expect(stub.requests.filter((request) => request.path === '/api/pull')).toEqual([
+      { method: 'POST', path: '/api/pull', body: { model, stream: true } },
+    ]);
+
+    pulling.release();
+    const failed = await untilAiSays(browser, 'The download did not finish.');
+    expect(failed.body).toContain(
+      '<p class="problem" role="alert">The download did not finish. Check that the name is spelled as Ollama lists it, that this computer is online and that its disk has room, then try again.</p>',
+    );
+    expect(failed.body).not.toContain(HOST_USER);
+    expect(failed.body).not.toContain('permission denied');
+    // And the form is back, to try again.
+    expect(failed.body).toContain('action="/setup/ai/pull"');
+
+    // Nowhere: no page, no log line and no operator log entry holds it.
+    expect([...at.pages, ...at.lines].join('\n')).not.toContain(HOST_USER);
+    expect(await modelLog(at)).toEqual([
+      ['setup', 'analysis_model_pull', 'done', null],
+      ['setup', 'analysis_model_pull', 'refused', 'busy'],
+    ]);
+  });
+
+  it('changes nothing for a name that is not a model’s, a model Ollama does not list, or one it says cannot call tools', async () => {
+    const { at, stub } = await worldWith({ ...CURRENT_SERVER, pull: () => ({ lines: [] }) });
+    const { browser } = await atAiStep(at);
+
+    const badName = await browser.post('/setup/ai/pull', { model: 'two words' });
+    expect(badName.headers.location).toBe('/setup/ai?bad-name');
+    expect((await browser.get('/setup/ai?bad-name')).body).toContain(
+      '<p class="problem" role="alert">That is not a model’s name.',
+    );
+    expect(stub.requests.filter((request) => request.path === '/api/pull')).toEqual([]);
+
+    for (const model of ['nowhere:1b', 'gamma:26b', 'two words']) {
+      const refused = await browser.post('/setup/ai/use', { model });
+      expect(refused.headers.location, model).toBe('/setup/ai?refused');
+    }
+    const said = await browser.get('/setup/ai?refused');
+    expect(said.body).toContain('<p class="problem" role="alert">That model could not be used:');
+    expect(said.body).not.toContain('AI write-ups are on.');
+    // Nothing was loaded, and nothing saved: the settings a job reads are still nobody's.
+    expect(stub.requests.filter((request) => request.path === '/api/generate')).toEqual([]);
+    expect(await modelLog(at)).toEqual([['setup', 'analysis_model_pull', 'refused', 'bad_model']]);
+    const store = await openSqlStore(at.path);
+    try {
+      expect(await store.getAnalysisSetting()).toBeUndefined();
+
+      // Settings made elsewhere (the app, or the host's command line) are read as a job reads
+      // them: the address they name is where Ollama is looked for first, and a model whose
+      // source is switched off is not "on".
+      const second = await startOllamaStub({
+        ...CURRENT_SERVER,
+        tags: { models: [{ name: 'zeta:1b', model: 'zeta:1b', size: 1_000_000_000 }] },
+      });
+      stubs.push(second);
+      const row = {
+        localUrl: `http://models-box:${String(second.port)}/v1`,
+        localModel: 'zeta:1b',
+        reasoningTokens: null,
+        offerHosted: null,
+        othersLocal: null,
+        updatedAt: 1,
+        updatedBy: 'cli',
+      } as const;
+      await store.putAnalysisSetting({ ...row, offerLocal: false });
+      const off = await browser.get('/setup/ai');
+      expect(off.body).toContain('<code>zeta:1b</code>');
+      expect(off.body).not.toContain('alpha:14b');
+      expect(off.body).not.toContain('AI write-ups are on.');
+      expect(off.body).toContain('Use zeta:1b');
+      await store.putAnalysisSetting({ ...row, offerLocal: null });
+      const on = await browser.get('/setup/ai');
+      expect(on.body).toContain(
+        'AI write-ups are on. They run on this model: <code>zeta:1b</code>',
+      );
+      expect(on.body).not.toContain('Use zeta:1b');
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('saves nothing when the server’s name resolves somewhere else between finding it and saving it (ADR 0040 D-6)', async () => {
+    const stub = await startOllamaStub(CURRENT_SERVER);
+    stubs.push(stub);
+    const shown = (): number =>
+      stub.requests.filter((request) => request.path === '/api/show').length;
+    // Local while Ollama is found and read, down to its last model's capabilities; public from
+    // the lookup after that, which is the save's own check of the address.
+    let publicAfter = Number.POSITIVE_INFINITY;
+    const at = await world({
+      ollama: [`http://models-box:${String(stub.port)}/v1`],
+      resolve: (name) =>
+        name !== 'models-box'
+          ? Promise.reject(new Error('no such name'))
+          : Promise.resolve([shown() >= publicAfter ? '8.8.8.8' : '127.0.0.1']),
+    });
+    const { browser } = await atAiStep(at);
+    expect((await browser.get('/setup/ai')).body).toContain('Use alpha:14b');
+    publicAfter = shown() + 3;
+    const refused = await browser.post('/setup/ai/use', { model: 'alpha:14b' });
+    expect(refused.headers.location).toBe('/setup/ai?refused');
+    // Nothing was loaded, the refusal is logged naming the field and never the address, and
+    // the settings a job reads are still nobody's.
+    expect(stub.requests.filter((request) => request.path === '/api/generate')).toEqual([]);
+    expect(await modelLog(at)).toEqual([
+      ['setup', 'analysis_settings_set', 'refused', 'local_url'],
+    ]);
+    const store = await openSqlStore(at.path);
+    try {
+      expect(await store.getAnalysisSetting()).toBeUndefined();
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('says in one sentence that no Ollama was found, is skipped, and the setup finishes with AI off', async () => {
+    const at = await world();
+    const { browser, ownerId } = await atAiStep(at);
+    const none = await browser.get('/setup/ai');
+    expect(none.status).toBe(200);
+    expect(none.body).toContain(
+      '<p class="notice">Ollama was not found on this computer, so AI write-ups stay off.</p>',
+    );
+    // Nothing to download or choose, and a button that looks again when the owner asks.
+    expect(none.body).not.toContain('action="/setup/ai/pull"');
+    expect(none.body).not.toContain('action="/setup/ai/use"');
+    expect(none.body).toContain(
+      '<form method="get" action="/setup/ai" aria-label="Look again"><button type="submit">Look again</button></form>',
+    );
+    // A form sent anyway asks for no download and saves nothing.
+    expect((await browser.post('/setup/ai/pull', { model: 'delta:8b' })).headers.location).toBe(
+      '/setup/ai',
+    );
+    expect((await browser.post('/setup/ai/use', { model: 'delta:8b' })).headers.location).toBe(
+      '/setup/ai?refused',
+    );
+    expect(await modelLog(at)).toEqual([['setup', 'analysis_model_pull', 'refused', 'no_server']]);
+
+    // Skipped with Next step, and finished.
+    expect(none.body).toContain('name="from" value="ai"');
+    expect((await browser.post('/setup/next', { from: 'ai' })).headers.location).toBe(
+      '/setup/finish',
+    );
+    expect(summaryOf((await browser.get('/setup/finish')).body).at(-1)).toBe(
+      'AI write-ups: off. Everything else works without them.',
+    );
+    expect((await browser.post('/setup/finish/done')).status).toBe(200);
+    await expectAllNotFound(at.port);
+    // Done with AI off, as a job meets it: the owner's write-up on this computer's model is
+    // refused at its start. Every step before this one worked with no model.
+    const refused = await at.instance
+      .analysisJobs()
+      ?.start({ athleteId: ownerId } as Caller, jobBody());
+    expect(refused).toMatchObject({ ok: false, code: 'local_unavailable' });
+  });
+});
+
 describe('the setup session and its step gate (#2784, ADR 0069 D-4, ADR 0080 D-2)', () => {
   const MINUTE = 60 * 1000;
 
@@ -958,6 +1394,8 @@ describe('the setup session and its step gate (#2784, ADR 0069 D-4, ADR 0080 D-2
       '/setup/backups/now',
       '/setup/registration/mode',
       '/setup/invite/code',
+      '/setup/ai/pull',
+      '/setup/ai/use',
     ]) {
       const answer = await browser.post(route, { mode: 'closed' });
       expect(answer.status, route).toBe(303);
@@ -1004,7 +1442,7 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const pending = await browser.get('/setup/claim');
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     await browser.post('/setup/claim/confirm', { comparison });
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite']) {
+    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite', 'ai']) {
       await browser.post('/setup/next', { from });
     }
     expect((await browser.get('/setup/finish')).status).toBe(200);
@@ -1036,7 +1474,7 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const twice = await again.get('/setup/claim');
     const digits = /name="comparison" value="([0-9]{6})"/.exec(twice.body)?.[1] ?? '';
     expect((await again.post('/setup/claim/confirm', { comparison: digits })).status).toBe(303);
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite']) {
+    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite', 'ai']) {
       await again.post('/setup/next', { from });
     }
     // This setup's, not the one before the reset: no kit downloaded since, no invite made.
@@ -1046,6 +1484,7 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
       'Backups: not checked yet. No backup has run.',
       'Who may join: I approve each new rider.',
       'Invites made: none.',
+      'AI write-ups: off. Everything else works without them.',
     ]);
     // A reset ends a setup session too, as it ends an admin one.
     expect(await ownerClaimReset(paths)).toMatchObject({ cleared: true, adminSessionsEnded: 1 });
