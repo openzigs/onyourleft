@@ -1459,6 +1459,11 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     const { browser, card } = await claimed(at);
     const step = await browser.get('/setup/tailnet');
     expect(step.status).toBe(200);
+    // One name for the step, in the progress bar and as the page's heading (owner, 2026-11-19).
+    expect(step.body).toContain('<h1>Tailnet</h1>');
+    expect(step.body).toMatch(
+      /aria-current="step">[\s\S]*?<span class="step-name">Tailnet<\/span>/,
+    );
     // Read back from the card the claim QR carried, not from a value the step was handed.
     expect(card.startsWith(`oyl-instance:${TAILNET_ORIGIN}#`)).toBe(true);
     expect(addressOn(step.body)).toBe(TAILNET_ORIGIN);
@@ -1620,6 +1625,9 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     const { browser } = await claimed(at);
     const step = await browser.get('/setup/tailnet');
     expect(step.body).toContain('reached through a Cloudflare tunnel on your own domain');
+    // Still named Tailnet, and the first thing it says is that nothing is needed here.
+    expect(step.body).toContain('<h1>Tailnet</h1>');
+    expect(step.body).toMatch(/<h1>Tailnet<\/h1>\n<p>Nothing to do here: /);
     // No access rule to paste: the one block to copy is the key reset a change of address needs.
     expect(step.body).not.toContain('tagOwners');
     expect(

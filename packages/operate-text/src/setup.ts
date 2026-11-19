@@ -36,7 +36,8 @@ export type OperateSetupStep =
 /** Each step's name, as its page's heading. */
 export const SETUP_STEP_NAMES: Readonly<Record<OperateSetupStep, string>> = {
   claim: 'Claim it with your tablet',
-  tailnet: 'How riders reach it',
+  // Named as the progress bar names it (owner, 2026-11-19): one name for one step.
+  tailnet: 'Tailnet',
   passkey: 'A passkey for the admin pages',
   secrets: 'The emergency kit',
   backups: 'Backups',
@@ -235,7 +236,7 @@ export const TAILNET_FUNNEL_TEXT =
   'Funnel is on, so this address is on the public internet too: anybody can reach it, and the admin pages are not served there. Riders do not need the Tailscale app.';
 /** The server is set up for a Cloudflare tunnel: nothing for this step to do. */
 export const TAILNET_CLOUDFLARE_TEXT =
-  'This server is reached through a Cloudflare tunnel on your own domain, not a tailnet, so there is nothing to set up here. Press Next step.';
+  'Nothing to do here: this server is reached through a Cloudflare tunnel on your own domain, not a tailnet. Press Next step.';
 /** The settings name no way in for other devices. */
 export const TAILNET_NO_PATH_TEXT =
   'This server’s settings do not say how other devices reach it, so this step cannot check your tailnet. The guide’s step 3 says how to choose; you can carry on and come back.';
