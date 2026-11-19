@@ -751,6 +751,10 @@ bash scripts/check-image-layers.test.sh
 # an image not named by digest, an image line that moved, a version that is
 # not plain, or a missing serve file (BUNDLE001-004). Run by instance-image.yml
 # with the digest it pushed, not by hand.
+# BUNDLE005 (#2857): it refuses a template whose OYL_INSTANCE_CONTACT_EMAIL is
+# not there once and EMPTY, and a bundled file that names an address at the
+# project's own domain -- the template is every new server's, and its /legal
+# page tells riders to write to whatever is there.
 bash scripts/make-instance-bundle.sh ghcr.io/openzigs/onyourleft-instance@sha256:<digest> <version> <outdir>
 # #2818: the bundle also holds an EMPTY, owner-only `secrets/`, made and never
 # copied, so Docker does not make it owned by root on Linux. The suite extracts
