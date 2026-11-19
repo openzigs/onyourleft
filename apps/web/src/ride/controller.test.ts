@@ -14500,6 +14500,12 @@ describe('#2077 — the HUD’s time in each power zone is the saved ride’s', 
       streams.sampleInterval,
     );
     expect(rig.controller.powerZoneTime(watts(250))).toEqual(saved);
+    // #2283: another threshold is its own zones over the whole ride, not the
+    // zones of the threshold the recording was being folded for.
+    expect(rig.controller.powerZoneTime(watts(400))).toEqual(
+      timeInZones(powerZones(watts(400)), streams.channels.power ?? [], streams.sampleInterval),
+    );
+    expect(rig.controller.powerZoneTime(watts(250))).toEqual(saved);
     // While riding it was the same figures, short only of what sealed at the stop.
     expect(saved.covered - (riding?.covered ?? Number.NaN)).toBeGreaterThanOrEqual(0);
     expect(atTheEnd?.perZone[1]).toBeGreaterThan(0);
