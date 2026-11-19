@@ -133,12 +133,23 @@ export type JobEvent =
       readonly status: 'succeeded' | 'failed' | 'cancelled' | 'withheld';
       readonly failure?: string;
       readonly writeUp?: string;
+      /**
+       * The version of the template the instance ran (#2932), which the saved
+       * write-up records; absent from an instance older than #2932.
+       */
+      readonly templateVersion?: string;
     };
 
 const RESULT_STATUSES = ['succeeded', 'failed', 'cancelled', 'withheld'] as const;
 
 /** A job id the instance writes: a path segment and nothing else. */
 const JOB_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/**
+ * A template version the instance names: what the store keeps of one
+ * (`@onyourleft/store` §`rideWriteUpProblem`). Anything else is read as none.
+ */
+const TEMPLATE_VERSION = /^[A-Za-z0-9._-]{1,64}$/;
 
 /** A failure code the instance names: a short identifier. Anything else is read as no code. */
 const CODE = /^[a-z][a-z0-9_-]{0,63}$/;
@@ -190,6 +201,9 @@ export function readJobEvent(kind: string, data: string): JobEvent | undefined {
           ? { failure: body.failure }
           : {}),
         ...(typeof body.writeUp === 'string' ? { writeUp: body.writeUp } : {}),
+        ...(typeof body.templateVersion === 'string' && TEMPLATE_VERSION.test(body.templateVersion)
+          ? { templateVersion: body.templateVersion }
+          : {}),
       };
     }
     default:

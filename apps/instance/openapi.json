@@ -2221,7 +2221,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons?, proposal? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results. A re-plan’s stream holds `progress` and `result` only, and its `result` carries `proposal` and never text."
+                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, templateVersion?, reasons?, proposal? }` — `templateVersion` the version of the template a write-up ran under) and one `data:` line of JSON. No event carries a tool’s arguments or results. A re-plan’s stream holds `progress` and `result` only, and its `result` carries `proposal` and never text."
                 }
               }
             }
