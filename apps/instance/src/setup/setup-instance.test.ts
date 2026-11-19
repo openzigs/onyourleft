@@ -32,7 +32,13 @@ import type { RemotePath } from '../config.ts';
 import type { Resolver } from '../history/address.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { freeLoopbackPort, testConfig } from '../instance-testing.ts';
-import { backupLoop, ownerClaimReset, registrationMode, setupCode } from '../operator/commands.ts';
+import {
+  backupLoop,
+  instanceKey,
+  ownerClaimReset,
+  registrationMode,
+  setupCode,
+} from '../operator/commands.ts';
 import { readServerConfig } from '../server-config.ts';
 import { sealedAt } from '../sealed/sealed-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
@@ -1416,13 +1422,18 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     });
     // ADR 0079 D-8: the cost of a change is read before anything says how to make one.
     const warning = step.body.indexOf(
-      'every device that uses this server, your tablet too, must scan',
+      'Every device that uses this server, your tablet too, must scan',
     );
     const how = step.body.indexOf('Set OYL_INSTANCE_ORIGIN in .env');
     expect(warning).toBeGreaterThan(-1);
     expect(step.body).toContain('every passkey made for the old address stops working');
+    // The keys are wrapped under the address: a change means new ones, so a new identity.
+    expect(step.body).toContain(
+      'the server’s keys belong to its address, so it must make new ones, which gives it a new identity',
+    );
     expect(how).toBeGreaterThan(warning);
     expect(step.body).toContain('Run bash deploy.sh beside compose.yaml');
+    expect(step.body.indexOf('instance-key reset')).toBeGreaterThan(warning);
     // It changes nothing itself: its one form is the GET that reads the address back again.
     const forms = [...step.body.matchAll(/<form [^>]*>/g)].map((match) => match[0]);
     expect(forms.filter((form) => form.includes('method="post"'))).toEqual([
@@ -1435,22 +1446,41 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     );
   });
 
-  it('reads the address back from the server that is running after a restart, not from what it said before', async () => {
+  it('reads the address back from the server that is running after a restart, and says it works only once a device can fetch its keys', async () => {
     const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
     const { card: before } = await claimed(at);
+    expect(before.startsWith(`oyl-instance:${TAILNET_ORIGIN}#`)).toBe(true);
     // The owner changes the address in .env and deploys again: the same database, a new start.
     at.origin = RENAMED_ORIGIN;
     await restart(at);
+    const tunnel = portOf(at.instance);
+    const keysOnDevice = () =>
+      send(tunnel, 'GET', '/v1/instance/keys', { host: `localhost:${String(tunnel)}` });
     const browser = new Browser(at);
     await browser.signIn(await codeInFile(at));
     const after = await browser.get('/setup/tailnet');
     expect(after.status).toBe(200);
     expect(addressOn(after.body)).toBe(RENAMED_ORIGIN);
     expect(after.body).not.toContain(TAILNET_ORIGIN);
-    // The card every device will now scan names the new address with the same identity
-    // (ADR 0079 D-8): the step reads that card, so it says the new address works.
-    expect(after.body).toContain('so a device on your tailnet can reach it');
-    expect(before.startsWith(`oyl-instance:${TAILNET_ORIGIN}#`)).toBe(true);
+    // The keys were wrapped under the old address (keys/wrap.ts), so what a device fetches
+    // first fails: the step must say so, and never that the new address can be reached.
+    const fetched = await keysOnDevice();
+    expect(fetched.status).toBe(503);
+    expect(fetched.body).toContain('cannot be unwrapped');
+    expect(after.body).toContain(
+      '<p class="problem">The server cannot open its keys at this address',
+    );
+    expect(after.body).toContain('instance-key reset');
+    expect(after.body).not.toContain('so a device on your tailnet can reach it');
+    // The remedy the page names, run on the host; then Check now reads the server again.
+    const paths = { database: at.path, blobs: `${at.path}.blobs` };
+    const secret = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)));
+    await instanceKey(paths, { action: 'reset' }, { secret, origin: RENAMED_ORIGIN });
+    const checked = await browser.get('/setup/tailnet');
+    expect((await keysOnDevice()).status).toBe(200);
+    expect(addressOn(checked.body)).toBe(RENAMED_ORIGIN);
+    expect(checked.body).toContain('so a device on your tailnet can reach it');
+    expect(checked.body).not.toContain('class="problem"');
   });
 
   it('says no card can be drawn, and never that the address works, when the keys cannot be read', async () => {
@@ -1530,6 +1560,11 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     expect(step.body).not.toContain('class="problem"');
     expect(step.body).not.toContain('That is a Tailscale address');
     expect(step.body).toContain('every passkey made for the old address stops working');
+    // How to change it names the Cloudflare address and nothing a tailnet needs.
+    expect(step.body).not.toContain('ts.net');
+    expect(step.body).not.toContain('COMPOSE_PROFILES=tailscale');
+    expect(step.body).not.toContain('OYL_INSTANCE_REMOTE_PATH=tailnet');
+    expect(step.body).toContain('your own domain that your Cloudflare tunnel serves');
   });
 
   it('says this step cannot check a tailnet when no path is named', async () => {

@@ -206,6 +206,13 @@ export const TAILNET_NO_PATH_TEXT =
 /** No card can be drawn (no keys opened): no device can be pointed at the address yet. */
 export const TAILNET_NO_CARD_TEXT =
   'The server’s keys could not be read, so it cannot draw a card for this address and no device can be pointed at it yet. The server makes its keys when it starts with its secret key: restart it, then press Check now.';
+/**
+ * The keys are held but do not open at this address (`unreadable`): what a changed
+ * OYL_INSTANCE_ORIGIN leaves, since the keys are wrapped under the address (`keys/wrap.ts`).
+ * A device's first fetch fails, so nothing reaches the server until they are made again.
+ */
+export const TAILNET_KEYS_UNREADABLE_TEXT =
+  'The server cannot open its keys at this address: they were made for another address, or under another secret key, so no tablet or phone can use it yet. Run the instance-key reset command in the steps below, then press Check now. Every device, your tablet too, must then scan the server’s new card.';
 
 /** How riders join the tailnet (ADR 0079 D-2): never as the owner. */
 export const TAILNET_RIDERS_HEADING = 'How each rider joins';
@@ -245,13 +252,26 @@ export const TAILNET_CHANGE_HEADING = 'Changing this server’s address';
  * (ADR 0079 D-8, ADR 0069 D-1): what every device and every passkey loses.
  */
 export const TAILNET_CHANGE_WARNING =
-  'Before you change it: every device that uses this server, your tablet too, must scan the server’s new card afterwards, and every passkey made for the old address stops working until you make one for the new address.';
-/** How to change it, for whoever wants the setting's name and the command. */
+  'Before you change it: the server’s keys belong to its address, so it must make new ones, which gives it a new identity. Every device that uses this server, your tablet too, must scan the server’s new card afterwards, and every passkey made for the old address stops working until you make one for the new address.';
+/** After the restart: the keys are made again for the new address (`unreadable` until then). */
+const TAILNET_CHANGE_RESET_LINE =
+  'Then run docker compose exec instance node src/operator/cli.ts instance-key reset beside compose.yaml: the server cannot open its old keys at the new address, so this makes new ones.';
+const TAILNET_CHANGE_CHECK_LINE =
+  'Then press Check now on this page: it shows the address the running server read back, and whether a device can fetch its keys there.';
+/** How to change it on a tailnet, for whoever wants the setting's name and the command. */
 export const TAILNET_CHANGE_EXPERT_LINES: readonly string[] = [
   'Set OYL_INSTANCE_ORIGIN in .env to https:// and this machine’s Tailscale name, for example https://onyourleft.your-tailnet.ts.net with your own tailnet’s name.',
   'Keep COMPOSE_PROFILES=tailscale and OYL_INSTANCE_REMOTE_PATH=tailnet (or funnel) and OYL_INSTANCE_CLIENT_ADDRESS_HEADER=x-forwarded-for.',
   'Run bash deploy.sh beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
-  'Then press Check now on this page: it shows the address the running server read back.',
+  TAILNET_CHANGE_RESET_LINE,
+  TAILNET_CHANGE_CHECK_LINE,
+];
+/** The same on a Cloudflare tunnel: an address on the owner's domain, nothing a tailnet needs. */
+export const TAILNET_CHANGE_CLOUDFLARE_LINES: readonly string[] = [
+  'Set OYL_INSTANCE_ORIGIN in .env to https:// and the new name on your own domain that your Cloudflare tunnel serves, and give the tunnel that name as the guide’s step 3b says.',
+  'Run bash deploy.sh beside compose.yaml.',
+  TAILNET_CHANGE_RESET_LINE,
+  TAILNET_CHANGE_CHECK_LINE,
 ];
 
 // --- passkey (ADR 0080 D-7, Q-6)

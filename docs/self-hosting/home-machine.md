@@ -353,9 +353,11 @@ were.
    needs. It repeats how each rider joins (invited into your tailnet or shared the machine, each on
    their own Tailscale account, never yours) and the access rule from step 3a.2, to copy. It changes
    nothing itself: the address is `OYL_INSTANCE_ORIGIN` in `.env`. Before it says how to change that,
-   it says what a change costs: **every device scans the new card, and every passkey made for the old
-   address stops working**. After a change and `bash deploy.sh`, press *Check now* to see the address
-   the server came back with. With a Cloudflare tunnel (3b) the page says there is nothing to set up.
+   it says what a change costs: **the server's keys belong to its address, so it makes new ones and
+   gets a new identity; every device scans the new card, and every passkey made for the old address
+   stops working**. After a change, `bash deploy.sh` and the `instance-key reset` command the page
+   names, press *Check now*: it shows the address the server came back with, and says so if a device
+   still cannot fetch its keys there. With a Cloudflare tunnel (3b) the page says there is nothing to set up.
 3. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
 4. **The emergency kit**: download it once and keep it in a password manager or on paper, **never

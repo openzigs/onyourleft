@@ -91,7 +91,7 @@ import {
   type RemotePath,
 } from '../config.ts';
 import type { Resolver } from '../history/address.ts';
-import type { InstanceKeys } from '../keys/instance-keys.ts';
+import { type InstanceKeys, InstanceKeysUnavailable } from '../keys/instance-keys.ts';
 import { keysView } from '../operate/operate.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
@@ -203,8 +203,11 @@ export interface SetupOptions {
   readonly ownerKeyFromEnvironment: boolean;
   /** The owner's claim (#2782): minted, confirmed and discarded from the setup source. */
   readonly ownerClaim: OwnerClaim;
-  /** The instance's own keys, for the card the claim and the invite carry. */
-  readonly instanceKeys?: Pick<InstanceKeys, 'show'>;
+  /**
+   * The instance's own keys, for the card the claim and the invite carry, and
+   * — `served`, what a device fetches — whether they open at this address (#2817).
+   */
+  readonly instanceKeys?: Pick<InstanceKeys, 'show' | 'served'>;
   /** The secrets read from the secrets folder: what the emergency kit holds. */
   readonly kitSecrets: readonly SecretFromFile[];
   /** `OYL_INSTANCE_REGISTRATION`, which the database's mode wins over (ADR 0080 D-6). */
@@ -379,6 +382,22 @@ export function createSetup(options: SetupOptions): Setup {
     return shown.card ?? null;
   }
 
+  /**
+   * Whether a device's `GET /v1/instance/keys` would be served now (#2817): `unreadable`
+   * when this secret and origin cannot unwrap the keys held — what a changed origin leaves.
+   */
+  async function servedKeys(): Promise<'ready' | 'none' | 'unreadable'> {
+    if (options.instanceKeys === undefined) return 'none';
+    try {
+      await options.instanceKeys.served();
+      return 'ready';
+    } catch (error) {
+      return error instanceof InstanceKeysUnavailable && error.code === 'unreadable'
+        ? 'unreadable'
+        : 'none';
+    }
+  }
+
   /** The owner's athlete, by the claimed key, or `undefined` before that device signs in. */
   async function ownerAthlete(): Promise<string | undefined> {
     const key = await store.claimedOwnerKey();
@@ -525,13 +544,15 @@ export function createSetup(options: SetupOptions): Setup {
       case 'tailnet': {
         // #2817: the address as the RUNNING server's card names it — what every device pins —
         // read back on every load, so "Check now" after a restart shows the address it came up with.
-        const card = await cardOf();
+        // The card is drawn from the public key alone, so it is no proof the keys open: what a
+        // device fetches first (`GET /v1/instance/keys`) is, and a changed origin fails it.
+        const [card, keys] = await Promise.all([cardOf(), servedKeys()]);
         const address = card === null ? options.origin : cardOrigin(card);
         const body = tailnetBody({
           path: options.remotePath,
           origin: address,
           tailscaleName: isTailscaleName(address),
-          card: card !== null,
+          keys: card === null ? 'none' : keys,
         });
         return page(stepPage(frame, body, { next: true }), 200);
       }

@@ -146,7 +146,7 @@ const tailnet = (view: Record<string, unknown>) => ({
   path: 'tailnet',
   origin: TAILNET_ORIGIN,
   tailscaleName: true,
-  card: true,
+  keys: 'ready',
   ...view,
 });
 
@@ -248,7 +248,11 @@ const PAGES: Readonly<Record<string, readonly (readonly [string, () => string])[
     ],
     [
       'no card',
-      step('tailnet', () => pages.tailnetBody(tailnet({ card: false })), true, 'tailnet'),
+      step('tailnet', () => pages.tailnetBody(tailnet({ keys: 'none' })), true, 'tailnet'),
+    ],
+    [
+      'keys that do not open at this address',
+      step('tailnet', () => pages.tailnetBody(tailnet({ keys: 'unreadable' })), true, 'tailnet'),
     ],
     [
       'a Cloudflare tunnel',

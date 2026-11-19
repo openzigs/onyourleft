@@ -134,11 +134,13 @@ import {
   TAILNET_ADDRESS_LEAD,
   TAILNET_ADDRESS_OK_TEXT,
   TAILNET_ADDRESS_WRONG_TEXT,
+  TAILNET_CHANGE_CLOUDFLARE_LINES,
   TAILNET_CHANGE_EXPERT_LINES,
   TAILNET_CHANGE_HEADING,
   TAILNET_CHANGE_WARNING,
   TAILNET_CLOUDFLARE_TEXT,
   TAILNET_FUNNEL_TEXT,
+  TAILNET_KEYS_UNREADABLE_TEXT,
   TAILNET_NEVER_YOURS_TEXT,
   TAILNET_NO_CARD_TEXT,
   TAILNET_NO_PATH_TEXT,
@@ -446,13 +448,17 @@ export interface TailnetStepView {
   /**
    * The address the RUNNING server read back: the one its card names, which
    * is what every device pins and reaches; `OYL_INSTANCE_ORIGIN` itself only
-   * when there is no card ({@link card} is then `false`).
+   * when there is no card ({@link keys} is then `none`).
    */
   readonly origin: string;
   /** Whether {@link origin} is a Tailscale name, `https://<machine>.<tailnet>.ts.net`. */
   readonly tailscaleName: boolean;
-  /** Whether the server's keys open for this address, so it can draw a card. */
-  readonly card: boolean;
+  /**
+   * What a device fetching the keys meets (`GET /v1/instance/keys`): `ready`;
+   * `none`, no card can be drawn; `unreadable`, keys held that do not open at
+   * this address — what a changed origin leaves — so nothing reaches it yet.
+   */
+  readonly keys: 'ready' | 'none' | 'unreadable';
 }
 
 /**
@@ -467,13 +473,16 @@ export function tailnetBody(view: TailnetStepView): string {
   const address = (() => {
     const read = `<p>${escapeHtml(TAILNET_ADDRESS_LEAD)} <code>${escapeHtml(view.origin)}</code></p>`;
     const tailnetPath = view.path === 'tailnet' || view.path === 'funnel';
-    const verdict = !view.card
-      ? `<p class="problem">${escapeHtml(TAILNET_NO_CARD_TEXT)}</p>`
-      : tailnetPath && !view.tailscaleName
-        ? `<p class="problem">${escapeHtml(TAILNET_ADDRESS_WRONG_TEXT)}</p>`
-        : view.tailscaleName
-          ? `<p class="notice">${escapeHtml(TAILNET_ADDRESS_OK_TEXT)}</p>`
-          : '';
+    const verdict =
+      view.keys === 'none'
+        ? `<p class="problem">${escapeHtml(TAILNET_NO_CARD_TEXT)}</p>`
+        : view.keys === 'unreadable'
+          ? `<p class="problem">${escapeHtml(TAILNET_KEYS_UNREADABLE_TEXT)}</p>`
+          : tailnetPath && !view.tailscaleName
+            ? `<p class="problem">${escapeHtml(TAILNET_ADDRESS_WRONG_TEXT)}</p>`
+            : view.tailscaleName
+              ? `<p class="notice">${escapeHtml(TAILNET_ADDRESS_OK_TEXT)}</p>`
+              : '';
     return card(`${read}\n${verdict}\n${checkAgain('/setup/tailnet', SETUP_CHECK_NOW_BUTTON)}`);
   })();
   const riders = TAILNET_RIDERS_TEXT.map((line) => `<li>${escapeHtml(line)}</li>`).join('\n');
@@ -484,7 +493,11 @@ ${riders}
 <p class="warning">${escapeHtml(TAILNET_NEVER_YOURS_TEXT)}</p>
 <p>${escapeHtml(TAILNET_ACL_LEAD)}</p>
 <pre class="copy"><code>${escapeHtml(TAILNET_ACL)}</code></pre>`;
-  const how = TAILNET_CHANGE_EXPERT_LINES.map((line) => `<li>${escapeHtml(line)}</li>`).join('\n');
+  const how = (
+    view.path === 'cloudflare' ? TAILNET_CHANGE_CLOUDFLARE_LINES : TAILNET_CHANGE_EXPERT_LINES
+  )
+    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .join('\n');
   // The warning comes first: nothing about HOW is read before what it costs (ADR 0079 D-8).
   const change = `<h2>${escapeHtml(TAILNET_CHANGE_HEADING)}</h2>
 <p class="warning">${escapeHtml(TAILNET_CHANGE_WARNING)}</p>

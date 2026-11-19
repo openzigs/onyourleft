@@ -1147,14 +1147,18 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
      after the claim and before the passkey, because a passkey is bound to the address. It shows the
      address the **running** server's card names, read on every load, and whether it is a `ts.net`
      name, a problem when `OYL_INSTANCE_REMOTE_PATH` is `tailnet` or `funnel` and it is not, and a
-     problem when no card can be drawn (no keys opened). It says how riders join (invitation or
+     problem when no card can be drawn (no keys opened) or when the keys held do not open at this
+     address, which is what a changed origin leaves: it asks the keys back as a device's
+     `GET /v1/instance/keys` does, not only the card. It says how riders join (invitation or
      machine sharing, each on their own Tailscale account, never the owner's) and shows the access
      rule of [3a.2](self-hosting/home-machine.md#3a-your-tailnet-no-domain) to copy; on `funnel` it
      says what Funnel changes. **It changes no setting**: `OYL_INSTANCE_ORIGIN` is `.env`'s alone
      (ADR 0080's table). Before its collapsed block says how to change the address (`.env`, then
      `bash deploy.sh`, whose round trip checks the running origin against the name `tailscale serve`
-     answers on), it says that every device must scan the new card and every passkey bound to the
-     old host stops working. *Check now* reads the address back after the restart. On `cloudflare` it
+     answers on, then `instance-key reset`, because the keys are wrapped under the origin), it says
+     that the server makes new keys and so a new identity, that every device must scan the new card,
+     and that every passkey bound to the old host stops working. *Check now* reads the address and
+     the keys back after the restart. On `cloudflare` it
      says there is nothing to set up; with no path named, that it cannot check a tailnet.
   3. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
      are in a collapsed block for people comfortable with the command line.
