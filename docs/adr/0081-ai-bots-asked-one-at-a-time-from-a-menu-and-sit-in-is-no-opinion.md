@@ -217,7 +217,7 @@ reader.
 | **R-2** | The menu's figures in D-2.3 and D-2.4 (the finish window of 2 launch distances, fresh at 0.8, quiet at 30 s, a counter within 10 s, a climb soon at 300 m) | **Approve as starting values**, to tune on #2838's harness |
 | **R-3** | A model `sit-in` inside the launch leaves the sprint to the seeded tactics, without ADR 0074's hold (D-1.3) | **Approve.** It keeps "a model that only says sit-in rides the seeded race" exact |
 | **R-4** | Keep the 10 s hold, now for each bot (D-2.6) | **Keep**, and set it against the round measured on the tablet: raise it if a round of the field takes more than 10 s |
-| **R-5** | Send the shared race fresh with every call, rather than one snapshot for a whole round so the model server reads only the bot's part | **Fresh**, and decide from `promptEvalMs` in the instance's log on the owner's PC |
+| **R-5** | Send the shared race fresh with every call, rather than one snapshot for a whole round so the model server reads only the bot's part | **Fresh.** On the owner's PC Ollama read the whole prompt on every call (What was measured), so a snapshot would save nothing there |
 | **R-6** | An older app against a newer instance, or the reverse, rides the seeded race (D-2.8) | **Approve** |
 | **R-7** | The model can no longer launch a kick from anywhere, send any bot on a flyer, or gamble under the W′ floor (ADR 0073 D-3): only what the menu offers | **Approve.** It is what "the model picks from that menu only" means |
 | **R-8** | 90 tactics calls a minute for one athlete (D-2.7) | **Approve** |
@@ -258,12 +258,50 @@ The scoring harness and its pass mark (#2838). The AI pacer (#2835, ADR 0083).
 
 ## What was measured
 
-**Not yet on the owner's PC**: the issue asks for the latency of a call, its prompt tokens and
-Ollama's `prompt_eval_duration` there, against today's median of 3.6 s for seven bots. D-5.2's
-line is what that measurement reads. It is owed before merge.
+### On the owner's PC, 2026-11-19
 
-On the author's Mac, 2026-11-18, gemma4:12b (Q4_K_M) under Ollama, with other work running on the
-machine, so **the token counts are the finding and the times are not**:
+gemma4:12b (Q4_K_M) under Ollama on the PC's loopback, reached over SSH, nothing deployed.
+
+**The scoring harness (#2838)**, all six fixed races, `tactics-8` ridden three times and the worst
+of the three taken (`docs/agents/game.md`), beside one run of `tactics-7` from `main` the same
+morning. Pass marks: at least 5 of 7 bots move, no quiet run over 30 s, a climber attacks a climb,
+9 answers in 10 are decisions and at most 1 in 10 is late. Results files, numbers only, under
+`apps/web/tools/model-tactics-spike/results/scores/`.
+
+| Race | Bots that moved, `tactics-7` | `tactics-8` (worst) | Longest quiet run, s, `-7` | `-8` | Climber attacks on a climb, `-7` | `-8` | Median answer, ms, `-7` | `-8` | Prompt tokens, `-7` | `-8` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| flat | **4** | 7 | 24 | 0 | 0 | 0 | 3 744 | 1 616 | 2 358 | 1 632 |
+| flat-mid-lap | **4** | 7 | 5 | 0 | 0 | 0 | 3 331 | 1 068 | 2 356 | 1 631 |
+| rolling | 5 | 7 | 0 | 0 | 0 | 0 | 2 907 | 1 062 | 2 369 | 1 630 |
+| rolling-mid-lap | **4** | 7 | 4 | 0 | 0 | 0 | 3 371 | 1 078 | 2 363 | 1 631 |
+| climb | 5 | 7 | 0 | 0 | 2 | 2 | 2 928 | 1 082 | 2 406 | 1 668 |
+| climb-mid-lap | 6 | 7 | 11 | 0 | 2 | 2 | 3 384 | 1 127 | 2 405 | 1 674 |
+
+`tactics-7` fails three of six races on bots that moved; `tactics-8` passes all six in all three
+runs. Every answer of both was a decision, and none was late. A `tactics-8` race makes 111 to 240
+calls, against 41 to 74 for `tactics-7`.
+
+**Ollama's own figures**, the flat race's first asks sent again in race order (12 of
+`tactics-7`, 21 of `tactics-8`, three rounds of the field), median:
+
+| | `tactics-7`, seven bots | `tactics-8`, one bot |
+|---|---|---|
+| Time a call (`total_duration`) | 2 659 ms | 1 070 ms |
+| Prompt tokens (`prompt_eval_count`) | 2 353 | 1 635 |
+| `prompt_eval_duration` | 1 108 ms | 644 ms |
+| Answer tokens (`eval_count`) | 74 | 16 |
+| `load_duration` | 20 ms | 20 ms |
+
+A round of seven bots is about 7.5 s of calls, inside the 10 s hold (R-4). **Ollama evaluated the
+whole prompt on every call**: `prompt_eval_count` is the full prompt each time, though the system
+text and most of the race are the same from one call to the next. So freezing the shared race for
+a round (R-5) would save nothing on this server as it stands; the 644 ms is the system text and
+the race read again. That is a finding for R-5, not a change made here.
+
+### On the author's Mac, 2026-11-18
+
+gemma4:12b (Q4_K_M) under Ollama, with other work running on the machine, so **the token counts
+are the finding and the times are not**:
 
 | | `tactics-7`, seven bots | `tactics-8`, one bot |
 |---|---|---|
