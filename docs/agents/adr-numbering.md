@@ -12,6 +12,12 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0086 is [ADR 0086](../adr/0086-the-setup-wizard-recommends-one-ai-model.md)**, taken by
+  [#2869](https://github.com/openzigs/onyourleft/issues/2869) on 2026-11-19 for the setup wizard
+  recommending one AI model, **Proposed** on the owner's ruling of that day. It supersedes in part
+  ADR 0046's 2026-11-14 entry, point 8, and ADR 0031 D-4 condition 2, for that step only; both
+  gained one dated `## Amendments` entry pointing to it. It skipped 0081, 0083, 0084 and 0085, which
+  the open pull requests #2873, #2864, #2863 and #2872 write.
   ⚠️ **0082 is [ADR 0082](../adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**,
   taken by [#2794](https://github.com/openzigs/onyourleft/issues/2794) on 2026-11-18 for the AI
   pacer pacing the terrain with the rider on its wheel, **Accepted** on the owner's *"Yes to pacer

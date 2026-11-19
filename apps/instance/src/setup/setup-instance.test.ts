@@ -1253,6 +1253,56 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
     ).toEqual(['delta:8b']);
   });
 
+  it('downloads the recommended model with one press, then offers it first with no download, and Use turns write-ups on (#2869, ADR 0086)', async () => {
+    const { at, stub } = await worldWith({
+      ...CURRENT_SERVER,
+      tags: { models: [] },
+      ps: { models: [] },
+      show: { 'qwen3:8b': { capabilities: ['completion', 'tools'] } },
+      pull: () => ({
+        lines: [{ status: 'pulling manifest' }],
+        then: [{ status: 'success' }],
+        adds: { name: 'qwen3:8b', model: 'qwen3:8b', size: 5_200_000_000 },
+      }),
+      load: (model) => ({ name: model, model, size: 6_000_000_000, size_vram: 6_000_000_000 }),
+    });
+    const { browser } = await atAiStep(at);
+    const before = await browser.get('/setup/ai');
+    // The one press, above the typed field, sending the name the page filled in.
+    const press =
+      /<form method="post" action="\/setup\/ai\/pull" aria-label="Download the recommended model \(qwen3:8b, about 5 GB\)">[\s\S]*?<\/form>/.exec(
+        before.body,
+      )?.[0];
+    expect(press).toBeDefined();
+    expect(before.body.indexOf(press ?? '')).toBeLessThan(before.body.indexOf('id="model"'));
+    const sends = /name="model" value="([^"]*)"/.exec(press ?? '')?.[1];
+    expect(sends).toBe('qwen3:8b');
+
+    const asked = await browser.post('/setup/ai/pull', { model: sends ?? '' });
+    expect(asked.headers.location).toBe('/setup/ai');
+    const done = await untilAiSays(browser, 'The download finished.');
+    expect(stub.requests.filter((request) => request.path === '/api/pull')).toEqual([
+      { method: 'POST', path: '/api/pull', body: { model: 'qwen3:8b', stream: true } },
+    ]);
+    // Now here: offered first, and nothing more is recommended for download.
+    expect(done.body).toContain(
+      'A model already on this computer can run write-ups, so nothing needs downloading.',
+    );
+    expect(done.body).not.toContain('Download the recommended model');
+    expect(done.body).toContain('<button type="submit">Use qwen3:8b</button>');
+    // Downloaded is not chosen (#2792): the owner's press is.
+    expect(done.body).not.toContain('AI write-ups are on.');
+    await browser.post('/setup/ai/use', { model: 'qwen3:8b' });
+    const on = await browser.get('/setup/ai');
+    expect(on.body).toContain('AI write-ups are on. They run on this model: <code>qwen3:8b</code>');
+    expect(on.body).not.toContain('nothing needs downloading');
+    expect(on.body).not.toContain('Download the recommended model');
+    expect(await modelLog(at)).toEqual([
+      ['setup', 'analysis_model_pull', 'done', null],
+      ['setup', 'analysis_settings_set', 'done', 'local_url,local_model,offer_local'],
+    ]);
+  });
+
   it('shows a download’s progress and its failure in its own words: never the model’s name, nor a path with the host’s user name', async () => {
     const pulling = held();
     const { at, stub } = await worldWith({
