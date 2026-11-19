@@ -284,10 +284,13 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
               } as const),
         );
       },
-      signInAsOwner: (card) => {
+      signInAsOwner: (card, displayName = '') => {
         calls.push(`signInAsOwner ${card}`);
         const answer = options.ownerSignInAnswer ?? { kind: 'connected' };
-        if (answer.kind === 'connected') scripted.held.connected = true;
+        if (answer.kind === 'connected') {
+          scripted.held.connected = true;
+          if (displayName.trim() !== '') scripted.held.displayName = displayName.trim();
+        }
         return Promise.resolve(answer);
       },
       keys: () => {
