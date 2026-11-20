@@ -19,7 +19,14 @@ export {
   MAX_VERTICES_PER_TILE,
   type DecodeLimits,
 } from './limits';
-export { localMetres, METRES_PER_DEGREE_LATITUDE, tileBounds } from './projection';
+export {
+  columnAtLongitude,
+  localMetres,
+  METRES_PER_DEGREE_LATITUDE,
+  rowAtLatitude,
+  tileBounds,
+  TILES_AT_Z15,
+} from './projection';
 export { describeRefusal } from './refusal';
 export {
   BUILDING_FIELD_NAMES,
