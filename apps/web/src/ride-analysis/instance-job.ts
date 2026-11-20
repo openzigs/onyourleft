@@ -109,7 +109,15 @@ export interface JobChannel {
 /** The session a job runs under, or why there is none now — with the sentence to show. */
 export type JobSession =
   | { readonly kind: 'open'; readonly channel: JobChannel; readonly token: string }
-  | { readonly kind: 'closed'; readonly text: string };
+  | {
+      readonly kind: 'closed';
+      readonly text: string;
+      /**
+       * Nobody answered as the session was opened (#2104): a fact that may
+       * pass, where every other closed session is one that will not.
+       */
+      readonly unreachable?: true;
+    };
 
 /**
  * The sealed session this device holds (`instance-port.ts` §`heldSealedSession`)
@@ -120,7 +128,11 @@ export type JobSession =
 export function jobSessionOf(held: HeldSealedSession): JobSession {
   return held.kind === 'open'
     ? { kind: 'open', channel: held.sealed, token: held.token }
-    : { kind: 'closed', text: held.text };
+    : {
+        kind: 'closed',
+        text: held.text,
+        ...(held.why === 'unreachable' ? { unreachable: true } : {}),
+      };
 }
 
 /** One event of a job's stream, read. Text in it is the instance's and is not yet screened here. */
