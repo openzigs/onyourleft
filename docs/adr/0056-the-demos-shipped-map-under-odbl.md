@@ -429,3 +429,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   only the synthetic fixture), and D-1 to D-11 otherwise. **Status: proposed, in force only when
   the owner rules on #2660**; the PR is not to be merged before that, and this entry is to be
   corrected or struck there if the ruling differs.
+- **2026-11-19** — **PROPOSED, pending the owner's ruling on
+  [#2688](https://github.com/openzigs/onyourleft/issues/2688): the demo bundle carries a pitch's
+  sport.** From #2688 `corridor.ts` §`packedCorridorFeatures` packs a pitch's `sport`, which
+  [ADR 0054](0054-towns-from-real-map-data.md)'s second entry of this date declares, as `sp` on the
+  polygon (packed version 7), one of eight sport names and nothing else. **A bundle baked from that
+  build publishes it** under ODbL 1.0, as it publishes every other record in it (D-3), and D-4's
+  §4.6 a offer covers it unchanged. D-2.1's list reads, from #2688, with *"land-use and water
+  polygons with `kind`"* followed by *"and a pitch's `sport`"*. What still stands, unchanged: D-5,
+  D-8, D-9, and D-1 to D-11 otherwise. **Status: proposed, in force only when the owner rules on
+  #2688**; the PR is not to be merged before that, and this entry is to be corrected or struck
+  there if the ruling differs.

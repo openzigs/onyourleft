@@ -17,6 +17,7 @@ import {
   type BuildingType,
   type Landmark,
   type LandUseFeature,
+  type PitchSport,
   type StreetFeature,
 } from '@onyourleft/map-features';
 
@@ -1142,6 +1143,73 @@ export function railFixture(latitude = FIXTURE_LATITUDE): {
         { kindDetail: 'rail', grade: 'ground', line: across(1_700, 30) },
         { kindDetail: 'rail', grade: 'bridge', line: across(2_000, 0) },
       ],
+    },
+  };
+}
+
+/**
+ * #2688's fixture: pitches and a playground beside 3 km of level road, for
+ * the owner's by-eye frames (`?town=fields`, whose before is
+ * `levers=-park-dressing`). **Rectangles from arithmetic, no real place.**
+ *
+ * - **Right, 1 000–1 100 m**: a soccer pitch, 15 m to 75 m back.
+ * - **Left, 1 150–1 250 m**: a baseball diamond's fan, home plate nearest the road.
+ * - **Right, 1 300–1 336 m**: two tennis courts side by side.
+ * - **Left, 1 400–1 430 m**: a basketball court.
+ * - **Right, 1 480–1 500 m**: a playground.
+ * - **Left, 1 550–1 650 m**: a pitch with no sport, the lines alone.
+ */
+export function fieldsFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (
+    kind: string,
+    from: number,
+    to: number,
+    near: number,
+    far: number,
+    sport?: PitchSport,
+  ): LandUseFeature => ({
+    ...landBeside(profile, origin, 'landuse', kind, from, to, near, far),
+    ...(sport === undefined ? {} : { sport }),
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'fields',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        land('park', 950, 1_700, 8, 200),
+        land('park', 950, 1_700, -8, -200),
+        land('pitch', 1_000, 1_100, 15, 75, 'soccer'),
+        {
+          layer: 'landuse',
+          kind: 'pitch',
+          sport: 'baseball',
+          rings: [
+            ringBeside(profile, origin, [
+              [1_200, -15],
+              [1_150, -110],
+              [1_250, -110],
+            ]),
+          ],
+        },
+        land('pitch', 1_300, 1_336, 15, 33, 'tennis'),
+        land('pitch', 1_300, 1_336, 35, 53, 'tennis'),
+        land('pitch', 1_400, 1_430, -15, -31, 'basketball'),
+        land('playground', 1_480, 1_500, 14, 30),
+        land('pitch', 1_550, 1_650, -15, -75),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [],
     },
   };
 }

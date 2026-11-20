@@ -17,6 +17,7 @@ import type {
   RAIL_KIND_DETAILS,
   ROOF_MATERIALS,
   ROOF_ORIENTATIONS,
+  PITCH_SPORTS,
   ROOF_SHAPES,
   WALL_MATERIALS,
   WATER_LINE_KINDS,
@@ -36,10 +37,18 @@ export interface PolygonFeature {
 /** Protomaps v4 `landuse.kind`, for example `residential` or `wood`. */
 export type LandUseKind = string;
 
-/** A `landuse` or `water` polygon and its `kind`, and nothing else (ADR 0054 D-2.2). */
+/** A pitch's sport, where it is one the world draws (#2688). */
+export type PitchSport = (typeof PITCH_SPORTS)[number];
+
+/**
+ * A `landuse` or `water` polygon and its `kind`, and nothing else (ADR 0054
+ * D-2.2) — but, since #2688, a `pitch`'s `sport` where it is one of
+ * {@link PITCH_SPORTS}. Absent on every other polygon.
+ */
 export interface LandUseFeature extends PolygonFeature {
   readonly layer: 'landuse' | 'water';
   readonly kind: LandUseKind;
+  readonly sport?: PitchSport;
 }
 
 export type BuildingType = (typeof BUILDING_TYPES)[number];

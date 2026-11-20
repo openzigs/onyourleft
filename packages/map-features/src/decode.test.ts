@@ -26,6 +26,8 @@ import {
   millionLineToTile,
   NAMED_FIXTURES,
   PLACE_FIXTURE_POINTS,
+  PITCH_FIXTURE_POLYGONS,
+  pitchesTile,
   PLACE_SENTINEL,
   placesTile,
   placesTileOf,
@@ -253,6 +255,17 @@ describe('decodeTile on the named fixtures', () => {
     });
   });
 
+  it('pitches — #2688: a pitch keeps its sport where it is one the world draws, and nothing else does', () => {
+    const tile = decoded(pitchesTile());
+    expect(tile.landUse.map((f) => [f.kind, f.sport ?? null])).toEqual(
+      PITCH_FIXTURE_POLYGONS.map((p) => [p.kind, p.kept]),
+    );
+    // Absent, not undefined-valued, where none is kept: the packed corridor carries no key for it.
+    for (const feature of tile.landUse) {
+      if (feature.sport === undefined) expect('sport' in feature).toBe(false);
+    }
+  });
+
   it('building_part: its height and its min_height; the address point is dropped', () => {
     const tile = decoded(buildingPartTile());
     expect(tile.buildings.map((b) => [b.kind, b.heightMetres, b.minHeightMetres])).toEqual([
@@ -319,6 +332,8 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'waterLines',
         // #2660.
         'rails',
+        // #2688: a pitch's sport.
+        'sport',
         // #1789: the building fields, from the one list.
         ...BUILDING_FIELD_NAMES,
       ];

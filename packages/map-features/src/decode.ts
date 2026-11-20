@@ -31,6 +31,9 @@ import {
   KEY_KIND_DETAIL,
   KEY_MIN_HEIGHT,
   KEY_POPULATION_RANK,
+  KEY_SPORT,
+  PITCH_KIND,
+  PITCH_SPORTS,
   LAYER_GEOMETRY_TYPES,
   LAYER_KEPT_GEOMETRIES,
   MAX_EXTENT,
@@ -61,6 +64,7 @@ import type {
   DecodeRefusal,
   LandUseFeature,
   PathFeature,
+  PitchSport,
   PlaceFeature,
   RailFeature,
   Ring,
@@ -177,6 +181,8 @@ interface FramedLayer {
     isBridge: number;
     isTunnel: number;
     populationRank: number;
+    /** #2688: `sport`'s key index, in `landuse` only; `-1` for none. */
+    sport: number;
     /** #1789: the key index of each building field, in `BUILDING_FIELD_NAMES` order; `-1` for none. */
     fields: Int32Array;
   };
@@ -349,6 +355,7 @@ function frameLayer(
     isBridge: -1,
     isTunnel: -1,
     populationRank: -1,
+    sport: -1,
     fields: new Int32Array(FIELD_SLOTS).fill(-1),
   };
   // ADR 0055 D-3: in `places`, only its three keys are ever matched, so no
@@ -356,6 +363,8 @@ function frameLayer(
   const isPlaces = name === 'places';
   // #1789: the building fields are matched in `buildings` and nowhere else.
   const isBuildings = name === 'buildings';
+  // #2688: a pitch's sport is matched in `landuse` and nowhere else.
+  const isLandUse = name === 'landuse';
   let f = 0;
   let v = 0;
   let k = 0;
@@ -382,7 +391,9 @@ function frameLayer(
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_MIN_HEIGHT)) keys.minHeight = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_BRIDGE)) keys.isBridge = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_TUNNEL)) keys.isTunnel = k;
-        else if (isBuildings) {
+        else if (isLandUse) {
+          if (bytesEqualAscii(bytes, range.start, range.end, KEY_SPORT)) keys.sport = k;
+        } else if (isBuildings) {
           for (let slot = 0; slot < FIELD_SLOTS; slot++) {
             const field = BUILDING_FIELD_NAMES[slot] as keyof typeof BUILDING_FIELD_RULES;
             if (bytesEqualAscii(bytes, range.start, range.end, BUILDING_FIELD_RULES[field].key)) {
@@ -560,11 +571,23 @@ function decodeFeature(
         sinks.landUse.push({ layer: layer.name, kind: kind ?? '', rings });
       }
       return;
-    case 'landuse':
+    case 'landuse': {
+      // #2688: a pitch keeps its sport, where it is one the world draws.
+      const sport =
+        kind === PITCH_KIND &&
+        (PITCH_SPORTS as readonly (string | null)[]).includes(attributes.sport)
+          ? (attributes.sport as PitchSport)
+          : undefined;
       for (const rings of parts as Ring[][]) {
-        sinks.landUse.push({ layer: layer.name, kind: kind ?? '', rings });
+        sinks.landUse.push({
+          layer: layer.name,
+          kind: kind ?? '',
+          rings,
+          ...(sport === undefined ? {} : { sport }),
+        });
       }
       return;
+    }
     case 'buildings':
       for (const rings of parts as Ring[][]) {
         sinks.buildings.push({
@@ -605,6 +628,8 @@ interface Attributes {
   isBridge: boolean;
   isTunnel: boolean;
   populationRank: number | null;
+  /** #2688: a `landuse` feature's `sport`, as an identifier; `null` for none or another shape. */
+  sport: string | null;
   /** #1789: each building field's value, in `BUILDING_FIELD_NAMES` order; `null` for none. */
   fields: (string | number | null)[];
 }
@@ -662,6 +687,7 @@ function readTags(
     isBridge: false,
     isTunnel: false,
     populationRank: null,
+    sport: null,
     fields: new Array<string | number | null>(FIELD_SLOTS).fill(null),
   };
   if (tags === null) return out;
@@ -680,7 +706,8 @@ function readTags(
     else if (key === layer.keys.isTunnel) out.isTunnel = cachedFlag(bytes, layer, value);
     else if (key === layer.keys.populationRank) {
       out.populationRank = cachedRank(bytes, layer, value);
-    } else {
+    } else if (key === layer.keys.sport) out.sport = cachedIdentifier(bytes, layer, value);
+    else {
       const slot = layer.keys.fields.indexOf(key);
       if (slot >= 0) out.fields[slot] = cachedField(bytes, layer, slot, value);
     }

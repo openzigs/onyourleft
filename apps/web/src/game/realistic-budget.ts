@@ -1096,6 +1096,26 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
 export const REALISTIC_PARK_DRESSING_TRIANGLES = 5_120;
 
 /**
+ * The most triangles a frame's pitches and playgrounds may add — #2688:
+ * **800**, `park-fields.ts` §`PARK_FIELD_CAPACITY` (80) boxes — a pitch's
+ * lines, goals, net, hoops or backstop and a playground's structures — at the
+ * park belt's box of 10 triangles, drawn in the same call after the golf and
+ * cemetery pieces. The realistic world's alone, so counted INSIDE
+ * {@link REALISTIC_FRAME_TRIANGLES}' worst frame.
+ *
+ * ⚠️ **Its own term, because {@link REALISTIC_PARK_DRESSING_TRIANGLES} was
+ * spent at its capacity.** With a room's remote riders in it, the golf and
+ * cemetery pieces left 882 triangles of {@link REALISTIC_REMOTE_TRIANGLES};
+ * this is what fits in them, measured by `realistic-budget.test.ts` (1 280
+ * did not: 398 over). No budget above is raised. The tablet's reading is the
+ * owner's (#733).
+ *
+ * @test-facing held by `realistic-budget.test.ts` (the worst frame, both
+ * cases) and `park-dressing-belt.test.ts` (the belt as built)
+ */
+export const REALISTIC_PARK_FIELD_TRIANGLES = 800;
+
+/**
  * The most triangles a frame's village streets may add — #1535's pavements,
  * #1564's paths to the front doors and #1536's street furniture: **34 304**
  * in the realistic world since the owner's ruling of 2026-11-05 on #1274

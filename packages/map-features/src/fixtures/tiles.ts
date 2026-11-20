@@ -728,8 +728,51 @@ export function waterLinesTile(): Uint8Array {
   ]);
 }
 
-/** The nine named fixtures, for the walks that run over all of them. */
+/**
+ * #2688's pitches: each `landuse` polygon's `kind`, the `sport` it carries,
+ * and the sport the decoder keeps — `null` for none.
+ */
+export const PITCH_FIXTURE_POLYGONS: readonly {
+  readonly kind: string;
+  readonly sport: string | undefined;
+  readonly kept: string | null;
+}[] = [
+  { kind: 'pitch', sport: 'soccer', kept: 'soccer' },
+  { kind: 'pitch', sport: 'baseball', kept: 'baseball' },
+  { kind: 'pitch', sport: 'tennis', kept: 'tennis' },
+  // Several sports joined, which is not a kind's shape: no sport.
+  { kind: 'pitch', sport: 'soccer;basketball', kept: null },
+  // A sport the world draws nothing for: no sport.
+  { kind: 'pitch', sport: 'curling', kept: null },
+  { kind: 'pitch', sport: undefined, kept: null },
+  // A sport on what is not a pitch is never kept.
+  { kind: 'park', sport: 'soccer', kept: null },
+  { kind: 'playground', sport: undefined, kept: null },
+];
+
+/** {@link PITCH_FIXTURE_POLYGONS} as one `landuse` layer, every feature carrying a name and an id. */
+export function pitchesTile(): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'landuse',
+      features: PITCH_FIXTURE_POLYGONS.map((pitch, index) => ({
+        id: POISON.id + index,
+        type: 3,
+        tags: {
+          ...poisonTags,
+          kind: pitch.kind,
+          ...(pitch.sport === undefined ? {} : { sport: pitch.sport }),
+        },
+        geometry: polygon([outerRing(regularPolygon(400 + index * 450, 2000, 180, 4))]),
+      })),
+    },
+  ]);
+}
+
+/** The ten named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
+  pitches: pitchesTile,
   residentialBlock: residentialBlockTile,
   woodWithHole: woodWithHoleTile,
   lake: lakeTile,

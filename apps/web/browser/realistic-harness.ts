@@ -82,6 +82,7 @@ import {
   fencedGroundsFixture,
   parksFixture,
   railFixture,
+  fieldsFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -591,7 +592,10 @@ async function run(): Promise<void> {
                                         : // #2660: level crossings.
                                           config.town === 'rail'
                                           ? railFixture(latitude)
-                                          : undefined;
+                                          : // #2688: pitches and a playground.
+                                            config.town === 'fields'
+                                            ? fieldsFixture(latitude)
+                                            : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

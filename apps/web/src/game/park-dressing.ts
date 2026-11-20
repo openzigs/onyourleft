@@ -55,8 +55,10 @@
  *   piece of wall, a flag's pole or its flag — drawn in ONE instanced call
  *   (`three-renderer.ts` §`ParkDressingBelt`), at most
  *   {@link PARK_DRESSING_CAPACITY} a frame, nearest first, the walls and flags
- *   before the stones. A frame with no cemetery and no golf course in reach
- *   draws none and makes no call.
+ *   before the stones. Since #2688 a pitch's lines and goals and a playground's
+ *   structures follow them in the same call (`park-fields.ts`), at most
+ *   {@link PARK_FIELD_CAPACITY} more, nearest first. A frame with none of
+ *   them in reach draws none and makes no call.
  *
  * ⚠️ **No new class, and no building** (ADR 0054 D-5.2): the looks are
  * `land-class.ts` §`ParkLook`'s, read through {@link LandClassMask.parkLookAt}.
@@ -73,13 +75,24 @@ import type { RouteProfile } from '@onyourleft/domain';
 
 import { LAND_CLASS_CELL_METRES, type LandClassMask, type ParkLook } from './land-class';
 import { distanceToDrawnRoad } from './road-grid';
+import { fieldsOf, PARK_FIELD_CAPACITY } from './park-fields';
 import { golfStandAt, GOLF_STAND_METRES } from './scatter';
 import { mixInto, slotHash, uniformFrom } from './seeded';
 import type { CorridorOrigin } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
 
-/** What a {@link ParkPiece} is. */
-export type ParkPieceKind = 'headstone' | 'wall' | 'flag-pole' | 'flag';
+/** What a {@link ParkPiece} is — since #2688 a pitch's or a playground's too (`park-fields.ts`). */
+export type ParkPieceKind =
+  | 'headstone'
+  | 'wall'
+  | 'flag-pole'
+  | 'flag'
+  | 'pitch-line'
+  | 'goal'
+  | 'net'
+  | 'hoop'
+  | 'backstop'
+  | 'play';
 
 /**
  * One box standing on a park's ground. The renderer draws a unit box, its
@@ -99,6 +112,12 @@ export interface ParkPiece {
    * along `(cos yaw, −sin yaw)` in `(x, z)`. @see yawAlong
    */
   readonly yaw: number;
+  /**
+   * Radians about its own depth axis, applied before {@link yaw}: its width's
+   * `+x` end rises by `sin tilt · width / 2`. Since #2688, a pitch's line laid
+   * along a slope (`park-fields.ts` §`laidAlongTheGround`); absent, level.
+   */
+  readonly tilt?: number;
   readonly width: number;
   readonly height: number;
   readonly depth: number;
@@ -183,6 +202,15 @@ export const FLAG_TRUE_SIZE_METRES = 120;
  * the rest, nearest first.
  */
 export const PARK_DRESSING_CAPACITY = 512;
+
+/**
+ * The most pieces the belt holds: **592** — {@link PARK_DRESSING_CAPACITY}'s
+ * golf and cemetery pieces and, since #2688, `park-fields.ts`
+ * §`PARK_FIELD_CAPACITY`'s pitches and playgrounds after them.
+ */
+export const PARK_BELT_CAPACITY = PARK_DRESSING_CAPACITY + PARK_FIELD_CAPACITY;
+
+export { PARK_FIELD_CAPACITY };
 
 /** The share of {@link PARK_DRESSING_CAPACITY} the walls and flags are taken from first. */
 const FIXTURE_SHARE = 0.25;
@@ -337,8 +365,10 @@ interface Dressing {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly seed: number;
-  /** Whether the corridor has any land this file dresses. */
+  /** Whether the corridor has any golf course or cemetery. */
   readonly any: boolean;
+  /** #2688: every pitch's and playground's pieces, by tile; empty where there are none. */
+  readonly fields: ReadonlyMap<number, readonly ParkPiece[]>;
   /** The wall pieces, by tile. */
   readonly walls: ReadonlyMap<number, readonly ParkPiece[]>;
   /** The mapped sand, with each polygon's box. */
@@ -371,10 +401,11 @@ export function parkDressingInView(
   cameraZ: number,
 ): ParkDressingInView {
   const dressing = dressingOf(corridor, profile, origin, seed, land);
-  if (!dressing.any) return NO_PARK_DRESSING;
+  if (!dressing.any && dressing.fields.size === 0) return NO_PARK_DRESSING;
   const viewKey = `${Math.round(cameraX / VIEW_STEP_METRES)},${Math.round(cameraZ / VIEW_STEP_METRES)}`;
   if (dressing.view?.key === viewKey) return dressing.view.value;
-  const ground = groundWindow(dressing, cameraX, cameraZ);
+  // The ground's window only where there is golf or a cemetery: a pitch paints none.
+  const ground = dressing.any ? groundWindow(dressing, cameraX, cameraZ) : undefined;
   const pieces = piecesInReach(dressing, ground, cameraX, cameraZ);
   const value = ground === undefined && pieces.length === 0 ? NO_PARK_DRESSING : { pieces, ground };
   dressing.view = { key: viewKey, value };
@@ -408,6 +439,7 @@ function dressingOf(
     seed,
     any,
     walls: any ? cemeteryWalls(corridor.landUse, profile, origin) : new Map(),
+    fields: byTile(fieldsOf(corridor.landUse, profile, origin)),
     sands: any ? sandsOf(corridor.landUse) : [],
     stones: new Map(),
     greens: new Map(),
@@ -867,7 +899,42 @@ function piecesInReach(
     if (kept.length >= PARK_DRESSING_CAPACITY) break;
     kept.push((fixtures[index] as { piece: ParkPiece }).piece);
   }
+  // #2688: the pitches and playgrounds after them, nearest first, in their own room.
+  const fields: { piece: ParkPiece; squared: number }[] = [];
+  for (let tx = first; tx <= last; tx += 1) {
+    for (let tz = firstRow; tz <= lastRow; tz += 1) {
+      const key = tileKey(tx, tz);
+      if (key === undefined) continue;
+      for (const field of dressing.fields.get(key) ?? []) {
+        const squared = near(field);
+        if (squared <= reachSquared) fields.push({ piece: field, squared });
+      }
+    }
+  }
+  fields.sort(byNearness);
+  for (let index = 0; index < fields.length && index < PARK_FIELD_CAPACITY; index += 1) {
+    kept.push((fields[index] as { piece: ParkPiece }).piece);
+  }
   return kept;
+}
+
+/** Pieces by the {@link PARK_TILE_METRES} tile their middle is in. */
+function byTile(pieces: readonly ParkPiece[]): ReadonlyMap<number, readonly ParkPiece[]> {
+  const tiles = new Map<number, ParkPiece[]>();
+  for (const piece of pieces) {
+    const key = tileKey(
+      Math.floor(piece.x / PARK_TILE_METRES),
+      Math.floor(piece.z / PARK_TILE_METRES),
+    );
+    if (key === undefined) continue;
+    let list = tiles.get(key);
+    if (list === undefined) {
+      list = [];
+      tiles.set(key, list);
+    }
+    list.push(piece);
+  }
+  return tiles;
 }
 
 /** The most tiles of stones kept before the far ones are forgotten. */

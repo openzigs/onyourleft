@@ -37,6 +37,8 @@ import {
   corridorTileCover,
   decodeTile,
   describeRefusal,
+  PITCH_KIND,
+  PITCH_SPORTS,
   RAIL_KIND_DETAILS,
   tileBounds,
   tileBox,
@@ -49,6 +51,7 @@ import {
   type DecodeRefusal,
   type LandUseFeature,
   type PathFeature,
+  type PitchSport,
   type PlaceFeature,
   type RailFeature,
   type StreetFeature,
@@ -93,9 +96,10 @@ export const READ_TIMEOUT_MS = 120_000;
  * version, so a version-5 row is read again here, and a version-6 row met by
  * version-5 code is read again there, never decoded as its own: that is
  * #1789's rollback, and #2659's and #2660's, and there is no Dexie schema
- * change.
+ * change; **7** since #2688, which keeps a pitch's sport a version-6 record
+ * never decoded.
  */
-export const CORRIDOR_READER_VERSION = 6;
+export const CORRIDOR_READER_VERSION = 7;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -557,9 +561,10 @@ const PACK_SCALE = 100;
 /**
  * The packed format's version: 2 since #1565 added the streets, 3 since #1632
  * added the places, 4 since #1789 added the building fields, 5 since #2659
- * added the water lines, 6 since #2660 added the railway lines.
+ * added the water lines, 6 since #2660 added the railway lines, 7 since #2688
+ * added a pitch's sport.
  */
-const PACKED_VERSION = 6;
+const PACKED_VERSION = 7;
 
 /**
  * #1789: each building field's name in the packed format, short because a
@@ -624,7 +629,13 @@ function buildingFieldsOfPacked(
 
 interface PackedFeatures {
   readonly v: typeof PACKED_VERSION;
-  readonly landUse: readonly { layer: 'landuse' | 'water'; kind: string; rings: number[][] }[];
+  /** `sp` is a pitch's sport (#2688), absent on every polygon with none. */
+  readonly landUse: readonly {
+    layer: 'landuse' | 'water';
+    kind: string;
+    sp?: PitchSport;
+    rings: number[][];
+  }[];
   readonly buildings: readonly {
     kind: 'building' | 'building_part';
     h: number | null;
@@ -726,6 +737,7 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
     landUse: features.landUse.map((f) => ({
       layer: f.layer,
       kind: f.kind,
+      ...(f.sport === undefined ? {} : { sp: f.sport }),
       rings: f.rings.map(toInts),
     })),
     buildings: features.buildings.map((f) => {
@@ -796,6 +808,12 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
     landUse: packed.landUse.map((f) => ({
       layer: f.layer,
       kind: f.kind,
+      // #2688: held to the decoder's rule again — a pitch's, and one of its sports.
+      ...(f.layer === 'landuse' &&
+      f.kind === PITCH_KIND &&
+      (PITCH_SPORTS as readonly unknown[]).includes(f.sp)
+        ? { sport: f.sp }
+        : {}),
       rings: f.rings.map(fromInts),
     })),
     buildings: packed.buildings.map((f) => ({

@@ -57,6 +57,33 @@ export const KEY_IS_TUNNEL = 'is_tunnel';
  * in `places`, and looked up nowhere else.
  */
 export const KEY_POPULATION_RANK = 'population_rank';
+/**
+ * A `landuse` pitch's sport (#2688, read from docs.protomaps.com/basemaps/layers
+ * on 2026-11-19: "Which sports are played on a pitch", a string). Looked up
+ * only in `landuse`, kept only on a {@link PITCH_KIND} polygon and only when
+ * it is one of {@link PITCH_SPORTS}.
+ */
+export const KEY_SPORT = 'sport';
+
+/** The `landuse.kind` a {@link KEY_SPORT} is kept on (#2688). */
+export const PITCH_KIND = 'pitch';
+
+/**
+ * The sports a pitch's {@link KEY_SPORT} is kept as (#2688): the ones the
+ * world draws a goal, a net, a hoop or a backstop for. Any other value —
+ * another sport, several joined by `;` (which is not a kind's shape), or
+ * none — is not kept, and the pitch is drawn with its lines alone.
+ */
+export const PITCH_SPORTS = [
+  'soccer',
+  'american_football',
+  'rugby_union',
+  'rugby_league',
+  'baseball',
+  'softball',
+  'tennis',
+  'basketball',
+] as const;
 
 /** MVT geometry types (spec 2.1 §4.3.4). */
 export const GEOMETRY_POINT = 1;
