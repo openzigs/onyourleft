@@ -22,6 +22,7 @@ import {
   SIDE_ROAD_TRIANGLES_PER_ARM,
   SIDE_ROAD_WIDTHS,
   sideRoadsAt,
+  STREET_MAX_METRES,
   TARMAC,
   type SideRoad,
 } from './cross-streets';
@@ -159,6 +160,20 @@ describe('where an unpaved way joins the route — #2695', () => {
     expect(mappedTracks(both, FARMLAND, ORIGIN, SEED)).toBe(
       mappedTracks(both, FARMLAND, ORIGIN, SEED),
     );
+  });
+
+  it('stops resampling at STREET_MAX_METRES, so a hostile tile cannot exhaust memory', () => {
+    const hostile: PathFeature = {
+      kind: 'path',
+      kindDetail: 'track',
+      line: Float32Array.from([9e5, 9e5, 9e5 + STREET_MAX_METRES * 2, 9e5]),
+    };
+    expect(mappedTracks(corridorOf([hostile, path(at, 'track')]), FARMLAND, ORIGIN, SEED)).toEqual(
+      [],
+    );
+    expect(
+      mappedTracks(corridorOf([path(at, 'track'), hostile]), FARMLAND, ORIGIN, SEED),
+    ).toHaveLength(1);
   });
 });
 
