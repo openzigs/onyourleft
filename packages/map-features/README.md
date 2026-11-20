@@ -11,7 +11,7 @@ map data and names no rendering library.** The archive read is #1539's one modul
 
 | Module | What it is |
 |---|---|
-| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry; and since #1632 ([ADR 0055](../../docs/adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) `places`, of which only `kind`, `kind_detail`, `population_rank` and the point, never a name; and since #1789 (ADR 0054's entry of 2026-11-01) the twelve building fields #1557's archive writes on `buildings`, each whitelisted or clamped at read and `null` where it cannot be. A refusal, never a throw |
+| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry; and since #1632 ([ADR 0055](../../docs/adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) `places`, of which only `kind`, `kind_detail`, `population_rank` and the point, never a name; and since #1789 (ADR 0054's entry of 2026-11-01) the twelve building fields #1557's archive writes on `buildings`, each whitelisted or clamped at read and `null` where it cannot be; and since #2892 (ADR 0091 D-2) a street's `oneway`, `access` and `is_link`, each its default where the tile's value is not recognised. A refusal, never a throw |
 | `src/limits.ts` | The five bounds, with what each sits above on the published archive, and the count of places kept a tile (#1632), at which the decoder stops |
 | `src/schema.ts` | What is read: the layers, the keys, the geometry types each layer carries, the footway set (#1551), and the building fields' rules, `BUILDING_FIELD_RULES` (#1789) |
 | `src/protobuf.ts` | A bounded protobuf reader: every read is inside its message or a refusal |
@@ -54,6 +54,22 @@ the path to it, can hand back anything. So:
   the list's own constant, a number is clamped (or, for a palette index, kept only inside the
   palette), and a string where a number belongs is `null` — never parsed. A field never refuses a
   tile or drops a footprint.
+- **The road fields (#2892, [ADR 0091](../../docs/adr/0091-the-open-world-street-graph-is-built-from-our-z15-tiles.md)
+  D-2) are looked up in `roads` alone** and kept on a street only, for the open-world street graph.
+  Each is compared byte for byte with `schema.ts`' lists and kept as a constant of the decoder's
+  own; no tile string is kept. A value the lists do not name — another string, a number where a
+  string belongs, a string where a boolean belongs — is the field's default (`NO_ROAD_FIELDS`) and
+  is counted in `DecodedTile.roadValuesDefaulted`; it never refuses the tile or drops the street.
+  `name`, `ref`, `network*`, `shield_text*`, `service` and `min_zoom` stay unread.
+
+  | Field on `DecodedStreetFeature` | Tile key | Values | Default |
+  |---|---|---|---|
+  | `oneway` | `oneway` | `'with-line'` for `yes` (along the line's vertex order), `'against-line'` for `-1`, `'no'` for `no` | `'no'` |
+  | `access` | `access` | `'no'` and `'private'` as themselves; `yes`, `permissive`, `destination` and `customers` as `'open'` | `'open'` |
+  | `isLink` | `is_link` | a boolean | `false` |
+
+  `oneway` is a fact about the street and never removes a turn (ADR 0091 D-5). A corridor's packed
+  streets keep the plain `StreetFeature`, without these fields.
 - **A refused tile's message names the layer and the limit, and nothing else.** The layer is always
   one of the four this package reads, never a name the tile supplied.
 
@@ -75,8 +91,8 @@ in the lockfile through `maplibre-gl`.
 ## Fixtures
 
 `src/fixtures/` holds a residential block with three footprints, a wood with a hole, a lake, a
-sidewalk, a `building_part` with a `min_height`, footprints with every building field set (#1789), a
+sidewalk, a `building_part` with a `min_height`, footprints with every building field set (#1789), streets carrying each road field (#2892), a
 tile at each limit and one over each, and the hostile tiles of `hostile.ts`, among them a hostile value
-under each building field's key. **No OpenStreetMap data of any kind**: rectangles, regular polygons
+under each building field's key and each road field's. **No OpenStreetMap data of any kind**: rectangles, regular polygons
 and evenly spaced points, for the reason `apps/web/browser/pmtiles-fixture.ts` gives. They are code
 rather than committed binaries, and `fixtures.test.ts` pins the named ones by SHA-256.
