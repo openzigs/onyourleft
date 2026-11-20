@@ -1,0 +1,609 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The rolling route — #2895, under ADR 0087 D-4.1 and D-6 and ADR 0088 D-1.
+ *
+ * An open-world ride (#2880) has no route in advance: the road ahead is
+ * whichever street the rider takes at the next junction. Almost everything in
+ * the game reads "distance along a {@link RouteProfile}", so the open-world
+ * ride keeps that and gives the game a profile that **grows**: the street being
+ * ridden, plus the default way on at each junction appended far enough ahead
+ * for the view and the HUD's look-ahead, with the tail past a junction replaced
+ * when the rider chooses another way.
+ *
+ * ## What `routeProfile` would not do, and what this does instead
+ *
+ * The spike #2882 (`docs/spikes/0041-rolling-route-and-a-turning-ride.md`,
+ * "What `RouteProfile` / `routeProfile` had to change") listed them:
+ *
+ * 1. **The grid is stretched** to land on the route's end, so a road whose
+ *    length changes moves every sample. Here sample `k` is exactly
+ *    `k × ROLLING_RESOLUTION_METRES` from the ride's start, and a sample once
+ *    taken never moves (ADR 0087 D-4.1).
+ * 2. **The windows are counted, not derived from a spacing**: a median over
+ *    {@link ROLLING_DESPIKE_SAMPLES} and a least-squares slope over
+ *    {@link ROLLING_SLOPE_SAMPLES}, the counts `routeProfile` gives a 10 m
+ *    spacing. The filters themselves are `routeProfile`'s, and
+ *    `rolling.test.ts` holds that the two agree on the same road.
+ * 3. **The arrays are fixed.** A consumer may hold a profile's arrays, so
+ *    {@link RollingRoute.view} hands out a NEW `RouteProfile` after every change
+ *    and the same object otherwise; a holder of an old one is never changed
+ *    under it.
+ * 4. **The grade near the end is provisional**, because its window runs past
+ *    the road known so far. Every change fits again the samples whose windows
+ *    reach it, and no others, so a change at distance `d` touches no grade
+ *    before `d − 70 m` (two samples of median, five of slope).
+ * 5. **The ridden road is trimmed**, to {@link ROLLING_BEHIND_METRES} behind
+ *    the rider, so an hour's ride does not grow without limit
+ *    ({@link ROLLING_MOST_SAMPLES}). That moves the first sample, so a view's
+ *    distance zero is the route's {@link RollingRoute.origin}, not the ride's
+ *    start: a consumer reads ride distance `d` at `d − origin`.
+ *
+ * ## Grade safety
+ *
+ * ADR 0087 D-6.1: on this grid the grade sent at `s` reads the road up to
+ * `s + 80 m` and no further. So a junction's choice is final
+ * {@link JUNCTION_LOCK_METRES} before it ({@link RollingRoute.choose} refuses
+ * one after that), and the route always reaches {@link ROLLING_AHEAD_METRES}
+ * ahead, past D-6.3's 180 m. A U-turn and a dead end's turn-round change the
+ * road under the rider at once; those are tail replacements here, and the grade
+ * path walks them at 1 % a second (D-6.4), which is the app's job, not this
+ * module's.
+ *
+ * ## What it knows of the street graph
+ *
+ * Only {@link RollingStreetGraph}: the edges that leave a node. The graph is
+ * #2894's; this module walks it and never builds it. Which way is the default
+ * at a junction is ADR 0088 D-1.4's rule, {@link waysOn}.
+ *
+ * Nothing here reads a clock or a random source, and no message names a
+ * position or a node (ADR 0004 D).
+ */
+
+import { bearingDifference, distanceBetween, initialBearing } from '../geodesy';
+import type { AltitudeMetres, DegreesBearing, GeographicPosition } from '../quantities';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  gradePercent,
+  metres,
+} from '../quantities';
+import { RouteError } from './errors';
+import {
+  DESPIKE_WINDOW_METRES,
+  GRADIENT_WINDOW_METRES,
+  PROFILE_RESOLUTION_METRES,
+  recordedAscent,
+  type RouteProfile,
+} from './profile';
+
+/** The spacing, exactly: `routeProfile`'s target, never stretched (ADR 0087 D-4.1). */
+export const ROLLING_RESOLUTION_METRES = PROFILE_RESOLUTION_METRES;
+
+/**
+ * The median's window, in samples: **5**, the count `routeProfile` gives
+ * {@link DESPIKE_WINDOW_METRES} at a 10 m spacing (`round(30 / 10 / 2) = 2`
+ * either side). Fixed, never derived from a spacing (ADR 0087 D-4.1).
+ */
+export const ROLLING_DESPIKE_SAMPLES =
+  2 * Math.round(DESPIKE_WINDOW_METRES / ROLLING_RESOLUTION_METRES / 2) + 1;
+
+/** The slope's window, in samples: **11**, as {@link ROLLING_DESPIKE_SAMPLES} is 5. */
+export const ROLLING_SLOPE_SAMPLES =
+  2 * Math.round(GRADIENT_WINDOW_METRES / ROLLING_RESOLUTION_METRES / 2) + 1;
+
+/**
+ * A junction's choice is final when the rider is this close to it: **100 m**
+ * (ADR 0087 D-6.2, ADR 0088 D-1.5). 80 m of the grade's reach and two samples
+ * of margin.
+ */
+export const JUNCTION_LOCK_METRES = 100;
+
+/**
+ * How far ahead of the rider the route always reaches: **2 km**, the HUD's
+ * look-ahead (`apps/web/src/game/hud/look-ahead.ts`), which is further than the
+ * view's 400 m and ADR 0087 D-6.3's 180 m. *#2895's choice.*
+ */
+export const ROLLING_AHEAD_METRES = 2_000;
+
+/**
+ * How much ridden road is kept behind the rider: **1 km**. Well past the
+ * 140 m a U-turn's refit reads back, and past anything drawn behind the chase
+ * camera. *#2895's choice.*
+ */
+export const ROLLING_BEHIND_METRES = 1_000;
+
+/**
+ * The most samples a route ever holds after {@link RollingRoute.advance}:
+ * the road behind and ahead, plus the sample either end that straddles a
+ * bound. At 10 m, 302 samples, whatever the ride's length.
+ */
+export const ROLLING_MOST_SAMPLES =
+  (ROLLING_BEHIND_METRES + ROLLING_AHEAD_METRES) / ROLLING_RESOLUTION_METRES + 2;
+
+/**
+ * A way shorter than this is not a way on: **1 m**. The graph comes from map
+ * tiles, which are untrusted input (#2880's hard rules); a cycle of edges a
+ * hair long would otherwise let the route walk them without end while it tries
+ * to reach {@link ROLLING_AHEAD_METRES}.
+ */
+export const ROLLING_LEAST_WAY_METRES = 1;
+
+/** A point of a street: where it is, and how high. */
+export interface RollingPoint {
+  readonly position: GeographicPosition;
+  readonly elevation: AltitudeMetres;
+}
+
+/** One street between two nodes of the graph, oriented away from `from`. */
+export interface RollingEdge {
+  /** The street's id, the same whichever way it is ridden. */
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  /** From `from` to `to`. At least two, and longer than {@link ROLLING_LEAST_WAY_METRES}. */
+  readonly points: readonly RollingPoint[];
+  /** Higher is the bigger road. Breaks a tie in ADR 0088 D-1.4's default. */
+  readonly roadClass: number;
+}
+
+/** What the rolling route reads of the street graph (#2894). */
+export interface RollingStreetGraph {
+  /** Every edge that leaves `node`, each oriented away from it. */
+  edgesFrom(node: string): readonly RollingEdge[];
+}
+
+/** One way on from a junction, with how far it turns. */
+export interface RollingWay {
+  readonly edge: RollingEdge;
+  /** The change of bearing onto it: negative is left, positive right. */
+  readonly turnDegrees: number;
+}
+
+/** How a leg came to be on the route. */
+export type RollingLegKind = 'start' | 'default' | 'chosen' | 'turn-round' | 'u-turn';
+
+/** One stretch of one street on the route, between two ride distances. */
+export interface RollingLeg {
+  readonly edge: RollingEdge;
+  readonly kind: RollingLegKind;
+  /** The ride distance where the leg starts. */
+  readonly start: number;
+  /** The ride distance where it ends: at `edge.to`, unless a U-turn cut it. */
+  readonly end: number;
+}
+
+/** A junction on the route, with the ways on from it. */
+export interface RollingJunction {
+  /** The ride distance of the junction. */
+  readonly distance: number;
+  /** Every way on, from the furthest left to the furthest right. Never the way back. */
+  readonly ways: readonly RollingWay[];
+  /** The edge id of ADR 0088 D-1.4's default. */
+  readonly defaultWay: string;
+  /** The edge id the route follows past it now. */
+  readonly taken: string;
+}
+
+/** What {@link RollingRoute.choose} did. */
+export type RollingChoice =
+  /** The tail past the junction now follows the chosen way. */
+  | 'swapped'
+  /** The route already took that way. */
+  | 'unchanged'
+  /** The rider is within {@link JUNCTION_LOCK_METRES} of the junction, or past it. */
+  | 'locked'
+  /** No junction of the route is at that distance. */
+  | 'no-junction'
+  /** That edge is not a way on from that junction. */
+  | 'no-such-way';
+
+interface Leg extends RollingLeg {
+  /** Cumulative distance along `edge.points`. */
+  readonly along: readonly number[];
+  /** The offset along the edge where the leg starts. */
+  readonly enter: number;
+  /** Whether it reaches `edge.to`: false once a U-turn cut it. */
+  readonly atNode: boolean;
+}
+
+/** Cumulative distance along `points`, from 0. */
+function cumulative(points: readonly RollingPoint[]): number[] {
+  const along = [0];
+  for (let index = 1; index < points.length; index += 1) {
+    const step = distanceBetween(
+      (points[index - 1] as RollingPoint).position,
+      (points[index] as RollingPoint).position,
+    );
+    along.push((along[index - 1] as number) + step);
+  }
+  return along;
+}
+
+function lengthOf(edge: RollingEdge): number {
+  const along = cumulative(edge.points);
+  return along[along.length - 1] as number;
+}
+
+function reversed(edge: RollingEdge): RollingEdge {
+  return {
+    id: edge.id,
+    from: edge.to,
+    to: edge.from,
+    points: [...edge.points].reverse(),
+    roadClass: edge.roadClass,
+  };
+}
+
+/** The bearing of the first stretch of `points` with a length, or `undefined`. */
+function firstBearing(points: readonly RollingPoint[]): DegreesBearing | undefined {
+  for (let index = 1; index < points.length; index += 1) {
+    const bearing = initialBearing(
+      (points[0] as RollingPoint).position,
+      (points[index] as RollingPoint).position,
+    );
+    if (bearing !== undefined) return bearing;
+  }
+  return undefined;
+}
+
+/** The bearing of the last stretch of `points` with a length, or `undefined`. */
+function lastBearing(points: readonly RollingPoint[]): DegreesBearing | undefined {
+  const last = points[points.length - 1] as RollingPoint;
+  for (let index = points.length - 2; index >= 0; index -= 1) {
+    const bearing = initialBearing((points[index] as RollingPoint).position, last.position);
+    if (bearing !== undefined) return bearing;
+  }
+  return undefined;
+}
+
+/** The signed turn from `from` to `to`, in `(-180, 180]`: negative is left. */
+function signedTurn(from: DegreesBearing, to: DegreesBearing): number {
+  const size = bearingDifference(from, to);
+  const clockwise = (((to - from) % 360) + 360) % 360;
+  return clockwise <= 180 ? size : -size;
+}
+
+/**
+ * The ways on from the node `arriving` ends at, ordered from the furthest left
+ * to the furthest right, with ADR 0088 D-1.4's default.
+ *
+ * The way back (an edge with `arriving`'s id) is never a way on, and nor is a
+ * way shorter than {@link ROLLING_LEAST_WAY_METRES}. **The default** is the way
+ * with the smallest change of bearing, counted in whole degrees; on a tie, the
+ * one of the higher road class; then the right-hand one.
+ */
+export function waysOn(
+  arriving: RollingEdge,
+  edges: readonly RollingEdge[],
+): { readonly ways: readonly RollingWay[]; readonly defaultWay: RollingWay | undefined } {
+  const heading = lastBearing(arriving.points);
+  const ways: RollingWay[] = [];
+  for (const edge of edges) {
+    if (edge.id === arriving.id || !(lengthOf(edge) >= ROLLING_LEAST_WAY_METRES)) continue;
+    const leaving = firstBearing(edge.points);
+    const turnDegrees =
+      heading === undefined || leaving === undefined ? 0 : signedTurn(heading, leaving);
+    ways.push({ edge, turnDegrees });
+  }
+  ways.sort((a, b) => a.turnDegrees - b.turnDegrees);
+  let defaultWay: RollingWay | undefined;
+  for (const way of ways) {
+    if (defaultWay === undefined) {
+      defaultWay = way;
+      continue;
+    }
+    const size = Math.round(Math.abs(way.turnDegrees));
+    const best = Math.round(Math.abs(defaultWay.turnDegrees));
+    if (
+      size < best ||
+      (size === best && way.edge.roadClass > defaultWay.edge.roadClass) ||
+      (size === best &&
+        way.edge.roadClass === defaultWay.edge.roadClass &&
+        way.turnDegrees > defaultWay.turnDegrees)
+    ) {
+      defaultWay = way;
+    }
+  }
+  return { ways, defaultWay };
+}
+
+/** `values[index]`, with the ends replicated, as `routeProfile`'s windows do. */
+function clamped(values: readonly number[], index: number): number {
+  const last = values.length - 1;
+  return values[index < 0 ? 0 : index > last ? last : index] as number;
+}
+
+const DESPIKE_HALF = (ROLLING_DESPIKE_SAMPLES - 1) / 2;
+const SLOPE_HALF = (ROLLING_SLOPE_SAMPLES - 1) / 2;
+// Σ t² over t = -half..half, as `routeProfile`'s `slopes` takes it.
+const SLOPE_SQUARES = (SLOPE_HALF * (SLOPE_HALF + 1) * (2 * SLOPE_HALF + 1)) / 3;
+
+/**
+ * A street-following profile that grows ahead of the rider, swaps its tail at
+ * a junction, and drops the road far behind. See the file's header.
+ *
+ * Mutable, and the web app owns when each method is called; every
+ * `RouteProfile` it hands out is immutable.
+ */
+export class RollingRoute {
+  readonly #graph: RollingStreetGraph;
+  readonly #legs: Leg[] = [];
+  /** The ride-distance index of the first sample held. */
+  #first = 0;
+  readonly #positions: GeographicPosition[] = [];
+  readonly #heights: number[] = [];
+  readonly #despiked: number[] = [];
+  readonly #grades: number[] = [];
+  #view: RouteProfile | undefined;
+
+  /**
+   * Starts a ride at the first point of `start`, and reaches
+   * {@link ROLLING_AHEAD_METRES} along the default ways.
+   *
+   * @throws {RouteError} `too-few-points` or `no-distance` for a start street
+   * with no length.
+   */
+  constructor(graph: RollingStreetGraph, start: RollingEdge) {
+    if (start.points.length < 2) {
+      throw new RouteError(
+        'too-few-points',
+        `a street needs at least two points to have a length; this one has ${start.points.length}`,
+      );
+    }
+    const along = cumulative(start.points);
+    const length = along[along.length - 1] as number;
+    if (!(length >= ROLLING_LEAST_WAY_METRES)) {
+      throw new RouteError(
+        'no-distance',
+        `the start street must be at least ${ROLLING_LEAST_WAY_METRES} m long`,
+      );
+    }
+    this.#graph = graph;
+    this.#legs.push({
+      edge: start,
+      kind: 'start',
+      start: 0,
+      end: length,
+      along,
+      enter: 0,
+      atNode: true,
+    });
+    this.#settle(0);
+  }
+
+  /** The ride distance of the first sample held: a view's distance zero. */
+  get origin(): number {
+    return this.#first * ROLLING_RESOLUTION_METRES;
+  }
+
+  /** The ride distance of the last sample held. */
+  get end(): number {
+    return (this.#first + this.#positions.length - 1) * ROLLING_RESOLUTION_METRES;
+  }
+
+  /** The legs held, in ride order. */
+  get legs(): readonly RollingLeg[] {
+    return this.#legs.map(({ edge, kind, start, end }) => ({ edge, kind, start, end }));
+  }
+
+  /**
+   * Extends the route to {@link ROLLING_AHEAD_METRES} past `rider` along the
+   * default ways, and drops what lies more than {@link ROLLING_BEHIND_METRES}
+   * behind. Neither moves a sample, a height or a grade the rider has passed.
+   */
+  advance(rider: number): void {
+    this.#settle(rider);
+  }
+
+  /** Every junction with two or more ways on whose way past it is known, after `rider`. */
+  junctionsAfter(rider: number): readonly RollingJunction[] {
+    const found: RollingJunction[] = [];
+    for (let index = 0; index < this.#legs.length - 1; index += 1) {
+      const leg = this.#legs[index] as Leg;
+      if (leg.end <= rider || !leg.atNode) continue;
+      const { ways, defaultWay } = this.#waysAfter(leg);
+      if (ways.length < 2 || defaultWay === undefined) continue;
+      found.push({
+        distance: leg.end,
+        ways,
+        defaultWay: defaultWay.edge.id,
+        taken: (this.#legs[index + 1] as Leg).edge.id,
+      });
+    }
+    return found;
+  }
+
+  /**
+   * Takes `edgeId` at the junction at ride distance `junction`, replacing the
+   * route past it, unless the rider at `rider` is within
+   * {@link JUNCTION_LOCK_METRES} of it (ADR 0087 D-6.2). Nothing before the
+   * junction changes, and no grade the rider can have been sent does.
+   */
+  choose(junction: number, edgeId: string, rider: number): RollingChoice {
+    const index = this.#legs.findIndex((leg) => leg.atNode && leg.end === junction);
+    if (index < 0) return 'no-junction';
+    if (junction - rider <= JUNCTION_LOCK_METRES) return 'locked';
+    const leg = this.#legs[index] as Leg;
+    const way = this.#waysAfter(leg).ways.find((candidate) => candidate.edge.id === edgeId);
+    if (way === undefined) return 'no-such-way';
+    if (this.#legs[index + 1]?.edge.id === edgeId) return 'unchanged';
+    this.#cutAfter(index, junction);
+    this.#push(way.edge, 'chosen', junction, 0);
+    this.#settle(rider);
+    return 'swapped';
+  }
+
+  /**
+   * Turns the rider round on the street they are on, at the first sample at or
+   * after ride distance `rider`: the route past it becomes that street ridden
+   * back, and the default ways on from there. Turning on a sample, never
+   * between two, is what keeps the position at every distance the rider has
+   * reached where it was, so ride distance runs on with no jump. The grade
+   * ahead changes at once, which the grade path walks (ADR 0087 D-6.4).
+   */
+  uTurn(rider: number): void {
+    const turn = Math.ceil(rider / ROLLING_RESOLUTION_METRES) * ROLLING_RESOLUTION_METRES;
+    // The route always reaches far past the rider, so a leg holds `turn`.
+    const index = this.#legs.findIndex((leg) => leg.start <= turn && turn <= leg.end);
+    const leg = this.#legs[index] as Leg;
+    const cut = leg.enter + (turn - leg.start);
+    this.#legs[index] = { ...leg, end: turn, atNode: false };
+    this.#cutAfter(index, turn);
+    const length = leg.along[leg.along.length - 1] as number;
+    this.#push(reversed(leg.edge), 'u-turn', turn, length - cut);
+    this.#settle(rider);
+  }
+
+  /**
+   * The route as the game reads a profile: a new object after every change,
+   * the same one otherwise. Its distance zero is {@link origin}.
+   */
+  view(): RouteProfile {
+    if (this.#view !== undefined) return this.#view;
+    const count = this.#positions.length;
+    const ascent = recordedAscent(this.#despiked) ?? 0;
+    // A descent is an ascent ridden the other way: the same run rule.
+    const descent = recordedAscent(this.#despiked.map((value) => -value)) ?? 0;
+    this.#view = {
+      loop: false,
+      resolution: metres(ROLLING_RESOLUTION_METRES),
+      totalDistance: metres((count - 1) * ROLLING_RESOLUTION_METRES),
+      totalAscent: metres(ascent),
+      totalDescent: metres(descent),
+      elevations: this.#despiked.map((value) => altitudeMetres(value)),
+      grades: this.#grades.map((value) => gradePercent(value)),
+      positions: this.#positions.slice(),
+    };
+    return this.#view;
+  }
+
+  #waysAfter(leg: Leg): ReturnType<typeof waysOn> {
+    return waysOn(leg.edge, this.#graph.edgesFrom(leg.edge.to));
+  }
+
+  #push(edge: RollingEdge, kind: RollingLegKind, start: number, enter: number): void {
+    const along = cumulative(edge.points);
+    const length = along[along.length - 1] as number;
+    this.#legs.push({ edge, kind, start, end: start + length - enter, along, enter, atNode: true });
+  }
+
+  /** Drops every leg after `index` and every sample past ride distance `distance`. */
+  #cutAfter(index: number, distance: number): void {
+    this.#legs.length = index + 1;
+    const keep = Math.floor(distance / ROLLING_RESOLUTION_METRES) - this.#first + 1;
+    if (keep < this.#positions.length) {
+      this.#positions.length = keep;
+      this.#heights.length = keep;
+      this.#despiked.length = keep;
+      this.#grades.length = keep;
+      this.#view = undefined;
+    }
+  }
+
+  /** Extends to `rider` + the reach ahead, then trims to the reach behind. */
+  #settle(rider: number): void {
+    const firstNew = this.#positions.length;
+    const target = rider + ROLLING_AHEAD_METRES;
+    let legIndex = 0;
+    for (;;) {
+      const distance = (this.#first + this.#positions.length) * ROLLING_RESOLUTION_METRES;
+      if (this.#positions.length > 0 && distance - ROLLING_RESOLUTION_METRES >= target) break;
+      while (legIndex < this.#legs.length && (this.#legs[legIndex] as Leg).end < distance) {
+        legIndex += 1;
+      }
+      if (legIndex === this.#legs.length) {
+        this.#extendFrom(this.#legs[legIndex - 1] as Leg);
+        continue;
+      }
+      const leg = this.#legs[legIndex] as Leg;
+      const { position, elevation } = pointAlong(leg, leg.enter + (distance - leg.start));
+      this.#positions.push(position);
+      this.#heights.push(elevation);
+    }
+    if (this.#positions.length > firstNew) this.#refit(firstNew);
+    this.#trim(rider);
+  }
+
+  /** Appends the default way on from `last`'s end, or turns round at a dead end. */
+  #extendFrom(last: Leg): void {
+    const { defaultWay } = this.#waysAfter(last);
+    if (defaultWay === undefined) {
+      this.#push(reversed(last.edge), 'turn-round', last.end, 0);
+    } else {
+      this.#push(defaultWay.edge, 'default', last.end, 0);
+    }
+  }
+
+  /** Fits again every sample whose windows reach the local index `firstNew`. */
+  #refit(firstNew: number): void {
+    this.#view = undefined;
+    const count = this.#heights.length;
+    const despikeFrom = Math.max(0, firstNew - DESPIKE_HALF);
+    this.#despiked.length = Math.min(this.#despiked.length, despikeFrom);
+    for (let index = despikeFrom; index < count; index += 1) {
+      const window: number[] = [];
+      for (let offset = -DESPIKE_HALF; offset <= DESPIKE_HALF; offset += 1) {
+        window.push(clamped(this.#heights, index + offset));
+      }
+      window.sort((a, b) => a - b);
+      this.#despiked.push(window[DESPIKE_HALF] as number);
+    }
+    const slopeFrom = Math.max(0, despikeFrom - SLOPE_HALF);
+    this.#grades.length = Math.min(this.#grades.length, slopeFrom);
+    for (let index = slopeFrom; index < count; index += 1) {
+      let weighted = 0;
+      for (let offset = -SLOPE_HALF; offset <= SLOPE_HALF; offset += 1) {
+        weighted += offset * clamped(this.#despiked, index + offset);
+      }
+      this.#grades.push((weighted / (ROLLING_RESOLUTION_METRES * SLOPE_SQUARES)) * 100);
+    }
+  }
+
+  /** Drops the samples and legs more than the reach behind `rider`. */
+  #trim(rider: number): void {
+    const first = Math.floor((rider - ROLLING_BEHIND_METRES) / ROLLING_RESOLUTION_METRES);
+    const drop = first - this.#first;
+    if (drop <= 0) return;
+    this.#positions.splice(0, drop);
+    this.#heights.splice(0, drop);
+    this.#despiked.splice(0, drop);
+    this.#grades.splice(0, drop);
+    this.#first = first;
+    this.#view = undefined;
+    const origin = this.origin;
+    let gone = 0;
+    while (gone < this.#legs.length - 1 && (this.#legs[gone] as Leg).end < origin) gone += 1;
+    this.#legs.splice(0, gone);
+  }
+}
+
+/** The point `offset` metres along `leg`'s edge, by linear interpolation. */
+function pointAlong(leg: Leg, offset: number): { position: GeographicPosition; elevation: number } {
+  const { along } = leg;
+  const points = leg.edge.points;
+  let low = 0;
+  let high = along.length - 1;
+  while (low < high - 1) {
+    const middle = Math.floor((low + high) / 2);
+    if ((along[middle] as number) <= offset) low = middle;
+    else high = middle;
+  }
+  const span = (along[high] as number) - (along[low] as number);
+  const share = span > 0 ? Math.min(1, Math.max(0, (offset - (along[low] as number)) / span)) : 0;
+  const from = points[low] as RollingPoint;
+  const to = points[high] as RollingPoint;
+  return {
+    position: geographicPosition(
+      degreesLatitude(
+        from.position.latitude + (to.position.latitude - from.position.latitude) * share,
+      ),
+      degreesLongitude(
+        from.position.longitude + (to.position.longitude - from.position.longitude) * share,
+      ),
+    ),
+    elevation: from.elevation + (to.elevation - from.elevation) * share,
+  };
+}
