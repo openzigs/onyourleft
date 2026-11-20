@@ -295,3 +295,47 @@ The owner answered all four on **2026-11-20**, on the pull request
   module. The test's known-writers check exists for that.
 - **A future ruling lets continuous steering choose a turn** (D-8). Then D-4 and D-2 change, by a new
   ADR.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-20** — **The owner's quotation in Context is cut short, and the cut is unmarked.** The
+  owner's sentence of 2026-11-20 went on after *"to turn left or right"* to name another trainer app
+  as the model for the symbols. Read the quotation as ending *"…to turn left or right …"*; D-3.1's
+  *"as other trainer apps do it"* stands for the words left out. (#2959, from the review of #2953)
+- **2026-11-20** — **D-3.1's *"on a touch screen"* says where the symbols must show, not where they
+  may not.** D-3's table lists the screen as an input for every rider, and D-3.1.4 makes each
+  symbol a button, which a mouse can press as well as a finger. How a touch screen is detected is
+  #2898's to choose; a choice that shows the symbols at every prompt on every screen meets D-3.1,
+  and a choice that hides them from a rider with a mouse leaves that rider D-3's keys but no
+  control on the screen, which #2898's pull request says if it makes that choice. (#2959, from the
+  review of #2953)
+- **2026-11-20** — **A cost that Consequences does not list: a single press turns the rider round.**
+  D-1.6's U-turn action, by key, pad or controller, and D-3's U-turn button by one tap, turns the
+  rider round mid-ride with no confirm, so a stray press or tap reverses the ride. It is not a
+  trainer-safety question, because the grade walks to the new direction's at 1 % a second (ADR 0087
+  D-6.4). (#2959, from the review of #2953)
+- **2026-11-20** — **The constraints table leaves out two issues that D-5.2 binds.** D-5.2 makes
+  every non-test module under the open-world mode's own directories, in `apps/web` and `packages/`,
+  a root of the static walk. That places modules for
+  [#2896](https://github.com/openzigs/onyourleft/issues/2896) (the session wiring) and
+  [#2899](https://github.com/openzigs/onyourleft/issues/2899) (the grade feed) too: whatever either
+  puts under those directories is walked, and so cannot import the trainer-command seam,
+  `game/gradient.ts` or a trainer-control writer. #2899's grade feed, which must reach the trainer,
+  therefore lives outside those directories: it may import from them, and nothing in them imports it.
+  Read the table as naming both. (#2959, from the review of #2953)
+- **2026-11-20** — **The owner ruled that a press or tap chooses directly at a junction with three
+  ways on or fewer.** This confirms D-1.3's first sentence: left chooses left, straight chooses
+  straight and right chooses right, whatever was chosen before, and the press does not step the
+  choice one way. A tap on a D-3.1 symbol does the same, because D-3.1.1 sends it through the same
+  press path. D-1.3's and D-3.1.1's *"moves the choice one step"* therefore sets a discrete press
+  against a continuous or scaled one, and does not mean one way round the junction. With more than
+  three ways on, D-1.3's parenthesis is unchanged: left and right step one way round the junction
+  per press. The owner answered in the maintainer's session, and the ruling is posted on
+  [#2897](https://github.com/openzigs/onyourleft/issues/2897) and on pull requests #2961 and #2964.
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964) implements it for #2897, and
+  [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s taps go through the same path.
+  (#2959)

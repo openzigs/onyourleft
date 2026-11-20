@@ -393,8 +393,11 @@ export class RollingRoute {
    * Extends the route to {@link ROLLING_AHEAD_METRES} past `rider` along the
    * default ways, and drops what lies more than {@link ROLLING_BEHIND_METRES}
    * behind. Neither moves a sample, a height or a grade the rider has passed.
+   * A rider distance that is not a finite number changes nothing: no reach
+   * past it is ever met, so extending to it would never end.
    */
   advance(rider: number): void {
+    if (!Number.isFinite(rider)) return;
     this.#settle(rider);
   }
 
@@ -420,12 +423,13 @@ export class RollingRoute {
    * Takes `edgeId` at the junction at ride distance `junction`, replacing the
    * route past it, unless the rider at `rider` is within
    * {@link JUNCTION_LOCK_METRES} of it (ADR 0087 D-6.2). Nothing before the
-   * junction changes, and no grade the rider can have been sent does.
+   * junction changes, and no grade the rider can have been sent does. A rider
+   * distance that is not a finite number is `'locked'`: the lock fails closed.
    */
   choose(junction: number, edgeId: string, rider: number): RollingChoice {
     const index = this.#legs.findIndex((leg) => leg.atNode && leg.end === junction);
     if (index < 0) return 'no-junction';
-    if (junction - rider <= JUNCTION_LOCK_METRES) return 'locked';
+    if (!Number.isFinite(rider) || junction - rider <= JUNCTION_LOCK_METRES) return 'locked';
     const leg = this.#legs[index] as Leg;
     const way = this.#waysAfter(leg).ways.find((candidate) => candidate.edge.id === edgeId);
     if (way === undefined) return 'no-such-way';
@@ -442,9 +446,11 @@ export class RollingRoute {
    * back, and the default ways on from there. Turning on a sample, never
    * between two, is what keeps the position at every distance the rider has
    * reached where it was, so ride distance runs on with no jump. The grade
-   * ahead changes at once, which the grade path walks (ADR 0087 D-6.4).
+   * ahead changes at once, which the grade path walks (ADR 0087 D-6.4). A
+   * rider distance that is not a finite number turns nothing round.
    */
   uTurn(rider: number): void {
+    if (!Number.isFinite(rider)) return;
     const turn = Math.ceil(rider / ROLLING_RESOLUTION_METRES) * ROLLING_RESOLUTION_METRES;
     // The route always reaches far past the rider, so a leg holds `turn`.
     const index = this.#legs.findIndex((leg) => leg.start <= turn && turn <= leg.end);
