@@ -27,6 +27,12 @@ import { EARTH, FIXTURE_EXTENT, FIXTURE_FRAME, FIXTURE_TILE } from './tiles';
 /** {@link FIXTURE_TILE}'s eastern neighbour: pixel columns 4096 to 8191 of a fixture. */
 export const EAST_TILE: TileId = { z: 15, x: FIXTURE_TILE.x + 1, y: FIXTURE_TILE.y };
 
+/** {@link FIXTURE_TILE}'s southern neighbour: pixel rows 4096 to 8191 of a fixture. */
+export const SOUTH_TILE: TileId = { z: 15, x: FIXTURE_TILE.x, y: FIXTURE_TILE.y + 1 };
+
+/** {@link FIXTURE_TILE}'s south-eastern neighbour, across its corner at pixel (4096, 4096). */
+export const SOUTH_EAST_TILE: TileId = { z: 15, x: FIXTURE_TILE.x + 1, y: FIXTURE_TILE.y + 1 };
+
 export type Pixel = readonly [number, number];
 
 /** One street of a fixture: its tags and its line, in fixture pixels. */
@@ -80,9 +86,9 @@ function octagon(cx: number, cy: number, radius: number): Pixel[] {
 const RING = octagon(2000, 2000, 160);
 
 /**
- * The seven shapes #2894 names, and two more: the ways the graph leaves out
- * (ADR 0091 D-3), and a street straight across the seam for the add and remove
- * test.
+ * The seven shapes #2894 names, and more: the ways the graph leaves out
+ * (ADR 0091 D-3), and a street straight across each kind of seam (east,
+ * south and a corner) for the add and remove tests.
  */
 export const GRAPH_FIXTURES = {
   /** A side street ending 6 px (about 1.4 m) short of a through street: a T-snap. */
@@ -544,6 +550,56 @@ export const GRAPH_FIXTURES = {
     edges: [
       { from: [2000, 1000], to: [4096, 1000], kind: 'minor_road', points: 2 },
       { from: [4096, 1000], to: [6000, 1000], kind: 'minor_road', points: 2 },
+    ],
+  },
+  /** One street straight across the south seam: the north–south twin of `acrossSeam`. */
+  acrossSouthSeam: {
+    tiles: [FIXTURE_TILE, SOUTH_TILE],
+    streets: [
+      {
+        tags: minor,
+        line: [
+          [1000, 2000],
+          [1000, 6000],
+        ],
+      },
+    ],
+    nodes: [
+      { at: [1000, 2000], kind: 'dead-end', degree: 1 },
+      { at: [1000, 4096], kind: 'join', degree: 2 },
+      { at: [1000, 6000], kind: 'dead-end', degree: 1 },
+    ],
+    edges: [
+      { from: [1000, 2000], to: [1000, 4096], kind: 'minor_road', points: 2 },
+      { from: [1000, 4096], to: [1000, 6000], kind: 'minor_road', points: 2 },
+    ],
+  },
+  /**
+   * One street leaving through the south-east corner of the tile into
+   * {@link SOUTH_EAST_TILE}, a vertex exactly on the corner: its seam ends lie
+   * on two box edges each. (Without that vertex the straight pixel line bends
+   * in metres, and crosses one edge a few millimetres from the corner.)
+   */
+  acrossCorner: {
+    tiles: [FIXTURE_TILE, SOUTH_EAST_TILE],
+    streets: [
+      {
+        tags: minor,
+        line: [
+          [3000, 3000],
+          [4096, 4096],
+          [5000, 5000],
+        ],
+      },
+    ],
+    nodes: [
+      { at: [3000, 3000], kind: 'dead-end', degree: 1 },
+      { at: [4096, 4096], kind: 'join', degree: 2 },
+      { at: [5000, 5000], kind: 'dead-end', degree: 1 },
+    ],
+    edges: [
+      { from: [3000, 3000], to: [4096, 4096], kind: 'minor_road', points: 2 },
+      { from: [4096, 4096], to: [5000, 5000], kind: 'minor_road', points: 2 },
     ],
   },
 } as const satisfies Readonly<Record<string, GraphFixture>>;

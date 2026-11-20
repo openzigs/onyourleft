@@ -21,6 +21,8 @@ import {
   GRAPH_FIXTURES,
   graphFixtureTile,
   SEAM_GRADE_STREETS,
+  SOUTH_EAST_TILE,
+  SOUTH_TILE,
   starTile,
   type GraphFixture,
   type GraphFixtureName,
@@ -144,9 +146,14 @@ describe('StreetGraph on the synthetic fixtures (#2894, ADR 0091 D-4)', () => {
     });
   }
 
-  it('seamJunction and acrossSeam: the same graph whichever tile arrives first', () => {
-    for (const fixture of [GRAPH_FIXTURES.seamJunction, GRAPH_FIXTURES.acrossSeam]) {
-      expectExactly(graphOf(fixture, [EAST_TILE, FIXTURE_TILE]), fixture);
+  it('every seam fixture: the same graph whichever tile arrives first', () => {
+    for (const fixture of [
+      GRAPH_FIXTURES.seamJunction,
+      GRAPH_FIXTURES.acrossSeam,
+      GRAPH_FIXTURES.acrossSouthSeam,
+      GRAPH_FIXTURES.acrossCorner,
+    ]) {
+      expectExactly(graphOf(fixture, [...fixture.tiles].reverse()), fixture);
     }
   });
 
@@ -253,6 +260,29 @@ describe('StreetGraph is incremental across a seam', () => {
         .map((edge) => edge.grade)
         .sort(),
     ).toEqual(['bridge', 'ground']);
+  });
+
+  it('across the south seam too: adding the south tile joins the street, removing it unjoins it', () => {
+    const south = GRAPH_FIXTURES.acrossSouthSeam;
+    const graph = graphOf(south, [FIXTURE_TILE]);
+    const alone = snapshot(graph);
+    expect(nodeAt(graph.nodes(), [1000, 4096]).kind).toBe('tile-edge');
+    expect(graph.addTile(SOUTH_TILE, decodedStreets(south, SOUTH_TILE))).toBeNull();
+    expectExactly(graph, south);
+    expect(graph.removeTile(SOUTH_TILE)).toBe(true);
+    expect(snapshot(graph)).toEqual(alone);
+  });
+
+  it('through a corner: a tile edge while the tile across the corner is not loaded, though its other two neighbours are', () => {
+    const corner = GRAPH_FIXTURES.acrossCorner;
+    const graph = graphOf(corner, [FIXTURE_TILE, EAST_TILE, SOUTH_TILE]);
+    const before = snapshot(graph);
+    expect(nodeAt(graph.nodes(), [4096, 4096]).kind).toBe('tile-edge');
+    expect(graph.addTile(SOUTH_EAST_TILE, decodedStreets(corner, SOUTH_EAST_TILE))).toBeNull();
+    const joined = nodeAt(graph.nodes(), [4096, 4096]);
+    expect([joined.kind, joined.edges.length]).toEqual(['join', 2]);
+    expect(graph.removeTile(SOUTH_EAST_TILE)).toBe(true);
+    expect(snapshot(graph)).toEqual(before);
   });
 
   it('removing a tile not held changes nothing', () => {
