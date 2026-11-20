@@ -2018,7 +2018,25 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`unknown`, and #1535's own rule, where not); and
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor, which #1541's people walk
-                        (`people.ts`). No crossing is either
+                        (`people.ts`). No crossing is either. It still
+                        draws nothing: since #2972 `footway-surfaces.ts` does
+    src/game/footway-surfaces.ts
+                        the mapped footways DRAWN (#2972, the owner's ruling
+                        of 2026-11-15) — `footwayNetwork`'s lines as ribbons
+                        on the ground by kind (paved footway, cycleway, park
+                        path, steps in treads), and a zebra wherever a mapped
+                        `crossing` crosses the drawn road. ⚠️ A ribbon is kept
+                        off the carriageway by its own half-width, off the
+                        mapped side roads (`people.ts` §`besideSideRoads`), off
+                        mapped water, and off a drawn village pavement
+                        (#1620's rule, `people.ts` §`onPavement`). Chunked,
+                        grounded the first time a chunk is in reach, ≤
+                        `FOOTWAY_FRAME_TRIANGLES` within `FOOTWAY_DRAW_METRES`
+                        of the camera, nearest first; `SceneFrame.footways`,
+                        drawn in ONE call by `three-renderer.ts`
+                        §`FootwayBelt`, realistic world only, on the ground as
+                        the side roads are. Lever `-footways`, page
+                        `town=footways`
     src/game/litter.ts  a village's litter (#1274, owner ruling 2026-11-05) —
                         Poly Haven's `trashbag` beside some bins and one
                         `old_tyre` laid flat by a lamp post, placed from the

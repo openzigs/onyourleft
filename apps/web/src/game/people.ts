@@ -605,7 +605,7 @@ export function footwayWalks(
 }
 
 /** A street's pavements as {@link clearOfPavements} reads them: segments, reaches, and their box. */
-interface PavementBands {
+export interface PavementBands {
   /** Every walk's segments, five floats a segment: `ax, az, bx, bz` and the pavement's reach. */
   readonly segments: Float32Array;
   readonly minX: number;
@@ -623,7 +623,7 @@ const bandsOf = new WeakMap<VillageStreet, PavementBands>();
  * the back and, kerbside, only onto the carriageway the rule already keeps
  * people off. Built once a street.
  */
-function pavementBands(street: VillageStreet): PavementBands {
+export function pavementBands(street: VillageStreet): PavementBands {
   const known = bandsOf.get(street);
   if (known !== undefined) return known;
   const segments: number[] = [];
@@ -650,8 +650,8 @@ function pavementBands(street: VillageStreet): PavementBands {
   return bands;
 }
 
-/** Whether `(x, z)` is on any of `bands`' pavements. */
-function onPavement(bands: readonly PavementBands[], x: number, z: number): boolean {
+/** Whether `(x, z)` is on any of `bands`' pavements. Since #2972 also what a footway's drawn surface is cut by. */
+export function onPavement(bands: readonly PavementBands[], x: number, z: number): boolean {
   for (const band of bands) {
     if (x < band.minX || x > band.maxX || z < band.minZ || z > band.maxZ) continue;
     const s = band.segments;
