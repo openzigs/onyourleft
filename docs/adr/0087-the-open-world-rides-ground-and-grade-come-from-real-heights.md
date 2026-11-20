@@ -1,8 +1,9 @@
 # ADR 0087: The open-world ride's ground and grade come from real heights, and a junction choice is final 100 m before the junction
 
-- **Status**: **Proposed**, 2026-11-19, on the owner's ruling of 2026-11-19 on the epic
-  [#2880](https://github.com/openzigs/onyourleft/issues/2880). Accepted only on the owner's approval
-  on its pull request. D-10 lists the questions for the owner
+- **Status**: **Accepted**, 2026-11-20, by the owner on its pull request
+  [#2948](https://github.com/openzigs/onyourleft/pull/2948), with every recommendation taken and the
+  answers recorded in D-10. Proposed 2026-11-19, on the owner's ruling of that day on the epic
+  [#2880](https://github.com/openzigs/onyourleft/issues/2880)
 - **Date**: 2026-11-19
 - **Deciders**: **the owner**, whose ruling of 2026-11-19 is quoted in Context. **The author** chose
   the lock distance, the decode bounds and the fallback within that ruling; each such choice is
@@ -106,12 +107,14 @@ profile and its invented hillside, and nothing here changes what its trainer is 
 2. **Read on ADR 0090's blocks.** A z14 block lies inside exactly one z12 tile, so the height tiles
    held are the z12 tiles that contain the 3 × 3 blocks ADR 0090 D-2 holds: one to four tiles, each
    about 7.5 km across at 40° N, coarser than a block. ADR 0090's R-1 (fixed grid), R-2 (no coordinate
-   or tile id in any words), R-3 (zones read the same way), R-6 (tiles off: nothing requested) and
-   R-7 (an accurate disclosure) bind every height read.
+   or tile id in any words), R-3 (zones read the same way), R-6 (tiles off: nothing requested),
+   R-7 (an accurate disclosure) and R-8 (a crossing's request waits a random delay of up to 30 s,
+   holding only the request and never the ride; accepted with ADR 0090 on 2026-11-20) bind every
+   height read.
 3. **Through #2013's module and its one `PERMITTED_NETWORK_CALLS` entry.** The open-world ride adds no
    network primitive for heights.
 4. **The map-tiles switch governs it** (ADR 0054 D-6.4's one switch). *The author's choice*, put to
-   the owner as D-10 Q4.
+   the owner as D-10 Q4 and accepted.
 
 ### D-3 — A height tile is untrusted input, and its decode is bounded
 
@@ -214,7 +217,8 @@ open-world ride sends what that state sends today.
 ### D-7 — Where heights are unavailable
 
 Offline with nothing held, tiles off (D-2.4), outside the archive, or a tile that is unreadable
-(D-3): the road's height there is unknown. *The author's choice*, put to the owner as D-10 Q2: the
+(D-3): the road's height there is unknown. *The author's choice*, put to the owner as D-10 Q2 and
+accepted: the
 grade sent **walks to 0 %** by D-6.4's bounded path and stays there until heights return, when it
 walks back up to the road's. The ground there is drawn flat at the last known height, and the ride
 screen says that heights are unavailable, with no coordinate in the words.
@@ -225,7 +229,7 @@ screen says that heights are unavailable, with no coordinate in the words.
 open-world ride's ground or grade comes from it, the game view's corner credit (ADR 0054 D-3.6) adds
 **"Terrain © Mapterhorn"**, with the sources on the credits screen. ADR 0032 D-6 judged Mapterhorn's
 attribution *"intractable for a frame"* because its list did not load; #2013 records that
-`attribution.json` now loads. Put to the owner as D-10 Q3.
+`attribution.json` now loads. Put to the owner as D-10 Q3 and accepted.
 
 ### D-9 — The instance, and no paid service
 
@@ -234,18 +238,26 @@ instance (ADR 0036 D-3). No paid service is a prerequisite (ADR 0036 D-7). The a
 and request lines are #2013's row in `docs/cost-model.md`. The open-world reads are a few z12 tiles
 an hour, far fewer than ADR 0090's block reads.
 
-### D-10 — What the owner is asked to rule on
+### D-10 — What the owner was asked, and the answers
+
+The owner answered all five on **2026-11-20**, on the pull request
+[#2948](https://github.com/openzigs/onyourleft/pull/2948), each as recommended. Each answer follows
+its question.
 
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
-   merge**.
+   merge**. **Answered: accepted before merge.** The Status line says so.
 2. **Q1 — The lock at 100 m and the slew limit at 1 % a second (D-6)?** Recommended: **yes**. The
    lock removes the step a choice could cause; the slew limit handles the U-turn and the dead end,
-   which no lock can.
+   which no lock can. **Answered: yes**, the lock at 100 m and a slew limit of 1 % a second. D-6
+   stands.
 3. **Q2 — With no heights, walk the grade to 0 % (D-7)**, rather than hold the last grade?
    Recommended: **walk to 0 %**. A held climb that the rider cannot see is worse than a flat road.
+   **Answered: walk the grade to 0 %** when there are no heights. D-7 stands.
 4. **Q3 — "Terrain © Mapterhorn" in the corner while it is drawn (D-8)?** Recommended: **yes**.
+   **Answered: yes.** D-8 stands.
 5. **Q4 — The map-tiles switch governs heights too (D-2.4)?** Recommended: **yes**, one switch, as
-   ADR 0054 D-8 Q4 ruled for the corridor.
+   ADR 0054 D-8 Q4 ruled for the corridor. **Answered: yes**, one switch: the map-tiles switch
+   governs heights too. D-2.4 stands.
 
 ---
 

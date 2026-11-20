@@ -450,8 +450,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   supersession is ADR 0065's.
 - **2026-11-19** — **D-3 and D-1's Mapterhorn row are superseded in part, for open-world rides only,
   by [ADR 0087](0087-the-open-world-rides-ground-and-grade-come-from-real-heights.md)**
-  ([#2885](https://github.com/openzigs/onyourleft/issues/2885)), **Proposed**, on the owner's ruling
-  Q7 of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880)
+  ([#2885](https://github.com/openzigs/onyourleft/issues/2885)), **Accepted** 2026-11-20 on its pull
+  request #2948, on the owner's ruling Q7 of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880)
   (*"Yes, real heights (Recommended)"*). An open-world ride has no route in advance, so its ground
   and the trainer's grade come from the project's own Mapterhorn extract
   ([#2013](https://github.com/openzigs/onyourleft/issues/2013)), read while the ride records. What

@@ -14,8 +14,8 @@ It has the same authority as the root file. Where the text below says "this file
 
   ⚠️ **0087 is [ADR 0087](../adr/0087-the-open-world-rides-ground-and-grade-come-from-real-heights.md)**,
   taken by [#2885](https://github.com/openzigs/onyourleft/issues/2885) on 2026-11-19 for the
-  open-world ride's ground and grade from real heights, **Proposed** on the owner's ruling Q7 of that
-  day on the epic #2880. It supersedes in part ADR 0032 D-3 and D-1's Mapterhorn row, and the two
+  open-world ride's ground and grade from real heights, on the owner's ruling Q7 of that day on the
+  epic #2880, and **Accepted** on 2026-11-20 by the owner on #2948. It supersedes in part ADR 0032 D-3 and D-1's Mapterhorn row, and the two
   rows of ADR 0054 D-1's table that keep them, for open-world rides only; both gained one dated
   `## Amendments` entry pointing to it. The owner's lane note of 2026-11-19 reserved it, beside
   **0088** (#2887), **0089** (#2888) and **0090** (#2884, moved off 0086, which ADR 0086 had taken).
