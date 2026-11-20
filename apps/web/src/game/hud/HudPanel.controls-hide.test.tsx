@@ -29,6 +29,7 @@ import { tap } from '../../design/touch-lock-testing';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
 import type { ControllerPort } from '../delivery/controller-port';
 import type { PadSnapshot } from '../gamepad-port';
+import { starRide } from '../open-world/junction-ride-testing';
 import { atStartLine } from '../simulation';
 import { CONTROLS_HIDE_MILLISECONDS, HIDES_ATTRIBUTE } from './controls-reveal';
 import { HudCore } from './HudCore';
@@ -102,6 +103,12 @@ async function hud(more: Partial<HudPanelProps> = {}): Promise<void> {
   pressed = { pause: 0, end: 0 };
   // No `settle`: its macrotask is a `setTimeout`, which these tests fake.
   mounted = await mount(ride(more));
+}
+
+/** An open-world junction's prompt, as the choice gives it inside its reach (#2898). */
+function junctionAhead() {
+  const { choice, rider } = starRide([-90, 0, 90]);
+  return choice.prompt(rider);
 }
 
 function controls(): string | null {
@@ -351,6 +358,11 @@ describe('the ride controls hide until touched — #2600', () => {
       ['a waiting re-plan', { keepPlan: { sentence: 'Easier next.', onKeep: () => undefined } }],
       ['the side camera filming', { sideCamera: { line: 'Filming', onStop: undefined } }],
       ['a Delivery round’s throw buttons', { throwing: { throwParcel: () => undefined } }],
+      // #2898: the prompt is in the actions panel, which hiding clips.
+      [
+        'an open-world junction’s prompt',
+        { junction: { prompt: junctionAhead(), press: () => undefined } },
+      ],
     ];
     for (const [reason, more] of held) {
       mounted?.unmount();
@@ -362,6 +374,11 @@ describe('the ride controls hide until touched — #2600', () => {
     // And the control for that list: a lap race not yet finished does not.
     mounted?.unmount();
     await hud({ lapRace: hudOf(startRace({ laps: 1 })) });
+    idle();
+    expect(controls()).toBe('hidden');
+    // Nor an open-world ride with no junction within its prompt's reach.
+    mounted?.unmount();
+    await hud({ junction: { prompt: undefined, press: () => undefined } });
     idle();
     expect(controls()).toBe('hidden');
   });
