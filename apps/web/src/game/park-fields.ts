@@ -357,50 +357,50 @@ function cutsAlong(ground: Float64Array): Float64Array | undefined {
   return Float64Array.from(at);
 }
 
-/** The ground under `count + 1` evenly spaced points along `line`, `NaN` where none. */
-function groundAlong(line: ParkPiece, count: number, mesh: TerrainMesh): Float64Array {
+/** A point read on the ground: `index` is its place in the frame's reads. */
+interface GroundRead {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly index: number;
+}
+
+/** The points at `shares` of `line`'s length from its `−x` end, indexed from `first`. */
+function pointsAlong(line: ParkPiece, shares: ArrayLike<number>, first: number): GroundRead[] {
   const ux = Math.cos(line.yaw);
   const uz = -Math.sin(line.yaw);
-  const points: { x: number; y: number; z: number; index: number }[] = [];
-  for (let index = 0; index <= count; index += 1) {
-    const along = (index / count - 0.5) * line.width;
-    points.push({ x: line.x + ux * along, y: 0, z: line.z + uz * along, index });
-  }
-  const ground = new Float64Array(count + 1).fill(Number.NaN);
-  for (const stood of standingOnGround(points, mesh)) ground[stood.index] = stood.y;
+  return Array.from(shares, (share, at) => {
+    const along = (share - 0.5) * line.width;
+    return { x: line.x + ux * along, y: 0, z: line.z + uz * along, index: first + at };
+  });
+}
+
+/** The ground under each of `reads`, by its index, `NaN` where none — one pass over `mesh`. */
+function readGround(reads: readonly GroundRead[], mesh: TerrainMesh): Float64Array {
+  const ground = new Float64Array(reads.length).fill(Number.NaN);
+  for (const stood of standingOnGround(reads, mesh)) ground[stood.index] = stood.y;
   return ground;
 }
 
 /**
- * One line as the runs of ground it lies along: cut where the ground folds
- * ({@link cutsAlong}), each piece stood on the ground under its own two ends,
- * at their mean, tilted from one to the other and lengthened by its rise.
- * Empty where any of it is over no ground — the edge of the drawn ground,
- * where it would hang in the air.
+ * One line cut at `at` as pieces, each stood on the ground under its own two
+ * ends (`ends`, `NaN` where none), at their mean, tilted from one to the other
+ * and lengthened by its rise. Empty where any end is over no ground — the edge
+ * of the drawn ground, where it would hang in the air.
  */
-function linePieces(line: ParkPiece, mesh: TerrainMesh): readonly ParkPiece[] {
-  let at = cuts.get(line);
-  if (at === undefined) {
-    const count = Math.max(1, Math.ceil(line.width / PITCH_LINE_SAMPLE_METRES));
-    at = cutsAlong(groundAlong(line, count, mesh));
-    if (at === undefined) return [];
-    cuts.set(line, at);
-  }
-  const ux = Math.cos(line.yaw);
-  const uz = -Math.sin(line.yaw);
-  const ends = Array.from(at, (share, index) => {
-    const along = (share - 0.5) * line.width;
-    return { x: line.x + ux * along, y: 0, z: line.z + uz * along, index };
-  });
-  const heights = new Float64Array(ends.length).fill(Number.NaN);
-  for (const stood of standingOnGround(ends, mesh)) heights[stood.index] = stood.y;
+function linePieces(
+  line: ParkPiece,
+  at: Float64Array,
+  ends: readonly GroundRead[],
+  ground: Float64Array,
+): readonly ParkPiece[] {
   const pieces: ParkPiece[] = [];
   for (let index = 1; index < ends.length; index += 1) {
-    const down = heights[index - 1] as number;
-    const up = heights[index] as number;
+    const a = ends[index - 1] as GroundRead;
+    const b = ends[index] as GroundRead;
+    const down = ground[a.index] as number;
+    const up = ground[b.index] as number;
     if (Number.isNaN(down) || Number.isNaN(up)) return [];
-    const a = ends[index - 1] as { x: number; z: number };
-    const b = ends[index] as { x: number; z: number };
     const run = ((at[index] as number) - (at[index - 1] as number)) * line.width;
     const rise = up - down;
     pieces.push({
@@ -418,9 +418,15 @@ function linePieces(line: ParkPiece, mesh: TerrainMesh): readonly ParkPiece[] {
 /**
  * A frame's park pieces stood on `mesh`, each pitch line laid along the
  * ground in pieces (#2688's review: one box, even tilted end to end, floated
- * 2 m mid-span where the ground folds under a 98 m line). Every other piece
- * is stood by `landform.ts` §`standingOnGround`, and dropped where it has no
- * ground, as before.
+ * 2 m mid-span where the ground folds under a 98 m line). Each line is cut
+ * where the ground folds ({@link cutsAlong}), read every
+ * {@link PITCH_LINE_SAMPLE_METRES} the first frame it has ground all along it;
+ * every other piece is stood by `landform.ts` §`standingOnGround`, and dropped
+ * where it has no ground, as before.
+ *
+ * Two passes over the mesh a frame, not one a line (#2950's review: one a
+ * line was 15× one pass): the first reads every other piece's foot and every
+ * point along a line not yet cut, the second every cut line's pieces' ends.
  *
  * ⚠️ **Still {@link PARK_FIELD_CAPACITY}**: `park-dressing.ts` cut the
  * field's pieces counting a line as one, and a line here is several. So in
@@ -432,24 +438,59 @@ export function laidAlongTheGround(
   pieces: readonly ParkPiece[],
   mesh: TerrainMesh,
 ): readonly ParkPiece[] {
-  const feet: { x: number; y: number; z: number; index: number }[] = [];
+  // The first pass: each other piece's foot, and the points along each line not yet cut.
+  const reads: GroundRead[] = [];
+  const foot = new Map<number, number>();
+  const sampled = new Map<number, readonly GroundRead[]>();
   pieces.forEach((piece, index) => {
-    if (piece.kind !== 'pitch-line') feet.push({ x: piece.x, y: piece.y, z: piece.z, index });
+    if (piece.kind !== 'pitch-line') {
+      foot.set(index, reads.length);
+      reads.push({ x: piece.x, y: piece.y, z: piece.z, index: reads.length });
+    } else if (!cuts.has(piece)) {
+      const count = Math.max(1, Math.ceil(piece.width / PITCH_LINE_SAMPLE_METRES));
+      const points = pointsAlong(
+        piece,
+        Array.from({ length: count + 1 }, (_, at) => at / count),
+        reads.length,
+      );
+      sampled.set(index, points);
+      reads.push(...points);
+    }
   });
-  const ground = new Map<number, number>();
-  for (const stood of standingOnGround(feet, mesh)) ground.set(stood.index, stood.y);
+  const ground = readGround(reads, mesh);
+  // The second pass: the ends of each cut line's pieces.
+  const ends: GroundRead[] = [];
+  const lineEnds = new Map<number, readonly GroundRead[]>();
+  pieces.forEach((piece, index) => {
+    if (piece.kind !== 'pitch-line') return;
+    const points = sampled.get(index);
+    if (points !== undefined) {
+      const first = (points[0] as GroundRead).index;
+      const made = cutsAlong(ground.subarray(first, first + points.length));
+      if (made !== undefined) cuts.set(piece, made);
+    }
+    const at = cuts.get(piece);
+    if (at === undefined) return;
+    const its = pointsAlong(piece, at, ends.length);
+    lineEnds.set(index, its);
+    ends.push(...its);
+  });
+  const endGround = readGround(ends, mesh);
   const out: ParkPiece[] = [];
   let room = PARK_FIELD_CAPACITY;
   pieces.forEach((piece, index) => {
     if (piece.kind === 'pitch-line') {
-      const laid = linePieces(piece, mesh);
+      const its = lineEnds.get(index);
+      const at = cuts.get(piece);
+      if (its === undefined || at === undefined) return;
+      const laid = linePieces(piece, at, its, endGround);
       if (laid.length > room) return;
       room -= laid.length;
       out.push(...laid);
       return;
     }
-    const y = ground.get(index);
-    if (y === undefined) return;
+    const y = ground[foot.get(index) as number] as number;
+    if (Number.isNaN(y)) return;
     if (FIELD_KINDS.has(piece.kind)) {
       if (room < 1) return;
       room -= 1;

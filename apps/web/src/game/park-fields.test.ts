@@ -357,22 +357,37 @@ describe('#2688 in the park dressing, through parkDressingInView and sceneFrame'
     return { pieces, floats, buried, run };
   }
 
+  /**
+   * The sceneFrame at any distance on `route`, the pitch (or `pitch`) beside
+   * it — every frame given the same origin, corridor and land-class mask, as
+   * a ride's frames are, so `park-dressing.ts` keeps its dressing and its
+   * line pieces from one frame to the next and the cut cache can hit.
+   */
+  function framesOn(
+    route: RouteProfile,
+    pitch: LandUseFeature = rectangle('pitch', PITCH, 'soccer'),
+  ): (distance: number) => ReturnType<typeof sceneFrame> {
+    const origin = corridorOrigin(route);
+    const corridor: WorldCorridor = { ...place(pitch).corridor, origin };
+    const landClass = landClassMask(corridor);
+    const start = atStartLine(route);
+    return (distance) =>
+      sceneFrame({
+        profile: route,
+        origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+        worldCorridor: corridor,
+        landClass,
+      });
+  }
+
   /** A sceneFrame at `distance` on `route`, the pitch (or `pitch`) beside it. */
   function frameOn(
     route: RouteProfile,
     distance: number,
-    pitch: LandUseFeature = rectangle('pitch', PITCH, 'soccer'),
+    pitch?: LandUseFeature,
   ): ReturnType<typeof sceneFrame> {
-    const origin = corridorOrigin(route);
-    const corridor: WorldCorridor = { ...place(pitch).corridor, origin };
-    const start = atStartLine(route);
-    return sceneFrame({
-      profile: route,
-      origin,
-      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
-      worldCorridor: corridor,
-      landClass: landClassMask(corridor),
-    });
+    return framesOn(route, pitch)(distance);
   }
 
   it('lays every line along the ground in pieces, no point of it off the ground by more than its height', () => {
@@ -413,9 +428,11 @@ describe('#2688 in the park dressing, through parkDressingInView and sceneFrame'
     let pieces = 0;
     for (const route of Object.values(routes)) {
       for (const [pitch, drawn] of lengths) {
-        // Twice, 30 m apart: the second frame reads the cuts the first made.
+        // Twice, 30 m apart, on the same corridor and mask, as a ride's frames
+        // are: the second frame reads the cuts the first made.
+        const at = framesOn(route, pitch);
         for (const distance of [2_500, 2_530]) {
-          const seen = offTheGround(frameOn(route, distance, pitch));
+          const seen = offTheGround(at(distance));
           expect(seen.floats).toBeLessThanOrEqual(PITCH_LINE_GROUND_METRES);
           expect(seen.buried).toBeLessThanOrEqual(PITCH_LINE_GROUND_METRES);
           // All five lines, whole: the pieces run end to end and leave none out.
