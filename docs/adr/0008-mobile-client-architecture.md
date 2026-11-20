@@ -551,3 +551,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   shell's `ThermalPlugin.java` and `apps/mobile/src/thermal/` are removed, so the thermal-headroom
   reading is no longer among the native capabilities; the foreground-service wake lock remains.
   #91's 60-minute run (above) is read on frame times alone.
+- **2026-11-19** — **D-5's *"over terrain generated from the imported route"* is superseded in part,
+  for open-world rides only, by
+  [ADR 0089](0089-the-chase-camera-follows-the-rolling-route-in-an-open-world-ride.md)**
+  ([#2888](https://github.com/openzigs/onyourleft/issues/2888)), **Accepted** 2026-11-20 on its pull
+  request #2956, on the owner's rulings of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880). An
+  open-world ride has no imported route: the fixed chase camera follows its rolling route (the street
+  being ridden and the branch ahead) through a junction turn and a U-turn, under rules ADR 0089
+  states as tests, including that the eye never enters a building. What still holds, unchanged: the
+  fixed chase camera itself, the warning that a free camera is out of scope and a change to D-5, and
+  every word of D-5 for route rides. This entry is a pointer and changes nothing here.

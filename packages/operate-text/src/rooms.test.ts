@@ -38,20 +38,37 @@ describe('the Rooms section’s words — #2612', () => {
 
 describe('a room’s line (#2649)', () => {
   it('says its kind, visibility, phase, when and by whom, who is in it and its code', () => {
-    const line = roomLine({
-      kind: 'lap-race',
-      visibility: 'public',
-      phase: 'countdown',
-      openedAt: '2026-11-14T19:30:00.000Z',
-      host: null,
-      riders: ['Ann'],
-      shortCode: 'a1b2c3',
-    });
+    const line = roomLine(
+      {
+        kind: 'lap-race',
+        visibility: 'public',
+        phase: 'countdown',
+        openedAt: '2026-11-14T19:30:00.000Z',
+        host: null,
+        riders: ['Ann'],
+        shortCode: 'a1b2c3',
+      },
+      'UTC',
+    );
     expect(line.kind).toBe('Lap race');
     expect(line.rest).toEqual([
       ', public, counting down. Opened 2026-11-14 19:30 UTC by a rider. 1 rider: Ann. Code ',
       { code: 'a1b2c3' },
       '.',
     ]);
+    // #2917: in the zone it is given, named.
+    const there = roomLine(
+      {
+        kind: 'group',
+        visibility: 'private',
+        phase: 'lobby',
+        openedAt: '2026-11-14T19:30:00.000Z',
+        host: 'Ann',
+        riders: [],
+        shortCode: 'a1b2c3',
+      },
+      'America/New_York',
+    );
+    expect(there.rest[0]).toContain('Opened 2026-11-14 14:30 EST by Ann.');
   });
 });

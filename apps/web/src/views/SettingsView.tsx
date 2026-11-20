@@ -951,9 +951,9 @@ export function SettingsView({
  * What this device's connection is, as {@link InstancePort.current} reads it:
  * `undefined` until it answers, and kept with the port it answered for, so a
  * new port reads as unanswered until it does (`where-rides-are.ts` does the
- * same for About).
+ * same for About). The More menu's Instance line reads it too (#2859).
  */
-function useInstanceState(port: InstancePort | undefined): InstanceState | undefined {
+export function useInstanceState(port: InstancePort | undefined): InstanceState | undefined {
   const [answer, setAnswer] = useState<
     { readonly port: InstancePort; readonly state: InstanceState } | undefined
   >(undefined);

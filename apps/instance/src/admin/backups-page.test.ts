@@ -168,7 +168,7 @@ async function backUpNow(browser: AdminBrowser, session: PasskeySession): Promis
  * table's Backup column (#2771), after the When column has taken its moment.
  */
 function lineHtml(record: OperateBackupLine): string {
-  const { rest } = backupLine(record);
+  const { rest } = backupLine(record, 'UTC');
   return `<td><p>${rest
     .map((part, index) =>
       typeof part === 'string'

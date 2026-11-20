@@ -24,7 +24,7 @@ import { createStoreHarness, type StoreHarness } from '@onyourleft/store/testing
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
-import { codeWithCard, readCodeWithCard, WEB_BUILD_TEXT } from './instance-pin';
+import { codeWithCard, readCodeWithCard, unreachableAtText, WEB_BUILD_TEXT } from './instance-pin';
 import {
   createInstancePort,
   INVITE_REFUSAL_TEXT,
@@ -249,5 +249,30 @@ describe('a new rider joins an invite-only instance with the invite line — #28
     const refused = await rider.port.connect('https://elsewhere.example', 'Bea', invite);
     expect(refused.kind).toBe('refused');
     expect(send.paths.slice(before)).toEqual([]);
+  });
+});
+
+describe('an invite for a server the rider’s device cannot reach — #2855', () => {
+  it('names the address and the likely cause, never the code, and the invite stays good', async () => {
+    const { send, clock, mint } = await inviteOnly();
+    const { invite, code } = await mint();
+    const before = send.paths.length;
+    // The rider's device is not on the owner's network yet: nothing answers it.
+    const cut = ((url: string) => {
+      send.paths.push(new URL(url).pathname);
+      return Promise.reject(new TypeError('Failed to fetch'));
+    }) as InstanceSend;
+    const away = device(cut, clock);
+    const refused = await away.port.connect('', 'Bea', invite);
+    expect(refused).toEqual({ kind: 'refused', text: unreachableAtText(testing.TEST_ORIGIN) });
+    const text = refused.kind === 'refused' ? refused.text : '';
+    expect(text).toContain(`The instance at ${testing.TEST_ORIGIN} did not answer`);
+    expect(text).not.toContain(code);
+    // Only the keys were asked for, and nothing was kept on the device.
+    expect(new Set(send.paths.slice(before))).toEqual(new Set(['/v1/instance/keys']));
+    expect(away.storage.map.size).toBe(0);
+    // Read back through the instance: the invite was not spent, so it lets the rider in once reachable.
+    const rider = device(send, clock);
+    expect((await rider.port.connect('', 'Bea', invite)).kind).toBe('connected');
   });
 });

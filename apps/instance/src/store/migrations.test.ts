@@ -495,6 +495,127 @@ describe('the migrations (#769)', () => {
     }
   });
 
+  it('widens 0049’s setup step for the AI step, keeping the row; undone, a setup that had reached it goes on to the finish (#2792)', async () => {
+    const path = await freshPath();
+    await migratedThrough(path, '0048-first-run-setup');
+    const before = openDatabase(path);
+    try {
+      // The wizard before the AI step cannot hold it.
+      expect(() => before.exec(`INSERT INTO setup_state VALUES (1, 'ai', NULL, NULL, 48)`)).toThrow(
+        /CHECK constraint failed/,
+      );
+      before.exec(`INSERT INTO setup_state VALUES (1, 'invite', NULL, 47, 48)`);
+    } finally {
+      before.close();
+    }
+    await withKysely(path, (db) => migrateToLatest(db));
+    const widened = openDatabase(path);
+    try {
+      // The row as it was: the step, and the invite it had minted.
+      expect(widened.prepare('SELECT * FROM setup_state').all()).toEqual([
+        { slot: 1, step: 'invite', done_at: null, invite_minted_at: 47, updated_at: 48 },
+      ]);
+      widened.exec(`UPDATE setup_state SET step = 'ai', updated_at = 49`);
+      // Still held to the wizard's steps, to one row, and strict.
+      for (const refused of [
+        `UPDATE setup_state SET step = 'welcome'`,
+        `INSERT INTO setup_state VALUES (2, 'ai', NULL, NULL, 49)`,
+        `UPDATE setup_state SET updated_at = 'soon'`,
+      ]) {
+        expect(() => widened.exec(refused), refused).toThrow(
+          /CHECK constraint failed|cannot store TEXT value/,
+        );
+      }
+    } finally {
+      widened.close();
+    }
+    await migratedThrough(path, '0048-first-run-setup');
+    const undone = openDatabase(path);
+    try {
+      // `ai` is not a step of the wizard `down` leaves: the step after `invite` there is the finish.
+      expect(undone.prepare('SELECT * FROM setup_state').all()).toEqual([
+        { slot: 1, step: 'finish', done_at: null, invite_minted_at: 47, updated_at: 49 },
+      ]);
+      expect(() => undone.exec(`UPDATE setup_state SET step = 'ai'`)).toThrow(
+        /CHECK constraint failed/,
+      );
+      // Every other step is kept as it is.
+      undone.exec(`UPDATE setup_state SET step = 'backups', done_at = 50`);
+    } finally {
+      undone.close();
+    }
+    await withKysely(path, (db) => migrateToLatest(db));
+    await migratedThrough(path, '0048-first-run-setup');
+    const kept = openDatabase(path);
+    try {
+      expect(kept.prepare('SELECT * FROM setup_state').all()).toEqual([
+        { slot: 1, step: 'backups', done_at: 50, invite_minted_at: 47, updated_at: 49 },
+      ]);
+    } finally {
+      kept.close();
+    }
+  });
+
+  it('widens 0050’s setup step for the tailnet step, keeping the row; undone, a setup that had reached it goes on to the passkey (#2817)', async () => {
+    const path = await freshPath();
+    await migratedThrough(path, '0049-setup-ai-step');
+    const before = openDatabase(path);
+    try {
+      // The wizard before the tailnet step cannot hold it.
+      expect(() =>
+        before.exec(`INSERT INTO setup_state VALUES (1, 'tailnet', NULL, NULL, 49)`),
+      ).toThrow(/CHECK constraint failed/);
+      before.exec(`INSERT INTO setup_state VALUES (1, 'ai', NULL, 47, 49)`);
+    } finally {
+      before.close();
+    }
+    await withKysely(path, (db) => migrateToLatest(db));
+    const widened = openDatabase(path);
+    try {
+      // The row as it was, `ai` included.
+      expect(widened.prepare('SELECT * FROM setup_state').all()).toEqual([
+        { slot: 1, step: 'ai', done_at: null, invite_minted_at: 47, updated_at: 49 },
+      ]);
+      widened.exec(`UPDATE setup_state SET step = 'tailnet', updated_at = 50`);
+      for (const refused of [
+        `UPDATE setup_state SET step = 'welcome'`,
+        `INSERT INTO setup_state VALUES (2, 'tailnet', NULL, NULL, 50)`,
+        `UPDATE setup_state SET updated_at = 'soon'`,
+      ]) {
+        expect(() => widened.exec(refused), refused).toThrow(
+          /CHECK constraint failed|cannot store TEXT value/,
+        );
+      }
+    } finally {
+      widened.close();
+    }
+    await migratedThrough(path, '0049-setup-ai-step');
+    const undone = openDatabase(path);
+    try {
+      // `tailnet` is not a step of the wizard `down` leaves: the step after the claim there is the passkey.
+      expect(undone.prepare('SELECT * FROM setup_state').all()).toEqual([
+        { slot: 1, step: 'passkey', done_at: null, invite_minted_at: 47, updated_at: 50 },
+      ]);
+      expect(() => undone.exec(`UPDATE setup_state SET step = 'tailnet'`)).toThrow(
+        /CHECK constraint failed/,
+      );
+      // Every other step is kept as it is, `ai` among them.
+      undone.exec(`UPDATE setup_state SET step = 'ai', done_at = 51`);
+    } finally {
+      undone.close();
+    }
+    await withKysely(path, (db) => migrateToLatest(db));
+    await migratedThrough(path, '0049-setup-ai-step');
+    const kept = openDatabase(path);
+    try {
+      expect(kept.prepare('SELECT * FROM setup_state').all()).toEqual([
+        { slot: 1, step: 'ai', done_at: 51, invite_minted_at: 47, updated_at: 50 },
+      ]);
+    } finally {
+      kept.close();
+    }
+  });
+
   it('refuses to undo 0048 while the operator log holds a setup or start entry, and changes nothing; with none it keeps every entry and its id (#2784)', async () => {
     const path = await freshPath();
     await migratedThrough(path, '0048-first-run-setup');
@@ -540,6 +661,57 @@ describe('the migrations (#769)', () => {
     } finally {
       after.close();
     }
+  });
+
+  it('narrows 0051’s operator log to refuse an embedded NUL, keeping every entry and its id; undone, it takes one again (#2618)', async () => {
+    const path = await freshPath();
+    await migratedThrough(path, '0050-setup-tailnet-step');
+    const NUL_DETAIL = `'applied=1' || char(0) || 'Any Text At All'`;
+    const before = openDatabase(path);
+    try {
+      before.exec(
+        `INSERT INTO operator_log VALUES (7, 38, 'cli', NULL, 'migrate', 'applied=1', 'done')`,
+      );
+    } finally {
+      before.close();
+    }
+    await withKysely(path, (db) => migrateUpOne(db));
+    const narrowed = openDatabase(path);
+    try {
+      expect(narrowed.prepare('SELECT id, detail FROM operator_log').all()).toEqual([
+        { id: 7, detail: 'applied=1' },
+      ]);
+      expect(() =>
+        narrowed.exec(
+          `INSERT INTO operator_log VALUES (8, 51, 'cli', NULL, 'migrate', ${NUL_DETAIL}, 'done')`,
+        ),
+      ).toThrow(/CHECK constraint failed/);
+      expect(() => narrowed.exec(`DELETE FROM operator_log`)).toThrow(/append-only/);
+      expect(() => narrowed.exec(`UPDATE operator_log SET outcome = 'failed'`)).toThrow(
+        /append-only/,
+      );
+    } finally {
+      narrowed.close();
+    }
+    await withKysely(path, (db) => migrateDownOne(db));
+    const undone = openDatabase(path);
+    try {
+      undone.exec(
+        `INSERT INTO operator_log VALUES (8, 51, 'cli', NULL, 'migrate', ${NUL_DETAIL}, 'done')`,
+      );
+      expect(undone.prepare('SELECT id FROM operator_log').all()).toEqual([{ id: 7 }, { id: 8 }]);
+    } finally {
+      undone.close();
+    }
+    // With a NUL in the log, `up` is refused and changes nothing.
+    const held = snapshot(path);
+    await expect(withKysely(path, (db) => migrateUpOne(db))).rejects.toThrow(
+      /holds an entry whose detail has an embedded NUL/,
+    );
+    expect(snapshot(path)).toEqual(held);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0050-setup-tailnet-step');
+    });
   });
 
   it('refuses to undo 0007 while the moderation log holds an entry, and changes nothing (#891)', async () => {

@@ -68,7 +68,7 @@ const STATE = {
 
 describe('the app’s Keys panel and the admin Keys page say the same thing (#2650)', () => {
   it('draws the same facts but the card, from one fixture, and the card only where it is handed', async () => {
-    mounted = await mount(<OperateKeysPanel port={scriptedOperate().port} />);
+    mounted = await mount(<OperateKeysPanel timeZone="UTC" port={scriptedOperate().port} />);
     await settle();
     const app = facts(mounted.container, 'dl.oyl-operate__keys').filter(
       ([label]) => label !== 'Card' && label !== 'Fingerprint',

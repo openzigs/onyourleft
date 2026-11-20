@@ -105,7 +105,7 @@ function adminRows(html: string): (readonly [string, string, string | null])[] {
 
 describe('the app’s Status panel and the admin Status page say the same thing (#2645)', () => {
   const drawnBoth = async () => {
-    mounted = await mount(<OperateStatusPanel status={STATUS} now={() => NOW} />);
+    mounted = await mount(<OperateStatusPanel timeZone="UTC" status={STATUS} now={() => NOW} />);
     return { app: appRows(mounted.container), admin: adminRows(pages.statusBody(STATUS, NOW)) };
   };
 
@@ -117,6 +117,16 @@ describe('the app’s Status panel and the admin Status page say the same thing 
       'Disk holding the blobs',
       'Last backup',
     ]);
+  });
+
+  it('the app’s panel draws the last backup in the zone it is given, named; the admin page in UTC (#2917)', async () => {
+    mounted = await mount(
+      <OperateStatusPanel timeZone="America/New_York" status={STATUS} now={() => NOW} />,
+    );
+    const lastBackup = (rows: readonly (readonly [string, string, string | null])[]) =>
+      rows.find(([label]) => label === 'Last backup')?.[1];
+    expect(lastBackup(appRows(mounted.container))).toMatch(/^2026-11-14 03:00 EST, /);
+    expect(lastBackup(adminRows(pages.statusBody(STATUS, NOW)))).toMatch(/^2026-11-14 08:00 UTC, /);
   });
 
   it('the app’s panel says the pinned rows', async () => {
@@ -132,7 +142,9 @@ describe('the app’s Status panel and the admin Status page say the same thing 
   it('says the same thing above the rows, ready or not', async () => {
     for (const ready of [true, false]) {
       mounted?.unmount();
-      mounted = await mount(<OperateStatusPanel status={{ ...STATUS, ready }} now={() => NOW} />);
+      mounted = await mount(
+        <OperateStatusPanel timeZone="UTC" status={{ ...STATUS, ready }} now={() => NOW} />,
+      );
       const sentence = ready
         ? 'The instance is up and ready for riders.'
         : 'The instance is up but not ready for riders. The checks below say which failed.';

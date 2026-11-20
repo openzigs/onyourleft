@@ -86,7 +86,7 @@
  * the line (`physics` §`BotCourse.lineMetres`, where the rider stood at the
  * press, wrapped onto the lap), and every grade a bot reads is read from
  * there: the grade under it, the grade ahead its tactics and the model are
- * shown (`model-race.ts` §`modelTacticsInputOf`), and the road under the
+ * shown (`model-race.ts` §`modelTacticsRaceOf`), and the road under the
  * rider as a wheel. A race started anywhere but the route's 0 has its bots on
  * the hills the rider sees them on. `ride-race.test.ts` holds each bot's felt
  * grade to the grade where it is drawn on a race started at 300 m.
@@ -713,7 +713,7 @@ export function startedLapRaceRide(ride: LapRaceRide, reply: ModelTacticsReply):
 
 /** What a race with AI bots keeps with the ride (#2710, D-4.4), or `undefined` for a seeded race. */
 export function lapRaceRideFact(ride: LapRaceRide): LapRaceModelRecord | undefined {
-  return ride.model === undefined ? undefined : lapRaceModelFact(ride.model, ride.seed);
+  return ride.model === undefined ? undefined : lapRaceModelFact(ride.model, ride.seed, ride.bots);
 }
 
 /** What the race offers the HUD's one region at `now`, ride seconds: one event per kind owed. */
