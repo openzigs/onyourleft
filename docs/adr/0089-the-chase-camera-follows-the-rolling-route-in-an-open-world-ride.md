@@ -1,8 +1,9 @@
 # ADR 0089: In an open-world ride the fixed chase camera follows the rolling route, through a junction turn and a U-turn, and never enters a building
 
-- **Status**: **Proposed**, 2026-11-19, on the owner's rulings of 2026-11-19 on the epic
-  [#2880](https://github.com/openzigs/onyourleft/issues/2880). Accepted only on the owner's approval
-  on its pull request. D-6 lists the questions for the owner
+- **Status**: **Accepted**, 2026-11-20, by the owner on its pull request
+  [#2956](https://github.com/openzigs/onyourleft/pull/2956), with every recommendation taken and the
+  answers recorded in D-6. Proposed 2026-11-19, on the owner's rulings of that day on the epic
+  [#2880](https://github.com/openzigs/onyourleft/issues/2880)
 - **Date**: 2026-11-19
 - **Deciders**: **the owner**, whose rulings of 2026-11-19 start the open-world ride. **The author**
   wrote the camera rules from the code as it stands; each number is read from a named constant
@@ -160,16 +161,21 @@ A route ride's camera is ADR 0008 D-5's, with its amendments, and `chase-camera-
 already holds it. C-5 may be applied to route rides too, since a mapped town on a route has the same
 corner. Doing so is #2903's or a follow-up's call, and it changes nothing this ADR decides.
 
-### D-6 — What the owner is asked to rule on
+### D-6 — What the owner was asked, and the answers
+
+The owner answered all three on **2026-11-20**, on the pull request
+[#2956](https://github.com/openzigs/onyourleft/pull/2956), each as recommended. Each answer follows
+its question.
 
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
-   merge**.
+   merge**. **Answered: accepted before merge.** The Status line says so.
 2. **Q1 — A new ADR rather than an amendment**, for ADR 0013 D-3's reason? Recommended: **yes**. The
-   owner's lane note already reserved a number for it.
+   owner's lane note already reserved a number for it. **Answered: yes**, a new ADR.
 3. **Q2 — Pull the eye in ahead of the wall, toward the rider and past 1.5 m if it must (D-2,
    C-5)**, rather than raise it or let it pass through a wall? Recommended: **yes**. A camera inside
    a building shows the rider nothing, and a camera that cuts behind one hides the junction. A
-   raised eye is inside the building while it rises.
+   raised eye is inside the building while it rises. **Answered: yes**, pull the eye in toward the
+   rider ahead of the wall, past 1.5 m if it must; never inside a building. C-5 stands.
 
 ---
 
