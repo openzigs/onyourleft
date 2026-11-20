@@ -4,7 +4,7 @@
  * #2882's spike: a route profile that grows ahead of the rider and has its
  * tail replaced at a junction. **Throwaway**: nothing the app ships imports
  * this directory (`spike-boundary.test.ts`), and the write-up is
- * `docs/spikes/0040-rolling-route-and-a-turning-ride.md`.
+ * `docs/spikes/0041-rolling-route-and-a-turning-ride.md`.
  *
  * ## What `RouteProfile` / `routeProfile` would not do, and what this does instead
  *

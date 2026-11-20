@@ -1,12 +1,13 @@
-# Spike 0040: A rolling route, and a moving ride that turns 90° every few hundred metres through streamed real buildings
+# Spike 0041: A rolling route, and a moving ride that turns 90° every few hundred metres through streamed real buildings
 
 - **Date**: 2026-11-19
 - **Issue**: [#2882](https://github.com/openzigs/onyourleft/issues/2882), Phase 0 of the open-world epic
   [#2880](https://github.com/openzigs/onyourleft/issues/2880). The owner's ruling of 2026-11-19 on the issue: *"build
   the spike and measure it in the browser harness on this Mac; the tablet frame measurement is the owner's and waits for
   a tablet session, so state it as owed in the PR. No install on any device."*
-- **Number**: **0040.** `docs/spikes/` holds 0001 to 0008, 0010 to 0020 and 0022 to 0039 on `origin/main` at
-  `ae37331f2`, and no open pull request adds a spike.
+- **Number**: **0041.** `docs/spikes/` holds 0001 to 0008, 0010 to 0020 and 0022 to 0039 on `origin/main` at
+  `4c0730bcb`, and open pull request [#2949](https://github.com/openzigs/onyourleft/pull/2949) (#2881's street-graph
+  spike, also carried by #2951) claimed 0040 first, so this takes the next free number.
 
 A spike is a dated measurement that decides nothing (`docs/agents/conventions.md` §7). It informs the ADRs #2884 (map
 reads), #2885 (heights) and #2888 (camera), and the Phase 1 issues #2895 (rolling profile) and #2901 (per-tile planning
@@ -292,7 +293,7 @@ The issue's first criterion is measured on the owner's tablet, and is **not met 
   (`pnpm exec vite build --config tools/rolling-route-spike/vite.config.ts` and
   `pnpm exec vite preview --config tools/rolling-route-spike/vite.config.ts --host`, from `apps/web`), open
   `http://<the Mac>:4173/?world=realistic&planning=worker&place=suburb&seconds=240` in the tablet's Chrome for each of
-  the eight configurations, and read the one `OYL-SPIKE-0040 {…}` line each run prints, through `adb logcat` or Chrome's
+  the eight configurations, and read the one `OYL-SPIKE-0041 {…}` line each run prints, through `adb logcat` or Chrome's
   remote inspector, while reading the GPU clock over `adb`. The tablet's Chrome is not the shell's WebView; the shell's
   numbers would need the page staged into a debug build, which the ruling rules out for now.
 

@@ -407,7 +407,7 @@ async function run(): Promise<void> {
       ?.usedJSHeapSize;
     // One line, as the realistic page's are, so `adb logcat` carries a
     // tablet's numbers off the device under the `chromium` tag.
-    console.log(`OYL-SPIKE-0040 ${JSON.stringify(summariseRun(result))}`);
+    console.log(`OYL-SPIKE-0041 ${JSON.stringify(summariseRun(result))}`);
     result.done = true;
     worker?.terminate();
   };
