@@ -12,6 +12,16 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0088 is [ADR 0088](../adr/0088-junction-choice-is-a-discrete-press-that-cannot-reach-the-trainer.md)**,
+  taken by [#2887](https://github.com/openzigs/onyourleft/issues/2887) on 2026-11-19 for junction
+  choice in an open-world ride as a discrete press, apart from lane steering, that cannot reach the
+  trainer, on the owner's rulings of that day on the epic #2880 and on #2883, and **Accepted** on
+  2026-11-20 by the owner on #2953, with tappable on-screen turn controls added. It
+  supersedes nothing and sits beside ADR 0060 D-6.3. The owner's lane note of 2026-11-19 reserved
+  it, beside **0087** (#2885), **0089** (#2888) and **0090** (#2884, moved off 0086, which ADR 0086
+  had taken). **0091 is claimed** by the open pull request
+  [#2951](https://github.com/openzigs/onyourleft/pull/2951) (#2886, the open-world street graph),
+  opened before this one, so the next free number is **0092**.
   ⚠️ **0090 is [ADR 0090](../adr/0090-the-open-world-ride-streams-its-map-in-fixed-grid-blocks.md)**,
   taken by [#2884](https://github.com/openzigs/onyourleft/issues/2884) on 2026-11-19 for the
   open-world ride's streamed map reads, ridden-block cache and privacy zones, on the owner's
