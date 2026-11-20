@@ -189,6 +189,48 @@ describe('claiming the owner from the app — #2823', () => {
     expect(await tablet.port.keys()).toMatchObject({ kind: 'trusted' });
   });
 
+  it('registers the owner’s athlete with the name given at the sign-in, and as Rider with none (#2878)', async () => {
+    for (const [given, shown] of [
+      ['  Mara Owner ', 'Mara Owner'],
+      ['', 'Rider'],
+    ] as const) {
+      const world = await instance();
+      const send = wire(world);
+      const tablet = device(send);
+      const { line } = await claimLine(world);
+      const claimed = await tablet.port.claimOwner(line);
+      if (claimed.kind !== 'pending') throw new Error(JSON.stringify(claimed));
+      await world.identity.ownerClaim.confirm(claimed.comparisonCode, 'admin_loopback');
+      expect(await tablet.port.signInAsOwner(claimed.card, given)).toMatchObject({
+        kind: 'connected',
+      });
+      // Read back as the app reads it, from the instance: the session's athlete.
+      expect(await tablet.port.current()).toMatchObject({ kind: 'connected', displayName: shown });
+      // Sealed, as the claim was: the name never crossed the edge in plaintext.
+      expect(send.paths).not.toContain('/v1/auth/session');
+    }
+  });
+
+  it('sends nothing for a name the instance would refuse, and the claim still signs in', async () => {
+    const world = await instance();
+    const send = wire(world);
+    const tablet = device(send);
+    const { line } = await claimLine(world);
+    const claimed = await tablet.port.claimOwner(line);
+    if (claimed.kind !== 'pending') throw new Error(JSON.stringify(claimed));
+    await world.identity.ownerClaim.confirm(claimed.comparisonCode, 'admin_loopback');
+    const before = send.paths.length;
+    expect(await tablet.port.signInAsOwner(claimed.card, 'x'.repeat(33))).toEqual({
+      kind: 'refused',
+      text: CONNECT_REFUSAL_TEXT['bad-name'],
+    });
+    expect(send.paths).toHaveLength(before);
+    expect(await tablet.port.signInAsOwner(claimed.card, 'Mara')).toMatchObject({
+      kind: 'connected',
+    });
+    expect(await tablet.port.current()).toMatchObject({ displayName: 'Mara' });
+  });
+
   it('is not the owner when the setup page has not confirmed, and says so plainly where registration waits', async () => {
     // An instance that registers nobody, as one that refuses every rider
     // until its owner is claimed does (ADR 0080 D-3, #2784).

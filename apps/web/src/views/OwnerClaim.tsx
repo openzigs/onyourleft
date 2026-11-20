@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { checkDisplayName } from '@onyourleft/domain';
 import { CLAIM_NO_BUTTON, CLAIM_YES_BUTTON, SETUP_NEXT_BUTTON } from '@onyourleft/operate-text';
 import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
-import type { ConnectOutcome, InstancePort } from '../instance/instance-port';
+import {
+  CONNECT_REFUSAL_TEXT,
+  type ConnectOutcome,
+  type InstancePort,
+} from '../instance/instance-port';
 
 /**
  * **Claim your own server from this device** — #2823, ADR 0080 D-3, D-5.
@@ -25,6 +30,13 @@ import type { ConnectOutcome, InstancePort } from '../instance/instance-port';
  * 3. once the owner has said Yes there, *Sign in as the owner* signs this
  *    device in, so the setup page's invite step opens.
  *
+ * The owner may give the name other riders see (#2878), as an invite's rider
+ * does on the Connect form: it is checked here before anything is sent, and
+ * goes to the server only with the sign-in of step 3, in the sealed
+ * registration that makes the owner's athlete. Not with the claim of step 1:
+ * until the owner has seen both screens show the same number, the server it
+ * would go to is not known to be theirs. Left empty, the owner is "Rider".
+ *
  * A claim line is the same `<card> <code>` as a link line or a rider's
  * invite, so it is the rider's answer that says "claim", and the server's
  * that says whether it was one. Every refusal is one sentence, under the
@@ -38,6 +50,8 @@ export const OWNER_CLAIM_TEXT = {
   heading: 'Claim your server',
   /** One short line (#1013): what the claim is for is the setup page's to say. */
   lead: 'Make this device the owner of the server whose setup page showed this code.',
+  /** The optional name (#2878), in the Connect form's own words for it. */
+  nameLabel: 'The name other riders will see (optional)',
   claim: 'Claim this server',
   /** Before the press (#2828): the claim sends nothing until it. */
   nothingSent: 'Nothing is sent until you press “Claim this server”.',
@@ -106,6 +120,9 @@ export function OwnerClaim({
   >(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
+  const nameId = useId();
+  /** The owner's name as typed (#2878): sent only with the sign-in, never with the claim. */
+  const [name, setName] = useState('');
 
   useEffect(() => {
     onProgress({ busy, pending: pending !== undefined });
@@ -119,8 +136,13 @@ export function OwnerClaim({
   }, []);
 
   async function claim(): Promise<void> {
-    setBusy(true);
     setRefusal(undefined);
+    // A name the server would refuse is said now, before the code is spent on a claim.
+    if (name.trim() !== '' && !checkDisplayName(name.trim()).ok) {
+      setRefusal(CONNECT_REFUSAL_TEXT['bad-name']);
+      return;
+    }
+    setBusy(true);
     const outcome = await port.claimOwner(line);
     setBusy(false);
     if (outcome.kind === 'refused') {
@@ -133,7 +155,7 @@ export function OwnerClaim({
   async function signIn(card: string): Promise<void> {
     setBusy(true);
     setRefusal(undefined);
-    const outcome = await port.signInAsOwner(card);
+    const outcome = await port.signInAsOwner(card, name);
     setBusy(false);
     if (outcome.kind === 'refused') {
       setRefusal(outcome.text);
@@ -199,6 +221,21 @@ export function OwnerClaim({
         {OWNER_CLAIM_TEXT.heading}
       </h3>
       <p>{OWNER_CLAIM_TEXT.lead}</p>
+      <p className="oyl-connect__field">
+        <label htmlFor={nameId}>{OWNER_CLAIM_TEXT.nameLabel}</label>
+        <input
+          className="oyl-input"
+          id={nameId}
+          autoComplete="nickname"
+          maxLength={64}
+          value={name}
+          disabled={busy}
+          onChange={(event) => {
+            setName(event.target.value);
+            setRefusal(undefined);
+          }}
+        />
+      </p>
       <p className="oyl-muted">{OWNER_CLAIM_TEXT.nothingSent}</p>
       <p>
         <Button

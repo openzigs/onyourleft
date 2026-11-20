@@ -30,7 +30,7 @@ async function open(scripted: ScriptedOperate): Promise<void> {
   mounted = await mount(
     <main>
       <h1>Operate</h1>
-      <OperateBackupsPanel port={scripted.port} every={NEVER} />
+      <OperateBackupsPanel timeZone="UTC" port={scripted.port} every={NEVER} />
     </main>,
   );
   await settle();

@@ -578,6 +578,34 @@ export {
   routeProfile,
 } from './route/profile';
 
+// The rolling route (#2895): an open-world ride's profile, which grows ahead
+// along the street graph's default ways, swaps its tail at a junction before
+// the 100 m lock and drops the road far behind (ADR 0087 D-4.1, D-6; ADR 0088
+// D-1). `route/rolling.ts` says what `routeProfile` would not do.
+
+export type {
+  RollingChoice,
+  RollingEdge,
+  RollingJunction,
+  RollingLeg,
+  RollingLegKind,
+  RollingPoint,
+  RollingStreetGraph,
+  RollingWay,
+} from './route/rolling';
+export {
+  JUNCTION_LOCK_METRES,
+  ROLLING_AHEAD_METRES,
+  ROLLING_BEHIND_METRES,
+  ROLLING_DESPIKE_SAMPLES,
+  ROLLING_LEAST_WAY_METRES,
+  ROLLING_MOST_SAMPLES,
+  ROLLING_RESOLUTION_METRES,
+  ROLLING_SLOPE_SAMPLES,
+  RollingRoute,
+  waysOn,
+} from './route/rolling';
+
 // The wind, and the resolution of it against the route's own bearings (#326).
 // Here rather than in the game for the reason `route/wind.ts` gives: the rider
 // and the bot pacer must read one implementation, and `packages/physics` says

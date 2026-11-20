@@ -194,6 +194,7 @@ import { blockText } from '../workouts/library';
 import { estimateFromRide, thresholdTestOf } from '../workouts/threshold-test-result';
 import type { HoldOff, WorkoutHold } from '../workout/hold-text';
 import type { ReplanPort } from '../workout/replan-port';
+import { warmReplan } from '../workout/replan-job';
 import { createReplanSession, type ReplanSession } from '../workout/replan-session';
 import type { WaitingReplan } from '../workout/replan-text';
 import { withTraceSample, type WorkoutTraceSample } from '../workout/workout-graph';
@@ -4192,6 +4193,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       },
       onChange: changed,
     });
+    // #2841: load the instance's model now, so the first re-plan does not wait
+    // for it — for the workout being ridden only, never one already replaced.
+    if (workout === current) {
+      void warmReplan(() => port.replanSession());
+    }
     changed();
   };
 

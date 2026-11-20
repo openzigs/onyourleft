@@ -122,7 +122,11 @@ describe('Backups over the real instance — #2607', () => {
     ]);
     const clock = handClock();
     mounted = await mount(
-      <OperateBackupsPanel port={createOperatePort(owner.dependencies)} every={clock.every} />,
+      <OperateBackupsPanel
+        timeZone="UTC"
+        port={createOperatePort(owner.dependencies)}
+        every={clock.every}
+      />,
     );
     await until(() => rows().length > 0);
     expect(rows()).toHaveLength(3);
@@ -172,6 +176,7 @@ describe('Backups over the real instance — #2607', () => {
     await writeBackups(world, [aSnapshot(world, 120)]);
     mounted = await mount(
       <OperateBackupsPanel
+        timeZone="UTC"
         port={createOperatePort(owner.dependencies)}
         every={handClock().every}
       />,
@@ -195,7 +200,9 @@ describe('Backups over a scripted instance — #2607', () => {
     const scripted = scriptedOperate();
     // The instance takes the request and records no backup.
     scripted.held.servesAtOnce = true;
-    mounted = await mount(<OperateBackupsPanel port={scripted.port} every={handClock().every} />);
+    mounted = await mount(
+      <OperateBackupsPanel timeZone="UTC" port={scripted.port} every={handClock().every} />,
+    );
     await settle();
     const before = rows();
     expect(before).toHaveLength(3);
@@ -207,7 +214,9 @@ describe('Backups over a scripted instance — #2607', () => {
 
   it('asks for nothing when the confirmation is declined, and says what Back up now removes', async () => {
     const scripted = scriptedOperate();
-    mounted = await mount(<OperateBackupsPanel port={scripted.port} every={handClock().every} />);
+    mounted = await mount(
+      <OperateBackupsPanel timeZone="UTC" port={scripted.port} every={handClock().every} />,
+    );
     await settle();
     const button = backUpNowButton();
     if (button === undefined) throw new Error('no Back up now');
@@ -228,7 +237,9 @@ describe('Backups over a scripted instance — #2607', () => {
 
   it('has no control that sends a restore: Back up now is the only one that sends anything', async () => {
     const scripted = scriptedOperate();
-    mounted = await mount(<OperateBackupsPanel port={scripted.port} every={handClock().every} />);
+    mounted = await mount(
+      <OperateBackupsPanel timeZone="UTC" port={scripted.port} every={handClock().every} />,
+    );
     await settle();
     const section = mounted.container.querySelector('section');
     expect(
@@ -247,7 +258,9 @@ describe('Backups over a scripted instance — #2607', () => {
 
   it('writes the restore steps for the chosen snapshot by name, and with no host path', async () => {
     const scripted = scriptedOperate();
-    mounted = await mount(<OperateBackupsPanel port={scripted.port} every={handClock().every} />);
+    mounted = await mount(
+      <OperateBackupsPanel timeZone="UTC" port={scripted.port} every={handClock().every} />,
+    );
     await settle();
     const [newest, , oldest] = SCRIPTED_BACKUPS as [
       Extract<OperateBackup, { outcome: 'done' }>,
@@ -298,6 +311,7 @@ describe('Backups over a scripted instance — #2607', () => {
     };
     mounted = await mount(
       <OperateBackupsPanel
+        timeZone="UTC"
         port={scriptedOperate({ backups: [oneOff] }).port}
         every={handClock().every}
       />,
@@ -313,7 +327,11 @@ describe('Backups over a scripted instance — #2607', () => {
 
   it('warns of a failed off-box copy and a failed run, and of none where all went well', async () => {
     mounted = await mount(
-      <OperateBackupsPanel port={scriptedOperate().port} every={handClock().every} />,
+      <OperateBackupsPanel
+        timeZone="UTC"
+        port={scriptedOperate().port}
+        every={handClock().every}
+      />,
     );
     await settle();
     const [newest, failed, oldest] = rows();
@@ -335,6 +353,7 @@ describe('Backups over a scripted instance — #2607', () => {
     if (newest === undefined) throw new Error('no backups');
     mounted = await mount(
       <OperateBackupsPanel
+        timeZone="UTC"
         port={scriptedOperate({ backups: [{ ...newest, ageSeconds }, ...rest] }).port}
         every={handClock().every}
       />,
@@ -361,6 +380,7 @@ describe('Backups over a scripted instance — #2607', () => {
     };
     mounted = await mount(
       <OperateBackupsPanel
+        timeZone="UTC"
         port={
           scriptedOperate({
             backups: [freshOneOff, { ...newest, ageSeconds: 2 * 21_600 + 1 }, ...rest],
@@ -389,6 +409,7 @@ describe('Backups over a scripted instance — #2607', () => {
     const clock = handClock();
     mounted = await mount(
       <OperateBackupsPanel
+        timeZone="UTC"
         port={{
           backups: () => Promise.resolve(answers.shift() ?? { kind: 'unreachable' }),
           backUpNow: () => Promise.resolve({ kind: 'unreachable' }),
@@ -413,6 +434,7 @@ describe('Backups over a scripted instance — #2607', () => {
   it('says the backups could not be read, and offers nothing', async () => {
     mounted = await mount(
       <OperateBackupsPanel
+        timeZone="UTC"
         port={scriptedOperate({ backups: null }).port}
         every={handClock().every}
       />,
@@ -426,6 +448,7 @@ describe('Backups over a scripted instance — #2607', () => {
   it('says no backup is recorded, and that there is nothing to restore, before the first', async () => {
     mounted = await mount(
       <OperateBackupsPanel
+        timeZone="UTC"
         port={scriptedOperate({ backups: [] }).port}
         every={handClock().every}
       />,
@@ -440,7 +463,9 @@ describe('Backups over a scripted instance — #2607', () => {
   it('says a Back up now the instance did not take was not asked for, and leaves the list', async () => {
     const scripted = scriptedOperate();
     scripted.held.backUpNow = { kind: 'unreachable' };
-    mounted = await mount(<OperateBackupsPanel port={scripted.port} every={handClock().every} />);
+    mounted = await mount(
+      <OperateBackupsPanel timeZone="UTC" port={scripted.port} every={handClock().every} />,
+    );
     await settle();
     await backUpNow();
     expect(text()).toContain(BACKUP_NOT_ASKED_TEXT);
@@ -452,7 +477,9 @@ describe('Backups over a scripted instance — #2607', () => {
     const scripted = scriptedOperate();
     scripted.held.pendingSince = '2026-11-14T20:59:00.000Z';
     const clock = handClock();
-    mounted = await mount(<OperateBackupsPanel port={scripted.port} every={clock.every} />);
+    mounted = await mount(
+      <OperateBackupsPanel timeZone="UTC" port={scripted.port} every={clock.every} />,
+    );
     await settle();
     expect(text()).toContain(BACKUP_WAITING_TEXT);
     expect(clock.running()).toEqual([BACKUPS_REREAD_MILLISECONDS]);

@@ -22,16 +22,20 @@
  *   that is hung but alive keeps beating, and keeps its lease; only a run
  *   that died stops, and its lease is free {@link LEASE_STALE_MS} later — the
  *   way out of a stuck lease, with no command to run.
- * - **Losing it**: a heartbeat that cannot be written, or finds the lease
- *   another run's, marks it lost, and the run stops before it records or
- *   prunes anything ({@link Lease.confirm}).
+ * - **Losing it**: {@link Lease.confirm} reads the lease's row before the run
+ *   records or prunes anything, and the run stops unless the row is still
+ *   its own (#2627). A heartbeat that could not be written is tried again at
+ *   the next beat, and decides nothing by itself: a run whose row nobody took
+ *   still holds its folder.
  * - **A database from before migration 0042** has no lease table: the run
  *   goes on with none, as runs did before.
  *
- * The folder is named in the row by the SHA-256 of its path, never the path.
+ * The folder is named in the row by the SHA-256 of its real path, never the
+ * path (#2627: two paths to one folder, through a symlink, are one lease).
  */
 
 import { createHash, randomBytes } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -54,16 +58,26 @@ export class BackupLeaseLost extends Error {
 }
 
 export interface Lease {
-  /** One heartbeat now: what the timer calls. */
+  /** One heartbeat now: what the timer calls. One that cannot be written is tried again at the next. */
   beat(): Promise<void>;
-  /** A heartbeat now, and throws {@link BackupLeaseLost} unless the lease is still this run's. */
+  /** A heartbeat now, then throws {@link BackupLeaseLost} unless the lease's row is still this run's. */
   confirm(): Promise<void>;
   release(): Promise<void>;
 }
 
-/** The lease row's key for `folder`: the SHA-256 of its resolved path. */
+/**
+ * The lease row's key for `folder`: the SHA-256 of its real path, symlinks
+ * followed (#2627), or of its resolved path while it cannot be read — a
+ * folder not made yet.
+ */
 export function placeOf(folder: string): string {
-  return createHash('sha256').update(resolve(folder)).digest('hex');
+  let path: string;
+  try {
+    path = realpathSync(folder);
+  } catch {
+    path = resolve(folder);
+  }
+  return createHash('sha256').update(path).digest('hex');
 }
 
 export interface LeaseOptions {
@@ -102,13 +116,10 @@ export async function takeLease(
   if (taken === 'busy') {
     throw new BackupFolderBusy('Another backup run holds this folder. Nothing was taken.');
   }
-  let lost = false;
+  // A beat decides nothing (#2627): one that cannot be written is tried again
+  // at the next, and `confirm` reads the row.
   const beat = async (): Promise<void> => {
-    try {
-      if (!(await store.heartbeatBackupLease(place, token, now()))) lost = true;
-    } catch {
-      lost = true;
-    }
+    await store.heartbeatBackupLease(place, token, now()).catch(() => false);
   };
   const timer = setInterval(() => void beat(), options.everyMs ?? HEARTBEAT_MS);
   // A run that ends releases it; the timer never keeps the process alive.
@@ -117,7 +128,8 @@ export async function takeLease(
     beat,
     async confirm() {
       await beat();
-      if (lost) throw new BackupLeaseLost('This run no longer holds its backup folder.');
+      const held = await store.holdsBackupLease(place, token).catch(() => false);
+      if (!held) throw new BackupLeaseLost('This run no longer holds its backup folder.');
     },
     async release() {
       clearInterval(timer);

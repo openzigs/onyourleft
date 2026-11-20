@@ -10,7 +10,7 @@
  */
 
 import { act } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createModerationPort } from '../instance/moderation-port';
 import { createOperatePort, OPERATOR_LOG_PAGE } from '../instance/operate-port';
@@ -73,7 +73,9 @@ describe('the Operate area over the real instance — #2603', () => {
   it(`shows the owner the log newest first, and Show older entries appends the next page`, async () => {
     const { owner, world } = await operatedWorld();
     await writeOperatorEntries(world, OPERATOR_LOG_PAGE + 2);
-    mounted = await mount(<OperateView port={createOperatePort(owner.dependencies)} />);
+    mounted = await mount(
+      <OperateView timeZone="UTC" port={createOperatePort(owner.dependencies)} />,
+    );
     await until(() => logLines().length > 0);
     expect(text()).toContain(OPERATE_PURPOSE);
     expect(logLines()).toHaveLength(OPERATOR_LOG_PAGE);
@@ -100,7 +102,7 @@ describe('the Operate area over the real instance — #2603', () => {
       if (who === 'rider') await operated.approveRider();
       const counted = countingSealed(operated.world, '/v1/operate/log');
       const port = createOperatePort({ ...operated[who].dependencies, send: counted.send });
-      mounted = await mount(<OperateView port={port} />);
+      mounted = await mount(<OperateView timeZone="UTC" port={port} />);
       await until(readDone);
       expect(text()).toContain(OPERATE_STANDING_TEXT['not-owner']);
       expect(logLines()).toEqual([]);
@@ -127,7 +129,9 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
   it('shows the owner the instance’s counts as the instance holds them, above the log', async () => {
     const { owner, approveRider } = await operatedWorld();
     await approveRider();
-    mounted = await mount(<OperateView port={createOperatePort(owner.dependencies)} />);
+    mounted = await mount(
+      <OperateView timeZone="UTC" port={createOperatePort(owner.dependencies)} />,
+    );
     await until(() => fact('Accounts') !== '');
     // The owner, the deputy and the approved rider.
     expect(fact('Accounts')).toBe('3 active, 0 awaiting approval, 0 suspended');
@@ -155,7 +159,7 @@ describe('the Operate area’s Status over the real instance — #2604', () => {
       const operated = await operatedWorld();
       const counted = countingSealed(operated.world, '/v1/operate/status');
       const port = createOperatePort({ ...operated[who].dependencies, send: counted.send });
-      mounted = await mount(<OperateView port={port} />);
+      mounted = await mount(<OperateView timeZone="UTC" port={port} />);
       await until(readDone);
       expect(text()).toContain(OPERATE_STANDING_TEXT['not-owner']);
       expect(fact('Accounts')).toBe('');
@@ -219,7 +223,9 @@ describe('the Operate area’s Accounts over the real instance — #2605', () =>
 
   it('gives the deputy no link-out in Operate, and the Moderation screen still opens for them at a section', async () => {
     const operated = await operatedWorld();
-    mounted = await mount(<OperateView port={createOperatePort(operated.deputy.dependencies)} />);
+    mounted = await mount(
+      <OperateView timeZone="UTC" port={createOperatePort(operated.deputy.dependencies)} />,
+    );
     await until(readDone);
     expect(text()).toContain(OPERATE_STANDING_TEXT['not-owner']);
     expect(section('Accounts')).toBeUndefined();
@@ -236,9 +242,46 @@ describe('the Operate area’s Accounts over the real instance — #2605', () =>
 });
 
 describe('the Operate area over a scripted instance — #2603', () => {
+  it('draws every moment in the zone it is given, named, in every section and the log (#2917)', async () => {
+    const scripted = scriptedOperate();
+    mounted = await mount(<OperateView timeZone="America/New_York" port={scripted.port} />);
+    await settle();
+    await until(() => text().includes('Opened 2026-11-14'));
+    const all = text();
+    // The log, Backups and its restore choice, Rooms, Keys, Recent problems and the AI jobs.
+    for (const moment of [
+      'Room opened, 2026-11-14 04:30 EST',
+      '2026-11-14 15:00 EST, 1 hour ago',
+      '2026-11-14 15:00 EST: snapshot-2026-11-14T20-00-00-000Z',
+      'Opened 2026-11-14 14:30 EST',
+      'made 2026-10-22 04:00 EDT',
+      '2026-11-14 15:45 EST:',
+      'done, 2026-11-14 04:00 EST',
+    ]) {
+      expect(all).toContain(moment);
+    }
+    expect(all).not.toMatch(/\d{2}:\d{2} UTC/);
+  });
+
+  it('draws the device’s own zone when it is given none, whatever the runner’s (#2917)', async () => {
+    // The device's zone is pinned here, so the test does not depend on the runner's TZ.
+    const options = new Intl.DateTimeFormat().resolvedOptions();
+    const pinned = vi
+      .spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions')
+      .mockReturnValue({ ...options, timeZone: 'Asia/Kolkata' });
+    try {
+      mounted = await mount(<OperateView port={scriptedOperate().port} />);
+      await settle();
+      await until(() => logLines().length > 0);
+      expect(logLines().join('\n')).toContain('Room opened, 2026-11-14 15:00 GMT+5:30');
+    } finally {
+      pinned.mockRestore();
+    }
+  });
+
   it('renders two entries newest first, then Show older entries appends the next page from the port', async () => {
     const scripted = scriptedOperate({ pageSize: 2 });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     expect(logLines()).toHaveLength(2);
     expect(logLines()[0]).toContain('Restored from a backup');
@@ -265,7 +308,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
   });
 
   it('says what the area is for', async () => {
-    mounted = await mount(<OperateView port={scriptedOperate().port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scriptedOperate().port} />);
     await settle();
     expect(text()).toContain(OPERATE_PURPOSE);
   });
@@ -283,7 +326,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
         },
       ],
     });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     expect(logLines()).toEqual([
       'tunnel check, 2026-11-14 09:00 UTC, from the command line on the host: done.',
@@ -311,7 +354,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
         },
       ],
     });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     expect([...logLines()].sort()).toEqual([
       'Admin sign-in attempts refused, 2026-11-15 09:01 UTC, from the admin pages, on the server machine: refused (code,refused=3).',
@@ -357,7 +400,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
         },
       ],
     });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     expect([...logLines()].sort()).toEqual([
       'Secret made at start, 2026-11-18 09:00 UTC, by the instance as it started: done (instance_secret_key).',
@@ -403,7 +446,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
         },
       ],
     });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     expect(mounted.container.querySelector('.oyl-operate__log strong')?.textContent).toBe(
       'constructor',
@@ -412,7 +455,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
 
   it('moves focus to the first entry the last page brought, as Show older entries goes', async () => {
     const scripted = scriptedOperate({ pageSize: 2 });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     const button = showOlder();
     if (button === undefined) throw new Error('no Show older entries');
@@ -437,7 +480,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
         return cursor === undefined ? read : { kind: 'page' as const, entries: [], next: null };
       },
     };
-    mounted = await mount(<OperateView port={port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={port} />);
     await settle();
     const button = showOlder();
     if (button === undefined) throw new Error('no Show older entries');
@@ -466,7 +509,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
     mounted = await mount(
       <>
         <a href="#elsewhere">Elsewhere</a>
-        <OperateView port={port} />
+        <OperateView timeZone="UTC" port={port} />
       </>,
     );
     await settle();
@@ -483,7 +526,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
 
   it('leaves focus on the document after a pointer press brings a middle page, as Safari leaves it', async () => {
     const scripted = scriptedOperate({ pageSize: 1 });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     const button = showOlder();
     if (button === undefined) throw new Error('no Show older entries');
@@ -502,7 +545,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
 
   it('leaves focus where it is while there is still an older page to show', async () => {
     const scripted = scriptedOperate({ pageSize: 1 });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     const button = showOlder();
     if (button === undefined) throw new Error('no Show older entries');
@@ -515,7 +558,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
 
   it('announces how the read ended — the not-the-owner sentence and the unreadable log are polite live regions', async () => {
     const refused = scriptedOperate({ standing: 'not-owner' });
-    mounted = await mount(<OperateView port={refused.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={refused.port} />);
     await settle();
     expect(mounted.container.querySelector('[role="status"]')?.textContent).toContain(
       OPERATE_STANDING_TEXT['not-owner'],
@@ -523,7 +566,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
     mounted.unmount();
     const unread = scriptedOperate();
     unread.held.logReadable = false;
-    mounted = await mount(<OperateView port={unread.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={unread.port} />);
     await settle();
     expect(mounted.container.querySelector('[role="status"]')?.textContent).toContain(
       OPERATOR_LOG_UNREADABLE_TEXT,
@@ -534,7 +577,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
     'tells %s only that, and asks for nothing but the standing',
     async (standing) => {
       const scripted = scriptedOperate({ standing });
-      mounted = await mount(<OperateView port={scripted.port} />);
+      mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
       await settle();
       expect(text()).toContain(OPERATE_STANDING_TEXT[standing]);
       expect(text()).not.toContain(OPERATE_PURPOSE);
@@ -548,7 +591,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
   it('says the log could not be read, and draws no entry', async () => {
     const scripted = scriptedOperate();
     scripted.held.logReadable = false;
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     expect(text()).toContain(OPERATOR_LOG_UNREADABLE_TEXT);
     expect(logLines()).toEqual([]);
@@ -556,7 +599,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
 
   it('says a page did not come, keeps what is shown, and offers it again', async () => {
     const scripted = scriptedOperate({ pageSize: 2 });
-    mounted = await mount(<OperateView port={scripted.port} />);
+    mounted = await mount(<OperateView timeZone="UTC" port={scripted.port} />);
     await settle();
     scripted.held.logReadable = false;
     const button = showOlder();
@@ -575,7 +618,7 @@ describe('the Operate area over a scripted instance — #2603', () => {
   });
 
   it('says so where there is no local store to keep a sign-in in', async () => {
-    mounted = await mount(<OperateView />);
+    mounted = await mount(<OperateView timeZone="UTC" />);
     await settle();
     expect(text()).toContain(OPERATE_NO_PORT);
   });

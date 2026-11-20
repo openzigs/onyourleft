@@ -1,0 +1,104 @@
+{
+  "measuredAt": "2026-11-19T16:08:19.232Z",
+  "model": "gemma4:12b",
+  "ollama": "0.40.16",
+  "label": "looks-3",
+  "summaries": [
+    {
+      "fixture": "replan-request",
+      "runs": 3,
+      "valid": 3,
+      "moves": {
+        "move-hold-range": 3
+      },
+      "failures": {},
+      "milliseconds": {
+        "median": 3214,
+        "p90": 3298,
+        "most": 3298
+      }
+    },
+    {
+      "fixture": "replan-request-long",
+      "runs": 3,
+      "valid": 3,
+      "moves": {
+        "end-main-set": 3
+      },
+      "failures": {},
+      "milliseconds": {
+        "median": 4558,
+        "p90": 4569,
+        "most": 4569
+      }
+    }
+  ],
+  "runs": [
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "move-hold-range",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 3,
+      "promptTokensMost": 1201,
+      "outputTokensTotal": 52,
+      "milliseconds": 3214
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 3,
+      "promptTokensMost": 3211,
+      "outputTokensTotal": 35,
+      "milliseconds": 4569
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "move-hold-range",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 3,
+      "promptTokensMost": 1201,
+      "outputTokensTotal": 52,
+      "milliseconds": 3298
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 3,
+      "promptTokensMost": 3211,
+      "outputTokensTotal": 35,
+      "milliseconds": 4558
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "proposed",
+      "move": "move-hold-range",
+      "reason": "heart-rate-high",
+      "turns": 1,
+      "toolCalls": 3,
+      "promptTokensMost": 1201,
+      "outputTokensTotal": 52,
+      "milliseconds": 3203
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "proposed",
+      "move": "end-main-set",
+      "reason": "goal-duration",
+      "turns": 1,
+      "toolCalls": 3,
+      "promptTokensMost": 3211,
+      "outputTokensTotal": 35,
+      "milliseconds": 4511
+    }
+  ]
+}

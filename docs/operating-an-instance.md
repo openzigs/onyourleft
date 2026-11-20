@@ -165,6 +165,12 @@ room on the turns after (ADR 0046, Amendments, #1268). To say so up front, set
 off with `"code":"bad-reasoning"`. A rider sets the same for their own hosted key with the
 `reasoningTokens` field of `POST /v1/analysis/hosted/key`.
 
+**Since #2840 a write-up asks the local model not to reason at all** (version 2 of its template:
+`reasoning_effort: "none"`, which Ollama reads as `think: false`), at a low temperature. Left to
+reason, the model on the owner's box used its whole allowance reasoning before it finished an
+answer on 4 of 12 fixed rides; told not to, it wrote all 12, in 3 to 13 s each. A model that reasons anyway is
+still found out and given the room above. A hosted service is sent nothing for it.
+
 **No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
 default, and an address with no model name leaves analysis off and says so. Two things to check of
 the model you choose. **It must support tool calling**: the agent lets the model choose its tools,
@@ -174,6 +180,18 @@ ADR 0040 D-5 requires of any model these documents would name. And give Ollama a
 larger than its default of 4 096 tokens (its `OLLAMA_CONTEXT_LENGTH`): a tool-calling run re-sends
 the whole conversation every turn, and Ollama cuts an over-long prompt silently, from the front,
 where the instructions are.
+
+**Tell the instance the same length** (#2840): `OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS`, a whole
+number from 2048 to 1048576. The agent then stops a write-up, with `out-of-context` and a sentence
+saying the model cannot read that much at once, **before** a turn would pass it, so nothing is lost
+silently; empty, and no turn is checked. The home Compose file sets both from this one variable,
+16384 unless you say otherwise, so they cannot disagree. Measured on 2026-11-19 (Ollama 0.40.16): a
+4 220-token prompt at a 1 024-token context was read as 1 027 tokens, with no error, and the system
+prompt was gone. A write-up's first turn is 1 000 to 2 300 tokens, and a model that reasons may
+then write 3 000 more in one turn, so 4 096 does not hold one write-up of a long ride; 16 384 holds
+every ride of the scored set with room for its tools. Anything else turns analysis off with
+`"code":"bad-context"`. It is `.env` only: the context is the model server's, which the app does
+not set.
 
 **The address rule** is the history index's (ADR 0040 D-6, `history/address.ts`): loopback,
 `localhost`, a private, link-local, shared or unique-local address, or a single-label name such as a
@@ -189,7 +207,7 @@ it**: its API has no authentication.
 | `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
 | `…"code":"tls-by-name"` | an `https:` address by a name was refused: each request goes to the checked address, so a certificate issued to the name cannot verify. Use `http:` on the private network, or `https:` at the address itself |
 | `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
-| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"` | the setting is malformed; standard error says which |
+| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"`, `"bad-context"` | the setting is malformed; standard error says which |
 
 **Setting it from the app** (#2609, ADR 0046's amendment of 2026-11-14). The owner — the athlete
 of `OYL_INSTANCE_OWNER_KEY`, never the deputy — can set the local model's address, its name and its
@@ -312,6 +330,22 @@ riders analyse.
 **Off unless there is a model.** With no analysis model and no hosted key held, every start answers
 `analysis_off` (503) and nothing else changes; the instance starts and serves as usual.
 
+**A re-plan during a workout ride** (ADR 0048) is a job of the same table. ⚠️ **The trainer
+rule: no model output sets a target.** A re-plan's model answers one word from a closed list — a
+move and a reason, or *keep* — and on a model on this machine its answer is held to a JSON Schema of
+exactly those lists (#2841), so it cannot write a watt, a share or a sentence; the instance reads it
+again and copies nothing else. The rider's device alone turns that word into a target, inside its
+own bounds — +5 % a move, +10 % in total, never above the workout's own peak, and one press to undo
+(`@onyourleft/domain` §`validateProposal`) — and nothing on the instance can reach a trainer.
+
+As a workout ride with re-plans on starts, the device asks `POST /v1/analysis/replans/warm`, and the
+instance sends the model one call shaped as a re-plan's first, about a fixed workout nobody rode, so
+the ride's first re-plan does not wait for the model to load: measured on the owner's box, a
+re-plan took 14.6 s with the model unloaded and 2.3 to 3.7 s with it loaded. It sends nothing of
+the rider's, runs no tool and keeps nothing, at most six an hour a rider. A re-plan's budgets
+were measured the same day (`apps/instance/tools/replan-measure.ts`): 4 turns, 3 tool calls,
+45 s, 16 000 tokens and 128 an answer.
+
 **What is kept, and for how long.**
 
 | What | Kept until |
@@ -328,7 +362,10 @@ and may start twelve an hour. There is one worker for the whole instance, so a j
 another athlete's, for up to the agent's run budget.
 
 **What the log says.** One line per change of status, `"event":"analysis-job"` with `state` (and
-`code`, the failure, when it failed). Never a job's id, its input, a tool name or any of the
+`code`, the failure, when it failed). A write-up's last line also says what its run came to
+(#2840): `turns` (model turns), `toolCalls`, `toolsUsed` (how many of the tools), `tokensIn` and
+`tokensOut` (as the model server reported them, or the instance's estimate where it reported
+none) and `ms`, whole numbers all. Never a job's id, its input, a tool name or any of the
 write-up.
 
 **How it is erased.** Erasing an account (`DELETE /v1/account`) deletes every job and event of the
@@ -877,7 +914,9 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   newer than every recorded snapshot in the folder, so the newest snapshot is always kept. It never
   removes a recorded snapshot, or an unrecorded one older than them, such as one the shell loop made
   before #2606. If the folder has no recorded snapshot at all, the run removes only the snapshot it
-  has just taken.
+  has just taken. A snapshot named after the present moment, which a clock running ahead left, is
+  left out of the bound: it is neither counted nor removed, and it does not stop the run removing
+  the others (#2627).
 - **How often it runs while records fail.** The loop holds back a request it has already tried for
   one interval. When it starts, it also holds off every run, the owner's requests included, until
   one interval after the newest snapshot in the folder that no record names. That snapshot may come
@@ -887,8 +926,8 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   interval.
 - **One run at a time in a folder: the lease.** A run holds a **lease** on each folder it writes:
   the snapshot folder, and the off-box folder. The lease is a row in the instance's own database
-  (`backup_lease`, keyed by the SHA-256 of the folder's path, never the path), held for the whole
-  run. Every run opens that database, whichever container it runs in: the `backup` service, a
+  (`backup_lease`, keyed by the SHA-256 of the folder's real path, never the path, so a folder
+  reached through a symlink is the same lease), held for the whole run. Every run opens that database, whichever container it runs in: the `backup` service, a
   `backup` run by hand, `deploy.sh`'s pre-deploy snapshot. SQLite's write lock is the one atomic step
   they all share, so a run takes the lease in a single `BEGIN IMMEDIATE` transaction, and only one
   run can.
@@ -903,8 +942,10 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   - A second run into a folder that is held is refused, and recorded `failed` as
     `BackupFolderBusy`. A run whose off-box lease is held elsewhere records its copy `failed`, and
     neither writes nor prunes there.
-  - A run that loses its lease, because a heartbeat cannot be written or another run took it, stops
-    before it records or prunes anything (`BackupLeaseLost`).
+  - Before it records or prunes anything, a run reads its lease's row, and stops
+    (`BackupLeaseLost`) if another run has taken it. A heartbeat that cannot be written is tried
+    again at the next beat and loses nothing by itself: while nobody has taken the row, the run
+    still holds the folder (#2627).
   - On a database from before migration 0042, which has no lease table, runs take no lease, as
     before.
   - One limit: `VACUUM INTO` holds the process while it copies the database, so no heartbeat is
@@ -920,10 +961,21 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
 - **On a rollback** to an image from before `backup-loop` existed, the service checks whether the
   image has the command. If it does not, it runs the old shell loop, so backups carry on. That loop
   now stops on `docker compose stop` between runs.
-- ⚠️ **The off-box copy has no time limit.** A share that stops answering blocks the copy inside a
-  file-system call, which Node cannot cancel, and the service waits with it. The snapshot on the box
-  is already complete by then. If the Status shows the last backup getting old, check
-  `docker compose logs backup` and the share. A watchdog for this is [#2626](https://github.com/openzigs/onyourleft/issues/2626).
+- **The off-box copy has a watchdog** (#2626). The copy runs in a process of its own, and if it has
+  not finished in 15 minutes, or in the snapshot's size at 1 MB/s when that is longer, it is killed.
+  A share that stops answering during the copy then costs that run's copy: the run's record says
+  off-box `failed`, the snapshot on the box is kept, nothing off the box is pruned, and the
+  `.partial-snapshot-…` copy is left there for a later run to remove (it removes partials older
+  than six hours). The run does not touch that share again, not even to read its free space.
+- ⚠️ **A share that stays hung still stops the loop, one run later.** Before it copies, the next
+  run creates the off-box folder and lists it for old partials in the service's own process, and
+  the watchdog does not cover those calls. If the share is still not answering then, that run
+  waits on it.
+- ⚠️ **A copy stuck in an uninterruptible wait can outlive the kill.** A process blocked in some
+  kernel file-system calls does not die until the call returns, whatever signal it is sent. The run
+  waits until the copy has exited, holding the off-box folder's lease, so no second copy is ever
+  started into that folder alongside it, and that run is then as stuck as the copy. If the Status
+  shows the last backup getting old, check `docker compose logs backup` and the share.
 
 ⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
 the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
@@ -1278,14 +1330,17 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
-  `logged: false` and prints a line on standard error, and still exits 0, so a log write never stops a
-  deploy whose migrations applied. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
+  `logged: false` and prints a line on standard error naming SQLite's result code, and still exits 0,
+  so a log write never stops a deploy whose migrations applied. Since #2618 such a command never logs
+  `failed` for work that succeeded: a detail outside its vocabulary is not written at all. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
   `admin_tunnel` and `admin_loopback`: see "Admin pages", below), the action, a
   short detail and the outcome: `done`, `refused` or `failed`. The detail is written only from a
   closed list of words and counts **for that action** (`applied=2` for `migrate`, `cleared` for
   `model-key clear`): anything else, including a word another action uses, is refused with the
-  action, so a detail is never free text, a key or a position. The schema also holds it to lower-case
-  letters, digits, `_`, `=` and `,`, at most 200 characters. The owner reads it
+  action, so a detail is never free text, a key or a position. Since #2618 each count is held to a
+  plausible range for what it counts (`blobs` at most 10 000 000, `applied` at most 1 000), and two
+  words that contradict each other (`ride,race`) are refused. The schema also holds it to lower-case
+  letters, digits, `_`, `=` and `,`, at most 200 characters, and no NUL (migration 0051). The owner reads it
   at `GET /v1/operate/log`, newest first (`?limit=` 1–200, `?cursor=`).
 - **What erasure and `migrate … down` do to it.** As with the moderation log
   ([`docs/moderation.md`](moderation.md) §"What the log is, and what erasure does to it"), two SQLite
@@ -1413,10 +1468,11 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:
   an internal network (no route out) that only `instance` and `tunnel` join.
-  `instance.env.example` sets `OYL_INSTANCE_TUNNEL_READY_URL=http://172.30.88.10:20241/ready`. It
-  uses the address, not the name `tunnel`, which resolves on both of the tunnel's networks. If
-  172.30.88.0/24 is already in use on the box, change the subnet, the address in the command and
-  the variable together.
+  `compose.yaml` asks `http://172.30.88.10:20241/ready` unless `.env` sets
+  `OYL_INSTANCE_TUNNEL_READY_URL` (empty asks nothing). It uses the address, not the name `tunnel`,
+  which resolves on both of the tunnel's networks. If 172.30.88.0/24 is already in use on the box,
+  set `OYL_TUNNEL_METRICS_PREFIX` in `.env` (#2918): the subnet, the address in the command and this
+  address all follow it.
   - **Why a network of its own:** cloudflared's metrics server serves more than `/ready`. It also
     serves `/metrics` (connector and edge details), `/config` (the tunnel's ingress: its public
     hostname and the origin it forwards to), `/debug/pprof` (profiling, which costs CPU) and

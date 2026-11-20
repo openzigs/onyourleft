@@ -59,6 +59,27 @@ export interface ModelTurnRequest {
   readonly messages: readonly AgentMessage[];
   readonly tools: readonly ToolSpec[];
   readonly maxOutputTokens: number;
+  /** The sampling temperature, when the template sets one (#2840); the model's own default otherwise. */
+  readonly temperature?: number;
+  /**
+   * `'off'` asks a model on the rider's own box not to reason before it
+   * answers (#2840): Ollama's `reasoning_effort: "none"` on its `/v1`
+   * address. A hosted connection sends nothing for it: a service's own
+   * spelling of "do not reason" is its own, and none is assumed.
+   */
+  readonly thinking?: 'off';
+  /**
+   * The JSON Schema the answer is held to (#2841), on a model on the rider's
+   * own box: Ollama's structured output admits nothing else. A grammar held
+   * answer cannot also be a native tool call (measured on Ollama 0.40.16: with
+   * a schema set, a model told to call a tool answered the schema instead), so
+   * the local connection lets the model call any of `tools` that takes no
+   * argument by answering `{"look":"<its name>"}`, and hands that back as the
+   * tool call it is. A hosted connection sends nothing for it, and offers
+   * `tools` as tools: whether a service holds an answer to a schema is its own.
+   * The agent reads the answer again either way.
+   */
+  readonly answerSchema?: Readonly<Record<string, unknown>>;
   /** How long this turn may take before it is given up as `timed-out`. */
   readonly timeoutMilliseconds: number;
   /** The job's signal: an abort here aborts the request on the wire. */
@@ -126,6 +147,19 @@ export function isReasoningTokens(value: unknown): value is number {
   );
 }
 
+/**
+ * How a turn whose answer is a choice from closed lists is sampled (#2841,
+ * the re-plan): at **0.2**, low because the answer is a pick and not prose,
+ * and not nought, so a run asked again is not bound to the same pick; and,
+ * on a model on the rider's own box, with no reasoning first. Here and not in
+ * the re-plan's modules, which name no environment figure (spike 0022 R4,
+ * `replan-input.test.ts`), and a sampling setting shares a word with one.
+ *
+ * ## Provenance — ⚠️ the author's figure; #2841's measurement ran at it and
+ * at no other
+ */
+export const CLOSED_LIST_TURN = { temperature: 0.2, thinking: 'off' } as const;
+
 /** A model, one turn at a time. */
 export interface ModelConnection {
   /**
@@ -134,5 +168,12 @@ export interface ModelConnection {
    * this model reasons (#1268). Absent: the agent finds out from the reply.
    */
   readonly reasoningTokens?: number;
+  /**
+   * How many tokens the model reads at once — the context its server loads it
+   * with — when the operator said (#2840). The agent stops a run before a
+   * turn would pass it, because Ollama cuts the oldest text without saying
+   * so. Absent: not known, and not checked.
+   */
+  readonly contextTokens?: number;
   turn(request: ModelTurnRequest): Promise<ModelTurn>;
 }

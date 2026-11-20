@@ -47,6 +47,10 @@ import {
   AI_PULL_HEADING,
   AI_PULL_HINT,
   AI_PULL_LABEL,
+  AI_RECOMMENDED_BUTTON,
+  AI_RECOMMENDED_HINT,
+  AI_RECOMMENDED_MODEL,
+  AI_INSTALLED_FIRST_TEXT,
   AI_SERVER_TEXT,
   AI_SKIP_TEXT,
   AI_STEP_LEAD,
@@ -805,10 +809,25 @@ ${action}</li>`;
 }
 
 /**
+ * The model Ollama already has that the step offers first, with no download
+ * (#2869, ADR 0086 D-4): one that can call tools and Ollama reports loaded
+ * wholly in the graphics card's memory, else the recommended model if it is
+ * there. Read from what Ollama reports, never guessed from a file's size.
+ */
+export function installedFit(models: readonly OperateLocalModel[]): OperateLocalModel | undefined {
+  const tools = models.filter((model) => model.tools === 'listed');
+  return (
+    tools.find((model) => model.gpu === 'all') ??
+    tools.find((model) => model.name === AI_RECOMMENDED_MODEL)
+  );
+}
+
+/**
  * The optional AI step: whether write-ups are on, the Ollama found and what
- * it lists, and a download by the name the owner types. ⚠️ No model is named
- * by this page, and nothing Ollama said of a download is drawn: only its
- * byte counts (`analysis/ollama-setup.ts`).
+ * it lists, and a download by the name the owner types. ⚠️ The one model this
+ * page names of its own is the recommended download (ADR 0086), and nothing
+ * Ollama said of a download is drawn: only its byte counts
+ * (`analysis/ollama-setup.ts`).
  */
 export function aiBody(view: AiStepView, csrf: string): string {
   const problem =
@@ -835,13 +854,26 @@ ${problem === null ? '' : `<p class="problem" role="alert">${escapeHtml(problem)
 ${checkAgain('/setup/ai', AI_LOOK_AGAIN_BUTTON)}
 ${expert}`;
   }
+  // ADR 0086 D-4: with write-ups off, a model already here that fits comes first, and no download
+  // is recommended; with none, the recommended one is a press away (D-3).
+  const fitting = view.model === null ? installedFit(view.server.models) : undefined;
+  const listed =
+    fitting === undefined
+      ? view.server.models
+      : [fitting, ...view.server.models.filter((model) => model !== fitting)];
   const models =
     view.server.models.length === 0
       ? `<p>${escapeHtml(AI_NO_MODELS_TEXT)}</p>`
-      : `<ul class="models">
-${view.server.models.map((model) => aiModelItem(model, model.name === view.model, csrf)).join('\n')}
+      : `${fitting === undefined ? '' : `<p class="notice">${escapeHtml(AI_INSTALLED_FIRST_TEXT)}</p>\n`}<ul class="models">
+${listed.map((model) => aiModelItem(model, model.name === view.model, csrf)).join('\n')}
 </ul>
 <p class="hint">${escapeHtml(AI_USE_HINT)}</p>`;
+  const recommended =
+    view.model === null && fitting === undefined
+      ? `${buttonForm('/setup/ai/pull', csrf, AI_RECOMMENDED_BUTTON, { model: AI_RECOMMENDED_MODEL })}
+<p class="hint">${escapeHtml(AI_RECOMMENDED_HINT)}</p>
+`
+      : '';
   // While a download runs, the wait is the whole state: no second one can be asked for.
   const download =
     view.pull.kind === 'running'
@@ -853,7 +885,7 @@ ${checkAgain('/setup/ai', SETUP_CHECK_NOW_BUTTON)}`
             : view.pull.kind === 'done'
               ? `<p class="notice" role="status">${escapeHtml(AI_PULL_DONE_TEXT)}</p>\n`
               : ''
-        }<form method="post" action="/setup/ai/pull" aria-label="${escapeHtml(AI_PULL_BUTTON)}">${csrfField(csrf)}
+        }${recommended}<form method="post" action="/setup/ai/pull" aria-label="${escapeHtml(AI_PULL_BUTTON)}">${csrfField(csrf)}
 <label for="model">${escapeHtml(AI_PULL_LABEL)}</label>
 <input type="text" id="model" name="model" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="model-hint">
 <p class="hint" id="model-hint">${escapeHtml(AI_PULL_HINT)}</p>

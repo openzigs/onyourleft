@@ -15,7 +15,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { AGENT_TOOL_DISCLOSURES } from '@onyourleft/analysis';
+import {
+  AGENT_TOOL_DISCLOSURES,
+  ANALYSIS_AGENT_TEMPLATE_V1,
+  ANALYSIS_AGENT_TEMPLATE_V2,
+} from '@onyourleft/analysis';
 
 import { AGENT_TOOLS } from './tools.ts';
 
@@ -48,5 +52,21 @@ describe('the agent’s tools, against what the rider is told (#1104)', () => {
         expect(/\s/.test(phrase.trim()), `${name}: "${phrase}"`).toBe(true);
       }
     }
+  });
+});
+
+describe('the agent’s tools, against what the model is told (#2840)', () => {
+  it('version 2 names every tool the agent has', () => {
+    const unnamed = toolNames.filter(
+      (name) => !new RegExp(`\\b${name}\\b`).test(ANALYSIS_AGENT_TEMPLATE_V2.system),
+    );
+    expect(unnamed).toStrictEqual([]);
+  });
+
+  it('version 1, frozen, names three of them: why version 2 exists', () => {
+    const named = toolNames.filter((name) =>
+      new RegExp(`\\b${name}\\b`).test(ANALYSIS_AGENT_TEMPLATE_V1.system),
+    );
+    expect(named).toStrictEqual(['ride_sections', 'recent_rides', 'goals']);
   });
 });

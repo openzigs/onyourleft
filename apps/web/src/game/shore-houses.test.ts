@@ -128,6 +128,39 @@ function drawnTop(
 }
 
 /**
+ * The triangles of `indices` whose plan reaches into the box from
+ * `(minX, minZ)` to `(maxX, maxZ)`, as indices again: the only ones
+ * {@link drawnTop} can find over a point in it, since it skips any whose plan
+ * the point is outside. Taken once a house, so each of its samples scans the
+ * few triangles round the house rather than the whole ground (#2829: the
+ * whole ground, every sample, was most of the hairpin case's time under
+ * coverage).
+ */
+function trianglesOver(
+  vertices: ArrayLike<number>,
+  indices: ArrayLike<number>,
+  box: {
+    readonly minX: number;
+    readonly maxX: number;
+    readonly minZ: number;
+    readonly maxZ: number;
+  },
+): number[] {
+  const near: number[] = [];
+  for (let at = 0; at + 2 < indices.length; at += 3) {
+    const a = (indices[at] as number) * 3;
+    const b = (indices[at + 1] as number) * 3;
+    const c = (indices[at + 2] as number) * 3;
+    const xs = [vertices[a] as number, vertices[b] as number, vertices[c] as number];
+    const zs = [vertices[a + 2] as number, vertices[b + 2] as number, vertices[c + 2] as number];
+    if (Math.max(...xs) < box.minX || Math.min(...xs) > box.maxX) continue;
+    if (Math.max(...zs) < box.minZ || Math.min(...zs) > box.maxZ) continue;
+    near.push(indices[at] as number, indices[at + 1] as number, indices[at + 2] as number);
+  }
+  return near;
+}
+
+/**
  * How far the foot of what `corners` draws — a triangle soup, three numbers a
  * corner — stands above the ground drawn under it at the worst point: every
  * triangle edge at the soup's lowest height, every quarter metre. Negative
@@ -138,6 +171,16 @@ function worstGapUnder(
   ground: { readonly vertices: ArrayLike<number>; readonly indices: ArrayLike<number> },
 ): number {
   const foot = Math.min(...corners.map(([, y]) => y));
+  // Every sample lies between two corners, so in their plan's box; a
+  // millimetre over it for a sample's rounding at an edge's end.
+  const xs = corners.map(([x]) => x);
+  const zs = corners.map(([, , z]) => z);
+  const near = trianglesOver(ground.vertices, ground.indices, {
+    minX: Math.min(...xs) - 1e-3,
+    maxX: Math.max(...xs) + 1e-3,
+    minZ: Math.min(...zs) - 1e-3,
+    maxZ: Math.max(...zs) + 1e-3,
+  });
   let worst = Number.NEGATIVE_INFINITY;
   let sampled = 0;
   for (let at = 0; at + 2 < corners.length; at += 3) {
@@ -149,7 +192,7 @@ function worstGapUnder(
       for (let step = 0; step <= steps; step += 1) {
         const x = ax + ((bx - ax) * step) / steps;
         const z = az + ((bz - az) * step) / steps;
-        const under = drawnTop(ground.vertices, ground.indices, x, z);
+        const under = drawnTop(ground.vertices, near, x, z);
         if (Number.isNaN(under)) continue;
         worst = Math.max(worst, foot - under);
         sampled += 1;

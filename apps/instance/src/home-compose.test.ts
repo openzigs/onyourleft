@@ -27,9 +27,50 @@ import { readServerConfig } from './server-config.ts';
 
 const COMPOSE = readFileSync(new URL('../deploy/home/compose.yaml', import.meta.url), 'utf8');
 
+/**
+ * `text` with compose's interpolation done as `docker compose config` does it
+ * with `env` as `.env` (#2918): `${NAME:-default}` (unset or empty),
+ * `${NAME-default}` (unset only), a default that holds another `${…}`, `$$`
+ * for a `$`, and `${NAME}`. A `:?` that is unset is empty here: the bundle
+ * job runs the real `docker compose config` over the same file and settings.
+ */
+function interpolate(text: string, env: Readonly<Record<string, string>>): string {
+  let out = '';
+  let at = 0;
+  while (at < text.length) {
+    const dollar = text.indexOf('$', at);
+    if (dollar < 0) return out + text.slice(at);
+    out += text.slice(at, dollar);
+    if (text[dollar + 1] !== '{') {
+      // `$$` is one `$`, and a lone `$` is itself.
+      out += '$';
+      at = dollar + (text[dollar + 1] === '$' ? 2 : 1);
+      continue;
+    }
+    let depth = 0;
+    let end = dollar + 1;
+    for (; end < text.length; end += 1) {
+      if (text[end] === '{') depth += 1;
+      if (text[end] === '}' && --depth === 0) break;
+    }
+    const [, name = '', operator = '', rest = ''] =
+      /^([A-Za-z_][A-Za-z0-9_]*)(:-|-|:\?|\?)?([\s\S]*)$/.exec(text.slice(dollar + 2, end)) ?? [];
+    const value = env[name];
+    if (operator === ':-')
+      out += value === undefined || value === '' ? interpolate(rest, env) : value;
+    else if (operator === '-') out += value ?? interpolate(rest, env);
+    else out += value ?? '';
+    at = end + 1;
+  }
+  return out;
+}
+
+/** The file as compose reads it with `.env` setting none of its networks (#2918). */
+const RESOLVED = interpolate(COMPOSE, {});
+
 /** The one value a `KEY: value` line in the file sets, or `undefined`. */
-function setting(key: string): string | undefined {
-  return new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`, 'm').exec(COMPOSE)?.[1];
+function setting(key: string, text = COMPOSE): string | undefined {
+  return new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`, 'm').exec(text)?.[1];
 }
 
 describe('deploy/home/compose.yaml — registration (#775)', () => {
@@ -48,18 +89,18 @@ describe('deploy/home/compose.yaml — registration (#775)', () => {
   });
 });
 
-/** Every fixed address a service has, one per network it is on. */
-const fixedAddresses = (name: string): string[] =>
-  [...service(name).matchAll(/ipv4_address: (\S+)/g)].map((match) => match[1] ?? '');
+/** Every fixed address a service has, one per network it is on, as compose reads them. */
+const fixedAddresses = (name: string, text = RESOLVED): string[] =>
+  [...service(name, text).matchAll(/ipv4_address: (\S+)/g)].map((match) => match[1] ?? '');
 
 describe('deploy/home/compose.yaml — the rider’s address behind the tunnel', () => {
   // `${…:-cf-connecting-ip}`: Cloudflare's unless .env names the tailnet's (#2805).
   const header = /^\$\{OYL_INSTANCE_CLIENT_ADDRESS_HEADER:-(\S+)\}$/.exec(
     setting('OYL_INSTANCE_CLIENT_ADDRESS_HEADER') ?? '',
   )?.[1];
-  const trusted = setting('OYL_INSTANCE_TRUSTED_PROXIES');
+  const trusted = setting('OYL_INSTANCE_TRUSTED_PROXIES', RESOLVED);
   const tunnelAddresses = fixedAddresses('tunnel');
-  const subnets = [...COMPOSE.matchAll(/- subnet: (\S+)/g)].map((match) => match[1] ?? '');
+  const subnets = [...RESOLVED.matchAll(/- subnet: (\S+)/g)].map((match) => match[1] ?? '');
 
   it('names the header, and trusts exactly the addresses it gives cloudflared and tailscale, each in a subnet the file declares', () => {
     expect(header).toBe('cf-connecting-ip');
@@ -92,10 +133,10 @@ describe('deploy/home/compose.yaml — the rider’s address behind the tunnel',
 });
 
 /** One service's block of the file: from its name to the next line at the same indent. */
-function service(name: string): string {
-  const start = COMPOSE.search(new RegExp(`^  ${name}:\\s*$`, 'm'));
+function service(name: string, text = COMPOSE): string {
+  const start = text.search(new RegExp(`^  ${name}:\\s*$`, 'm'));
   if (start < 0) return '';
-  const rest = COMPOSE.slice(start + 1);
+  const rest = text.slice(start + 1);
   const end = rest.search(/^ {2}[a-z#]|^[a-z]/m);
   return end < 0 ? rest : rest.slice(0, end);
 }
@@ -126,9 +167,25 @@ describe('deploy/home/compose.yaml — the remote path is a profile (#2805, ADR 
   });
 
   it('keeps the tunnel as it was when its profile is on: the same image, command and addresses', () => {
-    expect(code('tunnel')).toContain(
-      "command: ['tunnel', '--no-autoupdate', '--metrics', '172.30.88.10:20241', 'run']",
-    );
+    const command = (text: string): string[] =>
+      [
+        ...(/^ {4}command:\n((?: {6}- .*\n)+)/m.exec(text)?.[1]?.matchAll(/^ {6}- (.*)$/gm) ?? []),
+      ].map((match) => match[1] ?? '');
+    expect(command(code('tunnel'))).toEqual([
+      'tunnel',
+      '--no-autoupdate',
+      '--metrics',
+      '${OYL_TUNNEL_METRICS_PREFIX:-172.30.88}.10:20241',
+      'run',
+    ]);
+    // #2918: with .env naming no network, compose reads the addresses it always had.
+    expect(command(service('tunnel', RESOLVED))).toEqual([
+      'tunnel',
+      '--no-autoupdate',
+      '--metrics',
+      '172.30.88.10:20241',
+      'run',
+    ]);
     expect(fixedAddresses('tunnel')).toEqual(['172.30.87.10', '172.30.88.10']);
   });
 });
@@ -160,7 +217,7 @@ describe('deploy/home/compose.yaml — the tailscale service (#2805, ADR 0079 D-
     const read = readConfig({
       commit: '0'.repeat(40),
       clientAddressHeader: 'x-forwarded-for',
-      trustedProxies: setting('OYL_INSTANCE_TRUSTED_PROXIES'),
+      trustedProxies: setting('OYL_INSTANCE_TRUSTED_PROXIES', RESOLVED),
       remotePath: 'tailnet',
     });
     if (!read.ok) throw new Error(read.problems.join(' '));
@@ -222,7 +279,7 @@ describe('deploy/home/compose.yaml — the tailscale service (#2805, ADR 0079 D-
     const read = readConfig({
       commit: '0'.repeat(40),
       clientAddressHeader: REMOTE_PATH_ADDRESS_HEADER.tailnet,
-      trustedProxies: setting('OYL_INSTANCE_TRUSTED_PROXIES'),
+      trustedProxies: setting('OYL_INSTANCE_TRUSTED_PROXIES', RESOLVED),
       remotePath: 'tailnet',
     });
     if (!read.ok) throw new Error(read.problems.join(' '));
@@ -338,10 +395,10 @@ describe('deploy/home/compose.yaml — every setting the server reads reaches it
 });
 
 describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => {
-  const tunnel = service('tunnel');
+  const tunnel = service('tunnel', RESOLVED);
   const env = readFileSync(new URL('../deploy/home/instance.env.example', import.meta.url), 'utf8');
   /** The top-level `networks:` block. */
-  const networks = /^networks:\n([\s\S]*?)(?=^\S)/m.exec(COMPOSE)?.[1] ?? '';
+  const networks = /^networks:\n([\s\S]*?)(?=^\S)/m.exec(RESOLVED)?.[1] ?? '';
   /**
    * Every service a compose file declares, read from it, so a new one is held
    * too. The block ends at the next top-level key, not at any column-0 line,
@@ -360,7 +417,7 @@ describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => 
   });
 
   it('binds cloudflared’s metrics to its address on an internal network only it and the instance join', () => {
-    const bound = /'--metrics', '(\d+\.\d+\.\d+\.\d+):(\d+)'/.exec(tunnel);
+    const bound = /^ {6}- --metrics\n {6}- (\d+\.\d+\.\d+\.\d+):(\d+)$/m.exec(tunnel);
     expect(bound).not.toBeNull();
     const [, address = '', port = ''] = bound ?? [];
     // Not 0.0.0.0, which is every network the tunnel is on.
@@ -385,11 +442,91 @@ describe('deploy/home/compose.yaml — the tunnel’s readiness (#2604)', () => 
     // No port for it, and the template asks that address, which the instance accepts.
     const lines = tunnel.split('\n').filter((line) => !/^\s*#/.test(line));
     expect(lines.join('\n')).not.toMatch(/^\s*(ports|expose|network_mode):/m);
-    const url = /^OYL_INSTANCE_TUNNEL_READY_URL=(\S+)$/m.exec(env)?.[1];
+    // #2918: compose asks that address unless .env names one, and the template names none, so
+    // it follows the metrics network's prefix. Set empty in .env, nothing is asked.
+    const url = setting('OYL_INSTANCE_TUNNEL_READY_URL', RESOLVED);
     expect(url).toBe(`http://${address}:${port}/ready`);
     const read = readServerConfig({ tunnelReadyUrl: url }, 1);
     expect(read.ok && read.config.tunnelReadyUrl?.hostname).toBe(address);
-    expect(COMPOSE).toMatch(/OYL_INSTANCE_TUNNEL_READY_URL: \$\{OYL_INSTANCE_TUNNEL_READY_URL:-\}/);
+    expect(env).not.toMatch(/^OYL_INSTANCE_TUNNEL_READY_URL=/m);
+    expect(env).toMatch(/^# OYL_INSTANCE_TUNNEL_READY_URL=$/m);
+    const off = interpolate(COMPOSE, { OYL_INSTANCE_TUNNEL_READY_URL: '' });
+    expect(off).toMatch(/^ {6}OYL_INSTANCE_TUNNEL_READY_URL: $/m);
+    const named = interpolate(COMPOSE, {
+      OYL_INSTANCE_TUNNEL_READY_URL: 'http://10.1.2.3:1/ready',
+    });
+    expect(setting('OYL_INSTANCE_TUNNEL_READY_URL', named)).toBe('http://10.1.2.3:1/ready');
+  });
+});
+
+describe('deploy/home/compose.yaml — the networks are .env settings, so an update keeps a change (#2918)', () => {
+  const env = readFileSync(new URL('../deploy/home/instance.env.example', import.meta.url), 'utf8');
+  const MOVED_ENV = { OYL_NETWORK_PREFIX: '10.77.1', OYL_TUNNEL_METRICS_PREFIX: '10.77.2' };
+  const moved = interpolate(COMPOSE, MOVED_ENV);
+  /** The file's lines that are not comments, as compose reads them. */
+  const code = (text: string): string =>
+    text
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+
+  it('has today’s subnets and addresses when .env names none', () => {
+    expect([...RESOLVED.matchAll(/- subnet: (\S+)/g)].map((match) => match[1])).toEqual([
+      '172.30.87.0/24',
+      '172.30.88.0/24',
+    ]);
+    expect(fixedAddresses('tunnel')).toEqual(['172.30.87.10', '172.30.88.10']);
+    expect(fixedAddresses('tailscale')).toEqual(['172.30.87.11']);
+    expect(setting('OYL_INSTANCE_TRUSTED_PROXIES', RESOLVED)).toBe(
+      '172.30.87.10,172.30.88.10,172.30.87.11',
+    );
+    // Empty in .env, as the template ships them, is the same as unset.
+    expect(interpolate(COMPOSE, { OYL_NETWORK_PREFIX: '', OYL_TUNNEL_METRICS_PREFIX: '' })).toBe(
+      RESOLVED,
+    );
+  });
+
+  it('moves every dependent address with the two settings, and leaves none behind', () => {
+    expect([...moved.matchAll(/- subnet: (\S+)/g)].map((match) => match[1])).toEqual([
+      '10.77.1.0/24',
+      '10.77.2.0/24',
+    ]);
+    expect(fixedAddresses('tunnel', moved)).toEqual(['10.77.1.10', '10.77.2.10']);
+    expect(fixedAddresses('tailscale', moved)).toEqual(['10.77.1.11']);
+    expect(setting('OYL_INSTANCE_TRUSTED_PROXIES', moved)).toBe('10.77.1.10,10.77.2.10,10.77.1.11');
+    expect(service('tunnel', moved)).toMatch(/^ {6}- --metrics\n {6}- 10\.77\.2\.10:20241$/m);
+    expect(setting('OYL_INSTANCE_TUNNEL_READY_URL', moved)).toBe('http://10.77.2.10:20241/ready');
+    // Nothing that is not a comment still names the old networks: no address was left literal.
+    expect(code(moved)).not.toContain('172.30.');
+    // The instance accepts what it is given, and believes the moved proxies alone.
+    const read = readConfig({
+      commit: '0'.repeat(40),
+      clientAddressHeader: 'cf-connecting-ip',
+      trustedProxies: setting('OYL_INSTANCE_TRUSTED_PROXIES', moved),
+    });
+    if (!read.ok) throw new Error(read.problems.join(' '));
+    const sent = new Headers({ 'cf-connecting-ip': '203.0.113.9' });
+    for (const proxy of ['10.77.1.10', '10.77.2.10', '10.77.1.11']) {
+      expect(
+        clientAddress(proxy, sent, read.config.clientAddressHeader, read.config.trustedProxies),
+      ).toBe('203.0.113.9');
+    }
+    expect(
+      clientAddress(
+        '172.30.87.10',
+        sent,
+        read.config.clientAddressHeader,
+        read.config.trustedProxies,
+      ),
+    ).toBe('172.30.87.10');
+  });
+
+  it('names both settings once, empty, in the template and in .env.example', () => {
+    const repository = readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8');
+    for (const key of Object.keys(MOVED_ENV)) {
+      expect(env.match(new RegExp(`^${key}=$`, 'gm')), key).toHaveLength(1);
+      expect(repository.match(new RegExp(`^${key}=$`, 'gm')), key).toHaveLength(1);
+    }
   });
 });
 

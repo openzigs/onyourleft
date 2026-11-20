@@ -162,7 +162,7 @@ const says = (html: string, needle: string): boolean =>
 
 /** A room's row as the page draws it (#2771), from the package's words. */
 const lineHtml = (room: RoomAnswer): string => {
-  const { kind, rest } = roomLine(room);
+  const { kind, rest } = roomLine(room, 'UTC');
   return `<tr><td><strong>${escapeHtml(kind)}</strong></td><td>${rest
     .map((part, index) =>
       typeof part === 'string'

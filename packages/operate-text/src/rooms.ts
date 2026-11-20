@@ -109,20 +109,23 @@ const VISIBILITY_TEXT: Readonly<Record<OperateRoomVisibility, string>> = {
  * the rest — private or public, its phase, when it opened and by whom, who
  * is in it, and its short code, as code.
  */
-export function roomLine(room: {
-  readonly kind: OperateRoomKind;
-  readonly visibility: OperateRoomVisibility;
-  readonly phase: OperateRoomPhase;
-  /** ISO 8601, UTC. */
-  readonly openedAt: string;
-  readonly host: string | null;
-  readonly riders: readonly (string | null)[];
-  readonly shortCode: string;
-}): { readonly kind: string; readonly rest: readonly (string | { readonly code: string })[] } {
+export function roomLine(
+  room: {
+    readonly kind: OperateRoomKind;
+    readonly visibility: OperateRoomVisibility;
+    readonly phase: OperateRoomPhase;
+    /** ISO 8601, UTC. */
+    readonly openedAt: string;
+    readonly host: string | null;
+    readonly riders: readonly (string | null)[];
+    readonly shortCode: string;
+  },
+  timeZone: string,
+): { readonly kind: string; readonly rest: readonly (string | { readonly code: string })[] } {
   return {
     kind: ROOM_KIND_TEXT[room.kind],
     rest: [
-      `, ${VISIBILITY_TEXT[room.visibility]}, ${ROOM_PHASE_TEXT[room.phase]}. Opened ${momentText(room.openedAt)} by ${room.host ?? ROOM_UNNAMED_RIDER}. ${ridersText(room.riders)} Code `,
+      `, ${VISIBILITY_TEXT[room.visibility]}, ${ROOM_PHASE_TEXT[room.phase]}. Opened ${momentText(room.openedAt, timeZone)} by ${room.host ?? ROOM_UNNAMED_RIDER}. ${ridersText(room.riders)} Code `,
       { code: room.shortCode },
       '.',
     ],
