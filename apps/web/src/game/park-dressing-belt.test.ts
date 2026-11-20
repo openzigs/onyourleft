@@ -25,12 +25,17 @@ import {
   HEADSTONE_ROW_METRES,
   isCrossPathSlot,
   isPathRow,
+  PARK_BELT_CAPACITY,
   PARK_DRESSING_CAPACITY,
+  PARK_FIELD_CAPACITY,
   PARK_LOOK_CELLS,
   type ParkGround,
   type ParkPiece,
 } from './park-dressing';
-import { REALISTIC_PARK_DRESSING_TRIANGLES } from './realistic-budget';
+import {
+  REALISTIC_PARK_DRESSING_TRIANGLES,
+  REALISTIC_PARK_FIELD_TRIANGLES,
+} from './realistic-budget';
 import {
   GOLF_APPROACH_METRES,
   GOLF_FAIRWAY_PERIOD_METRES,
@@ -38,6 +43,7 @@ import {
   PARK_DRESSING_TRIANGLES,
   PARK_GROUND_LOOK,
   PARK_GROUND_MIX,
+  PARK_FIELD_TRIANGLES,
   PARK_PIECE_TRIANGLES,
   ParkDressingBelt,
   ParkGroundPaint,
@@ -70,6 +76,9 @@ describe('#2685 the park dressing belt', () => {
     expect((geometry.getIndex()?.count ?? 0) / 3).toBe(PARK_PIECE_TRIANGLES);
     expect(PARK_DRESSING_TRIANGLES).toBe(PARK_DRESSING_CAPACITY * PARK_PIECE_TRIANGLES);
     expect(PARK_DRESSING_TRIANGLES).toBeLessThanOrEqual(REALISTIC_PARK_DRESSING_TRIANGLES);
+    // #2688: the pitches and playgrounds after them, in their own term.
+    expect(PARK_FIELD_TRIANGLES).toBe(PARK_FIELD_CAPACITY * PARK_PIECE_TRIANGLES);
+    expect(PARK_FIELD_TRIANGLES).toBeLessThanOrEqual(REALISTIC_PARK_FIELD_TRIANGLES);
     // Its base at 0 and its top at 1: a piece stands ON the ground it is given.
     const position = geometry.getAttribute('position');
     let low = Infinity;
@@ -81,7 +90,9 @@ describe('#2685 the park dressing belt', () => {
     expect([low, high]).toEqual([0, 1]);
     const belt = new ParkDressingBelt();
     expect(belt.mesh.geometry.getIndex()?.count).toBe(PARK_PIECE_TRIANGLES * 3);
-    expect(belt.mesh.instanceMatrix.count).toBe(PARK_DRESSING_CAPACITY);
+    // #2688: the golf and cemetery pieces' and the pitches' and playgrounds' after them.
+    expect(belt.mesh.instanceMatrix.count).toBe(PARK_BELT_CAPACITY);
+    expect(PARK_BELT_CAPACITY).toBe(PARK_DRESSING_CAPACITY + PARK_FIELD_CAPACITY);
   });
 
   it('writes each piece where it stands, turned, sized and coloured, and hides with none', () => {
@@ -133,8 +144,8 @@ describe('#2685 the park dressing belt', () => {
 
   it('draws no more than its capacity', () => {
     const belt = new ParkDressingBelt();
-    belt.update(Array.from({ length: PARK_DRESSING_CAPACITY + 40 }, () => PIECE));
-    expect(belt.mesh.count).toBe(PARK_DRESSING_CAPACITY);
+    belt.update(Array.from({ length: PARK_BELT_CAPACITY + 40 }, () => PIECE));
+    expect(belt.mesh.count).toBe(PARK_BELT_CAPACITY);
   });
 });
 

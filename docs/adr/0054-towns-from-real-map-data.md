@@ -643,3 +643,24 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   in force only when the owner rules on #2660 and approves its screenshots and a moving-ride
   tablet frame check**; the PR is not to be merged before that, and this entry is to be corrected
   or struck there if the ruling differs.
+- **2026-11-19** — **PROPOSED, pending the owner's ruling on
+  [#2688](https://github.com/openzigs/onyourleft/issues/2688): a pitch's sport is kept in
+  `worldCorridors`, and the world draws a pitch's lines and goals and a playground's structures.**
+  The decoder kept a `landuse` polygon's `kind` alone. From this date `packages/map-features`
+  (`schema.ts` §`KEY_SPORT`, §`PITCH_SPORTS`) also reads the `landuse` layer's `sport` key, and keeps
+  it only on a `pitch` and only when it is `soccer`, `american_football`, `rugby_union`,
+  `rugby_league`, `baseball`, `softball`, `tennis` or `basketball` (`LandUseFeature.sport`); any
+  other value, several joined by `;`, or a sport on anything but a pitch is not kept. No name and no
+  OSM identifier. `apps/web/src/game/world-data/corridor.ts` packs it (packed version 7,
+  `CORRIDOR_READER_VERSION` 7, so a row of either build is read again by the other and no Dexie
+  schema changes), and `park-fields.ts` draws, in the park dressing belt's one call and in its own
+  budget term (`realistic-budget.ts` §`REALISTIC_PARK_FIELD_TRIANGLES`, 800), a pitch's lines and its
+  goals, net, hoops or backstop by sport, and a playground's swing frame, slide and climbing frame.
+  D-3.3's sentence reads, from this entry, as the earlier entry of this date left it, with
+  *"land-use polygons with `kind`"* followed by *"and, on a pitch, its `sport`"*. What still stands,
+  unchanged: D-3.1 to D-3.6, including that the store never leaves the device (D-3.5;
+  `apps/web/src/transfer/world-corridor-not-exported.test.ts` now packs decoded sports too), D-4,
+  and D-5.2: a goal or a swing frame is not a building, and none is drawn. **Status: proposed, in
+  force only when the owner rules on #2688 and approves its screenshots and a moving-ride tablet
+  frame check**; the PR is not to be merged before that, and this entry is to be corrected or
+  struck there if the ruling differs.

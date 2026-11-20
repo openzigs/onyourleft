@@ -21,7 +21,7 @@
  * streams and canals the product decoded and packed.
  *
  * #2660 (ADR 0054's entry of 2026-11-19): and for one that holds the railway
- * lines the product decoded and packed.
+ * lines the product decoded and packed; #2688: and the pitches' sports.
  */
 
 import {
@@ -42,6 +42,7 @@ import {
   FIXTURE_TILE,
   PLACE_SENTINEL,
   placesTile,
+  pitchesTile,
   streetsTile,
   waterLinesTile,
 } from '@onyourleft/map-features/testing';
@@ -177,12 +178,27 @@ async function packedRails(): Promise<Blob> {
   });
 }
 
+/** A corridor's features as the product packs them, holding its decoded pitches' sports (#2688). */
+async function packedSports(): Promise<Blob> {
+  const decoded = decodeTile(pitchesTile(), FIXTURE_TILE, FIXTURE_FRAME);
+  if ('reason' in decoded) throw new Error(decoded.reason);
+  expect(decoded.landUse.some((f) => f.sport !== undefined)).toBe(true);
+  return packCorridorFeatures({
+    landUse: decoded.landUse,
+    buildings: [],
+    paths: [],
+    streets: [],
+    places: [],
+  });
+}
+
 /** The decoded features a case packs into the corridor it exports. */
 const PACKED = {
   'decoded places': packedPlaces,
   'decoded building fields': packedBuildingFields,
   'decoded water lines': packedWaterLines,
   'decoded railway lines': packedRails,
+  'decoded sports': packedSports,
 } as const;
 
 describe('the account export carries no world corridor — #1545', () => {
@@ -194,6 +210,7 @@ describe('the account export carries no world corridor — #1545', () => {
     ['gpx', 'decoded building fields'],
     ['tcx', 'decoded water lines'],
     ['gpx', 'decoded railway lines'],
+    ['fit', 'decoded sports'],
   ] as const)(
     'finds no trace of one in any file of a %s export, its features the %s',
     async (format, features) => {

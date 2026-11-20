@@ -23,7 +23,8 @@
  *   is `corridor.ts` §`planCorridor` of the route's line, so a reader recomputes
  *   it;
  * - `features`: `corridor.ts` §`packedCorridorFeatures` — the very value the
- *   rider's store gzips (`v: 6` since #2660 added the railway lines; `v: 5`
+ *   rider's store gzips (`v: 7` since #2688 added a pitch's sport; `v: 6`
+ *   since #2660 added the railway lines; `v: 5`
  *   since #2659 added the water lines; `v: 4`
  *   since #1789 added the building fields, each
  *   footprint's under `b` by a short name and absent when none is set; every

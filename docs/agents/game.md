@@ -1680,7 +1680,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`REALISTIC_PARK_DRESSING_TRIANGLES`. A green is kept
                         off the road and off every stand of trees
                         (`scatter.ts` §`golfStandAt`). `SceneFrame.parkDressing`;
-                        lever `-park-dressing`, page `town=parks`
+                        lever `-park-dressing`, page `town=parks`.
+                        ⚠️ **Since #2688 a pitch and a playground too**
+                        (`park-fields.ts`): a pitch's lines (flat boxes, not a
+                        decal) and its goals, net, hoops or backstop by its
+                        mapped `sport` (`LandUseFeature.sport`), and a
+                        playground's swing frame, slide and climbing frame,
+                        after the 512 in the same call, ≤ `PARK_FIELD_CAPACITY`
+                        (80) nearest first, in their own term
+                        §`REALISTIC_PARK_FIELD_TRIANGLES`; page `town=fields`
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as

@@ -35,6 +35,8 @@ import {
   placesTile,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
+  PITCH_FIXTURE_POLYGONS,
+  pitchesTile,
   sidewalkTile,
   STREET_FIXTURE_ROADS,
   streetsTile,
@@ -557,8 +559,8 @@ describe('packing', () => {
       true,
       false,
     ]);
-    // 5 since #2659 added the water lines, 6 since #2660 added the railway lines.
-    expect(packed.v).toBe(6);
+    // 5 since #2659 added the water lines, 6 since #2660 the railway lines, 7 since #2688 a pitch's sport.
+    expect(packed.v).toBe(7);
   });
 
   it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {
@@ -699,6 +701,42 @@ describe('packing', () => {
     });
     expect('rails' in none).toBe(false);
     expect(corridorFeaturesOfPacked(none).rails).toStrictEqual([]);
+  });
+
+  it('keeps a pitch’s sport through the read and the store, and only the decoder’s (#2688)', async () => {
+    const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
+    const outcome = await read(plan, memoryArchive(() => pitchesTile()).archive);
+    if (outcome.kind !== 'read') throw new Error(outcome.kind);
+    const kept = PITCH_FIXTURE_POLYGONS.map((p) => p.kept);
+    const tiles = outcome.features.landUse.length / PITCH_FIXTURE_POLYGONS.length;
+    expect(tiles).toBeGreaterThan(0);
+    const back = await unpackCorridorFeatures(await packCorridorFeatures(outcome.features));
+    expect(back.landUse.map((f) => f.sport ?? null)).toStrictEqual(
+      Array.from({ length: tiles }).flatMap(() => kept),
+    );
+    // A sport the decoder would not keep, or one on what is not a pitch, edited into a blob, is not read back.
+    const edited = corridorFeaturesOfPacked({
+      ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+      landUse: [
+        { layer: 'landuse', kind: 'pitch', sp: 'soccer', rings: [] },
+        { layer: 'landuse', kind: 'pitch', sp: 'curling' as 'soccer', rings: [] },
+        { layer: 'landuse', kind: 'park', sp: 'soccer', rings: [] },
+      ],
+    });
+    expect(edited.landUse.map((f) => f.sport ?? null)).toStrictEqual(['soccer', null, null]);
+    // A polygon with none packs no `sp`, as it did at version 6.
+    expect('sp' in (packedCorridorFeatures(back).landUse.at(-1) ?? {})).toBe(false);
+  });
+
+  it('refuses a blob of the reader before a pitch’s sport (#2688)', async () => {
+    const json = new Blob([
+      JSON.stringify({ v: 6, landUse: [], buildings: [], paths: [], streets: [], places: [] }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    await expect(
+      unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
+    ).rejects.toThrow(/not a version/);
   });
 
   it('refuses a blob of the reader before the railway lines (#2660)', async () => {
