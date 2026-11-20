@@ -98,8 +98,9 @@ function wayForPress(press: 'left' | 'straight' | 'right', shown: JunctionPrompt
   }
   if (press === 'straight') return defaultWay;
   const at = ways.findIndex((way) => way.edge.id === chosen);
+  // Clamped to the junction's ends, so the index always names a way.
   const step = ways[Math.min(ways.length - 1, Math.max(0, at + (press === 'left' ? -1 : 1)))];
-  return step?.edge.id ?? defaultWay;
+  return (step as RollingWay).edge.id;
 }
 
 export interface JunctionChoice {
