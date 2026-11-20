@@ -325,3 +325,48 @@ The owner answered all five on **2026-11-20**, on the pull request
   by a new ADR if the block gets finer. A short lead is never met by pausing the ride (R-8).
 - **The owner's acceptance of the path disclosure is withdrawn.** Then the open-world ride needs a
   region download before the ride, which is a new decision.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-20** — **D-4's first two bullets overstate the time the host learns, now that R-8 is
+  adopted.** The first says the host learns the time each block was entered *"to within the
+  reader's own scheduling"*, and the second that each request puts the rider on a known block edge
+  *"at a known time"*. Both were written before the owner adopted R-8 (D-9 Q4) on 2026-11-20. With
+  R-8, a crossing's request goes out up to 30 s after the crossing, at a delay drawn afresh for each
+  one, so the host learns when an edge was crossed only to within that delay plus the reader's
+  scheduling. The second bullet's last sentence and the first entry under *What this costs* already
+  say so. The two bullets describe the larger disclosure, so they err on the safe side; where they
+  and R-8 differ, R-8 is the accurate account. Everything else in D-4 holds, map-matching included.
+  ([#2959](https://github.com/openzigs/onyourleft/issues/2959), from the review of #2942)
+- **2026-11-20** — **R-8's guarantee does not depend on speed, and its 40 km/h figures are
+  examples.** R-8 and D-2.3 give the lead left after the full 30 s delay at 40 km/h, at least
+  1 min 54 s. The owner's condition (D-9 Q4) names no speed: the ride never pauses for a request.
+  The game sets no top speed, and on a descent a rider can go well past 40 km/h. At 80 km/h the
+  1.6 km lead lasts 72 s, 42 s after the full delay; above about 190 km/h the delay alone would
+  outlast it. So the guarantee R-8's test holds is the one with no speed in it: **the frame loop
+  never waits on a pending request, at any speed**, and a block that has not arrived when the
+  rider reaches it is where the held area ends, which the ride treats as the edge of the map
+  (D-7.2's last sentence, [#2908](https://github.com/openzigs/onyourleft/issues/2908)), never as a
+  pause. #2890's R-8 test therefore runs at 80 km/h as well as at 40 km/h, and once with a block
+  that has not arrived, and asserts each time that the frame loop never waits. The 1 min 54 s and
+  1.6 km figures stay figures, for #2882 to measure. (#2959, from the review of #2942)
+- **2026-11-20** — **A change of block size is a new decision in either direction, never an
+  amendment.** D-2.4 says a measurement that keeps the block *"a z14 tile or coarser"* may be
+  recorded by an amendment, and D-9 Q1's recommendation says #2882's measurement *"may make it
+  coarser by amendment"*. ADR 0013 D-3 allows a figure to be amended only where the ADR's argument
+  does not turn on it, and D-4's account of what the host learns turns on the block size (about 1.6
+  to 2.2 km). What an amendment may record from #2882 is therefore a measured figure with the block
+  left a z14 tile: D-2.4's read counts and D-2.3's lead times. A coarser block, like a finer one,
+  changes D-4 and takes a superseding ADR. A coarser block discloses less, so nothing built under
+  D-2 meanwhile is less private than D-4 says. (#2959, from the review of #2942)
+- **2026-11-20** — **D-8's *"inside the free tier"* is not how the project counts cost.**
+  [`docs/cost-model.md`](../cost-model.md) excludes free tiers from every total, on #17's rule that
+  a free tier is a discount and not a plan. At its list rate of $0.36 a million Class B requests,
+  D-8's estimate of about four million reads a month, for a thousand riders riding ten open-world
+  hours each, costs about **$1.44 a month**. The rest of D-8 holds: no paid service is a
+  prerequisite, a self-hoster points the read at their own archive, and #2882's measurement goes
+  into `docs/cost-model.md` if it changes a figure there. (#2959, from the review of #2942)

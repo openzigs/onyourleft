@@ -218,3 +218,31 @@ its question.
 - **ADR 0087's lock or `bend-easing.ts`'s lag changes** so that the lock is less than the lag plus
   the 25 m look-ahead. Then C-6 no longer holds by construction, and needs a test of its own.
 - **A free camera is ever asked for.** That is still a change to ADR 0008 D-5, as it was.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-20** — **C-6's *"by any amount"*, and its margin, as a test states them.** A tail swap
+  rebuilds the rolling route's profile, and a rebuilt profile need not reproduce every
+  floating-point value bit for bit, so *"moves neither the eye nor the target by any amount"* is
+  read as **by no more than a stated floating-point tolerance**, far below anything drawn, which
+  [#2896](https://github.com/openzigs/onyourleft/issues/2896)'s test names. The margin is also
+  larger than C-6's row and the second bullet of *What would make this ADR wrong* count. The drawn
+  rider's lag (up to 30 m behind the odometer) puts the target further from the junction, not
+  nearer, so it adds to the margin rather than using it up: with the tail swapped no later than
+  100 m before the junction (ADR 0087 D-6.2) and the target at most 25 m ahead of the odometer, the
+  camera looks at least **75 m** short of the changed road, whatever the lag. That bullet's
+  condition is therefore a lock shorter than the 25 m look-ahead, not shorter than the lag plus it;
+  its conclusion, that C-6 then needs a test of its own, is unchanged. #2896's test states the
+  tolerance and the 75 m margin. (#2959, from the review of #2956)
+- **2026-11-20** — **C-5's jump covers any frame in which the eased eye would be inside a
+  building, not only a late block.** The bullet under C-5 names one cause, a building the 1 s
+  horizon *"could not see"*. A misprediction is another: the horizon rides on at the current speed
+  and turns at C-1's cap, so a rider who speeds up, or a heading that turns faster than the
+  prediction, can bring the eased eye to a wall the horizon placed further off. C-5 holds *"in every
+  frame"* and *"C-5 wins"* over the easing, so the eye jumps in to the clear length in that frame
+  too. #2896 tests it that way, with a ride that speeds up inside the horizon beside a building, and
+  asserts that C-5 holds in every frame. (#2959, from the review of #2956)
