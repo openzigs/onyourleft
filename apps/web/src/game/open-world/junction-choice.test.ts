@@ -152,10 +152,11 @@ describe('the prompt (ADR 0088 D-1.2, D-1.5)', () => {
 
 /**
  * A ride east along a 500 m street to one junction, whose ways on leave it at
- * `turns` (degrees, negative left), each 400 m long. The rider is 200 m short
- * of it, inside the prompt and before the lock.
+ * `turns` (degrees, negative left), each 400 m long and of road class 1 unless
+ * `roadClasses` says otherwise. The rider is 200 m short of it, inside the
+ * prompt and before the lock.
  */
-function starRide(turns: readonly number[]) {
+function starRide(turns: readonly number[], roadClasses: readonly number[] = []) {
   const approach = {
     id: 'in',
     from: 'start',
@@ -182,7 +183,7 @@ function starRide(turns: readonly number[]) {
         ],
         roughGround,
       ),
-      roadClass: 1,
+      roadClass: roadClasses[index] ?? 1,
     };
   });
   const route = new RollingRoute(graphOf([approach, ...ways]), approach);
@@ -235,23 +236,61 @@ describe('a press chooses directly at three ways or fewer (ADR 0088 D-1.3, owner
     expect(choice.prompt(rider)?.chosen).toBe(junction.ways[2]?.edge.id);
   });
 
-  it('with three ways, straight is the middle way even where it is not the default', () => {
-    const { junction, ids, pressFrom } = starRide([-15, 40, 95]);
-    expect(junction.defaultWay).toBe(ids[0]);
+  it('with three ways, straight is the way most nearly ahead by bearing, not the middle one', () => {
+    // The reviewer's layout: the middle way by position (-30°) is not straight on (0°).
+    const { junction, ids, pressFrom } = starRide([-90, -30, 0]);
+    expect(junction.defaultWay).toBe(ids[2]);
     for (const from of ids) {
-      expect(pressFrom(from, 'straight'), `straight from ${from}`).toBe(ids[1]);
+      expect(pressFrom(from, 'straight'), `straight from ${from}`).toBe(ids[2]);
       expect(pressFrom(from, 'left'), `left from ${from}`).toBe(ids[0]);
       expect(pressFrom(from, 'right'), `right from ${from}`).toBe(ids[2]);
     }
+    // And where the leftmost way is the most nearly ahead.
+    const fan = starRide([-15, 40, 95]);
+    for (const from of fan.ids) {
+      expect(fan.pressFrom(from, 'straight'), `straight from ${from}`).toBe(fan.ids[0]);
+      expect(fan.pressFrom(from, 'left'), `left from ${from}`).toBe(fan.ids[0]);
+      expect(fan.pressFrom(from, 'right'), `right from ${from}`).toBe(fan.ids[2]);
+    }
   });
 
-  it('with two ways, left and right take the two, and straight the default', () => {
-    const { junction, ids, pressFrom } = starRide([-90, 90]);
-    expect(ids).toHaveLength(2);
+  it('with two ways, left and right take the ends, and straight the one more nearly ahead', () => {
+    for (const [turns, ahead] of [
+      [[-90, 0], 1],
+      [[0, 90], 0],
+      [[-20, 70], 0],
+    ] as const) {
+      const { ids, pressFrom } = starRide(turns);
+      expect(ids).toHaveLength(2);
+      for (const from of ids) {
+        expect(pressFrom(from, 'left'), `${turns.join()}: left from ${from}`).toBe(ids[0]);
+        expect(pressFrom(from, 'right'), `${turns.join()}: right from ${from}`).toBe(ids[1]);
+        expect(pressFrom(from, 'straight'), `${turns.join()}: straight from ${from}`).toBe(
+          ids[ahead],
+        );
+      }
+    }
+  });
+
+  it('on a tie in bearing, straight takes the higher road class, then the right-hand way', () => {
+    // -30° and +30° are equally far from ahead in whole degrees (D-1.4's tie).
+    for (const [classes, ahead] of [
+      [[1, 1], 1],
+      [[2, 1], 0],
+      [[1, 2], 1],
+    ] as const) {
+      const { junction, ids, pressFrom } = starRide([-30, 30], classes);
+      expect(junction.defaultWay).toBe(ids[ahead]);
+      for (const from of ids) {
+        expect(pressFrom(from, 'straight'), `${classes.join()}: straight from ${from}`).toBe(
+          ids[ahead],
+        );
+      }
+    }
+    // The same tie at three ways, where the middle way by position is the left of the two.
+    const { ids, pressFrom } = starRide([-60, -30, 30]);
     for (const from of ids) {
-      expect(pressFrom(from, 'left'), `left from ${from}`).toBe(ids[0]);
-      expect(pressFrom(from, 'right'), `right from ${from}`).toBe(ids[1]);
-      expect(pressFrom(from, 'straight'), `straight from ${from}`).toBe(junction.defaultWay);
+      expect(pressFrom(from, 'straight'), `straight from ${from}`).toBe(ids[2]);
     }
   });
 });

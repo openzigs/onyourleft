@@ -8,7 +8,8 @@
  * continuous or scaled amount. At a junction with three ways on or fewer a
  * press chooses its way **directly**, whatever was chosen before (the owner's
  * ruling of 2026-11-20 on D-1.3's first sentence); with more than three, left
- * and right step the choice one way round the junction. Nothing pressed rides
+ * and right step the choice one way round the junction. Straight is always the
+ * way most nearly dead ahead by bearing (owner ruling 2026-11-20). Nothing pressed rides
  * ADR 0088 D-1.4's default (the smallest change of bearing). The
  * choice is final {@link JUNCTION_LOCK_METRES} before the junction (D-1.5,
  * ADR 0087 D-6.2), and after that a press for it does nothing. A U-turn press
@@ -67,38 +68,36 @@ export interface JunctionPrompt {
 }
 
 /**
- * The most ways on at which a press chooses its way directly (ADR 0088 D-1.3):
- * three, one for each of left, straight and right.
+ * The most ways on at which left and right choose their way directly (ADR
+ * 0088 D-1.3): three, one for each of left, straight and right.
  */
 const DIRECT_CHOICE_MAX_WAYS = 3;
 
 /**
  * The edge id a press asks for at the junction `shown` prompts.
  *
- * - **Three ways on or fewer: directly**, whatever was chosen before. Left is
- *   the furthest-left way and right the furthest-right. Straight is the middle
- *   way of three, so each of three ways has a press of its own; with two ways
- *   there is no middle, and straight is D-1.4's default, the smaller change of
- *   bearing.
- * - **More than three: a step.** Left and right move the choice one way round
- *   the junction and stop at its ends; straight is the default.
+ * - **Straight, at any junction, is the way most nearly dead ahead by
+ *   bearing**: the smallest absolute turn from the rider's heading (the
+ *   owner's ruling of 2026-11-20), never the middle way by position. That is
+ *   D-1.4's default, which the rolling route computes from each way's
+ *   `turnDegrees` (`waysOn`), so a straight press and no press always agree.
+ *   Ties are D-1.4's: turns are compared in whole degrees, then the higher
+ *   road class wins, then the right-hand way.
+ * - **Left and right, with three ways on or fewer: directly**, whatever was
+ *   chosen before. Left is the furthest-left way and right the furthest-right.
+ * - **Left and right, with more than three: a step** one way round the
+ *   junction, stopping at its ends.
  */
 function wayForPress(press: 'left' | 'straight' | 'right', shown: JunctionPrompt): string {
   const { ways, chosen, defaultWay } = shown;
-  if (ways.length <= DIRECT_CHOICE_MAX_WAYS) {
-    const direct =
-      press === 'left'
-        ? ways[0]
-        : press === 'right'
-          ? ways[ways.length - 1]
-          : ways.length === DIRECT_CHOICE_MAX_WAYS
-            ? ways[1]
-            : undefined;
-    return direct?.edge.id ?? defaultWay;
-  }
   if (press === 'straight') return defaultWay;
+  // A prompted junction has at least two ways on (`junctionsAfter`), so each
+  // index below names a way.
+  if (ways.length <= DIRECT_CHOICE_MAX_WAYS) {
+    return (ways[press === 'left' ? 0 : ways.length - 1] as RollingWay).edge.id;
+  }
   const at = ways.findIndex((way) => way.edge.id === chosen);
-  // Clamped to the junction's ends, so the index always names a way.
+  // Clamped to the junction's ends.
   const step = ways[Math.min(ways.length - 1, Math.max(0, at + (press === 'left' ? -1 : 1)))];
   return (step as RollingWay).edge.id;
 }

@@ -339,3 +339,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   [#2964](https://github.com/openzigs/onyourleft/pull/2964) implements it for #2897, and
   [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s taps go through the same path.
   (#2959)
+- **2026-11-20** — **The owner ruled that straight is the way most nearly dead ahead by bearing.** At
+  a junction with three ways on or fewer, a straight press chooses the way with the smallest
+  absolute turn from the rider's heading, not the middle way of three by position: at ways leaving
+  at −90°, −30° and 0°, straight takes 0°, and so does right. Left still takes the furthest-left way
+  and right the furthest-right, so with two ways left and right take the two ends and straight
+  takes the one more nearly ahead. That is D-1.4's default, so a straight press and no press always
+  agree, and a tie is broken as D-1.4 breaks one: the turn counted in whole degrees, then the higher
+  road class, then the right-hand way. With more than three ways on, D-1.3's parenthesis and the
+  earlier amendment of this date are unchanged. Because straight no longer names a position,
+  [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s D-3.1 symbols point each way's
+  actual direction, its turn from the rider's heading, rather than a fixed left, up and right.
+  The ruling is posted on [#2897](https://github.com/openzigs/onyourleft/issues/2897) and on
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)
