@@ -22,6 +22,20 @@ export {
 export { localMetres, METRES_PER_DEGREE_LATITUDE, tileBounds } from './projection';
 export { describeRefusal } from './refusal';
 export {
+  DEFAULT_STREET_GRAPH_LIMITS,
+  describeStreetGraphRefusal,
+  inStreetGraph,
+  SEAM_STITCH_METRES,
+  SNAP_METRES,
+  StreetGraph,
+  T_SNAP_METRES,
+  type StreetGraphEdge,
+  type StreetGraphLimits,
+  type StreetGraphNode,
+  type StreetGraphRefusal,
+  type StreetNodeKind,
+} from './street-graph';
+export {
   BUILDING_FIELD_NAMES,
   BUILDING_FIELD_RULES,
   BUILDING_KINDS,

@@ -19,6 +19,7 @@ map data and names no rendering library.** The archive read is #1539's one modul
 | `src/projection.ts` | The game's projection, restated (see below) |
 | `src/cover.ts` | `corridorTileCover`: the z15 tiles a route's corridor touches, in route order, capped |
 | `src/geometry.ts` | `simplifyRing`, `clipToBox`, `triangulate` (earcut), `rasterise` |
+| `src/street-graph.ts` | `StreetGraph` (#2894, ADR 0091): the open-world ride's street graph, built a tile at a time from decoded streets: clipped to each tile, snapped, crossed, T-snapped and stitched across seams, tiles added and removed without rebuilding the others, and bounded a tile and in total. It follows streets and plans no route (ADR 0091 D-6). `oneway` is kept on each edge and never removes a way on (D-5) |
 | `src/testing/mvt-encoder.ts`, `src/fixtures/` | A deterministic MVT encoder and the synthetic fixtures, from arithmetic only. `@onyourleft/map-features/testing`, never the barrel |
 
 ## The frame
@@ -93,6 +94,9 @@ in the lockfile through `maplibre-gl`.
 `src/fixtures/` holds a residential block with three footprints, a wood with a hole, a lake, a
 sidewalk, a `building_part` with a `min_height`, footprints with every building field set (#1789), streets carrying each road field (#2892), a
 tile at each limit and one over each, and the hostile tiles of `hostile.ts`, among them a hostile value
-under each building field's key and each road field's. **No OpenStreetMap data of any kind**: rectangles, regular polygons
+under each building field's key and each road field's, and the street graph's shapes
+(`street-graph.ts`: a T-junction, a crossroads, a bridge and a tunnel, a junction on a seam, a
+roundabout, a loop, a dead end, a one-way pair, the ways the graph leaves out, and many streets
+through one point). **No OpenStreetMap data of any kind**: rectangles, regular polygons
 and evenly spaced points, for the reason `apps/web/browser/pmtiles-fixture.ts` gives. They are code
 rather than committed binaries, and `fixtures.test.ts` pins the named ones by SHA-256.
