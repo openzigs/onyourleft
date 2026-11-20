@@ -624,7 +624,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880)). For the open-world ride
   only, ADR 0091 D-2 extends D-2.2's fields read from `roads` with `oneway` (`yes`, `-1` or none),
   `access` (only whether it is `no` or `private`) and `is_link`, beside the `kind`, `kind_detail`,
-  `is_bridge` and `is_tunnel` the 2026-10-22 entry records. ADR 0091 is **Proposed**, to be accepted
-  by the owner on its pull request. What still holds, unchanged: no name from any layer is read, no
+  `is_bridge` and `is_tunnel` the 2026-10-22 entry records. ADR 0091 is **Accepted**, 2026-11-20, by
+  the owner on its pull request #2951. What still holds, unchanged: no name from any layer is read, no
   house number, and no OSM identifier; D-2.2 for route corridors; and D-3. This entry is a pointer
   and changes nothing else here.

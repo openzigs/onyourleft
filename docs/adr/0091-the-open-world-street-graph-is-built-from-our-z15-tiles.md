@@ -1,7 +1,10 @@
 # ADR 0091: The open-world ride's street graph is built from our z15 basemap tiles, to follow streets and never to plan a route
 
-- **Status**: **Proposed**, 2026-11-19, on the owner's ruling Q3 of 2026-11-19 on the epic #2880.
-  Accepted only on the owner's approval on its pull request. D-9 lists the questions for the owner
+- **Status**: **Accepted**, 2026-11-20, by the owner on its pull request
+  [#2951](https://github.com/openzigs/onyourleft/pull/2951), with the answers recorded in D-9: Q1,
+  Q2 and Q4 as recommended, and **Q3 against the recommendation**, so a turn against a one-way
+  street is offered (D-5). It merges after #2949. Proposed 2026-11-19, on the owner's ruling Q3 of
+  that day on the epic #2880
 - **Date**: 2026-11-19
 - **Deciders**: **the owner**, who ruled Q3 on 2026-11-19 (quoted in Context) and asked for it to be
   proven first. **The author** chose among the three sources the ruling and #2886 name, on
@@ -108,7 +111,7 @@ From each `roads` feature at z15, and nothing else:
 - `kind` and `kind_detail`, already decoded (`@onyourleft/map-features` §`StreetFeature`);
 - `is_bridge` and `is_tunnel`, already decoded as `StreetFeature.grade`;
 - **`oneway`**, read as one of `yes`, `-1` or absent. Any other value, including `no`, is treated
-  as absent;
+  as absent. It is kept on the edge and **never removes a way on** (D-5);
 - **`access`**, read only to tell whether it is `no` or `private`. Any other value, or none, is
   treated as open;
 - **`is_link`**, as a boolean.
@@ -125,13 +128,13 @@ ADR 0054 D-2.2's rule that no name, house number or OSM identifier is read stand
 - **Never in the graph**: `kind` `highway`, which is motorways and their links, as
   `apps/web/src/game/cross-streets.ts` §`meetsAtGrade` rules. Footways and paths, the `path` kind
   and §`FOOTWAY_KIND_DETAILS`, are left out of the first version. That is *the author's choice*,
-  put to the owner as D-9 Q1.
+  put to the owner as D-9 Q1 and accepted.
 - **Never a junction where they cross**: a line on a bridge or in a tunnel. Its ends join the street
   where it comes back to grade, but a street it passes over or under meets it nowhere.
 - **Never offered as a turn**: a way whose `access` is `no` or `private`, and a way whose
   `kind_detail` is `service`. Driveways, parking aisles and alleys all carry that one value, which
   the tiles cannot tell apart. The spike's public-street figures are the graph with these left out.
-  Leaving service ways out is *the author's choice*, put to the owner as D-9 Q2.
+  Leaving service ways out is *the author's choice*, put to the owner as D-9 Q2 and accepted.
 
 ### D-4 — Junctions are found geometrically, not read from shared vertices
 
@@ -149,8 +152,11 @@ of the junctions.
 
 ### D-5 — One-way streets and roundabouts
 
-- A turn **against** a street's `oneway` is not offered. A street tagged `-1` runs against its
-  line's direction. *The author's choice*, put to the owner as D-9 Q3.
+- **A turn against a one-way street is allowed, not refused** (the owner's answer to D-9 Q3,
+  2026-11-20). The graph still reads `oneway` (D-2), and a street tagged `-1` still runs against
+  its line's direction, but every way on is offered **in both directions**, whatever its `oneway`
+  says. `oneway` is kept on the edge as a fact about the street, for later work to show, and it
+  never removes a turn, changes the default (ADR 0088 D-1.4) or turns the rider round.
 - **A roundabout is a ring of ordinary junctions.** The tiles carry no roundabout flag. A ring's
   direction is known only where its lines carry `oneway`, which 11 of the spike's 26 roundabouts
   did. The ring is not inferred from shape, because that matched 73 rings that were not
@@ -182,33 +188,45 @@ in its pull request #2942) say.
 - The graph module imports nothing that can reach the trainer. The grade comes from the road, and
   how a junction choice is made is #2887's ADR.
 
-### D-9 — Questions for the owner, with the author's recommendation
+### D-9 — Questions for the owner, with the author's recommendation, and the answers
+
+The owner answered all four on **2026-11-20**, on the pull request
+[#2951](https://github.com/openzigs/onyourleft/pull/2951), and accepted this ADR before it merges,
+to merge after #2949. Each answer follows its question.
 
 1. **May an open-world ride follow footways, cycleways and paths?** *Recommend: not in the first
    version.* The spike measured streets only. A cycleway network would need its own junction
    measurement, and footways in town centres would add many junctions that a road bike would not
-   take.
+   take. **Answered: no** footways, cycleways or paths in the first version. D-3 stands.
 2. **Should service ways (driveways, parking aisles, alleys) be offered as turns?** *Recommend: no.*
    The tiles cannot tell a driveway from an alley. Leaving them out gives the spike's public-street
    figures (recall 98.7 to 100 %, at most one false junction per area). Leaving them in offers a
-   turn at most driveways in a suburb (489 junctions against 184).
+   turn at most driveways in a suburb (489 junctions against 184). **Answered: no**, service ways
+   are not offered as turns. D-3 stands.
 3. **Should a turn against a one-way street be refused?** *Recommend: yes*, as a cyclist on a real
-   road would.
+   road would. **Answered: allow**, against the recommendation: a turn against a one-way street is
+   **not** refused. D-5's first point says so: the graph still reads `oneway` (D-2) but offers both
+   directions.
 4. **Should our archive build add a roundabout flag (#2893), so that a roundabout's direction and
    exits are known?** *Recommend: not now.* Ride the first version (#2910) with roundabouts as
    rings of ordinary junctions, then decide with the tablet ride in hand. The cost is a US rebuild
-   on the owner's Mac and an upload under ADR 0062 D-2.
+   on the owner's Mac and an upload under ADR 0062 D-2. **Answered: not now**: roundabouts are
+   rings of ordinary junctions, and #2893 waits for the tablet ride (#2910). D-5's second point
+   stands.
 
 ## Consequences
 
 - **#2892** decodes `oneway`, `access` and `is_link` from `roads` and nothing else new (D-2).
 - **#2894** builds the graph geometrically under `packages/` (D-4, D-7), and its tests hold it to
   the spike's figures.
-- **#2893** is not started unless D-9 Q4 is answered yes.
+- **#2893** is not started now (D-9 Q4); it waits for the tablet ride (#2910).
+- **A rider may ride either way along a one-way street** (D-5), as the owner ruled. The graph keeps
+  `oneway` on the edge but nothing in the first version refuses a turn by it.
 - **No new download and no change to the archive.** The graph comes from tiles the open-world ride
   is to stream (#2884).
 - **What is given up:** roundabouts are not known as roundabouts, a driveway cannot be told from an
-  alley, and the graph knows no turn restriction. None of these matters to following a street.
+  alley, the graph knows no turn restriction, and a one-way street does not limit which way the
+  rider may take it. None of these matters to following a street.
   Each would matter to routing, which #2009 keeps off this layer.
 
 ## What would make this ADR wrong
