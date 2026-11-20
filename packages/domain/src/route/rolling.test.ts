@@ -191,7 +191,12 @@ describe('a junction choice swaps the tail past the junction', () => {
     const end = chosen.points[chosen.points.length - 1]?.position;
     if (start === undefined || end === undefined) throw new Error('empty street');
     const length = distanceBetween(start, end);
-    for (const at of samplesIn(junction.distance + 1, junction.distance + length)) {
+    const past = samplesIn(junction.distance, junction.distance + length).filter(
+      (at) => at > junction.distance,
+    );
+    // The first sample past the junction is the one a stale sample would be.
+    expect(past[0]).toBe(Math.floor(junction.distance / 10) * 10 + 10);
+    for (const at of past) {
       const { position } = readAt(after, origin, at);
       expect(distanceBetween(start, position)).toBeCloseTo(at - junction.distance, 3);
       expect(distanceBetween(position, end)).toBeCloseTo(length - (at - junction.distance), 3);
@@ -400,6 +405,44 @@ describe('turning round', () => {
     expect(legs[2]?.start).toBeCloseTo(turn * 2, 6);
     // Past the U-turn, the road descends.
     expect(readAt(view, route.origin, turn + 100).grade).toBeLessThan(0);
+  });
+});
+
+describe('a U-turn mid-street', () => {
+  it('leaves no junction at the turn, so no prompt offers the far end of the street', () => {
+    const { route } = eastAlongRow3();
+    const rider = 95;
+    const turn = 100;
+    route.advance(rider);
+    // The street the rider is on ends at a junction with three ways on.
+    expect(route.junctionsAfter(rider)[0]?.ways.length).toBe(3);
+    route.uTurn(rider);
+    expect(route.legs[0]?.end).toBe(turn);
+    expect(route.legs[1]?.kind).toBe('u-turn');
+    expect(route.junctionsAfter(rider).map((junction) => junction.distance)).not.toContain(turn);
+  });
+});
+
+describe('a rider distance that is not a finite number', () => {
+  const notFinite = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+
+  it('is refused by every call that takes one, and changes nothing', () => {
+    const { route } = eastAlongRow3();
+    route.advance(900);
+    const { distance, ways, taken } = route.junctionsAfter(900)[0] as RollingJunction;
+    const other = ways.find((way) => way.edge.id !== taken)?.edge.id as string;
+    const view = route.view();
+    const legs = route.legs;
+    for (const rider of notFinite) {
+      expect(route.choose(distance, other, rider), `choose at ${rider}`).toBe('locked');
+      route.uTurn(rider);
+      route.advance(rider);
+      expect(route.view(), `view after ${rider}`).toBe(view);
+      expect(route.legs).toEqual(legs);
+    }
+    // And the route still rides on from where it was.
+    route.advance(1_000);
+    expect(route.end - 1_000).toBeGreaterThanOrEqual(ROLLING_AHEAD_METRES);
   });
 });
 
