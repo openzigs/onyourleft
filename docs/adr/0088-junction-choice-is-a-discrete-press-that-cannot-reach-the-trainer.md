@@ -1,9 +1,11 @@
 # ADR 0088: Junction choice in an open-world ride is a discrete press, apart from lane steering, that cannot reach the trainer
 
-- **Status**: **Proposed**, 2026-11-19, on the owner's rulings of 2026-11-19 on the epic
+- **Status**: **Accepted**, 2026-11-20, by the owner on its pull request
+  [#2953](https://github.com/openzigs/onyourleft/pull/2953), with the answers recorded in D-9: every
+  recommendation taken, and Q1 with an addition, tappable on-screen turn controls at the prompt
+  (D-3.1). Proposed 2026-11-19, on the owner's rulings of that day on the epic
   [#2880](https://github.com/openzigs/onyourleft/issues/2880) and on
-  [#2883](https://github.com/openzigs/onyourleft/issues/2883). Accepted only on the owner's approval
-  on its pull request. D-9 lists the questions for the owner
+  [#2883](https://github.com/openzigs/onyourleft/issues/2883)
 - **Date**: 2026-11-19
 - **Deciders**: **the owner**, whose rulings are quoted in Context. **The author** chose the keys,
   the buttons, the prompt distance and the default rule within them; each such choice is marked
@@ -37,6 +39,10 @@ streets"*, and the first version the epic describes is: *"The bike follows the r
 Before each junction a prompt shows the choices; pick with the steering keys, a bar remote, a
 gamepad, an OpenBikeControl controller or the screen; pick nothing and you go straight on; dead ends
 turn you round."*
+
+On 2026-11-20, answering D-9 Q1, the owner added that a rider with no controller must be able to
+turn on a tablet: *"On a tablet symbols should show on the screen if someone doesn't have a
+controller to turn left or right"*. That is D-3.1.
 
 ### Why this is a trainer question
 
@@ -122,7 +128,7 @@ a lane. So steering round a parked car cannot choose a wrong street. The turn pr
 | A gamepad, standard mapping | face button 2 | face button 0 | face button 1 | face button 3 |
 | The Android shell's numbered buttons | 4 | 3 | 2 | none: the screen or a key |
 | OpenBikeControl v1 | a button id the specification names for navigation left, if it names one | likewise up | likewise right | likewise down |
-| The screen | the prompt's own buttons (#2898) | | | a U-turn button |
+| The screen | the prompt's left symbol (D-3.1, #2898) | its straight symbol | its right symbol | a U-turn button |
 
 - The keys follow `intentOfKeyIn`'s discipline. No Enter, no Space.
 - The pad and the numbered buttons take the places Delivery's throws use, so a rider learns one
@@ -134,7 +140,31 @@ a lane. So steering round a parked car cannot choose a wrong street. The turn pr
   and every screen action has a key.
 - **The touch lock stays whole** (ADR 0059 D-5, ADR 0060 D-13): no prompt button carries
   `TOUCH_LOCK_EXEMPT`, so with the lock on, the choice comes by key, remote, pad or controller, and
-  with nothing pressed the ride takes the default. Put to the owner as D-9 Q3.
+  with nothing pressed the ride takes the default. Put to the owner as D-9 Q3, and answered yes.
+
+#### D-3.1 — Tappable on-screen turn controls (the owner's addition of 2026-11-20)
+
+So that a rider with **no controller** can turn, the prompt shows **tappable turn symbols on the
+screen: left, straight and right** (and, with more than three ways on, the same left and right
+stepping as D-1.3), as other trainer apps do it. They are shown at every prompt on a touch screen,
+whether or not a controller is paired, so a rider who has none never has to find a setting first
+(*the author's choice*).
+
+1. **A tap is a discrete press, through the same path as every other press.** A tap on a symbol is
+   one press of that symbol's choice and goes through the same discrete-press path as the arrow
+   keys, the pad and the numbered buttons (D-1.3): it moves the choice one step, never a continuous
+   or scaled amount. Where on the symbol the finger lands, and how far it moves, decide nothing; a
+   drag or a swipe across the symbols chooses nothing (D-4). A tap after the lock does nothing, as a
+   press does (D-1.5).
+2. **They can never reach the trainer.** The symbols' modules are roots of D-5.2's static walk, and
+   D-5.3's behavioural ride is run once more with the turn taken by a tap. They change only which
+   branch the rolling route appends, as every press does (D-5.1).
+3. **With the touch lock on, they still show the current choice but take no tap** (D-9 Q3). No
+   symbol carries `TOUCH_LOCK_EXEMPT`. The rider then sees which way the ride will go, and chooses by
+   key, remote, pad or controller, or takes the default.
+4. **Each symbol is a button** with a name a screen reader reads and a key that does the same thing
+   (D-3's keyboard and screen-reader row), and the current choice and the default are shown on the
+   symbols themselves.
 
 ### D-4 — Out of scope
 
@@ -153,9 +183,10 @@ single drag that both steers and chooses a turn is not built (ADR 0060 D-13.3's 
 2. **The static test: `apps/web/src/game/open-world/open-world-cannot-reach-trainer.test.ts`.** It
    calls `apps/web/src/game/cannot-reach-trainer-testing.ts` (**shared, not copied**), as
    `lap-race/lap-race-cannot-reach-trainer.test.ts` does:
-   - **Roots**: every non-test module of the junction-choice input and its prompt, wherever #2897
-     and #2898 put them, and every non-test module under the open-world mode's own directories in
-     `apps/web` and `packages/`, through `modulesUnder`.
+   - **Roots**: every non-test module of the junction-choice input and its prompt, **the on-screen
+     turn symbols of D-3.1 included**, wherever #2897 and #2898 put them, and every non-test module
+     under the open-world mode's own directories in `apps/web` and `packages/`, through
+     `modulesUnder`.
    - **Forbidden**: the trainer-command seam read off `scripts/check-wiring.mjs`
      (`trainerCommandSeam(WIRING_SOURCE)`), every trainer-control writer the #1807 rules find
      (`WRITERS_ON_DISK`), and `GAME_TRAINER_MODULES` (`game/trainer-port.ts`, `game/gradient.ts`,
@@ -174,7 +205,9 @@ single drag that both steers and chooses a turn is not built (ADR 0060 D-13.3's 
    compared with a stored route over the same streets: that ride reads its `RouteRecord`'s own
    heights on `routeProfile`'s stretched grid, and ADR 0087 D-4.1 and D-6.4 give the open-world ride
    other heights, another grid and another start, so the two could never match. A third ride presses
-   after the lock and asserts the grades sent are those of the default branch.
+   after the lock and asserts the grades sent are those of the default branch. #2898 runs the first
+   ride once more with the left turn taken by a **tap on the on-screen left symbol** (D-3.1), and its
+   grades are byte-identical too.
 4. **The keys' module imports nothing** that could bring the trainer onto its path, as `lanes.ts`
    already does.
 
@@ -192,18 +225,27 @@ Junction choice runs on the device. A rider with no instance has it (ADR 0036 D-
 If the owner ever wants continuous steering to choose a turn (D-4), a patent reading is owed first,
 or an explicit owner ruling naming it. This ADR does not decide that.
 
-### D-9 — What the owner is asked to rule on
+### D-9 — What the owner was asked, and the answers
+
+The owner answered all four on **2026-11-20**, on the pull request
+[#2953](https://github.com/openzigs/onyourleft/pull/2953). Each answer follows its question.
 
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
-   merge**.
+   merge**. **Answered: accepted before merge.** The Status line says so.
 2. **Q1 — The keys and buttons in D-3**: the arrows (and Page Up and Page Down) for a turn, A and D
    kept for lanes, pad face buttons in Delivery's places? Recommended: **yes**. They are free in an
-   open-world ride because Delivery does not run there.
+   open-world ride because Delivery does not run there. **Answered: yes, with an addition**: on a
+   tablet, turn symbols show on the screen so that a rider without a controller can turn left or
+   right. D-3 stands and gains D-3.1, tappable on-screen turn controls at the prompt, which go
+   through the same discrete-press path, can never reach the trainer and are covered by D-5's
+   static walk.
 3. **Q2 — The prompt at 250 m, and the lock at 100 m** (D-1.2, D-1.5)? Recommended: **yes**, to be
-   checked on the tablet in #2910.
+   checked on the tablet in #2910. **Answered: yes**, the prompt at 250 m and the lock at 100 m.
+   D-1.2 and D-1.5 stand.
 4. **Q3 — The touch lock stays whole for the prompt** (D-3), so with the lock on a tablet rider
    chooses by key or remote, or takes the default? Recommended: **yes**, as ADR 0059 D-5 ruled for
-   throws.
+   throws. **Answered: yes**, the touch lock stays whole: with the lock on, the on-screen turn
+   symbols still show the current choice but do not take a tap (D-3.1.3).
 
 ---
 
@@ -213,6 +255,8 @@ or an explicit owner ruling naming it. This ADR does not decide that.
 
 - **Turning onto real streets**, with every input the app already reads, and no new way for a press
   to reach the trainer.
+- **A rider with no controller turns by tapping** the prompt's left, straight or right symbol
+  (D-3.1).
 - #2897 (the input), #2898 (the prompt), #2904 (the street map as preview) and #2905 (the look-ahead
   on the default branch) have rules to be held to.
 
@@ -220,6 +264,8 @@ or an explicit owner ruling naming it. This ADR does not decide that.
 
 - **A second set of ride keys** beside the lanes. A rider who presses an arrow expecting a lane
   change chooses a turn instead; the prompt says what each key does.
+- **With the touch lock on, the symbols take no tap**, so a tablet rider with the lock on and no
+  key, remote, pad or controller rides the default at every junction (D-3.1.3).
 - **Late presses do nothing.** A rider who presses inside the last 100 m goes the way the lock froze.
   The prompt has to make the lock visible.
 - **A static walk and a behavioural ride** per D-5, before the first turn is taken.
@@ -231,7 +277,7 @@ or an explicit owner ruling naming it. This ADR does not decide that.
 | Issue | Constraint |
 |---|---|
 | [#2897](https://github.com/openzigs/onyourleft/issues/2897) | D-1, D-2, D-3, D-4 and D-5 in full, including the static test with its three plantings and the behavioural ride |
-| [#2898](https://github.com/openzigs/onyourleft/issues/2898) | D-1.2, D-1.5 and D-3's screen, keyboard, screen-reader and touch-lock rows |
+| [#2898](https://github.com/openzigs/onyourleft/issues/2898) | D-1.2, D-1.5 and D-3's screen, keyboard, screen-reader and touch-lock rows; D-3.1 in full: tappable left, straight and right symbols at every prompt on a touch screen, each tap one discrete press through the same path as a key, the symbols' modules among D-5.2's roots, the behavioural ride repeated with a tap, and with the touch lock on the symbols showing the current choice but taking no tap |
 | [#2895](https://github.com/openzigs/onyourleft/issues/2895) | A choice swaps the tail only before the lock (ADR 0087 D-6.2) |
 | [#2904](https://github.com/openzigs/onyourleft/issues/2904), [#2905](https://github.com/openzigs/onyourleft/issues/2905) | They show the current choice, and the default where none is pressed |
 | [#2906](https://github.com/openzigs/onyourleft/issues/2906) | D-6: no choice is recorded |
