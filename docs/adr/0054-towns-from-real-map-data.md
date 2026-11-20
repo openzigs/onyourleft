@@ -618,3 +618,35 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   on 2026-11-17 on its pull request [#2694](https://github.com/openzigs/onyourleft/pull/2694).
   What still holds, unchanged: D-5.2, D-5.4 to D-5.7, and the rest of D-5.1. This entry is a
   pointer and changes nothing else here.
+- **2026-11-19** — **PROPOSED, pending the owner's ruling on
+  [#2696](https://github.com/openzigs/onyourleft/issues/2696): a mapped footprint that touches a
+  yard is kept — D-5.2 narrowed for four `park` kinds.** D-5.2 drops a footprint whose centroid or
+  any vertex is on mapped wood, water or park, and `land-class.ts` §`LAND_CLASS_OF_KIND` reads
+  `garden`, `grass`, `village_green` and `allotments` as `park`. In the archive a `garden` is mostly
+  a house's own (spike 0031 counted 1 808 in one downtown corridor) and `grass` a lawn or a verge,
+  so a house touching its own garden was dropped. From this entry those four kinds are **yards**
+  (`land-class.ts` §`YARD_KINDS`): they stay `park` in the mask, mown, never fenced and with no
+  procedural lot, but a footprint touching one is not dropped for it. Where the mask says `park`,
+  `footprint-buildings.ts` rule 2 now drops a footprint only if a mapped park that is not a yard
+  covers the point or a point half a mask cell from it (§`parkProperNear`), so a garden inside a
+  public park still drops a house in it. Measured on 2026-11-19 through the game's own read and
+  planning path from `basemap-us-oyl-20261031.pmtiles`, along four public main streets — Oak Park
+  IL (Lake St), Truckee CA (Donner Pass Rd), Princeton NJ (Nassau St) and Brookline MA (Beacon
+  St) — this keeps **2, 6, 6 and 2** footprints of 3 944, 695, 1 618 and 6 002 that rule 2 dropped
+  before; **14, 10, 2 and 10** footprints inside a mapped `park` stay dropped. Questions for the
+  owner, each with a recommendation:
+  1. **Keep a footprint touching a garden, a lawn, a village green or allotments?**
+     Recommended: **yes**, as this entry does.
+  2. **Keep a golf course's clubhouse and a park's pavilion** (a footprint inside `golf_course` or
+     `park`), D-5.2's "one exception worth a line"? Recommended: **not yet**. They are 2 to 14 a
+     place and the park's planting stands where they would; revisit with the owner's screenshots of
+     #2685's looks. Nothing in this entry changes them.
+  3. **Any other `park` kind a yard** (`recreation_ground`, `dog_park`)? Recommended: **no**;
+     they are public grounds, and D-5.2 is about those.
+
+  What still stands, unchanged: D-5.2 for every other `park` kind, wood and water; #2657's
+  protected-area rule; #2754's beach inside a park; D-5.1 and D-5.3 to D-5.7. Held by
+  `apps/web/src/game/footprints-on-yards.test.ts`, which reads `footprintPlans`' verdicts. **Status:
+  proposed, in force only when the owner rules on #2696 and approves its screenshots and a
+  moving-ride tablet frame check**; the PR is not to be merged before that, and this entry is to
+  be corrected or struck there if the ruling differs.
