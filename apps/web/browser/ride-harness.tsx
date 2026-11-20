@@ -1366,6 +1366,9 @@ function measure(): StageMeasurement {
       // DRAWN, which it gives way to on a tablet beside the pacer and the
       // ghost (the same section).
       field.classList.contains('oyl-hud__field--solo-draft') ||
+      // #2864: the AI pacer's power, away from a tablet (`theme.css` §"THE AI
+      // PACER'S POWER, ON A TABLET ONLY").
+      field.classList.contains('oyl-hud__field--pacer-power') ||
       (field.classList.contains('oyl-hud__field--wind') && soloDraftDrawn(field));
     if (givesWay && box.width * box.height <= 1) {
       givenWay.push(name);

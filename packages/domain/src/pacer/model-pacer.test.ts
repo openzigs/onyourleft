@@ -12,6 +12,7 @@ import {
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
   MODEL_PACER_RECENT_LINES,
+  MODEL_PACER_REPEAT_MEMORY,
   MODEL_PACER_SAY_MOST_CHARACTERS,
   modelPacerAnswerSchema,
   PACER_CHASE_MOST,
@@ -19,20 +20,26 @@ import {
   PACER_INTENTS,
   PACER_LIFT,
   PACER_PLANS,
+  PACER_SAY_SAME_SHARE,
   PACER_START_RAMP_S,
+  PACER_SURGE_LEAST,
+  PACER_SURGE_MOST,
+  PACER_SURGE_WINDOW_S,
   PACER_WAIT_MOST,
   pacerAskOutcome,
+  pacerAsRidden,
   pacerDirectionAt,
   pacerSayRepeats,
   pacerSaysEasing,
   pacerSaysPushing,
   pacerSayProblem,
+  pacerStartFrom,
   pacerStartShare,
+  pacerSurgeAt,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
   riderPlaceOf,
-  startRamped,
   type ModelPacerInput,
   type PacerDecisionRecord,
   type PacerIntent,
@@ -576,26 +583,51 @@ describe('the device’s decisions in the log, and the one in force — #2835, A
   });
 
   it('rides a decision whose line failed, was late, or never arrived: the answer costs a line, never the pacing', () => {
-    expect(pacerDirectionAt(log, 75)).toEqual({ plan: 'rolling', intent: 'lift', by: 0.03 });
-    expect(pacerDirectionAt(log, 79.95)).toEqual({ plan: 'rolling', intent: 'lift', by: 0.03 });
-    expect(pacerDirectionAt(log, 80)).toEqual({ plan: 'rolling', intent: 'hold' });
+    const lift = { plan: 'rolling', intent: 'lift', by: 0.03 } as const;
+    expect(pacerDirectionAt(log, 75)).toEqual(pacerAsRidden(lift, 75));
+    expect(pacerDirectionAt(log, 79.95)).toEqual(pacerAsRidden(lift, 79.95));
+    expect(pacerDirectionAt(log, 80)).toEqual(
+      pacerAsRidden({ plan: 'rolling', intent: 'hold' }, 80),
+    );
   });
 
   it('lapses a decision nothing replaced, counted from its ask', () => {
-    expect(pacerDirectionAt(log, 80 + MODEL_PACER_LAPSE_S - 0.05)).toEqual({
-      plan: 'rolling',
-      intent: 'hold',
-    });
+    const at = 80 + MODEL_PACER_LAPSE_S - 0.05;
+    expect(pacerDirectionAt(log, at)).toEqual(
+      pacerAsRidden({ plan: 'rolling', intent: 'hold' }, at),
+    );
     expect(pacerDirectionAt(log, 80 + MODEL_PACER_LAPSE_S)).toBeUndefined();
   });
 
-  it('rides a decision inside the first minute up the start ramp', () => {
-    const early: PacerRuleRecord = { ...STOPPED, askedAtS: 10, arrivedAtS: 11 };
+  it('rides a decision inside the start ramp from where the rider was, as the log keeps it', () => {
+    const early: PacerRuleRecord = { ...STOPPED, askedAtS: 10, arrivedAtS: 11, startFrom: 0.62 };
+    expect(readPacerDecisionRecord(early)).toEqual(early);
     expect(pacerDirectionAt([early], 15)).toEqual({
       plan: 'rolling',
       intent: 'hold',
+      startFrom: 0.62,
       startShare: 15 / PACER_START_RAMP_S,
     });
+  });
+
+  it('rides the surge the seconds ridden give, live and on replay by one function', () => {
+    // A window with a surge in it, found rather than assumed, so the seed may change.
+    let at = PACER_START_RAMP_S;
+    while (pacerSurgeAt(at) < PACER_SURGE_LEAST / 2) at += 0.5;
+    const held: PacerRuleRecord = { ...STOPPED, askedAtS: at - 1, arrivedAtS: at };
+    expect(pacerDirectionAt([held], at)).toEqual({
+      plan: 'rolling',
+      intent: 'hold',
+      surge: pacerSurgeAt(at),
+    });
+  });
+
+  it('logs a decision that asked for no line as `unasked`, and reads it back whole', () => {
+    const quiet: PacerRuleRecord = { ...FAILED, outcome: 'unasked' };
+    expect(readPacerDecisionRecord(quiet)).toEqual(quiet);
+    expect(pacerDirectionAt([quiet], 76)).toEqual(
+      pacerAsRidden({ plan: 'rolling', intent: 'lift', by: 0.03 }, 76),
+    );
   });
 
   it('reads each record back whole', () => {
@@ -627,6 +659,12 @@ describe('the device’s decisions in the log, and the one in force — #2835, A
     ['a gap that is not a number', { ...WAIT, gapS: 'far' }],
     ['a plan outside the list', { ...WAIT, plan: 'sprint' }],
     ['an outcome outside the list', { ...WAIT, outcome: 'won' }],
+    ['an unasked decision with an answer', { ...WAIT, outcome: 'unasked', line: 'none' }],
+    ['an unasked decision with a line', { ...FAILED, outcome: 'unasked', line: 'repeat' }],
+    ['a start above the envelope', { ...WAIT, startFrom: 1.2 }],
+    ['a start below nothing', { ...WAIT, startFrom: -0.1 }],
+    ['a start finer than a hundredth', { ...WAIT, startFrom: 0.555 }],
+    ['an old-shape record that was unasked', { askedAtS: 5, arrivedAtS: null, outcome: 'unasked' }],
   ])('drops a record with %s', (_what, bad) => {
     expect(readPacerDecisionRecord(bad)).toBeUndefined();
   });
@@ -679,67 +717,188 @@ describe('how far an intent goes — #2835, ADR 0083 D-1', () => {
   });
 });
 
-describe('a gentle start — #2835, ADR 0083 D-3', () => {
-  it('states its figure: a minute', () => {
-    expect(PACER_START_RAMP_S).toBe(60);
+describe('a gentle start — #2835, ADR 0083 D-3, and the owner’s ruling of 2026-11-20', () => {
+  it('states its figure: 30 s, the owner’s “over about 30 s”', () => {
+    expect(PACER_START_RAMP_S).toBe(30);
   });
 
-  it('is a straight line from nothing at the start to the whole at a minute, and nothing after', () => {
+  it('is a straight line from nothing at the start to the whole at 30 s, and nothing after', () => {
     expect(pacerStartShare(0)).toBe(0);
-    expect(pacerStartShare(15)).toBe(0.25);
-    expect(pacerStartShare(30)).toBe(0.5);
-    expect(pacerStartShare(59.95)).toBeCloseTo(0.99917, 4);
-    expect(pacerStartShare(60)).toBeUndefined();
+    expect(pacerStartShare(15)).toBe(0.5);
+    expect(pacerStartShare(29.95)).toBeCloseTo(0.99833, 4);
+    expect(pacerStartShare(30)).toBeUndefined();
     expect(pacerStartShare(600)).toBeUndefined();
     expect(pacerStartShare(-1)).toBeUndefined();
     expect(pacerStartShare(Number.NaN)).toBeUndefined();
   });
 
-  it('starts at the bottom of #92’s envelope whatever the direction, and reaches the target without a step', () => {
+  it('starts from the rider’s own effort: their W/kg over the pacer’s, held to the ceiling', () => {
+    expect(pacerStartFrom(2.3, 2.3)).toBe(1);
+    expect(pacerStartFrom(1.15, 2.3)).toBe(0.5);
+    expect(pacerStartFrom(0, 2.3)).toBe(0);
+    expect(pacerStartFrom(0.1, 3)).toBe(0.03);
+    expect(pacerStartFrom(6, 2.3)).toBe(PACING_FACTOR_CEILING);
+    expect(pacerStartFrom(null, 2.3)).toBe(0);
+    expect(pacerStartFrom(undefined, 2.3)).toBe(0);
+    expect(pacerStartFrom(Number.NaN, 2.3)).toBe(0);
+    expect(pacerStartFrom(-2, 2.3)).toBe(0);
+    expect(pacerStartFrom(2, 0)).toBe(0);
+  });
+
+  it('rides as hard as the rider at the line, below the envelope if they are, and reaches the target without a step', () => {
     for (const plan of PACER_PLANS) {
       for (const intent of PACER_INTENTS) {
         for (const grade of [-8, -2, 0, 3, 9]) {
-          const direction = { plan, intent } as const;
-          const target = directedPacingFactor(direction, grade);
-          expect(directedPacingFactor(startRamped(direction, 0), grade)).toBe(PACING_FACTOR_FLOOR);
-          expect(directedPacingFactor(startRamped(direction, 30), grade)).toBeCloseTo(
-            (PACING_FACTOR_FLOOR + target) / 2,
-            12,
-          );
-          expect(directedPacingFactor(startRamped(direction, 59.999), grade)).toBeCloseTo(
-            target,
-            4,
-          );
-          expect(directedPacingFactor(startRamped(direction, 60), grade)).toBe(target);
+          for (const startFrom of [0, 0.4, 1, PACING_FACTOR_CEILING]) {
+            const direction = { plan, intent, startFrom } as const;
+            const target = directedPacingFactor({ plan, intent }, grade);
+            expect(directedPacingFactor(pacerAsRidden(direction, 0), grade)).toBe(startFrom);
+            expect(directedPacingFactor(pacerAsRidden(direction, 15), grade)).toBeCloseTo(
+              (startFrom + target) / 2,
+              12,
+            );
+            expect(directedPacingFactor(pacerAsRidden(direction, 29.999), grade)).toBeCloseTo(
+              target,
+              4,
+            );
+          }
         }
       }
     }
   });
 
-  it('never rides above the target, and never falls as the ride goes on', () => {
-    const direction = { plan: 'rolling', intent: 'lift', by: 0.1 } as const;
-    let before = 0;
-    for (let at = 0; at <= 70; at += 0.5) {
-      const factor = directedPacingFactor(startRamped(direction, at), 2);
-      expect(factor).toBeGreaterThanOrEqual(before);
-      expect(factor).toBeLessThanOrEqual(directedPacingFactor(direction, 2));
-      before = factor;
+  it('starts at the bottom of #92’s envelope for a decision from before the ruling, with no start kept', () => {
+    const direction = pacerAsRidden({ plan: 'rolling', intent: 'hold' }, 0);
+    expect(directedPacingFactor(direction, 0)).toBe(PACING_FACTOR_FLOOR);
+  });
+
+  it('is a power the rider’s own W/kg at the pacer’s 75 kg, at the line', () => {
+    const plan = botPacerPlan(2.5);
+    const direction = pacerAsRidden(
+      { plan: 'rolling', intent: 'hold', startFrom: pacerStartFrom(1.5, 2.5) },
+      0,
+    );
+    expect(directedPowerWatts(plan, gradePercent(0), direction)).toBeCloseTo(1.5 * 75, 9);
+  });
+
+  it('holds no surge inside the ramp', () => {
+    for (let at = 0; at < PACER_START_RAMP_S; at += 0.25) expect(pacerSurgeAt(at)).toBe(0);
+    const direction = { plan: 'rolling', intent: 'hold' } as const;
+    expect(pacerAsRidden(direction, 12)).toEqual({ ...direction, startShare: 0.4 });
+  });
+});
+
+describe('a power range, ridden like a person — the owner’s ruling of 2026-11-20', () => {
+  const HOUR = 3_600;
+  const samples = (): number[] => {
+    const out: number[] = [];
+    for (let at = PACER_START_RAMP_S; at < HOUR; at += 0.1) out.push(pacerSurgeAt(at));
+    return out;
+  };
+
+  it('states its range: surges of 4 to 8 % above the target, recoveries half as deep', () => {
+    expect(PACER_SURGE_LEAST).toBe(0.04);
+    expect(PACER_SURGE_MOST).toBe(0.08);
+  });
+
+  it('surges above its target and recovers below it, within the range, in the first hour', () => {
+    const seen = samples();
+    expect(Math.max(...seen)).toBeGreaterThanOrEqual(PACER_SURGE_LEAST);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(PACER_SURGE_MOST);
+    expect(Math.min(...seen)).toBeLessThanOrEqual(-PACER_SURGE_LEAST / 2);
+    expect(Math.min(...seen)).toBeGreaterThanOrEqual(-PACER_SURGE_MOST / 2);
+    // Not every minute: some of the ride is steady.
+    expect(seen.filter((surge) => surge === 0).length / seen.length).toBeGreaterThan(0.3);
+  });
+
+  it('rides some whole windows steady, as a person does not surge every minute', () => {
+    const windows = Math.floor((HOUR - PACER_START_RAMP_S) / PACER_SURGE_WINDOW_S);
+    let steady = 0;
+    for (let window = 0; window < windows; window += 1) {
+      const from = PACER_START_RAMP_S + window * PACER_SURGE_WINDOW_S;
+      let flat = true;
+      for (let at = from; at < from + PACER_SURGE_WINDOW_S; at += 0.5) {
+        if (pacerSurgeAt(at) !== 0) flat = false;
+      }
+      if (flat) steady += 1;
+    }
+    // About one in four, by the hash; neither none nor most.
+    expect(steady).toBeGreaterThan(windows / 8);
+    expect(steady).toBeLessThan(windows / 2);
+  });
+
+  it('never steps: a tenth of a second moves it by no more than an edge’s slope allows', () => {
+    const seen = samples();
+    for (let index = 1; index < seen.length; index += 1) {
+      expect(Math.abs((seen[index] ?? 0) - (seen[index - 1] ?? 0))).toBeLessThanOrEqual(
+        (PACER_SURGE_MOST / 2) * 0.1 + 1e-4,
+      );
     }
   });
 
-  it('is the same direction, untouched, once the minute is up', () => {
-    const direction = { plan: 'rolling', intent: 'hold' } as const;
-    expect(startRamped(direction, 60)).toBe(direction);
-    expect(startRamped(direction, 12)).toEqual({ ...direction, startShare: 0.2 });
+  it('is the same on every call: a function of the seconds ridden and nothing else', () => {
+    expect(samples()).toEqual(samples());
+    expect(pacerSurgeAt(Number.NaN)).toBe(0);
   });
 
-  it('is a power at the bottom of the envelope at the line', () => {
-    const plan = botPacerPlan(2.5);
-    const direction = startRamped({ plan: 'rolling', intent: 'hold' }, 0);
-    expect(directedPowerWatts(plan, gradePercent(0), direction)).toBeCloseTo(
-      flatPowerWatts(plan) * PACING_FACTOR_FLOOR,
-      9,
+  it('never surges away from a rider it is waiting for', () => {
+    const wait = { plan: 'rolling', intent: 'ease', by: 0.12 } as const;
+    for (let at = PACER_START_RAMP_S; at < 600; at += 1) expect(pacerAsRidden(wait, at)).toBe(wait);
+  });
+
+  it('surges a hold and a chase, and moves the pacer’s power by the surge', () => {
+    let at = PACER_START_RAMP_S;
+    while (pacerSurgeAt(at) < PACER_SURGE_LEAST - 1e-9) at += 0.5;
+    const hold = pacerAsRidden({ plan: 'even', intent: 'hold' }, at);
+    expect(hold.surge).toBe(pacerSurgeAt(at));
+    expect(directedPacingFactor(hold, 0)).toBeCloseTo(1 + pacerSurgeAt(at), 12);
+    expect(pacerAsRidden({ plan: 'even', intent: 'lift', by: 0.05 }, at).surge).toBe(
+      pacerSurgeAt(at),
     );
+  });
+
+  it('never takes the pacer outside #92’s envelope past the ramp, whatever it is handed', () => {
+    for (const surge of [0.08, -0.04, 0.5, -3, Number.NaN]) {
+      for (const intent of PACER_INTENTS) {
+        for (const plan of PACER_PLANS) {
+          for (let grade = -25; grade <= 25; grade += 2.5) {
+            const factor = directedPacingFactor({ plan, intent, by: 0.1, surge }, grade);
+            expect(factor).toBeGreaterThanOrEqual(PACING_FACTOR_FLOOR);
+            expect(factor).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('a line said again, or nearly — the owner’s ruling of 2026-11-20', () => {
+  it('states its figures: ten lines remembered, six in ten words in common', () => {
+    expect(MODEL_PACER_REPEAT_MEMORY).toBe(10);
+    expect(PACER_SAY_SAME_SHARE).toBe(0.6);
+  });
+
+  it.each([
+    ['the same words', 'Stay on my wheel.', 'stay on  my WHEEL'],
+    [
+      'nearly the same words',
+      'Easing a little so you can get back on.',
+      'Easing so you can get back on',
+    ],
+    ['the same words reordered', 'Keep it steady, nice work.', 'Nice work, keep it steady.'],
+  ])('is a repeat: %s', (_what, said, before) => {
+    expect(pacerSayRepeats(said, ['Something else entirely here.', before])).toBe(true);
+  });
+
+  it.each([
+    ['a new line', 'Climb starts soon, settle in.', 'Nice work, keep it steady.'],
+    ['a line sharing a phrase', 'Keep it steady up this climb.', 'Nice work, keep it steady.'],
+  ])('is not a repeat: %s', (_what, said, before) => {
+    expect(pacerSayRepeats(said, [before])).toBe(false);
+  });
+
+  it('never calls an empty line a repeat', () => {
+    expect(pacerSayRepeats('', [''])).toBe(false);
   });
 });
 

@@ -25,9 +25,11 @@
  *    top, at ADR 0072's fixed shares (`PACER_EASE`, `PACER_LIFT`).
  * 3. **The gap** ({@link pacerGapResponse}): inside `PACER_LEVEL_S` either
  *    way, `hold`. Behind, `ease`, to wait; ahead, `lift`, to chase. **The
- *    response grows with the gap**, in a straight line from nothing at
- *    `PACER_LEVEL_S` (2 s) to the whole of #92's envelope at
- *    {@link PACER_GAP_FULL_S} (10 s): 20 % for a wait, 10 % for a chase.
+ *    response grows with the gap**: a wait in a straight line from nothing at
+ *    `PACER_LEVEL_S` (2 s) to 20 % at {@link PACER_GAP_FULL_S} (10 s); a
+ *    chase, since the owner's ruling of 2026-11-20, from nothing at 2 s to
+ *    {@link PACER_CHASE_FIRST} (5 %) at {@link PACER_CHASE_FIRST_S} (3 s) and
+ *    on to 10 % at 10 s, so a rider who gets away sees it chase.
  *
  * ## What the rule cannot do
  *
@@ -64,6 +66,17 @@ import { pacerTerrainApplies, pacerTerrainIntent, type PacerTerrain } from './te
  */
 export const PACER_GAP_FULL_S = 10;
 
+/**
+ * The time gap ahead at which a chase is already {@link PACER_CHASE_FIRST}:
+ * **3 s**. The owner's ruling of 2026-11-20: *"Chasing must be visible: with
+ * the rider ahead, push clearly harder (≈5 % at 3 s ahead rising to ≈10 % at
+ * 10 s), not 1 %"* — the straight line from 2 s gave 1 % at 3 s.
+ */
+export const PACER_CHASE_FIRST_S = 3;
+
+/** How hard the chase is at {@link PACER_CHASE_FIRST_S}: **5 %**. */
+export const PACER_CHASE_FIRST = 0.05;
+
 /** What the device reads when it decides: where the rider and the pacer are. */
 export interface PacerRuleGround {
   /** Metres the rider is ahead of the pacer; below 0, behind it. */
@@ -92,9 +105,11 @@ const hundredths = (value: number): number => Math.round(value * 100) / 100;
  * **The gap curve** (ADR 0083 D-1.3): what the pacer does about a rider
  * `gapS` seconds ahead of it (below 0, behind), and by how much.
  *
- * `share = clamp((|gapS| − 2) / (10 − 2), 0, 1)`, and the pacer eases by
- * `share × 20 %` for a rider behind, or lifts by `share × 10 %` for one
- * ahead, in whole percent. A share that rounds to nothing is `hold`.
+ * Behind: `share = clamp((|gapS| − 2) / (10 − 2), 0, 1)`, and the pacer eases
+ * by `share × 20 %`. Ahead (the owner's ruling of 2026-11-20): it lifts by 0
+ * to 5 % from 2 s to 3 s, and 5 % to 10 % from 3 s to 10 s, each a straight
+ * line, and 10 % past it. In whole hundredths; one that rounds to nothing is
+ * `hold`.
  */
 export function pacerGapResponse(gapS: number): {
   readonly intent: PacerIntent;
@@ -103,10 +118,23 @@ export function pacerGapResponse(gapS: number): {
   if (!Number.isFinite(gapS)) return { intent: 'hold' };
   const beyond = Math.abs(gapS) - PACER_LEVEL_S;
   if (!(beyond > 0)) return { intent: 'hold' };
-  const share = Math.min(1, beyond / (PACER_GAP_FULL_S - PACER_LEVEL_S));
-  const by = hundredths(share * (gapS < 0 ? PACER_WAIT_MOST : PACER_CHASE_MOST));
+  const by = hundredths(gapS < 0 ? waitShare(beyond) : chaseShare(gapS));
   if (by === 0) return { intent: 'hold' };
   return { intent: gapS < 0 ? 'ease' : 'lift', by };
+}
+
+/** How far the pacer eases for a rider `beyond` seconds past the level band. */
+function waitShare(beyond: number): number {
+  return Math.min(1, beyond / (PACER_GAP_FULL_S - PACER_LEVEL_S)) * PACER_WAIT_MOST;
+}
+
+/** How far it lifts for a rider `gapS` seconds ahead: two straight lines, 2 → 3 s and 3 → 10 s. */
+function chaseShare(gapS: number): number {
+  if (gapS <= PACER_CHASE_FIRST_S) {
+    return ((gapS - PACER_LEVEL_S) / (PACER_CHASE_FIRST_S - PACER_LEVEL_S)) * PACER_CHASE_FIRST;
+  }
+  const on = Math.min(1, (gapS - PACER_CHASE_FIRST_S) / (PACER_GAP_FULL_S - PACER_CHASE_FIRST_S));
+  return PACER_CHASE_FIRST + on * (PACER_CHASE_MOST - PACER_CHASE_FIRST);
 }
 
 /** The largest time gap a decision says, seconds: a day, the most a pacer state or a log record may hold. */

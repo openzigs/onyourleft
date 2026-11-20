@@ -4,14 +4,21 @@ import {
   botPacerPlan,
   metres,
   metresPerSecond,
-  MODEL_PACER_ASK_EVERY_S,
+  MODEL_PACER_DECIDE_EVERY_S,
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
   MODEL_PACER_CODE_VERSION,
+  MODEL_PACER_REPEAT_MEMORY,
+  MODEL_PACER_SAY_LEAST_S,
+  MODEL_PACER_SAY_MOST_S,
   MODEL_PACER_SAY_SHOWN_S,
+  PACER_START_DECIDE_EVERY_S,
   PACER_START_RAMP_S,
   PACER_WAIT_MOST,
+  pacerAsRidden,
   pacerDirectionAt,
+  pacerStartFrom,
+  pacerSurgeAt,
   readModelPacerInput,
   readPacerDecisionRecord,
   seconds,
@@ -33,17 +40,21 @@ import {
   directionPercent,
   GAP_DRIFT_WINDOW_S,
   heartRateTrend,
+  lineDue,
   ModelPacer,
   modelPacerCourse,
   modelPacerInput,
   modelPacerSensorFields,
   modelPacerTerrain,
+  PACER_DOING_SURGE,
+  pacerDoing,
   powerTrend,
   secondsAtOrAbove,
   type ModelPacerLink,
   type ModelPacerRide,
   type ModelPacerSensors,
 } from './model-pacer';
+import type { PacerDoing } from './pacer-doing';
 import { circuitRoute, northRoute, rollingRoute } from './route-fixtures-testing';
 
 /** `length` seconds of trace, each sample from `at(index)`. */
@@ -114,9 +125,11 @@ function ride(
 ) {
   const records: PacerDecisionRecord[] = [];
   const applied: { direction: PacerDirection; from: number }[] = [];
+  /** What each frame said the pacer was doing (#2864), apart from the line it returns. */
+  const doings: (PacerDoing | undefined)[] = [];
   const pacer = new ModelPacer(link, (record) => records.push(record));
-  const frame = (at: number) =>
-    pacer.frame({
+  const frame = (at: number) => {
+    const { doing, ...said } = pacer.frame({
       riddenSeconds: at,
       ride: () => ({
         seen: { ...SEEN, rideS: Math.floor(at), ...seenAt(at) },
@@ -125,7 +138,12 @@ function ride(
       terrain: () => terrainAt(at),
       direct: (direction, from) => applied.push({ direction, from }),
     });
-  return { pacer, records, applied, frame };
+    doings.push(doing);
+    return said;
+  };
+  /** The records of the decisions that asked for a line. */
+  const askedRecords = () => records.filter((each) => each.outcome !== 'unasked');
+  return { pacer, records, askedRecords, applied, frame, doings };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -151,21 +169,119 @@ async function rideAsks(
 }
 
 describe('the AI pacer during a ride — #2712, ADR 0072 D-7; #2835, ADR 0083', () => {
-  it('takes the slot at the start and asks every few seconds of riding, never waiting', async () => {
+  it('takes the slot at the start, decides every few seconds whatever is out, and asks for a line far less often', async () => {
     const { link, asked, calls } = heldLink();
-    const { frame } = ride(link);
+    const { frame, applied, records } = ride(link);
     expect(calls.start).toBe(1);
-    frame(0);
+    frame(70);
     expect(asked).toHaveLength(1);
-    // Nothing more is asked while one is out, however long it takes.
-    frame(MODEL_PACER_ASK_EVERY_S * 3);
+    // Decisions go on while the ask is out, and none of them asks.
+    frame(70 + MODEL_PACER_DECIDE_EVERY_S - 0.05);
+    frame(70 + MODEL_PACER_DECIDE_EVERY_S);
+    frame(70 + MODEL_PACER_DECIDE_EVERY_S * 2);
+    expect(applied.map((each) => each.from)).toEqual([70, 75, 80]);
     expect(asked).toHaveLength(1);
+    // Held behind the ask that is out, then logged after it: the log stays oldest first.
+    expect(records).toEqual([]);
     asked[0]?.answer({ kind: 'failed' });
     await flush();
-    frame(MODEL_PACER_ASK_EVERY_S * 3 + 0.05);
-    // The next ask waits out its own interval from the last one.
-    frame(MODEL_PACER_ASK_EVERY_S * 3 + 0.1);
+    frame(81);
+    expect(
+      records.map((each) => [each.askedAtS, each.outcome, 'line' in each ? each.line : undefined]),
+    ).toEqual([
+      [70, 'failed', 'none'],
+      [75, 'unasked', 'none'],
+      [80, 'unasked', 'none'],
+    ]);
+    // The rider stays level: no line until the most a pacer stays quiet.
+    for (let at = 85; at < 70 + MODEL_PACER_SAY_MOST_S; at += MODEL_PACER_DECIDE_EVERY_S) frame(at);
+    expect(asked).toHaveLength(1);
+    frame(70 + MODEL_PACER_SAY_MOST_S);
     expect(asked).toHaveLength(2);
+    expect(records.every((each) => 'reason' in each)).toBe(true);
+  });
+
+  it('asks again sooner for a new reason, but never inside the least time between lines', async () => {
+    const { link, asked } = heldLink();
+    // Level, then 6 s behind from 90 s.
+    const { frame, records } = ride(link, (at) => ({
+      riderGapM: at >= 90 ? -60 : -3,
+      riderInDraft: false,
+    }));
+    for (let at = 70; at <= 110; at += MODEL_PACER_DECIDE_EVERY_S) {
+      frame(at);
+      asked.at(-1)?.answer({ kind: 'failed' });
+      await flush();
+    }
+    // 90 s has a new reason but is 20 s after the last ask; 100 s is the first it may ask.
+    expect(asked.map((each) => each.input.reason)).toEqual(['rider-level', 'rider-behind']);
+    expect(
+      records.filter((each) => each.outcome !== 'unasked').map((each) => each.askedAtS),
+    ).toEqual([70, 100]);
+  });
+
+  it('says when a line is due: the first, then never inside 30 s, a new reason after it, and anything after 60 s', () => {
+    expect(MODEL_PACER_SAY_LEAST_S).toBe(30);
+    expect(MODEL_PACER_SAY_MOST_S).toBe(60);
+    const last = { atS: 100, reason: 'rider-level' } as const;
+    expect(lineDue(0, 'rider-level', undefined)).toBe(true);
+    expect(lineDue(129.95, 'rider-behind', last)).toBe(false);
+    expect(lineDue(130, 'rider-behind', last)).toBe(true);
+    expect(lineDue(130, 'rider-level', last)).toBe(false);
+    expect(lineDue(159.95, 'rider-level', last)).toBe(false);
+    expect(lineDue(160, 'rider-level', last)).toBe(true);
+  });
+
+  it('starts from the rider’s own effort, deciding every second inside the start ramp, and keeps where it started', () => {
+    const { link, asked } = heldLink();
+    // The rider winds up from nothing by 0.2 W/kg a second.
+    const { frame, applied, records, pacer } = ride(link, (at) => ({
+      rider3sWPerKg: Math.round(at * 2) / 10,
+      riderGapM: 0,
+    }));
+    for (let at = 0; at <= 3; at += 0.5) frame(at);
+    expect(PACER_START_DECIDE_EVERY_S).toBe(1);
+    expect(applied.map((each) => [each.from, each.direction.startFrom])).toEqual([
+      [0, 0],
+      [1, pacerStartFrom(0.2, SEEN.pacerWPerKg)],
+      [2, pacerStartFrom(0.4, SEEN.pacerWPerKg)],
+      [3, pacerStartFrom(0.6, SEEN.pacerWPerKg)],
+    ]);
+    // The first decision asks, and says the pacer is starting.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.input.starting).toBe(true);
+    pacer.end();
+    expect(records.map((each) => ('startFrom' in each ? each.startFrom : undefined))).toEqual([
+      0, 0.08, 0.16, 0.24,
+    ]);
+    // Past the ramp: no start kept, and a decision every 5 s.
+    const late = ride(heldLink().link);
+    for (let at = PACER_START_RAMP_S; at < PACER_START_RAMP_S + 10; at += 1) late.frame(at);
+    expect(late.applied.map((each) => each.from)).toEqual([30, 35]);
+    expect(late.applied[0]?.direction).not.toHaveProperty('startFrom');
+  });
+
+  it('says what the pacer is doing for the HUD, and nothing once its decision has lapsed', async () => {
+    const { link, asked } = heldLink();
+    const { frame, doings } = ride(link, (at) => ({
+      riderGapM: at < 80 ? -60 : 60,
+      riderInDraft: false,
+    }));
+    frame(10);
+    asked[0]?.answer({ kind: 'refused' });
+    await flush();
+    const first = ride(heldLink().link, (at) => ({
+      riderGapM: at < 80 ? -60 : 60,
+      riderInDraft: false,
+    }));
+    first.frame(70);
+    first.frame(80);
+    expect(first.doings).toEqual(['waiting', 'chasing']);
+    // A refusal ends the decisions: the one in force says what it does until it lapses.
+    frame(11);
+    frame(10 + MODEL_PACER_LAPSE_S - 0.05);
+    frame(10 + MODEL_PACER_LAPSE_S);
+    expect(doings).toEqual(['starting', 'starting', 'starting', undefined]);
   });
 
   it('decides on the device and rides it at once, before the model has said anything', () => {
@@ -270,9 +386,9 @@ describe('the AI pacer during a ride — #2712, ADR 0072 D-7; #2835, ADR 0083', 
       decidePacer: () => Promise.reject(new Error('the wire fell out')),
     };
     const { frame, records, applied } = ride(throwing);
-    frame(0);
+    frame(70);
     await flush();
-    frame(1);
+    frame(71);
     expect(records.map((each) => each.outcome)).toEqual(['failed']);
     expect(applied).toHaveLength(1);
   });
@@ -284,7 +400,7 @@ describe('the AI pacer during a ride — #2712, ADR 0072 D-7; #2835, ADR 0083', 
     asked[0]?.answer({ kind: 'refused' });
     await flush();
     frame(101);
-    frame(101 + MODEL_PACER_ASK_EVERY_S * 4);
+    frame(101 + MODEL_PACER_DECIDE_EVERY_S * 4);
     expect(asked).toHaveLength(1);
     expect(applied).toHaveLength(1);
     expect(records.map((each) => each.outcome)).toEqual(['refused']);
@@ -323,15 +439,18 @@ describe('the AI pacer during a ride — #2712, ADR 0072 D-7; #2835, ADR 0083', 
         outcome: 'failed',
         plan: 'rolling',
         intent: 'lift',
-        by: 0.05,
+        by: 0.07,
         reason: 'rider-ahead',
         place: 'ahead',
         gapS: 6,
         line: 'none',
       },
     ]);
-    // What the log replays is what was put in force.
-    expect(pacerDirectionAt(pacer.log(), 71)).toEqual(applied[0]?.direction);
+    // What the log replays is what was put in force, as it is ridden.
+    const put = applied[0]?.direction;
+    expect(put).toBeDefined();
+    if (put !== undefined)
+      expect(pacerDirectionAt(pacer.log(), 71)).toEqual(pacerAsRidden(put, 71));
   });
 });
 
@@ -511,16 +630,17 @@ describe('where the rider is, and what the device decides from it — #2777, #28
     expect(readModelPacerInput({ ...ahead, ...DECIDED }).ok).toBe(true);
   });
 
-  it('tells the model how the gap moved since the last ask, for the rider', async () => {
+  it('tells the model how the gap moved since the decision before its ask, for the rider', async () => {
     const { link, asked } = heldLink();
-    const gaps: Record<number, number> = { 0: 0, 5: 4, 10: 4.5, 15: -1 };
-    const { frame } = ride(link, (seconds) => ({ riderGapM: gaps[seconds] ?? 0 }));
-    await rideAsks(frame, asked, [0, 5, 10, 15], () => ({ kind: 'failed' }));
-    expect(asked.map((each) => each.input.gapTrend)).toEqual([
-      undefined,
-      'rider-gaining',
-      'steady',
-      'rider-losing',
+    // Level throughout, so the asks come a minute apart; the gap moves just before each.
+    const gapAt = (at: number): number => (at >= 190 ? -1 : at >= 130 ? 4 : at >= 125 ? 3.5 : 0);
+    const { frame } = ride(link, (at) => ({ riderGapM: gapAt(at) }));
+    const asks = Array.from({ length: 25 }, (_, index) => 70 + index * MODEL_PACER_DECIDE_EVERY_S);
+    await rideAsks(frame, asked, asks, () => ({ kind: 'failed' }));
+    expect(asked.map((each) => [each.input.rideS, each.input.gapTrend])).toEqual([
+      [70, undefined],
+      [130, 'steady'],
+      [190, 'rider-losing'],
     ]);
     expect(asked[0]?.input).not.toHaveProperty('gapTrend');
     for (const each of asked) expect(readModelPacerInput(each.input).ok).toBe(true);
@@ -541,8 +661,9 @@ describe('where the rider is, and what the device decides from it — #2777, #28
       { plan: 'rolling', intent: 'ease', by: 0.15 },
       { plan: 'rolling', intent: 'ease', by: 0.2 },
       HOLD,
-      { plan: 'rolling', intent: 'lift', by: 0.03 },
-      { plan: 'rolling', intent: 'lift', by: 0.08 },
+      // The owner's ruling of 2026-11-20: 5 % at 3 s ahead, rising to 10 % at 10 s.
+      { plan: 'rolling', intent: 'lift', by: 0.06 },
+      { plan: 'rolling', intent: 'lift', by: 0.09 },
       { plan: 'rolling', intent: 'lift', by: 0.1 },
     ]);
     expect(
@@ -567,7 +688,7 @@ describe('where the rider is, and what the device decides from it — #2777, #28
       // Before a climb, where the terrain rule eases for a rider on the wheel.
       () => 'before-climb',
     );
-    await rideAsks(frame, asked, [0, 5, 10], () => saying('I will ease off for you.'));
+    await rideAsks(frame, asked, [70, 75, 80], () => saying('I will ease off for you.'));
     expect(applied.map((each) => each.direction.intent)).toEqual(['lift', 'lift', 'lift']);
   });
 
@@ -611,8 +732,8 @@ describe('where the rider is, and what the device decides from it — #2777, #28
       'rider-level',
     ]);
     // The model is told the terrain rule's fixed shares.
-    expect(asked.map((each) => each.input.byPct)).toEqual([7, 5, 5, 0]);
-    expect(asked.map((each) => each.input.secondsInIntent)).toEqual([0, 0, 5, 0]);
+    expect(asked.map((each) => each.input.byPct)).toEqual([7]);
+    expect(asked[0]?.input.secondsInIntent).toBe(0);
   });
 
   it('does the same with the rider in the draft, though the gap says behind, and not out of it', () => {
@@ -661,59 +782,67 @@ describe('where the rider is, and what the device decides from it — #2777, #28
   it('shows a line once: the same words again are no new line, whatever their case or punctuation', async () => {
     const { link, asked } = heldLink();
     const { frame, records } = ride(link);
-    const shown = await rideAsks(frame, asked, [100, 105, 110, 115], (index) =>
+    const asks = [100, 160, 220, 280];
+    const shown = await rideAsks(frame, asked, asks, (index) =>
       saying(
         ['Nice and steady.', 'nice and steady!', 'Find a lighter gear.', 'Nice and steady.'][
           index
         ] ?? '',
       ),
     );
+    expect(asked).toHaveLength(asks.length);
     expect(shown).toEqual([
       { arrived: 'Nice and steady.', showing: 'Nice and steady.' },
-      // Still on the screen from the first time, and not said again.
-      { showing: 'Nice and steady.' },
+      // Not said again.
+      {},
       { arrived: 'Find a lighter gear.', showing: 'Find a lighter gear.' },
-      { showing: 'Find a lighter gear.' },
+      {},
     ]);
-    expect(records.map((each) => ('line' in each ? each.line : undefined))).toEqual([
-      'shown',
-      'repeat',
-      'shown',
-      'repeat',
-    ]);
+    expect(
+      records
+        .filter((each) => each.outcome !== 'unasked')
+        .map((each) => ('line' in each ? each.line : undefined)),
+    ).toEqual(['shown', 'repeat', 'shown', 'repeat']);
     // A repeat is not one of the lines said: the model is sent each line once.
     expect(asked.at(-1)?.input.recentLines).toEqual(['Nice and steady.', 'Find a lighter gear.']);
   });
 
   it('tells the model how long the rider has been where they are, and how the gap drifted over half a minute', async () => {
     const { link, asked } = heldLink();
-    // Level for two asks, then behind and dropping 2 m a second.
-    const gapAt = (at: number): number => (at < 10 ? 0 : -30 - (at - 10) * 2);
+    // Level until 80 s, then behind and dropping 2 m a second.
+    const gapAt = (at: number): number => (at < 80 ? 0 : -30 - (at - 80) * 2);
     const { frame } = ride(link, (at) => ({ riderGapM: gapAt(at), riderInDraft: false }));
-    const asks = Array.from({ length: 10 }, (_, index) => index * 5);
+    const asks = Array.from({ length: 19 }, (_, index) => 70 + index * MODEL_PACER_DECIDE_EVERY_S);
     await rideAsks(frame, asked, asks, () => ({ kind: 'failed' }));
-    expect(asked.map((each) => each.input.placeForS)).toEqual([0, 5, 0, 5, 10, 15, 20, 25, 30, 35]);
-    // No drift until a reading at least the window old exists.
-    const drifts = asked.map((each) => each.input.gapDriftM);
-    expect(drifts.slice(0, GAP_DRIFT_WINDOW_S / 5)).toEqual(
-      Array.from({ length: GAP_DRIFT_WINDOW_S / 5 }, () => undefined),
-    );
-    expect(drifts[6]).toBe(gapAt(30) - gapAt(0));
-    expect(drifts[9]).toBe(gapAt(45) - gapAt(15));
-    expect(drifts[9]).toBe(-60);
-    expect(asked.map((each) => each.input.starting)).toEqual(
-      asks.map((at) => at < PACER_START_RAMP_S),
-    );
+    // Asked at 70 s, at 100 s for the new place, and a minute after.
+    expect(asked.map((each) => each.input.rideS)).toEqual([70, 100, 160]);
+    // Read at every decision, told at an ask.
+    expect(asked.map((each) => each.input.placeForS)).toEqual([0, 20, 80]);
+    expect(GAP_DRIFT_WINDOW_S).toBe(30);
+    expect(asked.map((each) => each.input.gapDriftM)).toEqual([
+      // No drift until a reading at least the window old exists.
+      undefined,
+      gapAt(100) - gapAt(70),
+      gapAt(160) - gapAt(130),
+    ]);
+    expect(asked[2]?.input.gapDriftM).toBe(-60);
+    expect(asked.map((each) => each.input.starting)).toEqual([false, false, false]);
     for (const each of asked) expect(readModelPacerInput(each.input).ok).toBe(true);
   });
 
   it('tells the model how cadence drifted over the last minute of asks, and nothing with too few', async () => {
     const { link, asked } = heldLink();
-    const asks = Array.from({ length: CADENCE_DRIFT_ASKS + 1 }, (_, index) => index * 5);
-    const { frame } = ride(link, (at) => ({ cadenceRpm: at < 30 ? 90 : 78 }));
+    // A decision every 5 s from 70 s; the asks at 70 s and a minute later.
+    const asks = Array.from(
+      { length: CADENCE_DRIFT_ASKS + 1 },
+      (_, index) => 70 + index * MODEL_PACER_DECIDE_EVERY_S,
+    );
+    const { frame } = ride(link, (at) => ({ cadenceRpm: at < 105 ? 90 : 78 }));
     await rideAsks(frame, asked, asks, () => ({ kind: 'failed' }));
-    expect(asked[CADENCE_DRIFT_ASKS - 2]?.input).not.toHaveProperty('cadenceDriftRpm');
-    expect(asked[CADENCE_DRIFT_ASKS - 1]?.input.cadenceDriftRpm).toBe(-12);
+    expect(asked.map((each) => each.input.rideS)).toEqual([70, 130]);
+    expect(asked[0]?.input).not.toHaveProperty('cadenceDriftRpm');
+    // The last twelve decisions, 75 s to 130 s: six at 90 rpm, then six at 78.
+    expect(asked[1]?.input.cadenceDriftRpm).toBe(-12);
     expect(
       cadenceDrift(Array.from({ length: CADENCE_DRIFT_ASKS }, () => undefined)),
     ).toBeUndefined();
@@ -752,42 +881,44 @@ describe('where the rider is, and what the device decides from it — #2777, #28
   it('replays from its log alone: the decision in force read off the log is what was ridden, start ramp and all', async () => {
     const { link, asked } = heldLink();
     const gaps = [-80, -40, 0, 50, 90];
-    const asks = [40, 50, 55, 62, 70];
-    const { frame, applied, pacer } = ride(
+    const asks = [10, 20, 35, 42, 50];
+    const { frame, applied, records, pacer } = ride(
       link,
       (at) => ({ riderGapM: gaps[asks.indexOf(at)] ?? 0, riderInDraft: false }),
-      (at) => (at === 55 ? 'before-climb' : 'none'),
+      (at) => (at === 35 ? 'before-climb' : 'none'),
     );
-    // Applied, failed, void and refused-free: the outcome of the ask changes nothing ridden.
+    // Answered, unasked, void and failed alike: what became of a line changes nothing ridden.
     const replies: readonly PacerReply[] = [
       saying('Easing so you can get back on.'),
-      { kind: 'failed' },
       { kind: 'invalid' },
-      saying(''),
       saying('Lifting to come back up to you.'),
     ];
     await rideAsks(frame, asked, asks, (index) => replies[index] ?? { kind: 'failed' });
-    expect(MODEL_PACER_CODE_VERSION).toBe(2);
+    pacer.end();
+    expect(MODEL_PACER_CODE_VERSION).toBe(3);
     const stored = JSON.parse(JSON.stringify(pacer.log())) as unknown[];
     const log = stored.map((each) => readPacerDecisionRecord(each) as PacerDecisionRecord);
-    expect(log).toHaveLength(asks.length);
+    expect(log).toEqual(records);
+    expect(log).toHaveLength(applied.length);
     for (const [index, each] of applied.entries()) {
       const until = applied[index + 1]?.from ?? each.from + 3;
       for (let at = each.from; at < until; at += 0.5) {
-        // Inside the first minute the log replays the ramp the simulation rides.
-        expect(pacerDirectionAt(log, at)).toEqual(
-          at < PACER_START_RAMP_S
-            ? { ...each.direction, startShare: at / PACER_START_RAMP_S }
-            : each.direction,
-        );
+        // The ramp from where the rider was inside it, and the surges past it, as the simulation rides them.
+        expect(pacerDirectionAt(log, at)).toEqual(pacerAsRidden(each.direction, at));
       }
     }
-    expect(applied.map((each) => each.direction.intent)).toEqual([
-      'ease',
-      'ease',
-      'ease',
-      'lift',
-      'lift',
+    // Inside the ramp each decision of the second keeps where the rider was.
+    expect(applied.slice(0, 4).map((each) => each.direction.startFrom)).toEqual(
+      Array.from({ length: 4 }, () => pacerStartFrom(SEEN.riderWPerKg, SEEN.pacerWPerKg)),
+    );
+    expect(applied.map((each) => [each.from, each.direction.intent])).toEqual([
+      [10, 'ease'],
+      [11, 'hold'],
+      [20, 'ease'],
+      [21, 'hold'],
+      [35, 'ease'],
+      [42, 'lift'],
+      [50, 'lift'],
     ]);
   });
 
@@ -808,6 +939,67 @@ describe('where the rider is, and what the device decides from it — #2777, #28
   });
 });
 
+describe('fewer, less repetitive lines — the owner’s ruling of 2026-11-20', () => {
+  it('hides a line nearly said before, and one said up to ten lines back', async () => {
+    const { link, asked } = heldLink();
+    const { frame, askedRecords } = ride(link);
+    const lines = Array.from({ length: MODEL_PACER_REPEAT_MEMORY }, (_, index) =>
+      saying(
+        [
+          'Nice and steady.',
+          'Find a lighter gear.',
+          'Breathe out and relax your shoulders.',
+          'Long road ahead, settle in.',
+          'Keep your cadence up.',
+          'Smooth circles on the pedals.',
+          'Drink while it is flat.',
+          'Hands loose on the bars.',
+          'Look up the road.',
+          'Sit tall and open your chest.',
+        ][index] ?? '',
+      ),
+    );
+    const asks = Array.from(
+      { length: MODEL_PACER_REPEAT_MEMORY + 2 },
+      (_, index) => 70 + index * MODEL_PACER_SAY_MOST_S,
+    );
+    await rideAsks(frame, asked, asks, (index) =>
+      index < MODEL_PACER_REPEAT_MEMORY
+        ? (lines[index] ?? saying(''))
+        : // The first line again, ten lines on, and the second nearly so.
+          saying(
+            index === MODEL_PACER_REPEAT_MEMORY ? 'Nice and steady!' : 'Find a lighter gear now.',
+          ),
+    );
+    expect(askedRecords().map((each) => ('line' in each ? each.line : undefined))).toEqual([
+      ...Array.from({ length: MODEL_PACER_REPEAT_MEMORY }, () => 'shown'),
+      'repeat',
+      'repeat',
+    ]);
+    // The model is still sent only the last three.
+    expect(asked.at(-1)?.input.recentLines).toHaveLength(3);
+  });
+
+  it('names the surge the pacer rides with the rider level, and what each rule does', () => {
+    let surging = PACER_START_RAMP_S;
+    while (pacerSurgeAt(surging) < PACER_DOING_SURGE) surging += 0.5;
+    let recovering = PACER_START_RAMP_S;
+    while (pacerSurgeAt(recovering) > -PACER_DOING_SURGE / 2) recovering += 0.5;
+    let steady = PACER_START_RAMP_S;
+    while (pacerSurgeAt(steady) !== 0) steady += 0.5;
+    expect(pacerDoing('rider-level', surging)).toBe('surging');
+    expect(pacerDoing('rider-level', recovering)).toBe('recovering');
+    expect(pacerDoing('rider-level', steady)).toBe('with-you');
+    expect(pacerDoing('rider-level', PACER_START_RAMP_S - 0.05)).toBe('starting');
+    expect(pacerDoing('rider-behind', 100)).toBe('waiting');
+    expect(pacerDoing('rider-stopped', 100)).toBe('waiting');
+    expect(pacerDoing('rider-ahead', 100)).toBe('chasing');
+    expect(pacerDoing('before-climb', 100)).toBe('saving');
+    expect(pacerDoing('descent', 100)).toBe('pushing');
+    expect(pacerDoing('over-the-top', 100)).toBe('pushing');
+  });
+});
+
 describe('the model sees its own last lines, so it does not repeat itself — #2760', () => {
   const line = (say: string): PacerReply => ({ kind: 'answer', say });
 
@@ -821,12 +1013,14 @@ describe('the model sees its own last lines, so it does not repeat itself — #2
       'Stay with me.',
       'Ease a little.',
     ];
-    let at = 0;
+    let at = 70;
     frame(at);
     for (const say of said) {
       asked.at(-1)?.answer(line(say));
       await flush();
-      at += MODEL_PACER_ASK_EVERY_S;
+      // Arrived in time, a second on; the next ask a minute after the last.
+      frame(at + 1);
+      at += MODEL_PACER_SAY_MOST_S;
       frame(at);
     }
     expect(asked[0]?.input).not.toHaveProperty('recentLines');

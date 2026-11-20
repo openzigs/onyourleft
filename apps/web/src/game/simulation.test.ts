@@ -42,9 +42,11 @@ import {
   kilograms,
   MODEL_PACER_LAPSE_S,
   PACER_START_RAMP_S,
+  directedPowerWatts,
+  pacerAsRidden,
+  pacerSurgeAt,
   routeProfile,
   seconds,
-  startRamped,
   watts,
   type PacerDirection,
   type RoutePoint,
@@ -470,7 +472,7 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
       state = advanceBot(
         state,
         seconds(SIMULATION_STEP_SECONDS),
-        inForce ? { ...plain, direction: startRamped(ridden, at) } : plain,
+        inForce ? { ...plain, direction: pacerAsRidden(ridden, at) } : plain,
       ).state;
     }
     return state;
@@ -514,6 +516,45 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
     expect(simulation.state.bot?.state.distance).toBeLessThan(
       reference(hillyRoute(), steps).distance - 1,
     );
+  });
+
+  it('starts from the rider’s own effort at the line, not the bottom of the envelope — the owner’s ruling of 2026-11-20', () => {
+    const steps = Math.round(10 / SIMULATION_STEP_SECONDS);
+    const still = { plan: 'rolling', intent: 'hold', startFrom: 0 } as const;
+    const fromRider = ride((it) => {
+      it.directPacer(still, 0);
+    }, steps);
+    expect(fromRider.state.bot?.state.distance).toBe(
+      reference(hillyRoute(), steps, { from: 0, until: MODEL_PACER_LAPSE_S }, still).distance,
+    );
+    const fromFloor = ride((it) => {
+      it.directPacer({ plan: 'rolling', intent: 'hold' }, 0);
+    }, steps);
+    // A rider still at the line holds the pacer back with them.
+    expect(fromRider.state.bot?.state.distance).toBeLessThan(
+      (fromFloor.state.bot?.state.distance ?? 0) - 1,
+    );
+  });
+
+  it('says on its state the power the pacer rode, surge and all: what the HUD shows', () => {
+    // A second inside a surge, past the ramp, found rather than assumed.
+    let at = PACER_START_RAMP_S + 1;
+    while (pacerSurgeAt(at) < 0.03) at += 1;
+    const steps = Math.round(at / SIMULATION_STEP_SECONDS);
+    const HOLD = { plan: 'rolling', intent: 'hold' } as const;
+    const simulation = ride((it) => {
+      it.directPacer(HOLD, at - 5);
+    }, steps);
+    const bot = simulation.state.bot;
+    expect(bot).toBeDefined();
+    if (bot === undefined) return;
+    // The last step began one step before `at`.
+    const last = (steps - 1) * SIMULATION_STEP_SECONDS;
+    expect(bot.power).toBeCloseTo(
+      directedPowerWatts(PLAN, bot.grade, pacerAsRidden(HOLD, last)),
+      9,
+    );
+    expect(bot.power as number).toBeGreaterThan(directedPowerWatts(PLAN, bot.grade, HOLD));
   });
 
   it('lapses a decision nothing replaced, and #92’s rule rides from there', () => {

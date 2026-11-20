@@ -776,7 +776,13 @@ export {
 // #2835, ADR 0083: the device decides the intent, from the gap and the
 // terrain; the model writes only the line.
 export type { PacerRuleDecision, PacerRuleGround } from './pacer/device-rule';
-export { PACER_GAP_FULL_S, pacerGapResponse, pacerRuleDecision } from './pacer/device-rule';
+export {
+  PACER_CHASE_FIRST,
+  PACER_CHASE_FIRST_S,
+  PACER_GAP_FULL_S,
+  pacerGapResponse,
+  pacerRuleDecision,
+} from './pacer/device-rule';
 export {
   CLIMBER_CLIMB_GRADE_PERCENT,
   CLIMBER_DESCENT_GRADE_PERCENT,
@@ -784,14 +790,17 @@ export {
   directedPowerWatts,
   gapTrendOf,
   MODEL_PACER_ANSWER_MOST_CHARACTERS,
-  MODEL_PACER_ASK_EVERY_S,
   MODEL_PACER_CODE_VERSION,
+  MODEL_PACER_DECIDE_EVERY_S,
   MODEL_PACER_INPUT_MOST_CHARACTERS,
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
   MODEL_PACER_LOG_MOST,
   MODEL_PACER_RECENT_LINES,
+  MODEL_PACER_REPEAT_MEMORY,
+  MODEL_PACER_SAY_LEAST_S,
   MODEL_PACER_SAY_MOST_CHARACTERS,
+  MODEL_PACER_SAY_MOST_S,
   MODEL_PACER_SAY_SHOWN_S,
   modelPacerAnswerSchema,
   PACER_CHASE_MOST,
@@ -807,21 +816,27 @@ export {
   PACER_PLANS,
   PACER_POWER_TRENDS,
   PACER_REASONS,
+  PACER_SAY_SAME_SHARE,
+  PACER_START_DECIDE_EVERY_S,
   PACER_START_RAMP_S,
+  PACER_SURGE_LEAST,
+  PACER_SURGE_MOST,
   PACER_WAIT_MOST,
   pacerAskOutcome,
+  pacerAsRidden,
   pacerDirectionAt,
   pacerSayRepeats,
   pacerSaysEasing,
   pacerSaysPushing,
   pacerSayProblem,
+  pacerStartFrom,
   pacerStartShare,
+  pacerSurgeAt,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
   RIDER_PLACES,
   riderPlaceOf,
-  startRamped,
 } from './pacer/model-pacer';
 
 // --- Racing your own previous attempt (#93) ----------------------------------

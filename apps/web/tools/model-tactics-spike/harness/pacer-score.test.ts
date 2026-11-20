@@ -88,13 +88,17 @@ describe('the scores of a ride', () => {
         step({ outcome: 'invalid', ridden: 'lift' }),
         step({ outcome: 'failed' }),
         step({ outcome: 'refused' }),
+        // #2864: a decision that asked for no line is scored for what was ridden, and is no answer.
+        step({ outcome: 'unasked', ridden: 'lift' }),
+        step({ outcome: 'unasked' }),
       ],
       calls: [],
     });
     expect(score).toMatchObject({
+      decisions: 9,
       answers: 7,
       applied: 3,
-      intentsCalledFor: 5,
+      intentsCalledFor: 6,
       lateAnswers: 1,
       invalidAnswers: 1,
       failedAnswers: 2,
@@ -161,6 +165,7 @@ describe('the scores of a ride', () => {
 describe('the pass mark for the ride', () => {
   /** A score at the mark exactly. */
   const AT_THE_MARK: PacerScore = {
+    decisions: 20,
     answers: 20,
     applied: 20,
     lateAnswers: 0,

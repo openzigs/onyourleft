@@ -68,6 +68,7 @@ import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { endRideAnswer } from './end-ride-testing';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
+import { PACER_DOING_TEXT, PACER_OWN_PACE_TEXT } from './pacer-doing';
 import type { GameRenderer } from './port';
 import type { LapRaceChoice } from './lap-race/choice';
 import { circuitRoute, rollingRoute } from './route-fixtures-testing';
@@ -329,6 +330,15 @@ interface Run {
   readonly lineShown: boolean;
   /** What the chooser said before the rider agreed. */
   readonly consentText: string | undefined;
+  /**
+   * #2864: on each of the ride's frames, the HUD's pacer power field as the
+   * rider reads it (its whole `dd`), beside the power the simulation's pacer
+   * rode on that frame; `undefined` where the field is not drawn.
+   */
+  readonly pacerPower: readonly {
+    readonly shown: string | undefined;
+    readonly rode: number | undefined;
+  }[];
 }
 
 async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<Run> {
@@ -400,6 +410,7 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
   stamp();
 
   let lineShown = false;
+  const pacerPower: { shown: string | undefined; rode: number | undefined }[] = [];
   for (frame = 1; frame <= FRAMES; frame += 1) {
     const next = pending.shift();
     if (next === undefined)
@@ -417,6 +428,14 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
     await settle();
     stamp();
     lineShown ||= (mounted.container.textContent ?? '').includes(`Your pacer: ${LINE}`);
+    const field = [...mounted.container.querySelectorAll('.oyl-hud__field')].find(
+      (each) => each.querySelector('dt')?.textContent === 'Pacer power',
+    );
+    const rode = seen.simulations.at(-1)?.state.bot?.power;
+    pacerPower.push({
+      shown: field?.querySelector('dd')?.textContent ?? undefined,
+      rode,
+    });
   }
   const simulation = seen.simulations.at(-1);
   const pacerDistance = simulation?.state.bot?.state.distance ?? Number.NaN;
@@ -440,6 +459,7 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
     records,
     lineShown,
     consentText,
+    pacerPower,
   };
 }
 
@@ -491,14 +511,23 @@ function expectDirected(plain: Run, directed: Run): void {
   // never on a ride with no AI pacer.
   expect(plain.asked.warms).toEqual([]);
   expect(directed.asked.warms).toEqual([0]);
-  expect(directed.asked.inputs.length).toBeGreaterThan(8);
-  expect(directed.records.filter((each) => each.outcome === 'applied').length).toBeGreaterThan(8);
+  // The owner's ruling of 2026-11-20: a line at most every 30 s, so two asks
+  // in the ride's 69 s, and a decision every second of the start and every
+  // 5 s after it.
+  expect(directed.asked.inputs.length).toBeGreaterThanOrEqual(2);
+  expect(
+    directed.records.filter((each) => each.outcome === 'applied').length,
+  ).toBeGreaterThanOrEqual(2);
+  expect(directed.records.length).toBeGreaterThan(30);
   expect(directed.lineShown).toBe(true);
   // #2835: every record is a decision of the device's, ridden from its ask.
   expect(directed.records.every((each) => 'reason' in each)).toBe(true);
   // Not "further", since #2835: the device eases the pacer in at the start
   // and waits for a rider behind it, so a directed pacer may well ride less.
-  expect(Math.abs(directed.pacerDistance - plain.pacerDistance)).toBeGreaterThan(5);
+  // Since the owner's ruling of 2026-11-20 it starts at the rider's own
+  // effort, which on this trace (230 W about the pacer's 217) is near #92's
+  // own figure, so the two part by metres, not tens of them.
+  expect(Math.abs(directed.pacerDistance - plain.pacerDistance)).toBeGreaterThan(1);
 }
 
 function expectGradesOnly(plain: Run, directed: Run): void {
@@ -550,7 +579,9 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     // intent here is the rule's: the plan never leaves #92's own, the first
     // ask is inside the start ramp, and the pacer both holds and, once the
     // rider has ridden away from its gentle start, chases.
-    const intents = directed.asked.inputs.map((each) => each.intent);
+    // The owner's ruling of 2026-11-20: most decisions ask for no line, so the
+    // intents are read off the log, every decision in it.
+    const intents = directed.records.map((each) => ('intent' in each ? each.intent : undefined));
     expect(directed.asked.inputs.every((each) => each.plan === 'rolling')).toBe(true);
     expect(directed.asked.inputs[0]).toMatchObject({ starting: true });
     for (const each of directed.asked.inputs) {
@@ -587,6 +618,30 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     expect(directed.asked.inputs[0]).not.toHaveProperty('gapTrend');
     expect(RIDER_PLACES).toContain(last?.riderPlace);
     expect(PACER_GAP_TRENDS).toContain(last?.gapTrend);
+  });
+
+  it('shows the pacer’s power as it rode it, and what it is doing, on every frame — #2864, the owner’s ruling of 2026-11-20', async () => {
+    const plain = await ridden(false, 'simulation');
+    const directed = await ridden(true, 'simulation');
+    // Not on a ride with no AI pacer, which reads as it did.
+    expect(plain.pacerPower.every((each) => each.shown === undefined)).toBe(true);
+    // On every frame of a directed one: the watts the pacer's tick rode, whole, and its words.
+    const words = new Set<string>();
+    for (const [index, each] of directed.pacerPower.entries()) {
+      expect(each.rode, `frame ${String(index)}`).toBeDefined();
+      const shown = each.shown ?? '';
+      const match = /^(\d+) W (.+)$/u.exec(shown.trim());
+      expect(match, `frame ${String(index)}: ${shown}`).not.toBeNull();
+      expect(Number(match?.[1])).toBe(Math.round(each.rode ?? Number.NaN));
+      words.add(match?.[2] ?? '');
+    }
+    // It starts with the rider, and its power moves as it rides.
+    expect(directed.pacerPower[0]?.shown).toContain(PACER_DOING_TEXT.starting);
+    for (const each of words) {
+      expect([...Object.values(PACER_DOING_TEXT), PACER_OWN_PACE_TEXT]).toContain(each);
+    }
+    expect(words.size).toBeGreaterThan(1);
+    expect(new Set(directed.pacerPower.map((each) => each.shown)).size).toBeGreaterThan(10);
   });
 
   it('reaches no trainer write in simulation mode: the grade at the rider’s own odometer, the defaults, and the same release', async () => {
@@ -638,10 +693,12 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
       await press(toggle('Let the AI on your server coach you through the pacer'));
       await press(buttonStarting('Allow the AI pacer'));
       await press(buttonStarting('Ride '));
-      for (let frame = 0; frame < 60; frame += 1) {
+      // Half-second frames for 65 s (#2864): a line is asked at most once in
+      // 30 s, so the second ask, with a trace behind it, comes up to a minute in.
+      for (let frame = 0; frame < 130; frame += 1) {
         const next = pending.shift();
         if (next === undefined) break;
-        nowMs += FRAME_MS;
+        nowMs += 500;
         await act(async () => {
           next(nowMs);
           await Promise.resolve();

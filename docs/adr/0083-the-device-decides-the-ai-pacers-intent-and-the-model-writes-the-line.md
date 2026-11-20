@@ -300,3 +300,35 @@ as recorded in the owner-ruling comment on
   its job, and the rider has a silent pacer.
 - **A pacer decision reaches a trainer write**, by any path: then ADR 0072 D-6 has failed.
 - **Replay diverges under version 2**: then something reads a clock or the rider outside the log.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-20** — The owner's tablet ride of 2026-11-20 (build `deploy/ride-preview-1120`, 2.3
+  W/kg, 128 s) and the owner's four rulings on it, recorded in the comment on
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864#issuecomment-7052547100), make
+  these figures and statements of the body no longer true; #2864 builds them.
+  **1. Gentle start** (*"starts alongside the rider at the rider's speed and builds to its target
+  over about 30 s"*): D-3.1's 60 s ramp from #92's 80 % floor is now **30 s**
+  (`PACER_START_RAMP_S`) from **the rider's own effort**, their W/kg over the pacer's held to 0 and
+  110 % (`pacerStartFrom`), decided every second inside the ramp (`PACER_START_DECIDE_EVERY_S`) and
+  kept with each decision as `startFrom`, so the replay still reads it off the log. The pacer may
+  therefore ride **below 80 %** in those 30 s, as the rider does pulling away; Consequences' *"the
+  fix is below 80 %, which is a change to the owner's 80-110"* is that change, made by the owner.
+  **2. The pacer's power on the ride screen**: a *Pacer power* reading, the watts its tick rode and
+  what it is doing (`hud/fields.ts` §`pacerPowerReading`, `pacer-doing.ts`), on a tablet; away from
+  one it gives way, as the solo draft does. **3. A power range** (*"push almost like a real person
+  would do then pull back"*): past the ramp, a hold or a lift surges 4 to 8 % above its target for 8
+  to 15 s and recovers half as far below it for as long, in fixed 45 s windows a seeded hash picks,
+  one in four steady (`pacerSurgeAt`); never on an ease, and still inside 80 to 110 %. D-1.3's chase
+  is now **5 % at 3 s ahead rising to 10 % at 10 s** (`PACER_CHASE_FIRST`, `PACER_CHASE_FIRST_S`),
+  where the body's straight line from 2 s gave 1 % at 3 s; the wait is unchanged. **4. Fewer, less
+  repetitive lines**: a decision is still made every 5 s (`MODEL_PACER_DECIDE_EVERY_S`), but it asks
+  for a line only on the first decision, then no sooner than **30 s** after the last ask and only for
+  a new `reason`, or after **60 s** (`MODEL_PACER_SAY_LEAST_S`, `MODEL_PACER_SAY_MOST_S`); a decision
+  that asks for none is logged `unasked`. D-2.4's *"the last three lines"* is now the last **ten**
+  shown (`MODEL_PACER_REPEAT_MEMORY`), and a line with six in ten of its words in common with one of
+  them is a repeat too (`PACER_SAY_SAME_SHARE`); the model is still sent the last three.
+  `MODEL_PACER_CODE_VERSION` is **3**, so D-5.3's *"is 2"* is no longer true; a version 2 log, from
+  preview builds only, is not replayed under 3 (ADR 0072 D-5). The trainer is unchanged (D-7).

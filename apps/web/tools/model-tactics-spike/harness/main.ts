@@ -138,7 +138,7 @@ async function pacer(
     );
   }
   print(
-    `pacer: ${String(score.intentsCalledFor)} of ${String(score.answers)} decisions rode what the gap called for, ${String(score.easedWithRiderAhead)} eased with the rider ahead; ${String(score.distinctLines)} distinct of ${String(score.linesWritten)} lines written, ${String(score.repeatedLines)} repeated, ${String(score.linesShown)} shown, ${String(score.linesHiddenRepeat)} hidden as repeats, ${String(score.linesHiddenAgainst)} hidden as against the intent, ${String(score.linesVoided)} void answers; ${String(score.applied)} of ${String(score.answers)} answers applied, ${String(score.lateAnswers)} late, median ${String(score.answerMs.median)} ms, ${String(score.promptTokens.median)} tokens in, ${String(score.outputTokens.median)} out: ${shortfallLine(shortfalls)}`,
+    `pacer: ${String(score.intentsCalledFor)} of ${String(score.decisions)} decisions rode what the gap called for, ${String(score.easedWithRiderAhead)} eased with the rider ahead; ${String(score.distinctLines)} distinct of ${String(score.linesWritten)} lines written, ${String(score.repeatedLines)} repeated, ${String(score.linesShown)} shown, ${String(score.linesHiddenRepeat)} hidden as repeats, ${String(score.linesHiddenAgainst)} hidden as against the intent, ${String(score.linesVoided)} void answers; ${String(score.applied)} of ${String(score.answers)} answers applied, ${String(score.lateAnswers)} late, median ${String(score.answerMs.median)} ms, ${String(score.promptTokens.median)} tokens in, ${String(score.outputTokens.median)} out: ${shortfallLine(shortfalls)}`,
   );
   return {
     kind: 'pacer',

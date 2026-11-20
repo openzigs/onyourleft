@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  PACER_CHASE_FIRST,
+  PACER_CHASE_FIRST_S,
   PACER_GAP_FULL_S,
   pacerGapResponse,
   pacerRuleDecision,
@@ -58,12 +60,18 @@ describe('the gap curve — ADR 0083 D-1.3', () => {
     expect(pacerGapResponse(gapS)).toEqual({ intent: 'ease', by });
   });
 
+  it('states the chase’s figures, the owner’s of 2026-11-20: 5 % at 3 s ahead', () => {
+    expect(PACER_CHASE_FIRST_S).toBe(3);
+    expect(PACER_CHASE_FIRST).toBe(0.05);
+  });
+
   it.each([
-    [3, 0.01],
-    [4, 0.03], // a quarter of 10 %, 2.5 %, to a whole percent
-    [6, 0.05],
-    [8, 0.08], // three quarters of 10 %, 7.5 %
-    [10, 0.1],
+    [2.5, 0.03], // half way from nothing at 2 s to 5 % at 3 s, 2.5 %, to a whole percent
+    [3, 0.05], // the owner's "≈5 % at 3 s ahead"
+    [4, 0.06], // a seventh of the way on from 5 % to 10 %
+    [6, 0.07],
+    [8, 0.09],
+    [10, 0.1], // the owner's "rising to ≈10 % at 10 s"
     [40, 0.1],
   ])('chases a rider %d s ahead by lifting %d of its power', (gapS, by) => {
     expect(pacerGapResponse(gapS)).toEqual({ intent: 'lift', by });
@@ -124,7 +132,7 @@ describe('the device’s decision — ADR 0083 D-1', () => {
 
   it('chases a rider who has pulled away, more the further ahead they are', () => {
     expect(pacerRuleDecision(ground({ riderGapM: 60 }))).toEqual({
-      direction: { plan: 'rolling', intent: 'lift', by: 0.05 },
+      direction: { plan: 'rolling', intent: 'lift', by: 0.07 },
       reason: 'rider-ahead',
       place: 'ahead',
       gapS: 6,
@@ -155,7 +163,7 @@ describe('the device’s decision — ADR 0083 D-1', () => {
       {
         plan: 'rolling',
         intent: 'lift',
-        by: 0.01,
+        by: 0.05,
       },
     );
   });

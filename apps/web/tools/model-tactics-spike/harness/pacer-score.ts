@@ -120,11 +120,15 @@ export type PacerLine =
   /** Hidden by the device: the opposite of what the pacer was doing. */
   | 'against';
 
-/** One ask of a ridden script. */
+/**
+ * One decision of a ridden script: since the owner's rulings of 2026-11-20
+ * most ask for no line (`unasked`), and those are scored for what the device
+ * rode and nothing else.
+ */
 export interface PacerStep {
   readonly askedAtS: number;
   readonly ground: PacerGround;
-  /** What the director logged for the ask's answer. */
+  /** What the director logged for the ask's answer; `unasked` for a decision that asked for none. */
   readonly outcome: PacerDecisionOutcome;
   /** The intent the device decided and rode from the ask, whatever the answer was. */
   readonly ridden: PacerIntent;
@@ -144,12 +148,15 @@ export interface PacerRun {
 
 /** What one ride came to. Numbers only. */
 export interface PacerScore {
+  /** Every decision the device made, asked for a line or not. */
+  readonly decisions: number;
+  /** The decisions that asked for a line. */
   readonly answers: number;
   readonly applied: number;
   readonly lateAnswers: number;
   readonly invalidAnswers: number;
   readonly failedAnswers: number;
-  /** Decisions whose ridden intent the gap called for: every answer is one. */
+  /** Decisions whose ridden intent the gap called for. */
   readonly intentsCalledFor: number;
   /** Decisions ridden as `ease` with the rider ahead. */
   readonly easedWithRiderAhead: number;
@@ -182,7 +189,9 @@ const present = (values: readonly (number | undefined)[]): number[] =>
 
 /** The scores of `run`. */
 export function scorePacerRide(run: PacerRun): PacerScore {
-  const { steps, calls } = run;
+  const { calls } = run;
+  const steps = run.steps;
+  const asks = steps.filter((step) => step.outcome !== 'unasked');
   const applied = steps.filter((step) => step.outcome === 'applied');
   const written = steps.flatMap((step) =>
     (step.line === 'shown' || step.line === 'repeat') && step.said !== undefined
@@ -194,7 +203,8 @@ export function scorePacerRide(run: PacerRun): PacerScore {
   const lines = (line: PacerLine): number => steps.filter((step) => step.line === line).length;
   const answered = calls.filter((call) => call.text !== undefined);
   return {
-    answers: steps.length,
+    decisions: steps.length,
+    answers: asks.length,
     applied: applied.length,
     lateAnswers: count('late'),
     invalidAnswers: count('invalid'),
@@ -249,7 +259,7 @@ export function pacerShortfalls(score: PacerScore): readonly Shortfall[] {
   };
   under(
     'intentShare',
-    share(score.intentsCalledFor, score.answers),
+    share(score.intentsCalledFor, score.decisions),
     PACER_PASS_MARK.leastIntentShare,
   );
   over('easedWithRiderAhead', score.easedWithRiderAhead, PACER_PASS_MARK.mostEasedWithRiderAhead);

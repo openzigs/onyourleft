@@ -47,6 +47,7 @@
 import {
   botPacerPlan,
   distanceOnRoute,
+  gapTrendOf,
   gradeAt,
   gradePercent,
   metres,
@@ -57,6 +58,7 @@ import {
   watts,
   type ModelPacerInput,
   type PacerDecisionRecord,
+  type PacerGapReading,
   type PacerLineOutcome,
   type RouteProfile,
 } from '@onyourleft/domain';
@@ -72,7 +74,7 @@ import { northRoute } from '../../../src/game/route-fixtures-testing';
 import type { PacerReply } from '../../../src/instance/pacer-port';
 
 import { seeded, type Ask, type ModelCall } from './model-call';
-import type { PacerLine, PacerRun, PacerStep } from './pacer-score';
+import type { PacerGround, PacerLine, PacerRun, PacerStep } from './pacer-score';
 import type { PacerPromptModule } from './production';
 
 /** A value against the seconds ridden, joined by straight lines. */
@@ -271,8 +273,16 @@ export async function ridePacerScript(
   const steps: PacerStep[] = [];
   const trace: TraceSample[] = [];
   const asked = slot<Outstanding>();
-  const logged = slot<PacerDecisionRecord>();
+  // Every record the director logs: since the owner's rulings of 2026-11-20
+  // most decisions ask for no line (`unasked`), and a decision made while an
+  // ask is out is logged after it, so the ask's record is found by its time.
+  const logged: PacerDecisionRecord[] = [];
   let arriving: Arriving | undefined;
+  // What each decision was made on, read as the director read it, for the
+  // decisions that ask for no line (#2864): the gap's trend since the decision before.
+  const grounds = new Map<number, PacerGround>();
+  const asks = new Map<number, PacerStep>();
+  let lastGap: PacerGapReading | undefined;
   const director = new ModelPacer(
     {
       startPacerRide: () => Promise.resolve(true),
@@ -286,7 +296,7 @@ export async function ridePacerScript(
         return reply;
       },
     },
-    logged.put,
+    (record) => logged.push(record),
   );
   let pacerAt = PACER_STARTS_AT_METRES;
   const frames = Math.round(script.seconds / FRAME_SECONDS);
@@ -337,25 +347,36 @@ export async function ridePacerScript(
     }
     director.frame({
       riddenSeconds: atS,
-      ride: () => ({
-        seen: modelPacerInput({
+      ride: () => {
+        const seen = modelPacerInput({
           state,
           plan,
           profile,
           riderMassKilograms: script.riderKilograms,
           sensors,
-        }),
-        riderSpeed: state.ride.speed,
-      }),
+        });
+        const now: PacerGapReading = { atS, riderGapM: seen.riderGapM };
+        grounds.set(atS, {
+          riderPlace: seen.riderPlace,
+          gapTrend: lastGap === undefined ? undefined : gapTrendOf(lastGap, now),
+          riderInDraft: seen.riderInDraft,
+          terrain: modelPacerTerrain(state, profile),
+        });
+        lastGap = now;
+        return { seen, riderSpeed: state.ride.speed };
+      },
       terrain: () => modelPacerTerrain(state, profile),
       // The pacer's place is the script's: the decision is scored, not ridden.
       direct: () => undefined,
     });
-    const record = logged.take();
+    const record =
+      due === undefined
+        ? undefined
+        : logged.find((each) => each.askedAtS === due.step.askedAtS && each.outcome !== 'unasked');
     if (record !== undefined && due !== undefined) {
       if (!('reason' in record)) throw new Error('the director logged a record of the model’s');
       const line = lineOf(record.line, due);
-      steps.push({
+      asks.set(record.askedAtS, {
         ...due.step,
         outcome: record.outcome,
         ridden: record.intent,
@@ -396,5 +417,25 @@ export async function ridePacerScript(
     pacerAt += speed * FRAME_SECONDS;
   }
   director.end();
+  // Every decision, oldest first: an ask as its answer came back, and one
+  // that asked for nothing as the device rode it.
+  for (const record of logged) {
+    if (!('reason' in record)) throw new Error('the director logged a record of the model’s');
+    if (record.outcome !== 'unasked') {
+      const step = asks.get(record.askedAtS);
+      if (step !== undefined) steps.push(step);
+      continue;
+    }
+    const ground = grounds.get(record.askedAtS);
+    if (ground === undefined) throw new Error('a decision the harness did not see made');
+    steps.push({
+      askedAtS: record.askedAtS,
+      ground,
+      outcome: 'unasked',
+      ridden: record.intent,
+      reason: record.reason,
+      line: 'none',
+    });
+  }
   return { steps, calls };
 }

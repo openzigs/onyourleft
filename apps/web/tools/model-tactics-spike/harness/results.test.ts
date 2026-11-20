@@ -18,6 +18,7 @@ const RESULT: HarnessResult = {
   passMark: { leastIntentShare: 0.8 },
   shortfalls: [{ mark: 'intentShare', scored: 0.7333333333333333, asked: 0.8 }],
   score: {
+    decisions: 60,
     answers: 60,
     applied: 60,
     lateAnswers: 0,

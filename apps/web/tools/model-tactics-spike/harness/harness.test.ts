@@ -360,10 +360,12 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
         },
       },
     });
-    // One ask every five seconds of the five minutes.
-    expect(ridden.steps.map((step) => step.askedAtS)).toEqual(
-      Array.from({ length: 60 }, (_, at) => at * 5),
-    );
+    // The owner's ruling of 2026-11-20: a line at most every 30 s, sooner only
+    // for a new reason, so eight asks in the five minutes, among 84 decisions.
+    expect(
+      ridden.steps.filter((step) => step.outcome !== 'unasked').map((step) => step.askedAtS),
+    ).toEqual([0, 39, 84, 114, 174, 204, 234, 264]);
+    expect(ridden.steps).toHaveLength(84);
     const [first, second] = model.bodies as [ChatBody, ChatBody];
     expect(first.options.seed).toBe(PACER_SCRIPT.seed * 1_000);
     expect(second.options.seed).toBe(PACER_SCRIPT.seed * 1_000 + 1);
@@ -376,10 +378,10 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
     // The rider's sensors, the pacer's own last line and the device's decision are in the state, as on a ride.
     expect(input).toMatchObject({
       cadenceRpm: 88,
-      heartRateBpm: 132,
+      heartRateBpm: 134,
       recentLines: [line(1)],
-      intent: 'hold',
-      reason: 'rider-level',
+      intent: 'ease',
+      reason: 'rider-behind',
     });
   });
 
@@ -419,7 +421,8 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
       const found = ridden.steps.find((step) => step.askedAtS === askedAtS);
       return `${String(found?.ridden)} ${String(found?.reason)}`;
     };
-    expect([at(10), at(45), at(110), at(195), at(240), at(275)]).toEqual([
+    // A decision every second of the start ramp, then every 5 s: 34 s, 39 s, and on.
+    expect([at(10), at(44), at(109), at(194), at(239), at(274)]).toEqual([
       'hold rider-level',
       'ease rider-behind',
       'lift rider-ahead',
@@ -439,13 +442,14 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
     expect(result.passed).toBe(true);
     expect(result.shortfalls).toEqual([]);
     expect(result.score).toMatchObject({
-      answers: 60,
-      applied: 60,
-      intentsCalledFor: 60,
+      decisions: 84,
+      answers: 8,
+      applied: 8,
+      intentsCalledFor: 84,
       easedWithRiderAhead: 0,
-      linesShown: 60,
-      linesWritten: 60,
-      distinctLines: 60,
+      linesShown: 8,
+      linesWritten: 8,
+      distinctLines: 8,
       repeatedLines: 0,
       linesHiddenRepeat: 0,
       linesHiddenAgainst: 0,
@@ -461,13 +465,14 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
     );
     expect(ridden.code).toBe(1);
     expect(result.score).toMatchObject({
-      answers: 60,
+      decisions: 84,
+      answers: 8,
       applied: 0,
-      invalidAnswers: 60,
-      intentsCalledFor: 60,
+      invalidAnswers: 8,
+      intentsCalledFor: 84,
       easedWithRiderAhead: 0,
       linesShown: 0,
-      linesVoided: 60,
+      linesVoided: 8,
     });
     expect(result.shortfalls.map((short) => short.mark)).toEqual([
       'distinctLineShare',
@@ -487,7 +492,7 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
     expect(score.linesShown).toBe(1);
     expect(score.linesHiddenRepeat).toBeGreaterThan(0);
     expect(score.linesHiddenAgainst).toBeGreaterThan(0);
-    expect(score.linesShown + score.linesHiddenRepeat + score.linesHiddenAgainst).toBe(60);
+    expect(score.linesShown + score.linesHiddenRepeat + score.linesHiddenAgainst).toBe(8);
     expect(score.linesWritten).toBe(score.linesShown + score.linesHiddenRepeat);
     expect(score.distinctLines).toBe(1);
     expect(result.shortfalls.map((short) => short.mark)).toEqual([
@@ -515,7 +520,8 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
       );
     };
     const ridden = await ridePacerScript({ ask, model: 'a-model', prompt: production.pacer });
-    expect(ridden.steps.slice(0, 6).map((step) => [step.outcome, step.line])).toEqual([
+    const asks = ridden.steps.filter((step) => step.outcome !== 'unasked');
+    expect(asks.slice(0, 6).map((step) => [step.outcome, step.line])).toEqual([
       ['applied', 'none'],
       ['invalid', 'voided'],
       ['late', 'none'],
@@ -524,8 +530,16 @@ describe('the scripted pacer ride, ridden with the instance’s request', () => 
       ['invalid', 'none'],
     ]);
     // Each was ridden as the device decided, whatever the answer.
-    expect(ridden.steps.slice(0, 6).map((step) => step.ridden)).toEqual(
-      Array.from({ length: 6 }, () => 'hold'),
+    const decided = await ridePacerScript({
+      ask: pacerModel().ask,
+      model: 'a-model',
+      prompt: production.pacer,
+    });
+    expect(asks.slice(0, 6).map((step) => [step.askedAtS, step.ridden])).toEqual(
+      decided.steps
+        .filter((step) => step.outcome !== 'unasked')
+        .slice(0, 6)
+        .map((step) => [step.askedAtS, step.ridden]),
     );
   });
 });
@@ -541,24 +555,27 @@ describe('the scripted pacer ride from recorded answers', () => {
     const [result] = ridden.results as [HarnessResult];
     if (result.kind !== 'pacer') throw new Error('a pacer result');
     expect(result.promptVersion).toBe(production.pacer.PACER_PROMPT_VERSION);
+    // Since the owner's ruling of 2026-11-20 the ride asks eight times, so it
+    // replays the first eight of the sixty answers recorded under `pacer-6`.
     expect(result.score).toEqual({
-      answers: 60,
-      applied: 59,
+      decisions: 84,
+      answers: 8,
+      applied: 8,
       lateAnswers: 0,
-      invalidAnswers: 1,
+      invalidAnswers: 0,
       failedAnswers: 0,
-      intentsCalledFor: 60,
+      intentsCalledFor: 84,
       easedWithRiderAhead: 0,
-      linesShown: 58,
-      linesWritten: 59,
-      distinctLines: 57,
-      repeatedLines: 2,
-      linesHiddenRepeat: 1,
+      linesShown: 8,
+      linesWritten: 8,
+      distinctLines: 8,
+      repeatedLines: 0,
+      linesHiddenRepeat: 0,
       linesHiddenAgainst: 0,
-      linesVoided: 1,
-      answerMs: { median: 3_234, p90: 3_761, most: 4_416 },
-      promptTokens: { median: 1_848, p90: 1_872, most: 1_886 },
-      outputTokens: { median: 25, p90: 27, most: 28 },
+      linesVoided: 0,
+      answerMs: { median: 3_518, p90: 4_416, most: 4_416 },
+      promptTokens: { median: 1_796, p90: 1_825, most: 1_825 },
+      outputTokens: { median: 22, p90: 26, most: 26 },
     });
   });
 
@@ -579,13 +596,18 @@ describe('the scripted pacer ride from recorded answers', () => {
 
   it('prints each ask in closed words, and never a line', () => {
     const asks = ridden.printed.filter((printed) => /^pacer +\d+ s:/u.test(printed));
-    expect(asks).toHaveLength(60);
-    expect(asks[8]).toBe(
-      'pacer    40 s: behind rider-losing none: called for ease, rode ease (rider-behind), applied, line shown',
+    // Every decision, asked for a line or not.
+    expect(asks).toHaveLength(84);
+    const lines = asks.filter((printed) => !printed.includes(', unasked, '));
+    expect(lines).toHaveLength(8);
+    expect(lines[1]).toBe(
+      'pacer    39 s: behind rider-losing none: called for ease, rode ease (rider-behind), applied, line shown',
     );
-    // The line the screen stopped named a distance; the device rode its decision all the same.
-    expect(asks[39]).toBe(
-      'pacer   195 s: level steady in-draft before-climb: called for ease, rode ease (before-climb), invalid, line voided',
+    expect(lines[5]).toBe(
+      'pacer   204 s: level steady in-draft before-climb: called for ease, rode ease (before-climb), applied, line shown',
+    );
+    expect(asks).toContain(
+      'pacer    44 s: behind rider-losing none: called for ease, rode ease (rider-behind), unasked, line none',
     );
     expect(asks.filter((printed) => printed.includes('(NOT CALLED FOR)'))).toHaveLength(0);
   });

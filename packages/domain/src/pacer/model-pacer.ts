@@ -51,9 +51,11 @@
  * **the product is held inside #92's own envelope**,
  * {@link PACING_FACTOR_FLOOR} to {@link PACING_FACTOR_CEILING} of the flat
  * figure. In the first {@link PACER_START_RAMP_S} of a directed ride it is
- * ramped up from the bottom of that envelope ({@link pacerStartShare}).
- * Nothing can take the pacer outside the envelope, and nothing names a
- * power. The pacer's power never reaches a trainer (ADR 0072 D-6): it moves
+ * ramped up from the rider's own effort ({@link pacerStartShare},
+ * {@link PacerDirection.startFrom}), which may be below the envelope; past
+ * it, it surges and recovers inside the envelope ({@link pacerSurgeAt}). Past
+ * the ramp nothing can take the pacer outside the envelope, and nothing names
+ * a power. The pacer's power never reaches a trainer (ADR 0072 D-6): it moves
  * the pacer, and the pacer gives a draft only as a rider riding harder does.
  *
  * ## Replay
@@ -114,10 +116,26 @@ export interface PacerDirection {
   readonly by?: number;
   /**
    * How far through the start ramp the ride is, 0 to 1 (#2835,
-   * {@link pacerStartShare}). **Never stored**: {@link startRamped} sets it
+   * {@link pacerStartShare}). **Never stored**: {@link pacerAsRidden} sets it
    * from the seconds ridden, live and on replay alike. Absent past the ramp.
    */
   readonly startShare?: number;
+  /**
+   * Where the start ramp begins, as a share of the pacer's flat figure: the
+   * rider's own W/kg over the pacer's ({@link pacerStartFrom}), so the pacer
+   * starts at the rider's speed (the owner's ruling of 2026-11-20). **Stored**
+   * with each decision of the ramp, since it reads the rider; absent past it,
+   * and in a log from before the ruling, where the ramp begins at
+   * {@link PACING_FACTOR_FLOOR}.
+   */
+  readonly startFrom?: number;
+  /**
+   * How far the pacer is surging (above 0) or recovering (below 0) about its
+   * target, as a share of it ({@link pacerSurgeAt}, the owner's ruling of
+   * 2026-11-20). **Never stored**: {@link pacerAsRidden} sets it from the
+   * seconds ridden. Absent where it is nothing.
+   */
+  readonly surge?: number;
 }
 
 /** How much `lift` raises the plan's power with no {@link PacerDirection.by}: **5 %**. A feel parameter, the author's choice. */
@@ -139,31 +157,117 @@ export const PACER_WAIT_MOST = 0.2;
 export const PACER_CHASE_MOST = 0.1;
 
 /**
- * How long the start ramp lasts, seconds ridden: **60** (#2835). The owner's
- * tablet ride of 2026-11-18: *"at the start it takes off to aggressive.
- * Almost at full speed"*.
+ * How long the start ramp lasts, seconds ridden: **30**. #2835 made it 60
+ * from the bottom of the envelope; the owner's tablet ride of 2026-11-20 found
+ * the pacer 28.6 s up the road 5 s in, and ruled *"The pacer starts alongside
+ * the rider at the rider's speed and builds to its target over about 30 s"*.
  */
-export const PACER_START_RAMP_S = 60;
+export const PACER_START_RAMP_S = 30;
 
 /**
  * How far through the start ramp a ride `riddenS` seconds old is: `riddenS /
- * 60`, from 0 at the start, or `undefined` once the ramp is over (and for a
+ * 30`, from 0 at the start, or `undefined` once the ramp is over (and for a
  * time that is not one). **The curve is linear in power**: under a direction
- * the pacer rides `floor + (target − floor) × share` of its flat figure,
- * where `floor` is {@link PACING_FACTOR_FLOOR} and `target` what the direction
- * asks at this grade ({@link directedPacingFactor}). So it starts at the
- * bottom of #92's envelope whatever the direction, and reaches its target at
- * exactly {@link PACER_START_RAMP_S}, without a step.
+ * the pacer rides `from + (target − from) × share` of its flat figure, where
+ * `from` is {@link PacerDirection.startFrom} — the rider's own effort — and
+ * `target` what the direction asks at this grade ({@link directedPacingFactor}).
+ * So it starts riding as hard as the rider, and reaches its target at exactly
+ * {@link PACER_START_RAMP_S}, without a step.
  */
 export function pacerStartShare(riddenS: number): number | undefined {
   if (!(riddenS >= 0) || riddenS >= PACER_START_RAMP_S) return undefined;
   return riddenS / PACER_START_RAMP_S;
 }
 
-/** `direction` as it is ridden at `riddenS` seconds: inside the start ramp, with its share. The same object past it. */
-export function startRamped(direction: PacerDirection, riddenS: number): PacerDirection {
+/**
+ * Where the start ramp begins for a rider at `riderWPerKg` behind a pacer of
+ * `pacerWPerKg`: the rider's W/kg over the pacer's, in hundredths, held to `0`
+ * and {@link PACING_FACTOR_CEILING} (the owner's ruling of 2026-11-20). At the
+ * same W/kg the pacer, at its 75 kg, rides about the rider's speed. With no
+ * live power, `0`: a rider who is not pedalling is not left behind.
+ */
+export function pacerStartFrom(
+  riderWPerKg: number | null | undefined,
+  pacerWPerKg: number,
+): number {
+  if (riderWPerKg === null || riderWPerKg === undefined || !Number.isFinite(riderWPerKg)) return 0;
+  if (!(pacerWPerKg > 0)) return 0;
+  const share = Math.min(PACING_FACTOR_CEILING, Math.max(0, riderWPerKg / pacerWPerKg));
+  return Math.round(share * 100) / 100;
+}
+
+/**
+ * **The pacer's surges and recoveries** — the owner's ruling of 2026-11-20:
+ * *"have a power range and be able to push almost like a real person would do
+ * then pull back"*. A share of the pacer's target, above 0 a surge and below
+ * it a recovery, as a function of the seconds ridden and nothing else, so it
+ * replays from the log as the ramp does.
+ *
+ * Past the start ramp the ride is cut into {@link PACER_SURGE_WINDOW_S}
+ * windows. In each, a fixed hash of the window's number (seeded by
+ * {@link PACER_SURGE_SEED}) picks one of four: no surge, or a surge of
+ * {@link PACER_SURGE_LEAST} to {@link PACER_SURGE_MOST} held for 8 to 15 s,
+ * then a recovery of half that depth for as long. Each begins
+ * {@link PACER_SURGE_LEAD_S} into its window and every edge is a
+ * {@link PACER_SURGE_EDGE_S} slope, so the power never steps. Deterministic:
+ * the same second gives the same share on every ride and every replay.
+ */
+export function pacerSurgeAt(riddenS: number): number {
+  if (!Number.isFinite(riddenS) || riddenS < PACER_START_RAMP_S) return 0;
+  const since = riddenS - PACER_START_RAMP_S;
+  const window = Math.floor(since / PACER_SURGE_WINDOW_S);
+  const into = since - window * PACER_SURGE_WINDOW_S;
+  const roll = surgeHash(window);
+  // One window in four rides steady: a person does not surge every minute.
+  if (roll % 4 === 0) return 0;
+  const depth =
+    PACER_SURGE_LEAST + (((roll >>> 2) % 101) / 100) * (PACER_SURGE_MOST - PACER_SURGE_LEAST);
+  const held = 8 + ((roll >>> 9) % 8);
+  const surge = plateau(into, PACER_SURGE_LEAD_S, PACER_SURGE_LEAD_S + held);
+  const recover = plateau(into, PACER_SURGE_LEAD_S + held, PACER_SURGE_LEAD_S + 2 * held);
+  return Math.round((depth * surge - (depth / 2) * recover) * 10_000) / 10_000;
+}
+
+/** The surge pattern's window, seconds ridden: **45**. A feel parameter. */
+export const PACER_SURGE_WINDOW_S = 45;
+/** Seconds into a window before its surge begins: **5**. */
+export const PACER_SURGE_LEAD_S = 5;
+/** Seconds each edge of a surge or a recovery takes: **2**, so the power never steps. */
+export const PACER_SURGE_EDGE_S = 2;
+/** The least a surge goes above the target: **4 %**. */
+export const PACER_SURGE_LEAST = 0.04;
+/** The most: **8 %**. A recovery goes half as far below it. Still inside #92's envelope. */
+export const PACER_SURGE_MOST = 0.08;
+/** The surge pattern's fixed seed. Changing it changes every ride's pacer: a code-version change. */
+export const PACER_SURGE_SEED = 0x2835_1120;
+
+/** 1 inside `[from, to]`, 0 outside, with an {@link PACER_SURGE_EDGE_S} slope at each end. */
+function plateau(at: number, from: number, to: number): number {
+  if (at <= from || at >= to) return 0;
+  return Math.min(1, (at - from) / PACER_SURGE_EDGE_S, (to - at) / PACER_SURGE_EDGE_S);
+}
+
+/** A 32-bit integer hash of `window` under {@link PACER_SURGE_SEED} (a murmur3 finaliser). */
+function surgeHash(window: number): number {
+  let h = (PACER_SURGE_SEED ^ Math.imul(window + 1, 0x9e3779b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/**
+ * `direction` as it is ridden at `riddenS` seconds, live and on replay by this
+ * one function: inside the start ramp with its share; past it with the
+ * surge or recovery of {@link pacerSurgeAt}, unless it is easing — a pacer
+ * waiting for a rider does not surge away from them. The same object where
+ * neither applies.
+ */
+export function pacerAsRidden(direction: PacerDirection, riddenS: number): PacerDirection {
   const startShare = pacerStartShare(riddenS);
-  return startShare === undefined ? direction : { ...direction, startShare };
+  if (startShare !== undefined) return { ...direction, startShare };
+  if (direction.intent === 'ease') return direction;
+  const surge = pacerSurgeAt(riddenS);
+  return surge === 0 ? direction : { ...direction, surge };
 }
 
 /** The grade at which the `climber` plan is at the top of the envelope: **4 %**, half #92's 8 %. */
@@ -223,11 +327,21 @@ export function directedPacingFactor(
   grade: GradePercent | number,
 ): number {
   const value: number = grade;
-  const target = inEnvelope(planFactor(direction.plan, value) * intentFactor(direction));
-  const { startShare } = direction;
+  const { startShare, startFrom, surge } = direction;
+  const surged =
+    surge === undefined || !Number.isFinite(surge)
+      ? 1
+      : 1 + Math.min(PACER_SURGE_MOST, Math.max(-PACER_SURGE_MOST / 2, surge));
+  const target = inEnvelope(planFactor(direction.plan, value) * intentFactor(direction) * surged);
   if (startShare === undefined || !Number.isFinite(startShare)) return target;
   const share = Math.min(1, Math.max(0, startShare));
-  return PACING_FACTOR_FLOOR + (target - PACING_FACTOR_FLOOR) * share;
+  // The owner's ruling of 2026-11-20: from the rider's own effort, which may
+  // be below the envelope's floor, as a rider pulling away from the line is.
+  const from =
+    startFrom === undefined || !Number.isFinite(startFrom)
+      ? PACING_FACTOR_FLOOR
+      : Math.min(PACING_FACTOR_CEILING, Math.max(0, startFrom));
+  return from + (target - from) * share;
 }
 
 /**
@@ -326,7 +440,7 @@ export interface ModelPacerInput {
   readonly gapDriftM?: number;
   /** The last half-minute's mean power against the half-minute before, whole percent: below 0, fading. */
   readonly powerDriftPct?: number;
-  /** The same for cadence, whole rpm, from the readings of the last minute's asks. */
+  /** The same for cadence, whole rpm, from the readings of the last minute's decisions. */
   readonly cadenceDriftRpm?: number;
   /** The same for heart rate, whole bpm. Effort, never a health reading. */
   readonly heartRateDriftBpm?: number;
@@ -886,19 +1000,53 @@ function wordsOf(say: string): string {
 }
 
 /**
+ * How many of its last lines the device remembers to refuse a repeat of:
+ * **10** (the owner's ruling of 2026-11-20, *"never the same line again soon
+ * after"*). With a line at most every {@link MODEL_PACER_SAY_LEAST_S}, that is
+ * at least five minutes. Held in memory for the ride and never stored; the
+ * model is still sent only the last {@link MODEL_PACER_RECENT_LINES}.
+ */
+export const MODEL_PACER_REPEAT_MEMORY = 10;
+
+/**
+ * The share of words two lines must have in common to be one line said again:
+ * **0.6** of the words in either (the owner's ruling of 2026-11-20). So "easing
+ * so you can get back on" and "easing a little so you can get back on" are one
+ * line; "nice work, keep it steady" and "keep it steady up this climb" are two.
+ */
+export const PACER_SAY_SAME_SHARE = 0.6;
+
+/** The distinct words of a line, as {@link wordsOf} reads them. */
+function wordSetOf(say: string): ReadonlySet<string> {
+  const words = wordsOf(say);
+  return new Set(words === '' ? [] : words.split(' '));
+}
+
+/**
  * Whether `say` is one of `recent` again (#2835): the same words in the same
- * order, whatever the case, spacing or punctuation. The device shows such a
+ * order, whatever the case, spacing or punctuation — or, since the owner's
+ * ruling of 2026-11-20, nearly so: at least {@link PACER_SAY_SAME_SHARE} of
+ * the words of the two lines together are in both. The device shows such a
  * line as no new line.
  */
 export function pacerSayRepeats(say: string, recent: readonly string[]): boolean {
   const words = wordsOf(say);
-  return words !== '' && recent.some((line) => wordsOf(line) === words);
+  if (words === '') return false;
+  const these = wordSetOf(say);
+  return recent.some((line) => {
+    if (wordsOf(line) === words) return true;
+    const those = wordSetOf(line);
+    let shared = 0;
+    for (const word of these) if (those.has(word)) shared += 1;
+    const either = these.size + those.size - shared;
+    return either > 0 && shared / either >= PACER_SAY_SAME_SHARE;
+  });
 }
 
 // --- The decision log, and the decision in force -----------------------------
 
 /**
- * Which pacer code a log was ridden under: **2**. Raised by any change that
+ * Which pacer code a log was ridden under: **3**. Raised by any change that
  * alters the pacer's power for some route, plan and log — the factors above,
  * {@link MODEL_PACER_LAPSE_S}, or how a decision comes into force. A log
  * stored under another version is not replayed (ADR 0072 D-5).
@@ -908,11 +1056,41 @@ export function pacerSayRepeats(say: string, recent: readonly string[]): boolean
  * share the log keeps; and the first {@link PACER_START_RAMP_S} are ramped.
  * A version 1 log still reads ({@link readPacerDecisionRecord}) and
  * {@link pacerDirectionAt} still rides its records by version 1's rule.
+ *
+ * **3 since the owner's rulings of 2026-11-20**: the start ramp is 30 s from
+ * the rider's own effort ({@link PacerDirection.startFrom}), the pacer surges
+ * and recovers ({@link pacerSurgeAt}), and a chase is 5 % at 3 s. A version 2
+ * log, from preview builds only, is not replayed under 3 (ADR 0072 D-5).
  */
-export const MODEL_PACER_CODE_VERSION = 2;
+export const MODEL_PACER_CODE_VERSION = 3;
 
-/** How often a directed ride asks, seconds ridden: **every 5 s** (ADR 0072 D-7). */
-export const MODEL_PACER_ASK_EVERY_S = 5;
+/**
+ * How often the device decides what the pacer does, seconds ridden: **every
+ * 5 s** (ADR 0072 D-7's cadence). Since the owner's rulings of 2026-11-20 a
+ * decision no longer asks for a line each time ({@link MODEL_PACER_SAY_LEAST_S}).
+ */
+export const MODEL_PACER_DECIDE_EVERY_S = 5;
+
+/**
+ * How often it decides inside the start ramp: **every second**, so the
+ * pacer's start follows the rider's own effort closely
+ * ({@link PacerDirection.startFrom}).
+ */
+export const PACER_START_DECIDE_EVERY_S = 1;
+
+/**
+ * The least time between two asks for a line, seconds ridden: **30**. The
+ * owner's ruling of 2026-11-20: *"Speak much less often (not every ask)"*.
+ * A decision between them is logged `unasked`.
+ */
+export const MODEL_PACER_SAY_LEAST_S = 30;
+
+/**
+ * The most: **60**. Between {@link MODEL_PACER_SAY_LEAST_S} and this the
+ * device asks only when the reason for what the pacer does has changed since
+ * the last ask, so a line has something new to say.
+ */
+export const MODEL_PACER_SAY_MOST_S = 60;
 
 /** An answer this long after its ask, seconds ridden, is late and never applied: **5 s**. */
 export const MODEL_PACER_LATE_S = 5;
@@ -932,8 +1110,19 @@ export const MODEL_PACER_SAY_SHOWN_S = 8;
  */
 export const MODEL_PACER_LOG_MOST = 2_000;
 
-/** What became of one ask. A closed list (ADR 0071 D-4.2's, with `applied`). */
-export const PACER_DECISION_OUTCOMES = ['applied', 'late', 'invalid', 'refused', 'failed'] as const;
+/**
+ * What became of one ask. A closed list (ADR 0071 D-4.2's, with `applied`);
+ * since the owner's rulings of 2026-11-20, `unasked` for a decision that asked
+ * for no line ({@link MODEL_PACER_SAY_LEAST_S}), which a version 1 log never holds.
+ */
+export const PACER_DECISION_OUTCOMES = [
+  'applied',
+  'late',
+  'invalid',
+  'refused',
+  'failed',
+  'unasked',
+] as const;
 export type PacerDecisionOutcome = (typeof PACER_DECISION_OUTCOMES)[number];
 
 /** What became of an ask's line (#2835). A closed list; **the line itself is never kept** (ADR 0072 D-4.4). */
@@ -963,6 +1152,8 @@ export interface PacerRuleRecord {
   readonly intent: PacerIntent;
   /** {@link PacerDirection.by}, in hundredths; absent where the direction has none. */
   readonly by?: number;
+  /** {@link PacerDirection.startFrom}, in hundredths: inside the start ramp only. */
+  readonly startFrom?: number;
   /** Which device rule set the intent. */
   readonly reason: PacerReason;
   /** Where the rider was; absent at a standstill. */
@@ -994,7 +1185,7 @@ export type PacerDecisionRecord =
       readonly askedAtS: number;
       /** `null` for an ask nothing came back for: failed, refused before arrival, or unreachable. */
       readonly arrivedAtS: number | null;
-      readonly outcome: Exclude<PacerDecisionOutcome, 'applied'>;
+      readonly outcome: Exclude<PacerDecisionOutcome, 'applied' | 'unasked'>;
     };
 
 /**
@@ -1020,13 +1211,13 @@ export function readPacerDecisionRecord(value: unknown): PacerDecisionRecord | u
       intent: value.intent as PacerIntent,
     };
   }
-  if (!oneOf(PACER_DECISION_OUTCOMES, outcome)) return undefined;
+  if (!oneOf(PACER_DECISION_OUTCOMES, outcome) || outcome === 'unasked') return undefined;
   if (Object.keys(value).sort().join() !== 'arrivedAtS,askedAtS,outcome') return undefined;
   if (arrivedAtS !== null && !numberIn(arrivedAtS, askedAtS, MOST_SECONDS)) return undefined;
   return {
     askedAtS,
     arrivedAtS,
-    outcome: outcome as Exclude<PacerDecisionOutcome, 'applied'>,
+    outcome: outcome as Exclude<PacerDecisionOutcome, 'applied' | 'unasked'>,
   };
 }
 
@@ -1037,6 +1228,7 @@ const RULE_RECORD_KEYS: ReadonlySet<string> = new Set([
   'plan',
   'intent',
   'by',
+  'startFrom',
   'reason',
   'place',
   'gapS',
@@ -1053,7 +1245,7 @@ function readPacerRuleRecord(
   askedAtS: number,
 ): PacerRuleRecord | undefined {
   if (Object.keys(value).some((key) => !RULE_RECORD_KEYS.has(key))) return undefined;
-  const { arrivedAtS, outcome, plan, intent, by, reason, place, gapS, line } = value;
+  const { arrivedAtS, outcome, plan, intent, by, startFrom, reason, place, gapS, line } = value;
   if (!oneOf(PACER_DECISION_OUTCOMES, outcome)) return undefined;
   if (arrivedAtS === null ? outcome === 'applied' : !numberIn(arrivedAtS, askedAtS, MOST_SECONDS)) {
     return undefined;
@@ -1061,6 +1253,8 @@ function readPacerRuleRecord(
   if (!oneOf(PACER_PLANS, plan) || !oneOf(PACER_INTENTS, intent)) return undefined;
   if (!oneOf(PACER_REASONS, reason) || !oneOf(PACER_LINE_OUTCOMES, line)) return undefined;
   if (line === 'shown' && outcome !== 'applied') return undefined;
+  if (outcome === 'unasked' && (arrivedAtS !== null || line !== 'none')) return undefined;
+  if (startFrom !== undefined && !hundredthsIn(startFrom, PACING_FACTOR_CEILING)) return undefined;
   if (by !== undefined) {
     const most = intent === 'lift' ? PACER_CHASE_MOST : intent === 'ease' ? PACER_WAIT_MOST : -1;
     if (!hundredthsIn(by, most)) return undefined;
@@ -1074,6 +1268,7 @@ function readPacerRuleRecord(
     plan: plan as PacerPlan,
     intent: intent as PacerIntent,
     ...(by === undefined ? {} : { by }),
+    ...(startFrom === undefined ? {} : { startFrom }),
     reason: reason as PacerReason,
     ...(place === undefined ? {} : { place: place as RiderPlace }),
     ...(gapS === undefined ? {} : { gapS }),
@@ -1103,8 +1298,8 @@ export function pacerAskOutcome(
  * **A device's decision** ({@link PacerRuleRecord}, #2835) is in force from
  * the first step at or after it was **asked**, whatever became of its line,
  * until a newer one replaces it or {@link MODEL_PACER_LAPSE_S} passes; and
- * inside the first {@link PACER_START_RAMP_S} it is ridden ramped
- * ({@link startRamped}).
+ * it is ridden as {@link pacerAsRidden} says: up the start ramp in the first
+ * {@link PACER_START_RAMP_S}, and with its surges past it.
  *
  * **A version 1 record** applies only when `applied`, from its **arrival**,
  * with no ramp and the fixed shares: a ride saved before #2835 replays as it
@@ -1120,8 +1315,16 @@ export function pacerDirectionAt(
     if ('reason' in record) {
       if (record.askedAtS > atS) continue;
       if (atS >= record.askedAtS + MODEL_PACER_LAPSE_S) return undefined;
-      const { plan, intent, by } = record;
-      return startRamped({ plan, intent, ...(by === undefined ? {} : { by }) }, atS);
+      const { plan, intent, by, startFrom } = record;
+      return pacerAsRidden(
+        {
+          plan,
+          intent,
+          ...(by === undefined ? {} : { by }),
+          ...(startFrom === undefined ? {} : { startFrom }),
+        },
+        atS,
+      );
     }
     if (record.outcome !== 'applied' || record.arrivedAtS > atS) continue;
     return atS < record.arrivedAtS + MODEL_PACER_LAPSE_S

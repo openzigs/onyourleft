@@ -7,18 +7,28 @@
  *
  * `GameView` calls {@link ModelPacer.frame} once per frame, after the
  * simulation has advanced, with the seconds ridden (`GameState.ridden`).
- * Every {@link MODEL_PACER_ASK_EVERY_S}, with no ask out:
+ * Every {@link MODEL_PACER_DECIDE_EVERY_S} — every
+ * {@link PACER_START_DECIDE_EVERY_S} inside the start ramp:
  *
  * 1. **The device decides** (`@onyourleft/domain` §`pacerRuleDecision`): the
  *    intent and how far it goes, from the rider's gap and the road under the
- *    pacer. The decision is put in force on the simulation **at once**
+ *    pacer, and inside the start ramp where it starts from: the rider's own
+ *    effort (§`pacerStartFrom`, the owner's ruling of 2026-11-20). The
+ *    decision is put in force on the simulation **at once**
  *    (§`GameSimulation.directPacer`).
- * 2. **It asks for a line**, telling the model what the pacer is doing and
- *    why (§`modelPacerInput`, and the director's own trends). **The ride
- *    never waits for the answer** (ADR 0072 D-7).
- * 3. When the answer has come back, the next frame logs the decision with
- *    what became of the ask — applied, late, invalid, refused or failed —
- *    and of its line, and shows a line that may be shown.
+ * 2. **Now and then it asks for a line** ({@link lineDue}): on the first
+ *    decision, then no sooner than {@link MODEL_PACER_SAY_LEAST_S} after the
+ *    last ask, and only when why the pacer rides as it does has changed or
+ *    {@link MODEL_PACER_SAY_MOST_S} have passed (the owner's ruling of
+ *    2026-11-20, *"Speak much less often"*). It tells the model what the
+ *    pacer is doing and why (§`modelPacerInput`, and the director's own
+ *    trends). **The ride never waits for the answer** (ADR 0072 D-7), and a
+ *    decision is made on time whether an ask is out or not.
+ * 3. A decision that asked for nothing is logged at once as `unasked`. One
+ *    that asked is logged when its answer has come back, with what became of
+ *    the ask — applied, late, invalid, refused or failed — and of its line;
+ *    the decisions made while it was out are held and logged after it, so
+ *    the log stays oldest first.
  *
  * **A failed, late or void answer costs a line, never the pacing** (ADR 0083
  * D-2): nothing a model writes reaches `direct`.
@@ -61,17 +71,24 @@ import {
   gradeAt,
   heartRateZones,
   metres,
-  MODEL_PACER_ASK_EVERY_S,
+  MODEL_PACER_DECIDE_EVERY_S,
+  MODEL_PACER_LAPSE_S,
   MODEL_PACER_LOG_MOST,
   MODEL_PACER_RECENT_LINES,
+  MODEL_PACER_REPEAT_MEMORY,
+  MODEL_PACER_SAY_LEAST_S,
+  MODEL_PACER_SAY_MOST_S,
   MODEL_PACER_SAY_SHOWN_S,
   PACER_EASE,
   PACER_LIFT,
+  PACER_START_DECIDE_EVERY_S,
   PACER_START_RAMP_S,
   pacerAskOutcome,
   pacerRuleDecision,
   pacerSayAgainstRidden,
   pacerSayRepeats,
+  pacerStartFrom,
+  pacerSurgeAt,
   pacerTerrainAt,
   powerZones,
   riderPlaceOf,
@@ -87,6 +104,7 @@ import {
   type PacerHeartRateTrend,
   type PacerLineOutcome,
   type PacerPowerTrend,
+  type PacerReason,
   type PacerRuleDecision,
   type PacerTerrain,
   type RouteProfile,
@@ -94,6 +112,7 @@ import {
 
 import type { PacerPort, PacerReply } from '../instance/pacer-port';
 import type { TraceSample } from './hud/recent-trace';
+import type { PacerDoing } from './pacer-doing';
 import type { GameState } from './simulation';
 
 /** What the director needs of the instance: `instance/pacer-port.ts` §`PacerPort`'s ride half. */
@@ -135,6 +154,62 @@ export interface ModelPacerFrameResult {
   readonly arrived?: string;
   /** The line on the screen now, or `undefined` for none. */
   readonly showing?: string;
+  /**
+   * What the pacer is doing now, for the HUD (the owner's ruling of
+   * 2026-11-20, {@link pacerDoing}); `undefined` with no decision in force,
+   * when the pacer rides #92's own rule.
+   */
+  readonly doing?: PacerDoing;
+}
+
+/**
+ * What the pacer is doing at `atS` under a decision for `reason` (the owner's
+ * ruling of 2026-11-20): starting with the rider inside the start ramp;
+ * waiting for a rider behind; chasing one ahead; on the terrain rule, saving
+ * itself before a climb or pushing on over the top and down; and with the
+ * rider level, surging, recovering or riding with them, as
+ * `@onyourleft/domain` §`pacerSurgeAt` has it — the surge the pacer rides.
+ */
+export function pacerDoing(reason: PacerReason, atS: number): PacerDoing {
+  if (atS < PACER_START_RAMP_S) return 'starting';
+  switch (reason) {
+    case 'rider-behind':
+    case 'rider-stopped':
+      return 'waiting';
+    case 'rider-ahead':
+      return 'chasing';
+    case 'before-climb':
+      return 'saving';
+    case 'descent':
+    case 'over-the-top':
+      return 'pushing';
+    case 'rider-level': {
+      const surge = pacerSurgeAt(atS);
+      if (surge >= PACER_DOING_SURGE) return 'surging';
+      if (surge <= -PACER_DOING_SURGE / 2) return 'recovering';
+      return 'with-you';
+    }
+  }
+}
+
+/** A surge the HUD names: **2 %**, and half of it a recovery, so a slope's foot reads as riding with the rider. */
+export const PACER_DOING_SURGE = 0.02;
+
+/**
+ * Whether a decision at `atS` asks for a line, the last ask having been at
+ * `last.atS` for `last.reason` (the owner's ruling of 2026-11-20): the first
+ * always; then never inside {@link MODEL_PACER_SAY_LEAST_S}; between it and
+ * {@link MODEL_PACER_SAY_MOST_S} only for a new reason; and past it, always.
+ */
+export function lineDue(
+  atS: number,
+  reason: PacerReason,
+  last: { readonly atS: number; readonly reason: PacerReason } | undefined,
+): boolean {
+  if (last === undefined) return true;
+  const since = atS - last.atS;
+  if (since < MODEL_PACER_SAY_LEAST_S) return false;
+  return since >= MODEL_PACER_SAY_MOST_S || reason !== last.reason;
 }
 
 /** Round to one decimal: the state is a summary, and a shorter one is a cheaper prompt. */
@@ -381,7 +456,7 @@ const MOST_DRIFT_PERCENT = 1_000;
 /** How far back the gap's drift is read, seconds ridden: **30** (#2835: "the last 30–60 s"). */
 export const GAP_DRIFT_WINDOW_S = 30;
 
-/** How many asks' cadence the drift is read from: **12**, a minute at one every 5 s, in two halves. */
+/** How many decisions' cadence the drift is read from: **12**, a minute at one every 5 s, in two halves. Each decision reads it, asked or not (#2864). */
 export const CADENCE_DRIFT_ASKS = 12;
 
 /** A half with fewer live cadence readings than this (**3**) says no drift. */
@@ -447,6 +522,7 @@ function recordOf(
     plan: direction.plan,
     intent: direction.intent,
     ...(direction.by === undefined ? {} : { by: direction.by }),
+    ...(direction.startFrom === undefined ? {} : { startFrom: direction.startFrom }),
     reason,
     ...(place === undefined ? {} : { place }),
     ...(gapS === undefined ? {} : { gapS }),
@@ -459,14 +535,25 @@ export class ModelPacer {
   readonly #link: ModelPacerLink;
   readonly #onRecord: (record: PacerDecisionRecord) => void;
   readonly #log: PacerDecisionRecord[] = [];
+  /** Decisions made while an ask was out, logged after it, oldest first. */
+  readonly #held: PacerDecisionRecord[] = [];
   #asked: Asked | undefined;
-  #lastAskAt: number | undefined;
+  #lastDecidedAt: number | undefined;
+  /** The last decision: when, and why, for what the pacer is doing. */
+  #decided: { readonly at: number; readonly reason: PacerReason } | undefined;
+  /** The last ask for a line: when, and why the pacer rode as it did then. */
+  #lastAsk: { readonly atS: number; readonly reason: PacerReason } | undefined;
   #settled: PacerReply | undefined;
   #stopped = false;
   #ended = false;
   #inForce: { direction: PacerDirection; since: number } = { direction: UNDIRECTED, since: 0 };
   #line: { readonly text: string; readonly until: number } | undefined;
-  /** The last lines shown this ride, oldest first, for the next asks (#2760) and the repeat check (#2835). Never stored. */
+  /**
+   * The last lines shown this ride, oldest first: the last
+   * {@link MODEL_PACER_RECENT_LINES} go with the next ask (#2760), and all
+   * {@link MODEL_PACER_REPEAT_MEMORY} are read for a repeat (#2835, the
+   * owner's ruling of 2026-11-20). Never stored.
+   */
   readonly #said: string[] = [];
   /** The gap at each ask of about the last {@link GAP_DRIFT_WINDOW_S}, oldest first (#2777, #2835). */
   readonly #gaps: PacerGapReading[] = [];
@@ -501,42 +588,80 @@ export class ModelPacer {
           ? this.#lineOf(settled.say, asked.decision)
           : 'none';
       this.#keep(recordOf(asked, at, outcome, line));
+      this.#release();
       if (settled.kind === 'refused') this.#stopped = true;
       if (line === 'shown' && settled.kind === 'answer') {
         this.#line = { text: settled.say, until: at + MODEL_PACER_SAY_SHOWN_S };
         arrived = settled.say;
         this.#said.push(settled.say);
-        if (this.#said.length > MODEL_PACER_RECENT_LINES) this.#said.shift();
+        if (this.#said.length > MODEL_PACER_REPEAT_MEMORY) this.#said.shift();
       }
     }
+    const every = at < PACER_START_RAMP_S ? PACER_START_DECIDE_EVERY_S : MODEL_PACER_DECIDE_EVERY_S;
     if (
       !this.#stopped &&
-      this.#asked === undefined &&
-      this.#log.length < MODEL_PACER_LOG_MOST &&
-      (this.#lastAskAt === undefined || at - this.#lastAskAt >= MODEL_PACER_ASK_EVERY_S)
+      this.#log.length + this.#held.length < MODEL_PACER_LOG_MOST &&
+      (this.#lastDecidedAt === undefined || at - this.#lastDecidedAt >= every)
     ) {
-      const { seen, riderSpeed } = frame.ride();
-      // ADR 0083 D-1: the device decides, and the decision is ridden from now
-      // whatever the model then says, or does not.
-      const decision = pacerRuleDecision({
-        riderGapM: seen.riderGapM,
-        riderSpeed,
-        riderInDraft: seen.riderInDraft,
-        terrain: frame.terrain(),
-      });
-      frame.direct(decision.direction, at);
-      this.#inForce = {
-        direction: decision.direction,
-        since:
-          decision.direction.intent === this.#inForce.direction.intent ? this.#inForce.since : at,
-      };
-      this.#ask({ at, decision }, this.#told(at, seen, decision));
+      this.#lastDecidedAt = at;
+      this.#decide(frame, at);
     }
     if (this.#line !== undefined && at >= this.#line.until) this.#line = undefined;
+    const decided = this.#decided;
+    const doing =
+      decided === undefined || at >= decided.at + MODEL_PACER_LAPSE_S
+        ? undefined
+        : pacerDoing(decided.reason, at);
     return {
       ...(arrived === undefined ? {} : { arrived }),
       ...(this.#line === undefined ? {} : { showing: this.#line.text }),
+      ...(doing === undefined ? {} : { doing }),
     };
+  }
+
+  /**
+   * One decision of the device's at `at`, put in force at once, and an ask
+   * for a line when one is due ({@link lineDue}) and none is out; else logged
+   * `unasked`, or held behind the ask that is out.
+   */
+  #decide(frame: ModelPacerFrame, at: number): void {
+    const { seen, riderSpeed } = frame.ride();
+    // ADR 0083 D-1: the device decides, and the decision is ridden from now
+    // whatever the model then says, or does not.
+    const ruled = pacerRuleDecision({
+      riderGapM: seen.riderGapM,
+      riderSpeed,
+      riderInDraft: seen.riderInDraft,
+      terrain: frame.terrain(),
+    });
+    // The owner's ruling of 2026-11-20: inside the start ramp, from the
+    // rider's own effort, so the pacer starts alongside them.
+    const decision: PacerRuleDecision =
+      at < PACER_START_RAMP_S
+        ? {
+            ...ruled,
+            direction: {
+              ...ruled.direction,
+              startFrom: pacerStartFrom(seen.rider3sWPerKg ?? seen.riderWPerKg, seen.pacerWPerKg),
+            },
+          }
+        : ruled;
+    frame.direct(decision.direction, at);
+    this.#decided = { at, reason: decision.reason };
+    this.#inForce = {
+      direction: decision.direction,
+      since:
+        decision.direction.intent === this.#inForce.direction.intent ? this.#inForce.since : at,
+    };
+    const told = this.#told(at, seen, decision);
+    if (this.#asked === undefined && lineDue(at, decision.reason, this.#lastAsk)) {
+      this.#lastAsk = { atS: at, reason: decision.reason };
+      this.#ask({ at, decision }, told);
+      return;
+    }
+    const record = recordOf({ at, decision }, null, 'unasked', 'none');
+    if (this.#asked === undefined) this.#keep(record);
+    else this.#held.push(record);
   }
 
   /**
@@ -551,12 +676,18 @@ export class ModelPacer {
     const asked = this.#asked;
     this.#asked = undefined;
     if (asked !== undefined) this.#keep(recordOf(asked, null, 'failed', 'none'));
+    this.#release();
     void this.#link.endPacerRide();
   }
 
   #keep(record: PacerDecisionRecord): void {
     this.#log.push(record);
     this.#onRecord(record);
+  }
+
+  /** Log the decisions held while an ask was out, after it. */
+  #release(): void {
+    for (const record of this.#held.splice(0)) this.#keep(record);
   }
 
   /**
@@ -618,13 +749,14 @@ export class ModelPacer {
         ? {}
         : { gapDriftM: Math.round((seen.riderGapM - before.riderGapM) * 10) / 10 }),
       ...(cadence === undefined ? {} : { cadenceDriftRpm: cadence }),
-      ...(this.#said.length === 0 ? {} : { recentLines: [...this.#said] }),
+      ...(this.#said.length === 0
+        ? {}
+        : { recentLines: this.#said.slice(-MODEL_PACER_RECENT_LINES) }),
     };
   }
 
   #ask(asked: Asked, input: ModelPacerInput): void {
     this.#asked = asked;
-    this.#lastAskAt = asked.at;
     this.#link.decidePacer(input).then(
       (reply) => {
         this.#settled = reply;

@@ -2281,22 +2281,29 @@ by §`readModelPacerAnswer` — **one line and no other field**, screened by §`
 (80 characters, no digit but a cadence or power target, no markup, no metric trademark, no medical
 wording) — and read again on the device (`instance/pacer-port.ts`). `POST /v1/analysis/pacer/warm`
 (§`warmPacer`) loads the model with that same prompt prefix when the rider turns the AI pacer on,
-and takes no slot. On the device, `game/model-pacer.ts` decides every 5 s of riding with no ask out:
+and takes no slot. On the device, `game/model-pacer.ts` decides every 5 s of riding (every second
+of the first 30 s), whether an ask is out or not:
 `pacer/device-rule.ts` §`pacerRuleDecision` picks the intent and how far it goes — `ease` by the
 whole 20 % for a rider stopped behind; with the rider level or in the draft and never ahead,
 [ADR 0082](adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)'s `ease` in
 the last 300 m before a climb and `lift` on a descent and for 200 m over a climb's top
 (§`pacerTerrainAt`); otherwise the gap, `hold` inside 2 s, and beyond it an `ease` for a rider behind
-or a `lift` for one ahead that grows in a straight line to the whole of #92's envelope at 10 s. The
-decision is put in force on the simulation at once (`GameSimulation.directPacer`), which rides it
-through `advanceBot` inside the envelope and, for the first 60 s, up the start ramp (§`startRamped`).
-Then it asks for a line and never waits: **a failed, late or void answer costs a line, never the
-pacing**, and a line that repeats one of the last three, or says the opposite of the intent, is not
-shown. Each decision is logged when its answer settles, with where the rider was, the rule that set
-the intent and a word for what became of the line. Nothing of it reaches the gradient session or a
+or a `lift` for one ahead, each growing with the gap to the whole of #92's envelope at 10 s (a chase
+is 5 % at 3 s, the owner's ruling of 2026-11-20). The decision is put in force on the simulation at
+once (`GameSimulation.directPacer`), which rides it through `advanceBot` as §`pacerAsRidden` says:
+for the first 30 s up a ramp from the rider's own effort (`startFrom`, kept with the decision), and
+after it, but never while it waits, with the surges and recoveries of §`pacerSurgeAt` inside the
+envelope. It asks for a line on the first decision, then no sooner than 30 s after the last ask and
+only for a new reason, or after 60 s (§`lineDue`), and never waits: **a failed, late or void answer
+costs a line, never the pacing**, and a line that nearly repeats one of the last ten shown, or says
+the opposite of the intent, is not shown. A decision that asked is logged when its answer settles,
+with where the rider was, the rule that set the intent and a word for what became of the line; one
+that did not is logged `unasked`, after any ask still out. The HUD's *Pacer power* reading
+(`hud/fields.ts` §`pacerPowerReading`, on a tablet) shows the watts the pacer's tick rode and what it
+is doing (`pacer-doing.ts`). Nothing of it reaches the gradient session or a
 trainer write: `game/model-pacer-wiring.test.tsx` compares a directed and an undirected ride write
 for write. The log is kept with the ride as `RideFacts.pacerModel` under
-`MODEL_PACER_CODE_VERSION` 2, and the line is never kept.
+`MODEL_PACER_CODE_VERSION` 3, and the line is never kept.
 
 ### A room, from the client: `apps/web/src/net/`
 
