@@ -309,3 +309,33 @@ its question.
   not hide it. #2899's measurements on real streets say.
 - **A rider finds the 100 m lock too early** at speed on a descent. The lock is a distance, so at
   60 km/h it is 6 s; a time-based lock would be a new decision.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-11-20** — **How D-4.1's windows treat a no-data sample, which D-3's step row relies on.**
+  D-3's *Height step along the road* row makes two neighbouring road samples no-data, and the
+  paragraph under D-3's table says that turns a hostile plateau into no-data *"which D-7 walks to
+  0 %"*. The body does not say what D-4.1's 5-sample median and 11-sample slope do with a window
+  that holds a no-data sample. If they dropped it and fitted the rest, a valid sample beside the
+  plateau's edge could still carry the jump into the slope, and the grade sent would leave the road
+  before D-7's walk began, which D-3 says cannot happen. D-3's statement is true only if **a grade
+  whose median or slope window holds any no-data sample is itself unavailable, and D-7 applies to
+  it**: the grade sent walks to 0 % at D-6.4's 1 % a second, and walks back once every sample in
+  its windows is valid again. That is the reading
+  [#2899](https://github.com/openzigs/onyourleft/issues/2899) should build, and its plateau-tile test
+  (the #2899 row of the constraints table) should assert that the grade sent never moves by more than
+  1 % a second while the rider nears, crosses and leaves the plateau. The step row also reaches one
+  sample further than D-6.1 counts: whether a sample is no-data depends on the sample 10 m after
+  it, so the grade sent at `s` depends on the road up to **`s + 90 m`**, not `s + 80 m`. D-6.2's
+  100 m lock still covers it, with one grid sample of margin rather than two; a lock that stays at
+  or above the reach is a figure D-6.6 records by amendment, and this is that record.
+  ([#2959](https://github.com/openzigs/onyourleft/issues/2959), from the review of #2948)
+- **2026-11-20** — **D-6.4's *"ten times the driver's deadband"* compares a rate with a
+  magnitude.** The slew is 1 % a second; the deadband is 0.1 % of grade between one write and the
+  next. The comparison holds per write: `gradient.ts` writes at most once a second, so each write
+  of a walk moves the grade by at most 1 %, ten times the 0.1 % deadband. (#2959, from the review
+  of #2948)
