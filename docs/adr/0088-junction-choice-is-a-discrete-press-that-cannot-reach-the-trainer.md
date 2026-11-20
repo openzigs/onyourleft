@@ -306,18 +306,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   owner's sentence of 2026-11-20 went on after *"to turn left or right"* to name another trainer app
   as the model for the symbols. Read the quotation as ending *"…to turn left or right …"*; D-3.1's
   *"as other trainer apps do it"* stands for the words left out. (#2959, from the review of #2953)
-- **2026-11-20** — **A press or tap of a labelled way chooses that way; "one step" is set against a
-  continuous amount.** D-1.3 says a discrete press chooses *left*, *straight* or *right*, and that
-  left and right step through the ways on *"with more than three ways on"*. Its *"a press moves the
-  choice one step"* sets a discrete press against a continuous or scaled one, and D-3.1.1 repeats
-  the phrase for a tap. Read alone, *"one step"* could make a tap on the left symbol, with right
-  chosen, give straight, which is not what D-1.3's first sentence says. At a junction with three
-  ways on or fewer, a press or tap of left, straight or right chooses that way, wherever the choice
-  stood; with more than three, D-1.3's parenthesis applies, and left and right step one way round
-  the junction per press. [#2897](https://github.com/openzigs/onyourleft/issues/2897)'s and
-  [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s tests hold that reading: with right
-  chosen at a three-way junction, one press or tap of left chooses left. (#2959, from the review of
-  #2953)
 - **2026-11-20** — **D-3.1's *"on a touch screen"* says where the symbols must show, not where they
   may not.** D-3's table lists the screen as an input for every rider, and D-3.1.4 makes each
   symbol a button, which a mouse can press as well as a finger. How a touch screen is detected is

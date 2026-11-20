@@ -351,8 +351,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   never waits on a pending request, at any speed**, and a block that has not arrived when the
   rider reaches it is where the held area ends, which the ride treats as the edge of the map
   (D-7.2's last sentence, [#2908](https://github.com/openzigs/onyourleft/issues/2908)), never as a
-  pause. #2890's R-8 test therefore runs at 80 km/h as well as at 40 km/h, and once with a block
-  that has not arrived, and asserts each time that the frame loop never waits. The 1 min 54 s and
+  pause. #2890's R-8 test should therefore run at 80 km/h as well as at 40 km/h, and once with a block
+  that has not arrived, and assert each time that the frame loop never waits. The 1 min 54 s and
   1.6 km figures stay figures, for #2882 to measure. (#2959, from the review of #2942)
 - **2026-11-20** — **A change of block size is a new decision in either direction, never an
   amendment.** D-2.4 says a measurement that keeps the block *"a z14 tile or coarser"* may be

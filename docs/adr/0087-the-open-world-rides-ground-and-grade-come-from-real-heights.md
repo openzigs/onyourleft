@@ -326,8 +326,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   whose median or slope window holds any no-data sample is itself unavailable, and D-7 applies to
   it**: the grade sent walks to 0 % at D-6.4's 1 % a second, and walks back once every sample in
   its windows is valid again. That is the reading
-  [#2899](https://github.com/openzigs/onyourleft/issues/2899) builds, and its plateau-tile test
-  (the #2899 row of the constraints table) asserts that the grade sent never moves by more than
+  [#2899](https://github.com/openzigs/onyourleft/issues/2899) should build, and its plateau-tile test
+  (the #2899 row of the constraints table) should assert that the grade sent never moves by more than
   1 % a second while the rider nears, crosses and leaves the plateau. The step row also reaches one
   sample further than D-6.1 counts: whether a sample is no-data depends on the sample 10 m after
   it, so the grade sent at `s` depends on the road up to **`s + 90 m`**, not `s + 80 m`. D-6.2's
