@@ -147,8 +147,9 @@ describe('the erasure enumeration comes from the schema', () => {
     // `syncBases` (#893's review) the nineteenth, #836's `riderTexts` the
     // twentieth, #898's `trustedDeviceKeys` the twenty-first, #1236's
     // `workoutGoals` the twenty-second, #1431's `recentlyDeleted` the
-    // twenty-third, #1545's `worldCorridors` the twenty-fourth.
-    expect(tablesInSchema().length).toBeGreaterThanOrEqual(24);
+    // twenty-third, #1545's `worldCorridors` the twenty-fourth, #2891's
+    // `riddenBlocks` the twenty-fifth.
+    expect(tablesInSchema().length).toBeGreaterThanOrEqual(25);
   });
 
   it('claims no table is unscoped without that being checked', () => {

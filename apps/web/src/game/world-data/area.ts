@@ -25,6 +25,13 @@
  *   returns at once and the ride keeps riding on what is held.
  * - {@link AreaReader.stop} abandons a running read and every waiting one.
  *
+ * **The ridden-block cache** (#2891, ADR 0090 D-6): every block is looked for
+ * in {@link AreaReaderOptions.cache} before it is asked for, and a block in it
+ * is never asked for again (D-6.7); a block read from the archive is kept
+ * there. Each block's features are decoded about the block's own corner
+ * ({@link blockFrame}), not the ride's start, so a kept block serves any later
+ * ride. With map tiles off, a ride reads only what is kept (D-7.2).
+ *
  * ⚠️ **What is requested is a function of the rider's block alone** (R-1):
  * a position is turned into its block by {@link blockOf} and nothing else of
  * it is kept. The reader takes no privacy zone (R-3, the owner's Q2) and the
@@ -43,12 +50,14 @@
 import {
   columnAtLongitude,
   rowAtLatitude,
+  tileBounds,
   TILES_AT_Z15,
   type CorridorFrame,
   type TileId,
 } from '@onyourleft/map-features';
 
 import {
+  describeCorridorFailure,
   readCorridorTiles,
   type ArchiveOpening,
   type CorridorArchive,
@@ -125,6 +134,22 @@ export function tilesOfBlock(block: BlockId): TileId[] {
 }
 
 /**
+ * The frame a block's features are decoded in: its own north-west corner,
+ * fixed to the grid like the block (R-1). A block's features are the same
+ * whichever ride reads them, so the ridden-block cache (#2891) can keep them
+ * and hand them to a ride that started somewhere else.
+ */
+export function blockFrame(block: BlockId): CorridorFrame {
+  const corner = tileBounds({ z: 15, x: block.x * 2, y: block.y * 2 });
+  return { latitude: corner.north, longitude: corner.west };
+}
+
+/** The key a block is kept under (`RiddenBlockRecord.block`): `y × 2^14 + x`. */
+export function blockKey(block: BlockId): number {
+  return block.y * BLOCKS + block.x;
+}
+
+/**
  * A crossing's delay (R-8): `random()` scaled onto [0, {@link CROSSING_DELAY_MAX_MS}].
  * ⚠️ It is handed nothing but the draw, so no position, block or time of
  * crossing can decide it.
@@ -138,8 +163,22 @@ export function crossingDelayMs(random: () => number): number {
 /** One block the reader holds: its four tiles' states and its decoded features. */
 export interface HeldBlock {
   readonly block: BlockId;
+  /** {@link blockFrame}: the features' local metres are about the block's own corner. */
+  readonly frame: CorridorFrame;
   readonly tiles: readonly CorridorTile[];
   readonly features: CorridorFeatures;
+}
+
+/**
+ * The ridden-block cache, as the reader sees it (ADR 0090 D-6.7): read before
+ * the network, written after it. `world-data/ridden-blocks.ts` is the
+ * product's, over the store and for one athlete.
+ */
+export interface AreaCache {
+  /** The block as kept, or `undefined` when it is not. */
+  get(block: BlockId): Promise<Pick<HeldBlock, 'tiles' | 'features'> | undefined>;
+  /** Keeps a block just read from the archive whose identity is `identity`. */
+  put(held: HeldBlock, identity: string): Promise<void>;
 }
 
 /** What {@link AreaReader.start} came to. */
@@ -153,8 +192,11 @@ export type AreaStart =
 export interface AreaReaderOptions {
   /** `corridor-source.ts` §`corridorArchive` in the product; `undefined` when none is configured. */
   readonly archive: CorridorArchive | undefined;
-  /** The frame the ride's world is drawn in; the features are decoded into it. */
-  readonly frame: CorridorFrame;
+  /**
+   * The ridden-block cache (#2891), asked before every request. With map
+   * tiles off, a ride reads only what it holds (D-7.2).
+   */
+  readonly cache?: AreaCache | undefined;
   /** The map-tiles switch (ADR 0090 D-7.1), read before every request. */
   readonly mapTilesOn: () => boolean;
   /** The draw for R-8's delay. `Math.random` in the product. */
@@ -181,7 +223,10 @@ export interface AreaReader {
   stop(): void;
 }
 
-const keyOf = (block: BlockId): number => block.y * BLOCKS + block.x;
+const keyOf = blockKey;
+
+/** An error's class name, which says what failed and carries no value. */
+const nameOf = (error: unknown): string => (error instanceof Error ? error.name : 'unknown');
 
 const defaultSchedule = (run: () => void, ms: number): (() => void) => {
   const timer = setTimeout(run, ms);
@@ -223,14 +268,35 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
           tile: (tile, signal) => (options.archive as CorridorArchive).tile(tile, signal),
         };
 
+  const log = options.log ?? ((): void => undefined);
+
+  /** The block from the cache, or `undefined`; a store that fails is a miss. */
+  const cached = async (block: BlockId): Promise<HeldBlock | undefined> => {
+    if (options.cache === undefined) return undefined;
+    try {
+      const kept = await options.cache.get(block);
+      return kept === undefined ? undefined : { block, frame: blockFrame(block), ...kept };
+    } catch (error) {
+      log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
+      return undefined;
+    }
+  };
+
   const readOne = async (
     block: BlockId,
     stop: AbortController,
   ): Promise<'read' | 'wrong-schema' | 'none'> => {
+    // D-6.7: a block in the cache is never asked for again while it is there.
+    const kept = await cached(block);
+    if (kept !== undefined) {
+      if (!stopped && wanted.has(keyOf(block))) held.set(keyOf(block), kept);
+      return 'read';
+    }
     if (archive === undefined) return 'none';
     const tiles = tilesOfBlock(block);
+    const frame = blockFrame(block);
     const plan: CorridorPlan = {
-      frame: options.frame,
+      frame,
       tiles: tiles.map((tile) => ({ x: tile.x, y: tile.y, state: 'covered' })),
       requestable: tiles,
     };
@@ -246,7 +312,14 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     if (read.kind === 'wrong-schema') return 'wrong-schema';
     // A block the rider has left behind while it was read is not kept.
     if (read.kind !== 'read' || stopped || !wanted.has(keyOf(block))) return 'none';
-    held.set(keyOf(block), { block, tiles: read.tiles, features: read.features });
+    const fresh: HeldBlock = { block, frame, tiles: read.tiles, features: read.features };
+    held.set(keyOf(block), fresh);
+    // Kept for the next ride. A store that refuses it costs that ride a re-read.
+    try {
+      await options.cache?.put(fresh, read.identity);
+    } catch (error) {
+      log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
+    }
     return 'read';
   };
 
@@ -308,12 +381,18 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     start: async (position) => {
       const block = blockOf(position);
       if (stopped || block === undefined) return { kind: 'unavailable' };
-      const why = off();
-      if (why !== undefined) return why;
+      // With no cache, map tiles off or no archive means nothing to read at all.
+      if (options.cache === undefined) {
+        const why = off();
+        if (why !== undefined) return why;
+      }
       ask(centreOn(block));
       await pumping;
       if (sawWrongSchema) return { kind: 'off', why: 'wrong-schema' };
-      return held.has(keyOf(block)) ? { kind: 'ready' } : { kind: 'unavailable' };
+      if (held.has(keyOf(block))) return { kind: 'ready' };
+      // D-7.2: the start's block is not cached, and tiles off or no archive
+      // is why it was not read.
+      return off() ?? { kind: 'unavailable' };
     },
     moveTo: (position) => {
       const block = blockOf(position);

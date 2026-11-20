@@ -41,7 +41,6 @@ const inside = (block: BlockId, fx: number, fy: number): AreaPosition => ({
 });
 
 const START = inside(BLOCK, 0.5, 0.5);
-const FRAME = { latitude: START.latitude, longitude: START.longitude };
 
 /** What the stubbed host does with a request for tile data, instead of answering it. */
 type Tamper = (range: { offset: number; length: number }, body: Uint8Array) => Response | undefined;
@@ -88,7 +87,6 @@ function tilesAround(
 function areaReader(log: string[] = []) {
   return createAreaReader({
     archive: corridorArchiveFrom(archiveSource(URL_)),
-    frame: FRAME,
     mapTilesOn: () => true,
     random: () => 0,
     yieldToIdle: () => Promise.resolve(),

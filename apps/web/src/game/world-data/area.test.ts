@@ -14,6 +14,7 @@ import { residentialBlockTile } from '@onyourleft/map-features/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  blockFrame,
   blockOf,
   blocksAround,
   createAreaReader,
@@ -44,7 +45,6 @@ const START: AreaPosition = inside(
   0.5,
   0.5,
 );
-const FRAME = { latitude: START.latitude, longitude: START.longitude };
 const METRES_PER_DEGREE = 111_320;
 
 /** A position `east` and `north` metres from `from`. */
@@ -112,7 +112,6 @@ function manualClock() {
 
 function reader(overrides: Partial<AreaReaderOptions> & Pick<AreaReaderOptions, 'archive'>) {
   return createAreaReader({
-    frame: FRAME,
     mapTilesOn: () => true,
     random: () => 0,
     schedule: (run) => {
@@ -188,8 +187,16 @@ describe('R-1: what is asked for is a function of the rider’s block alone', ()
     expect(blockKeys(area.held().map((h) => h.block))).toStrictEqual(
       blockKeys(blocksAround(block)),
     );
-    // Each held block carries its own decoded features, in the ride's frame.
-    for (const held of area.held()) expect(held.features.buildings.length).toBeGreaterThan(0);
+    // Each held block carries its own decoded features, in its own frame:
+    // its corner on the grid, whatever the start (#2891 keeps them so).
+    for (const held of area.held()) {
+      expect(held.features.buildings.length).toBeGreaterThan(0);
+      expect(held.frame).toStrictEqual(blockFrame(held.block));
+    }
+    const corner = blockFrame(block);
+    expect(
+      blockOf({ latitude: corner.latitude - 1e-6, longitude: corner.longitude + 1e-6 }),
+    ).toStrictEqual(block);
     // The archive's header and metadata are asked for once per ride, not per block.
     expect(opened).toHaveLength(1);
   });
@@ -398,7 +405,6 @@ describe('reads that fail, and reads left behind', () => {
       const { archive, asked } = countingArchive();
       const area = createAreaReader({
         archive,
-        frame: FRAME,
         mapTilesOn: () => true,
         random: () => 1,
         yieldToIdle: () => Promise.resolve(),

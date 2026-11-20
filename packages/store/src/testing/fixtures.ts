@@ -114,6 +114,7 @@ import type {
   TrustedDeviceKeyRecord,
   WorkoutGoalsRecord,
   WorldCorridorRecord,
+  RiddenBlockRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -1243,6 +1244,49 @@ export async function worldCorridorFor(
     features:
       overrides.features ??
       (await packWorldCorridorFeatures(worldCorridorFeaturesFor(owner, seed))),
+    licence: 'ODbL-1.0',
+  };
+}
+
+/**
+ * One of an athlete's ridden blocks — #2891. ⚠️ **Different features per
+ * athlete and per `seed`** ({@link worldCorridorFeaturesFor}'s), so a read
+ * that handed back somebody else's block cannot match. `block` defaults to a
+ * block that differs per athlete too; pass the same one to two athletes to
+ * make the owner the only thing telling their rows apart.
+ */
+export async function riddenBlockFor(
+  owner: AthleteId,
+  overrides: {
+    readonly block?: number;
+    readonly seed?: number;
+    readonly riddenAt?: string;
+    readonly features?: Blob;
+  } = {},
+): Promise<RiddenBlockRecord> {
+  const seed = overrides.seed ?? 0;
+  const offset = ATHLETES.indexOf(owner) * 10 + seed;
+  const block = overrides.block ?? 6269 * 2 ** 14 + 4685 + offset;
+  const at = new Date((FIXTURE_EPOCH + 800_000 + offset) * 1000).toISOString();
+  return {
+    owner,
+    block,
+    archive: {
+      url: 'https://tiles.example.org/basemap.pmtiles',
+      identity: `"etag-block-${String(offset)}"`,
+    },
+    readerVersion: 1,
+    readAt: at,
+    riddenAt: overrides.riddenAt ?? at,
+    tiles: [
+      { x: 9370, y: 12538, state: 'covered' },
+      { x: 9371, y: 12538, state: 'covered' },
+      { x: 9370, y: 12539, state: 'refused' },
+      { x: 9371, y: 12539, state: 'outside-archive' },
+    ],
+    features:
+      overrides.features ??
+      (await packWorldCorridorFeatures(worldCorridorFeaturesFor(owner, seed + 20))),
     licence: 'ODbL-1.0',
   };
 }

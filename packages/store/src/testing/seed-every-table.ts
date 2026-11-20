@@ -43,6 +43,7 @@ import {
   workoutFor,
   workoutGoalsFor,
   worldCorridorFor,
+  riddenBlockFor,
 } from './fixtures';
 import type { StoreHarness } from './harness';
 
@@ -132,5 +133,7 @@ export async function seedEveryTable(harness: StoreHarness, owner: AthleteId): P
     // #1545. The map features around this rider's route — location data,
     // seeded so "empty afterwards" is checked against a table something filled.
     await store.putWorldCorridor(await worldCorridorFor(owner, route.id));
+    // #2891. A block an open-world ride read: location data as well.
+    await store.putRiddenBlock(await riddenBlockFor(owner));
   });
 }
