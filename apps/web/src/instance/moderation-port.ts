@@ -472,6 +472,19 @@ export const INVITE_CARD_CAUTION =
   'person.';
 
 /**
+ * Said beside an invitation, before it is sent (#2855): the new rider's
+ * device needs the same way in to the instance as this one has. An invitation
+ * scanned by a device that cannot reach the instance only gets "did not
+ * answer", so the moderator is told what to arrange first. On a tailnet the
+ * rider signs in to Tailscale as themselves, never as the owner (ADR 0079
+ * D-2). ⚠️ **Draft wording for the owner to approve** (#880's convention).
+ */
+export const INVITE_DEVICE_NEEDS_TEXT =
+  'The new rider’s phone or tablet must be able to reach this instance before the invitation ' +
+  'works. If your instance is on a Tailscale network, their device needs the Tailscale app ' +
+  'first, signed in with their own account, never yours, and let onto your network.';
+
+/**
  * Every moderator route is sealed and signed by the moderator's device key
  * (#1192, ADR 0047 D-7, D-8), so the port needs what a sealed call needs.
  */

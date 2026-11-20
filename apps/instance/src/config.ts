@@ -116,6 +116,7 @@ export interface RawConfig extends RawLegalSettings, RawTermsSettings {
   readonly analysisModelUrl?: string | undefined;
   readonly analysisModel?: string | undefined;
   readonly analysisModelReasoningTokens?: string | undefined;
+  readonly analysisModelContextTokens?: string | undefined;
   readonly pictureModel?: string | undefined;
   readonly name?: string | undefined;
 }
@@ -158,6 +159,12 @@ export type AnalysisModelSettings =
        * Absent: the agent finds out from the model's replies.
        */
       readonly reasoningTokens?: number;
+      /**
+       * The context the operator says the model server loads the model with
+       * (`OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS`, #2840). Absent: not
+       * known, and the agent does not check a turn against it.
+       */
+      readonly contextTokens?: number;
     }
   | {
       readonly kind: 'off';
@@ -174,7 +181,8 @@ export type AnalysisModelOffCode =
   | 'tls-by-name'
   | 'no-model'
   | 'bad-model'
-  | 'bad-reasoning';
+  | 'bad-reasoning'
+  | 'bad-context';
 
 /**
  * The model the side camera's pictures are shown to (#1106): the local server
@@ -202,7 +210,10 @@ export type PictureModelOffCode = 'not-set' | 'no-server' | 'bad-model';
 /** The `.env` lines the analysis model is read from (#2609). */
 export type AnalysisModelEnv = Pick<
   RawConfig,
-  'analysisModelUrl' | 'analysisModel' | 'analysisModelReasoningTokens'
+  | 'analysisModelUrl'
+  | 'analysisModel'
+  | 'analysisModelReasoningTokens'
+  | 'analysisModelContextTokens'
 >;
 
 /** A configuration the instance can start with. */
@@ -478,6 +489,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
         analysisModelUrl: raw.analysisModelUrl,
         analysisModel: raw.analysisModel,
         analysisModelReasoningTokens: raw.analysisModelReasoningTokens,
+        analysisModelContextTokens: raw.analysisModelContextTokens,
       },
       pictures,
       name: instanceName,
@@ -641,7 +653,18 @@ export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings
       'OYL_INSTANCE_ANALYSIS_MODEL must be a model name, such as name or name:tag.',
     );
   }
-  if (!present(raw.analysisModelReasoningTokens)) return { kind: 'on', baseUrl, model };
+  let contextTokens: number | undefined;
+  if (present(raw.analysisModelContextTokens)) {
+    contextTokens = Number(raw.analysisModelContextTokens.trim());
+    if (!isContextTokens(contextTokens)) {
+      return off(
+        'bad-context',
+        `OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS must be a whole number from ${String(MINIMUM_CONTEXT_TOKENS)} to ${String(MAXIMUM_CONTEXT_TOKENS)}, or not set.`,
+      );
+    }
+  }
+  const context = contextTokens === undefined ? {} : { contextTokens };
+  if (!present(raw.analysisModelReasoningTokens)) return { kind: 'on', baseUrl, model, ...context };
   const reasoningTokens = Number(raw.analysisModelReasoningTokens.trim());
   if (!isReasoningTokens(reasoningTokens)) {
     return off(
@@ -649,7 +672,24 @@ export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings
       `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS must be a whole number from 1 to ${MAXIMUM_REASONING_TOKENS}, or not set.`,
     );
   }
-  return { kind: 'on', baseUrl, model, reasoningTokens };
+  return { kind: 'on', baseUrl, model, reasoningTokens, ...context };
+}
+
+/**
+ * The least context an operator may state: 2 048 tokens. Version 2's system
+ * prompt and five tools are about 1 400 tokens before any ride (#2840's
+ * measurement), so less cannot hold a turn at all.
+ */
+export const MINIMUM_CONTEXT_TOKENS = 2_048;
+
+/** The most: 1 048 576 tokens, past any model this instance would run. */
+export const MAXIMUM_CONTEXT_TOKENS = 1_048_576;
+
+/** Whether `value` is a whole number of tokens an operator may state as the context. */
+export function isContextTokens(value: number): boolean {
+  return (
+    Number.isInteger(value) && value >= MINIMUM_CONTEXT_TOKENS && value <= MAXIMUM_CONTEXT_TOKENS
+  );
 }
 
 /**

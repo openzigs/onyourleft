@@ -298,6 +298,10 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     send(world, 'POST', '/v1/analysis/jobs', (await signedIn(world)).token, jobBody()),
   startReplanJob: async (world) =>
     send(world, 'POST', '/v1/analysis/replans', (await signedIn(world)).token, replanBody()),
+  warmReplanModel: async (world) =>
+    send(world, 'POST', '/v1/analysis/replans/warm', (await signedIn(world)).token, {
+      source: 'instance-local',
+    }),
   getAnalysisJob: async (world) => {
     const { token, jobId } = await finishedJob(world);
     return send(world, 'GET', `/v1/analysis/jobs/${jobId}`, token);

@@ -34,10 +34,16 @@ import type { OperatePort, OperateProblem, OperateProblemsRead } from '../instan
 
 export { PROBLEMS_UNREADABLE_TEXT } from '@onyourleft/operate-text';
 
-function Line({ problem }: { readonly problem: OperateProblem }): JSX.Element {
+function Line({
+  problem,
+  timeZone,
+}: {
+  readonly problem: OperateProblem;
+  readonly timeZone: string;
+}): JSX.Element {
   return (
     <li>
-      <strong>{momentText(problem.at)}</strong>: {problemSentence(problem.fields)}
+      <strong>{momentText(problem.at, timeZone)}</strong>: {problemSentence(problem.fields)}
       <details className="oyl-details">
         <summary>{RAW_LINE_LABEL}</summary>
         <code>{problem.line}</code>
@@ -49,8 +55,11 @@ function Line({ problem }: { readonly problem: OperateProblem }): JSX.Element {
 /** The Recent problems section: the instance's last problem lines, newest first. */
 export function OperateProblemsPanel({
   port,
+  timeZone,
 }: {
   readonly port: Pick<OperatePort, 'problems'>;
+  /** The IANA zone its moments are drawn in, named (#2917): the device's, from `OperateView`. */
+  readonly timeZone: string;
 }): JSX.Element {
   const [read, setRead] = useState<OperateProblemsRead | undefined>(undefined);
 
@@ -87,7 +96,7 @@ export function OperateProblemsPanel({
       </section>
     );
   }
-  const since = momentText(read.since);
+  const since = momentText(read.since, timeZone);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-operate-problems">
       {heading}
@@ -99,7 +108,7 @@ export function OperateProblemsPanel({
           <ol className="oyl-operate__problems">
             {read.lines.map((problem, index) => (
               // Two lines may be the same text at the same second: the place in the list is the key.
-              <Line key={`${String(index)} ${problem.at}`} problem={problem} />
+              <Line key={`${String(index)} ${problem.at}`} problem={problem} timeZone={timeZone} />
             ))}
           </ol>
         </>

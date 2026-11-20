@@ -156,7 +156,17 @@ describe('the setup wizard’s words (#2784)', () => {
     );
     expect(plain.length).toBeGreaterThan(40);
     for (const sentence of plain) expect(sentence).not.toMatch(/OYL_|docker compose|moderator/);
-    expect(BACKUPS_EXPERT_LINES.join(' ')).toContain('OYL_OFFBOX_DIR');
+    expect(BACKUPS_EXPERT_LINES.map((line) => line.text).join(' ')).toContain('OYL_OFFBOX_DIR');
+    // #2858: a command is never inside a line's words; the page draws it in a block to copy.
+    for (const line of [
+      ...BACKUPS_EXPERT_LINES,
+      ...setup.TAILNET_CHANGE_EXPERT_LINES,
+      ...setup.TAILNET_CHANGE_CLOUDFLARE_LINES,
+      ...setup.passkeyStepHow('http://localhost:8788/admin'),
+    ]) {
+      // #2920: `bash deploy.sh` too, which a sentence once named inline.
+      expect(line.text).not.toMatch(/docker compose|operator\/cli|\bbash\s|deploy\.sh/);
+    }
     expect(setup.AI_EXPERT_LINES.join(' ')).toContain('COMPOSE_PROFILES=analysis');
     expect(SETUP_EXPERT_SUMMARY).toBe('For people comfortable with the command line');
   });

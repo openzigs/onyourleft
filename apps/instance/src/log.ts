@@ -141,6 +141,11 @@ function isRoomId(value: unknown): boolean {
   return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value);
 }
 
+/** A whole number from nought, as a count is. */
+function isCount(value: unknown): boolean {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
 /**
  * Keys one event may carry beyond {@link LOGGABLE_KEYS}, each with the only
  * value it may hold there. Not on the shared list, because `reason`, `room`
@@ -177,6 +182,19 @@ export const EVENT_KEYS: ReadonlyMap<
       item: (value) => typeof value === 'string' && LOGGED_ITEM_KEYS.has(value),
     },
   ],
+  // #2840: what one write-up's run came to — its model turns, tool calls,
+  // how many of the tools it used, the tokens sent and answered — beside the
+  // job's state. Whole numbers only: never a tool's name or the model's text.
+  [
+    'analysis-job',
+    {
+      turns: isCount,
+      toolCalls: isCount,
+      toolsUsed: isCount,
+      tokensIn: isCount,
+      tokensOut: isCount,
+    },
+  ],
   // #2609: where the analysis model's settings come from — the operator's
   // row in the app, `.env`, or nowhere. Never the model's name or address.
   [
@@ -208,6 +226,19 @@ export const EVENT_KEYS: ReadonlyMap<
       codeIn: (value) => value === 'secrets/setup-code' || value === 'operator setup-code',
       validUntil: (value) =>
         typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]{8,12}Z$/.test(value),
+      // #2858: the same moment by this machine's clock, its zone named (`localTimeText`).
+      validUntilLocal: (value) =>
+        typeof value === 'string' &&
+        /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} [A-Za-z0-9+:-]{1,12}$/.test(value),
+    },
+  ],
+  // #2855: the instance's address is still the template's example, and
+  // where the page that says what to set is. Never the address it was given.
+  [
+    'example-address',
+    {
+      open: (value) =>
+        typeof value === 'string' && /^http:\/\/localhost:[0-9]{1,5}\/setup$/.test(value),
     },
   ],
 ]);
@@ -263,7 +294,8 @@ const SERVER_SIDE_CLOSES: ReadonlySet<string> = new Set(['room-lost']);
  *   write, a rooms sweep or a history catch-up that failed, a voice request
  *   that failed;
  * - an analysis job that failed; the analysis model, the picture model or
- *   the history index off; the instance keys not `ready`; a hosted model key
+ *   the history index off for a reason other than not being set (#2859: each
+ *   is optional, and not set is not a problem); the instance keys not `ready`; a hosted model key
  *   held with no secret or one that will not open; voice turned off by a
  *   refusal (not merely unset); a refusal to serve over migrations;
  * - a room socket closed for a server-side reason (`room-lost`).
@@ -288,7 +320,8 @@ export function isProblem(line: Readonly<Record<string, unknown>>): boolean {
     case 'analysis-model':
     case 'picture-model':
     case 'history-index':
-      return state === 'off';
+      // #2859: each is optional, and not set is not a problem — only one set and not working.
+      return state === 'off' && code !== 'not-set';
     case 'instance-keys':
       return state !== 'ready';
     case 'hosted-model-key':

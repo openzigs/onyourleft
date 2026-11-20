@@ -151,10 +151,12 @@ describe('GET /v1/operate/logs — the problem lines, as standard output got the
     logEvent(w.instance.log, 'ready', { version: '0' });
     logEvent(w.instance.log, 'voice-swept', { deleted: 2 });
     logEvent(w.instance.log, 'room-socket-closed', { reason: 'room-lost', count: 1 });
+    // #2859: an optional model never set is not a problem; one set and not working is.
     logEvent(w.instance.log, 'analysis-model', { state: 'off', code: 'not-set', setIn: 'none' });
+    logEvent(w.instance.log, 'analysis-model', { state: 'off', code: 'not-local', setIn: 'env' });
     // The owner's own reads are 200s: none of them is kept either.
     expect(parsed(await logsOf(w))).toEqual([
-      { event: 'analysis-model', state: 'off', code: 'not-set', setIn: 'none' },
+      { event: 'analysis-model', state: 'off', code: 'not-local', setIn: 'env' },
       { event: 'room-socket-closed', reason: 'room-lost', count: 1 },
     ]);
     expect(parsed(await logsOf(w))).toHaveLength(2);

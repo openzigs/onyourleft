@@ -636,16 +636,20 @@ describe('operator owner-claim reset (ADR 0080 D-3)', () => {
     }
 
     const report = await ownerClaimReset({ database: w.path, blobs: `${w.path}.blobs` });
-    expect(report).toEqual({
+    expect(report).toMatchObject({
       command: 'owner-claim reset',
       cleared: true,
       adminSessionsEnded: 1,
       ownerKeyFromEnvironment: false,
+      // #2858: the reopened setup's code, printed here as setup-code prints it (no folder: no file).
+      setupCode: expect.stringMatching(/^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/) as unknown,
+      writtenToFile: false,
     });
     // The running instance reads it on the next request: no restart.
     expect(await operateStatus(w.instance.handler, w, token, owner.signingKey)).toBe(404);
     expect(rowsOf(w, 'admin_session')).toEqual([]);
-    expect(rowsOf(w, 'operator_log').at(-1)).toEqual(
+    // The reset, then the setup code it made for the reopened setup (#2858), both from the host.
+    expect(rowsOf(w, 'operator_log').slice(-2)).toEqual([
       expect.objectContaining({
         source: 'cli',
         actor_athlete_id: null,
@@ -653,7 +657,8 @@ describe('operator owner-claim reset (ADR 0080 D-3)', () => {
         detail: 'cleared,sessions_ended=1',
         outcome: 'done',
       }),
-    );
+      expect.objectContaining({ source: 'cli', action: 'setup_code_minted', outcome: 'done' }),
+    ]);
     // Unclaimed again: a new claim can be made.
     await claim(w, owner);
     expect(await operateStatus(w.instance.handler, w, token, owner.signingKey)).toBe(200);
@@ -666,7 +671,8 @@ describe('operator owner-claim reset (ADR 0080 D-3)', () => {
     expect(nothing.ownerKeyFromEnvironment).toBe(true);
     const twice = await ownerClaimReset({ database: w.path, blobs: `${w.path}.blobs` });
     expect(twice.cleared).toBe(false);
-    expect(rowsOf(w, 'operator_log').at(-1)?.detail).toBe('none_claimed,sessions_ended=0');
+    const resets = rowsOf(w, 'operator_log').filter((row) => row.action === 'owner_claim_reset');
+    expect(resets.at(-1)?.detail).toBe('none_claimed,sessions_ended=0');
   });
 });
 

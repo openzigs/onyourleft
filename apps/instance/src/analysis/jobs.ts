@@ -74,9 +74,12 @@
  * - **No event carries a tool's arguments or its results**: progress names a
  *   tool by name alone, and only a name of the tool-name shape
  *   ({@link TOOL_NAME}). A section is screened text, and nothing else is text.
- * - **Nothing about a job is logged but its status and failure code**: every
- *   line goes through `log.ts` §`redacted`, and a job's input, id, write-up
- *   and tool names are never handed to it (`jobs.test.ts` plants markers).
+ * - **Nothing about a job is logged but its status and failure code**, and
+ *   on a write-up's last line what its run came to (#2840): turns, tool calls,
+ *   how many tools it used, tokens in and out, and time, whole numbers all.
+ *   Every line goes through `log.ts` §`redacted`, and a job's input, id,
+ *   write-up and tool names are never handed to it (`jobs.test.ts` plants
+ *   markers).
  * - **The athlete is always the session's** (ADR 0040 D-3): every store call
  *   names the caller's athlete, so another athlete's job is `not_found`.
  */
@@ -101,7 +104,7 @@ import type {
   AnalysisJobStatus,
   SqlStore,
 } from '../store/sql-store.ts';
-import type { AgentEvent, AgentFailure } from './agent.ts';
+import type { AgentEvent, AgentFailure, AgentUsage } from './agent.ts';
 import { pictureFaults, readRideInput } from './job-input.ts';
 import type { ReplanFailure } from './replan-agent.ts';
 import { readReplanInput, type ReplanInput } from './replan-input.ts';
@@ -142,6 +145,13 @@ export const ANALYSIS_SWEEP_PERIOD_MS = DEFAULT_ANALYSIS_STARTS.windowMs;
  */
 export const DEFAULT_REPLAN_STARTS: RateLimit = { limit: 24, windowMs: 60 * 60 * 1000 };
 
+/**
+ * How many warm-ups an athlete may ask for (#2841): one a workout ride, and
+ * six an hour is more rides than an hour holds. Each is one model call, so it
+ * has a limit of its own rather than one of the hour's re-plans.
+ */
+export const DEFAULT_REPLAN_WARMS: RateLimit = { limit: 6, windowMs: 60 * 60 * 1000 };
+
 /** How many events a stream reads from the store at once. */
 const EVENT_PAGE = 100;
 
@@ -158,6 +168,7 @@ export const JOB_FAILURES: readonly JobFailure[] = [
   'out-of-tool-calls',
   'out-of-time',
   'out-of-tokens',
+  'out-of-context',
   'model-without-tools',
   'model-not-local',
   'model-unreachable',
@@ -197,7 +208,15 @@ export interface ReplanEngineJob {
 
 /** How an engine's run ended. `AgentOutcome` (`agent.ts`) is one. */
 export type EngineEnding =
-  | { readonly kind: 'written'; readonly writeUp: ScreenedWriteUp }
+  | {
+      readonly kind: 'written';
+      readonly writeUp: ScreenedWriteUp;
+      /**
+       * The template the run used (#2932), whose version the `result` names
+       * so that the device records the one that wrote it, not its own.
+       */
+      readonly template?: { readonly id: string; readonly version: string };
+    }
   /** A re-plan's: one proposal, or `null` when the model kept the workout as it is. */
   | { readonly kind: 'proposed'; readonly proposal: Proposal | null }
   | { readonly kind: 'withheld'; readonly reasons: readonly ScreenReason[] }
@@ -213,6 +232,8 @@ export interface AnalysisEngine {
     job: EngineJob,
     signal: AbortSignal,
     emit: (event: AgentEvent) => void,
+    /** Told what the run came to, numbers only, for the job's log line (#2840). */
+    report?: (usage: AgentUsage) => void,
   ): Promise<WriteUpEnding>;
 }
 
@@ -229,6 +250,12 @@ export interface ReplanEngine {
     signal: AbortSignal,
     emit: (event: Extract<AgentEvent, { readonly type: 'progress' }>) => void,
   ): Promise<ReplanEnding>;
+  /**
+   * Load the athlete's local model for the re-plans of a ride starting now
+   * (#2841): `false` when there is none to load. Never throws for a model's
+   * doing; nothing it hears is kept.
+   */
+  warm?(athleteId: string, signal: AbortSignal): Promise<boolean>;
 }
 
 /** Timers the heartbeat runs on: the platform's unless a test's fake clock. */
@@ -329,6 +356,15 @@ export interface AnalysisJobs {
     caller: Caller,
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ jobId: string }>>;
+  /**
+   * A workout ride with re-plans on is starting (#2841): load the caller's
+   * local model, in the background, for its first re-plan. `{ warming }` says
+   * a call went out; it is answered before the model is loaded.
+   */
+  warmReplan(
+    caller: Caller,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<{ warming: boolean }>>;
   /** The caller's job, or `undefined`. */
   read(caller: Caller, jobId: string): Promise<JobView | undefined>;
   /** The caller's job's stream after `lastEventId`, or `undefined` when it is not theirs. */
@@ -386,7 +422,11 @@ function ending(outcome: EngineEnding, at: number): AnalysisJobEnding {
         status: 'succeeded',
         failure: null,
         candidate: outcome.writeUp,
-        data: JSON.stringify({ status: 'succeeded', writeUp: outcome.writeUp }),
+        data: JSON.stringify({
+          status: 'succeeded',
+          writeUp: outcome.writeUp,
+          ...(outcome.template === undefined ? {} : { templateVersion: outcome.template.version }),
+        }),
         at,
       };
     case 'proposed':
@@ -486,6 +526,9 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
   const retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
   const starts = createRateLimiter(options.starts ?? DEFAULT_ANALYSIS_STARTS, now);
   const replanStarts = createRateLimiter(options.replanStarts ?? DEFAULT_REPLAN_STARTS, now);
+  const replanWarms = createRateLimiter(DEFAULT_REPLAN_WARMS, now);
+  /** The athletes whose warm-up is in flight, and how to stop each: one at a time an athlete. */
+  const warming = new Map<string, AbortController>();
 
   /** Who is waiting on each job's stream. */
   const listeners = new Map<string, Set<() => void>>();
@@ -503,10 +546,21 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     for (const listener of [...(listeners.get(id) ?? [])]) listener();
   };
 
-  const logged = (status: AnalysisJobStatus, failure?: string | null): void => {
+  const logged = (status: AnalysisJobStatus, failure?: string | null, usage?: AgentUsage): void => {
     logEvent(log, 'analysis-job', {
       state: status,
       ...(failure === null || failure === undefined ? {} : { code: failure }),
+      // What a write-up's run came to (#2840): numbers only, never a tool's name or the model's text.
+      ...(usage === undefined
+        ? {}
+        : {
+            turns: usage.turns,
+            toolCalls: usage.toolCalls,
+            toolsUsed: usage.toolsUsed,
+            tokensIn: usage.tokensIn,
+            tokensOut: usage.tokensOut,
+            ms: usage.milliseconds,
+          }),
     });
   };
 
@@ -535,6 +589,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
         .catch(() => undefined);
     };
     let outcome: EngineEnding;
+    let usage: AgentUsage | undefined;
     try {
       // Read again on the way out of the table: what is stored is what was checked.
       const stored = JSON.parse(job.inputJson) as unknown;
@@ -565,6 +620,9 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
               },
               controller.signal,
               emit,
+              (reported) => {
+                usage = reported;
+              },
             )
           : { kind: 'failed', why: 'engine-error' };
       }
@@ -578,7 +636,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     if (stopping) return;
     const ended = ending(controller.signal.aborted ? { kind: 'cancelled' } : outcome, now());
     if ((await store.endAnalysisJob(job.athleteId, job.id, ended)) !== undefined) {
-      logged(ended.status, ended.failure);
+      logged(ended.status, ended.failure, usage);
     }
     notify(job.id);
   }
@@ -744,6 +802,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
           return refused([{ field: key, problem: 'is not a field of a job' }]);
         }
       }
+      // Version 1's input, which the agent's version 2 reads unchanged (#2840, `agent.ts` §`AGENT_TEMPLATE`).
       if (body.templateVersion !== ANALYSIS_AGENT_TEMPLATE_V1.version) {
         return refused([
           { field: 'templateVersion', problem: 'must be a template version this instance runs' },
@@ -845,6 +904,37 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       return { ok: true, value: { jobId: id } };
     },
 
+    async warmReplan(caller, body) {
+      const engine = options.replan;
+      if (engine === undefined || !(await options.available())) {
+        return { ok: false, code: 'analysis_off' };
+      }
+      for (const key of Object.keys(body)) {
+        if (key !== 'source')
+          return refused([{ field: key, problem: 'is not a field of a warm-up' }]);
+      }
+      if (body.source !== 'instance-local' && body.source !== 'instance-hosted') {
+        return refused([{ field: 'source', problem: 'must be instance-local or instance-hosted' }]);
+      }
+      const notOffered = await refusedSource(caller.athleteId, body.source);
+      if (notOffered !== undefined) return notOffered;
+      // A hosted model is never loaded by anyone but its service; one in flight is enough.
+      if (body.source !== 'instance-local' || engine.warm === undefined || stopping) {
+        return { ok: true, value: { warming: false } };
+      }
+      if (warming.has(caller.athleteId)) return { ok: true, value: { warming: true } };
+      if (!replanWarms.allow(caller.athleteId)) return { ok: false, code: 'rate_limited' };
+      const controller = new AbortController();
+      warming.set(caller.athleteId, controller);
+      void engine
+        .warm(caller.athleteId, controller.signal)
+        .catch(() => false)
+        .finally(() => {
+          if (warming.get(caller.athleteId) === controller) warming.delete(caller.athleteId);
+        });
+      return { ok: true, value: { warming: true } };
+    },
+
     async read(caller, id) {
       const job = await store.getAnalysisJob(caller.athleteId, id);
       return job === undefined
@@ -906,6 +996,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     async stop() {
       stopping = true;
       for (const controller of running.values()) controller.abort();
+      for (const controller of warming.values()) controller.abort();
       for (const finish of [...streams]) finish();
       while (working !== undefined) await working;
     },

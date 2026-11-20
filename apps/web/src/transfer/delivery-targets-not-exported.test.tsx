@@ -972,11 +972,17 @@ const FORMATS = ['fit', 'gpx', 'tcx'] as const satisfies readonly ActivityFileFo
 
 // ---------------------------------------------------------------------------
 
-/** Ridden once, under coverage too: about three times the ride's own few seconds. */
-const RIDE = { timeout: 20_000 } as const;
+/*
+ * Ridden once, by the first case to ask (`theRide`). #2528, #1688's ruling:
+ * these cases carried a 20 s per-case limit, and no case here carries one now.
+ * On this Mac, Node 26, at a load average near 2, the case that rides
+ * 687 ms without coverage and 1 462 ms with `--coverage`, and the level's
+ * ride (`theLevelRide`) 590 ms and 1 353 ms; every other case reads a ride
+ * already made and takes 50 ms or less with `--coverage`. The removal changes nothing they run.
+ */
 
 describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
-  it('rides a round with deliveries in it over the targets the scan looks for', RIDE, async () => {
+  it('rides a round with deliveries in it over the targets the scan looks for', async () => {
     const ride = await theRide();
     expect(ride.targets).toHaveLength(WEEK.houses);
     // The round ran over these houses: their markers were drawn on the ride's first frame.
@@ -998,7 +1004,7 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
     }
   });
 
-  it('stores none of it with the ride, its streams or its laps', RIDE, async () => {
+  it('stores none of it with the ride, its streams or its laps', async () => {
     const ride = await theRide();
     const markers = markersOf(ride.targets);
     const [activity, streams, laps, summaries] = await ride.harness.read(async (store) => [
@@ -1023,7 +1029,7 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
     ]).toStrictEqual([]);
   });
 
-  it('keeps only the week’s counts on the device', RIDE, async () => {
+  it('keeps only the week’s counts on the device', async () => {
     const ride = await theRide();
     const stored = JSON.parse(
       localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY) ?? 'null',
@@ -1049,45 +1055,37 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
     expect(kept).toStrictEqual([]);
   });
 
-  it.each(FORMATS)(
-    'exports none of it in an account export, %s',
-    async (format) => {
-      const ride = await theRide();
-      const files: DownloadableFile[] = [];
-      const report = await ride.harness.read((store) =>
-        exportEverything({
-          store,
-          athleteId: ATHLETE_A,
-          format,
-          onFile: (file) => {
-            files.push(file);
-          },
-        }),
-      );
-      expect(report.exported).toBe(1);
-      // Not vacuous: the ride's file is there and decodes, beside the manifest.
-      const rideFile = files.find((file) => file.fileName.endsWith(`.${format}`));
-      expect(rideFile && decoded(rideFile.fileName, rideFile.bytes)).toBeDefined();
-      const markers = markersOf(ride.targets);
-      expect(files.flatMap((file) => tracesInFile(file, markers))).toStrictEqual([]);
-    },
-    RIDE.timeout,
-  );
+  it.each(FORMATS)('exports none of it in an account export, %s', async (format) => {
+    const ride = await theRide();
+    const files: DownloadableFile[] = [];
+    const report = await ride.harness.read((store) =>
+      exportEverything({
+        store,
+        athleteId: ATHLETE_A,
+        format,
+        onFile: (file) => {
+          files.push(file);
+        },
+      }),
+    );
+    expect(report.exported).toBe(1);
+    // Not vacuous: the ride's file is there and decodes, beside the manifest.
+    const rideFile = files.find((file) => file.fileName.endsWith(`.${format}`));
+    expect(rideFile && decoded(rideFile.fileName, rideFile.bytes)).toBeDefined();
+    const markers = markersOf(ride.targets);
+    expect(files.flatMap((file) => tracesInFile(file, markers))).toStrictEqual([]);
+  });
 
-  it.each(FORMATS)(
-    'exports none of it in the single-ride export, %s',
-    async (format) => {
-      const ride = await theRide();
-      const { file } = await ride.harness.read((store) =>
-        exportActivity({ store, athleteId: ATHLETE_A, activityId: RIDE_ID, format }),
-      );
-      expect(decoded(file.fileName, file.bytes)).toBeDefined();
-      expect(tracesInFile(file, markersOf(ride.targets))).toStrictEqual([]);
-    },
-    RIDE.timeout,
-  );
+  it.each(FORMATS)('exports none of it in the single-ride export, %s', async (format) => {
+    const ride = await theRide();
+    const { file } = await ride.harness.read((store) =>
+      exportActivity({ store, athleteId: ATHLETE_A, activityId: RIDE_ID, format }),
+    );
+    expect(decoded(file.fileName, file.bytes)).toBeDefined();
+    expect(tracesInFile(file, markersOf(ride.targets))).toStrictEqual([]);
+  });
 
-  it('sends none of it in the payload sync builds for the ride', RIDE, async () => {
+  it('sends none of it in the payload sync builds for the ride', async () => {
     const ride = await theRide();
     const instance = scriptedInstance();
     const deviceKey = await fixedDeviceKey();
@@ -1121,7 +1119,7 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
   });
   // Last of the ride's cases, and in file order (Vitest's default, never shuffled here): sync
   // has written its key and state into the same store, so the walk reads those rows too.
-  it('stores none of it in any table of the database', RIDE, async () => {
+  it('stores none of it in any table of the database', async () => {
     const ride = await theRide();
     await ride.harness.discard();
     const tables = await everyRow(ride.harness.databaseName);
@@ -1166,30 +1164,26 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
   const levelMarkers = (targets: readonly DeliveryTarget[]): Marker[] =>
     markersOf(targets, ON_LEVEL.origin);
 
-  it(
-    'rides the level’s round, with deliveries in it, over targets the scan can find',
-    RIDE,
-    async () => {
-      const ride = await theLevelRide();
-      // #2365: the houses to deliver to and those that must not get a parcel, together.
-      expect(ride.targets).toHaveLength(LEVEL.round.houses);
-      // The houses in view on the ride's first frame are the targets the scan looks for.
-      const drawnMarkers = ride.drawn[0]?.delivery?.markers ?? [];
-      expect(drawnMarkers.length).toBeGreaterThan(0);
-      for (const marker of drawnMarkers) {
-        expect(ride.targets.some(({ x, z }) => x === marker.x && z === marker.z)).toBe(true);
+  it('rides the level’s round, with deliveries in it, over targets the scan can find', async () => {
+    const ride = await theLevelRide();
+    // #2365: the houses to deliver to and those that must not get a parcel, together.
+    expect(ride.targets).toHaveLength(LEVEL.round.houses);
+    // The houses in view on the ride's first frame are the targets the scan looks for.
+    const drawnMarkers = ride.drawn[0]?.delivery?.markers ?? [];
+    expect(drawnMarkers.length).toBeGreaterThan(0);
+    for (const marker of drawnMarkers) {
+      expect(ride.targets.some(({ x, z }) => x === marker.x && z === marker.z)).toBe(true);
+    }
+    const delivered = Number(/^(\d+)/.exec(ride.houses?.detail ?? '')?.[1] ?? '0');
+    expect(delivered).toBeGreaterThan(0);
+    for (const target of ride.targets) {
+      for (const value of [target.distance, target.x, target.z]) {
+        expect(Number.isInteger(value)).toBe(false);
       }
-      const delivered = Number(/^(\d+)/.exec(ride.houses?.detail ?? '')?.[1] ?? '0');
-      expect(delivered).toBeGreaterThan(0);
-      for (const target of ride.targets) {
-        for (const value of [target.distance, target.x, target.z]) {
-          expect(Number.isInteger(value)).toBe(false);
-        }
-      }
-    },
-  );
+    }
+  });
 
-  it('stores none of it with the ride, its streams or its laps', RIDE, async () => {
+  it('stores none of it with the ride, its streams or its laps', async () => {
     const ride = await theLevelRide();
     const markers = levelMarkers(ride.targets);
     const [activity, streams, laps] = await ride.harness.read(async (store) => [
@@ -1214,27 +1208,21 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
     expect(jsonOf([streams, laps])).not.toContain(LEVEL_KEY);
   });
 
-  it(
-    'keeps nothing of the week, and nothing of the round, on the device (ADR 0065 D-9.3)',
-    RIDE,
-    async () => {
-      const ride = await theLevelRide();
-      expect(JSON.parse(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY) ?? 'null')).toEqual(
-        WEEK,
+  it('keeps nothing of the week, and nothing of the round, on the device (ADR 0065 D-9.3)', async () => {
+    const ride = await theLevelRide();
+    expect(JSON.parse(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY) ?? 'null')).toEqual(WEEK);
+    const markers = levelMarkers(ride.targets);
+    const kept: string[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key === null) continue;
+      const own = key.startsWith('oyl.game.delivery.');
+      kept.push(
+        ...scan(`localStorage ${key}`, markers, localStorage.getItem(key) ?? '', undefined, !own),
       );
-      const markers = levelMarkers(ride.targets);
-      const kept: string[] = [];
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        if (key === null) continue;
-        const own = key.startsWith('oyl.game.delivery.');
-        kept.push(
-          ...scan(`localStorage ${key}`, markers, localStorage.getItem(key) ?? '', undefined, !own),
-        );
-      }
-      expect(kept).toStrictEqual([]);
-    },
-  );
+    }
+    expect(kept).toStrictEqual([]);
+  });
 
   it.each(FORMATS)(
     'exports none of it, and not the level’s id, in the single-ride export, %s',
@@ -1256,40 +1244,35 @@ describe('a ride on a built-in level keeps no target either — #2362, ADR 0065 
         ]),
       ).toStrictEqual([]);
     },
-    RIDE.timeout,
   );
 
-  it(
-    'sends none of it, and not the level’s id, in the payload sync builds for the ride',
-    RIDE,
-    async () => {
-      const ride = await theLevelRide();
-      const instance = scriptedInstance();
-      const deviceKey = await fixedDeviceKey();
-      await ride.harness.write((store) => store.putDeviceKey(deviceKey));
-      const report = await ride.harness.write((store) =>
-        syncWithInstance({
-          sealed: instance.sealed,
-          store,
-          athleteId: ATHLETE_A,
-          signingKey: () => ensureDeviceSigningKey(store, ATHLETE_A, { now: () => NOW }),
-          sha256: webCryptoSha256,
-          verifier: webCryptoVerifier,
-          now: () => NOW,
-          timeZone: 'Europe/London',
-          rideSummary: rideSummaryOf(store as unknown as RideSummaryStore, ATHLETE_A),
-          athleteKeys: () => athleteKeysFrom(instance.sealed),
-          newDocumentId: () => crypto.randomUUID(),
-        }),
-      );
-      expect(report.pushed).toBe(1);
-      expect(report.failures).toStrictEqual([]);
-      expect(tracesInValue('sync', instance.sent, levelMarkers(ride.targets))).toStrictEqual([]);
-      expect(jsonOf(instance.sent)).not.toContain(LEVEL_KEY);
-      // #2363: nor the levels this device has finished (ADR 0065 D-9.2).
-      expect(levelProgressIn(() => [jsonOf(instance.sent)])).toStrictEqual([]);
-    },
-  );
+  it('sends none of it, and not the level’s id, in the payload sync builds for the ride', async () => {
+    const ride = await theLevelRide();
+    const instance = scriptedInstance();
+    const deviceKey = await fixedDeviceKey();
+    await ride.harness.write((store) => store.putDeviceKey(deviceKey));
+    const report = await ride.harness.write((store) =>
+      syncWithInstance({
+        sealed: instance.sealed,
+        store,
+        athleteId: ATHLETE_A,
+        signingKey: () => ensureDeviceSigningKey(store, ATHLETE_A, { now: () => NOW }),
+        sha256: webCryptoSha256,
+        verifier: webCryptoVerifier,
+        now: () => NOW,
+        timeZone: 'Europe/London',
+        rideSummary: rideSummaryOf(store as unknown as RideSummaryStore, ATHLETE_A),
+        athleteKeys: () => athleteKeysFrom(instance.sealed),
+        newDocumentId: () => crypto.randomUUID(),
+      }),
+    );
+    expect(report.pushed).toBe(1);
+    expect(report.failures).toStrictEqual([]);
+    expect(tracesInValue('sync', instance.sent, levelMarkers(ride.targets))).toStrictEqual([]);
+    expect(jsonOf(instance.sent)).not.toContain(LEVEL_KEY);
+    // #2363: nor the levels this device has finished (ADR 0065 D-9.2).
+    expect(levelProgressIn(() => [jsonOf(instance.sent)])).toStrictEqual([]);
+  });
 });
 
 describe('a ride on a level in rain and at dusk records what a clear one does — #2366, ADR 0065 D-11', () => {

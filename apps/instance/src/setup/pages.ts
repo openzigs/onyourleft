@@ -47,6 +47,10 @@ import {
   AI_PULL_HEADING,
   AI_PULL_HINT,
   AI_PULL_LABEL,
+  AI_RECOMMENDED_BUTTON,
+  AI_RECOMMENDED_HINT,
+  AI_RECOMMENDED_MODEL,
+  AI_INSTALLED_FIRST_TEXT,
   AI_SERVER_TEXT,
   AI_SKIP_TEXT,
   AI_STEP_LEAD,
@@ -62,12 +66,14 @@ import {
   BACKUPS_LAST_COPY_FAILED_TEXT,
   BACKUPS_LAST_FAILED_TEXT,
   BACKUPS_LAST_NOT_CONFIGURED_TEXT,
+  BACKUPS_BEFORE_CLAIM_TEXT,
   BACKUPS_LAST_RAN_TEXT,
   BACKUPS_NONE_YET_TEXT,
   BACKUPS_STEP_LEAD,
   BACKUPS_TOO_SOON_TEXT,
   BACKUPS_WAITING_TEXT,
   bytesText,
+  CLAIM_ADDRESS_LEAD,
   CLAIM_CODE_LEAD,
   CLAIM_EXPIRED_TEXT,
   CLAIM_LEAD,
@@ -77,13 +83,16 @@ import {
   CLAIM_NOT_CONFIRMED_TEXT,
   CLAIM_PENDING_LABEL,
   CLAIM_PENDING_LEAD,
+  CLAIM_REACH_TEXT,
   CLAIM_SCANNED_BUTTON,
   CLAIM_SHOW_BUTTON,
+  CLAIM_TABLET_CHECK_LEAD,
   CLAIM_WAITING_TEXT,
   CLAIM_YES_BUTTON,
   CLAIMED_NEXT_TEXT,
   CLAIMED_TEXT,
   CLAIMED_WRONG_TEXT,
+  CLAIM_RESTARTED_TEXT,
   codeWorksOnceText,
   FINISH_BUTTON,
   FINISH_CLOSE_TEXT,
@@ -95,11 +104,13 @@ import {
   INVITE_MAKE_BUTTON,
   INVITE_NO_OWNER_TEXT,
   INVITE_NOT_INVITE_MODE_TEXT,
+  INVITE_REACH_TEXT,
   INVITE_STEP_LEAD,
   INVITE_TAKEN_TEXT,
   KIT_DOWNLOAD_BUTTON,
   KIT_KEEP_TEXT,
   KIT_NONE_TEXT,
+  KIT_AGAIN_TEXT,
   KIT_ONCE_TEXT,
   KIT_STEP_LEAD,
   KIT_TAKEN_TEXT,
@@ -107,6 +118,7 @@ import {
   PASSKEY_STEP_LATER,
   PASSKEY_STEP_LEAD,
   passkeyStepHow,
+  REACH_CHECKED_TEXT,
   ranAgoText,
   REGISTRATION_SAVE_BUTTON,
   REGISTRATION_STEP_LEAD,
@@ -114,9 +126,15 @@ import {
   SETUP_CHECK_NOW_BUTTON,
   SETUP_CODE_LABEL,
   SETUP_CODE_REFUSED_TEXT,
+  SETUP_EXAMPLE_ADDRESS_EXPERT_LINES,
+  SETUP_EXAMPLE_ADDRESS_HEADING,
+  SETUP_EXAMPLE_ADDRESS_TEXT,
   SETUP_EXPERT_SUMMARY,
+  type SetupHowLine,
   SETUP_FORM_REFUSED_TEXT,
   SETUP_LOCKED_LEAD,
+  SETUP_COMMANDS,
+  SETUP_COMMANDS_WHERE,
   SETUP_NEW_CODE_TEXT,
   SETUP_NEXT_BUTTON,
   SETUP_REGISTRATION_MODE_TEXT,
@@ -129,8 +147,28 @@ import {
   SETUP_WRONG_ADDRESS_TEXT,
   setupStepNumberText,
   setupSummaryLines,
+  TAILNET_ACL,
+  TAILNET_ACL_LEAD,
+  TAILNET_ADDRESS_LEAD,
+  TAILNET_ADDRESS_OK_TEXT,
+  TAILNET_ADDRESS_WRONG_TEXT,
+  TAILNET_CHANGE_CLOUDFLARE_LINES,
+  TAILNET_CHANGE_EXPERT_LINES,
+  TAILNET_CHANGE_HEADING,
+  TAILNET_CHANGE_WARNING,
+  TAILNET_CLOUDFLARE_TEXT,
+  TAILNET_FUNNEL_TEXT,
+  TAILNET_KEYS_UNREADABLE_TEXT,
+  TAILNET_NEVER_YOURS_TEXT,
+  TAILNET_NO_CARD_TEXT,
+  TAILNET_NO_PATH_TEXT,
+  TAILNET_RIDERS_HEADING,
+  TAILNET_RIDERS_TEXT,
+  TAILNET_STEP_LEAD,
   type OperateLocalModel,
   type OperateRegistrationMode,
+  type OperateRemotePath,
+  type ReachPath,
   type SetupSummary,
 } from '@onyourleft/operate-text';
 
@@ -191,7 +229,8 @@ ${card(`<form method="post" action="/setup/sign-in">
 ${problem}<input type="text" id="code" name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" required${refused ? ' aria-describedby="code-problem"' : ''}>
 <button type="submit">Open the setup</button>
 </form>`)}</div>
-<p class="hint">${escapeHtml(SETUP_NEW_CODE_TEXT)}</p>`,
+<p class="hint">${escapeHtml(SETUP_NEW_CODE_TEXT)} ${escapeHtml(SETUP_COMMANDS_WHERE)}</p>
+${commandBlock(SETUP_COMMANDS.setupCode)}`,
   );
 }
 
@@ -219,6 +258,26 @@ export function messagePage(heading: string, text: string): string {
     null,
     heading,
     `<p>${escapeHtml(text)}</p>\n<p><a href="/setup">Go back to the setup page</a>.</p>`,
+  );
+}
+
+/**
+ * The page every setup address answers with while the instance's address is
+ * still the template's example (#2855): the setup has not opened, why, and
+ * what to set — one plain sentence, and the setting's name for whoever wants
+ * it. No form, so no code is typed and no session is opened: a claim code, an
+ * invite or an emergency kit drawn now would name an address that is not this
+ * instance's. It names the example address nowhere: the owner's own goes there.
+ */
+export function exampleAddressPage(name: string | null): string {
+  const expert = SETUP_EXAMPLE_ADDRESS_EXPERT_LINES.map(
+    (line) => `<li>${escapeHtml(line)}</li>`,
+  ).join('\n');
+  return signedOutPage(
+    name,
+    SETUP_EXAMPLE_ADDRESS_HEADING,
+    `<p class="problem">${escapeHtml(SETUP_EXAMPLE_ADDRESS_TEXT)}</p>
+${expertDetails(`<ul>\n${expert}\n</ul>`)}`,
   );
 }
 
@@ -254,6 +313,13 @@ export interface SetupFrame {
   readonly csrf: string;
 }
 
+/**
+ * A command to run on this machine, whole, in a block to copy (#2858): one
+ * click selects all of it (`style.ts`), since the setup pages carry no script.
+ */
+const commandBlock = (command: string): string =>
+  `<pre class="copy"><code>${escapeHtml(command)}</code></pre>`;
+
 const csrfField = (csrf: string): string =>
   `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">`;
 
@@ -273,6 +339,21 @@ function buttonForm(
     .join('');
   // Named, as every form on a page of several must be (`a11y/audit.ts` §`landmarks-are-distinguishable`).
   return `<form method="post" action="${escapeHtml(action)}" aria-label="${escapeHtml(label)}">${csrfField(csrf)}${hidden}<button type="submit"${tone === 'secondary' ? ' class="secondary"' : ''}>${escapeHtml(label)}</button></form>`;
+}
+
+/**
+ * A step's command-line details as a list: each line's words, then each
+ * command it names in its own block to copy (#2858), never inline in a sentence.
+ */
+function howList(lines: readonly SetupHowLine[], list: 'ol' | 'ul'): string {
+  const items = lines
+    .map((line) =>
+      line.commands.length === 0
+        ? `<li>${escapeHtml(line.text)}</li>`
+        : `<li>${escapeHtml(line.text)}\n${line.commands.map((command) => commandBlock(command)).join('\n')}</li>`,
+    )
+    .join('\n');
+  return `<${list}>\n${items}\n</${list}>`;
 }
 
 /** A collapsed block of commands and settings names, for whoever wants them. */
@@ -361,6 +442,38 @@ const checkNow = (path: string, text: string): string =>
 
 // --- claim
 
+/**
+ * Where the tablet reaches this server, and what it needs before it can
+ * (#2855): said before the claim code is shown, and beside it.
+ */
+export interface ReachView {
+  /** `OYL_INSTANCE_ORIGIN`: the address the card names, and so the one the tablet uses. */
+  readonly origin: string;
+  readonly path: ReachPath;
+  /**
+   * What this computer could check by itself: the tunnel connected or not, or
+   * `null` when it cannot tell — on a tailnet it never can, and says nothing.
+   */
+  readonly checked: 'connected' | 'not-connected' | null;
+}
+
+/**
+ * The address, what the tablet needs first, and how to check it from the
+ * tablet: `<origin>/health`, which answers anybody. The address is the
+ * operator's own setting, escaped; it is shown on this loopback page only.
+ */
+function reachPart(reach: ReachView): string {
+  const checked =
+    reach.checked === null
+      ? ''
+      : reach.checked === 'connected'
+        ? `\n<p class="notice" role="status">${escapeHtml(REACH_CHECKED_TEXT.connected)}</p>`
+        : `\n<p class="problem">${escapeHtml(REACH_CHECKED_TEXT['not-connected'])}</p>`;
+  return card(`<p>${escapeHtml(CLAIM_ADDRESS_LEAD)} <code>${escapeHtml(reach.origin)}</code></p>
+<p class="warning">${escapeHtml(CLAIM_REACH_TEXT[reach.path])}</p>
+<p>${escapeHtml(CLAIM_TABLET_CHECK_LEAD)} <code>${escapeHtml(`${reach.origin}/health`)}</code></p>${checked}`);
+}
+
 /** What the claim step shows. */
 export type ClaimView =
   /** The instance has an owner. */
@@ -375,7 +488,10 @@ export type ClaimView =
       readonly kind: 'open';
       readonly card: boolean;
       readonly notConfirmed: boolean;
+      readonly reach: ReachView;
       readonly expired: boolean;
+      /** A restart voided a code the server showed before, and none has been shown since (#2858). */
+      readonly restarted: boolean;
     }
   /** A code minted and not yet scanned: the card and it, as a QR and as text, and the wait. */
   | {
@@ -386,6 +502,7 @@ export type ClaimView =
       readonly expiresAt: string;
       /** How long the code has left, in seconds. */
       readonly secondsLeft: number;
+      readonly reach: ReachView;
     };
 
 export function claimBody(view: ClaimView, csrf: string): string {
@@ -393,7 +510,8 @@ export function claimBody(view: ClaimView, csrf: string): string {
     case 'claimed':
       return `<p class="notice" role="status">${escapeHtml(CLAIMED_TEXT)}</p>
 <p>${escapeHtml(CLAIMED_NEXT_TEXT)}</p>
-<p class="hint">${escapeHtml(CLAIMED_WRONG_TEXT)}</p>`;
+<p class="hint">${escapeHtml(CLAIMED_WRONG_TEXT)}</p>
+${commandBlock(SETUP_COMMANDS.ownerClaimReset)}`;
     case 'pending':
       return card(`<p>${escapeHtml(CLAIM_PENDING_LEAD)}</p>
 <p>${escapeHtml(CLAIM_PENDING_LABEL)}:</p>
@@ -407,12 +525,15 @@ ${buttonForm('/setup/claim/discard', csrf, CLAIM_NO_BUTTON, {}, 'secondary')}
         ? CLAIM_NOT_CONFIRMED_TEXT
         : view.expired
           ? CLAIM_EXPIRED_TEXT
-          : null;
+          : view.restarted
+            ? CLAIM_RESTARTED_TEXT
+            : null;
       return `${problem === null ? '' : `<p class="problem" role="alert">${escapeHtml(problem)}</p>\n`}<p>${escapeHtml(CLAIM_LEAD)}</p>
-${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p class="problem">${escapeHtml(CLAIM_NO_CARD_TEXT)}</p>`}`;
+${reachPart(view.reach)}${view.card ? buttonForm('/setup/claim/code', csrf, CLAIM_SHOW_BUTTON) : `<p class="problem">${escapeHtml(CLAIM_NO_CARD_TEXT)}</p>`}`;
     }
     case 'code':
-      return `${cardCodePart(
+      // #2855, owner 2026-11-19: what the tablet needs is read first, above the QR and its button.
+      return `${reachPart(view.reach)}${cardCodePart(
         { purpose: 'claim', card: view.card, code: view.code, expiresAt: view.expiresAt },
         { lead: CLAIM_CODE_LEAD, until: codeWorksOnceText(view.secondsLeft) },
       )}<p class="notice">${escapeHtml(CLAIM_WAITING_TEXT)}</p>
@@ -420,15 +541,90 @@ ${checkAgain('/setup/claim', CLAIM_SCANNED_BUTTON)}`;
   }
 }
 
+// --- tailnet
+
+/** What the tailnet step shows (#2817, ADR 0079 D-2, D-3, D-8). */
+export interface TailnetStepView {
+  /** `OYL_INSTANCE_REMOTE_PATH`, or `null` when it names none. */
+  readonly path: OperateRemotePath | null;
+  /**
+   * The address the RUNNING server read back: the one its card names, which
+   * is what every device pins and reaches; `OYL_INSTANCE_ORIGIN` itself only
+   * when there is no card ({@link keys} is then `none`).
+   */
+  readonly origin: string;
+  /** Whether {@link origin} is a Tailscale name, `https://<machine>.<tailnet>.ts.net`. */
+  readonly tailscaleName: boolean;
+  /**
+   * What a device fetching the keys meets (`GET /v1/instance/keys`): `ready`;
+   * `none`, no card can be drawn; `unreadable`, keys held that do not open at
+   * this address — what a changed origin leaves — so nothing reaches it yet.
+   */
+  readonly keys: 'ready' | 'none' | 'unreadable';
+}
+
+/**
+ * The tailnet step (#2817): the address the running server read back and
+ * whether it fits the path, how riders join (never as the owner, ADR 0079
+ * D-2), the access rule to paste, and — said BEFORE how to change the address
+ * — what changing it costs (D-8). Nothing here changes a setting: the address
+ * is `.env`'s alone (ADR 0080's table), so the page says how, and "Check now"
+ * reads it back from the server once it has been started again.
+ */
+export function tailnetBody(view: TailnetStepView): string {
+  const address = (() => {
+    const read = `<p>${escapeHtml(TAILNET_ADDRESS_LEAD)} <code>${escapeHtml(view.origin)}</code></p>`;
+    const tailnetPath = view.path === 'tailnet' || view.path === 'funnel';
+    const verdict =
+      view.keys === 'none'
+        ? `<p class="problem">${escapeHtml(TAILNET_NO_CARD_TEXT)}</p>`
+        : view.keys === 'unreadable'
+          ? `<p class="problem">${escapeHtml(TAILNET_KEYS_UNREADABLE_TEXT)}</p>`
+          : tailnetPath && !view.tailscaleName
+            ? `<p class="problem">${escapeHtml(TAILNET_ADDRESS_WRONG_TEXT)}</p>`
+            : view.tailscaleName
+              ? `<p class="notice">${escapeHtml(TAILNET_ADDRESS_OK_TEXT)}</p>`
+              : '';
+    return card(`${read}\n${verdict}\n${checkAgain('/setup/tailnet', SETUP_CHECK_NOW_BUTTON)}`);
+  })();
+  const riders = TAILNET_RIDERS_TEXT.map((line) => `<li>${escapeHtml(line)}</li>`).join('\n');
+  const joining = `<h2>${escapeHtml(TAILNET_RIDERS_HEADING)}</h2>
+<ul>
+${riders}
+</ul>
+<p class="warning">${escapeHtml(TAILNET_NEVER_YOURS_TEXT)}</p>
+<p>${escapeHtml(TAILNET_ACL_LEAD)}</p>
+<pre class="copy"><code>${escapeHtml(TAILNET_ACL)}</code></pre>`;
+  const how = howList(
+    view.path === 'cloudflare' ? TAILNET_CHANGE_CLOUDFLARE_LINES : TAILNET_CHANGE_EXPERT_LINES,
+    'ol',
+  );
+  // The warning comes first: nothing about HOW is read before what it costs (ADR 0079 D-8).
+  const change = `<h2>${escapeHtml(TAILNET_CHANGE_HEADING)}</h2>
+<p class="warning">${escapeHtml(TAILNET_CHANGE_WARNING)}</p>
+${expertDetails(how)}`;
+  switch (view.path) {
+    case 'cloudflare':
+      return `<p>${escapeHtml(TAILNET_CLOUDFLARE_TEXT)}</p>
+${address}${change}`;
+    case null:
+      return `<p class="hint">${escapeHtml(TAILNET_NO_PATH_TEXT)}</p>
+${address}${joining}
+${change}`;
+    case 'tailnet':
+    case 'funnel':
+      return `<p>${escapeHtml(TAILNET_STEP_LEAD)}</p>
+${view.path === 'funnel' ? `<p class="warning">${escapeHtml(TAILNET_FUNNEL_TEXT)}</p>\n` : ''}${address}${joining}
+${change}`;
+  }
+}
+
 // --- passkey
 
 export function passkeyBody(adminAddress: string): string {
-  const steps = passkeyStepHow(adminAddress)
-    .map((line) => `<li>${escapeHtml(line)}</li>`)
-    .join('\n');
   return `<p>${escapeHtml(PASSKEY_STEP_LEAD)}</p>
 <p>${escapeHtml(PASSKEY_STEP_LATER)}</p>
-${expertDetails(`<ol>\n${steps}\n</ol>`)}`;
+${expertDetails(howList(passkeyStepHow(adminAddress), 'ol'))}`;
 }
 
 // --- the emergency kit
@@ -441,7 +637,9 @@ export function secretsBody(view: KitView, csrf: string): string {
   const action =
     view === 'offer'
       ? `${buttonForm('/setup/secrets/kit', csrf, KIT_DOWNLOAD_BUTTON)}\n<p class="hint">${escapeHtml(KIT_ONCE_TEXT)}</p>`
-      : `<p class="notice" role="status">${escapeHtml(KIT_TAKEN_TEXT)}</p>`;
+      : `<p class="notice" role="status">${escapeHtml(KIT_TAKEN_TEXT)}</p>
+<p class="hint">${escapeHtml(KIT_AGAIN_TEXT)}</p>
+${commandBlock(SETUP_COMMANDS.setupCode)}`;
   return `<p>${escapeHtml(KIT_STEP_LEAD)}</p>
 <p class="warning">${escapeHtml(KIT_KEEP_TEXT)}</p>
 ${action}`;
@@ -457,6 +655,8 @@ export interface BackupStepRecord {
   readonly secondsAgo: number;
   readonly outcome: 'done' | 'failed';
   readonly offBox: 'copied' | 'failed' | 'not-configured' | null;
+  /** Made before the owner was claimed, so it does not hold the owner's account (#2858). */
+  readonly beforeClaim: boolean;
 }
 
 export interface BackupsStepView {
@@ -490,16 +690,15 @@ export function backupsBody(view: BackupsStepView, csrf: string): string {
       ? `<p>${escapeHtml(BACKUPS_NONE_YET_TEXT)}</p>\n${button}`
       : `<p>${escapeHtml(BACKUPS_LAST_RAN_TEXT)} <time datetime="${escapeHtml(view.last.at)}">${escapeHtml(ranAgoText(view.last.secondsAgo))}</time>.</p>
 ${lastBackupResult(view.last)}
-${button}`;
+${view.last.beforeClaim ? `<p class="warning">${escapeHtml(BACKUPS_BEFORE_CLAIM_TEXT)}</p>\n` : ''}${button}`;
   const tooSoon =
     view.notice === 'too-soon' && !view.waiting
       ? `<p class="problem" role="alert">${escapeHtml(BACKUPS_TOO_SOON_TEXT)}</p>\n`
       : '';
-  const expert = BACKUPS_EXPERT_LINES.map((line) => `<li>${escapeHtml(line)}</li>`).join('\n');
   return `<p>${escapeHtml(BACKUPS_STEP_LEAD)}</p>
 ${tooSoon}${card(state)}<p>${escapeHtml(BACKUPS_FOLDERS_TEXT)}</p>
 <p class="warning">${escapeHtml(OFFBOX_RULE_TEXT)}</p>
-${expertDetails(`<ul>\n${expert}\n</ul>`)}`;
+${expertDetails(howList(BACKUPS_EXPERT_LINES, 'ul'))}`;
 }
 
 // --- registration
@@ -535,7 +734,7 @@ ${choices}
 // --- invite
 
 export type InviteView =
-  | { readonly kind: 'offer'; readonly inviteMode: boolean }
+  | { readonly kind: 'offer'; readonly inviteMode: boolean; readonly reach: ReachPath }
   | { readonly kind: 'taken' }
   | { readonly kind: 'no-owner' }
   | { readonly kind: 'no-card' }
@@ -547,14 +746,20 @@ export type InviteView =
       /** How long the invite has left, in seconds. */
       readonly secondsLeft: number;
       readonly inviteMode: boolean;
+      /** What the rider's device needs first (#2855). */
+      readonly reach: ReachPath;
     };
 
 export function inviteBody(view: InviteView, csrf: string): string {
   const notInvite = (inviteMode: boolean): string =>
     inviteMode ? '' : `<p class="hint">${escapeHtml(INVITE_NOT_INVITE_MODE_TEXT)}</p>`;
+  // #2855: the rider's device needs the same way in as the owner's tablet did.
+  const needs = (reach: ReachPath): string =>
+    `<p class="warning">${escapeHtml(INVITE_REACH_TEXT[reach])}</p>`;
   switch (view.kind) {
     case 'offer':
       return `<p>${escapeHtml(INVITE_STEP_LEAD)}</p>
+${needs(view.reach)}
 ${buttonForm('/setup/invite/code', csrf, INVITE_MAKE_BUTTON)}
 ${notInvite(view.inviteMode)}`;
     case 'taken':
@@ -569,7 +774,8 @@ ${notInvite(view.inviteMode)}`;
       return `${cardCodePart(
         { purpose: 'invite', card: view.card, code: view.code, expiresAt: view.expiresAt },
         { lead: INVITE_CODE_LEAD, until: codeWorksOnceText(view.secondsLeft) },
-      )}${notInvite(view.inviteMode)}`;
+      )}${needs(view.reach)}
+${notInvite(view.inviteMode)}`;
   }
 }
 
@@ -603,10 +809,25 @@ ${action}</li>`;
 }
 
 /**
+ * The model Ollama already has that the step offers first, with no download
+ * (#2869, ADR 0086 D-4): one that can call tools and Ollama reports loaded
+ * wholly in the graphics card's memory, else the recommended model if it is
+ * there. Read from what Ollama reports, never guessed from a file's size.
+ */
+export function installedFit(models: readonly OperateLocalModel[]): OperateLocalModel | undefined {
+  const tools = models.filter((model) => model.tools === 'listed');
+  return (
+    tools.find((model) => model.gpu === 'all') ??
+    tools.find((model) => model.name === AI_RECOMMENDED_MODEL)
+  );
+}
+
+/**
  * The optional AI step: whether write-ups are on, the Ollama found and what
- * it lists, and a download by the name the owner types. ⚠️ No model is named
- * by this page, and nothing Ollama said of a download is drawn: only its
- * byte counts (`analysis/ollama-setup.ts`).
+ * it lists, and a download by the name the owner types. ⚠️ The one model this
+ * page names of its own is the recommended download (ADR 0086), and nothing
+ * Ollama said of a download is drawn: only its byte counts
+ * (`analysis/ollama-setup.ts`).
  */
 export function aiBody(view: AiStepView, csrf: string): string {
   const problem =
@@ -633,13 +854,26 @@ ${problem === null ? '' : `<p class="problem" role="alert">${escapeHtml(problem)
 ${checkAgain('/setup/ai', AI_LOOK_AGAIN_BUTTON)}
 ${expert}`;
   }
+  // ADR 0086 D-4: with write-ups off, a model already here that fits comes first, and no download
+  // is recommended; with none, the recommended one is a press away (D-3).
+  const fitting = view.model === null ? installedFit(view.server.models) : undefined;
+  const listed =
+    fitting === undefined
+      ? view.server.models
+      : [fitting, ...view.server.models.filter((model) => model !== fitting)];
   const models =
     view.server.models.length === 0
       ? `<p>${escapeHtml(AI_NO_MODELS_TEXT)}</p>`
-      : `<ul class="models">
-${view.server.models.map((model) => aiModelItem(model, model.name === view.model, csrf)).join('\n')}
+      : `${fitting === undefined ? '' : `<p class="notice">${escapeHtml(AI_INSTALLED_FIRST_TEXT)}</p>\n`}<ul class="models">
+${listed.map((model) => aiModelItem(model, model.name === view.model, csrf)).join('\n')}
 </ul>
 <p class="hint">${escapeHtml(AI_USE_HINT)}</p>`;
+  const recommended =
+    view.model === null && fitting === undefined
+      ? `${buttonForm('/setup/ai/pull', csrf, AI_RECOMMENDED_BUTTON, { model: AI_RECOMMENDED_MODEL })}
+<p class="hint">${escapeHtml(AI_RECOMMENDED_HINT)}</p>
+`
+      : '';
   // While a download runs, the wait is the whole state: no second one can be asked for.
   const download =
     view.pull.kind === 'running'
@@ -651,7 +885,7 @@ ${checkAgain('/setup/ai', SETUP_CHECK_NOW_BUTTON)}`
             : view.pull.kind === 'done'
               ? `<p class="notice" role="status">${escapeHtml(AI_PULL_DONE_TEXT)}</p>\n`
               : ''
-        }<form method="post" action="/setup/ai/pull" aria-label="${escapeHtml(AI_PULL_BUTTON)}">${csrfField(csrf)}
+        }${recommended}<form method="post" action="/setup/ai/pull" aria-label="${escapeHtml(AI_PULL_BUTTON)}">${csrfField(csrf)}
 <label for="model">${escapeHtml(AI_PULL_LABEL)}</label>
 <input type="text" id="model" name="model" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="model-hint">
 <p class="hint" id="model-hint">${escapeHtml(AI_PULL_HINT)}</p>

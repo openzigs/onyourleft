@@ -209,6 +209,16 @@ export interface AgentTemplate {
   readonly system: string;
   readonly firstMessage: (input: RideAnalysisInput) => string;
   readonly rewrite: (reasons: readonly ScreenReason[]) => string;
+  /**
+   * The sampling temperature every turn asks for (version 2, #2840), or none,
+   * when the model's own default is used (version 1, which is frozen).
+   */
+  readonly temperature?: number;
+  /**
+   * `'off'` when every turn asks a model on the rider's own box not to reason
+   * before it answers (version 2, #2840); absent, the model's own default.
+   */
+  readonly thinking?: 'off';
 }
 
 export const ANALYSIS_AGENT_TEMPLATE_V1: AgentTemplate = {
@@ -218,3 +228,9 @@ export const ANALYSIS_AGENT_TEMPLATE_V1: AgentTemplate = {
   firstMessage,
   rewrite,
 };
+
+/** Version 1's first message, which version 2 sends unchanged (#2840). */
+export const agentFirstMessageV1 = firstMessage;
+
+/** Version 1's rewrite request, which version 2 sends unchanged (#2840). */
+export const agentRewriteV1 = rewrite;

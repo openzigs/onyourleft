@@ -89,16 +89,19 @@ export function olderHeldText(count: number): string {
  * fingerprint is taken, so a page that may not show them cannot draw them
  * from here.
  */
-export function keyFactRows(keys: {
-  readonly state: OperateKeysWord;
-  readonly current: {
-    readonly serial: number;
-    /** ISO 8601, UTC. */
-    readonly createdAt: string;
-    readonly rotatesAt: string;
-  } | null;
-  readonly olderHeld: number;
-}): readonly OperateRow[] {
+export function keyFactRows(
+  keys: {
+    readonly state: OperateKeysWord;
+    readonly current: {
+      readonly serial: number;
+      /** ISO 8601, UTC. */
+      readonly createdAt: string;
+      readonly rotatesAt: string;
+    } | null;
+    readonly olderHeld: number;
+  },
+  timeZone: string,
+): readonly OperateRow[] {
   const row = (label: string, value: string): OperateRow => ({
     label,
     value,
@@ -112,9 +115,9 @@ export function keyFactRows(keys: {
       : [
           row(
             'Encryption key',
-            currentKeyText(keys.current.serial, momentText(keys.current.createdAt)),
+            currentKeyText(keys.current.serial, momentText(keys.current.createdAt, timeZone)),
           ),
-          row('Rotates by itself', momentText(keys.current.rotatesAt)),
+          row('Rotates by itself', momentText(keys.current.rotatesAt, timeZone)),
         ]),
     row('Older keys held', olderHeldText(keys.olderHeld)),
   ];

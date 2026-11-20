@@ -91,7 +91,7 @@ async function appRows(): Promise<Rows> {
     models: SCRIPTED_MODELS,
     jobs: SCRIPTED_JOBS,
   });
-  mounted = await mount(<OperateAnalysisPanel port={scripted.port} />);
+  mounted = await mount(<OperateAnalysisPanel timeZone="UTC" port={scripted.port} />);
   await settle();
   const root = mounted.container;
   const ownKey = [...root.querySelectorAll('h3')].find(
