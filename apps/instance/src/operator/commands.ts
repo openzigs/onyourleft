@@ -44,11 +44,12 @@ import { readServerConfig } from '../server-config.ts';
 import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { takeLease, type Lease, type LeaseOptions } from './backup-lease.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
-import type {
-  BackupRun,
-  OperatorAction,
-  RegistrationModeSetting,
-  SqlStore,
+import {
+  operatorDetailFits,
+  type BackupRun,
+  type OperatorAction,
+  type RegistrationModeSetting,
+  type SqlStore,
 } from '../store/sql-store.ts';
 import { localTimeText, mintSetupCode } from '../setup/setup-code.ts';
 import { createSync } from '../sync/sync.ts';
@@ -200,12 +201,25 @@ async function asOperatorAction<T>(
 
 /**
  * What a file command writes to standard error when its work is done and its
- * entry could not be written (#2602): a fixed sentence and the action's name,
- * no value.
+ * entry could not be written (#2602): a fixed sentence, the action's name and
+ * — when there is one — why (#2618): SQLite's result code, or the name of the
+ * error. Never a message or a value.
  */
-export function unloggedSentence(action: OperatorAction): string {
-  return `operator: ${action} is done, but its entry could not be written to the operator log.\n`;
+export function unloggedSentence(action: OperatorAction, why?: string): string {
+  const because = why === undefined ? '' : ` (${why})`;
+  return `operator: ${action} is done, but its entry could not be written to the operator log${because}.\n`;
 }
+
+/** Why an entry could not be written, for {@link unloggedSentence}: SQLite's result code, else the error's name. */
+export function unloggedBecause(error: unknown): string {
+  const errcode = (error as { readonly errcode?: unknown } | null)?.errcode;
+  return typeof errcode === 'number' && Number.isSafeInteger(errcode)
+    ? `SQLite error code ${String(errcode)}`
+    : errorName(error);
+}
+
+/** Why {@link loggedAfter} wrote no entry for a detail its action's vocabulary refuses. */
+export const DETAIL_REFUSED = 'its detail is outside the action’s vocabulary';
 
 /**
  * Log a command whose change is FILES once it has ended (#2602): `done` with
@@ -213,11 +227,15 @@ export function unloggedSentence(action: OperatorAction): string {
  * whether the entry was written. The command's outcome is its WORK's: a log
  * that cannot be written — a database with no operator log yet (one not
  * migrated, or restored from before it), a full disk, a lock still held after
- * the retries — leaves the work done and `logged: false`, and anything but a
- * missing table says so on standard error. A deploy whose migrations applied
- * is never stopped by its log entry.
+ * the retries, a store that cannot be opened or closed — leaves the work done
+ * and `logged: false`, and anything but a missing table says so on standard
+ * error. A deploy whose migrations applied is never stopped by its log entry.
+ *
+ * #2618: a `detail` its action's vocabulary refuses is never offered to the
+ * store, which would log the work `failed`: the entry is not written, and
+ * standard error says so. The log never says `failed` for work that succeeded.
  */
-async function loggedAfter<T>(
+export async function loggedAfter<T>(
   database: string,
   action: OperatorAction,
   work: () => Promise<T>,
@@ -232,18 +250,24 @@ async function loggedAfter<T>(
   }
   let logged = false;
   if (existsSync(database)) {
-    const store = openServingStore(database);
+    let store: SqlStore | undefined;
     try {
-      await store.recordOperatorAction(
-        { actor: FROM_THE_CLI, action, at: secondsOf(undefined) },
-        () => {
-          // Keep this guard: it is what logs a failed run `failed` and never
-          // `done`, whatever a future `detail` does with an undefined value.
-          if (failure !== undefined) throw failure.error;
-          return { outcome: 'done', detail: detail(value as T), value: undefined };
-        },
-      );
-      logged = true;
+      const written = failure === undefined ? detail(value as T) : null;
+      if (written !== null && !operatorDetailFits(action, written)) {
+        process.stderr.write(unloggedSentence(action, DETAIL_REFUSED));
+      } else {
+        store = openServingStore(database);
+        await store.recordOperatorAction(
+          { actor: FROM_THE_CLI, action, at: secondsOf(undefined) },
+          () => {
+            // Keep this guard: it is what logs a failed run `failed` and never
+            // `done`, whatever a future `detail` does with an undefined value.
+            if (failure !== undefined) throw failure.error;
+            return { outcome: 'done', detail: written, value: undefined };
+          },
+        );
+        logged = true;
+      }
     } catch (error) {
       // The work's own error is the one an operator needs, and work that
       // succeeded stays a success: a log that could not be written leaves
@@ -252,10 +276,11 @@ async function loggedAfter<T>(
         failure === undefined &&
         !(error instanceof Error && /no such table/.test(error.message))
       ) {
-        process.stderr.write(unloggedSentence(action));
+        process.stderr.write(unloggedSentence(action, unloggedBecause(error)));
       }
     } finally {
-      await store.close();
+      // A close that fails changes nothing the command did, nor its entry.
+      await store?.close().catch(() => undefined);
     }
   }
   if (failure !== undefined) throw failure.error;
@@ -677,7 +702,7 @@ async function recordTakenBackup(
     return { recorded: true, logged: true, prune: true };
   } catch (error) {
     const noTables = error instanceof Error && /no such table/.test(error.message);
-    if (!noTables) process.stderr.write(unloggedSentence('backup'));
+    if (!noTables) process.stderr.write(unloggedSentence('backup', unloggedBecause(error)));
     return { recorded: false, logged: false, prune: noTables };
   } finally {
     await store.close();
@@ -1032,6 +1057,12 @@ function keyEnvironment(environment: KeyEnvironment): {
   return { secret: read.kind === 'ok' ? read.bytes : undefined, origin: config.config.origin };
 }
 
+/** The key actions whose `no-keys` is a refusal: there is nothing to rotate until `init` (#2618). */
+const NO_KEYS_REFUSED: readonly OperatorAction[] = [
+  'instance_key_rotate',
+  'instance_key_rotate_identity',
+];
+
 /**
  * `operation` over the instance's keys — as an operator action when `action`
  * is named (#2602): the keys over the action's store, so what it writes and
@@ -1059,10 +1090,14 @@ async function withInstanceKeys<T>(
         try {
           return await operation(keysOver(inside));
         } catch (error) {
-          // A missing secret or origin is a refusal, logged `refused`, not a failure.
+          // A missing secret or origin is a refusal, logged `refused`, not a
+          // failure — and so is a rotation with no keys to rotate (#2618).
+          // `init`'s `no-keys`, after a race `maintain` lost, stays `failed`.
           if (
             error instanceof InstanceKeysUnavailable &&
-            (error.code === 'no-secret' || error.code === 'no-origin')
+            (error.code === 'no-secret' ||
+              error.code === 'no-origin' ||
+              (error.code === 'no-keys' && NO_KEYS_REFUSED.includes(action)))
           ) {
             return new Refused(error.message);
           }
