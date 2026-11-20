@@ -12,6 +12,13 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0088 is [ADR 0088](../adr/0088-junction-choice-is-a-discrete-press-that-cannot-reach-the-trainer.md)**,
+  taken by [#2887](https://github.com/openzigs/onyourleft/issues/2887) on 2026-11-19 for junction
+  choice in an open-world ride as a discrete press, apart from lane steering, that cannot reach the
+  trainer, **Proposed** on the owner's rulings of that day on the epic #2880 and on #2883. It
+  supersedes nothing and sits beside ADR 0060 D-6.3. The owner's lane note of 2026-11-19 reserved
+  it, beside **0087** (#2885), **0089** (#2888) and **0090** (#2884, moved off 0086, which ADR 0086
+  had taken). The next free number is **0091**.
   ⚠️ **0086 is [ADR 0086](../adr/0086-the-setup-wizard-recommends-one-ai-model.md)**, taken by
   [#2869](https://github.com/openzigs/onyourleft/issues/2869) on 2026-11-19 for the setup wizard
   recommending one AI model, **Proposed** on the owner's ruling of that day. It supersedes in part
