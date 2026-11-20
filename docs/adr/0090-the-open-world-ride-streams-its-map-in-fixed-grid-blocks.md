@@ -1,8 +1,11 @@
 # ADR 0090: The open-world ride streams its map in fixed-grid blocks while it rides, keeps what it rode on the device, and reads inside the rider's own privacy zone
 
-- **Status**: **Proposed**, 2026-11-19, on the owner's rulings of 2026-11-19 on the epic
-  [#2880](https://github.com/openzigs/onyourleft/issues/2880). Accepted only on the owner's approval
-  on its pull request. D-9 lists the questions for the owner
+- **Status**: **Accepted**, 2026-11-20, by the owner on its pull request
+  [#2942](https://github.com/openzigs/onyourleft/pull/2942), on the owner's rulings of 2026-11-20,
+  with the answers recorded in D-9: every recommendation taken, and Q4's R-8 adopted on the owner's
+  condition that the delay holds only the background request and never the ride. Proposed
+  2026-11-19, on the owner's rulings of that day on the epic
+  [#2880](https://github.com/openzigs/onyourleft/issues/2880)
 - **Date**: 2026-11-19
 - **Deciders**: **the owner**, whose rulings of 2026-11-19 are quoted in Context. **The author**
   chose the block size, the lead and the cache rules within those rulings; each such choice is
@@ -125,8 +128,9 @@ still reads its corridor once, before the ride, and asks nothing while it record
 3. **The lead is at least one block.** With the rider anywhere in the centre block, every point less
    than one block width away is held, so the nearest edge of what is held is at least **1.6 km**
    off, about 2 min 24 s at 40 km/h. That is four times the 400 m fog, so a block is read long before
-   anything in it is drawn. A **start** requests the start's 3 × 3, 36 z15 tiles, before the ride
-   begins.
+   anything in it is drawn. R-8's delay of up to 30 s (D-5) comes out of this lead and leaves at
+   least **1 min 54 s** at 40 km/h. A **start** requests the start's 3 × 3, 36 z15 tiles, before
+   the ride begins, and R-8 does not delay it.
 4. **Tile reads, estimated, not measured**: at a steady 40 km/h in a straight line a rider crosses a
    1.9 km block about every 2.8 min, about 21 times an hour, and each crossing asks for 3 new blocks
    (5 on a diagonal), 12 to 20 z15 tiles. That is **about 250 to 420 tile reads an hour**, plus the
@@ -170,7 +174,8 @@ What the host learns, and what it does not:
   public street graph can be **map-matched** to the streets the rider took, finer than a block:
   few roads cross a given edge, and the time between crossings rules out most routes between them.
   The host's view is therefore **not** limited to block precision, and this ADR does not claim it
-  is. D-9 Q4 asks whether to blur the timing.
+  is. R-8 (D-5) blurs the time of each crossing by a random delay of up to 30 s; it widens the
+  map-matching and does not stop it, since the order of the blocks alone still allows it.
 - **It does not learn** where the rider is inside a block between crossings, the start point
   inside its block, any coordinate, the rider's identity (no credential, no cookie, no athlete id),
   the privacy zone, or anything recorded. What it can infer by map-matching is the bullet above.
@@ -188,6 +193,7 @@ What the host learns, and what it does not:
 | **R-5. The cache is location data and stays on the device** (D-6) | The never-sent and not-exported tests named in D-6.4 fail if a cached record reaches any payload |
 | **R-6. Map tiles off: nothing is requested** (D-7) | With the switch off, an open-world ride makes no request at all, cached or not |
 | **R-7. A disclosure that is accurate.** `apps/web/src/privacy/boundaries.ts` declares the streamed read `departing`, and says in its own words that it follows the rider block by block; `docs/privacy-policy.md` and `apps/mobile/src/android/data-safety.ts` say so too (ADR 0054 D-6.5's precedent) | The pull request that first sends a streamed request (#2890) changes all three, and re-checks data-safety's two facts: the retained record holds no `Range` field, and every request names one file |
+| **R-8. A crossing's request waits a random delay of up to 30 s** (D-9 Q4), drawn afresh on the device for each crossing from nothing the rider's position decides, so that a request's time no longer says when the edge was crossed. **The delay holds only the background request. It never pauses, stalls or slows the ride**: the rider keeps riding on what is already held, and the 3 × 3 lead (D-2.3) keeps the next blocks loaded, at least 1 min 54 s ahead at 40 km/h with the whole 30 s spent. The start's 3 × 3 (D-2.3) is not delayed | The delay's derivation takes no position, block, zone or time of crossing (tested as R-1 is: two rides through the same blocks at different positions draw from the same distribution, and the draw never reads the rider's position); every delay is in [0 s, 30 s]; and with every request held at the full 30 s, a ride at 40 km/h never waits for a block and its frame loop is never blocked by a pending request. #2882 checks the lead left on the tablet |
 
 ### D-6 — The ridden-block cache: ADR 0054 D-3, extended
 
@@ -237,26 +243,35 @@ Class B requests, free up to 10 million a month and $0.36 a million after
 hours a month make about four million reads, inside the free tier. `docs/cost-model.md` carries no
 figure this changes; #2882's measurement goes there if it does.
 
-### D-9 — What the owner is asked to rule on
+### D-9 — What the owner was asked, and the answers
+
+The owner answered all five on **2026-11-20**, on the pull request
+[#2942](https://github.com/openzigs/onyourleft/pull/2942). Each answer follows its question.
 
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
    merge**, and the pull request changes the Status line, which an amendment cannot do later
-   (ADR 0013).
+   (ADR 0013). **Answered: accepted before merge.** The Status line says so.
 2. **Q1 — The block: a z14 tile, and its 3 × 3 held round the rider (D-2)?** Recommended: **yes**. A
    coarser block hides more and costs more bytes; a z15 block would halve both. #2882's measurement
-   may make it coarser by amendment, never finer.
+   may make it coarser by amendment, never finer. **Answered: yes**, z14 blocks, 3 × 3 held round
+   the rider. D-2 stands.
 3. **Q2 — The cache's ceiling (D-6.5)**: set by #2891 from a measurement, or a number now?
-   Recommended: **by #2891**, with least-recently-ridden eviction fixed here.
+   Recommended: **by #2891**, with least-recently-ridden eviction fixed here. **Answered: by
+   #2891**, from a measurement, with least-recently-ridden eviction. D-6.5 stands.
 4. **Q3 — Tiles off rides what is cached (D-7.2)**, rather than refusing the open-world ride
-   outright? Recommended: **yes**; a cached block costs no request.
+   outright? Recommended: **yes**; a cached block costs no request. **Answered: yes**, ride what is
+   cached when tiles are off. D-7.2 stands.
 5. **Q4 — Decouple a request's time from the crossing (D-4)?** An **R-8** would hold each
    crossing's request for a random delay, drawn afresh on the device for each crossing, so that a
    request's time no longer says when the edge was crossed. Up to 30 s blurs a crossing by up to
    about 330 m at 40 km/h and leaves a lead of at least 1 min 54 s at that speed, still well over
    the 400 m fog; it does not stop map-matching, which the order of the blocks alone still allows,
    and only widens it. Recommended: **yes, up to 30 s**, tested as R-1 is (the delay is drawn from
-   nothing the rider's position decides), with #2882 checking the lead it leaves. Answered no, D-4
-   stands as written.
+   nothing the rider's position decides), with #2882 checking the lead it leaves. Had it been
+   answered no, D-4 would have stood as written. **Answered: yes, up to 30 s, on a condition**: the delay holds only the
+   background request and never pauses or stalls the ride. In the owner's words: *"Will the ride
+   pause for 30s we don't want that. If it is just the request that is fine"*. It is **R-8** in D-5,
+   which says so, and #2882 checks that the lead left still covers it.
 
 ---
 
@@ -272,9 +287,10 @@ figure this changes; #2882's measurement goes there if it does.
 
 ### What this costs
 
-- **The rider's path, at block precision and with each block edge's crossing time, to the tile
-  host, for the whole ride**, which map-matching over the street graph can sharpen (D-4). It is the
-  largest location disclosure the app has made to any party, and it is accepted for this mode only.
+- **The rider's path, at block precision and with each block edge's crossing time blurred by up
+  to 30 s (R-8), to the tile host, for the whole ride**, which map-matching over the street graph
+  can sharpen (D-4). It is the largest location disclosure the app has made to any party, and it
+  is accepted for this mode only.
 - **No hole round a privacy zone** for an open-world ride, so the first ride from home tells the host
   which block home is in (D-4). The corridor read's hole told the host where the zone roughly was;
   this tells it where the ride roughly began. Neither is nothing.
@@ -288,11 +304,12 @@ figure this changes; #2882's measurement goes there if it does.
 | Issue | Constraint |
 |---|---|
 | [#2889](https://github.com/openzigs/onyourleft/issues/2889) | The start's 3 × 3 is read before the ride (D-2.3); the start point never leaves the device; tiles off with nothing cached says so (D-7.2) |
-| [#2890](https://github.com/openzigs/onyourleft/issues/2890) | D-2, D-3, R-1, R-2, R-3, R-6 and R-7 in full, including `boundaries.ts`, `docs/privacy-policy.md` and `data-safety.ts`; a route ride still makes no request while recording |
+| [#2890](https://github.com/openzigs/onyourleft/issues/2890) | D-2, D-3, R-1, R-2, R-3, R-6, R-7 and R-8 in full, including `boundaries.ts`, `docs/privacy-policy.md` and `data-safety.ts`; a route ride still makes no request while recording |
 | [#2891](https://github.com/openzigs/onyourleft/issues/2891) | D-6 in full: the scoping-test entry, the payload tests, the ceiling with its measurement, and a tested rollback |
 | [#2906](https://github.com/openzigs/onyourleft/issues/2906) | R-4 |
+| [#2882](https://github.com/openzigs/onyourleft/issues/2882) | Measures D-2.4's reads and checks that the lead left after R-8's delay of up to 30 s still keeps the next blocks loaded with the ride never waiting |
 | [#2908](https://github.com/openzigs/onyourleft/issues/2908) | D-7.2 and D-7.3 |
-| ADR 0087 (#2885) | Height tiles are read on D-2's blocks, under R-1 to R-3, R-6 and R-7 |
+| ADR 0087 (#2885) | Height tiles are read on D-2's blocks, under R-1 to R-3 and R-6 to R-8: a height read made at the crossing without R-8's delay would name the crossing's time that R-8 blurs |
 | ADR 0054 | One dated `## Amendments` entry pointing here; its body is not edited |
 
 ---
@@ -304,7 +321,7 @@ figure this changes; #2882's measurement goes there if it does.
   and R-1 needs a fix before the reader ships.
 - **The cache starts to leave the device.** Then ODbL §4.4 is live, as ADR 0054 says for its own store.
 - **#2882 measures a lead the grid cannot meet**, for example a block read that takes longer than the
-  2 min 24 s the lead gives at 40 km/h on a slow connection. Then D-2 changes, by a new ADR if the
-  block gets finer.
+  1 min 54 s the lead gives at 40 km/h after R-8's delay, on a slow connection. Then D-2 changes,
+  by a new ADR if the block gets finer. A short lead is never met by pausing the ride (R-8).
 - **The owner's acceptance of the path disclosure is withdrawn.** Then the open-world ride needs a
   region download before the ride, which is a new decision.

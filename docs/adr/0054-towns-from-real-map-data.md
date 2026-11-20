@@ -621,8 +621,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
 - **2026-11-19** — **D-2.3, D-2.4, D-4, D-6.2's range-to-zone tests and D-6.3 are superseded for
   open-world rides only, and D-3 is extended, by
   [ADR 0090](0090-the-open-world-ride-streams-its-map-in-fixed-grid-blocks.md)**
-  ([#2884](https://github.com/openzigs/onyourleft/issues/2884)), **Proposed**, on the owner's rulings
-  of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880): an
+  ([#2884](https://github.com/openzigs/onyourleft/issues/2884)), **Accepted** 2026-11-20 on its pull
+  request #2942, on the owner's rulings of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880): an
   open-world ride, which has no route in advance, reads the archive in fixed-grid blocks while it
   records, reads inside the rider's own privacy zone, waits for its start's blocks, treats the end
   of what it holds as the edge of the map instead of falling back to the procedural world, and keeps
