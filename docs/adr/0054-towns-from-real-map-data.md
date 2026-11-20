@@ -631,3 +631,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   before the ride; and for every ride D-2.1, D-2.2, D-2.5 (one module, one `fetch`), D-3.1 to D-3.6,
   D-5, D-6.1, D-6.2's `departing` entry and tiles-off test, D-6.4 to D-6.6 and D-7. This entry is a
   pointer and changes nothing here.
+- **2026-11-19** — **Two rows of D-1's table are superseded in part, for open-world rides only, by
+  [ADR 0087](0087-the-open-world-rides-ground-and-grade-come-from-real-heights.md)**
+  ([#2885](https://github.com/openzigs/onyourleft/issues/2885)), **Accepted** 2026-11-20 on its pull
+  request #2948, on the owner's ruling Q7 of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880): the row
+  *"D-3: the route's elevation is not the world's — Unchanged"*, and the row that keeps Mapterhorn
+  rejected. An open-world ride reads its ground and grade from the project's own Mapterhorn extract
+  ([#2013](https://github.com/openzigs/onyourleft/issues/2013)). What still holds, unchanged: both
+  rows for every route ride, every other row, and the rest of this ADR. This entry is a pointer and
+  changes nothing here.
