@@ -25,7 +25,7 @@ import { deliveryInView, LOW_LIGHT_REVEAL_METRES } from './in-view';
 import { parseLevelFile, type LevelRound } from './levels/level-file';
 import { AVOIDABLE_FASTEST_METRES_PER_SECOND } from './obstacles';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './ride-round';
-import { DELIVERY_TICK_SECONDS, THROW_WINDOW_AFTER_METRES } from './throw';
+import { DEFAULT_THROW_WINDOW, DELIVERY_TICK_SECONDS } from './throw';
 
 /**
  * The least time a marker shown in rain or at dusk leaves to throw at its
@@ -71,7 +71,7 @@ type Weather = { readonly weather: 'clear' | 'rain'; readonly light: 'day' | 'du
 function onLevel(
   sky: Weather,
   storage = storageOf(),
-  round: Partial<Omit<LevelRound, 'throwWindow'>> = {},
+  round: Partial<LevelRound> = {},
 ): DeliveryRide {
   const ride = startDeliveryRide({
     buildings: town.buildings,
@@ -195,6 +195,10 @@ describe('in rain or at dusk a marker shows once the rider is closer — #2366, 
       for (let from = 0; from < 12; from += 1) {
         seed = (from * 2_654_435_761) >>> 0;
         const ride = onLevel({ weather: sky.weather, light: sky.light }, storageOf(), round);
+        // #2931: each shipped level rides its own window, the synthetic round the throw's.
+        expect(ride.throwWindow).toStrictEqual(
+          'throwWindow' in round ? round.throwWindow : DEFAULT_THROW_WINDOW,
+        );
         const seen = firstSeen(ride, speed);
         for (const target of ride.targets) {
           const shown = seen.get(target.position);
@@ -204,8 +208,8 @@ describe('in rain or at dusk a marker shows once the rider is closer — #2366, 
           expect(target.distance - (shown ?? 0)).toBeGreaterThan(
             LOW_LIGHT_REVEAL_METRES - speed * DELIVERY_TICK_SECONDS,
           );
-          // From then until its window closes behind the rider.
-          const seconds = (target.distance + THROW_WINDOW_AFTER_METRES - (shown ?? 0)) / speed;
+          // From then until its window closes behind the rider: the round's own window (#2931).
+          const seconds = (target.distance + ride.throwWindow.afterMetres - (shown ?? 0)) / speed;
           expect(seconds).toBeGreaterThanOrEqual(LEAST_SECONDS_TO_THROW);
           houses += 1;
         }
