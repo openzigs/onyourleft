@@ -33,7 +33,7 @@ import {
   INSTANCE_SESSION_STORAGE_KEY,
   type InstanceStorage,
 } from '../instance/instance-port';
-import { INVITE_CARD_CAUTION } from '../instance/moderation-port';
+import { INVITE_CARD_CAUTION, INVITE_DEVICE_NEEDS_TEXT } from '../instance/moderation-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import {
   LOADED_LOCALLY,
@@ -263,6 +263,21 @@ describe('the invitation share sheet (#1190, D-6 source 3)', () => {
     await typeInto(reason[reason.length - 1] as HTMLInputElement, 'A friend from the club');
     await press('Make an invitation');
     expect(text()).toContain(INVITE_CARD_CAUTION);
+    // #2855: beside the invitation, what the new rider's device needs before it scans it —
+    // as a status message under its own label, after the caution and before the line to send.
+    const section = mounted.container.querySelector('[aria-labelledby="oyl-moderation-invite"]');
+    const needs = [...(section?.querySelectorAll('.oyl-status') ?? [])].find((each) =>
+      each.textContent.includes(INVITE_DEVICE_NEEDS_TEXT),
+    );
+    expect(needs?.textContent).toContain('Before they scan it');
+    expect(INVITE_DEVICE_NEEDS_TEXT).toMatch(/must be able to reach this instance/);
+    expect(INVITE_DEVICE_NEEDS_TEXT).toMatch(/Tailscale app.*their own account, never yours/);
+    const line = section?.querySelector('code.oyl-instance__card');
+    expect(line).not.toBeNull();
+    expect(
+      (needs as Element).compareDocumentPosition(line as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
     expect(text()).toContain(`oyl-instance:${ORIGIN}#${SCRIPTED_FINGERPRINT} wxyz-2345-abcd-efgh`);
   });
 
@@ -275,5 +290,7 @@ describe('the invitation share sheet (#1190, D-6 source 3)', () => {
     await press('Make an invitation');
     expect(text()).toContain(INSTANCE_KEY_TEXT['needs-card']);
     expect(text()).not.toContain(INVITE_CARD_CAUTION);
+    // No invitation, so nothing to say about scanning one.
+    expect(text()).not.toContain(INVITE_DEVICE_NEEDS_TEXT);
   });
 });

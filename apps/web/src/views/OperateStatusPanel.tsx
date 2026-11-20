@@ -79,9 +79,11 @@ function Fact({ row }: { readonly row: OperateRow }): JSX.Element {
 function Shown({
   status,
   now,
+  timeZone,
 }: {
   readonly status: OperateStatus;
   readonly now: number;
+  readonly timeZone: string;
 }): JSX.Element {
   const compare = compareWithMainUrl(status);
   return (
@@ -104,7 +106,7 @@ function Shown({
         </p>
       )}
       <dl className="oyl-operate__status">
-        {statusRows(status, now).map((row) => (
+        {statusRows(status, now, timeZone).map((row) => (
           <Fact key={row.label} row={row} />
         ))}
       </dl>
@@ -116,10 +118,13 @@ function Shown({
 export function OperateStatusPanel({
   status,
   now = Date.now,
+  timeZone,
 }: {
   readonly status: OperateStatusRead;
   /** Unix milliseconds, for the last backup's age. */
   readonly now?: () => number;
+  /** The IANA zone its moments are drawn in, named (#2917): the device's, from `OperateView`. */
+  readonly timeZone: string;
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-operate-status">
@@ -136,7 +141,7 @@ export function OperateStatusPanel({
         Status
       </SectionHeading>
       {status.kind === 'status' ? (
-        <Shown status={status} now={now()} />
+        <Shown status={status} now={now()} timeZone={timeZone} />
       ) : (
         <StatusMessage tone="warning" label="Not read" live>
           {STATUS_UNREADABLE_TEXT}

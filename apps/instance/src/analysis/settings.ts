@@ -103,6 +103,8 @@ export function resolveLocalModel(
       row?.reasoningTokens === null || row?.reasoningTokens === undefined
         ? env.analysisModelReasoningTokens
         : String(row.reasoningTokens),
+    // `.env` only (#2840): the context is the model server's, which the app does not set.
+    analysisModelContextTokens: env.analysisModelContextTokens,
   });
 }
 

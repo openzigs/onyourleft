@@ -30,6 +30,7 @@ import { sealedAt } from '../sealed/sealed-testing.ts';
 import { readServerConfig } from '../server-config.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 import { registrationFixture } from '../store/testing/index.ts';
+import { AGENT_TEMPLATE } from './agent.ts';
 import { startFakeModelServer, type FakeModelServer } from './fake-model-server-testing.ts';
 import { secretText } from './hosted-key-testing.ts';
 import { MASKING_ITEM_KEY } from './hosted.ts';
@@ -166,7 +167,12 @@ async function jobOf(
   return parseStream((await stream?.text()) ?? '').events.at(-1)?.data;
 }
 
-const SUCCEEDED = { status: 'succeeded', writeUp: 'A steady ride.' };
+// #2932: a running instance names the template its agent ran.
+const SUCCEEDED = {
+  status: 'succeeded',
+  writeUp: 'A steady ride.',
+  templateVersion: AGENT_TEMPLATE.version,
+};
 const modelsAsked = (server: FakeModelServer): unknown[] =>
   server.requests.map((request) => request.model);
 

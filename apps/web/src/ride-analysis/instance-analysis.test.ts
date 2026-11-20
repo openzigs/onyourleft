@@ -36,6 +36,8 @@ import {
   type PendingJobStorage,
 } from './instance-analysis';
 import type { InstanceJobView } from './instance-analysis-port';
+import { exportEverything, MANIFEST_FILE_NAME } from '../transfer/export-everything';
+import type { DownloadableFile } from '../transfer/store-port';
 import { forgettingOnDelete } from '../library/store-port';
 import { emptyLibraryStore } from '../library/testing';
 import {
@@ -144,6 +146,46 @@ describe('one press: start, follow, screen, save, acknowledge', () => {
     // The page was handed each section, in order, as it came.
     expect(seen.views.at(-2)?.sections).toStrictEqual(['First part.', 'Second part.']);
     expect(seen.views.some((view) => view.phase === 'saving')).toBe(true);
+  });
+
+  it('saves the template version the instance ran, read back and exported (#2932)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP, '2')]);
+    const outcome = await controller(scripted).ask(id, 'instance-local', () => undefined, live());
+    expect(outcome).toStrictEqual({ kind: 'written' });
+    const row = await saved(id);
+    expect(row?.templateId).toBe(ANALYSIS_AGENT_TEMPLATE_V1.id);
+    expect(row?.templateVersion).toBe('2');
+    // The job was still started under this device's own template version.
+    expect(startedWith(scripted)?.templateVersion).toBe(ANALYSIS_AGENT_TEMPLATE_V1.version);
+    // And the account export carries the version that was saved.
+    const files: DownloadableFile[] = [];
+    await harness.read(async (store) =>
+      exportEverything({
+        store,
+        athleteId: ATHLETE_A,
+        format: 'gpx',
+        onFile: (file) => {
+          files.push(file);
+        },
+      }),
+    );
+    const manifest = files.find((file) => file.fileName === MANIFEST_FILE_NAME);
+    const activities = (
+      JSON.parse(new TextDecoder().decode(manifest?.bytes)) as {
+        activities: { activityId: string; rideWriteUp: { templateVersion: string } | null }[];
+      }
+    ).activities;
+    expect(activities.find((each) => each.activityId === id)?.rideWriteUp?.templateVersion).toBe(
+      '2',
+    );
+  });
+
+  it('saves its own template’s version when the instance names none, as an older one does (#2932)', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    await controller(scripted).ask(id, 'instance-local', () => undefined, live());
+    expect((await saved(id))?.templateVersion).toBe(ANALYSIS_AGENT_TEMPLATE_V1.version);
   });
 
   it('sends the input, the agent template’s version and the source, and nothing else', async () => {
@@ -346,9 +388,11 @@ describe('failures are sentences', () => {
     'out-of-tool-calls',
     'out-of-time',
     'out-of-tokens',
+    'out-of-context',
     'model-without-tools',
     'model-cut-off',
     'model-no-answer',
+    'local_unavailable',
     'hosted_unavailable',
     'interrupted',
   ] as const)('says %s in its own sentence, and saves nothing', async (failure) => {
@@ -361,6 +405,14 @@ describe('failures are sentences', () => {
     );
     expect(outcome).toStrictEqual({ kind: 'failed', text: INSTANCE_FAILURE_TEXT[failure] });
     expect(await saved(id)).toBeUndefined();
+  });
+
+  it('says the local model is not available to the rider, not that the instance has none (#2634)', () => {
+    // The operator may have a model and not have opened it to this rider.
+    expect(INSTANCE_FAILURE_TEXT.local_unavailable).toMatch(
+      /has not made its own model available to you/,
+    );
+    expect(INSTANCE_FAILURE_TEXT.local_unavailable).not.toMatch(/no model of its own/);
   });
 
   it.each(['analysis_off', 'job_running', 'rate_limited'] as const)(

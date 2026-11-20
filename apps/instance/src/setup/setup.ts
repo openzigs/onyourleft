@@ -20,6 +20,11 @@
  * - **At `http://localhost:<port>` only**: a passkey's RP ID cannot be an IP
  *   address, and the `Host` check is exact (DNS rebinding), so any other host
  *   — `127.0.0.1:<port>` among them — is told which address to open.
+ * - **Not while the instance's address is the template's example** (#2855):
+ *   `instance.ts` then serves {@link createExampleAddressSetup} here instead,
+ *   whose every page says what to set, with no form — so no code is typed, no
+ *   session is opened and no claim code, invite or kit is drawn for an address
+ *   that is not this instance's.
  *
  * ## The setup session (D-2)
  *
@@ -49,11 +54,15 @@
  * transaction, from the source `setup`, naming no athlete. The step the setup is on is kept in the database,
  * so leaving and coming back — after a restart, with a new code — resumes it.
  *
+ * The tailnet step (#2817, ADR 0079 D-2, D-8) changes nothing: it reads the
+ * address back from the running server's card, says how riders join and what
+ * an address change costs, and how to make one in `.env` (ADR 0080's table).
+ *
  * Nothing here renders the setup code, a secret, a token or a coordinate (see
  * `pages.ts` for ADR 0080's own exceptions).
  */
 
-import type { SetupSummary } from '@onyourleft/operate-text';
+import { reachPathOf, type SetupSummary } from '@onyourleft/operate-text';
 
 import { randomToken, sha256Hex } from '../auth/crypto.ts';
 import {
@@ -80,10 +89,16 @@ import {
   sweepPeriodMs,
   type RateLimit,
 } from '../auth/rate-limit.ts';
-import { analysisModelNameProblem, REGISTRATION_MODES, type RegistrationMode } from '../config.ts';
+import {
+  analysisModelNameProblem,
+  REGISTRATION_MODES,
+  type RegistrationMode,
+  type RemotePath,
+} from '../config.ts';
 import type { Resolver } from '../history/address.ts';
-import type { InstanceKeys } from '../keys/instance-keys.ts';
+import { type InstanceKeys, InstanceKeysUnavailable } from '../keys/instance-keys.ts';
 import { keysView } from '../operate/operate.ts';
+import type { TunnelState } from '../operate/status.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type {
   BackupRequestOutcome,
@@ -97,6 +112,7 @@ import {
   aiBody,
   backupsBody,
   claimBody,
+  exampleAddressPage,
   finishBody,
   FINISHED_PAGE_STYLE,
   finishedPage,
@@ -108,15 +124,38 @@ import {
   registrationBody,
   secretsBody,
   stepPage,
+  tailnetBody,
   wrongAddressPage,
   type ClaimView,
   type InviteView,
+  type ReachView,
   type SetupFrame,
 } from './pages.ts';
 import type { SecretFromFile } from './secrets.ts';
 import { removeSetupCodeFile, setupAddress } from './setup-code.ts';
 import { SETUP_ROUTES, SETUP_STEPS, stepPath, type SetupStep } from './setup-routes.ts';
 import { SETUP_STYLE } from './style.ts';
+
+/** The origin an instance card names: `oyl-instance:<origin>#<fingerprint>` (#2817). */
+export function cardOrigin(card: string): string {
+  return card.slice('oyl-instance:'.length, card.lastIndexOf('#'));
+}
+
+/**
+ * Whether `origin` is a Tailscale name, `https://<machine>.<tailnet>.ts.net`
+ * (#2817): what the tailnet path's address must be (ADR 0079 D-2).
+ */
+export function isTailscaleName(origin: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === 'https:' && /^[^.]+\.[^.]+\.ts\.net$/.test(url.hostname.replace(/\.$/, ''))
+  );
+}
 
 /** The setup session's cookie. */
 export const SETUP_COOKIE = 'oyl-setup';
@@ -164,20 +203,40 @@ export interface SetupOptions {
   readonly port: number;
   /** `OYL_INSTANCE_ORIGIN`: what the emergency kit and the card are bound to. */
   readonly origin: string;
+  /**
+   * `OYL_INSTANCE_REMOTE_PATH`: which sentences say what a device needs first
+   * (#2855), and which way in the tailnet step checks, or `null` (#2817).
+   */
+  readonly remotePath: RemotePath | null;
+  /**
+   * The tunnel's readiness, as Status asks it (`operate/status.ts`
+   * §`tunnelReadiness`): the one thing this computer can check of the way in
+   * (#2855). Asked only on the `cloudflare` path, and only by the claim step.
+   */
+  readonly tunnel?: () => Promise<TunnelState>;
   /** What the operator calls the instance, or `null`. */
   readonly name: string | null;
   /** `OYL_INSTANCE_OWNER_KEY` is set: the setup is done from the first start (ADR 0080 D-3, D-7). */
   readonly ownerKeyFromEnvironment: boolean;
   /** The owner's claim (#2782): minted, confirmed and discarded from the setup source. */
   readonly ownerClaim: OwnerClaim;
-  /** The instance's own keys, for the card the claim and the invite carry. */
-  readonly instanceKeys?: Pick<InstanceKeys, 'show'>;
+  /**
+   * The instance's own keys, for the card the claim and the invite carry, and
+   * — `served`, what a device fetches — whether they open at this address (#2817).
+   */
+  readonly instanceKeys?: Pick<InstanceKeys, 'show' | 'served'>;
   /** The secrets read from the secrets folder: what the emergency kit holds. */
   readonly kitSecrets: readonly SecretFromFile[];
   /** `OYL_INSTANCE_REGISTRATION`, which the database's mode wins over (ADR 0080 D-6). */
   readonly environmentRegistration: RegistrationMode;
   /** `OYL_INSTANCE_SECRETS_DIR`: where the setup code's file is removed from. */
   readonly secretsDirectory: string | undefined;
+  /**
+   * Whether this start voided a claim code the process before it had shown
+   * (#2858): a restart drops the page's QR, so the code it showed is voided
+   * rather than left working unseen, and the claim step says why.
+   */
+  readonly claimCodesVoidedAtStart?: () => boolean;
   /** The AI step's (#2792). */
   readonly analysis: SetupAnalysisSources;
   readonly limits?: SetupLimits;
@@ -293,12 +352,55 @@ async function finishedPagePolicy(): Promise<string> {
  * D-3: the database keeps only the code's hash). Shown only to the session
  * that asked for it, and only until it runs out.
  */
+interface ShownInvite {
+  readonly sessionSha256: string;
+  readonly card: string;
+  readonly code: string;
+  readonly codeSha256: string;
+  /** Unix seconds. */
+  readonly expiresAt: number;
+}
+
 interface ShownClaim {
   readonly sessionSha256: string;
   readonly card: string;
   readonly code: string;
   /** Unix seconds. */
   readonly expiresAt: number;
+}
+
+/**
+ * **The setup while the instance's address is still the template's example**
+ * (#2855): the same addresses on the same loopback listener, and every one of
+ * them answers the page that says what to set. It takes no code, reads no
+ * body and no cookie, opens no session and touches no store — `instance.ts`
+ * runs such an instance as one with NO address, so it has made no keys, no
+ * card and no kit for the example either. Setting the address and starting
+ * again is the whole way out, and then {@link createSetup} serves these paths.
+ */
+export function createExampleAddressSetup(options: {
+  readonly port: number;
+  readonly name: string | null;
+}): Setup {
+  const host = `localhost:${String(options.port)}`;
+  return {
+    handle(request) {
+      // The same address rule as the setup itself (D-1): one host, told to any other.
+      if (request.headers.get('host') !== host) {
+        return Promise.resolve(page(wrongAddressPage(setupAddress(options.port)), 421));
+      }
+      const route = new URL(request.url).pathname;
+      if (route === '/setup/setup.css' && request.method === 'GET') {
+        return Promise.resolve(
+          adminResponse(SETUP_STYLE, 200, { 'content-type': 'text/css; charset=utf-8' }),
+        );
+      }
+      return Promise.resolve(page(exampleAddressPage(options.name), 409));
+    },
+    flushRefusals: () => Promise.resolve(),
+    sweepRateLimits: () => undefined,
+    rateLimitSweepPeriodMs: 60_000,
+  };
 }
 
 export function createSetup(options: SetupOptions): Setup {
@@ -314,6 +416,14 @@ export function createSetup(options: SetupOptions): Setup {
   const CLEARED = `${SETUP_COOKIE}=; ${attributes}; Max-Age=0`;
   const refused = new Map<SetupRefusal, number>();
   let shownClaim: ShownClaim | undefined;
+  /** Whether this process has shown a claim code since it started (#2858). */
+  let claimShownSinceStart = false;
+  /**
+   * The one invite this setup made (#2858), held in memory for the session
+   * that made it, so its step shows it again until it is used or runs out.
+   * The database keeps only its hash, as it does every invite's.
+   */
+  let shownInvite: ShownInvite | undefined;
   const { analysis } = options;
   const localServer = { resolve: analysis.resolve };
   // #2792: the instance's one download, in memory: lost at a restart, as the model it left is not.
@@ -335,7 +445,8 @@ export function createSetup(options: SetupOptions): Setup {
   async function reached(): Promise<SetupStep> {
     if ((await store.claimedOwnerKey()) === undefined) return 'claim';
     const state = await store.setupState();
-    return state === undefined || state.step === 'claim' ? 'passkey' : state.step;
+    // The step after the claim (#2817: the tailnet's, before the passkey bound to the address).
+    return state === undefined || state.step === 'claim' ? 'tailnet' : state.step;
   }
 
   /** The instance card, whole, or `null` when the keys cannot be read. */
@@ -343,6 +454,47 @@ export function createSetup(options: SetupOptions): Setup {
     if (options.instanceKeys === undefined) return null;
     const shown = await keysView(options.instanceKeys);
     return shown.card ?? null;
+  }
+
+  /** How a device gets to this server: the operator's word, else the address's (#2855). */
+  const reachPath = reachPathOf(options.remotePath, options.origin);
+
+  /**
+   * The claim step's address and what the tablet needs first (#2855), with
+   * what this computer could check: the tunnel, on the tunnel's path alone. On
+   * a tailnet nothing here can see the owner's network, so nothing is claimed.
+   */
+  async function reachView(): Promise<ReachView> {
+    const tunnel =
+      options.remotePath === 'cloudflare' && options.tunnel !== undefined
+        ? await options.tunnel()
+        : undefined;
+    return {
+      origin: options.origin,
+      path: reachPath,
+      checked:
+        tunnel === undefined || tunnel.state === 'unknown'
+          ? null
+          : tunnel.state === 'ready'
+            ? 'connected'
+            : 'not-connected',
+    };
+  }
+
+  /**
+   * Whether a device's `GET /v1/instance/keys` would be served now (#2817): `unreadable`
+   * when this secret and origin cannot unwrap the keys held — what a changed origin leaves.
+   */
+  async function servedKeys(): Promise<'ready' | 'none' | 'unreadable'> {
+    if (options.instanceKeys === undefined) return 'none';
+    try {
+      await options.instanceKeys.served();
+      return 'ready';
+    } catch (error) {
+      return error instanceof InstanceKeysUnavailable && error.code === 'unreadable'
+        ? 'unreadable'
+        : 'none';
+    }
   }
 
   /** The owner's athlete, by the claimed key, or `undefined` before that device signs in. */
@@ -488,6 +640,21 @@ export function createSetup(options: SetupOptions): Setup {
         const view = await claimView(url, session);
         return page(stepPage(frame, claimBody(view, csrf), { next: false }), 200);
       }
+      case 'tailnet': {
+        // #2817: the address as the RUNNING server's card names it — what every device pins —
+        // read back on every load, so "Check now" after a restart shows the address it came up with.
+        // The card is drawn from the public key alone, so it is no proof the keys open: what a
+        // device fetches first (`GET /v1/instance/keys`) is, and a changed origin fails it.
+        const [card, keys] = await Promise.all([cardOf(), servedKeys()]);
+        const address = card === null ? options.origin : cardOrigin(card);
+        const body = tailnetBody({
+          path: options.remotePath,
+          origin: address,
+          tailscaleName: isTailscaleName(address),
+          keys: card === null ? 'none' : keys,
+        });
+        return page(stepPage(frame, body, { next: true }), 200);
+      }
       case 'passkey':
         return page(stepPage(frame, passkeyBody(`${origin}/admin`), { next: true }), 200);
       case 'secrets': {
@@ -500,9 +667,10 @@ export function createSetup(options: SetupOptions): Setup {
         return page(stepPage(frame, secretsBody(kit, csrf), { next: true }), 200);
       }
       case 'backups': {
-        const [records, pending] = await Promise.all([
+        const [records, pending, claimedAt] = await Promise.all([
           store.listBackupRecords(1),
           store.pendingBackupRequest(),
+          store.ownerClaimedAt(),
         ]);
         const newest = records[0];
         const body = backupsBody(
@@ -515,6 +683,7 @@ export function createSetup(options: SetupOptions): Setup {
                     secondsAgo: seconds() - newest.at,
                     outcome: newest.outcome,
                     offBox: newest.offBox,
+                    beforeClaim: claimedAt !== undefined && newest.at < claimedAt,
                   },
             waiting: pending !== undefined,
             notice: url.searchParams.has('too-soon')
@@ -533,7 +702,10 @@ export function createSetup(options: SetupOptions): Setup {
         return page(stepPage(frame, body, { next: false }), 200);
       }
       case 'invite':
-        return page(stepPage(frame, inviteBody(await inviteView(), csrf), { next: true }), 200);
+        return page(
+          stepPage(frame, inviteBody(await inviteView(session), csrf), { next: true }),
+          200,
+        );
       case 'ai': {
         const [found, model] = await Promise.all([ollama(), writeUpModel()]);
         const body = aiBody(
@@ -581,13 +753,30 @@ export function createSetup(options: SetupOptions): Setup {
         code: shown.code,
         expiresAt: iso(shown.expiresAt),
         secondsLeft: shown.expiresAt - at,
+        reach: await reachView(),
       };
     }
     return {
       kind: 'open',
       card: (await cardOf()) !== null,
       notConfirmed: url.searchParams.has('unconfirmed'),
+      reach: await reachView(),
       expired: ours && ranOut,
+      // #2858: until this process shows a code, a code the one before it showed was voided at start.
+      restarted: !claimShownSinceStart && (options.claimCodesVoidedAtStart?.() ?? false),
+    };
+  }
+
+  /** The invite this session made, as its step draws it (#2858). */
+  async function inviteCodeView(shown: ShownInvite, at: number): Promise<InviteView> {
+    return {
+      kind: 'code',
+      card: shown.card,
+      code: shown.code,
+      expiresAt: iso(shown.expiresAt),
+      secondsLeft: shown.expiresAt - at,
+      inviteMode: (await modeNow()) === 'invite',
+      reach: reachPath,
     };
   }
 
@@ -595,11 +784,29 @@ export function createSetup(options: SetupOptions): Setup {
     return (await store.registrationSetting()) ?? options.environmentRegistration;
   }
 
-  async function inviteView(): Promise<InviteView> {
-    if (((await store.setupState())?.inviteMintedAt ?? null) !== null) return { kind: 'taken' };
+  async function inviteView(session: Session): Promise<InviteView> {
+    if (((await store.setupState())?.inviteMintedAt ?? null) !== null) {
+      // #2858: the invite this session made, again, until it is used or runs out.
+      const shown = shownInvite;
+      const athleteId = await ownerAthlete();
+      if (
+        shown !== undefined &&
+        shown.sessionSha256 === session.record.tokenSha256 &&
+        athleteId !== undefined
+      ) {
+        // Unused: a rider who joined with it spent it. It cannot run out first: an invite lasts
+        // seven days, and a setup session two hours, and only the session that made it sees it.
+        const held = (await store.listInviteCodes(athleteId)).find(
+          (each) => each.codeSha256 === shown.codeSha256,
+        );
+        if (held !== undefined && held.usedAt === null) return inviteCodeView(shown, seconds());
+        shownInvite = undefined;
+      }
+      return { kind: 'taken' };
+    }
     if ((await ownerAthlete()) === undefined) return { kind: 'no-owner' };
     if ((await cardOf()) === null) return { kind: 'no-card' };
-    return { kind: 'offer', inviteMode: (await modeNow()) === 'invite' };
+    return { kind: 'offer', inviteMode: (await modeNow()) === 'invite', reach: reachPath };
   }
 
   /**
@@ -682,6 +889,7 @@ export function createSetup(options: SetupOptions): Setup {
           code: minted.code,
           expiresAt: minted.expiresAt,
         };
+        claimShownSinceStart = true;
         return seeOther('/setup/claim');
       }
       case '/setup/claim/confirm': {
@@ -691,7 +899,8 @@ export function createSetup(options: SetupOptions): Setup {
             ? await options.ownerClaim.confirm(comparison, 'setup')
             : 'none';
         if (confirmed !== 'confirmed') return seeOther('/setup/claim?unconfirmed');
-        await store.setSetupStep('passkey', at);
+        // The step after the claim: the tailnet's (#2817).
+        await store.setSetupStep('tailnet', at);
         // The claim step, now saying the tablet owns the server, before the next step.
         return seeOther('/setup/claim');
       }
@@ -727,7 +936,10 @@ export function createSetup(options: SetupOptions): Setup {
         const { value } = await store.recordOperatorAction<BackupRequestOutcome>(
           { actor, action: 'backup_requested', at },
           async (inside) => {
-            const asked = await inside.requestBackup(at);
+            // #2858: a backup made before the claim does not hold the owner's account, so it does
+            // not count against the gap — the setup's one backup regardless of the limit.
+            const since = await inside.ownerClaimedAt();
+            const asked = await inside.requestBackup(at, since === undefined ? {} : { since });
             return asked.outcome === 'requested'
               ? { outcome: 'done', value: asked }
               : { outcome: 'refused', detail: asked.outcome, value: asked };
@@ -778,16 +990,15 @@ export function createSetup(options: SetupOptions): Setup {
           },
         );
         if (!minted) return seeOther('/setup/invite');
-        const frame = await frameOf('invite', session);
-        const view: InviteView = {
-          kind: 'code',
+        shownInvite = {
+          sessionSha256: session.record.tokenSha256,
           card,
           code,
-          expiresAt: iso(expiresAt),
-          secondsLeft: expiresAt - at,
-          inviteMode: (await modeNow()) === 'invite',
+          codeSha256,
+          expiresAt,
         };
-        return page(stepPage(frame, inviteBody(view, frame.csrf), { next: true }), 200);
+        // Drawn by the step's own page, which shows it again on every load until it is used.
+        return seeOther('/setup/invite');
       }
       case '/setup/ai/pull': {
         const model = (single(form, 'model') ?? '').trim();
@@ -853,7 +1064,20 @@ export function createSetup(options: SetupOptions): Setup {
 
   return {
     async handle(request, readBody, client) {
-      if (!(await open())) return undefined;
+      if (!(await open())) {
+        // #2858: `/setup` itself, opened on this machine after the finish, says so in a page
+        // rather than the raw `not_found` of a missing route. Every other setup path, and
+        // every other listener (which never reaches here), still gets that `not_found`.
+        const finishedHere =
+          request.method === 'GET' &&
+          request.headers.get('host') === host &&
+          new URL(request.url).pathname === '/setup' &&
+          !options.ownerKeyFromEnvironment;
+        if (!finishedHere) return undefined;
+        return page(finishedPage(options.name), 404, {
+          'content-security-policy': await finishedPagePolicy(),
+        });
+      }
       // Against DNS rebinding, and the one address a passkey could use (D-1).
       if (request.headers.get('host') !== host) {
         return page(wrongAddressPage(setupAddress(options.port)), 421);

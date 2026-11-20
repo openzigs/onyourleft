@@ -65,6 +65,8 @@ import * as tacticsConsent from './0046-tactics-consent.ts';
 import * as ownerClaim from './0047-owner-claim.ts';
 import * as firstRunSetup from './0048-first-run-setup.ts';
 import * as setupAiStep from './0049-setup-ai-step.ts';
+import * as setupTailnetStep from './0050-setup-tailnet-step.ts';
+import * as operatorLogNoNul from './0051-operator-log-no-nul.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -122,4 +124,6 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0047-owner-claim': ownerClaim,
   '0048-first-run-setup': firstRunSetup,
   '0049-setup-ai-step': setupAiStep,
+  '0050-setup-tailnet-step': setupTailnetStep,
+  '0051-operator-log-no-nul': operatorLogNoNul,
 };

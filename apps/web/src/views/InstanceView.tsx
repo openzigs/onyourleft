@@ -71,7 +71,7 @@ import { SyncPanel } from './SyncPanel';
  */
 export const INSTANCE_RECEIVES: readonly string[] = [
   'This device’s public key, which is how the server knows it is you. The private key never leaves this device.',
-  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the server keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. A server keeps your earlier names there too, for moderation.',
+  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, or “Sign in as the owner” after claiming your own server, and the server keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. A server keeps your earlier names there too, for moderation.',
   'Your internet address and your device or browser type, as any server you connect to sees them.',
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',

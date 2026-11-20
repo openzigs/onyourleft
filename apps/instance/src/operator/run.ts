@@ -275,7 +275,11 @@ export async function runCommand(
       }
       case 'owner-claim': {
         if (args.length !== 1 || args[0] !== 'reset') throw new CommandError(USAGE);
-        report = await ownerClaimReset(paths, { ownerKey: env.ownerKey });
+        report = await ownerClaimReset(paths, {
+          ownerKey: env.ownerKey,
+          secretsDirectory: env.secretsDirectory,
+          port: env.loopbackPort,
+        });
         break;
       }
       case 'setup-code': {

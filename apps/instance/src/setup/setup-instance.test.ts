@@ -12,11 +12,19 @@
  */
 
 import { createHash } from 'node:crypto';
-import { request as httpRequest } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { createServer, request as httpRequest, type Server } from 'node:http';
 import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  CLAIM_REACH_TEXT,
+  INVITE_REACH_TEXT,
+  REACH_CHECKED_TEXT,
+  SETUP_EXAMPLE_ADDRESS_TEXT,
+} from '@onyourleft/operate-text';
 
 import { jobBody, parseStream } from '../analysis/jobs-testing.ts';
 import {
@@ -28,26 +36,36 @@ import {
 import { sha256Hex } from '../auth/crypto.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from '../auth/identity-testing.ts';
 import type { Caller } from '../auth/identity.ts';
+import type { RemotePath } from '../config.ts';
 import type { Resolver } from '../history/address.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { freeLoopbackPort, testConfig } from '../instance-testing.ts';
-import { backupLoop, ownerClaimReset, registrationMode, setupCode } from '../operator/commands.ts';
+import {
+  backupLoop,
+  instanceKey,
+  ownerClaimReset,
+  registrationMode,
+  setupCode,
+} from '../operator/commands.ts';
 import { readServerConfig } from '../server-config.ts';
 import { sealedAt } from '../sealed/sealed-testing.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import { migrateForDeploy } from '../store/serving.ts';
 import { registrationFixture } from '../store/testing/index.ts';
 import type { SecretFromFile } from './secrets.ts';
-import { SETUP_CODE_FILE } from './setup-code.ts';
+import { localTimeText, SETUP_CODE_FILE, setupCodeFileText } from './setup-code.ts';
 import { SETUP_ROUTES } from './setup-routes.ts';
-import { SETUP_COOKIE } from './setup.ts';
+import { cardOrigin, isTailscaleName, SETUP_COOKIE } from './setup.ts';
 
 let running: StartedInstance | undefined;
 let directory: string | undefined;
+let tunnel: Server | undefined;
 const stubs: OllamaStub[] = [];
 afterEach(async () => {
   await running?.stop();
   running = undefined;
+  tunnel?.close();
+  tunnel = undefined;
   for (const stub of stubs.splice(0)) await stub.close();
   if (directory !== undefined) await rm(directory, { recursive: true, force: true });
   directory = undefined;
@@ -61,7 +79,16 @@ const KIT_SECRET: SecretFromFile = {
   generated: true,
 };
 
+/** What `.env` says of the way in (#2855): unset, a test instance's own address and no path named. */
+interface Settings {
+  readonly origin?: string;
+  readonly remotePath?: RemotePath;
+  readonly tunnelReadyUrl?: string;
+}
+
 interface World {
+  /** Read at each start, so a test can correct `.env` and start again. */
+  settings: Settings;
   readonly path: string;
   readonly secrets: string;
   readonly port: number;
@@ -78,10 +105,14 @@ interface World {
    */
   readonly ollama: readonly string[];
   readonly resolve: Resolver | undefined;
+  /** `OYL_INSTANCE_ORIGIN`, moved by a test that changes the address (#2817). */
+  origin: string;
+  /** `OYL_INSTANCE_REMOTE_PATH` (#2817): none unless a test names one. */
+  remotePath: RemotePath | null;
 }
 
 async function world(
-  options: { readonly ollama?: readonly string[]; readonly resolve?: Resolver } = {},
+  options: Settings & { readonly ollama?: readonly string[]; readonly resolve?: Resolver } = {},
 ): Promise<World> {
   directory = await mkdtemp(join(tmpdir(), 'oyl-setup-'));
   const path = join(directory, 'instance.sqlite');
@@ -89,6 +120,7 @@ async function world(
   const secrets = join(directory, 'secrets');
   await mkdir(secrets, { mode: 0o700 });
   const made: World = {
+    settings: options,
     path,
     secrets,
     port: await freeLoopbackPort(),
@@ -98,6 +130,8 @@ async function world(
     clock: undefined,
     ollama: options.ollama ?? [],
     resolve: options.resolve,
+    origin: options.origin ?? TEST_ORIGIN,
+    remotePath: options.remotePath ?? null,
   };
   made.instance = await start(made);
   return made;
@@ -106,12 +140,18 @@ async function world(
 /** Start (or start again) the instance on the world's file, as `serve.ts` does on a fresh install. */
 async function start(
   at: World,
-  options: { readonly ownerKey?: string; readonly adminPages?: boolean } = {},
+  options: {
+    readonly ownerKey?: string;
+    readonly adminPages?: boolean;
+    /** Start with no `OYL_INSTANCE_SECRET_KEY`, so no keys are opened (#2817). */
+    readonly noSecret?: boolean;
+  } = {},
 ): Promise<StartedInstance> {
   const read = readServerConfig(
     {
       database: at.path,
-      origin: TEST_ORIGIN,
+      origin: at.origin,
+      tunnelReadyUrl: at.settings.tunnelReadyUrl,
       roomWorkers: '1',
       adminPages: options.adminPages === true ? 'on' : 'off',
       adminLoopbackPort: String(at.port),
@@ -124,11 +164,12 @@ async function start(
       // `.env`'s mode on a fresh install, which a mode set in the wizard wins over.
       registration: 'approval',
       moderators: options.ownerKey === undefined ? {} : { owner: options.ownerKey },
+      remotePath: at.remotePath,
     }),
     server: {
       ...read.config,
       blobsPath: join(at.path, '..', 'blobs'),
-      secretKey: new Uint8Array(32).fill(9),
+      ...(options.noSecret === true ? {} : { secretKey: new Uint8Array(32).fill(9) }),
     },
     version: '9.8.7',
     notices: 'notices',
@@ -257,8 +298,16 @@ async function noRoute(port: number, method: string): Promise<Answer> {
   return send(port, method, '/no-such-route-2784', { host: `localhost:${String(port)}` });
 }
 
-/** Every setup route, every method it takes and one it does not, answered as a path with no route. */
-async function expectAllNotFound(port: number): Promise<void> {
+/**
+ * Every setup route, every method it takes and one it does not, answered as a
+ * path with no route. With `finishedHere` — the loopback listener once the
+ * setup is done (#2858) — `GET /setup` alone answers the small "Setup is
+ * finished" page, still a 404 and setting no cookie.
+ */
+async function expectAllNotFound(
+  port: number,
+  options: { readonly finishedHere?: boolean } = {},
+): Promise<void> {
   const expected = await noRoute(port, 'GET');
   expect(expected.status).toBe(404);
   for (const route of SETUP_ROUTES) {
@@ -267,16 +316,30 @@ async function expectAllNotFound(port: number): Promise<void> {
         host: `localhost:${String(port)}`,
         origin: `http://localhost:${String(port)}`,
       });
+      if (options.finishedHere === true && method === 'GET' && route.path === '/setup') {
+        expect(answer.status).toBe(404);
+        expect(answer.body).toContain('<h1>Setup is finished</h1>');
+        expect(answer.body).not.toContain('<form');
+        expect(answer.headers['set-cookie']).toBeUndefined();
+        continue;
+      }
       expect(answer.status, `${method} ${route.path}`).toBe(404);
       expect(answer.body, `${method} ${route.path}`).toBe(expected.body);
       expect(answer.headers['set-cookie'], `${method} ${route.path}`).toBeUndefined();
     }
   }
+  // Against DNS rebinding: a page on the loopback port under any other name gets the bare
+  // `not_found`, never the finished page and the instance name its banner carries.
+  for (const name of ['rebound.example', '127.0.0.1']) {
+    const rebound = await send(port, 'GET', '/setup', { host: `${name}:${String(port)}` });
+    expect(rebound.status, name).toBe(404);
+    expect(rebound.body, name).toBe(expected.body);
+  }
 }
 
 /** The tablet: pins nothing here, but redeems the claim on the REAL sealed route. */
 async function tabletRedeems(at: World, device: TestDevice, claimCode: string) {
-  return sealedAt(at.instance.url, TEST_ORIGIN, {
+  return sealedAt(at.instance.url, at.origin, {
     method: 'POST',
     path: '/v1/auth/owner-claim',
     body: { publicKey: device.publicKey, claimCode },
@@ -285,7 +348,7 @@ async function tabletRedeems(at: World, device: TestDevice, claimCode: string) {
 }
 
 /** A device registering over the sealed session route, unauthenticated: what a stranger meets. */
-async function register(at: World, device: TestDevice) {
+async function register(at: World, device: TestDevice, inviteCode?: string) {
   const challenge = (await (
     await fetch(`${at.instance.url}/v1/auth/challenge`, {
       method: 'POST',
@@ -296,7 +359,10 @@ async function register(at: World, device: TestDevice) {
   return sealedAt(at.instance.url, TEST_ORIGIN, {
     method: 'POST',
     path: '/v1/auth/session',
-    body: await device.statement(challenge.nonce, { issuedAt: Math.floor(Date.now() / 1000) }),
+    body: {
+      ...(await device.statement(challenge.nonce, { issuedAt: Math.floor(Date.now() / 1000) })),
+      ...(inviteCode === undefined ? {} : { inviteCode }),
+    },
     signer: device.signingKey,
   });
 }
@@ -329,6 +395,10 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
       open: `http://localhost:${String(at.port)}/setup`,
       codeIn: 'secrets/setup-code',
       validUntil: expect.stringMatching(/Z$/) as unknown,
+      // #2858: the same moment by this machine's clock, its zone named.
+      validUntilLocal: expect.stringMatching(
+        /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} [A-Za-z0-9+:-]+$/,
+      ) as unknown,
     });
     expect(at.lines.join('\n')).not.toContain(code);
     const locked = await new Browser(at).get('/setup');
@@ -374,7 +444,7 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     const pending = await browser.get('/setup/claim');
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     expect((await browser.post('/setup/claim/confirm', { comparison })).status).toBe(303);
-    expect((await browser.get('/setup/passkey')).status).toBe(200);
+    expect((await browser.get('/setup/tailnet')).status).toBe(200);
     await expectAllNotFound(portOf(at.instance));
   });
 
@@ -466,12 +536,17 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(owner.status, owner.text).toBe(200);
     expect(JSON.parse(owner.text)).toMatchObject({ registrationState: 'active' });
 
-    // Passkey: optional, explained.
-    expect((await browser.get('/setup/passkey')).body).toContain('admin-passkeys confirm');
+    // The tailnet (#2817): the step after the claim, before the passkey bound to the address.
+    expect((await browser.get('/setup/tailnet')).body).toContain('This server is running with');
     // Next pressed on an earlier step's page does not skip the step the setup has reached.
     const stale = await browser.post('/setup/next', { from: 'claim' });
-    expect(stale.headers.location).toBe('/setup/passkey');
-    expect((await browser.get('/setup/passkey')).status).toBe(200);
+    expect(stale.headers.location).toBe('/setup/tailnet');
+    expect((await browser.get('/setup/passkey')).status).toBe(303);
+    expect((await browser.post('/setup/next', { from: 'tailnet' })).headers.location).toBe(
+      '/setup/passkey',
+    );
+    // Passkey: optional, explained.
+    expect((await browser.get('/setup/passkey')).body).toContain('admin-passkeys confirm');
     expect((await browser.post('/setup/next', { from: 'passkey' })).headers.location).toBe(
       '/setup/secrets',
     );
@@ -564,11 +639,28 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(turnedAway.text).toContain('registration_closed');
 
     // One rider invite, as a QR with the card.
-    const invite = await back.post('/setup/invite/code');
-    expect(invite.status).toBe(200);
+    const made = await back.post('/setup/invite/code');
+    expect(made.headers.location).toBe('/setup/invite');
+    const invite = await back.get('/setup/invite');
     expect(CARD_LINE.exec(invite.body)?.[1]).toMatch(/^[a-z2-9]{4}/);
     expect((await back.post('/setup/invite/code')).status).toBe(303);
-    expect((await back.get('/setup/invite')).body).toContain('made its one invite');
+    // #2858: shown again to the session that made it, until it is used or runs out.
+    expect(CARD_LINE.exec((await back.get('/setup/invite')).body)?.[1]).toBe(
+      CARD_LINE.exec(invite.body)?.[1],
+    );
+    // Another session is told the setup made its one invite, and is never shown it.
+    const other = new Browser(at);
+    await other.signIn(
+      (
+        await setupCode(
+          { database: at.path, blobs: `${at.path}.blobs` },
+          { secretsDirectory: at.secrets, port: String(at.port) },
+        )
+      ).code,
+    );
+    const elsewhere = await other.get('/setup/invite');
+    expect(elsewhere.body).toContain('made its one invite');
+    expect(elsewhere.body).not.toContain(CARD_LINE.exec(invite.body)?.[1] ?? 'none');
     expect((await back.post('/setup/next', { from: 'invite' })).headers.location).toBe('/setup/ai');
 
     // AI write-ups (#2792): optional, and skipped here. Its own tests are further down.
@@ -598,17 +690,42 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     );
     expect(policy).not.toContain("'unsafe-inline'");
     expect(await fileThere(at)).toBe(false);
-    await expectAllNotFound(at.port);
+    await expectAllNotFound(at.port, { finishedHere: true });
+    // #2858: through the tunnel `/setup` stays byte-identical to a missing route.
+    await expectAllNotFound(portOf(at.instance));
 
     // Done is the database's: a restart neither reopens it nor writes a code.
     at.lines.length = 0;
     await restart(at);
+    await restart(at);
     expect(await fileThere(at)).toBe(false);
     expect(at.lines.join('\n')).not.toContain('first-run-setup');
-    await expectAllNotFound(at.port);
+    // Nor does a start after Finish leave a "setup code made: refused" entry in the operator
+    // log each time (owner, 2026-11-19): it asks for no code once the setup is done.
+    const logged = await openSqlStore(at.path);
+    try {
+      const minted = (await logged.listOperatorLogPage(undefined, 200))
+        .filter((entry) => entry.action === 'setup_code_minted')
+        .map((entry) => entry.outcome);
+      expect(minted.length).toBeGreaterThan(0);
+      expect(minted).not.toContain('refused');
+    } finally {
+      await logged.close();
+    }
+    await expectAllNotFound(at.port, { finishedHere: true });
     await expect(
       setupCode({ database: at.path, blobs: `${at.path}.blobs` }, { secretsDirectory: at.secrets }),
     ).rejects.toThrow(/setup is done/);
+    // #2920: the operator ran `setup-code`, so its refusal IS logged, once, from the CLI.
+    const afterCli = await openSqlStore(at.path);
+    try {
+      const refused = (await afterCli.listOperatorLogPage(undefined, 200))
+        .filter((entry) => entry.action === 'setup_code_minted' && entry.outcome === 'refused')
+        .map((entry) => entry.source);
+      expect(refused).toEqual(['cli']);
+    } finally {
+      await afterCli.close();
+    }
 
     // ADR 0004 D, ADR 0069 D-4: no page and no log line holds a setup code or the secret.
     const everything = [...at.pages, ...at.lines].join('\n');
@@ -674,11 +791,11 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     expect(owned.body).toContain('name="from" value="claim"');
     expect(owned.body).not.toContain(claim);
     expect((await browser.post('/setup/next', { from: 'claim' })).headers.location).toBe(
-      '/setup/passkey',
+      '/setup/tailnet',
     );
 
     // The invite step before the tablet has signed in: an instruction, not a fault.
-    for (const from of ['passkey', 'secrets', 'backups'])
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups'])
       await browser.post('/setup/next', { from });
     await browser.post('/setup/registration/mode', { mode: 'invite' });
     const early = await browser.get('/setup/invite');
@@ -791,7 +908,8 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     const pending = await browser.get('/setup/claim');
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     await browser.post('/setup/claim/confirm', { comparison });
-    for (const from of ['claim', 'passkey', 'secrets']) await browser.post('/setup/next', { from });
+    for (const from of ['claim', 'tailnet', 'passkey', 'secrets'])
+      await browser.post('/setup/next', { from });
 
     const ran = new Date(at.clock);
     const stop = new AbortController();
@@ -961,7 +1079,7 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
     const owner = await register(at, tablet);
     expect(owner.status, owner.text).toBe(200);
     let landed: Answer | undefined;
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite']) {
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups', 'registration', 'invite']) {
       landed = await browser.post('/setup/next', { from });
     }
     expect(landed?.headers.location).toBe('/setup/ai');
@@ -1137,12 +1255,63 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
     expect(parseStream((await stream?.text()) ?? '').events.at(-1)?.data).toEqual({
       status: 'succeeded',
       writeUp: 'A steady ride.',
+      templateVersion: '2',
     });
     expect(
       stub.requests
         .filter((request) => request.path === '/v1/chat/completions')
         .map((request) => (request.body as { model?: unknown }).model),
     ).toEqual(['delta:8b']);
+  });
+
+  it('downloads the recommended model with one press, then offers it first with no download, and Use turns write-ups on (#2869, ADR 0086)', async () => {
+    const { at, stub } = await worldWith({
+      ...CURRENT_SERVER,
+      tags: { models: [] },
+      ps: { models: [] },
+      show: { 'qwen3:8b': { capabilities: ['completion', 'tools'] } },
+      pull: () => ({
+        lines: [{ status: 'pulling manifest' }],
+        then: [{ status: 'success' }],
+        adds: { name: 'qwen3:8b', model: 'qwen3:8b', size: 5_200_000_000 },
+      }),
+      load: (model) => ({ name: model, model, size: 6_000_000_000, size_vram: 6_000_000_000 }),
+    });
+    const { browser } = await atAiStep(at);
+    const before = await browser.get('/setup/ai');
+    // The one press, above the typed field, sending the name the page filled in.
+    const press =
+      /<form method="post" action="\/setup\/ai\/pull" aria-label="Download the recommended model \(qwen3:8b, about 5 GB\)">[\s\S]*?<\/form>/.exec(
+        before.body,
+      )?.[0];
+    expect(press).toBeDefined();
+    expect(before.body.indexOf(press ?? '')).toBeLessThan(before.body.indexOf('id="model"'));
+    const sends = /name="model" value="([^"]*)"/.exec(press ?? '')?.[1];
+    expect(sends).toBe('qwen3:8b');
+
+    const asked = await browser.post('/setup/ai/pull', { model: sends ?? '' });
+    expect(asked.headers.location).toBe('/setup/ai');
+    const done = await untilAiSays(browser, 'The download finished.');
+    expect(stub.requests.filter((request) => request.path === '/api/pull')).toEqual([
+      { method: 'POST', path: '/api/pull', body: { model: 'qwen3:8b', stream: true } },
+    ]);
+    // Now here: offered first, and nothing more is recommended for download.
+    expect(done.body).toContain(
+      'A model already on this computer can run write-ups, so nothing needs downloading.',
+    );
+    expect(done.body).not.toContain('Download the recommended model');
+    expect(done.body).toContain('<button type="submit">Use qwen3:8b</button>');
+    // Downloaded is not chosen (#2792): the owner's press is.
+    expect(done.body).not.toContain('AI write-ups are on.');
+    await browser.post('/setup/ai/use', { model: 'qwen3:8b' });
+    const on = await browser.get('/setup/ai');
+    expect(on.body).toContain('AI write-ups are on. They run on this model: <code>qwen3:8b</code>');
+    expect(on.body).not.toContain('nothing needs downloading');
+    expect(on.body).not.toContain('Download the recommended model');
+    expect(await modelLog(at)).toEqual([
+      ['setup', 'analysis_model_pull', 'done', null],
+      ['setup', 'analysis_settings_set', 'done', 'local_url,local_model,offer_local'],
+    ]);
   });
 
   it('shows a download’s progress and its failure in its own words: never the model’s name, nor a path with the host’s user name', async () => {
@@ -1323,13 +1492,515 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
       'AI write-ups: off. Everything else works without them.',
     );
     expect((await browser.post('/setup/finish/done')).status).toBe(200);
-    await expectAllNotFound(at.port);
+    await expectAllNotFound(at.port, { finishedHere: true });
     // Done with AI off, as a job meets it: the owner's write-up on this computer's model is
     // refused at its start. Every step before this one worked with no model.
     const refused = await at.instance
       .analysisJobs()
       ?.start({ athleteId: ownerId } as Caller, jobBody());
     expect(refused).toMatchObject({ ok: false, code: 'local_unavailable' });
+  });
+});
+
+describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
+  const TAILNET_ORIGIN = 'https://onyourleft.tail1a2b.ts.net';
+  const RENAMED_ORIGIN = 'https://onyourleft-1.tail1a2b.ts.net';
+
+  /** Signed in, the claim made and confirmed with a tablet: the setup lands on the tailnet step. */
+  async function claimed(at: World): Promise<{ browser: Browser; card: string }> {
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const shown = await showClaim(browser);
+    const card = /oyl-instance:[^ <]+/.exec(shown.body)?.[0] ?? '';
+    const claim = CARD_LINE.exec(shown.body)?.[1] ?? '';
+    expect((await tabletRedeems(at, await testDevice(), claim)).status).toBe(200);
+    const pending = await browser.get('/setup/claim');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    await browser.post('/setup/claim/confirm', { comparison });
+    expect((await browser.post('/setup/next', { from: 'claim' })).headers.location).toBe(
+      '/setup/tailnet',
+    );
+    return { browser, card };
+  }
+
+  /** The address the step says the running server read back. */
+  const addressOn = (body: string): string | undefined =>
+    /This server is running with this address: <code>([^<]*)<\/code>/.exec(body)?.[1];
+
+  it('comes straight after the claim, shows the address the running server’s card names, how riders join and the access rule, and says what a change costs before how', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const { browser, card } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.status).toBe(200);
+    // One name for the step, in the progress bar and as the page's heading (owner, 2026-11-19).
+    expect(step.body).toContain('<h1>Tailnet</h1>');
+    expect(step.body).toMatch(
+      /aria-current="step">[\s\S]*?<span class="step-name">Tailnet<\/span>/,
+    );
+    // Read back from the card the claim QR carried, not from a value the step was handed.
+    expect(card.startsWith(`oyl-instance:${TAILNET_ORIGIN}#`)).toBe(true);
+    expect(addressOn(step.body)).toBe(TAILNET_ORIGIN);
+    expect(step.body).toContain(
+      '<p class="notice">That is a Tailscale address, so a device on your tailnet can reach it.</p>',
+    );
+    expect(step.body).not.toContain('class="problem"');
+    // ADR 0079 D-2: by invitation or sharing, each on their own account, never the owner's.
+    expect(step.body).toContain('Invite each rider into your tailnet');
+    expect(step.body).toContain('share this machine with them');
+    expect(step.body).toContain('signs in with their own Tailscale account');
+    expect(step.body).toContain(
+      '<p class="warning">Never sign a rider’s device in to your own Tailscale account',
+    );
+    // The access rule limiting every other device to the instance's port, to copy.
+    const rule = /<pre class="copy"><code>([\s\S]*?)<\/code><\/pre>/.exec(step.body)?.[1] ?? '';
+    const parsed = JSON.parse(rule.replaceAll('&quot;', '"')) as {
+      tagOwners: Record<string, string[]>;
+      grants: { src: string[]; dst: string[]; ip: string[] }[];
+    };
+    expect(parsed.tagOwners).toEqual({ 'tag:onyourleft': ['autogroup:owner'] });
+    expect(parsed.grants).toContainEqual({
+      src: ['autogroup:member', 'autogroup:shared'],
+      dst: ['tag:onyourleft'],
+      ip: ['tcp:443'],
+    });
+    // ADR 0079 D-8: the cost of a change is read before anything says how to make one.
+    const warning = step.body.indexOf(
+      'Every device that uses this server, your tablet too, must scan',
+    );
+    const how = step.body.indexOf('Set OYL_INSTANCE_ORIGIN in .env');
+    expect(warning).toBeGreaterThan(-1);
+    expect(step.body).toContain('every passkey made for the old address stops working');
+    // The keys are wrapped under the address: a change means new ones, so a new identity.
+    expect(step.body).toContain(
+      'the server’s keys belong to its address, so it must make new ones, which gives it a new identity',
+    );
+    expect(how).toBeGreaterThan(warning);
+    // #2920: the deploy is a block to copy, like every other command, never words in a sentence.
+    expect(step.body).toContain(
+      'Then run this beside compose.yaml. It prints Tailscale’s sign-in link',
+    );
+    expect(step.body).toContain('<pre class="copy"><code>bash deploy.sh</code></pre>');
+    expect(step.body).not.toContain('Run bash deploy.sh');
+    expect(step.body.indexOf('instance-key reset')).toBeGreaterThan(warning);
+    // It changes nothing itself: its one form is the GET that reads the address back again.
+    const forms = [...step.body.matchAll(/<form [^>]*>/g)].map((match) => match[0]);
+    expect(forms.filter((form) => form.includes('method="post"'))).toEqual([
+      expect.stringContaining('action="/setup/next"'),
+    ]);
+    expect(forms).toContainEqual(expect.stringContaining('action="/setup/tailnet"'));
+    // Moving on leads to the passkey, which is bound to the address now settled.
+    expect((await browser.post('/setup/next', { from: 'tailnet' })).headers.location).toBe(
+      '/setup/passkey',
+    );
+  });
+
+  it('reads the address back from the server that is running after a restart, and says it works only once a device can fetch its keys', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const { card: before } = await claimed(at);
+    expect(before.startsWith(`oyl-instance:${TAILNET_ORIGIN}#`)).toBe(true);
+    // The owner changes the address in .env and deploys again: the same database, a new start.
+    at.origin = RENAMED_ORIGIN;
+    await restart(at);
+    const tunnel = portOf(at.instance);
+    const keysOnDevice = () =>
+      send(tunnel, 'GET', '/v1/instance/keys', { host: `localhost:${String(tunnel)}` });
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    const after = await browser.get('/setup/tailnet');
+    expect(after.status).toBe(200);
+    expect(addressOn(after.body)).toBe(RENAMED_ORIGIN);
+    expect(after.body).not.toContain(TAILNET_ORIGIN);
+    // The keys were wrapped under the old address (keys/wrap.ts), so what a device fetches
+    // first fails: the step must say so, and never that the new address can be reached.
+    const fetched = await keysOnDevice();
+    expect(fetched.status).toBe(503);
+    expect(fetched.body).toContain('cannot be unwrapped');
+    expect(after.body).toContain(
+      '<p class="problem">The server cannot open its keys at this address',
+    );
+    expect(after.body).toContain('instance-key reset');
+    expect(after.body).not.toContain('so a device on your tailnet can reach it');
+    // The remedy the page names, run on the host; then Check now reads the server again.
+    const paths = { database: at.path, blobs: `${at.path}.blobs` };
+    const secret = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)));
+    await instanceKey(paths, { action: 'reset' }, { secret, origin: RENAMED_ORIGIN });
+    const checked = await browser.get('/setup/tailnet');
+    expect((await keysOnDevice()).status).toBe(200);
+    expect(addressOn(checked.body)).toBe(RENAMED_ORIGIN);
+    expect(checked.body).toContain('so a device on your tailnet can reach it');
+    expect(checked.body).not.toContain('class="problem"');
+  });
+
+  it('says no card can be drawn, and never that the address works, when the keys cannot be read', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    await claimed(at);
+    // Started again with no secret: the keys are not opened, so there is no card for any address.
+    await restart(at, { noSecret: true });
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    const step = await browser.get('/setup/tailnet');
+    expect(step.status).toBe(200);
+    expect(addressOn(step.body)).toBe(TAILNET_ORIGIN);
+    expect(step.body).toContain(
+      '<p class="problem">The server’s keys could not be read, so it cannot draw a card',
+    );
+    expect(step.body).not.toContain('so a device on your tailnet can reach it');
+  });
+
+  it('is where an owner claimed outside the setup lands too, with the setup still at the claim', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const { browser } = await claimed(at);
+    // An owner claimed from the admin pages, say, leaves the setup's own step at the claim.
+    const store = await openSqlStore(at.path);
+    try {
+      await store.setSetupStep('claim', Math.floor(Date.now() / 1000));
+    } finally {
+      await store.close();
+    }
+    expect((await browser.get('/setup')).headers.location).toBe('/setup/tailnet');
+    expect((await browser.get('/setup/passkey')).headers.location).toBe('/setup/tailnet');
+  });
+
+  it('takes only https://<machine>.<tailnet>.ts.net for a Tailscale name', () => {
+    expect(isTailscaleName(TAILNET_ORIGIN)).toBe(true);
+    expect(isTailscaleName('https://onyourleft.tail1a2b.ts.net.')).toBe(true);
+    for (const not of [
+      'https://tail1a2b.ts.net',
+      'https://a.onyourleft.tail1a2b.ts.net',
+      'http://onyourleft.tail1a2b.ts.net',
+      'https://onyourleft.tail1a2b.ts.net.example.org',
+      'https://rides.example.org',
+      'not an address',
+    ]) {
+      expect(isTailscaleName(not), not).toBe(false);
+    }
+    expect(cardOrigin(`oyl-instance:${TAILNET_ORIGIN}#${'a'.repeat(52)}`)).toBe(TAILNET_ORIGIN);
+  });
+
+  it('says a tailnet server whose address is not a Tailscale name will not be reached', async () => {
+    const at = await world({ origin: 'https://rides.example.org', remotePath: 'tailnet' });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(addressOn(step.body)).toBe('https://rides.example.org');
+    expect(step.body).toContain(
+      '<p class="problem">That is not a Tailscale address, but this server is set up to be reached over your tailnet',
+    );
+  });
+
+  it('says what Funnel changes on the Funnel path, and keeps the riders and the access rule', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'funnel' });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.body).toContain(
+      '<p class="warning">Funnel is on, so this address is on the public internet too',
+    );
+    expect(step.body).toContain('<pre class="copy">');
+    expect(step.body).toContain('Never sign a rider’s device in to your own Tailscale account');
+  });
+
+  it('has nothing to set up on a Cloudflare tunnel: no tailnet words, but the cost of a change still first', async () => {
+    const at = await world({ origin: 'https://rides.example.org', remotePath: 'cloudflare' });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.body).toContain('reached through a Cloudflare tunnel on your own domain');
+    // Still named Tailnet, and the first thing it says is that nothing is needed here.
+    expect(step.body).toContain('<h1>Tailnet</h1>');
+    expect(step.body).toMatch(/<h1>Tailnet<\/h1>\n<p>Nothing to do here: /);
+    // No access rule to paste: the blocks to copy are what a change of address needs, the
+    // deploy (#2920) and the key reset.
+    expect(step.body).not.toContain('tagOwners');
+    expect(
+      [...step.body.matchAll(/<pre class="copy"><code>([^<]*)<\/code>/g)].map((m) => m[1]),
+    ).toEqual([
+      'bash deploy.sh',
+      'docker compose exec instance node src/operator/cli.ts instance-key reset',
+    ]);
+    expect(step.body).not.toContain('Invite each rider into your tailnet');
+    expect(step.body).not.toContain('class="problem"');
+    expect(step.body).not.toContain('That is a Tailscale address');
+    expect(step.body).toContain('every passkey made for the old address stops working');
+    // How to change it names the Cloudflare address and nothing a tailnet needs.
+    expect(step.body).not.toContain('ts.net');
+    expect(step.body).not.toContain('COMPOSE_PROFILES=tailscale');
+    expect(step.body).not.toContain('OYL_INSTANCE_REMOTE_PATH=tailnet');
+    expect(step.body).toContain('your own domain that your Cloudflare tunnel serves');
+  });
+
+  it('says this step cannot check a tailnet when no path is named', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN });
+    const { browser } = await claimed(at);
+    const step = await browser.get('/setup/tailnet');
+    expect(step.body).toContain('do not say how other devices reach it');
+    expect(addressOn(step.body)).toBe(TAILNET_ORIGIN);
+  });
+
+  it('is not_found through the public listener, before the claim and at the step', async () => {
+    const at = await world({ origin: TAILNET_ORIGIN, remotePath: 'tailnet' });
+    const tunnel = portOf(at.instance);
+    const missing = await noRoute(tunnel, 'GET');
+    const before = await send(tunnel, 'GET', '/setup/tailnet', {
+      host: `localhost:${String(tunnel)}`,
+    });
+    expect(before.status).toBe(404);
+    expect(before.body).toBe(missing.body);
+    await claimed(at);
+    const during = await send(tunnel, 'GET', '/setup/tailnet', {
+      host: `localhost:${String(tunnel)}`,
+    });
+    expect(during.status).toBe(404);
+    expect(during.body).toBe(missing.body);
+  });
+});
+
+describe('the setup wizard’s snags from the trial of 2026-11-18 (#2858)', () => {
+  /** Signed in, claimed with a tablet and confirmed: the setup past its claim. */
+  async function claimed(at: World): Promise<{ browser: Browser; tablet: TestDevice }> {
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const claim = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    const tablet = await testDevice();
+    expect((await tabletRedeems(at, tablet, claim)).status).toBe(200);
+    const pending = await browser.get('/setup/claim');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    await browser.post('/setup/claim/confirm', { comparison });
+    return { browser, tablet };
+  }
+
+  /** One backup by the backup service's own loop, at `when`. */
+  async function backUp(at: World, when: Date): Promise<void> {
+    const stop = new AbortController();
+    await backupLoop(
+      { database: at.path, blobs: join(at.path, '..', 'blobs') },
+      join(at.path, '..', 'backups-dir'),
+      {
+        intervalSeconds: 21_600,
+        signal: stop.signal,
+        now: () => when,
+        wait: () => {
+          stop.abort();
+          return Promise.resolve();
+        },
+        report: () => undefined,
+      },
+    );
+  }
+
+  it('takes "Back up now" past the 15-minute gap while the newest backup predates the claim, and says it does not hold the account', async () => {
+    const at = await world();
+    at.clock = Date.now();
+    await restart(at);
+    // The backup service's start-up backup, before anybody claimed the server.
+    await backUp(at, new Date(at.clock));
+    at.clock += 60 * 1000;
+    const { browser } = await claimed(at);
+    for (const from of ['tailnet', 'passkey', 'secrets'])
+      await browser.post('/setup/next', { from });
+    const step = await browser.get('/setup/backups');
+    expect(step.body).toContain(
+      '<p class="warning">That backup was made before your tablet claimed this server, so it does not hold your account yet.',
+    );
+    // Asked: one minute after the start-up backup, well inside the 15-minute gap.
+    const asked = await browser.post('/setup/backups/now');
+    expect(asked.headers.location).toBe('/setup/backups?asked');
+    // The backup it asked for runs, after the claim: now the gap holds again, and no warning.
+    at.clock += 60 * 1000;
+    await backUp(at, new Date(at.clock));
+    const after = await browser.get('/setup/backups');
+    expect(after.body).not.toContain('before your tablet claimed this server');
+    at.clock += 60 * 1000;
+    expect((await browser.post('/setup/backups/now')).headers.location).toBe(
+      '/setup/backups?too-soon',
+    );
+  });
+
+  it('voids a claim code a restart took the page of, and says why the QR went', async () => {
+    const at = await world();
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const before = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    expect(before).toMatch(/^[a-z2-9]{4}/);
+    await restart(at);
+    const again = new Browser(at);
+    await again.signIn(await codeInFile(at));
+    const open = await again.get('/setup/claim');
+    expect(open.body).toContain(
+      '<p class="problem" role="alert">The server restarted, so a claim code it showed before no longer works. Show a new one.</p>',
+    );
+    // The tablet that scans the old page's QR now is refused: the code is void, not merely unseen.
+    const late = await tabletRedeems(at, await testDevice(), before);
+    expect(late.status).not.toBe(200);
+    // Once this process has shown a new code, the sentence has done its work, for every session.
+    await showClaim(again);
+    const printed = await setupCode(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    const third = new Browser(at);
+    await third.signIn(printed.code);
+    const elsewhere = await third.get('/setup/claim');
+    expect(elsewhere.body).toContain('Show the claim code');
+    expect(elsewhere.body).not.toContain('The server restarted');
+  });
+
+  it('keeps a redeemed claim waiting for Yes across a restart, and confirms it after', async () => {
+    const at = await world();
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    await browser.get('/setup/claim');
+    const claim = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    const tablet = await testDevice();
+    expect((await tabletRedeems(at, tablet, claim)).status).toBe(200);
+    // The owner restarts between the tablet's scan and pressing Yes.
+    await restart(at);
+    const again = new Browser(at);
+    await again.signIn(await codeInFile(at));
+    const pending = await again.get('/setup/claim');
+    expect(pending.body).not.toContain('The server restarted');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    expect(comparison).toMatch(/^[0-9]{6}$/);
+    expect((await again.post('/setup/claim/confirm', { comparison })).status).toBe(303);
+    expect((await again.get('/setup/tailnet')).status).toBe(200);
+  });
+
+  it('owner-claim reset makes the setup code and writes its file, which opens the setup', async () => {
+    const at = await world();
+    await claimed(at);
+    await rm(join(at.secrets, SETUP_CODE_FILE), { force: true });
+    const reset = await ownerClaimReset(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    expect(reset).toMatchObject({
+      cleared: true,
+      open: `http://localhost:${String(at.port)}/setup`,
+      writtenToFile: true,
+    });
+    const code = await codeInFile(at);
+    expect(reset).toMatchObject({ setupCode: code });
+    const browser = new Browser(at);
+    expect((await browser.signIn(code)).headers.location).toBe('/setup/claim');
+    // With .env naming the owner the setup stays done: no code, and no file.
+    await rm(join(at.secrets, SETUP_CODE_FILE), { force: true });
+    const named = await ownerClaimReset(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port), ownerKey: 'a-key' },
+    );
+    expect(named).not.toHaveProperty('setupCode');
+    expect(await fileThere(at)).toBe(false);
+  });
+
+  it('writes the whole command wherever a page names one, in a block to copy', async () => {
+    const at = await world();
+    const locked = await new Browser(at).get('/setup');
+    expect(locked.body).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts setup-code</code></pre>',
+    );
+    const { browser } = await claimed(at);
+    expect((await browser.get('/setup/claim')).body).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts owner-claim reset</code></pre>',
+    );
+    await browser.post('/setup/next', { from: 'claim' });
+    const tailnet = (await browser.get('/setup/tailnet')).body;
+    expect(tailnet).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts instance-key reset</code></pre>',
+    );
+    await browser.post('/setup/next', { from: 'tailnet' });
+    const passkey = (await browser.get('/setup/passkey')).body;
+    for (const command of [
+      'docker compose up -d instance',
+      'docker compose exec instance node src/operator/cli.ts admin-code',
+      'docker compose exec instance node src/operator/cli.ts admin-passkeys list',
+      'docker compose exec instance node src/operator/cli.ts admin-passkeys confirm &lt;id&gt;',
+    ]) {
+      expect(passkey).toContain(`<pre class="copy"><code>${command}</code></pre>`);
+    }
+    await browser.post('/setup/next', { from: 'passkey' });
+    await browser.post('/setup/next', { from: 'secrets' });
+    const backups = (await browser.get('/setup/backups')).body;
+    expect(backups).toContain('<pre class="copy"><code>docker compose ps backup</code></pre>');
+    // No plain sentence says "the … command" without the command itself, nor runs one inline.
+    expect(locked.body).not.toMatch(/the [a-z]+-[a-z-]+ command/);
+    expect(passkey).not.toMatch(/the [a-z]+-[a-z-]+ command/);
+    for (const page of [locked.body, tailnet, passkey, backups]) {
+      expect(page.replaceAll(/<pre class="copy"><code>[^<]*<\/code><\/pre>/g, '')).not.toMatch(
+        /docker compose|operator\/cli/,
+      );
+    }
+  });
+
+  it('says how to download the kit again after the one download, and a new session can', async () => {
+    const at = await world();
+    const { browser } = await claimed(at);
+    for (const from of ['tailnet', 'passkey']) await browser.post('/setup/next', { from });
+    expect((await browser.post('/setup/secrets/kit')).status).toBe(200);
+    const taken = await browser.get('/setup/secrets');
+    expect(taken.body).toContain('If you cancelled the save or cannot find the file');
+    expect(taken.body).toContain(
+      '<pre class="copy"><code>docker compose exec instance node src/operator/cli.ts setup-code</code></pre>',
+    );
+    // ADR 0080 D-4: once per session — this one downloads nothing more.
+    expect((await browser.post('/setup/secrets/kit')).status).toBe(303);
+    // The command's code opens a new session, which downloads it once more.
+    const printed = await setupCode(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    const fresh = new Browser(at);
+    await fresh.signIn(printed.code);
+    await fresh.get('/setup/secrets');
+    const again = await fresh.post('/setup/secrets/kit');
+    expect(again.status).toBe(200);
+    expect(again.body).toContain(KIT_SECRET.text);
+  });
+
+  it('is shown again by the process that made it only: after a restart, the step says it was made', async () => {
+    const at = await world();
+    const { browser, tablet } = await claimed(at);
+    expect((await register(at, tablet)).status).toBe(200);
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups'])
+      await browser.post('/setup/next', { from });
+    await browser.post('/setup/registration/mode', { mode: 'invite' });
+    await browser.post('/setup/invite/code');
+    const code = CARD_LINE.exec((await browser.get('/setup/invite')).body)?.[1] ?? '';
+    expect(code).toMatch(/^[a-z2-9]{4}/);
+    // The database keeps only the invite's hash, so a new process cannot draw it again.
+    await restart(at);
+    const later = new Browser(at);
+    await later.signIn(await codeInFile(at));
+    const gone = await later.get('/setup/invite');
+    expect(gone.body).toContain('made its one invite');
+    expect(gone.body).not.toContain(code);
+  });
+
+  it('stops showing the invite once a rider has used it', async () => {
+    const at = await world();
+    const { browser, tablet } = await claimed(at);
+    expect((await register(at, tablet)).status).toBe(200);
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups'])
+      await browser.post('/setup/next', { from });
+    await browser.post('/setup/registration/mode', { mode: 'invite' });
+    await browser.post('/setup/invite/code');
+    const code = CARD_LINE.exec((await browser.get('/setup/invite')).body)?.[1] ?? '';
+    const rider = await testDevice();
+    const joined = await register(at, rider, code);
+    expect(joined.status, joined.text).toBe(200);
+    const after = await browser.get('/setup/invite');
+    expect(after.body).toContain('made its one invite');
+    expect(after.body).not.toContain(code);
+  });
+});
+
+describe('local times with the zone named (#2858)', () => {
+  it('reads a moment by a named zone, and the code’s file says it beside UTC', () => {
+    const at = Date.UTC(2026, 10, 19, 10, 30) / 1000;
+    expect(localTimeText(at, 'America/New_York')).toBe('2026-11-19 05:30 EST');
+    expect(localTimeText(at, 'UTC')).toBe('2026-11-19 10:30 UTC');
+    expect(setupCodeFileText('abcd-efgh-jkmn-pqrs', at, 8788, 'America/New_York')).toContain(
+      'It works once, until 2026-11-19 05:30 EST (2026-11-19T10:30:00.000Z).',
+    );
   });
 });
 
@@ -1442,7 +2113,15 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const pending = await browser.get('/setup/claim');
     const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
     await browser.post('/setup/claim/confirm', { comparison });
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite', 'ai']) {
+    for (const from of [
+      'tailnet',
+      'passkey',
+      'secrets',
+      'backups',
+      'registration',
+      'invite',
+      'ai',
+    ]) {
       await browser.post('/setup/next', { from });
     }
     expect((await browser.get('/setup/finish')).status).toBe(200);
@@ -1454,7 +2133,7 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const second = new Browser(at);
     await second.signIn(printedBefore.code);
     expect((await browser.post('/setup/finish/done')).status).toBe(200);
-    await expectAllNotFound(at.port);
+    await expectAllNotFound(at.port, { finishedHere: true });
 
     // The claim taken by the wrong device after the setup was done: reset on the host.
     const paths = { database: at.path, blobs: `${at.path}.blobs` };
@@ -1474,7 +2153,15 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const twice = await again.get('/setup/claim');
     const digits = /name="comparison" value="([0-9]{6})"/.exec(twice.body)?.[1] ?? '';
     expect((await again.post('/setup/claim/confirm', { comparison: digits })).status).toBe(303);
-    for (const from of ['passkey', 'secrets', 'backups', 'registration', 'invite', 'ai']) {
+    for (const from of [
+      'tailnet',
+      'passkey',
+      'secrets',
+      'backups',
+      'registration',
+      'invite',
+      'ai',
+    ]) {
       await again.post('/setup/next', { from });
     }
     // This setup's, not the one before the reset: no kit downloaded since, no invite made.
@@ -1527,5 +2214,259 @@ describe('the setup’s commands on the host (#2784, ADR 0080 D-2, D-6)', () => 
     const pending = await register(at, await testDevice());
     expect(pending.status, pending.text).toBe(200);
     expect(JSON.parse(pending.text)).toMatchObject({ registrationState: 'pending' });
+  });
+});
+
+describe('what a device needs before it can reach the server, and an address never set (#2855)', () => {
+  /** The origin line of the settings template, as an owner who filled nothing in has it in `.env`. */
+  const templateOrigin = (): string =>
+    /^OYL_INSTANCE_ORIGIN=(.+)$/m.exec(
+      readFileSync(new URL('../../deploy/home/instance.env.example', import.meta.url), 'utf8'),
+    )?.[1] ?? '';
+
+  /** Everything before a step's button: what its page says BEFORE the code is shown. */
+  const beforeTheButton = (body: string, label: string): string => {
+    const at = body.indexOf(`aria-label="${label}"`);
+    expect(at, label).toBeGreaterThan(0);
+    return body.slice(0, at);
+  };
+
+  /** A browser signed in to the setup, on its claim step. */
+  async function signedIn(at: World): Promise<Browser> {
+    const browser = new Browser(at);
+    await browser.signIn(await codeInFile(at));
+    return browser;
+  }
+
+  /** Claim with a tablet, sign it in, and walk the setup to its invite step. */
+  async function walkToInvite(at: World, browser: Browser): Promise<void> {
+    await browser.get('/setup/claim');
+    const claim = CARD_LINE.exec((await showClaim(browser)).body)?.[1] ?? '';
+    const tablet = await testDevice();
+    expect((await tabletRedeems(at, tablet, claim)).status).toBe(200);
+    const pending = await browser.get('/setup/claim');
+    const comparison = /name="comparison" value="([0-9]{6})"/.exec(pending.body)?.[1] ?? '';
+    await browser.post('/setup/claim/confirm', { comparison });
+    expect((await register(at, tablet)).status).toBe(200);
+    for (const from of ['tailnet', 'passkey', 'secrets', 'backups']) {
+      await browser.post('/setup/next', { from });
+    }
+    const mode = await browser.post('/setup/registration/mode', { mode: 'invite' });
+    expect(mode.headers.location).toBe('/setup/invite');
+  }
+
+  /** `cloudflared`'s `/ready`, stood in on loopback: the connections it says it has, and how often it was asked. */
+  async function tunnelStandIn(state: { connections: number; asked: number }): Promise<string> {
+    const server = createServer((_request, response) => {
+      state.asked += 1;
+      response.writeHead(state.connections > 0 ? 200 : 503, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ status: 200, readyConnections: state.connections }));
+    });
+    tunnel = server;
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    return `http://127.0.0.1:${String(port)}/ready`;
+  }
+
+  it('does not open while the address is the template’s example: no code is made or taken, and every page says what to set', async () => {
+    const example = templateOrigin();
+    expect(example).toMatch(/^https:\/\//);
+    const at = await world({ origin: example, remotePath: 'tailnet' });
+    // The start: no code file, and a line that says where the page is, never the address.
+    expect(await fileThere(at)).toBe(false);
+    const said = at.lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(said.find((line) => line.event === 'example-address')).toEqual({
+      event: 'example-address',
+      open: `http://localhost:${String(at.port)}/setup`,
+    });
+    expect(said.some((line) => line.event === 'first-run-setup')).toBe(false);
+    expect(at.lines.join('\n')).not.toContain('your-tailnet');
+    // An example address is no address: the instance made no keys for it, and serves none.
+    expect(said.find((line) => line.event === 'instance-keys')).toMatchObject({
+      state: 'no-origin',
+    });
+    expect((await fetch(`${at.instance.url}/v1/instance/keys`)).status).not.toBe(200);
+
+    // The page: one plain sentence, the setting's name in the collapsed block, and no form.
+    const browser = new Browser(at);
+    const refused = await browser.get('/setup');
+    expect(refused.status).toBe(409);
+    expect(refused.body).toContain(SETUP_EXAMPLE_ADDRESS_TEXT);
+    expect(refused.body).toContain('<details>');
+    expect(refused.body).toContain('OYL_INSTANCE_ORIGIN');
+    expect(refused.body).not.toContain('<form');
+    expect(refused.body).not.toContain('your-tailnet');
+    // Its stylesheet is still served, or the page would be drawn bare.
+    const sheet = await browser.get('/setup/setup.css');
+    expect(sheet.status).toBe(200);
+    expect(sheet.headers['content-type']).toBe('text/css; charset=utf-8');
+
+    // A code the host's command prints is not taken either: no session, so no step and no claim code.
+    const printed = await setupCode(
+      { database: at.path, blobs: `${at.path}.blobs` },
+      { secretsDirectory: at.secrets, port: String(at.port) },
+    );
+    const typed = await browser.post('/setup/sign-in', { code: printed.code });
+    expect(typed.status).toBe(409);
+    expect(typed.headers['set-cookie']).toBeUndefined();
+    expect(typed.body).toContain(SETUP_EXAMPLE_ADDRESS_TEXT);
+    for (const route of SETUP_ROUTES) {
+      if (route.kind === 'stylesheet') continue;
+      for (const method of route.methods) {
+        const answer =
+          method === 'GET' ? await browser.get(route.path) : await browser.post(route.path);
+        expect(answer.status, `${method} ${route.path}`).toBe(409);
+        expect(answer.body, `${method} ${route.path}`).toContain(SETUP_EXAMPLE_ADDRESS_TEXT);
+        expect(answer.body, `${method} ${route.path}`).not.toMatch(CARD_LINE);
+        expect(answer.headers['set-cookie'], `${method} ${route.path}`).toBeUndefined();
+      }
+    }
+    // The instance itself runs: only the setup, and the accounts, wait for the address.
+    expect((await fetch(`${at.instance.url}/health`)).status).toBe(200);
+  });
+
+  it('binds nothing to the example: once the address is set, the same database opens the setup and its claim code’s card names the new address', async () => {
+    const at = await world({ origin: templateOrigin() });
+    expect((await new Browser(at).get('/setup')).status).toBe(409);
+    // `.env` corrected and the instance started again on the SAME database. Keys made for the
+    // example would not open now (their wrap binds the origin), and there would be no card.
+    at.origin = TEST_ORIGIN;
+    await restart(at);
+    const opened = new Browser(at);
+    expect((await opened.get('/setup')).body).toContain('name="code"');
+    const landed = await opened.signIn(await codeInFile(at));
+    expect(landed.headers.location).toBe('/setup/claim');
+    expect((await opened.get('/setup/claim')).body).toContain('Show the claim code');
+    const shown = await showClaim(opened);
+    expect(shown.body).toMatch(CARD_LINE);
+    expect(shown.body).toContain(`oyl-instance:${TEST_ORIGIN}#`);
+    // And a tablet can claim it there, on the sealed route, under those keys.
+    const claim = CARD_LINE.exec(shown.body)?.[1] ?? '';
+    expect((await tabletRedeems(at, await testDevice(), claim)).status).toBe(200);
+  });
+
+  it('answers another host with the setup’s one address, even while the address is the example', async () => {
+    const at = await world({ origin: templateOrigin() });
+    const elsewhere = await send(at.port, 'GET', '/setup', {
+      host: `127.0.0.1:${String(at.port)}`,
+    });
+    expect(elsewhere.status).toBe(421);
+    expect(elsewhere.body).toContain(`http://localhost:${String(at.port)}/setup`);
+    expect(elsewhere.body).not.toContain(SETUP_EXAMPLE_ADDRESS_TEXT);
+    // Through the tunnel's listener the setup is a path with no route, as it always is.
+    await expectAllNotFound(portOf(at.instance));
+  });
+
+  it('serves nothing of the setup for an example address when the owner key is in the environment, and still says so in the log', async () => {
+    const at = await world({ origin: templateOrigin() });
+    await restart(at, { ownerKey: (await testDevice()).publicKey });
+    expect(at.instance.adminLoopback).toBeUndefined();
+    const said = at.lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(said.filter((line) => line.event === 'example-address').at(-1)).toEqual({
+      event: 'example-address',
+    });
+  });
+
+  it('names the address and says the tablet must be on the tailnet before the claim code is shown, and beside the code', async () => {
+    const at = await world({ remotePath: 'tailnet' });
+    const browser = await signedIn(at);
+    const open = await browser.get('/setup/claim');
+    // Before the button that shows the code: the address, what the tablet needs, and how to check.
+    const before = beforeTheButton(open.body, 'Show the claim code');
+    expect(before).toContain(`<code>${TEST_ORIGIN}</code>`);
+    expect(before).toContain(CLAIM_REACH_TEXT.tailnet);
+    expect(before).toContain('same Tailscale network as this computer');
+    expect(before).toContain(`<code>${TEST_ORIGIN}/health</code>`);
+    // The address the page tells the owner to open on the tablet is one the instance answers.
+    const health = await fetch(`${at.instance.url}/health`);
+    expect(health.status).toBe(200);
+    expect(await health.text()).toContain('ok');
+    // Nothing on a tailnet can be checked from this computer, so nothing is claimed.
+    expect(open.body).not.toContain('Checked from this computer');
+
+    // Beside the code too: a scan that fails sends the owner back to this page.
+    const shown = await showClaim(browser);
+    expect(shown.body).toMatch(CARD_LINE);
+    expect(shown.body).toContain(CLAIM_REACH_TEXT.tailnet);
+    expect(shown.body).toContain(`<code>${TEST_ORIGIN}</code>`);
+    // Above the QR and the button, as before the code is shown (owner, 2026-11-19).
+    const needs = shown.body.indexOf('same Tailscale network as this computer');
+    expect(needs).toBeGreaterThan(-1);
+    expect(needs).toBeLessThan(shown.body.indexOf('role="img"'));
+    expect(needs).toBeLessThan(shown.body.indexOf('I’ve scanned it'));
+  });
+
+  it('says a rider’s device needs the tailnet too, before the invite is made and beside it', async () => {
+    const at = await world({ remotePath: 'tailnet' });
+    const browser = await signedIn(at);
+    await walkToInvite(at, browser);
+    const offer = await browser.get('/setup/invite');
+    expect(beforeTheButton(offer.body, 'Make an invite')).toContain(INVITE_REACH_TEXT.tailnet);
+    expect((await browser.post('/setup/invite/code')).headers.location).toBe('/setup/invite');
+    const invite = await browser.get('/setup/invite');
+    expect(invite.body).toMatch(CARD_LINE);
+    expect(invite.body).toContain(INVITE_REACH_TEXT.tailnet);
+    expect(invite.body).toContain('never yours');
+  });
+
+  it('takes a ts.net address for a tailnet when no path was named', async () => {
+    const tailscale = 'https://onyourleft.tail1a2b.ts.net';
+    const at = await world({ origin: tailscale });
+    const named = await (await signedIn(at)).get('/setup/claim');
+    expect(named.body).toContain(`<code>${tailscale}</code>`);
+    expect(named.body).toContain(`<code>${tailscale}/health</code>`);
+    expect(named.body).toContain(CLAIM_REACH_TEXT.tailnet);
+  });
+
+  it('says a domain with no path named is reached over the internet, with no Tailscale on the page', async () => {
+    const at = await world();
+    const browser = await signedIn(at);
+    const internet = await browser.get('/setup/claim');
+    expect(internet.body).toContain(`<code>${TEST_ORIGIN}</code>`);
+    expect(internet.body).toContain(CLAIM_REACH_TEXT.internet);
+    expect(internet.body).not.toContain('Tailscale');
+    await walkToInvite(at, browser);
+    const offer = await browser.get('/setup/invite');
+    expect(offer.body).toContain(INVITE_REACH_TEXT.internet);
+    expect(offer.body).not.toContain('Tailscale');
+  });
+
+  it('says what this computer could check of a tunnel, as the tunnel answers it on each load', async () => {
+    const state = { connections: 2, asked: 0 };
+    const at = await world({
+      remotePath: 'cloudflare',
+      tunnelReadyUrl: await tunnelStandIn(state),
+    });
+    const browser = await signedIn(at);
+    const connected = await browser.get('/setup/claim');
+    expect(connected.body).toContain(CLAIM_REACH_TEXT.internet);
+    expect(connected.body).toContain(REACH_CHECKED_TEXT.connected);
+    expect(connected.body).not.toContain(REACH_CHECKED_TEXT['not-connected']);
+    expect(state.asked).toBe(1);
+    // The tunnel drops: the next load of the step says so, before any code is shown.
+    state.connections = 0;
+    const dropped = await browser.get('/setup/claim');
+    expect(beforeTheButton(dropped.body, 'Show the claim code')).toContain(
+      REACH_CHECKED_TEXT['not-connected'],
+    );
+    expect(dropped.body).not.toContain(REACH_CHECKED_TEXT.connected);
+    expect(state.asked).toBe(2);
+  });
+
+  it('asks no tunnel on a tailnet, even with its address left in .env, and claims no check', async () => {
+    const state = { connections: 2, asked: 0 };
+    const at = await world({ remotePath: 'tailnet', tunnelReadyUrl: await tunnelStandIn(state) });
+    const unasked = await (await signedIn(at)).get('/setup/claim');
+    expect(unasked.body).toContain(CLAIM_REACH_TEXT.tailnet);
+    expect(unasked.body).not.toContain('Checked from this computer');
+    expect(state.asked).toBe(0);
+  });
+
+  it('claims no check of a tunnel it was given nowhere to ask, rather than guess', async () => {
+    const at = await world({ remotePath: 'cloudflare' });
+    const unknown = await (await signedIn(at)).get('/setup/claim');
+    expect(unknown.body).toContain(CLAIM_REACH_TEXT.internet);
+    expect(unknown.body).not.toContain('Checked from this computer');
   });
 });

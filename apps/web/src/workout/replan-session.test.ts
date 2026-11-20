@@ -911,22 +911,28 @@ describe('every failure is the plan already on the device', () => {
     expect(r.session.records()).toEqual([]);
   });
 
-  it.each(['rate_limited', 'analysis_off', 'validation_failed', 'unauthenticated'])(
-    'asks nothing more for this workout once the instance refuses with %s',
-    async (code) => {
-      const r = rig();
-      r.scripted.startAnswer = { status: 429, body: { error: { code } } };
-      await r.ride(300);
-      expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
-      r.scripted.startAnswer = undefined;
-      await r.ride(1300);
-      expect(r.scripted.starts()).toHaveLength(1);
-    },
-  );
+  it.each([
+    'rate_limited',
+    'analysis_off',
+    'validation_failed',
+    'unauthenticated',
+    'local_unavailable',
+    'hosted_unavailable',
+  ])('asks nothing more for this workout once the instance refuses with %s', async (code) => {
+    const r = rig();
+    r.scripted.startAnswer = { status: 429, body: { error: { code } } };
+    await r.ride(300);
+    expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
+    r.scripted.startAnswer = undefined;
+    await r.ride(1300);
+    expect(r.scripted.starts()).toHaveLength(1);
+  });
 
   it('ends the asking for exactly the refusals the instance’s start names as permanent', () => {
     expect([...PERMANENT_REFUSALS].sort()).toEqual([
       'analysis_off',
+      'hosted_unavailable',
+      'local_unavailable',
       'rate_limited',
       'unauthenticated',
       'validation_failed',
@@ -1022,6 +1028,55 @@ describe('every failure is the plan already on the device', () => {
     await r.ride(310);
     expect(r.scripted.requests).toEqual([]);
     expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
+  });
+
+  it('asks again at the next boundary after an instance that could not be reached (#2104)', async () => {
+    // The 5:00 boundary's key read finds nobody there; by 15:00 it is back.
+    let asked = 0;
+    const scripted = scriptedReplans();
+    const r = rig({
+      session: () => {
+        asked += 1;
+        return Promise.resolve(
+          asked === 1
+            ? { kind: 'closed', text: 'Nobody answered.', unreachable: true }
+            : scripted.session,
+        );
+      },
+    });
+    await r.ride(300);
+    expect(r.session.state().notice).toBe(REPLAN_UNAVAILABLE);
+    expect(asked).toBe(1);
+    // Not before the next boundary, and at least REPLAN_ASK_INTERVAL_SECONDS on.
+    await r.ride(599);
+    expect(asked).toBe(1);
+    await r.ride(1);
+    expect(asked).toBe(2);
+    expect(scripted.starts()).toHaveLength(1);
+  });
+
+  it('is never a storm when the instance stays unreachable: a boundary, 3 minutes apart (#2104)', async () => {
+    const opened: number[] = [];
+    let second = 0;
+    const r = rig({
+      workout: {
+        name: 'Minutes',
+        blocks: [...Array.from({ length: 62 }, () => steady(60, 0.6)), steady(300, 0.5)],
+      },
+      session: () => {
+        opened.push(second);
+        return Promise.resolve({ kind: 'closed', text: 'Nobody answered.', unreachable: true });
+      },
+    });
+    for (second = 1; second <= 3600; second += 1) await r.ride(1);
+    expect(opened.length).toBeGreaterThan(10);
+    expect(opened.length).toBeLessThanOrEqual(20);
+    for (let index = 1; index < opened.length; index += 1) {
+      expect((opened[index] ?? 0) - (opened[index - 1] ?? 0)).toBeGreaterThanOrEqual(
+        REPLAN_ASK_INTERVAL_SECONDS,
+      );
+    }
+    expect(opened.every((at) => at % 60 === 0)).toBe(true);
   });
 
   it('asks nothing more once this device holds no sign-in the instance would take', async () => {

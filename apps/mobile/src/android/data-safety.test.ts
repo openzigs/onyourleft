@@ -182,6 +182,10 @@ describe('the declaration filed on Play', () => {
     expect(approximate?.why).toContain('Cloudflare Tunnel');
     // A typed name is sent on every Connect, kept only the first time.
     expect(name?.why).toContain('each time the rider presses Connect with a name typed');
+    // #2878: and with the owner's sign-in after a claim.
+    expect(name?.why).toContain(
+      'or Sign in as the owner with one typed after claiming their own server',
+    );
     expect(name?.why).toContain('only when it has not seen this device before');
     expect(name?.why).toContain('each earlier name');
     // #906 item 2: the app changes it, so the answer says so.

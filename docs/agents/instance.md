@@ -101,7 +101,19 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel
                         measurement, and `tools/replan-round-trip.ts` #1235's
                         (an analysis job timed start to decrypted result;
-                        spike 0023). Since #881 it also holds `src/sync/` —
+                        spike 0023); `tools/write-up-measure.ts` (#2840)
+                        runs the shipped write-up agent over the twelve
+                        fixed rides of `tools/write-up-set.ts` against
+                        Ollama (loopback, or `--host` over SSH), books each
+                        turn's tokens and the loaded context, writes numbers
+                        under `tools/results/write-up/` and exits 1 below
+                        the set's pass mark — run it before and after any
+                        change to the write-up's prompt, tools, budgets or
+                        model; it is no CI gate. `tools/replan-measure.ts`
+                        (#2841) does the same for a re-plan over the
+                        device's two golden requests (`--looks` makes each
+                        run read the tools first), a measurement with no
+                        pass mark. Since #881 it also holds `src/sync/` —
                         ingestion of a signed record and its original file
                         (#37), the athlete's own rides, detail and streams
                         (#38, never a position), the sync manifest, items and
@@ -303,6 +315,15 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         registration mode is now `identity.registrationMode()`
                         (the database's over `.env`'s), never
                         `config.registration`, wherever a rider meets it.
+                        ⚠️ Since #2855 an `OYL_INSTANCE_ORIGIN` still on the
+                        template's example (`server-config.ts`
+                        §`isTemplateOrigin`) is run as NO origin — no
+                        accounts, no keys (the wrap binds the origin) — and
+                        `/setup` answers one page saying what to set
+                        (`createExampleAddressSetup`), taking no code.
+                        Since #2817 a `tailnet` step follows the claim
+                        (migration 0050); it reads the address back from
+                        the card and changes no setting.
                         Since #2792 its optional `ai` step (migration 0049)
                         finds Ollama (`analysis/ollama-setup.ts`), downloads
                         a model the owner NAMES and saves the one chosen

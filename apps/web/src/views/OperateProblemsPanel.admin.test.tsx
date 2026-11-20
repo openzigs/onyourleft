@@ -64,7 +64,7 @@ function said(items: Iterable<Element>): (readonly [string, string, string])[] {
 describe('the app’s Recent problems panel and the admin page say the same thing (#2651)', () => {
   it('draws the same sentence and raw line for every problem, from one fixture', async () => {
     const scripted = scriptedOperate();
-    mounted = await mount(<OperateProblemsPanel port={scripted.port} />);
+    mounted = await mount(<OperateProblemsPanel timeZone="UTC" port={scripted.port} />);
     await settle();
     const app = said(mounted.container.querySelectorAll('.oyl-operate__problems > li'));
     const read = await scripted.port.problems();
