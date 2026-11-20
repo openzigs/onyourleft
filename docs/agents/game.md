@@ -1104,7 +1104,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         module under `game/open-world/` and
                         `packages/domain/src/route/rolling.ts`, with D-5.2's
                         three plantings (`gradient.ts`, a seam module, a
-                        trainer-control writer) each a red case
+                        trainer-control writer) each a red case; since
+                        #2898 also the HUD's junction prompt
+                        (`hud/JunctionChoicePrompt.tsx`, its words in
+                        `hud/junction-text.ts`, and `hud/GamepadIntents.tsx`,
+                        which hands it a pad's turns), named as roots, with
+                        the prompt importing `gradient.ts` a red case
     src/game/draft-cannot-reach-trainer.test.tsx
                         ADR 0038 D-1 and D-4, ADR 0059 D-2 (#2423, epic
                         #2421): a draft changes the rider's speed and

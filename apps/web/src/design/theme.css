@@ -8907,20 +8907,47 @@ select.oyl-input {
    ride-time control at #94's 72 px floor (set inline from
    CONTROL_MINIMUM_PIXELS), each with an arrow pointing the way's own
    direction, its name, *Default* and *Chosen* in words, and its key and pad
-   hints; then how far until the choice is final, and the U-turn. The ways
-   wrap, as the throws do, rather than overflow a landscape phone's narrow
-   actions panel. In the HUD's own ink on the panel's opaque surface: no
-   backing of its own. No ride shows it until #2896, which measures where it
-   lands on the stage. */
-.oyl-hud__junction,
+   hints; over them its title and how far until the choice is final, and the
+   U-turn beside them. The ways wrap, as the throws do,
+   rather than overflow a landscape phone's narrow actions panel. In the
+   HUD's own ink on the panel's opaque surface: no backing of its own.
+   `junction-prompt.browser.spec.ts` measures its targets on a tablet; no ride
+   shows it until #2896, which measures where it lands on the stage. */
+.oyl-hud__junction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--oyl-space-sm);
+  margin-block-start: var(--oyl-space-sm);
+}
+
 .oyl-hud__junction-prompt {
   display: grid;
   justify-items: start;
   gap: var(--oyl-space-xs);
 }
 
-.oyl-hud__junction {
-  margin-block-start: var(--oyl-space-sm);
+.oyl-hud__junction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__junction-note {
+  flex-basis: 100%;
+}
+
+/* Its own width, never `.oyl-hud__control`'s `flex: 1`, which comes later. */
+.oyl-hud__junction > .oyl-hud__junction-u-turn {
+  flex: none;
+}
+
+.oyl-hud__junction-u-turn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oyl-space-xs);
 }
 
 .oyl-hud__junction-title,
@@ -8948,7 +8975,12 @@ select.oyl-input {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--oyl-space-xs);
+}
+
+/* *Default* and *Chosen* on one line under the way's name, smaller, so a way
+   that is both is no taller than one that is either. */
+.oyl-hud__junction-marks {
+  font-size: var(--oyl-font-size-sm);
 }
 
 /* The way chosen says so in words; bold and a heavier edge are the glance's

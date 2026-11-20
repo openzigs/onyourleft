@@ -248,9 +248,14 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
     const chosenAt = shown.ways.findIndex((way) => way.edge.id === shown.chosen);
     ways = (
       <div role="group" aria-labelledby={TITLE_ID} className="oyl-hud__junction-prompt">
-        <p id={TITLE_ID} className="oyl-hud__junction-title">
-          {JUNCTION_PROMPT_TITLE}
-        </p>
+        <div className="oyl-hud__junction-head">
+          <p id={TITLE_ID} className="oyl-hud__junction-title">
+            {JUNCTION_PROMPT_TITLE}
+          </p>
+          <p className="oyl-hud__junction-lock">
+            {shown.locked ? JUNCTION_LOCKED_LINE : lockLine(shown.toLock, units)}
+          </p>
+        </div>
         <ul className="oyl-hud__junction-ways">
           {shown.ways.map((way, index) => {
             const id = way.edge.id;
@@ -279,13 +284,10 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
                 >
                   <WayArrow turnDegrees={way.turnDegrees} />
                   <span className="oyl-hud__junction-word">{wayWord(way.turnDegrees)}</span>
-                  {isDefault ? (
-                    <span className="oyl-hud__junction-mark"> {JUNCTION_DEFAULT_WORD}</span>
-                  ) : null}
-                  {isChosen ? (
-                    <span className="oyl-hud__junction-mark oyl-hud__junction-mark--chosen">
-                      {' '}
-                      {JUNCTION_CHOSEN_WORD}
+                  {isDefault || isChosen ? (
+                    <span className="oyl-hud__junction-marks">
+                      {isDefault ? ` ${JUNCTION_DEFAULT_WORD}` : null}
+                      {isChosen ? ` ${JUNCTION_CHOSEN_WORD}` : null}
                     </span>
                   ) : null}
                   <Hints presses={own} />
@@ -294,9 +296,6 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
             );
           })}
         </ul>
-        <p className="oyl-hud__junction-lock">
-          {shown.locked ? JUNCTION_LOCKED_LINE : lockLine(shown.toLock, units)}
-        </p>
       </div>
     );
   }
