@@ -54,8 +54,8 @@ the path to it, can hand back anything. So:
   the list's own constant, a number is clamped (or, for a palette index, kept only inside the
   palette), and a string where a number belongs is `null` — never parsed. A field never refuses a
   tile or drops a footprint.
-- **The road fields (#2892, [ADR 0091](../../docs/adr/0091-the-open-world-street-graph-is-built-from-our-z15-tiles.md)
-  D-2) are looked up in `roads` alone** and kept on a street only, for the open-world street graph.
+- **The road fields (#2892, ADR 0091 D-2, accepted on its pull request #2951) are looked up in
+  `roads` alone** and kept on a street only, for the open-world street graph.
   Each is compared byte for byte with `schema.ts`' lists and kept as a constant of the decoder's
   own; no tile string is kept. A value the lists do not name — another string, a number where a
   string belongs, a string where a boolean belongs — is the field's default (`NO_ROAD_FIELDS`) and
