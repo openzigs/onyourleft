@@ -34,10 +34,14 @@ export const section = (index: number, text: string): ScriptedEvent => ({
 });
 /** Every section so far retracted. */
 export const withdrawn = (): ScriptedEvent => ({ kind: 'withdrawn', data: {} });
-/** The job succeeded with `writeUp`. */
-export const succeeded = (writeUp: string): ScriptedEvent => ({
+/** The job succeeded with `writeUp`, under `templateVersion` when the instance names one (#2932). */
+export const succeeded = (writeUp: string, templateVersion?: string): ScriptedEvent => ({
   kind: 'result',
-  data: { status: 'succeeded', writeUp },
+  data: {
+    status: 'succeeded',
+    writeUp,
+    ...(templateVersion === undefined ? {} : { templateVersion }),
+  },
 });
 /** The job failed with `failure`. */
 export const failedWith = (failure: string): ScriptedEvent => ({

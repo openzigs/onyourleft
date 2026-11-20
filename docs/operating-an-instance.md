@@ -914,7 +914,9 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   newer than every recorded snapshot in the folder, so the newest snapshot is always kept. It never
   removes a recorded snapshot, or an unrecorded one older than them, such as one the shell loop made
   before #2606. If the folder has no recorded snapshot at all, the run removes only the snapshot it
-  has just taken.
+  has just taken. A snapshot named after the present moment, which a clock running ahead left, is
+  left out of the bound: it is neither counted nor removed, and it does not stop the run removing
+  the others (#2627).
 - **How often it runs while records fail.** The loop holds back a request it has already tried for
   one interval. When it starts, it also holds off every run, the owner's requests included, until
   one interval after the newest snapshot in the folder that no record names. That snapshot may come
@@ -924,8 +926,8 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   interval.
 - **One run at a time in a folder: the lease.** A run holds a **lease** on each folder it writes:
   the snapshot folder, and the off-box folder. The lease is a row in the instance's own database
-  (`backup_lease`, keyed by the SHA-256 of the folder's path, never the path), held for the whole
-  run. Every run opens that database, whichever container it runs in: the `backup` service, a
+  (`backup_lease`, keyed by the SHA-256 of the folder's real path, never the path, so a folder
+  reached through a symlink is the same lease), held for the whole run. Every run opens that database, whichever container it runs in: the `backup` service, a
   `backup` run by hand, `deploy.sh`'s pre-deploy snapshot. SQLite's write lock is the one atomic step
   they all share, so a run takes the lease in a single `BEGIN IMMEDIATE` transaction, and only one
   run can.
@@ -940,8 +942,10 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   - A second run into a folder that is held is refused, and recorded `failed` as
     `BackupFolderBusy`. A run whose off-box lease is held elsewhere records its copy `failed`, and
     neither writes nor prunes there.
-  - A run that loses its lease, because a heartbeat cannot be written or another run took it, stops
-    before it records or prunes anything (`BackupLeaseLost`).
+  - Before it records or prunes anything, a run reads its lease's row, and stops
+    (`BackupLeaseLost`) if another run has taken it. A heartbeat that cannot be written is tried
+    again at the next beat and loses nothing by itself: while nobody has taken the row, the run
+    still holds the folder (#2627).
   - On a database from before migration 0042, which has no lease table, runs take no lease, as
     before.
   - One limit: `VACUUM INTO` holds the process while it copies the database, so no heartbeat is
@@ -957,10 +961,21 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
 - **On a rollback** to an image from before `backup-loop` existed, the service checks whether the
   image has the command. If it does not, it runs the old shell loop, so backups carry on. That loop
   now stops on `docker compose stop` between runs.
-- ⚠️ **The off-box copy has no time limit.** A share that stops answering blocks the copy inside a
-  file-system call, which Node cannot cancel, and the service waits with it. The snapshot on the box
-  is already complete by then. If the Status shows the last backup getting old, check
-  `docker compose logs backup` and the share. A watchdog for this is [#2626](https://github.com/openzigs/onyourleft/issues/2626).
+- **The off-box copy has a watchdog** (#2626). The copy runs in a process of its own, and if it has
+  not finished in 15 minutes, or in the snapshot's size at 1 MB/s when that is longer, it is killed.
+  A share that stops answering during the copy then costs that run's copy: the run's record says
+  off-box `failed`, the snapshot on the box is kept, nothing off the box is pruned, and the
+  `.partial-snapshot-…` copy is left there for a later run to remove (it removes partials older
+  than six hours). The run does not touch that share again, not even to read its free space.
+- ⚠️ **A share that stays hung still stops the loop, one run later.** Before it copies, the next
+  run creates the off-box folder and lists it for old partials in the service's own process, and
+  the watchdog does not cover those calls. If the share is still not answering then, that run
+  waits on it.
+- ⚠️ **A copy stuck in an uninterruptible wait can outlive the kill.** A process blocked in some
+  kernel file-system calls does not die until the call returns, whatever signal it is sent. The run
+  waits until the copy has exited, holding the off-box folder's lease, so no second copy is ever
+  started into that folder alongside it, and that run is then as stuck as the copy. If the Status
+  shows the last backup getting old, check `docker compose logs backup` and the share.
 
 ⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
 the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
@@ -1315,14 +1330,17 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
-  `logged: false` and prints a line on standard error, and still exits 0, so a log write never stops a
-  deploy whose migrations applied. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
+  `logged: false` and prints a line on standard error naming SQLite's result code, and still exits 0,
+  so a log write never stops a deploy whose migrations applied. Since #2618 such a command never logs
+  `failed` for work that succeeded: a detail outside its vocabulary is not written at all. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
   `admin_tunnel` and `admin_loopback`: see "Admin pages", below), the action, a
   short detail and the outcome: `done`, `refused` or `failed`. The detail is written only from a
   closed list of words and counts **for that action** (`applied=2` for `migrate`, `cleared` for
   `model-key clear`): anything else, including a word another action uses, is refused with the
-  action, so a detail is never free text, a key or a position. The schema also holds it to lower-case
-  letters, digits, `_`, `=` and `,`, at most 200 characters. The owner reads it
+  action, so a detail is never free text, a key or a position. Since #2618 each count is held to a
+  plausible range for what it counts (`blobs` at most 10 000 000, `applied` at most 1 000), and two
+  words that contradict each other (`ride,race`) are refused. The schema also holds it to lower-case
+  letters, digits, `_`, `=` and `,`, at most 200 characters, and no NUL (migration 0051). The owner reads it
   at `GET /v1/operate/log`, newest first (`?limit=` 1–200, `?cursor=`).
 - **What erasure and `migrate … down` do to it.** As with the moderation log
   ([`docs/moderation.md`](moderation.md) §"What the log is, and what erasure does to it"), two SQLite

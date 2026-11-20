@@ -618,3 +618,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   on 2026-11-17 on its pull request [#2694](https://github.com/openzigs/onyourleft/pull/2694).
   What still holds, unchanged: D-5.2, D-5.4 to D-5.7, and the rest of D-5.1. This entry is a
   pointer and changes nothing else here.
+- **2026-11-19** — **D-2.3, D-2.4, D-4, D-6.2's range-to-zone tests and D-6.3 are superseded for
+  open-world rides only, and D-3 is extended, by
+  [ADR 0090](0090-the-open-world-ride-streams-its-map-in-fixed-grid-blocks.md)**
+  ([#2884](https://github.com/openzigs/onyourleft/issues/2884)), **Accepted** 2026-11-20 on its pull
+  request #2942, on the owner's rulings of 2026-11-19 on the epic [#2880](https://github.com/openzigs/onyourleft/issues/2880): an
+  open-world ride, which has no route in advance, reads the archive in fixed-grid blocks while it
+  records, reads inside the rider's own privacy zone, waits for its start's blocks, treats the end
+  of what it holds as the edge of the map instead of falling back to the procedural world, and keeps
+  the blocks it rode on the device in a cache under D-3's rules. What still holds, unchanged: every
+  word of this ADR for a route ride, D-4 and D-6.2 included, which keeps its corridor read once
+  before the ride; and for every ride D-2.1, D-2.2, D-2.5 (one module, one `fetch`), D-3.1 to D-3.6,
+  D-5, D-6.1, D-6.2's `departing` entry and tiles-off test, D-6.4 to D-6.6 and D-7. This entry is a
+  pointer and changes nothing here.
