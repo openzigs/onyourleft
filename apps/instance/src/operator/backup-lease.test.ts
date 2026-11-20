@@ -191,6 +191,20 @@ describe('a backup folder’s lease (#2606)', () => {
     expect(tokenHolding(database)).toBe('another');
   });
 
+  it('counts a lease it cannot read back as lost, not held (#2627)', async () => {
+    const database = await migrated();
+    const holder = await takeLease(connection(database), FOLDER, { now: () => T });
+    const opened = openDatabase(database);
+    try {
+      // Another connection takes the table away: the read in `confirm` fails.
+      opened.exec('DROP TABLE backup_lease');
+    } finally {
+      opened.close();
+    }
+    await expect(holder?.confirm()).rejects.toBeInstanceOf(BackupLeaseLost);
+    await holder?.release();
+  });
+
   it('is one lease for a folder and a symlink to it, and keyed by the resolved path before the folder exists (#2627)', async () => {
     const database = await migrated();
     const real = join(directory ?? '', 'real-backups');
