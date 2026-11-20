@@ -959,10 +959,14 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   now stops on `docker compose stop` between runs.
 - **The off-box copy has a watchdog** (#2626). The copy runs in a process of its own, and if it has
   not finished in 15 minutes, or in the snapshot's size at 1 MB/s when that is longer, it is killed.
-  A share that stops answering then costs one run's copy, not the service: the run's record says
+  A share that stops answering during the copy then costs that run's copy: the run's record says
   off-box `failed`, the snapshot on the box is kept, nothing off the box is pruned, and the
   `.partial-snapshot-…` copy is left there for a later run to remove (it removes partials older
   than six hours). The run does not touch that share again, not even to read its free space.
+- ⚠️ **A share that stays hung still stops the loop, one run later.** Before it copies, the next
+  run creates the off-box folder and lists it for old partials in the service's own process, and
+  the watchdog does not cover those calls. If the share is still not answering then, that run
+  waits on it.
 - ⚠️ **A copy stuck in an uninterruptible wait can outlive the kill.** A process blocked in some
   kernel file-system calls does not die until the call returns, whatever signal it is sent. The run
   waits until the copy has exited, holding the off-box folder's lease, so no second copy is ever

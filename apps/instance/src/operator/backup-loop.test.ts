@@ -56,6 +56,7 @@ interface BackupBody {
     readonly error: string | null;
     readonly snapshot: string | null;
     readonly offBox: string | null;
+    readonly freeBytes: { readonly backups: number | null; readonly offBox: number | null };
     readonly intervalSeconds: number | null;
     readonly requested: boolean;
   }[];
@@ -988,6 +989,9 @@ describe('backup: a hung off-box copy is stopped by its watchdog (#2626)', () =>
     // Read back as the owner reads it: the run is done, and its copy failed.
     const body = await backupsOf(on);
     expect(body.backups[0]).toMatchObject({ outcome: 'done', offBox: 'failed' });
+    // The hung share is not asked for its free space: that read would hang too.
+    expect(body.backups[0]?.freeBytes.offBox).toBeNull();
+    expect(body.backups[0]?.freeBytes.backups).toEqual(expect.any(Number));
     const status = await on.as(on.owner, 'GET', '/v1/operate/status');
     expect((status.body as { lastBackup: { offBox: string } }).lastBackup.offBox).toBe('failed');
     // The snapshot on the box is whole: its manifest is there and names its database.
@@ -1036,6 +1040,31 @@ describe('backup: a hung off-box copy is stopped by its watchdog (#2626)', () =>
             '-e',
             "require('node:fs').mkdirSync(process.argv[2]); process.exit(3);",
           ],
+        },
+      });
+      expect(taken).toMatchObject({ offBox: 'failed', recorded: true, copiedTo: null });
+    } finally {
+      quiet.mockRestore();
+    }
+    expect((await readdir(offBox)).sort()).toEqual(older);
+    expect(await readdir(onBox)).toEqual(['snapshot-2026-09-01T00-00-00-000Z']);
+  });
+
+  it('records off-box failed and prunes nothing when the copier cannot be started', async () => {
+    const paths = await migratedAlone();
+    const onBox = join(paths.root, 'on-box');
+    const offBox = join(paths.root, 'off-box');
+    const older = await restorePoints(offBox);
+    const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      const taken = await backup(paths, onBox, {
+        keep: 1,
+        copyTo: offBox,
+        now: () => new Date('2026-09-01T00:00:00Z'),
+        offBoxWatchdog: {
+          ...OFF_BOX_WATCHDOG,
+          // No such program: the spawn fails, and Node emits `error` with no `exit`.
+          copier: [join(paths.root, 'no-such-copier')],
         },
       });
       expect(taken).toMatchObject({ offBox: 'failed', recorded: true, copiedTo: null });
