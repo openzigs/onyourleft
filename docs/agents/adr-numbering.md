@@ -15,8 +15,8 @@ It has the same authority as the root file. Where the text below says "this file
   ⚠️ **0090 is [ADR 0090](../adr/0090-the-open-world-ride-streams-its-map-in-fixed-grid-blocks.md)**,
   taken by [#2884](https://github.com/openzigs/onyourleft/issues/2884) on 2026-11-19 for the
   open-world ride's streamed map reads, ridden-block cache and privacy zones, **Proposed** on the
-  owner's rulings of that day on the epic #2880. It supersedes in part ADR 0054 D-2.3, D-2.4 and
-  D-6.3, and extends D-3, for open-world rides only; ADR 0054 gained one dated `## Amendments` entry
+  owner's rulings of that day on the epic #2880. It supersedes in part ADR 0054 D-2.3, D-2.4, D-4,
+  D-6.2's range-to-zone tests and D-6.3, and extends D-3, for open-world rides only; ADR 0054 gained one dated `## Amendments` entry
   pointing to it. The owner's lane note of 2026-11-19 reserved **0086** for #2884, **0087** for
   #2885, **0088** for #2887 and **0089** for #2888; 0086 was already ADR 0086 (#2869), so #2884 took
   0090 and the other three reservations stand. The next free number is **0091**.

@@ -18,14 +18,19 @@
   are written
 - **Supersedes, in part, for open-world rides only**:
   [ADR 0054](0054-towns-from-real-map-data.md) **D-2.3** (the corridor only), **D-2.4** (no request
-  for the world while a ride is recording) and **D-6.3** (no tile touching a privacy zone is
-  requested). **Extends** ADR 0054 **D-3** (the ODbL store) to a cache of ridden blocks (D-6 here).
-  ADR 0054 gains one dated `## Amendments` entry pointing here; its body is not edited
+  for the world while a ride is recording), **D-4** (no data: the procedural world, with no error or
+  prompt, and the ride never waits for the read; D-2.3 and D-7 here replace it, since an open-world
+  ride waits for its start's blocks and treats the end of what it holds as the edge of the map),
+  **D-6.2's range-to-zone tests** (R-3's test replaces them, since R-3 reads inside a zone on
+  purpose; D-6.2's `departing` entry stands, as R-7) and **D-6.3** (no tile touching a privacy zone
+  is requested). **Extends** ADR 0054 **D-3** (the ODbL store) to a cache of ridden blocks (D-6
+  here). ADR 0054 gains one dated `## Amendments` entry pointing here; its body is not edited
   ([ADR 0013](0013-adr-amendments.md) D-2, D-3)
 - **Leaves standing, for every ride**: ADR 0054 D-2.1 (one origin, the configured archive), D-2.2
-  (the layers and fields read), **D-2.5** (one module, one `fetch`; D-3 here), D-3.1 to D-3.6, D-4,
-  D-5, D-6.1, D-6.2, D-6.4 to D-6.6 and D-7. **For route rides, every word of ADR 0054**: a route
-  ride keeps its corridor, read once, before the ride
+  (the layers and fields read), **D-2.5** (one module, one `fetch`; D-3 here), D-3.1 to D-3.6, D-5,
+  D-6.1, D-6.2's `departing` entry and tiles-off test, D-6.4 to D-6.6 and D-7. **For route rides,
+  every word of ADR 0054**, D-4 and D-6.2 included: a route ride keeps its corridor, read once,
+  before the ride
 - **Relates to**: [ADR 0004](0004-privacy-and-location.md) B, C and D;
   [ADR 0036](0036-a-self-hostable-instance-server-now.md) D-3 and D-7;
   [ADR 0032](0032-external-data-for-the-game-world.md) D-4; ADR 0087 (#2885, real heights, which
@@ -158,9 +163,17 @@ What the host learns, and what it does not:
   learns that the ride began somewhere in the centre block of the first request, which is where home
   is to within one block. A cache (D-6) means a second ride from home asks nothing for the blocks it
   already holds, but the first ride's disclosure has happened.
-- **It does not learn** the rider's position inside a block, the start point inside its block, any
-  coordinate, the rider's identity (no credential, no cookie, no athlete id), the privacy zone, or
-  anything recorded.
+- **It learns, at the moment of each request, which edge the rider has just crossed.** A request
+  goes out when the rider enters a new block (D-2.2), and the new row or column it asks for names
+  the edge crossed. So each request puts the rider on one known block edge, a line about 1.6 to
+  2.2 km long, at a known time. A sequence of those crossings, with their times, laid over the
+  public street graph can be **map-matched** to the streets the rider took, finer than a block:
+  few roads cross a given edge, and the time between crossings rules out most routes between them.
+  The host's view is therefore **not** limited to block precision, and this ADR does not claim it
+  is. D-9 Q4 asks whether to blur the timing.
+- **It does not learn** where the rider is inside a block between crossings, the start point
+  inside its block, any coordinate, the rider's identity (no credential, no cookie, no athlete id),
+  the privacy zone, or anything recorded. What it can infer by map-matching is the bullet above.
 - **A rider who wants none of this turns map tiles off** (D-7), and the open-world ride then asks
   nothing.
 
@@ -236,6 +249,14 @@ figure this changes; #2882's measurement goes there if it does.
    Recommended: **by #2891**, with least-recently-ridden eviction fixed here.
 4. **Q3 — Tiles off rides what is cached (D-7.2)**, rather than refusing the open-world ride
    outright? Recommended: **yes**; a cached block costs no request.
+5. **Q4 — Decouple a request's time from the crossing (D-4)?** An **R-8** would hold each
+   crossing's request for a random delay, drawn afresh on the device for each crossing, so that a
+   request's time no longer says when the edge was crossed. Up to 30 s blurs a crossing by up to
+   about 330 m at 40 km/h and leaves a lead of at least 1 min 54 s at that speed, still well over
+   the 400 m fog; it does not stop map-matching, which the order of the blocks alone still allows,
+   and only widens it. Recommended: **yes, up to 30 s**, tested as R-1 is (the delay is drawn from
+   nothing the rider's position decides), with #2882 checking the lead it leaves. Answered no, D-4
+   stands as written.
 
 ---
 
@@ -251,7 +272,8 @@ figure this changes; #2882's measurement goes there if it does.
 
 ### What this costs
 
-- **The rider's path, at block precision, to the tile host, for the whole ride** (D-4). It is the
+- **The rider's path, at block precision and with each block edge's crossing time, to the tile
+  host, for the whole ride**, which map-matching over the street graph can sharpen (D-4). It is the
   largest location disclosure the app has made to any party, and it is accepted for this mode only.
 - **No hole round a privacy zone** for an open-world ride, so the first ride from home tells the host
   which block home is in (D-4). The corridor read's hole told the host where the zone roughly was;
@@ -277,9 +299,9 @@ figure this changes; #2882's measurement goes there if it does.
 
 ## What would make this ADR wrong
 
-- **The host's view turns out finer than a block.** If #2890 finds the archive's directory layout or
-  the reader's timing reveals position inside a block, D-4's account is wrong and R-1 needs a fix
-  before the reader ships.
+- **The host's view turns out finer than D-4 says.** If #2890 finds the archive's directory layout,
+  or anything but the crossing D-4 names, reveals position inside a block, D-4's account is wrong
+  and R-1 needs a fix before the reader ships.
 - **The cache starts to leave the device.** Then ODbL §4.4 is live, as ADR 0054 says for its own store.
 - **#2882 measures a lead the grid cannot meet**, for example a block read that takes longer than the
   2 min 24 s the lead gives at 40 km/h on a slow connection. Then D-2 changes, by a new ADR if the
