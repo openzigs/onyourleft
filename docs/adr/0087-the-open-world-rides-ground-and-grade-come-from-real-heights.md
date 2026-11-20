@@ -75,6 +75,11 @@ it is this ADR it needs to supersede."* This is that ADR, for open-world rides o
     At a 10 m spacing that is **±5 samples (±50 m)** for the slope and **±2 samples (±20 m)** for the
     median, because `Math.round(1.5)` is 2. The file's header says *"a median over three samples"*;
     that holds only where the spacing is a little over 10 m.
+  - **The grid is stretched to the route's length.** `routeProfile` takes
+    `count = round(total / 10) + 1` samples and spaces them `total / (count − 1)` apart, so the last
+    lands on the route's end. A route ride's length never changes, so this costs it nothing. A road
+    whose length changes moves **every** sample, from `s = 0`, and a spacing that crosses 10 m flips
+    the median between 3 and 5 samples.
   - `gradeAt` interpolates between the two grid samples either side of the rider, so it reads the
     next sample, up to **10 m** ahead.
   - `packages/domain/src/trainer/simulation.ts` writes at most once a second
@@ -121,15 +126,38 @@ production tile (#2880's hard rules). *The author's choice*, each one:
 | Time | the decode runs off the main thread and is abandoned after **2 s** | the tile is unreadable |
 | Heights | Terrarium: `R × 256 + G + B / 256 − 32768` metres; a value outside **−200 m to 4,600 m** (the lower 48 run from −86 m to 4,421 m) is no-data | the pixel is no-data |
 | No-data | a sample whose four bilinear neighbours include no-data takes the nearest valid pixel within 2 pixels; with none, the tile is unreadable | the tile is unreadable |
+| Height step along the road | two neighbouring road samples on D-4.1's grid (10 m apart) differ by at most **4 m**, the **±40 %** grade `simulation.ts` clamps to | both samples are no-data, and D-7 applies there |
 
 **An unreadable tile is an error, never a crash or a hang**, and its words name the field and the
 constraint, never the tile's `z/x/y` or a coordinate (ADR 0004 D). What the ride does with it is D-7.
 
+**The decode bounds alone do not bound the grade.** A hostile tile whose heights all stay inside
+−200…4,600 m decodes cleanly, and a plateau 3 or more samples wide survives the median, so without
+the last row it could take the grade sent to the ±40 % clamp from one second to the next. A route
+file is held only by the clamp, because the rider chose it; a height tile the rider did not choose,
+read while they pedal, is not (CLAUDE.md §6, trainer control). The step row turns such a plateau
+into no-data, which D-7 walks to 0 % at D-6.4's 1 % a second. *The author's choice* of 4 m: a road
+needs no steeper step than the clamp would send, and a real one that a 14.6 m pixel renders steeper
+(a road cut along a cliff, a bridge with no flag) is flattened by D-7, the safe direction. A tile
+can still describe a steep road made of steps under 4 m; that is the same ground a route file can
+describe, and the clamp and the deadband hold it.
+
 ### D-4 — Heights along the road, and the ground beside it
 
-1. **The road's heights** are sampled from the tiles along the rolling route's line at the profile's
-   10 m grid, by bilinear interpolation, and go through `routeProfile`'s despike and slope stages
-   **unchanged**. The grade is computed by `profile.ts` exactly as a route ride's is.
+1. **The road's heights** are sampled from the tiles along the rolling route's line by bilinear
+   interpolation, on a **ride-anchored, unstretched 10 m grid**: sample `i` is exactly `i × 10 m`
+   from the ride's start, and a sample once taken is never moved. Extending the rolling route, or
+   swapping its tail past a junction, adds or replaces samples past the changed road and moves no
+   sample before it. The despike and the slope run over that grid with **fixed counts**, 5 samples
+   for the median and 11 for the slope, the counts `profile.ts` gives a 10 m spacing; never with
+   counts derived from a spacing. Their filters and constants are `profile.ts`'s, **unchanged**.
+   What changes is the resampling: `routeProfile` as written stretches its grid to the route's
+   length (Context), which an open-world road, whose length changes every second, cannot use.
+   #2899 adds the anchored grid to `packages/domain`; whether as an option of `routeProfile` or a
+   sibling over the same stages is #2899's call. *The author's choice*, over the alternative of
+   sending every swap and extension through D-6.4's bounded path: the rolling route extends all the
+   time, so that path would hold every open-world grade at 1 % a second and the trainer would never
+   feel a real hill's start.
 2. **The ground** (#2900) is drawn from the same tiles, and meets the road at the road's own
    despiked height, so a side street and the road it leaves stand on one surface, with no step.
 3. **Bridges and tunnels** (#2013's design): where the basemap marks a road `is_bridge` or
@@ -145,23 +173,33 @@ open-world ride sends what that state sends today.
 
 ### D-6 — Grade safety: a junction choice is final **100 m** before the junction, and anything the lock cannot prevent is walked at **1 % a second**
 
-1. **How far ahead the grade reads.** From Context's reading of the code: the grade sent at a
-   distance `s` reads the grid sample up to 10 m ahead (`gradeAt`), whose slope reads heights up to
-   50 m beyond it, each of which is a median of heights up to 20 m beyond that. **The grade sent at
-   `s` depends on the road up to `s + 80 m` at most, and on nothing further.** That is a bound by
-   construction. A probe run for this ADR against `profile.ts` at `ae37331f2` (two profiles equal up
-   to a junction and different after it, five branch shapes, the junction on and off the 10 m grid,
-   not committed) found the grade first differing **49.5 to 65 m** before the junction, so the
-   research's *"about 60 m"* was a fair typical figure. The lock covers the bound, not the typical
-   figure, because a probe cannot try every road.
+1. **How far ahead the grade reads, on D-4.1's grid.** **Precondition: the samples before a
+   changed road do not move**, which D-4.1's anchored grid with fixed window counts guarantees. On
+   it, the grade sent at a distance `s` reads the grid sample up to 10 m ahead (`gradeAt`), whose
+   slope reads heights up to 50 m beyond it, each of which is a median of heights up to 20 m beyond
+   that. **The grade sent at `s` depends on the road up to `s + 80 m` at most, and on nothing
+   further.** That is a bound by construction, given the precondition. **Without it the bound is
+   false.** On `routeProfile`'s stretched grid a tail of a different length moves every sample:
+   the review of this ADR's first draft measured grade changes of 0.02 to 0.06 % on gentle ground
+   and 1.3 to 4.6 % on rough ground more than 100 m before the junction, a step that neither the
+   lock nor the slew covers. The first draft's probe had used branches of equal length, so it
+   never moved the grid. `packages/domain/src/route/profile.reach.test.ts` now holds both halves:
+   two tails of the same length, one climbing at 60 % and one falling at 60 %, leave every grade up
+   to `s = junction − 80 m` identical; two flat tails 600 m and 655 m long change a grade more than
+   100 m before the junction by more than the 0.1 % deadband (0.72 % on its ground). The equal-length
+   probe found the grade first differing **49.5 to 65 m** before the junction, so the research's
+   *"about 60 m"* was a fair typical figure. The lock covers the bound, not the typical figure,
+   because a probe cannot try every road.
 2. **The lock: 100 m.** A choice at a junction is **final when the rider is 100 m before it**:
    80 m of reach and two grid samples of margin. Until then the rolling route's tail past the
-   junction follows the current choice (the default, or the rider's), and swapping it changes no
-   grade sent, because every grade sent so far reads the road short of the junction. After it, no
-   press changes that junction. At 40 km/h, 100 m is 9 s.
+   junction follows the current choice (the default, or the rider's), and swapping it, for a branch
+   of any length, changes no grade sent, because on D-4.1's grid every grade sent so far reads only
+   samples short of the junction, and the swap moves none of them. After it, no press changes that
+   junction. At 40 km/h, 100 m is 9 s.
 3. **The rolling route always reaches past the reach.** It extends at least **180 m** ahead of the
    rider along its current branches (the 100 m lock plus the 80 m reach), so no grade sent is read
-   from the taper `profile.ts` puts on a profile's last half-window.
+   from the taper `profile.ts` puts on a profile's last half-window. On D-4.1's grid an extension
+   only appends samples, so it changes no grade sent either.
 4. **The slew limit, for what the lock cannot prevent.** A **U-turn**, a **dead end** that turns the
    rider round, a height tile that arrives late or is replaced (D-7), and the start of a ride all
    change the road under the rider at once. For each, the grade is sent through `gradient.ts`'s
@@ -236,8 +274,8 @@ an hour, far fewer than ADR 0090's block reads.
 | Issue | Constraint |
 |---|---|
 | [#2013](https://github.com/openzigs/onyourleft/issues/2013) | A prerequisite: the archive, its reader's one `fetch`, the bridge interpolation and the credits list |
-| [#2895](https://github.com/openzigs/onyourleft/issues/2895) | D-6.2 and D-6.3: the tail swaps only before the lock, and the profile always reaches 180 m ahead |
-| [#2899](https://github.com/openzigs/onyourleft/issues/2899) | D-3 (each bound a test with a committed synthetic fixture), D-4.1, D-4.3, D-5, D-6 and D-7. A test drives a junction choice at 101 m and at 99 m and asserts the grades sent: the first may change the branch, the second does not, and neither steps the grade |
+| [#2895](https://github.com/openzigs/onyourleft/issues/2895) | D-6.2 and D-6.3: the tail swaps only before the lock, and the profile always reaches 180 m ahead. Its tests swap between branches **of different lengths**, and extend the route, and assert that no grade sent before the swap point changes |
+| [#2899](https://github.com/openzigs/onyourleft/issues/2899) | D-3 (each bound a test with a committed synthetic fixture, including a plateau tile inside the height range that the step row turns into no-data), D-4.1 (the anchored grid with fixed window counts), D-4.3, D-5, D-6 and D-7. A test drives a junction choice at 101 m and at 99 m, between branches **of different lengths**, and asserts the grades sent: the first may change the branch, the second does not, and neither steps the grade. `profile.reach.test.ts`'s equal-length half is rewritten over the anchored grid with tails of different lengths |
 | [#2900](https://github.com/openzigs/onyourleft/issues/2900) | D-3 and D-4.2: no step where a side street meets the road |
 | ADR 0088 (#2887) | The 100 m lock is when a choice becomes final, and the prompt shows it |
 | ADR 0032 and ADR 0054 | One dated `## Amendments` entry each, pointing here; neither body is edited |
@@ -247,8 +285,12 @@ an hour, far fewer than ADR 0090's block reads.
 ## What would make this ADR wrong
 
 - **`profile.ts`'s windows or `gradeAt`'s interpolation change.** D-6.1's 80 m is read from them; a
-  wider window needs a longer lock, in the same pull request. #2899 holds it with a test that fails
-  if the reach grows past the lock.
+  wider window needs a longer lock, in the same pull request.
+  `packages/domain/src/route/profile.reach.test.ts` fails if the reach grows past the lock (a
+  200 m slope window turns it red).
+- **The open-world road is sampled on a stretched grid.** D-6.1's bound holds only while a swap or
+  an extension moves no sample before it (D-4.1). `profile.reach.test.ts`'s stretched-grid half
+  shows what breaks otherwise.
 - **#2013's archive does not ship**, or ships without the bridge flags' interpolation. Then this ADR
   has no source, and an open-world ride has no real grade.
 - **The 14.6 m pixel is too coarse** for a steep street in a town, and the 100 m slope window does
