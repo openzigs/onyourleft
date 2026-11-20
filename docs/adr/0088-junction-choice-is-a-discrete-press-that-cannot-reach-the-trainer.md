@@ -327,3 +327,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `game/gradient.ts` or a trainer-control writer. #2899's grade feed, which must reach the trainer,
   therefore lives outside those directories: it may import from them, and nothing in them imports it.
   Read the table as naming both. (#2959, from the review of #2953)
+- **2026-11-20** — **The owner ruled that a press or tap chooses directly at a junction with three
+  ways on or fewer.** This confirms D-1.3's first sentence: left chooses left, straight chooses
+  straight and right chooses right, whatever was chosen before, and the press does not step the
+  choice one way. A tap on a D-3.1 symbol does the same, because D-3.1.1 sends it through the same
+  press path. D-1.3's and D-3.1.1's *"moves the choice one step"* therefore sets a discrete press
+  against a continuous or scaled one, and does not mean one way round the junction. With more than
+  three ways on, D-1.3's parenthesis is unchanged: left and right step one way round the junction
+  per press. The owner answered in the maintainer's session, and the ruling is posted on
+  [#2897](https://github.com/openzigs/onyourleft/issues/2897) and on pull requests #2961 and #2964.
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964) implements it for #2897, and
+  [#2898](https://github.com/openzigs/onyourleft/issues/2898)'s taps go through the same path.
+  (#2959)
