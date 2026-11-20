@@ -36,7 +36,11 @@
  * (`park-dressing.ts` §`ParkGround`) has its four channels spent on golf and
  * cemeteries, and a box costs the same ten triangles whatever it is. Each
  * line is {@link PITCH_LINE_WIDTH_METRES} wide — wider than a real line's
- * 0.12 m, so it does not break into dashes from the saddle.
+ * 0.12 m, so it does not break into dashes from the saddle. ⚠️ **One box
+ * per line, laid along the slope**: the scene tilts it from the ground
+ * under one end to the ground under the other ({@link laidAlongTheGround}),
+ * because a line split into the cemetery wall's 4 m pieces would spend
+ * {@link PARK_FIELD_CAPACITY} on one pitch.
  *
  * ## A playground
  *
@@ -54,6 +58,7 @@ import type { LandUseFeature, PitchSport } from '@onyourleft/map-features';
 
 import type { RouteProfile } from '@onyourleft/domain';
 
+import { standingOnGround, type TerrainMesh } from './landform';
 import type { ParkPiece, ParkPieceKind } from './park-dressing';
 import { distanceToDrawnRoad } from './road-grid';
 import type { CorridorOrigin } from './terrain';
@@ -80,6 +85,13 @@ export const PITCH_LINE_WIDTH_METRES = 0.2;
 
 /** A line's height above the ground, in metres: **0.03**. */
 export const PITCH_LINE_HEIGHT_METRES = 0.03;
+
+/**
+ * How deep a line is set into the ground beneath that, in metres: **0.15**,
+ * the cemetery wall's — so where the ground sags between a line's ends
+ * (§`laidAlongTheGround`) no gap shows under it.
+ */
+export const PITCH_LINE_SET_IN_METRES = 0.15;
 
 /** A soccer pitch narrower than this has small-sided goals, in metres: **30**. */
 export const SMALL_PITCH_WIDTH_METRES = 30;
@@ -225,6 +237,28 @@ class FieldPieces {
       colour,
     });
   }
+
+  /**
+   * A line centred at `(u, v)`, `length` long along the long axis or (where
+   * `across`) the other: its length always its `width`, so
+   * {@link laidAlongTheGround} tilts it about its own depth axis. Set
+   * {@link PITCH_LINE_SET_IN_METRES} into the ground.
+   */
+  line(u: number, v: number, length: number, across: boolean): void {
+    const { x, z, ax, az } = this.frame;
+    this.pieces.push({
+      kind: 'pitch-line',
+      x: x + ax * u - az * v,
+      y: 0,
+      z: z + az * u + ax * v,
+      lift: -PITCH_LINE_SET_IN_METRES,
+      yaw: across ? yawOf(-az, ax) : yawOf(ax, az),
+      width: length,
+      height: PITCH_LINE_HEIGHT_METRES + PITCH_LINE_SET_IN_METRES,
+      depth: PITCH_LINE_WIDTH_METRES,
+      colour: PITCH_LINE_COLOUR,
+    });
+  }
 }
 
 /** A pitch's touch lines, goal lines and (where `halfway`) its halfway line. */
@@ -232,12 +266,53 @@ function lines(build: FieldPieces, frame: FieldFrame, halfway: boolean): void {
   const halfL = frame.length / 2 - PITCH_LINE_INSET_METRES;
   const halfW = frame.width / 2 - PITCH_LINE_INSET_METRES;
   const w = PITCH_LINE_WIDTH_METRES;
-  const h = PITCH_LINE_HEIGHT_METRES;
   for (const side of [-1, 1]) {
-    build.box('pitch-line', 0, side * halfW, halfL * 2 + w, w, h, 0, PITCH_LINE_COLOUR);
-    build.box('pitch-line', side * halfL, 0, w, halfW * 2 + w, h, 0, PITCH_LINE_COLOUR);
+    build.line(0, side * halfW, halfL * 2 + w, false);
+    build.line(side * halfL, 0, halfW * 2 + w, true);
   }
-  if (halfway) build.box('pitch-line', 0, 0, w, halfW * 2, h, 0, PITCH_LINE_COLOUR);
+  if (halfway) build.line(0, 0, halfW * 2, true);
+}
+
+/**
+ * `pieces` stood on `mesh` by `landform.ts` §`standingOnGround`, with each
+ * pitch line laid along the ground: its two ends found on the ground under
+ * them, it is stood at their mean, tilted from one to the other and
+ * lengthened by the slope, so a line up to a pitch's length neither floats
+ * nor sinks at its ends on a slope (#2688's review). Where the ground between
+ * its ends sags, its {@link PITCH_LINE_SET_IN_METRES} fills under it; where
+ * it bulges, the line passes under it. A line with no ground under an end is
+ * left as it was stood. Every other piece is returned as it is.
+ */
+export function laidAlongTheGround(
+  pieces: readonly ParkPiece[],
+  mesh: TerrainMesh,
+): readonly ParkPiece[] {
+  const ends: { x: number; y: number; z: number; index: number; end: 1 | -1 }[] = [];
+  pieces.forEach((piece, index) => {
+    if (piece.kind !== 'pitch-line') return;
+    const dx = Math.cos(piece.yaw) * (piece.width / 2);
+    const dz = -Math.sin(piece.yaw) * (piece.width / 2);
+    ends.push({ x: piece.x + dx, y: 0, z: piece.z + dz, index, end: 1 });
+    ends.push({ x: piece.x - dx, y: 0, z: piece.z - dz, index, end: -1 });
+  });
+  if (ends.length === 0) return pieces;
+  const high = new Map<number, number>();
+  const low = new Map<number, number>();
+  for (const stood of standingOnGround(ends, mesh)) {
+    (stood.end === 1 ? high : low).set(stood.index, stood.y);
+  }
+  return pieces.map((piece, index) => {
+    const up = high.get(index);
+    const down = low.get(index);
+    if (up === undefined || down === undefined) return piece;
+    const rise = up - down;
+    return {
+      ...piece,
+      y: (up + down) / 2,
+      tilt: Math.atan2(rise, piece.width),
+      width: Math.hypot(piece.width, rise),
+    };
+  });
 }
 
 /** Two posts and a bar at each goal line: a soccer goal, or rugby's and football's H. */

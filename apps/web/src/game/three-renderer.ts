@@ -16762,6 +16762,8 @@ export class ParkDressingBelt {
   readonly #at = new Vector3();
   readonly #size = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
+  readonly #tilt = new Quaternion();
+  readonly #depthAxis = new Vector3(0, 0, 1);
   readonly #colour = new Color();
   #held: readonly ParkPiece[] | undefined;
 
@@ -16799,7 +16801,10 @@ export class ParkDressingBelt {
       for (let index = 0; index < count; index += 1) {
         const piece = pieces[index] as ParkPiece;
         this.#at.set(piece.x, piece.y + piece.lift, piece.z);
-        this.#turn.setFromAxisAngle(this.#up, piece.yaw);
+        // #2688: a pitch line's tilt about its own depth axis, then its yaw.
+        this.#turn
+          .setFromAxisAngle(this.#up, piece.yaw)
+          .multiply(this.#tilt.setFromAxisAngle(this.#depthAxis, piece.tilt ?? 0));
         this.#size.set(piece.width, piece.height, piece.depth);
         this.#mesh.setMatrixAt(index, this.#matrix.compose(this.#at, this.#turn, this.#size));
         this.#mesh.setColorAt(index, this.#colour.setHex(piece.colour));

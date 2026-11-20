@@ -112,6 +112,12 @@ export interface ParkPiece {
    * along `(cos yaw, −sin yaw)` in `(x, z)`. @see yawAlong
    */
   readonly yaw: number;
+  /**
+   * Radians about its own depth axis, applied before {@link yaw}: its width's
+   * `+x` end rises by `sin tilt · width / 2`. Since #2688, a pitch's line laid
+   * along a slope (`park-fields.ts` §`laidAlongTheGround`); absent, level.
+   */
+  readonly tilt?: number;
   readonly width: number;
   readonly height: number;
   readonly depth: number;

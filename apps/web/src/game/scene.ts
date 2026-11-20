@@ -145,6 +145,7 @@ import {
   type WalkKind,
 } from './people';
 import { parkDressingInView, type ParkDressingInView } from './park-dressing';
+import { laidAlongTheGround } from './park-fields';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { streetsAt, type VillageStreet } from './streets';
 import {
@@ -812,7 +813,8 @@ function parkDressing(
     camera.z,
   );
   if (view.pieces.length === 0) return view;
-  const stood = standingOnGround(view.pieces, ground);
+  // #2688: and a pitch's lines laid along it, end to end.
+  const stood = laidAlongTheGround(standingOnGround(view.pieces, ground), ground);
   // `standingOnGround` hands back a new array every call; the belt re-composes
   // and re-uploads its matrices whenever the array it is given changes. So keep
   // returning the last frame's pieces while the same view stands at the same
@@ -838,7 +840,7 @@ function sameStanding(
   for (let index = 0; index < after.length; index += 1) {
     const a = before[index]!;
     const b = after[index]!;
-    if (a.x !== b.x || a.y !== b.y || a.z !== b.z) return false;
+    if (a.x !== b.x || a.y !== b.y || a.z !== b.z || a.tilt !== b.tilt) return false;
   }
   return true;
 }

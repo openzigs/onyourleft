@@ -142,6 +142,27 @@ describe('#2685 the park dressing belt', () => {
     expect(belt.mesh.count).toBe(0);
   });
 
+  it('#2688: tilts a piece about its own depth axis, its width’s ends at their heights', () => {
+    const belt = new ParkDressingBelt();
+    const tilt = 0.03;
+    const line: ParkPiece = { ...PIECE, kind: 'pitch-line', width: 98, tilt };
+    belt.update([line]);
+    const m = [...belt.mesh.instanceMatrix.array.slice(0, 16)];
+    // A unit box's +x end, (0.5, 0, 0), through the column-major matrix.
+    const end = (sign: number) => ({
+      x: m[12]! + sign * 0.5 * m[0]!,
+      y: m[13]! + sign * 0.5 * m[1]!,
+      z: m[14]! + sign * 0.5 * m[2]!,
+    });
+    const half = line.width / 2;
+    for (const sign of [-1, 1]) {
+      const at = end(sign);
+      expect(at.y).toBeCloseTo(line.y + line.lift + sign * half * Math.sin(tilt), 5);
+      expect(at.x).toBeCloseTo(line.x + sign * half * Math.cos(tilt) * Math.cos(line.yaw), 5);
+      expect(at.z).toBeCloseTo(line.z - sign * half * Math.cos(tilt) * Math.sin(line.yaw), 5);
+    }
+  });
+
   it('draws no more than its capacity', () => {
     const belt = new ParkDressingBelt();
     belt.update(Array.from({ length: PARK_BELT_CAPACITY + 40 }, () => PIECE));

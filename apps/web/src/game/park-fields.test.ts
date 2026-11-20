@@ -13,6 +13,7 @@ import { metres } from '@onyourleft/domain';
 import type { Box, LandUseFeature, PitchSport } from '@onyourleft/map-features';
 
 import { landClassMask, type LandClassMask } from './land-class';
+import { standingOnGround } from './landform';
 import {
   NO_PARK_DRESSING,
   parkDressingInView,
@@ -131,6 +132,18 @@ describe('#2688 what a pitch is drawn with, by its sport', () => {
   it('soccer: its lines, the halfway line, and a full-size goal at each end', () => {
     const pieces = fieldPieces(rectangle('pitch', PITCH, 'soccer'));
     expect(ofKind(pieces, 'pitch-line')).toHaveLength(5);
+    // Each line's length is its width, and both its ends lie inside the pitch.
+    for (const line of ofKind(pieces, 'pitch-line')) {
+      expect(line.width).toBeGreaterThan(line.depth);
+      for (const end of [-1, 1]) {
+        const x = line.x + end * (line.width / 2) * Math.cos(line.yaw);
+        const z = line.z - end * (line.width / 2) * Math.sin(line.yaw);
+        expect(x).toBeGreaterThanOrEqual(PITCH.minX);
+        expect(x).toBeLessThanOrEqual(PITCH.maxX);
+        expect(z).toBeGreaterThanOrEqual(PITCH.minZ);
+        expect(z).toBeLessThanOrEqual(PITCH.maxZ);
+      }
+    }
     const goals = ofKind(pieces, 'goal');
     expect(goals).toHaveLength(6);
     // A goal on each goal line, inside the frame by the lines' inset.
@@ -288,5 +301,42 @@ describe('#2688 in the park dressing, through parkDressingInView and sceneFrame'
       parkDressingOff: true,
     });
     expect(off.parkDressing).toBeUndefined();
+  });
+
+  it('lays each line along a slope, both its ends on the ground under them', () => {
+    // A 3 % grade: the PR's review measured a 98 m touch line 1.5 m off the
+    // ground at its ends here, stood from the ground under its middle alone.
+    const graded = northRoute(6_000, (along) => 10 + 0.03 * along);
+    const origin = corridorOrigin(graded);
+    const flat = place(rectangle('pitch', PITCH, 'soccer'));
+    const corridor: WorldCorridor = { ...flat.corridor, origin };
+    const start = atStartLine(graded);
+    const frame = sceneFrame({
+      profile: graded,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(2_500) } },
+      worldCorridor: corridor,
+      landClass: landClassMask(corridor),
+    });
+    const lines = ofKind((frame.parkDressing as ParkDressingInView).pieces, 'pitch-line');
+    expect(lines).toHaveLength(5);
+    let steepest = 0;
+    for (const line of lines) {
+      const tilt = line.tilt ?? 0;
+      steepest = Math.max(steepest, Math.abs(tilt));
+      const reach = (line.width / 2) * Math.cos(tilt);
+      for (const end of [-1, 1]) {
+        const x = line.x + end * reach * Math.cos(line.yaw);
+        const z = line.z - end * reach * Math.sin(line.yaw);
+        const [under] = standingOnGround([{ x, y: 0, z }], frame.terrain.mesh);
+        if (under === undefined) throw new Error('no ground under a line’s end');
+        const base = line.y + line.lift + end * (line.width / 2) * Math.sin(tilt);
+        // The ground at its end lies between its base and its top: neither floating nor buried.
+        expect(under.y).toBeGreaterThanOrEqual(base - 0.01);
+        expect(under.y).toBeLessThanOrEqual(base + line.height + 0.01);
+      }
+    }
+    // The control: the ground under the pitch does slope.
+    expect(steepest).toBeGreaterThan(0.005);
   });
 });
