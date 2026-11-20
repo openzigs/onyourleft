@@ -12,6 +12,14 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0089 is [ADR 0089](../adr/0089-the-chase-camera-follows-the-rolling-route-in-an-open-world-ride.md)**,
+  taken by [#2888](https://github.com/openzigs/onyourleft/issues/2888) on 2026-11-19 for the fixed
+  chase camera in an open-world ride, which follows the rolling route through a junction turn and a
+  U-turn and never enters a building, **Proposed** on the owner's rulings of that day on the epic
+  #2880. It supersedes in part ADR 0008 D-5's *"over terrain generated from the imported route"*, for
+  open-world rides only; ADR 0008 gained one dated `## Amendments` entry pointing to it. The owner's
+  lane note of 2026-11-19 reserved it, beside **0087** (#2885), **0088** (#2887) and **0090**
+  (#2884, moved off 0086, which ADR 0086 had taken). The next free number is **0091**.
   ⚠️ **0086 is [ADR 0086](../adr/0086-the-setup-wizard-recommends-one-ai-model.md)**, taken by
   [#2869](https://github.com/openzigs/onyourleft/issues/2869) on 2026-11-19 for the setup wizard
   recommending one AI model, **Proposed** on the owner's ruling of that day. It supersedes in part
