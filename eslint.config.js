@@ -398,6 +398,8 @@ const INSTANCE_NODE_ADAPTER_FILES = [
   'apps/instance/src/operator/commands.ts',
   // #2606: the backup folder's lease, naming its holder's host and process.
   'apps/instance/src/operator/backup-lease.ts',
+  // #2626: the off-box copy, run by `backup` in a process of its own.
+  'apps/instance/src/operator/copy-snapshot.ts',
   // #2781: the secrets folder's files, made on the first start.
   'apps/instance/src/setup/secrets.ts',
   // #2784: the setup code's file in the secrets folder, written at a start and removed once used.

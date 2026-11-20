@@ -23,6 +23,22 @@ It has the same authority as the root file. Where the text below says "this file
   [#2951](https://github.com/openzigs/onyourleft/pull/2951) (#2886), and 0081 and 0083 to 0085 by
   the open pull requests #2873, #2864, #2863 and #2872. The next free number is **0092**. The older
   entries below that call 0081 free were written before #2873 claimed it.
+  ⚠️ **0090 is [ADR 0090](../adr/0090-the-open-world-ride-streams-its-map-in-fixed-grid-blocks.md)**,
+  taken by [#2884](https://github.com/openzigs/onyourleft/issues/2884) on 2026-11-19 for the
+  open-world ride's streamed map reads, ridden-block cache and privacy zones, on the owner's
+  rulings of that day on the epic #2880, and **Accepted** on 2026-11-20 by the owner on #2942. It supersedes in part ADR 0054 D-2.3, D-2.4, D-4,
+  D-6.2's range-to-zone tests and D-6.3, and extends D-3, for open-world rides only; ADR 0054 gained one dated `## Amendments` entry
+  pointing to it. The owner's lane note of 2026-11-19 reserved **0086** for #2884, **0087** for
+  #2885, **0088** for #2887 and **0089** for #2888; 0086 was already ADR 0086 (#2869), so #2884 took
+  0090 and the other three reservations stand. The next free number is **0091**.
+  ⚠️ **0087 is [ADR 0087](../adr/0087-the-open-world-rides-ground-and-grade-come-from-real-heights.md)**,
+  taken by [#2885](https://github.com/openzigs/onyourleft/issues/2885) on 2026-11-19 for the
+  open-world ride's ground and grade from real heights, on the owner's ruling Q7 of that day on the
+  epic #2880, and **Accepted** on 2026-11-20 by the owner on #2948. It supersedes in part ADR 0032 D-3 and D-1's Mapterhorn row, and the two
+  rows of ADR 0054 D-1's table that keep them, for open-world rides only; both gained one dated
+  `## Amendments` entry pointing to it. The owner's lane note of 2026-11-19 reserved it, beside
+  **0088** (#2887), **0089** (#2888) and **0090** (#2884, moved off 0086, which ADR 0086 had taken).
+  The next free number is **0091**.
   ⚠️ **0086 is [ADR 0086](../adr/0086-the-setup-wizard-recommends-one-ai-model.md)**, taken by
   [#2869](https://github.com/openzigs/onyourleft/issues/2869) on 2026-11-19 for the setup wizard
   recommending one AI model, **Proposed** on the owner's ruling of that day. It supersedes in part
