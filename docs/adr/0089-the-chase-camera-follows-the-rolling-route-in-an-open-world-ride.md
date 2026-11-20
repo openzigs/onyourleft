@@ -61,7 +61,10 @@ a U-turn on a street lined with real buildings has not been written down anywher
   - **A 90° corner.** The target stays on the road (within half the 7 m road). The yaw rate stays
     under the cap. The camera turns the whole 90°. The rider stays within 0.2 of the frame's middle.
   - **A hairpin.** The same rules hold.
-  - **The target slides along the road.** It moves under 0.25 m a frame.
+  - **The target slides along the road.** From one 60 fps frame to the next, the target's step
+    changes by under 0.25 m (`TARGET_STEP_METRES`). The step itself is not bounded: the target
+    legitimately travels several times the rider's speed, on 25 m of lever. It is a jump in the
+    step that the test rules out.
   - **A turnaround.** The camera turns round with the rider at no more than the cap and keeps them
     in the frame. The target may leave the road while it turns.
 - **Bend easing.** `apps/web/src/game/bend-easing.ts` eases the **drawn** rider into a sharp bend
@@ -98,16 +101,37 @@ harness.
 | **C-1. The swing is capped** | The yaw rate never exceeds **90°/s**, or **60°/s** with reduced motion | `CAMERA_MAXIMUM_YAW_RATE`, `REDUCED_MOTION_MAXIMUM_YAW_RATE` |
 | **C-2. The camera looks at the road** | The target stays within **3.5 m** of the road's centreline all the way round | `chase-camera-bend.test.ts` §`ON_THE_ROAD` (half of `ROAD_WIDTH_METRES`) |
 | **C-3. The rider stays in the middle** | The rider is never more than **0.2** of the frame's width off its middle | `chase-camera-bend.test.ts` §`RIDER_IN_THE_MIDDLE` |
-| **C-4. The target slides** | The target moves less than **0.25 m** in a 60 fps frame | `chase-camera-bend.test.ts` §`TARGET_STEP_METRES` |
-| **C-5. The eye is never inside a building** | The eye is never inside a drawn building's footprint, grown by `NEAR_PLANE_METRES` (**0.5 m**). The line from the eye to the rider crosses no drawn building's footprint | The near plane, so no wall is clipped open in front of the lens |
+| **C-4. The target slides** | From one 60 fps frame to the next, the target's step changes by less than **0.25 m**. The step itself is not bounded, since the target travels several times the rider's speed | `chase-camera-bend.test.ts` §`TARGET_STEP_METRES`, which bounds the change in the step, not the step |
+| **C-5. The eye is never inside a building** | The eye is never inside a drawn building's volume: its footprint raised to its drawn height, grown by `NEAR_PLANE_METRES` (**0.5 m**) on every side and on top. The line from the eye to the rider passes through no drawn building's volume. Both hold in every frame, including while the eye is moving | The near plane, so no wall is clipped open in front of the lens |
 | **C-6. A choice never moves the camera** | Swapping the rolling route's tail (a choice made before the lock) moves neither the eye nor the target by any amount | The tail swaps at least **100 m** before the junction (ADR 0087 D-6.2). The target is at most **25 m** ahead, and the drawn rider is at most **30 m** behind the odometer, so the camera never looks at the part that changed |
 
-**How C-5 is met.** Where the eye would break C-5, it is pulled in toward the pivot, along the line
-from the pivot to the eye, until it is clear. The pull eases at most **0.25 m a 60 fps frame** (C-4's
-bound) in and out. The eye is never pulled nearer than **1.5 m** to the pivot. If a corner is so
-tight that 1.5 m is still inside a footprint, the eye **rises** by the same eased step instead,
-until it clears the footprint's mapped height. It never passes through a wall, and it never cuts
-behind the building.
+**How C-5 is met.** The eye is pulled in toward the rider, along the line from the eye to the
+rider's head. That keeps it on the sight line it already had, so a pull-in only shortens that line
+and never moves it behind a building. The pull-in is **anticipatory**, not reactive. A pull that
+starts only once the eye is inside a volume is already too late: at 40 km/h the eye closes on a
+wall at about 0.185 m a 60 fps frame from riding forward, plus about 0.12 m a frame of yaw sweep
+at the cap.
+
+- **Look ahead 1 s.** Each frame, the rig tests the eye it would have over the next **1 s**. It
+  rides on at the current speed, turns the heading toward the road ahead at no more than C-1's cap,
+  and takes the shortest pull-in that keeps every one of those eyes clear of C-5. The rig eases
+  toward the largest such pull-in.
+- **Ease at 4.5 m/s.** The pull-in changes at most **4.5 m a second** (0.075 m a 60 fps frame), in
+  and out. That is the whole 4.5 m of `CAMERA_BEHIND_METRES` in the 1 s horizon, so any pull-in
+  the horizon calls for is complete before the eye reaches the wall. The pull-in eases back out only
+  once the whole horizon is clear.
+- **Prefer 1.5 m.** The eye stays at least **1.5 m** from the rider where that clears C-5.
+- **C-5 wins** over the 1.5 m floor and over the easing. If a corner is so tight that 1.5 m is
+  still inside a volume, the eye goes on in toward the rider's head. That always clears C-5: the
+  rider is on the road, and every structure keeps 4.1 m from its centreline. If a building the
+  horizon could not see (a block streamed in late) would put the eased eye inside it, the eye jumps
+  in to the clear length that frame. #2896's rides through a 90° junction, at 30 and 40 km/h and at
+  60 and 20 fps, assert that no such jump happens.
+- **No rise.** The eye is never raised to clear a building. A raised eye is still inside the
+  volume while it rises, and a sight line from over a roof to a rider beside the building passes
+  through it.
+
+It never passes through a wall, and it never cuts behind the building.
 
 ### D-3 — Through a U-turn and a dead end: checkable rules
 
@@ -142,9 +166,10 @@ corner. Doing so is #2903's or a follow-up's call, and it changes nothing this A
    merge**.
 2. **Q1 — A new ADR rather than an amendment**, for ADR 0013 D-3's reason? Recommended: **yes**. The
    owner's lane note already reserved a number for it.
-3. **Q2 — Pull the eye in, then raise it (D-2, C-5)**, rather than let it pass through a wall?
-   Recommended: **yes**. A camera inside a building shows the rider nothing, and a camera that cuts
-   behind one hides the junction.
+3. **Q2 — Pull the eye in ahead of the wall, toward the rider and past 1.5 m if it must (D-2,
+   C-5)**, rather than raise it or let it pass through a wall? Recommended: **yes**. A camera inside
+   a building shows the rider nothing, and a camera that cuts behind one hides the junction. A
+   raised eye is inside the building while it rises.
 
 ---
 
@@ -159,9 +184,10 @@ corner. Doing so is #2903's or a follow-up's call, and it changes nothing this A
 
 ### What this costs
 
-- **A per-frame test of the eye against nearby footprints** (C-5), on the frame budget the tablet
-  is already short of. #2901's per-tile plans give the footprints; the test touches only the few
-  near the pivot.
+- **A per-frame test of the eyes of the next 1 s against nearby building volumes** (C-5), on the
+  frame budget the tablet is already short of. #2901's per-tile plans give the footprints and
+  heights. The test touches only the few within the horizon: at 40 km/h, about 11 m of riding plus
+  the 4.5 m eye.
 - **The rider looks bigger at a city corner**, when the eye is pulled in, and the field of view
   briefly shows less road ahead.
 - **A U-turn takes at least 2 s** to turn the view, by C-1's cap.
@@ -173,7 +199,7 @@ corner. Doing so is #2903's or a follow-up's call, and it changes nothing this A
 | [#2896](https://github.com/openzigs/onyourleft/issues/2896) | D-1, and C-1 to C-9 as tests on the rolling route |
 | [#2895](https://github.com/openzigs/onyourleft/issues/2895) | C-6: the tail swaps only before ADR 0087's lock |
 | [#2897](https://github.com/openzigs/onyourleft/issues/2897) | The U-turn and the dead end ride D-3's turnaround |
-| [#2901](https://github.com/openzigs/onyourleft/issues/2901), [#2902](https://github.com/openzigs/onyourleft/issues/2902) | The building footprints near the pivot are available to C-5 each frame |
+| [#2901](https://github.com/openzigs/onyourleft/issues/2901), [#2902](https://github.com/openzigs/onyourleft/issues/2902) | The footprints and drawn heights of the buildings within C-5's 1 s horizon are available to C-5 each frame |
 | [#2910](https://github.com/openzigs/onyourleft/issues/2910) | The tablet session watches a city-corner turn and a U-turn |
 | ADR 0008 | One dated `## Amendments` entry pointing here; its body is not edited |
 
@@ -181,8 +207,8 @@ corner. Doing so is #2903's or a follow-up's call, and it changes nothing this A
 
 ## What would make this ADR wrong
 
-- **`camera.ts`'s rig changes.** C-1 to C-4 are its constants; C-5's 1.5 m floor assumes a 4.5 m
-  eye. A new rig is checked against C-5 in the same pull request.
+- **`camera.ts`'s rig changes.** C-1 to C-4 are its constants; C-5's 1.5 m floor and its 4.5 m/s
+  ease assume a 4.5 m eye. A new rig is checked against C-5 in the same pull request.
 - **ADR 0087's lock or `bend-easing.ts`'s lag changes** so that the lock is less than the lag plus
   the 25 m look-ahead. Then C-6 no longer holds by construction, and needs a test of its own.
 - **A free camera is ever asked for.** That is still a change to ADR 0008 D-5, as it was.

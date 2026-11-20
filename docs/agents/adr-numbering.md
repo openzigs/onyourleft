@@ -19,7 +19,10 @@ It has the same authority as the root file. Where the text below says "this file
   #2880. It supersedes in part ADR 0008 D-5's *"over terrain generated from the imported route"*, for
   open-world rides only; ADR 0008 gained one dated `## Amendments` entry pointing to it. The owner's
   lane note of 2026-11-19 reserved it, beside **0087** (#2885), **0088** (#2887) and **0090**
-  (#2884, moved off 0086, which ADR 0086 had taken). The next free number is **0091**.
+  (#2884, moved off 0086, which ADR 0086 had taken). **0091** is claimed by the open pull request
+  [#2951](https://github.com/openzigs/onyourleft/pull/2951) (#2886), and 0081 and 0083 to 0085 by
+  the open pull requests #2873, #2864, #2863 and #2872. The next free number is **0092**. The older
+  entries below that call 0081 free were written before #2873 claimed it.
   ⚠️ **0086 is [ADR 0086](../adr/0086-the-setup-wizard-recommends-one-ai-model.md)**, taken by
   [#2869](https://github.com/openzigs/onyourleft/issues/2869) on 2026-11-19 for the setup wizard
   recommending one AI model, **Proposed** on the owner's ruling of that day. It supersedes in part
