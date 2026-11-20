@@ -1683,7 +1683,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         lever `-park-dressing`, page `town=parks`.
                         ⚠️ **Since #2688 a pitch and a playground too**
                         (`park-fields.ts`): a pitch's lines (flat boxes, not a
-                        decal) and its goals, net, hoops or backstop by its
+                        decal, cut where the ground folds, §`laidAlongTheGround`) and its goals, net, hoops or backstop by its
                         mapped `sport` (`LandUseFeature.sport`), and a
                         playground's swing frame, slide and climbing frame,
                         after the 512 in the same call, ≤ `PARK_FIELD_CAPACITY`

@@ -813,8 +813,8 @@ function parkDressing(
     camera.z,
   );
   if (view.pieces.length === 0) return view;
-  // #2688: and a pitch's lines laid along it, end to end.
-  const stood = laidAlongTheGround(standingOnGround(view.pieces, ground), ground);
+  // #2688: stood on the ground, and a pitch's lines laid along it in pieces.
+  const stood = laidAlongTheGround(view.pieces, ground);
   // `standingOnGround` hands back a new array every call; the belt re-composes
   // and re-uploads its matrices whenever the array it is given changes. So keep
   // returning the last frame's pieces while the same view stands at the same

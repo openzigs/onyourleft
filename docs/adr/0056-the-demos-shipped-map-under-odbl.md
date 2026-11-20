@@ -431,7 +431,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   corrected or struck there if the ruling differs.
 - **2026-11-19** — **PROPOSED, pending the owner's ruling on
   [#2688](https://github.com/openzigs/onyourleft/issues/2688): the demo bundle carries a pitch's
-  sport.** From #2688 `corridor.ts` §`packedCorridorFeatures` packs a pitch's `sport`
+  sport.** From #2688 `corridor.ts` §`packedCorridorFeatures` packs a pitch's `sport`, which
   [ADR 0054](0054-towns-from-real-map-data.md)'s second entry of this date declares, as `sp` on the
   polygon (packed version 7), one of eight sport names and nothing else. **A bundle baked from that
   build publishes it** under ODbL 1.0, as it publishes every other record in it (D-3), and D-4's

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { metres } from '@onyourleft/domain';
+import { metres, type RouteProfile } from '@onyourleft/domain';
 import type { Box, LandUseFeature, PitchSport } from '@onyourleft/map-features';
 
 import { landClassMask, type LandClassMask } from './land-class';
@@ -27,6 +27,7 @@ import {
   fieldFrame,
   fieldPieces,
   PARK_FIELD_CAPACITY,
+  PITCH_LINE_GROUND_METRES,
   PITCH_LINE_INSET_METRES,
 } from './park-fields';
 import { distanceToDrawnRoad } from './road-grid';
@@ -201,6 +202,18 @@ describe('#2688 what a pitch is drawn with, by its sport', () => {
     expect(backstop).toHaveLength(3);
     // At the fan's narrow end (x 40), not its wide one (x 190).
     for (const panel of backstop) expect(panel.x).toBeLessThan(70);
+    // One fence round home plate: the side panels stand on the back panel's
+    // ends, no gap at its corners.
+    const frame = fieldFrame(fan.rings[0] as Float32Array);
+    if (frame === undefined) throw new Error('no frame');
+    const across = (panel: ParkPiece) =>
+      -(panel.x - frame.x) * frame.az + (panel.z - frame.z) * frame.ax;
+    const [back, ...sides] = [...backstop].sort(
+      (a, b) => Math.abs(across(a)) - Math.abs(across(b)),
+    );
+    for (const side of sides) {
+      expect(Math.abs(across(side))).toBeCloseTo((back as ParkPiece).depth / 2, 3);
+    }
   });
 
   it('no sport, or one it does not draw: the lines alone', () => {
@@ -303,23 +316,122 @@ describe('#2688 in the park dressing, through parkDressingInView and sceneFrame'
     expect(off.parkDressing).toBeUndefined();
   });
 
-  it('lays each line along a slope, both its ends on the ground under them', () => {
-    // A 3 % grade: the PR's review measured a 98 m touch line 1.5 m off the
-    // ground at its ends here, stood from the ground under its middle alone.
-    const graded = northRoute(6_000, (along) => 10 + 0.03 * along);
-    const origin = corridorOrigin(graded);
-    const flat = place(rectangle('pitch', PITCH, 'soccer'));
-    const corridor: WorldCorridor = { ...flat.corridor, origin };
-    const start = atStartLine(graded);
-    const frame = sceneFrame({
-      profile: graded,
+  /**
+   * Every drawn line piece on `frame`'s ground, read every 0.1 m along it: the
+   * most its run stands above the ground and the ground above its run, and
+   * how much of the pitch's lines its pieces cover, run end to end.
+   */
+  function offTheGround(frame: ReturnType<typeof sceneFrame>): {
+    readonly pieces: readonly ParkPiece[];
+    readonly floats: number;
+    readonly buried: number;
+    readonly run: number;
+  } {
+    const pieces = ofKind((frame.parkDressing as ParkDressingInView).pieces, 'pitch-line');
+    let floats = 0;
+    let buried = 0;
+    let run = 0;
+    for (const line of pieces) {
+      const tilt = line.tilt ?? 0;
+      const reach = (line.width / 2) * Math.cos(tilt);
+      run += reach * 2;
+      const steps = Math.max(1, Math.ceil((reach * 2) / 0.1));
+      const points = [];
+      for (let step = 0; step <= steps; step += 1) {
+        const along = -reach + (step / steps) * reach * 2;
+        points.push({
+          x: line.x + along * Math.cos(line.yaw),
+          y: 0,
+          z: line.z - along * Math.sin(line.yaw),
+          laid: line.y + along * Math.tan(tilt),
+        });
+      }
+      const under = standingOnGround(points, frame.terrain.mesh);
+      // Every point along it is over ground.
+      expect(under).toHaveLength(points.length);
+      for (const point of under) {
+        floats = Math.max(floats, point.laid - point.y);
+        buried = Math.max(buried, point.y - point.laid);
+      }
+    }
+    return { pieces, floats, buried, run };
+  }
+
+  /** A sceneFrame at `distance` on `route`, the pitch (or `pitch`) beside it. */
+  function frameOn(
+    route: RouteProfile,
+    distance: number,
+    pitch: LandUseFeature = rectangle('pitch', PITCH, 'soccer'),
+  ): ReturnType<typeof sceneFrame> {
+    const origin = corridorOrigin(route);
+    const corridor: WorldCorridor = { ...place(pitch).corridor, origin };
+    const start = atStartLine(route);
+    return sceneFrame({
+      profile: route,
       origin,
-      state: { ...start, ride: { ...start.ride, distance: metres(2_500) } },
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
       worldCorridor: corridor,
       landClass: landClassMask(corridor),
     });
+  }
+
+  it('lays every line along the ground in pieces, no point of it off the ground by more than its height', () => {
+    // The PR's second review: one 98 m box tilted end to end still floated
+    // 2.04 m mid-span on the level ROUTE, where the ground folds at the
+    // terrain's columns, and the crest route buried a goal line 0.28 m.
+    const turned = Math.PI / 7;
+    const corner = (u: number, v: number): [number, number] => [
+      -100 + Math.cos(turned) * u - Math.sin(turned) * v,
+      2_530 + Math.sin(turned) * u + Math.cos(turned) * v,
+    ];
+    const askew: LandUseFeature = {
+      layer: 'landuse',
+      kind: 'pitch',
+      sport: 'soccer',
+      rings: [
+        Float32Array.from([
+          ...corner(-45, -28),
+          ...corner(45, -28),
+          ...corner(45, 28),
+          ...corner(-45, 28),
+        ]),
+      ],
+    };
+    const routes = {
+      level: ROUTE,
+      grade: northRoute(6_000, (along) => 10 + 0.03 * along),
+      crest: northRoute(6_000, (along) => 10 + 40 * Math.sin(along / 400)),
+      rolling: northRoute(6_000, (along) => 10 + 15 * Math.sin(along / 150)),
+    };
+    // Each pitch's five lines, end to end: two touch lines and two goal lines
+    // a line's width past its length and width less the inset, and the halfway line.
+    const square = rectangle('pitch', PITCH, 'soccer');
+    const lengths = new Map([
+      [square, 2 * 98.2 + 2 * 58.2 + 58],
+      [askew, 2 * 88.2 + 2 * 54.2 + 54],
+    ]);
+    let pieces = 0;
+    for (const route of Object.values(routes)) {
+      for (const [pitch, drawn] of lengths) {
+        // Twice, 30 m apart: the second frame reads the cuts the first made.
+        for (const distance of [2_500, 2_530]) {
+          const seen = offTheGround(frameOn(route, distance, pitch));
+          expect(seen.floats).toBeLessThanOrEqual(PITCH_LINE_GROUND_METRES);
+          expect(seen.buried).toBeLessThanOrEqual(PITCH_LINE_GROUND_METRES);
+          // All five lines, whole: the pieces run end to end and leave none out.
+          expect(seen.run).toBeCloseTo(drawn, 3);
+          pieces = Math.max(pieces, seen.pieces.length);
+        }
+      }
+    }
+    // The control: the ground does fold under them, so a line is several pieces.
+    expect(pieces).toBeGreaterThan(5);
+  });
+
+  it('lays each piece’s two ends on the ground under them, on a 3 % grade', () => {
+    const graded = northRoute(6_000, (along) => 10 + 0.03 * along);
+    const frame = frameOn(graded, 2_500);
     const lines = ofKind((frame.parkDressing as ParkDressingInView).pieces, 'pitch-line');
-    expect(lines).toHaveLength(5);
     let steepest = 0;
     for (const line of lines) {
       const tilt = line.tilt ?? 0;
@@ -330,13 +442,55 @@ describe('#2688 in the park dressing, through parkDressingInView and sceneFrame'
         const z = line.z - end * reach * Math.sin(line.yaw);
         const [under] = standingOnGround([{ x, y: 0, z }], frame.terrain.mesh);
         if (under === undefined) throw new Error('no ground under a line’s end');
+        expect(under.y).toBeCloseTo(line.y + end * reach * Math.tan(tilt), 4);
+        // The ground at its end lies between its base and its top.
         const base = line.y + line.lift + end * (line.width / 2) * Math.sin(tilt);
-        // The ground at its end lies between its base and its top: neither floating nor buried.
         expect(under.y).toBeGreaterThanOrEqual(base - 0.01);
         expect(under.y).toBeLessThanOrEqual(base + line.height + 0.01);
       }
     }
     // The control: the ground under the pitch does slope.
     expect(steepest).toBeGreaterThan(0.005);
+  });
+
+  it('keeps a frame’s pitch and playground pieces within their room once its lines are cut', () => {
+    const pitches: LandUseFeature[] = [];
+    for (let row = 0; row < 8; row += 1) {
+      for (const x0 of [-150, -90, 30, 90]) {
+        const z0 = 2_400 + row * 40;
+        pitches.push(
+          rectangle('pitch', { minX: x0, maxX: x0 + 50, minZ: z0, maxZ: z0 + 30 }, 'soccer'),
+        );
+      }
+    }
+    const route = northRoute(6_000, (along) => 10 + 40 * Math.sin(along / 400));
+    const origin = corridorOrigin(route);
+    const corridor: WorldCorridor = { ...place(...pitches).corridor, origin };
+    const start = atStartLine(route);
+    const frame = sceneFrame({
+      profile: route,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(2_500) } },
+      worldCorridor: corridor,
+      landClass: landClassMask(corridor),
+    });
+    const pieces = (frame.parkDressing as ParkDressingInView).pieces;
+    // The control: `park-dressing.ts` handed it the room's 80, a line as one.
+    const handed = parkDressingInView(
+      corridor,
+      route,
+      origin,
+      scatterSeed(route),
+      landClassMask(corridor),
+      frame.camera.x,
+      frame.camera.z,
+    );
+    expect(handed.pieces).toHaveLength(PARK_FIELD_CAPACITY);
+    // Cut, its lines are more pieces than it was handed, and still the room holds.
+    expect(ofKind(pieces, 'pitch-line').length).toBeGreaterThan(
+      ofKind(handed.pieces, 'pitch-line').length,
+    );
+    expect(pieces.length).toBeLessThanOrEqual(PARK_FIELD_CAPACITY);
+    expect(pieces.length).toBeGreaterThan(PARK_FIELD_CAPACITY / 2);
   });
 });

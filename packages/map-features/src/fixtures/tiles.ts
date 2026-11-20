@@ -728,7 +728,6 @@ export function waterLinesTile(): Uint8Array {
   ]);
 }
 
-/** The nine named fixtures, for the walks that run over all of them. */
 /**
  * #2688's pitches: each `landuse` polygon's `kind`, the `sport` it carries,
  * and the sport the decoder keeps — `null` for none.
@@ -771,6 +770,7 @@ export function pitchesTile(): Uint8Array {
   ]);
 }
 
+/** The ten named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   pitches: pitchesTile,
   residentialBlock: residentialBlockTile,

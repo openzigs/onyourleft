@@ -809,7 +809,9 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
       layer: f.layer,
       kind: f.kind,
       // #2688: held to the decoder's rule again — a pitch's, and one of its sports.
-      ...(f.kind === PITCH_KIND && (PITCH_SPORTS as readonly unknown[]).includes(f.sp)
+      ...(f.layer === 'landuse' &&
+      f.kind === PITCH_KIND &&
+      (PITCH_SPORTS as readonly unknown[]).includes(f.sp)
         ? { sport: f.sp }
         : {}),
       rings: f.rings.map(fromInts),

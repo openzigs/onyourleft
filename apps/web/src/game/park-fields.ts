@@ -36,11 +36,18 @@
  * (`park-dressing.ts` §`ParkGround`) has its four channels spent on golf and
  * cemeteries, and a box costs the same ten triangles whatever it is. Each
  * line is {@link PITCH_LINE_WIDTH_METRES} wide — wider than a real line's
- * 0.12 m, so it does not break into dashes from the saddle. ⚠️ **One box
- * per line, laid along the slope**: the scene tilts it from the ground
- * under one end to the ground under the other ({@link laidAlongTheGround}),
- * because a line split into the cemetery wall's 4 m pieces would spend
- * {@link PARK_FIELD_CAPACITY} on one pitch.
+ * 0.12 m, so it does not break into dashes from the saddle. ⚠️ **Laid
+ * along the ground in pieces** ({@link laidAlongTheGround}): the drawn ground
+ * is flat between its folds — the terrain's columns, 40, 60, 90 and 135 m off
+ * the road and so on (`landform.ts` §`TERRAIN_COLUMN_OFFSETS`) — and folds
+ * there by as much as a tenth of a metre a metre. So a piece of fixed length
+ * that straddles a fold leaves it off the ground: 4 m pieces left it up to
+ * 0.18 m off on #2688's probe, and 1 m pieces would spend
+ * {@link PARK_FIELD_CAPACITY} on a third of one pitch. A line is cut where
+ * the ground under it folds instead, and each piece tilted from the ground
+ * under one end to the ground under the other: no point of it is more than
+ * {@link PITCH_LINE_GROUND_METRES} off the ground, and a line on ground that
+ * does not fold is one piece.
  *
  * ## A playground
  *
@@ -67,7 +74,9 @@ import type { CorridorOrigin } from './terrain';
  * The most pitch and playground pieces a frame draws: **80**, nearest
  * first, after the golf and cemetery pieces' 512 — inside what the worst
  * realistic frame left beside them (`realistic-budget.ts`
- * §`REALISTIC_PARK_FIELD_TRIANGLES`). Seven goal pitches, or ten courts.
+ * §`REALISTIC_PARK_FIELD_TRIANGLES`). A line counts each of its pieces
+ * ({@link laidAlongTheGround}): a soccer pitch is 15 to 24 pieces on the tests'
+ * routes square to the road, 27 to 42 turned to it, so three or four pitches.
  */
 export const PARK_FIELD_CAPACITY = 80;
 
@@ -88,7 +97,7 @@ export const PITCH_LINE_HEIGHT_METRES = 0.03;
 
 /**
  * How deep a line is set into the ground beneath that, in metres: **0.15**,
- * the cemetery wall's — so where the ground sags between a line's ends
+ * the cemetery wall's — so where the ground sags under one of a line's pieces
  * (§`laidAlongTheGround`) no gap shows under it.
  */
 export const PITCH_LINE_SET_IN_METRES = 0.15;
@@ -273,46 +282,181 @@ function lines(build: FieldPieces, frame: FieldFrame, halfway: boolean): void {
   if (halfway) build.line(0, 0, halfW * 2, true);
 }
 
+/** The kinds this file draws: what {@link PARK_FIELD_CAPACITY} counts. */
+const FIELD_KINDS: ReadonlySet<ParkPieceKind> = new Set<ParkPieceKind>([
+  'pitch-line',
+  'goal',
+  'net',
+  'hoop',
+  'backstop',
+  'play',
+]);
+
 /**
- * `pieces` stood on `mesh` by `landform.ts` §`standingOnGround`, with each
- * pitch line laid along the ground: its two ends found on the ground under
- * them, it is stood at their mean, tilted from one to the other and
- * lengthened by the slope, so a line up to a pitch's length neither floats
- * nor sinks at its ends on a slope (#2688's review). Where the ground between
- * its ends sags, its {@link PITCH_LINE_SET_IN_METRES} fills under it; where
- * it bulges, the line passes under it. A line with no ground under an end is
- * left as it was stood. Every other piece is returned as it is.
+ * How far apart the ground is read along a line to find where it folds, in
+ * metres: **0.5**. @see linePieces
+ */
+export const PITCH_LINE_SAMPLE_METRES = 0.5;
+
+/**
+ * How far from the ground any point of a drawn line's run is, at most, in
+ * metres: **0.03**, its own {@link PITCH_LINE_HEIGHT_METRES} — so its top is
+ * never under the ground and its base, {@link PITCH_LINE_SET_IN_METRES}
+ * deeper, never above it. `park-fields.test.ts` measures it along every line.
+ */
+export const PITCH_LINE_GROUND_METRES = PITCH_LINE_HEIGHT_METRES;
+
+/**
+ * How far the ground read along a line may stand off one of its pieces'
+ * straight runs before the line is cut there, in metres: **0.02**, two
+ * thirds of {@link PITCH_LINE_GROUND_METRES}. The third left is for between
+ * two reads, where a fold adds up to an eighth of the read spacing times its
+ * change of slope: 0.6 cm at the terrain's sharpest fold on #2688's probe.
+ */
+export const PITCH_LINE_FOLD_METRES = (PITCH_LINE_GROUND_METRES * 2) / 3;
+
+/**
+ * Where along each line it is cut, as shares of its length from its `−x` end
+ * to its `+x` end — kept per line, the dressing's own piece, once every read
+ * along it found ground. The ground at a place is the same in every frame
+ * (`landform.ts`: the columns never move and the rows are the route's), so
+ * the reads are paid once a line, and only its pieces' ends every frame.
+ */
+const cuts = new WeakMap<ParkPiece, Float64Array>();
+
+/**
+ * Where to cut a line whose ground, read every
+ * {@link PITCH_LINE_SAMPLE_METRES}, is `ground` (`NaN` where there is none):
+ * the fewest straight runs, greedily from its `−x` end, each the longest whose
+ * every read lies within {@link PITCH_LINE_FOLD_METRES} of the chord between
+ * its two ends. A run's chord slope must lie inside every read's window, so
+ * each read narrows the window once. `undefined` where a read found no ground.
+ */
+function cutsAlong(ground: Float64Array): Float64Array | undefined {
+  const last = ground.length - 1;
+  for (const y of ground) if (Number.isNaN(y)) return undefined;
+  const at: number[] = [0];
+  let start = 0;
+  while (start < last) {
+    let low = Number.NEGATIVE_INFINITY;
+    let high = Number.POSITIVE_INFINITY;
+    let end = start + 1;
+    const from = ground[start] as number;
+    for (let next = start + 1; next <= last; next += 1) {
+      const run = next - start;
+      const y = ground[next] as number;
+      const slope = (y - from) / run;
+      if (slope < low || slope > high) break;
+      end = next;
+      low = Math.max(low, (y - PITCH_LINE_FOLD_METRES - from) / run);
+      high = Math.min(high, (y + PITCH_LINE_FOLD_METRES - from) / run);
+    }
+    at.push(end / last);
+    start = end;
+  }
+  return Float64Array.from(at);
+}
+
+/** The ground under `count + 1` evenly spaced points along `line`, `NaN` where none. */
+function groundAlong(line: ParkPiece, count: number, mesh: TerrainMesh): Float64Array {
+  const ux = Math.cos(line.yaw);
+  const uz = -Math.sin(line.yaw);
+  const points: { x: number; y: number; z: number; index: number }[] = [];
+  for (let index = 0; index <= count; index += 1) {
+    const along = (index / count - 0.5) * line.width;
+    points.push({ x: line.x + ux * along, y: 0, z: line.z + uz * along, index });
+  }
+  const ground = new Float64Array(count + 1).fill(Number.NaN);
+  for (const stood of standingOnGround(points, mesh)) ground[stood.index] = stood.y;
+  return ground;
+}
+
+/**
+ * One line as the runs of ground it lies along: cut where the ground folds
+ * ({@link cutsAlong}), each piece stood on the ground under its own two ends,
+ * at their mean, tilted from one to the other and lengthened by its rise.
+ * Empty where any of it is over no ground — the edge of the drawn ground,
+ * where it would hang in the air.
+ */
+function linePieces(line: ParkPiece, mesh: TerrainMesh): readonly ParkPiece[] {
+  let at = cuts.get(line);
+  if (at === undefined) {
+    const count = Math.max(1, Math.ceil(line.width / PITCH_LINE_SAMPLE_METRES));
+    at = cutsAlong(groundAlong(line, count, mesh));
+    if (at === undefined) return [];
+    cuts.set(line, at);
+  }
+  const ux = Math.cos(line.yaw);
+  const uz = -Math.sin(line.yaw);
+  const ends = Array.from(at, (share, index) => {
+    const along = (share - 0.5) * line.width;
+    return { x: line.x + ux * along, y: 0, z: line.z + uz * along, index };
+  });
+  const heights = new Float64Array(ends.length).fill(Number.NaN);
+  for (const stood of standingOnGround(ends, mesh)) heights[stood.index] = stood.y;
+  const pieces: ParkPiece[] = [];
+  for (let index = 1; index < ends.length; index += 1) {
+    const down = heights[index - 1] as number;
+    const up = heights[index] as number;
+    if (Number.isNaN(down) || Number.isNaN(up)) return [];
+    const a = ends[index - 1] as { x: number; z: number };
+    const b = ends[index] as { x: number; z: number };
+    const run = ((at[index] as number) - (at[index - 1] as number)) * line.width;
+    const rise = up - down;
+    pieces.push({
+      ...line,
+      x: (a.x + b.x) / 2,
+      y: (up + down) / 2,
+      z: (a.z + b.z) / 2,
+      tilt: Math.atan2(rise, run),
+      width: Math.hypot(run, rise),
+    });
+  }
+  return pieces;
+}
+
+/**
+ * A frame's park pieces stood on `mesh`, each pitch line laid along the
+ * ground in pieces (#2688's review: one box, even tilted end to end, floated
+ * 2 m mid-span where the ground folds under a 98 m line). Every other piece
+ * is stood by `landform.ts` §`standingOnGround`, and dropped where it has no
+ * ground, as before.
+ *
+ * ⚠️ **Still {@link PARK_FIELD_CAPACITY}**: `park-dressing.ts` cut the
+ * field's pieces counting a line as one, and a line here is several. So in
+ * the order they come — nearest first — a line whose pieces no longer fit
+ * the room left is dropped whole, and so is any other field piece that does
+ * not fit; the golf and cemetery pieces before them are not counted.
  */
 export function laidAlongTheGround(
   pieces: readonly ParkPiece[],
   mesh: TerrainMesh,
 ): readonly ParkPiece[] {
-  const ends: { x: number; y: number; z: number; index: number; end: 1 | -1 }[] = [];
+  const feet: { x: number; y: number; z: number; index: number }[] = [];
   pieces.forEach((piece, index) => {
-    if (piece.kind !== 'pitch-line') return;
-    const dx = Math.cos(piece.yaw) * (piece.width / 2);
-    const dz = -Math.sin(piece.yaw) * (piece.width / 2);
-    ends.push({ x: piece.x + dx, y: 0, z: piece.z + dz, index, end: 1 });
-    ends.push({ x: piece.x - dx, y: 0, z: piece.z - dz, index, end: -1 });
+    if (piece.kind !== 'pitch-line') feet.push({ x: piece.x, y: piece.y, z: piece.z, index });
   });
-  if (ends.length === 0) return pieces;
-  const high = new Map<number, number>();
-  const low = new Map<number, number>();
-  for (const stood of standingOnGround(ends, mesh)) {
-    (stood.end === 1 ? high : low).set(stood.index, stood.y);
-  }
-  return pieces.map((piece, index) => {
-    const up = high.get(index);
-    const down = low.get(index);
-    if (up === undefined || down === undefined) return piece;
-    const rise = up - down;
-    return {
-      ...piece,
-      y: (up + down) / 2,
-      tilt: Math.atan2(rise, piece.width),
-      width: Math.hypot(piece.width, rise),
-    };
+  const ground = new Map<number, number>();
+  for (const stood of standingOnGround(feet, mesh)) ground.set(stood.index, stood.y);
+  const out: ParkPiece[] = [];
+  let room = PARK_FIELD_CAPACITY;
+  pieces.forEach((piece, index) => {
+    if (piece.kind === 'pitch-line') {
+      const laid = linePieces(piece, mesh);
+      if (laid.length > room) return;
+      room -= laid.length;
+      out.push(...laid);
+      return;
+    }
+    const y = ground.get(index);
+    if (y === undefined) return;
+    if (FIELD_KINDS.has(piece.kind)) {
+      if (room < 1) return;
+      room -= 1;
+    }
+    out.push(y === piece.y ? piece : { ...piece, y });
   });
+  return out;
 }
 
 /** Two posts and a bar at each goal line: a soccer goal, or rugby's and football's H. */
@@ -364,7 +508,7 @@ export function fieldPieces(feature: LandUseFeature): readonly ParkPiece[] {
       build.box(
         'backstop',
         u - end * 2.1,
-        side * 4.2,
+        side * 3,
         4.5,
         0.08,
         BACKSTOP_HEIGHT_METRES,

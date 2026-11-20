@@ -721,9 +721,11 @@ describe('packing', () => {
         { layer: 'landuse', kind: 'pitch', sp: 'soccer', rings: [] },
         { layer: 'landuse', kind: 'pitch', sp: 'curling' as 'soccer', rings: [] },
         { layer: 'landuse', kind: 'park', sp: 'soccer', rings: [] },
+        // Nor on a pitch-kinded polygon of another layer: the decoder keeps it in `landuse` only.
+        { layer: 'water', kind: 'pitch', sp: 'soccer', rings: [] },
       ],
     });
-    expect(edited.landUse.map((f) => f.sport ?? null)).toStrictEqual(['soccer', null, null]);
+    expect(edited.landUse.map((f) => f.sport ?? null)).toStrictEqual(['soccer', null, null, null]);
     // A polygon with none packs no `sp`, as it did at version 6.
     expect('sp' in (packedCorridorFeatures(back).landUse.at(-1) ?? {})).toBe(false);
   });
