@@ -43,7 +43,7 @@ import { recoveryCodeSha256 } from '../auth/identity.ts';
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
-import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
+import { forgetRunState, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { takeLease, type Lease, type LeaseOptions } from './backup-lease.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
 import {
@@ -467,10 +467,24 @@ async function snapshotsIn(place: string): Promise<string[]> {
  * `made` is in the oldest snapshots no record names that are newer than every
  * recorded one there (third review F7). Answers whether `made` itself went.
  * A record that cannot be READ either removes `made` alone, as the safe way.
+ *
+ * A snapshot named after `now` (Unix ms), which a clock running ahead made,
+ * is left out — neither counted nor the newest recorded one — as the
+ * startup hold-off leaves it out ({@link newestSnapshotIn}): recorded, it
+ * would sort after every snapshot this run could prune, and the bound would
+ * stop holding (#2627). It is never removed here.
  */
-async function capUnrecorded(database: string, made: string, limit: number): Promise<boolean> {
+async function capUnrecorded(
+  database: string,
+  made: string,
+  limit: number,
+  now: number,
+): Promise<boolean> {
   const place = dirname(made);
-  const names = await snapshotsIn(place);
+  const names = (await snapshotsIn(place)).filter((name) => {
+    const at = snapshotTime(name);
+    return at === undefined || at <= now;
+  });
   if (names.length <= limit) return false;
   const madeName = made.slice(place.length + 1);
   let droppable: string[];
@@ -532,7 +546,10 @@ async function takeAndRecord(
   } else if (options.keep !== undefined) {
     const limit = options.keep + UNRECORDED_ALLOWANCE;
     for (const made of [taken.snapshot, ...(taken.copiedTo === null ? [] : [taken.copiedTo])]) {
-      if ((await capUnrecorded(paths.database, made, limit)) && made === taken.snapshot) {
+      if (
+        (await capUnrecorded(paths.database, made, limit, at.getTime())) &&
+        made === taken.snapshot
+      ) {
         kept = false;
       }
     }
@@ -655,7 +672,7 @@ async function takeBackup(
     vacuumInto(paths.database, database);
     // The snapshot does not hold a "back up now" as waiting (#2606 review
     // L1): this run serves it, so restoring the snapshot would ask again.
-    forgetWaitingRequests(database);
+    forgetRunState(database);
     blobs = await blobFiles(paths.blobs);
     if (blobs.length > 0) {
       await cp(join(paths.blobs, 'objects'), join(partial, BLOBS_DIRECTORY, 'objects'), {

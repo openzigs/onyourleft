@@ -914,7 +914,9 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   newer than every recorded snapshot in the folder, so the newest snapshot is always kept. It never
   removes a recorded snapshot, or an unrecorded one older than them, such as one the shell loop made
   before #2606. If the folder has no recorded snapshot at all, the run removes only the snapshot it
-  has just taken.
+  has just taken. A snapshot named after the present moment, which a clock running ahead left, is
+  left out of the bound: it is neither counted nor removed, and it does not stop the run removing
+  the others (#2627).
 - **How often it runs while records fail.** The loop holds back a request it has already tried for
   one interval. When it starts, it also holds off every run, the owner's requests included, until
   one interval after the newest snapshot in the folder that no record names. That snapshot may come
@@ -924,8 +926,8 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   interval.
 - **One run at a time in a folder: the lease.** A run holds a **lease** on each folder it writes:
   the snapshot folder, and the off-box folder. The lease is a row in the instance's own database
-  (`backup_lease`, keyed by the SHA-256 of the folder's path, never the path), held for the whole
-  run. Every run opens that database, whichever container it runs in: the `backup` service, a
+  (`backup_lease`, keyed by the SHA-256 of the folder's real path, never the path, so a folder
+  reached through a symlink is the same lease), held for the whole run. Every run opens that database, whichever container it runs in: the `backup` service, a
   `backup` run by hand, `deploy.sh`'s pre-deploy snapshot. SQLite's write lock is the one atomic step
   they all share, so a run takes the lease in a single `BEGIN IMMEDIATE` transaction, and only one
   run can.
@@ -940,8 +942,10 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   - A second run into a folder that is held is refused, and recorded `failed` as
     `BackupFolderBusy`. A run whose off-box lease is held elsewhere records its copy `failed`, and
     neither writes nor prunes there.
-  - A run that loses its lease, because a heartbeat cannot be written or another run took it, stops
-    before it records or prunes anything (`BackupLeaseLost`).
+  - Before it records or prunes anything, a run reads its lease's row, and stops
+    (`BackupLeaseLost`) if another run has taken it. A heartbeat that cannot be written is tried
+    again at the next beat and loses nothing by itself: while nobody has taken the row, the run
+    still holds the folder (#2627).
   - On a database from before migration 0042, which has no lease table, runs take no lease, as
     before.
   - One limit: `VACUUM INTO` holds the process while it copies the database, so no heartbeat is
