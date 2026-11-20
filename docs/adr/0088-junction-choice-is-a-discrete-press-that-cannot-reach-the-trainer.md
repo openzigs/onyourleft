@@ -352,3 +352,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   actual direction, its turn from the rider's heading, rather than a fixed left, up and right.
   The ruling is posted on [#2897](https://github.com/openzigs/onyourleft/issues/2897) and on
   [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)
+- **2026-11-20** — **The owner ruled that at three ways on, when straight is an end, that end's
+  press steps inward, so every way shown has a press.** Straight stays the way most nearly dead
+  ahead by bearing, as the amendment above records. At a junction of three ways on, when that way is
+  also the furthest left or the furthest right, the press for that end does not take it a second
+  time: it takes the middle way instead, and the other end's press keeps its end. At ways leaving at
+  −90°, −30° and 0°, left takes −90°, straight 0° and right −30°; at −15°, 40° and 95°, left takes
+  40°, straight −15° and right 95°. With two ways on each way already has a press, so left and right
+  keep the two ends even when straight is one of them. With more than three ways on, D-1.3's
+  parenthesis is unchanged. Nothing in this reaches the trainer: a press still changes only which
+  branch the rolling route appends (D-5.1). The ruling is posted on
+  [#2964](https://github.com/openzigs/onyourleft/pull/2964), which implements it. (#2897)

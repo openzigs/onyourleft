@@ -9,8 +9,9 @@
  * press chooses its way **directly**, whatever was chosen before (the owner's
  * ruling of 2026-11-20 on D-1.3's first sentence); with more than three, left
  * and right step the choice one way round the junction. Straight is always the
- * way most nearly dead ahead by bearing (owner ruling 2026-11-20). Nothing pressed rides
- * ADR 0088 D-1.4's default (the smallest change of bearing). The
+ * way most nearly dead ahead by bearing (owner ruling 2026-11-20), and at three
+ * ways, when that way is an end, the press for that end steps inward. Nothing
+ * pressed rides ADR 0088 D-1.4's default (the smallest change of bearing). The
  * choice is final {@link JUNCTION_LOCK_METRES} before the junction (D-1.5,
  * ADR 0087 D-6.2), and after that a press for it does nothing. A U-turn press
  * turns the rider round at any time (D-1.6); a dead end turns them round by
@@ -68,8 +69,8 @@ export interface JunctionPrompt {
 }
 
 /**
- * The most ways on at which left and right choose their way directly (ADR
- * 0088 D-1.3): three, one for each of left, straight and right.
+ * The most ways on at which a press chooses its way directly rather than
+ * stepping round the junction (ADR 0088 D-1.3, owner ruling 2026-11-20).
  */
 const DIRECT_CHOICE_MAX_WAYS = 3;
 
@@ -84,7 +85,11 @@ const DIRECT_CHOICE_MAX_WAYS = 3;
  *   Ties are D-1.4's: turns are compared in whole degrees, then the higher
  *   road class wins, then the right-hand way.
  * - **Left and right, with three ways on or fewer: directly**, whatever was
- *   chosen before. Left is the furthest-left way and right the furthest-right.
+ *   chosen before. Left is the furthest-left way and right the furthest-right,
+ *   except that with three ways, when straight is that end, the press steps
+ *   inward to the middle way, so every way shown has a press of its own (owner
+ *   ruling 2026-11-20). With two ways each already has one, and left and right
+ *   keep their ends.
  * - **Left and right, with more than three: a step** one way round the
  *   junction, stopping at its ends.
  */
@@ -94,7 +99,10 @@ function wayForPress(press: 'left' | 'straight' | 'right', shown: JunctionPrompt
   // A prompted junction has at least two ways on (`junctionsAfter`), so each
   // index below names a way.
   if (ways.length <= DIRECT_CHOICE_MAX_WAYS) {
-    return (ways[press === 'left' ? 0 : ways.length - 1] as RollingWay).edge.id;
+    const end = press === 'left' ? 0 : ways.length - 1;
+    const endId = (ways[end] as RollingWay).edge.id;
+    if (ways.length === 2 || endId !== defaultWay) return endId;
+    return (ways[1] as RollingWay).edge.id;
   }
   const at = ways.findIndex((way) => way.edge.id === chosen);
   // Clamped to the junction's ends.

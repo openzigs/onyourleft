@@ -243,14 +243,31 @@ describe('a press chooses directly at three ways or fewer (ADR 0088 D-1.3, owner
     for (const from of ids) {
       expect(pressFrom(from, 'straight'), `straight from ${from}`).toBe(ids[2]);
       expect(pressFrom(from, 'left'), `left from ${from}`).toBe(ids[0]);
-      expect(pressFrom(from, 'right'), `right from ${from}`).toBe(ids[2]);
     }
     // And where the leftmost way is the most nearly ahead.
     const fan = starRide([-15, 40, 95]);
+    expect(fan.junction.defaultWay).toBe(fan.ids[0]);
     for (const from of fan.ids) {
       expect(fan.pressFrom(from, 'straight'), `straight from ${from}`).toBe(fan.ids[0]);
-      expect(fan.pressFrom(from, 'left'), `left from ${from}`).toBe(fan.ids[0]);
       expect(fan.pressFrom(from, 'right'), `right from ${from}`).toBe(fan.ids[2]);
+    }
+  });
+
+  it('with three ways, when straight is an end, that end’s press steps inward, so every way has a press', () => {
+    // The owner's examples of 2026-11-20: -90°/-30°/0° gives left -90°, straight 0°,
+    // right -30°; -15°/40°/95° gives left 40°, straight -15°, right 95°.
+    for (const [turns, wanted] of [
+      [[-90, -30, 0], { left: 0, straight: 2, right: 1 }],
+      [[-15, 40, 95], { left: 1, straight: 0, right: 2 }],
+    ] as const) {
+      const { ids, pressFrom } = starRide(turns);
+      for (const from of ids) {
+        for (const press of ['left', 'straight', 'right'] as const) {
+          expect(pressFrom(from, press), `${turns.join()}: ${press} from ${from}`).toBe(
+            ids[wanted[press]],
+          );
+        }
+      }
     }
   });
 
@@ -261,6 +278,8 @@ describe('a press chooses directly at three ways or fewer (ADR 0088 D-1.3, owner
       [[-20, 70], 0],
     ] as const) {
       const { ids, pressFrom } = starRide(turns);
+      // Each of the two ways already has a press, so left and right keep their ends
+      // even when straight is one of them.
       expect(ids).toHaveLength(2);
       for (const from of ids) {
         expect(pressFrom(from, 'left'), `${turns.join()}: left from ${from}`).toBe(ids[0]);
@@ -319,21 +338,35 @@ describe('with more than three ways on, left and right step round the junction (
 describe('every input source presses alike (ADR 0088 D-3)', () => {
   it('every input source makes the same choice', () => {
     for (const press of TURN_PRESSES) {
-      const chosen = new Set<string>();
       for (const [source, read] of Object.entries(TURN_SOURCES[press])) {
         const { route, choice } = newRide();
         const junction = theJunction(route);
         const rider = junction.distance - 200;
+        const ids = junction.ways.map((way) => way.edge.id);
+        expect(ids, source).toHaveLength(3);
+        // Straight from a choice that is not already straight, so the press shows.
         if (press === 'straight') choice.press('left', rider);
+        const behind = readAt(route, rider - 50).position;
         const presses = read();
         expect(presses, source).toEqual([press]);
         for (const each of presses) choice.press(each, rider);
-        const after = readAt(route, rider + 300);
-        chosen.add(
-          `${choice.prompt(rider)?.chosen ?? 'none'} ${after.position.latitude} ${after.position.longitude}`,
-        );
+        if (press === 'u-turn') {
+          // Turned round where the rider is (on the nearest sample, so within a
+          // metre): fifty metres on is fifty metres back, not a hundred apart.
+          expect(distanceBetween(readAt(route, rider + 50).position, behind), source).toBeLessThan(
+            1,
+          );
+          continue;
+        }
+        // The crossroads' ways sit left, ahead and right, so each press has its own way.
+        const wanted = { left: ids[0], straight: ids[1], right: ids[2] }[press];
+        expect(choice.prompt(rider)?.chosen, `${press} by ${source}`).toBe(wanted);
+        // Read back through the route the ride rides: the leg past the junction.
+        expect(
+          route.legs.find((leg) => leg.start === junction.distance)?.edge.id,
+          `${press} by ${source}`,
+        ).toBe(wanted);
       }
-      expect(chosen.size, press).toBe(1);
     }
   });
 });
