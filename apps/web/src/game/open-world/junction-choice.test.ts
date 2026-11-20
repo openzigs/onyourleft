@@ -33,7 +33,7 @@ import {
   watts,
   type RollingJunction,
 } from '@onyourleft/domain';
-import { gridGraph } from '@onyourleft/domain/rolling-testing';
+import { graphOf, gridGraph, roughGround, streetThrough } from '@onyourleft/domain/rolling-testing';
 import { advance, START_OF_RIDE, type RideConditions } from '@onyourleft/physics';
 
 import { startSteer, steerIntentOfKey, steerToward } from '../lanes';
@@ -150,29 +150,134 @@ describe('the prompt (ADR 0088 D-1.2, D-1.5)', () => {
   });
 });
 
-describe('a discrete press moves the choice one step (ADR 0088 D-1.3)', () => {
-  it('left and right step round the junction and stop at its ends; straight is the default', () => {
+/**
+ * A ride east along a 500 m street to one junction, whose ways on leave it at
+ * `turns` (degrees, negative left), each 400 m long. The rider is 200 m short
+ * of it, inside the prompt and before the lock.
+ */
+function starRide(turns: readonly number[]) {
+  const approach = {
+    id: 'in',
+    from: 'start',
+    to: 'junction',
+    points: streetThrough(
+      [
+        [0, 0],
+        [500, 0],
+      ],
+      roughGround,
+    ),
+    roadClass: 1,
+  };
+  const ways = turns.map((turn, index) => {
+    const radians = (turn * Math.PI) / 180;
+    return {
+      id: `way${index}`,
+      from: 'junction',
+      to: `end${index}`,
+      points: streetThrough(
+        [
+          [500, 0],
+          [500 + 400 * Math.cos(radians), -400 * Math.sin(radians)],
+        ],
+        roughGround,
+      ),
+      roadClass: 1,
+    };
+  });
+  const route = new RollingRoute(graphOf([approach, ...ways]), approach);
+  const choice = createJunctionChoice(route);
+  const junction = route.junctionsAfter(0)[0];
+  if (junction === undefined || Math.abs(junction.distance - 500) > 10) {
+    throw new Error('no junction at the end of the 500 m street');
+  }
+  const rider = junction.distance - 200;
+  const ids = junction.ways.map((way) => way.edge.id);
+  /** Sets the choice to `id` as an earlier press would have, then presses `press`. */
+  const pressFrom = (id: string, press: 'left' | 'straight' | 'right') => {
+    route.choose(junction.distance, id, rider);
+    expect(choice.prompt(rider)?.chosen).toBe(id);
+    choice.press(press, rider);
+    return route.legs.find((leg) => leg.start === junction.distance)?.edge.id;
+  };
+  return { route, choice, junction, rider, ids, pressFrom };
+}
+
+describe('a press chooses directly at three ways or fewer (ADR 0088 D-1.3, owner ruling 2026-11-20)', () => {
+  it('at a crossroads, left, straight and right each take their own way, whatever was chosen before', () => {
     const { route, choice } = newRide();
     const junction = theJunction(route);
     const rider = junction.distance - 200;
     const ids = junction.ways.map((way) => way.edge.id);
     expect(ids).toHaveLength(3);
-    const chosen = () => choice.prompt(rider)?.chosen;
-    expect(chosen()).toBe(ids[1]);
-    choice.press('left', rider);
-    expect(chosen()).toBe(ids[0]);
-    choice.press('left', rider);
-    expect(chosen()).toBe(ids[0]);
-    choice.press('right', rider);
-    expect(chosen()).toBe(ids[1]);
-    choice.press('right', rider);
+    expect(junction.defaultWay).toBe(ids[1]);
+    const wanted = { left: ids[0], straight: ids[1], right: ids[2] } as const;
+    for (const from of ids) {
+      for (const press of ['left', 'straight', 'right'] as const) {
+        route.choose(junction.distance, from, rider);
+        choice.press(press, rider);
+        expect(choice.prompt(rider)?.chosen, `${press} from ${from}`).toBe(wanted[press]);
+        // Read back through the route the ride rides: the leg past the junction.
+        expect(route.legs.find((leg) => leg.start === junction.distance)?.edge.id).toBe(
+          wanted[press],
+        );
+      }
+    }
+  });
+
+  it('a press repeated, or held, chooses nothing more', () => {
+    const { route, choice } = newRide();
+    const junction = theJunction(route);
+    const rider = junction.distance - 200;
+    for (let press = 0; press < 3; press += 1) choice.press('left', rider);
+    expect(choice.prompt(rider)?.chosen).toBe(junction.ways[0]?.edge.id);
+    for (let press = 0; press < 3; press += 1) choice.press('right', rider);
+    expect(choice.prompt(rider)?.chosen).toBe(junction.ways[2]?.edge.id);
+  });
+
+  it('with three ways, straight is the middle way even where it is not the default', () => {
+    const { junction, ids, pressFrom } = starRide([-15, 40, 95]);
+    expect(junction.defaultWay).toBe(ids[0]);
+    for (const from of ids) {
+      expect(pressFrom(from, 'straight'), `straight from ${from}`).toBe(ids[1]);
+      expect(pressFrom(from, 'left'), `left from ${from}`).toBe(ids[0]);
+      expect(pressFrom(from, 'right'), `right from ${from}`).toBe(ids[2]);
+    }
+  });
+
+  it('with two ways, left and right take the two, and straight the default', () => {
+    const { junction, ids, pressFrom } = starRide([-90, 90]);
+    expect(ids).toHaveLength(2);
+    for (const from of ids) {
+      expect(pressFrom(from, 'left'), `left from ${from}`).toBe(ids[0]);
+      expect(pressFrom(from, 'right'), `right from ${from}`).toBe(ids[1]);
+      expect(pressFrom(from, 'straight'), `straight from ${from}`).toBe(junction.defaultWay);
+    }
+  });
+});
+
+describe('with more than three ways on, left and right step round the junction (ADR 0088 D-1.3)', () => {
+  it('one way per press, stopping at its ends; straight is the default', () => {
+    const { route, choice, junction, rider, ids } = starRide([-100, -45, 0, 45, 100]);
+    expect(ids).toHaveLength(5);
+    expect(junction.defaultWay).toBe(ids[2]);
+    const chosen = () => route.legs.find((leg) => leg.start === junction.distance)?.edge.id;
     expect(chosen()).toBe(ids[2]);
-    choice.press('right', rider);
-    expect(chosen()).toBe(ids[2]);
+    for (const expected of [ids[1], ids[0], ids[0]]) {
+      choice.press('left', rider);
+      expect(chosen()).toBe(expected);
+      expect(choice.prompt(rider)?.chosen).toBe(expected);
+    }
+    for (const expected of [ids[1], ids[2], ids[3], ids[4], ids[4]]) {
+      choice.press('right', rider);
+      expect(chosen()).toBe(expected);
+    }
     choice.press('straight', rider);
     expect(chosen()).toBe(junction.defaultWay);
   });
+});
 
+describe('every input source presses alike (ADR 0088 D-3)', () => {
   it('every input source makes the same choice', () => {
     for (const press of TURN_PRESSES) {
       const chosen = new Set<string>();

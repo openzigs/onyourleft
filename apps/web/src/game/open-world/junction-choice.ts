@@ -4,9 +4,12 @@
  * Junction choice in an open-world ride — #2897, under ADR 0088.
  *
  * The bike follows the road by itself. Before each junction the rider may pick
- * a way on with a **discrete press** (D-1.3): left, straight or right, each
- * moving the choice one step, never a continuous or scaled amount. Nothing
- * pressed rides ADR 0088 D-1.4's default (the smallest change of bearing). The
+ * a way on with a **discrete press** (D-1.3): left, straight or right, never a
+ * continuous or scaled amount. At a junction with three ways on or fewer a
+ * press chooses its way **directly**, whatever was chosen before (the owner's
+ * ruling of 2026-11-20 on D-1.3's first sentence); with more than three, left
+ * and right step the choice one way round the junction. Nothing pressed rides
+ * ADR 0088 D-1.4's default (the smallest change of bearing). The
  * choice is final {@link JUNCTION_LOCK_METRES} before the junction (D-1.5,
  * ADR 0087 D-6.2), and after that a press for it does nothing. A U-turn press
  * turns the rider round at any time (D-1.6); a dead end turns them round by
@@ -42,7 +45,7 @@ import { JUNCTION_LOCK_METRES, type RollingRoute, type RollingWay } from '@onyou
  */
 export const JUNCTION_PROMPT_METRES = 250;
 
-/** A discrete press: one step of the choice, or a U-turn (ADR 0088 D-1.3, D-1.6). */
+/** A discrete press: left, straight or right (ADR 0088 D-1.3), or a U-turn (D-1.6). */
 export const TURN_PRESSES = ['left', 'straight', 'right', 'u-turn'] as const;
 
 export type TurnPress = (typeof TURN_PRESSES)[number];
@@ -61,6 +64,42 @@ export interface JunctionPrompt {
   readonly locked: boolean;
   /** Metres until the choice is final; 0 once it is. */
   readonly toLock: number;
+}
+
+/**
+ * The most ways on at which a press chooses its way directly (ADR 0088 D-1.3):
+ * three, one for each of left, straight and right.
+ */
+const DIRECT_CHOICE_MAX_WAYS = 3;
+
+/**
+ * The edge id a press asks for at the junction `shown` prompts.
+ *
+ * - **Three ways on or fewer: directly**, whatever was chosen before. Left is
+ *   the furthest-left way and right the furthest-right. Straight is the middle
+ *   way of three, so each of three ways has a press of its own; with two ways
+ *   there is no middle, and straight is D-1.4's default, the smaller change of
+ *   bearing.
+ * - **More than three: a step.** Left and right move the choice one way round
+ *   the junction and stop at its ends; straight is the default.
+ */
+function wayForPress(press: 'left' | 'straight' | 'right', shown: JunctionPrompt): string {
+  const { ways, chosen, defaultWay } = shown;
+  if (ways.length <= DIRECT_CHOICE_MAX_WAYS) {
+    const direct =
+      press === 'left'
+        ? ways[0]
+        : press === 'right'
+          ? ways[ways.length - 1]
+          : ways.length === DIRECT_CHOICE_MAX_WAYS
+            ? ways[1]
+            : undefined;
+    return direct?.edge.id ?? defaultWay;
+  }
+  if (press === 'straight') return defaultWay;
+  const at = ways.findIndex((way) => way.edge.id === chosen);
+  const step = ways[Math.min(ways.length - 1, Math.max(0, at + (press === 'left' ? -1 : 1)))];
+  return step?.edge.id ?? defaultWay;
 }
 
 export interface JunctionChoice {
@@ -95,14 +134,7 @@ export function createJunctionChoice(route: RollingRoute): JunctionChoice {
       }
       const shown = prompt(rider);
       if (shown === undefined) return;
-      const at = shown.ways.findIndex((way) => way.edge.id === shown.chosen);
-      const step =
-        press === 'straight'
-          ? undefined
-          : shown.ways[
-              Math.min(shown.ways.length - 1, Math.max(0, at + (press === 'left' ? -1 : 1)))
-            ];
-      const wanted = step === undefined ? shown.defaultWay : step.edge.id;
+      const wanted = wayForPress(press, shown);
       // `choose` refuses a choice inside the lock itself, so a press can never
       // move the grade under the rider, whatever this module decides.
       route.choose(shown.distance, wanted, rider);
