@@ -166,9 +166,14 @@ single drag that both steers and chooses a turn is not built (ADR 0060 D-13.3's 
    - It fails closed on an import it cannot follow, as the walk already does.
 3. **The behavioural test.** A static walk cannot see a value handed in at run time (ADR 0060
    D-2's note). So #2897 also rides **one power trace twice** through the real ride: once on an
-   open-world ride that takes a left turn by a press before the lock, and once on a fixed route over
-   the same streets. The grades sent, and their times, are **byte-identical**. That proves the grade
-   came from the road ridden, and from nothing about how the road was chosen. A third ride presses
+   open-world ride that takes a left turn by a press before the lock, and once on an open-world ride
+   through **the same open-world machinery** (the same street graph and height fixture, the same
+   rolling-route builder, ADR 0087's ride-anchored grid and start) with that junction's branch fixed
+   to the left and no press. The grades sent, and their times, are **byte-identical**. That proves the
+   grade came from the road ridden, and from nothing about how the road was chosen. It is **not**
+   compared with a stored route over the same streets: that ride reads its `RouteRecord`'s own
+   heights on `routeProfile`'s stretched grid, and ADR 0087 D-4.1 and D-6.4 give the open-world ride
+   other heights, another grid and another start, so the two could never match. A third ride presses
    after the lock and asserts the grades sent are those of the default branch.
 4. **The keys' module imports nothing** that could bring the trainer onto its path, as `lanes.ts`
    already does.

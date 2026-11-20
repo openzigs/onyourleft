@@ -18,7 +18,9 @@ It has the same authority as the root file. Where the text below says "this file
   trainer, **Proposed** on the owner's rulings of that day on the epic #2880 and on #2883. It
   supersedes nothing and sits beside ADR 0060 D-6.3. The owner's lane note of 2026-11-19 reserved
   it, beside **0087** (#2885), **0089** (#2888) and **0090** (#2884, moved off 0086, which ADR 0086
-  had taken). The next free number is **0091**.
+  had taken). **0091 is claimed** by the open pull request
+  [#2951](https://github.com/openzigs/onyourleft/pull/2951) (#2886, the open-world street graph),
+  opened before this one, so the next free number is **0092**.
   ⚠️ **0086 is [ADR 0086](../adr/0086-the-setup-wizard-recommends-one-ai-model.md)**, taken by
   [#2869](https://github.com/openzigs/onyourleft/issues/2869) on 2026-11-19 for the setup wizard
   recommending one AI model, **Proposed** on the owner's ruling of that day. It supersedes in part
