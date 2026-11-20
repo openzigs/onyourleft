@@ -109,8 +109,14 @@ function Line({ line }: { readonly line: OperateLine }): JSX.Element {
   );
 }
 
-function Row({ backup }: { readonly backup: OperateBackup }): JSX.Element {
-  const { moment, rest } = backupLine(backup);
+function Row({
+  backup,
+  timeZone,
+}: {
+  readonly backup: OperateBackup;
+  readonly timeZone: string;
+}): JSX.Element {
+  const { moment, rest } = backupLine(backup, timeZone);
   return (
     <li>
       <strong>{moment}</strong>
@@ -128,7 +134,13 @@ function Row({ backup }: { readonly backup: OperateBackup }): JSX.Element {
   );
 }
 
-function RestoreSteps({ snapshots }: { readonly snapshots: readonly Snapshot[] }): JSX.Element {
+function RestoreSteps({
+  snapshots,
+  timeZone,
+}: {
+  readonly snapshots: readonly Snapshot[];
+  readonly timeZone: string;
+}): JSX.Element {
   const [chosenId, setChosenId] = useState<number | undefined>(undefined);
   const chosen = snapshots.find((each) => each.id === chosenId) ?? snapshots[0];
   return (
@@ -162,7 +174,7 @@ function RestoreSteps({ snapshots }: { readonly snapshots: readonly Snapshot[] }
             >
               {snapshots.map((each) => (
                 <option key={each.id} value={String(each.id)}>
-                  {momentText(each.at)}: {each.snapshot}
+                  {momentText(each.at, timeZone)}: {each.snapshot}
                 </option>
               ))}
             </select>
@@ -184,10 +196,13 @@ function RestoreSteps({ snapshots }: { readonly snapshots: readonly Snapshot[] }
 export function OperateBackupsPanel({
   port,
   every = everyInterval,
+  timeZone,
 }: {
   readonly port: Pick<OperatePort, 'backups' | 'backUpNow'>;
   /** The clock the list is read again on while a request waits. */
   readonly every?: Every;
+  /** The IANA zone its moments are drawn in, named (#2917): the device's, from `OperateView`. */
+  readonly timeZone: string;
 }): JSX.Element {
   const [read, setRead] = useState<OperateBackupsRead | undefined>(undefined);
   const [confirming, setConfirming] = useState(false);
@@ -298,11 +313,11 @@ export function OperateBackupsPanel({
       ) : (
         <ol className="oyl-operate__backups">
           {read.records.map((backup) => (
-            <Row key={backup.id} backup={backup} />
+            <Row key={backup.id} backup={backup} timeZone={timeZone} />
           ))}
         </ol>
       )}
-      <RestoreSteps snapshots={snapshots} />
+      <RestoreSteps snapshots={snapshots} timeZone={timeZone} />
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}

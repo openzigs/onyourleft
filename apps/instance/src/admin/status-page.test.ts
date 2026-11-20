@@ -142,7 +142,7 @@ describe('the Status page is the status route’s answer, read through the seam 
     expect(answer.lastBackup).not.toBeNull();
 
     const facts = factsOf(page);
-    expect(facts).toEqual(statusRows(answer, made.clock.ms));
+    expect(facts).toEqual(statusRows(answer, made.clock.ms, 'UTC'));
     expect(facts.length).toBeGreaterThan(10);
     expect(facts).toContainEqual({
       label: 'Accounts',
@@ -191,7 +191,7 @@ describe('the Status page is the status route’s answer, read through the seam 
       async (store) => (await store.operateCounts()).athletes.pending,
     );
     expect(pending).toBe(2);
-    expect(factsOf(page)).toEqual(statusRows(answer, made.clock.ms));
+    expect(factsOf(page)).toEqual(statusRows(answer, made.clock.ms, 'UTC'));
     expect(page).toContain('41 awaiting approval');
   });
 

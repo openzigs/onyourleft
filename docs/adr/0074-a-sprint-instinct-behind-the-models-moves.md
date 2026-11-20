@@ -94,3 +94,18 @@ there as `ADR_0073_MOVE_STRATEGY`, used by no race.
 - **The finish looks scripted on the tablet**: every bot kicking at its seeded distance makes the
   last 300 m the seeded race's. Then the fix is the prompt or the input (option 2), by a superseding
   ADR.
+
+## Amendments
+
+- **2026-11-18** — **Once [ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted, D-1 and D-2 are superseded by it in part: for a
+  model `sit-in` only.** Under ADR 0081 a `sit-in` from the model is no opinion and is no longer
+  written over the bot's seeded tactics, which launch the kick inside the launch themselves. So the
+  backstop and its hold no longer fire on a `sit-in`, and a bot inside its launch is not asked
+  about. **Both stand behind every other move the model names**: a bot sent on anything but its
+  kick inside its launch, or holding a kick near the line, still rides its own kick. The rules stay
+  behind the seam as `ADR_0074_MOVE_STRATEGY`, which `ADR_0081_MOVE_STRATEGY` is built on. Read
+  ADR 0081 for the rule. This entry only points there; nothing else in this ADR changes. (#2836)
+
+- **2026-11-19** — **[ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted**, on the owner's answers
+  to its D-8 (its D-9), so the entry above is in force. This entry only records that; nothing else in
+  this ADR changes. (#2836)

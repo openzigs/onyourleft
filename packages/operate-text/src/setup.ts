@@ -91,6 +91,7 @@ export const SETUP_COMMANDS = {
     'docker compose exec instance node src/operator/cli.ts admin-passkeys confirm <id>',
   backupStatus: 'docker compose ps backup',
   instanceKeyReset: 'docker compose exec instance node src/operator/cli.ts instance-key reset',
+  deploy: 'bash deploy.sh',
 } as const;
 
 /**
@@ -310,8 +311,8 @@ export const TAILNET_CHANGE_EXPERT_LINES: readonly SetupHowLine[] = [
     commands: [],
   },
   {
-    text: 'Run bash deploy.sh beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
-    commands: [],
+    text: 'Then run this beside compose.yaml. It prints Tailscale’s sign-in link if the machine is not signed in yet, and checks that the address the server runs with is the one Tailscale answers on: it says both if they differ.',
+    commands: [SETUP_COMMANDS.deploy],
   },
   TAILNET_CHANGE_RESET_LINE,
   TAILNET_CHANGE_CHECK_LINE,
@@ -322,7 +323,7 @@ export const TAILNET_CHANGE_CLOUDFLARE_LINES: readonly SetupHowLine[] = [
     text: 'Set OYL_INSTANCE_ORIGIN in .env to https:// and the new name on your own domain that your Cloudflare tunnel serves, and give the tunnel that name as the guide’s step 3b says.',
     commands: [],
   },
-  { text: 'Run bash deploy.sh beside compose.yaml.', commands: [] },
+  { text: 'Then run this beside compose.yaml:', commands: [SETUP_COMMANDS.deploy] },
   TAILNET_CHANGE_RESET_LINE,
   TAILNET_CHANGE_CHECK_LINE,
 ];
@@ -481,9 +482,10 @@ export const INVITE_NOT_INVITE_MODE_TEXT =
 
 // --- AI write-ups (#2792, ADR 0046)
 //
-// ⚠️ No model is named or recommended here (ADR 0046's amendment of 2026-11-14,
-// point 8; ADR 0031 D-4): the step lists what the owner's own Ollama reports,
-// and downloads the model whose name the owner types.
+// The step lists what the owner's own Ollama reports, and downloads the model
+// whose name the owner types. ⚠️ Since #2869 (ADR 0086) it names ONE model, the
+// recommended download below, and nowhere else does: ADR 0046's amendment of
+// 2026-11-14, point 8, and ADR 0031 D-4 still hold for every other screen.
 
 export const AI_STEP_LEAD =
   'This step is optional, and you can skip it. An AI write-up is a short written summary of a ride. It is made on this computer, by a model that a free program called Ollama runs, so nothing about a ride leaves your server for it. Everything else works the same without it.';
@@ -538,6 +540,26 @@ export function aiFitText(gpu: OperateGpuFit, percent: number | null): string {
       return 'Ollama did not say how well it fits the graphics card.';
   }
 }
+
+/**
+ * The one model the step recommends (#2869, ADR 0086 D-1): Apache-2.0, can call
+ * tools, 5.2 GB in Ollama's library (`Q4_K_M`), read 2026-11-19. Change it only
+ * with ADR 0086's D-1 read again on the day.
+ */
+export const AI_RECOMMENDED_MODEL = 'qwen3:8b';
+/** Its download's size, 5.2 GB in Ollama's library, in words: whole gigabytes, as no fixed sentence here carries a digit run with a point (ADR 0004 D). */
+export const AI_RECOMMENDED_SIZE_TEXT = 'about 5 GB';
+/** The one press that downloads it (ADR 0086 D-3). */
+export const AI_RECOMMENDED_BUTTON = `Download the recommended model (${AI_RECOMMENDED_MODEL}, ${AI_RECOMMENDED_SIZE_TEXT})`;
+/** Why it is the one, under its button. */
+export const AI_RECOMMENDED_HINT =
+  'It can call tools, which write-ups need, and fits a graphics card with 8 GB of memory. It is free to use, under an open-source licence. To download another model instead, type its name below.';
+/**
+ * Before the list, when Ollama already has a model that fits (ADR 0086 D-4):
+ * nothing needs downloading, and that model is the list's first.
+ */
+export const AI_INSTALLED_FIRST_TEXT =
+  'A model already on this computer can run write-ups, so nothing needs downloading. It is first in the list below.';
 
 export const AI_PULL_HEADING = 'Download a model';
 export const AI_PULL_LABEL = 'Model to download';

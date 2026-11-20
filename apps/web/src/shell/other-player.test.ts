@@ -128,29 +128,6 @@ describe('when the control shows — owner ruling 2 of 2026-11-05', () => {
     expect(player.getSnapshot().seen).toBe(false);
   });
 
-  it('does not ask again while a reading is in flight', async () => {
-    let asked = 0;
-    let answer: (active: boolean) => void = () => undefined;
-    const slow: OtherPlayerPort = {
-      sendKey: () => Promise.resolve(),
-      otherAudioActive: () => {
-        asked += 1;
-        return new Promise<boolean>((resolve) => {
-          answer = resolve;
-        });
-      },
-    };
-    const player = new OtherPlayer(slow, manualOtherPlayerClock().clock);
-    const first = player.poll();
-    await player.poll();
-    expect(asked).toBe(1);
-    answer(false);
-    await first;
-    // Settled: the next poll asks again (and is left in flight).
-    void player.poll();
-    expect(asked).toBe(2);
-  });
-
   it('tells a subscriber of a change, and keeps the same snapshot when nothing changed', async () => {
     const scripted = scriptedOtherPlayerPort(true);
     const player = new OtherPlayer(scripted.port, manualOtherPlayerClock().clock);
@@ -328,6 +305,127 @@ describe('a reading that may be our own stream is not believed — #2253', () =>
     );
     await player.poll();
     expect(player.getSnapshot().seen).toBe(true);
+  });
+});
+
+/**
+ * #2407: menu music asks for readings at fixed moments (#2402), and one asked
+ * while another poll is out must be answered by a poll that starts after the
+ * ask, not dropped until the header's next 4 s poll.
+ */
+describe('a reading asked for while one is in flight is asked again — #2407', () => {
+  /** A port whose readings stay out until the test answers them, in order. */
+  function slowPort(): {
+    port: OtherPlayerPort;
+    asked: () => number;
+    answer: (active: boolean) => void;
+  } {
+    const waiting: ((active: boolean) => void)[] = [];
+    let asked = 0;
+    return {
+      port: {
+        sendKey: () => Promise.resolve(),
+        otherAudioActive: () => {
+          asked += 1;
+          return new Promise<boolean>((resolve) => {
+            waiting.push(resolve);
+          });
+        },
+      },
+      asked: () => asked,
+      answer: (active) => {
+        const next = waiting.shift();
+        if (next === undefined) throw new Error('no reading is out');
+        next(active);
+      },
+    };
+  }
+
+  it('asks one poll at a time, then once more after the one that was out', async () => {
+    const slow = slowPort();
+    const player = new OtherPlayer(slow.port, manualOtherPlayerClock().clock);
+    const first = player.poll();
+    const asked = player.poll();
+    const askedToo = player.poll();
+    expect(slow.asked(), 'two polls were out at once').toBe(1);
+    slow.answer(false);
+    await first;
+    await flush();
+    expect(slow.asked(), 'the request made in flight was dropped').toBe(2);
+    let answered = false;
+    void asked.then(() => {
+      answered = true;
+    });
+    await flush();
+    expect(answered, 'answered before its own reading came back').toBe(false);
+    slow.answer(true);
+    await asked;
+    await askedToo;
+    expect(slow.asked(), 'two requests in one flight are one poll after it').toBe(2);
+    expect(player.riderPlayerInUse(), 'the reading asked for was not the one believed').toBe(true);
+    // And the next flight takes a request of its own.
+    const later = player.poll();
+    const laterAsked = player.poll();
+    slow.answer(true);
+    await later;
+    await flush();
+    expect(slow.asked(), 'a later request in flight was dropped').toBe(4);
+    slow.answer(false);
+    await laterAsked;
+    expect(player.riderPlayerInUse()).toBe(false);
+  });
+
+  it('judges the poll asked again by its own ask, so a reading of ours is followed by one believed', async () => {
+    const slow = slowPort();
+    const own = { open: true, quietToken: (): number | undefined => (own.open ? undefined : 0) };
+    const player = new OtherPlayer(slow.port, manualOtherPlayerClock().clock, own);
+    let heard = 0;
+    player.onReading(() => {
+      heard += 1;
+    });
+    // The header's poll goes out while our stream is still open…
+    const header = player.poll();
+    // …and the menus' music, having hushed, asks for a reading of its own.
+    own.open = false;
+    const music = player.poll();
+    slow.answer(true);
+    await header;
+    expect(heard, 'a reading taken over our own stream was believed').toBe(0);
+    await flush();
+    slow.answer(true);
+    await music;
+    expect(heard, 'the reading the music asked for never came').toBe(1);
+    expect(player.riderPlayerInUse()).toBe(true);
+  });
+
+  it('asks again even when the reading that was out failed', async () => {
+    let asked = 0;
+    const port: OtherPlayerPort = {
+      sendKey: () => Promise.resolve(),
+      otherAudioActive: () => {
+        asked += 1;
+        return asked === 1 ? Promise.reject(new Error('timed out')) : Promise.resolve(true);
+      },
+    };
+    const player = new OtherPlayer(port, manualOtherPlayerClock().clock);
+    const first = player.poll();
+    const again = player.poll();
+    await first;
+    await again;
+    expect(asked).toBe(2);
+    expect(player.riderPlayerInUse()).toBe(true);
+  });
+
+  it('does not ask again once the shell has stopped watching, as on a ride route', async () => {
+    const slow = slowPort();
+    const player = new OtherPlayer(slow.port, manualOtherPlayerClock().clock);
+    const stop = player.watch();
+    const asked = player.poll();
+    stop();
+    slow.answer(false);
+    await flush();
+    expect(slow.asked(), 'asked again after the shell stopped polling').toBe(1);
+    await expect(asked).resolves.toBeUndefined();
   });
 });
 

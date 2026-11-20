@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import {
@@ -14,6 +15,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
 
@@ -41,14 +43,15 @@ import { recoveryCodeSha256 } from '../auth/identity.ts';
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
-import { forgetWaitingRequests, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
+import { forgetRunState, integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { takeLease, type Lease, type LeaseOptions } from './backup-lease.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
-import type {
-  BackupRun,
-  OperatorAction,
-  RegistrationModeSetting,
-  SqlStore,
+import {
+  operatorDetailFits,
+  type BackupRun,
+  type OperatorAction,
+  type RegistrationModeSetting,
+  type SqlStore,
 } from '../store/sql-store.ts';
 import { localTimeText, mintSetupCode } from '../setup/setup-code.ts';
 import { createSync } from '../sync/sync.ts';
@@ -200,12 +203,25 @@ async function asOperatorAction<T>(
 
 /**
  * What a file command writes to standard error when its work is done and its
- * entry could not be written (#2602): a fixed sentence and the action's name,
- * no value.
+ * entry could not be written (#2602): a fixed sentence, the action's name and
+ * — when there is one — why (#2618): SQLite's result code, or the name of the
+ * error. Never a message or a value.
  */
-export function unloggedSentence(action: OperatorAction): string {
-  return `operator: ${action} is done, but its entry could not be written to the operator log.\n`;
+export function unloggedSentence(action: OperatorAction, why?: string): string {
+  const because = why === undefined ? '' : ` (${why})`;
+  return `operator: ${action} is done, but its entry could not be written to the operator log${because}.\n`;
 }
+
+/** Why an entry could not be written, for {@link unloggedSentence}: SQLite's result code, else the error's name. */
+export function unloggedBecause(error: unknown): string {
+  const errcode = (error as { readonly errcode?: unknown } | null)?.errcode;
+  return typeof errcode === 'number' && Number.isSafeInteger(errcode)
+    ? `SQLite error code ${String(errcode)}`
+    : errorName(error);
+}
+
+/** Why {@link loggedAfter} wrote no entry for a detail its action's vocabulary refuses. */
+export const DETAIL_REFUSED = 'its detail is outside the action’s vocabulary';
 
 /**
  * Log a command whose change is FILES once it has ended (#2602): `done` with
@@ -213,11 +229,15 @@ export function unloggedSentence(action: OperatorAction): string {
  * whether the entry was written. The command's outcome is its WORK's: a log
  * that cannot be written — a database with no operator log yet (one not
  * migrated, or restored from before it), a full disk, a lock still held after
- * the retries — leaves the work done and `logged: false`, and anything but a
- * missing table says so on standard error. A deploy whose migrations applied
- * is never stopped by its log entry.
+ * the retries, a store that cannot be opened or closed — leaves the work done
+ * and `logged: false`, and anything but a missing table says so on standard
+ * error. A deploy whose migrations applied is never stopped by its log entry.
+ *
+ * #2618: a `detail` its action's vocabulary refuses is never offered to the
+ * store, which would log the work `failed`: the entry is not written, and
+ * standard error says so. The log never says `failed` for work that succeeded.
  */
-async function loggedAfter<T>(
+export async function loggedAfter<T>(
   database: string,
   action: OperatorAction,
   work: () => Promise<T>,
@@ -232,18 +252,24 @@ async function loggedAfter<T>(
   }
   let logged = false;
   if (existsSync(database)) {
-    const store = openServingStore(database);
+    let store: SqlStore | undefined;
     try {
-      await store.recordOperatorAction(
-        { actor: FROM_THE_CLI, action, at: secondsOf(undefined) },
-        () => {
-          // Keep this guard: it is what logs a failed run `failed` and never
-          // `done`, whatever a future `detail` does with an undefined value.
-          if (failure !== undefined) throw failure.error;
-          return { outcome: 'done', detail: detail(value as T), value: undefined };
-        },
-      );
-      logged = true;
+      const written = failure === undefined ? detail(value as T) : null;
+      if (written !== null && !operatorDetailFits(action, written)) {
+        process.stderr.write(unloggedSentence(action, DETAIL_REFUSED));
+      } else {
+        store = openServingStore(database);
+        await store.recordOperatorAction(
+          { actor: FROM_THE_CLI, action, at: secondsOf(undefined) },
+          () => {
+            // Keep this guard: it is what logs a failed run `failed` and never
+            // `done`, whatever a future `detail` does with an undefined value.
+            if (failure !== undefined) throw failure.error;
+            return { outcome: 'done', detail: written, value: undefined };
+          },
+        );
+        logged = true;
+      }
     } catch (error) {
       // The work's own error is the one an operator needs, and work that
       // succeeded stays a success: a log that could not be written leaves
@@ -252,10 +278,11 @@ async function loggedAfter<T>(
         failure === undefined &&
         !(error instanceof Error && /no such table/.test(error.message))
       ) {
-        process.stderr.write(unloggedSentence(action));
+        process.stderr.write(unloggedSentence(action, unloggedBecause(error)));
       }
     } finally {
-      await store.close();
+      // A close that fails changes nothing the command did, nor its entry.
+      await store?.close().catch(() => undefined);
     }
   }
   if (failure !== undefined) throw failure.error;
@@ -285,6 +312,75 @@ export interface BackupOptions {
   readonly requestId?: number;
   /** The folder leases' clock and heartbeat (`backup-lease.ts`): a test's. */
   readonly lease?: LeaseOptions;
+  /** The off-box copy's watchdog (#2626): {@link OFF_BOX_WATCHDOG} unless a test's. */
+  readonly offBoxWatchdog?: OffBoxWatchdog;
+}
+
+/**
+ * How long the off-box copy may run before its watchdog kills it (#2626):
+ * the snapshot's size at {@link OffBoxWatchdog.bytesPerSecond}, and never less
+ * than {@link OffBoxWatchdog.floorMs}.
+ */
+export interface OffBoxWatchdog {
+  readonly floorMs: number;
+  readonly bytesPerSecond: number;
+  /** The copier's command line, before `<from> <to>`: {@link COPIER} unless a test's. */
+  readonly copier?: readonly string[];
+}
+
+/**
+ * The watchdog's defaults: 1 MB/s, far below any share that is answering,
+ * and a floor of 15 minutes, so a small snapshot on a slow share is not cut
+ * short.
+ */
+export const OFF_BOX_WATCHDOG: OffBoxWatchdog = { floorMs: 15 * 60_000, bytesPerSecond: 1_000_000 };
+
+/** The copier: `copy-snapshot.ts` under this Node, in a process of its own. */
+export const COPIER: readonly string[] = [
+  process.execPath,
+  fileURLToPath(new URL('./copy-snapshot.ts', import.meta.url)),
+];
+
+/** The watchdog's limit for a snapshot of `bytes`, in milliseconds. */
+export function offBoxLimitMs(bytes: number, watchdog: OffBoxWatchdog): number {
+  return Math.max(watchdog.floorMs, Math.ceil((bytes / watchdog.bytesPerSecond) * 1000));
+}
+
+/**
+ * Copies `from` to `to` in a child process, and kills it with SIGKILL once
+ * `limitMs` has passed (#2626): `copied` when it exited 0, `stopped` when the
+ * watchdog killed it, `failed` otherwise. Answers only once the child has
+ * EXITED, so the run — and the folder's lease it holds — outlasts the copy: a
+ * second copy is never started into the place while this one is alive. A
+ * child stuck in an uninterruptible wait may outlive SIGKILL, and the run
+ * waits on with it; `docs/operating-an-instance.md` says so.
+ */
+async function copyOffBox(
+  from: string,
+  to: string,
+  limitMs: number,
+  copier: readonly string[],
+): Promise<'copied' | 'stopped' | 'failed'> {
+  const [command = process.execPath, ...args] = copier;
+  // No output: the copier's errors would name paths (`log.ts`'s rule).
+  const child = spawn(command, [...args, from, to], { stdio: 'ignore' });
+  return new Promise((resolve) => {
+    let stopped = false;
+    const watchdog = setTimeout(() => {
+      stopped = true;
+      child.kill('SIGKILL');
+    }, limitMs);
+    child.once('error', () => {
+      // Only a child that never started ends here; a running one ends at `exit`.
+      if (child.pid !== undefined) return;
+      clearTimeout(watchdog);
+      resolve('failed');
+    });
+    child.once('exit', (code) => {
+      clearTimeout(watchdog);
+      resolve(stopped ? 'stopped' : code === 0 ? 'copied' : 'failed');
+    });
+  });
 }
 
 /**
@@ -371,10 +467,24 @@ async function snapshotsIn(place: string): Promise<string[]> {
  * `made` is in the oldest snapshots no record names that are newer than every
  * recorded one there (third review F7). Answers whether `made` itself went.
  * A record that cannot be READ either removes `made` alone, as the safe way.
+ *
+ * A snapshot named after `now` (Unix ms), which a clock running ahead made,
+ * is left out — neither counted nor the newest recorded one — as the
+ * startup hold-off leaves it out ({@link newestSnapshotIn}): recorded, it
+ * would sort after every snapshot this run could prune, and the bound would
+ * stop holding (#2627). It is never removed here.
  */
-async function capUnrecorded(database: string, made: string, limit: number): Promise<boolean> {
+async function capUnrecorded(
+  database: string,
+  made: string,
+  limit: number,
+  now: number,
+): Promise<boolean> {
   const place = dirname(made);
-  const names = await snapshotsIn(place);
+  const names = (await snapshotsIn(place)).filter((name) => {
+    const at = snapshotTime(name);
+    return at === undefined || at <= now;
+  });
   if (names.length <= limit) return false;
   const madeName = made.slice(place.length + 1);
   let droppable: string[];
@@ -436,7 +546,10 @@ async function takeAndRecord(
   } else if (options.keep !== undefined) {
     const limit = options.keep + UNRECORDED_ALLOWANCE;
     for (const made of [taken.snapshot, ...(taken.copiedTo === null ? [] : [taken.copiedTo])]) {
-      if ((await capUnrecorded(paths.database, made, limit)) && made === taken.snapshot) {
+      if (
+        (await capUnrecorded(paths.database, made, limit, at.getTime())) &&
+        made === taken.snapshot
+      ) {
         kept = false;
       }
     }
@@ -532,11 +645,12 @@ async function bytesUnder(root: string): Promise<number> {
  * the old snapshots `--keep` would remove, and `backup` removes them once the
  * run is recorded.
  *
- * ⚠️ The off-box copy has no time limit. A share that stops answering blocks
- * the copy inside a file-system call, which Node cannot cancel, and the loop
- * waits with it; the snapshot on the box is already complete. Watch
- * `docker compose logs backup` and the age of the last backup in Status;
- * #2626 is the child-process watchdog that would stop it.
+ * The off-box copy runs in a child process under a watchdog (#2626,
+ * {@link copyOffBox}): a share that stops answering blocks the child, not this
+ * run, and the watchdog kills it. A copy the watchdog stopped is an off-box
+ * `failed`, and the run touches that place no more: its partial copy is left
+ * for a later run's cleanup ({@link removePartials}), and its free space is
+ * not read.
  */
 async function takeBackup(
   paths: DataPaths,
@@ -558,7 +672,7 @@ async function takeBackup(
     vacuumInto(paths.database, database);
     // The snapshot does not hold a "back up now" as waiting (#2606 review
     // L1): this run serves it, so restoring the snapshot would ask again.
-    forgetWaitingRequests(database);
+    forgetRunState(database);
     blobs = await blobFiles(paths.blobs);
     if (blobs.length > 0) {
       await cp(join(paths.blobs, 'objects'), join(partial, BLOBS_DIRECTORY, 'objects'), {
@@ -581,21 +695,34 @@ async function takeBackup(
   // A copy that fails leaves the snapshot taken and recorded (#2606): the
   // record says `failed`, and the off-box place's older copies are not
   // pruned, so a drive that is full or gone keeps what it had.
+  const sizeBytes = await bytesUnder(snapshot);
   let copiedTo: string | null = null;
   let offBox: 'copied' | 'failed' | 'not-configured' = 'not-configured';
+  let offBoxHung = false;
   if (options.copyTo !== undefined) {
     const copy = join(options.copyTo, name);
     const partialCopy = join(options.copyTo, `${PARTIAL}${name}`);
+    const watchdog = options.offBoxWatchdog ?? OFF_BOX_WATCHDOG;
     try {
       if (!offBoxHeld) throw new Error('the off-box place is not this run’s');
       await removePartials(options.copyTo, `${PARTIAL}${name}`);
-      await cp(snapshot, partialCopy, { recursive: true });
+      const copied = await copyOffBox(
+        snapshot,
+        partialCopy,
+        offBoxLimitMs(sizeBytes, watchdog),
+        watchdog.copier ?? COPIER,
+      );
+      if (copied === 'stopped') offBoxHung = true;
+      if (copied !== 'copied') throw new Error('the off-box copy did not finish');
       await renameRetrying(partialCopy, copy);
       copiedTo = copy;
       offBox = 'copied';
     } catch {
       offBox = 'failed';
-      await rm(partialCopy, { recursive: true, force: true }).catch(() => undefined);
+      // A share that hung is not touched again: its partial copy is a later run's to remove.
+      if (!offBoxHung) {
+        await rm(partialCopy, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
   }
   const prune: string[] = [];
@@ -621,11 +748,12 @@ async function takeBackup(
     rows: Object.values(manifest.rows).reduce((sum, n) => sum + n, 0),
     blobs: manifest.blobs,
     databaseSha256: manifest.databaseSha256,
-    sizeBytes: await bytesUnder(snapshot),
+    sizeBytes,
     offBox,
     removed: prune.length,
     backupsFreeBytes: await freeBytesAt(destination),
-    offBoxFreeBytes: options.copyTo === undefined ? null : await freeBytesAt(options.copyTo),
+    offBoxFreeBytes:
+      options.copyTo === undefined || offBoxHung ? null : await freeBytesAt(options.copyTo),
     intervalSeconds: options.intervalSeconds ?? null,
   };
   return {
@@ -677,7 +805,7 @@ async function recordTakenBackup(
     return { recorded: true, logged: true, prune: true };
   } catch (error) {
     const noTables = error instanceof Error && /no such table/.test(error.message);
-    if (!noTables) process.stderr.write(unloggedSentence('backup'));
+    if (!noTables) process.stderr.write(unloggedSentence('backup', unloggedBecause(error)));
     return { recorded: false, logged: false, prune: noTables };
   } finally {
     await store.close();
@@ -891,6 +1019,9 @@ export async function backupLoop(
           await backup(paths, destination, {
             ...(options.keep === undefined ? {} : { keep: options.keep }),
             ...(options.copyTo === undefined ? {} : { copyTo: options.copyTo }),
+            ...(options.offBoxWatchdog === undefined
+              ? {}
+              : { offBoxWatchdog: options.offBoxWatchdog }),
             now: clock,
             intervalSeconds: options.intervalSeconds,
             ...(served === undefined ? {} : { requestId: served }),
@@ -1032,6 +1163,12 @@ function keyEnvironment(environment: KeyEnvironment): {
   return { secret: read.kind === 'ok' ? read.bytes : undefined, origin: config.config.origin };
 }
 
+/** The key actions whose `no-keys` is a refusal: there is nothing to rotate until `init` (#2618). */
+const NO_KEYS_REFUSED: readonly OperatorAction[] = [
+  'instance_key_rotate',
+  'instance_key_rotate_identity',
+];
+
 /**
  * `operation` over the instance's keys — as an operator action when `action`
  * is named (#2602): the keys over the action's store, so what it writes and
@@ -1059,10 +1196,14 @@ async function withInstanceKeys<T>(
         try {
           return await operation(keysOver(inside));
         } catch (error) {
-          // A missing secret or origin is a refusal, logged `refused`, not a failure.
+          // A missing secret or origin is a refusal, logged `refused`, not a
+          // failure — and so is a rotation with no keys to rotate (#2618).
+          // `init`'s `no-keys`, after a race `maintain` lost, stays `failed`.
           if (
             error instanceof InstanceKeysUnavailable &&
-            (error.code === 'no-secret' || error.code === 'no-origin')
+            (error.code === 'no-secret' ||
+              error.code === 'no-origin' ||
+              (error.code === 'no-keys' && NO_KEYS_REFUSED.includes(action)))
           ) {
             return new Refused(error.message);
           }

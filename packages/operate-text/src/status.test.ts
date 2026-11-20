@@ -58,7 +58,7 @@ const plain = (label: string, value: string): OperateRow => ({
 
 describe('statusRows — the Status section, as rows of label and value (#2644)', () => {
   it('turns the answer into every row, in the order it is drawn, and nothing else', () => {
-    expect(statusRows(ANSWER, NOW)).toEqual([
+    expect(statusRows(ANSWER, NOW, 'UTC')).toEqual([
       plain('Version', '0.0.0'),
       {
         label: 'Deployed commit',
@@ -108,6 +108,7 @@ describe('statusRows — the Status section, as rows of label and value (#2644)'
         keys: 'no-secret',
       },
       NOW,
+      'UTC',
     );
     const value = (label: string) => rows.find((each) => each.label === label);
     expect(value('Deployed commit')).toEqual(plain('Deployed commit', 'not named'));
@@ -134,6 +135,7 @@ describe('statusRows — the Status section, as rows of label and value (#2644)'
         },
       },
       NOW,
+      'UTC',
     );
     const value = (label: string) => rows.find((each) => each.label === label)?.value;
     expect(value('Up for')).toBe('less than a minute');
@@ -158,6 +160,7 @@ describe('statusRows — the Status section, as rows of label and value (#2644)'
         },
       },
       NOW,
+      'UTC',
     );
     const value = (label: string) => rows.find((each) => each.label === label)?.value;
     expect(value('Up for')).toBe('104249991374 days 7 hours');
@@ -168,7 +171,7 @@ describe('statusRows — the Status section, as rows of label and value (#2644)'
 
   it('names every word of every closed table the answer can carry', () => {
     for (const migrations of ['at-head', 'migrating', 'behind', 'ahead', 'unknown'] as const) {
-      const rows = statusRows({ ...ANSWER, checks: { ...ANSWER.checks, migrations } }, NOW);
+      const rows = statusRows({ ...ANSWER, checks: { ...ANSWER.checks, migrations } }, NOW, 'UTC');
       expect(rows.find((each) => each.label === 'Migrations')?.value).toMatch(/^[a-z]/);
     }
     for (const keys of [
@@ -179,11 +182,11 @@ describe('statusRows — the Status section, as rows of label and value (#2644)'
       'unreadable',
       'busy',
     ] as const) {
-      const rows = statusRows({ ...ANSWER, keys }, NOW);
+      const rows = statusRows({ ...ANSWER, keys }, NOW, 'UTC');
       expect(rows.find((each) => each.label === 'Instance keys')?.value).toMatch(/^[a-z]/);
     }
     for (const registration of ['approval', 'invite', 'open', 'closed'] as const) {
-      const rows = statusRows({ ...ANSWER, registration }, NOW);
+      const rows = statusRows({ ...ANSWER, registration }, NOW, 'UTC');
       expect(rows.find((each) => each.label === 'Registration')?.value).toBe(
         REGISTRATION_MODE_TEXT[registration].short,
       );
@@ -205,7 +208,11 @@ describe('the rows Status is built from', () => {
     const at = (secondsAgo: number) => new Date(NOW - secondsAgo * 1000).toISOString();
     const twice = 2 * 6 * HOUR;
     const backup = (secondsAgo: number) =>
-      lastBackupRow({ at: at(secondsAgo), offBox: 'failed', intervalSeconds: 6 * HOUR }, NOW);
+      lastBackupRow(
+        { at: at(secondsAgo), offBox: 'failed', intervalSeconds: 6 * HOUR },
+        NOW,
+        'UTC',
+      );
     expect(backup(twice).warning).toBeNull();
     expect(backup(twice + 1).warning?.label).toBe('Stale');
     expect(backup(5 * HOUR).value).toBe(
@@ -217,11 +224,28 @@ describe('the rows Status is built from', () => {
     const row = lastBackupRow(
       { at: '2026-11-14T21:05:00.000Z', offBox: 'not-configured', intervalSeconds: 0 },
       NOW,
+      'UTC',
     );
     expect(row.value).toBe(
       '2026-11-14 21:05 UTC, less than a minute ago; no off-box copy is set up.',
     );
     expect(row.warning).toBeNull();
+  });
+
+  it('draws the last backup in the zone it is given, named (#2917)', () => {
+    const backup = {
+      at: '2026-11-14T16:00:00.000Z',
+      offBox: 'copied',
+      intervalSeconds: 6 * HOUR,
+    } as const;
+    expect(lastBackupRow(backup, NOW, 'America/New_York').value).toMatch(
+      /^2026-11-14 11:00 EST, 5 hours ago;/,
+    );
+    expect(
+      statusRows({ ...ANSWER, lastBackup: backup }, NOW, 'America/New_York').find(
+        (row) => row.label === 'Last backup',
+      )?.value,
+    ).toMatch(/^2026-11-14 11:00 EST,/);
   });
 
   it('says the tunnel’s three states', () => {

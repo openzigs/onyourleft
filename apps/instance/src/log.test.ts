@@ -165,6 +165,45 @@ describe('what the instance logs about a request (#767)', () => {
     }
   });
 
+  it('keeps an analysis-job line’s run figures as whole numbers, and nothing else under those keys — #2840', () => {
+    const lines: string[] = [];
+    const sink = (line: string): void => {
+      lines.push(line);
+    };
+    const figures = { turns: 3, toolCalls: 2, toolsUsed: 1, tokensIn: 4_812, tokensOut: 0 };
+    logEvent(sink, 'analysis-job', { state: 'succeeded', ...figures, ms: 61_250 });
+    logEvent(sink, 'analysis-job', {
+      state: 'failed',
+      turns: 'goals',
+      toolCalls: -1,
+      toolsUsed: 1.5,
+      tokensIn: TOKEN,
+      tokensOut: Number(LATITUDE),
+    });
+    // On any other event, those keys are not loggable.
+    logEvent(sink, 'room-report', figures);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual<Record<string, unknown>[]>([
+      { event: 'analysis-job', state: 'succeeded', ...figures, ms: 61_250 },
+      {
+        event: 'analysis-job',
+        state: 'failed',
+        turns: REDACTED,
+        toolCalls: REDACTED,
+        toolsUsed: REDACTED,
+        tokensIn: REDACTED,
+        tokensOut: REDACTED,
+      },
+      {
+        event: 'room-report',
+        turns: REDACTED,
+        toolCalls: REDACTED,
+        toolsUsed: REDACTED,
+        tokensIn: REDACTED,
+        tokensOut: REDACTED,
+      },
+    ]);
+  });
+
   it('keeps a room-item-event line’s room, rider number, event and item key, and nothing else — #1909', () => {
     const lines: string[] = [];
     const sink = (line: string): void => {

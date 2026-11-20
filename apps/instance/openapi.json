@@ -1971,7 +1971,7 @@
     "/v1/analysis/jobs/{jobId}": {
       "get": {
         "operationId": "getAnalysisJob",
-        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-no-answer`, `model-malformed`, `not-a-proposal`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
+        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `out-of-context`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-no-answer`, `model-malformed`, `not-a-proposal`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
         "parameters": [
           {
             "name": "jobId",
@@ -2221,7 +2221,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons?, proposal? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results. A re-plan’s stream holds `progress` and `result` only, and its `result` carries `proposal` and never text."
+                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, templateVersion?, reasons?, proposal? }` — `templateVersion` the version of the template a write-up ran under) and one `data:` line of JSON. No event carries a tool’s arguments or results. A re-plan’s stream holds `progress` and `result` only, and its `result` carries `proposal` and never text."
                 }
               }
             }
@@ -2451,6 +2451,106 @@
           },
           "409": {
             "description": "One of `job_running`, `hosted_unavailable`, `local_unavailable`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "description": "One of `unavailable`, `analysis_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analysis/replans/warm": {
+      "post": {
+        "operationId": "warmReplanModel",
+        "summary": "A workout ride of yours with re-plans on is starting (#2841): load this instance's local model now, so the ride's first re-plan does not wait for it to load. `source` is the one your re-plans will name. Answers 202 at once, before the model is loaded; `warming` says one call went out — shaped as a re-plan's first, about a fixed workout nobody rode, with nothing of yours in it, its answer read by nothing. `false` for `instance-hosted`, which no instance loads. At most 6 an hour (`rate_limited`), one at a time. `analysis_off`, `local_unavailable` and `hosted_unavailable` as for a re-plan, and nothing is sent.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "instance-local",
+                      "instance-hosted"
+                    ]
+                  }
+                },
+                "required": [
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "warming": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "warming"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "description": "One of `hosted_unavailable`, `local_unavailable`, in the one error shape.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2790,7 +2890,7 @@
     "/v1/analysis/tactics/decide": {
       "post": {
         "operationId": "decideBotTactics",
-        "summary": "One decision for your AI bots (ADR 0071 D-3): `input` is the race as it stands, exactly `@onyourleft/domain`’s `ModelTacticsInput` — seats, styles, ranks, who is ahead and its move, gaps, W′ shares, drafting, moves and the seconds held, the lull and whether an attack is open, laps and metres to the line, launch distance, grade ahead, since #2794 the course ahead of the leading bot (the next climb and descent before the line, the metres and climbing left in its lap, and the grade of the last 500 m), your gap, rank and W/kg; no coordinate, no name — at most 4 096 characters. Answers `bots`: a move from the closed list of seven for each bot the model named, and a target only of `rider` or a seat. **No power, ever.** The model is given no tools, asked for no reasoning, and its text is neither kept nor returned. `tactics_invalid` when its answer was not such a decision, `tactics_failed` when it gave none in time; on either, and on every refusal, ride the bots’ usual tactics. Takes or refreshes the model race slot as `start` does. `rate_limited` past 30 a minute on an instance with the default limits, or while one of yours is out.",
+        "summary": "One decision for ONE of your AI bots (ADR 0071 D-3; one bot a call since #2836, ADR 0081): `input` is that bot’s ask, exactly `@onyourleft/domain`’s `ModelTacticsInput` — the race as it stands (laps, the course ahead of the leading bot since #2794, your rank, gaps and W/kg, and every racing bot’s seat, style, rank, move and gap), the story so far in numbers and closed words (seconds raced, laps left, the break, the lull, how the bots are for energy), and last the bot asked about: its style and strengths, the seconds since its last move, its move, rank, gaps, W′ share, laps and metres to the line, grade ahead and metres to the next climb, its cue words, and the menu of two to four moves your device offers it; no coordinate, no name — at most 4 096 characters. Answers `reason`, a word from a closed list, and `move`, one from that menu, with an `effort` word when the model named one. **No power, ever.** The model is given no tools, asked for no reasoning, and its text is neither kept nor returned. `tactics_invalid` when its answer was not such a pick, a move off the menu included, `tactics_failed` when it gave none in time; on either, and on every refusal, the bot rides its usual tactics. An ask of the shape sent before #2836 is `validation_failed`. Takes or refreshes the model race slot as `start` does. `rate_limited` past 90 a minute on an instance with the default limits, or while one of yours is out.",
         "security": [
           {
             "session": []
@@ -2806,7 +2906,7 @@
                 "properties": {
                   "input": {
                     "type": "object",
-                    "description": "A `ModelTacticsInput` (#2709)."
+                    "description": "A `ModelTacticsInput` (#2709, #2836)."
                   }
                 },
                 "required": [
@@ -2824,17 +2924,43 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "The model’s pick for the one bot asked about (#2836, ADR 0081): `reason`, why, from its closed list; `move`, one of the moves on the menu the ask offered; and, only when the model named one, `effort`, how hard. No other field, never a target (the menu names it), and never a power.",
                   "properties": {
-                    "bots": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "description": "One bot’s move: `bot`, its seat; `move`, one of `sit-in`, `follow`, `attack`, `chase`, `recover`, `flyer` and `kick`; and, only when the model named one, `target`: `\"rider\"` or a seat. No other field, and never a power."
-                      }
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "my-terrain",
+                        "cover-move",
+                        "counter",
+                        "save-legs",
+                        "finish-near"
+                      ]
+                    },
+                    "move": {
+                      "type": "string",
+                      "enum": [
+                        "kick",
+                        "recover",
+                        "sit-in",
+                        "follow",
+                        "chase",
+                        "attack",
+                        "flyer"
+                      ]
+                    },
+                    "effort": {
+                      "type": "string",
+                      "enum": [
+                        "easy",
+                        "tempo",
+                        "threshold",
+                        "all-out"
+                      ]
                     }
                   },
                   "required": [
-                    "bots"
+                    "reason",
+                    "move"
                   ],
                   "additionalProperties": false
                 }
@@ -8224,7 +8350,8 @@
                             "tls-by-name",
                             "no-model",
                             "bad-model",
-                            "bad-reasoning"
+                            "bad-reasoning",
+                            "bad-context"
                           ]
                         }
                       },
@@ -8416,7 +8543,8 @@
                             "tls-by-name",
                             "no-model",
                             "bad-model",
-                            "bad-reasoning"
+                            "bad-reasoning",
+                            "bad-context"
                           ]
                         }
                       },
@@ -8561,7 +8689,8 @@
                             "tls-by-name",
                             "no-model",
                             "bad-model",
-                            "bad-reasoning"
+                            "bad-reasoning",
+                            "bad-context"
                           ]
                         }
                       },

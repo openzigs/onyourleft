@@ -52,10 +52,28 @@ export function bytesText(bytes: number): string {
 }
 
 /**
- * A moment, to the minute, in UTC, so the screen says the same thing wherever
- * it is read: `2026-11-14T08:00:00.000Z` is "2026-11-14 08:00 UTC". It reads
- * the ISO 8601 text the route sent, never a clock.
+ * A moment, to the minute, in the IANA zone `timeZone`, with the zone named
+ * (#2917): `2026-11-14T08:00:00.000Z` is "2026-11-14 08:00 UTC" in `UTC` and
+ * "2026-11-14 03:00 EST" in `America/New_York`. The caller names the zone, so
+ * nothing here depends on the machine's: the app's Operate panels pass the
+ * device's, the instance's admin pages pass `UTC` (`admin/pages.ts`
+ * §`ADMIN_TIME_ZONE`). It reads the ISO 8601 text the route sent, never a
+ * clock; text that is not a moment is kept as it came, to the minute's length.
  */
-export function momentText(iso: string): string {
-  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+export function momentText(iso: string, timeZone: string): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return `${iso.slice(0, 16).replace('T', ' ')} ${timeZone}`;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'short',
+  }).formatToParts(at);
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((each) => each.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')} ${part('timeZoneName')}`;
 }

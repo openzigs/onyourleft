@@ -247,91 +247,88 @@ function stubSeed(seed: number): void {
 }
 
 describe('the Delivery picker lists the built-in levels — #2362, ADR 0065 D-8.1', () => {
-  it(
-    'with no saved route and no instance, lists every level, each chosen opens a round, and level 1’s says its first house',
-    { timeout: 30_000 },
-    async () => {
-      // #2363, #2367: every level but the last finished on this device, so every one is open to choose.
-      writeLevelProgress(localStorage, ALL_OPEN);
-      await openPicker();
-      // All six levels are listed, in unlock order, each with a way to choose it.
-      const names = [...document.querySelectorAll('[data-level] h3')].map(
-        (each) => each.textContent,
-      );
-      expect(names).toStrictEqual(SHIPPED_LEVELS.list().map((level) => level.name));
-      expect(names).toHaveLength(6);
-      for (const level of SHIPPED_LEVELS.list()) {
-        const href = link(`${GAME_COURSES_TEXT.choose}: ${level.name}`)?.getAttribute('href') ?? '';
-        expect(gameRouteFromHash(href)).toBe(levelRouteId(level.id));
-        expect(gamePlayFromHash(href)).toBe('delivery');
+  // #2528: this case carried a 30 s per-case limit and carries none; the
+  // removal changes nothing it runs. On this Mac, Node 26, at a load average
+  // near 3: 415 ms without coverage, 776 ms with `--coverage`.
+  it('with no saved route and no instance, lists every level, each chosen opens a round, and level 1’s says its first house', async () => {
+    // #2363, #2367: every level but the last finished on this device, so every one is open to choose.
+    writeLevelProgress(localStorage, ALL_OPEN);
+    await openPicker();
+    // All six levels are listed, in unlock order, each with a way to choose it.
+    const names = [...document.querySelectorAll('[data-level] h3')].map((each) => each.textContent);
+    expect(names).toStrictEqual(SHIPPED_LEVELS.list().map((level) => level.name));
+    expect(names).toHaveLength(6);
+    for (const level of SHIPPED_LEVELS.list()) {
+      const href = link(`${GAME_COURSES_TEXT.choose}: ${level.name}`)?.getAttribute('href') ?? '';
+      expect(gameRouteFromHash(href)).toBe(levelRouteId(level.id));
+      expect(gamePlayFromHash(href)).toBe('delivery');
+    }
+    // The credit beside them (D-6.5), and the rider is told how a route of their own gets here.
+    expect(document.querySelector('[data-credit="levels"]')?.textContent).toContain(
+      OSM_ATTRIBUTION,
+    );
+    // #2362, round 2: in words that are true beside the levels.
+    const empty = document.querySelector('[data-oyl-empty-state]')?.textContent ?? '';
+    expect(empty).toContain(GAME_COURSES_TEXT.noRoutesBesideLevels);
+    expect(empty).not.toContain(GAME_COURSES_TEXT.noRoutes);
+    // Listing read no level's file (D-2.5).
+    expect(read).toStrictEqual([]);
+
+    // Level 1, chosen: the setup its link opens, with the round on.
+    const href = link(`${GAME_COURSES_TEXT.choose}: ${FIRST.name}`)?.getAttribute('href') ?? '';
+    mounted?.unmount();
+    stubSeed(7);
+    await openSetup(href);
+    // Only the chosen level's file was read, in full.
+    expect(read).toStrictEqual([FIRST.id]);
+    expect(rideButton()?.textContent).toContain(FIRST.name);
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+
+    const heard = new Set<string>();
+    let creditless = 0;
+    for (let frame = 0; frame < 480; frame += 1) {
+      await pump();
+      heard.add(region());
+      if (!stageText().includes(OSM_ATTRIBUTION)) creditless += 1;
+      const all = [...heard];
+      if (
+        all.some((each) => /^(Delivered to|Missed) the 1st house/.test(each)) &&
+        all.some((each) => / ahead, in the ((left|right) lane|middle of the road)\.$/.test(each))
+      ) {
+        break;
       }
-      // The credit beside them (D-6.5), and the rider is told how a route of their own gets here.
-      expect(document.querySelector('[data-credit="levels"]')?.textContent).toContain(
-        OSM_ATTRIBUTION,
-      );
-      // #2362, round 2: in words that are true beside the levels.
-      const empty = document.querySelector('[data-oyl-empty-state]')?.textContent ?? '';
-      expect(empty).toContain(GAME_COURSES_TEXT.noRoutesBesideLevels);
-      expect(empty).not.toContain(GAME_COURSES_TEXT.noRoutes);
-      // Listing read no level's file (D-2.5).
-      expect(read).toStrictEqual([]);
+    }
+    const said = [...heard];
+    // Its first house, said through the one live region, on the level's round of
+    // houses and not the week's.
+    const houses = fixtureAs(FIRST.id).round.houses;
+    expect(houses).not.toBe(WEEK.houses);
+    expect(
+      said.some((each) =>
+        new RegExp(
+          `^(Delivered to|Missed) the 1st house\\. ${String(houses - 1)} houses left\\.$`,
+        ).test(each),
+      ),
+    ).toBe(true);
+    // And a parked car or a bin standing ahead, said in words before the rider reaches it.
+    expect(
+      said.some((each) =>
+        /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/.test(each),
+      ),
+    ).toBe(true);
+    // The credit, for the whole of the ride (D-6.5).
+    expect(creditless).toBe(0);
 
-      // Level 1, chosen: the setup its link opens, with the round on.
-      const href = link(`${GAME_COURSES_TEXT.choose}: ${FIRST.name}`)?.getAttribute('href') ?? '';
-      mounted?.unmount();
-      stubSeed(7);
-      await openSetup(href);
-      // Only the chosen level's file was read, in full.
-      expect(read).toStrictEqual([FIRST.id]);
-      expect(rideButton()?.textContent).toContain(FIRST.name);
-      await click(rideButton());
-      await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
-
-      const heard = new Set<string>();
-      let creditless = 0;
-      for (let frame = 0; frame < 480; frame += 1) {
-        await pump();
-        heard.add(region());
-        if (!stageText().includes(OSM_ATTRIBUTION)) creditless += 1;
-        const all = [...heard];
-        if (
-          all.some((each) => /^(Delivered to|Missed) the 1st house/.test(each)) &&
-          all.some((each) => / ahead, in the ((left|right) lane|middle of the road)\.$/.test(each))
-        ) {
-          break;
-        }
-      }
-      const said = [...heard];
-      // Its first house, said through the one live region, on the level's round of
-      // houses and not the week's.
-      const houses = fixtureAs(FIRST.id).round.houses;
-      expect(houses).not.toBe(WEEK.houses);
-      expect(
-        said.some((each) =>
-          new RegExp(
-            `^(Delivered to|Missed) the 1st house\\. ${String(houses - 1)} houses left\\.$`,
-          ).test(each),
-        ),
-      ).toBe(true);
-      // And a parked car or a bin standing ahead, said in words before the rider reaches it.
-      expect(
-        said.some((each) =>
-          /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/.test(each),
-        ),
-      ).toBe(true);
-      // The credit, for the whole of the ride (D-6.5).
-      expect(creditless).toBe(0);
-
-      // Ended (nothing records here, so #2381's one-step question): the week is as it was (D-9.3).
-      await click(
-        queryAll<HTMLButtonElement>(mounted?.container ?? document.body, 'button').find((button) =>
-          (button.textContent ?? '').startsWith('End ride'),
-        ),
-      );
-      await click(endRideAnswer(document, 'End ride'));
-      expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
-    },
-  );
+    // Ended (nothing records here, so #2381's one-step question): the week is as it was (D-9.3).
+    await click(
+      queryAll<HTMLButtonElement>(mounted?.container ?? document.body, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('End ride'),
+      ),
+    );
+    await click(endRideAnswer(document, 'End ride'));
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+  });
 
   it('lists the levels above every one of three saved routes', async () => {
     const routes = ['First road', 'Second road', 'Third road'].map((name, index): RidableRoute => ({
@@ -514,31 +511,30 @@ describe('levels open in order, kept on the device — #2363, ADR 0065 D-9', () 
 });
 
 describe('a hazard ahead is always said — the owner’s ruling of 2026-11-08, ADR 0065 D-10.9', () => {
-  it(
-    'says the parked car or bin ahead with announcements off, the default, and no house, miss or crash',
-    { timeout: 30_000 },
-    async () => {
-      localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
-      expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
-      stubSeed(7);
-      await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
-      await click(rideButton());
-      await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
-      const heard = new Set<string>();
-      // As long as the first case rides, which hears the first house said with announcements on.
-      for (let frame = 0; frame < 480; frame += 1) {
-        await pump();
-        heard.add(region());
-      }
-      const said = [...heard];
-      expect(
-        said.some((each) =>
-          /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/.test(each),
-        ),
-      ).toBe(true);
-      expect(said.filter((each) => /^(Delivered to|Missed|Crashed)/.test(each))).toEqual([]);
-    },
-  );
+  // #2528: this case carried a 30 s per-case limit and carries none; the
+  // removal changes nothing it runs. On this Mac, Node 26, at a load average
+  // near 3: 691 ms without coverage, 1 736 ms with `--coverage`.
+  it('says the parked car or bin ahead with announcements off, the default, and no house, miss or crash', async () => {
+    localStorage.removeItem(ANNOUNCEMENTS_STORAGE_KEY);
+    expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
+    stubSeed(7);
+    await openSetup(hrefForGamePlay('delivery', levelRouteId(FIRST.id)));
+    await click(rideButton());
+    await until(() => mounted?.container.querySelector('.oyl-game--riding') !== null);
+    const heard = new Set<string>();
+    // As long as the first case rides, which hears the first house said with announcements on.
+    for (let frame = 0; frame < 480; frame += 1) {
+      await pump();
+      heard.add(region());
+    }
+    const said = [...heard];
+    expect(
+      said.some((each) =>
+        /^A (parked car|bin) ahead, in the ((left|right) lane|middle of the road)\.$/.test(each),
+      ),
+    ).toBe(true);
+    expect(said.filter((each) => /^(Delivered to|Missed|Crashed)/.test(each))).toEqual([]);
+  });
 });
 
 describe('a press on a level is always a round — ADR 0065 D-8.1', () => {

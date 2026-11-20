@@ -280,7 +280,14 @@ function ModelList({
 }
 
 /** The AI backend section of Operate. @see the file comment. */
-export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): JSX.Element {
+export function OperateAnalysisPanel({
+  port,
+  timeZone,
+}: {
+  readonly port: OperatePort;
+  /** The IANA zone its moments are drawn in, named (#2917): the device's, from `OperateView`. */
+  readonly timeZone: string;
+}): JSX.Element {
   const [analysis, setAnalysis] = useState<OperateAnalysisRead | 'reading'>('reading');
   const [models, setModels] = useState<LocalModelsRead | 'reading'>('reading');
   const [jobs, setJobs] = useState<OperateJobsRead | 'reading'>('reading');
@@ -511,7 +518,7 @@ export function OperateAnalysisPanel({ port }: { readonly port: OperatePort }): 
           ) : (
             <ol className="oyl-operate__jobs">
               {jobs.recent.map((job, index) => (
-                <li key={`${job.createdAt}-${String(index)}`}>{jobLine(job)}</li>
+                <li key={`${job.createdAt}-${String(index)}`}>{jobLine(job, timeZone)}</li>
               ))}
             </ol>
           )}

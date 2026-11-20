@@ -101,7 +101,19 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `deploy.sh`; `tools/tunnel-soak.ts` is #807's tunnel
                         measurement, and `tools/replan-round-trip.ts` #1235's
                         (an analysis job timed start to decrypted result;
-                        spike 0023). Since #881 it also holds `src/sync/` —
+                        spike 0023); `tools/write-up-measure.ts` (#2840)
+                        runs the shipped write-up agent over the twelve
+                        fixed rides of `tools/write-up-set.ts` against
+                        Ollama (loopback, or `--host` over SSH), books each
+                        turn's tokens and the loaded context, writes numbers
+                        under `tools/results/write-up/` and exits 1 below
+                        the set's pass mark — run it before and after any
+                        change to the write-up's prompt, tools, budgets or
+                        model; it is no CI gate. `tools/replan-measure.ts`
+                        (#2841) does the same for a re-plan over the
+                        device's two golden requests (`--looks` makes each
+                        run read the tools first), a measurement with no
+                        pass mark. Since #881 it also holds `src/sync/` —
                         ingestion of a signed record and its original file
                         (#37), the athlete's own rides, detail and streams
                         (#38, never a position), the sync manifest, items and
@@ -185,6 +197,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         while it is held the job worker claims re-plans
                         only, so write-ups wait — docs/architecture.md §"Bot-tactics
                         decisions and the model slot — #2709".
+                        Since #2836 (ADR 0081) a decision is for ONE bot,
+                        picked from the menu its ask carries (`tactics-8`,
+                        the reason word first), 90 a minute, and each
+                        writes one `tactics-call` log line of figures.
                         Since #2712 (ADR 0072) `POST /v1/analysis/pacer/decide`
                         (`tactics.ts` §`pace`, `pacer-prompt.ts`): the AI
                         pacer's plan, intent and one screened line, under

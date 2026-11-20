@@ -185,6 +185,8 @@ describe('the Connect screen — #777, #778', () => {
     // name is sent on every Connect and kept only on the first.
     const said = INSTANCE_RECEIVES.join(' ');
     expect(said).toContain('sent each time you press Connect with a name typed');
+    // #2878: and with the owner's sign-in after a claim, never with the claim itself.
+    expect(said).toContain('or “Sign in as the owner” after claiming your own server');
     expect(said).toContain('keeps it only if it has not seen this device before');
     expect(said).toContain('earlier names');
     expect(said).toContain('Connecting itself sends no ride, route, position or heart rate');

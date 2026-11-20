@@ -41,11 +41,13 @@
  *   §`DEFAULT_REPLAN_STARTS`), which a refused start still spends.
  * - **A request the instance refuses with one of {@link PERMANENT_REFUSALS}**
  *   — a reason that will not change during this workout — **ends the asking
- *   for it**, and so does a sign-in this device no longer holds. **Anything
- *   else does not**: `job_running` (a write-up on the same worker),
- *   `unavailable`, a 5xx the tunnel relayed with no code, an answer this
- *   build cannot read, a session that threw as it was opened. Each is the
- *   plan as it stands and one short line, and the next boundary may ask.
+ *   for it**, and so do a sign-in this device no longer holds and instance
+ *   keys that do not verify under the pin. **Anything else does not**:
+ *   `job_running` (a write-up on the same worker), `unavailable`, a 5xx the
+ *   tunnel relayed with no code, an answer this build cannot read, a session
+ *   that threw as it was opened, an instance that did not answer the session's
+ *   keys read (#2104). Each is the plan as it stands and one short line, and
+ *   the next boundary may ask.
  *   The list is of what is known to be permanent, so an answer nobody
  *   foresaw waits for the next block rather than switching re-plans off.
  *
@@ -153,6 +155,12 @@ export const PERMANENT_REFUSALS: readonly string[] = [
   'validation_failed',
   'rate_limited',
   'analysis_off',
+  // #2634, option A: the operator has not opened the model to this rider. Each
+  // refused start still spends one of the hour's re-plan starts, and a switch
+  // turned on mid-ride is rare; asking every block until the hour's starts
+  // were gone helped nobody. The next workout asks again.
+  'local_unavailable',
+  'hosted_unavailable',
 ];
 
 /** The ride as it is now, read by the session whenever it needs it. */
@@ -657,8 +665,10 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       return;
     }
     if (opened.kind !== 'open') {
-      // This device holds no sign-in the instance would take.
-      failed(from, true);
+      // This device holds no sign-in the instance would take, or the
+      // instance's keys did not verify: neither changes during the workout.
+      // An instance that did not answer may be back by the next boundary (#2104).
+      failed(from, opened.unreachable !== true);
       return;
     }
     from.session = opened;

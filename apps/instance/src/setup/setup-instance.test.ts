@@ -716,6 +716,16 @@ describe('the first-run setup on a fresh install (#2784, ADR 0080)', () => {
     await expect(
       setupCode({ database: at.path, blobs: `${at.path}.blobs` }, { secretsDirectory: at.secrets }),
     ).rejects.toThrow(/setup is done/);
+    // #2920: the operator ran `setup-code`, so its refusal IS logged, once, from the CLI.
+    const afterCli = await openSqlStore(at.path);
+    try {
+      const refused = (await afterCli.listOperatorLogPage(undefined, 200))
+        .filter((entry) => entry.action === 'setup_code_minted' && entry.outcome === 'refused')
+        .map((entry) => entry.source);
+      expect(refused).toEqual(['cli']);
+    } finally {
+      await afterCli.close();
+    }
 
     // ADR 0004 D, ADR 0069 D-4: no page and no log line holds a setup code or the secret.
     const everything = [...at.pages, ...at.lines].join('\n');
@@ -1245,12 +1255,63 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
     expect(parseStream((await stream?.text()) ?? '').events.at(-1)?.data).toEqual({
       status: 'succeeded',
       writeUp: 'A steady ride.',
+      templateVersion: '2',
     });
     expect(
       stub.requests
         .filter((request) => request.path === '/v1/chat/completions')
         .map((request) => (request.body as { model?: unknown }).model),
     ).toEqual(['delta:8b']);
+  });
+
+  it('downloads the recommended model with one press, then offers it first with no download, and Use turns write-ups on (#2869, ADR 0086)', async () => {
+    const { at, stub } = await worldWith({
+      ...CURRENT_SERVER,
+      tags: { models: [] },
+      ps: { models: [] },
+      show: { 'qwen3:8b': { capabilities: ['completion', 'tools'] } },
+      pull: () => ({
+        lines: [{ status: 'pulling manifest' }],
+        then: [{ status: 'success' }],
+        adds: { name: 'qwen3:8b', model: 'qwen3:8b', size: 5_200_000_000 },
+      }),
+      load: (model) => ({ name: model, model, size: 6_000_000_000, size_vram: 6_000_000_000 }),
+    });
+    const { browser } = await atAiStep(at);
+    const before = await browser.get('/setup/ai');
+    // The one press, above the typed field, sending the name the page filled in.
+    const press =
+      /<form method="post" action="\/setup\/ai\/pull" aria-label="Download the recommended model \(qwen3:8b, about 5 GB\)">[\s\S]*?<\/form>/.exec(
+        before.body,
+      )?.[0];
+    expect(press).toBeDefined();
+    expect(before.body.indexOf(press ?? '')).toBeLessThan(before.body.indexOf('id="model"'));
+    const sends = /name="model" value="([^"]*)"/.exec(press ?? '')?.[1];
+    expect(sends).toBe('qwen3:8b');
+
+    const asked = await browser.post('/setup/ai/pull', { model: sends ?? '' });
+    expect(asked.headers.location).toBe('/setup/ai');
+    const done = await untilAiSays(browser, 'The download finished.');
+    expect(stub.requests.filter((request) => request.path === '/api/pull')).toEqual([
+      { method: 'POST', path: '/api/pull', body: { model: 'qwen3:8b', stream: true } },
+    ]);
+    // Now here: offered first, and nothing more is recommended for download.
+    expect(done.body).toContain(
+      'A model already on this computer can run write-ups, so nothing needs downloading.',
+    );
+    expect(done.body).not.toContain('Download the recommended model');
+    expect(done.body).toContain('<button type="submit">Use qwen3:8b</button>');
+    // Downloaded is not chosen (#2792): the owner's press is.
+    expect(done.body).not.toContain('AI write-ups are on.');
+    await browser.post('/setup/ai/use', { model: 'qwen3:8b' });
+    const on = await browser.get('/setup/ai');
+    expect(on.body).toContain('AI write-ups are on. They run on this model: <code>qwen3:8b</code>');
+    expect(on.body).not.toContain('nothing needs downloading');
+    expect(on.body).not.toContain('Download the recommended model');
+    expect(await modelLog(at)).toEqual([
+      ['setup', 'analysis_model_pull', 'done', null],
+      ['setup', 'analysis_settings_set', 'done', 'local_url,local_model,offer_local'],
+    ]);
   });
 
   it('shows a download’s progress and its failure in its own words: never the model’s name, nor a path with the host’s user name', async () => {
@@ -1515,7 +1576,12 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
       'the server’s keys belong to its address, so it must make new ones, which gives it a new identity',
     );
     expect(how).toBeGreaterThan(warning);
-    expect(step.body).toContain('Run bash deploy.sh beside compose.yaml');
+    // #2920: the deploy is a block to copy, like every other command, never words in a sentence.
+    expect(step.body).toContain(
+      'Then run this beside compose.yaml. It prints Tailscale’s sign-in link',
+    );
+    expect(step.body).toContain('<pre class="copy"><code>bash deploy.sh</code></pre>');
+    expect(step.body).not.toContain('Run bash deploy.sh');
     expect(step.body.indexOf('instance-key reset')).toBeGreaterThan(warning);
     // It changes nothing itself: its one form is the GET that reads the address back again.
     const forms = [...step.body.matchAll(/<form [^>]*>/g)].map((match) => match[0]);
@@ -1641,11 +1707,15 @@ describe('the setup’s tailnet step (#2817, ADR 0079 D-2, D-8)', () => {
     // Still named Tailnet, and the first thing it says is that nothing is needed here.
     expect(step.body).toContain('<h1>Tailnet</h1>');
     expect(step.body).toMatch(/<h1>Tailnet<\/h1>\n<p>Nothing to do here: /);
-    // No access rule to paste: the one block to copy is the key reset a change of address needs.
+    // No access rule to paste: the blocks to copy are what a change of address needs, the
+    // deploy (#2920) and the key reset.
     expect(step.body).not.toContain('tagOwners');
     expect(
       [...step.body.matchAll(/<pre class="copy"><code>([^<]*)<\/code>/g)].map((m) => m[1]),
-    ).toEqual(['docker compose exec instance node src/operator/cli.ts instance-key reset']);
+    ).toEqual([
+      'bash deploy.sh',
+      'docker compose exec instance node src/operator/cli.ts instance-key reset',
+    ]);
     expect(step.body).not.toContain('Invite each rider into your tailnet');
     expect(step.body).not.toContain('class="problem"');
     expect(step.body).not.toContain('That is a Tailscale address');

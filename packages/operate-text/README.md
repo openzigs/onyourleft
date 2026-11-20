@@ -26,7 +26,7 @@ owner, and `git log` gives every commit to the same author.
 
 | Module | What it holds |
 | --- | --- |
-| `words.ts` | `durationText`, `bytesText`, `countText`, `momentText`: time, size, counts and a UTC moment, in words |
+| `words.ts` | `durationText`, `bytesText`, `countText`, `momentText`: time, size, counts and a moment in the zone the caller names, with the zone named (#2917), in words |
 | `status.ts` | `statusRows` and the rows it is built from (`diskRow`, `lastBackupRow`), `compareWithMainUrl`, the closed-word tables (migrations, keys, disks, the newest backup's off-box copy, the tunnel), and Status's sentences |
 | `accounts.ts` | `REGISTRATION_MODE_TEXT`, the one table the registration mode's short line and sentence are read from, and `MODERATORS_ALWAYS_JOIN` |
 | `backups.ts` | The Backups section's sentences, a snapshot's off-box words, `backupsStaleText` and `snapshotPlace` |

@@ -277,10 +277,15 @@ internal network only it and the instance share for the tunnel's readiness (#260
 `tailscale` `172.30.87.11`, and names exactly those three addresses. You do not set them in `.env`.
 The same list is what makes the admin pages' loopback listener close a connection from either proxy
 unread (ADR 0069 D-5). If `172.30.87.0/24` or `172.30.88.0/24` is already in use on this machine,
-change that subnet, the proxies' addresses on it and `OYL_INSTANCE_TRUSTED_PROXIES` in
-`compose.yaml` together; for `172.30.88.0/24`, also the `--metrics` address in the tunnel's command
-and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network, or a port published
-for local debugging, is counted as itself, whatever header it sends.
+set **`OYL_NETWORK_PREFIX`** or **`OYL_TUNNEL_METRICS_PREFIX`** in `.env` to the first three numbers
+of a free `/24`, such as `10.77.1`, and run `bash deploy.sh` again
+([#2918](https://github.com/openzigs/onyourleft/issues/2918)). `compose.yaml` writes every address
+that depends on it from that setting: the proxies' fixed addresses, `OYL_INSTANCE_TRUSTED_PROXIES`,
+the tunnel's `--metrics` address and its readiness address. Being in `.env`, the change survives
+every update of `compose.yaml`. A `.env` from before #2918 may still name
+`OYL_INSTANCE_TUNNEL_READY_URL=http://172.30.88.10:20241/ready`: delete that line when you change
+`OYL_TUNNEL_METRICS_PREFIX`. Anything else on that network, or a port published for local
+debugging, is counted as itself, whatever header it sends.
 
 ## 5. Start it
 
@@ -589,10 +594,23 @@ done here.
 Ollama's default context follows the GPU memory it sees: 4 096 tokens under 24 GiB, 32 768 from 24
 to 48 GiB, more above ([Ollama's documentation](https://docs.ollama.com/context-length)). On the
 Windows box the default was 32 768, and at that length a larger model put 37 % of itself on the
-processor (#1235). So state it, and check that the model fits the GPU with it. The project's runs
-used 4 096 (spike 0023); read
+processor (#1235). So state it, and check that the model fits the GPU with it. **State 16 384, and
+put the same number in the instance's `.env` as `OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS`**, so
+a write-up that would not fit is stopped with a reason instead of losing its start (#2840). The
+project's early runs used 4 096 (spike 0023), and that is too short: measured on this box on
+2026-11-19, a write-up's first turn is 1 000 to 2 300 tokens before any tool result, and the
+model reasoned up to 3 000 tokens in one turn on top. Read
 [`operating-an-instance.md` → Analysis model](../operating-an-instance.md#analysis-model) before
 choosing.
+
+**What it costs in memory**, for the model the box runs (a 12-billion-parameter Gemma at Q4_K_M,
+q8_0 KV cache, on the 12 GB RTX 3060): five of every six of its 48 layers attend over a window of
+1 024 tokens whatever the context, so only the other eight grow with it, by about 8.5 KB a token —
+about 36 MB at 4 096, 140 MB at 16 384 and 285 MB at 32 768 (worked from the model's own
+`/api/show` figures, not measured). Measured: loaded at 32 768, the whole model was on the GPU
+(`size_vram` equal to `size`) and the card had 9 591 MiB of 12 288 in use, so 16 384 fits with
+room; when the bots' tactics name the same model, they share that one load. A model of another
+shape costs differently: check `ollama ps` as below.
 
 - **Windows**: quit Ollama from the tray; in Settings, search for *environment variables* and
   choose *Edit environment variables for your account*; add `OLLAMA_CONTEXT_LENGTH`; and start

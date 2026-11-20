@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { codeWithCard } from '../instance/instance-pin';
-import { CLAIM_REFUSAL_TEXT } from '../instance/instance-port';
+import { CLAIM_REFUSAL_TEXT, CONNECT_REFUSAL_TEXT } from '../instance/instance-port';
 import {
   SCRIPTED_COMPARISON_CODE,
   SCRIPTED_FINGERPRINT,
@@ -27,7 +27,7 @@ import {
   pressNamed,
   saidUnder,
 } from '../testing/connect-flow';
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { mount, queryAll, settle, typeInto, type Mounted } from '../testing/mount';
 import { CONNECT_FLOW_TEXT } from './ConnectFlow';
 import { InstanceView, RECOVERY_CODES_LEAD } from './InstanceView';
 import { comparisonGroups, OWNER_CLAIM_TEXT } from './OwnerClaim';
@@ -130,6 +130,43 @@ describe('the owner’s claim on the Connect screen — #2823', () => {
     expect(text()).toContain(OWNER_CLAIM_TEXT.owned);
     expect(text()).toContain(RECOVERY_CODES_LEAD);
     expect(text()).toContain('aaaa-bbbb-cccc-dddd');
+  });
+
+  it('offers an optional name, sends it with the sign-in and not with the claim (#2878)', async () => {
+    const scripted = scriptedInstance();
+    const operate = scriptedOperate({ standing: 'owner' });
+    mounted = await mount(<InstanceView port={scripted.port} operate={operate.port} />);
+    await settle();
+    await pasteCode(LINE);
+    await answer('claim');
+    const field = fieldLabelled<HTMLInputElement>(OWNER_CLAIM_TEXT.nameLabel);
+    expect(field.value).toBe('');
+    await typeInto(field, 'Mara');
+    await press(OWNER_CLAIM_TEXT.claim);
+    // The claim carries the line alone, and nothing is registered yet.
+    expect(scripted.calls).toContain(`claimOwner ${LINE}`);
+    expect(scripted.held.displayName).not.toBe('Mara');
+    await press(OWNER_CLAIM_TEXT.signIn);
+    expect(scripted.calls).toContain(`signInAsOwner ${CARD}`);
+    expect(scripted.held.displayName).toBe('Mara');
+    expect(text()).toContain(OWNER_CLAIM_TEXT.owned);
+  });
+
+  it('refuses a name the server would refuse under Claim this server, and sends nothing', async () => {
+    const scripted = scriptedInstance();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    await pasteCode(LINE);
+    await answer('claim');
+    await typeInto(fieldLabelled<HTMLInputElement>(OWNER_CLAIM_TEXT.nameLabel), 'x'.repeat(33));
+    await press(OWNER_CLAIM_TEXT.claim);
+    expect(saidUnder(OWNER_CLAIM_TEXT.claim)).toContain(CONNECT_REFUSAL_TEXT['bad-name']);
+    expect(scripted.calls.some((call) => call.startsWith('claimOwner'))).toBe(false);
+    // Corrected, the same press claims.
+    await typeInto(fieldLabelled<HTMLInputElement>(OWNER_CLAIM_TEXT.nameLabel), 'Mara');
+    expect(saidUnder(OWNER_CLAIM_TEXT.claim) ?? '').not.toContain(CONNECT_REFUSAL_TEXT['bad-name']);
+    await press(OWNER_CLAIM_TEXT.claim);
+    expect(scripted.calls).toContain(`claimOwner ${LINE}`);
   });
 
   it('says the device is not the owner yet when the server does not say it is', async () => {
