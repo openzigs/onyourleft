@@ -181,6 +181,11 @@ describe('an event', () => {
     ],
     [
       'result',
+      '{"status":"succeeded","writeUp":"Done.","templateVersion":"2"}',
+      { kind: 'result', status: 'succeeded', writeUp: 'Done.', templateVersion: '2' },
+    ],
+    [
+      'result',
       '{"status":"failed","failure":"out-of-time"}',
       { kind: 'result', status: 'failed', failure: 'out-of-time' },
     ],
@@ -199,6 +204,18 @@ describe('an event', () => {
   ])('skips a %s event it cannot read: %s', (kind, data) => {
     expect(readJobEvent(kind, data)).toBeUndefined();
   });
+
+  it.each(['2 beta', '', 'v'.repeat(65), '<b>2</b>'])(
+    'drops a template version the store would not keep: %j (#2932)',
+    (version) => {
+      expect(
+        readJobEvent(
+          'result',
+          JSON.stringify({ status: 'succeeded', writeUp: 'Done.', templateVersion: version }),
+        ),
+      ).toStrictEqual({ kind: 'result', status: 'succeeded', writeUp: 'Done.' });
+    },
+  );
 
   it('drops a failure code that is not an identifier', () => {
     expect(readJobEvent('result', '{"status":"failed","failure":"<b>x</b>"}')).toStrictEqual({

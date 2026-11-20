@@ -1255,6 +1255,7 @@ describe('the setup’s optional AI step (#2792, ADR 0046)', () => {
     expect(parseStream((await stream?.text()) ?? '').events.at(-1)?.data).toEqual({
       status: 'succeeded',
       writeUp: 'A steady ride.',
+      templateVersion: '2',
     });
     expect(
       stub.requests
