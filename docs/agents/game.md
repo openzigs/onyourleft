@@ -2102,7 +2102,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         geometry carries a `normal` attribute the shader never
                         reads: without one, three compiles a standard material
                         FLAT_SHADED and every triangle is lit as a facet
-                        (the owner's look of PR #1615)
+                        (the owner's look of PR #1615). ⚠️ A skin TONE is not
+                        an albedo (PR #2844): both people materials give a
+                        region its colour through `PEOPLE_COLOUR_GLSL`, the
+                        skin's through `people-body.ts` §`skinAlbedo` —
+                        handed to the light as it stood, a face in the sun
+                        was bleached pale by the tone map. The atlas's skin
+                        is divided by its photograph's MEDIAN, its trousers
+                        keep no dye, a skirt has no thigh under it and the
+                        fingers are curled in the rest mesh — all in
+                        `process_people.py`; `gait.ts` §`LimbAngles.carry`
+                        turns a runner's arm in
     src/game/scenery-cyclists.ts
                         other cyclists on the road (#2722) — oncoming, slower
                         (caught) and faster (overtaking), a few a ride, more on

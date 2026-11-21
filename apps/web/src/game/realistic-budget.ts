@@ -1529,6 +1529,9 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * transcoder was 48 157 070 bytes, 77 426 under the old ceiling; the people's
  * model and atlas (`realistic-assets.ts` §`REALISTIC_PEOPLE`) add **391 045**
  * (242 536 and 148 509), so it is **48 548 115**, 734 957 under the new one.
+ * Since PR #2844's polish they are 243 932 and 126 304 — **370 236**, 20 809
+ * fewer: an atlas with no dye in its trousers and no outline round a garment's
+ * pieces is a smaller one — so the set is 48 527 306, 755 766 under.
  * The model ships without normals and the atlas at 1024 px, which is as
  * small as three dressed people were made; the APK carries the same bytes
  * more, and a browser's first download does not move.
