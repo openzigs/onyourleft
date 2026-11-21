@@ -2098,6 +2098,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
                         is broken at its crossroads with dropped kerbs
+    src/game/nearby-streets.ts
+                        nearby streets (#2973) — the mapped `ground` streets
+                        off the route drawn out to the fog (400 m): a street
+                        that never touches the route with its edge off the
+                        verge, a cross street run on from 23.5 m off the road
+                        (where every stub is still whole, and above it), the
+                        driveways and parking aisles at the service width,
+                        stopping short of a footprint; none on water or an
+                        overpass's road. ⚠️ **Side roads, not a belt of their
+                        own**: `scene.ts` appends the pieces in view to the
+                        frame's `sideRoads`, so `SideRoadBelt` draws them in the
+                        road's material in its ONE call and every clearance
+                        keeps the scenery and the people off them. At most 256
+                        pieces of 32 triangles a frame, chosen again every 40 m.
+                        A footprint on one is dropped `on-street`
+                        (`footprint-buildings.ts` rule 3b). `streetRibbon` names
+                        no route: #2903's open world draws with it.
+                        Lever `-nearby-streets`, page `town=streets`
     src/game/overpasses.ts
                         overpasses and underpasses (#2661) — where a mapped
                         street on a bridge crosses the route, a level deck 5 m

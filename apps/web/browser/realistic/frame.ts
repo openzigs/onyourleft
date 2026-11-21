@@ -52,6 +52,8 @@ export function rideFrame(input: {
   readonly countrysideOff?: readonly CountrysideLever[];
   /** #2685's lever, `levers=-park-dressing`: the golf courses and cemeteries as their planting alone. */
   readonly parkDressingOff?: boolean;
+  /** #2973's lever, `levers=-nearby-streets`: only the route, its stubs and its overpasses' roads. */
+  readonly nearbyStreetsOff?: boolean;
   /**
    * #1972's `race=worst`: a lap race's bots and the rider's own hit effect,
    * as `scene.ts` §`SceneInput.raceBots` and §`SceneInput.riderHit` take
@@ -102,6 +104,7 @@ export function rideFrame(input: {
     settlementsWooded: input.settlementsWooded,
     countrysideOff: input.countrysideOff,
     parkDressingOff: input.parkDressingOff,
+    nearbyStreetsOff: input.nearbyStreetsOff,
     ...(input.town === undefined
       ? {}
       : {
