@@ -319,6 +319,16 @@ export const RIDER_BODY_IS_ONE_CHOICE =
   'a model.';
 
 /**
+ * Who sees the rider you chose — the owner's room-privacy ruling of
+ * 2026-11-20: other riders in a multiplayer room see it, like any game avatar,
+ * and nothing else of the calorie inputs ever leaves the device
+ * (`privacy/calorie-inputs-stay-here.test.ts`). Kept visible for
+ * {@link RIDER_BODY_IS_ONE_CHOICE}'s reason. ⚠️ Draft wording awaiting the
+ * owner's approval, and ahead of the rooms work: no room sends the rider yet.
+ */
+export const RIDER_BODY_SEEN_IN_A_ROOM = 'Other riders in a room see the rider you chose.';
+
+/**
  * The sentences on this screen that are never tucked behind a section's ⓘ
  * disclosure — #666. They are about what leaves the device and to whom, and
  * what a rider can lose: the map-tile host (#534's review, #558), where a
@@ -333,6 +343,7 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   // #2839, the owner's ruling of 2026-11-20: the one rider choice is the
   // calorie estimate's sex, so where it is kept is said on the screen.
   RIDER_BODY_IS_ONE_CHOICE,
+  RIDER_BODY_SEEN_IN_A_ROOM,
   ANNOUNCEMENTS_STAY_HERE,
   DELIVERY_ASSIST_STAYS_HERE,
   'opening a ride that has GPS asks',
@@ -3057,6 +3068,7 @@ function RiderBodyPanel({
         <>
           <KeptVisible>
             <p className="oyl-muted">{RIDER_BODY_IS_ONE_CHOICE}</p>
+            <p className="oyl-muted">{RIDER_BODY_SEEN_IN_A_ROOM}</p>
           </KeptVisible>
           <fieldset className="oyl-segmented">
             <legend>Are you a female or a male rider?</legend>

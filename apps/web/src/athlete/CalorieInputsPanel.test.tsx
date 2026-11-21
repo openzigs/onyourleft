@@ -147,7 +147,8 @@ describe('the calorie-inputs panel on Settings (#2432)', () => {
   });
 
   it('a blank year removes the stored year and only the year, and the screen says no figure is shown', async () => {
-    await writer.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1990 });
+    await writer.setAthleteRider(ATHLETE_A, 'male');
+    await writer.setAthleteBirthYear(ATHLETE_A, 1990);
     await openSettings({ store: writer, athleteId: ATHLETE_A }, { riderBody: 'male' });
     expect(said()).toContain(CALORIE_INPUTS_SET);
 
@@ -163,7 +164,8 @@ describe('the calorie-inputs panel on Settings (#2432)', () => {
   });
 
   it('with sex and year but no weight entered, says a weight is needed and where, not that a ride gets a figure', async () => {
-    await writer.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1985 });
+    await writer.setAthleteRider(ATHLETE_A, 'female');
+    await writer.setAthleteBirthYear(ATHLETE_A, 1985);
     await openSettings({ store: writer, athleteId: ATHLETE_A }, { riderMass: null });
     expect(said()).toContain(CALORIE_INPUTS_NO_WEIGHT);
     expect(said()).toContain('Your weight');

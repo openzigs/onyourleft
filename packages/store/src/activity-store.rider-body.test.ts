@@ -228,10 +228,10 @@ describe('nothing but one of the two words comes back out (#2839, CLAUDE.md §6)
  */
 describe('choosing a rider is also the calorie estimate’s sex (#2839, 2026-11-20)', () => {
   async function assertRiderWritesBoth(harness: StoreHarness): Promise<void> {
-    await harness.write(async (fresh) => fresh.putAthlete(athlete()));
-    // The calorie sex starts as the OTHER word, so a half write shows.
+    // The calorie sex starts as the OTHER word, so a half write shows: a row
+    // as #2432 left it, with the sex and no look.
     await harness.write(async (fresh) =>
-      fresh.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1985 }),
+      fresh.putAthlete({ ...athlete(), calorieSex: 'male', birthYear: 1985 }),
     );
     await harness.write(async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'female'));
 

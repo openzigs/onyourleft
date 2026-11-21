@@ -141,7 +141,6 @@ import type {
   ActivitySummary,
   RideFacts,
   AthleteRecord,
-  CalorieSex,
   CameraFrameRecord,
   FramingReferenceRecord,
   SideCameraReportRecord,
@@ -167,7 +166,7 @@ import type {
   WorkoutRecord,
   WorldCorridorRecord,
 } from './records';
-import { isBirthYear, parseCalorieSex, WORLD_CORRIDOR_FEATURES_LIMIT_BYTES } from './records';
+import { isBirthYear, WORLD_CORRIDOR_FEATURES_LIMIT_BYTES } from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
 import { parseRiderBody, type RiderBody } from './rider-body';
 import { parseMaskedWords } from '@onyourleft/analysis';
@@ -968,64 +967,21 @@ export class ActivityStore {
   }
 
   /**
-   * Replaces the two inputs a heart-rate calorie estimate needs beyond the
-   * mass — the sex and the year of birth — leaving every other field alone
-   * (#2432).
-   *
-   * Shaped like {@link setAthleteMass}, and for its reason: **`undefined`
-   * clears a field**, because *Not set* is the only way back for a rider who
-   * no longer wants a heart-rate estimate, so it has to be a write rather than
-   * a refusal. Both fields are given on every call; the screen saves them
-   * together.
-   *
-   * @throws {RangeError} for a birth year that is not a whole number, before
-   *   anything is written: {@link fromPersistedAthlete} would read such a row
-   *   back as unset, which is a write that reports success while the read
-   *   cannot see it. The plausible range is the screen's to check, because it
-   *   needs today's date.
-   *
-   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
-   *
-   * @returns the stored record, or `undefined` if there is no such athlete —
-   * which is not an error, for {@link setAthleteThresholds}' reason.
-   */
-  async setAthleteCalorieInputs(
-    id: AthleteId,
-    inputs: {
-      readonly calorieSex: CalorieSex | undefined;
-      readonly birthYear: number | undefined;
-    },
-  ): Promise<AthleteRecord | undefined> {
-    const { calorieSex, birthYear } = inputs;
-    if (birthYear !== undefined && !isBirthYear(birthYear)) {
-      throw new RangeError('athlete.birthYear: must be a whole year');
-    }
-    const sex = parseCalorieSex(calorieSex);
-    return this.#db.transaction('rw', [this.#athletes], async () => {
-      const row = await this.#athletes.get(id);
-      if (row === undefined) {
-        return undefined;
-      }
-      const updated: AthleteRecord = {
-        ...withoutCalorieInputs(fromPersistedAthlete(row)),
-        ...(sex === undefined ? {} : { calorieSex: sex }),
-        ...(birthYear === undefined ? {} : { birthYear }),
-      };
-      await this.#athletes.put(toPersistedAthlete(updated));
-      return updated;
-    });
-  }
-
-  /**
    * Replaces the year of birth the heart-rate calorie estimate uses, leaving
    * every other field alone (#2432) — the sex among them, which since the
    * owner's ruling of 2026-11-20 is the rider's one Female / Male choice and
    * is written by {@link setAthleteRider}, not here.
    *
-   * **`undefined` clears it**, for {@link setAthleteCalorieInputs}' reason.
+   * Shaped like {@link setAthleteMass}, and for its reason: **`undefined`
+   * clears it**, because *Not set* is the only way back for a rider who no
+   * longer wants a heart-rate estimate, so it has to be a write rather than a
+   * refusal.
    *
    * @throws {RangeError} for a year that is not a whole number, before
-   *   anything is written, for {@link setAthleteCalorieInputs}' reason.
+   *   anything is written: {@link fromPersistedAthlete} would read such a row
+   *   back as unset, which is a write that reports success while the read
+   *   cannot see it. The plausible range is the screen's to check, because it
+   *   needs today's date.
    *
    * Read and write in one transaction, for {@link ensureAthlete}'s reason.
    *
@@ -4575,18 +4531,6 @@ function withoutMass(record: AthleteRecord): AthleteRecord {
  */
 function withoutBirthYear(record: AthleteRecord): AthleteRecord {
   const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
-  delete copy.birthYear;
-  return copy as AthleteRecord;
-}
-
-/**
- * The athlete row with the sex and the year of birth removed, for
- * {@link ActivityStore.setAthleteCalorieInputs} — {@link withoutMass}' shape and
- * its reason.
- */
-function withoutCalorieInputs(record: AthleteRecord): AthleteRecord {
-  const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
-  delete copy.calorieSex;
   delete copy.birthYear;
   return copy as AthleteRecord;
 }

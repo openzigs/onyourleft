@@ -137,7 +137,6 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
     setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
     setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
-    setAthleteCalorieInputs: async (id, inputs) => real.setAthleteCalorieInputs(id, inputs),
     setAthleteKitColour: async (id, colour) => real.setAthleteKitColour(id, colour),
     setAthleteRider: async (id, rider) => real.setAthleteRider(id, rider),
     setAthleteBirthYear: async (id, year) => real.setAthleteBirthYear(id, year),
@@ -1182,14 +1181,13 @@ export function lastWordDroppedStoreFactory(): StoreFactory {
 }
 
 /**
- * A repository whose calorie-input write **keeps the sex and drops the year of
- * birth** — for #2432.
+ * A repository whose year-of-birth write **drops the year** — for #2432.
  *
- * *Wrong layer*: the write is real and commits, and the call answers with both
- * fields as asked, so the screen says "Saved" and shows the year. A fresh
- * connection reads a row with a sex and no year, which is a rider whose
- * heart-rate rides quietly show no calorie figure. A round trip that checked
- * only the sex passes against this; the red/green pair is in
+ * *Wrong layer*: the write is real and commits, and the call answers with the
+ * year as asked, so the screen says "Saved" and shows it. A fresh connection
+ * reads a row with a sex and no year, which is a rider whose heart-rate rides
+ * quietly show no calorie figure. A round trip that checked only the sex
+ * passes against this; the red/green pair is in
  * `activity-store.calorie-inputs.test.ts`.
  */
 export function droppedBirthYearStoreFactory(): StoreFactory {
@@ -1198,16 +1196,7 @@ export function droppedBirthYearStoreFactory(): StoreFactory {
       const real = openActivityStore(name);
       return {
         ...bindStore(real),
-        setAthleteCalorieInputs: async (id, inputs) => {
-          const written = await real.setAthleteCalorieInputs(id, {
-            calorieSex: inputs.calorieSex,
-            birthYear: undefined,
-          });
-          return written === undefined || inputs.birthYear === undefined
-            ? written
-            : { ...written, birthYear: inputs.birthYear };
-        },
-        // The panel's write since the owner's ruling of 2026-11-20, dropped the same way.
+        // The panel's one write of the year since the owner's ruling of 2026-11-20.
         setAthleteBirthYear: async (id, birthYear) => {
           const written = await real.setAthleteBirthYear(id, undefined);
           return written === undefined || birthYear === undefined

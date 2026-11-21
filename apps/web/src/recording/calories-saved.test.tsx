@@ -114,7 +114,8 @@ async function readBack(): Promise<ActivityRecord | undefined> {
 
 async function setInputs(sex: 'female' | 'male' | undefined): Promise<void> {
   await harness.write(async (store) => {
-    await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: sex, birthYear: 1985 });
+    if (sex !== undefined) await store.setAthleteRider(ATHLETE_A, sex);
+    await store.setAthleteBirthYear(ATHLETE_A, 1985);
     await store.setAthleteMass(ATHLETE_A, kilograms(68));
   });
 }
@@ -213,7 +214,8 @@ describe('a ride’s calorie estimate is saved with it (#2433)', () => {
     // Settings' write, not the calorie panel's: `setAthleteRider` is the only
     // write of the sex since the ruling, and the save reads the row afresh.
     await harness.write(async (store) => {
-      await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1985 });
+      await store.setAthleteRider(ATHLETE_A, 'male');
+      await store.setAthleteBirthYear(ATHLETE_A, 1985);
       await store.setAthleteMass(ATHLETE_A, kilograms(68));
       await store.setAthleteRider(ATHLETE_A, 'female');
     });

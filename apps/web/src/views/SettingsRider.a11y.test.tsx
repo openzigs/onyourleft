@@ -26,6 +26,7 @@ import {
   KIT_NO_ATHLETE,
   RIDER_BODY_IS_ONE_CHOICE,
   RIDER_BODY_NOT_CHOSEN,
+  RIDER_BODY_SEEN_IN_A_ROOM,
   RIDER_BODY_SAVED,
   riderBodySaveFailure,
 } from './SettingsView';
@@ -144,6 +145,8 @@ describe('Settings with a rider-body port — #2839', () => {
     expect(offersFemale[0]?.getAttribute('name')).toBe('oyl-rider-body');
     // Kept visible rather than behind the ⓘ: it is about a health input.
     expect(document.body.textContent).toContain(RIDER_BODY_IS_ONE_CHOICE);
+    // The owner's room-privacy ruling of 2026-11-20: who else sees the rider.
+    expect(document.body.textContent).toContain(RIDER_BODY_SEEN_IN_A_ROOM);
     expectClean('Settings, with the rider choice and the calorie panel');
   });
 

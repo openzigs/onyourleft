@@ -991,9 +991,10 @@ describe('the chosen rider reaches the ride (#2839)', () => {
     vi.stubGlobal('cancelAnimationFrame', () => undefined);
     const harness = createStoreHarness();
     await seedAthletes(harness);
-    await harness.write(async (store) =>
-      store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1985 }),
-    );
+    await harness.write(async (store) => {
+      await store.setAthleteRider(ATHLETE_A, 'male');
+      await store.setAthleteBirthYear(ATHLETE_A, 1985);
+    });
     const drawn: (string | undefined)[] = [];
     const renderer: GameRenderer = {
       loadRealisticWorld: () => Promise.reject(new Error('not chosen')),
