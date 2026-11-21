@@ -12,7 +12,7 @@
   "round": {
     "houses": 7,
     "throwWindow": {
-      "beforeMetres": 20,
+      "beforeMetres": 18,
       "afterMetres": 1
     },
     "hazardsPerKilometre": {

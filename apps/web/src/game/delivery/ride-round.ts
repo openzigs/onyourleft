@@ -56,9 +56,10 @@
  *
  * ## A house is missed when its window has closed behind the rider
  *
- * `throw.ts` §`THROW_WINDOW_AFTER_METRES` says where a house's window closes
- * (widened by the assist's {@link ASSISTED_THROW_SCALE}), and that is where a
- * house still expecting a parcel is counted missed — but not while a parcel
+ * The round's window ({@link DeliveryRide.throwWindow}: `throw.ts`
+ * §`THROW_WINDOW_AFTER_METRES`, or a level's own since #2931) says where a
+ * house's window closes (widened by the assist's {@link ASSISTED_THROW_SCALE}),
+ * and that is where a house still expecting a parcel is counted missed — but not while a parcel
  * thrown to it from inside its window is still in the air, because that
  * parcel may yet land on the doorstep. Every parcel lands within
  * `PARCEL_FLIGHT_SECONDS`, so the wait is bounded.
@@ -109,10 +110,12 @@
  * apart from the week ({@link DeliveryRide.onLevel}, ADR 0065 D-9.3): its end
  * is never written to `delivery-progress.ts`. Reached, its end keeps the
  * level finished instead ({@link keepLevelFinished}, #2363, D-9), which opens
- * the next level in the picker. The level's throw window is not
- * read yet: every shipped level asks for `throw.ts`' own, the widest a level
- * may (`level-file.ts`), and reading it, then narrowing levels 3 to 6, is
- * #2931 (#2367 drew those levels and added no logic). Its mailbox and no-delivery shares are read
+ * the next level in the picker. Since #2931 its throw window is read
+ * ({@link DeliveryRide.throwWindow}): the throw's test, the line a house is
+ * missed at and where {@link nextHouse} counts down to are all the level's,
+ * no wider than `throw.ts`' own (`level-file.ts`), and the assist's wider
+ * windows scale its closing edge as they scale the default's. A rider's own
+ * route keeps `throw.ts`' own. Its mailbox and no-delivery shares are read
  * (#2365): the pick makes that share of its houses mailboxes at the kerb, and
  * that share houses that must not get a parcel, apart from the round
  * ({@link DeliveryRide.noDeliveryTargets}); a parcel one catches takes
@@ -165,6 +168,7 @@ import {
   type WeekProgress,
 } from './round';
 import { LANE_OFFSETS_METRES, startSteer, stepSteer, type SteerState } from './steer';
+import type { ThrowIntent } from './throw-input';
 import {
   drawRoundSeed,
   pickRoundTargets,
@@ -174,15 +178,17 @@ import {
 import {
   ASSISTED_THROW_SCALE,
   CARRIAGEWAY_HALF_WIDTH_METRES,
+  DEFAULT_THROW_WINDOW,
   DELIVERY_TICK_SECONDS,
+  insideThrowWindow,
   NO_DELIVERY_SCORE_DELTA,
   NO_PARCELS,
   stepThrows,
-  THROW_WINDOW_AFTER_METRES,
-  THROW_WINDOW_BEFORE_METRES,
+  throwSideFor,
   type ThrowSide,
   type ThrowState,
   type ThrowTarget,
+  type ThrowWindow,
 } from './throw';
 
 /** A Delivery round being ridden, in memory for the ride only. */
@@ -203,6 +209,13 @@ export interface DeliveryRide {
   readonly score: number;
   /** The assist's wider windows (#1813), for the throw and for the misses. */
   readonly widerWindows: boolean;
+  /**
+   * The round's throw window, before the assist widens it (#2931): a level's
+   * own (`level-file.ts` §`LevelRound.throwWindow`), or `throw.ts`
+   * §`DEFAULT_THROW_WINDOW` on a rider's own route. The throw, the misses and
+   * {@link nextHouse} all read it.
+   */
+  readonly throwWindow: ThrowWindow;
   /** Where the rider has steered across the road (#1820), stepped on every step that ran. */
   readonly steer: SteerState;
   /** The rider's distance after the last step that ran, metres. */
@@ -274,7 +287,9 @@ export interface DeliveryRideStart {
    */
   readonly level?:
     | (Pick<LevelRound, 'houses' | 'hazardsPerKilometre'> &
-        Partial<Pick<LevelRound, 'mailboxShare' | 'noDeliveryShare' | 'weather' | 'light'>> & {
+        Partial<
+          Pick<LevelRound, 'mailboxShare' | 'noDeliveryShare' | 'weather' | 'light' | 'throwWindow'>
+        > & {
           readonly lengthMetres: number;
           /** The level's id (#2363): its round's end opens the next level (ADR 0065 D-9). */
           readonly id: string;
@@ -342,6 +357,8 @@ export function startDeliveryRide(input: DeliveryRideStart): DeliveryRide | unde
     changes: [],
     score: 0,
     widerWindows: assist.widerWindows,
+    // #2931: a level's own window; a rider's own route keeps the throw's.
+    throwWindow: input.level?.throwWindow ?? DEFAULT_THROW_WINDOW,
     steer: startSteer(input.lineOffset),
     along: input.riderDistance,
     outcome: undefined,
@@ -391,28 +408,22 @@ export interface DeliveryRideStepped {
   readonly noDeliveries: number;
 }
 
-/** The throw left the rider inside the target's window: `throw.ts`' own test, restated. */
-function inWindow(launchAlong: number, target: ThrowTarget, scale: number): boolean {
-  return (
-    launchAlong >= target.along - THROW_WINDOW_BEFORE_METRES &&
-    launchAlong <= target.along + THROW_WINDOW_AFTER_METRES * scale
-  );
-}
-
 /** Every house whose window has closed behind the rider with no parcel still able to reach it, missed. */
 function recordMisses(
   round: Round,
   throws: ThrowState,
   targets: readonly ThrowTarget[],
   along: number,
+  window: ThrowWindow,
   scale: number,
 ): Round {
   let settled = round;
   for (const target of targets) {
     if (settled.houses[target.position] !== 'expecting') continue;
-    if (along <= target.along + THROW_WINDOW_AFTER_METRES * scale) continue;
+    if (along <= target.along + window.afterMetres * scale) continue;
     const coming = throws.inFlight.some(
-      (parcel) => parcel.side === target.side && inWindow(parcel.launchAlong, target, scale),
+      (parcel) =>
+        parcel.side === target.side && insideThrowWindow(parcel.launchAlong, target, window, scale),
     );
     if (!coming) settled = recordMiss(settled, target.position);
   }
@@ -451,6 +462,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
       ...(tick === 1 && step.throwTo !== undefined ? { throwTo: step.throwTo } : {}),
       widerWindows: ride.widerWindows,
       noDelivery: ride.throwNoDelivery,
+      window: ride.throwWindow,
     });
     thrown ||= thrownNow.thrown;
     throws = thrownNow.state;
@@ -492,7 +504,7 @@ export function stepDeliveryRide(ride: DeliveryRide, step: DeliveryRideStep): De
     }
     changes.push(...obstaclesNow.crashes);
     crashes += obstaclesNow.crashes.length;
-    round = recordMisses(thrownNow.round, throws, ride.throwTargets, at, scale);
+    round = recordMisses(thrownNow.round, throws, ride.throwTargets, at, ride.throwWindow, scale);
     if (roundTally(round).expecting === 0) outcome = endRound(ride.week, round);
   }
   return {
@@ -525,7 +537,7 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
   const scale = ride.widerWindows ? ASSISTED_THROW_SCALE : 1;
   return endRound(
     ride.week,
-    recordMisses(ride.round, NO_PARCELS, ride.throwTargets, ride.along, scale),
+    recordMisses(ride.round, NO_PARCELS, ride.throwTargets, ride.along, ride.throwWindow, scale),
   );
 }
 
@@ -541,7 +553,7 @@ export function endDeliveryRide(ride: DeliveryRide): RoundOutcome {
  * the countdown pointed the rider at the one place the house cannot be seen,
  * and a parcel thrown there is thrown late. It now counts down to where the
  * house's throw window opens (`throw.ts` §`THROW_WINDOW_BEFORE_METRES`, 20 m
- * before it), and reaches nought there; from there until the window closes
+ * before it, or a level's own since #2931), and reaches nought there; from there until the window closes
  * the HUD says to throw (the owner's ruling of 2026-11-12 on #2513).
  */
 export interface NextHouse {
@@ -559,12 +571,12 @@ export interface NextHouse {
  * The next house still expecting a parcel, in route order, from where the
  * rider is after the last step that ran — #2453. A house the rider is level
  * with or has just passed stays the next one, at nought metres, until its
- * window closes behind them and the round counts it missed (`throw.ts`
- * §`THROW_WINDOW_AFTER_METRES`): it can still be delivered to. `undefined`
- * when no house on the round is still expecting one. Its distance is to the
- * window's opening edge, {@link THROW_WINDOW_BEFORE_METRES} before the house
- * (#2513), which the assist's wider windows do not move (`throw.ts` §"Wider
- * windows").
+ * window closes behind them and the round counts it missed
+ * ({@link DeliveryRide.throwWindow}'s closing edge): it can still be delivered
+ * to. `undefined` when no house on the round is still expecting one. Its
+ * distance is to the window's opening edge, the round's `beforeMetres` before
+ * the house (#2513; a level's own since #2931), which the assist's wider
+ * windows do not move (`throw.ts` §"Wider windows").
  */
 export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   let next: DeliveryTarget | undefined;
@@ -575,8 +587,25 @@ export function nextHouse(ride: DeliveryRide): NextHouse | undefined {
   if (next === undefined) return undefined;
   return {
     side: next.side === 1 ? 'right' : 'left',
-    metres: Math.max(0, next.distance - THROW_WINDOW_BEFORE_METRES - ride.along),
+    metres: Math.max(0, next.distance - ride.throwWindow.beforeMetres - ride.along),
   };
+}
+
+/**
+ * The side a throw the rider asked for goes to on this round (#1810), or
+ * `undefined` for *the next house* when none is left: `throw.ts`
+ * §`throwSideFor` over the round as it stands, where a house is behind once
+ * the round's own window ({@link DeliveryRide.throwWindow}, a level's since
+ * #2931) has closed past it. `GameView` calls it when the HUD's throw control
+ * hands it an intent.
+ */
+export function throwSideOn(ride: DeliveryRide, intent: ThrowIntent): ThrowSide | undefined {
+  return throwSideFor(intent, {
+    targets: ride.throwTargets,
+    round: ride.round,
+    along: ride.along,
+    window: ride.throwWindow,
+  });
 }
 
 /**
