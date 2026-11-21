@@ -8,6 +8,7 @@
 
 import {
   MAX_PLACES_PER_TILE,
+  MAX_POIS_PER_TILE,
   MAX_RINGS_PER_POLYGON,
   MAX_TILE_BYTES,
   MAX_FEATURES_PER_LAYER,
@@ -226,6 +227,31 @@ export function placesTileOf(count: number): Uint8Array {
       features: [{ type: 3, tags: { kind: 'building' }, geometry: square }],
     },
     { name: 'places', features },
+  ]);
+}
+
+/**
+ * #2975: one building, then `count` POIs inside it, the first
+ * `MAX_POIS_PER_TILE` bakeries and every one after a fuel station. A fuel
+ * station outranks a shop, so a decoder that read past the bound shows it in
+ * the footprint's class.
+ */
+export function poisTileOf(count: number): Uint8Array {
+  const features: FeatureSpec[] = [];
+  for (let k = 0; k < count; k++) {
+    features.push({
+      type: 1,
+      tags: { kind: k < MAX_POIS_PER_TILE ? 'bakery' : 'fuel' },
+      geometry: points([[110 + (k % 180), 110 + Math.floor(k / 180) * 4]]),
+    });
+  }
+  return encodeTile([
+    EARTH,
+    {
+      name: 'buildings',
+      features: [{ type: 3, tags: { kind: 'building' }, geometry: square }],
+    },
+    { name: 'pois', features },
   ]);
 }
 

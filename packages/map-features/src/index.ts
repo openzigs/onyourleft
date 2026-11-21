@@ -13,6 +13,7 @@ export {
   DEFAULT_DECODE_LIMITS,
   MAX_FEATURES_PER_LAYER,
   MAX_PLACES_PER_TILE,
+  MAX_POIS_PER_TILE,
   MAX_RINGS_PER_POLYGON,
   MAX_TILE_BYTES,
   MAX_VERTICES_PER_FEATURE,
@@ -60,6 +61,10 @@ export {
   OPEN_ACCESS_VALUES,
   OTHER_ROAD_KIND,
   OTHER_STREET_KIND_DETAILS,
+  POI_CLASS_OF_KIND,
+  POI_CLASS_RANK,
+  POI_CLASSES,
+  POI_REACH_METRES,
   READ_LAYERS,
   ROOF_DIRECTION_STEP_DEGREES,
   ROOF_MATERIALS,
@@ -70,6 +75,7 @@ export {
   WATER_LINE_KINDS,
   type BuildingFieldName,
   type BuildingFieldRule,
+  type PoiClass,
 } from './schema';
 export type {
   BuildingFeature,

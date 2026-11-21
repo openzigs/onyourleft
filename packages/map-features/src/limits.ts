@@ -47,6 +47,12 @@ export interface DecodeLimits {
    * decoder stops reading `places` at it, and the tile's other layers stand.
    */
   readonly maxPlacesPerTile: number;
+  /**
+   * POI points of a kept class matched from one tile (#2975). Not a refusal,
+   * as {@link maxPlacesPerTile} is not: the decoder stops reading `pois` at
+   * it, and the tile's footprints stand.
+   */
+  readonly maxPoisPerTile: number;
 }
 
 /**
@@ -95,6 +101,20 @@ export const MAX_RINGS_PER_POLYGON = 256;
  */
 export const MAX_PLACES_PER_TILE = 768;
 
+/**
+ * 2,048 (#2975). Counted over the points whose `kind` is one of
+ * `schema.ts` §`POI_CLASS_OF_KIND`'s, not over the layer: on 2026-11-21, of
+ * nine z15 tiles of `basemap-us-oyl-20261031` (five downtowns, two main
+ * streets, two suburban strips), the densest — midtown Manhattan, 2,584
+ * points in all — held 754 of those, 435 places to eat or drink and 319
+ * shops; the next was 327. Past it the decoder **stops**, as it does for
+ * places: the points after it are dropped, and the tile is not refused, since
+ * a shopfront is a cue and worth less than the footprints it would dress. The
+ * layer's own feature count is still held to {@link MAX_FEATURES_PER_LAYER},
+ * 7.7 times the 2,584.
+ */
+export const MAX_POIS_PER_TILE = 2_048;
+
 /** The limits a caller gets when it names none. */
 export const DEFAULT_DECODE_LIMITS: DecodeLimits = {
   maxBytes: MAX_TILE_BYTES,
@@ -103,4 +123,5 @@ export const DEFAULT_DECODE_LIMITS: DecodeLimits = {
   maxVerticesPerTile: MAX_VERTICES_PER_TILE,
   maxRingsPerPolygon: MAX_RINGS_PER_POLYGON,
   maxPlacesPerTile: MAX_PLACES_PER_TILE,
+  maxPoisPerTile: MAX_POIS_PER_TILE,
 };

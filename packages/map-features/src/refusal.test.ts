@@ -16,6 +16,7 @@ const UNLIMITED: DecodeLimits = {
   maxVerticesPerTile: Number.POSITIVE_INFINITY,
   maxRingsPerPolygon: Number.POSITIVE_INFINITY,
   maxPlacesPerTile: Number.POSITIVE_INFINITY,
+  maxPoisPerTile: Number.POSITIVE_INFINITY,
 };
 
 /** Every maximal run of digits in a string. */

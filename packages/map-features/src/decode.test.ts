@@ -30,7 +30,11 @@ import {
   PLACE_SENTINEL,
   placesTile,
   placesTileOf,
+  POI_FIXTURE_BUILDINGS,
+  POI_SENTINEL,
   POISON,
+  poisTile,
+  poisTileOf,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   ROAD_FIELD_FIXTURE_STREETS,
@@ -53,6 +57,7 @@ import {
   DEFAULT_DECODE_LIMITS,
   MAX_FEATURES_PER_LAYER,
   MAX_PLACES_PER_TILE,
+  MAX_POIS_PER_TILE,
   MAX_VERTICES_PER_TILE,
 } from './limits';
 import {
@@ -60,6 +65,7 @@ import {
   BUILDING_FIELD_RULES,
   NO_BUILDING_FIELDS,
   NO_ROAD_FIELDS,
+  POI_CLASSES,
   type BuildingFieldName,
 } from './schema';
 import type { BuildingFeature, DecodedTile, DecodeRefusal, StreetRoadFields } from './types';
@@ -320,6 +326,8 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'access',
         'isLink',
         'roadValuesDefaulted',
+        // #2975: a footprint's POI class, and nothing else of a POI.
+        'poi',
         // #1789: the building fields, from the one list.
         ...BUILDING_FIELD_NAMES,
       ];
@@ -396,6 +404,52 @@ describe('decodeTile reads places: the kind and the rank, never the name (#1632,
   });
 });
 
+describe('decodeTile reads POIs: a class on the footprint, never a name, a brand or a point (#2975)', () => {
+  it('gives each footprint the class of the POI it holds or stands beside, and none to the rest', () => {
+    const tile = decoded(poisTile());
+    expect(tile.buildings.map((b) => [b.kind, b.poi])).toStrictEqual(
+      POI_FIXTURE_BUILDINGS.map((b) => [b.kind, b.poi]),
+    );
+  });
+
+  it('keeps the footprints as they were: only `poi` is added, and a footprint with none has no key', () => {
+    const tile = decoded(poisTile());
+    const bare = tile.buildings.find((b) => b.poi === undefined);
+    expect(bare !== undefined && 'poi' in bare).toBe(false);
+    for (const [index, building] of tile.buildings.entries()) {
+      expectRingAt(building.rings[0] as Float32Array, POI_FIXTURE_BUILDINGS[index]?.rings[0] ?? []);
+      expect(building.heightMetres).toBe(6);
+    }
+  });
+
+  it('carries no name, brand, kind_detail, wikidata or point: the sentinel is nowhere in the result', () => {
+    const tile = decoded(poisTile());
+    // Not vacuous: the sentinel's POIs were matched.
+    expect(tile.buildings.filter((b) => b.poi !== undefined)).toHaveLength(5);
+    const text = JSON.stringify(tile);
+    expect(text).not.toContain(POI_SENTINEL);
+    expect(Object.keys(tile)).not.toContain('pois');
+  });
+
+  it('a tile with no pois layer, or only a park in it, gives no footprint a class', () => {
+    expect(decoded(buildingFieldsTile()).buildings.every((b) => b.poi === undefined)).toBe(true);
+    expect(decoded(residentialBlockTile()).buildings.every((b) => b.poi === undefined)).toBe(true);
+  });
+
+  it(`stops at ${String(MAX_POIS_PER_TILE)} POIs a tile, and the tile is not refused`, () => {
+    // Every POI past the bound is a fuel station, which would outrank the bakeries.
+    const over = decoded(poisTileOf(MAX_POIS_PER_TILE + 5));
+    expect(over.buildings.map((b) => b.poi)).toStrictEqual(['shop']);
+    // Control: under a bound one higher, the first fuel station is read and wins.
+    const lifted = decodeTile(poisTileOf(MAX_POIS_PER_TILE + 5), FIXTURE_TILE, FIXTURE_FRAME, {
+      ...DEFAULT_DECODE_LIMITS,
+      maxPoisPerTile: MAX_POIS_PER_TILE + 1,
+    });
+    if ('reason' in lifted) throw new Error(lifted.reason);
+    expect(lifted.buildings.map((b) => b.poi)).toStrictEqual(['fuel']);
+  });
+});
+
 /** A footprint's building fields alone, by name. */
 function fieldsOf(building: BuildingFeature | undefined): Record<string, unknown> {
   return Object.fromEntries(
@@ -439,7 +493,9 @@ describe('decodeTile reads the building fields, whitelisted and clamped (#1789)'
     let set = 0;
     for (const tile of tiles) {
       for (const building of tile.buildings) {
-        const extra = Object.keys(building).filter((key) => !base.includes(key));
+        // #2975: a footprint's POI class, where it has one, is one of the decoder's three.
+        if ('poi' in building) expect(POI_CLASSES as readonly unknown[]).toContain(building.poi);
+        const extra = Object.keys(building).filter((key) => !base.includes(key) && key !== 'poi');
         expect(extra.sort()).toStrictEqual([...BUILDING_FIELD_NAMES].sort());
         for (const name of extra as BuildingFieldName[]) {
           const value: unknown = building[name];
