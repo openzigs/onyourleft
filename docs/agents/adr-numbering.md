@@ -12,6 +12,13 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0092 is [ADR 0092](../adr/0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md)**, taken by
+  [#2835](https://github.com/openzigs/onyourleft/issues/2835) on 2026-11-20, in its pull request
+  #2864, for the AI pacer's start riding from the rider's own effort, below #92's 80 % floor when the
+  rider is, for the first 30 s; **Accepted** the same day on the owner's ruling on #2864. It
+  supersedes in part ADR 0072 D-2.2 and ADR 0083 D-3.1 and D-7; each gained one dated
+  `## Amendments` entry pointing to it. The next free number is **0093**; the entry below that
+  calls 0092 free was written before it was taken.
   ⚠️ **0089 is [ADR 0089](../adr/0089-the-chase-camera-follows-the-rolling-route-in-an-open-world-ride.md)**,
   taken by [#2888](https://github.com/openzigs/onyourleft/issues/2888) on 2026-11-19 for the fixed
   chase camera in an open-world ride, which follows the rolling route through a junction turn and a

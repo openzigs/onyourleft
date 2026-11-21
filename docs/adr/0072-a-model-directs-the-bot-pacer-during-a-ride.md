@@ -490,3 +490,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-10 and on [#2864](https://github.com/openzigs/onyourleft/pull/2864), so the previous entry's *"Proposed"* no longer holds. Its R-7 also replaces R-8's
   switch and status wording: the switch reads *"Let the AI on your server coach you through the
   pacer"* and, once agreed, *"The AI will coach you on this ride."* This ADR's body is unchanged.
+- **2026-11-20** — **D-2.2 is superseded in part by [ADR 0092](0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md)**, accepted on the owner's
+  ruling of that day on [#2864](https://github.com/openzigs/onyourleft/pull/2864#issuecomment-7052547100)
+  (*"The pacer starts alongside the rider at the rider's speed and builds to its target over about
+  30 s"*). For the first 30 s of a directed ride the pacer ramps from the rider's own effort, which
+  may be below 80 %, down to 0; from 30 s on the envelope is 80 % to 110 % as before, and never above
+  110 % at any time. So the earlier entries' *"the envelope does not move"* holds from 30 s on only.
+  This ADR's body is unchanged.

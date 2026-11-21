@@ -332,3 +332,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   them is a repeat too (`PACER_SAY_SAME_SHARE`); the model is still sent the last three.
   `MODEL_PACER_CODE_VERSION` is **3**, so D-5.3's *"is 2"* is no longer true; a version 2 log, from
   preview builds only, is not replayed under 3 (ADR 0072 D-5). The trainer is unchanged (D-7).
+- **2026-11-20** — **D-3.1, and D-7's *"The envelope"*, are superseded in part by
+  [ADR 0092](0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md)**, accepted on the owner's ruling 1 of that day on #2864. The previous entry's
+  start below 80 % is that ADR's decision, not this ADR's: ADR 0072 D-2.2's envelope gives way for
+  the first 30 s only, and this ADR's *Leaves standing* and D-7 hold from 30 s on. This ADR's body
+  is unchanged.
