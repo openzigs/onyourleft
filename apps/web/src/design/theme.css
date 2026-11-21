@@ -7130,6 +7130,93 @@ select.oyl-input {
 }
 
 /*
+ * The open-world start picker's map (#2889, the owner's ruling of
+ * 2026-11-20): moved by hand, the page's hero, with its few buttons on it.
+ *
+ * The frame is the buttons' containing block, so they sit in the map's top
+ * right corner without being inside MapLibre's container. The map is as tall
+ * as the screen leaves it under the title, the section heading and its line —
+ * inside the safe area: 412 px on the landscape tablet in the shell, 480 in a
+ * browser at 1280 × 800. Never under the 20 rem every other map has, or over
+ * 40 rem. `controls-first.browser.spec.ts` §"#2889" measures it
+ * against its frame, its buttons and its pin.
+ */
+.oyl-map-frame {
+  margin-top: var(--oyl-space-sm);
+  position: relative;
+}
+
+.oyl-map-frame > .oyl-map {
+  margin-top: 0;
+}
+
+.oyl-map--direct {
+  height: clamp(
+    20rem,
+    calc(100vh - 20rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)),
+    40rem
+  );
+}
+
+/* The canvas takes focus on this map; its ring is drawn inside the frame, which clips. */
+.oyl-map--direct canvas:focus-visible {
+  outline-offset: -4px;
+}
+
+.oyl-map__controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
+  position: absolute;
+  right: var(--oyl-space-sm);
+  top: var(--oyl-space-sm);
+  z-index: 1;
+}
+
+/* 48 px, the owner's ruling for this map's buttons; layout only, the colours are the variant's. */
+.oyl-map__control {
+  align-items: center;
+  display: inline-flex;
+  height: 3rem;
+  justify-content: center;
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0;
+  width: 3rem;
+}
+
+/*
+ * The start pin: a drop whose tip is the point, drawn by `map/maplibre.ts`
+ * §`pinGraphic`, in the accent with the surface round it and through it, as
+ * the waypoints' disc is. No text on it, so there is none to clip; on the
+ * picker it takes focus, and its name is its `aria-label`.
+ */
+.oyl-map__waypoint--pin {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  height: 2.75rem;
+  width: 2.0625rem;
+}
+
+.oyl-map__waypoint--pin svg {
+  display: block;
+  height: 100%;
+  overflow: visible;
+  width: 100%;
+}
+
+.oyl-map__pin-drop {
+  fill: var(--oyl-color-accent);
+  stroke: var(--oyl-color-surface);
+  stroke-width: 1.5;
+}
+
+.oyl-map__pin-hole {
+  fill: var(--oyl-color-surface);
+}
+
+/*
  * THE ILLUSTRATION KIT'S PAINT — #936, the menus' house style
  * (`docs/architecture.md` §"House style for the menus").
  *

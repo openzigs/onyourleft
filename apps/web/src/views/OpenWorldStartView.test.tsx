@@ -32,7 +32,7 @@ import {
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { STUB_MAP_CENTRE, stubMapPort, type StubMapPort } from '../map/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
-import { OpenWorldStartView, START_NEEDS_TILES_TEXT } from './OpenWorldStartView';
+import { OpenWorldStartView, PIN_NAME, START_NEEDS_TILES_TEXT } from './OpenWorldStartView';
 
 const BASEMAP = {
   archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
@@ -96,6 +96,28 @@ function hasButton(view: Mounted, label: string): boolean {
   return queryAll(view.container, 'button').some((each) => each.textContent?.trim() === label);
 }
 
+/** What the pin's live region last said (#2889): the region in the pin's own section. */
+function pinSaid(view: Mounted): string {
+  return (
+    view.container.querySelector('section[aria-labelledby="oyl-open-world-pin"] [role="status"]')
+      ?.textContent ?? ''
+  );
+}
+
+/** A focused pin's arrow key, as the adapter reports it (`maplibre.ts` §`PIN_KEYS`). */
+async function nudge(
+  picker: Picker,
+  direction: 'north' | 'south' | 'east' | 'west',
+): Promise<void> {
+  const handlers = picker.engine.created.at(-1)?.handlers;
+  if (handlers?.nudgeWaypoint === undefined) throw new Error('the picker hears no pin keys');
+  await act(async () => {
+    handlers.nudgeWaypoint?.('open-world-pin', direction);
+    await Promise.resolve();
+  });
+  await settle();
+}
+
 async function tap(picker: Picker, position: GeographicPosition): Promise<void> {
   const handlers = picker.engine.created.at(-1)?.handlers;
   if (handlers === undefined) throw new Error('the picker is not listening to its map');
@@ -111,8 +133,9 @@ describe('a pin on the map — #2889', () => {
     const picker = await open();
     await tap(picker, DENVER);
     expect(picker.engine.created.at(-1)?.waypoints.at(-1)).toEqual([
-      { id: 'open-world-pin', position: DENVER, label: 'S' },
+      { id: 'open-world-pin', position: DENVER, label: PIN_NAME, kind: 'pin' },
     ]);
+    expect(pinSaid(picker.view)).toBe('Pin dropped.');
     expect(picker.entry.take(), 'nothing is handed before the press').toBeUndefined();
     await activateWithKeyboard(button(picker.view, 'Start the ride'));
     expect(picker.entry.take()).toEqual({ position: DENVER, source: 'pin' });
@@ -132,12 +155,14 @@ describe('a pin on the map — #2889', () => {
     expect(picker.entry.take()).toEqual({ position: GOLDEN, source: 'pin' });
   });
 
-  it('places and nudges the pin by keyboard alone', async () => {
+  it('places the pin by keyboard, and moves it by the focused pin’s arrow keys', async () => {
     const picker = await open();
-    expect(hasButton(picker.view, 'Move the pin north'), 'no nudge before a pin').toBe(false);
     await activateWithKeyboard(button(picker.view, 'Put the pin at the map’s centre'));
-    await activateWithKeyboard(button(picker.view, 'Move the pin north'));
-    await activateWithKeyboard(button(picker.view, 'Move the pin east'));
+    expect(pinSaid(picker.view)).toBe('Pin put at the map’s centre.');
+    await nudge(picker, 'north');
+    expect(pinSaid(picker.view)).toBe('Pin moved north.');
+    await nudge(picker, 'east');
+    expect(pinSaid(picker.view)).toBe('Pin moved east.');
     await activateWithKeyboard(button(picker.view, 'Start the ride'));
     const taken = picker.entry.take();
     expect(taken?.source).toBe('pin');
@@ -150,9 +175,109 @@ describe('a pin on the map — #2889', () => {
     await tap(picker, LONDON);
     const text = picker.view.container.textContent ?? '';
     expect(text).toContain(describeStartRefusal('outside-coverage', 'pin'));
-    const status = picker.view.container.querySelector('[role="status"]')?.textContent ?? '';
+    const status = queryAll(picker.view.container, '[role="status"]')
+      .map((each) => each.textContent ?? '')
+      .join(' ');
     expect(status).not.toMatch(/\d/u);
     expect(hasButton(picker.view, 'Start the ride')).toBe(false);
+  });
+});
+
+describe('the map is moved by hand, with no rows of buttons — #2889, 2026-11-20', () => {
+  it('asks for a map moved by hand, named and described for the keyboard', async () => {
+    const picker = await open();
+    const direct = picker.engine.created.at(-1)?.options.direct;
+    expect(direct?.label).toBe('Map for placing the start of an open-world ride.');
+    const help = direct === undefined ? null : document.getElementById(direct.describedBy);
+    expect(help?.textContent).toContain('Arrow keys move the map');
+  });
+
+  it('has no text button rows: zoom, pin and recentre are the map’s own icon buttons', async () => {
+    const picker = await open();
+    for (const gone of [
+      'Move north',
+      'Move south',
+      'Move east',
+      'Move west',
+      'Whole route',
+      'Move the pin north',
+      'Move the pin south',
+      'Move the pin east',
+      'Move the pin west',
+    ]) {
+      expect(hasButton(picker.view, gone), gone).toBe(false);
+    }
+    expect(picker.view.container.querySelector('.oyl-map__moves')).toBeNull();
+    const cluster = picker.view.container.querySelector(
+      '[role="group"][aria-label="Map controls"]',
+    );
+    expect(
+      queryAll(cluster ?? picker.view.container, 'button').map((each) => each.textContent?.trim()),
+    ).toEqual(['Zoom in', 'Zoom out', 'Put the pin at the map’s centre', 'Recentre the map']);
+    for (const each of queryAll(cluster ?? picker.view.container, 'button')) {
+      expect(each.querySelector('svg[aria-hidden="true"]'), 'an icon').not.toBeNull();
+    }
+  });
+
+  it('zooms by its buttons, and recentres on the whole map or on the pin', async () => {
+    const picker = await open();
+    const record = picker.engine.created.at(-1);
+    await activateWithKeyboard(button(picker.view, 'Zoom in'));
+    await activateWithKeyboard(button(picker.view, 'Zoom out'));
+    await activateWithKeyboard(button(picker.view, 'Recentre the map'));
+    expect(record?.moves).toEqual(['zoom in', 'zoom out', 'fit']);
+    await tap(picker, DENVER);
+    await activateWithKeyboard(button(picker.view, 'Recentre the map'));
+    expect(record?.moves.at(-1)).toBe('show');
+    expect(record?.shown.at(-1)).toEqual(DENVER);
+  });
+
+  it('flies to a chosen route’s start, and puts the pin there', async () => {
+    const picker = await open();
+    const record = picker.engine.created.at(-1);
+    await activateWithKeyboard(button(picker.view, 'Lookout loop'));
+    const shown = record?.shown.at(-1);
+    expect(shown?.latitude).toBeCloseTo(GOLDEN.latitude, 6);
+    expect(shown?.longitude).toBeCloseTo(GOLDEN.longitude, 6);
+    expect(record?.waypoints.at(-1)?.[0]?.position).toEqual(shown);
+  });
+
+  it('flies to a chosen ride’s start', async () => {
+    const picker = await open();
+    const record = picker.engine.created.at(-1);
+    const spin = queryAll<HTMLButtonElement>(picker.view.container, 'button').find((each) =>
+      each.textContent?.startsWith('Morning spin,'),
+    );
+    if (spin === undefined) throw new Error('no past ride listed');
+    await activateWithKeyboard(spin);
+    await settle();
+    expect(record?.shown.at(-1)).toEqual(BOULDER);
+  });
+
+  it('says each pin move by direction, never by a number', async () => {
+    const picker = await open();
+    await tap(picker, DENVER);
+    const said: string[] = [pinSaid(picker.view)];
+    for (const direction of ['north', 'south', 'east', 'west'] as const) {
+      await nudge(picker, direction);
+      said.push(pinSaid(picker.view));
+    }
+    const handlers = picker.engine.created.at(-1)?.handlers;
+    await act(async () => {
+      handlers?.moveWaypoint('open-world-pin', GOLDEN);
+      await Promise.resolve();
+    });
+    await settle();
+    said.push(pinSaid(picker.view));
+    expect(said).toEqual([
+      'Pin dropped.',
+      'Pin moved north.',
+      'Pin moved south.',
+      'Pin moved east.',
+      'Pin moved west.',
+      'Pin moved.',
+    ]);
+    expect(said.join(' ')).not.toMatch(/\d/u);
   });
 });
 

@@ -88,12 +88,16 @@ describe('the open-world start picker is inside the accessibility gate — #2889
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
-  it('places and nudges the pin from the tab order, and audits clean with it placed', async () => {
+  it('places the pin and zooms from the tab order, and audits clean with it placed', async () => {
     const view = await open();
-    await activateWithKeyboard(tabStop(view, 'Put the pin at the map’s centre'));
-    for (const direction of ['north', 'south', 'east', 'west']) {
-      await activateWithKeyboard(tabStop(view, `Move the pin ${direction}`));
+    for (const name of ['Zoom in', 'Zoom out', 'Recentre the map']) {
+      await activateWithKeyboard(tabStop(view, name));
     }
+    await activateWithKeyboard(tabStop(view, 'Put the pin at the map’s centre'));
+    expect(
+      view.container.querySelector('section[aria-labelledby="oyl-open-world-pin"] [role="status"]')
+        ?.textContent,
+    ).toBe('Pin put at the map’s centre.');
     expect(tabStop(view, 'Start the ride')).toBeDefined();
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
@@ -116,7 +120,9 @@ describe('the open-world start picker is inside the accessibility gate — #2889
     const view = await open();
     await activateWithKeyboard(rideStop(view, 'Thames path'));
     await settle();
-    const status = view.container.querySelector('[role="status"]');
+    const status = view.container.querySelector(
+      'section[aria-labelledby="oyl-open-world-start"] [role="status"]',
+    );
     expect(status?.textContent).toContain('outside the map');
     expect(queryAll(view.container, 'button').map((each) => each.textContent)).not.toContain(
       'Start the ride',
