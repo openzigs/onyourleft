@@ -110,9 +110,9 @@
  * is never written to `delivery-progress.ts`. Reached, its end keeps the
  * level finished instead ({@link keepLevelFinished}, #2363, D-9), which opens
  * the next level in the picker. The level's throw window is not
- * read yet: both shipped levels ask for `throw.ts`' own, the widest a level
- * may (`level-file.ts`), and the later levels that tighten it read it
- * (#2367, which draws them). Its mailbox and no-delivery shares are read
+ * read yet: every shipped level asks for `throw.ts`' own, the widest a level
+ * may (`level-file.ts`), and reading it, then narrowing levels 3 to 6, is
+ * #2931 (#2367 drew those levels and added no logic). Its mailbox and no-delivery shares are read
  * (#2365): the pick makes that share of its houses mailboxes at the kerb, and
  * that share houses that must not get a parcel, apart from the round
  * ({@link DeliveryRide.noDeliveryTargets}); a parcel one catches takes

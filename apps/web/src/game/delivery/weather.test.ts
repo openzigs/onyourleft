@@ -10,6 +10,10 @@
  * real `ride-round.ts` and drawn by the real `in-view.ts`.
  */
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PreferenceStorage } from '../hud/announce-preference';
@@ -18,6 +22,7 @@ import { roadCorridor } from '../terrain';
 import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './assist-preference';
 import { deliveryTown } from './delivery-town-testing';
 import { deliveryInView, LOW_LIGHT_REVEAL_METRES } from './in-view';
+import { parseLevelFile, type LevelRound } from './levels/level-file';
 import { AVOIDABLE_FASTEST_METRES_PER_SECOND } from './obstacles';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './ride-round';
 import { DELIVERY_TICK_SECONDS, THROW_WINDOW_AFTER_METRES } from './throw';
@@ -63,7 +68,11 @@ afterEach(() => {
 
 type Weather = { readonly weather: 'clear' | 'rain'; readonly light: 'day' | 'dusk' };
 
-function onLevel(sky: Weather, storage = storageOf()): DeliveryRide {
+function onLevel(
+  sky: Weather,
+  storage = storageOf(),
+  round: Partial<Omit<LevelRound, 'throwWindow'>> = {},
+): DeliveryRide {
   const ride = startDeliveryRide({
     buildings: town.buildings,
     profile: town.profile,
@@ -77,6 +86,7 @@ function onLevel(sky: Weather, storage = storageOf()): DeliveryRide {
       lengthMetres: 2_000,
       // #2363: a level round names its level.
       id: 'test-level',
+      ...round,
       ...sky,
     },
   });
@@ -160,28 +170,53 @@ describe('in rain or at dusk a marker shows once the rider is closer — #2366, 
     }
   });
 
-  it(`leaves at least ${String(LEAST_SECONDS_TO_THROW)} s to throw once a marker shows, at the fastest avoidable speed, on every house at every seed`, () => {
-    const speed = AVOIDABLE_FASTEST_METRES_PER_SECOND;
-    let houses = 0;
-    for (let from = 0; from < 12; from += 1) {
-      seed = (from * 2_654_435_761) >>> 0;
-      const ride = onLevel({ weather: 'rain', light: 'dusk' });
-      const seen = firstSeen(ride, speed);
-      for (const target of ride.targets) {
-        const shown = seen.get(target.position);
-        expect(shown, 'a house never shown').toBeDefined();
-        // Hidden until within the reveal distance, a tick's ride of it.
-        expect(target.distance - (shown ?? 0)).toBeLessThanOrEqual(LOW_LIGHT_REVEAL_METRES);
-        expect(target.distance - (shown ?? 0)).toBeGreaterThan(
-          LOW_LIGHT_REVEAL_METRES - speed * DELIVERY_TICK_SECONDS,
-        );
-        // From then until its window closes behind the rider.
-        const seconds = (target.distance + THROW_WINDOW_AFTER_METRES - (shown ?? 0)) / speed;
-        expect(seconds).toBeGreaterThanOrEqual(LEAST_SECONDS_TO_THROW);
-        houses += 1;
+  /**
+   * #2367: every shipped level that rains or rides at dusk, its own round's
+   * parameters (houses, hazards, mailbox and no-delivery shares, sky) read for
+   * their shape only (ADR 0065 D-6.4, D-7.5) and ridden on the synthetic town.
+   */
+  const LEVEL_DATA = fileURLToPath(new URL('./levels/data/', import.meta.url));
+  const LOW_LIGHT_LEVELS = readdirSync(LEVEL_DATA)
+    .filter((name) => name.endsWith('.json'))
+    .map((name) =>
+      parseLevelFile(JSON.parse(readFileSync(join(LEVEL_DATA, name), 'utf8')), name.slice(0, -5)),
+    )
+    .filter((file) => file.round.weather === 'rain' || file.round.light === 'dusk');
+
+  for (const [label, sky, round] of [
+    ['rain and dusk', { weather: 'rain', light: 'dusk' }, {}] as const,
+    ...LOW_LIGHT_LEVELS.map(
+      (file) => [`${file.id}’s round`, file.round, { ...file.round, id: file.id }] as const,
+    ),
+  ]) {
+    it(`leaves at least ${String(LEAST_SECONDS_TO_THROW)} s to throw once a marker shows, at the fastest avoidable speed, on every house at every seed, ${label}`, () => {
+      const speed = AVOIDABLE_FASTEST_METRES_PER_SECOND;
+      let houses = 0;
+      for (let from = 0; from < 12; from += 1) {
+        seed = (from * 2_654_435_761) >>> 0;
+        const ride = onLevel({ weather: sky.weather, light: sky.light }, storageOf(), round);
+        const seen = firstSeen(ride, speed);
+        for (const target of ride.targets) {
+          const shown = seen.get(target.position);
+          expect(shown, 'a house never shown').toBeDefined();
+          // Hidden until within the reveal distance, a tick's ride of it.
+          expect(target.distance - (shown ?? 0)).toBeLessThanOrEqual(LOW_LIGHT_REVEAL_METRES);
+          expect(target.distance - (shown ?? 0)).toBeGreaterThan(
+            LOW_LIGHT_REVEAL_METRES - speed * DELIVERY_TICK_SECONDS,
+          );
+          // From then until its window closes behind the rider.
+          const seconds = (target.distance + THROW_WINDOW_AFTER_METRES - (shown ?? 0)) / speed;
+          expect(seconds).toBeGreaterThanOrEqual(LEAST_SECONDS_TO_THROW);
+          houses += 1;
+        }
       }
-    }
-    expect(houses).toBeGreaterThan(50);
+      expect(houses).toBeGreaterThan(50);
+    });
+  }
+
+  it('sweeps every shipped level that rains or rides at dusk — #2367', () => {
+    // Levels 5 and 6 (rain; rain and dusk).
+    expect(LOW_LIGHT_LEVELS.length).toBeGreaterThanOrEqual(2);
   });
 
   it('picks the same round, the same houses in the same order, in rain and at dusk as in clear daylight', () => {
