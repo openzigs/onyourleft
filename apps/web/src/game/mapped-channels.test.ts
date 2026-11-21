@@ -25,6 +25,7 @@ import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
 import {
   CHANNEL_DRAPE_METRES,
+  CHANNEL_NEAR_METRES,
   CHANNEL_SHAPES,
   MAXIMUM_CHANNELS,
   inWater,
@@ -245,6 +246,36 @@ describe('a mapped water line beside the road is drawn as a channel — #2974', 
     expect(terrainHeightAt(CLIMB, origin, seed, 1_200, 27, NO_LAND_CLASS)).toBeGreaterThan(
       bed + shape.depth / 2,
     );
+  });
+
+  it('keeps the road’s edge at the road’s height where a wide channel’s shore is at the kerb', () => {
+    // A river and a canal whose near shore is at the 4.5 m floor: their banks
+    // are wider than the 1 m from the road's edge out to it, and unheld would
+    // pull the edge's vertex, column 0 at 3.5 m on the right, under the tarmac.
+    const edges = (land: LandClassMask): number[] => {
+      const { vertices, fields } = frameAt(1_200, land).terrain.mesh;
+      const heights: number[] = [];
+      for (let at = 0; at * 2 < fields.length; at += 1) {
+        const along = fields[at * 2] as number;
+        const lateral = fields[at * 2 + 1] as number;
+        if (along < 1_000 || along > 1_400 || Math.abs(lateral - 3.5) > 1e-3) continue;
+        heights.push(vertices[at * 3 + 1] as number);
+      }
+      return heights;
+    };
+    const dry = edges(NO_LAND_CLASS);
+    expect(dry.length).toBeGreaterThan(10);
+    for (const kind of ['river', 'canal'] as const) {
+      const lateral = CHANNEL_NEAR_METRES + CHANNEL_SHAPES[kind].halfWidth;
+      const land = maskOf([beside(kind, lateral)]);
+      const channel = channelsOf(land)[0] as Lake;
+      expect(channel.near).toBeCloseTo(CHANNEL_NEAR_METRES, 3);
+      const wet = edges(land);
+      expect(wet).toHaveLength(dry.length);
+      wet.forEach((height, index) => {
+        expect(height).toBeCloseTo(dry[index] as number, 3);
+      });
+    }
   });
 
   it('stands nothing on its water or its bank, and its bank is the kind’s', () => {
