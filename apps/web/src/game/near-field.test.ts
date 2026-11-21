@@ -872,7 +872,10 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
     // ⚠️ Since #2422 the undamped camera stands on the drawn path, which turns
     // smoothly, so there is less for the damping to trail: 0.42 m at the
     // turnarounds, and over 0.1 m still in the hairpins and on the planner's
-    // route. The floors are below those, as before.
+    // route. ⚠️ Since #2989 the heading settles in 0.04 s, not 0.1 s, so it
+    // trails less again: 0.079 m and 0.082 m in the hairpins, 0.047 m on the
+    // planner's route and 0.15 m at the turnarounds. The floors are below
+    // those, as before.
     const most = (name: string): number => {
       let off = 0;
       for (const { rig, undamped } of ride(name)) {
@@ -881,14 +884,15 @@ describe('a ride — nothing the camera passes is cut by the near plane (#545)',
       return off;
     };
     expect(most('a level road through villages')).toBeLessThan(1e-6);
-    for (const name of ['a 20 m hairpin', 'a 20 m left-hand hairpin', "a planner's route"]) {
-      expect(most(name), name).toBeGreaterThan(0.1);
+    for (const name of ['a 20 m hairpin', 'a 20 m left-hand hairpin']) {
+      expect(most(name), name).toBeGreaterThan(0.05);
     }
+    expect(most("a planner's route")).toBeGreaterThan(0.03);
     for (const name of [
       'a turnaround, the legs 4 m apart',
       'a left-hand turnaround, the legs 4 m apart',
     ]) {
-      expect(most(name), name).toBeGreaterThan(0.3);
+      expect(most(name), name).toBeGreaterThan(0.1);
     }
   }, 600_000);
 
