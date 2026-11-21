@@ -4,7 +4,9 @@
  * **A lap race whose bots' moves a language model picks: the decision log,
  * when a logged decision is in force, and how a move is ridden** — #2710,
  * ADR 0071 D-4 and D-7, ADR 0073 D-2 to D-4, which supersedes ADR 0071 D-3.6
- * for a model race, and ADR 0074, which puts a sprint backstop behind it.
+ * for a model race, ADR 0074, which puts a sprint backstop behind it, and
+ * ADR 0081 (#2836), under which the model is asked about one bot at a time
+ * and its `sit-in` is no opinion.
  *
  * Written fresh for #2710 (ADR 0071 D-8.7): the spike's AGPL copies under
  * `apps/web/tools/model-tactics-spike/` are not moved.
@@ -13,14 +15,27 @@
  *
  * Every model call is one {@link ModelTacticsLogEntry}: the race time it was
  * asked at, the race time its answer **arrived** at, and the answer as checked
- * or the closed reason it was not applied. A decision applies from the first
- * tactics window (`archetype.ts` §`BOT_TACTICS_WINDOW_MS`) that starts after it
- * arrived ({@link modelTacticsAppliedAtMs}) and lapses
- * {@link MODEL_TACTICS_HOLD_MS} later unless the next replaces it
+ * or the closed reason it was not applied. Since bot-code version 7 a call is
+ * about ONE bot (ADR 0081 D-2), and a decision holds for the bot it names: it
+ * applies from the first tactics window (`archetype.ts`
+ * §`BOT_TACTICS_WINDOW_MS`) that starts after it arrived
+ * ({@link modelTacticsAppliedAtMs}) and lapses {@link MODEL_TACTICS_HOLD_MS}
+ * later unless the next decision for that bot replaces it
  * ({@link modelMovesInForce}). Race time only, never a wall clock, so a race
  * replays from the seed, the log, {@link LAP_RACE_BOT_CODE_VERSION} and the
  * rider's own input, to the bit. A seeded race is a model race with an empty
  * log.
+ *
+ * ## What explains a race afterwards (#2836, ADR 0081 D-5)
+ *
+ * The owner's race of 2026-11-18 could not be explained from its record
+ * without recomputing the field. So, beside what a replay reads, an entry
+ * keeps the bot asked about, its place, the cue words and the menu it was
+ * offered, and the model's reason word; and the record keeps each bot's
+ * racing style, personality and skill ({@link LapRaceModelRecord.bots}) and
+ * every change of move with who chose it ({@link LapRaceModelRecord.rode}):
+ * the model, the seeded tactics, or the sprint instinct. Numbers and closed
+ * words only. **No replay reads any of it.**
  *
  * ## How a move is ridden: through the tactics' own memory
  *
@@ -41,15 +56,19 @@
  *   choice (it cannot surge), and its power is `spendableWatts`' whatever the
  *   move. These are checked here, outside the seam.
  * - **Strategy rules**, behind ONE seam, {@link ModelMoveStrategy}.
- *   {@link ADR_0074_MOVE_STRATEGY} is what a model race rides since bot-code
- *   version 3: ADR 0073's freedom with ADR 0074's sprint-instinct backstop, so
+ *   {@link ADR_0081_MOVE_STRATEGY} is what a model race rides since bot-code
+ *   version 7: ADR 0074's, under which **a `sit-in` from the model is no
+ *   opinion**, so the bot's seeded tactics decide (and already send a climber
+ *   up a climb, `tactics.ts` §`BOT_TACTIC_CLIMB_GRADE_PERCENT`); the model
+ *   overrides them only with a move. {@link ADR_0074_MOVE_STRATEGY} (versions
+ *   3 to 6) is ADR 0073's freedom with a sprint-instinct backstop, so
  *   a bot the model has not sent on its kick by its launch distance launches
  *   its own, and every race gets a finish. {@link ADR_0073_MOVE_STRATEGY}
  *   (version 2) refuses nothing, and only carries a `follow` or `chase` of a
  *   racer who is not directly ahead through the moves a bot has (D-3.4).
  *   {@link ADR_0071_MOVE_STRATEGY} is ADR 0071 D-3.6's rules, which version 1
- *   rode. Both are kept behind the seam as the rules a superseding ADR would
- *   hand back, and no race uses either.
+ *   rode. The three are kept behind the seam as the rules a superseding ADR
+ *   would hand back, and no race uses any of them.
  *
  * ## The line as the bot misreads it (#2705, ADR 0073 D-3.5)
  *
@@ -80,12 +99,25 @@ import {
   type TacticMemory,
 } from './tactics';
 import type { BotRacePlan } from './plan';
-import type { BotSkill } from './strategy';
 import type { BotEnergy } from './wbal';
-import type { ModelTacticsInvalid, ModelTacticsMove, ModelTacticsTarget } from './model-tactics';
+import {
+  MODEL_RACING_STYLES,
+  MODEL_TACTICS_CUES,
+  MODEL_TACTICS_MENU_MOST,
+  MODEL_TACTICS_MOST_SEATS,
+  MODEL_TACTICS_REASONS,
+  type ModelRacingStyle,
+  type ModelTacticsCue,
+  type ModelTacticsInvalid,
+  type ModelTacticsMenuEntry,
+  type ModelTacticsMove,
+  type ModelTacticsReason,
+  type ModelTacticsTarget,
+} from './model-tactics';
+import { BOT_PERSONALITIES, BOT_SKILLS, type BotPersonality, type BotSkill } from './strategy';
 
 /**
- * **The bot-code version: 6** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074, ADR 0076).
+ * **The bot-code version: 7** (ADR 0071 D-4.3, ADR 0073 D-6, ADR 0074, ADR 0076, ADR 0081).
  * Version 1 rode ADR 0071 D-3.6's strategy rules; version 2 ADR 0073's, with
  * D-5's input; version 3 ADR 0073's with ADR 0074's sprint backstop; version 4
  * a field with bodies that fit their styles and a spread of strength, and an
@@ -94,17 +126,31 @@ import type { ModelTacticsInvalid, ModelTacticsMove, ModelTacticsTarget } from '
  * (#2759, ADR 0076 D-11), which changes the moves in force for a logged race;
  * version 6 version 5's on the road from the race's line rather than from the
  * route's start (#2800), which moves every bot on a race started off the
- * route's 0 over a hill and none started at it. Raised by any change that
+ * route's 0 over a hill and none started at it; version 7 (#2836, ADR 0081) a
+ * decision for one bot at a time, held for that bot alone, and a `sit-in` from
+ * the model left to the bot's seeded tactics. Raised by any change that
  * alters any bot's output for some seed and log — a tactic, a plan, the W′
  * model, the adapter, a seam's rule, a physics step. Stored beside the seed and
  * the log; a log recorded under another version is not replayed.
  * `apps/web` §`model-race-replay.test.ts` holds committed seeds and logs to
  * their outcomes, keyed by this number.
  */
-export const LAP_RACE_BOT_CODE_VERSION = 6;
+export const LAP_RACE_BOT_CODE_VERSION = 7;
 
-/** How often the model is asked, ms of race time: every **4 s**, spike 0039's draft (D-7). */
-export const MODEL_TACTICS_ASK_EVERY_MS = 4_000;
+/**
+ * The least time between two asks, ms of race time: **1 s** (#2836, ADR 0081
+ * D-2.1; 4 s for the whole field until bot-code version 7). One bot is asked
+ * about at a time, round the field, so with seven bots each is asked about
+ * every seven seconds or so. Only one call is ever out, so a call slower than
+ * this sets the pace itself ({@link modelTacticsNextAskAtMs}).
+ */
+export const MODEL_TACTICS_ASK_EVERY_MS = 1_000;
+
+/**
+ * The race time of the first ask, ms: **4 s** after Go, as it was (ADR 0071
+ * D-7): the start is the bots' own.
+ */
+export const MODEL_TACTICS_FIRST_ASK_MS = 4_000;
 
 /**
  * An answer that arrives more than this after it was asked is **late**, ms of
@@ -123,13 +169,15 @@ export const MODEL_TACTICS_ASK_EVERY_MS = 4_000;
 export const MODEL_TACTICS_LATE_MS = 8_000;
 
 /**
- * How long an applied decision holds, ms, unless the next replaces it first:
- * **10 s** (#2759, ADR 0076 D-11; spike 0039 drafted 5 s against a 5 s late
- * limit). A call that takes more than 4 s is followed by the next ask at the
- * next 4 s mark, so decisions arrive about 8 s apart; 10 s holds one until the
- * next lands, with 2 s for a slower one, and a late or missing answer still
- * lets the field fall back to its seeded tactics rather than ride a stale move
- * on.
+ * How long an applied decision holds for the bot it names, ms, unless that
+ * bot's next replaces it first: **10 s** (#2759, ADR 0076 D-11; spike 0039
+ * drafted 5 s against a 5 s late limit). Until bot-code version 7 it was set
+ * against one call for the whole field every 8 s or so. Since #2836 (ADR 0081
+ * D-2.5) a bot is asked about once a round of the field: seven bots at a call
+ * a second is 7 s, so 10 s holds a move until the bot's next answer with 3 s
+ * to spare, and a round slower than that lets the bot fall back to its seeded
+ * tactics rather than ride a stale move on. ⚠️ Unchanged, and to be set
+ * against the round measured on the owner's tablet (ADR 0081 R-3).
  */
 export const MODEL_TACTICS_HOLD_MS = 10_000;
 
@@ -180,6 +228,8 @@ export const MODEL_TACTICS_LOG_REASONS: readonly ModelTacticsLogReason[] = [
   'bad-move',
   'bad-target',
   'bad-effort',
+  'bad-reason',
+  'off-menu',
   'local_unavailable',
   'tactics_consent_required',
   'tactics_busy',
@@ -201,10 +251,25 @@ export interface ModelTacticsLogEntry {
   /** Race time its answer arrived at (or it was given up at), ms. */
   readonly arrivedAtMs: number;
   readonly outcome: ModelTacticsLogOutcome;
-  /** The moves, for a `decision` only. */
+  /**
+   * The moves, for a `decision` only. Since bot-code version 7 one move, the
+   * bot's the call was about; until then one for each bot the model named.
+   */
   readonly moves?: readonly ModelTacticsMove[];
   /** Why it applied nothing, for every other outcome. */
   readonly reason?: ModelTacticsLogReason;
+  /**
+   * What the call was about, since bot-code version 7 (#2836, ADR 0081 D-5):
+   * the seat asked about, its place in the race then, the cue words and the
+   * menu the device offered it. Kept so a race can be explained afterwards;
+   * no replay reads them.
+   */
+  readonly bot?: number;
+  readonly rank?: number;
+  readonly cues?: readonly ModelTacticsCue[];
+  readonly menu?: readonly ModelTacticsMenuEntry[];
+  /** The model's reason word, for a `decision` only (ADR 0081 D-3). Never its text. */
+  readonly why?: ModelTacticsReason;
 }
 
 /** The race time a decision that arrived at `arrivedAtMs` applies from: the next window's start. */
@@ -212,14 +277,22 @@ export function modelTacticsAppliedAtMs(arrivedAtMs: number): number {
   return (Math.floor(arrivedAtMs / BOT_TACTICS_WINDOW_MS) + 1) * BOT_TACTICS_WINDOW_MS;
 }
 
-/** The race time of the next ask after a call settled at `settledAtMs`: the next 4 s mark. */
-export function modelTacticsNextAskAtMs(settledAtMs: number): number {
-  return (Math.floor(settledAtMs / MODEL_TACTICS_ASK_EVERY_MS) + 1) * MODEL_TACTICS_ASK_EVERY_MS;
+/**
+ * The race time of the next ask after a call asked at `askedAtMs` settled at
+ * `settledAtMs`: as soon as it settled, and no sooner than
+ * {@link MODEL_TACTICS_ASK_EVERY_MS} after it was asked. So a model that
+ * answers inside a second is asked once a second, and a slower one as fast as
+ * it answers, with one call out at a time.
+ */
+export function modelTacticsNextAskAtMs(askedAtMs: number, settledAtMs: number): number {
+  return Math.max(settledAtMs, askedAtMs + MODEL_TACTICS_ASK_EVERY_MS);
 }
 
 /**
- * The moves in force at race time `atMs`, or `undefined` with none: the latest
- * `decision` applied at or before it, for {@link MODEL_TACTICS_HOLD_MS}. Any
+ * The moves in force at race time `atMs`, one a bot at most, or `undefined`
+ * with none: **for each bot, the move of the latest `decision` naming it**
+ * that applied at or before `atMs`, for {@link MODEL_TACTICS_HOLD_MS} (ADR
+ * 0081 D-2.5). A decision for one bot leaves every other bot's in force. Any
  * other outcome applies nothing. Reads the log and nothing else, so a replay
  * from the log finds the same moves at the same instant.
  */
@@ -227,17 +300,21 @@ export function modelMovesInForce(
   log: readonly ModelTacticsLogEntry[],
   atMs: number,
 ): readonly ModelTacticsMove[] | undefined {
-  let found: ModelTacticsLogEntry | undefined;
-  let foundFrom = Number.NEGATIVE_INFINITY;
+  const latest = new Map<number, { readonly move: ModelTacticsMove; readonly from: number }>();
   for (const entry of log) {
-    if (entry.outcome !== 'decision') continue;
+    if (entry.outcome !== 'decision' || entry.moves === undefined) continue;
     const from = modelTacticsAppliedAtMs(entry.arrivedAtMs);
-    if (from > atMs || from < foundFrom) continue;
-    found = entry;
-    foundFrom = from;
+    if (from > atMs) continue;
+    for (const move of entry.moves) {
+      const had = latest.get(move.bot);
+      if (had === undefined || from >= had.from) latest.set(move.bot, { move, from });
+    }
   }
-  if (found === undefined || atMs >= foundFrom + MODEL_TACTICS_HOLD_MS) return undefined;
-  return found.moves;
+  const inForce: ModelTacticsMove[] = [];
+  for (const { move, from } of latest.values()) {
+    if (atMs < from + MODEL_TACTICS_HOLD_MS) inForce.push(move);
+  }
+  return inForce.length === 0 ? undefined : inForce;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,9 +364,18 @@ export interface ModelMoveRide {
   readonly ride: BotTactic;
 }
 
-/** Why a strategy rule kept a bot on its seeded choice. */
+/**
+ * Why a strategy rule kept a bot on its seeded choice. `no-opinion` is ADR
+ * 0081's: the model said `sit-in`, which names no move to ride.
+ */
 export type ModelMoveStrategyRefusal =
-  'launch' | 'wbal-floor' | 'kick-closed' | 'flyer-closed' | 'attack-over' | 'target-not-ahead';
+  | 'launch'
+  | 'wbal-floor'
+  | 'kick-closed'
+  | 'flyer-closed'
+  | 'attack-over'
+  | 'target-not-ahead'
+  | 'no-opinion';
 
 /**
  * **The one strategy seam** (the owner's ruling of 2026-11-16 on #2710): every
@@ -359,6 +445,39 @@ export const ADR_0074_MOVE_STRATEGY: ModelMoveStrategy = (ask) => {
 };
 
 const BACKSTOP: ModelMoveRide = Object.freeze({ outcome: 'backstop', ride: 'kick' });
+
+/**
+ * **ADR 0081's strategy: ADR 0074's, under which the model's `sit-in` is no
+ * opinion** (#2836; the owner's ruling of 2026-11-18, *"yes fold these in"*).
+ * What a model race rides since bot-code version 7.
+ *
+ * On the owner's race of 2026-11-18 the model answered `sit-in` for five of
+ * seven bots in every answer, and {@link applyModelMoves} wrote each one over
+ * the bot's seeded tactics: the climber was held on a wheel up the climb its
+ * own tactics would have attacked on. So a `sit-in` from the model now
+ * **writes nothing**: the bot keeps its seeded choice (`no-opinion`), and
+ * `tactics.ts` §`decideTactic` decides for that window as it does in a
+ * seeded race, on its own terrain and inside its own rules. The model
+ * overrides the seeded tactics only with a move.
+ *
+ * - **A `sit-in` is `no-opinion` everywhere, the launch included.** So a bot
+ *   with a model `sit-in` in force rides exactly what it rides with no
+ *   decision in force, and a model that only ever says `sit-in` rides the
+ *   seeded race to the bit. Inside its launch the seeded tactics launch the
+ *   kick themselves, as they do in every seeded race: ADR 0074's instinct was
+ *   needed there because the `sit-in` used to be written over it.
+ * - **Every other move is {@link ADR_0074_MOVE_STRATEGY}'s**, so its sprint
+ *   instinct still stands behind a move the model names: inside its launch,
+ *   or holding a kick near the line, a bot sent on anything but its kick rides
+ *   its own kick (`backstop`). And a `follow` or `chase` of a racer behind is
+ *   still ridden as sitting in (`marking`), because there the model named a
+ *   move and a racer.
+ *
+ * The body's limits are outside the seam, as ever, and a seeded choice is
+ * capped by the same `wbal.ts` §`spendableWatts` as a model's.
+ */
+export const ADR_0081_MOVE_STRATEGY: ModelMoveStrategy = (ask) =>
+  ask.move === 'sit-in' ? 'no-opinion' : ADR_0074_MOVE_STRATEGY(ask);
 
 /**
  * ADR 0071 D-3.6's strategy rules, the ones bot-code version 1 rode. No race
@@ -440,9 +559,31 @@ export interface AppliedModelMoves<B extends ModelRaceBot> {
   readonly bots: readonly B[];
   /** One per racing bot whose window opens on this tick, in seat order; none mid-window. */
   readonly outcomes: readonly ModelMoveOutcome[];
+  /** The seat of each of {@link outcomes}, in the same order. */
+  readonly seats: readonly number[];
 }
 
 const NONE: readonly ModelMoveOutcome[] = Object.freeze([]);
+const NO_SEATS: readonly number[] = Object.freeze([]);
+
+/**
+ * Who chose a move a bot took up (#2836, ADR 0081 D-5): the `model`, when its
+ * move was written for the bot (as named, bridging or marking); the bot's
+ * sprint `instinct` (ADR 0074's backstop); or its `seeded` tactics, for every
+ * other outcome, a model's `sit-in` included.
+ */
+export type ModelMoveChooser = 'model' | 'seeded' | 'instinct';
+
+/** Every chooser, for a reader. */
+export const MODEL_MOVE_CHOOSERS: readonly ModelMoveChooser[] = ['model', 'seeded', 'instinct'];
+
+/** Who chose the move a bot rides in a window whose outcome was `outcome`. */
+export function modelMoveChooser(outcome: ModelMoveOutcome): ModelMoveChooser {
+  if (outcome === 'backstop') return 'instinct';
+  return outcome === 'applied' || outcome === 'bridging' || outcome === 'marking'
+    ? 'model'
+    : 'seeded';
+}
 
 /** The seat or `"rider"` of the racer directly ahead of `id` in `order`, or `null`. */
 function aheadOf(
@@ -479,19 +620,19 @@ function placeOf(
  * `bots` itself and allocates nothing (ADR 0067 D-6.4).
  *
  * @param seed - the race's own seed, which the misread line is drawn from.
- * @param strategy - the strategy rules (see the file comment); ADR 0074's unless given.
+ * @param strategy - the strategy rules (see the file comment); ADR 0081's unless given.
  */
 export function applyModelMoves<B extends ModelRaceBot>(
   race: ItemRaceState,
   bots: readonly B[],
   moves: readonly ModelTacticsMove[] | undefined,
   seed: number,
-  strategy: ModelMoveStrategy = ADR_0074_MOVE_STRATEGY,
+  strategy: ModelMoveStrategy = ADR_0081_MOVE_STRATEGY,
 ): AppliedModelMoves<B> {
   const window = Math.floor(race.atMs / BOT_TACTICS_WINDOW_MS);
   // Nothing to decide on a tick inside every bot's window: the common tick.
   if (bots.every((bot) => bot.plan === undefined || bot.tactics.window === window)) {
-    return { bots, outcomes: NONE };
+    return { bots, outcomes: NONE, seats: NO_SEATS };
   }
   // The racers still racing, the leader first, ties by id: `stepBotRace`'s order.
   const racing = race.racers
@@ -503,6 +644,7 @@ export function applyModelMoves<B extends ModelRaceBot>(
   const seats = new Map(bots.map((bot, seat) => [bot.id, seat]));
   const { laps, lapLengthMetres } = race.course;
   const outcomes: ModelMoveOutcome[] = [];
+  const decided: number[] = [];
   let changed = false;
   const next = bots.map((bot, seat): B => {
     const plan = bot.plan;
@@ -540,6 +682,7 @@ export function applyModelMoves<B extends ModelRaceBot>(
       }
     }
     outcomes.push(outcome);
+    decided.push(seat);
     if (
       (outcome !== 'applied' &&
         outcome !== 'bridging' &&
@@ -564,7 +707,7 @@ export function applyModelMoves<B extends ModelRaceBot>(
       },
     };
   });
-  return { bots: changed ? next : bots, outcomes };
+  return { bots: changed ? next : bots, outcomes, seats: decided };
 }
 
 // ---------------------------------------------------------------------------
@@ -581,8 +724,14 @@ const ENTRY_KEYS: ReadonlySet<string> = new Set([
   'outcome',
   'moves',
   'reason',
+  'bot',
+  'rank',
+  'cues',
+  'menu',
+  'why',
 ]);
 const MOVE_KEYS: ReadonlySet<string> = new Set(['bot', 'move', 'target', 'effort']);
+const MENU_KEYS: ReadonlySet<string> = new Set(['move', 'target']);
 
 const isTime = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -612,16 +761,64 @@ function moveOf(value: unknown): ModelTacticsMove | undefined {
   };
 }
 
+function menuEntryOf(value: unknown): ModelTacticsMenuEntry | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => !MENU_KEYS.has(key))) return undefined;
+  const { move, target } = value;
+  if (typeof move !== 'string' || !(BOT_TACTICS as readonly string[]).includes(move)) {
+    return undefined;
+  }
+  if (target !== undefined && target !== 'rider' && !isSeat(target)) return undefined;
+  return { move: move as BotTactic, ...(target === undefined ? {} : { target }) };
+}
+
+/** What an entry says its call was about (version 7 on), each absent or whole; `undefined` for anything else. */
+function askedOf(
+  value: Readonly<Record<string, unknown>>,
+): Pick<ModelTacticsLogEntry, 'bot' | 'rank' | 'cues' | 'menu'> | undefined {
+  const { bot, rank, cues, menu } = value;
+  if (bot !== undefined && !isSeat(bot)) return undefined;
+  if (rank !== undefined && !(isSeat(rank) && rank >= 1 && rank <= MODEL_TACTICS_MOST_SEATS + 1)) {
+    return undefined;
+  }
+  if (
+    cues !== undefined &&
+    !(
+      Array.isArray(cues) &&
+      cues.length <= MODEL_TACTICS_CUES.length &&
+      (cues as readonly unknown[]).every(
+        (cue) => typeof cue === 'string' && (MODEL_TACTICS_CUES as readonly string[]).includes(cue),
+      )
+    )
+  ) {
+    return undefined;
+  }
+  let offered: ModelTacticsMenuEntry[] | undefined;
+  if (menu !== undefined) {
+    if (!Array.isArray(menu) || menu.length > MODEL_TACTICS_MENU_MOST) return undefined;
+    const read = (menu as readonly unknown[]).map(menuEntryOf);
+    if (read.some((each) => each === undefined)) return undefined;
+    offered = read as ModelTacticsMenuEntry[];
+  }
+  return {
+    ...(bot === undefined ? {} : { bot }),
+    ...(rank === undefined ? {} : { rank }),
+    ...(cues === undefined ? {} : { cues: cues as ModelTacticsCue[] }),
+    ...(offered === undefined ? {} : { menu: offered }),
+  };
+}
+
 /**
  * One log entry read back from storage, whole or not at all: `undefined` for
  * anything that is not one this build wrote. A `decision` carries its moves
- * and no reason; every other outcome a reason and no moves.
+ * and no reason; every other outcome a reason and no moves. What the call was
+ * about, and a decision's reason word, are read where an entry has them: one
+ * from before bot-code version 7 has none.
  */
 export function readModelTacticsLogEntry(value: unknown): ModelTacticsLogEntry | undefined {
   if (!isRecord(value) || Object.keys(value).some((key) => !ENTRY_KEYS.has(key))) {
     return undefined;
   }
-  const { askedAtMs, arrivedAtMs, outcome, moves, reason } = value;
+  const { askedAtMs, arrivedAtMs, outcome, moves, reason, why } = value;
   if (!isTime(askedAtMs) || !isTime(arrivedAtMs) || arrivedAtMs < askedAtMs) return undefined;
   if (
     typeof outcome !== 'string' ||
@@ -629,19 +826,30 @@ export function readModelTacticsLogEntry(value: unknown): ModelTacticsLogEntry |
   ) {
     return undefined;
   }
+  const asked = askedOf(value);
+  if (asked === undefined) return undefined;
   if (outcome === 'decision') {
     if (reason !== undefined || !Array.isArray(moves)) return undefined;
     const read = (moves as readonly unknown[]).map(moveOf);
     if (read.some((each) => each === undefined)) return undefined;
+    if (
+      why !== undefined &&
+      !(typeof why === 'string' && (MODEL_TACTICS_REASONS as readonly string[]).includes(why))
+    ) {
+      return undefined;
+    }
     return {
       askedAtMs,
       arrivedAtMs,
       outcome,
       moves: read as ModelTacticsMove[],
+      ...asked,
+      ...(why === undefined ? {} : { why: why as ModelTacticsReason }),
     };
   }
   if (
     moves !== undefined ||
+    why !== undefined ||
     typeof reason !== 'string' ||
     !(MODEL_TACTICS_LOG_REASONS as readonly string[]).includes(reason)
   ) {
@@ -652,6 +860,7 @@ export function readModelTacticsLogEntry(value: unknown): ModelTacticsLogEntry |
     arrivedAtMs,
     outcome: outcome as ModelTacticsLogOutcome,
     reason: reason as ModelTacticsLogReason,
+    ...asked,
   };
 }
 
@@ -665,11 +874,23 @@ export function readModelTacticsLogEntry(value: unknown): ModelTacticsLogEntry |
  * at every race tick — what a replay needs, because the bots read the rider
  * (D-4.1). Never the model's text, and not the model input, which is
  * rederived from the rest (D-11 R-7). The instance keeps no copy (D-7).
+ *
+ * Since bot-code version 7 (#2836, ADR 0081 D-5) it also keeps what explains
+ * the race to somebody reading it afterwards, which no replay reads:
+ * {@link bots} and {@link rode}. Numbers and closed words only.
  */
 export interface LapRaceModelRecord {
   readonly version: number;
   readonly seed: number;
   readonly log: readonly ModelTacticsLogEntry[];
+  /** Who each bot is, by seat: its racing style, its personality and its skill. Absent before version 7. */
+  readonly bots?: readonly LapRaceModelBot[];
+  /**
+   * Every change of move, in race order: the bot, the move it took up, and who
+   * chose it. So "which moves were seeded" is read off, not recomputed. At
+   * most {@link LAP_RACE_MODEL_MOST_MOVES}. Absent before version 7.
+   */
+  readonly rode?: readonly LapRaceModelRode[];
   /** The rider at every race tick, one entry a tick in each list but `uses`. */
   readonly rider: {
     /** Effort distance after each tick, metres. */
@@ -683,13 +904,83 @@ export interface LapRaceModelRecord {
   };
 }
 
+/** One bot of a race with AI bots, as its record names it (#2836): closed words only. */
+export interface LapRaceModelBot {
+  readonly style: ModelRacingStyle;
+  readonly personality: BotPersonality;
+  readonly skill: BotSkill;
+}
+
+/** One change of move in a race with AI bots (#2836): when, which bot, to what, and who chose it. */
+export interface LapRaceModelRode {
+  /** Race time of the tick it took the move up on, ms. */
+  readonly atMs: number;
+  /** Its seat. */
+  readonly bot: number;
+  readonly move: BotTactic;
+  readonly by: ModelMoveChooser;
+}
+
 /**
  * The most race ticks a record holds: **four hours** at the race's 20 Hz. A
  * list longer is not one this build wrote.
  */
 export const LAP_RACE_MODEL_MOST_TICKS = 4 * 60 * 60 * 20;
 
-const RECORD_KEYS: ReadonlySet<string> = new Set(['version', 'seed', 'log', 'rider']);
+/**
+ * The most changes of move a record holds: **100 800**, every one of seven
+ * bots changing its move in every 1 s window of four hours, which no race
+ * comes near. A race stops appending there; a list longer is not one this
+ * build wrote.
+ */
+export const LAP_RACE_MODEL_MOST_MOVES = MODEL_TACTICS_MOST_SEATS * 4 * 60 * 60;
+
+const RECORD_KEYS: ReadonlySet<string> = new Set([
+  'version',
+  'seed',
+  'log',
+  'rider',
+  'bots',
+  'rode',
+]);
+const BOT_KEYS: ReadonlySet<string> = new Set(['style', 'personality', 'skill']);
+const RODE_KEYS: ReadonlySet<string> = new Set(['atMs', 'bot', 'move', 'by']);
+
+const isWord = (value: unknown, words: readonly string[]): boolean =>
+  typeof value === 'string' && words.includes(value);
+
+function recordBotOf(value: unknown): LapRaceModelBot | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => !BOT_KEYS.has(key))) return undefined;
+  const { style, personality, skill } = value;
+  return isWord(style, MODEL_RACING_STYLES) &&
+    isWord(personality, BOT_PERSONALITIES) &&
+    isWord(skill, BOT_SKILLS)
+    ? {
+        style: style as ModelRacingStyle,
+        personality: personality as BotPersonality,
+        skill: skill as BotSkill,
+      }
+    : undefined;
+}
+
+function rodeOf(value: unknown): LapRaceModelRode | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => !RODE_KEYS.has(key))) return undefined;
+  const { atMs, bot, move, by } = value;
+  return isTime(atMs) && isSeat(bot) && isWord(move, BOT_TACTICS) && isWord(by, MODEL_MOVE_CHOOSERS)
+    ? { atMs, bot, move: move as BotTactic, by: by as ModelMoveChooser }
+    : undefined;
+}
+
+/** A list read whole, each item by `each`, no longer than `most`; `undefined` for anything else. */
+function listOf<T>(
+  value: unknown,
+  most: number,
+  each: (item: unknown) => T | undefined,
+): readonly T[] | undefined {
+  if (!Array.isArray(value) || value.length > most) return undefined;
+  const read = (value as readonly unknown[]).map(each);
+  return read.some((item) => item === undefined) ? undefined : (read as T[]);
+}
 const RIDER_KEYS: ReadonlySet<string> = new Set([
   'effortDistances',
   'wattsPerKilogram',
@@ -724,6 +1015,11 @@ export function readLapRaceModelRecord(value: unknown): LapRaceModelRecord | und
   }
   const { version, seed, log, rider } = value;
   if (!isWhole(version) || version < 1 || !isWhole(seed) || !Array.isArray(log)) return undefined;
+  const bots =
+    value.bots === undefined ? [] : listOf(value.bots, MODEL_TACTICS_MOST_SEATS, recordBotOf);
+  const rode =
+    value.rode === undefined ? [] : listOf(value.rode, LAP_RACE_MODEL_MOST_MOVES, rodeOf);
+  if (bots === undefined || rode === undefined) return undefined;
   const entries = (log as readonly unknown[]).map(readModelTacticsLogEntry);
   if (entries.some((entry) => entry === undefined)) return undefined;
   if (!isRecord(rider) || Object.keys(rider).some((key) => !RIDER_KEYS.has(key))) return undefined;
@@ -750,5 +1046,7 @@ export function readLapRaceModelRecord(value: unknown): LapRaceModelRecord | und
     seed,
     log: entries as ModelTacticsLogEntry[],
     rider: { effortDistances, wattsPerKilogram, lanes, uses },
+    ...(value.bots === undefined ? {} : { bots }),
+    ...(value.rode === undefined ? {} : { rode }),
   };
 }

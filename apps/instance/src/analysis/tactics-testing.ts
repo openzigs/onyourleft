@@ -11,34 +11,13 @@ import type { ModelPacerInput, ModelTacticsInput } from '@onyourleft/domain';
 import type { IdentityInstance } from '../auth/identity-testing.ts';
 import type { TacticsLocal } from './tactics.ts';
 
-/** Seven bots three laps out, the rider fourth: spike 0039's shape, with no coordinate or name. */
+/**
+ * One bot's ask (#2836, ADR 0081): seven bots three laps out, the rider
+ * fourth, and the climber in seat 2 asked about on a climb, offered an attack,
+ * a follow of the bot ahead and sitting in. No coordinate and no name.
+ */
 export const TACTICS_INPUT: ModelTacticsInput = {
   laps: 3,
-  quietS: 40,
-  rider: { rank: 4, wPerKg: 3.1, ahead: 2, gapAheadM: 4.2, gapBehindM: 3.4, drafting: true },
-  bots: [0, 1, 2, 3, 4, 5, 6].map((seat) => ({
-    bot: seat,
-    style: (['breakaway', 'sprinter', 'climber', 'rouleur', 'opportunist'] as const)[seat % 5]!,
-    flat: 'average' as const,
-    climb: (['strong', 'average', 'weak'] as const)[seat % 3]!,
-    sprint: 'average' as const,
-    punch: 'average' as const,
-    rank: seat < 3 ? seat + 1 : seat + 2,
-    ahead: seat === 0 ? null : seat === 3 ? 'rider' : seat - 1,
-    aheadMove: seat === 0 || seat === 3 ? null : ('sit-in' as const),
-    gapAheadM: seat === 0 ? null : 2.5,
-    gapBehindM: seat === 6 ? null : 1.2,
-    wbal: 0.8,
-    blown: false,
-    drafting: seat !== 0,
-    move: 'sit-in' as const,
-    secondsInMove: 12,
-    lapsLeft: 3,
-    toLineM: 1_800,
-    launchM: 250,
-    gradeAheadPct: 1.5,
-    riderGapM: seat < 3 ? -4.2 : 3.4,
-  })),
   // #2794: a climb coming, a descent after it, and a flat finish.
   course: {
     climb: { inM: 400, lengthM: 600, avgPct: 6, maxPct: 9 },
@@ -46,6 +25,45 @@ export const TACTICS_INPUT: ModelTacticsInput = {
     lapLeftM: 1_800,
     lapClimbM: 38,
     finishPct: 0,
+  },
+  rider: { rank: 4, wPerKg: 3.1, ahead: 2, gapAheadM: 4, gapBehindM: 3, drafting: true },
+  field: [0, 1, 2, 3, 4, 5, 6].map((seat) => ({
+    bot: seat,
+    style: (['breakaway', 'sprinter', 'climber', 'rouleur', 'opportunist'] as const)[seat % 5]!,
+    rank: seat < 3 ? seat + 1 : seat + 2,
+    move: seat === 1 ? ('attack' as const) : ('sit-in' as const),
+    gapAheadM: seat === 0 ? null : 3,
+  })),
+  story: {
+    raceS: 130,
+    lapsLeft: 3,
+    quietS: 0,
+    moved: true,
+    away: { racers: 2, s: 40, gapM: 60 },
+    bunch: 'tiring',
+  },
+  you: {
+    bot: 2,
+    style: 'climber',
+    flat: 'average',
+    climb: 'strong',
+    sprint: 'weak',
+    punch: 'average',
+    sinceMoveS: 95,
+    move: 'sit-in',
+    secondsInMove: 12,
+    rank: 3,
+    gapAheadM: 3,
+    gapBehindM: 4,
+    riderGapM: -4,
+    wbal: 0.8,
+    drafting: true,
+    lapsLeft: 3,
+    toLineM: 1_800,
+    gradeAheadPct: 6,
+    climbInM: 0,
+    cues: ['on-your-terrain', 'fresh', 'move-ahead'],
+    menu: [{ move: 'follow', target: 1 }, { move: 'attack' }, { move: 'sit-in' }],
   },
 };
 
@@ -66,11 +84,26 @@ export interface ChatRequest {
 }
 
 /**
+ * What a model server says a call cost, as Ollama spells it: durations in
+ * nanoseconds, counts in tokens. Sent with every answer {@link chatServer}
+ * gives unless a test hands its own.
+ */
+export const CHAT_FIGURES = {
+  total_duration: 812_345_678,
+  load_duration: 21_400_000,
+  prompt_eval_count: 1_420,
+  prompt_eval_duration: 301_600_000,
+  eval_count: 17,
+  eval_duration: 455_500_000,
+} as const;
+
+/**
  * A `fetch` that answers `/api/chat` with `answer(body)` as the model's
  * content — or, for `undefined`, a 500 — and records every request.
  */
 export function chatServer(
   answer: (body: Readonly<Record<string, unknown>>) => string | undefined,
+  figures: Readonly<Record<string, unknown>> = CHAT_FIGURES,
 ): {
   readonly fetch: typeof globalThis.fetch;
   readonly requests: ChatRequest[];
@@ -93,19 +126,15 @@ export function chatServer(
               model: body.model,
               message: { role: 'assistant', content },
               done: true,
+              ...figures,
             }),
       );
     },
   };
 }
 
-/** The answer a model gives that every bot named should attack: a valid decision. */
-export const ATTACK = JSON.stringify({
-  bots: [
-    { bot: 0, move: 'attack' },
-    { bot: 3, move: 'chase', target: 2 },
-  ],
-});
+/** A model's valid pick for {@link TACTICS_INPUT}: the reason first, then a move on its menu. */
+export const ATTACK = JSON.stringify({ reason: 'my-terrain', move: 'attack', effort: 'all-out' });
 
 /** Record `token`'s consent naming what the instance says now, as a device does. */
 export async function consentToTactics(
