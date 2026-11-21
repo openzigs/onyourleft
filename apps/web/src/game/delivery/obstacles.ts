@@ -664,28 +664,29 @@ export interface RoadBox {
  * footprint is not turned.
  */
 export function footprintMeets(footprint: ObstacleFootprint, box: RoadBox): boolean {
-  const corners = footprintCorners(footprint);
-  const boxCorners: readonly (readonly [number, number])[] = [
-    [box.back, box.low],
-    [box.back, box.high],
-    [box.front, box.low],
-    [box.front, box.high],
-  ];
-  const cos = Math.cos(footprint.heading);
-  const sin = Math.sin(footprint.heading);
-  const axes: readonly (readonly [number, number])[] = [
-    [1, 0],
-    [0, 1],
-    [cos, sin],
-    [-sin, cos],
-  ];
-  return axes.every(([x, y]) => {
-    const onAxis = (points: readonly (readonly [number, number])[]): readonly number[] =>
-      points.map(([along, across]) => along * x + across * y);
-    const car = onAxis(corners);
-    const rider = onAxis(boxCorners);
-    return overlaps(Math.min(...car), Math.max(...car), Math.min(...rider), Math.max(...rider));
-  });
+  const { along, across, heading, halfLength, halfWidth } = footprint;
+  // Each tick meets every obstacle, so this allocates nothing.
+  const cos = Math.cos(heading);
+  const sin = Math.sin(heading);
+  // The road's two axes: the rectangle's reach along and across the road.
+  const alongReach = halfLength * Math.abs(cos) + halfWidth * Math.abs(sin);
+  const acrossReach = halfLength * Math.abs(sin) + halfWidth * Math.abs(cos);
+  if (!overlaps(along - alongReach, along + alongReach, box.back, box.front)) return false;
+  if (!overlaps(across - acrossReach, across + acrossReach, box.low, box.high)) return false;
+  if (sin === 0) return true;
+  // The rectangle's own two axes: the box's reach on each, about its middle.
+  const middleAlong = (box.back + box.front) / 2 - along;
+  const middleAcross = (box.low + box.high) / 2 - across;
+  const boxAlong = (box.front - box.back) / 2;
+  const boxAcross = (box.high - box.low) / 2;
+  const onLength = middleAlong * cos + middleAcross * sin;
+  const lengthReach = boxAlong * Math.abs(cos) + boxAcross * Math.abs(sin);
+  if (!overlaps(-halfLength, halfLength, onLength - lengthReach, onLength + lengthReach)) {
+    return false;
+  }
+  const onWidth = -middleAlong * sin + middleAcross * cos;
+  const widthReach = boxAlong * Math.abs(sin) + boxAcross * Math.abs(cos);
+  return overlaps(-halfWidth, halfWidth, onWidth - widthReach, onWidth + widthReach);
 }
 
 /**
