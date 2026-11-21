@@ -107,8 +107,18 @@ export type LandClass =
  * `school` is; `village_green` and `allotments` are park; and the ground where
  * nothing grows and no field is fenced is `bare` — `beach`, `sand`,
  * `bare_rock`, `glacier`, the airfield's `aerodrome`, `runway` and `taxiway`,
- * and the built-on `pier`, `platform` and `dam`. `grassland` stays `other`:
- * natural grass, where the procedural world's planting is the right one.
+ * and the built-on `pier`, `platform` and `dam`.
+ *
+ * #2976, the mapped-features audit of 2026-11-20 (the owner's ruling of
+ * 2026-11-15: draw everything that is marked): `grassland` and `heath` are
+ * `farmland`, as `meadow` is. Until then both read as `other`, so the
+ * procedural world — its fields, villages and woods — was drawn on land the
+ * map says is open grass or heather. As farmland each is open ground: pasture
+ * with a few trees, stones, hedgerow trees at its edge, no lot, and a mapped
+ * building on it kept, which `park` (natural ground, but a footprint in a park
+ * is dropped) and `wood` (planted throughout) would not give. Both take a
+ * code of their own below a protected area's ({@link OPEN_GROUND_KINDS}), so
+ * a heath inside a national park still reads as the park.
  */
 export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unknown'>>> =
   Object.freeze({
@@ -153,6 +163,8 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     dam: 'bare',
     farmland: 'farmland',
     meadow: 'farmland',
+    grassland: 'farmland',
+    heath: 'farmland',
   });
 
 /**
@@ -169,6 +181,15 @@ export const PROTECTED_AREA_KINDS: ReadonlySet<string> = new Set([
   'national_park',
   'nature_reserve',
 ]);
+
+/**
+ * #2976: the `farmland` kinds that are natural open ground — `grassland` and
+ * `heath`. Each reads `farmland`, but from a code below a protected area's
+ * (#2657), so moorland inside a national park or nature reserve is the
+ * park's natural ground and inside a national forest the forest's, as each
+ * was while the two kinds read `other`. Outside one, each is farmland.
+ */
+export const OPEN_GROUND_KINDS: ReadonlySet<string> = new Set(['grassland', 'heath']);
 
 /**
  * What `bare` ground is made of — #2700, in precedence order, least first: a
@@ -378,7 +399,8 @@ export const INFERRED_MIN_JOINS_PER_HECTARE = 0.15;
 /**
  * The share of the 560 m square that is mapped farmland, meadow or farmyard
  * (all `farmland` here) from which the ground reads as rural: **0.15** (ADR
- * 0070 D-1.5). A cue against, which one cue for cancels.
+ * 0070 D-1.5). A cue against, which one cue for cancels. Since #2976 a
+ * mapped grassland or heath counts toward it too, being `farmland`.
  */
 export const INFERRED_RURAL_FARMLAND_SHARE = 0.15;
 
@@ -460,7 +482,8 @@ function bareCodes(): readonly Code[] {
  * The classes by code, the code being the precedence: a cell keeps the
  * highest code written to it. 0 is `unknown`, which nothing writes. #2657: a
  * protected area's `park` and `wood` ({@link PROTECTED_AREA_KINDS}) are codes
- * of their own, below farmland, and read as the class they name. `bare`
+ * of their own, below farmland, and read as the class they name. #2976: below
+ * them, {@link OPEN_GROUND_KINDS}' own `farmland` code. `bare`
  * takes one code a surface (#2700), in {@link BARE_SURFACES}' order, and
  * since #2754 twice: once below built-up, where #2662 placed the class, and
  * once above a mapped park for {@link BARE_KINDS_OVER_LAND}.
@@ -474,6 +497,7 @@ function bareCodes(): readonly Code[] {
 const CODES: readonly Code[] = [
   { land: 'unknown' },
   { land: 'other' },
+  { land: 'farmland' },
   { land: 'park' },
   { land: 'wood' },
   { land: 'farmland' },
@@ -490,9 +514,11 @@ const CODES: readonly Code[] = [
 ];
 const CLASS_OF_CODE: readonly LandClass[] = CODES.map((code) => code.land);
 const CODE_OTHER = 1;
-const CODE_PROTECTED_PARK = 2;
-const CODE_PROTECTED_WOOD = 3;
-const CODE_FARMLAND = CLASS_OF_CODE.indexOf('farmland');
+/** #2976: a grassland's or heath's `farmland`, below a protected area. @see OPEN_GROUND_KINDS */
+const CODE_OPEN_GROUND = 2;
+const CODE_PROTECTED_PARK = 3;
+const CODE_PROTECTED_WOOD = 4;
+const CODE_FARMLAND = CLASS_OF_CODE.indexOf('farmland', CODE_PROTECTED_WOOD);
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
 /**
  * The mapped `park` code, above farmland — #2685's looks are read on it and on
@@ -515,7 +541,8 @@ function isBuiltCode(code: number): boolean {
 }
 
 /**
- * #2684: an `other` cell a land-use polygon covers — a heath, say; since
+ * #2684: an `other` cell a land-use polygon covers — a kind the table does
+ * not name, say (a heath until #2976 made it farmland); since
  * #2662 a beach or an aerodrome is `bare`, its own code — which
  * {@link inferBuiltUp} leaves alone. Held only while the mask is
  * built, and `other` by precedence while it is; every one is `other` again
@@ -567,6 +594,7 @@ function codeOfFeature(feature: LandUseFeature): number {
     return landClass === 'wood' ? CODE_PROTECTED_WOOD : CODE_PROTECTED_PARK;
   }
   if (landClass === 'other') return CODE_OTHER;
+  if (landClass === 'farmland' && OPEN_GROUND_KINDS.has(feature.kind)) return CODE_OPEN_GROUND;
   if (landClass === 'water') return CODE_WATER;
   if (landClass !== 'bare') return CLASS_OF_CODE.indexOf(landClass, CODE_FARMLAND);
   const first = BARE_KINDS_OVER_LAND.has(feature.kind) ? CODE_BARE_OVER_LAND : CODE_BARE;
@@ -1383,9 +1411,9 @@ function paint(
 /**
  * A code's place in the precedence: {@link CODE_MAPPED_OTHER} is above a
  * covered cell no polygon reaches and below every other class, so a wood
- * drawn over a heath is still a wood. That includes #2657's protected-area
- * codes: a national forest's boundary over a heath reads `wood`, as it did
- * before #2684 marked the heath. (A beach is `bare` since #2662, above the
+ * drawn over a polygon of a kind the table does not name is still a wood.
+ * That includes #2657's protected-area codes: a national forest's boundary
+ * over one reads `wood`, as it did before #2684 marked such cells. (A beach is `bare` since #2662, above the
  * protected codes, so a beach inside a national forest stays a beach.)
  */
 function precedence(code: number): number {
@@ -1535,7 +1563,7 @@ export function suburbCues(window: {
  *
  * Never on farmland, meadow, wood, water, park or `bare` ground (#2662: an
  * aerodrome, a beach), nor on any polygon of another kind that classes
- * `other` (a heath): those cells do not hold plain `other`
+ * `other` (a kind the table does not name): those cells do not hold plain `other`
  * ({@link CODE_MAPPED_OTHER}); nor on a protected area's boundary (#2657),
  * whose cells hold its own codes. Rail,
  * industrial and military land is already `built-up` and is not changed.
@@ -1667,12 +1695,13 @@ function inferBuiltUp(
       const rowKey = row * densityPerChunk + Math.floor(cellZ / cellsPerDensity);
       for (let cellX = 0; cellX < LAND_CLASS_CHUNK_CELLS; cellX += 1) {
         const code = chunk[start + cellX] as number;
-        if (code !== CODE_FARMLAND && code !== CODE_BUILT_UP) continue;
+        const farm = code === CODE_FARMLAND || code === CODE_OPEN_GROUND;
+        if (!farm && code !== CODE_BUILT_UP) continue;
         const cell = densityKey(
           column * densityPerChunk + Math.floor(cellX / cellsPerDensity),
           rowKey,
         );
-        const into = code === CODE_FARMLAND ? farmland : mapped;
+        const into = farm ? farmland : mapped;
         into.set(cell, (into.get(cell) ?? 0) + 1);
       }
     }
