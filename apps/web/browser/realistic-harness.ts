@@ -81,6 +81,7 @@ import {
   // #1274's industrial estate, school and pitches, which `town=grounds` rides.
   fencedGroundsFixture,
   parksFixture,
+  railFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -587,7 +588,10 @@ async function run(): Promise<void> {
                                       : // #2685: a golf course and cemeteries.
                                         config.town === 'parks'
                                         ? parksFixture(latitude)
-                                        : undefined;
+                                        : // #2660: level crossings.
+                                          config.town === 'rail'
+                                          ? railFixture(latitude)
+                                          : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
