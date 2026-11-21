@@ -1507,6 +1507,26 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on a ride running a race (#1906);
                         `browser/lap-race-hud.browser.spec.ts` holds the
                         layout on the HUD harness's stage, not in a real ride
+    src/game/hud/standings-room.ts, src/game/hud/standings-follow.ts
+                        the room a race's standings have on a tablet (#2599):
+                        the list is as tall as the whole lines that fit above
+                        the actions panel less the owner's 16 px, and scrolls
+                        under a finger where that is short, opening on the
+                        rider's own line. #2837: hidden (#2600), the actions
+                        panel is its trainer's line, and where standings are
+                        drawn theme.css §"#2837" moves that line to the
+                        stage's bottom edge as the panel closes, so the list
+                        GROWS into the room the controls stood on and gives
+                        it back when a touch returns them. The room is read
+                        off the page — the panel's box as drawn — on an
+                        event of the layout's (a resize, a class or style, the
+                        HUD's `data-oyl-controls`, the end of the panel's own
+                        animation or transition), ⚠️ never on a frame. While
+                        the controls are DRAWN the room is #2599's: they are
+                        held drawn by a notice, a held item (ADR 0075 D-5)
+                        and a finished race (`HudCore.tsx` §`controlsHeld`).
+                        `browser/lap-race-hud.browser.spec.ts` §"#2837" and
+                        `ride-chrome.browser.spec.ts` §"#2837" measure it
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost

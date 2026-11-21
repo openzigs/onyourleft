@@ -170,7 +170,10 @@ const MARKER_ON_STEP_METRES = 0.5;
  * #2362: on the fixture level, half way along, its footprints either side
  * (ADR 0065 D-7.5). Since #2366 in rain and at dusk, a level's worst case:
  * the rain's one call on top of the round's, and the dusk's dimmer light,
- * which costs none. One load, because this shard's loads of the page are
+ * which costs none. Since #2367 the pieces are every obstacle and marker
+ * kind (`realistic/delivery.ts`), the moving hazards, mailboxes and
+ * no-delivery signs among them: the hardest level's settings, evening-round's,
+ * on the fixture level. One load, because this shard's loads of the page are
  * counted (`nightly-split.test.ts` §"#1698") and it has none to spare.
  */
 const LEVEL_HOLD_METRES = 1000;
