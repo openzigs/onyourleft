@@ -303,7 +303,8 @@ describe('#1793: an undated town plans as before', () => {
         town.origin,
         undefined,
         urban,
-        options,
+        // Since #2848 the shops' aprons are off: the plans before #1793 had none.
+        { shopAprons: false, ...options },
       );
       expect(planFingerprint(plans)).toBe(MIXED_TOWN_BEFORE_1793);
     }

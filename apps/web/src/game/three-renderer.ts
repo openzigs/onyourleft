@@ -20768,6 +20768,8 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   'porch-trim': 1,
   // #2206: a spire is shaded as the roof it is built of.
   spire: REALISTIC_ROLE_SHADE.roof,
+  // #2848: a shop's apron is painted, as a driveway is.
+  apron: 1,
 };
 
 /**
@@ -20775,9 +20777,10 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
  * surface's multiplier on the walls, the plinth, the parapet and the chimney;
  * the roof surface's on the roof; the door's paint on the door and the trim's
  * on the trim. Since #1588: a shingled roof's albedo on the roof and a
- * dormer's roof, the walls' paint on a dormer, and none on a driveway or on a
- * clapboard house's plinth, whose colours the shader lays (`facade.ts`
- * §`PAVING`, §`FOUNDATION`) — so their vertex colour is their light alone.
+ * dormer's roof, the walls' paint on a dormer, and none on a driveway, on a
+ * shop's apron (#2848) or on a clapboard house's plinth, whose colours the
+ * shader lays (`facade.ts` §`PAVING`, §`FOUNDATION`) — so their vertex colour
+ * is their light alone.
  * Since #1590 none on a shop's front, sign or awning, which it paints too.
  * Since #1589 a porch's roof is the roof's, and the porch the trim's.
  */
@@ -20798,6 +20801,7 @@ export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
         unpainted
       );
     case 'driveway':
+    case 'apron':
     case 'shopfront':
       return unpainted;
     case 'plinth':
@@ -23620,8 +23624,9 @@ export class MappedBuildingBelt {
     const [red, green, blue] = mappedRolePaint(plan, role);
     const [trimRed, trimGreen, trimBlue] = mappedRolePaint(plan, 'trim');
     // A plan with a plinth stands in the ground at its foot; a raised part
-    // does not, and nor does a driveway, which is laid on the ground.
-    const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway';
+    // does not, and nor does a driveway or, since #2848, an apron, which are
+    // laid on the ground.
+    const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway' && role !== 'apron';
     // #1588: a soffit's and a gutter's underside, in the shade of the wall and the eaves;
     // #1589: a porch's ceiling likewise, and its deck in the shade of its roof;
     // #1590: an awning's underside likewise.

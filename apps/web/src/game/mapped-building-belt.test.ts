@@ -428,6 +428,8 @@ describe('what the buffers hold — #1549', () => {
       'porch-trim': 1,
       // #2206: a spire is shaded as the roof it is built of.
       spire: 1,
+      // #2848: a shop's apron is painted by the shader, as a driveway is.
+      apron: 1,
     };
     // And the paint, written out too: the wall surface's list on everything
     // but the roof, the door and the trim, which wear their own — and since
@@ -445,6 +447,7 @@ describe('what the buffers hold — #1549', () => {
       }
       if (
         role === 'driveway' ||
+        role === 'apron' ||
         role === 'shopfront' ||
         (role === 'plinth' && plan.cladding.wall === 'clapboard')
       ) {
@@ -479,9 +482,11 @@ describe('what the buffers hold — #1549', () => {
             1,
             Math.max(0, (y - (plan.base + FOUNDATION_METRES)) / GROUNDING_METRES),
           );
-          // A driveway lies on the ground, and is not grounded.
+          // A driveway lies on the ground, and is not grounded; nor, since #2848, is an apron.
           const ground =
-            standing && role !== 'driveway' ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise : 1;
+            standing && role !== 'driveway' && role !== 'apron'
+              ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise
+              : 1;
           // #1588: trim facing down — a soffit, a gutter's underside — is in the eaves' shade;
           // #1589: so is a porch's ceiling, and its deck is in its roof's.
           const facing = floats[vertex * FOOTPRINT_VERTEX_FLOATS + 4] as number;
@@ -800,8 +805,13 @@ describe('the share of the structures’ term a refill takes — #1549, P-12', (
 describe('the procedural structures and the mapped buildings, ranked together — #1586', () => {
   const mixed = mixedTownFixture();
   const mixedLand = landClassMask(mixed.corridor);
+  // #2848: without the shops' aprons. This frame carries no `mappedTown`, so procedural lots
+  // stand before the mapped shops; an apron's ground takes four of them off it
+  // (`clearOfDriveways`), and the frame below is no longer one whose structures fill the cap.
   const mixedBuildings = mappedBuildingsOf(
-    footprintPlans(mixed.corridor, mixedLand, mixed.profile, mixed.origin).plans,
+    footprintPlans(mixed.corridor, mixedLand, mixed.profile, mixed.origin, undefined, undefined, {
+      shopAprons: false,
+    }).plans,
   );
 
   /** #1581's mixed town with the rider at `along`, as a realistic rung carries it. */

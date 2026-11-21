@@ -496,13 +496,19 @@ describe('#1791: untyped changes nothing, and the lever puts the type out', () =
     expect(town.corridor.buildings.every((building) => building.buildingType === null)).toBe(true);
     const land = landClassMask(town.corridor);
     const urban = urbanClassMap(town.corridor, land, town.profile);
+    // Since #2848 the shops' aprons are off: the plans before #1791 had none.
+    const before = { shopAprons: false } as const;
     expect(
       planFingerprint(
-        footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban).plans,
+        footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, before)
+          .plans,
       ),
     ).toBe(MIXED_BEFORE_1791.urban);
     expect(
-      planFingerprint(footprintPlans(town.corridor, land, town.profile, town.origin).plans),
+      planFingerprint(
+        footprintPlans(town.corridor, land, town.profile, town.origin, undefined, undefined, before)
+          .plans,
+      ),
     ).toBe(MIXED_BEFORE_1791.none);
   });
 
