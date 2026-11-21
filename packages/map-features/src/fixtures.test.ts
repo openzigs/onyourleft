@@ -8,8 +8,10 @@ import {
   buildingFieldCaseTile,
   HOSTILE_BUILDING_FIELD_CASES,
   HOSTILE_FIXTURES,
+  HOSTILE_ROAD_FIELD_CASES,
   LIMIT_NAMES,
   NAMED_FIXTURES,
+  roadFieldCaseTile,
   tileAtLimit,
   tileOverLimit,
 } from './testing';
@@ -31,6 +33,7 @@ const DIGESTS: Readonly<Record<string, string>> = {
   places: '9851995321b9ab45bce3c24df91e06b9f33fa6949f846806cdaf111a1ffd6d5d',
   buildingFields: '28639c36c4c37e47b25fa3e4af834afd3ae772121bf486742dbe6bcc72f27dd7',
   waterLines: '006e9d5229c38c320fd24d126ef189a2683fcb34b26b460eba06eb180e3531a7',
+  roadFields: '961e7637fd6dec3135f045c86f430c6ebe7b91dd891f1097610306726317c43c',
 };
 
 describe('the synthetic fixtures', () => {
@@ -46,6 +49,8 @@ describe('the synthetic fixtures', () => {
       expect(sha256(buildingFieldCaseTile(fieldCase))).toBe(
         sha256(buildingFieldCaseTile(fieldCase)),
       );
+    for (const fieldCase of HOSTILE_ROAD_FIELD_CASES)
+      expect(sha256(roadFieldCaseTile(fieldCase))).toBe(sha256(roadFieldCaseTile(fieldCase)));
   });
 
   it('are pinned by digest', () => {

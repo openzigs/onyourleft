@@ -793,6 +793,11 @@ interface Judged {
    * first verified it, whichever is earlier (D-5, #2776).
    */
   readonly trustedUntil?: number;
+  /**
+   * Nobody answered the keys read (#2104): a passing fact, unlike keys that
+   * do not verify. Nothing is sealed either way.
+   */
+  readonly unreachable?: true;
 }
 
 /**
@@ -834,7 +839,10 @@ async function judgeAccount(
     crypto,
   );
   if (verdict === 'unreachable') {
-    return { outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned } };
+    return {
+      outcome: { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable, pinned },
+      unreachable: true,
+    };
   }
   // The verdict was judged against `pinned`: if the rider replaced the pin, or
   // another read found an endorsement, while the request was in flight, it says
@@ -959,8 +967,12 @@ export type HeldSealedSession =
     }
   | {
       readonly kind: 'closed';
-      /** `signed-out`: no sign-in; `gate`: D-11 or no card (D-14 Q1, Q8); `keys`: the keys were refused. */
-      readonly why: 'signed-out' | 'gate' | 'keys';
+      /**
+       * `signed-out`: no sign-in; `gate`: D-11 or no card (D-14 Q1, Q8);
+       * `keys`: the keys were refused; `unreachable`: nobody answered the keys
+       * read (#2104), which may pass.
+       */
+      readonly why: 'signed-out' | 'gate' | 'keys' | 'unreachable';
       readonly text: string;
     };
 
@@ -1007,7 +1019,7 @@ async function sealedSessionOf(
   const judged = await trustedKeyFor(dependencies, kit, account, gate.pin, held.token);
   if (judged.instanceKey === undefined) {
     const text = 'text' in judged.outcome ? judged.outcome.text : INSTANCE_KEY_TEXT.unreachable;
-    return { kind: 'closed', why: 'keys', text };
+    return { kind: 'closed', why: judged.unreachable === true ? 'unreachable' : 'keys', text };
   }
   return {
     kind: 'open',
@@ -1083,7 +1095,7 @@ export type HeldAccountSession =
     }
   | {
       readonly kind: 'closed';
-      readonly why: 'signed-out' | 'gate' | 'keys';
+      readonly why: 'signed-out' | 'gate' | 'keys' | 'unreachable';
       readonly text: string;
     };
 
