@@ -20,12 +20,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   RollingRoute,
+  buildGhostTrack,
   distanceBetween,
   gradeAt,
   metres,
   positionAt,
   watts,
   type GeographicPosition,
+  type GhostTrack,
   type RollingEdge,
 } from '@onyourleft/domain';
 import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
@@ -35,6 +37,8 @@ import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import { GameView, type GamePort } from '../GameView';
 import type { GameRenderer } from '../port';
 import type { SceneInput } from '../scene';
+import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../hud/announce-preference';
+import { slopeAhead, slopeSentence, slopesOf } from '../hud/climb-ahead';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 import { fixtureStart, START_COLUMN, START_ROW } from './fixture-testing';
 import { OPEN_WORLD_ROUTE_ID, type OpenWorldSessions } from './ride';
@@ -74,6 +78,7 @@ beforeEach(() => {
 afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -114,8 +119,11 @@ function hillyRoute(): RollingRoute {
   return new RollingRoute(graph, edges.find((edge) => edge.id === 'h0,3') as RollingEdge);
 }
 
-/** The game port's open-world sessions: one start, ready at once on {@link hillyRoute}. */
-function sessions(): OpenWorldSessions {
+/**
+ * The game port's open-world sessions: one start, ready at once on {@link hillyRoute}.
+ * `attempts` is the card's: one with an attempt offers the rider's own ghost.
+ */
+function sessions(attempts = 0): OpenWorldSessions {
   let start = fixtureStart(START_COLUMN, START_ROW) as ReturnType<typeof fixtureStart> | undefined;
   return {
     take: () => {
@@ -130,7 +138,7 @@ function sessions(): OpenWorldSessions {
           id: OPEN_WORLD_ROUTE_ID,
           name: 'Open world',
           profile: hillyRoute().view(),
-          attempts: 0,
+          attempts,
         },
         road: () => new OpenWorldRoad(hillyRoute()),
       }),
@@ -140,7 +148,10 @@ function sessions(): OpenWorldSessions {
 }
 
 /** A trainer that takes the road, and keeps every grade it was asked for with the frame it came on. */
-function trainer(written: { readonly grade: number; readonly frame: number }[]): GameTrainerPort {
+function trainer(
+  written: { readonly grade: number; readonly frame: number }[],
+  courseLines: unknown[] = [],
+): GameTrainerPort {
   const facts = { paired: true, controllable: true, canSimulate: true, hasControl: true };
   const control: GradientTrainer = {
     setSimulationParameters: (parameters: SimulationParameters) => {
@@ -149,16 +160,25 @@ function trainer(written: { readonly grade: number; readonly frame: number }[]):
     },
     letGo: () => Promise.resolve({ kind: 'stopped' as const }),
   };
-  return gameTrainerPortOver({
+  const port = gameTrainerPortOver({
     getSnapshot: () => ({ trainer: facts, workout: undefined }),
     simulationControl: () => control,
     requestTrainerControl: () => Promise.resolve(),
     noteGameRideEnded: () => undefined,
     subscribe: () => () => undefined,
   });
+  // A recording under the ride, as the Ride screen's is: every course-line
+  // event the game hands it is kept here.
+  return {
+    ...port,
+    courseLine: (event) => {
+      courseLines.push(event);
+      return [];
+    },
+  };
 }
 
-function port(): GamePort {
+function port(attempts = 0): GamePort {
   return {
     listRoutes: () => Promise.resolve([]),
     loadGhost: () => Promise.resolve(undefined),
@@ -167,7 +187,7 @@ function port(): GamePort {
       cadence: { value: 90, live: true, paired: true },
       heartRate: { value: 140, live: true, paired: true },
     }),
-    openWorld: sessions(),
+    openWorld: sessions(attempts),
   };
 }
 
@@ -281,5 +301,150 @@ describe('an open-world ride past its first view — #2982', () => {
       );
       expect(off, `the write on frame ${write.frame}`).toBeLessThan(1e-6);
     }
+  });
+});
+
+/** A previous attempt, ahead of the rider: drawn as a ghost wherever one is loaded. */
+const OWN_GHOST: GhostTrack = buildGhostTrack({
+  elapsedSeconds: [0, 60],
+  distanceMetres: [0, 1_200],
+});
+
+const toggle = (text: string): HTMLInputElement | undefined =>
+  queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[type="checkbox"]').find(
+    (input) => (input.closest('label')?.textContent ?? '').includes(text),
+  );
+
+async function clickThrough(element: HTMLElement | undefined): Promise<void> {
+  expect(element).toBeDefined();
+  await act(async () => {
+    element?.click();
+    await Promise.resolve();
+  });
+  await settle();
+}
+
+async function untilTheCard(): Promise<void> {
+  for (let tries = 0; tries < 50 && rideButton()?.textContent !== 'Ride Open world'; tries++) {
+    await settle();
+  }
+  expect(rideButton()?.textContent).toBe('Ride Open world');
+}
+
+const spoken = (): string =>
+  mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+
+describe('an open-world ride is ridden alone — #2982', () => {
+  it('rides past its first view with a pacer, a ghost and a Delivery round asked for, and has none of them, no course line, no "to go" and the new view’s climbs', async () => {
+    localStorage.setItem(
+      ANNOUNCEMENTS_STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_ANNOUNCEMENTS, enabled: true, distanceEvery: 0.5 }),
+    );
+    const loadGhost = vi.fn(() => Promise.resolve<GhostTrack | undefined>(OWN_GHOST));
+    const courseLines: unknown[] = [];
+    mounted = await mount(
+      <GameView
+        port={{ ...port(1), loadGhost }}
+        trainer={trainer([], courseLines)}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await untilTheCard();
+    // Everything the picker offers this card that a solo ride on a saved route would ride.
+    await clickThrough(toggle('pacer'));
+    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    await act(async () => {
+      setter?.set?.call(intensity, '3');
+      intensity?.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await clickThrough(toggle('Race your own'));
+    await clickThrough(rideButton());
+
+    const firstView = () => inputs[0]?.profile;
+    const heard: string[] = [];
+    let slopesPastFirst = 0;
+    for (let frames = 0; frames < 400; frames += 1) {
+      const views = new Set(inputs.map((input) => input.profile)).size;
+      const last = inputs[inputs.length - 1];
+      if (views >= 3 && (last?.state.ride.distance ?? 0) > 5_000) break;
+      const before = spoken();
+      await pump();
+      const said = spoken();
+      const at = inputs[inputs.length - 1];
+      if (said === before || said === '' || at === undefined) continue;
+      heard.push(said);
+      if (/^(Climb|Descent) /.test(said)) {
+        // The climb said is the one ahead on the view drawn this frame, from
+        // that view's own slopes: a climb read off the first view's would be
+        // one the rider is not approaching.
+        const ahead = slopeAhead(
+          slopesOf(at.profile),
+          at.profile,
+          at.state.ride.distance,
+          DEFAULT_ANNOUNCEMENTS.climbLeadMetres as number,
+        );
+        expect(ahead, `"${said}"`).toBeDefined();
+        if (ahead !== undefined) expect(said).toBe(slopeSentence(ahead, 'metric'));
+        if (at.profile !== firstView()) slopesPastFirst += 1;
+      }
+    }
+
+    // Ridden on past the first view: a pacer the road moved under would have
+    // stopped the loop at the first new one.
+    expect(new Set(inputs.map((input) => input.profile)).size).toBeGreaterThanOrEqual(3);
+    // And the climbs and descents of each new view are said on it, as the
+    // first view's were: slopes kept from the first view go quiet there.
+    expect(slopesPastFirst).toBeGreaterThanOrEqual(3);
+    // No pacer, no ghost of the rider's own: nothing drawn beside the rider.
+    expect(inputs.every((input) => input.botDistance === undefined)).toBe(true);
+    expect(inputs.every((input) => input.ghost === undefined)).toBe(true);
+    expect(loadGhost).not.toHaveBeenCalled();
+    // No course: the recording under the ride is handed no line, no lap and no progress.
+    expect(courseLines).toEqual([]);
+    // No distance to go, which a view's end is not, and no Delivery round.
+    expect(heard.filter((sentence) => sentence.includes('to go'))).toEqual([]);
+    expect(heard.filter((sentence) => /deliver|house|round/i.test(sentence))).toEqual([]);
+  });
+
+  it('races no other rider’s ghost: the press asks for none and rides alone', async () => {
+    const loadRiderGhost = vi.fn(() =>
+      Promise.resolve({ kind: 'ghost' as const, rider: 'Bea', track: OWN_GHOST }),
+    );
+    mounted = await mount(
+      <GameView
+        port={{ ...port(), riderGhostOffered: () => true, loadRiderGhost }}
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(toggle('Race another rider'));
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(loadRiderGhost).not.toHaveBeenCalled();
+    expect(inputs.length).toBeGreaterThan(10);
+    expect(inputs.every((input) => input.ghost === undefined)).toBe(true);
+  });
+
+  it('is no ride in a room: a room’s road is the room’s', async () => {
+    mounted = await mount(
+      <GameView
+        port={port()}
+        roomId="room-1"
+        renderer={() => Promise.resolve(capturingRenderer())}
+        now={() => nowMs}
+      />,
+    );
+    await untilTheCard();
+    await clickThrough(rideButton());
+    for (let frames = 0; frames < 20; frames += 1) await pump();
+
+    expect(inputs).toEqual([]);
+    expect(rideButton()?.textContent).toBe('Ride Open world');
   });
 });
