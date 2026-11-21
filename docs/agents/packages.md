@@ -114,7 +114,9 @@ packages/             Apache-2.0, without exception
   map-features/       one z15 Protomaps v4 tile, already decompressed, into
                       bounded, typed features in the corridor's local metres,
                       and the corridor's tile cover, simplification, clipping,
-                      triangulation and rasterisation (#1544, ADR 0054).
+                      triangulation and rasterisation (#1544, ADR 0054);
+                      and since #2894 the open-world street graph, built a
+                      tile at a time from decoded streets (ADR 0091).
                       ⚠️ A tile is UNTRUSTED input: every limit is a refusal,
                       never a throw, and a refusal names no coordinate and no
                       tile x/y. It fetches nothing and holds no map data; it

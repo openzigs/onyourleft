@@ -458,3 +458,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   still holds, unchanged: D-3 for every route ride (the hillside is invented from the route's own
   heights), every other row of D-1's table, D-4's checklist, and D-6's reading. This entry is a
   pointer and changes nothing here.
+- **2026-11-20** — **The 2026-11-19 entry's *"D-6's reading"* still holds, except D-6's finding
+  that Mapterhorn's attribution list does not load.** That entry listed D-6 among what still holds,
+  unchanged, but [ADR 0087](0087-the-open-world-rides-ground-and-grade-come-from-real-heights.md)
+  D-8 relies on that finding no longer being true. [#2013](https://github.com/openzigs/onyourleft/issues/2013)
+  records that the list now loads, at `https://download.mapterhorn.com/attribution.json`; it
+  answered HTTP 200 on 2026-11-20 with 151 sources. So D-6's third finding, that the list 404s, no
+  longer describes the world, and the last bullet of *What would make this ADR wrong* has happened.
+  ADR 0087 D-8 reads D-6's *"intractable for a frame"* as resting on that finding, and adds
+  *"Terrain © Mapterhorn"* to the game view's corner, with the sources on the credits screen.
+  What still holds: D-6's answer that the data is a union of separately licensed sources (151 in
+  the list, where D-6 counted 153 source directories), curated to exclude share-alike and
+  non-commercial terms. This entry records a fact and changes no decision: D-1's rows stand as
+  ADR 0087 left them. (#2959, from the review of #2948)

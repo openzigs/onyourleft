@@ -21,8 +21,11 @@
  *   outside the new 3 × 3 (the bound: never more than {@link MAX_HELD_BLOCKS}
  *   blocks, {@link MAX_HELD_TILES} tiles) and asks for the new 3 × 3's other
  *   blocks after one random delay of up to {@link CROSSING_DELAY_MAX_MS}
- *   (R-8). ⚠️ **The delay holds only that background request**: the call
- *   returns at once and the ride keeps riding on what is held.
+ *   (R-8). A running read of a block left behind is abandoned only when that
+ *   delay ends too, so nothing the host sees — a new request, a cancelled
+ *   one — happens at the crossing. ⚠️ **The delay holds only that background
+ *   request**: the call returns at once and the ride keeps riding on what is
+ *   held.
  * - {@link AreaReader.stop} abandons a running read and every waiting one.
  *
  * **The ridden-block cache** (#2891, ADR 0090 D-6): every block is looked for
@@ -57,6 +60,7 @@ import {
 } from '@onyourleft/map-features';
 
 import {
+  corridorError,
   describeCorridorFailure,
   readCorridorTiles,
   type ArchiveOpening,
@@ -249,7 +253,66 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
   let pumping: Promise<void> = Promise.resolve();
   const waiting = new Set<() => void>();
   let stopped = false;
-  let opening: Promise<ArchiveOpening> | undefined;
+  /** The archive's one opening for the ride, while it is pending or once it has answered. */
+  interface Opening {
+    readonly answer: Promise<ArchiveOpening>;
+    readonly stop: AbortController;
+    settled: boolean;
+  }
+  let opening: Opening | undefined;
+
+  const openOnce = (inner: CorridorArchive): Opening => {
+    const stop = new AbortController();
+    const forward = (): void => {
+      stop.abort();
+    };
+    ride.signal.addEventListener('abort', forward, { once: true });
+    const current: Opening = { answer: inner.open(stop.signal), stop, settled: false };
+    current.answer.then(
+      () => {
+        current.settled = true;
+        ride.signal.removeEventListener('abort', forward);
+      },
+      () => {
+        current.settled = true;
+        ride.signal.removeEventListener('abort', forward);
+        if (opening === current) opening = undefined;
+      },
+    );
+    return current;
+  };
+
+  /**
+   * Waits on the opening for as long as `signal` — the read's own, which
+   * carries its timeout — allows. A read that gives up on a pending opening
+   * abandons it, so the next read asks for the header again rather than
+   * waiting on a range that never answered.
+   */
+  const awaitOpening = (current: Opening, signal: AbortSignal): Promise<ArchiveOpening> =>
+    new Promise((resolve, reject) => {
+      const quit = (): void => {
+        if (!current.settled && opening === current) {
+          opening = undefined;
+          current.stop.abort();
+        }
+        reject(corridorError({ kind: 'aborted' }));
+      };
+      if (signal.aborted) {
+        quit();
+        return;
+      }
+      signal.addEventListener('abort', quit, { once: true });
+      current.answer.then(
+        (value) => {
+          signal.removeEventListener('abort', quit);
+          resolve(value);
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', quit);
+          reject(error instanceof Error ? error : corridorError({ kind: 'network' }));
+        },
+      );
+    });
 
   // The archive is opened once per ride, not once per block: its header and
   // metadata are the same ranges whatever the block, and need asking once.
@@ -257,13 +320,9 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     options.archive === undefined
       ? undefined
       : {
-          open: () => {
-            const inner = options.archive as CorridorArchive;
-            opening ??= inner.open(ride.signal).catch((error: unknown) => {
-              opening = undefined;
-              throw error;
-            });
-            return opening;
+          open: (signal) => {
+            opening ??= openOnce(options.archive as CorridorArchive);
+            return awaitOpening(opening, signal);
           },
           tile: (tile, signal) => (options.archive as CorridorArchive).tile(tile, signal),
         };
@@ -310,7 +369,8 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
       yieldToIdle: options.yieldToIdle,
     });
     if (read.kind === 'wrong-schema') return 'wrong-schema';
-    // A block the rider has left behind while it was read is not kept.
+    // A block the rider has left behind while it was read is not kept: its
+    // read runs on until a crossing's delay ends, and may finish first.
     if (read.kind !== 'read' || stopped || !wanted.has(keyOf(block))) return 'none';
     const fresh: HeldBlock = { block, frame, tiles: read.tiles, features: read.features };
     held.set(keyOf(block), fresh);
@@ -367,8 +427,17 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
     for (let i = queue.length - 1; i >= 0; i--) {
       if (!wanted.has(keyOf(queue[i] as BlockId))) queue.splice(i, 1);
     }
-    if (running !== undefined && !wanted.has(running.key)) running.stop.abort();
     return around;
+  };
+
+  /**
+   * Abandons the running read when its block has left the 3 × 3. Called only
+   * from a crossing's delayed callback (R-8): an abort is something the host
+   * sees — a cancelled request, and the next block's tiles asked for at once
+   * — so it waits the crossing's delay like any request the crossing makes.
+   */
+  const abandonLeftBehind = (): void => {
+    if (running !== undefined && !wanted.has(running.key)) running.stop.abort();
   };
 
   const off = (): AreaStart | undefined => {
@@ -408,6 +477,7 @@ export function createAreaReader(options: AreaReaderOptions): AreaReader {
         timer.fired = true;
         waiting.delete(timer.cancel);
         if (stopped) return;
+        abandonLeftBehind();
         // Only what is still round the rider when the delay ends. Map tiles
         // turned off since, or no archive, and the read asks for nothing
         // (`readOne`'s `mustStop`, checked before every request).

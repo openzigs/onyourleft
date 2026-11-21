@@ -25,9 +25,10 @@ import {
   tilesOfBlock,
   type AreaPosition,
   type AreaReaderOptions,
+  type AreaStart,
   type BlockId,
 } from './area';
-import type { CorridorArchive } from './corridor';
+import { READ_TIMEOUT_MS, type CorridorArchive } from './corridor';
 
 /** The latitude at a fractional z14 row (Web Mercator, row 0 at the north). */
 const latitudeAt = (row: number): number =>
@@ -121,6 +122,44 @@ function reader(overrides: Partial<AreaReaderOptions> & Pick<AreaReaderOptions, 
     yieldToIdle: () => Promise.resolve(),
     ...overrides,
   });
+}
+
+/** One task later: every read the last step set going has made its requests. */
+const tick = (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
+/**
+ * An archive that answers every tile until `stall` is set, and from then on
+ * answers none until its own signal aborts — or until `release` is called.
+ */
+function stallingArchive() {
+  const { archive: answering } = countingArchive();
+  const asked: TileId[] = [];
+  const signals: AbortSignal[] = [];
+  const held: (() => void)[] = [];
+  const state = { stall: false };
+  const archive: CorridorArchive = {
+    open: (signal) => answering.open(signal),
+    tile: (tile, signal) => {
+      asked.push(tile);
+      signals.push(signal);
+      if (!state.stall) return answering.tile(tile, signal);
+      return new Promise((resolve, reject) => {
+        held.push(() => {
+          resolve(residentialBlockTile());
+        });
+        signal.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    },
+  };
+  const release = (): void => {
+    for (const answer of held.splice(0)) answer();
+  };
+  return { archive, asked, signals, state, release };
 }
 
 const tileKeys = (tiles: readonly TileId[]): string[] => tiles.map((t) => `${t.x},${t.y}`);
@@ -373,6 +412,75 @@ describe('R-8: a crossing’s request waits a random delay, and the ride never d
   });
 });
 
+describe('R-8 holds for a read a crossing abandons', () => {
+  // Crossing east asks, after its delay, for the new east column, two blocks
+  // east of the start; the first of its three is the one north of the start's row.
+  const EAST = (): AreaPosition => offset(START, 2_000, 0);
+  // Then crossing south leaves that block behind while it is still read.
+  const SOUTH_EAST = (): AreaPosition => offset(START, 2_000, -2_000);
+
+  it('abandons it, and asks for the next block, only when the crossing’s own delay ends', async () => {
+    const clock = manualClock();
+    const { archive, asked, signals, state } = stallingArchive();
+    const area = reader({ archive, random: () => 0.5, schedule: clock.schedule });
+    expect(await area.start(START)).toStrictEqual({ kind: 'ready' });
+    state.stall = true;
+    area.moveTo(EAST());
+    clock.advance(15_000);
+    await vi.waitFor(() => {
+      expect(asked).toHaveLength(MAX_HELD_TILES + 4);
+    });
+    const start = blockOf(START) as BlockId;
+    const reading: BlockId = { x: start.x + 2, y: start.y - 1 };
+    expect(tileKeys(asked.slice(MAX_HELD_TILES))).toStrictEqual(tileKeys(tilesOfBlock(reading)));
+    expect(blockKeys(blocksAround(blockOf(SOUTH_EAST()) as BlockId))).not.toContain(
+      blockKeys([reading])[0],
+    );
+    const running = signals.slice(MAX_HELD_TILES);
+
+    area.moveTo(SOUTH_EAST());
+    await tick();
+    await tick();
+    // Nothing the host could see happens at the crossing: no cancel, no request.
+    expect(running.some((signal) => signal.aborted)).toBe(false);
+    expect(asked).toHaveLength(MAX_HELD_TILES + 4);
+    clock.advance(15_000 - 1);
+    await tick();
+    await tick();
+    expect(running.some((signal) => signal.aborted)).toBe(false);
+    expect(asked).toHaveLength(MAX_HELD_TILES + 4);
+
+    clock.advance(1);
+    await vi.waitFor(() => {
+      expect(running.every((signal) => signal.aborted)).toBe(true);
+      expect(asked.length).toBeGreaterThan(MAX_HELD_TILES + 4);
+    });
+    area.stop();
+  });
+
+  it('does not keep a block left behind whose read finishes before that delay ends', async () => {
+    const clock = manualClock();
+    const { archive, asked, state, release } = stallingArchive();
+    const area = reader({ archive, random: () => 0.5, schedule: clock.schedule });
+    await area.start(START);
+    state.stall = true;
+    area.moveTo(EAST());
+    clock.advance(15_000);
+    await vi.waitFor(() => {
+      expect(asked).toHaveLength(MAX_HELD_TILES + 4);
+    });
+    const reading = asked.slice(MAX_HELD_TILES);
+    area.moveTo(SOUTH_EAST());
+    state.stall = false;
+    release();
+    await area.settled();
+    const held = area.held().flatMap((block) => tileKeys(tilesOfBlock(block.block)));
+    expect(held).not.toContain(tileKeys(reading)[0]);
+    expect(area.held().length).toBeLessThanOrEqual(MAX_HELD_BLOCKS);
+    area.stop();
+  });
+});
+
 describe('the end of the ride', () => {
   it('abandons a running read and every waiting one, and asks nothing after', async () => {
     const clock = manualClock();
@@ -442,6 +550,46 @@ describe('reads that fail, and reads left behind', () => {
     await area.settled();
     expect(asked).toHaveLength(MAX_HELD_TILES);
     expect(area.holds(offset(START, 2_000, 0))).toBe(true);
+  });
+
+  it('gives up on an archive header that never answers at the read’s timeout, and reads on', async () => {
+    vi.useFakeTimers();
+    try {
+      const { archive: answering, asked } = countingArchive();
+      const opens: AbortSignal[] = [];
+      const archive: CorridorArchive = {
+        // The first header range never answers, and ignores its signal.
+        open: (signal) => {
+          opens.push(signal);
+          return opens.length === 1 ? new Promise(() => undefined) : answering.open(signal);
+        },
+        tile: (tile, signal) => answering.tile(tile, signal),
+      };
+      const area = reader({ archive });
+      let result: AreaStart | undefined;
+      void area.start(START).then((started) => {
+        result = started;
+      });
+      await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS - 1);
+      expect(result).toBeUndefined();
+      expect(asked).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      await area.settled();
+      await vi.advanceTimersByTimeAsync(0);
+      // The start's own block was the read that waited; the other eight load.
+      expect(result).toStrictEqual({ kind: 'unavailable' });
+      expect(opens).toHaveLength(2);
+      expect(opens[0]?.aborted).toBe(true);
+      expect(area.held()).toHaveLength(MAX_HELD_BLOCKS - 1);
+      // And the pump is not wedged: a crossing still loads its blocks.
+      const far = offset(START, 4_000, 0);
+      area.moveTo(far);
+      await area.settled();
+      expect(area.holds(far)).toBe(true);
+      area.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('says an archive that is not the basemap schema is off', async () => {

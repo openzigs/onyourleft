@@ -18,12 +18,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from '../rider';
 import { circuitRoute } from '../route-fixtures-testing';
-import {
-  modelTacticsInputOf,
-  startLapRaceModel,
-  answerLapRaceModel,
-  askLapRaceModel,
-} from './model-race';
+import { startLapRaceModel, answerLapRaceModel, askLapRaceModel } from './model-race';
 import {
   createModelTacticsPort,
   readTacticsStatus,
@@ -129,16 +124,32 @@ function raceSoFar() {
   );
 }
 
-const ATTACK = JSON.stringify({
-  bots: [
-    { bot: 0, move: 'attack' },
-    { bot: 4, move: 'follow' },
-  ],
-});
+/** The ask the race makes of its instance a few seconds in: one bot's, as `GameView` would send it. */
+function askSoFar() {
+  const ride = raceSoFar();
+  const asking = askLapRaceModel(
+    ride.model ?? startLapRaceModel(),
+    ride.race,
+    ride.bots,
+    ride.conditions,
+    ride.seed,
+    true,
+    220 / 75,
+  );
+  if (asking.send === undefined) throw new Error('a race a few seconds in has a bot to ask about');
+  return { ride, model: asking.model, send: asking.send };
+}
+
+/** The model's pick of the first move on the menu it was held to: the reason first (#2836). */
+const firstOnTheMenu = (body: Readonly<Record<string, unknown>>): string => {
+  const format = JSON.stringify(body.format);
+  const move = /"move":\{"type":"string","enum":\["([a-z-]+)"/.exec(format)?.[1];
+  return JSON.stringify({ reason: 'my-terrain', move, effort: 'threshold' });
+};
 
 describe('the tactics port, through the real instance (#2709’s routes)', () => {
-  it('offers, records a consent, warms the model, and brings back a decision the race logs', async () => {
-    const { server, ports } = await instanceWith(1, () => ATTACK);
+  it('offers, records a consent, warms the model, and brings back one bot’s decision the race logs', async () => {
+    const { server, ports } = await instanceWith(1, firstOnTheMenu);
     const port = ports[0]!;
     const before = await port.tacticsStatus();
     expect(before).toEqual({
@@ -154,60 +165,38 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
 
     expect(await port.startTacticsRace()).toEqual({ kind: 'answer', body: { warming: true } });
 
-    const ride = raceSoFar();
-    const model = ride.model ?? startLapRaceModel();
-    const asking = askLapRaceModel(
-      model,
-      ride.race,
-      ride.bots,
-      ride.conditions,
-      ride.seed,
-      true,
-      220 / 75,
-    );
-    expect(asking.send).toBeDefined();
-    const send = asking.send!;
+    const { ride, model, send } = askSoFar();
+    const offered = send.input.you.menu[0]!;
+    expect(offered.move).not.toBe('sit-in');
     const reply = await port.decideTactics(send.input);
     expect(reply).toEqual({
       kind: 'answer',
-      body: {
-        bots: [
-          { bot: 0, move: 'attack' },
-          { bot: 4, move: 'follow' },
-        ],
-      },
+      body: { reason: 'my-terrain', move: offered.move, effort: 'threshold' },
     });
-    const logged = answerLapRaceModel(asking.model, ride.race, send.ask, reply);
+    const logged = answerLapRaceModel(model, ride.race, send.ask, reply);
+    // The race logs it for the bot it asked about, the target the menu's own.
     expect(logged.log.at(-1)).toMatchObject({
       outcome: 'decision',
-      moves: [
-        { bot: 0, move: 'attack' },
-        { bot: 4, move: 'follow' },
-      ],
+      bot: send.input.you.bot,
+      why: 'my-terrain',
+      moves: [{ ...offered, bot: send.input.you.bot, effort: 'threshold' }],
     });
-    // The model was asked about the very race state the device sent.
+    // The model was asked about the very ask the device sent: its bot, its cues and its menu, last.
     const asked = server.requests.at(-1)?.body.messages as { content: string }[];
-    expect(JSON.parse(asked.at(-1)?.content ?? '')).toEqual(send.input);
+    const lines = (asked.at(-1)?.content ?? '').split('\n');
+    expect(JSON.parse((lines.at(-1) ?? '').slice('You: '.length))).toEqual(send.input.you);
+    expect(lines[0]).toContain(JSON.stringify(send.input.field));
     await port.endTacticsRace();
   });
 
   it('comes back refused after a withdrawal, and for a second rider while one races (D-5.4, D-6.3)', async () => {
-    const { ports } = await instanceWith(2, () => ATTACK);
+    const { ports } = await instanceWith(2, firstOnTheMenu);
     const [one, two] = ports as [(typeof ports)[0], (typeof ports)[0]];
     for (const port of [one, two]) {
       const status = await port.tacticsStatus();
       if (status.kind === 'offered') await port.recordTacticsConsent(status);
     }
-    const ride = raceSoFar();
-    const input = modelTacticsInputOf(
-      ride.race,
-      ride.bots,
-      ride.conditions,
-      ride.seed,
-      true,
-      3,
-      0,
-    )!;
+    const { input } = askSoFar().send;
     expect((await one.startTacticsRace()).kind).toBe('answer');
     expect(await two.startTacticsRace()).toEqual({ kind: 'refused', code: 'tactics_busy' });
     expect(await two.decideTactics(input)).toEqual({ kind: 'refused', code: 'tactics_busy' });
@@ -220,25 +209,39 @@ describe('the tactics port, through the real instance (#2709’s routes)', () =>
     });
   });
 
-  it('comes back refused when the model gave no decision', async () => {
+  it('comes back refused when the model gave no decision, or one off the menu the race then logs as none', async () => {
     const { ports } = await instanceWith(1, () => undefined);
     const port = ports[0]!;
     const status = await port.tacticsStatus();
     if (status.kind === 'offered') await port.recordTacticsConsent(status);
-    const ride = raceSoFar();
-    const input = modelTacticsInputOf(
-      ride.race,
-      ride.bots,
-      ride.conditions,
-      ride.seed,
-      true,
-      3,
-      0,
-    )!;
-    expect(await port.decideTactics(input)).toEqual({ kind: 'refused', code: 'tactics_failed' });
+    const { ride, model, send } = askSoFar();
+    const failed = await port.decideTactics(send.input);
+    expect(failed).toEqual({ kind: 'refused', code: 'tactics_failed' });
+    expect(answerLapRaceModel(model, ride.race, send.ask, failed).log.at(-1)).toMatchObject({
+      outcome: 'failed',
+      reason: 'tactics_failed',
+      bot: send.input.you.bot,
+    });
+  });
+
+  it('refuses, at the instance, a move the device did not offer (#2836)', async () => {
+    const { ports } = await instanceWith(1, () =>
+      JSON.stringify({ reason: 'finish-near', move: 'kick' }),
+    );
+    const port = ports[0]!;
+    const status = await port.tacticsStatus();
+    if (status.kind === 'offered') await port.recordTacticsConsent(status);
+    const { ride, model, send } = askSoFar();
+    // Five seconds into three laps, no bot's menu has a kick on it.
+    expect(send.input.you.menu.map((entry) => entry.move)).not.toContain('kick');
+    const reply = await port.decideTactics(send.input);
+    expect(reply).toEqual({ kind: 'refused', code: 'tactics_invalid' });
+    expect(answerLapRaceModel(model, ride.race, send.ask, reply).log.at(-1)).toMatchObject({
+      outcome: 'invalid',
+      reason: 'tactics_invalid',
+    });
   });
 });
-
 describe('the tactics port’s own edges', () => {
   it('sends nothing with no session, and says so as unreachable', async () => {
     const calls: string[] = [];
