@@ -1657,7 +1657,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         #2657) is still dropped (`insidePark`).
                         Since #2976 `grassland` and `heath` are `farmland`, as
                         `meadow` is: open pasture where the procedural world
-                        drew before, and a building mapped there is kept.
+                        drew before, and a building mapped there is kept;
+                        inside a protected area (#2657) each reads as the
+                        area, below it (`OPEN_GROUND_KINDS`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's

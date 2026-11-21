@@ -481,6 +481,16 @@ describe('suburb or rural: the cues, combined — the owner’s ruling of 2026-1
     ).toBe(false);
   });
 
+  it('reads a grassland or heath near as farmland, a cue against (#2976)', () => {
+    const open = (kind: string): Fixture =>
+      streetSuburbFixture('residential', 'ground', (profile, origin) => [
+        landBeside(profile, origin, 'landuse', kind, 1_300, 1_900, 100, 400),
+      ]);
+    for (const kind of ['grassland', 'heath']) expect(inferred(open(kind)), kind).toBe(false);
+    // Control: the same polygon of a kind the table does not name is no cue against.
+    expect(inferred(open('quarry'))).toBe(true);
+  });
+
   it('reads farmland near, or a hamlet near, as a cue against, which a cue for cancels', () => {
     const fields = (joined: boolean): Fixture =>
       streetSuburbFixture(

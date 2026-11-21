@@ -116,7 +116,9 @@ export type LandClass =
  * map says is open grass or heather. As farmland each is open ground: pasture
  * with a few trees, stones, hedgerow trees at its edge, no lot, and a mapped
  * building on it kept, which `park` (natural ground, but a footprint in a park
- * is dropped) and `wood` (planted throughout) would not give.
+ * is dropped) and `wood` (planted throughout) would not give. Both take a
+ * code of their own below a protected area's ({@link OPEN_GROUND_KINDS}), so
+ * a heath inside a national park still reads as the park.
  */
 export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unknown'>>> =
   Object.freeze({
@@ -179,6 +181,15 @@ export const PROTECTED_AREA_KINDS: ReadonlySet<string> = new Set([
   'national_park',
   'nature_reserve',
 ]);
+
+/**
+ * #2976: the `farmland` kinds that are natural open ground — `grassland` and
+ * `heath`. Each reads `farmland`, but from a code below a protected area's
+ * (#2657), so moorland inside a national park or nature reserve is the
+ * park's natural ground and inside a national forest the forest's, as each
+ * was while the two kinds read `other`. Outside one, each is farmland.
+ */
+export const OPEN_GROUND_KINDS: ReadonlySet<string> = new Set(['grassland', 'heath']);
 
 /**
  * What `bare` ground is made of — #2700, in precedence order, least first: a
@@ -471,7 +482,8 @@ function bareCodes(): readonly Code[] {
  * The classes by code, the code being the precedence: a cell keeps the
  * highest code written to it. 0 is `unknown`, which nothing writes. #2657: a
  * protected area's `park` and `wood` ({@link PROTECTED_AREA_KINDS}) are codes
- * of their own, below farmland, and read as the class they name. `bare`
+ * of their own, below farmland, and read as the class they name. #2976: below
+ * them, {@link OPEN_GROUND_KINDS}' own `farmland` code. `bare`
  * takes one code a surface (#2700), in {@link BARE_SURFACES}' order, and
  * since #2754 twice: once below built-up, where #2662 placed the class, and
  * once above a mapped park for {@link BARE_KINDS_OVER_LAND}.
@@ -485,6 +497,7 @@ function bareCodes(): readonly Code[] {
 const CODES: readonly Code[] = [
   { land: 'unknown' },
   { land: 'other' },
+  { land: 'farmland' },
   { land: 'park' },
   { land: 'wood' },
   { land: 'farmland' },
@@ -501,9 +514,11 @@ const CODES: readonly Code[] = [
 ];
 const CLASS_OF_CODE: readonly LandClass[] = CODES.map((code) => code.land);
 const CODE_OTHER = 1;
-const CODE_PROTECTED_PARK = 2;
-const CODE_PROTECTED_WOOD = 3;
-const CODE_FARMLAND = CLASS_OF_CODE.indexOf('farmland');
+/** #2976: a grassland's or heath's `farmland`, below a protected area. @see OPEN_GROUND_KINDS */
+const CODE_OPEN_GROUND = 2;
+const CODE_PROTECTED_PARK = 3;
+const CODE_PROTECTED_WOOD = 4;
+const CODE_FARMLAND = CLASS_OF_CODE.indexOf('farmland', CODE_PROTECTED_WOOD);
 const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
 /**
  * The mapped `park` code, above farmland — #2685's looks are read on it and on
@@ -579,6 +594,7 @@ function codeOfFeature(feature: LandUseFeature): number {
     return landClass === 'wood' ? CODE_PROTECTED_WOOD : CODE_PROTECTED_PARK;
   }
   if (landClass === 'other') return CODE_OTHER;
+  if (landClass === 'farmland' && OPEN_GROUND_KINDS.has(feature.kind)) return CODE_OPEN_GROUND;
   if (landClass === 'water') return CODE_WATER;
   if (landClass !== 'bare') return CLASS_OF_CODE.indexOf(landClass, CODE_FARMLAND);
   const first = BARE_KINDS_OVER_LAND.has(feature.kind) ? CODE_BARE_OVER_LAND : CODE_BARE;
@@ -1679,12 +1695,13 @@ function inferBuiltUp(
       const rowKey = row * densityPerChunk + Math.floor(cellZ / cellsPerDensity);
       for (let cellX = 0; cellX < LAND_CLASS_CHUNK_CELLS; cellX += 1) {
         const code = chunk[start + cellX] as number;
-        if (code !== CODE_FARMLAND && code !== CODE_BUILT_UP) continue;
+        const farm = code === CODE_FARMLAND || code === CODE_OPEN_GROUND;
+        if (!farm && code !== CODE_BUILT_UP) continue;
         const cell = densityKey(
           column * densityPerChunk + Math.floor(cellX / cellsPerDensity),
           rowKey,
         );
-        const into = code === CODE_FARMLAND ? farmland : mapped;
+        const into = farm ? farmland : mapped;
         into.set(cell, (into.get(cell) ?? 0) + 1);
       }
     }

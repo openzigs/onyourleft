@@ -251,6 +251,38 @@ describe('#2976 grassland and heath: open ground, as a meadow is', () => {
     // Control: the same building in a park is dropped.
     expect(kept('park')).toMatchObject({ kept: 0, 'on-excluded-land': 1 });
   });
+
+  it('reads inside a protected area as the area, and as farmland beside it', () => {
+    // The open ground: the north half of the covered 2 km; the area: all of it.
+    const north: Box = { ...MIDDLE, minZ: 3_000 };
+    const cases = [
+      ['national_park', 'park'],
+      ['nature_reserve', 'park'],
+      ['forest', 'wood'],
+    ] as const;
+    for (const kind of OPEN) {
+      for (const [area, reads] of cases) {
+        // Either drawing order: the higher code wins, not the later polygon.
+        for (const land of [
+          mask(rectangle(area, MIDDLE), rectangle(kind, north)),
+          mask(rectangle(kind, north), rectangle(area, MIDDLE)),
+        ]) {
+          expect(land.classAt(0, 3_500), `${kind} in ${area}`).toBe(reads);
+          expect(land.protectedArea(0, 3_500), `${kind} in ${area}`).toBe(true);
+          expect(fieldGround(land, 0, 3_500), `${kind} in ${area}`).toBe(false);
+        }
+      }
+      // Control: the same open ground with no area round it is farmland.
+      const alone = mask(rectangle(kind, north));
+      expect(alone.classAt(0, 3_500), kind).toBe('farmland');
+      expect(alone.protectedArea(0, 3_500), kind).toBe(false);
+      expect(fieldGround(alone, 0, 3_500), kind).toBe(true);
+    }
+    // Control: a meadow, which is not open ground, still outranks the area.
+    const meadow = mask(rectangle('national_park', MIDDLE), rectangle('meadow', north));
+    expect(meadow.classAt(0, 3_500)).toBe('farmland');
+    expect(meadow.protectedArea(0, 3_500)).toBe(false);
+  });
 });
 
 describe('#2662 a footprint’s size limit', () => {
