@@ -727,9 +727,9 @@ describe('the camera’s heading is damped — #1994', () => {
   });
 
   it('closes a small error exponentially, with the stated time constant', () => {
-    // 5° is under the knee (90°/s × 0.1 s = 9°), so it is all exponential.
-    const after = degreesOf(step(toward(0), toward(5), CAMERA_YAW_SETTLE_SECONDS, 30));
-    expect(5 - after).toBeCloseTo(5 * Math.exp(-1), 9);
+    // 3° is under the knee (90°/s × 0.04 s = 3.6°), so it is all exponential.
+    const after = degreesOf(step(toward(0), toward(3), CAMERA_YAW_SETTLE_SECONDS, 30));
+    expect(3 - after).toBeCloseTo(3 * Math.exp(-1), 9);
   });
 
   it('turns the short way round across the back', () => {

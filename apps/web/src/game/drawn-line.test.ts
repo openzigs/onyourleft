@@ -227,14 +227,20 @@ function steadyTurnSpeed(profile: RouteProfile, corner: number): number {
 
 /**
  * The fastest the rider's heading may turn through a junction, **45°/s**, and
- * the camera's, **65°/s**. A rider leaning 25° turns at `g·tan 25° / v`, 38°/s
+ * the camera's, **72°/s**. A rider leaning 25° turns at `g·tan 25° / v`, 38°/s
  * at 25 km/h and less the faster they go. Measured on 2026-11-10, the worst of
  * the 200 seeds: the rider 35°/s, the camera 60°/s (its eye held in from the
  * kerb, `scene.ts` §`eyeOnDrawnPath`, turns it a little more than the rider).
  * On #2445's head: the rider 86–171°/s, the camera 44–83°/s.
+ *
+ * ⚠️ **The camera's was 65°/s until #2989**, which cut the heading's settle
+ * from 0.1 s to 0.04 s so that the camera's target stays on the road through
+ * a hard junction (ADR 0089 C-2, `camera.ts` §`CAMERA_YAW_SETTLE_SECONDS`).
+ * A camera that trails the road less follows its turn more closely: measured
+ * on 2026-11-21, the worst of the 200 seeds is 69°/s, under C-1's 90°/s cap.
  */
 const MOST_TURN = 45 * DEGREES;
-const MOST_CAMERA_TURN = 65 * DEGREES;
+const MOST_CAMERA_TURN = 72 * DEGREES;
 
 /**
  * How much the turn rate may change from one 60 fps frame to the next, as a
