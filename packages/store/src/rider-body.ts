@@ -3,16 +3,21 @@
 /**
  * Which rider the trainer game draws for this athlete — #2839.
  *
- * ## A closed word, and never a health input
+ * ## One choice, which is also the calorie estimate's sex
  *
- * The owner's ruling of 2026-11-18: a "Rider" choice beside the kit colour,
- * Female or Male, that says how the rider LOOKS. It is not read from
- * `AthleteRecord.calorieSex` and never writes it: that field is an input to
- * the heart-rate calorie estimate and stays on the device
- * (`apps/web/src/privacy/calorie-inputs-stay-here.test.ts`), and choosing how
- * you look does not touch it. Two fields, two setters, and no code path from
- * one to the other — `activity-store.rider-body.test.ts` holds that a write of
- * either leaves the other as it was.
+ * The owner's ruling of 2026-11-18 made this a "Rider" choice beside the kit
+ * colour, Female or Male, and kept it apart from `AthleteRecord.calorieSex`
+ * (the heart-rate calorie estimate's sex, #2432). **The owner's ruling of
+ * 2026-11-20 supersedes the separation: "They should be a single choice."**
+ * Settings asks Female or Male once, and the store's
+ * `ActivityStore.setAthleteRider` writes that word to both fields in one
+ * transaction. `calorieSex` still stays on the device
+ * (`apps/web/src/privacy/calorie-inputs-stay-here.test.ts`), and so does this.
+ *
+ * Two fields remain on the row, because rows written before the ruling can
+ * hold one without the other, or the two disagreeing. {@link riderChoiceOf}
+ * is the one rule that reads them: `calorieSex` when it is set, else
+ * `riderBody`. The next choice writes both, and they agree from then on.
  *
  * ## Like the kit colour, stored here and read nowhere in `packages/`
  *
@@ -64,4 +69,26 @@ export function isRiderBody(value: unknown): value is RiderBody {
  */
 export function parseRiderBody(value: unknown): RiderBody {
   return isRiderBody(value) ? value : DEFAULT_RIDER_BODY;
+}
+
+/**
+ * The rider's one Female / Male choice, read from a row written at any time —
+ * the owner's ruling of 2026-11-20.
+ *
+ * `calorieSex` when it is set, else `riderBody`, else `undefined` (a rider who
+ * never chose: drawn as {@link DEFAULT_RIDER_BODY}, and *Not set* for the
+ * calorie estimate). Settings shows this, the game draws it, and the calorie
+ * estimate uses it, so the three cannot disagree about a row whose two fields
+ * do.
+ *
+ * `calorieSex` wins a disagreement because it is the one a rider chose
+ * knowing it was a health input, and it is the older field (#2432 shipped,
+ * #2839's `riderBody` existed only on test builds before the ruling).
+ */
+export function riderChoiceOf(
+  row:
+    | { readonly calorieSex?: RiderBody | undefined; readonly riderBody?: RiderBody | undefined }
+    | undefined,
+): RiderBody | undefined {
+  return row?.calorieSex ?? row?.riderBody;
 }

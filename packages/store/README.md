@@ -262,14 +262,18 @@ on the way in and on the way out, so neither a cast at a call site nor a hand-ed
 anything but a key on the record. `misfiledKitColourStoreFactory` is its fake — the right row, a key
 the reader does not use — and `activity-store.kit-colour.test.ts` holds the red/green pair.
 
-`setAthleteRiderBody(id, riderBody)` ([#2839](https://github.com/openzigs/onyourleft/issues/2839)) is
-the same shape for which rider the trainer game draws: one of two words, `female` or `male`
-(`rider-body.ts`), through `parseRiderBody` on the way in and on the way out, and absent on a row
-nobody has chosen for — the client draws that as `male`, the rider every athlete had before.
-⚠️ **It is how the rider looks and never a health input**: it is not read from `calorieSex` and
-never writes it (the owner's ruling of 2026-11-18). `healthCoupledRiderBodyStoreFactory` is its
-fake — a store that keeps the two "in step" — and `activity-store.rider-body.test.ts` holds the
-red/green pair, from a row whose calorie sex is the other word.
+`setAthleteRider(id, rider)` ([#2839](https://github.com/openzigs/onyourleft/issues/2839)) is the
+same shape for the rider's one Female / Male choice: one of two words, `female` or `male`
+(`rider-body.ts`), through `parseRiderBody` on the way in and on the way out. ⚠️ **Since the
+owner's ruling of 2026-11-20 ("They should be a single choice") it writes BOTH `riderBody` (the
+rider the trainer game draws) and `calorieSex` (the heart-rate calorie estimate's sex, #2432)** in
+one transaction; the 2026-11-18 design, in which the two were never coupled, is superseded. A row
+written before the ruling can hold one without the other, or the two disagreeing, so the choice is
+read through `riderChoiceOf`: `calorieSex` when it is set, else `riderBody`, else nothing (drawn
+as `male`, and *Not set* for the estimate). `lookOnlyRiderStoreFactory` is its fake — a store that
+writes the look and not the sex — and `activity-store.rider-body.test.ts` holds the red/green pair,
+from a row whose calorie sex is the other word. `setAthleteBirthYear(id, year)` writes the year of
+birth alone, which is Settings' calorie panel's write since the sex left it.
 
 `setActivityLoadSummary(owner, id, summary)` (#77) is the same shape again, for a ride: it writes
 the threshold-independent half of a ride's load and touches nothing else, and it is **athlete-scoped**

@@ -641,9 +641,13 @@ describe('the manifest names its fields rather than spreading the row', () => {
     // calorie sex is the OTHER word, so a manifest that filled one field from
     // the other is red.
     await seedLibrary(1);
+    // A row written before the owner's ruling of 2026-11-20, whose two fields
+    // disagree: the export carries each as stored, never one filled from the other.
     await harness.write(async (store) => {
       await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1985 });
-      await store.setAthleteRiderBody(ATHLETE_A, 'female');
+      const row = await store.getAthlete(ATHLETE_A);
+      if (row === undefined) throw new Error('no athlete row');
+      await store.putAthlete({ ...row, riderBody: 'female' });
     });
     const athlete = manifestOf((await runExport()).files)['athlete'] as Record<string, unknown>;
 

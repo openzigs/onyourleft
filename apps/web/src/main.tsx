@@ -22,6 +22,7 @@ import {
   lapId,
   openActivityStore,
   recordingSessionId,
+  riderChoiceOf,
   routeId,
   webCryptoSha256,
   type AthleteRecord,
@@ -1105,8 +1106,8 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
 }
 
 /**
- * The settings screen's write of which rider is drawn (#2839), over the same
- * connection and separate for the reason `athlete/rider-body-port.ts` gives.
+ * The settings screen's write of the rider's one Female / Male choice (#2839,
+ * the owner's ruling of 2026-11-20), over the same connection.
  */
 function buildAthleteRiderBodyPort(): AthleteRiderBodyPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
@@ -1120,7 +1121,7 @@ function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
-/** The rider's sex and year of birth (#2432), over the same connection. */
+/** The rider's year of birth (#2432), over the same connection. */
 function buildCalorieInputsPort(): CalorieInputsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
@@ -1987,7 +1988,11 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}
           // #2839: which rider is drawn, undefaulted likewise — `game/rider-body.ts`
           // §`riderBodyFor` is the one place a missing one becomes the default.
-          {...(athlete?.riderBody === undefined ? {} : { riderBody: athlete.riderBody })}
+          // ⚠️ Through `riderChoiceOf` (the owner's ruling of 2026-11-20): the
+          // rider's one Female / Male choice is `calorieSex` when it is set,
+          // else `riderBody`, so Settings, the game and the calorie estimate
+          // read a row whose two fields disagree the same way.
+          riderBody={riderChoiceOf(athlete)}
           // ⚠️ The **stored** preference, read before the first paint. The
           // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
           // place — `AppShell`'s own default — so "a row with no setting" and

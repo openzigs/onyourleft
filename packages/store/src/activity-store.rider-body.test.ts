@@ -3,8 +3,9 @@
 /**
  * Which rider is drawn (#2839): that the choice survives a reload, that it is
  * athlete-scoped, that nothing but one of the two words ever comes back out —
- * and that it never touches the heart-rate calorie estimate's sex, in either
- * direction, which is the owner's ruling of 2026-11-18.
+ * and that it IS the heart-rate calorie estimate's sex, one choice written to
+ * both fields, which is the owner's ruling of 2026-11-20 (superseding the
+ * 2026-11-18 ruling that kept them apart).
  *
  * Every read is through the #28 round-trip harness, whose `read()` cannot be
  * served by the handle that wrote, and through `getAthlete` — the path
@@ -19,13 +20,19 @@ import { unixSeconds } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import type { AthleteRecord } from './records';
-import { DEFAULT_RIDER_BODY, isRiderBody, parseRiderBody, RIDER_BODIES } from './rider-body';
+import {
+  DEFAULT_RIDER_BODY,
+  isRiderBody,
+  parseRiderBody,
+  RIDER_BODIES,
+  riderChoiceOf,
+} from './rider-body';
 import {
   ATHLETE_A,
   ATHLETE_B,
   ATHLETE_C,
   createStoreHarness,
-  healthCoupledRiderBodyStoreFactory,
+  lookOnlyRiderStoreFactory,
   seedAthletes,
   type StoreHarness,
 } from './testing';
@@ -64,7 +71,7 @@ describe('the rider body is stored on the athlete (#2839)', () => {
     const harness = await seeded();
     try {
       const onDisk = await harness.roundTrip(
-        async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'female'),
+        async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'female'),
         async (fresh) => fresh.getAthlete(ATHLETE_A),
       );
 
@@ -92,9 +99,9 @@ describe('the rider body is stored on the athlete (#2839)', () => {
   it('can be changed back', async () => {
     const harness = await seeded();
     try {
-      await harness.write(async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'female'));
+      await harness.write(async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'female'));
       const onDisk = await harness.roundTrip(
-        async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'male'),
+        async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'male'),
         async (fresh) => fresh.getAthlete(ATHLETE_A),
       );
 
@@ -108,9 +115,9 @@ describe('the rider body is stored on the athlete (#2839)', () => {
     // CLAUDE.md §6's cross-athlete class, with three athletes.
     const harness = await seeded();
     try {
-      await harness.write(async (fresh) => fresh.setAthleteRiderBody(ATHLETE_C, 'male'));
+      await harness.write(async (fresh) => fresh.setAthleteRider(ATHLETE_C, 'male'));
       const [a, b, c] = await harness.roundTrip(
-        async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'female'),
+        async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'female'),
         async (fresh) =>
           Promise.all([
             fresh.getAthlete(ATHLETE_A),
@@ -131,7 +138,7 @@ describe('the rider body is stored on the athlete (#2839)', () => {
     const harness = createStoreHarness();
     try {
       await harness.write(async (fresh) => fresh.putAthlete(athlete()));
-      await harness.write(async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'female'));
+      await harness.write(async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'female'));
       await harness.write(async (fresh) => fresh.setAthleteKitColour(ATHLETE_A, 'purple'));
       const onDisk = await harness.roundTrip(
         async (fresh) => fresh.setAthleteUnits(ATHLETE_A, 'imperial'),
@@ -150,7 +157,7 @@ describe('the rider body is stored on the athlete (#2839)', () => {
     const harness = createStoreHarness();
     try {
       const result = await harness.write(async (fresh) =>
-        fresh.setAthleteRiderBody(ATHLETE_A, 'female'),
+        fresh.setAthleteRider(ATHLETE_A, 'female'),
       );
 
       expect(result).toBeUndefined();
@@ -163,7 +170,7 @@ describe('the rider body is stored on the athlete (#2839)', () => {
   it('goes with the row when the athlete is erased, and a recreated row carries none', async () => {
     const harness = await seeded();
     try {
-      await harness.write(async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'female'));
+      await harness.write(async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'female'));
       await harness.write(async (fresh) => fresh.deleteAthlete(ATHLETE_A));
 
       const recreated = await harness.roundTrip(
@@ -199,7 +206,7 @@ describe('nothing but one of the two words comes back out (#2839, CLAUDE.md §6)
     try {
       await harness.write(async (fresh) => fresh.putAthlete(athlete()));
       const answered = await harness.write(async (fresh) =>
-        fresh.setAthleteRiderBody(ATHLETE_A, 'robot' as 'female'),
+        fresh.setAthleteRider(ATHLETE_A, 'robot' as 'female'),
       );
       const onDisk = await harness.read(async (fresh) => fresh.getAthlete(ATHLETE_A));
 
@@ -212,85 +219,97 @@ describe('nothing but one of the two words comes back out (#2839, CLAUDE.md §6)
 });
 
 /**
- * The owner's ruling, as a property of the store: how you look and the sex a
- * calorie estimate uses are two fields with no path between them.
+ * The owner's ruling of 2026-11-20, as a property of the store: one Female /
+ * Male choice, written to the look and to the calorie estimate's sex together.
  *
  * ⚠️ **A pair, and neither means anything alone** (docs/agents/store-harness.md
  * §5): the same assertion passes against the real store and fails against one
- * that keeps the two "in step".
+ * that writes the look only.
  */
-describe('choosing a rider never touches the calorie estimate’s sex (#2839)', () => {
-  async function assertRiderBodyLeavesCalorieSex(harness: StoreHarness): Promise<void> {
+describe('choosing a rider is also the calorie estimate’s sex (#2839, 2026-11-20)', () => {
+  async function assertRiderWritesBoth(harness: StoreHarness): Promise<void> {
     await harness.write(async (fresh) => fresh.putAthlete(athlete()));
-    // The calorie sex is the OTHER word, so a coupled write shows.
+    // The calorie sex starts as the OTHER word, so a half write shows.
     await harness.write(async (fresh) =>
       fresh.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1985 }),
     );
-    await harness.write(async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'female'));
+    await harness.write(async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'female'));
 
     const onDisk = await harness.read(async (fresh) => fresh.getAthlete(ATHLETE_A));
     if (onDisk?.riderBody !== 'female') {
       throw new Error(`read back the rider ${String(onDisk?.riderBody)}, not female`);
     }
-    if (onDisk.calorieSex !== 'male' || onDisk.birthYear !== 1985) {
-      throw new Error(
-        `the calorie inputs changed to ${String(onDisk.calorieSex)}, ${String(onDisk.birthYear)}`,
-      );
+    if (onDisk.calorieSex !== 'female') {
+      throw new Error(`the calorie sex read back ${String(onDisk.calorieSex)}, not female`);
+    }
+    if (onDisk.birthYear !== 1985) {
+      throw new Error(`the year of birth changed to ${String(onDisk.birthYear)}`);
     }
   }
 
   it('passes against the real store', async () => {
     const harness = createStoreHarness();
     try {
-      await expect(assertRiderBodyLeavesCalorieSex(harness)).resolves.toBeUndefined();
+      await expect(assertRiderWritesBoth(harness)).resolves.toBeUndefined();
     } finally {
       await harness.destroy();
     }
   });
 
-  it('fails against a store that keeps the two in step', async () => {
-    const harness = createStoreHarness({ factory: healthCoupledRiderBodyStoreFactory() });
+  it('fails against a store that writes the look only', async () => {
+    const harness = createStoreHarness({ factory: lookOnlyRiderStoreFactory() });
     try {
-      await expect(assertRiderBodyLeavesCalorieSex(harness)).rejects.toThrow(
-        /calorie inputs changed to female/,
+      await expect(assertRiderWritesBoth(harness)).rejects.toThrow(
+        /calorie sex read back male, not female/,
       );
     } finally {
       await harness.destroy();
     }
   });
 
-  it('and setting the calorie sex leaves the rider as chosen', async () => {
+  it('writes male to both, from a row where they disagreed the other way', async () => {
     const harness = createStoreHarness();
     try {
-      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
-      await harness.write(async (fresh) => fresh.setAthleteRiderBody(ATHLETE_A, 'female'));
+      await harness.write(async (fresh) => fresh.putAthlete({ ...athlete(), riderBody: 'female' }));
       const onDisk = await harness.roundTrip(
-        async (fresh) =>
-          fresh.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: undefined }),
+        async (fresh) => fresh.setAthleteRider(ATHLETE_A, 'male'),
         async (fresh) => fresh.getAthlete(ATHLETE_A),
       );
 
-      expect(onDisk?.riderBody).toBe('female');
+      expect(onDisk?.riderBody).toBe('male');
       expect(onDisk?.calorieSex).toBe('male');
     } finally {
       await harness.destroy();
     }
   });
+});
 
-  it('a row with a calorie sex and no chosen rider reads back with no rider', async () => {
-    // Never read FROM the health input: a rider who gave a sex for the
-    // estimate has not thereby chosen how they look.
+describe('riderChoiceOf: the one rule that reads the two fields (2026-11-20)', () => {
+  it('is the calorie sex when it is set, whatever the look says', () => {
+    expect(riderChoiceOf({ calorieSex: 'female', riderBody: 'male' })).toBe('female');
+    expect(riderChoiceOf({ calorieSex: 'male', riderBody: 'female' })).toBe('male');
+    expect(riderChoiceOf({ calorieSex: 'female' })).toBe('female');
+  });
+
+  it('is the look when there is no calorie sex', () => {
+    expect(riderChoiceOf({ riderBody: 'female' })).toBe('female');
+  });
+
+  it('is nothing for a rider who never chose, and for no row', () => {
+    expect(riderChoiceOf({})).toBeUndefined();
+    expect(riderChoiceOf(undefined)).toBeUndefined();
+  });
+
+  it('reads a row stored before the ruling, through the store', async () => {
     const harness = createStoreHarness();
     try {
-      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
       const onDisk = await harness.roundTrip(
         async (fresh) =>
-          fresh.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1990 }),
+          fresh.putAthlete({ ...athlete(), riderBody: 'male', calorieSex: 'female' }),
         async (fresh) => fresh.getAthlete(ATHLETE_A),
       );
 
-      expect(onDisk?.calorieSex).toBe('female');
-      expect(onDisk?.riderBody).toBeUndefined();
+      expect(riderChoiceOf(onDisk)).toBe('female');
     } finally {
       await harness.destroy();
     }

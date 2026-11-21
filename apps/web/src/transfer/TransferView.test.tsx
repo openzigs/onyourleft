@@ -1200,7 +1200,7 @@ describe('TransferView — what it may say about another platform', () => {
     const port = await openPort();
     await (harness ?? never()).write(async (store) => {
       await store.putActivity(rideFor(ATHLETE_A, { name: 'Last one' }));
-      await store.setAthleteRiderBody(ATHLETE_A, 'female');
+      await store.setAthleteRider(ATHLETE_A, 'female');
     });
 
     const reset: (string | undefined)[] = [];

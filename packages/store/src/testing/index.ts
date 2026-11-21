@@ -100,7 +100,7 @@ export {
   droppedFlushStoreFactory,
   gapFillingStoreFactory,
   memoryWriteStoreFactory,
-  healthCoupledRiderBodyStoreFactory,
+  lookOnlyRiderStoreFactory,
   misfiledKitColourStoreFactory,
   lastWordDroppedStoreFactory,
   droppedBirthYearStoreFactory,

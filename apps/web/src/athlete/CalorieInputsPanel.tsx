@@ -4,9 +4,18 @@
  * The Settings panel for the two optional inputs a heart-rate calorie estimate
  * needs — the sex and the year of birth (#2432), beside the weight panel.
  *
+ * ## The sex is the rider choice above, not a control here
+ *
+ * The owner's ruling of 2026-11-20, "They should be a single choice": Settings
+ * asks Female or Male once, under *Your rider*, saved on change, and that is
+ * both the rider drawn and this estimate's sex. So this panel has no sex
+ * control. It says which sex the estimate uses ({@link calorieSexReading}, from
+ * `riderSex`, the shell's copy of the choice, which the rider panel updates
+ * after each save) and keeps the year of birth, with its own save.
+ *
  * ## Why it reads the store itself
  *
- * `calorie-inputs-port.ts` says: nothing else in the client holds these, so
+ * `calorie-inputs-port.ts` says: nothing else in the client holds the year, so
  * the panel reads the row on mount and shows what came back from each save,
  * never what was typed, as `MaskedWordsPanel` does.
  *
@@ -16,7 +25,7 @@
  * what happens without them. It is kept on the screen rather than behind the
  * section's ⓘ (#666), because it is about what leaves the device. The line
  * under the form says whether a heart-rate ride gets a figure today, from the
- * stored sex and year and the weight the rider entered: all three,
+ * rider choice, the stored year and the weight the rider entered: all three,
  * {@link CALORIE_INPUTS_SET}; both of these but no weight,
  * {@link CALORIE_INPUTS_NO_WEIGHT}; otherwise {@link CALORIE_INPUTS_UNSET}.
  *
@@ -28,13 +37,13 @@
 import { useEffect, useId, useState, type JSX } from 'react';
 
 import type { Kilograms } from '@onyourleft/domain';
-import type { CalorieSex } from '@onyourleft/store';
+import type { RiderBody } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
-import { calorieInputsToSave } from './calorie-inputs';
+import { birthYearToSave } from './calorie-inputs';
 import type { CalorieInputsPort } from './calorie-inputs-port';
 
 export const CALORIE_INPUTS_HEADING = 'Calorie estimate from heart rate';
@@ -44,6 +53,17 @@ export const CALORIE_INPUTS_LEAD =
   'Used only to estimate calories from heart rate on a ride with no power. They are kept on this ' +
   'device, are never sent to an instance or a model, and go only into your own account export. ' +
   'Leave them unset and such a ride shows no calorie figure.';
+
+/**
+ * Which sex the estimate uses, read out under a *Sex* term: the rider's one
+ * choice under *Your rider* (2026-11-20), or a pointer to it when they have
+ * not chosen. A reading rather than a control, so it is a `<dd>`.
+ */
+export function calorieSexReading(riderSex: RiderBody | undefined): string {
+  return riderSex === undefined
+    ? 'Not set. Choose Female or Male under Your rider, above.'
+    : `${riderSex === 'female' ? 'Female' : 'Male'}, the rider you chose under Your rider, above.`;
+}
 
 /** Said under the form when the stored row has both and a weight is entered. */
 export const CALORIE_INPUTS_SET =
@@ -61,7 +81,7 @@ export const CALORIE_INPUTS_NO_WEIGHT =
 export const CALORIE_INPUTS_UNSET =
   'A ride with heart rate and no power shows no calorie figure until these and your weight are all set.';
 
-export const CALORIE_INPUTS_SAVED = 'Saved. Rides you save from now on use these.';
+export const CALORIE_INPUTS_SAVED = 'Saved. Rides you save from now on use this year of birth.';
 
 export const CALORIE_INPUTS_NO_STORE =
   'This browser has no local store, so anything entered here would be forgotten as soon as the ' +
@@ -79,29 +99,25 @@ export function calorieInputsSaveFailure(reason: string): string {
   return `That could not be saved, so these are as they were: ${reason}`;
 }
 
-/** The choice's options, *Not set* first: its value is the empty string. */
-export const CALORIE_SEX_OPTIONS: readonly {
-  readonly value: '' | CalorieSex;
-  readonly label: string;
-}[] = [
-  { value: '', label: 'Not set' },
-  { value: 'female', label: 'Female' },
-  { value: 'male', label: 'Male' },
-];
-
 type Message = { readonly tone: 'success' | 'danger'; readonly text: string };
 
 interface Stored {
-  readonly calorieSex: CalorieSex | undefined;
   readonly birthYear: number | undefined;
 }
 
 export function CalorieInputsPanel({
   port,
   riderMass,
+  riderSex,
   currentYear = new Date().getUTCFullYear(),
 }: {
   readonly port?: CalorieInputsPort | undefined;
+  /**
+   * The rider's one Female / Male choice (`riderChoiceOf` of the row, kept by
+   * the shell and updated by the rider panel's save), `undefined` when they
+   * have not chosen: then the estimate has no sex.
+   */
+  readonly riderSex?: RiderBody | undefined;
   /** The weight the rider entered, `undefined` when they have not: never the assumed one. */
   readonly riderMass?: Kilograms | undefined;
   /**
@@ -112,16 +128,13 @@ export function CalorieInputsPanel({
 }): JSX.Element {
   const [stored, setStored] = useState<Stored | undefined>(undefined);
   const [unreadable, setUnreadable] = useState(false);
-  const [sex, setSex] = useState<string>('');
   const [year, setYear] = useState('');
   const [message, setMessage] = useState<Message | undefined>(undefined);
-  const sexId = useId();
   const yearId = useId();
   const yearHintId = useId();
 
   function show(row: Stored): void {
     setStored(row);
-    setSex(row.calorieSex ?? '');
     setYear(row.birthYear === undefined ? '' : String(row.birthYear));
   }
 
@@ -133,7 +146,7 @@ export function CalorieInputsPanel({
     port.store.getAthlete(port.athleteId).then(
       (row) => {
         if (current) {
-          show({ calorieSex: row?.calorieSex, birthYear: row?.birthYear });
+          show({ birthYear: row?.birthYear });
         }
       },
       () => {
@@ -151,22 +164,19 @@ export function CalorieInputsPanel({
     if (port === undefined) {
       return;
     }
-    const decision = calorieInputsToSave(sex, year, currentYear);
+    const decision = birthYearToSave(year, currentYear);
     if (decision.kind === 'refused') {
       setMessage({ tone: 'danger', text: decision.reason });
       return;
     }
     try {
-      const saved = await port.store.setAthleteCalorieInputs(port.athleteId, {
-        calorieSex: decision.calorieSex,
-        birthYear: decision.birthYear,
-      });
+      const saved = await port.store.setAthleteBirthYear(port.athleteId, decision.birthYear);
       if (saved === undefined) {
         setMessage({ tone: 'danger', text: calorieInputsSaveFailure(CALORIE_INPUTS_NO_ATHLETE) });
         return;
       }
       // What landed, not what was asked for.
-      show({ calorieSex: saved.calorieSex, birthYear: saved.birthYear });
+      show({ birthYear: saved.birthYear });
       setMessage({ tone: 'success', text: CALORIE_INPUTS_SAVED });
     } catch (error: unknown) {
       setMessage({
@@ -211,24 +221,11 @@ export function CalorieInputsPanel({
             void save();
           }}
         >
-          <p>
-            <label htmlFor={sexId}>Sex</label>{' '}
-            <select
-              className="oyl-input"
-              id={sexId}
-              value={sex}
-              onChange={(event) => {
-                setSex(event.target.value);
-                setMessage(undefined);
-              }}
-            >
-              {CALORIE_SEX_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </p>
+          {/* 2026-11-20: the one choice is under Your rider; this says which it is. */}
+          <dl className="oyl-calorie-inputs__sex">
+            <dt>Sex</dt>
+            <dd>{calorieSexReading(riderSex)}</dd>
+          </dl>
           <p>
             <label htmlFor={yearId}>Year of birth</label>{' '}
             <input
@@ -249,7 +246,7 @@ export function CalorieInputsPanel({
             Leave it blank to unset it.
           </p>
           <Button variant="secondary" type="submit">
-            Save sex and year of birth
+            Save year of birth
           </Button>
         </form>
       )}
@@ -262,7 +259,7 @@ export function CalorieInputsPanel({
 
       {stored === undefined ? null : (
         <p className="oyl-muted">
-          {stored.calorieSex === undefined || stored.birthYear === undefined
+          {riderSex === undefined || stored.birthYear === undefined
             ? CALORIE_INPUTS_UNSET
             : riderMass === undefined
               ? CALORIE_INPUTS_NO_WEIGHT

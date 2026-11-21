@@ -32,12 +32,13 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type JSX } from 'react';
 
-import type {
-  ActivityId,
-  ActivitySummary,
-  KitColour,
-  RiderBody,
-  UnitSystem,
+import {
+  riderChoiceOf,
+  type ActivityId,
+  type ActivitySummary,
+  type KitColour,
+  type RiderBody,
+  type UnitSystem,
 } from '@onyourleft/store';
 import type { Kilograms } from '@onyourleft/domain';
 
@@ -1154,8 +1155,9 @@ function ErasePanel({
       onMassReset?.(port.athleteRow.mass);
       // And the kit colour (#623), for the same reason.
       onKitColourReset?.(port.athleteRow.kitColour);
-      // And which rider is drawn (#2839), likewise.
-      onRiderBodyReset?.(port.athleteRow.riderBody);
+      // And which rider is drawn (#2839), likewise — the one choice, read by
+      // the rule `main.tsx` reads it by (the owner's ruling of 2026-11-20).
+      onRiderBodyReset?.(riderChoiceOf(port.athleteRow));
       // The panels above list what the store holds. Without this they go on
       // offering rides that are no longer there, and a rider who presses Export
       // on one is told their own ride does not exist.

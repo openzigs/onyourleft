@@ -49,7 +49,7 @@
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  * | `misfiledKitColourStoreFactory` | *wrong storage* — the right table and the right row, under a key the reader does not use | the call answers with the chosen colour, and a fresh connection reads the house kit |
- * | `healthCoupledRiderBodyStoreFactory` | *wrong layer* — a layer above kept the rider's look and their calorie sex "in step" (#2839) | the chosen rider comes back as chosen, and the heart-rate calorie estimate's sex has **changed to match it**, unasked |
+ * | `lookOnlyRiderStoreFactory` | *wrong layer* — the rider's one Female / Male choice written to the look and not to the calorie estimate's sex (#2839, the owner's ruling of 2026-11-20) | the call answers with both fields as chosen and the game draws the chosen rider, and a fresh connection's **calorie sex is still the old word** |
  * | `lastWordDroppedStoreFactory` | *wrong layer* — a layer above dropped the last entry of the rider's masked-word list on its way in | the call answers with the whole list, and a fresh connection reads one word short — the one the rider typed last, which is then sent to a hosted model unmasked |
 | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
@@ -139,7 +139,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
     setAthleteCalorieInputs: async (id, inputs) => real.setAthleteCalorieInputs(id, inputs),
     setAthleteKitColour: async (id, colour) => real.setAthleteKitColour(id, colour),
-    setAthleteRiderBody: async (id, body) => real.setAthleteRiderBody(id, body),
+    setAthleteRider: async (id, rider) => real.setAthleteRider(id, rider),
+    setAthleteBirthYear: async (id, year) => real.setAthleteBirthYear(id, year),
     setAthleteMaskedWords: async (id, words) => real.setAthleteMaskedWords(id, words),
     setActivityLoadSummary: async (owner, activity, summary) =>
       real.setActivityLoadSummary(owner, activity, summary),
@@ -1110,38 +1111,35 @@ export function misfiledKitColourStoreFactory(): StoreFactory {
 }
 
 /**
- * A repository whose rider-body write **also writes the calorie estimate's
- * sex** — #2839's one forbidden coupling.
+ * A repository whose rider write **writes the look and not the calorie
+ * estimate's sex** — what `setAthleteRider` did before the owner's ruling of
+ * 2026-11-20 that the two are one choice.
  *
- * The owner's ruling of 2026-11-18 is that choosing how you look does not
- * touch a health input. This is the layer that "helpfully" keeps the two in
- * step: the rider body lands exactly as a correct store writes it and reads
- * back as chosen, so every assertion about the body alone is green — and the
- * row's `calorieSex` now says the same word, which changes every heart-rate
- * calorie estimate from then on with nothing on any screen saying why.
+ * *Wrong layer*: the write is real and commits, and the call answers with
+ * both fields as chosen, so Settings shows the choice and the game draws it.
+ * A fresh connection reads the old `calorieSex`, so every heart-rate calorie
+ * estimate from then on uses the sex the rider just changed away from.
  *
  * ⚠️ **Which is why the assertion it calibrates reads `calorieSex` back, and
- * starts from a row whose calorie sex is the OTHER word**: from a row with
- * none, or with the same one, a coupled write and a correct one read alike.
+ * starts from a row whose calorie sex is the OTHER word**: from a row with the
+ * same one, a half write and a correct one read alike.
  *
  * The red/green pair is in `activity-store.rider-body.test.ts`.
  */
-export function healthCoupledRiderBodyStoreFactory(): StoreFactory {
+export function lookOnlyRiderStoreFactory(): StoreFactory {
   return {
     open(name: string): PersistentStore {
       const real = openActivityStore(name);
       return {
         ...bindStore(real),
-        setAthleteRiderBody: async (id: AthleteId, riderBody: RiderBody) => {
-          const written = await real.setAthleteRiderBody(id, riderBody);
-          if (written === undefined) {
+        setAthleteRider: async (id: AthleteId, rider: RiderBody) => {
+          const before = await real.getAthlete(id);
+          if (before === undefined) {
             return undefined;
           }
-          await real.setAthleteCalorieInputs(id, {
-            calorieSex: riderBody,
-            birthYear: written.birthYear,
-          });
-          return written;
+          await real.putAthlete({ ...before, riderBody: rider });
+          const written = await real.getAthlete(id);
+          return written === undefined ? undefined : { ...written, calorieSex: rider };
         },
       };
     },
@@ -1208,6 +1206,13 @@ export function droppedBirthYearStoreFactory(): StoreFactory {
           return written === undefined || inputs.birthYear === undefined
             ? written
             : { ...written, birthYear: inputs.birthYear };
+        },
+        // The panel's write since the owner's ruling of 2026-11-20, dropped the same way.
+        setAthleteBirthYear: async (id, birthYear) => {
+          const written = await real.setAthleteBirthYear(id, undefined);
+          return written === undefined || birthYear === undefined
+            ? written
+            : { ...written, birthYear };
         },
       };
     },

@@ -263,3 +263,94 @@ describe('the round trip calibrated against a store that drops the year', () => 
     }
   });
 });
+
+/**
+ * The year of birth alone — Settings' write since the owner's ruling of
+ * 2026-11-20, when the sex became the rider's one Female / Male choice and
+ * left this panel (`setAthleteRider` writes it).
+ */
+describe('the year of birth is written alone (2026-11-20)', () => {
+  async function assertBirthYearLandsAlone(harness: StoreHarness): Promise<void> {
+    await seedAthletes(harness);
+    await harness.write(async (store) => store.setAthleteRider(ATHLETE_A, 'female'));
+    const onDisk = await harness.roundTrip(
+      async (store) => store.setAthleteBirthYear(ATHLETE_A, 1985),
+      async (store) => store.getAthlete(ATHLETE_A),
+    );
+    if (onDisk?.birthYear !== 1985) {
+      throw new Error(`read back the year ${String(onDisk?.birthYear)}, not 1985`);
+    }
+    if (onDisk.calorieSex !== 'female' || onDisk.riderBody !== 'female') {
+      throw new Error(
+        `the rider choice changed to ${String(onDisk.calorieSex)} / ${String(onDisk.riderBody)}`,
+      );
+    }
+  }
+
+  it('passes against the real store, and leaves the rider choice as it was', async () => {
+    const harness = createStoreHarness();
+    try {
+      await expect(assertBirthYearLandsAlone(harness)).resolves.toBeUndefined();
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('fails against a store that drops the year of birth', async () => {
+    const harness = createStoreHarness({ factory: droppedBirthYearStoreFactory() });
+    try {
+      await expect(assertBirthYearLandsAlone(harness)).rejects.toThrow(/not 1985/);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('clears on undefined, and leaves the sex', async () => {
+    const harness = await seeded();
+    try {
+      await harness.write(async (store) =>
+        store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1990 }),
+      );
+      const onDisk = await harness.roundTrip(
+        async (store) => store.setAthleteBirthYear(ATHLETE_A, undefined),
+        async (store) => store.getAthlete(ATHLETE_A),
+      );
+      expect(onDisk?.birthYear).toBeUndefined();
+      expect(onDisk?.calorieSex).toBe('male');
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('refuses a year that is not whole, and writes nothing', async () => {
+    const harness = await seeded();
+    try {
+      await harness.write(async (store) => store.setAthleteBirthYear(ATHLETE_A, 1990));
+      await expect(
+        harness.write(async (store) => store.setAthleteBirthYear(ATHLETE_A, 1990.5)),
+      ).rejects.toThrow(RangeError);
+      const onDisk = await harness.read(async (store) => store.getAthlete(ATHLETE_A));
+      expect(onDisk?.birthYear).toBe(1990);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('is athlete-scoped, and on a missing athlete writes nothing', async () => {
+    const harness = await seeded();
+    try {
+      const [a, b] = await harness.roundTrip(
+        async (store) => store.setAthleteBirthYear(ATHLETE_A, 1980),
+        async (store) => Promise.all([store.getAthlete(ATHLETE_A), store.getAthlete(ATHLETE_B)]),
+      );
+      expect(a?.birthYear).toBe(1980);
+      expect(b?.birthYear).toBeUndefined();
+      const missing = await harness.write(async (store) =>
+        store.setAthleteBirthYear('nobody' as typeof ATHLETE_A, 1980),
+      );
+      expect(missing).toBeUndefined();
+    } finally {
+      await harness.destroy();
+    }
+  });
+});

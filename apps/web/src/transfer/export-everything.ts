@@ -586,7 +586,7 @@ export function accountManifest(input: {
         readonly units?: string | undefined;
         /** #623's kit colour: a palette key, on the athlete for ADR 0020 D-2's reason. */
         readonly kitColour?: string | undefined;
-        /** #2839: which rider is drawn, one of two words. How the rider looks, never `calorieSex`. */
+        /** #2839: which rider is drawn, one of two words, carried as stored beside `calorieSex`. */
         readonly riderBody?: string | undefined;
       }
     | undefined;
@@ -644,9 +644,11 @@ export function accountManifest(input: {
       // athlete for the reason `units` is, and named here for the reason every
       // field is.
       kitColour: input.athlete?.kitColour,
-      // #2839. Which rider is drawn — the rider's own appearance, on the
-      // athlete and named here for `kitColour`'s reason. Not `calorieSex`
-      // above: neither is ever derived from the other.
+      // #2839. Which rider is drawn — on the athlete and named here for
+      // `kitColour`'s reason. Since the owner's ruling of 2026-11-20 one
+      // choice writes it and `calorieSex` together, but the export carries
+      // each field AS STORED and never fills one from the other: a row written
+      // before the ruling may hold them disagreeing, and the archive says so.
       riderBody: input.athlete?.riderBody,
     },
     // The public half only. See the file header: the private half is a handle

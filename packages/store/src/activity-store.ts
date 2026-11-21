@@ -842,25 +842,29 @@ export class ActivityStore {
   }
 
   /**
-   * Replaces which rider the trainer game draws for the athlete, leaving every
-   * other field alone (#2839) — `calorieSex` among them, which this never
-   * reads and never writes (`rider-body.ts`).
+   * Writes the rider's one Female / Male choice (the owner's ruling of
+   * 2026-11-20): the rider the trainer game draws (`riderBody`, #2839) **and**
+   * the heart-rate calorie estimate's sex (`calorieSex`, #2432), both the same
+   * word, in one transaction, leaving every other field alone — the year of
+   * birth among them.
    *
-   * Shaped like {@link setAthleteKitColour}, for its reasons: one of a closed
-   * set, so there is no "clear it" case, and the value goes through
-   * `parseRiderBody` on its way in as well as on its way out, so a caller that
-   * got past the type with a cast writes the default rather than what it was
-   * handed.
+   * One write rather than two calls, so a row can never be left with the new
+   * look and the old sex: that is the disagreement `rider-body.ts`
+   * §`riderChoiceOf` exists to read past, and a choice made from now on
+   * clears it.
+   *
+   * One of a closed set, so there is no "clear it" case, and the value goes
+   * through `parseRiderBody` on its way in as well as on its way out, so a
+   * caller that got past the type with a cast writes the default rather than
+   * what it was handed.
    *
    * Read and write in one transaction, for {@link ensureAthlete}'s reason.
    *
    * @returns the stored record, or `undefined` if there is no such athlete —
    * which is not an error, for {@link setAthleteThresholds}' reason.
    */
-  async setAthleteRiderBody(
-    id: AthleteId,
-    riderBody: RiderBody,
-  ): Promise<AthleteRecord | undefined> {
+  async setAthleteRider(id: AthleteId, rider: RiderBody): Promise<AthleteRecord | undefined> {
+    const chosen = parseRiderBody(rider);
     return this.#db.transaction('rw', [this.#athletes], async () => {
       const row = await this.#athletes.get(id);
       if (row === undefined) {
@@ -868,7 +872,8 @@ export class ActivityStore {
       }
       const updated: AthleteRecord = {
         ...fromPersistedAthlete(row),
-        riderBody: parseRiderBody(riderBody),
+        riderBody: chosen,
+        calorieSex: chosen,
       };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;
@@ -1004,6 +1009,43 @@ export class ActivityStore {
       const updated: AthleteRecord = {
         ...withoutCalorieInputs(fromPersistedAthlete(row)),
         ...(sex === undefined ? {} : { calorieSex: sex }),
+        ...(birthYear === undefined ? {} : { birthYear }),
+      };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
+    });
+  }
+
+  /**
+   * Replaces the year of birth the heart-rate calorie estimate uses, leaving
+   * every other field alone (#2432) — the sex among them, which since the
+   * owner's ruling of 2026-11-20 is the rider's one Female / Male choice and
+   * is written by {@link setAthleteRider}, not here.
+   *
+   * **`undefined` clears it**, for {@link setAthleteCalorieInputs}' reason.
+   *
+   * @throws {RangeError} for a year that is not a whole number, before
+   *   anything is written, for {@link setAthleteCalorieInputs}' reason.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error, for {@link setAthleteThresholds}' reason.
+   */
+  async setAthleteBirthYear(
+    id: AthleteId,
+    birthYear: number | undefined,
+  ): Promise<AthleteRecord | undefined> {
+    if (birthYear !== undefined && !isBirthYear(birthYear)) {
+      throw new RangeError('athlete.birthYear: must be a whole year');
+    }
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      const updated: AthleteRecord = {
+        ...withoutBirthYear(fromPersistedAthlete(row)),
         ...(birthYear === undefined ? {} : { birthYear }),
       };
       await this.#athletes.put(toPersistedAthlete(updated));
@@ -4523,6 +4565,17 @@ function withoutThresholds(record: AthleteRecord): AthleteRecord {
 function withoutMass(record: AthleteRecord): AthleteRecord {
   const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
   delete copy.mass;
+  return copy as AthleteRecord;
+}
+
+/**
+ * The athlete row with its year of birth removed, for
+ * {@link ActivityStore.setAthleteBirthYear} — {@link withoutMass}' shape and
+ * reason.
+ */
+function withoutBirthYear(record: AthleteRecord): AthleteRecord {
+  const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
+  delete copy.birthYear;
   return copy as AthleteRecord;
 }
 

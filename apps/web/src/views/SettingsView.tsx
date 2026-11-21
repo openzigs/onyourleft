@@ -65,6 +65,7 @@ import {
   KIT_COLOURS,
   parseKitColour,
   RIDER_BODIES,
+  riderChoiceOf,
   UNIT_SYSTEMS,
   type KitColour,
   type RiderBody,
@@ -74,7 +75,7 @@ import {
 import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athlete/mass';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import type { AthleteRiderBodyPort } from '../athlete/rider-body-port';
-import { RIDER_BODY_NAMES, riderBodyFor } from '../game/rider-body';
+import { RIDER_BODY_NAMES } from '../game/rider-body';
 import {
   MASKED_WORDS_CAVEAT,
   MASKED_WORDS_LEAD,
@@ -306,6 +307,18 @@ export const DELIVERY_ASSIST_STAYS_HERE =
   'They change nothing on any other ride and nothing your trainer is sent. They are kept on this device only.';
 
 /**
+ * What the one choice is for and where it is kept — the owner's ruling of
+ * 2026-11-20, "They should be a single choice", which supersedes the
+ * 2026-11-18 wording that it was only a look. On the screen rather than behind
+ * the ⓘ, for `CALORIE_INPUTS_LEAD`'s reason (#666): it is about a health input
+ * and what leaves the device. ⚠️ Draft wording awaiting the owner's approval.
+ */
+export const RIDER_BODY_IS_ONE_CHOICE =
+  'One choice for both: the rider you are drawn as in the trainer game, and the sex the calorie ' +
+  'estimate from heart rate uses. It is kept on this device and is never sent to an instance or ' +
+  'a model.';
+
+/**
  * The sentences on this screen that are never tucked behind a section's ⓘ
  * disclosure — #666. They are about what leaves the device and to whom, and
  * what a rider can lose: the map-tile host (#534's review, #558), where a
@@ -317,6 +330,9 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   WEIGHT_WHERE_IT_GOES,
   // #2432: where the sex and year of birth are kept, and that they are never sent.
   CALORIE_INPUTS_LEAD,
+  // #2839, the owner's ruling of 2026-11-20: the one rider choice is the
+  // calorie estimate's sex, so where it is kept is said on the screen.
+  RIDER_BODY_IS_ONE_CHOICE,
   ANNOUNCEMENTS_STAY_HERE,
   DELIVERY_ASSIST_STAYS_HERE,
   'opening a ride that has GPS asks',
@@ -403,8 +419,13 @@ export function kitSaveFailure(reason: string): string {
 export const KIT_NO_ATHLETE =
   'there is no athlete row on this device to save it against, so nothing was written';
 
-/** Said when which rider is drawn has been written and read back — #2839. */
-export const RIDER_BODY_SAVED = 'Saved. This is your rider from your next ride.';
+/**
+ * Said when the rider choice has been written and read back — #2839, and since
+ * the owner's ruling of 2026-11-20 the calorie estimate's sex too.
+ */
+export const RIDER_BODY_SAVED =
+  'Saved. This is your rider from your next ride, and rides you save from now on use it for the ' +
+  'calorie estimate.';
 
 /**
  * Said when there is nothing to write the choice to — #2839. The control is
@@ -416,13 +437,13 @@ export const RIDER_BODY_NO_STORE =
   'page reloaded. You are drawn as the male rider.';
 
 /**
- * What the choice is and is not, said in Your rider's help — #2839. ⚠️ Draft
- * wording awaiting the owner's approval: the second sentence is the owner's
- * ruling of 2026-11-18, that how you look never touches a health input.
+ * Said, instead of a selected option, to a rider who has never chosen — the
+ * owner's ruling of 2026-11-20: drawn as the male rider, and *Not set* for the
+ * calorie estimate, until they choose. No option is shown selected, because a
+ * pre-selected Male would read as chosen while the estimate has no sex.
  */
-export const RIDER_BODY_IS_A_LOOK =
-  'This is only how your rider is drawn. It is separate from the sex you can give for the ' +
-  'calorie estimate, and neither changes the other.';
+export const RIDER_BODY_NOT_CHOSEN =
+  'Not chosen yet: you are drawn as the male rider, and get no calorie estimate from heart rate.';
 
 /** Said when the write failed — {@link kitSaveFailure}'s shape. */
 export function riderBodySaveFailure(reason: string): string {
@@ -729,15 +750,19 @@ export function SettingsView({
           onRiderMassChange={onRiderMassChange}
         />
 
-        {/* #2432. Beside the weight: the heart-rate calorie estimate needs all three. */}
-        <CalorieInputsPanel port={calorieInputs} riderMass={riderMass} />
-
-        {/* #2839. Which rider is drawn, beside the kit they wear: both are how the rider looks. */}
+        {/*
+          #2839, and the owner's ruling of 2026-11-20: the rider's one Female /
+          Male choice, which is both the rider drawn and the calorie estimate's
+          sex. Above the calorie panel, which says it uses this choice.
+        */}
         <RiderBodyPanel
           {...(rider === undefined ? {} : { port: rider })}
           {...(riderBody === undefined ? {} : { riderBody })}
           {...(onRiderBodyChange === undefined ? {} : { onRiderBodyChange })}
         />
+
+        {/* #2432. Beside the weight: the heart-rate calorie estimate needs all three. */}
+        <CalorieInputsPanel port={calorieInputs} riderMass={riderMass} riderSex={riderBody} />
 
         {/* #623. Beside the weight: both are about the rider, and both are kept on the athlete. */}
         <KitPanel
@@ -2971,18 +2996,21 @@ function KitPanel({
 }
 
 /**
- * Which rider the trainer game draws — #2839, the owner's ruling of
- * 2026-11-18: Female or Male, beside the kit colour.
+ * The rider's one Female / Male choice — #2839. The owner's ruling of
+ * 2026-11-18 put a Rider choice beside the kit colour; the ruling of
+ * 2026-11-20, "They should be a single choice", made it the calorie
+ * estimate's sex as well, so Settings asks once. It saves on change, through
+ * {@link AthleteRiderBodyPort}, whose one write sets `riderBody` and
+ * `calorieSex` together.
  *
- * ⚠️ **How the rider looks, and never a health input.** This panel is handed
- * {@link AthleteRiderBodyPort}, which cannot reach `calorieSex`; the calorie
- * estimate's own panel (`CalorieInputsPanel`) is handed a different port and
- * cannot reach this. Neither reads the other's value to pre-select its own.
+ * ⚠️ **What it shows is `riderChoiceOf` of the row** (`calorieSex` when it is
+ * set, else `riderBody`), handed down by the shell as `riderBody`, so a row
+ * whose two fields disagree shows what the game draws and the estimate uses.
+ * A rider who never chose sees no option selected and
+ * {@link RIDER_BODY_NOT_CHOSEN}.
  *
  * Two options, so #668's segmented control: native radios in a `fieldset`
- * whose `legend` is the question. The current choice is always selected — the
- * default for a rider who never chose, which is the rider they are drawn as
- * (ADR 0020 D-3: a default the rider can see).
+ * whose `legend` is the question.
  */
 function RiderBodyPanel({
   port,
@@ -2993,23 +3021,21 @@ function RiderBodyPanel({
   readonly riderBody?: RiderBody | undefined;
   readonly onRiderBodyChange?: ((riderBody: RiderBody | undefined) => void) | undefined;
 }): JSX.Element {
-  // What is shown as chosen: the same answer the renderer draws.
-  const current = riderBodyFor(riderBody);
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
   async function choose(chosen: RiderBody): Promise<void> {
-    if (port === undefined || chosen === current) {
+    if (port === undefined || chosen === riderBody) {
       return;
     }
     try {
       // ⚠️ The return is read, not discarded — see {@link KIT_NO_ATHLETE}.
-      const saved = await port.store.setAthleteRiderBody(port.athleteId, chosen);
+      const saved = await port.store.setAthleteRider(port.athleteId, chosen);
       if (saved === undefined) {
         setMessage({ tone: 'danger', text: riderBodySaveFailure(KIT_NO_ATHLETE) });
         return;
       }
-      // What landed, not what was asked for: the store writes one of two words.
-      onRiderBodyChange?.(saved.riderBody);
+      // What landed, not what was asked for, read by the one rule.
+      onRiderBodyChange?.(riderChoiceOf(saved));
       setMessage({ tone: 'success', text: RIDER_BODY_SAVED });
     } catch (error: unknown) {
       setMessage({
@@ -3021,49 +3047,39 @@ function RiderBodyPanel({
 
   return (
     <section className="oyl-panel" aria-labelledby="oyl-rider-body-heading">
-      {/* #1031: the help is offered only where the choice is, as Your kit's is. */}
-      {port === undefined ? (
-        <h3 id="oyl-rider-body-heading">Your rider</h3>
-      ) : (
-        <SectionHeading
-          level={3}
-          id="oyl-rider-body-heading"
-          help={
-            <>
-              <p className="oyl-muted">{RIDER_BODY_IS_A_LOOK}</p>
-              <p className="oyl-muted">{KIT_KEPT}</p>
-            </>
-          }
-        >
-          Your rider
-        </SectionHeading>
-      )}
+      <h3 id="oyl-rider-body-heading">Your rider</h3>
       {/* Absent rather than disabled where there is nothing to write to — the kit's rule. */}
       {port === undefined ? (
         <StatusMessage tone="warning" label="No local store">
           {RIDER_BODY_NO_STORE}
         </StatusMessage>
       ) : (
-        <fieldset className="oyl-segmented">
-          <legend>Which rider are you in the trainer game?</legend>
-          <div className="oyl-segmented__options">
-            {RIDER_BODIES.map((option) => (
-              <label key={option} htmlFor={`oyl-rider-body-${option}`}>
-                <input
-                  type="radio"
-                  id={`oyl-rider-body-${option}`}
-                  name="oyl-rider-body"
-                  value={option}
-                  checked={current === option}
-                  onChange={() => {
-                    void choose(option);
-                  }}
-                />{' '}
-                {RIDER_BODY_NAMES[option]}
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        <>
+          <KeptVisible>
+            <p className="oyl-muted">{RIDER_BODY_IS_ONE_CHOICE}</p>
+          </KeptVisible>
+          <fieldset className="oyl-segmented">
+            <legend>Are you a female or a male rider?</legend>
+            <div className="oyl-segmented__options">
+              {RIDER_BODIES.map((option) => (
+                <label key={option} htmlFor={`oyl-rider-body-${option}`}>
+                  <input
+                    type="radio"
+                    id={`oyl-rider-body-${option}`}
+                    name="oyl-rider-body"
+                    value={option}
+                    checked={riderBody === option}
+                    onChange={() => {
+                      void choose(option);
+                    }}
+                  />{' '}
+                  {RIDER_BODY_NAMES[option]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          {riderBody === undefined ? <p className="oyl-muted">{RIDER_BODY_NOT_CHOSEN}</p> : null}
+        </>
       )}
 
       {message === undefined ? null : (

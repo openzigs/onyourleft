@@ -10,9 +10,11 @@
  * `realistic-assets.ts` §`REALISTIC_RIDER_BODIES`.
  *
  * ⚠️ **Drawing only.** Nothing here reaches the physics, a trainer, a saved
- * ride or the heart-rate calorie estimate — `AthleteRecord.calorieSex` is a
- * different field that this module never reads (the owner's ruling of
- * 2026-11-18). Pure: no `three`, no clock, no storage.
+ * ride or the heart-rate calorie estimate. Since the owner's ruling of
+ * 2026-11-20 the rider's choice is ALSO the estimate's sex, but that is the
+ * store's one write (`setAthleteRider`) and `athlete/calorie-inputs.ts`' read,
+ * not this module's: it is handed the choice and only draws it. Pure: no
+ * `three`, no clock, no storage.
  *
  * ⚠️ **A TYPE from `@onyourleft/store`, and nothing at runtime**, for
  * `bicycle.ts`'s reason: the renderer imports this file, the demo bundles the

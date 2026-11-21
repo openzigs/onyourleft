@@ -263,10 +263,12 @@ export interface AthleteRecord {
    * no choice, and the one place that substitutes the default is
    * `apps/web/src/game/rider-body.ts` §`riderBodyFor`.
    *
-   * ⚠️ **How the rider looks, and nothing else.** It is not
-   * {@link calorieSex}, is never read from it and never writes it —
-   * `rider-body.ts` says why — and it is on the athlete rather than the
-   * device for {@link kitColour}'s reason.
+   * ⚠️ **One half of the rider's one Female / Male choice** (the owner's
+   * ruling of 2026-11-20): `setAthleteRider` writes it and {@link calorieSex}
+   * together. A row written before the ruling may hold one without the other,
+   * so read the choice through `rider-body.ts` §`riderChoiceOf`, never this
+   * field alone. It is on the athlete rather than the device for
+   * {@link kitColour}'s reason.
    */
   readonly riderBody?: RiderBody;
 
