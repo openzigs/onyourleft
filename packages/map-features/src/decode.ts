@@ -20,16 +20,20 @@ import {
   BUILDING_FIELD_NAMES,
   BUILDING_FIELD_RULES,
   BUILDING_KINDS,
+  CLOSED_ACCESS_VALUES,
   COORDINATE_BUFFER_EXTENTS,
   EARTH_LAYER,
   FOOTWAY_KIND,
   FOOTWAY_KIND_DETAILS,
+  KEY_ACCESS,
   KEY_HEIGHT,
   KEY_IS_BRIDGE,
+  KEY_IS_LINK,
   KEY_IS_TUNNEL,
   KEY_KIND,
   KEY_KIND_DETAIL,
   KEY_MIN_HEIGHT,
+  KEY_ONEWAY,
   KEY_POPULATION_RANK,
   LAYER_GEOMETRY_TYPES,
   LAYER_KEPT_GEOMETRIES,
@@ -40,6 +44,9 @@ import {
   MIN_EXTENT,
   MIN_POPULATION_RANK,
   MVT_VERSION,
+  NO_ROAD_FIELDS,
+  ONEWAY_VALUES,
+  OPEN_ACCESS_VALUES,
   OTHER_ROAD_KIND,
   OTHER_STREET_KIND_DETAILS,
   PLACE_KIND_DETAILS,
@@ -55,14 +62,16 @@ import type {
   BuildingFeature,
   BuildingFields,
   CorridorFrame,
+  DecodedStreetFeature,
   DecodedTile,
   DecodeRefusal,
   LandUseFeature,
   PathFeature,
   PlaceFeature,
   Ring,
-  StreetFeature,
+  StreetAccess,
   StreetGrade,
+  StreetOneway,
   TileId,
   WaterLineFeature,
 } from './types';
@@ -94,7 +103,11 @@ import type {
  * never turned into a value (`schema.ts`); and in `buildings`, since #1789,
  * the twelve keys of `schema.ts` §`BUILDING_FIELD_RULES` too, each value
  * whitelisted or clamped, and `null` where it cannot be. A building field
- * never refuses a tile and never drops a footprint.
+ * never refuses a tile and never drops a footprint. In `roads`, since #2892
+ * (ADR 0091 D-2), `oneway`, `access` and `is_link` too, each compared with
+ * `schema.ts`' lists and kept on a street as a constant of the decoder's own;
+ * a value the lists do not name is the field's default, counted in
+ * `roadValuesDefaulted`, and never refuses a tile or drops a street.
  *
  * `places` is read up to `limits.maxPlacesPerTile` points and no further: the
  * decoder stops there rather than refusing the tile.
@@ -176,6 +189,10 @@ interface FramedLayer {
     populationRank: number;
     /** #1789: the key index of each building field, in `BUILDING_FIELD_NAMES` order; `-1` for none. */
     fields: Int32Array;
+    /** #2892: the road fields' key indices, matched in `roads` alone; `-1` for none. */
+    oneway: number;
+    access: number;
+    isLink: number;
   };
   /** Decoded values by index, filled as features ask for them. */
   readonly identifiers: Map<number, string | null>;
@@ -184,6 +201,24 @@ interface FramedLayer {
   readonly ranks: Map<number, number | null>;
   /** #1789: building field values, keyed `index · FIELD_SLOTS + slot`. */
   readonly fieldValues: Map<number, string | number | null>;
+  /** #2892: road field values, keyed `index · ROAD_SLOTS + slot`. */
+  readonly roadValues: Map<number, RoadReading>;
+}
+
+/** The road fields' slots (#2892), for {@link FramedLayer.roadValues}' key. */
+const ROAD_SLOT_ONEWAY = 0;
+const ROAD_SLOT_ACCESS = 1;
+const ROAD_SLOT_IS_LINK = 2;
+const ROAD_SLOTS = 3;
+
+/**
+ * One road field's value as read (#2892): the value, or the field's default,
+ * and whether the tile's value was one the lists name. A value of
+ * `undefined` is never one: it is always a constant of the decoder's own.
+ */
+interface RoadReading {
+  readonly value: StreetOneway | StreetAccess | boolean;
+  readonly recognised: boolean;
 }
 
 /** The building fields' slots: one per name in `BUILDING_FIELD_NAMES`. */
@@ -241,9 +276,10 @@ function decodeChecked(
   const landUse: LandUseFeature[] = [];
   const buildings: BuildingFeature[] = [];
   const paths: PathFeature[] = [];
-  const streets: StreetFeature[] = [];
+  const streets: DecodedStreetFeature[] = [];
   const places: PlaceFeature[] = [];
   const waterLines: WaterLineFeature[] = [];
+  const counts = { roadValuesDefaulted: 0 };
   for (const layer of framed) {
     state.layer = layer.name;
     const project = new Projector(tile, origin, layer.extent);
@@ -260,11 +296,21 @@ function decodeChecked(
         limits,
         state,
         { landUse, buildings, paths, streets, places, waterLines },
+        counts,
       );
     }
   }
   state.layer = null;
-  return { tile, landUse, buildings, paths, streets, places, waterLines };
+  return {
+    tile,
+    landUse,
+    buildings,
+    paths,
+    streets,
+    places,
+    waterLines,
+    roadValuesDefaulted: counts.roadValuesDefaulted,
+  };
 }
 
 /** The layer's name if it is one this package reads or checks for, else `null`. Never decodes it. */
@@ -346,12 +392,17 @@ function frameLayer(
     isTunnel: -1,
     populationRank: -1,
     fields: new Int32Array(FIELD_SLOTS).fill(-1),
+    oneway: -1,
+    access: -1,
+    isLink: -1,
   };
   // ADR 0055 D-3: in `places`, only its three keys are ever matched, so no
   // other key of a place - a height, a flag, its name - has a value decoded.
   const isPlaces = name === 'places';
   // #1789: the building fields are matched in `buildings` and nowhere else.
   const isBuildings = name === 'buildings';
+  // #2892: the road fields are matched in `roads` and nowhere else.
+  const isRoads = name === 'roads';
   let f = 0;
   let v = 0;
   let k = 0;
@@ -378,7 +429,11 @@ function frameLayer(
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_MIN_HEIGHT)) keys.minHeight = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_BRIDGE)) keys.isBridge = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_TUNNEL)) keys.isTunnel = k;
-        else if (isBuildings) {
+        else if (isRoads) {
+          if (bytesEqualAscii(bytes, range.start, range.end, KEY_ONEWAY)) keys.oneway = k;
+          else if (bytesEqualAscii(bytes, range.start, range.end, KEY_ACCESS)) keys.access = k;
+          else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_LINK)) keys.isLink = k;
+        } else if (isBuildings) {
           for (let slot = 0; slot < FIELD_SLOTS; slot++) {
             const field = BUILDING_FIELD_NAMES[slot] as keyof typeof BUILDING_FIELD_RULES;
             if (bytesEqualAscii(bytes, range.start, range.end, BUILDING_FIELD_RULES[field].key)) {
@@ -404,6 +459,7 @@ function frameLayer(
     flags: new Map(),
     ranks: new Map(),
     fieldValues: new Map(),
+    roadValues: new Map(),
   };
 }
 
@@ -458,7 +514,7 @@ interface Sinks {
   readonly landUse: LandUseFeature[];
   readonly buildings: BuildingFeature[];
   readonly paths: PathFeature[];
-  readonly streets: StreetFeature[];
+  readonly streets: DecodedStreetFeature[];
   readonly places: PlaceFeature[];
   readonly waterLines: WaterLineFeature[];
 }
@@ -490,6 +546,7 @@ function decodeFeature(
   limits: DecodeLimits,
   state: DecodeState,
   sinks: Sinks,
+  counts: { roadValuesDefaulted: number },
 ): void {
   const reader = new ProtoReader(bytes, start, end);
   let type = 0;
@@ -568,6 +625,10 @@ function decodeFeature(
       }
       return;
     case 'roads':
+      if (road === 'streets') {
+        // #2892: counted once a street, however many lines it is.
+        counts.roadValuesDefaulted += attributes.roadDefaulted;
+      }
       for (const line of parts as Float32Array[]) {
         if (road === 'paths') sinks.paths.push({ kind: kind as string, kindDetail, line });
         else
@@ -575,6 +636,9 @@ function decodeFeature(
             kind: kind as string,
             kindDetail,
             grade: gradeOf(attributes),
+            oneway: attributes.oneway,
+            access: attributes.access,
+            isLink: attributes.isLink,
             line,
           });
       }
@@ -592,6 +656,12 @@ interface Attributes {
   populationRank: number | null;
   /** #1789: each building field's value, in `BUILDING_FIELD_NAMES` order; `null` for none. */
   fields: (string | number | null)[];
+  /** #2892: the road fields, each its default unless the tile carried a value the lists name. */
+  oneway: StreetOneway;
+  access: StreetAccess;
+  isLink: boolean;
+  /** #2892: how many of the three were present and not recognised. */
+  roadDefaulted: number;
 }
 
 /**
@@ -648,8 +718,15 @@ function readTags(
     isTunnel: false,
     populationRank: null,
     fields: new Array<string | number | null>(FIELD_SLOTS).fill(null),
+    ...NO_ROAD_FIELDS,
+    roadDefaulted: 0,
   };
   if (tags === null) return out;
+  // #2892: whether each road field's last value was unrecognised. A key the
+  // tile repeats is read for its last value, as every other key is.
+  let onewayDefaulted = false;
+  let accessDefaulted = false;
+  let isLinkDefaulted = false;
   const reader = new ProtoReader(bytes, tags.start, tags.end);
   const valueCount = layer.values.length / 2;
   while (!reader.atEnd()) {
@@ -665,12 +742,90 @@ function readTags(
     else if (key === layer.keys.isTunnel) out.isTunnel = cachedFlag(bytes, layer, value);
     else if (key === layer.keys.populationRank) {
       out.populationRank = cachedRank(bytes, layer, value);
+    } else if (key === layer.keys.oneway) {
+      const reading = cachedRoadValue(bytes, layer, ROAD_SLOT_ONEWAY, value);
+      out.oneway = reading.value as StreetOneway;
+      onewayDefaulted = !reading.recognised;
+    } else if (key === layer.keys.access) {
+      const reading = cachedRoadValue(bytes, layer, ROAD_SLOT_ACCESS, value);
+      out.access = reading.value as StreetAccess;
+      accessDefaulted = !reading.recognised;
+    } else if (key === layer.keys.isLink) {
+      const reading = cachedRoadValue(bytes, layer, ROAD_SLOT_IS_LINK, value);
+      out.isLink = reading.value as boolean;
+      isLinkDefaulted = !reading.recognised;
     } else {
       const slot = layer.keys.fields.indexOf(key);
       if (slot >= 0) out.fields[slot] = cachedField(bytes, layer, slot, value);
     }
   }
+  out.roadDefaulted = Number(onewayDefaulted) + Number(accessDefaulted) + Number(isLinkDefaulted);
   return out;
+}
+
+function cachedRoadValue(
+  bytes: Uint8Array,
+  layer: FramedLayer,
+  slot: number,
+  index: number,
+): RoadReading {
+  const cacheKey = index * ROAD_SLOTS + slot;
+  let reading = layer.roadValues.get(cacheKey);
+  if (reading === undefined) {
+    reading = roadValue(bytes, layer, slot, index);
+    layer.roadValues.set(cacheKey, reading);
+  }
+  return reading;
+}
+
+/**
+ * One road field's value (#2892, ADR 0091 D-2), or its default and
+ * `recognised: false`. A string is compared byte for byte with `schema.ts`'
+ * lists and never turned into a string of its own; a boolean is a boolean.
+ */
+function roadValue(
+  bytes: Uint8Array,
+  layer: FramedLayer,
+  slot: number,
+  index: number,
+): RoadReading {
+  switch (slot) {
+    case ROAD_SLOT_ONEWAY: {
+      const value = enumValue(bytes, layer, index, ONEWAY_VALUES);
+      if (value === 'yes') return { value: 'with-line', recognised: true };
+      if (value === '-1') return { value: 'against-line', recognised: true };
+      return { value: NO_ROAD_FIELDS.oneway, recognised: value === 'no' };
+    }
+    case ROAD_SLOT_ACCESS: {
+      const closed = enumValue(bytes, layer, index, CLOSED_ACCESS_VALUES);
+      if (closed !== null) return { value: closed as StreetAccess, recognised: true };
+      const open = enumValue(bytes, layer, index, OPEN_ACCESS_VALUES);
+      return { value: NO_ROAD_FIELDS.access, recognised: open !== null };
+    }
+    default: {
+      const value = booleanValue(bytes, layer, index);
+      return { value: value ?? NO_ROAD_FIELDS.isLink, recognised: value !== null };
+    }
+  }
+}
+
+/** A boolean value, else `null`: a string, a number or nothing is not one (#2892). */
+function booleanValue(bytes: Uint8Array, layer: FramedLayer, index: number): boolean | null {
+  const reader = new ProtoReader(
+    bytes,
+    layer.values[index * 2] as number,
+    layer.values[index * 2 + 1] as number,
+  );
+  let result: boolean | null = null;
+  while (!reader.atEnd()) {
+    const tag = reader.uint32();
+    if (tag >>> 3 === 7 && (tag & 7) === WIRE_VARINT) result = reader.uint64() !== 0;
+    else {
+      reader.skip(tag & 7);
+      result = null;
+    }
+  }
+  return result;
 }
 
 function cachedField(

@@ -44,7 +44,7 @@ function sentences(): string[] {
 }
 
 async function show(port: Parameters<typeof OperateProblemsPanel>[0]['port']): Promise<void> {
-  mounted = await mount(<OperateProblemsPanel port={port} />);
+  mounted = await mount(<OperateProblemsPanel timeZone="UTC" port={port} />);
   for (let turn = 0; turn < 200 && text().includes('Reading the recent'); turn += 1) {
     await settle();
   }

@@ -746,8 +746,15 @@ bash scripts/check-image-layers.sh onyourleft-instance
 bash scripts/check-image-layers.test.sh
 
 # #2786: the pull-only release bundle -- the home deployment's compose.yaml with
-# the image BY DIGEST, its deploy.sh, instance.env.example and release.image,
-# zipped. Run by instance-image.yml with the digest it pushed, not by hand.
+# the image BY DIGEST, its deploy.sh, instance.env.example, release.image and
+# the two serve files in `tailscale/` (#2805), zipped. It makes no bundle from
+# an image not named by digest, an image line that moved, a version that is
+# not plain, or a missing serve file (BUNDLE001-004). Run by instance-image.yml
+# with the digest it pushed, not by hand.
+# BUNDLE005 (#2857): it refuses a template whose OYL_INSTANCE_CONTACT_EMAIL is
+# not there once and EMPTY, and a bundled file that names an address at the
+# project's own domain -- the template is every new server's, and its /legal
+# page tells riders to write to whatever is there.
 bash scripts/make-instance-bundle.sh ghcr.io/openzigs/onyourleft-instance@sha256:<digest> <version> <outdir>
 # #2818: the bundle also holds an EMPTY, owner-only `secrets/`, made and never
 # copied, so Docker does not make it owned by root on Linux. The suite extracts

@@ -19,7 +19,7 @@
  *
  * ## Bounds
  *
- * A re-plan has 6 000 tokens for the whole run (`replan-agent.ts`), so each
+ * A re-plan has 16 000 tokens for the whole run (`replan-agent.ts`), so each
  * answer here is far smaller than the write-up's: twelve summaries, and
  * {@link REPLAN_GOALS_CHARACTERS} and {@link SAVED_WORKOUTS_CHARACTERS}.
  *

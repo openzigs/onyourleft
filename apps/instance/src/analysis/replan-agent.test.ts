@@ -12,6 +12,9 @@
  * `no trainer reachable from the instance` is `agent-safety.test.ts`'s walk.
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import {
   encodeWorkoutFile,
   REASON_CODES,
@@ -54,7 +57,8 @@ import {
   type ReplanOptions,
   type ReplanOutcome,
 } from './replan-agent.ts';
-import { offeredReasons, REPLAN_TEMPLATE } from './replan-template.ts';
+import { readReplanInput } from './replan-input.ts';
+import { offeredReasons, replanAnswerSchema, REPLAN_TEMPLATE } from './replan-template.ts';
 import { REPLAN_INPUT_JSON, replanInput } from './replan-testing.ts';
 import type { AnalysisReads } from './tools/reads.ts';
 
@@ -140,10 +144,8 @@ async function served(...script: ScriptedReply[]): Promise<ModelConnection> {
 }
 
 const says = (reply: string): ScriptedReply => ({ kind: 'text', text: reply });
-const asks = (name: string): ScriptedReply => ({
-  kind: 'tool-calls',
-  calls: [{ name, arguments: '{}' }],
-});
+/** A tool called as a local model held to the answer's schema calls one: by its name (#2841). */
+const asks = (name: string): ScriptedReply => says(JSON.stringify({ look: name }));
 
 /** Every tool result the model was shown, over the whole run. */
 function toolResults(model: ScriptedModel): string[] {
@@ -157,17 +159,25 @@ describe('one closed-list move out', () => {
     const { outcome, events } = await run(await served(says(ANSWER)));
     expect(outcome).toStrictEqual({ kind: 'proposed', proposal: PROPOSAL });
     expect(events).toStrictEqual([{ type: 'progress', step: 1 }]);
-    // What the model server was asked: the three tools, the answer's small bound.
+    // What the model server was asked: the answer held to the closed lists, or a
+    // call of one of the three tools by its name (#2841), at a low temperature
+    // with no reasoning, and the answer's small bound.
     const asked = fake?.requests[0] as {
-      tools: { function: { name: string } }[];
+      tools?: unknown;
+      response_format: { type: string; json_schema: { schema: { anyOf: unknown[] } } };
+      temperature: number;
+      reasoning_effort: string;
       max_tokens: number;
       messages: { role: string; content: string }[];
     };
-    expect(asked.tools.map((tool) => tool.function.name)).toStrictEqual([
-      'ride_so_far',
-      'goals',
-      'saved_workouts',
-    ]);
+    expect(asked.tools).toBeUndefined();
+    expect(asked.response_format.type).toBe('json_schema');
+    const [answer, look] = asked.response_format.json_schema.schema.anyOf;
+    expect(answer).toStrictEqual(replanAnswerSchema(INPUT));
+    expect(look).toMatchObject({
+      properties: { look: { enum: ['ride_so_far', 'goals', 'saved_workouts'] } },
+    });
+    expect([asked.temperature, asked.reasoning_effort]).toStrictEqual([0.2, 'none']);
     expect(asked.max_tokens).toBe(REPLAN_TURN_OUTPUT_TOKENS);
     // The first message carries the plan as shares, the goals and the newest summary only.
     const first = asked.messages.find((message) => message.role === 'user')?.content ?? '';
@@ -271,14 +281,60 @@ describe('a malformed answer is no proposal', () => {
   });
 });
 
-describe('budgets (ADR 0048 D-11): 4 turns, 3 tool calls, 45 s, 6 000 tokens', () => {
-  it('are the figures #1243 states', () => {
+describe('budgets (ADR 0048 D-11): 4 turns, 3 tool calls, 45 s, 16 000 tokens', () => {
+  it('are the figures #2841 measured them to', () => {
     expect(REPLAN_BUDGETS).toStrictEqual({
       modelCalls: 4,
       toolCalls: 3,
       milliseconds: 45_000,
-      tokens: 6_000,
+      tokens: 16_000,
     });
+    expect(REPLAN_TURN_OUTPUT_TOKENS).toBe(128);
+  });
+
+  it('holds the longer golden request reading all three tools, at what the server measured (#2841)', async () => {
+    const long = readReplanInput(
+      (
+        JSON.parse(
+          readFileSync(
+            fileURLToPath(
+              new URL(
+                '../../../../packages/domain/src/workout/fixtures/replan-request-long.json',
+                import.meta.url,
+              ),
+            ),
+            'utf8',
+          ),
+        ) as { input: unknown }
+      ).input,
+    );
+    if (!long.ok) throw new Error('the golden request does not read');
+    // What gemma4:12b's server reported for that request on 2026-11-19: 2 448
+    // tokens read with no tool result, 3 211 with all three.
+    const reported = (turn: ReturnType<typeof calls>, read: number) => ({
+      ...turn,
+      usage: { inputTokens: read, outputTokens: 12 },
+    });
+    const model = scriptedModel(
+      reported(calls(['ride_so_far', {}]), 2_448),
+      reported(calls(['goals', {}]), 2_700),
+      reported(calls(['saved_workouts', {}]), 2_950),
+      { ...text('{"keep":true}'), usage: { inputTokens: 3_211, outputTokens: 6 } },
+    );
+    expect((await run(model, { job: { athleteId: A, input: long.value } })).outcome).toStrictEqual({
+      kind: 'kept',
+    });
+    expect(model.requests).toHaveLength(4);
+    // Under #1243's 6 000 it did not get past its first tool.
+    const before = scriptedModel(
+      reported(calls(['ride_so_far', {}]), 2_448),
+      reported(calls(['goals', {}]), 2_700),
+      text('{"keep":true}'),
+    );
+    expect(
+      (await run(before, { job: { athleteId: A, input: long.value }, budgets: { tokens: 6_000 } }))
+        .outcome,
+    ).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
   });
 
   it('stops a looping model at the tool-call cap, having run exactly three tools', async () => {
@@ -347,10 +403,10 @@ describe('budgets (ADR 0048 D-11): 4 turns, 3 tool calls, 45 s, 6 000 tokens', (
   });
 
   it('stops before a turn that would pass the token budget', async () => {
-    // Each tool turn is reported at 2 500 tokens: the third would pass 6 000.
+    // Each tool turn is reported at 7 500 tokens: the third would pass 16 000.
     const model = scriptedModel({
       ...calls(['ride_so_far', {}]),
-      usage: { inputTokens: 2_400, outputTokens: 100 },
+      usage: { inputTokens: 7_400, outputTokens: 100 },
     });
     const { outcome } = await run(model);
     expect(outcome).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
@@ -372,23 +428,30 @@ describe('budgets (ADR 0048 D-11): 4 turns, 3 tool calls, 45 s, 6 000 tokens', (
     expect((await run(model)).outcome.kind).toBe('proposed');
   });
 
-  it('on a server that reports nothing, every turn is counted in full and the fourth does not fit', async () => {
+  it('on a server that reports nothing, every turn is counted in full: in a budget of 6 000 the fourth does not fit', async () => {
     const unreported = (turn: ReturnType<typeof calls>) => ({ ...turn, usage: {} });
-    const model = scriptedModel(
-      unreported(calls(['ride_so_far', {}])),
-      unreported(calls(['goals', {}])),
-      unreported(calls(['saved_workouts', {}])),
-      text(ANSWER),
-    );
-    expect((await run(model)).outcome).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
-    expect(model.requests).toHaveLength(3);
+    const script = () =>
+      scriptedModel(
+        unreported(calls(['ride_so_far', {}])),
+        unreported(calls(['goals', {}])),
+        unreported(calls(['saved_workouts', {}])),
+        text(ANSWER),
+      );
+    const tight = script();
+    expect((await run(tight, { budgets: { tokens: 6_000 } })).outcome).toStrictEqual({
+      kind: 'failed',
+      why: 'out-of-tokens',
+    });
+    expect(tight.requests).toHaveLength(3);
+    // In the shipped 16 000 the same run answers.
+    expect((await run(script())).outcome.kind).toBe('proposed');
   });
 
   it('gives a model said to reason its allowance, inside the same token budget (#1268)', async () => {
     const model: ScriptedModel = { ...scriptedModel(text(ANSWER)), reasoningTokens: 2_000 };
     expect((await run(model)).outcome.kind).toBe('proposed');
     expect(model.requests[0]?.maxOutputTokens).toBe(REPLAN_TURN_OUTPUT_TOKENS + 2_000);
-    const greedy: ScriptedModel = { ...scriptedModel(text(ANSWER)), reasoningTokens: 6_000 };
+    const greedy: ScriptedModel = { ...scriptedModel(text(ANSWER)), reasoningTokens: 16_000 };
     expect((await run(greedy)).outcome).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
     expect(greedy.requests).toHaveLength(0);
   });
@@ -633,5 +696,77 @@ describe('the reasons a request offers (#1329)', () => {
       kind: 'proposed',
       proposal: { ...PROPOSAL, reason: 'on-plan' },
     });
+  });
+});
+
+/**
+ * #2841: the answer's schema, as a local server holds a model to it. Every
+ * answer it admits is one the device's decoder reads, so the schema can only
+ * narrow what `readAnswer` already takes, and the device's own bounds
+ * (`validateProposal`) are untouched by it.
+ */
+describe('the answer’s schema (#2841)', () => {
+  interface Branch {
+    readonly properties: Readonly<Record<string, { readonly enum?: readonly unknown[] }>>;
+  }
+  /** Every move the schema's move branches admit, a string or a range taken at one value. */
+  function admittedMoves(schema: Readonly<Record<string, unknown>>): Record<string, unknown>[] {
+    const [, proposal] = schema.anyOf as [unknown, { properties: { move: { anyOf: Branch[] } } }];
+    return proposal.properties.move.anyOf.flatMap((branch) => {
+      let moves: Record<string, unknown>[] = [{}];
+      for (const [key, field] of Object.entries(branch.properties)) {
+        const values = field.enum ?? (key === 'workoutId' ? ['workout-of-athlete-a'] : [0]);
+        moves = moves.flatMap((move) => values.map((value) => ({ ...move, [key]: value })));
+      }
+      return moves;
+    });
+  }
+  const reasonsOf = (schema: Readonly<Record<string, unknown>>): unknown => {
+    const [, proposal] = schema.anyOf as [unknown, { properties: { reason: { enum: unknown } } }];
+    return proposal.properties.reason.enum;
+  };
+
+  it('admits only answers the device’s decoder reads, each move kind on its list', () => {
+    const moves = admittedMoves(replanAnswerSchema(INPUT));
+    expect(moves.length).toBeGreaterThan(20);
+    for (const move of moves) {
+      expect(
+        readAnswer(JSON.stringify({ move, reason: 'heart-rate-high' }), INPUT),
+        JSON.stringify(move),
+      ).toBeDefined();
+    }
+    expect(new Set(moves.map((move) => move.kind))).toStrictEqual(
+      new Set([
+        'extend-block',
+        'shorten-block',
+        'scale-remaining-intervals',
+        'move-hold-range',
+        'swap-next-block',
+        'end-main-set',
+      ]),
+    );
+    expect(readAnswer('{"keep":true}', INPUT)).toBe('kept');
+  });
+
+  it('names a block only after the one being ridden, and none once the last is being ridden', () => {
+    const blocks = (input: ReturnType<typeof replanInput>) =>
+      new Set(
+        admittedMoves(replanAnswerSchema(input)).flatMap((move) =>
+          move.block === undefined ? [] : [move.block],
+        ),
+      );
+    // REPLAN_INPUT_JSON: five blocks, block 1 being ridden.
+    expect(blocks(INPUT)).toStrictEqual(new Set([2, 3, 4]));
+    const last = replanInput({ currentBlock: 4 });
+    expect(blocks(last)).toStrictEqual(new Set());
+    expect(new Set(admittedMoves(replanAnswerSchema(last)).map((move) => move.kind))).toStrictEqual(
+      new Set(['scale-remaining-intervals', 'swap-next-block', 'end-main-set']),
+    );
+  });
+
+  it('offers the reasons the request offers, and no field a watt or a share could travel in', () => {
+    const schema = replanAnswerSchema(INPUT);
+    expect(reasonsOf(schema)).toStrictEqual(offeredReasons(INPUT));
+    expect(JSON.stringify(schema)).not.toMatch(/watt|share|target|power/i);
   });
 });

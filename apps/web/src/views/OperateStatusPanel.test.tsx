@@ -35,7 +35,7 @@ const NOW = Date.parse('2026-11-14T21:00:00.000Z');
 const HOUR = 3600;
 
 async function show(status: OperateStatus | { kind: 'unreachable' }): Promise<void> {
-  mounted = await mount(<OperateStatusPanel status={status} now={() => NOW} />);
+  mounted = await mount(<OperateStatusPanel timeZone="UTC" status={status} now={() => NOW} />);
 }
 
 function text(): string {

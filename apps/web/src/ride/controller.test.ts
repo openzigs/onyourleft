@@ -130,6 +130,33 @@ vi.mock('../recording/laps', async (importOriginal) => {
   };
 });
 
+/**
+ * How many running folds the controller started — #2283's review: the HUD's
+ * totals and time in zones go on with the fold they have as the recording
+ * grows, and a fold built again on every sample is the whole-ride cost back.
+ * Counted through the real classes, so every other test reads what it read
+ * before.
+ */
+const runningFolds = vi.hoisted(() => ({ totals: 0, zoneTime: 0 }));
+vi.mock('../recording/totals', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../recording/totals')>();
+  return {
+    ...actual,
+    RunningRideTotals: class extends actual.RunningRideTotals {
+      constructor(...args: ConstructorParameters<typeof actual.RunningRideTotals>) {
+        super(...args);
+        runningFolds.totals += 1;
+      }
+    },
+    RunningPowerZoneTime: class extends actual.RunningPowerZoneTime {
+      constructor(...args: ConstructorParameters<typeof actual.RunningPowerZoneTime>) {
+        super(...args);
+        runningFolds.zoneTime += 1;
+      }
+    },
+  };
+});
+
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
 import { keepThisRide } from '../camera/keep';
 import { discardKeptFramesWithTheRide } from '../camera/kept-frame-discard';
@@ -653,6 +680,9 @@ const metric = (rig: Bench, id: 'power' | 'heartRate' | 'cadence' | 'speed') => 
 };
 
 // --- Pairing and live metrics ------------------------------------------------
+
+/** Where a workout ride with re-plans on asks the instance to load its model (#2841). */
+const WARM_PATH = '/v1/analysis/replans/warm';
 
 describe('what the trainer role asks the chooser for', () => {
   it('names trainer-control rather than arriving at it through the measurements', async () => {
@@ -12384,8 +12414,12 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
     it('with the switch on, the same ride does ask — the control', async () => {
       const { rig, scripted, calls } = await riding({ replans: true });
       await rideOn(rig, 70);
-      expect(calls.replanSession).toBe(1);
+      // One session for the warm-up as the workout starts (#2841), one for the re-plan.
+      expect(calls.replanSession).toBe(2);
       expect(scripted.starts()).toHaveLength(1);
+      expect(scripted.requests.filter((each) => each.path === WARM_PATH)).toStrictEqual([
+        { method: 'POST', path: WARM_PATH, body: { source: 'instance-local' } },
+      ]);
       rig.controller.dispose();
     });
 
@@ -12941,9 +12975,13 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       const { rig, scripted } = await riding({ replans: true });
       await rideTo(rig, 40);
       await rig.controller.pause();
-      // Two minutes paused: the first block would have ended in them.
+      // Two minutes paused: the first block would have ended in them. The one
+      // call before is the warm-up as the workout started (#2841), which
+      // carries the source and nothing of the ride.
       await rideOn(rig, 120);
-      expect(scripted.requests).toEqual([]);
+      expect(scripted.requests).toEqual([
+        { method: 'POST', path: WARM_PATH, body: { source: 'instance-local' } },
+      ]);
       await rig.controller.resume();
       await rideTo(rig, 62);
       expect(scripted.starts()).toHaveLength(1);
@@ -14466,6 +14504,35 @@ describe('#2434 — the HUD’s calorie estimate is the saved ride’s', () => {
   });
 });
 
+describe('#2283 — the HUD’s totals and time in zones go on with the fold they have', () => {
+  it('builds one fold per recording, rider and threshold, not one per sample', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    rig.bench.rider.set({ power: watts(200) });
+    await ride(rig, 2);
+    expect(hud.rideTotals?.()).toBeDefined();
+    expect(hud.ridePowerZoneTime?.(watts(250))).toBeDefined();
+    const totalsBuilt = runningFolds.totals;
+    const zoneTimeBuilt = runningFolds.zoneTime;
+    let last = hud.rideTotals?.();
+    for (let second = 0; second < 20; second += 1) {
+      await ride(rig, 1);
+      // Each second is a new answer, read as the HUD reads it…
+      const now = hud.rideTotals?.();
+      expect(now).not.toBe(last);
+      last = now;
+      expect(hud.ridePowerZoneTime?.(watts(250))?.covered).toBeGreaterThan(0);
+    }
+    // …from the folds it already had, which take only the samples since.
+    expect(runningFolds.totals).toBe(totalsBuilt);
+    expect(runningFolds.zoneTime).toBe(zoneTimeBuilt);
+    expect(last?.averagePower).toBe(200);
+    rig.controller.dispose();
+  });
+});
+
 describe('#2077 — the HUD’s time in each power zone is the saved ride’s', () => {
   it('works it out over the recorder’s power, as the saved power channel reads, and holds one object between reads', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
@@ -14498,6 +14565,12 @@ describe('#2077 — the HUD’s time in each power zone is the saved ride’s', 
       powerZones(watts(250)),
       streams.channels.power ?? [],
       streams.sampleInterval,
+    );
+    expect(rig.controller.powerZoneTime(watts(250))).toEqual(saved);
+    // #2283: another threshold is its own zones over the whole ride, not the
+    // zones of the threshold the recording was being folded for.
+    expect(rig.controller.powerZoneTime(watts(400))).toEqual(
+      timeInZones(powerZones(watts(400)), streams.channels.power ?? [], streams.sampleInterval),
     );
     expect(rig.controller.powerZoneTime(watts(250))).toEqual(saved);
     // While riding it was the same figures, short only of what sealed at the stop.

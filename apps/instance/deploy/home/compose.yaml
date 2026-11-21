@@ -76,9 +76,11 @@ services:
       # any — the WAF rule, or the tailnet, is what keeps others out. Not asked
       # on the server machine.
       OYL_INSTANCE_ADMIN_ADDRESSES: ${OYL_INSTANCE_ADMIN_ADDRESSES:-}
-      # cloudflared's `/ready` (#2604), asked for the owner's Status. Empty:
-      # the tunnel shows as "not known" and nothing is asked.
-      OYL_INSTANCE_TUNNEL_READY_URL: ${OYL_INSTANCE_TUNNEL_READY_URL:-}
+      # cloudflared's `/ready` (#2604), asked for the owner's Status: its
+      # address on `tunnel_metrics` below unless .env names one (#2918), so it
+      # follows OYL_TUNNEL_METRICS_PREFIX. Set EMPTY in .env: the tunnel shows
+      # as "not known" and nothing is asked.
+      OYL_INSTANCE_TUNNEL_READY_URL: ${OYL_INSTANCE_TUNNEL_READY_URL-http://${OYL_TUNNEL_METRICS_PREFIX:-172.30.88}.10:20241/ready}
       # The room's WebSocket ping (25 s when empty). `0` turns it off, for
       # measuring the tunnel's idle timeout only (home-machine.md, "Measuring
       # the tunnel"); remove it again afterwards.
@@ -93,9 +95,12 @@ services:
       OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES:-}
       # The legal and contact page, /legal (#908) — .env.example says what each
-      # names. Public rooms stay off unless .env turns them on, and on refuses
-      # to start without a contact address and an accountable person.
-      OYL_INSTANCE_CONTACT_EMAIL: ${OYL_INSTANCE_CONTACT_EMAIL:-}
+      # names. The contact address is `:?`, required (#2857): the page tells
+      # riders and anybody with a complaint to write to it, so it is the
+      # operator's own, typed into .env, and never a default — the template
+      # ships it empty (BUNDLE005). Public rooms stay off unless .env turns
+      # them on, and on refuses to start without an accountable person too.
+      OYL_INSTANCE_CONTACT_EMAIL: ${OYL_INSTANCE_CONTACT_EMAIL:?set OYL_INSTANCE_CONTACT_EMAIL in .env to an email address you read, because this server's /legal page tells its riders and anybody with a complaint to write to it}
       OYL_INSTANCE_CONTACT_LANGUAGES: ${OYL_INSTANCE_CONTACT_LANGUAGES:-}
       OYL_INSTANCE_ACCOUNTABLE_PERSON: ${OYL_INSTANCE_ACCOUNTABLE_PERSON:-}
       OYL_INSTANCE_LEGAL_REPRESENTATIVE: ${OYL_INSTANCE_LEGAL_REPRESENTATIVE:-}
@@ -119,9 +124,10 @@ services:
       # `tailscale serve`, which REPLACES any copy the client sent (#2805,
       # measured). The instance refuses a remote path with the other one.
       # The addresses: cloudflared's on both its networks (#2604: Docker's DNS
-      # may answer `instance` with either), and the `tailscale` service's.
+      # may answer `instance` with either), and the `tailscale` service's,
+      # each from its network's prefix in .env (#2918), as `networks:` below.
       OYL_INSTANCE_CLIENT_ADDRESS_HEADER: ${OYL_INSTANCE_CLIENT_ADDRESS_HEADER:-cf-connecting-ip}
-      OYL_INSTANCE_TRUSTED_PROXIES: 172.30.87.10,172.30.88.10,172.30.87.11
+      OYL_INSTANCE_TRUSTED_PROXIES: ${OYL_NETWORK_PREFIX:-172.30.87}.10,${OYL_TUNNEL_METRICS_PREFIX:-172.30.88}.10,${OYL_NETWORK_PREFIX:-172.30.87}.11
       # The history index (#835, ADR 0040): http://ollama:11434 with the
       # `ollama` service below running; empty, and the index is off.
       OYL_INSTANCE_EMBEDDING_URL: ${OYL_INSTANCE_EMBEDDING_URL:-}
@@ -134,6 +140,8 @@ services:
       OYL_INSTANCE_ANALYSIS_MODEL_URL: ${OYL_INSTANCE_ANALYSIS_MODEL_URL:-}
       OYL_INSTANCE_ANALYSIS_MODEL: ${OYL_INSTANCE_ANALYSIS_MODEL:-}
       OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS: ${OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS:-}
+      # #2840: the context the `ollama` service below loads the model with, from one variable.
+      OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS: ${OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS:-16384}
       OYL_INSTANCE_PICTURE_MODEL: ${OYL_INSTANCE_PICTURE_MODEL:-}
       # The secret a hosted model key (#1097) and the instance's own keys
       # (#1189) are encrypted under: HERE and on no other service. The `backup` service below deliberately does not get
@@ -208,7 +216,12 @@ services:
     # serves `/metrics`, `/config` (the tunnel's ingress), `/debug/pprof` and
     # `/diag`, so no other container — not `ollama`, not `backup` — may reach
     # it. ⚠️ NO `ports:` for it, EVER.
-    command: ['tunnel', '--no-autoupdate', '--metrics', '172.30.88.10:20241', 'run']
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - ${OYL_TUNNEL_METRICS_PREFIX:-172.30.88}.10:20241
+      - run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
@@ -216,13 +229,13 @@ services:
     restart: unless-stopped
     # FIXED addresses, so the instance can name this proxy, whose
     # client-address header it believes, by both of them
-    # (OYL_INSTANCE_TRUSTED_PROXIES above). Change a network's subnet, this
-    # address on it and that list together if the subnet is already in use.
+    # (OYL_INSTANCE_TRUSTED_PROXIES above). Each is its network's prefix
+    # from .env and `.10` (#2918), so a changed prefix moves both together.
     networks:
       default:
-        ipv4_address: 172.30.87.10
+        ipv4_address: ${OYL_NETWORK_PREFIX:-172.30.87}.10
       tunnel_metrics:
-        ipv4_address: 172.30.88.10
+        ipv4_address: ${OYL_TUNNEL_METRICS_PREFIX:-172.30.88}.10
 
   # The owner's tailnet (#2805, ADR 0079 D-2): `tailscale serve` answers on
   # https://<TAILSCALE_HOSTNAME>.<tailnet>.ts.net:443 and proxies to the
@@ -270,7 +283,7 @@ services:
     restart: unless-stopped
     networks:
       default:
-        ipv4_address: 172.30.87.11
+        ipv4_address: ${OYL_NETWORK_PREFIX:-172.30.87}.11
 
   # The history index's embedding model (#835, ADR 0040 D-5, D-6): a local
   # Ollama, which the instance reaches by this service's name. Only with the
@@ -296,6 +309,12 @@ services:
     # one Ollama serves both.
     profiles: ['history', 'analysis']
     restart: unless-stopped
+    environment:
+      # #2840: Ollama's own default under 24 GiB of GPU is 4 096, too short for
+      # a write-up, and it cuts an over-long one from the front without saying
+      # so. The instance is told the same number, and stops a write-up that
+      # would not fit (docs/operating-an-instance.md, Analysis model).
+      OLLAMA_CONTEXT_LENGTH: ${OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS:-16384}
     volumes:
       - models:/root/.ollama
 
@@ -346,24 +365,29 @@ services:
       - ${OYL_OFFBOX_DIR:?set OYL_OFFBOX_DIR to a drive or share that is NOT this machine}:/offbox
 
 networks:
+  # #2918: each network's /24 is the first three numbers of its address, from
+  # .env, so an update of this file keeps an owner's change: OYL_NETWORK_PREFIX
+  # (172.30.87 when empty) and OYL_TUNNEL_METRICS_PREFIX (172.30.88). Every
+  # address that depends on one is written from it, here and above: the
+  # proxies' fixed addresses, OYL_INSTANCE_TRUSTED_PROXIES, the tunnel's
+  # `--metrics` and OYL_INSTANCE_TUNNEL_READY_URL. Change one only if its
+  # subnet is already in use on this machine.
+  #
   # The project's own network, with a subnet stated so cloudflared's and
   # tailscale's addresses can be fixed (above). Nothing else in it is trusted
   # with the header.
   default:
     ipam:
       config:
-        - subnet: 172.30.87.0/24
+        - subnet: ${OYL_NETWORK_PREFIX:-172.30.87}.0/24
   # #2604: cloudflared's metrics server, for the instance's Status. Internal
   # (no route out) and joined by `instance` and `tunnel` only, so the other
   # services cannot read the tunnel's `/config`, `/debug/pprof` or `/diag`.
-  # Change the address here, in `tunnel`'s command, in
-  # OYL_INSTANCE_TUNNEL_READY_URL and in OYL_INSTANCE_TRUSTED_PROXIES
-  # together if 172.30.88.0/24 is in use.
   tunnel_metrics:
     internal: true
     ipam:
       config:
-        - subnet: 172.30.88.0/24
+        - subnet: ${OYL_TUNNEL_METRICS_PREFIX:-172.30.88}.0/24
 
 volumes:
   # The SQLite database and the blobs: the one volume that is backed up.

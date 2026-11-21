@@ -31,6 +31,13 @@
  * write to is the one configuration this page exists to prevent. No room is
  * public yet (`rooms/rooms.ts`: no field makes one); the setting is the gate
  * public rooms will be opened behind, and today it opens nothing else.
+ *
+ * ⚠️ **The home deployment starts nothing without a contact address**
+ * (#2857): `deploy/home/compose.yaml` requires the line, and its template
+ * ships it empty — it once shipped the project's own, to every new server.
+ * That is the deployment's rule, not this module's: an instance run another
+ * way with no address still starts, and its page says none is published. The
+ * page never shows a default or a placeholder, because there is none to show.
  */
 
 import { escapeHtml, htmlPage } from './html.ts';

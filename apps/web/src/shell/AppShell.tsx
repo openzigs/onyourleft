@@ -942,7 +942,7 @@ function viewFor(
     case 'operate':
       return <OperateView port={props.operate} />;
     case 'more':
-      return <MoreView />;
+      return <MoreView instance={props.instance} />;
     case 'credits':
       // No props: the manifest is built into the bundle, so this is the one
       // view in the shell that needs nothing passed down. `CreditsView.tsx`

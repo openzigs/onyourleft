@@ -64,7 +64,8 @@ line standard output got, after that one redaction, so it never holds what stand
 A line is a problem when it is one of a closed list (`log.ts` §`isProblem`): a request answered
 `5xx`, an `unhandled` exception, `room-worker-died`, `room-write-failed`, `rooms-sweep-failed`,
 `history-index-failed`, `voice-failed`, `refusing`, an `analysis-job` that `failed`, the
-`analysis-model`, `picture-model` or `history-index` `off`, `instance-keys` not `ready`, a
+`analysis-model`, `picture-model` or `history-index` `off` for a reason other than `not-set` (each is
+optional, so one never set is not a problem, #2859), `instance-keys` not `ready`, a
 `hosted-model-key` that is `no-secret` or `unreadable`, `voice` off for a reason other than
 `not-set`, and a `room-socket-closed` for `room-lost`. Every other line, a `200` request included, is
 not kept. They are **gone when the instance restarts**, and are never written to the database or a
@@ -142,6 +143,10 @@ reach a model for the post-ride write-up's agent
 ([ADR 0046](adr/0046-ai-analysis-on-the-riders-instance-as-a-tool-calling-agent.md) D-8, D-9;
 #1096). The agent runs from the job engine, #1095 ("Analysis jobs", below).
 
+**On a fresh install, the setup page can do this for you**: its optional AI step finds Ollama, downloads
+the model you name and saves it ([The first-run setup page](#the-first-run-setup-page), step 7). The
+lines below are the same thing by hand.
+
 **Running Ollama beside the instance, in Compose.** The home deployment's `ollama` service serves
 the history index and the analysis model both. Set `COMPOSE_PROFILES=analysis` (or
 `history,analysis`) in `.env`, start it once with `docker compose up -d ollama`, pull the model you
@@ -160,6 +165,12 @@ room on the turns after (ADR 0046, Amendments, #1268). To say so up front, set
 off with `"code":"bad-reasoning"`. A rider sets the same for their own hosted key with the
 `reasoningTokens` field of `POST /v1/analysis/hosted/key`.
 
+**Since #2840 a write-up asks the local model not to reason at all** (version 2 of its template:
+`reasoning_effort: "none"`, which Ollama reads as `think: false`), at a low temperature. Left to
+reason, the model on the owner's box used its whole allowance reasoning before it finished an
+answer on 4 of 12 fixed rides; told not to, it wrote all 12, in 3 to 13 s each. A model that reasons anyway is
+still found out and given the room above. A hosted service is sent nothing for it.
+
 **No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
 default, and an address with no model name leaves analysis off and says so. Two things to check of
 the model you choose. **It must support tool calling**: the agent lets the model choose its tools,
@@ -169,6 +180,18 @@ ADR 0040 D-5 requires of any model these documents would name. And give Ollama a
 larger than its default of 4 096 tokens (its `OLLAMA_CONTEXT_LENGTH`): a tool-calling run re-sends
 the whole conversation every turn, and Ollama cuts an over-long prompt silently, from the front,
 where the instructions are.
+
+**Tell the instance the same length** (#2840): `OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS`, a whole
+number from 2048 to 1048576. The agent then stops a write-up, with `out-of-context` and a sentence
+saying the model cannot read that much at once, **before** a turn would pass it, so nothing is lost
+silently; empty, and no turn is checked. The home Compose file sets both from this one variable,
+16384 unless you say otherwise, so they cannot disagree. Measured on 2026-11-19 (Ollama 0.40.16): a
+4 220-token prompt at a 1 024-token context was read as 1 027 tokens, with no error, and the system
+prompt was gone. A write-up's first turn is 1 000 to 2 300 tokens, and a model that reasons may
+then write 3 000 more in one turn, so 4 096 does not hold one write-up of a long ride; 16 384 holds
+every ride of the scored set with room for its tools. Anything else turns analysis off with
+`"code":"bad-context"`. It is `.env` only: the context is the model server's, which the app does
+not set.
 
 **The address rule** is the history index's (ADR 0040 D-6, `history/address.ts`): loopback,
 `localhost`, a private, link-local, shared or unique-local address, or a single-label name such as a
@@ -184,7 +207,7 @@ it**: its API has no authentication.
 | `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
 | `…"code":"tls-by-name"` | an `https:` address by a name was refused: each request goes to the checked address, so a certificate issued to the name cannot verify. Use `http:` on the private network, or `https:` at the address itself |
 | `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
-| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"` | the setting is malformed; standard error says which |
+| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"`, `"bad-context"` | the setting is malformed; standard error says which |
 
 **Setting it from the app** (#2609, ADR 0046's amendment of 2026-11-14). The owner — the athlete
 of `OYL_INSTANCE_OWNER_KEY`, never the deputy — can set the local model's address, its name and its
@@ -307,6 +330,22 @@ riders analyse.
 **Off unless there is a model.** With no analysis model and no hosted key held, every start answers
 `analysis_off` (503) and nothing else changes; the instance starts and serves as usual.
 
+**A re-plan during a workout ride** (ADR 0048) is a job of the same table. ⚠️ **The trainer
+rule: no model output sets a target.** A re-plan's model answers one word from a closed list — a
+move and a reason, or *keep* — and on a model on this machine its answer is held to a JSON Schema of
+exactly those lists (#2841), so it cannot write a watt, a share or a sentence; the instance reads it
+again and copies nothing else. The rider's device alone turns that word into a target, inside its
+own bounds — +5 % a move, +10 % in total, never above the workout's own peak, and one press to undo
+(`@onyourleft/domain` §`validateProposal`) — and nothing on the instance can reach a trainer.
+
+As a workout ride with re-plans on starts, the device asks `POST /v1/analysis/replans/warm`, and the
+instance sends the model one call shaped as a re-plan's first, about a fixed workout nobody rode, so
+the ride's first re-plan does not wait for the model to load: measured on the owner's box, a
+re-plan took 14.6 s with the model unloaded and 2.3 to 3.7 s with it loaded. It sends nothing of
+the rider's, runs no tool and keeps nothing, at most six an hour a rider. A re-plan's budgets
+were measured the same day (`apps/instance/tools/replan-measure.ts`): 4 turns, 3 tool calls,
+45 s, 16 000 tokens and 128 an answer.
+
 **What is kept, and for how long.**
 
 | What | Kept until |
@@ -323,7 +362,10 @@ and may start twelve an hour. There is one worker for the whole instance, so a j
 another athlete's, for up to the agent's run budget.
 
 **What the log says.** One line per change of status, `"event":"analysis-job"` with `state` (and
-`code`, the failure, when it failed). Never a job's id, its input, a tool name or any of the
+`code`, the failure, when it failed). A write-up's last line also says what its run came to
+(#2840): `turns` (model turns), `toolCalls`, `toolsUsed` (how many of the tools), `tokensIn` and
+`tokensOut` (as the model server reported them, or the instance's estimate where it reported
+none) and `ms`, whole numbers all. Never a job's id, its input, a tool name or any of the
 write-up.
 
 **How it is erased.** Erasing an account (`DELETE /v1/account`) deletes every job and event of the
@@ -872,7 +914,9 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   newer than every recorded snapshot in the folder, so the newest snapshot is always kept. It never
   removes a recorded snapshot, or an unrecorded one older than them, such as one the shell loop made
   before #2606. If the folder has no recorded snapshot at all, the run removes only the snapshot it
-  has just taken.
+  has just taken. A snapshot named after the present moment, which a clock running ahead left, is
+  left out of the bound: it is neither counted nor removed, and it does not stop the run removing
+  the others (#2627).
 - **How often it runs while records fail.** The loop holds back a request it has already tried for
   one interval. When it starts, it also holds off every run, the owner's requests included, until
   one interval after the newest snapshot in the folder that no record names. That snapshot may come
@@ -882,8 +926,8 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   interval.
 - **One run at a time in a folder: the lease.** A run holds a **lease** on each folder it writes:
   the snapshot folder, and the off-box folder. The lease is a row in the instance's own database
-  (`backup_lease`, keyed by the SHA-256 of the folder's path, never the path), held for the whole
-  run. Every run opens that database, whichever container it runs in: the `backup` service, a
+  (`backup_lease`, keyed by the SHA-256 of the folder's real path, never the path, so a folder
+  reached through a symlink is the same lease), held for the whole run. Every run opens that database, whichever container it runs in: the `backup` service, a
   `backup` run by hand, `deploy.sh`'s pre-deploy snapshot. SQLite's write lock is the one atomic step
   they all share, so a run takes the lease in a single `BEGIN IMMEDIATE` transaction, and only one
   run can.
@@ -898,8 +942,10 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
   - A second run into a folder that is held is refused, and recorded `failed` as
     `BackupFolderBusy`. A run whose off-box lease is held elsewhere records its copy `failed`, and
     neither writes nor prunes there.
-  - A run that loses its lease, because a heartbeat cannot be written or another run took it, stops
-    before it records or prunes anything (`BackupLeaseLost`).
+  - Before it records or prunes anything, a run reads its lease's row, and stops
+    (`BackupLeaseLost`) if another run has taken it. A heartbeat that cannot be written is tried
+    again at the next beat and loses nothing by itself: while nobody has taken the row, the run
+    still holds the folder (#2627).
   - On a database from before migration 0042, which has no lease table, runs take no lease, as
     before.
   - One limit: `VACUUM INTO` holds the process while it copies the database, so no heartbeat is
@@ -915,10 +961,21 @@ snapshot and remove an older one. A run that fails is recorded and the loop carr
 - **On a rollback** to an image from before `backup-loop` existed, the service checks whether the
   image has the command. If it does not, it runs the old shell loop, so backups carry on. That loop
   now stops on `docker compose stop` between runs.
-- ⚠️ **The off-box copy has no time limit.** A share that stops answering blocks the copy inside a
-  file-system call, which Node cannot cancel, and the service waits with it. The snapshot on the box
-  is already complete by then. If the Status shows the last backup getting old, check
-  `docker compose logs backup` and the share. A watchdog for this is [#2626](https://github.com/openzigs/onyourleft/issues/2626).
+- **The off-box copy has a watchdog** (#2626). The copy runs in a process of its own, and if it has
+  not finished in 15 minutes, or in the snapshot's size at 1 MB/s when that is longer, it is killed.
+  A share that stops answering during the copy then costs that run's copy: the run's record says
+  off-box `failed`, the snapshot on the box is kept, nothing off the box is pruned, and the
+  `.partial-snapshot-…` copy is left there for a later run to remove (it removes partials older
+  than six hours). The run does not touch that share again, not even to read its free space.
+- ⚠️ **A share that stays hung still stops the loop, one run later.** Before it copies, the next
+  run creates the off-box folder and lists it for old partials in the service's own process, and
+  the watchdog does not cover those calls. If the share is still not answering then, that run
+  waits on it.
+- ⚠️ **A copy stuck in an uninterruptible wait can outlive the kill.** A process blocked in some
+  kernel file-system calls does not die until the call returns, whatever signal it is sent. The run
+  waits until the copy has exited, holding the off-box folder's lease, so no second copy is ever
+  started into that folder alongside it, and that run is then as stuck as the copy. If the Status
+  shows the last backup getting old, check `docker compose logs backup` and the share.
 
 ⚠️ **The oldest backup you keep may be 30 days old, and no older** (#1381). A backup holds what
 the instance has since erased: a notice's notifier details ([moderation](moderation.md)), an
@@ -1102,7 +1159,11 @@ setup session**, **reopens the first-run setup at its claim step** (#2784), and 
 `owner_claim_reset` to the operator log, in one transaction. Its report says whether a key was cleared
 (`cleared`), how many admin sessions ended, and `ownerKeyFromEnvironment: true` when
 `OYL_INSTANCE_OWNER_KEY` is set — in which case that variable is still the owner, as it was. The
-instance is then unclaimed, and the owner claims it again from the setup page. A rider who recovered
+instance is then unclaimed, and the owner claims it again from the setup page. Since
+[#2858](https://github.com/openzigs/onyourleft/issues/2858) the reset also **makes a setup code**,
+writes it to the `setup-code` file in the secrets folder and prints it with the page's address
+(`setupCode`, `open`, `expiresAt` and `expiresAtLocal`), as `setup-code` does, so the setup page's
+file is there at once; not while `OYL_INSTANCE_OWNER_KEY` is set. A rider who recovered
 their account with a recovery code holds a new device key, so they reset and claim again too, just as
 they would edit `.env`.
 
@@ -1116,10 +1177,22 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
   8788 in the home deployment), **with the admin pages on or off**. Type `localhost`, not `127.0.0.1`:
   any other address is told which one to open. Through the tunnel or the tailnet every `/setup` path is
   `not_found`, as a path with no route is.
+- **Not while the address is the template's example**
+  ([#2855](https://github.com/openzigs/onyourleft/issues/2855)): an `OYL_INSTANCE_ORIGIN` still on
+  `your-tailnet.ts.net`, as `instance.env.example` ships it, has the right shape, so the instance
+  starts. It is then run as an instance with **no** address: no accounts, and no keys, card or
+  emergency kit made for a name that is not its own (the keys are bound to the origin, so keys made
+  for the example would not open once it is corrected). Every `/setup` address answers one page,
+  *Set this server's address first*, with no box for a code; no setup code is made, and the log says
+  `{"event":"example-address","open":"http://localhost:8788/setup"}`, never the address. Set the
+  origin and start the instance again.
 - **The setup code**: the instance makes one at **every start** while the setup is open and writes it
   to the file `setup-code` in the secrets folder beside `compose.yaml` (`OYL_INSTANCE_SECRETS_DIR`),
   owner-only. The log says where it is, never what it is:
   `{"event":"first-run-setup","open":"http://localhost:8788/setup","codeIn":"secrets/setup-code",…}`.
+  The file and the log line say when it stops working by this machine's clock with the zone named
+  (`validUntilLocal`, `2026-11-19 05:30 EST`), beside the UTC time (#2858); in a container with no
+  `TZ` that zone is UTC, and it says so.
   A code works once, for ten minutes; restart the instance (`docker compose restart instance`) for a
   new one, or print one on the host:
 
@@ -1133,35 +1206,89 @@ D-6, D-7; [#2784](https://github.com/openzigs/onyourleft/issues/2784)).
 - **The steps**, each of which the operator log records from the source `setup`, naming no athlete:
   1. **Claim** — a claim code as a QR with the instance card, the tablet's claim, and the six digits
      compared on both screens ([Claiming the instance from the app](#claiming-the-instance-from-the-app)).
+     Before the code is shown, and beside it, the step names the address the tablet will use
+     (`OYL_INSTANCE_ORIGIN`) and says what the tablet needs first: on `OYL_INSTANCE_REMOTE_PATH=tailnet`
+     (or, with no path named, a `ts.net` address) the Tailscale app, signed in and on; otherwise, to be
+     online. It gives `<origin>/health` to open in the tablet's browser as the check. On the
+     `cloudflare` path with `OYL_INSTANCE_TUNNEL_READY_URL` set it also says whether the tunnel is
+     connected, asked as Status asks it; on a tailnet the instance cannot tell, and says nothing (#2855).
      Until a tablet scans it the step keeps showing the **same** QR, with an *I’ve scanned it* button
      that loads the step again; no setup page reloads itself (WCAG 2.2.1), so the code beside the QR
      stays selectable. The code is held in the instance's memory for the session that asked for it,
-     never in the database, and is no longer drawn once its ten minutes are over. After *Yes* the step says the tablet now owns the
-     server, before the next step.
-  2. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
+     never in the database. Once its ten minutes are over it is dropped from memory and no longer
+     drawn, and the step says once, to the session that was shown it, *That code ran out. Show a new
+     one.* After *Yes* the step says the tablet now owns the server, before the next step.
+  2. **Tailnet** ([#2817](https://github.com/openzigs/onyourleft/issues/2817), ADR 0079 D-2, D-8) —
+     after the claim and before the passkey, because a passkey is bound to the address. It shows the
+     address the **running** server's card names, read on every load, and whether it is a `ts.net`
+     name, a problem when `OYL_INSTANCE_REMOTE_PATH` is `tailnet` or `funnel` and it is not, and a
+     problem when no card can be drawn (no keys opened) or when the keys held do not open at this
+     address, which is what a changed origin leaves: it asks the keys back as a device's
+     `GET /v1/instance/keys` does, not only the card. It says how riders join (invitation or
+     machine sharing, each on their own Tailscale account, never the owner's) and shows the access
+     rule of [3a.2](self-hosting/home-machine.md#3a-your-tailnet-no-domain) to copy; on `funnel` it
+     says what Funnel changes. **It changes no setting**: `OYL_INSTANCE_ORIGIN` is `.env`'s alone
+     (ADR 0080's table). Before its collapsed block says how to change the address (`.env`, then
+     `bash deploy.sh`, whose round trip checks the running origin against the name `tailscale serve`
+     answers on, then `instance-key reset`, because the keys are wrapped under the origin), it says
+     that the server makes new keys and so a new identity, that every device must scan the new card,
+     and that every passkey bound to the old host stops working. *Check now* reads the address and
+     the keys back after the restart. On `cloudflare` it
+     says there is nothing to set up; with no path named, that it cannot check a tailnet.
+  3. **A passkey** — optional: the commands to add one on the admin pages and confirm it on the host
      are in a collapsed block for people comfortable with the command line.
-  3. **The emergency kit** — offered **once** per setup session, with no passkey
-     ([The instance's secrets](#the-instances-secrets)).
-  4. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
-     elsewhere"), and **Back up now**; while a backup waits the step has a *Check now* button. The folders
+  4. **The emergency kit** — offered **once** per setup session, with no passkey
+     ([The instance's secrets](#the-instances-secrets)). The page does not change after the download
+     (it carries no script), so it says so before the button. Once taken, it says how to get it again
+     if the save was cancelled: a new setup session, whose code the `setup-code` command shown on the
+     page makes, may download it once more (ADR 0080 D-4's "once" is per session; #2858).
+  5. **Backups** — whether the last backup reached both folders ("on this computer" and "the copy kept
+     elsewhere"), how long ago it ran by the server's clock ("14 minutes ago", never a UTC time), and
+     **Back up now**; while a backup waits the step has a *Check now* button. A backup made **before
+     the claim** — the backup service's start-up one, on a fresh install — does not hold the owner's
+     account: the step says so, and *Back up now* is taken regardless of the 15-minute gap until a
+     backup made since the claim has run (#2858). The folders
      are `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` in `.env`, named only in the step's collapsed command-line
      block: the `backup` service is started with them, so the page checks and explains and cannot
      choose them.
-  5. **Who may join** — the registration mode, in plain words (*Anyone can join*, *I approve each new
+  6. **Who may join** — the registration mode, in plain words (*Anyone can join*, *I approve each new
      rider*, *Only people I invite*, *Nobody new*; stored as `open`, `approval`, `invite`, `closed`).
      Its one button saves the choice and moves on. The one chosen here is kept in the database and
      **wins over `OYL_INSTANCE_REGISTRATION`** until it is cleared (ADR 0080 D-6).
-  6. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
+  7. **Invite a rider** — one invite, as a QR with the card, once the owner's tablet has signed in to
      the instance. The app does not sign in by itself after the claim, so until it has the step says
-     what to do on the tablet.
-  7. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
-     working or not, who may join, and the invites made. The page is then `not_found` for good, after
-     a restart too; only `owner-claim reset` reopens it. The *Setup is finished* page carries its
-     stylesheet inline, allowed by its hash in that response's CSP, because `/setup/setup.css` has
-     gone with the rest.
+     what to do on the tablet. The session that made the invite sees it again on the step until a
+     rider uses it (#2858); it is held in memory only, so after a restart the step says it was made.
+  8. **AI write-ups** — optional ([#2792](https://github.com/openzigs/onyourleft/issues/2792)). The
+     step looks for Ollama at the address in `OYL_INSTANCE_ANALYSIS_MODEL_URL` if one is set, then at
+     `http://ollama:11434` (the Compose `ollama` service), `http://host.docker.internal:11434` and
+     `http://127.0.0.1:11434` (an Ollama installed on the host), each held to the rule for a local
+     model address. With none it says so in one sentence and is skipped with *Next step*. With one it
+     lists the models Ollama has, each with how well it fits the graphics card — read from what
+     Ollama has loaded, never guessed from a file's size — and downloads the model whose name the
+     owner types (`POST /api/pull`), showing how far it has got when *Check now* is pressed. **It
+     names and recommends no model** (ADR 0046's amendment of 2026-11-14, point 8). *Use …* saves
+     that model and its address as the local model, as the app's AI backend section does
+     ([Analysis model](#analysis-model)), so the next write-up runs on it with no restart, and loads
+     the model once so the page can say how it fits. A download is logged `analysis_model_pull` and
+     the choice `analysis_settings_set`, naming no model. Nothing Ollama says about a download is
+     shown or logged, only its byte counts: its words can carry a path under the host user's home.
+  9. **Finish** — where the server stands: the owner claimed, the kit downloaded or not, backups
+     working or not, who may join, the invites made, and whether AI write-ups are on. The page is
+     then `not_found` for good, after a restart too; only `owner-claim reset` reopens it. The *Setup
+     is finished* page carries its stylesheet inline, allowed by its hash in that response's CSP,
+     because `/setup/setup.css` has gone with the rest.
 - **Leave whenever you like.** The step is kept in the database, so coming back — after a restart, with
   the new code — resumes it. A setup session ends after 15 minutes without use and 2 hours after the
   code was typed.
+- **A restart while the claim QR is showing voids that claim code** (#2858): the page that showed
+  it went with the process, so the code is not left working unseen. The claim step then says the
+  server restarted and to show a new code.
+- **Every command a setup page names is written whole, in a block to copy** (#2858): one click
+  selects all of it, since the pages carry no script.
+- **After the finish, `/setup` on the server machine** answers the small *Setup is finished* page
+  (a 404, setting nothing), not the raw `not_found` of a missing route (#2858). Every other setup
+  path, and every path through the tunnel or the tailnet, is still byte-identical to a missing route.
 - **With `OYL_INSTANCE_OWNER_KEY` set the setup is done from the first start**: no code is made and
   nothing is served at `/setup`. Every install from before #2784 is unchanged.
 - **While the instance is unclaimed and holds no account, every registration is refused**, whatever the
@@ -1203,14 +1330,17 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   work has ended and says `logged` in its report; a restore logs into the database it restored, so a
   snapshot from before migration 0040 is `logged: false` until `migrate`. **The command succeeds when
   its work did**: if its entry cannot be written (a full disk, a lock held too long), it reports
-  `logged: false` and prints a line on standard error, and still exits 0, so a log write never stops a
-  deploy whose migrations applied. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
+  `logged: false` and prints a line on standard error naming SQLite's result code, and still exits 0,
+  so a log write never stops a deploy whose migrations applied. Since #2618 such a command never logs
+  `failed` for work that succeeded: a detail outside its vocabulary is not written at all. An entry carries when, where from (`app`, `cli`, or since #2641 the admin pages'
   `admin_tunnel` and `admin_loopback`: see "Admin pages", below), the action, a
   short detail and the outcome: `done`, `refused` or `failed`. The detail is written only from a
   closed list of words and counts **for that action** (`applied=2` for `migrate`, `cleared` for
   `model-key clear`): anything else, including a word another action uses, is refused with the
-  action, so a detail is never free text, a key or a position. The schema also holds it to lower-case
-  letters, digits, `_`, `=` and `,`, at most 200 characters. The owner reads it
+  action, so a detail is never free text, a key or a position. Since #2618 each count is held to a
+  plausible range for what it counts (`blobs` at most 10 000 000, `applied` at most 1 000), and two
+  words that contradict each other (`ride,race`) are refused. The schema also holds it to lower-case
+  letters, digits, `_`, `=` and `,`, at most 200 characters, and no NUL (migration 0051). The owner reads it
   at `GET /v1/operate/log`, newest first (`?limit=` 1–200, `?cursor=`).
 - **What erasure and `migrate … down` do to it.** As with the moderation log
   ([`docs/moderation.md`](moderation.md) §"What the log is, and what erasure does to it"), two SQLite
@@ -1338,10 +1468,11 @@ so the instance gains no new login. The server half is [#2602](https://github.co
   **`OYL_INSTANCE_TUNNEL_READY_URL`** to cloudflared's own `/ready`. The home compose file runs the
   `tunnel` service with `--metrics 172.30.88.10:20241`, bound to its address on **`tunnel_metrics`**:
   an internal network (no route out) that only `instance` and `tunnel` join.
-  `instance.env.example` sets `OYL_INSTANCE_TUNNEL_READY_URL=http://172.30.88.10:20241/ready`. It
-  uses the address, not the name `tunnel`, which resolves on both of the tunnel's networks. If
-  172.30.88.0/24 is already in use on the box, change the subnet, the address in the command and
-  the variable together.
+  `compose.yaml` asks `http://172.30.88.10:20241/ready` unless `.env` sets
+  `OYL_INSTANCE_TUNNEL_READY_URL` (empty asks nothing). It uses the address, not the name `tunnel`,
+  which resolves on both of the tunnel's networks. If 172.30.88.0/24 is already in use on the box,
+  set `OYL_TUNNEL_METRICS_PREFIX` in `.env` (#2918): the subnet, the address in the command and this
+  address all follow it.
   - **Why a network of its own:** cloudflared's metrics server serves more than `/ready`. It also
     serves `/metrics` (connector and edge details), `/config` (the tunnel's ingress: its public
     hostname and the origin it forwards to), `/debug/pprof` (profiling, which costs CPU) and
@@ -1425,12 +1556,16 @@ has the instance's name, how you signed in and through which listener, the secti
 - **Off unless you turn them on.** Set `OYL_INSTANCE_ADMIN_PAGES=on` in the `.env` beside
   `compose.yaml` and run `docker compose up -d instance`. Off, `/admin` answers as any address with
   no route. On, the pages also need `OYL_INSTANCE_ORIGIN`, `OYL_INSTANCE_SECRET_KEY` (as Operate
-  does) and `OYL_INSTANCE_OWNER_KEY`, and an account holding that key: without any of them the page
-  says it is unavailable and names the variable, never its value.
-- **The owner only.** A sign-in opens a session for the athlete whose device holds
-  `OYL_INSTANCE_OWNER_KEY`, and nobody else; there is no name to type. The deputy has no admin
-  sign-in. The instance asks again on every request: change `OYL_INSTANCE_OWNER_KEY` and every admin
-  session ends on its next request.
+  does) and an **owner**: the one the setup page's claim made, or `OYL_INSTANCE_OWNER_KEY` on the
+  expert path, which wins over the claim (ADR 0080 D-3), and an account holding that key. Without
+  any of them the page says it is unavailable and names what is missing, never a value. Since
+  [#2784](https://github.com/openzigs/onyourleft/issues/2784) a claimed owner needs no
+  `OYL_INSTANCE_OWNER_KEY` (corrected by #2859: this line used to say it did).
+- **The owner only.** A sign-in opens a session for the athlete whose device holds the owner key —
+  the claimed one, or `OYL_INSTANCE_OWNER_KEY` when it is set — and nobody else; there is no name to
+  type. The deputy has no admin sign-in. The instance asks again on every request: change the owner
+  (a reset and a new claim, or `OYL_INSTANCE_OWNER_KEY`) and every admin session ends on its next
+  request.
 - **`operator admin-code`.** On the server machine, run
   `docker compose exec instance node src/operator/cli.ts admin-code` (or
   `node src/operator/cli.ts admin-code` beside the data). It prints a one-time code, four groups of
@@ -1584,7 +1719,7 @@ Running an instance for other people is a set of duties as well as a box:
 
   | Setting | What to put |
   |---|---|
-  | `OYL_INSTANCE_CONTACT_EMAIL` | the address you read, for authorities and riders alike (the EU DSA's single point of contact, Arts 11 and 12). A person must read it |
+  | `OYL_INSTANCE_CONTACT_EMAIL` | the address you read, for authorities and riders alike (the EU DSA's single point of contact, Arts 11 and 12). A person must read it. **The home deployment starts nothing without it** (#2857): its template leaves the line empty, and `compose.yaml` requires it |
   | `OYL_INSTANCE_CONTACT_LANGUAGES` | the languages you can be written to in, separated by commas. Empty means English |
   | `OYL_INSTANCE_ACCOUNTABLE_PERSON` | the person accountable for keeping illegal content off the instance (the UK Online Safety Act Codes, ICU A2) |
   | `OYL_INSTANCE_LEGAL_REPRESENTATIVE` | only if you have one: your EU legal representative's name, postal address, email and telephone, on one line (DSA Art. 13(4)) |

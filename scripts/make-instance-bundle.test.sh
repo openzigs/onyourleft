@@ -41,6 +41,9 @@ assert_says() {
 dir_has_mode() { [ -n "$(find "$1" -maxdepth 0 -type d -perm "$2" 2>/dev/null)" ]; }
 
 IMAGE="ghcr.io/openzigs/onyourleft-instance:1.2.3@sha256:$(printf 'c%.0s' $(seq 1 64))"
+# An email address at the project's own domain, or under it (#2857). Written
+# out here and not read from the script, so the script's own pattern is tested.
+PROJECT_ADDRESS='[a-z0-9._%+-]+@([a-z0-9-]+\.)*openzigs\.[a-z]'
 
 new_fixture() {
   cleanup
@@ -90,6 +93,22 @@ if diff <(grep -v 'OYL_INSTANCE_IMAGE' "${b}/instance.env.example" | grep -v "^#
   ok 'and every other line of it is the home deployment'"'"'s'
 else
   bad 'and every other line of it is the home deployment'"'"'s'
+fi
+# #2857: the bundle is every new server's template, and its /legal page tells
+# riders to write to whatever OYL_INSTANCE_CONTACT_EMAIL holds. Asserted on the
+# bundle itself and not through the script's BUNDLE005, so these are red
+# whichever of the template and the rule is lost.
+if [ "$(grep -c '^OYL_INSTANCE_CONTACT_EMAIL=' "${b}/instance.env.example")" = 1 ] &&
+  grep -qxF 'OYL_INSTANCE_CONTACT_EMAIL=' "${b}/instance.env.example"; then
+  ok 'instance.env.example offers OYL_INSTANCE_CONTACT_EMAIL once, and empty: it names nobody to write to'
+else
+  out="$(grep -n 'OYL_INSTANCE_CONTACT_EMAIL' "${b}/instance.env.example")"
+  bad 'instance.env.example offers OYL_INSTANCE_CONTACT_EMAIL once, and empty: it names nobody to write to'
+fi
+if out="$(grep -rIinE "${PROJECT_ADDRESS}" "${b}")"; then
+  bad 'no file of the bundle holds an address at the project'"'"'s own domain'
+else
+  ok 'no file of the bundle holds an address at the project'"'"'s own domain'
 fi
 if cmp -s "${b}/deploy.sh" "${REPO}/apps/instance/deploy/home/deploy.sh"; then ok 'deploy.sh is copied unchanged'; else bad 'deploy.sh is copied unchanged'; fi
 if [ -x "${b}/deploy.sh" ]; then ok 'and is executable'; else bad 'and is executable'; fi
@@ -225,6 +244,56 @@ for serve in serve-tailnet.json serve-funnel.json; do
   assert_says 'as BUNDLE004, naming the file' "BUNDLE004 apps/instance/deploy/home/tailscale/${serve} is missing"
   if [ -e "${tmp}/out/onyourleft-instance-1.2.3.zip" ]; then bad 'and writes no zip'; else ok 'and writes no zip'; fi
 done
+
+# --- BUNDLE005 ---------------------------------------------------------------------
+
+# #2857: the template shipped the project's own contact address, so every new
+# server's /legal page told its riders to write to the maintainer.
+contact_template() {
+  new_fixture
+  sed -i.bak "$1" "${tmp}/repo/apps/instance/deploy/home/instance.env.example"
+  run_bundle "${IMAGE}" 1.2.3 "${tmp}/out"
+}
+refused_as_bundle005() {
+  assert_exit "$1 is refused" 1
+  assert_says 'as BUNDLE005' 'BUNDLE005'
+  if [ -e "${tmp}/out/onyourleft-instance-1.2.3.zip" ]; then bad 'and writes no zip'; else ok 'and writes no zip'; fi
+}
+
+contact_template 's/^OYL_INSTANCE_CONTACT_EMAIL=$/OYL_INSTANCE_CONTACT_EMAIL=someone@openzigs.ai/'
+refused_as_bundle005 'a template whose contact is an address at the project'"'"'s domain'
+
+# Anybody's: whatever the template holds is what a new server publishes.
+contact_template 's/^OYL_INSTANCE_CONTACT_EMAIL=$/OYL_INSTANCE_CONTACT_EMAIL=owner@club.example/'
+refused_as_bundle005 'a template whose contact is any address at all'
+assert_says 'naming the line that must be empty' "exactly one line 'OYL_INSTANCE_CONTACT_EMAIL='"
+
+# No line to fill in: the operator would have nothing to type their own into.
+contact_template '/^OYL_INSTANCE_CONTACT_EMAIL=$/d'
+refused_as_bundle005 'a template with no contact line'
+
+contact_template 's/^OYL_INSTANCE_CONTACT_EMAIL=$/OYL_INSTANCE_CONTACT_EMAIL=\
+OYL_INSTANCE_CONTACT_EMAIL=/'
+refused_as_bundle005 'a template with the contact line twice'
+
+# In a comment, the line itself empty: it is still shipped to every new server.
+contact_template 's/^OYL_INSTANCE_CONTACT_EMAIL=$/# Write to Someone@Sub.OpenZigs.ai.\
+OYL_INSTANCE_CONTACT_EMAIL=/'
+refused_as_bundle005 'a template that names an address under the project'"'"'s domain in a comment'
+assert_says 'naming the file' 'in instance.env.example:'
+
+# Any file of the bundle, not only the template.
+new_fixture
+printf '# questions to someone@openzigs.ai\n' >> "${tmp}/repo/apps/instance/deploy/home/compose.yaml"
+run_bundle "${IMAGE}" 1.2.3 "${tmp}/out"
+refused_as_bundle005 'a compose.yaml that names an address at the project'"'"'s domain'
+assert_says 'naming the file' 'in compose.yaml:'
+
+# The rule is the project's domain, not every `@`: an example address in a
+# comment, and the image's own `@sha256:`, are not what it refuses.
+contact_template 's/^OYL_INSTANCE_CONTACT_EMAIL=$/# For example you@club.example.\
+OYL_INSTANCE_CONTACT_EMAIL=/'
+assert_exit 'a template with an example address elsewhere in a comment still bundles' 0
 
 # --- BUNDLE003 ---------------------------------------------------------------------
 

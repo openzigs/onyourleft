@@ -75,7 +75,9 @@ comes back only once somebody has signed in — set Windows to sign in automatic
    ```
 
    The folder holds `compose.yaml`, `deploy.sh`, `instance.env.example`, `release.image`, and a
-   `tailscale` folder with the two files `tailscale serve` reads on the tailnet (3a).
+   `tailscale` folder with two serve files. On the tailnet (3a) `tailscale serve` reads one of them,
+   the one `OYL_INSTANCE_REMOTE_PATH` names: `serve-tailnet.json` for `tailnet`, `serve-funnel.json`
+   for `funnel`.
    `compose.yaml` names the instance's image **by its digest**, the line in `release.image`, so
    what Docker downloads is exactly the image this release was tested with.
 
@@ -131,11 +133,18 @@ Do **one** of [3a](#3a-your-tailnet-no-domain) or [3b](#3b-a-cloudflare-tunnel-y
    instance's address is `https://onyourleft.your-tailnet.ts.net`. That is `OYL_INSTANCE_ORIGIN` in
    step 4. If the tailnet already has a machine of that name, Tailscale calls this one
    `onyourleft-1`; step 5 says how to check, and `deploy.sh` checks it for you.
-4. **How each rider joins**: invite them into your tailnet (*Users → Invite users*, each on their
+4. **Put Tailscale on your own tablet now**, the one you ride with: install the Tailscale app on
+   it, sign in with **your** Tailscale account, and leave it switched on. ⚠️ **Do this before step
+   5a.** The tablet claims the instance by reaching its `https://` address, and that address exists
+   only on the tailnet: a tablet that is not on it gets no answer, and the app can only say that the
+   instance did not answer. Being on the same Wi-Fi is not enough, because plain `http://` on the
+   home network is refused by the app and the instance alike (ADR 0079 D-6).
+5. **How each rider joins**: invite them into your tailnet (*Users → Invite users*, each on their
    own Tailscale account; the free plan has 6 users), or share the machine with them (*Machines →
    onyourleft → Share*). Each rider installs the Tailscale app on their tablet or phone and signs in
-   **as themselves**. Sharing a *tagged* machine has not been tried here: if the console does not
-   offer it, invite the rider.
+   **as themselves**, and does so **before they scan an invite**: an invite scanned by a device that
+   is not on the tailnet yet gets the same "did not answer". Sharing a *tagged* machine has not been
+   tried here: if the console does not offer it, invite the rider.
    ⚠️ **Never sign a rider's device in to your own account**: that gives it your identity across the
    whole tailnet, past the access rule above.
 
@@ -240,10 +249,12 @@ the setup page on this machine sets them up after the deploy, in step 5a, with n
 | `COMPOSE_PROFILES` | `tailscale` for 3a, `cloudflare` for 3b (add `history` or `analysis` with a comma if you use those) |
 | `OYL_INSTANCE_REMOTE_PATH` | `tailnet` for 3a (or `funnel`, if you turned it on), `cloudflare` for 3b |
 | `OYL_INSTANCE_CLIENT_ADDRESS_HEADER` | `x-forwarded-for` for 3a; `cf-connecting-ip` for 3b, which is also what empty means. The instance refuses to start with the other path's |
-| `OYL_INSTANCE_ORIGIN` | `https://` and the address from step 3: `https://onyourleft.your-tailnet.ts.net`, or the tunnel's public hostname |
+| `OYL_INSTANCE_ORIGIN` | `https://` and the address from step 3: `https://onyourleft.your-tailnet.ts.net` with **your** tailnet's name in place of `your-tailnet`, or the tunnel's public hostname. ⚠️ The template's line is an example, not a default: while it still says `your-tailnet`, the instance serves no account and makes no keys, and the setup page (step 5a) only says to set this ([#2855](https://github.com/openzigs/onyourleft/issues/2855)) |
+| `OYL_INSTANCE_CONTACT_EMAIL` | **required — nothing starts without it.** An email address **you** read. Your server's own page at `/legal`, which the app's *About* links to, tells your riders — and anybody with a complaint about what is on your server — to write to it. The template leaves it empty on purpose: the address is yours, never the project's and never an example ([#2857](https://github.com/openzigs/onyourleft/issues/2857)). It is published, so use one you are content for your riders to see |
 | `OYL_INSTANCE_REGISTRATION` | **leave it empty** on a fresh install, and choose on the setup page (step 5a), which wins over this line. Otherwise `approval` (you approve each new account; the default, and what an empty value means), `invite`, `open`, or `closed` — see [`docs/moderation.md`](../moderation.md). Your own device registers active in every mode once it is the owner. ⚠️ `closed` turns away **your other** devices too: the app says the instance is not taking new riders. Link them to your account from the app instead, or approve them |
 | `OYL_INSTANCE_OWNER_KEY` | **leave it empty** on a fresh install: you claim the instance with your tablet on the setup page (step 5a). The expert path: your device key, which the app shows — then the instance is yours from its first start and the setup page never opens |
 | `OYL_INSTANCE_DEPUTY_KEY` | leave it **empty**. An instance has one moderator ([`docs/moderation.md`](../moderation.md)); this names a second only if you want one |
+| `OYL_INSTANCE_ADMIN_PAGES` | `off`, as the template ships it. Set `on` (and run `docker compose up -d instance`) to use the admin pages at `http://localhost:8788/admin` on this machine: where the emergency kit can be downloaded again after setup, and where you add a passkey. Once your tablet has claimed the server they need nothing else ([#2859](https://github.com/openzigs/onyourleft/issues/2859)) |
 | `CLOUDFLARE_TUNNEL_TOKEN` | 3b only: the token from step 3b |
 | `TAILSCALE_HOSTNAME` | 3a only, optional: the machine's name on the tailnet, `onyourleft` when empty. It is public (step 3a) |
 | `TAILSCALE_AUTH_KEY` | 3a only, optional: empty, and the first deploy prints a sign-in link instead. A key from *Settings → Keys* (tagged `tag:onyourleft`) signs the machine in by itself; it is a secret, like the tunnel token |
@@ -266,10 +277,15 @@ internal network only it and the instance share for the tunnel's readiness (#260
 `tailscale` `172.30.87.11`, and names exactly those three addresses. You do not set them in `.env`.
 The same list is what makes the admin pages' loopback listener close a connection from either proxy
 unread (ADR 0069 D-5). If `172.30.87.0/24` or `172.30.88.0/24` is already in use on this machine,
-change that subnet, the proxies' addresses on it and `OYL_INSTANCE_TRUSTED_PROXIES` in
-`compose.yaml` together; for `172.30.88.0/24`, also the `--metrics` address in the tunnel's command
-and `OYL_INSTANCE_TUNNEL_READY_URL` in `.env`. Anything else on that network, or a port published
-for local debugging, is counted as itself, whatever header it sends.
+set **`OYL_NETWORK_PREFIX`** or **`OYL_TUNNEL_METRICS_PREFIX`** in `.env` to the first three numbers
+of a free `/24`, such as `10.77.1`, and run `bash deploy.sh` again
+([#2918](https://github.com/openzigs/onyourleft/issues/2918)). `compose.yaml` writes every address
+that depends on it from that setting: the proxies' fixed addresses, `OYL_INSTANCE_TRUSTED_PROXIES`,
+the tunnel's `--metrics` address and its readiness address. Being in `.env`, the change survives
+every update of `compose.yaml`. A `.env` from before #2918 may still name
+`OYL_INSTANCE_TUNNEL_READY_URL=http://172.30.88.10:20241/ready`: delete that line when you change
+`OYL_TUNNEL_METRICS_PREFIX`. Anything else on that network, or a port published for local
+debugging, is counted as itself, whatever header it sends.
 
 ## 5. Start it
 
@@ -332,34 +348,71 @@ and if they differ says both and exits 1.
 
 On this machine, open **`http://localhost:8788/setup`** in a browser (type `localhost`, not
 `127.0.0.1`). The page asks for the **setup code**: open the file `setup-code` in the `secrets` folder
-beside `compose.yaml` (`apps/instance/deploy/home/secrets/setup-code`) and type the first line. A code
+beside `compose.yaml` (`secrets/setup-code` in the folder you unpacked, or ran `deploy.sh` from) and type the first line. A code
 works once, for ten minutes; if it has run out, run `docker compose restart instance` in that folder
 and open the file again. The code is never printed in `docker compose logs`, which only say where it
 is.
 
+If the page says **Set this server's address first** and shows no box for the code,
+`OYL_INSTANCE_ORIGIN` in `.env` is still the template's example: set it (step 4), run
+`docker compose up -d instance`, and open the page again. Nothing was made for the example address,
+so no device needs a new card afterwards.
+
 Then follow the page, step by step. You can leave and come back at any time; it resumes where you
 were.
 
-1. **Claim it with your tablet.** Press *Show the claim code*, open On Your Left on the tablet you ride
-   with, go to *Instance* and scan the code **with the app's own scanner**, then press *I’ve scanned
+1. **Claim it with your tablet.** ⚠️ **First, the tablet must be able to reach the instance's
+   address**: on the tailnet (3a), Tailscale installed, signed in as you and switched on (step 3a.4);
+   with a tunnel (3b), online. The page names the address the tablet will use and says this before it
+   shows the code. To check, open that address with `/health` on the end in the tablet's browser: it
+   answers `{"status":"ok",…}`. With a tunnel the page also says whether the tunnel is connected,
+   checked from this machine; it cannot see your tailnet, so on 3a it says nothing of the kind.
+   Then press *Show the claim code*, open On Your Left on the tablet you ride
+   with, go to *More*, then *Instance*, and scan the code **with the app's own scanner**, then press *I’ve scanned
    it* on the page. The tablet shows six digits; if the page shows the same six, press *Yes*. The page
-   says your tablet now owns the server.
-2. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
+   says your tablet now owns the server. If the app says the instance **did not answer**, the tablet
+   cannot reach the address yet: the app names the address it tried and the likely cause, and the
+   code is not spent, so scan it again once the tablet is on the network.
+   A code lasts ten minutes: if the page says *That code ran out*, press *Show the claim code* again
+   and scan the new one.
+2. **Tailnet**: how riders reach the server
+   ([#2817](https://github.com/openzigs/onyourleft/issues/2817)). The page shows the address the
+   running server read back from its card, and says whether it is a Tailscale address, as step 3a
+   needs. It repeats how each rider joins (invited into your tailnet or shared the machine, each on
+   their own Tailscale account, never yours) and the access rule from step 3a.2, to copy. It changes
+   nothing itself: the address is `OYL_INSTANCE_ORIGIN` in `.env`. Before it says how to change that,
+   it says what a change costs: **the server's keys belong to its address, so it makes new ones and
+   gets a new identity; every device scans the new card, and every passkey made for the old address
+   stops working**. After a change, `bash deploy.sh` and the `instance-key reset` command the page
+   names, press *Check now*: it shows the address the server came back with, and says so if a device
+   still cannot fetch its keys there. With a Cloudflare tunnel (3b) the page says there is nothing to set up.
+3. **A passkey** for the admin pages: optional. You can skip it and add one later from the admin
    pages.
-3. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
-   beside the backups**. After setup it can be downloaded again from the admin pages on this machine,
-   once you have added a passkey there.
-4. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says
-   whether the snapshot reached **both** folders: the one on this computer and the copy kept
-   elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and `OYL_OFFBOX_DIR` lines in `.env`
-   (step 4): to change one, edit that line and deploy again. ⚠️ On Windows the copy kept elsewhere
-   cannot be on a USB stick ([Backups](#backups)).
-5. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
+4. **The emergency kit**: download it once and keep it in a password manager or on paper, **never
+   beside the backups**. The page does not change after the download. If you cancelled the save,
+   the page gives the command for a new setup code: a new setup session can download it once more.
+   After setup it can be downloaded again from the admin pages on this machine, once you have added
+   a passkey there. ⚠️ **The admin pages are off until you turn them on**: set
+   `OYL_INSTANCE_ADMIN_PAGES=on` in `.env`, run `docker compose up -d instance`, then open
+   `http://localhost:8788/admin` ([#2859](https://github.com/openzigs/onyourleft/issues/2859)).
+5. **Backups**: press *Back up now*, then *Check now* until the backup has run. The page says how
+   long ago the last backup ran, and whether the snapshot reached **both** folders: the one on this
+   computer and the copy kept elsewhere. The folders themselves are the `OYL_BACKUP_DIR` and
+   `OYL_OFFBOX_DIR` lines in `.env` (step 4): to change one, edit that line and deploy again. ⚠️ On
+   Windows the copy kept elsewhere cannot be on a USB stick ([Backups](#backups)).
+6. **Who may join**: *Anyone can join*, *I approve each new rider*, *Only people I invite* or *Nobody
    new*, then *Save and go to the next step*. You can change it later with
    `docker compose exec instance node src/operator/cli.ts registration set <mode>`.
-6. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
-   has not signed in yet, connect to the instance from the app on the tablet first.
-7. **Finish.** The page lists where the server stands, and the setup page closes for good.
+7. **Invite a rider**: one invite, as a code a rider scans in the app. If the page says your tablet
+   has not signed in yet, connect to the instance from the app on the tablet first. ⚠️ **The rider's
+   phone or tablet needs the same way in first**: on the tailnet, the Tailscale app, signed in as
+   **themselves** and let onto your tailnet (step 3a.5), before they scan. The page says so, and so
+   does the app's own *Invite a rider*, under *Moderation*, for every invite you make later.
+8. **AI write-ups**: optional. If Ollama is running on this computer, the page lists the models it
+   has, says how well each fits your graphics card, and can download one whose name you type. Press
+   *Use …* beside a model to have ride write-ups made on it. If the page says Ollama was not found,
+   press *Next step*: everything else works without it.
+9. **Finish.** The page lists where the server stands, and the setup page closes for good.
 
 Until the tablet has claimed the instance, nobody can make an account on it. **The expert path**
 still works: with `OYL_INSTANCE_OWNER_KEY` set in `.env` the setup page never opens, and the
@@ -541,10 +594,23 @@ done here.
 Ollama's default context follows the GPU memory it sees: 4 096 tokens under 24 GiB, 32 768 from 24
 to 48 GiB, more above ([Ollama's documentation](https://docs.ollama.com/context-length)). On the
 Windows box the default was 32 768, and at that length a larger model put 37 % of itself on the
-processor (#1235). So state it, and check that the model fits the GPU with it. The project's runs
-used 4 096 (spike 0023); read
+processor (#1235). So state it, and check that the model fits the GPU with it. **State 16 384, and
+put the same number in the instance's `.env` as `OYL_INSTANCE_ANALYSIS_MODEL_CONTEXT_TOKENS`**, so
+a write-up that would not fit is stopped with a reason instead of losing its start (#2840). The
+project's early runs used 4 096 (spike 0023), and that is too short: measured on this box on
+2026-11-19, a write-up's first turn is 1 000 to 2 300 tokens before any tool result, and the
+model reasoned up to 3 000 tokens in one turn on top. Read
 [`operating-an-instance.md` → Analysis model](../operating-an-instance.md#analysis-model) before
 choosing.
+
+**What it costs in memory**, for the model the box runs (a 12-billion-parameter Gemma at Q4_K_M,
+q8_0 KV cache, on the 12 GB RTX 3060): five of every six of its 48 layers attend over a window of
+1 024 tokens whatever the context, so only the other eight grow with it, by about 8.5 KB a token —
+about 36 MB at 4 096, 140 MB at 16 384 and 285 MB at 32 768 (worked from the model's own
+`/api/show` figures, not measured). Measured: loaded at 32 768, the whole model was on the GPU
+(`size_vram` equal to `size`) and the card had 9 591 MiB of 12 288 in use, so 16 384 fits with
+room; when the bots' tactics name the same model, they share that one load. A model of another
+shape costs differently: check `ollama ps` as below.
 
 - **Windows**: quit Ollama from the tray; in Settings, search for *environment variables* and
   choose *Edit environment variables for your account*; add `OLLAMA_CONTEXT_LENGTH`; and start
@@ -656,6 +722,12 @@ last two commands again. A launcher that does this on Windows without a terminal
 `COMPOSE_PROFILES`. `deploy.sh` still starts its tunnel, and says to add `cloudflare` to
 `COMPOSE_PROFILES`. Do that before you update, so that a `docker compose up` by hand — the Windows
 steps above — starts it too.
+
+**A `.env` copied from a template older than #2857** may name an address at the project's own domain
+in `OYL_INSTANCE_CONTACT_EMAIL`: the template shipped the project's by mistake. Your `/legal` page is
+then telling your riders to write to somebody who does not run your server. Change the line to an
+address you read (step 4) before you update. A `.env` with that line empty or missing no longer
+starts: `docker compose` and `deploy.sh` both stop before anything changes, and name the line.
 
 ## Backups
 
