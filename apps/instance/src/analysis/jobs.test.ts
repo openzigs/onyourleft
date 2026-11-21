@@ -22,6 +22,7 @@ import type { SqlStore } from '../store/sql-store.ts';
 import { createStoreHarness, registrationFixture } from '../store/testing/index.ts';
 import { syncWorld } from '../sync/sync-testing.ts';
 import { calls, PASSING_WRITE_UP, RIDE_INPUT, scriptedModel, text } from './agent-testing.ts';
+import { AGENT_TEMPLATE } from './agent.ts';
 import { agentEngine } from './engine.ts';
 import {
   createAnalysisJobs,
@@ -966,6 +967,31 @@ describe('never logged', () => {
     });
     expect(ended[0]?.tokensIn).toBeGreaterThanOrEqual(1_000);
     expect(ended[0]?.tokensOut).toBeGreaterThanOrEqual(30);
+  });
+
+  it('names in its result the template version the production engine ran (#2932)', async () => {
+    // The device records this version with the write-up it saves; before
+    // #2932 the result named none, and the device wrote its own template's.
+    const { world: w, riders } = await jobsWorld(1, {
+      analysis: {
+        engine: agentEngine({
+          reads: { listLiveSyncItems: () => Promise.resolve([]) },
+          sources: {
+            local: scriptedModel(text(PASSING_WRITE_UP)),
+            hostedKey: () => Promise.resolve({ kind: 'none' } as const),
+          },
+          clock: { now: () => 0 },
+        }),
+      },
+    });
+    const jobId = await started(w, riders[0]!.token);
+    await w.analysis?.idle();
+    const { response } = await openStream(w, riders[0]!.token, jobId);
+    const { text: streamed } = await readUntil(response, () => false);
+    const result = parseStream(streamed).events.at(-1);
+    expect(result?.kind).toBe('result');
+    expect(result?.data).toMatchObject({ status: 'succeeded', templateVersion: '2' });
+    expect(AGENT_TEMPLATE.version).toBe('2');
   });
 
   it('fails a job whose engine rejects, and keeps the error’s text nowhere (#1187)', async () => {

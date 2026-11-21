@@ -25,9 +25,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import {
-  BOT_TACTICS,
   kilograms,
   LAP_RACE_BOT_CODE_VERSION,
+  MODEL_TACTICS_REASONS,
   type ModelTacticsInput,
 } from '@onyourleft/domain';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -80,6 +80,9 @@ const SECONDS = 90;
  * version 3's digests of them equal version 2's. The flat circuit under seed 4
  * is the race found earliest apart from ADR 0073's strategy (148 s) and from
  * ADR 0074 without its hold (149 s), so 170 s turns either red at a small cost.
+ * Since version 7 (#2836, ADR 0081) it is also the golden race whose finish a
+ * model `sit-in` leaves to the seeded tactics: ridden under ADR 0074's own
+ * strategy, which wrote that `sit-in`, its digest is another.
  */
 const LAUNCH_RACE: readonly [Circuit, number] = ['flat', 4];
 const LAUNCH_SECONDS = 170;
@@ -96,6 +99,10 @@ const SEALS: Readonly<Record<string, string>> = {
   // a hill, and every golden race is flat and starts at 0 (see GOLDEN_RACES),
   // so its outcomes, and its seal, are version 5's.
   '6': '7a7cde094331f5d9a25b357a965a32c03a91e50fc9a47455685255dcf903a1e9',
+  // #2836, ADR 0081: one bot asked about at a time, a decision held for that
+  // bot alone, and a model `sit-in` left to the seeded tactics. The scripted
+  // model answers one bot off its menu, so every outcome is new.
+  '7': 'e9b73c139eed4e579f7a5fd0c74543706f39b59962eeef3e0a87654aa498aa31',
 };
 
 afterEach(() => {
@@ -130,27 +137,27 @@ function startRace(circuit: Circuit, seed: number, model: boolean): LapRaceRide 
 }
 
 /**
- * The scripted model: each bot a move by its seat and the ask, and a latency
- * that varies, some late. Since version 5 (#2759, ADR 0076 D-11) one answer in
- * six takes 6.8 s, applied under the 8 s limit, and one 8.6 s, late.
+ * The scripted model: for the bot an ask is about, a move off its menu by its
+ * seat and the ask, and a latency that varies, some late. Since version 5
+ * (#2759, ADR 0076 D-11) one answer in six takes 6.8 s, applied under the 8 s
+ * limit, and one 8.6 s, late. Since version 7 (#2836, ADR 0081) an answer is
+ * for one bot, the other four latencies are a per-bot call's (0.4 to 2.6 s),
+ * and one answer in three is `sit-in`, which leaves the bot to its seeded
+ * tactics.
  */
 function scripted(
   input: ModelTacticsInput,
   ask: number,
 ): { reply: ModelTacticsReply; afterMs: number } {
+  const { bot, menu } = input.you;
+  const move =
+    (bot + ask) % 3 === 0 ? 'sit-in' : (menu[(bot * 5 + ask) % menu.length]?.move ?? 'sit-in');
   return {
     reply: {
       kind: 'answer',
-      body: {
-        bots: input.bots
-          .filter((view) => (view.bot + ask) % 3 !== 0)
-          .map((view) => ({
-            bot: view.bot,
-            move: BOT_TACTICS[(view.bot * 5 + ask) % BOT_TACTICS.length] as string,
-          })),
-      },
+      body: { reason: MODEL_TACTICS_REASONS[ask % MODEL_TACTICS_REASONS.length], move },
     },
-    afterMs: [1_900, 2_600, 3_300, 5_600, 6_800, 8_600][ask % 6] as number,
+    afterMs: [400, 900, 1_300, 2_600, 6_800, 8_600][ask % 6] as number,
   };
 }
 

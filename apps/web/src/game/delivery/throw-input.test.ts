@@ -10,7 +10,13 @@
 import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import { recordDelivery, recordMiss, startRound } from './round';
-import { THROW_WINDOW_AFTER_METRES, throwSideFor, type ThrowTarget } from './throw';
+import {
+  DEFAULT_THROW_WINDOW,
+  THROW_WINDOW_AFTER_METRES,
+  throwSideFor,
+  type ThrowSide,
+  type ThrowTarget,
+} from './throw';
 import {
   intentOfKey,
   THROW_INTENTS,
@@ -167,6 +173,18 @@ describe('which side the next house is on — #1810, `throw.ts` §`throwSideFor`
         along: 100 + THROW_WINDOW_AFTER_METRES + 0.01,
       }),
     ).toBe('right');
+  });
+
+  it('closes a house behind the rider where a level’s own window closes — #2931', () => {
+    const round = startRound(3);
+    const window = { beforeMetres: 10, afterMetres: 0.5 };
+    const at = (along: number): ThrowSide | undefined =>
+      throwSideFor('next-house', { targets: TARGETS, round, along, window });
+    expect(at(100 + 0.5)).toBe('left');
+    expect(at(100 + 0.51)).toBe('right');
+    // The same place on a rider's own route is still inside the first house's window.
+    expect(throwSideFor('next-house', { targets: TARGETS, round, along: 100.51 })).toBe('left');
+    expect(DEFAULT_THROW_WINDOW.afterMetres).toBe(THROW_WINDOW_AFTER_METRES);
   });
 
   it('passes over a house already delivered or missed', () => {

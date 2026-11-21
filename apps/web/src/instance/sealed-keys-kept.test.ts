@@ -246,6 +246,24 @@ describe('what the kept key does not change (#2776)', () => {
     expect(await ask()).toBe(200);
   });
 
+  it('closes as unreachable, not as refused keys, when nobody answers the keys read (#2104)', async () => {
+    const { w, send, seen, edge } = await world();
+    const { ask } = await connected(send, w);
+    for (const down of [
+      async () => Promise.reject(new TypeError('Failed to fetch')),
+      async () => Promise.resolve(new Response(null, { status: 502 })),
+    ]) {
+      edge.rewrite = async (request, forward) =>
+        new URL(request.url).pathname === '/v1/instance/keys' ? down() : forward();
+      const from = seen.length;
+      expect(await ask()).toBe('unreachable');
+      expect(count(seen, SEALED, from)).toBe(0);
+    }
+    // Back again: the next call reads the keys and seals.
+    edge.rewrite = undefined;
+    expect(await ask()).toBe(200);
+  });
+
   it('closes at once, kept key or not, when the instance’s identity endorsed a new card (D-14 Q8)', async () => {
     const { w, send, seen } = await world();
     const { ask, instance } = await connected(send, w);

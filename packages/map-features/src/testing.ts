@@ -9,3 +9,4 @@ export * from './testing/mvt-encoder';
 export * from './fixtures/tiles';
 export * from './fixtures/limits';
 export * from './fixtures/hostile';
+export * from './fixtures/street-graph';

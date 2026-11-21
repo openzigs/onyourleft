@@ -488,6 +488,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   takeBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
   heartbeatBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
+  holdsBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2627)' },
   releaseBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
   listLoadAthletes: {
     notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',
