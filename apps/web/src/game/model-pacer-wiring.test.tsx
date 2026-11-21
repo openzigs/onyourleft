@@ -45,6 +45,10 @@ import {
   gradePercent,
   metres,
   PACER_GAP_TRENDS,
+  PACER_SURGE_CEILING,
+  PACING_FACTOR_CEILING,
+  botPacerPlan,
+  pacedPowerWatts,
   PACER_REASONS,
   readModelPacerInput,
   RIDER_PLACES,
@@ -117,6 +121,11 @@ vi.mock('./gradient', async (importOriginal) => {
 
 const FRAME_MS = 230;
 const FRAMES = 300;
+/**
+ * A ride long enough to reach a surge (ADR 0092 D-4): the first window past
+ * the start ramp is steady under the seed, and the second surges from 80 s.
+ */
+const SURGE_FRAMES = 420;
 const GRADE_QUANTUM_PERCENT = 0.01;
 /** The solo-draft gate's pacer: a touch stronger than the trace, so the rider sits behind it. */
 const PACER_INTENSITY = '2.9';
@@ -341,7 +350,11 @@ interface Run {
   }[];
 }
 
-async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<Run> {
+async function rideWith(
+  directed: boolean,
+  mode: 'simulation' | 'erg',
+  length = FRAMES,
+): Promise<Run> {
   localStorage.setItem(SOLO_DRAFT_STORAGE_KEY, 'on');
   const profile = rollingRoute();
   const { transport, bench } = createSimulator({
@@ -411,7 +424,7 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
 
   let lineShown = false;
   const pacerPower: { shown: string | undefined; rode: number | undefined }[] = [];
-  for (frame = 1; frame <= FRAMES; frame += 1) {
+  for (frame = 1; frame <= length; frame += 1) {
     const next = pending.shift();
     if (next === undefined)
       throw new Error(`the ride stopped asking for frames at ${String(frame)}`);
@@ -465,11 +478,11 @@ async function rideWith(directed: boolean, mode: 'simulation' | 'erg'): Promise<
 
 /** Each run ridden once by the first case that asks for it (#1688: cheaper, never a longer timeout). */
 const runs = new Map<string, Promise<Run>>();
-function ridden(directed: boolean, mode: 'simulation' | 'erg'): Promise<Run> {
-  const key = `${directed ? 'ai' : 'plain'} ${mode}`;
+function ridden(directed: boolean, mode: 'simulation' | 'erg', frames = FRAMES): Promise<Run> {
+  const key = `${directed ? 'ai' : 'plain'} ${mode} ${String(frames)}`;
   let run = runs.get(key);
   if (run === undefined) {
-    run = rideWith(directed, mode).then(async (done) => {
+    run = rideWith(directed, mode, frames).then(async (done) => {
       await endRun();
       return done;
     });
@@ -648,6 +661,28 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     const plain = await ridden(false, 'simulation');
     const directed = await ridden(true, 'simulation');
     expectDirected(plain, directed);
+    expectGradesOnly(plain, directed);
+  });
+
+  it('rides the pacer undirected through the surge-length ride with no AI pacer port', async () => {
+    // Ridden here rather than in the next case, so each case rides one long ride.
+    const plain = await ridden(false, 'simulation', SURGE_FRAMES);
+    expect(plain.asked.inputs).toEqual([]);
+    expect(plain.pacerPower.every((each) => each.shown === undefined)).toBe(true);
+  });
+
+  it('reaches no trainer write while the pacer surges above 110 % — ADR 0092 D-4', async () => {
+    const plain = await ridden(false, 'simulation', SURGE_FRAMES);
+    const directed = await ridden(true, 'simulation', SURGE_FRAMES);
+    const flat = pacedPowerWatts(botPacerPlan(Number(PACER_INTENSITY)), gradePercent(0)) as number;
+    const above = directed.pacerPower.filter(
+      (each) => (each.rode ?? 0) > flat * PACING_FACTOR_CEILING + 0.5,
+    );
+    // The ride reached a surge past #92's ceiling, and still never past a surge's.
+    expect(above.length).toBeGreaterThan(0);
+    for (const each of directed.pacerPower) {
+      expect(each.rode ?? 0).toBeLessThanOrEqual(flat * PACER_SURGE_CEILING + 1e-6);
+    }
     expectGradesOnly(plain, directed);
   });
 

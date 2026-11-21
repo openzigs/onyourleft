@@ -22,6 +22,9 @@ import {
   PACER_PLANS,
   PACER_SAY_SAME_SHARE,
   PACER_START_RAMP_S,
+  PACER_SURGE_CEILING,
+  PACER_SURGE_HELD_LEAST_S,
+  PACER_SURGE_HELD_MOST_S,
   PACER_SURGE_LEAST,
   PACER_SURGE_MOST,
   PACER_SURGE_WINDOW_S,
@@ -862,17 +865,114 @@ describe('a power range, ridden like a person — the owner’s ruling of 2026-1
     );
   });
 
-  it('never takes the pacer outside #92’s envelope past the ramp, whatever it is handed', () => {
+  it('never takes the pacer below #92’s floor past the ramp, nor above a surge’s 115 %, whatever it is handed', () => {
     for (const surge of [0.08, -0.04, 0.5, -3, Number.NaN]) {
       for (const intent of PACER_INTENTS) {
         for (const plan of PACER_PLANS) {
           for (let grade = -25; grade <= 25; grade += 2.5) {
             const factor = directedPacingFactor({ plan, intent, by: 0.1, surge }, grade);
             expect(factor).toBeGreaterThanOrEqual(PACING_FACTOR_FLOOR);
-            expect(factor).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
+            expect(factor).toBeLessThanOrEqual(PACER_SURGE_CEILING);
           }
         }
       }
+    }
+  });
+});
+
+describe('a surge alone may reach 115 % for 15 s — the owner’s second ruling of 2026-11-20, ADR 0092 D-4', () => {
+  it('states its figures: 115 % at the most, held 15 s at the most', () => {
+    expect(PACER_SURGE_CEILING).toBe(1.15);
+    expect(PACER_SURGE_HELD_MOST_S).toBe(15);
+  });
+
+  it('holds the plan and the chase to 110 % with no surge, at any share and grade', () => {
+    for (const by of [0.1, 0.5, 5, Number.POSITIVE_INFINITY]) {
+      for (const plan of PACER_PLANS) {
+        for (let grade = -25; grade <= 25; grade += 0.5) {
+          for (const intent of PACER_INTENTS) {
+            expect(directedPacingFactor({ plan, intent, by }, grade)).toBeLessThanOrEqual(
+              PACING_FACTOR_CEILING,
+            );
+            expect(directedPacingFactor({ plan, intent, by, surge: 0 }, grade)).toBeLessThanOrEqual(
+              PACING_FACTOR_CEILING,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it('goes above 110 % only by the surge’s own share: the chase and the plan are held before it', () => {
+    for (const surge of [0.001, 0.01, 0.04, 0.08, 0.5]) {
+      const most = Math.min(
+        PACER_SURGE_CEILING,
+        PACING_FACTOR_CEILING * (1 + Math.min(surge, PACER_SURGE_MOST)),
+      );
+      for (const plan of PACER_PLANS) {
+        for (let grade = -25; grade <= 25; grade += 0.5) {
+          for (const intent of PACER_INTENTS) {
+            const factor = directedPacingFactor(
+              { plan, intent, by: PACER_CHASE_MOST, surge },
+              grade,
+            );
+            expect(factor).toBeLessThanOrEqual(most + 1e-12);
+          }
+        }
+      }
+    }
+    // A full surge at the top of the envelope reaches 115 %, and goes no further.
+    expect(
+      directedPacingFactor({ plan: 'climber', intent: 'hold', surge: PACER_SURGE_MOST }, 8),
+    ).toBe(PACER_SURGE_CEILING);
+    expect(
+      directedPacingFactor({ plan: 'even', intent: 'lift', by: PACER_CHASE_MOST, surge: 0.04 }, 0),
+    ).toBeCloseTo(PACING_FACTOR_CEILING * 1.04, 12);
+  });
+
+  it('is above 110 % in a ride only while a surge is ridden, and never for more than 15 s at a time', () => {
+    const SIX_HOURS = 6 * 3_600;
+    const STEP = 0.1;
+    // The top of the envelope before any surge: a climber on a climb, and a chase at its whole share.
+    const tops = [
+      { direction: { plan: 'climber', intent: 'hold' }, grade: 8 },
+      { direction: { plan: 'even', intent: 'lift', by: PACER_CHASE_MOST }, grade: 0 },
+    ] as const;
+    for (const { direction, grade } of tops) {
+      let run = 0;
+      let longest = 0;
+      let highest = 0;
+      let surgingWhileAbove = true;
+      for (let step = 0; step * STEP < SIX_HOURS; step += 1) {
+        const at = step * STEP;
+        const factor = directedPacingFactor(pacerAsRidden(direction, at), grade);
+        highest = Math.max(highest, factor);
+        if (factor > PACING_FACTOR_CEILING + 1e-12) {
+          if (!(pacerSurgeAt(at) > 0)) surgingWhileAbove = false;
+          run += STEP;
+          longest = Math.max(longest, run);
+        } else {
+          run = 0;
+        }
+      }
+      expect(surgingWhileAbove).toBe(true);
+      expect(highest).toBeGreaterThan(PACING_FACTOR_CEILING + 0.03);
+      expect(highest).toBeLessThanOrEqual(PACER_SURGE_CEILING);
+      expect(longest).toBeGreaterThan(PACER_SURGE_HELD_LEAST_S - 1);
+      expect(longest).toBeLessThanOrEqual(PACER_SURGE_HELD_MOST_S + 1e-9);
+    }
+  });
+
+  it('never goes above 110 % inside the start ramp, nor while waiting for a rider', () => {
+    for (let at = 0; at < 3_600; at += 0.5) {
+      if (at < PACER_START_RAMP_S) {
+        for (const startFrom of [0, 1, PACING_FACTOR_CEILING]) {
+          const start = pacerAsRidden({ plan: 'climber', intent: 'lift', by: 0.1, startFrom }, at);
+          expect(directedPacingFactor(start, 8)).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
+        }
+      }
+      const wait = pacerAsRidden({ plan: 'climber', intent: 'ease', by: 0.01 }, at);
+      expect(directedPacingFactor(wait, 8)).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
     }
   });
 });

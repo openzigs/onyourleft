@@ -497,3 +497,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   may be below 80 %, down to 0; from 30 s on the envelope is 80 % to 110 % as before, and never above
   110 % at any time. So the earlier entries' *"the envelope does not move"* holds from 30 s on only.
   This ADR's body is unchanged.
+- **2026-11-20** — **D-2.2's ceiling is superseded in part by [ADR 0092](0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md) D-4**, on the owner's
+  second ruling of that day on [#2864](https://github.com/openzigs/onyourleft/pull/2864#issuecomment-7054189148) (*"a surge on its own may reach 115 % of the target
+  for at most 15 s; the chase and the plan stay capped at 110 %"*). Past the first 30 s a surge,
+  and nothing else, may take the pacer above 110 %, to 115 %, for at most 15 s at a time; the plan
+  and the intent are held to 110 % before it. So the previous entry's *"never above 110 % at any
+  time"* holds for everything but a surge. This ADR's body is unchanged.

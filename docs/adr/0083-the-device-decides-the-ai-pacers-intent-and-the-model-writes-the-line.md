@@ -337,3 +337,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   start below 80 % is that ADR's decision, not this ADR's: ADR 0072 D-2.2's envelope gives way for
   the first 30 s only, and this ADR's *Leaves standing* and D-7 hold from 30 s on. This ADR's body
   is unchanged.
+- **2026-11-20** — **The first 2026-11-20 entry's point 3 (surges *"inside 80..110 %"*) and D-7's
+  *"The envelope"* are superseded in part by
+  [ADR 0092](0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md) D-4**, on the owner's second ruling of that day on
+  [#2864](https://github.com/openzigs/onyourleft/pull/2864#issuecomment-7054189148): a surge, and
+  nothing else, may take the pacer above 110 %, to 115 %, for at most 15 s at a time. The gap
+  response, the chase's 10 % and the plans stay inside 80 % to 110 % (D-1, D-3). This ADR's body
+  is unchanged.

@@ -52,10 +52,13 @@
  * {@link PACING_FACTOR_FLOOR} to {@link PACING_FACTOR_CEILING} of the flat
  * figure. In the first {@link PACER_START_RAMP_S} of a directed ride it is
  * ramped up from the rider's own effort ({@link pacerStartShare},
- * {@link PacerDirection.startFrom}), which may be below the envelope; past
- * it, it surges and recovers inside the envelope ({@link pacerSurgeAt}). Past
- * the ramp nothing can take the pacer outside the envelope, and nothing names
- * a power. The pacer's power never reaches a trainer (ADR 0072 D-6): it moves
+ * {@link PacerDirection.startFrom}), which may be below the envelope (ADR
+ * 0092 D-1); past it, it surges and recovers ({@link pacerSurgeAt}). A surge,
+ * and nothing else, may take it above the envelope, to
+ * {@link PACER_SURGE_CEILING} for at most {@link PACER_SURGE_HELD_MOST_S}
+ * (ADR 0092 D-4): the plan and the intent together stay at
+ * {@link PACING_FACTOR_CEILING}. Past the ramp nothing takes the pacer below
+ * the envelope's floor, and nothing names a power. The pacer's power never reaches a trainer (ADR 0072 D-6): it moves
  * the pacer, and the pacer gives a draft only as a rider riding harder does.
  *
  * ## Replay
@@ -206,8 +209,8 @@ export function pacerStartFrom(
  * Past the start ramp the ride is cut into {@link PACER_SURGE_WINDOW_S}
  * windows. In each, a fixed hash of the window's number (seeded by
  * {@link PACER_SURGE_SEED}) picks one of four: no surge, or a surge of
- * {@link PACER_SURGE_LEAST} to {@link PACER_SURGE_MOST} held for 8 to 15 s,
- * then a recovery of half that depth for as long. Each begins
+ * {@link PACER_SURGE_LEAST} to {@link PACER_SURGE_MOST} held for
+ * {@link PACER_SURGE_HELD_LEAST_S} to {@link PACER_SURGE_HELD_MOST_S}, then a recovery of half that depth for as long. Each begins
  * {@link PACER_SURGE_LEAD_S} into its window and every edge is a
  * {@link PACER_SURGE_EDGE_S} slope, so the power never steps. Deterministic:
  * the same second gives the same share on every ride and every replay.
@@ -222,7 +225,9 @@ export function pacerSurgeAt(riddenS: number): number {
   if (roll % 4 === 0) return 0;
   const depth =
     PACER_SURGE_LEAST + (((roll >>> 2) % 101) / 100) * (PACER_SURGE_MOST - PACER_SURGE_LEAST);
-  const held = 8 + ((roll >>> 9) % 8);
+  const held =
+    PACER_SURGE_HELD_LEAST_S +
+    ((roll >>> 9) % (PACER_SURGE_HELD_MOST_S - PACER_SURGE_HELD_LEAST_S + 1));
   const surge = plateau(into, PACER_SURGE_LEAD_S, PACER_SURGE_LEAD_S + held);
   const recover = plateau(into, PACER_SURGE_LEAD_S + held, PACER_SURGE_LEAD_S + 2 * held);
   return Math.round((depth * surge - (depth / 2) * recover) * 10_000) / 10_000;
@@ -236,8 +241,28 @@ export const PACER_SURGE_LEAD_S = 5;
 export const PACER_SURGE_EDGE_S = 2;
 /** The least a surge goes above the target: **4 %**. */
 export const PACER_SURGE_LEAST = 0.04;
-/** The most: **8 %**. A recovery goes half as far below it. Still inside #92's envelope. */
+/**
+ * The most: **8 %**. A recovery goes half as far below it. On a target at the
+ * top of #92's envelope a surge may go above it, to {@link PACER_SURGE_CEILING}.
+ */
 export const PACER_SURGE_MOST = 0.08;
+/** The shortest a surge is held, seconds: **8**. */
+export const PACER_SURGE_HELD_LEAST_S = 8;
+/**
+ * The longest a surge is held, seconds: **15**, edges included — the owner's
+ * second ruling of 2026-11-20, *"a surge on its own may reach 115 % of the
+ * target for at most 15 s"* (ADR 0092 D-4). So the pacer is above
+ * {@link PACING_FACTOR_CEILING} for 15 s at the most at a time, and a
+ * recovery follows every surge.
+ */
+export const PACER_SURGE_HELD_MOST_S = 15;
+/**
+ * The most a surge may take the pacer to, as a multiplier of its flat figure:
+ * **115 %** (the owner's second ruling of 2026-11-20, ADR 0092 D-4). Only a
+ * surge: the plan and the intent, the chase among them, are held to
+ * {@link PACING_FACTOR_CEILING} before the surge is applied.
+ */
+export const PACER_SURGE_CEILING = 1.15;
 /** The surge pattern's fixed seed. Changing it changes every ride's pacer: a code-version change. */
 export const PACER_SURGE_SEED = 0x2835_1120;
 
@@ -317,9 +342,11 @@ function intentFactor(direction: PacerDirection): number {
 
 /**
  * The multiplier a direction applies to the flat figure at `grade`: the
- * plan's factor times the intent's, **held inside #92's envelope**, and
- * inside the start ramp brought up from the envelope's floor
- * ({@link pacerStartShare}). With `{rolling, hold}` and no ramp it is
+ * plan's factor times the intent's, **held inside #92's envelope**; then the
+ * surge or recovery, if any, held to {@link PACING_FACTOR_FLOOR} and
+ * {@link PACER_SURGE_CEILING} (ADR 0092 D-4), so only a surge is ever above
+ * the envelope; and inside the start ramp brought up from where the ramp
+ * begins ({@link pacerStartShare}). With `{rolling, hold}` and no ramp it is
  * {@link pacingFactor} exactly.
  */
 export function directedPacingFactor(
@@ -328,11 +355,18 @@ export function directedPacingFactor(
 ): number {
   const value: number = grade;
   const { startShare, startFrom, surge } = direction;
-  const surged =
+  // The plan and the intent, the chase among them, never above the envelope.
+  const directed = inEnvelope(planFactor(direction.plan, value) * intentFactor(direction));
+  const target =
     surge === undefined || !Number.isFinite(surge)
-      ? 1
-      : 1 + Math.min(PACER_SURGE_MOST, Math.max(-PACER_SURGE_MOST / 2, surge));
-  const target = inEnvelope(planFactor(direction.plan, value) * intentFactor(direction) * surged);
+      ? directed
+      : Math.min(
+          PACER_SURGE_CEILING,
+          Math.max(
+            PACING_FACTOR_FLOOR,
+            directed * (1 + Math.min(PACER_SURGE_MOST, Math.max(-PACER_SURGE_MOST / 2, surge))),
+          ),
+        );
   if (startShare === undefined || !Number.isFinite(startShare)) return target;
   const share = Math.min(1, Math.max(0, startShare));
   // The owner's ruling of 2026-11-20: from the rider's own effort, which may

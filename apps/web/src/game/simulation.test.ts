@@ -560,6 +560,30 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
     expect(bot.power as number).toBeGreaterThan(directedPowerWatts(PLAN, bot.grade, HOLD));
   });
 
+  it('rides a chase at 110 % and above it only in a surge, to 115 % at the most — ADR 0092 D-4', () => {
+    const CHASE = { plan: 'even', intent: 'lift', by: 0.1 } as const;
+    const flat = directedPowerWatts(PLAN, 0, { plan: 'even', intent: 'hold' }) as number;
+    const ridden = (at: number): number => {
+      const steps = Math.round(at / SIMULATION_STEP_SECONDS);
+      const simulation = ride((it) => {
+        it.directPacer(CHASE, at - 5);
+      }, steps);
+      return (simulation.state.bot?.power as number | undefined) ?? Number.NaN;
+    };
+    // The last step begins one step before the second the ride is read at.
+    const surgeAt = (at: number): number => pacerSurgeAt(at - SIMULATION_STEP_SECONDS);
+    // Bounded, so a surge that never comes is a red test and not a hung one.
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
+    let surging = PACER_START_RAMP_S + 1;
+    // A surge deep enough that 110 % times it is past 115 %, so the ceiling is what holds it.
+    while (surging < SEARCH_UNTIL && surgeAt(surging) < 0.06) surging += 1;
+    let steady = PACER_START_RAMP_S + 1;
+    while (steady < SEARCH_UNTIL && surgeAt(steady) !== 0) steady += 1;
+    expect(Math.max(surging, steady)).toBeLessThan(SEARCH_UNTIL);
+    expect(ridden(steady)).toBeCloseTo(flat * 1.1, 9);
+    expect(ridden(surging)).toBeCloseTo(flat * 1.15, 9);
+  });
+
   it('lapses a decision nothing replaced, and #92’s rule rides from there', () => {
     const steps = Math.round((MODEL_PACER_LAPSE_S + 10) / SIMULATION_STEP_SECONDS);
     const simulation = ride((it) => {
