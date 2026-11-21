@@ -46,7 +46,17 @@ import { PEOPLE_NEAR_MAX } from './people';
 import { REALISTIC_PEOPLE, REALISTIC_RIDER } from './realistic-assets';
 import { REALISTIC_PEOPLE_TRIANGLES, REALISTIC_TEXTURE_PIXELS } from './realistic-budget';
 import { fileKtx2Facts } from './realistic-bytes-testing';
-import { PEOPLE_NORMAL_GLSL } from './three-renderer';
+import { PEOPLE_NORMAL_GLSL, peopleSlotData, peopleSlotGlsl } from './three-renderer';
+
+/** An IEEE half float's bits as the number they hold — how the GPU reads a texel. */
+function halfFloat(bits: number): number {
+  const sign = bits & 0x8000 ? -1 : 1;
+  const exponent = (bits >> 10) & 0x1f;
+  const fraction = bits & 0x3ff;
+  if (exponent === 0) return sign * 2 ** -14 * (fraction / 1024);
+  if (exponent === 31) return fraction === 0 ? sign * Number.POSITIVE_INFINITY : Number.NaN;
+  return sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
+}
 
 const shipped = (file: string): string =>
   fileURLToPath(new URL(`../../public/realistic/${file}`, import.meta.url));
@@ -286,6 +296,51 @@ describe('the people’s animation texture', () => {
     expect(peopleTextureBytes([100], [10])).toBe(
       (100 * (GAIT_ROWS + RIDE_PHASES) + SLOT_WIDTH * 1) * ANIMATION_BYTES_PER_TEXEL,
     );
+  });
+
+  it('writes each body’s corners into the slot texture as the shader’s own decode reads them back, the second block too', () => {
+    // Three bodies of 3 500 columns between them: two blocks, so the second
+    // and third bodies have columns in the second block.
+    const columns = [1000, 1200, 1300];
+    const layout = animationLayout(columns);
+    expect(layout.blocks).toBe(2);
+    const counts = [1500, 1797, 1600];
+    const most = Math.max(...counts);
+    const people = counts.map((triangles, body) => ({
+      triangles: Uint32Array.from(
+        { length: triangles * 3 },
+        (_, slot) => (slot * 7 + body) % (columns[body] as number),
+      ),
+      corners: Array.from({ length: triangles * 3 }, (_, slot) => ({
+        region: (slot % 5) as PersonRegion,
+        u: (slot % 128) / 128,
+        v: ((slot + body) % 64) / 64,
+      })),
+    }));
+    const data = peopleSlotData(people, layout, most);
+    const glsl = new GlslProgram(peopleSlotGlsl(slotRows(most)));
+    let secondBlock = 0;
+    people.forEach((person, body) => {
+      const base = layout.base[body] as number;
+      for (let slot = 0; slot < most * 3; slot += 1) {
+        const [x, y] = glsl.call('oylSlotTexelOf', body, slot) as readonly number[];
+        expect({ x, y }).toEqual(slotTexel(body, slot, most));
+        const at = ((y as number) * SLOT_WIDTH + (x as number)) * 4;
+        const texel = [0, 1, 2, 3].map((k) => halfFloat(data[at + k] as number));
+        const block = glsl.call('oylBlockOf', texel[1] as number) as number;
+        const column =
+          block * layout.width + (glsl.call('oylColumnOf', texel[0] as number) as number);
+        const used = slot < person.triangles.length;
+        const corner = person.corners[slot];
+        if (block > 0) secondBlock += 1;
+        expect(column).toBe(base + (used ? (person.triangles[slot] as number) : 0));
+        expect(glsl.call('oylRegionOf', texel[1] as number)).toBe(used ? corner?.region : 0);
+        expect(texel[2]).toBe(used ? corner?.u : 0);
+        expect(texel[3]).toBe(used ? corner?.v : 0);
+      }
+    });
+    // The second block was read, not only the first.
+    expect(secondBlock).toBeGreaterThan(1000);
   });
 
   it('welds only vertices at exactly the same place', () => {

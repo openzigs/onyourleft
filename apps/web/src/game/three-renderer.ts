@@ -18735,6 +18735,66 @@ function personColumnsOf(source: PersonSource): PersonColumns {
 }
 
 /**
+ * The slot texture's half floats: for each body, each triangle's corners in
+ * turn — the column's texel across, its block and the corner's region, and
+ * its place in the atlas. A body's spare slots all stand on its first column.
+ * `most` is the largest body's triangles. Exported so `people-body.test.ts`
+ * can read it back through {@link peopleSlotGlsl}, the shader's own decode.
+ */
+export function peopleSlotData(
+  people: readonly Pick<PersonColumns, 'triangles' | 'corners'>[],
+  layout: AnimationLayout,
+  most: number,
+): Uint16Array {
+  const data = new Uint16Array(SLOT_WIDTH * slotRows(most) * people.length * 4);
+  people.forEach((person, body) => {
+    const base = layout.base[body] ?? 0;
+    for (let slot = 0; slot < most * 3; slot += 1) {
+      const used = slot < person.triangles.length;
+      const column = base + (used ? (person.triangles[slot] as number) : 0);
+      const corner = used ? person.corners[slot] : undefined;
+      const texel = slotTexel(body, slot, most);
+      const at = (texel.y * SLOT_WIDTH + texel.x) * 4;
+      data[at] = DataUtils.toHalfFloat(column % layout.width);
+      data[at + 1] = DataUtils.toHalfFloat(
+        Math.floor(column / layout.width) * SLOT_REGIONS + (corner?.region ?? 0),
+      );
+      data[at + 2] = DataUtils.toHalfFloat(corner?.u ?? 0);
+      data[at + 3] = DataUtils.toHalfFloat(corner?.v ?? 0);
+    }
+  });
+  return data;
+}
+
+/**
+ * The vertex shader's decode of a slot, in GLSL: where a body's slot is in
+ * the slot texture ({@link slotTexel}), and the block, region and column
+ * across its texel's first two numbers carry ({@link peopleSlotData}).
+ * Whole numbers held as floats, so the arithmetic is exact. `rows` is
+ * {@link slotRows} of the largest body. Exported so `people-body.test.ts`
+ * can run it as text against the writer.
+ */
+export function peopleSlotGlsl(rows: number): string {
+  const width = `${String(SLOT_WIDTH)}.0`;
+  const regions = `${String(SLOT_REGIONS)}.0`;
+  return /* glsl */ `
+vec2 oylSlotTexelOf(float body, float slot) {
+  float row = floor(slot / ${width});
+  return vec2(slot - row * ${width}, body * ${String(rows)}.0 + row);
+}
+float oylBlockOf(float packed) {
+  return floor((packed + 0.5) / ${regions});
+}
+float oylRegionOf(float packed) {
+  return floor(packed + 0.5) - oylBlockOf(packed) * ${regions};
+}
+float oylColumnOf(float across) {
+  return floor(across + 0.5);
+}
+`;
+}
+
+/**
  * The people's model posed at every phase of both gaits into the animation
  * texture — #1541 — the first of them seated by `ride` at every phase of a
  * crank's turn after that (#2722), and every body's corners written into the
@@ -18925,27 +18985,8 @@ function bakedPeople(scene: Object3D, ride: (crankAngle: number) => SkinnedMesh)
   animation.generateMipmaps = false;
   animation.needsUpdate = true;
 
-  // The slots: for each body, each triangle's corners in turn — the column's
-  // texel across, its block and the corner's region, and its place in the
-  // atlas. A body's spare slots all stand on its first column.
   const rows = slotRows(most);
-  const slotData = new Uint16Array(SLOT_WIDTH * rows * people.length * 4);
-  people.forEach((person, body) => {
-    const base = layout.base[body] ?? 0;
-    for (let slot = 0; slot < most * 3; slot += 1) {
-      const used = slot < person.triangles.length;
-      const column = base + (used ? (person.triangles[slot] as number) : 0);
-      const corner = used ? person.corners[slot] : undefined;
-      const texel = slotTexel(body, slot, most);
-      const at = (texel.y * SLOT_WIDTH + texel.x) * 4;
-      slotData[at] = DataUtils.toHalfFloat(column % layout.width);
-      slotData[at + 1] = DataUtils.toHalfFloat(
-        Math.floor(column / layout.width) * SLOT_REGIONS + (corner?.region ?? 0),
-      );
-      slotData[at + 2] = DataUtils.toHalfFloat(corner?.u ?? 0);
-      slotData[at + 3] = DataUtils.toHalfFloat(corner?.v ?? 0);
-    }
-  });
+  const slotData = peopleSlotData(people, layout, most);
   const slots = new DataTexture(
     slotData,
     SLOT_WIDTH,
@@ -19063,19 +19104,17 @@ attribute vec4 oylMotion;
 varying vec3 vOylColour;
 varying vec2 vOylUv;
 ${PEOPLE_UNPACK}
-${PEOPLE_NORMAL_GLSL}`,
+${PEOPLE_NORMAL_GLSL}
+${peopleSlotGlsl(rows)}`,
           'vertex',
           spliced,
         ),
         '#include <beginnormal_vertex>',
         /* glsl */ `
-int oylBody = int(oylMotion.w + 0.5);
-int oylSlotAt = int(oylSlot + 0.5);
-vec4 oylCorner = texelFetch(oylSlots, ivec2(oylSlotAt % ${String(SLOT_WIDTH)}, oylBody * ${String(rows)} + oylSlotAt / ${String(SLOT_WIDTH)}), 0);
-int oylPacked = int(oylCorner.g + 0.5);
-int oylBlock = oylPacked / ${String(SLOT_REGIONS)};
-float oylRegion = float(oylPacked - oylBlock * ${String(SLOT_REGIONS)});
-int oylColumn = int(oylCorner.r + 0.5);
+vec4 oylCorner = texelFetch(oylSlots, ivec2(oylSlotTexelOf(floor(oylMotion.w + 0.5), floor(oylSlot + 0.5))), 0);
+int oylBlock = int(oylBlockOf(oylCorner.g));
+float oylRegion = oylRegionOf(oylCorner.g);
+int oylColumn = int(oylColumnOf(oylCorner.r));
 vOylUv = oylCorner.ba;
 int oylGait = int(oylMotion.x + 0.5);
 // #2722: a scenery cyclist's ride is the rows after every block, the first body's alone.
