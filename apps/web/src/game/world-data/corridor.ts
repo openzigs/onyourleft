@@ -45,6 +45,8 @@ import {
   type BuildingFieldName,
   type BuildingFields,
   type CorridorFrame,
+  type DecodedStreetFeature,
+  type DecodedTile,
   type DecodeRefusal,
   type LandUseFeature,
   type PathFeature,
@@ -360,6 +362,18 @@ export interface CorridorFeatures {
   readonly waterLines?: readonly WaterLineFeature[];
 }
 
+/**
+ * One decoded tile's streets, with their road fields — #2896: the open-world
+ * street graph is built a tile at a time (`StreetGraph.addTile`), and clips
+ * each tile's streets to that tile's own box, so it needs them per tile and
+ * not joined as {@link CorridorFeatures.streets} are. The same objects as
+ * those, so holding both costs the arrays and nothing more.
+ */
+export interface TileStreets {
+  readonly tile: TileId;
+  readonly streets: readonly DecodedStreetFeature[];
+}
+
 /** What {@link readCorridorTiles} came to. */
 export type CorridorRead =
   | {
@@ -367,6 +381,8 @@ export type CorridorRead =
       readonly identity: string;
       readonly tiles: readonly CorridorTile[];
       readonly features: CorridorFeatures;
+      /** Every decoded tile's streets, in the plan's order (#2896). */
+      readonly tileStreets: readonly TileStreets[];
     }
   | { readonly kind: 'wrong-schema' }
   /** The archive could not be opened, or not one tile came back: nothing to keep. */
@@ -452,7 +468,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     // queue's order at the end, so the features' order is the plan's and not
     // the order the tiles happened to arrive in. Two reads of one archive then
     // pack to the same bytes, which the demo's bake is checked against.
-    const decodedTiles: (CorridorFeatures | undefined)[] = [];
+    const decodedTiles: (DecodedTile | undefined)[] = [];
     let done = 0;
     let arrived = 0;
     const of = queue.length;
@@ -525,11 +541,16 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
       const state = states.get(key(tile));
       return state === undefined ? tile : { x: tile.x, y: tile.y, state };
     });
+    const tileStreets: TileStreets[] = [];
+    for (const decoded of decodedTiles) {
+      if (decoded !== undefined) tileStreets.push({ tile: decoded.tile, streets: decoded.streets });
+    }
     return {
       kind: 'read',
       identity: opening.identity,
       tiles,
       features: { landUse, buildings, paths, streets, places, waterLines },
+      tileStreets,
     };
   } finally {
     whole.done();
