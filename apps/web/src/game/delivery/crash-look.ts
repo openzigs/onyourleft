@@ -17,7 +17,9 @@
  *   square of the time).
  * - **Lying**, until {@link CRASH_RISE_AT_SECONDS}: held there, the body rolled
  *   with the bicycle rather than held upright over it, and the pedal stroke's
- *   motion stopped.
+ *   motion stopped. The bicycle lands with weight: it lifts a little way back
+ *   off the road and settles ({@link crashRebound}), where it used to stop
+ *   dead at the end of its fastest frame.
  * - **Back up** — the respawn — over {@link CRASH_RISE_SECONDS}: eased back to
  *   the ride's own lean, so the rider rejoins the ride with no jump.
  *
@@ -46,11 +48,29 @@
  * made by `tools/realistic/blender/process_rider.py` on THIS file's times):
  * the hands off the bars and the feet off the pedals, the low arm out for the
  * road, lying along the bicycle, and one foot planted to get back on. The
- * body is blended toward it by {@link crashShare}, so it starts and ends on
- * the riding pose with the roll. `GameView` hands the scene how long ago the
+ * body is blended toward it by {@link crashBodyShare}, so it starts and ends
+ * on the riding pose. `GameView` hands the scene how long ago the
  * crash was only when motion is not reduced; under reduced motion the marker
  * carries no crash and the still pose above is drawn unchanged. The stylised
  * world draws no MakeHuman rider and keeps the roll alone.
+ *
+ * ⚠️ **The body's share is not the roll's**, and was until the review of the
+ * pictures of 2026-11-21. Blended by the roll's share, the body was still a
+ * fifth of the way back to the saddle when the fall was nine tenths over,
+ * while the clip already had it out on the road beside the bicycle: half way
+ * between the two is INSIDE the frame, and the rider fell through the top
+ * tube. The clip's `thrown` moment ({@link CRASH_THROWN_SECONDS}) is the body
+ * off the bicycle, so the body is wholly the clip's from there, and the
+ * clip's own path from thrown to landed goes over the saddle, not through it.
+ * Getting back up, it is wholly the clip's until the clip has it back over
+ * the saddle (its `rising` moment, half way up), and only then eased onto the
+ * ride's own pose.
+ *
+ * ⚠️ **The clip is played on its own times** ({@link crashClipSeconds}). It
+ * was made on a rise of {@link CRASH_CLIP_RISE_SECONDS}, and the file is not
+ * re-made to draw the rise slower: from lying on the road to riding in 0.3 s
+ * read as a jump cut, so the rise is drawn over {@link CRASH_RISE_SECONDS}
+ * and the clip's rise is played across it.
  *
  * ## A drawing, never physics
  *
@@ -65,11 +85,101 @@ export const CRASH_FALL_SECONDS = 0.45;
 /** When the rider starts back up, in seconds after the crash: **1.2**. */
 export const CRASH_RISE_AT_SECONDS = 1.2;
 
-/** How long getting back up takes, in seconds: **0.3**. */
-export const CRASH_RISE_SECONDS = 0.3;
+/**
+ * How long getting back up takes, in seconds: **0.6**. It was 0.3 until the
+ * review of 2026-11-21: nine frames from lying on the road to riding, a jump
+ * cut. This project's own number.
+ */
+export const CRASH_RISE_SECONDS = 0.6;
 
-/** How long a crash is drawn, start to finish: **1.5 s**, inside the issue's "about 1–2 s". */
+/** How long a crash is drawn, start to finish: **1.8 s**, inside the issue's "about 1–2 s". */
 export const CRASH_SECONDS = CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS;
+
+/**
+ * How long getting back up takes IN THE CLIP `rider.glb` carries, in seconds:
+ * **0.3**, what {@link CRASH_RISE_SECONDS} was when the clip was made
+ * (`tools/realistic/rider-crash.ts`). {@link crashClipSeconds} plays it
+ * across the drawn rise.
+ */
+export const CRASH_CLIP_RISE_SECONDS = 0.3;
+
+/** How long the clip `rider.glb` carries is, in seconds: **1.5**. `tools/realistic/rider-crash.ts` makes it on this. */
+export const CRASH_CLIP_SECONDS = CRASH_RISE_AT_SECONDS + CRASH_CLIP_RISE_SECONDS;
+
+/**
+ * When the clip has the body thrown clear of the bicycle, in seconds after
+ * the crash: **55 %** of the fall, `tools/realistic/blender/rider_crash.py`'s
+ * `thrown` moment, held to the file by `realistic-textures.test.ts`.
+ */
+export const CRASH_THROWN_SECONDS = 0.55 * CRASH_FALL_SECONDS;
+
+/**
+ * The crash clip's own time, `seconds` after a crash: the same until the rise
+ * begins, and from there the clip's rise played across the drawn one. Held to
+ * the clip's span.
+ */
+export function crashClipSeconds(seconds: number): number {
+  if (!(seconds > 0)) return 0;
+  if (seconds <= CRASH_RISE_AT_SECONDS) return seconds;
+  const risen = (seconds - CRASH_RISE_AT_SECONDS) / CRASH_RISE_SECONDS;
+  return Math.min(CRASH_CLIP_SECONDS, CRASH_RISE_AT_SECONDS + risen * CRASH_CLIP_RISE_SECONDS);
+}
+
+/**
+ * How far the realistic rider's BODY is blended from its riding pose toward
+ * the crash clip's, `seconds` after a crash: 0 the ride's, 1 the clip's.
+ * Eased up to 1 by {@link CRASH_THROWN_SECONDS}; 1 from there until half way
+ * through the rise, where the clip has the body back over the saddle; and
+ * eased back to 0 over the rise's second half. `undefined` when no crash is
+ * drawn, as {@link crashShare}. @see the header for why it is not the roll's
+ */
+export function crashBodyShare(seconds: number): number | undefined {
+  if (crashShare(seconds, false) === undefined) return undefined;
+  if (seconds < CRASH_THROWN_SECONDS) {
+    const thrown = seconds / CRASH_THROWN_SECONDS;
+    return thrown * thrown * (3 - 2 * thrown);
+  }
+  const risen = (seconds - CRASH_RISE_AT_SECONDS) / CRASH_RISE_SECONDS;
+  if (risen <= 0.5) return 1;
+  const back = 2 * risen - 1;
+  return 1 - back * back * (3 - 2 * back);
+}
+
+/**
+ * How far a fallen bicycle first lifts back off the road, in radians: **5°**
+ * at the envelope, 2.9° at the top of its one visible bounce. It lands at
+ * about 330° a second and leaves at about 87: a quarter of it back, a bicycle
+ * on tarmac and not a ball. This project's own number.
+ */
+export const CRASH_REBOUND_RADIANS = (5 * Math.PI) / 180;
+
+/** How long each of the fallen bicycle's bounces takes, in seconds: **0.18**. */
+export const CRASH_REBOUND_BOUNCE_SECONDS = 0.18;
+
+/** How many times it bounces before it lies still: **3**, the last under a tenth of a degree. */
+export const CRASH_REBOUND_BOUNCES = 3;
+
+/** The time over which each bounce is 1/e of the last, in seconds: **0.1**. */
+export const CRASH_REBOUND_DECAY_SECONDS = 0.1;
+
+/**
+ * How far the fallen bicycle is lifted back off the road, `seconds` after a
+ * crash, in radians toward upright: nought until it lands, then
+ * {@link CRASH_REBOUND_BOUNCES} bounces that die away
+ * ({@link CRASH_REBOUND_RADIANS}), and nought from there, so it lies still
+ * well before the rider starts back up. Never below the road: it is taken OFF
+ * the lean. Not drawn under reduced motion, whose crash is a still pose
+ * (`scene.ts`).
+ */
+export function crashRebound(seconds: number): number {
+  const since = seconds - CRASH_FALL_SECONDS;
+  if (!(since > 0) || since >= CRASH_REBOUND_BOUNCES * CRASH_REBOUND_BOUNCE_SECONDS) return 0;
+  return (
+    CRASH_REBOUND_RADIANS *
+    Math.exp(-since / CRASH_REBOUND_DECAY_SECONDS) *
+    Math.abs(Math.sin((Math.PI * since) / CRASH_REBOUND_BOUNCE_SECONDS))
+  );
+}
 
 /**
  * How far over a fallen bicycle lies, in radians from upright: **75°** — on
@@ -145,14 +255,17 @@ export function crashSideFor(offset: number): CrashSide {
  * from the ride's own `bicycle` and `body` (`bicycle.ts` §`RiderRoll`): the
  * bicycle toward {@link CRASH_LEAN_RADIANS} on that side, and the body's roll
  * relative to it toward nought, so a fallen rider lies with the bicycle.
+ * `rebound` ({@link crashRebound}) is how far the bicycle is lifted back off
+ * the road as it lands, radians toward upright; none unless given.
  */
 export function crashedRoll(
   roll: { readonly bicycle: number; readonly body: number },
   share: number,
   side: CrashSide,
+  rebound = 0,
 ): { readonly bicycle: number; readonly body: number } {
   return {
-    bicycle: roll.bicycle + (side * CRASH_LEAN_RADIANS - roll.bicycle) * share,
+    bicycle: roll.bicycle + (side * (CRASH_LEAN_RADIANS - rebound) - roll.bicycle) * share,
     // `+ 0` so that a fallen rider's body is `0` and never `-0`, as `bicycleRoll`'s.
     body: roll.body * (1 - share) + 0,
   };

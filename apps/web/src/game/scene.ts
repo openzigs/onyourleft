@@ -55,7 +55,13 @@ import {
 } from './land-class';
 import { horizonRelief, standingOnGround, terrainCorridor, type TerrainMesh } from './landform';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
-import { crashedRoll, type CrashSide } from './delivery/crash-look';
+import {
+  crashBodyShare,
+  crashClipSeconds,
+  crashedRoll,
+  crashRebound,
+  type CrashSide,
+} from './delivery/crash-look';
 import {
   BOT_TURN_SPEED_FLOOR,
   LANE_CHANGE_TURN_SPEED_FLOOR,
@@ -1844,7 +1850,16 @@ function ridersOnTheRoad(
     // #2454: the rider's own crash in a Delivery round, drawn as a fall and a
     // getting back up, on top of the lean the ride asks for.
     const crash = rider.kind === 'rider' ? input.riderCrash : undefined;
-    const roll = crash === undefined ? ridden : crashedRoll(ridden, crash.share, crash.side);
+    // The bicycle lands with weight, where motion is not reduced. @see crashRebound
+    const roll =
+      crash === undefined
+        ? ridden
+        : crashedRoll(
+            ridden,
+            crash.share,
+            crash.side,
+            crash.seconds === undefined ? 0 : crashRebound(crash.seconds),
+          );
     // #2494: the bars turned by the steer the drawn path's turn asks for —
     // #2493: and let go of as the rider falls, straight on the ground and back
     // as they rise, as the stroke is.
@@ -1858,10 +1873,19 @@ function ridersOnTheRoad(
     // Under a millionth of a radian is straight: `leanAt` leaves 10⁻¹⁹ on a straight.
     const steered = Math.abs(steer) < 1e-6 ? placed : { ...placed, steer };
     // #2493: and the body's own part of it, where motion is not reduced.
+    // The clip on its own times, and the body's own share of it, which is not
+    // the roll's. @see crashBodyShare
     const marker =
       crash?.seconds === undefined
         ? steered
-        : { ...steered, crash: { seconds: crash.seconds, side: crash.side, share: crash.share } };
+        : {
+            ...steered,
+            crash: {
+              seconds: crashClipSeconds(crash.seconds),
+              side: crash.side,
+              share: crashBodyShare(crash.seconds) ?? crash.share,
+            },
+          };
     // #546: in a bend tight enough for the inside pedal to strike, every
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle

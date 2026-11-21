@@ -829,6 +829,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the body toward it by the crash's share whenever a
                         marker carries `crash`, never under reduced motion,
                         and the stylised world keeps #2475's roll alone.
+                        ⚠️ **That share is the BODY's, not the roll's**
+                        (`crashBodyShare`: wholly the clip's from its
+                        `thrown` moment until half way back up; by the
+                        roll's share the rider fell through the top tube),
+                        the clip is played on its OWN times
+                        (`crashClipSeconds`: made on a 0.3 s rise, drawn
+                        across 0.6 s, so `CRASH_SECONDS` is 1.8 and the file
+                        is not re-made), and the bicycle lands with a
+                        rebound (`crashRebound`) that reduced motion never
+                        draws.
                         #2505: write a lying moment with `on_road`, not in the
                         bicycle's `x`/`y`, and name its `elbows`/`knees`; the
                         test reads the drawn body 3 cm clear of every part of
