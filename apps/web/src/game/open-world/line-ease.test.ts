@@ -114,11 +114,21 @@ describe('a new view’s drawn path eased in from the one drawn before — #2989
   const to = corridorOrigin(after.profile);
   /** The after view's last sample at or before ride distance `ride`. */
   const indexOf = (ride: number) => Math.floor((ride - after.origin) / resolution);
+  /** The before view's index of the after view's `index`. */
+  const beforeIndex = (index: number) =>
+    index + Math.round((after.origin - before.origin) / resolution);
   /** The before view's sample at the after view's `index`, in the after view's frame. */
   const was = (index: number) => {
-    const at = index + Math.round((after.origin - before.origin) / resolution);
+    const at = beforeIndex(index);
     return reframed(from, to, before.line.xs[at] as number, before.line.zs[at] as number);
   };
+  /**
+   * The channels that are not a place, so no frame moves them: `shifts` sets
+   * the drawn rider's height on a climb (`drawnPlaceOf`), `curvatures` their
+   * lag (`bend-easing.ts` `easedPlace`), and `offsets` the path's distance
+   * from the centreline. Each is blended at the same weight as the place.
+   */
+  const scalars = ['shifts', 'offsets', 'curvatures'] as const;
 
   it('moves the frame north and east between the two views', () => {
     expect(to.latitude).toBeGreaterThan(from.latitude);
@@ -136,6 +146,26 @@ describe('a new view’s drawn path eased in from the one drawn before — #2989
         (eased.zs[index] as number) - there.z,
       );
       expect(off, `sample ${index}`).toBeLessThan(1e-6);
+      for (const channel of scalars) {
+        expect(eased[channel][index], `${channel} at sample ${index}`).toBeCloseTo(
+          before.line[channel][beforeIndex(index)] as number,
+          9,
+        );
+      }
+    }
+    // The two views' values differ on that road, or the hold would not be seen.
+    for (const channel of scalars) {
+      let apart = 0;
+      for (let index = indexOf(after.origin); index <= indexOf(junction); index += 1) {
+        apart = Math.max(
+          apart,
+          Math.abs(
+            (before.line[channel][beforeIndex(index)] as number) -
+              (after.line[channel][index] as number),
+          ),
+        );
+      }
+      expect(apart, channel).toBeGreaterThan(1e-3);
     }
   });
 
@@ -163,6 +193,23 @@ describe('a new view’s drawn path eased in from the one drawn before — #2989
         there.z - (after.line.zs[index] as number),
       ),
     ).toBeGreaterThan(1e-3);
+    // Each scalar channel, at the shared sample where the two views differ most in it.
+    for (const channel of scalars) {
+      let widest = indexOf(after.origin);
+      let apart = 0;
+      for (let at = indexOf(after.origin); at <= indexOf(junction); at += 1) {
+        const gap = Math.abs(
+          (before.line[channel][beforeIndex(at)] as number) - (after.line[channel][at] as number),
+        );
+        if (gap > apart) [widest, apart] = [at, gap];
+      }
+      expect(apart, channel).toBeGreaterThan(1e-3);
+      expect(half[channel][widest], channel).toBeCloseTo(
+        0.5 * (before.line[channel][beforeIndex(widest)] as number) +
+          0.5 * (after.line[channel][widest] as number),
+        9,
+      );
+    }
     expect(easedLine(held, after.line, after.origin, 1)).toBe(after.line);
   });
 
