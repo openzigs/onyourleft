@@ -90,6 +90,7 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { UnitsPort } from '../units/store-port';
 import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { CalorieInputsPort } from '../athlete/calorie-inputs-port';
+import type { AthleteRiderBodyPort } from '../athlete/rider-body-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { memoryRiderText } from '../rider-text/testing';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
@@ -655,6 +656,27 @@ function maskedWordsPort(populated: boolean): MaskedWordsPort {
 }
 
 /**
+ * The rider's one Female / Male choice (#2839, the owner's ruling of
+ * 2026-11-20), so Settings lays out the choice rather than its "no local
+ * store" notice, and the browser gate can count its controls.
+ */
+function riderPort(): AthleteRiderBodyPort {
+  return {
+    athleteId: ATHLETE,
+    store: {
+      setAthleteRider: (id, rider): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: unixSeconds(NOW),
+          riderBody: rider,
+          calorieSex: rider,
+        }),
+    },
+  };
+}
+
+/**
  * The rider's sex and year of birth (#2432) — set in the populated walk, which
  * enters no weight, so its line under the form says the weight is still
  * needed, and unset in the empty one, so it says no figure is shown.
@@ -666,13 +688,13 @@ function calorieInputsPort(populated: boolean): CalorieInputsPort {
     store: {
       getAthlete: (id): Promise<AthleteRecord | undefined> =>
         Promise.resolve({ id, displayName: 'You', createdAt: unixSeconds(NOW), ...inputs }),
-      setAthleteCalorieInputs: (id, next): Promise<AthleteRecord | undefined> =>
+      setAthleteBirthYear: (id, birthYear): Promise<AthleteRecord | undefined> =>
         Promise.resolve({
           id,
           displayName: 'You',
           createdAt: unixSeconds(NOW),
-          ...(next.calorieSex === undefined ? {} : { calorieSex: next.calorieSex }),
-          ...(next.birthYear === undefined ? {} : { birthYear: next.birthYear }),
+          ...(populated ? { calorieSex: 'female' as const } : {}),
+          ...(birthYear === undefined ? {} : { birthYear }),
         }),
     },
   };
@@ -893,6 +915,9 @@ export function PopulatedShell({
       athleteMass={athleteMassPort()}
       maskedWords={maskedWordsPort(populated)}
       calorieInputs={calorieInputsPort(populated)}
+      athleteRider={riderPort()}
+      // As `main.tsx` reads it: the populated row's calorie sex is female.
+      {...(populated ? { riderBody: 'female' as const } : {})}
       riderText={riderTextPort(populated)}
       workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}

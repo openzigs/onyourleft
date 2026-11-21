@@ -114,7 +114,8 @@ async function readBack(): Promise<ActivityRecord | undefined> {
 
 async function setInputs(sex: 'female' | 'male' | undefined): Promise<void> {
   await harness.write(async (store) => {
-    await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: sex, birthYear: 1985 });
+    if (sex !== undefined) await store.setAthleteRider(ATHLETE_A, sex);
+    await store.setAthleteBirthYear(ATHLETE_A, 1985);
     await store.setAthleteMass(ATHLETE_A, kilograms(68));
   });
 }
@@ -207,6 +208,36 @@ describe('a ride’s calorie estimate is saved with it (#2433)', () => {
     });
     expect(read?.calories).toStrictEqual(expected);
     expect(read?.calories?.basis).toBe('heart-rate');
+  });
+
+  it('takes the sex from the rider’s one Female / Male choice — the owner’s ruling of 2026-11-20', async () => {
+    // Settings' write, not the calorie panel's: `setAthleteRider` is the only
+    // write of the sex since the ruling, and the save reads the row afresh.
+    await harness.write(async (store) => {
+      await store.setAthleteRider(ATHLETE_A, 'male');
+      await store.setAthleteBirthYear(ATHLETE_A, 1985);
+      await store.setAthleteMass(ATHLETE_A, kilograms(68));
+      await store.setAthleteRider(ATHLETE_A, 'female');
+    });
+    const recorded = series({ heartRate: 145 });
+    await save(recorded);
+    const read = await readBack();
+    const female = rideCalories({
+      work: undefined,
+      heartRate: recorded.channels.heartRate,
+      sampleInterval: recorded.sampleInterval,
+      rider: { sex: 'female', ageYears: 41, mass: kilograms(68) },
+    });
+    const male = rideCalories({
+      work: undefined,
+      heartRate: recorded.channels.heartRate,
+      sampleInterval: recorded.sampleInterval,
+      rider: { sex: 'male', ageYears: 41, mass: kilograms(68) },
+    });
+    // The two sexes give different figures, so the assertion can tell them apart.
+    expect(female?.energy).toBeDefined();
+    expect(female?.energy).not.toBe(male?.energy);
+    expect(read?.calories).toStrictEqual(female);
   });
 
   it('a heart-rate ride for a rider with no sex set is saved with no figure, and the page says why', async () => {

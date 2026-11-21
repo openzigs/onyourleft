@@ -73,7 +73,8 @@ describe('an imported ride gets its calorie estimate on import (#2433)', () => {
 
   it('a GPX with heart rate and no power uses the importing athlete’s current inputs', async () => {
     await harness.write(async (store) => {
-      await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'male', birthYear: 1980 });
+      await store.setAthleteRider(ATHLETE_A, 'male');
+      await store.setAthleteBirthYear(ATHLETE_A, 1980);
       await store.setAthleteMass(ATHLETE_A, kilograms(75));
     });
     const { summary, streams, athlete } = await importOne('nominal-ride.gpx', true);
