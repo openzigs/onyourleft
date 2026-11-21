@@ -8,6 +8,7 @@
  * connection.
  */
 
+import { withoutUserinfo } from '@onyourleft/operate-text';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { INSTANCE_SESSION_STORAGE_KEY } from './instance-port';
@@ -794,6 +795,38 @@ describe('the AI backend’s reads and writes — #2609, #2610, #2611', () => {
     );
     expect(JSON.stringify(settings)).not.toContain('MARKER');
     expect(JSON.stringify(settings)).toContain('http://ollama:11434/v1');
+  });
+
+  it('strips an address as `@onyourleft/operate-text`’s `withoutUserinfo` does, and no further (#2713)', async () => {
+    // The package's own test inputs, and an `@` past the authority, which is not userinfo.
+    const inputs = [
+      'http://MARKER-user:MARKER-pass@ollama:11434/v1',
+      'https://ollama:11434/v1?a=b@c',
+      'http://ollama:11434/v1#a@b',
+      'http://ollama:11434/v1/a@b',
+      'https://user@ollama:11434/v1?a=b@c',
+    ];
+    for (const url of inputs) {
+      const settings = await answered(
+        '/v1/operate/analysis',
+        {
+          local: {
+            url,
+            model: null,
+            reasoningTokens: null,
+            offered: true,
+            othersMayUse: false,
+            setIn: 'env',
+            state: 'not-base-url',
+          },
+          hosted: { offered: true, operatorKey: 'none', operatorKeyOrigin: null },
+        },
+        (port) => port.analysis(),
+      );
+      expect((settings as { local: { url: string } }).local.url, url).toBe(withoutUserinfo(url));
+    }
+    // A query's `@` is the query's: the address stays as it was.
+    expect(withoutUserinfo('https://ollama:11434/v1?a=b@c')).toBe('https://ollama:11434/v1?a=b@c');
   });
 });
 

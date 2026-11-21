@@ -82,6 +82,53 @@ export const INSTANCE_KEY_TEXT = {
   unreachable: 'The instance did not answer, so its keys could not be checked. Nothing was sent.',
 } as const;
 
+/**
+ * What follows "did not answer" for a card, a claim or an invite (#2855): the
+ * likely cause, in plain words. A `ts.net` address is on somebody's Tailscale
+ * network, and a device that is not on it gets no answer at all — which is
+ * what a new owner's tablet met in the trial of 2026-11-18, with nothing on
+ * either screen to say so. Plain `http://` on the home network is no way
+ * round it: both sides refuse it (ADR 0079 D-6).
+ */
+export const UNREACHABLE_HINT_TEXT = {
+  tailscale:
+    'That is a Tailscale address, so this device most likely cannot reach it yet: it needs the ' +
+    'Tailscale app, signed in and switched on, on the network of whoever runs the instance. ' +
+    'Then try again.',
+  other: 'Check that this device is online and that the instance is running, then try again.',
+} as const;
+
+/**
+ * Whether `origin` is a Tailscale name, `https://<machine>.<tailnet>.ts.net`:
+ * the rule `@onyourleft/operate-text` §`isTailscaleOrigin` reads the setup
+ * page's address by, restated here because a module in `instance/` imports no
+ * package beyond the ones its walk allows (`instance-transport.test.ts`, ADR
+ * 0036 D-3 (d)). `instance-pin.test.ts` holds the two to the same answers.
+ */
+function isTailscaleAddress(origin: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  return url.protocol === 'https:' && url.hostname.replace(/\.$/, '').endsWith('.ts.net');
+}
+
+/**
+ * `unreachable` for a card that was just read — a claim, an invite, a link or
+ * a card alone (#2855): the address that was tried, and the likely cause.
+ * `origin` is the card's own, already read as an address
+ * (`address.ts`); nothing else of the card or the line is said — **never a
+ * code, and never the fingerprint**.
+ */
+export function unreachableAtText(origin: string): string {
+  return (
+    `The instance at ${origin} did not answer, so its keys could not be checked. Nothing was ` +
+    `sent. ${UNREACHABLE_HINT_TEXT[isTailscaleAddress(origin) ? 'tailscale' : 'other']}`
+  );
+}
+
 /** D-5's older-key refusal, naming the serial this device holds. Never the phone's clock. */
 export function olderKeyText(highestSerial: number): string {
   return (
@@ -296,7 +343,8 @@ export async function checkCard(
   const parsed = parseInstanceCard(cardText, origin);
   if (!parsed.ok) return { kind: 'refused', text: cardRefusalText(parsed.problem) };
   const verdict = await judgeWithReread(read, origin, parsed.card.fingerprintText, trust, crypto);
-  if (verdict === 'unreachable') return { kind: 'refused', text: INSTANCE_KEY_TEXT.unreachable };
+  // #2855: with the address that was tried and the likely cause, never a code.
+  if (verdict === 'unreachable') return { kind: 'refused', text: unreachableAtText(origin) };
   if (verdict.kind === 'mismatch' || verdict.kind === 'new-card') {
     return { kind: 'refused', text: INSTANCE_KEY_TEXT.mismatch };
   }

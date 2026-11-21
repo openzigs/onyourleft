@@ -62,6 +62,27 @@ describe('countText and momentText', () => {
   });
 
   it('says a moment to the minute, in UTC, from the text the route sent', () => {
-    expect(momentText('2026-11-14T08:00:59.999Z')).toBe('2026-11-14 08:00 UTC');
+    expect(momentText('2026-11-14T08:00:59.999Z', 'UTC')).toBe('2026-11-14 08:00 UTC');
+  });
+
+  it('says a moment in the zone it is given, with the zone named, whatever the machine’s (#2917)', () => {
+    // Winter and summer in one zone: the name follows the moment, not the machine.
+    expect(momentText('2026-11-14T08:00:59.999Z', 'America/New_York')).toBe('2026-11-14 03:00 EST');
+    expect(momentText('2026-07-14T08:00:00.000Z', 'America/New_York')).toBe('2026-07-14 04:00 EDT');
+    // Across midnight, the date is the zone's.
+    expect(momentText('2026-11-14T02:30:00.000Z', 'America/Los_Angeles')).toBe(
+      '2026-11-13 18:30 PST',
+    );
+    // A zone with no short name in English is named by its offset; midnight is 00, never 24.
+    expect(momentText('2026-11-14T18:30:00.000Z', 'Asia/Kolkata')).toBe(
+      '2026-11-15 00:00 GMT+5:30',
+    );
+  });
+
+  it('keeps text that is not a moment as it came, to the minute’s length, with the zone', () => {
+    expect(momentText('soon', 'UTC')).toBe('soon UTC');
+    expect(momentText('2026-13-45T99:99 and more', 'America/New_York')).toBe(
+      '2026-13-45 99:99 America/New_York',
+    );
   });
 });

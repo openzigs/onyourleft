@@ -38,6 +38,9 @@
  * across a triangle. And the clothes stand off the body
  * ({@link CLOTHES_STAND_OFF}), flaring at each hem ({@link HEM_FLARE}), so the
  * silhouette is everyday clothes and shoes rather than leggings and bare feet.
+ * Since the modeller's pass of 2026-11-18 each seam is straightened first
+ * ({@link straightenSeams}): an edge the cut left runs where its cubes fell,
+ * and a hem drawn on such edges was a saw's.
  *
  * ## The animation texture
  *
@@ -384,18 +387,8 @@ export interface Dressed {
   readonly standOff: Float32Array;
 }
 
-/**
- * A body's triangles dressed by face rather than by vertex — #1618. Each
- * triangle takes the region most of its corners have (and where all three
- * differ, the first of them in clothes-first order); a kept vertex whose
- * triangles are of more than one region is drawn once for each, every copy
- * the same column of the animation texture, so the seam is a hard edge
- * between two colours rather than a fade across a triangle — and costs no
- * texture and no triangle. `indices` are three a triangle into the kept
- * vertices; `regions` is each kept vertex's (`regionOf`).
- */
-export function dressed(indices: ArrayLike<number>, regions: ArrayLike<number>): Dressed {
-  const columns = regions.length;
+/** Each triangle's region: the one most of its corners have. @see dressed */
+function faceRegions(indices: ArrayLike<number>, regions: ArrayLike<number>): Uint8Array {
   const faces = Math.floor(indices.length / 3);
   const faceRegion = new Uint8Array(faces);
   for (let face = 0; face < faces; face += 1) {
@@ -409,6 +402,105 @@ export function dressed(indices: ArrayLike<number>, regions: ArrayLike<number>):
           ? b
           : (FACE_PRECEDENCE.find((region) => region === a || region === b || region === c) ?? a);
   }
+  return faceRegion;
+}
+
+/**
+ * How many times {@link straightenSeams} smooths a seam, and by how much each
+ * way: Taubin's pair — a step toward the neighbours' middle, then a slightly
+ * larger step back — which flattens a zigzag (the shortest wave a seam can
+ * carry) and leaves a seam's own loop round a waist or an ankle the size it
+ * was, where the step toward alone would shrink it.
+ */
+export const SEAM_SMOOTHING = { passes: 8, toward: 0.5, back: -0.53 } as const;
+
+/**
+ * The seams between a body's regions, straightened — the modeller's pass of
+ * 2026-11-18. Moves `positions` (three numbers a kept vertex, the REST body)
+ * in place and returns how many vertices it moved.
+ *
+ * {@link dressed} changes colour on the mesh's own edges, and the mesh is
+ * what the cut left: its edges run where the cubes fell, so a top's hem over
+ * the bottoms, a trouser leg over a shoe and a hairline each ran as a saw's
+ * edge, a tooth a triangle — the owner's street showed every shirt torn along
+ * its bottom. A seam is the edges between two triangles of different regions;
+ * each seam vertex with exactly two seam neighbours is moved toward the
+ * middle of those two and back ({@link SEAM_SMOOTHING}), so the seam runs
+ * straight round the body and the triangles either side follow it. A vertex
+ * where three seams meet, or where one ends, stays where it was.
+ *
+ * It costs no triangle, no vertex and no texel: the same vertices, a few of
+ * them a centimetre or two from where the file had them, with their own skin
+ * weights — so they still bend at their own joints. Deterministic: the same
+ * body gives the same seams on every load.
+ */
+export function straightenSeams(
+  positions: Float32Array,
+  indices: ArrayLike<number>,
+  regions: ArrayLike<number>,
+): number {
+  const faceRegion = faceRegions(indices, regions);
+  const columns = regions.length;
+  // Each edge's first triangle's region; an edge met again from a triangle of
+  // another region is a seam.
+  const edgeRegion = new Map<number, number>();
+  const neighbours = new Map<number, number[]>();
+  const join = (a: number, b: number): void => {
+    const list = neighbours.get(a);
+    if (list === undefined) neighbours.set(a, [b]);
+    else if (!list.includes(b)) list.push(b);
+  };
+  for (let face = 0; face < faceRegion.length; face += 1) {
+    const region = faceRegion[face] as number;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const a = indices[face * 3 + corner] as number;
+      const b = indices[face * 3 + ((corner + 1) % 3)] as number;
+      const key = Math.min(a, b) * columns + Math.max(a, b);
+      const met = edgeRegion.get(key);
+      if (met === undefined) {
+        edgeRegion.set(key, region);
+      } else if (met !== region) {
+        join(a, b);
+        join(b, a);
+      }
+    }
+  }
+  const moving = [...neighbours].filter(([, list]) => list.length === 2);
+  const next = new Float32Array(moving.length * 3);
+  for (let pass = 0; pass < SEAM_SMOOTHING.passes * 2; pass += 1) {
+    const step = pass % 2 === 0 ? SEAM_SMOOTHING.toward : SEAM_SMOOTHING.back;
+    moving.forEach(([vertex, list], at) => {
+      const [before, after] = list as [number, number];
+      for (let axis = 0; axis < 3; axis += 1) {
+        const here = positions[vertex * 3 + axis] as number;
+        const middle =
+          ((positions[before * 3 + axis] as number) + (positions[after * 3 + axis] as number)) / 2;
+        next[at * 3 + axis] = here + (middle - here) * step;
+      }
+    });
+    moving.forEach(([vertex], at) => {
+      positions[vertex * 3] = next[at * 3] as number;
+      positions[vertex * 3 + 1] = next[at * 3 + 1] as number;
+      positions[vertex * 3 + 2] = next[at * 3 + 2] as number;
+    });
+  }
+  return moving.length;
+}
+
+/**
+ * A body's triangles dressed by face rather than by vertex — #1618. Each
+ * triangle takes the region most of its corners have (and where all three
+ * differ, the first of them in clothes-first order); a kept vertex whose
+ * triangles are of more than one region is drawn once for each, every copy
+ * the same column of the animation texture, so the seam is a hard edge
+ * between two colours rather than a fade across a triangle — and costs no
+ * texture and no triangle. `indices` are three a triangle into the kept
+ * vertices; `regions` is each kept vertex's (`regionOf`).
+ */
+export function dressed(indices: ArrayLike<number>, regions: ArrayLike<number>): Dressed {
+  const columns = regions.length;
+  const faces = Math.floor(indices.length / 3);
+  const faceRegion = faceRegions(indices, regions);
   const standOff = new Float32Array(columns);
   const seen = new Uint8Array(columns * REGION_SLOTS);
   for (let face = 0; face < faces; face += 1) {

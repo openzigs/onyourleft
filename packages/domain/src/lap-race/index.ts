@@ -111,9 +111,11 @@ export {
 // 0067 D-2), a capacity fixed at the start that no rank or gap changes.
 // Each bot's own pace (#2455): an ability at or under its tier and a pacing
 // style read off the course, dealt from the race's seed before the start.
-export type { BotPace, BotPacingStyle } from './pace';
+export type { BotBody, BotPace, BotPacingStyle } from './pace';
 export {
   BOT_ABILITY_SPREAD,
+  BOT_BODY_MASS_RANGE_KILOGRAMS,
+  BOT_BODY_STRENGTH_RANGE,
   BOT_EVEN_PACE,
   BOT_PACING_STYLES,
   BOT_STYLE_EASING,
@@ -169,6 +171,7 @@ export {
   BOT_TACTIC_UTILITY,
   BOT_EFFORTS,
   BOT_EFFORT_CP_SHARE,
+  BOT_HARD_TACTICS,
   BOT_TACTIC_WBAL_FLOOR,
   BOT_TACTIC_WHEEL_CLOSING_GAIN,
   BOT_TACTIC_WHEEL_EASE,
@@ -189,29 +192,78 @@ export {
 
 // A language model's bot tactics (#2709, ADR 0071 D-3): the race state it is
 // shown and the answer it may give, each checked field by field. No power field.
+// Since #2836 (ADR 0081) one bot's ask at a time: the story so far, its cue
+// words and the menu the device offers it, and a reason word before the move.
 export type {
   ModelTacticsAnswer,
+  ModelTacticsAskFacts,
   ModelTacticsBotView,
+  ModelTacticsBunchWord,
+  ModelTacticsCourse,
+  ModelTacticsCue,
+  ModelTacticsFieldView,
   ModelTacticsInput,
   ModelTacticsInputProblem,
   ModelTacticsInputRead,
   ModelTacticsInvalid,
+  ModelTacticsMenuEntry,
+  ModelTacticsOffer,
+  ModelTacticsPick,
+  ModelTacticsRace,
+  ModelTacticsReason,
   ModelRacingStyle,
   ModelTacticsMove,
   ModelTacticsRiderView,
+  ModelTacticsStory,
   ModelTacticsTarget,
+  ModelTacticsYou,
+  ModelStrengthWord,
 } from './model-tactics';
 export {
+  MODEL_MENU_CAUGHT_SECONDS,
+  MODEL_MENU_CLIMB_SOON_METRES,
+  MODEL_MENU_FINISH_LAUNCHES,
+  MODEL_MENU_FRESH_SHARE,
+  MODEL_MENU_QUIET_SECONDS,
+  MODEL_STORY_BREAK_METRES,
+  MODEL_STORY_BUNCH_FRESH_SHARE,
+  MODEL_STORY_BUNCH_TIRING_SHARE,
+  MODEL_STRENGTH_WORDS,
   MODEL_TACTICS_ANSWER_MOST_CHARACTERS,
+  MODEL_TACTICS_BUNCH_WORDS,
+  MODEL_TACTICS_CUES,
   MODEL_TACTICS_INPUT_MOST_CHARACTERS,
+  MODEL_TACTICS_MENU_LEAST,
+  MODEL_TACTICS_MENU_MOST,
   MODEL_RACING_STYLES,
   MODEL_TACTICS_MOST_SEATS,
+  MODEL_TACTICS_REASONS,
   modelRacingStyles,
   modelTacticsAnswerSchema,
-  modelTacticsSeats,
+  modelTacticsAsk,
+  modelTacticsBreak,
+  modelTacticsBunch,
+  modelTacticsMoveOf,
+  modelTacticsOffer,
+  modelTacticsStoryLine,
   readModelTacticsAnswer,
   readModelTacticsInput,
 } from './model-tactics';
+
+// The field of a race with AI bots (#2759, ADR 0076): each racing style its
+// pace and body, a spread of strength whose middle is the tier, and how each
+// bot compares with the field in plain words.
+export type { ModelBotStrengths, ModelStyleBody } from './model-field';
+export {
+  MODEL_FIELD_MASS_JITTER_KILOGRAMS,
+  MODEL_FIELD_STRENGTH_SPREAD,
+  MODEL_STRENGTH_MARGIN,
+  MODEL_STYLE_BODY,
+  MODEL_STYLE_PACE,
+  modelFieldPaces,
+  modelFieldStrengths,
+  modelRacingStyleOf,
+} from './model-field';
 
 export type { BotPlanInput, BotPlanStep, BotPlanTactic, BotRacePlan } from './plan';
 export {
@@ -229,6 +281,7 @@ export {
 export type { BotCapacity, BotEnergy } from './wbal';
 export {
   BOT_CEILING_WATTS,
+  botCeilingWatts,
   BOT_WBAL_REENTRY_FRACTION,
   BOT_WBAL_TICK_TOLERANCE,
   fullBotEnergy,
@@ -241,11 +294,14 @@ export {
 export type {
   AppliedModelMoves,
   ModelMoveAsk,
+  ModelMoveChooser,
   ModelMoveOutcome,
   ModelMoveRide,
   ModelMoveStrategy,
   ModelMoveStrategyRefusal,
+  LapRaceModelBot,
   LapRaceModelRecord,
+  LapRaceModelRode,
   ModelRaceBot,
   ModelTacticsLogEntry,
   ModelTacticsLogOutcome,
@@ -255,14 +311,19 @@ export {
   ADR_0071_MOVE_STRATEGY,
   ADR_0073_MOVE_STRATEGY,
   ADR_0074_MOVE_STRATEGY,
+  ADR_0081_MOVE_STRATEGY,
   applyModelMoves,
   LAP_RACE_BOT_CODE_VERSION,
+  LAP_RACE_MODEL_MOST_MOVES,
   LAP_RACE_MODEL_MOST_TICKS,
+  MODEL_MOVE_CHOOSERS,
   MODEL_TACTICS_ASK_EVERY_MS,
+  MODEL_TACTICS_FIRST_ASK_MS,
   MODEL_TACTICS_HOLD_MS,
   MODEL_TACTICS_LATE_MS,
   MODEL_TACTICS_LOG_OUTCOMES,
   MODEL_TACTICS_LOG_REASONS,
+  modelMoveChooser,
   modelMovesInForce,
   modelTacticsAppliedAtMs,
   modelTacticsNextAskAtMs,

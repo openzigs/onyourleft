@@ -1,0 +1,398 @@
+{
+  "measuredAt": "2026-11-19T15:55:49.480Z",
+  "model": "gemma4:12b",
+  "ollama": "0.40.16",
+  "label": "shipped",
+  "summaries": [
+    {
+      "fixture": "replan-request",
+      "runs": 20,
+      "valid": 0,
+      "moves": {},
+      "failures": {
+        "model-cut-off": 20
+      },
+      "milliseconds": {
+        "median": 6729,
+        "p90": 7171,
+        "most": 7205
+      }
+    },
+    {
+      "fixture": "replan-request-long",
+      "runs": 20,
+      "valid": 0,
+      "moves": {},
+      "failures": {
+        "model-cut-off": 20
+      },
+      "milliseconds": {
+        "median": 8035,
+        "p90": 8457,
+        "most": 8559
+      }
+    }
+  ],
+  "runs": [
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 7036
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8207
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6552
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 7624
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6192
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 7980
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 7205
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8031
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6646
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 7586
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6772
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 7727
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6461
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8422
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 7171
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8559
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6729
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8004
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6382
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8361
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 7195
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8035
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6913
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8140
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6462
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 7862
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 7115
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8112
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 7045
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8375
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6173
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 7703
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6163
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8403
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6766
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 7592
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6784
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8457
+    },
+    {
+      "fixture": "replan-request",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 1043,
+      "outputTokensTotal": 256,
+      "milliseconds": 6377
+    },
+    {
+      "fixture": "replan-request-long",
+      "outcome": "failed:model-cut-off",
+      "turns": 1,
+      "toolCalls": 0,
+      "promptTokensMost": 2555,
+      "outputTokensTotal": 256,
+      "milliseconds": 8537
+    }
+  ]
+}

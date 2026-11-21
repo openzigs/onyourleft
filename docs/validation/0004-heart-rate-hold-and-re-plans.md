@@ -422,11 +422,11 @@ before riding.
   A refusal that will not change during the workout (`unauthenticated`, `validation_failed`,
   `rate_limited`, `analysis_off`) ends the asking for that workout. A start that fails after a good
   key read, or a failed job, is asked again at the next allowed boundary (`replan-session.ts`
-  §`PERMANENT_REFUSALS`). ⚠️ **An instance that is down is not in that class.** Every request first
-  opens a session, which reads the instance's keys; an unreachable instance closes the session with
-  `why: 'keys'`, and that ends the asking for the workout, the same as a refusal. This is a defect
-  (an outage treated as permanent), filed from B3.2 as
-  [#2104](https://github.com/openzigs/onyourleft/issues/2104), not the intended behaviour.
+  §`PERMANENT_REFUSALS`). **An instance that is down is in that class too**
+  ([#2104](https://github.com/openzigs/onyourleft/issues/2104)): every request first opens a
+  session, which reads the instance's keys, and an instance that does not answer closes the session
+  with `why: 'unreachable'`, which the next allowed boundary asks again. Only keys that do not
+  verify under the card (`why: 'keys'`) end the asking for the workout.
 - **A proposal the validator refuses, or an answer of "keep the workout"**, shows nothing.
 - **The record of every decision (P9)** is kept with the ride on the device, and through a
   recovery ([#1328](https://github.com/openzigs/onyourleft/issues/1328)). It is **not on any
@@ -619,11 +619,12 @@ most) **and ADR 0036 D-3(a)** (nothing that works with no instance starts to nee
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
 | B3.1 | Riding block 2 with the hold running, have the instance **stopped** (`docker compose stop instance`). Ride through the 11:00 and 17:00 boundaries | The ride carries on. **The hold keeps working** in block 2. Each boundary's `0x05` is the loaded plan's. From 11:00 the panel shows, and keeps showing, with no label and not spoken, *"No re-plan could be asked for just now. The workout carries on as planned."*, one line and no more. **No write is caused by the failure**: no `0x05` at the moment the instance went, no `0x08`, no `0x00` | the target changes at the moment the instance stops, or the workout pauses or ends |
-| B3.2 | Have the instance started again (`docker compose up -d instance`; wait for `/ready`). Ride through the 23:00 boundary | **By the code, no request leaves at 23:00.** The 11:00 key read found the instance unreachable, which closed the session (`why: 'keys'`) and ended the asking for this workout, so the job table shows **no row** at 17:00 or 23:00 and no burst at the restart. This is a **known defect, not a pass**: an outage is treated as permanent, against the module header ([#2104](https://github.com/openzigs/onyourleft/issues/2104)). Record what you saw. If a request did leave at 23:00, record that too, as the code was then not as read | |
+| B3.2 | Have the instance started again (`docker compose up -d instance`; wait for `/ready`). Ride through the 23:00 boundary | **One request leaves at 23:00**, and the job table shows **one row** for it. The 11:00 and 17:00 key reads found the instance unreachable, which closed the session as `why: 'unreachable'`: a passing fact, so each later boundary asked again, at least 3 minutes after the last ([#2104](https://github.com/openzigs/onyourleft/issues/2104)). No row at 11:00 or 17:00, and **no burst at the restart**: nothing is sent between boundaries | no request leaves at 23:00, or more than one job is made for it |
 
 **Fails P8 if:** any write in the log coincides with the instance stopping; the workout paused or
-ended; more than one line was shown; or more than one job was made at the restart. B3.2 is
-**filed as a defect** when no request leaves after the restart (fail-safe, so not a P8 failure).
+ended; more than one line was shown; or more than one job was made at the restart. A B3.2 where no
+request leaves after the restart is a regression of [#2104](https://github.com/openzigs/onyourleft/issues/2104)
+(fail-safe, so not a P8 failure): file it.
 
 ### B8 — *Switch re-plans off* mid-workout
 

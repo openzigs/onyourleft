@@ -23,10 +23,17 @@ import { ODBL_LICENCE_URL, ODBL_NOTICE } from '../../../map/basemap';
 import { modulesUnder } from '../../cannot-reach-trainer-testing';
 import { SHIPPED_LEVEL_FILES, SHIPPED_LEVELS } from '../../shipped-levels';
 import { roundHousesOn } from '../courses';
+import { DEFAULT_THROW_WINDOW } from '../throw';
 import { LEVEL_HOUSE_MARGIN } from '../../../../tools/delivery-levels/author-level';
 import { levelFileSizes, levelSizeFindings } from '../../../../tools/delivery-levels/level-sizes';
 import { LEVEL_CATALOGUE, type LevelListing } from './catalogue';
-import { LEVEL_LICENCE, parseLevelFile, type LevelFile } from './level-file';
+import {
+  LEVEL_HAZARD_KINDS,
+  LEVEL_LICENCE,
+  parseLevelFile,
+  type LevelFile,
+  type LevelRound,
+} from './level-file';
 import {
   levelBuildingFeature,
   levelCorridor,
@@ -53,6 +60,20 @@ function fixture(): LevelFile {
 const SHIPPED = readdirSync(DATA)
   .filter((name) => name.endsWith('.json'))
   .sort();
+
+/**
+ * Every shipped file, read through the reader, in the unlock order the app's
+ * own library lists them (#2367). Read for their parameters and their round
+ * houses only (ADR 0065 D-6.4, D-7.5): nothing here draws one.
+ */
+function inUnlockOrder(): LevelFile[] {
+  return SHIPPED_LEVELS.list().map((level) =>
+    parseLevelFile(
+      JSON.parse(readFileSync(join(DATA, `${level.id}.json`), 'utf8')) as unknown,
+      level.id,
+    ),
+  );
+}
 
 describe('the level: namespace — #2361, D-8.2', () => {
   it('names a level by its own id, and refuses a saved route’s id and a circuit’s as a level’s', () => {
@@ -320,10 +341,109 @@ describe('the shipped level files — #2361, D-3.2, D-6.2 and D-7', () => {
     );
   });
 
+  // #2367: one case a level, so no one case pays for every level's footprint
+  // planning (972 ms for all six together without coverage, on the Mac).
+  for (const file of inUnlockOrder()) {
+    it(`${file.id} holds its round’s houses with the build tool’s margin, counted as a ride counts them (D-5.4, #2367)`, () => {
+      // The tool refuses to write a level short of this; this holds every
+      // committed file to it, so one edited by hand or drawn by an older tool is red.
+      expect(roundHousesOn(levelCorridor(file), levelRoute(file).profile)).toBeGreaterThanOrEqual(
+        file.round.houses + LEVEL_HOUSE_MARGIN,
+      );
+    });
+  }
+
   it('are inside the walk delivery-cannot-reach-trainer.test.ts makes (D-11)', () => {
     const walked = modulesUnder('apps/web/src/game/delivery');
     expect(walked).toContain('apps/web/src/game/delivery/levels/level-file.ts');
     expect(walked).toContain('apps/web/src/game/delivery/levels/levels.ts');
     expect(walked).not.toContain('apps/web/src/game/shipped-levels.ts');
+  });
+});
+
+describe('the progression: each level no easier than the one before — #2367, ADR 0065 D-4.3', () => {
+  const total = (round: LevelRound): number =>
+    LEVEL_HAZARD_KINDS.reduce((sum, kind) => sum + round.hazardsPerKilometre[kind], 0);
+  const width = (round: LevelRound): number =>
+    round.throwWindow.beforeMetres + round.throwWindow.afterMetres;
+
+  it('ships six levels, read in the unlock order the picker lists them', () => {
+    expect(inUnlockOrder().map((file) => file.id)).toStrictEqual(
+      SHIPPED_LEVELS.list().map((level) => level.id),
+    );
+    expect(inUnlockOrder()).toHaveLength(6);
+  });
+
+  it('has as many houses, a window no wider and hazards no sparser as the level before, and is strictly harder in one', () => {
+    const levels = inUnlockOrder();
+    for (let at = 1; at < levels.length; at += 1) {
+      const [was, now] = [levels[at - 1] as LevelFile, levels[at] as LevelFile];
+      const step = `${was.id} → ${now.id}`;
+      expect(now.round.houses, step).toBeGreaterThanOrEqual(was.round.houses);
+      expect(now.round.throwWindow.beforeMetres, step).toBeLessThanOrEqual(
+        was.round.throwWindow.beforeMetres,
+      );
+      expect(now.round.throwWindow.afterMetres, step).toBeLessThanOrEqual(
+        was.round.throwWindow.afterMetres,
+      );
+      for (const kind of LEVEL_HAZARD_KINDS) {
+        expect(now.round.hazardsPerKilometre[kind], `${step}, ${kind}`).toBeGreaterThanOrEqual(
+          was.round.hazardsPerKilometre[kind],
+        );
+      }
+      expect(
+        now.round.houses > was.round.houses ||
+          width(now.round) < width(was.round) ||
+          total(now.round) > total(was.round),
+        `${step} is no harder in houses, window or hazards`,
+      ).toBe(true);
+    }
+  });
+
+  it('narrows the throw window from level 3, each of levels 3 to 6 narrower than the one before — #2931', () => {
+    const levels = inUnlockOrder();
+    // Levels 1 and 2 throw in the throw's own window, the widest a level may.
+    for (const file of levels.slice(0, 2)) {
+      expect(file.round.throwWindow, file.id).toStrictEqual(DEFAULT_THROW_WINDOW);
+    }
+    for (let at = 2; at < levels.length; at += 1) {
+      const [was, now] = [levels[at - 1] as LevelFile, levels[at] as LevelFile];
+      expect(width(now.round), `${was.id} → ${now.id}`).toBeLessThan(width(was.round));
+    }
+  });
+
+  it('brings in the kinds of hazard in turn, never dropping one, so the last level has all four', () => {
+    const levels = inUnlockOrder();
+    /** The four kinds (ADR 0065 D-10): standing, moving, tighter targets, low light. */
+    const kinds = (round: LevelRound): readonly boolean[] => [
+      round.hazardsPerKilometre.static > 0,
+      round.hazardsPerKilometre.moving > 0,
+      round.mailboxShare > 0 || round.noDeliveryShare > 0,
+      round.weather === 'rain' || round.light === 'dusk',
+    ];
+    for (let at = 1; at < levels.length; at += 1) {
+      const [was, now] = [(levels[at - 1] as LevelFile).round, (levels[at] as LevelFile).round];
+      const step = `${String(at)} → ${String(at + 1)}`;
+      kinds(was).forEach((had, kind) => {
+        if (had) expect(kinds(now)[kind], `${step}, kind ${String(kind)}`).toBe(true);
+      });
+      expect(now.mailboxShare, step).toBeGreaterThanOrEqual(was.mailboxShare);
+      expect(now.noDeliveryShare, step).toBeGreaterThanOrEqual(was.noDeliveryShare);
+      if (was.weather === 'rain') expect(now.weather, step).toBe('rain');
+      if (was.light === 'dusk') expect(now.light, step).toBe('dusk');
+    }
+    expect(kinds((levels.at(-1) as LevelFile).round)).toStrictEqual([true, true, true, true]);
+    // In turn: levels 3 to 6 each bring one in (#2364 moving, #2365 targets, #2366 rain, then dusk).
+    expect(levels.map((file) => kinds(file.round).filter(Boolean).length)).toStrictEqual([
+      1, 1, 2, 3, 4, 4,
+    ]);
+    expect(levels.map((file) => file.round.light)).toStrictEqual([
+      'day',
+      'day',
+      'day',
+      'day',
+      'day',
+      'dusk',
+    ]);
   });
 });

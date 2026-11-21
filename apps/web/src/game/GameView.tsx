@@ -67,7 +67,7 @@ import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
-import { ModelPacer, modelPacerInput } from './model-pacer';
+import { ModelPacer, modelPacerInput, modelPacerTerrain } from './model-pacer';
 import { DEFAULT_WIND_FROM_BEARING, windChoice } from './wind-choice';
 import {
   ARRIVING_REALISTIC_QUALITY,
@@ -267,6 +267,7 @@ import {
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
+  throwSideOn,
   type DeliveryRide,
 } from './delivery/ride-round';
 import { sidewaysSpeedOf, steeredLateralFor, steerToLane, steerToward } from './delivery/steer';
@@ -275,7 +276,7 @@ import { dampedSway } from './lane-change-lean';
 import type { ControllerPort } from './delivery/controller-port';
 import type { LaneInputPort } from './delivery/lane-input-port';
 import type { SteerInputPort } from './delivery/steer-port';
-import { throwSideFor, type ThrowSide } from './delivery/throw';
+import type { ThrowSide } from './delivery/throw';
 import type { ThrowInputPort } from './delivery/throw-input-port';
 import type { ItemInputPort } from './lap-race/item-input-port';
 import {
@@ -2094,11 +2095,8 @@ function GameScreen({
     throwParcel: (intent) => {
       const ride = deliveryRef.current;
       if (ride === undefined || !loopRunningRef.current) return;
-      const side = throwSideFor(intent, {
-        targets: ride.throwTargets,
-        round: ride.round,
-        along: ride.along,
-      });
+      // #2931: on a level, a house is behind once the level's own window closes.
+      const side = throwSideOn(ride, intent);
       if (side !== undefined) throwAskedRef.current = side;
     },
   });
@@ -3642,6 +3640,8 @@ function GameScreen({
                 thresholdHeartRate: ownThresholdsRef.current.heartRate,
               },
             }),
+          // ADR 0082: where the pacer is on the road, for the terrain rule.
+          terrain: () => modelPacerTerrain(simulation.state, chosen.profile),
           direct: (direction, from) => {
             simulation.directPacer(direction, from);
           },

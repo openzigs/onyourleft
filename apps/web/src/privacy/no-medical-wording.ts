@@ -150,6 +150,11 @@ export const EXEMPT: readonly {
     text: PROMPT_FORBIDS_THE_WORD,
     why: 'an instruction to a model, not text a rider is shown: the write-up prompt uses the word to forbid it. Excused as this one whole sentence in the one prompt template that carries it (the chain templates that also did went in #1797), so any other sentence in @onyourleft/analysis is still read',
   },
+  {
+    file: '../../../packages/analysis/src/template/agent-v2.ts',
+    text: PROMPT_FORBIDS_THE_WORD,
+    why: 'the same sentence in version 2 of the write-up prompt (#2840), which keeps every rule of version 1 word for word: an instruction to a model that uses the word to forbid it, never text a rider is shown',
+  },
 ];
 
 /** Whether a finding is one {@link EXEMPT} excuses: the same file and the same whole text. */

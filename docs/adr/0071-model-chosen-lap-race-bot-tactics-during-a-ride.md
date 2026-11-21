@@ -433,3 +433,27 @@ for the model (D-3), a hosted model playing the bots (D-5.1), a model anywhere n
   choice records it (ADR 0072 D-1.3). D-2 stands for the rider's own ghost, a cross-rider ghost, a
   room and every announcement and HUD text but the AI pacer's own screened line. Everything else in
   this ADR is unchanged. This entry only points there. (#2712)
+
+- **2026-11-17** — **Once [ADR 0076](0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-1.3 is superseded by it in part.** A model
+  race deals its own field from its seed: each bot's racing style brings a pace whose legs fit it
+  and a body, a mass and a strength around the tier, with the field's mean CP in W/kg held to the
+  tier. So a model race no longer differs from a seeded one only in its moves; with no decision in
+  force it rides seeded tactics on that field. **D-1.4 is unchanged**: a rider with no instance or
+  no consent rides the seeded race, to the bit. Read ADR 0076 for the rule. This entry only points
+  there; nothing else in this ADR changes. (#2759)
+
+- **2026-11-18** — **Once [ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted, D-3.1, D-3.4, D-4.4 and D-7 are superseded by it in
+  part for a model race.** A call is about one bot, and the answer is a reason word from a closed
+  list and one move from a menu the device made for that bot, where D-3.1 had a move for each bot
+  the model named. The input is that bot's ask, the race in short and the bot last, where D-3.4 had
+  the whole field's race state; every field is still a number, a boolean or a word from a closed
+  list. The log also keeps what each call was about (the seat, its place, its cue words and menu,
+  and the reason word), and the record who each bot is and who chose each move, where D-4.4 kept
+  the answers and times only; the model input and the model's text are still not kept. The device
+  asks about one bot a second at most, where D-7's draft was a call every 4 s. **D-3.2, D-3.3,
+  D-3.5, D-5, D-6, D-7's fallback and D-8 are unchanged**, and so is D-1.4. Read ADR 0081 for the
+  rule. This entry only points there; nothing else in this ADR changes. (#2836)
+
+- **2026-11-19** — **[ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted**, on the owner's answers
+  to its D-8 (its D-9), so the entry above is in force. This entry only records that; nothing else in
+  this ADR changes. (#2836)

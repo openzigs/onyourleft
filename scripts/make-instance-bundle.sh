@@ -17,6 +17,12 @@
 # into the `tailscale` service, and the file in it that OYL_INSTANCE_REMOTE_PATH
 # names is what `tailscale serve` serves. Without it a bundle on the tailnet
 # would mount an empty folder and serve nothing.
+# And an EMPTY `secrets/`, owner-only (#2818): compose.yaml mounts it into the
+# instance, which makes its secret key there on its first start. Docker makes a
+# missing bind-mount folder owned by root on Linux, where the instance (uid
+# 1000) cannot write it, and the guide's install is `docker compose up` alone,
+# with no deploy.sh to make it first. It is made here, never copied: a
+# `secrets/` beside the checkout's compose.yaml is the owner's own.
 #
 #   bash scripts/make-instance-bundle.sh IMAGE@sha256:DIGEST VERSION OUTDIR
 #
@@ -33,6 +39,9 @@
 #   BUNDLE003  the version is empty or is not a plain version string
 #   BUNDLE004  a serve file the tailscale profile reads is missing from
 #              apps/instance/deploy/home/tailscale/
+#   BUNDLE005  the bundle's instance.env.example does not offer
+#              OYL_INSTANCE_CONTACT_EMAIL exactly once and EMPTY, or a file of
+#              the bundle holds an email address at the project's own domain
 #
 # Its own suite: bash scripts/make-instance-bundle.test.sh
 
@@ -47,6 +56,15 @@ HOME_DEPLOY="${ROOT}/apps/instance/deploy/home"
 # shellcheck disable=SC2016
 LOCAL_IMAGE_LINE='  image: ${OYL_INSTANCE_IMAGE:-onyourleft-instance:local}'
 LOCAL_IMAGE_SETTING='OYL_INSTANCE_IMAGE=onyourleft-instance:local'
+# #2857: the bundle is the template EVERY new server starts from, and what
+# OYL_INSTANCE_CONTACT_EMAIL holds is what that server's /legal page tells its
+# riders, and anybody with a complaint, to write to. The template shipped the
+# project's own address once. So the line ships once and empty -- compose.yaml
+# refuses to start without it, and the operator types their own -- and no file
+# of the bundle holds an address at the project's domain or under it, in a
+# setting or in a comment.
+CONTACT_SETTING='OYL_INSTANCE_CONTACT_EMAIL='
+PROJECT_ADDRESS='[a-z0-9._%+-]+@([a-z0-9-]+\.)*openzigs\.[a-z]'
 
 die() {
   printf 'make-instance-bundle: %s\n' "$1" >&2
@@ -82,6 +100,8 @@ zip="${name}-${version}.zip"
 bundle="${out}/${name}"
 rm -rf "${bundle}" "${out:?}/${zip}"
 mkdir -p "${bundle}"
+# #2818: there before Docker could make it, and owner-only before anything is in it.
+mkdir -m 700 "${bundle}/secrets"
 
 # `awk` with the line passed as data, so nothing in the image name is read as
 # a pattern or a replacement.
@@ -111,6 +131,16 @@ if grep -qF 'onyourleft-instance:local}' "${bundle}/compose.yaml"; then
 fi
 if grep -q '^OYL_INSTANCE_IMAGE=' "${bundle}/instance.env.example"; then
   die "BUNDLE002 the bundle's instance.env.example still sets OYL_INSTANCE_IMAGE."
+fi
+# Read back, on what ships: the contact line once and empty, and nobody's
+# address at the project's domain in any file (#2857).
+if [ "$(grep -c -- "^${CONTACT_SETTING}" "${bundle}/instance.env.example")" != 1 ] ||
+  ! grep -qxF -- "${CONTACT_SETTING}" "${bundle}/instance.env.example"; then
+  die "BUNDLE005 the bundle's instance.env.example does not have exactly one line '${CONTACT_SETTING}', with nothing after it: every new server starts from this file, and its /legal page tells riders to write to whatever address is there."
+fi
+holding="$(cd "${bundle}" && grep -rIilE -- "${PROJECT_ADDRESS}" . | sed 's|^\./||' | sort | tr '\n' ' ')" || true
+if [ -n "${holding}" ]; then
+  die "BUNDLE005 the bundle holds an email address at the project's own domain, in ${holding% }: every new server would ship it. The project's address is not an operator's default."
 fi
 
 (cd "${out}" && zip -q -r -X "${zip}" "${name}")

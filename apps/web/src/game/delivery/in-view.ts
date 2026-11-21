@@ -272,7 +272,9 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
  * dusk, metres — #2366: **40**. At `obstacles.ts`
  * §`AVOIDABLE_FASTEST_METRES_PER_SECOND` (12 m/s) that is 3.4 s before the
  * house's throw window closes (`throw.ts` §`THROW_WINDOW_AFTER_METRES`), and
- * the window opens 20 m after the marker shows. This project's own number,
+ * the window opens 20 m after the marker shows; a level's own narrower window
+ * (#2931) closes up to a metre sooner and opens later, so at least 3.3 s
+ * (`weather.test.ts` sweeps each shipped level's own). This project's own number,
  * for the owner's approval in #2366's pull request.
  */
 export const LOW_LIGHT_REVEAL_METRES = 40;

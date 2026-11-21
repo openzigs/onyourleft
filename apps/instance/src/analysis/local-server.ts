@@ -9,7 +9,7 @@
  *
  * The server is the configured local address (the operator's row over `.env`,
  * `settings.ts` §`localServerOf`), and every request goes through
- * {@link askLocal}: the name is resolved, EVERY address must be local, and
+ * {@link sendLocal}: the name is resolved, EVERY address must be local, and
  * the request goes to the checked address with `redirect: 'error'` — on
  * every request, not once per read (ADR 0040 D-6, `history/address.ts`). A
  * name that resolves private for one request and public for the next stops
@@ -115,7 +115,7 @@ export const LOCAL_SERVER_BODY_BYTES = 4 * 1024 * 1024;
 /** The most models listed: more than a box with one card has room for. */
 export const LOCAL_MODELS_LISTED = 100;
 
-/** Thrown by {@link askLocal} for a name that is no longer local: the read stops there. */
+/** Thrown by {@link sendLocal} for a name that is no longer local: the read stops there. */
 class AddressRefused extends Error {
   readonly why: 'not-local' | 'unresolved';
   constructor(why: 'not-local' | 'unresolved') {
@@ -165,8 +165,33 @@ async function cappedJson(response: Response): Promise<unknown> {
 /**
  * One request to the local server: `path` under `base`, sent to the address
  * its name resolves to NOW, every address of it local, or {@link AddressRefused}.
- * Answers the parsed body of a 2xx, or `undefined` for any other answer; a
- * network failure throws.
+ * Answers the response as it came, unread; a network failure throws.
+ */
+export async function sendLocal(
+  base: URL,
+  path: string,
+  init: { readonly method: 'GET' | 'POST'; readonly body?: unknown },
+  options: LocalServerOptions,
+  signal: AbortSignal,
+): Promise<Response> {
+  const checked = await localAddressesOnly(base.hostname, options.resolve);
+  if (!checked.ok) throw new AddressRefused(checked.why);
+  const target = new URL(`${base.href.replace(/\/+$/, '')}${path}`);
+  target.hostname = checked.address.includes(':') ? `[${checked.address}]` : checked.address;
+  const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  return send(target.href, {
+    method: init.method,
+    ...(init.body === undefined
+      ? {}
+      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(init.body) }),
+    redirect: 'error',
+    signal,
+  });
+}
+
+/**
+ * {@link sendLocal}, read: the parsed body of a 2xx, up to
+ * {@link LOCAL_SERVER_BODY_BYTES}, or `undefined` for any other answer.
  */
 export async function askLocal(
   base: URL,
@@ -175,19 +200,7 @@ export async function askLocal(
   options: LocalServerOptions,
   signal: AbortSignal,
 ): Promise<unknown> {
-  const checked = await localAddressesOnly(base.hostname, options.resolve);
-  if (!checked.ok) throw new AddressRefused(checked.why);
-  const target = new URL(`${base.href.replace(/\/+$/, '')}${path}`);
-  target.hostname = checked.address.includes(':') ? `[${checked.address}]` : checked.address;
-  const send = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const response = await send(target.href, {
-    method: init.method,
-    ...(init.body === undefined
-      ? {}
-      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(init.body) }),
-    redirect: 'error',
-    signal,
-  });
+  const response = await sendLocal(base, path, init, options, signal);
   if (!response.ok) {
     await response.body?.cancel();
     return undefined;

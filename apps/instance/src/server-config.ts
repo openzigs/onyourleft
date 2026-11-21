@@ -142,6 +142,28 @@ export const DEFAULT_BLOBS_PATH = 'data/blobs';
 /** What `OYL_INSTANCE_METRICS_TOKEN` must be; `setup/secrets.ts` holds a made one's file to it too (#2781). */
 export const METRICS_TOKEN = /^[A-Za-z0-9._~-]{32,256}$/;
 
+/**
+ * The tailnet name `deploy/home/instance.env.example` and the guide write
+ * where the owner's own goes (#2855). No tailnet has it: Tailscale gives each
+ * one a name of its own.
+ */
+export const TEMPLATE_TAILNET = 'your-tailnet.ts.net';
+
+/**
+ * Whether `origin` — {@link ServerConfig.origin}, so already an origin alone —
+ * is still the template's example address (#2855): a `.env` copied from
+ * `instance.env.example` and never filled in. Such an origin has the right
+ * SHAPE, which is all {@link readServerConfig} holds it to, and the instance
+ * starts; but no device can reach it, and a card or an emergency kit drawn
+ * for it names an address that is not this instance's. So `instance.ts` asks
+ * this, and the first-run setup does not open while it is true.
+ */
+export function isTemplateOrigin(origin: string | null): boolean {
+  if (origin === null) return false;
+  const host = new URL(origin).hostname.replace(/\.$/, '');
+  return host === TEMPLATE_TAILNET || host.endsWith(`.${TEMPLATE_TAILNET}`);
+}
+
 const present = (value: string | undefined): value is string =>
   value !== undefined && value.trim() !== '';
 

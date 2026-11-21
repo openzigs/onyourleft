@@ -28,7 +28,7 @@ async function open(scripted: ScriptedOperate): Promise<void> {
   mounted = await mount(
     <main>
       <h1>Operate</h1>
-      <OperateKeysPanel port={scripted.port} />
+      <OperateKeysPanel timeZone="UTC" port={scripted.port} />
     </main>,
   );
   await settle();

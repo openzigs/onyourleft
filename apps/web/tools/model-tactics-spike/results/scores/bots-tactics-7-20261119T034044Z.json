@@ -1,0 +1,290 @@
+{
+  "kind": "bots",
+  "promptVersion": "tactics-7",
+  "model": "gemma4:12b",
+  "measuredAt": "2026-11-19T03:40:44Z",
+  "passed": false,
+  "passMark": {
+    "leastBotsMoved": 5,
+    "mostQuietRunS": 30,
+    "leastClimberAttacksOnAClimb": 1,
+    "leastDecisionShare": 0.9,
+    "mostLateShare": 0.1
+  },
+  "races": [
+    {
+      "race": "flat",
+      "seed": 11,
+      "passed": false,
+      "shortfalls": [
+        {
+          "mark": "botsMoved",
+          "scored": 4,
+          "asked": 5
+        },
+        {
+          "mark": "longestQuietRunS",
+          "scored": 73,
+          "asked": 30
+        }
+      ],
+      "score": {
+        "bots": 7,
+        "seconds": 217,
+        "scoredFromS": 7,
+        "botsMoved": 4,
+        "botsToldToMove": 4,
+        "climbers": 1,
+        "attacksOnClimbsByClimbers": 0,
+        "sprinters": 2,
+        "sprintersKicked": 2,
+        "longestQuietRunS": 73,
+        "blownBots": 0,
+        "leadChanges": 24,
+        "answers": 49,
+        "decisions": 49,
+        "lateAnswers": 0,
+        "invalidAnswers": 0,
+        "failedAnswers": 0,
+        "answerMs": {
+          "median": 3432,
+          "p90": 3906,
+          "most": 4163
+        },
+        "promptTokens": {
+          "median": 2359,
+          "p90": 2368,
+          "most": 2374
+        },
+        "outputTokens": {
+          "median": 103,
+          "p90": 110,
+          "most": 116
+        }
+      }
+    },
+    {
+      "race": "flat-mid-lap",
+      "seed": 12,
+      "passed": false,
+      "shortfalls": [
+        {
+          "mark": "botsMoved",
+          "scored": 4,
+          "asked": 5
+        }
+      ],
+      "score": {
+        "bots": 7,
+        "seconds": 223,
+        "scoredFromS": 9,
+        "botsMoved": 4,
+        "botsToldToMove": 4,
+        "climbers": 1,
+        "attacksOnClimbsByClimbers": 0,
+        "sprinters": 2,
+        "sprintersKicked": 2,
+        "longestQuietRunS": 6,
+        "blownBots": 0,
+        "leadChanges": 57,
+        "answers": 46,
+        "decisions": 46,
+        "lateAnswers": 0,
+        "invalidAnswers": 0,
+        "failedAnswers": 0,
+        "answerMs": {
+          "median": 3315,
+          "p90": 4182,
+          "most": 4386
+        },
+        "promptTokens": {
+          "median": 2359,
+          "p90": 2366,
+          "most": 2373
+        },
+        "outputTokens": {
+          "median": 83,
+          "p90": 110,
+          "most": 113
+        }
+      }
+    },
+    {
+      "race": "rolling",
+      "seed": 13,
+      "passed": true,
+      "shortfalls": [],
+      "score": {
+        "bots": 7,
+        "seconds": 233,
+        "scoredFromS": 8,
+        "botsMoved": 5,
+        "botsToldToMove": 5,
+        "climbers": 1,
+        "attacksOnClimbsByClimbers": 0,
+        "sprinters": 2,
+        "sprintersKicked": 2,
+        "longestQuietRunS": 0,
+        "blownBots": 0,
+        "leadChanges": 33,
+        "answers": 52,
+        "decisions": 52,
+        "lateAnswers": 0,
+        "invalidAnswers": 0,
+        "failedAnswers": 0,
+        "answerMs": {
+          "median": 2868,
+          "p90": 3838,
+          "most": 4334
+        },
+        "promptTokens": {
+          "median": 2366,
+          "p90": 2379,
+          "most": 2382
+        },
+        "outputTokens": {
+          "median": 73,
+          "p90": 108,
+          "most": 109
+        }
+      }
+    },
+    {
+      "race": "rolling-mid-lap",
+      "seed": 14,
+      "passed": false,
+      "shortfalls": [
+        {
+          "mark": "botsMoved",
+          "scored": 4,
+          "asked": 5
+        }
+      ],
+      "score": {
+        "bots": 7,
+        "seconds": 226,
+        "scoredFromS": 7,
+        "botsMoved": 4,
+        "botsToldToMove": 4,
+        "climbers": 1,
+        "attacksOnClimbsByClimbers": 0,
+        "sprinters": 2,
+        "sprintersKicked": 2,
+        "longestQuietRunS": 0,
+        "blownBots": 0,
+        "leadChanges": 76,
+        "answers": 56,
+        "decisions": 56,
+        "lateAnswers": 0,
+        "invalidAnswers": 0,
+        "failedAnswers": 0,
+        "answerMs": {
+          "median": 3320,
+          "p90": 3535,
+          "most": 3639
+        },
+        "promptTokens": {
+          "median": 2364,
+          "p90": 2372,
+          "most": 2376
+        },
+        "outputTokens": {
+          "median": 104,
+          "p90": 112,
+          "most": 115
+        }
+      }
+    },
+    {
+      "race": "climb",
+      "seed": 15,
+      "passed": true,
+      "shortfalls": [],
+      "score": {
+        "bots": 7,
+        "seconds": 297,
+        "scoredFromS": 8,
+        "botsMoved": 6,
+        "botsToldToMove": 6,
+        "climbers": 1,
+        "attacksOnClimbsByClimbers": 3,
+        "sprinters": 2,
+        "sprintersKicked": 2,
+        "longestQuietRunS": 21,
+        "blownBots": 1,
+        "leadChanges": 7,
+        "answers": 73,
+        "decisions": 73,
+        "lateAnswers": 0,
+        "invalidAnswers": 0,
+        "failedAnswers": 0,
+        "answerMs": {
+          "median": 2815,
+          "p90": 3411,
+          "most": 3709
+        },
+        "promptTokens": {
+          "median": 2417,
+          "p90": 2436,
+          "most": 2452
+        },
+        "outputTokens": {
+          "median": 81,
+          "p90": 108,
+          "most": 116
+        }
+      }
+    },
+    {
+      "race": "climb-mid-lap",
+      "seed": 16,
+      "passed": false,
+      "shortfalls": [
+        {
+          "mark": "botsMoved",
+          "scored": 4,
+          "asked": 5
+        },
+        {
+          "mark": "longestQuietRunS",
+          "scored": 33,
+          "asked": 30
+        }
+      ],
+      "score": {
+        "bots": 7,
+        "seconds": 257,
+        "scoredFromS": 7,
+        "botsMoved": 4,
+        "botsToldToMove": 4,
+        "climbers": 1,
+        "attacksOnClimbsByClimbers": 2,
+        "sprinters": 2,
+        "sprintersKicked": 2,
+        "longestQuietRunS": 33,
+        "blownBots": 0,
+        "leadChanges": 28,
+        "answers": 63,
+        "decisions": 63,
+        "lateAnswers": 0,
+        "invalidAnswers": 0,
+        "failedAnswers": 0,
+        "answerMs": {
+          "median": 2993,
+          "p90": 3452,
+          "most": 3753
+        },
+        "promptTokens": {
+          "median": 2407,
+          "p90": 2436,
+          "most": 2446
+        },
+        "outputTokens": {
+          "median": 89,
+          "p90": 110,
+          "most": 116
+        }
+      }
+    }
+  ]
+}

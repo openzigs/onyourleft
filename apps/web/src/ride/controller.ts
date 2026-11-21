@@ -73,7 +73,6 @@ import {
   type WorkoutTimeline,
   powerZones,
   seconds,
-  timeInZones,
   unixSeconds,
   type PacerDecisionRecord,
   type PlayerStatus,
@@ -130,7 +129,7 @@ import {
   listRecoverableRecordings,
   recoverRecorder,
 } from '../recording/recorder';
-import { rideTotals, type RideTotals } from '../recording/totals';
+import { RunningPowerZoneTime, RunningRideTotals, type RideTotals } from '../recording/totals';
 import {
   recoverableRides,
   unreadableRecordings,
@@ -195,6 +194,7 @@ import { blockText } from '../workouts/library';
 import { estimateFromRide, thresholdTestOf } from '../workouts/threshold-test-result';
 import type { HoldOff, WorkoutHold } from '../workout/hold-text';
 import type { ReplanPort } from '../workout/replan-port';
+import { warmReplan } from '../workout/replan-job';
 import { createReplanSession, type ReplanSession } from '../workout/replan-session';
 import type { WaitingReplan } from '../workout/replan-text';
 import { withTraceSample, type WorkoutTraceSample } from '../workout/workout-graph';
@@ -2700,9 +2700,10 @@ export function createRideController(options: RideControllerOptions): RideContro
    * #2076: the ride's totals, worked out again only when the recording has
    * moved on — a new sample, or a lap kept or advanced — or, since #2434, the
    * rider the calorie estimate is worked out with has been read again. A
-   * snapshot is built for every reading and every tick, and the series is the
-   * whole ride, so this is what holds the totals to once a sample: once a
-   * second.
+   * snapshot is built for every reading and every tick, so this is what holds
+   * the totals to once a sample: once a second. Since #2283 each of those
+   * folds in the samples since the last one (`RunningRideTotals`), where it
+   * copied the whole recording's channels, a cost that grew with the ride.
    */
   let totalsMemo:
     | {
@@ -2711,6 +2712,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         readonly laps: readonly RecordedCourseLap[];
         readonly open: RecordedCourseLap | undefined;
         readonly rider: CalorieRider;
+        readonly running: RunningRideTotals;
         readonly totals: RideTotals;
       }
     | undefined;
@@ -2727,24 +2729,36 @@ export function createRideController(options: RideControllerOptions): RideContro
       totalsMemo.rider !== liveRider
     ) {
       const ridden = open === undefined ? laps : [...laps, open];
+      // The same recording and rider go on with the fold they have; another
+      // starts again from the first sample.
+      const running =
+        totalsMemo?.recorder === current && totalsMemo.rider === liveRider
+          ? totalsMemo.running
+          : new RunningRideTotals(current.session, current.sampleInterval, liveRider);
       totalsMemo = {
         recorder: current,
         samples,
         laps,
         open,
         rider: liveRider,
-        totals: rideTotals(current.session.series(), ridden, liveRider),
+        running,
+        totals: running.totals(ridden),
       };
     }
     return totalsMemo.totals;
   };
 
-  /** #2077: `powerZoneTime`, worked out again only when the recording or the threshold moves on. */
+  /**
+   * #2077: `powerZoneTime`, worked out again only when the recording or the
+   * threshold moves on; since #2283 from the samples since the last time, as
+   * {@link totalsMemo} is.
+   */
   let zoneTimeMemo:
     | {
         readonly recorder: Recorder;
         readonly samples: number;
         readonly threshold: Watts;
+        readonly running: RunningPowerZoneTime;
         readonly time: TimeInZones;
       }
     | undefined;
@@ -2756,17 +2770,15 @@ export function createRideController(options: RideControllerOptions): RideContro
       zoneTimeMemo.samples !== samples ||
       zoneTimeMemo.threshold !== threshold
     ) {
-      const series = current.session.series();
-      zoneTimeMemo = {
-        recorder: current,
-        samples,
-        threshold,
-        time: timeInZones(
-          powerZones(threshold),
-          series.channels.power ?? [],
-          series.sampleInterval,
-        ),
-      };
+      const running =
+        zoneTimeMemo?.recorder === current && zoneTimeMemo.threshold === threshold
+          ? zoneTimeMemo.running
+          : new RunningPowerZoneTime(
+              current.session,
+              powerZones(threshold),
+              current.sampleInterval,
+            );
+      zoneTimeMemo = { recorder: current, samples, threshold, running, time: running.time() };
     }
     return zoneTimeMemo.time;
   };
@@ -4181,6 +4193,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       },
       onChange: changed,
     });
+    // #2841: load the instance's model now, so the first re-plan does not wait
+    // for it — for the workout being ridden only, never one already replaced.
+    if (workout === current) {
+      void warmReplan(() => port.replanSession());
+    }
     changed();
   };
 

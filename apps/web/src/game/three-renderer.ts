@@ -482,6 +482,7 @@ import {
   clusterDecimate,
   dressed,
   regionOf,
+  straightenSeams,
   vertexNormals,
 } from './people-body';
 import {
@@ -4701,7 +4702,7 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
     case 'tube':
       return new CylinderGeometry(solid.radius, solid.radius, solid.length, LIMB_SEGMENTS);
     case 'ring':
-      return new TorusGeometry(solid.radius, solid.thickness, 5, 12);
+      return ringGeometry(solid.radius, solid.thickness);
     case 'bend':
       // ⚠️ `rotateZ(start)` is applied to the geometry HERE, before the part's
       // own X→Y→Z rotations — which is exactly what `RiderSolid.bend` says it
@@ -4714,6 +4715,37 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
     case 'ball':
       return new SphereGeometry(solid.radius, 8, 6);
   }
+}
+
+/**
+ * How many sides a ring's own section has, and how many straight pieces go
+ * round it: **3 and 20**, the 120 triangles `TorusGeometry(…, 5, 12)` spent
+ * until the modeller's pass of 2026-11-18, spent the other way round.
+ *
+ * A wheel is read by its OUTLINE: twelve pieces round it drew a twelve-sided
+ * wheel, corners and all, from the chase camera and from beside it, while
+ * nobody can count the sides of a 5 cm tyre's section. Twenty pieces turn a
+ * corner of 18° where twelve turned 30°.
+ */
+const RING_SECTION_SIDES = 3;
+const RING_PIECES = 20;
+
+/**
+ * A `ring` — a wheel or the chainring — at the same triangles as before and
+ * the same extent: `radius ± thickness` seen from the side.
+ *
+ * ⚠️ A three-sided section has one corner on the ring's outside and a flat
+ * face on its inside, half its own radius in from the middle, so built at
+ * `thickness` it would reach only `radius − thickness / 2` inward and draw a
+ * tyre three quarters as deep. It is therefore built 4/3 as thick about a
+ * middle moved inward by a third of `thickness`: outside at
+ * `radius + thickness` — a wheel still stands on the road — and inside at
+ * `radius − thickness`. `three-renderer.test.ts` §"the wheels" holds both, and
+ * the triangles.
+ */
+function ringGeometry(radius: number, thickness: number): BufferGeometry {
+  const section = (thickness * 4) / 3;
+  return new TorusGeometry(radius + thickness - section, section, RING_SECTION_SIDES, RING_PIECES);
 }
 
 /** How many sides a tube has. Six reads as round at eight metres and costs four
@@ -17027,6 +17059,18 @@ export class RealisticRiderBelt {
    */
   readonly #handReach: [number, number] = [0, 0];
   readonly #handAlong: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  /**
+   * The modeller's pass of 2026-11-18, the feet as the hands above: where the
+   * BALL of each foot is on its sole — under the shoe, most of the way from
+   * the heel to the toe ({@link FOOT_BALL_SHARE}) — from its ankle, in the
+   * foot bone's own frame, in metres at the body's scale. Measured once off
+   * the file's rest pose, as the hands are. Index 0 is `+X`. @see footBall
+   */
+  readonly #footBall: readonly [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  readonly #ballNow = new Vector3();
+  /** Each foot as the body stands on it, in world space, before this frame's pose. */
+  readonly #footStood: readonly [Quaternion, Quaternion] = [new Quaternion(), new Quaternion()];
+  readonly #footWanted = new Quaternion();
   readonly #handWanted = new Vector3();
   readonly #wristAt = new Vector3();
   readonly #handNow = new Vector3();
@@ -17136,6 +17180,13 @@ export class RealisticRiderBelt {
           this.#handReach[index] = offset.length();
           wrist.getWorldQuaternion(this.#world);
           this.#handAlong[index].copy(offset).normalize().applyQuaternion(this.#world.invert());
+          // And where the ball of each foot is from its ankle.
+          const foot = boneOf(bones, `foot.${index === 0 ? 'L' : 'R'}`);
+          const ball = footBall(skinned, skinned.skeleton.bones.indexOf(foot), this.#a);
+          foot.getWorldQuaternion(this.#world);
+          this.#footBall[index]
+            .copy(ball.sub(foot.getWorldPosition(this.#b)))
+            .applyQuaternion(this.#world.invert());
         }
       }
       ownHelmet.removeFromParent();
@@ -17273,6 +17324,21 @@ export class RealisticRiderBelt {
     into.y = (left.y + right.y) / 2;
     into.z = (left.z + right.z) / 2;
     return true;
+  }
+
+  /**
+   * Where the ball of each of the first rider's feet is drawn, in world
+   * space: index 0 the `+X` foot. For the tests, which hold it to the pedal.
+   * @see footBall
+   */
+  get footBalls(): readonly (readonly [number, number, number])[] {
+    const rider = this.#riders[0];
+    if (rider === undefined) return [];
+    return LIMB_BONES.map((limb, index) => {
+      const foot = boneOf(rider.bones, limb.foot);
+      const ball = this.#ballOf(foot, index as 0 | 1, new Vector3());
+      return [ball.x, ball.y, ball.z] as const;
+    });
   }
 
   /** Every rider's body. For the tests. */
@@ -17512,8 +17578,9 @@ export class RealisticRiderBelt {
    *    shoulders move and the head stays level, looking up the road.
    * 3. The arms are solved from wherever the shoulders now are to the grips,
    *    so the hands stay on the bar: the arms absorb the rock.
-   * 4. Each foot turns about the bicycle's `+X` at its own ankle, which is the
-   *    point the shin is aimed at, so ankling moves no pedal.
+   * 4. Each foot turns about the bicycle's `+X` at its own BALL, which is on
+   *    the pedal (the modeller's pass of 2026-11-18; until then the ankle
+   *    was), so ankling moves no pedal.
    *
    * #1999: every joint is read from `stance` — where the rider's position on
    * the bicycle puts the hips, the shoulders and the hands — so the same four
@@ -17537,6 +17604,10 @@ export class RealisticRiderBelt {
       bone.position.copy(rider.restPositions[index] as Vector3);
     }
     rider.root.updateMatrixWorld(true);
+    // The feet as the rest body stands on them, on this bicycle: level.
+    for (const index of [0, 1] as const) {
+      boneOf(rider.bones, LIMB_BONES[index].foot).getWorldQuaternion(this.#footStood[index]);
+    }
     const along = this.#alongWorld.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
     const across = this.#acrossWorld.set(1, 0, 0).transformDirection(rider.root.matrixWorld);
     const skeletonRoot = boneOf(rider.bones, 'root');
@@ -17650,16 +17721,39 @@ export class RealisticRiderBelt {
         along,
       );
       // The leg: hip to the pedal, the knee forward — `bicycle.ts`'s own rule.
+      // ⚠️ The modeller's pass of 2026-11-18: the BALL of the foot goes on
+      // the pedal, under the shoe — not the ankle, as the hand and not the
+      // wrist goes on the grip above. With the ankle on the pedal's axle the
+      // whole shoe hung under the pedal and ahead of it, and the leg was
+      // straight at the bottom of the stroke only because the foot was 9 cm
+      // too low. The foot lies as the body stands on it, turned toe-down by
+      // {@link FOOT_TOE_DOWN_RADIANS} and by its ankling (4) — in the
+      // BICYCLE's frame, whatever the shin above it is doing, so a shin that
+      // slopes forward at the top of the stroke does not point the toes at
+      // the road. The ankle is behind and above the pedal by the ball's own
+      // offset on that foot, and the leg is solved from the hip to it.
+      //
+      // 4. #625: ankling. A toe lifted is a turn of MINUS the dorsiflexion
+      // about `+X`, which takes `+Z` toward `−Y`. It turns the foot about
+      // the BALL now — the ankle rises and falls over a pedal that does not
+      // move.
+      const footBone = boneOf(rider.bones, limb.foot);
+      const footTurned = this.#footWanted
+        .setFromAxisAngle(across, FOOT_TOE_DOWN_RADIANS - motion.ankle[index])
+        .multiply(this.#footStood[index]);
       const hip = boneOf(rider.bones, limb.thigh).getWorldPosition(this.#a);
-      const foot = toWorld(joints.foot[index], this.#b);
+      const ankle = toWorld(joints.foot[index], this.#b).sub(
+        this.#ballNow.copy(this.#footBall[index]).applyQuaternion(footTurned),
+      );
       const thigh = this.#length(rider, limb.thigh, limb.shin);
       const shin = this.#length(rider, limb.shin, limb.foot);
-      const knee = twoBoneJoint(hip, foot, thigh, shin, forward, this.#d);
+      const knee = twoBoneJoint(hip, ankle, thigh, shin, forward, this.#d);
       this.#aim(rider, limb.thigh, limb.shin, this.#c.copy(knee).sub(hip));
-      this.#aim(rider, limb.shin, limb.foot, this.#c.copy(foot).sub(knee));
-      // 4. #625: ankling. A toe lifted is a turn of MINUS the dorsiflexion
-      // about `+X`, which takes `+Z` toward `−Y`.
-      this.#turnInWorld(boneOf(rider.bones, limb.foot), across, -motion.ankle[index]);
+      this.#aim(rider, limb.shin, limb.foot, this.#c.copy(ankle).sub(knee));
+      this.#parent.identity();
+      footBone.parent?.getWorldQuaternion(this.#parent);
+      footBone.quaternion.copy(this.#parent.invert().multiply(footTurned));
+      footBone.updateMatrixWorld(true);
     }
   }
 
@@ -17716,6 +17810,15 @@ export class RealisticRiderBelt {
     bone.quaternion.copy(this.#parent.invert().multiply(this.#spin.multiply(this.#world)));
     bone.updateMatrixWorld(true);
   }
+
+  /** Where the ball of a foot is now, in world space, written into `into`. @see footBall */
+  #ballOf(foot: Bone, index: 0 | 1, into: Vector3): Vector3 {
+    foot.getWorldQuaternion(this.#world);
+    into.copy(this.#footBall[index]).applyQuaternion(this.#world);
+    return into.add(foot.getWorldPosition(this.#ballFrom));
+  }
+
+  readonly #ballFrom = new Vector3();
 
   #length(rider: RealisticRiderSlot, from: string, to: string): number {
     const start = boneOf(rider.bones, from).getWorldPosition(this.#scratchLength);
@@ -17894,6 +17997,56 @@ function handMiddle(mesh: SkinnedMesh, bone: number, into: Vector3): Vector3 {
   }
   if (count === 0) throw new Error('the rider model carries no hand on its wrist');
   return into.divideScalar(count);
+}
+
+/**
+ * How far along a foot, from the heel to the toe, its ball is — the part of
+ * the sole a cyclist's shoe is clipped to its pedal under: **0.7**.
+ */
+const FOOT_BALL_SHARE = 0.7;
+
+/**
+ * How far a foot on its pedal is turned toe-down from level: **12°**. A
+ * cyclist's foot is never flat on the pedal — the heel rides a little above
+ * the ball all round the stroke — and ankling (`bicycle.ts`
+ * §`ANKLE_SWING_RADIANS`) swings it either side of this.
+ */
+const FOOT_TOE_DOWN_RADIANS = (12 * Math.PI) / 180;
+
+/**
+ * The ball of a foot, on its sole — in world space, off the pose the skinned
+ * mesh is drawn in now, which a belt being built holds at rest: standing,
+ * facing `+Z`. Of the vertices whose heaviest weight is on `bone` (a foot),
+ * the lowest is the sole and the rearmost and foremost the heel and the toe;
+ * the ball is {@link FOOT_BALL_SHARE} of the way from the one to the other,
+ * on the sole, under the middle of the foot. Written into `into`. Run once,
+ * when a belt is built, as {@link handMiddle} is.
+ */
+function footBall(mesh: SkinnedMesh, bone: number, into: Vector3): Vector3 {
+  const carried = mesh.geometry.getAttribute('skinIndex');
+  const weights = mesh.geometry.getAttribute('skinWeight');
+  const vertex = new Vector3();
+  let [sole, heel, toe, across, count] = [Infinity, Infinity, -Infinity, 0, 0];
+  for (let at = 0; at < carried.count; at += 1) {
+    let most = 0;
+    let heaviest = -1;
+    for (let slot = 0; slot < 4; slot += 1) {
+      const weight = weights.getComponent(at, slot);
+      if (weight > most) {
+        most = weight;
+        heaviest = carried.getComponent(at, slot);
+      }
+    }
+    if (heaviest !== bone) continue;
+    mesh.getVertexPosition(at, vertex).applyMatrix4(mesh.matrixWorld);
+    sole = Math.min(sole, vertex.y);
+    heel = Math.min(heel, vertex.z);
+    toe = Math.max(toe, vertex.z);
+    across += vertex.x;
+    count += 1;
+  }
+  if (count === 0) throw new Error('the rider model carries no foot on its ankle');
+  return into.set(across / count, sole, heel + (toe - heel) * FOOT_BALL_SHARE);
 }
 
 /**
@@ -18453,6 +18606,9 @@ function bakedPeople(body: Object3D, ride: (crankAngle: number) => SkinnedMesh):
     plain[vertex * 3 + 1] = positions[from * 3 + 1] as number;
     plain[vertex * 3 + 2] = positions[from * 3 + 2] as number;
   }
+  // The modeller's pass of 2026-11-18: the seams between the regions run
+  // straight round the body, where the cut had left each a saw's edge.
+  straightenSeams(plain, cut.indices, regions);
   const dress = dressed(cut.indices, regions);
   // The clothes stood off along the rest body's own normals, in the body's
   // units, BEFORE it is posed: so they bend with the joint they are on.
@@ -18965,6 +19121,14 @@ export function peopleDrawnOf(view: GameView):
       readonly blendedTriangles: number;
       /** #1618: @see PeopleBelt.standOff */
       readonly standOff: { readonly clothes: number; readonly skin: number };
+      /**
+       * The modeller's pass of 2026-11-18: how far the top's hem over the
+       * bottoms strays up and down round the body, as a share of its height —
+       * the spread of the rest heights of every vertex drawn once as a top
+       * and once as bottoms. A saw's edge strays by its teeth; a straightened
+       * hem (`people-body.ts` §`straightenSeams`) by a waist's own tilt.
+       */
+      readonly hemSpread: number;
     }
   | undefined {
   const belt = view instanceof ThreeGameView ? view.people : undefined;
@@ -18993,6 +19157,21 @@ export function peopleDrawnOf(view: GameView):
       }
     }
   }
+  // The hem: the columns drawn in both a top and bottoms, by their rest heights.
+  const column = geometry.getAttribute('oylVertex');
+  const rest = geometry.getAttribute('position');
+  const wears = new Map<number, number>();
+  for (let vertex = 0; vertex < column.count; vertex += 1) {
+    const worn = region.getX(vertex);
+    const bit = worn === PersonRegion.top ? 1 : worn === PersonRegion.bottoms ? 2 : 0;
+    wears.set(column.getX(vertex), (wears.get(column.getX(vertex)) ?? 0) | bit);
+  }
+  let [hemLow, hemHigh] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (let vertex = 0; vertex < column.count; vertex += 1) {
+    if (wears.get(column.getX(vertex)) !== 3) continue;
+    hemLow = Math.min(hemLow, rest.getY(vertex));
+    hemHigh = Math.max(hemHigh, rest.getY(vertex));
+  }
   return {
     near: read(belt.bodies),
     far: read(belt.impostors),
@@ -19000,6 +19179,7 @@ export function peopleDrawnOf(view: GameView):
     animationBytes: belt.animationBytes,
     blendedTriangles,
     standOff: belt.standOff,
+    hemSpread: hemHigh - hemLow,
   };
 }
 

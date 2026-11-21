@@ -220,6 +220,11 @@ describe('the Connect flow — #2828', () => {
     await pressNamed(CONNECT_FLOW_TEXT.again);
     // The claim is pending on the server: the rider is told to press No there.
     expect(text()).toContain(OWNER_CLAIM_TEXT.mismatch);
+    // #2859: said alone, under "Not claimed", so it says what happened and opens with no "Then".
+    expect(OWNER_CLAIM_TEXT.mismatch).toMatch(
+      /^The numbers did not match, so this device has not claimed/,
+    );
+    expect(OWNER_CLAIM_TEXT.mismatch).not.toMatch(/^Then\b/);
   });
 
   it('holds Continue and Scan a code while the expert’s Connect is in flight', async () => {

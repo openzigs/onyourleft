@@ -54,9 +54,13 @@ describe('the model-tactics spike’s boundary (#2616)', () => {
     const roots = modulesUnder(SPIKE);
     expect(roots).toContain(`${SPIKE}/adapter.ts`);
     expect(roots).toContain(`${SPIKE}/live.ts`);
+    // #2838: the scoring harness is under the same roof, and held to the same rule.
+    expect(roots).toContain(`${SPIKE}/harness/main.ts`);
     const { modules } = walk(roots);
-    // Not vacuous: the walk went through the race step the adapter rides.
+    // Not vacuous: the walk went through the race step the adapter rides,
+    // and the pacer's director the harness rides.
     expect(modules).toContain('apps/web/src/game/lap-race/ride-race.ts');
+    expect(modules).toContain('apps/web/src/game/model-pacer.ts');
     expect(seamViolations(roots, forbiddenInTheTree())).toEqual([]);
   });
 });

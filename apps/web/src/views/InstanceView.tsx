@@ -5,7 +5,7 @@ import { StatementsPanel } from './StatementsPanel';
 import { ERASE_ACCOUNT_TEXT, EraseAccountPanel } from './EraseAccount';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BlocksPanel } from './BlocksPanel';
-import { useCallback, useEffect, useState, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import type { CameraController } from '../camera/session';
 import { Button } from '../design/Button';
@@ -71,7 +71,7 @@ import { SyncPanel } from './SyncPanel';
  */
 export const INSTANCE_RECEIVES: readonly string[] = [
   'This device’s public key, which is how the server knows it is you. The private key never leaves this device.',
-  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, and the server keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. A server keeps your earlier names there too, for moderation.',
+  'The name other riders will see, if you type one. It is sent each time you press Connect with a name typed, or “Sign in as the owner” after claiming your own server, and the server keeps it only if it has not seen this device before. Once you are connected you can change it on this screen. A server keeps your earlier names there too, for moderation.',
   'Your internet address and your device or browser type, as any server you connect to sees them.',
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
@@ -263,21 +263,43 @@ export function InstanceView({
   /** This screen deleted the account on the instance (#906): said once the device is disconnected. */
   const [erased, setErased] = useState(false);
 
+  /**
+   * Whether this screen is still drawn (#2851). A read is four answers from
+   * the instance, one after the other, and a rider can leave between any two.
+   * ⚠️ **Every `await` in {@link read} is followed by a look at this before
+   * anything is set or asked**: an answer that arrives for a screen that has
+   * gone sets nothing and asks the instance nothing more.
+   */
+  const drawn = useRef(true);
+  useEffect(() => {
+    // Set here as well as above: a development double-mount runs the cleanup once.
+    drawn.current = true;
+    return () => {
+      drawn.current = false;
+    };
+  }, []);
+
   const read = useCallback(async (): Promise<void> => {
     if (port === undefined) return;
     const now = await port.current();
+    if (!drawn.current) return;
     setState(now);
     setStanding(undefined);
     setOwnership(undefined);
     if (now.kind === 'connected') {
       setDevices(undefined);
-      setDevices(await port.devices());
+      const listed = await port.devices();
+      if (!drawn.current) return;
+      setDevices(listed);
       // #1208: every notice, at each sealed read of this screen.
-      setChanges(await port.accountChanges());
+      const noticed = await port.accountChanges();
+      if (!drawn.current) return;
+      setChanges(noticed);
       // Both read `GET /v1/auth/account`, so they are asked together rather
       // than one after the other (#2617's review). #2603: only the instance's
       // owner is offered Operate.
       const [moderating, owning] = await Promise.all([moderation?.standing(), operate?.standing()]);
+      if (!drawn.current) return;
       if (moderating !== undefined) setStanding(moderating);
       if (owning !== undefined) setOwnership(owning);
     }

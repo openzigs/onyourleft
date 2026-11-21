@@ -363,6 +363,7 @@ issue that first needs it.
 | `identity/errors.ts` | `IdentityError`, and the rule that no message names the material it rejected |
 | `identity/testing.ts` | a **non-cryptographic** stand-in, for this package's own tests. Not exported |
 | `route/profile.ts` | elevation and gradient as a function of distance (#89) |
+| `route/rolling.ts` | the open-world ride's rolling route (#2895, ADR 0087 D-4.1, D-6): a profile on a ride-anchored 10 m grid that grows along the street graph's default ways, swaps its tail at a junction only before the 100 m lock, turns round at a U-turn or a dead end, and keeps 1 km behind the rider. `route/rolling-testing.ts` builds synthetic street graphs for its tests |
 | `trainer/simulation.ts` | the gradient setpoint driver: what to tell a trainer, and when (#90) |
 | `pacer/pacing.ts` | the bot pacer's pacing rule: a target w/kg, and how it responds to a gradient (#92) |
 | `pacer/gap.ts` | how far ahead the bot is, as a distance and as a time (#92) |

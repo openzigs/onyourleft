@@ -119,9 +119,93 @@ describe('an AI-pacer decision, read back as the app reads it (#2712)', () => {
       status: 200,
       body: { plan: 'even', intent: 'hold', say },
     });
-    expect(PACER_PROMPT_VERSION).toBe('pacer-3');
     expect(PACER_SYSTEM).toMatch(/"aim for 90 rpm"/);
     expect(PACER_SYSTEM).toMatch(/Never write any other number/);
+  });
+
+  it('passes where the rider is to the model, and asks for an intent that follows the gap — #2777', async () => {
+    const server = chatServer(() => PACER_ANSWER);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    const placed = {
+      ...PACER_INPUT,
+      riderGapM: 40,
+      riderInDraft: false,
+      riderPlace: 'ahead',
+      gapTrend: 'rider-gaining',
+    };
+    expect((await pace(w, riders[0]!.token, { input: placed })).status).toBe(200);
+    const body = server.requests[0]?.body as { messages: { content: string }[] };
+    expect(JSON.parse(body.messages[1]!.content)).toEqual(placed);
+    for (const field of ['riderPlace', 'gapTrend', 'rider-gaining', 'rider-losing']) {
+      expect(PACER_SYSTEM).toContain(`"${field}"`);
+    }
+    expect(PACER_SYSTEM).toMatch(/not pulling away: "hold" or "lift", never "ease"/);
+    expect(PACER_SYSTEM).toMatch(/coming back: "hold" or "ease", never "lift"/);
+    // The owner's ride: the model eased while telling a rider ahead of it to ease.
+    expect(PACER_SYSTEM).toMatch(/never a reason for you to ease/);
+    expect(PACER_SYSTEM).toMatch(/it must match your intent/);
+    // The old inertia, which kept an ease in force while the rider rode away, is gone.
+    expect(PACER_SYSTEM).not.toMatch(/Change intent only every few decisions/);
+  });
+
+  it('is no decision for a line that says the opposite of its intent — #2777', async () => {
+    const answers = [
+      JSON.stringify({ plan: 'rolling', intent: 'ease', say: 'I will push on this climb now.' }),
+      JSON.stringify({ plan: 'rolling', intent: 'hold', say: 'Here I come, stay sharp.' }),
+      JSON.stringify({
+        plan: 'rolling',
+        intent: 'lift',
+        say: 'I am easing off so you can bridge.',
+      }),
+    ];
+    let next = 0;
+    const server = chatServer(() => answers[next++]);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    for (const answer of answers) {
+      const decided = await pace(w, riders[0]!.token);
+      expect(decided.status, answer).toBe(502);
+      expect(codeOf(decided)).toBe('tactics_invalid');
+      expect(JSON.stringify(decided.body)).not.toMatch(/push|come|easing/);
+    }
+  });
+
+  it('passes the course ahead to the model, and asks it to pace the terrain where the gap leaves a choice — #2794', async () => {
+    const server = chatServer(() => PACER_ANSWER);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    expect((await pace(w, riders[0]!.token)).status).toBe(200);
+    const body = server.requests[0]?.body as { messages: { content: string }[] };
+    expect((JSON.parse(body.messages[1]!.content) as { course?: unknown }).course).toEqual(
+      PACER_INPUT.course,
+    );
+    expect(PACER_PROMPT_VERSION).toBe('pacer-5');
+    for (const field of ['course', 'climb', 'descent', 'inM', 'lengthM', 'avgPct', 'maxPct']) {
+      expect(PACER_SYSTEM).toContain(`"${field}"`);
+    }
+    for (const field of ['climbLeftM', 'lapLeftM']) expect(PACER_SYSTEM).toContain(`"${field}"`);
+    expect(PACER_SYSTEM).toMatch(/"ease" in the last 300 m before a climb/);
+    expect(PACER_SYSTEM).toMatch(/"lift" on a descent/);
+    // The gap rules still come first: the terrain only chooses where they leave a choice.
+    expect(PACER_SYSTEM).toMatch(/Where these rules leave a choice, pace the terrain/);
+    expect(PACER_SYSTEM).toMatch(
+      /in your draft \("riderInDraft"\): "hold", except on the terrain below/,
+    );
+    // Measured on the owner's PC: easing lines quoted the gap in metres, which the screen voids.
+    expect(PACER_SYSTEM).toMatch(/distance \(not the gap, not the road ahead\)/);
+  });
+
+  it('refuses a course ahead that carries anything but its numbers, before a model is called — #2794', async () => {
+    const server = chatServer(() => PACER_ANSWER);
+    const { world: w, riders } = await pacerWorld(1, { local: OFFERED, fetch: server.fetch });
+    await consentToTactics(w, riders[0]!.token);
+    const placed = await pace(w, riders[0]!.token, {
+      input: { ...PACER_INPUT, course: { ...PACER_INPUT.course, name: 'Box Hill' } },
+    });
+    expect(codeOf(placed)).toBe('validation_failed');
+    expect(JSON.stringify(placed.body)).not.toContain('Box Hill');
+    expect(server.requests).toEqual([]);
   });
 
   it('refuses a state whose last lines carry what the screen stops, before a model is called — #2760', async () => {

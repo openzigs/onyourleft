@@ -56,11 +56,13 @@ export {
 function Row({
   room,
   onEnd,
+  timeZone,
 }: {
   readonly room: OperateRoom;
   readonly onEnd: (room: OperateRoom) => void;
+  readonly timeZone: string;
 }): JSX.Element {
-  const line = roomLine(room);
+  const line = roomLine(room, timeZone);
   return (
     <li>
       <strong>{line.kind}</strong>
@@ -82,8 +84,11 @@ function Row({
 /** The Rooms section: the open rooms, who is in each, and *End room*. */
 export function OperateRoomsPanel({
   port,
+  timeZone,
 }: {
   readonly port: Pick<OperatePort, 'rooms' | 'endRoom'>;
+  /** The IANA zone its moments are drawn in, named (#2917): the device's, from `OperateView`. */
+  readonly timeZone: string;
 }): JSX.Element {
   const [read, setRead] = useState<OperateRoomsRead | undefined>(undefined);
   /** The room whose *End room* is open, or `undefined`. */
@@ -160,6 +165,7 @@ export function OperateRoomsPanel({
             <Row
               key={room.roomId}
               room={room}
+              timeZone={timeZone}
               onEnd={(chosen) => {
                 setReason('other');
                 setTyped('');

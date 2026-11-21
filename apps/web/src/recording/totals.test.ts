@@ -10,17 +10,24 @@ import { describe, expect, it } from 'vitest';
 import {
   altitudeMetres,
   beatsPerMinute,
+  createRecordingSession,
   kilograms,
   metres,
   metresPerSecond,
+  powerZones,
   recordedAscent,
   rideCalories,
   seconds,
+  timeInZones,
   unixSeconds,
   watts,
+  type CalorieRider,
+  type ChannelReading,
   type RecordedSeries,
+  type RecordingSession,
+  type UnixSeconds,
 } from '@onyourleft/domain';
-import type { StreamChannelValue } from '@onyourleft/store';
+import type { RecordedCourseLap, StreamChannelValue } from '@onyourleft/store';
 
 import {
   rideAveragePower,
@@ -30,6 +37,9 @@ import {
   rideEnergy,
   rideTotals,
   recordedRideCalories,
+  RunningPowerZoneTime,
+  RunningRideTotals,
+  type RunningSource,
 } from './totals';
 
 function series(
@@ -193,5 +203,173 @@ describe('the ride’s calorie estimate so far (#2434)', () => {
     expect(totals.averagePower).toBe(rideAveragePower(readings));
     expect(totals.energy).toBe(rideEnergy(plain));
     expect(totals.calories).toEqual(recordedRideCalories(plain, {}));
+  });
+});
+
+describe('#2283 — the ride so far, folded as the recording grows', () => {
+  const START = 1_800_000_000;
+  const RIDER = { sex: 'female', ageYears: 37, mass: kilograms(61) } as const;
+  const THRESHOLD = watts(230);
+  const HOURS_3 = 3 * 60 * 60;
+
+  /** A deterministic stand-in for a rider's readings: the same ride every run. */
+  const prng = (seed: number) => {
+    let state = seed;
+    return (): number => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+  };
+
+  /** A session as the recorder makes one, and a source that counts the slots it hands out. */
+  const recording = () => {
+    const session = createRecordingSession<StreamChannelValue>({
+      id: 'ride-2283',
+      sampleInterval: seconds(1),
+      lateToleranceSeconds: 2,
+    });
+    session.start(unixSeconds(START));
+    let sliced = 0;
+    const source: RunningSource = {
+      get sampleCount() {
+        return session.sampleCount;
+      },
+      get sealedCount() {
+        return session.sealedCount;
+      },
+      slice(from, to) {
+        const slice = session.slice(from, to);
+        sliced += slice.sampleCount;
+        return slice;
+      },
+    };
+    return { session, source, sliced: () => sliced };
+  };
+
+  type Channel = 'power' | 'speed' | 'heartRate' | 'altitude';
+
+  /**
+   * Rides `secondsLong`: a reading of each of `channels` most seconds, at an
+   * odd instant within it, and every seventh second a second power reading
+   * into a slot the last answer already counted, which is not sealed yet and
+   * so takes it. `each` is called after every second, and again after that
+   * reading, as the HUD asks.
+   */
+  const ride = (
+    session: RecordingSession<StreamChannelValue>,
+    secondsLong: number,
+    channels: readonly Channel[],
+    each: (second: number) => void,
+  ): void => {
+    const random = prng(2283);
+    let altitude = 120;
+    const reading = (channel: Channel, at: UnixSeconds): ChannelReading<StreamChannelValue> => {
+      switch (channel) {
+        case 'power':
+          return { channel, value: watts(150 + Math.round(random() * 220)), at };
+        case 'speed':
+          return { channel, value: metresPerSecond(6 + random() * 7.3), at };
+        case 'heartRate':
+          return { channel, value: beatsPerMinute(105 + Math.round(random() * 60)), at };
+        case 'altitude':
+          return { channel, value: altitudeMetres(altitude), at };
+      }
+    };
+    for (let second = 0; second < secondsLong; second += 1) {
+      const at = unixSeconds(START + second + 0.1 + random() * 0.8);
+      // A long climb and descent, with noise inside the run rule's threshold.
+      altitude += Math.sin(second / 900) * 0.4 + (random() - 0.5) * 0.6;
+      for (const channel of channels) {
+        // A dropout now and then: a slot with nothing in it.
+        if (random() < 0.03) continue;
+        session.observe(reading(channel, at));
+      }
+      session.advanceTo(unixSeconds(START + second + 1));
+      each(second);
+      if (second % 7 === 3 && channels.includes('power')) {
+        expect(
+          session.observe({
+            channel: 'power',
+            value: watts(400),
+            at: unixSeconds(START + second + 0.95),
+          }),
+        ).toBe('recorded');
+        each(second);
+      }
+    }
+  };
+
+  /** The answers over the whole series, as the HUD worked them out before #2283. */
+  const batch = (
+    session: RecordingSession<StreamChannelValue>,
+    laps: readonly Pick<RecordedCourseLap, 'ascent'>[],
+    rider: CalorieRider,
+  ) => {
+    const whole = session.series();
+    return {
+      totals: rideTotals(whole, laps, rider),
+      zones: timeInZones(powerZones(THRESHOLD), whole.channels.power ?? [], whole.sampleInterval),
+    };
+  };
+
+  it('gives a three-hour ride’s totals and time in zones exactly as the whole series does', () => {
+    const { session, source, sliced } = recording();
+    const totals = new RunningRideTotals(source, seconds(1), RIDER);
+    const zones = new RunningPowerZoneTime(source, powerZones(THRESHOLD), seconds(1));
+    let asked = 0;
+    let compared = 0;
+    ride(session, HOURS_3, ['power', 'speed', 'heartRate', 'altitude'], (second) => {
+      asked += 1;
+      const running = { totals: totals.totals([]), zones: zones.time() };
+      // Every answer is folded. The whole series is copied to check it for the
+      // first ten minutes and every 61st second after, which keeps this test
+      // from being the cost it removes.
+      if (second < 600 || second % 61 === 0) {
+        expect(running, `at ${String(second)} s`).toStrictEqual(batch(session, [], RIDER));
+        compared += 1;
+      }
+    });
+    session.stop(unixSeconds(START + HOURS_3 + 5));
+    const atTheEnd = { totals: totals.totals([]), zones: zones.time() };
+    expect(atTheEnd).toStrictEqual(batch(session, [], RIDER));
+    // Non-vacuity: every figure is one, and the ride climbed.
+    expect(atTheEnd.totals.distance).toBeGreaterThan(50_000);
+    expect(atTheEnd.totals.climbed).toBeGreaterThan(100);
+    expect(atTheEnd.totals.averagePower).toBeGreaterThan(150);
+    expect(atTheEnd.totals.calories?.basis).toBe('power');
+    expect(atTheEnd.zones.covered).toBeGreaterThan(HOURS_3 * 0.9);
+    expect(compared).toBeGreaterThan(700);
+    // What it cost: each sealed slot is handed out once to be held, and only
+    // the few still open again on each call, for each of the two folds.
+    // Copying the whole ride on each call, as before, is about
+    // HOURS_3 × asked slots: some seventy million.
+    expect(sliced()).toBeLessThan(2 * (HOURS_3 + 4 * asked));
+  });
+
+  it('estimates a ride with heart rate and no power from the heart rate, as the whole series does', () => {
+    const { session, source } = recording();
+    const totals = new RunningRideTotals(source, seconds(1), RIDER);
+    const unknown = new RunningRideTotals(source, seconds(1));
+    ride(session, 1_200, ['heartRate', 'speed'], () => {
+      expect(totals.totals([])).toStrictEqual(batch(session, [], RIDER).totals);
+      expect(unknown.totals([])).toStrictEqual(batch(session, [], {}).totals);
+    });
+    const atTheEnd = totals.totals([]);
+    expect(atTheEnd.calories?.basis).toBe('heart-rate');
+    expect(atTheEnd.calories?.energy).toBeGreaterThan(0);
+    expect(atTheEnd.recordedHeartRate).toBe(true);
+    // And none without a rider to estimate it for.
+    expect(unknown.totals([]).calories).toBeUndefined();
+  });
+
+  it('climbs what the laps state on a ride with no altitude, and nothing before any reading', () => {
+    const { session, source } = recording();
+    const totals = new RunningRideTotals(source, seconds(1));
+    expect(totals.totals([])).toStrictEqual(batch(session, [], {}).totals);
+    const laps = [{ ascent: metres(14) }, { ascent: undefined }, { ascent: metres(4) }];
+    ride(session, 90, ['power', 'speed'], () => {
+      expect(totals.totals(laps)).toStrictEqual(batch(session, laps, {}).totals);
+    });
+    expect(totals.totals(laps).climbed).toBe(18);
   });
 });

@@ -1301,3 +1301,11 @@ Until 2026-10-07 this section was §"Owner questions left open".
   D-3). The operator is still the athlete of the owner key, and the deputy is still not the operator.
   Neither the variable nor a claim changes who may ask for analysis. This entry only points there.
   The body above is not edited. (#2780)
+- **2026-11-19** — **Once [ADR 0086](0086-the-setup-wizard-recommends-one-ai-model.md) is
+  Accepted, it supersedes point 8 of the 2026-11-14 entry (*"The repository names and recommends no
+  model"*) for the setup wizard's AI step only.** The owner ruled on #2869 on 2026-11-19, verbatim:
+  *"Yes, one recommended model (Recommended)"*. That step may offer one recommended model, named
+  with its size, as a one-press download above the typed field, and offers a model the owner's
+  Ollama already has that fits before it. Point 8 stands everywhere else: the app's Operate panel
+  names and recommends no model, and no setting defaults to one. This entry only points there. The
+  body above is not edited. (#2869)

@@ -58,11 +58,11 @@ function drawn(fact: Element) {
 
 describe('the Status panel draws operate-text’s rows — #2644', () => {
   it('shows every row, in order, with its value, its code and its warning', async () => {
-    mounted = await mount(<OperateStatusPanel status={STATUS} now={() => NOW} />);
+    mounted = await mount(<OperateStatusPanel timeZone="UTC" status={STATUS} now={() => NOW} />);
     const shown = [...mounted.container.querySelectorAll('dl.oyl-operate__status > div')].map(
       drawn,
     );
-    const rows = statusRows(STATUS, NOW);
+    const rows = statusRows(STATUS, NOW, 'UTC');
     expect(rows.some((row) => row.code)).toBe(true);
     expect(rows.filter((row) => row.warning !== null).length).toBe(2);
     expect(shown).toEqual(

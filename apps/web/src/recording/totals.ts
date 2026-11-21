@@ -32,19 +32,28 @@
  */
 
 import {
+  caloriesFromWork,
+  HeartRateCaloriesFold,
   joules,
   metres,
   metresPerSecond,
   recordedAscent,
+  RecordedAscentFold,
   rideCalories,
+  TimeInZonesFold,
   watts,
   type CalorieEstimate,
   type CalorieRider,
   type Joules,
   type Metres,
   type MetresPerSecond,
+  type RecordedChannels,
   type RecordedSeries,
+  type RecordingSession,
+  type Seconds,
+  type TimeInZones,
   type Watts,
+  type Zone,
 } from '@onyourleft/domain';
 import type { RecordedCourseLap, StreamChannelValue } from '@onyourleft/store';
 
@@ -237,6 +246,11 @@ export function rideClimbed(
   if (altitude !== undefined) {
     return recordedAscent(altitude);
   }
+  return lapsClimbed(laps);
+}
+
+/** What the laps say was climbed: a game ride's climb. @see rideClimbed */
+function lapsClimbed(laps: readonly Pick<RecordedCourseLap, 'ascent'>[]): Metres | undefined {
   const stated = laps.filter((lap) => lap.ascent !== undefined);
   if (stated.length === 0) {
     return undefined;
@@ -267,4 +281,183 @@ export function rideTotals(
     calories: caloriesFrom(series, rider, energy),
     recordedHeartRate: series.channels.heartRate?.some((sample) => sample !== undefined) ?? false,
   };
+}
+
+/**
+ * What a running fold reads a recording through: the recorder's session.
+ * `sealedCount` is how many leading slots can no longer change, so those are
+ * folded once and held; the slots after them can still take a late reading,
+ * so they are folded again, on a copy, every time.
+ */
+export type RunningSource = Pick<
+  RecordingSession<StreamChannelValue>,
+  'sampleCount' | 'sealedCount' | 'slice'
+>;
+
+/** One slot at a time, and a copy that goes on alone. */
+interface SlotFold<F> {
+  add(channels: RecordedChannels<StreamChannelValue>, at: number): void;
+  copy(): F;
+}
+
+/**
+ * A fold over every slot of a recording so far, worked out from the slots it
+ * has not held yet rather than from the first slot again — #2283. The HUD's
+ * totals and its time in zones were each `series()`, a copy of every channel
+ * of the whole ride, once a sample: a cost that grew with the ride.
+ */
+class Running<F extends SlotFold<F>> {
+  readonly #source: RunningSource;
+  readonly #held: F;
+  /** How many leading slots {@link #held} has had: the sealed ones, once each. */
+  #folded = 0;
+
+  constructor(source: RunningSource, start: F) {
+    this.#source = source;
+    this.#held = start;
+  }
+
+  /** A fold that has had every slot so far, in order. */
+  now(): F {
+    const count = this.#source.sampleCount;
+    const sealed = Math.min(this.#source.sealedCount, count);
+    const slice = this.#source.slice(this.#folded, count);
+    let at = 0;
+    for (; at < sealed - this.#folded; at += 1) this.#held.add(slice.channels, at);
+    this.#folded += at;
+    const open = this.#held.copy();
+    for (; at < slice.sampleCount; at += 1) open.add(slice.channels, at);
+    return open;
+  }
+}
+
+/** {@link rideTotals}' sums, one slot at a time. */
+class TotalsFold implements SlotFold<TotalsFold> {
+  distance = 0;
+  powerTotal = 0;
+  work = 0;
+  powerCount = 0;
+  heartRateRead = false;
+  /** Whether the recording has an altitude channel, which decides where the climb comes from. */
+  altitudeChannel = false;
+  ascent = new RecordedAscentFold();
+  heartRateCalories: HeartRateCaloriesFold;
+
+  readonly sampleInterval: Seconds;
+
+  constructor(sampleInterval: Seconds, rider: CalorieRider) {
+    this.sampleInterval = sampleInterval;
+    this.heartRateCalories = new HeartRateCaloriesFold(sampleInterval, rider);
+  }
+
+  add(channels: RecordedChannels<StreamChannelValue>, at: number): void {
+    // Each sum is added to in the order `rideTotals` adds to it, so that the
+    // two are the same number and not merely close (`totals.test.ts`).
+    const speed = channels.speed?.[at];
+    if (speed !== undefined) this.distance += speed * this.sampleInterval;
+    const power = channels.power?.[at];
+    if (power !== undefined) {
+      this.powerTotal += power;
+      this.work += power * this.sampleInterval;
+      this.powerCount += 1;
+    }
+    const heartRate = channels.heartRate?.[at];
+    if (heartRate !== undefined) this.heartRateRead = true;
+    this.heartRateCalories.add(heartRate);
+    if (channels.altitude !== undefined) {
+      this.altitudeChannel = true;
+      this.ascent.add(channels.altitude[at]);
+    }
+  }
+
+  copy(): TotalsFold {
+    const next = new TotalsFold(this.sampleInterval, {});
+    next.distance = this.distance;
+    next.powerTotal = this.powerTotal;
+    next.work = this.work;
+    next.powerCount = this.powerCount;
+    next.heartRateRead = this.heartRateRead;
+    next.altitudeChannel = this.altitudeChannel;
+    next.ascent = this.ascent.copy();
+    next.heartRateCalories = this.heartRateCalories.copy();
+    return next;
+  }
+
+  totals(laps: readonly Pick<RecordedCourseLap, 'ascent'>[]): RideTotals {
+    const sums = { total: this.powerTotal, work: this.work, count: this.powerCount };
+    const energy = workOf(sums);
+    const heartRateEnergy = this.heartRateCalories.energy;
+    return {
+      distance: metres(this.distance),
+      climbed: this.altitudeChannel ? this.ascent.ascent : lapsClimbed(laps),
+      averagePower: averageOf(sums),
+      energy,
+      // `rideCalories`' order: the work when there is any, else the heart rate.
+      calories:
+        energy !== undefined
+          ? { energy: caloriesFromWork(energy), basis: 'power' }
+          : heartRateEnergy === undefined
+            ? undefined
+            : { energy: heartRateEnergy, basis: 'heart-rate' },
+      recordedHeartRate: this.heartRateRead,
+    };
+  }
+}
+
+/**
+ * {@link rideTotals} of a recording in progress, worked out from the samples
+ * since the last time rather than from the whole series — #2283. The same
+ * figures: `totals.test.ts` holds a three-hour ride to it sample by sample.
+ * One per recording and rider: a new rider is a new fold, because each
+ * heart-rate sample's estimate depends on who the rider is.
+ */
+export class RunningRideTotals {
+  readonly #running: Running<TotalsFold>;
+
+  constructor(source: RunningSource, sampleInterval: Seconds, rider: CalorieRider = {}) {
+    this.#running = new Running(source, new TotalsFold(sampleInterval, rider));
+  }
+
+  /** The ride so far, with `laps` the laps so far and the lap in progress last. @see rideTotals */
+  totals(laps: readonly Pick<RecordedCourseLap, 'ascent'>[]): RideTotals {
+    return this.#running.now().totals(laps);
+  }
+}
+
+/** `timeInZones` over the power channel, one slot at a time. */
+class PowerZonesFold implements SlotFold<PowerZonesFold> {
+  readonly zones: TimeInZonesFold;
+
+  constructor(zones: TimeInZonesFold) {
+    this.zones = zones;
+  }
+
+  add(channels: RecordedChannels<StreamChannelValue>, at: number): void {
+    this.zones.add(channels.power?.[at]);
+  }
+
+  copy(): PowerZonesFold {
+    return new PowerZonesFold(this.zones.copy());
+  }
+}
+
+/**
+ * `timeInZones(zones, series.channels.power ?? [], sampleInterval)` of a
+ * recording in progress, worked out from the samples since the last time —
+ * #2283, beside {@link RunningRideTotals}. One per recording and set of zones.
+ */
+export class RunningPowerZoneTime {
+  readonly #running: Running<PowerZonesFold>;
+
+  constructor(source: RunningSource, zones: readonly Zone[], sampleInterval: Seconds) {
+    this.#running = new Running(
+      source,
+      new PowerZonesFold(new TimeInZonesFold(zones, sampleInterval)),
+    );
+  }
+
+  /** The time in each zone so far. */
+  time(): TimeInZones {
+    return this.#running.now().zones.time;
+  }
 }
