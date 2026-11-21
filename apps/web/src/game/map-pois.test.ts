@@ -96,6 +96,19 @@ function ringArea(ring: ArrayLike<number>): number {
   return Math.abs(twice / 2);
 }
 
+/** Whether a point is inside a ring (even-odd). */
+function insideRing(ring: ArrayLike<number>, x: number, z: number): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
+    const xi = ring[i] as number;
+    const zi = ring[i + 1] as number;
+    const xj = ring[j] as number;
+    const zj = ring[j + 1] as number;
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 /** The roles a canopy is drawn in: its slab and columns, its kerbs and pumps, its band, its forecourt. */
 const CANOPY_ROLES: ReadonlySet<FootprintRole> = new Set([
   'wall',
@@ -426,6 +439,103 @@ describe('a fuel station the map marks — #2975', () => {
         expect(each.triangles.wall.length, row).toBeGreaterThan(0);
         expect(each.farTriangleCount, row).toBeGreaterThan(0);
         expect(each.shop.front, row).toBe(true);
+      }
+    }
+  });
+
+  it('a long canopy has at most its islands’ `most`, one column at each', () => {
+    // 48 m: one island every 8 m would be six.
+    const [long] = plan({}, fuelCorridor([rectangleBeside(1_180, 26, 48, 12)])).plans as [
+      FootprintPlan,
+    ];
+    const ys = heights(long.triangles.wall);
+    const underside = long.eaves - FUEL_CANOPY.thickness;
+    // Each column four upright faces of two triangles, three of whose six corners are at the foot.
+    expect(ys.filter((y) => y < underside - 1e-4)).toHaveLength(FUEL_ISLAND.most * 4 * 3);
+  });
+
+  it('an untyped landmark a fuel POI marks keeps its building: no canopy', () => {
+    const corridor = fuelCorridor([rectangleBeside(1_180, 26, 24, 14)]);
+    const [canopy] = plan({}, corridor).plans as [FootprintPlan];
+    const [townhall] = plan(
+      {},
+      {
+        ...corridor,
+        buildings: corridor.buildings.map((each) => ({ ...each, landmark: 'townhall' as const })),
+      },
+    ).plans as [FootprintPlan];
+    // The control: the same footprint with no landmark is a canopy, on columns with no plinth.
+    expect(canopy.triangles.plinth.length).toBe(0);
+    expect(trianglesIn(canopy, 'driveway')).toBeGreaterThan(0);
+    // The townhall stands on its plinth, and lays no forecourt.
+    expect(townhall.triangles.plinth.length).toBeGreaterThan(0);
+    expect(townhall.triangles.driveway.length).toBe(0);
+  });
+
+  it('on a narrow canopy a pump never stands in its column: it keeps its clearance off it', () => {
+    // 4 m across: `fromColumn` would put a pump's inner end inside the column.
+    const pair = plan(
+      {},
+      fuelCorridor([rectangleBeside(1_180, 26, 24, 4), rectangleBeside(1_180, -26, 24, 4)]),
+    ).plans as [FootprintPlan, FootprintPlan];
+    const [right, left] = pair;
+    const apart = Math.hypot(
+      right.centroid.x - left.centroid.x,
+      right.centroid.z - left.centroid.z,
+    );
+    const across = {
+      x: (right.centroid.x - left.centroid.x) / apart,
+      z: (right.centroid.z - left.centroid.z) / apart,
+    };
+    for (const canopy of pair) {
+      const underside = canopy.eaves - FUEL_CANOPY.thickness;
+      const floats = canopy.triangles.door;
+      const offsets: number[] = [];
+      for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+        // A pump body's corner, not the band up on the fascia.
+        if ((floats[at + 1] as number) >= underside) continue;
+        offsets.push(
+          Math.abs(
+            ((floats[at] as number) - canopy.centroid.x) * across.x +
+              ((floats[at + 2] as number) - canopy.centroid.z) * across.z,
+          ),
+        );
+      }
+      expect(offsets.length).toBeGreaterThan(0);
+      // The columns stand on the canopy's middle line: a pump's nearest face is clear of one.
+      expect(Math.min(...offsets)).toBeGreaterThanOrEqual(
+        FUEL_CANOPY.post / 2 + FUEL_ISLAND.pump.clear - 1e-3,
+      );
+      // And still under the slab.
+      expect(Math.max(...offsets)).toBeLessThan(2);
+    }
+  });
+
+  it('a house planned after a canopy puts no front porch on its forecourt', () => {
+    const { profile, origin } = fixture;
+    // Three houses between a canopy and the road, on the forecourt it lays out to the road.
+    const houses = [1_170, 1_180, 1_190].map((along) => ({
+      ...buildingBeside(profile, origin, [rectangleBeside(along, 22, 9, 8)], 6),
+      buildingType: 'house' as const,
+    }));
+    const canopyOf = (poi: 'fuel' | undefined) => ({
+      ...buildingBeside(profile, origin, [rectangleBeside(1_180, 40, 24, 10)], 6),
+      buildingType: null,
+      ...(poi === undefined ? {} : { poi }),
+    });
+    const porchesWith = (poi: 'fuel' | undefined): readonly FootprintPlan[] =>
+      plan({}, { ...fixture.corridor, buildings: [canopyOf(poi), ...houses] }).plans;
+    // The control: with no fuel POI, there is no forecourt, and two of the houses have porches.
+    const control = porchesWith(undefined).slice(1);
+    expect(control.filter((house) => house.porch)).toHaveLength(2);
+    const [canopy, ...after] = porchesWith('fuel') as [FootprintPlan, ...FootprintPlan[]];
+    expect(canopy.driveway).toHaveLength(8);
+    for (const house of after) {
+      const floats = house.triangles.porch;
+      for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+        expect(insideRing(canopy.driveway, floats[at] as number, floats[at + 2] as number)).toBe(
+          false,
+        );
       }
     }
   });
