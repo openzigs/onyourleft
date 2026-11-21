@@ -10,7 +10,7 @@
  * One function, {@link gaitPose}, from a gait and a phase of its cycle to the
  * angles of each joint the MakeHuman body's skeleton bends, in radians, and
  * how far the body is lifted clear of the ground. The renderer poses the body
- * from it at {@link GAIT_PHASES} phases a gait and bakes the result into a
+ * from it at `people-body.ts` §`PHASES` phases a gait and bakes the result into a
  * vertex-animation texture (`three-renderer.ts` §`PeopleBelt`), so nothing
  * here runs per frame.
  *
@@ -46,14 +46,6 @@ export type Gait = 'walk' | 'run';
 
 /** Every {@link Gait}, in the order the animation texture holds them. */
 export const GAITS: readonly Gait[] = ['walk', 'run'];
-
-/**
- * How many phases of a cycle the renderer bakes a gait at: **24**. The shader
- * blends between the two nearest, so the motion is continuous; 24 keeps the
- * knee's 60° swing peak within 15° a step, under the blend's error at the
- * distance a person is drawn from.
- */
-export const GAIT_PHASES = 24;
 
 /** The angles of one side's joints, in radians. */
 export interface LimbAngles {

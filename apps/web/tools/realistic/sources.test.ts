@@ -65,6 +65,7 @@ import {
 import {
   REALISTIC_CHAIN_LINK,
   REALISTIC_HOUSE_ATLAS,
+  REALISTIC_PEOPLE,
   REALISTIC_RIDER,
   REALISTIC_DELIVERY_CAR,
   REALISTIC_RIDER_PACK,
@@ -555,7 +556,8 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
         // #623: the rider's maps are read at the body's own glTF texture
         // coordinates, which `GLTFLoader` never flips, and `process_rider.py`
         // writes them top row first as those coordinates read them.
-        const glTF = output.file === REALISTIC_RIDER;
+        // The people's atlas likewise, at their GLB's own coordinates.
+        const glTF = output.file === REALISTIC_RIDER || output.file === REALISTIC_PEOPLE.model;
         for (const also of recipe.alsoWrites ?? []) {
           // #2485: the pack's vertex-animation texture is no picture, and no encoder touches it.
           if (also.ktx2 === undefined) {
