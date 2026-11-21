@@ -51,6 +51,7 @@ import {
   describeStartRefusal,
   nudgePin,
   openWorldStart,
+  startCoverage,
   type OpenWorldStartOutcome,
 } from '../game/open-world/start';
 import type { BasemapConfig } from '../map/basemap';
@@ -78,6 +79,14 @@ export const START_NEEDS_TILES_TEXT =
   'An open-world ride reads the map as you ride, and map tiles are off in Settings. Turn them on ' +
   'to start one.';
 
+/** What the pin's section says when this browser has no map to drop it on (#2985). */
+export const START_NO_MAP_TEXT =
+  'There is no map in this browser to drop a pin on. Start from a saved route or a past ride.';
+
+/** What the screen says when a past ride's start could not be read from the device (#2985). */
+export const START_RIDE_UNREAD_TEXT =
+  'That ride could not be read on this device. Choose it again, or start from the pin or a saved route.';
+
 /** The pin's marker, as the map draws it. */
 const PIN_ID = 'open-world-pin';
 
@@ -98,7 +107,8 @@ type Chosen =
       readonly source: 'ride';
       readonly id: string;
       readonly name: string;
-      readonly outcome: OpenWorldStartOutcome | 'reading';
+      /** `unread`: the store refused the read (#2985), which is not a ride with no position. */
+      readonly outcome: OpenWorldStartOutcome | 'reading' | 'unread';
     };
 
 type MapEngine =
@@ -137,6 +147,8 @@ export function OpenWorldStartView({
 }: OpenWorldStartViewProps): JSX.Element {
   const [engine, setEngine] = useState<MapEngine>({ kind: 'loading' });
   const [tiles] = useState(() => readMapTilesChoice(preferences ?? deviceStorage()));
+  /** Where a pin may stand: the build's own archive's coverage (#2985). */
+  const coverage = useMemo(() => startCoverage(basemap), [basemap]);
   const online = useOnline();
   const [pin, setPin] = useState<GeographicPosition | undefined>(undefined);
   const [chosen, setChosen] = useState<Chosen>({ source: 'none' });
@@ -195,18 +207,18 @@ export function OpenWorldStartView({
     };
   }, [port]);
 
-  const placePin = useCallback((position: GeographicPosition, words: string) => {
-    reading.current = undefined;
-    setPin(position);
-    setChosen({ source: 'pin', outcome: openWorldStart(position, 'pin') });
-    setSaid((last) => ({ words, count: last.count + 1 }));
-  }, []);
+  const placePin = useCallback(
+    (position: GeographicPosition, words: string) => {
+      reading.current = undefined;
+      setPin(position);
+      setChosen({ source: 'pin', outcome: openWorldStart(position, 'pin', coverage) });
+      setSaid((last) => ({ words, count: last.count + 1 }));
+    },
+    [coverage],
+  );
 
   const outcome = chosen.source === 'none' ? undefined : chosen.outcome;
-  const start =
-    outcome !== undefined && outcome !== 'reading' && outcome.kind === 'start'
-      ? outcome.start
-      : undefined;
+  const start = typeof outcome === 'object' && outcome.kind === 'start' ? outcome.start : undefined;
   /** Where the pin stands: the dropped pin, or the chosen route's or ride's start. */
   const pinAt =
     chosen.source === 'none' || chosen.source === 'pin' ? pin : (start?.position ?? undefined);
@@ -275,12 +287,7 @@ export function OpenWorldStartView({
       },
       () => {
         if (reading.current === ride.id) {
-          setChosen({
-            source: 'ride',
-            id: ride.id,
-            name: ride.name,
-            outcome: { kind: 'refused', refusal: 'no-position' },
-          });
+          setChosen({ source: 'ride', id: ride.id, name: ride.name, outcome: 'unread' });
         }
       },
     );
@@ -293,7 +300,9 @@ export function OpenWorldStartView({
     <>
       <section aria-labelledby="oyl-open-world-pin">
         <h2 id="oyl-open-world-pin">Drop a pin</h2>
-        {map === undefined ? null : engine.kind === 'failed' ? (
+        {map === undefined ? (
+          <p className="oyl-muted">{START_NO_MAP_TEXT}</p>
+        ) : engine.kind === 'failed' ? (
           <p className="oyl-muted">
             The map could not be loaded on this device. Start from a saved route or a past ride.
           </p>
@@ -396,6 +405,10 @@ export function OpenWorldStartView({
             <p>Choose a start: a pin, a saved route or a past ride.</p>
           ) : outcome === 'reading' ? (
             <p>Reading where that ride started…</p>
+          ) : outcome === 'unread' ? (
+            <StatusMessage tone="warning" label="Cannot read that ride">
+              {START_RIDE_UNREAD_TEXT}
+            </StatusMessage>
           ) : outcome.kind === 'refused' ? (
             <StatusMessage tone="warning" label="Cannot start there">
               {describeStartRefusal(outcome.refusal, source)}
