@@ -3968,6 +3968,20 @@ describe('the people’s atlas — the owner’s pictures of PR #2844', () => {
     }
   }
 
+  /**
+   * Decoded once for the three cases below: the real KTX2Loader's transcode is
+   * the slow part, and a per-case timeout is banned (#1688).
+   */
+  let shareAt: Awaited<ReturnType<typeof atlasShares>>;
+  beforeAll(async () => {
+    const undoing = served();
+    try {
+      shareAt = await atlasShares();
+    } finally {
+      for (const each of undoing.reverse()) each();
+    }
+  });
+
   /** The atlas's side, in texels (`realistic-budget.ts` §`REALISTIC_TEXTURE_PIXELS`). */
   const ATLAS_SIDE = REALISTIC_TEXTURE_PIXELS.people;
 
@@ -3978,8 +3992,7 @@ describe('the people’s atlas — the owner’s pictures of PR #2844', () => {
   const light = (share: readonly [number, number, number]): number =>
     0.2126 * share[0] + 0.7152 * share[1] + 0.0722 * share[2];
 
-  it('draws plain skin as the person’s own colour, on the face and the limbs alike, with no shine painted on', async () => {
-    const shareAt = await atlasShares();
+  it('draws plain skin as the person’s own colour, on the face and the limbs alike, with no shine painted on', () => {
     const people = peopleReads('skin');
     expect(people.length).toBe(3);
     let cast = 0;
@@ -4020,10 +4033,9 @@ describe('the people’s atlas — the owner’s pictures of PR #2844', () => {
       `PR #2844: the limbs' green over their red, the three people together: ${cast.toFixed(3)}`,
     );
     expect(cast).toBeLessThan(0.06);
-  }, 120_000);
+  });
 
-  it('keeps the trousers’ light and shade and none of their photograph’s dye', async () => {
-    const shareAt = await atlasShares();
+  it('keeps the trousers’ light and shade and none of their photograph’s dye', () => {
     peopleReads('bottoms').forEach((reads, person) => {
       // Every corner as well as every middle: a seam's corners are where a
       // photograph's outline is.
@@ -4054,10 +4066,9 @@ describe('the people’s atlas — the owner’s pictures of PR #2844', () => {
       );
       expect(Math.min(...beside)).toBeGreaterThan(0.3);
     });
-  }, 120_000);
+  });
 
-  it('wears no painted shadow on a jacket’s chest', async () => {
-    const shareAt = await atlasShares();
+  it('wears no painted shadow on a jacket’s chest', () => {
     peopleReads('top').forEach((reads, person) => {
       const lights = reads.centroids.map(shareAt).map(light);
       const dark = lights.filter((each) => each < 0.25).length;
@@ -4067,5 +4078,5 @@ describe('the people’s atlas — the owner’s pictures of PR #2844', () => {
       // A stripe may be dark; a twentieth of a garment may not.
       expect(dark / lights.length).toBeLessThan(0.05);
     });
-  }, 120_000);
+  });
 });
