@@ -981,12 +981,16 @@ describe('fewer, less repetitive lines — the owner’s ruling of 2026-11-20', 
   });
 
   it('names the surge the pacer rides with the rider level, and what each rule does', () => {
+    // Each search is bounded, so a surge that never comes is a red test and not a hung one.
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
     let surging = PACER_START_RAMP_S;
-    while (pacerSurgeAt(surging) < PACER_DOING_SURGE) surging += 0.5;
+    while (surging < SEARCH_UNTIL && pacerSurgeAt(surging) < PACER_DOING_SURGE) surging += 0.5;
     let recovering = PACER_START_RAMP_S;
-    while (pacerSurgeAt(recovering) > -PACER_DOING_SURGE / 2) recovering += 0.5;
+    while (recovering < SEARCH_UNTIL && pacerSurgeAt(recovering) > -PACER_DOING_SURGE / 2)
+      recovering += 0.5;
     let steady = PACER_START_RAMP_S;
-    while (pacerSurgeAt(steady) !== 0) steady += 0.5;
+    while (steady < SEARCH_UNTIL && pacerSurgeAt(steady) !== 0) steady += 0.5;
+    expect(Math.max(surging, recovering, steady)).toBeLessThan(SEARCH_UNTIL);
     expect(pacerDoing('rider-level', surging)).toBe('surging');
     expect(pacerDoing('rider-level', recovering)).toBe('recovering');
     expect(pacerDoing('rider-level', steady)).toBe('with-you');

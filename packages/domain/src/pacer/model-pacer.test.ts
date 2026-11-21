@@ -612,8 +612,11 @@ describe('the device’s decisions in the log, and the one in force — #2835, A
 
   it('rides the surge the seconds ridden give, live and on replay by one function', () => {
     // A window with a surge in it, found rather than assumed, so the seed may change.
+    // Bounded, so a surge that never comes is a red test and not a hung one.
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
     let at = PACER_START_RAMP_S;
-    while (pacerSurgeAt(at) < PACER_SURGE_LEAST / 2) at += 0.5;
+    while (at < SEARCH_UNTIL && pacerSurgeAt(at) < PACER_SURGE_LEAST / 2) at += 0.5;
+    expect(at).toBeLessThan(SEARCH_UNTIL);
     const held: PacerRuleRecord = { ...STOPPED, askedAtS: at - 1, arrivedAtS: at };
     expect(pacerDirectionAt([held], at)).toEqual({
       plan: 'rolling',
@@ -847,8 +850,10 @@ describe('a power range, ridden like a person — the owner’s ruling of 2026-1
   });
 
   it('surges a hold and a chase, and moves the pacer’s power by the surge', () => {
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
     let at = PACER_START_RAMP_S;
-    while (pacerSurgeAt(at) < PACER_SURGE_LEAST - 1e-9) at += 0.5;
+    while (at < SEARCH_UNTIL && pacerSurgeAt(at) < PACER_SURGE_LEAST - 1e-9) at += 0.5;
+    expect(at).toBeLessThan(SEARCH_UNTIL);
     const hold = pacerAsRidden({ plan: 'even', intent: 'hold' }, at);
     expect(hold.surge).toBe(pacerSurgeAt(at));
     expect(directedPacingFactor(hold, 0)).toBeCloseTo(1 + pacerSurgeAt(at), 12);

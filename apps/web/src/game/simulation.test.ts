@@ -538,8 +538,11 @@ describe('an AI pacer’s decision — #2712, ADR 0072 D-2 and D-5', () => {
 
   it('says on its state the power the pacer rode, surge and all: what the HUD shows', () => {
     // A second inside a surge, past the ramp, found rather than assumed.
+    // Bounded, so a surge that never comes is a red test and not a hung one.
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
     let at = PACER_START_RAMP_S + 1;
-    while (pacerSurgeAt(at) < 0.03) at += 1;
+    while (at < SEARCH_UNTIL && pacerSurgeAt(at) < 0.03) at += 1;
+    expect(at).toBeLessThan(SEARCH_UNTIL);
     const steps = Math.round(at / SIMULATION_STEP_SECONDS);
     const HOLD = { plan: 'rolling', intent: 'hold' } as const;
     const simulation = ride((it) => {
