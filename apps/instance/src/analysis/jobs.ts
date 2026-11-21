@@ -208,7 +208,15 @@ export interface ReplanEngineJob {
 
 /** How an engine's run ended. `AgentOutcome` (`agent.ts`) is one. */
 export type EngineEnding =
-  | { readonly kind: 'written'; readonly writeUp: ScreenedWriteUp }
+  | {
+      readonly kind: 'written';
+      readonly writeUp: ScreenedWriteUp;
+      /**
+       * The template the run used (#2932), whose version the `result` names
+       * so that the device records the one that wrote it, not its own.
+       */
+      readonly template?: { readonly id: string; readonly version: string };
+    }
   /** A re-plan's: one proposal, or `null` when the model kept the workout as it is. */
   | { readonly kind: 'proposed'; readonly proposal: Proposal | null }
   | { readonly kind: 'withheld'; readonly reasons: readonly ScreenReason[] }
@@ -414,7 +422,11 @@ function ending(outcome: EngineEnding, at: number): AnalysisJobEnding {
         status: 'succeeded',
         failure: null,
         candidate: outcome.writeUp,
-        data: JSON.stringify({ status: 'succeeded', writeUp: outcome.writeUp }),
+        data: JSON.stringify({
+          status: 'succeeded',
+          writeUp: outcome.writeUp,
+          ...(outcome.template === undefined ? {} : { templateVersion: outcome.template.version }),
+        }),
         at,
       };
     case 'proposed':

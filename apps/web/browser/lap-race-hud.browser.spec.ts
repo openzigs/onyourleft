@@ -51,7 +51,11 @@ import {
   type Viewport,
 } from './ride-stage';
 
+import { HUD_CONTROLS_FADE_MS, MOTION_DURATION_MS } from '../src/design/tokens';
+import { CONTROLS_HIDE_MILLISECONDS } from '../src/game/hud/controls-reveal';
 import { STANDINGS_RETURN_MS } from '../src/game/hud/standings-follow';
+
+import { applyInsets, NO_INSETS, PIXEL_TABLET_LANDSCAPE_INSETS, type Insets } from './insets';
 
 import type { Box, LapRaceStageMeasurement } from './lap-race-hud-harness';
 
@@ -356,8 +360,18 @@ const CORNER_CASES = [
   ),
 ];
 
-/** What is wrong with the corner of one stage, as sentences. */
-function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: string): string[] {
+/**
+ * What is wrong with the corner of one stage, as sentences. `roomy` is
+ * whether every line must be in view without scrolling: {@link ROOMY}'s
+ * answer, unless the caller draws the corner with less room than that was
+ * measured in (#2837's cases, in the shell or with the AI bots' sentence).
+ */
+function cornerFaults(
+  stage: LapRaceStageMeasurement,
+  viewport: Viewport,
+  text: string,
+  roomy: boolean = ROOMY[text]?.has(sized(viewport)) === true,
+): string[] {
   const faults: string[] = [];
   const say = (box: Box): string =>
     `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
@@ -399,7 +413,7 @@ function cornerFaults(stage: LapRaceStageMeasurement, viewport: Viewport, text: 
     if (!stage.standingsLines.some((line) => line.you && line.inView)) {
       faults.push('the rider’s own line out of view');
     }
-    if (ROOMY[text]?.has(sized(viewport)) === true && inView.length !== 8) {
+    if (roomy && inView.length !== 8) {
       faults.push(`${String(inView.length)} of 8 lines in view where there is room for all`);
     }
     const swap = stage.swap;
@@ -660,4 +674,385 @@ test('#2599 the corner measurement can fail: the list at its full height is on t
   const faults = undone.flatMap((stage) => cornerFaults(stage, fourByThree, 'normal'));
   console.log(`#2599 control, 1024×768 with the list at its full height: ${faults.join('; ')}`);
   expect(faults.some((each) => each.includes('over the actions panel'))).toBe(true);
+});
+
+/*
+ * #2837 — the standings take the room the hidden ride controls leave.
+ *
+ * The owner's tablet race of 2026-11-18, seven bots: *"the position menu
+ * should get bigger when the other one reduces or make it bigger to begin
+ * with. Can only see 3 people."* The ride controls fade until touched
+ * (#2600), and hidden the actions panel is its trainer's line; in a race that
+ * line is drawn at the stage's bottom edge (`theme.css` §"#2837"), and the
+ * standings measure the room to it there (`standings-room.ts`).
+ *
+ * `?corner=race&controls=hide` is the corner with the auto-hide on
+ * (`lap-race-hud-harness.tsx` §`CORNER`): `corner-back` holds nothing, so its
+ * controls hide; `corner-middle` holds an item, which holds them drawn (ADR
+ * 0075 D-5), so it is each case's control on the same page. `&note=ai` adds
+ * the AI bots' sentence, as a race against a rider's own model draws it. The
+ * controls' wait runs on Playwright's clock, not a real one.
+ *
+ * Held, on the tablets — the owner's in the shell with its insets (the
+ * tablet's real viewport, `insets.ts`) among them — at each text size:
+ *
+ * - DRAWN, the corner is #2599's: the standings 16 px or more above the
+ *   actions panel, the rider's own line in view;
+ * - HIDDEN, every one of the eight lines is in view without scrolling, the
+ *   standings are taller by the lines they were short of, still on the stage,
+ *   over no panel, clear of the leaning rider and 16 px or more above the
+ *   trainer's line, which is on the stage at its bottom edge and the topmost
+ *   thing at each of its corners;
+ * - the stage whose controls are held is exactly as it was;
+ * - RETURNED by a touch on the road, the corner is the drawn one again;
+ * - and on the way there the panel stays in its own place for as long as its
+ *   controls are fading, then comes down to its line with no step.
+ *
+ * The control leaves the hidden panel in its own place, as it was before
+ * #2837: the standings then do not grow by a line. And on a phone, whose
+ * stage draws no standings, the hidden panel does not move at all.
+ */
+
+/** `controls-reveal.ts` §`CONTROLS_HIDE_MILLISECONDS`, and a frame more. */
+const HIDE_AFTER_MILLISECONDS = CONTROLS_HIDE_MILLISECONDS + 100;
+
+/** The stage whose controls hide, and the one whose rider holds an item. */
+const HIDES = 'corner-back';
+const HELD = 'corner-middle';
+
+/** `theme.css` §"#2837" undone: the hidden actions panel in its own place. */
+const HIDDEN_PANEL_IN_PLACE = `
+  .oyl-game--riding .oyl-hud .oyl-hud__actions { translate: none !important; }`;
+
+interface GrowCase {
+  readonly viewport: Viewport;
+  readonly text: 'normal' | 'large' | 'extra-large';
+  readonly insets: Insets;
+  /** Whether the AI bots' sentence is under the summary. */
+  readonly note: boolean;
+  /**
+   * Whether the drawn corner is short of the eight lines here on every
+   * machine measured — by two lines or more on a Mac — so that "it grows" is
+   * asserted of a list that had lines to gain.
+   */
+  readonly short: boolean;
+}
+
+/**
+ * Whether {@link ROOMY} speaks for a case's DRAWN corner: only as it was
+ * measured, with no insets and no sentence under the summary. ⚠️ Measured on
+ * this pull request's first CI run: in the shell at the normal text with the
+ * AI bots' sentence, the runner's fonts hold 7 of the 8 lines where a Mac
+ * holds all 8 — and hidden, both hold 8.
+ */
+function drawnRoomy(each: GrowCase): boolean {
+  return (
+    each.insets === NO_INSETS && !each.note && ROOMY[each.text]?.has(sized(each.viewport)) === true
+  );
+}
+
+function tablet(size: string): Viewport {
+  const found = TABLET_VIEWPORTS.find((each) => sized(each) === size);
+  if (found === undefined) throw new Error(`no ${size} tablet`);
+  return found;
+}
+
+const IN_THE_SHELL = PIXEL_TABLET_LANDSCAPE_INSETS;
+
+const GROW_CASES: readonly GrowCase[] = [
+  // A race of seven bots at 1280×800: all eight lines from the start.
+  { viewport: tablet('1280×800'), text: 'normal', insets: NO_INSETS, note: false, short: false },
+  // The owner's tablet in the shell, a race against the rider's own model.
+  { viewport: tablet('1280×800'), text: 'normal', insets: IN_THE_SHELL, note: true, short: false },
+  { viewport: tablet('1280×800'), text: 'large', insets: IN_THE_SHELL, note: true, short: true },
+  {
+    viewport: tablet('1280×800'),
+    text: 'extra-large',
+    insets: IN_THE_SHELL,
+    note: true,
+    short: true,
+  },
+  { viewport: tablet('1024×768'), text: 'normal', insets: NO_INSETS, note: false, short: true },
+  { viewport: tablet('1024×768'), text: 'large', insets: NO_INSETS, note: true, short: true },
+  { viewport: tablet('1024×768'), text: 'extra-large', insets: NO_INSETS, note: true, short: true },
+  // Upright there is room for every line already: nothing to gain, nothing lost.
+  { viewport: tablet('800×1280'), text: 'large', insets: NO_INSETS, note: true, short: false },
+];
+
+function growQuery(each: GrowCase): string {
+  return `?corner=race&controls=hide&text=${each.text}${each.note ? '&note=ai' : ''}`;
+}
+
+function growName(each: GrowCase): string {
+  const shell = each.insets === NO_INSETS ? '' : ', in the shell';
+  return `${each.viewport.name}${shell}, ${each.text} text${each.note ? ', AI bots' : ''}`;
+}
+
+function linesInView(stage: LapRaceStageMeasurement): number {
+  return stage.standingsLines.filter((line) => line.inView).length;
+}
+
+function standingsOf(stage: LapRaceStageMeasurement): Box {
+  if (stage.standings === undefined) throw new Error(`no standings on ${stage.stage}`);
+  return stage.standings;
+}
+
+/** Load the corner with the auto-hide on, on Playwright's clock, and measure it drawn. */
+async function openHiding(page: Page, each: GrowCase): Promise<readonly LapRaceStageMeasurement[]> {
+  if (each.insets !== NO_INSETS) await applyInsets(page, each.insets);
+  await page.clock.install();
+  return open(page, each.viewport, growQuery(each));
+}
+
+/** Run the controls' wait out, and the fade and the panel's closing to their end. */
+async function hide(page: Page): Promise<void> {
+  await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
+  const hud = page.locator(`[data-oyl-lap-race-stage="${HIDES}"] .oyl-hud`);
+  await expect(hud).toHaveAttribute('data-oyl-controls', 'hidden');
+  // A CSS animation runs on the page's own clock, not `page.clock`'s.
+  await hud
+    .locator('.oyl-hud__actions')
+    .evaluate((panel) =>
+      Promise.all(panel.getAnimations({ subtree: true }).map((each) => each.finished)),
+    );
+}
+
+/** What is wrong with the stage whose controls are hidden, as sentences. */
+function hiddenFaults(
+  stage: LapRaceStageMeasurement,
+  drawn: LapRaceStageMeasurement,
+  each: GrowCase,
+): string[] {
+  const faults: string[] = [];
+  const say = (box: Box): string =>
+    `[${box.left.toFixed(0)},${box.top.toFixed(0)} → ${box.right.toFixed(0)},${box.bottom.toFixed(0)}]`;
+  const { viewport, insets } = each;
+  const floor = viewport.height - insets.bottom;
+  const standings = standingsOf(stage);
+  const { actions, trainer } = stage;
+  if (linesInView(stage) !== 8) faults.push(`${String(linesInView(stage))} of 8 lines in view`);
+  if (!stage.standingsLines.some((line) => line.you && line.inView)) {
+    faults.push('the rider’s own line out of view');
+  }
+  if (stage.standingsList?.scrolls === true) faults.push('the list still scrolls');
+  if (standings.top < insets.top - 1 || standings.bottom > floor + 1 || standings.left < 0) {
+    faults.push(`the standings ${say(standings)} off the stage`);
+  }
+  if (overlap(standings, riderBox(viewport))) {
+    faults.push(`the standings ${say(standings)} over the rider`);
+  }
+  for (const panel of stage.panels) {
+    if (panel.name.includes('oyl-hud__standings')) continue;
+    if (overlap(panel.box, standings)) {
+      faults.push(`the standings ${say(standings)} over ${panel.name} ${say(panel.box)}`);
+    }
+  }
+  if (actions === undefined || trainer === undefined) {
+    faults.push('no actions panel or no trainer line');
+    return faults;
+  }
+  // The drawn part of the hidden panel begins at its box's top: the line.
+  if (actions.top - standings.bottom < CLEARANCE_PIXELS - 0.5) {
+    faults.push(
+      `the standings ${(actions.top - standings.bottom).toFixed(0)} px above the trainer's line`,
+    );
+  }
+  if (trainer.box.bottom > floor + 1) {
+    faults.push(`the trainer line ${say(trainer.box)} off the stage`);
+  }
+  if (floor - trainer.box.bottom > 2 * CLEARANCE_PIXELS) {
+    faults.push(`the trainer line ${say(trainer.box)} not at the stage's bottom edge`);
+  }
+  if (!trainer.topmost) faults.push(`the trainer line ${say(trainer.box)} covered`);
+  const grew = standings.height - standingsOf(drawn).height;
+  const gained = 8 - linesInView(drawn);
+  if (gained > 0 && grew < 1) faults.push(`the standings no taller, ${String(gained)} lines short`);
+  if (gained === 0 && Math.abs(grew) > 1) {
+    faults.push(`the standings ${grew.toFixed(0)} px taller with no line to gain`);
+  }
+  return faults;
+}
+
+test.describe('#2837 a lap race’s standings take the room the hidden controls leave', () => {
+  // The touch that brings the controls back is a real one.
+  test.use({ hasTouch: true });
+
+  for (const each of GROW_CASES) {
+    test(`grow when the controls hide and give the room back when a touch returns them — ${growName(each)}`, async ({
+      page,
+    }) => {
+      const { viewport, text } = each;
+      const at = growName(each);
+      const drawn = await openHiding(page, each);
+      for (const stage of drawn) {
+        expect(
+          cornerFaults(stage, viewport, text, drawnRoomy(each)),
+          `${at}, ${stage.stage}, drawn`,
+        ).toEqual([]);
+      }
+      const before = stageOf(drawn, HIDES);
+      if (each.short) {
+        expect(linesInView(before), `${at}: short of the eight lines while drawn`).toBeLessThan(8);
+      }
+      if (sized(viewport) === '1280×800' && text === 'normal' && !each.note) {
+        expect(linesInView(before), `${at}: all eight lines from the start`).toBe(8);
+      }
+
+      await hide(page);
+      await expect
+        .poll(async () => linesInView(stageOf(await remeasure(page), HIDES)), {
+          message: `${at}: every line in view once the controls have hidden`,
+        })
+        .toBe(8);
+      const hidden = await remeasure(page);
+      console.log(
+        `#2837 ${at}: ${String(linesInView(before))} of 8 lines drawn, ` +
+          `${String(linesInView(stageOf(hidden, HIDES)))} hidden, the standings ` +
+          `${standingsOf(before).height.toFixed(0)} → ${standingsOf(stageOf(hidden, HIDES)).height.toFixed(0)} px`,
+      );
+      expect(hiddenFaults(stageOf(hidden, HIDES), before, each), `${at}, hidden`).toEqual([]);
+      // The same page's control: an item held holds the controls, and the room.
+      await expect(page.locator(`[data-oyl-lap-race-stage="${HELD}"] .oyl-hud`)).toHaveAttribute(
+        'data-oyl-controls',
+        'shown',
+      );
+      expect(standingsOf(stageOf(hidden, HELD)), `${at}: the held stage`).toEqual(
+        standingsOf(stageOf(drawn, HELD)),
+      );
+
+      // A touch on the road returns the controls, and the room with them.
+      await page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+      await page.touchscreen.tap(viewport.width / 2, viewport.height / 2);
+      await expect(page.locator(`[data-oyl-lap-race-stage="${HIDES}"] .oyl-hud`)).toHaveAttribute(
+        'data-oyl-controls',
+        'shown',
+      );
+      await expect
+        .poll(async () => standingsOf(stageOf(await remeasure(page), HIDES)).height, {
+          message: `${at}: the standings as tall as they were drawn`,
+        })
+        .toBeCloseTo(standingsOf(before).height, 0);
+      const returned = stageOf(await remeasure(page), HIDES);
+      expect(cornerFaults(returned, viewport, text, drawnRoomy(each)), `${at}, returned`).toEqual(
+        [],
+      );
+      expect(linesInView(returned), `${at}, returned`).toBe(linesInView(before));
+    });
+  }
+
+  // No fade and no closing to wait out: the move is a 0.01 ms transition there
+  // (`theme.css` §"Motion is opt-in"), and the room is measured as it ends.
+  test('grow for a rider who asked for less motion — a 4:3 tablet', async ({ page }) => {
+    const each = GROW_CASES.find((one) => sized(one.viewport) === '1024×768' && one.short);
+    if (each === undefined) throw new Error('no short case at 1024×768');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const drawn = await openHiding(page, each);
+    await hide(page);
+    await expect.poll(async () => linesInView(stageOf(await remeasure(page), HIDES))).toBe(8);
+    const hidden = stageOf(await remeasure(page), HIDES);
+    expect(hiddenFaults(hidden, stageOf(drawn, HIDES), each)).toEqual([]);
+  });
+
+  test('the hidden panel keeps its own place until the fade has run, then comes down to its line with no step', async ({
+    page,
+  }) => {
+    const each = GROW_CASES.find((one) => sized(one.viewport) === '1024×768' && one.short);
+    if (each === undefined) throw new Error('no short case at 1024×768');
+    const drawn = stageOf(await openHiding(page, each), HIDES);
+    const inPlace = drawn.actions?.top;
+    if (inPlace === undefined) throw new Error('no actions panel');
+    const out = HUD_CONTROLS_FADE_MS.out;
+    const close = MOTION_DURATION_MS.medium;
+    const stage = page.locator(`[data-oyl-lap-race-stage="${HIDES}"]`);
+    // The page's own clock runs the animations, not `page.clock`, and the hold
+    // lasts 800 ms of it: a runner that stalls that long between the attribute
+    // and the sampling would find the hold over. So the panel's animations are
+    // paused in the mutation's own microtask, before a frame has been drawn
+    // (reading the style forces them into being), and nothing here races.
+    await stage.locator('.oyl-hud').evaluate((hud) => {
+      new MutationObserver((_records, observer) => {
+        if (hud.getAttribute('data-oyl-controls') !== 'hidden') return;
+        const panel = hud.querySelector('.oyl-hud__actions');
+        if (panel === null) return;
+        getComputedStyle(panel).getPropertyValue('animation-name');
+        for (const animation of panel.getAnimations()) animation.pause();
+        observer.disconnect();
+      }).observe(hud, { attributes: true, attributeFilter: ['data-oyl-controls'] });
+    });
+    await page.clock.fastForward(HIDE_AFTER_MILLISECONDS);
+    await expect(stage.locator('.oyl-hud')).toHaveAttribute('data-oyl-controls', 'hidden');
+    // The panel's own animations, already held, are set to each moment in turn,
+    // as `ride-chrome.browser.spec.ts` §`sampleFade` does for the fade.
+    const fading = [0, out / 2, out - 1];
+    const closing = [out + close / 4, out + close / 2, out + (3 * close) / 4];
+    const tops = await stage.locator('.oyl-hud__actions').evaluate(
+      (panel, times) => {
+        const origin = panel.closest('[data-oyl-lap-race-stage]')?.getBoundingClientRect().top ?? 0;
+        const animations = panel.getAnimations();
+        if (animations.length < 2) throw new Error(`${String(animations.length)} animations held`);
+        for (const animation of animations) animation.pause();
+        const sampled = times.map((atMs) => {
+          for (const animation of animations) animation.currentTime = atMs;
+          return panel.getBoundingClientRect().top - origin;
+        });
+        for (const animation of animations) animation.finish();
+        return { sampled, ended: panel.getBoundingClientRect().top - origin };
+      },
+      [...fading, ...closing],
+    );
+    const where = growName(each);
+    // While the controls fade, the panel they fade in has not moved.
+    for (const [index, atMs] of fading.entries()) {
+      expect(tops.sampled[index], `${where}: in its own place at ${String(atMs)} ms`).toBeCloseTo(
+        inPlace,
+        0,
+      );
+    }
+    // Then it comes down, each sample lower than the last, to where it ends.
+    const coming = [inPlace, ...tops.sampled.slice(fading.length), tops.ended];
+    coming.slice(1).forEach((top, index) => {
+      expect(top, `${where}: lower at closing sample ${String(index)}`).toBeGreaterThan(
+        (coming[index] ?? 0) + 1,
+      );
+    });
+    expect(tops.ended - inPlace, `${where}: down by most of the panel`).toBeGreaterThan(100);
+  });
+
+  test('on a phone, where no standings are drawn, the hidden panel stays where it was', async ({
+    page,
+  }) => {
+    const phone = OVERLAY_VIEWPORTS.find((one) => sized(one) === '844×390');
+    if (phone === undefined) throw new Error('no phone in landscape');
+    await page.clock.install();
+    const drawn = stageOf(await open(page, phone, '?corner=race&controls=hide'), HIDES);
+    expect(laidOut(standingsOf(drawn)), 'no standings on a phone’s stage').toBe(false);
+    await hide(page);
+    const hidden = stageOf(await remeasure(page), HIDES);
+    expect(hidden.actions?.top).toBeCloseTo(drawn.actions?.top ?? Number.NaN, 0);
+  });
+
+  test('the growth can fail: with the hidden panel left in its own place, the standings gain no line', async ({
+    page,
+  }) => {
+    const each = GROW_CASES.find((one) => sized(one.viewport) === '1024×768' && one.short);
+    if (each === undefined) throw new Error('no short case to control at');
+    const drawn = await openHiding(page, each);
+    const before = stageOf(drawn, HIDES);
+    await page.addStyleTag({ content: HIDDEN_PANEL_IN_PLACE });
+    await hide(page);
+    // Two frames, so a room measured as the closing ended has been drawn.
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        }),
+    );
+    const hidden = stageOf(await remeasure(page), HIDES);
+    const faults = hiddenFaults(hidden, before, each);
+    console.log(`#2837 control, ${growName(each)} with the panel in place: ${faults.join('; ')}`);
+    expect(linesInView(hidden)).toBe(linesInView(before));
+    expect(faults.some((fault) => fault.includes('the standings no taller'))).toBe(true);
+  });
 });

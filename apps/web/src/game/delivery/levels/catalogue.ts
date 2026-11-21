@@ -32,10 +32,15 @@ export interface LevelListing {
 }
 
 /**
- * The shipped levels — the names are proposed in #2362's pull request for
- * the owner's approval.
+ * The shipped levels, in unlock order — the names are proposed in #2362's
+ * pull request (levels 1 and 2) and #2367's (levels 3 to 6) for the owner's
+ * approval.
  */
 export const LEVEL_CATALOGUE: readonly LevelListing[] = Object.freeze([
   Object.freeze({ id: 'morning-round', name: 'Morning Round', lengthMetres: 2138, houses: 4 }),
   Object.freeze({ id: 'busy-round', name: 'Busy Round', lengthMetres: 2998, houses: 6 }),
+  Object.freeze({ id: 'corner-round', name: 'Corner Round', lengthMetres: 2708, houses: 7 }),
+  Object.freeze({ id: 'mailbox-round', name: 'Mailbox Round', lengthMetres: 3840, houses: 8 }),
+  Object.freeze({ id: 'rainy-round', name: 'Rainy Round', lengthMetres: 3696, houses: 9 }),
+  Object.freeze({ id: 'evening-round', name: 'Evening Round', lengthMetres: 2731, houses: 10 }),
 ]);

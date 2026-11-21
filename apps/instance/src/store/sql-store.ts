@@ -1056,6 +1056,29 @@ export type SetupSource = 'setup' | 'start';
 export type OperatorSource = 'app' | 'cli' | AdminSource | SetupSource;
 
 /**
+ * The most each count in an operator log entry may be (#2618): a plausible
+ * range for what it counts, so a nine-digit number under a real key —
+ * `blobs=51507400`, a latitude in disguise — is refused. `refused` and
+ * `sessions_ended` keep the nine-digit ceiling their writers already clamp to
+ * (`admin.ts`, `setup.ts`): a refusal count is an attacker's to raise.
+ */
+export const OPERATOR_COUNT_LIMITS = {
+  // Migrations this build carries: 50 in November 2026.
+  applied: 1_000,
+  // Blob files in one snapshot.
+  blobs: 10_000_000,
+  // Snapshots one backup run pruned.
+  removed: 100_000,
+  // Load accounts one `load-accounts` run made or erased.
+  added: 100_000,
+  erased: 100_000,
+  // Riders in a room: the wire format allows 100 (`MAXIMUM_RIDERS`).
+  riders: 1_000,
+  refused: 999_999_999,
+  sessions_ended: 999_999_999,
+} as const;
+
+/**
  * An entry's `detail`: the CLOSED vocabulary each action may write (#2602).
  * A detail is parts joined by commas, each one of the action's `words`, or
  * one of its `counts` `=` a whole number of up to nine digits — `applied=2`,
@@ -1064,19 +1087,33 @@ export type OperatorSource = 'app' | 'cli' | AdminSource | SetupSource;
  * detail is never free text, a secret or a coordinate: `lat=51507400`, a
  * hex key split into words and `password_hunter2` fit no action's list. Each
  * Operate sub-issue lists what its own actions write.
+ *
+ * #2618: a count is also held to its key's {@link OPERATOR_COUNT_LIMITS}, and
+ * `apart` (or `oneWord`, for an action whose every word contradicts every
+ * other) names words that contradict each other — a detail holds at most one
+ * word of each group, so `keys_rotated,keys_not_rotated` and `ride,race` are
+ * refused.
  */
 export const OPERATOR_DETAILS: {
   readonly [action in OperatorAction]: {
     readonly words: readonly string[];
-    readonly counts: readonly string[];
+    readonly counts: readonly (keyof typeof OPERATOR_COUNT_LIMITS)[];
+    /** Groups of words that contradict each other: at most one word of each. */
+    readonly apart?: readonly (readonly string[])[];
+    /** Every word contradicts every other: at most one word in all. */
+    readonly oneWord?: true;
   };
 } = {
   migrate: { words: [], counts: ['applied'] },
   backup: { words: ['offbox_failed', 'requested'], counts: ['blobs', 'removed'] },
-  restore: { words: ['keys_rotated', 'keys_not_rotated'], counts: ['blobs'] },
-  room_open: { words: ['ride', 'race'], counts: [] },
+  restore: {
+    words: ['keys_rotated', 'keys_not_rotated'],
+    counts: ['blobs'],
+    oneWord: true,
+  },
+  room_open: { words: ['ride', 'race'], counts: [], oneWord: true },
   model_key_set: { words: [], counts: [] },
-  model_key_clear: { words: ['cleared', 'none_held'], counts: [] },
+  model_key_clear: { words: ['cleared', 'none_held'], counts: [], oneWord: true },
   instance_key_init: { words: [], counts: [] },
   // #2613: a rotation from the app refused while the key lease is held.
   instance_key_rotate: { words: ['busy'], counts: [] },
@@ -1087,13 +1124,19 @@ export const OPERATOR_DETAILS: {
   account_erase: { words: [], counts: [] },
   // #2606: why "back up now" was refused — a request already waits, or a
   // backup ran in the last 15 minutes.
-  backup_requested: { words: ['pending', 'too_soon'], counts: [] },
+  backup_requested: { words: ['pending', 'too_soon'], counts: [], oneWord: true },
   // #2609: WHICH settings a write changed, never their values.
   analysis_settings_set: {
     words: [...ANALYSIS_SETTING_FIELD_WORDS, 'unchanged'],
     counts: [],
+    // `unchanged` is said alone; any number of fields may change together.
+    apart: ANALYSIS_SETTING_FIELD_WORDS.map((field) => ['unchanged', field]),
   },
-  analysis_settings_cleared: { words: ['cleared', 'none_set'], counts: [] },
+  analysis_settings_cleared: {
+    words: ['cleared', 'none_set'],
+    counts: [],
+    oneWord: true,
+  },
   // #2610: how the owner's tool check went — `analysis/tool-check.ts`
   // §`ToolCheckOutcome`, each `-` an `_`. Never the model's name.
   analysis_model_checked: {
@@ -1109,12 +1152,13 @@ export const OPERATOR_DETAILS: {
       'busy',
     ],
     counts: [],
+    oneWord: true,
   },
   // #2641 (ADR 0069 D-8): never a code, an athlete, a session or an address.
   // Minting voids every unused code, and says so when one was live.
   admin_code_minted: { words: ['voided_unused'], counts: [] },
   // How a session was opened: `passkey` is #2642's.
-  admin_sign_in: { words: ['code', 'passkey'], counts: [] },
+  admin_sign_in: { words: ['code', 'passkey'], counts: [], oneWord: true },
   // At most one a minute per kind, carrying how many were refused.
   // `counter` (#2642): a passkey whose signature counter did not rise — a
   // cloned authenticator, or a replay — counted apart from other refusals.
@@ -1131,16 +1175,21 @@ export const OPERATOR_DETAILS: {
       'address',
     ],
     counts: ['refused'],
+    oneWord: true,
   },
   // #2642: the algorithm, never the passkey's id, label or RP ID.
-  admin_passkey_enrolled: { words: ['ed25519', 'es256'], counts: [] },
+  admin_passkey_enrolled: { words: ['ed25519', 'es256'], counts: [], oneWord: true },
   admin_passkey_revoked: { words: [], counts: ['sessions_ended'] },
   admin_passkey_confirmed: { words: [], counts: [] },
   // #2612: why the owner ended a room, what kind it was and how many riders
   // were in it — never the room's id, a rider or a place.
-  room_ended: { words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'], counts: ['riders'] },
+  room_ended: {
+    words: [...ROOM_END_REASONS, 'group', 'race', 'lap_race'],
+    counts: ['riders'],
+    apart: [ROOM_END_REASONS, ['group', 'race', 'lap_race']],
+  },
   // #2646 (ADR 0069 D-8): the decision, never the rider, their name or the reason.
-  registration_decided: { words: ['approved', 'refused'], counts: [] },
+  registration_decided: { words: ['approved', 'refused'], counts: [], oneWord: true },
   emergency_kit_downloaded: { words: [], counts: [] },
   // #2782 (ADR 0080 D-7): never a code, a key or a comparison code. Minting
   // voids every other code, a pending claim's included, and says so.
@@ -1148,35 +1197,55 @@ export const OPERATOR_DETAILS: {
   owner_claim_confirmed: { words: [], counts: [] },
   owner_claim_discarded: { words: [], counts: [] },
   // Whether a claimed key was cleared, and how many admin sessions ended.
-  owner_claim_reset: { words: ['cleared', 'none_claimed'], counts: ['sessions_ended'] },
+  owner_claim_reset: {
+    words: ['cleared', 'none_claimed'],
+    counts: ['sessions_ended'],
+    oneWord: true,
+  },
   // #2784 (ADR 0080 D-7): never a code, a session, a secret or an address.
   setup_code_minted: { words: ['voided_unused'], counts: [] },
   setup_sign_in: { words: [], counts: [] },
   // At most one a minute per kind, carrying how many were refused (ADR 0069 D-8's coalescing).
-  setup_refused: { words: ['code', 'csrf', 'origin', 'rate_limited'], counts: ['refused'] },
+  setup_refused: {
+    words: ['code', 'csrf', 'origin', 'rate_limited'],
+    counts: ['refused'],
+    oneWord: true,
+  },
   // WHICH secret the start made, never the secret (#2781's `secrets.ts` §`SECRET_FILES`).
-  secret_generated: { words: ['instance_secret_key', 'metrics_token'], counts: [] },
+  // One entry per secret.
+  secret_generated: { words: ['instance_secret_key', 'metrics_token'], counts: [], oneWord: true },
   // The mode chosen, or `cleared`: back to OYL_INSTANCE_REGISTRATION.
   registration_mode_set: {
     words: ['open', 'approval', 'invite', 'closed', 'cleared'],
     counts: [],
+    oneWord: true,
   },
   invite_minted: { words: [], counts: [] },
   setup_done: { words: [], counts: [] },
   // #2792: why a download was not asked for — one is running, no Ollama
   // answered, or the name is not a model's. Never the model's name.
-  analysis_model_pull: { words: ['busy', 'no_server', 'bad_model'], counts: [] },
+  analysis_model_pull: { words: ['busy', 'no_server', 'bad_model'], counts: [], oneWord: true },
 };
 
-/** Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once. */
+/**
+ * Whether `detail` is written only from `action`'s vocabulary ({@link OPERATOR_DETAILS}), each part once,
+ * each count within its key's limit and no two words of one `apart` group.
+ */
 export function operatorDetailFits(action: OperatorAction, detail: string): boolean {
-  const { words, counts } = OPERATOR_DETAILS[action];
+  const { words, counts, apart = [], oneWord = false } = OPERATOR_DETAILS[action];
   const parts = detail.split(',');
   if (new Set(parts.map((part) => part.split('=')[0])).size !== parts.length) return false;
+  const groups = oneWord ? [...apart, words] : apart;
+  if (groups.some((group) => parts.filter((part) => group.includes(part)).length > 1)) return false;
   return parts.every((part) => {
     const [key = '', count, ...rest] = part.split('=');
     if (count === undefined) return words.includes(key);
-    return rest.length === 0 && counts.includes(key) && /^[0-9]{1,9}$/.test(count);
+    return (
+      rest.length === 0 &&
+      (counts as readonly string[]).includes(key) &&
+      /^[0-9]{1,9}$/.test(count) &&
+      Number(count) <= OPERATOR_COUNT_LIMITS[key as keyof typeof OPERATOR_COUNT_LIMITS]
+    );
   });
 }
 
@@ -2820,6 +2889,8 @@ export interface SqlStore {
   }): Promise<'taken' | 'busy'>;
   /** The holder's heartbeat: `false` when the lease is no longer `token`'s. */
   heartbeatBackupLease(place: string, token: string, now: number): Promise<boolean>;
+  /** Whether the lease's row is still `token`'s, read (#2627). */
+  holdsBackupLease(place: string, token: string): Promise<boolean>;
   /** Give the lease up, if it is still `token`'s. */
   releaseBackupLease(place: string, token: string): Promise<void>;
   /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
@@ -3329,7 +3400,6 @@ const backupRecordFrom = (
   requested: Number(row.requested) === 1,
 });
 
-/** Append one operator log entry through `executor`, answering its id (#2602). */
 /**
  * What the store reports on the console's error stream when an operator
  * action's scrub could not be checkpointed (#2602): a fixed sentence, naming
@@ -3338,6 +3408,7 @@ const backupRecordFrom = (
 export const SCRUB_CHECKPOINT_FAILED =
   'instance: the write-ahead log could not be checkpointed after an operator action’s scrub; the action’s outcome stands, and old page images may remain in the log until the next truncating checkpoint.';
 
+/** Append one operator log entry through `executor`, answering its id (#2602). */
 async function appendOperatorLog(
   executor: Kysely<InstanceDatabase>,
   entry: OperatorEntry,
@@ -7427,6 +7498,17 @@ function storeOver(
           .executeTakeFirst();
         return beat.numUpdatedRows > 0n;
       }),
+
+    holdsBackupLease: (place, token) =>
+      exclusive(
+        async () =>
+          (await db
+            .selectFrom('backup_lease')
+            .select('token')
+            .where('place', '=', place)
+            .where('token', '=', token)
+            .executeTakeFirst()) !== undefined,
+      ),
 
     releaseBackupLease: (place, token) =>
       exclusive(async () => {
