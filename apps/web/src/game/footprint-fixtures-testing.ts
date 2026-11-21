@@ -1652,7 +1652,7 @@ export const POI_ROWS: readonly PoiRow[] = [
     buildingType: null,
     poi: 'fuel',
     footprint: rectangleBeside(0, 0, 24, 14),
-    height: 5.8,
+    height: 6.4,
   },
   {
     row: 'canopy-no-height',

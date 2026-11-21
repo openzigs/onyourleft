@@ -134,7 +134,7 @@ describe('a fuel station the map marks — #2975', () => {
 
   it('its slab’s top is its mapped height, or with none the forecourt’s, and its posts reach the ground', () => {
     for (const [row, rise] of [
-      ['canopy', 5.8],
+      ['canopy', 6.4],
       ['canopy-no-height', FUEL_CANOPY.clearance + FUEL_CANOPY.thickness],
     ] as const) {
       for (const canopy of rowOf(row)) {
