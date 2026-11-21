@@ -368,9 +368,8 @@ describe('an open-world ride is ridden alone — #2982', () => {
     const heard: string[] = [];
     let slopesPastFirst = 0;
     for (let frames = 0; frames < 400; frames += 1) {
-      const views = new Set(inputs.map((input) => input.profile)).size;
-      const last = inputs[inputs.length - 1];
-      if (views >= 3 && (last?.state.ride.distance ?? 0) > 5_000) break;
+      // Past a second advance of the road, with new views' slopes said.
+      if (new Set(inputs.map((input) => input.profile)).size >= 3 && slopesPastFirst >= 3) break;
       const before = spoken();
       await pump();
       const said = spoken();
