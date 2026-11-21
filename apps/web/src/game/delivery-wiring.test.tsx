@@ -2674,6 +2674,8 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
     /** #2365: a throw pressed after each of these frames, on that side; frames of FRAME_MS only. */
     throwsAt: ReadonlyMap<number, ThrowSide> = new Map(),
     fine?: ReadonlySet<number>,
+    /** Every frame the ride hands the view, for a case that reads what was drawn. */
+    drawn: SceneFrame[] = [],
   ): Promise<{
     readonly writes: readonly Write[];
     readonly offered: readonly string[];
@@ -2711,7 +2713,7 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
         trainer={trainerPort(writes)}
         renderer={() =>
           Promise.resolve({
-            ...capturingRenderer([]),
+            ...capturingRenderer(drawn),
             loadRealisticWorld: () => Promise.resolve({ loaded: true }),
           })
         }
@@ -2785,6 +2787,49 @@ describe('a built-in levelâ€™s parked cars change nothing the trainer is sent â€
       expect(withHazards.writes).toStrictEqual(without.writes);
     },
   );
+
+  // Ridden only to the crash, as the case above: two thirds of a round in all.
+  it('hands the view a car pulling out DRIVING out, its indicator flashing, and lit steadily under reduced motion', async () => {
+    const { seed, frame } = crashingRide(
+      MOVING_LEVEL,
+      'car-pulling-out',
+      EARLY_CRASH_SEEDS['car-pulling-out'] ?? 1,
+    );
+    const cars = (frames: readonly SceneFrame[]) =>
+      frames.flatMap((each) =>
+        (each.delivery?.obstacles ?? []).filter((piece) => piece.kind === 'car-pulling-out'),
+      );
+    const moving: SceneFrame[] = [];
+    await rideLevel('normal', MOVING_LEVEL, seed, frame, FRAME_MS, new Map(), undefined, moving);
+    const drawn = cars(moving);
+    expect(drawn.length).toBeGreaterThan(10);
+    // Every one carries its motion: the wheels, the steer and the road-side indicator.
+    expect(drawn.every((piece) => piece.car?.indicator !== undefined)).toBe(true);
+    // It drove: its wheels rolled its whole way out, and it was drawn turned on the way.
+    expect(Math.max(...drawn.map((piece) => piece.car?.travelledMetres ?? 0))).toBeCloseTo(8, 6);
+    expect(drawn.some((piece) => (piece.car?.speedMetresPerSecond ?? 0) > 1)).toBe(true);
+    expect(drawn.some((piece) => Math.abs(piece.car?.steerRadians ?? 0) > 0.1)).toBe(true);
+    // And once set going its indicator flashes, on a clock that runs.
+    const clocks = drawn.flatMap((piece) =>
+      piece.car?.indicatorSeconds === undefined ? [] : [piece.car.indicatorSeconds],
+    );
+    expect(clocks.length).toBeGreaterThan(5);
+    expect(Math.max(...clocks)).toBeGreaterThan(1);
+
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const still: SceneFrame[] = [];
+    await rideLevel('normal', MOVING_LEVEL, seed, frame, FRAME_MS, new Map(), undefined, still);
+    const steady = cars(still);
+    expect(steady.length).toBe(drawn.length);
+    // Lit, with no clock to flash on; the car itself drives out as it did.
+    expect(steady.every((piece) => piece.car?.indicator !== undefined)).toBe(true);
+    expect(steady.every((piece) => piece.car?.indicatorSeconds === undefined)).toBe(true);
+    expect(Math.max(...steady.map((piece) => piece.car?.travelledMetres ?? 0))).toBeCloseTo(8, 6);
+  });
 
   // #1688's ruling: cheaper, never a longer timeout. Both rides are the
   // level's same 66 s in frames of 1 s, not 330 of 200 ms: the simulation's

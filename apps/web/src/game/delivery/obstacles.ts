@@ -93,8 +93,8 @@
  * distance, and it is set going — and said in words, `hud/delivery-announce.ts`
  * — when the rider comes within that distance, at least
  * {@link MOVING_HAZARD_WARNING_SECONDS} before it can touch them. A dog crosses
- * the whole road and is dodged by timing, as a bin is; a car pulling out stops
- * in its kerb lane ({@link LaneObstacle}), and another rider rides out into
+ * the whole road and is dodged by timing, as a bin is; a car pulling out drives
+ * out ({@link carPullingOut}) and stops in its kerb lane ({@link LaneObstacle}), and another rider rides out into
  * theirs and then toward the rider ({@link obstacleAlong}), each dodged by
  * changing lane. `moving-hazards.test.ts` sweeps every one at every avoidable speed
  * and lane.
@@ -238,7 +238,8 @@ export interface ObstacleShape {
  *
  * The moving hazards (#2364, {@link MOVING_HAZARD_KINDS}): a dog runs across
  * the road side on, so it is 0.9 m across and 0.4 m along it, at 3 m/s; a car
- * pulling out is a parked car's size, nosing out at 1.5 m/s; another rider is
+ * pulling out is a parked car's size and DRIVES out ({@link carPullingOut}),
+ * so its `speed` here is read by nothing; another rider is
  * a bicycle's size, 1.7 m along and 0.6 m across, riding out from the kerb at
  * 1.5 m/s and then toward the rider at {@link ONCOMING_RIDER_METRES_PER_SECOND}.
  * This project's own numbers, for the owner's approval in #2364's pull request.
@@ -454,6 +455,142 @@ function kerbOffset(shape: ObstacleShape): number {
 }
 
 /**
+ * How far a car pulling out drives along the road as it comes out, metres:
+ * **8**, from where it waits off the kerb to where it stops in its kerb lane.
+ * Its 2 m across the road over 8 m along it turn it at most 20.6° from the
+ * road, a parallel-parked car's way out. This project's own number.
+ *
+ * Until this, the car crossed its 2 m sideways at 1.5 m/s facing along the
+ * road with its wheels still: the owner, on the tablet, "just slid sideways
+ * onto the road with a strange animation".
+ */
+export const PULL_OUT_RUN_METRES = 8;
+
+/**
+ * How long a car pulling out takes to drive out, seconds: **3.2**, so it
+ * averages 2.5 m/s and peaks at 3.9 m/s (14 km/h), from standing to standing.
+ * This project's own number.
+ */
+export const PULL_OUT_SECONDS = 3.2;
+
+/**
+ * The wheelbase a car pulling out's front wheels are steered for, metres:
+ * **2.6**, between the three drawn bodies' own (2.50 to 2.69 m). A drawing's
+ * number: nothing that meets the rider reads it.
+ */
+export const PULL_OUT_WHEELBASE_METRES = 2.6;
+
+/** How long before it moves a car pulling out turns its front wheels toward the road, seconds: 0.6. A drawing only. */
+export const PULL_OUT_STEER_READY_SECONDS = 0.6;
+
+/** A car pulling out, at one moment. @see carPullingOut */
+export interface CarPullingOut {
+  /** Its middle along the route, metres. */
+  readonly along: number;
+  /** Its middle across the road, metres right of the centre line. */
+  readonly across: number;
+  /** How far its nose is turned from the road's heading, radians, positive toward the rider's right. */
+  readonly heading: number;
+  /** How far along the road it has driven since it set off, metres: within 2 % of its path's length. */
+  readonly travelled: number;
+  /** Its speed over the ground, metres a second. */
+  readonly speed: number;
+  /** Its front wheels' angle, radians, positive to the car's own left. */
+  readonly steer: number;
+  /** How hard it is braking, `0` to `1`: nought until half way out, and nought again once it stands. */
+  readonly braking: number;
+}
+
+/** Whether a lane hazard is a car pulling out, which drives out and stops in its lane. */
+function pullsOut(obstacle: LaneObstacle): boolean {
+  return obstacle.kind === 'car-pulling-out';
+}
+
+/**
+ * How long a lane hazard takes to come out from off the kerb into its lane,
+ * seconds: a car's {@link PULL_OUT_SECONDS}, anything else its way across at
+ * its own speed.
+ */
+function laneEntrySeconds(obstacle: LaneObstacle): number {
+  if (pullsOut(obstacle)) return PULL_OUT_SECONDS;
+  const shape = OBSTACLE_KINDS[obstacle.kind];
+  return (kerbOffset(shape) - Math.abs(obstacle.to)) / shape.speed;
+}
+
+/**
+ * Where a car pulling out is, and how it is moving, `seconds` after it was
+ * set going: it waits parallel to the road, off the kerb,
+ * {@link PULL_OUT_RUN_METRES} short of `obstacle.along`; from its
+ * `startAfter` it DRIVES out, forward and across together, gathering speed
+ * and then braking over {@link PULL_OUT_SECONDS}; and it stops at
+ * `obstacle.along` in its kerb lane, straight, where a parked car stands.
+ *
+ * Its path across the road is a smooth step of its way along it, so its nose
+ * is along the road at both ends and turned toward the road between, and its
+ * front wheels steer into the road first and back out of the turn after: the
+ * path's own curvature at {@link PULL_OUT_WHEELBASE_METRES}. Before it moves
+ * the wheels turn to where its first metre needs them.
+ *
+ * ⚠️ **What meets the rider is this place** ({@link obstacleAlong},
+ * {@link obstacleAcross}), in a box along the road as every obstacle's is,
+ * grown to hold the car as it is turned ({@link obstacleReach}): at its most,
+ * 20.6° from the road, 0.72 m wider each side and 0.18 m longer each end. So
+ * the drawn car and the car that costs a point are one.
+ */
+export function carPullingOut(obstacle: LaneObstacle, seconds: number): CarPullingOut {
+  const shape = OBSTACLE_KINDS[obstacle.kind];
+  const kerb = kerbOffset(shape);
+  const way = kerb - Math.abs(obstacle.to);
+  const towardRight = obstacle.from === 'left' ? 1 : -1;
+  const time = Math.min(1, Math.max(0, (seconds - obstacle.startAfter) / PULL_OUT_SECONDS));
+  // Its share of the way out: gathering speed from standing, braking to standing.
+  const out = time * time * (3 - 2 * time);
+  // Across the road, a smooth step of the way along it: level at both ends.
+  const across = way * out * out * (3 - 2 * out);
+  const slope = (towardRight * way * 6 * out * (1 - out)) / PULL_OUT_RUN_METRES;
+  const bend =
+    (towardRight * way * (6 - 12 * out)) /
+    (PULL_OUT_RUN_METRES * PULL_OUT_RUN_METRES) /
+    (1 + slope * slope) ** 1.5;
+  const ready = Math.min(
+    1,
+    Math.max(0, 1 - (obstacle.startAfter - seconds) / PULL_OUT_STEER_READY_SECONDS),
+  );
+  return {
+    along: obstacle.along - PULL_OUT_RUN_METRES * (1 - out),
+    across: towardRight * (across - kerb),
+    // `+ 0`: nought and never `-0`, from the right-hand kerb too.
+    heading: Math.atan(slope) + 0,
+    travelled: PULL_OUT_RUN_METRES * out,
+    speed:
+      ((PULL_OUT_RUN_METRES * 6 * time * (1 - time)) / PULL_OUT_SECONDS) *
+      Math.sqrt(1 + slope * slope),
+    // Turning toward the rider's right is a steer to the car's own right: negative.
+    steer: -Math.atan(PULL_OUT_WHEELBASE_METRES * bend) * (time > 0 ? 1 : ready) + 0,
+    braking: time > 0.5 && time < 1 ? Math.sin(2 * Math.PI * (time - 0.5)) : 0,
+  };
+}
+
+/**
+ * Half of `obstacle`'s size along and across the road, `seconds` after it was
+ * set going, metres: its roster shape's, except a car pulling out, whose box
+ * holds the whole car turned as it is at that moment ({@link carPullingOut}),
+ * so a rider beside its turned nose meets it where it is drawn.
+ */
+export function obstacleReach(
+  obstacle: Obstacle,
+  seconds: number,
+): Pick<ObstacleShape, 'halfLength' | 'halfWidth'> {
+  const shape = OBSTACLE_KINDS[obstacle.kind];
+  if (obstacle.to === undefined || !pullsOut(obstacle)) return shape;
+  const turn = Math.abs(carPullingOut(obstacle, seconds).heading);
+  return {
+    halfLength: shape.halfLength * Math.cos(turn) + shape.halfWidth * Math.sin(turn),
+    halfWidth: shape.halfWidth * Math.cos(turn) + shape.halfLength * Math.sin(turn),
+  };
+}
+
+/**
  * Where the middle of `obstacle` is across the road, `seconds` after it was
  * set going, in metres right of the centre line. Off the near kerb until its
  * `startAfter`, then crossing, then off the far kerb for good. #1814 draws it
@@ -461,6 +598,10 @@ function kerbOffset(shape: ObstacleShape): number {
  */
 export function obstacleAcross(obstacle: Obstacle, seconds: number): number {
   if (obstacle.stands !== undefined) return obstacle.stands;
+  // A car pulling out drives out along its own path. @see carPullingOut
+  if (obstacle.to !== undefined && pullsOut(obstacle)) {
+    return carPullingOut(obstacle, seconds).across;
+  }
   const shape = OBSTACLE_KINDS[obstacle.kind];
   const kerb = kerbOffset(shape);
   // #2364: a lane hazard stops in its lane, its whole way out from off the kerb.
@@ -473,12 +614,15 @@ export function obstacleAcross(obstacle: Obstacle, seconds: number): number {
 /**
  * Where the middle of `obstacle` is along the route, `seconds` after it was
  * set going, in metres — #2364: where it was placed, except another rider,
- * who rides toward the rider from the moment they are in their lane.
+ * who rides toward the rider from the moment they are in their lane, and a
+ * car pulling out, which drives up to where it was placed as it comes out
+ * ({@link carPullingOut}).
  */
 export function obstacleAlong(obstacle: Obstacle, seconds: number): number {
-  if (obstacle.to === undefined || obstacle.rides === 0) return obstacle.along;
-  const shape = OBSTACLE_KINDS[obstacle.kind];
-  const inLane = obstacle.startAfter + (kerbOffset(shape) - Math.abs(obstacle.to)) / shape.speed;
+  if (obstacle.to === undefined) return obstacle.along;
+  if (pullsOut(obstacle)) return carPullingOut(obstacle, seconds).along;
+  if (obstacle.rides === 0) return obstacle.along;
+  const inLane = obstacle.startAfter + laneEntrySeconds(obstacle);
   return obstacle.along + obstacle.rides * Math.max(0, seconds - inLane);
 }
 
@@ -685,8 +829,8 @@ export function placeObstacles(
  *
  * - A **dog** crosses the whole road as a crossing obstacle does, timed so a
  *   rider at their seeded on-time speed meets it on the centre line.
- * - A **car pulling out** stops in its kerb lane where a parked car stands
- *   ({@link parkedCarStands}), out before a rider at
+ * - A **car pulling out** drives out ({@link carPullingOut}) and stops in its
+ *   kerb lane where a parked car stands ({@link parkedCarStands}), out before a rider at
  *   {@link ON_TIME_FASTEST_METRES_PER_SECOND} reaches it.
  * - **Another rider** rides out into the middle of their kerb lane as soon as
  *   they are set going, then toward the rider at
@@ -716,7 +860,8 @@ function movingHazard(hash: number, start: number, spacing: number): Obstacle {
   }
   if (kind === 'car-pulling-out') {
     const to = parkedCarStands(from);
-    const out = (kerbOffset(shape) - Math.abs(to)) / shape.speed;
+    // It drives out, and is standing in its lane this long after it sets off.
+    const out = PULL_OUT_SECONDS;
     return {
       kind,
       along,
@@ -788,8 +933,9 @@ export function stepObstacles(state: ObstacleState, input: ObstacleInput): Obsta
     }
     const started = startedAt[index];
     if (started === undefined || crashed[index] === true) return;
-    const shape = OBSTACLE_KINDS[obstacle.kind];
     const seconds = (tick - started) * DELIVERY_TICK_SECONDS;
+    // Its roster shape, or a car pulling out's as it is turned now.
+    const shape = obstacleReach(obstacle, seconds);
     // #2364: another rider comes toward the rider, so is met where they are now.
     const along = obstacleAlong(obstacle, seconds);
     if (!overlaps(riderBack, riderFront, along - shape.halfLength, along + shape.halfLength)) {
@@ -848,7 +994,10 @@ export function clearOfParkedCars(
       obstacle.kind === 'car-pulling-out';
     if (!car || state.crashed[index] !== true) return;
     const started = state.startedAt[index] ?? state.tick;
-    const stands = obstacleAcross(obstacle, (state.tick - started) * DELIVERY_TICK_SECONDS);
+    const seconds = (state.tick - started) * DELIVERY_TICK_SECONDS;
+    const stands = obstacleAcross(obstacle, seconds);
+    // A car pulling out is beside the rider where it has driven to.
+    const carAlong = obstacleAlong(obstacle, seconds);
     const shape = OBSTACLE_KINDS[obstacle.kind];
     const offset = moved?.offset ?? rider.offset;
     // #2396: the car widened by the clearance, so a rider held at it, who
@@ -858,8 +1007,8 @@ export function clearOfParkedCars(
       !overlaps(
         rider.along - RIDER_BEHIND_METRES,
         rider.along + RIDER_AHEAD_METRES,
-        obstacle.along - shape.halfLength,
-        obstacle.along + shape.halfLength,
+        carAlong - shape.halfLength,
+        carAlong + shape.halfLength,
       ) ||
       !overlaps(
         offset - RIDER_HALF_WIDTH_METRES,

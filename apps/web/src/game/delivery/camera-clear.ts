@@ -35,7 +35,13 @@
  * Nothing here formats a position into a string (CLAUDE.md §6, ADR 0004 D).
  */
 
-import { OBSTACLE_KINDS, obstacleAcross, type Obstacle, type ObstacleState } from './obstacles';
+import {
+  OBSTACLE_KINDS,
+  obstacleAcross,
+  obstacleAlong,
+  type Obstacle,
+  type ObstacleState,
+} from './obstacles';
 import { DELIVERY_TICK_SECONDS } from './throw';
 
 /** How far behind the rider the chase camera's eye stands, metres: `camera.ts` §`CAMERA_BEHIND_METRES`, pinned by the test. */
@@ -87,18 +93,22 @@ export function eyeLateralBesideParkedCars(
   let lateral = riderLateral;
   for (const [index, obstacle] of obstacles.entries()) {
     let stands: number;
+    let along = obstacle.along;
     if (obstacle.kind === 'parked-car' && obstacle.stands !== undefined) {
       stands = obstacle.stands;
     } else if (obstacle.kind === 'car-pulling-out' && state !== undefined) {
       const started = state.startedAt[index];
       if (started === undefined) continue;
-      stands = obstacleAcross(obstacle, (state.tick - started) * DELIVERY_TICK_SECONDS);
+      const seconds = (state.tick - started) * DELIVERY_TICK_SECONDS;
+      stands = obstacleAcross(obstacle, seconds);
+      // It drives out, so it is beside the eye where it has driven to.
+      along = obstacleAlong(obstacle, seconds);
     } else {
       continue;
     }
     const { halfLength, halfWidth } = OBSTACLE_KINDS[obstacle.kind];
-    const back = obstacle.along - halfLength - CAMERA_NEAR_PLANE_METRES;
-    const front = obstacle.along + halfLength;
+    const back = along - halfLength - CAMERA_NEAR_PLANE_METRES;
+    const front = along + halfLength;
     const beside =
       smoothStep(back - CAMERA_CAR_EASE_METRES, back, eyeAlong) *
       (1 - smoothStep(front, front + CAMERA_CAR_EASE_METRES, eyeAlong));

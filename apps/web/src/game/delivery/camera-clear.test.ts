@@ -12,7 +12,15 @@ import {
   eyeLateralBesideParkedCars,
 } from './camera-clear';
 import { LANE_OFFSETS_METRES } from './steer';
-import { OBSTACLE_KINDS, parkedCarStands, startObstacles, type Obstacle } from './obstacles';
+import {
+  OBSTACLE_KINDS,
+  obstacleAcross,
+  obstacleAlong,
+  parkedCarStands,
+  startObstacles,
+  type Obstacle,
+} from './obstacles';
+import { DELIVERY_TICK_SECONDS } from './throw';
 
 const CAR = OBSTACLE_KINDS['parked-car'];
 const AT = 200;
@@ -111,6 +119,27 @@ describe('the chase camera’s eye beside a parked car — #2396', () => {
       );
     }
     expect(beside).toBeGreaterThan(50);
+    // While it drives out it is short of its place: the eye is held off it THERE.
+    const driving = { ...set, tick: Math.round(2.4 / DELIVERY_TICK_SECONDS), startedAt: [0] };
+    const seconds = driving.tick * DELIVERY_TICK_SECONDS;
+    const carAlong = obstacleAlong(pulling[0] as Obstacle, seconds);
+    expect(AT - carAlong).toBeGreaterThan(1);
+    const moved: Obstacle[] = [
+      {
+        kind: 'parked-car',
+        along: carAlong,
+        stands: obstacleAcross(pulling[0] as Obstacle, seconds),
+      },
+    ];
+    let differs = 0;
+    for (const along of SWEEP) {
+      const eye = eyeLateralBesideParkedCars(pulling, along, RIGHT_LANE, driving);
+      expect(eye).toBeCloseTo(eyeLateralBesideParkedCars(moved, along, RIGHT_LANE), 9);
+      if (Math.abs(eye - eyeLateralBesideParkedCars(parked, along, RIGHT_LANE)) > 1e-6)
+        differs += 1;
+    }
+    // Not vacuous: that is not where a car standing at its place would hold it.
+    expect(differs).toBeGreaterThan(0);
     // Not yet set going: it is drawn nowhere, so the eye is the rider's own.
     for (const along of SWEEP) {
       expect(eyeLateralBesideParkedCars(pulling, along, RIGHT_LANE, set)).toBe(RIGHT_LANE);
