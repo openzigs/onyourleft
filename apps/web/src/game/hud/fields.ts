@@ -530,6 +530,16 @@ export interface HudInput {
    */
   readonly units?: UnitSystem | undefined;
   /**
+   * An open-world ride — #2990: the road goes nowhere in particular, and
+   * {@link profile} is only the rolling route's view, about 3 km of road held
+   * round the rider, which a new view replaces. So the distance to go and the
+   * totals strip's *Route* are dashes, never the view's end or length: each
+   * keeps its place (#94), and the spoken "to go" reads the dash as nothing to
+   * say (`announce.ts` §`remainingFrom`). Chosen with the card and held for the
+   * ride. Absent on every other ride, which reads exactly as it did.
+   */
+  readonly openEnded?: boolean | undefined;
+  /**
    * The ride's moving time, in seconds — #1111. **The recorder's own figure**,
    * `RideSnapshot.movingSeconds`, read through `trainer-port.ts`
    * §`GameTrainerPort.rideMovingSeconds`: the number the saved activity's
@@ -733,7 +743,10 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
   // argument rather than a unit one: this is a countdown, and a rider watching
   // the last kilometre go past wants the ten-metre digit. `units/format.ts`
   // §Rounding says why the two are kept apart.
-  const togo = remainingDistance(remaining as Metres, units);
+  const togo: Measurement =
+    input.openEnded === true
+      ? { value: NO_READING, unit: distanceUnit(units) }
+      : remainingDistance(remaining as Metres, units);
   // ⚠️ **Last, and the position is the decision rather than an afterthought.**
   // The order above is a contract — #94 asks a rider to find a field by
   // position rather than by reading its label — and this is the one field

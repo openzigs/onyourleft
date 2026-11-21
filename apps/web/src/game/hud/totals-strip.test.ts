@@ -172,3 +172,28 @@ describe('the totals strip — #2387', () => {
     expect(value(bare, 'totals-remaining')[0]).not.toBe(NO_READING);
   });
 });
+
+describe('the totals strip on an open-world ride — #2990', () => {
+  it('shows a dash for the route and the distance to go, in their places, and the ride’s own totals', () => {
+    const own = input();
+    const open = input({ openEnded: true });
+    // The same six-less-a-lap in the same order: nothing moves under a rider.
+    expect(strip(open).map((each) => each.key)).toEqual(KEYS.slice(1));
+    for (const units of ['metric', 'imperial'] as const) {
+      const hud = input({ openEnded: true, units });
+      expect(value(hud, 'totals-route')).toEqual([NO_READING, units === 'metric' ? 'km' : 'mi']);
+      expect(value(hud, 'totals-remaining')).toEqual([
+        NO_READING,
+        units === 'metric' ? 'km' : 'mi',
+      ]);
+    }
+    // The HUD's own field says the same, and nothing else of the ride changes.
+    expect(hudReadings(open).find((each) => each.key === 'remaining')?.value).toBe(NO_READING);
+    for (const key of ['totals-average-speed', 'totals-energy', 'totals-climbed']) {
+      expect(value(open, key)).toEqual(value(own, key));
+    }
+    expect(hudReadings(open).map((each) => each.key)).toEqual(
+      hudReadings(own).map((each) => each.key),
+    );
+  });
+});

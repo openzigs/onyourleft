@@ -41,10 +41,26 @@
  * count of U-turns, so a U-turn made by any caller — #2897's junction choice
  * calls the route directly — is told apart.
  *
- * Nothing here reads a clock, writes to a trainer or names a place.
+ * ## What it tells the session (#2990)
+ *
+ * Each follow hands the rider's position to {@link OpenWorldRoadHooks.at}, so
+ * the session's reader reads the blocks round them as they go, and reads the
+ * graph's version: when the graph has grown, the route takes a way on past any
+ * turn-round more than the lock ahead (`RollingRoute.reopen`), which changes no
+ * grade the rider can have been sent, so its view is handed on as an extension
+ * is.
+ *
+ * Nothing here reads a clock, writes to a trainer or names a place: the
+ * position goes to the reader, which keeps only its block (ADR 0090 R-1).
  */
 
-import { metres, type RollingRoute, type RouteProfile } from '@onyourleft/domain';
+import {
+  metres,
+  positionAt,
+  type GeographicPosition,
+  type RollingRoute,
+  type RouteProfile,
+} from '@onyourleft/domain';
 
 import type { GameState } from '../simulation';
 
@@ -90,16 +106,32 @@ export function alongRoad(state: GameState, origin: number): GameState {
   };
 }
 
+/** What the road tells the session, and asks of it, as the ride goes — #2990. */
+export interface OpenWorldRoadHooks {
+  /** Where the rider is now, each {@link OpenWorldRoad.follow}: the map round them is read. */
+  readonly at?: ((position: GeographicPosition) => void) | undefined;
+  /**
+   * The street graph's version: a change since the last follow may have given
+   * a way on past a turn-round, which the route then takes
+   * (`RollingRoute.reopen`).
+   */
+  readonly graphVersion?: (() => number) | undefined;
+}
+
 /** One open-world ride's road, from its start. See the file's header. */
 export class OpenWorldRoad {
   /** The rolling route itself: #2897's junction choice presses through it. */
   readonly route: RollingRoute;
+  readonly #hooks: OpenWorldRoadHooks;
   #view: OpenWorldRoadView;
   #uTurns: number;
+  #graphVersion: number | undefined;
 
-  constructor(route: RollingRoute) {
+  constructor(route: RollingRoute, hooks: OpenWorldRoadHooks = {}) {
     this.route = route;
+    this.#hooks = hooks;
     this.#uTurns = route.uTurns;
+    this.#graphVersion = hooks.graphVersion?.();
     this.#view = { profile: route.view(), origin: route.origin, turned: false };
   }
 
@@ -118,8 +150,16 @@ export class OpenWorldRoad {
    */
   follow(rider: number): OpenWorldRoadView | undefined {
     const route = this.route;
-    if (Number.isFinite(rider) && route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) {
-      route.advance(rider);
+    if (Number.isFinite(rider)) {
+      // #2990: streets added since may go on past where the route turned round.
+      const version = this.#hooks.graphVersion?.();
+      if (version !== this.#graphVersion) {
+        this.#graphVersion = version;
+        route.reopen(rider);
+      }
+      if (route.end - rider < OPEN_WORLD_REACH_FLOOR_METRES) route.advance(rider);
+      const at = alongView(route, rider);
+      if (at >= 0 && at <= route.end - route.origin) this.#hooks.at?.(positionAt(route.view(), at));
     }
     const profile = route.view();
     if (profile === this.#view.profile) return undefined;
