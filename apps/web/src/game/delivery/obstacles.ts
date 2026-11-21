@@ -480,8 +480,20 @@ export const PULL_OUT_SECONDS = 3.2;
  */
 export const PULL_OUT_WHEELBASE_METRES = 2.6;
 
-/** How long before it moves a car pulling out turns its front wheels toward the road, seconds: 0.6. A drawing only. */
+/**
+ * How long before it moves a car pulling out turns its front wheels toward
+ * the road, seconds: **0.6**, or all the time it has when its `startAfter` is
+ * shorter, so the wheels never jump. A drawing only.
+ */
 export const PULL_OUT_STEER_READY_SECONDS = 0.6;
+
+/**
+ * How long before it stands a car pulling out straightens its front wheels,
+ * seconds: **0.6**. Its path's curvature is not nought where it stops (a
+ * smooth step's never is at its ends), so without this the wheels stood
+ * turned about 26° toward the kerb for the rest of the round. A drawing only.
+ */
+export const PULL_OUT_STEER_SETTLE_SECONDS = 0.6;
 
 /** A car pulling out, at one moment. @see carPullingOut */
 export interface CarPullingOut {
@@ -529,13 +541,15 @@ function laneEntrySeconds(obstacle: LaneObstacle): number {
  * is along the road at both ends and turned toward the road between, and its
  * front wheels steer into the road first and back out of the turn after: the
  * path's own curvature at {@link PULL_OUT_WHEELBASE_METRES}. Before it moves
- * the wheels turn to where its first metre needs them.
+ * the wheels turn to where its first metre needs them, and they straighten
+ * as it comes to stand ({@link PULL_OUT_STEER_SETTLE_SECONDS}).
  *
- * ⚠️ **What meets the rider is this place** ({@link obstacleAlong},
- * {@link obstacleAcross}), in a box along the road as every obstacle's is,
- * grown to hold the car as it is turned ({@link obstacleReach}): at its most,
- * 20.6° from the road, 0.72 m wider each side and 0.18 m longer each end. So
- * the drawn car and the car that costs a point are one.
+ * ⚠️ **What meets the rider is this car** ({@link obstacleFootprint}): this
+ * place ({@link obstacleAlong}, {@link obstacleAcross}) and this heading, the
+ * roster's rectangle turned as the drawn car is, met by an exact test
+ * ({@link stepObstacles}). The hold-clear ({@link clearOfParkedCars}) and the
+ * camera (`camera-clear.ts`) read the same rectangle. So the drawn car and
+ * the car that costs a point are one, turned or not.
  */
 export function carPullingOut(obstacle: LaneObstacle, seconds: number): CarPullingOut {
   const shape = OBSTACLE_KINDS[obstacle.kind];
@@ -552,10 +566,15 @@ export function carPullingOut(obstacle: LaneObstacle, seconds: number): CarPulli
     (towardRight * way * (6 - 12 * out)) /
     (PULL_OUT_RUN_METRES * PULL_OUT_RUN_METRES) /
     (1 + slope * slope) ** 1.5;
-  const ready = Math.min(
-    1,
-    Math.max(0, 1 - (obstacle.startAfter - seconds) / PULL_OUT_STEER_READY_SECONDS),
-  );
+  // The wheels turn in over the time it waits, at most the ready time...
+  const readyWindow = Math.min(PULL_OUT_STEER_READY_SECONDS, obstacle.startAfter);
+  const ready =
+    readyWindow > 0
+      ? Math.min(1, Math.max(0, 1 - (obstacle.startAfter - seconds) / readyWindow))
+      : 1;
+  // ...and straighten, eased, as it comes to stand.
+  const left = Math.min(1, ((1 - time) * PULL_OUT_SECONDS) / PULL_OUT_STEER_SETTLE_SECONDS);
+  const settle = left * left * (3 - 2 * left);
   return {
     along: obstacle.along - PULL_OUT_RUN_METRES * (1 - out),
     across: towardRight * (across - kerb),
@@ -566,28 +585,137 @@ export function carPullingOut(obstacle: LaneObstacle, seconds: number): CarPulli
       ((PULL_OUT_RUN_METRES * 6 * time * (1 - time)) / PULL_OUT_SECONDS) *
       Math.sqrt(1 + slope * slope),
     // Turning toward the rider's right is a steer to the car's own right: negative.
-    steer: -Math.atan(PULL_OUT_WHEELBASE_METRES * bend) * (time > 0 ? 1 : ready) + 0,
+    steer: -Math.atan(PULL_OUT_WHEELBASE_METRES * bend) * (time > 0 ? settle : ready) + 0,
     braking: time > 0.5 && time < 1 ? Math.sin(2 * Math.PI * (time - 0.5)) : 0,
   };
 }
 
 /**
- * Half of `obstacle`'s size along and across the road, `seconds` after it was
- * set going, metres: its roster shape's, except a car pulling out, whose box
- * holds the whole car turned as it is at that moment ({@link carPullingOut}),
- * so a rider beside its turned nose meets it where it is drawn.
+ * What of an obstacle meets the rider, at one moment: a rectangle on the road,
+ * its middle at {@link along} and {@link across}, its length turned
+ * {@link heading} from the road's. @see obstacleFootprint
  */
-export function obstacleReach(
-  obstacle: Obstacle,
-  seconds: number,
-): Pick<ObstacleShape, 'halfLength' | 'halfWidth'> {
-  const shape = OBSTACLE_KINDS[obstacle.kind];
-  if (obstacle.to === undefined || !pullsOut(obstacle)) return shape;
-  const turn = Math.abs(carPullingOut(obstacle, seconds).heading);
+export interface ObstacleFootprint {
+  /** Its middle along the route, metres. */
+  readonly along: number;
+  /** Its middle across the road, metres right of the centre line. */
+  readonly across: number;
+  /** How far its length is turned from the road's heading, radians, positive toward the rider's right. */
+  readonly heading: number;
+  /** Half its length, metres. */
+  readonly halfLength: number;
+  /** Half its width, metres. */
+  readonly halfWidth: number;
+}
+
+/**
+ * What of `obstacle` meets the rider `seconds` after it was set going: its
+ * roster shape where it is, along the road, except a car pulling out, which
+ * is its roster shape turned as it is drawn ({@link carPullingOut}).
+ */
+export function obstacleFootprint(obstacle: Obstacle, seconds: number): ObstacleFootprint {
+  const { halfLength, halfWidth } = OBSTACLE_KINDS[obstacle.kind];
+  if (obstacle.to !== undefined && pullsOut(obstacle)) {
+    const car = carPullingOut(obstacle, seconds);
+    return { along: car.along, across: car.across, heading: car.heading, halfLength, halfWidth };
+  }
   return {
-    halfLength: shape.halfLength * Math.cos(turn) + shape.halfWidth * Math.sin(turn),
-    halfWidth: shape.halfWidth * Math.cos(turn) + shape.halfLength * Math.sin(turn),
+    along: obstacleAlong(obstacle, seconds),
+    across: obstacleAcross(obstacle, seconds),
+    heading: 0,
+    halfLength,
+    halfWidth,
   };
+}
+
+/** A footprint's four corners, `[along, across]` each, in order round it. */
+export function footprintCorners(
+  footprint: ObstacleFootprint,
+): readonly (readonly [number, number])[] {
+  const { along, across, heading, halfLength, halfWidth } = footprint;
+  const cos = Math.cos(heading);
+  const sin = Math.sin(heading);
+  return (
+    [
+      [1, 1],
+      [1, -1],
+      [-1, -1],
+      [-1, 1],
+    ] as const
+  ).map(([forward, side]) => [
+    along + forward * halfLength * cos - side * halfWidth * sin,
+    across + forward * halfLength * sin + side * halfWidth * cos,
+  ]);
+}
+
+/** A stretch of road along it and across it, metres: the rider's box. */
+export interface RoadBox {
+  readonly back: number;
+  readonly front: number;
+  readonly low: number;
+  readonly high: number;
+}
+
+/**
+ * Whether `box` and `footprint` overlap by more than a touch: the separating
+ * axis test on the four axes a box along the road and a turned rectangle
+ * have, the road's two and the rectangle's two. Exact for any heading, and
+ * the very test of two intervals along the road and across it when the
+ * footprint is not turned.
+ */
+export function footprintMeets(footprint: ObstacleFootprint, box: RoadBox): boolean {
+  const corners = footprintCorners(footprint);
+  const boxCorners: readonly (readonly [number, number])[] = [
+    [box.back, box.low],
+    [box.back, box.high],
+    [box.front, box.low],
+    [box.front, box.high],
+  ];
+  const cos = Math.cos(footprint.heading);
+  const sin = Math.sin(footprint.heading);
+  const axes: readonly (readonly [number, number])[] = [
+    [1, 0],
+    [0, 1],
+    [cos, sin],
+    [-sin, cos],
+  ];
+  return axes.every(([x, y]) => {
+    const onAxis = (points: readonly (readonly [number, number])[]): readonly number[] =>
+      points.map(([along, across]) => along * x + across * y);
+    const car = onAxis(corners);
+    const rider = onAxis(boxCorners);
+    return overlaps(Math.min(...car), Math.max(...car), Math.min(...rider), Math.max(...rider));
+  });
+}
+
+/**
+ * How far across the road `footprint` reaches within the stretch from `back`
+ * to `front` along it, metres: its least and most, or `undefined` when it is
+ * not in that stretch by more than a touch. The turned rectangle cut by the
+ * stretch's two ends, so a rider held beside it is held beside the car drawn.
+ */
+export function footprintAcrossWithin(
+  footprint: ObstacleFootprint,
+  back: number,
+  front: number,
+): { readonly low: number; readonly high: number } | undefined {
+  const corners = footprintCorners(footprint);
+  const alongs = corners.map(([along]) => along);
+  if (!overlaps(Math.min(...alongs), Math.max(...alongs), back, front)) return undefined;
+  const acrosses: number[] = [];
+  corners.forEach(([along, across], index) => {
+    if (along >= back && along <= front) acrosses.push(across);
+    const [nextAlong, nextAcross] = corners[(index + 1) % corners.length] as readonly [
+      number,
+      number,
+    ];
+    if (nextAlong === along) return;
+    for (const end of [back, front]) {
+      const share = (end - along) / (nextAlong - along);
+      if (share > 0 && share < 1) acrosses.push(across + share * (nextAcross - across));
+    }
+  });
+  return { low: Math.min(...acrosses), high: Math.max(...acrosses) };
 }
 
 /**
@@ -934,24 +1062,15 @@ export function stepObstacles(state: ObstacleState, input: ObstacleInput): Obsta
     const started = startedAt[index];
     if (started === undefined || crashed[index] === true) return;
     const seconds = (tick - started) * DELIVERY_TICK_SECONDS;
-    // Its roster shape, or a car pulling out's as it is turned now.
-    const shape = obstacleReach(obstacle, seconds);
-    // #2364: another rider comes toward the rider, so is met where they are now.
-    const along = obstacleAlong(obstacle, seconds);
-    if (!overlaps(riderBack, riderFront, along - shape.halfLength, along + shape.halfLength)) {
-      return;
-    }
-    const across = obstacleAcross(obstacle, seconds);
-    if (
-      !overlaps(
-        rider.lateral - RIDER_HALF_WIDTH_METRES,
-        rider.lateral + RIDER_HALF_WIDTH_METRES,
-        across - shape.halfWidth,
-        across + shape.halfWidth,
-      )
-    ) {
-      return;
-    }
+    // Its roster shape where it is now (#2364: another rider comes toward the
+    // rider), or a car pulling out's turned as it is drawn.
+    const meets = footprintMeets(obstacleFootprint(obstacle, seconds), {
+      back: riderBack,
+      front: riderFront,
+      low: rider.lateral - RIDER_HALF_WIDTH_METRES,
+      high: rider.lateral + RIDER_HALF_WIDTH_METRES,
+    });
+    if (!meets) return;
     crashed[index] = true;
     crashes.push({ scoreDelta: CRASH_SCORE_DELTA });
   });
@@ -995,35 +1114,33 @@ export function clearOfParkedCars(
     if (!car || state.crashed[index] !== true) return;
     const started = state.startedAt[index] ?? state.tick;
     const seconds = (state.tick - started) * DELIVERY_TICK_SECONDS;
-    const stands = obstacleAcross(obstacle, seconds);
-    // A car pulling out is beside the rider where it has driven to.
-    const carAlong = obstacleAlong(obstacle, seconds);
-    const shape = OBSTACLE_KINDS[obstacle.kind];
+    // A car pulling out is beside the rider where it has driven to, turned
+    // as it is drawn and as it was met (stepObstacles).
+    const footprint = obstacleFootprint(obstacle, seconds);
+    const beside = footprintAcrossWithin(
+      footprint,
+      rider.along - RIDER_BEHIND_METRES,
+      rider.along + RIDER_AHEAD_METRES,
+    );
+    if (beside === undefined) return;
     const offset = moved?.offset ?? rider.offset;
     // #2396: the car widened by the clearance, so a rider held at it, who
     // steers back toward the car by any amount, is inside again and held.
-    const held = shape.halfWidth + PARKED_CAR_CLEARANCE_METRES;
     if (
-      !overlaps(
-        rider.along - RIDER_BEHIND_METRES,
-        rider.along + RIDER_AHEAD_METRES,
-        carAlong - shape.halfLength,
-        carAlong + shape.halfLength,
-      ) ||
       !overlaps(
         offset - RIDER_HALF_WIDTH_METRES,
         offset + RIDER_HALF_WIDTH_METRES,
-        stands - held,
-        stands + held,
+        beside.low - PARKED_CAR_CLEARANCE_METRES,
+        beside.high + PARKED_CAR_CLEARANCE_METRES,
       )
     ) {
       return;
     }
-    const reach = shape.halfWidth + RIDER_HALF_WIDTH_METRES;
-    const side = stands > 0 ? -1 : 1;
+    // Its road side, beside the rider: the car's side nearer the centre line.
+    const reach = RIDER_HALF_WIDTH_METRES + PARKED_CAR_CLEARANCE_METRES;
     moved = {
       lane: rider.lane,
-      offset: stands + side * (reach + PARKED_CAR_CLEARANCE_METRES),
+      offset: footprint.across > 0 ? beside.low - reach : beside.high + reach,
     };
   });
   return moved;

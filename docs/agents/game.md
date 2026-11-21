@@ -1192,9 +1192,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         "just slid sideways onto the road"):
                         `delivery/obstacles.ts` §`carPullingOut` runs it 8 m
                         up the road as it comes 2 m across, in 3.2 s, turned
-                        at most 20.6°; what meets the rider is that place,
-                        in a box grown to hold the turned car
-                        (§`obstacleReach`); and `in-view.ts` hands the view
+                        at most 20.6°; what meets the rider is the drawn
+                        car itself, turned (§`obstacleFootprint`, an exact
+                        separating-axis test), and the hold-clear and the
+                        camera read the same rectangle; it stops with its
+                        wheels straight; and `in-view.ts` hands the view
                         its `DeliveryCarMotion`, which nothing produced
                         before, so the wheels never rolled. Its indicator is
                         lit steadily under reduced motion

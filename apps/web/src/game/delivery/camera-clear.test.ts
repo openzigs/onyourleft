@@ -13,11 +13,12 @@ import {
 } from './camera-clear';
 import { LANE_OFFSETS_METRES } from './steer';
 import {
+  carPullingOut,
   OBSTACLE_KINDS,
-  obstacleAcross,
   obstacleAlong,
   parkedCarStands,
   startObstacles,
+  type LaneObstacle,
   type Obstacle,
 } from './obstacles';
 import { DELIVERY_TICK_SECONDS } from './throw';
@@ -119,27 +120,41 @@ describe('the chase camera’s eye beside a parked car — #2396', () => {
       );
     }
     expect(beside).toBeGreaterThan(50);
-    // While it drives out it is short of its place: the eye is held off it THERE.
+    // While it drives out it is short of its place and turned: the eye is held
+    // off the turned car THERE, its road-side corner and its reach along.
     const driving = { ...set, tick: Math.round(2.4 / DELIVERY_TICK_SECONDS), startedAt: [0] };
     const seconds = driving.tick * DELIVERY_TICK_SECONDS;
-    const carAlong = obstacleAlong(pulling[0] as Obstacle, seconds);
-    expect(AT - carAlong).toBeGreaterThan(1);
-    const moved: Obstacle[] = [
-      {
-        kind: 'parked-car',
-        along: carAlong,
-        stands: obstacleAcross(pulling[0] as Obstacle, seconds),
-      },
-    ];
-    let differs = 0;
+    const car = carPullingOut(pulling[0] as LaneObstacle, seconds);
+    expect(AT - car.along).toBeGreaterThan(1);
+    expect(car.heading).toBeLessThan(-0.1);
+    // Its four corners, worked here from its middle and heading.
+    const corners = [-1, 1].flatMap((forward) =>
+      [-1, 1].map((side) => [
+        car.along +
+          forward * CAR.halfLength * Math.cos(car.heading) -
+          side * CAR.halfWidth * Math.sin(car.heading),
+        car.across +
+          forward * CAR.halfLength * Math.sin(car.heading) +
+          side * CAR.halfWidth * Math.cos(car.heading),
+      ]),
+    );
+    const back = Math.min(...corners.map(([along]) => along as number));
+    const front = Math.max(...corners.map(([along]) => along as number));
+    const limit =
+      Math.min(...corners.map(([, across]) => across as number)) - CAMERA_CAR_CLEARANCE_METRES;
+    // Nearer the centre than the car's straight road side would hold it.
+    expect(limit).toBeLessThan(car.across - CAR.halfWidth - CAMERA_CAR_CLEARANCE_METRES - 0.1);
+    let held = 0;
     for (const along of SWEEP) {
       const eye = eyeLateralBesideParkedCars(pulling, along, RIGHT_LANE, driving);
-      expect(eye).toBeCloseTo(eyeLateralBesideParkedCars(moved, along, RIGHT_LANE), 9);
-      if (Math.abs(eye - eyeLateralBesideParkedCars(parked, along, RIGHT_LANE)) > 1e-6)
-        differs += 1;
+      const eyeAlong = along - CAMERA_BEHIND_RIDER_METRES;
+      if (eyeAlong + CAMERA_NEAR_PLANE_METRES < back || eyeAlong > front) continue;
+      held += 1;
+      expect(eye).toBeCloseTo(Math.min(RIGHT_LANE, limit), 9);
     }
-    // Not vacuous: that is not where a car standing at its place would hold it.
-    expect(differs).toBeGreaterThan(0);
+    expect(held).toBeGreaterThan(50);
+    // Still where it has driven to, not where it will stop.
+    expect(obstacleAlong(pulling[0] as Obstacle, seconds)).toBe(car.along);
     // Not yet set going: it is drawn nowhere, so the eye is the rider's own.
     for (const along of SWEEP) {
       expect(eyeLateralBesideParkedCars(pulling, along, RIGHT_LANE, set)).toBe(RIGHT_LANE);
