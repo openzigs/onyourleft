@@ -72,8 +72,12 @@
  * {@link BotCourse.direction} is chosen from the rider's gap to it: by a
  * model until #2835, and since ADR 0083 by a rule on the device
  * (`@onyourleft/domain` §`pacerRuleDecision`). It reaches the bot as words
- * from closed lists and a share, inside #92's envelope, and still never as a
- * power; with none in force the bot is #92's.
+ * from closed lists and a share, and still never as a power; with none in
+ * force the bot is #92's. Its power is held to #92's envelope but for two
+ * cases ([ADR 0092](../../../docs/adr/0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md)):
+ * the 30 s start ramp, which rides from the rider's own effort and may be
+ * below 80 %, down to 0, and a surge, which alone may take it to 115 % for at
+ * most 15 s.
  *
  * ⚠️ **And no recorded ride, which is the patent-posture criterion.** ADR 0007
  * D4 and `pacer/pacing.ts`'s header carry the argument in full; the part that
@@ -135,9 +139,10 @@ export interface BotCourse {
   /**
    * The direction an AI pacer rides (#2712, ADR 0072; chosen on the device
    * since #2835, ADR 0083), in force for this tick: the pacing rule becomes
-   * `@onyourleft/domain` §`directedPowerWatts`, inside #92's envelope. Two
-   * words, a share and, in a ride's first minute, how far through the start
-   * ramp it is: never a power. **Absent — every ride but an AI pacer's, and an AI pacer's
+   * `@onyourleft/domain` §`directedPowerWatts`: #92's envelope, but for the
+   * start ramp's from-the-rider's-effort and a surge's 115 % (ADR 0092). Two
+   * words, a share and, in a ride's first 30 s, how far through the start
+   * ramp it is and where it began, or past them the surge: never a power. **Absent — every ride but an AI pacer's, and an AI pacer's
    * whenever no decision is in force — the bot is #92's to the bit.**
    */
   readonly direction?: PacerDirection;

@@ -779,6 +779,31 @@ describe('where the rider is, and what the device decides from it — #2777, #28
     },
   );
 
+  it.each([
+    ['the rider stays behind', -60, 'shown'],
+    ['the rider goes ahead', 60, 'against'],
+  ] as const)(
+    'screens the first line against the decision in force when it arrives as well as the one asked: %s — #2864 review',
+    async (_, laterGapM, line) => {
+      const say = 'I will ease off so you can get back on.';
+      const { link, asked } = heldLink();
+      const { frame, askedRecords } = ride(link, (at) => ({
+        riderGapM: at < 1 ? -60 : laterGapM,
+        riderInDraft: false,
+      }));
+      // Asked at the line with the rider behind: an easing line is the pacer's.
+      frame(0);
+      expect(asked).toHaveLength(1);
+      // A second later, still inside the start ramp, the device decides again.
+      frame(1);
+      asked[0]?.answer(saying(say));
+      await flush();
+      const result = frame(1.5);
+      expect(askedRecords()[0]).toMatchObject({ outcome: 'applied', intent: 'ease', line });
+      expect(result).toEqual(line === 'shown' ? { arrived: say, showing: say } : {});
+    },
+  );
+
   it('shows a line once: the same words again are no new line, whatever their case or punctuation', async () => {
     const { link, asked } = heldLink();
     const { frame, records } = ride(link);

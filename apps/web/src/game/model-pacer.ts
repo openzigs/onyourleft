@@ -694,11 +694,19 @@ export class ModelPacer {
    * What becomes of a line that arrived in time (#2835): nothing said is
    * `none`; one that says the opposite of what the pacer is doing is hidden
    * (`against`, ADR 0082 D-3), and so is one of its last lines said again
-   * (`repeat`); any other is `shown`.
+   * (`repeat`); any other is `shown`. "What the pacer is doing" is both the
+   * decision the line was asked for and the one in force as it arrives: in
+   * the start ramp the device decides every second while an ask is out, so
+   * the two can differ (#2864's review).
    */
   #lineOf(say: string, decision: PacerRuleDecision): PacerLineOutcome {
     if (say === '') return 'none';
-    if (pacerSayAgainstRidden(say, decision.direction.intent)) return 'against';
+    if (
+      pacerSayAgainstRidden(say, decision.direction.intent) ||
+      pacerSayAgainstRidden(say, this.#inForce.direction.intent)
+    ) {
+      return 'against';
+    }
     return pacerSayRepeats(say, this.#said) ? 'repeat' : 'shown';
   }
 
