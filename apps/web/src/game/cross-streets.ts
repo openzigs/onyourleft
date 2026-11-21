@@ -35,6 +35,10 @@
  *   railway (`WorldCorridor.rails`) crosses the route at grade, found by the
  *   same rules, each arm a stretch of track. Kept apart from the mapped
  *   junctions, so a street's consumers never read a track as a street.
+ * - **Unpaved ways** ({@link mappedTracks}, #2695): where a mapped `track` or
+ *   `bridleway` (`WorldCorridor.paths`, `kind_detail`) leaves the route, found
+ *   by the same rules, each arm a gravel or earth way. Kept apart from the
+ *   mapped junctions for the level crossings' reason.
  * - **Procedural** ({@link villageJunction}): one crossroads at the centre of
  *   every procedural village (`settlements.ts` §`Site`), square to the road,
  *   so that the world with no map data (ADR 0054 D-4) has them too. The plots
@@ -72,6 +76,11 @@
  * give-way line. Its `across` is nought, so #628's wheel tracks and dust are
  * never on it. ⚠️ **No crossbuck, signal or barrier, and no track that runs
  * beside the route without crossing it**: those need meshes of their own.
+ *
+ * An unpaved way's arm (#2695) is drawn the same way in the same mesh, at its
+ * own narrower width, in {@link GRAVEL} or {@link EARTH} rather than the
+ * road's tarmac, and with no give-way line: no paint and no kerb. Its
+ * `across` is kept, so #628's wheel tracks wear two ruts along it.
  *
  * An arm stops early where it would run on water (`waterways.ts` §`inWater`),
  * onto another stretch of the route, or off the land that was read.
@@ -169,12 +178,13 @@ export const SIDE_ROAD_END_WIDTH_SHARE = 0.25;
  * since #2660 `rail`, a level crossing's track ({@link levelCrossings}),
  * which no street is.
  */
-export type WidthClass = 'highway' | 'major' | 'minor' | 'service' | 'rail';
+export type WidthClass = 'highway' | 'major' | 'minor' | 'service' | 'rail' | 'track' | 'bridleway';
 
 /**
  * How wide each class is drawn, in metres: a highway **9**, a major road the
  * main road's **7**, a minor road **5.5**, a service road or an alley **3.5**,
- * and a railway's ballast bed **3.4** (#2660).
+ * a railway's ballast bed **3.4** (#2660), and since #2695 a farm or forest
+ * track **3** and a bridleway **2** — narrower than any street.
  */
 export const SIDE_ROAD_WIDTHS: Readonly<Record<WidthClass, number>> = {
   highway: 9,
@@ -182,7 +192,16 @@ export const SIDE_ROAD_WIDTHS: Readonly<Record<WidthClass, number>> = {
   minor: 5.5,
   service: 3.5,
   rail: 3.4,
+  track: 3,
+  bridleway: 2,
 };
+
+/**
+ * The `kind_detail`s of a `roads` path that are an unpaved way the world
+ * draws — #2695: a `track` and a `bridleway`, which `footways.ts`
+ * §`NOT_FOOTWAYS` keeps out of the footways and the streets alike.
+ */
+export const UNPAVED_DETAILS: readonly ('track' | 'bridleway')[] = ['track', 'bridleway'];
 
 /** The `kind_detail` values that make a minor street a service road. */
 const SERVICE_DETAILS: readonly string[] = [
@@ -223,8 +242,12 @@ export interface SideRoadArm {
 export interface Junction {
   /** The route distance of the junction, on the first lap. */
   readonly along: number;
-  /** `rail` is a level crossing ({@link levelCrossings}): its arms are track, never a street. */
-  readonly source: 'mapped' | 'village' | 'rail';
+  /**
+   * `rail` is a level crossing ({@link levelCrossings}): its arms are track,
+   * never a street. `unpaved` (#2695) is a mapped track or bridleway
+   * ({@link mappedTracks}).
+   */
+  readonly source: 'mapped' | 'village' | 'rail' | 'unpaved';
   readonly arms: readonly SideRoadArm[];
 }
 
@@ -438,7 +461,7 @@ function armFrom(
 }
 
 /** Candidates within {@link JUNCTION_MERGE_METRES} of the first, as junctions, in route order. */
-function grouped(candidates: Candidate[], source: 'mapped' | 'rail'): Junction[] {
+function grouped(candidates: Candidate[], source: 'mapped' | 'rail' | 'unpaved'): Junction[] {
   candidates.sort((a, b) => a.along - b.along);
   const junctions: Junction[] = [];
   let group: Candidate[] = [];
@@ -614,6 +637,42 @@ export function levelCrossings(
   return junctions;
 }
 
+/** One corridor's unpaved ways' junctions, kept with the profile they were found against. */
+const tracksFound = new WeakMap<
+  WorldCorridor,
+  { profile: RouteProfile; land: LandClassMask; junctions: readonly Junction[] }
+>();
+
+/**
+ * Every junction where a mapped unpaved way leaves the route — #2695: a
+ * `roads` path whose `kind_detail` is in {@link UNPAVED_DETAILS}, found as a
+ * mapped junction is, each arm of width class `track` or `bridleway`. A
+ * path carries no grade, so the archive's tracks are all read as at grade.
+ * Drawn by {@link sideRoadsAt} with the side roads, in their one mesh and
+ * under their frame bound. Built once per corridor, the same array after.
+ */
+export function mappedTracks(
+  corridor: WorldCorridor,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  land: LandClassMask = NO_LAND_CLASS,
+): readonly Junction[] {
+  const cached = tracksFound.get(corridor);
+  if (cached?.profile === profile && cached.land === land) return cached.junctions;
+  const candidates: Candidate[] = [];
+  const budget = { metres: STREET_MAX_METRES };
+  for (const path of corridor.paths) {
+    const detail = UNPAVED_DETAILS.find((unpaved) => unpaved === path.kindDetail);
+    if (detail === undefined) continue;
+    const points = resampled(path.line, budget);
+    armsLeaving(points, detail, corridor, profile, origin, seed, land, candidates);
+  }
+  const junctions = grouped(candidates, 'unpaved');
+  tracksFound.set(corridor, { profile, land, junctions });
+  return junctions;
+}
+
 /** The mapped junctions and the level crossings, as one list, kept per pair. */
 const bothFound = new WeakMap<
   readonly Junction[],
@@ -621,11 +680,12 @@ const bothFound = new WeakMap<
 >();
 
 /**
- * {@link mappedJunctions} and {@link levelCrossings} as the one list
- * {@link sideRoadsAt} reads — #2660. The same array for the same two, so a
- * frame allocates nothing; either alone where the other is empty.
+ * Two lists of junctions as the one list {@link sideRoadsAt} reads — #2660's
+ * {@link mappedJunctions} and {@link levelCrossings}, and since #2695 that
+ * pair and {@link mappedTracks}. The same array for the same two, so a frame
+ * allocates nothing; either alone where the other is empty.
  */
-export function withLevelCrossings(
+export function joinedJunctions(
   junctions: readonly Junction[],
   crossings: readonly Junction[],
 ): readonly Junction[] {
@@ -703,6 +763,12 @@ const PAINT = linearColour(MARKING_COLOUR);
  * road tint's paint, so #628's wear never reads it as paint.
  */
 export const BALLAST = linearColour(0x6e675e);
+
+/** A track's gravel — #2695: a pale buff stone, still well under the paint's luminance. */
+export const GRAVEL = linearColour(0x8f8270);
+
+/** A bridleway's earth — #2695: a darker brown than a track's gravel. */
+export const EARTH = linearColour(0x6f5d47);
 
 /**
  * A rail's head — #2660: worn steel, as light as it may be while #628's wear
@@ -937,7 +1003,15 @@ function armMesh(
   const half = SIDE_ROAD_WIDTHS[arm.widthClass] / 2;
   // #2660: a level crossing's arm is ballast with two rails on it, no paint.
   const rail = arm.widthClass === 'rail';
-  const surface = rail ? BALLAST : TARMAC;
+  // #2695: an unpaved way is gravel or earth, and has no paint either.
+  const unpaved = arm.widthClass === 'track' || arm.widthClass === 'bridleway';
+  const surface = rail
+    ? BALLAST
+    : arm.widthClass === 'track'
+      ? GRAVEL
+      : arm.widthClass === 'bridleway'
+        ? EARTH
+        : TARMAC;
   const step = rail ? RAIL_STEP_METRES : SIDE_ROAD_STEP_METRES;
   // #628's wheel tracks and dust read `across`; a track has neither.
   const acrossAt = (offset: number): number => (rail ? 0 : offset);
@@ -1103,8 +1177,8 @@ function armMesh(
     }
   }
   // The give-way line: two broken lines across the arm, just past its mouth.
-  // None at a level crossing (#2660): the track is not a road that gives way.
-  for (const offset of rail ? [] : GIVE_WAY_LINES_METRES) {
+  // None at a level crossing (#2660) or on an unpaved way (#2695): neither gives way.
+  for (const offset of rail || unpaved ? [] : GIVE_WAY_LINES_METRES) {
     const near = stationAt(arm.line, regular + offset);
     const far = stationAt(arm.line, regular + offset + GIVE_WAY_DEPTH_METRES);
     const [ax, az] = acrossOf(near);

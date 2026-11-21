@@ -1146,6 +1146,67 @@ export function railFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/**
+ * #2695's fixture: unpaved ways leaving 3 km of level road through fields,
+ * for the owner's by-eye frames (`?town=tracks`). **Lines from arithmetic,
+ * no real place.**
+ *
+ * - **Right, 1 100 m**: a farm track, square to the road.
+ * - **Left, 1 250 m**: a bridleway, leaning forward at 60°.
+ * - **Right, 1 400 m**: a residential street, the control: tarmac, a give-way line.
+ */
+export function tracksFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'tracks',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [land('farmland', 900, 1_600, 6, 300), land('farmland', 900, 1_600, -6, -300)],
+      buildings: [],
+      paths: [
+        {
+          kind: 'path',
+          kindDetail: 'track',
+          line: ringBeside(profile, origin, [
+            [1_100, 0],
+            [1_100, 200],
+          ]),
+        },
+        {
+          kind: 'path',
+          kindDetail: 'bridleway',
+          line: ringBeside(profile, origin, [
+            [1_250, 0],
+            [1_250 + 100, -173],
+          ]),
+        },
+      ],
+      streets: [
+        {
+          kind: 'minor_road',
+          kindDetail: 'residential',
+          grade: 'ground',
+          line: ringBeside(profile, origin, [
+            [1_400, 0],
+            [1_400, 200],
+          ]),
+        },
+      ],
+    },
+  };
+}
+
 /** Where the kerbside town's every fifth front wall is mapped, metres from the road: inside the press's clearance. */
 export const INSIDE_CLEARANCE_METRES = 2;
 

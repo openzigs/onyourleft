@@ -122,11 +122,12 @@ import {
   clearOfSideRoads,
   levelCrossings,
   mappedJunctions,
+  mappedTracks,
   onSideRoad,
   SIDE_ROAD_SCENERY_MARGIN_METRES,
   sideRoadClearance,
   sideRoadsAt,
-  withLevelCrossings,
+  joinedJunctions,
   type SideRoad,
 } from './cross-streets';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
@@ -591,9 +592,19 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // drawn with them and kept clear of the scenery as they are.
     input.worldCorridor === undefined
       ? []
-      : withLevelCrossings(
-          junctions ?? [],
-          levelCrossings(
+      : joinedJunctions(
+          joinedJunctions(
+            junctions ?? [],
+            levelCrossings(
+              input.worldCorridor,
+              input.profile,
+              input.origin,
+              seed,
+              input.landClass ?? NO_LAND_CLASS,
+            ),
+          ),
+          // #2695: and a mapped track or bridleway, drawn unpaved.
+          mappedTracks(
             input.worldCorridor,
             input.profile,
             input.origin,
