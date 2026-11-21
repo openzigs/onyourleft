@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_POI_MATCH_WORK } from './limits';
 import { POI_CLASS_RANK, POI_REACH_METRES, type PoiClass } from './schema';
 import type { BuildingFeature, Ring } from './types';
 
@@ -23,6 +24,13 @@ const OFFSET = 2 ** 20;
 const cellKey = (column: number, row: number): number => (column + OFFSET) * 2 ** 21 + row + OFFSET;
 
 /**
+ * Units of work a cell a footprint is bucketed in costs: making a map entry
+ * is about ten times walking a vertex (1,000,000 cells, 120 ms on an M4 Pro,
+ * against 1,000,000 vertices in about 12 ms).
+ */
+const CELL_WORK = 8;
+
+/**
  * Gives each footprint the class of the POIs that are its (#2975, ADR 0054's
  * entry of 2026-11-21): a POI is the footprint's that holds it, or where none
  * does, the nearest whose outline is within `schema.ts` §`POI_REACH_METRES`
@@ -33,13 +41,22 @@ const cellKey = (column: number, row: number): number => (column + OFFSET) * 2 *
  *
  * Returns `buildings` with every matched footprint replaced by a copy that
  * carries its `poi`, in the same order; the others are the same objects.
+ *
+ * **Bounded by `budget`** (`limits.ts` §`MAX_POI_MATCH_WORK`): the cost is
+ * the POIs times the vertices of the footprints near each, and the tile's
+ * other limits bound each side but not the product. A unit of work is a
+ * footprint a POI looks at or a vertex a distance walks, and a cell a
+ * footprint is bucketed in is {@link CELL_WORK} of them. At the budget matching **stops**: the matches made stand,
+ * the POIs after are dropped, and the tile is not refused.
  */
 export function matchPoisToBuildings(
   buildings: readonly BuildingFeature[],
   pois: readonly PoiPoint[],
+  budget: number = MAX_POI_MATCH_WORK,
 ): BuildingFeature[] {
   const out = buildings.slice();
   if (pois.length === 0) return out;
+  let work = 0;
 
   // Each footprint's outer box, and the cells it covers.
   const boxes = new Float64Array(buildings.length * 4);
@@ -61,8 +78,17 @@ export function matchPoisToBuildings(
       if (z > maxZ) maxZ = z;
     }
     boxes.set([minX, minZ, maxX, maxZ], i * 4);
-    for (let c = Math.floor(minX / CELL_METRES); c <= Math.floor(maxX / CELL_METRES); c++) {
-      for (let r = Math.floor(minZ / CELL_METRES); r <= Math.floor(maxZ / CELL_METRES); r++) {
+    const c0 = Math.floor(minX / CELL_METRES);
+    const c1 = Math.floor(maxX / CELL_METRES);
+    const r0 = Math.floor(minZ / CELL_METRES);
+    const r1 = Math.floor(maxZ / CELL_METRES);
+    // Counted before a cell is made, so one footprint the size of a county
+    // costs nothing. Over the budget before a POI is looked at: no footprint
+    // gets one.
+    work += (c1 - c0 + 1) * (r1 - r0 + 1) * CELL_WORK;
+    if (work > budget) return out;
+    for (let c = c0; c <= c1; c++) {
+      for (let r = r0; r <= r1; r++) {
         const key = cellKey(c, r);
         const list = cells.get(key);
         if (list === undefined) cells.set(key, [i]);
@@ -73,7 +99,7 @@ export function matchPoisToBuildings(
 
   const taken = new Map<number, PoiClass>();
   const seen = new Int32Array(buildings.length).fill(-1);
-  for (let p = 0; p < pois.length; p++) {
+  matching: for (let p = 0; p < pois.length; p++) {
     const { poi, x, z } = pois[p] as PoiPoint;
     const reach = POI_REACH_METRES[poi];
     let best = -1;
@@ -91,6 +117,7 @@ export function matchPoisToBuildings(
         for (const i of cells.get(cellKey(c, r)) ?? []) {
           if (seen[i] === p) continue;
           seen[i] = p;
+          if (++work > budget) break matching;
           const at = i * 4;
           if (
             x < (boxes[at] as number) - reach ||
@@ -100,7 +127,10 @@ export function matchPoisToBuildings(
           ) {
             continue;
           }
-          const distance = distanceToFootprint((buildings[i] as BuildingFeature).rings, x, z);
+          const rings = (buildings[i] as BuildingFeature).rings;
+          for (const ring of rings) work += ring.length / 2;
+          if (work > budget) break matching;
+          const distance = distanceToFootprint(rings, x, z);
           if (
             distance <= reach &&
             (distance < bestDistance || (distance === bestDistance && i < best))

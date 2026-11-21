@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { MAX_POI_MATCH_WORK } from './limits';
 import { matchPoisToBuildings, type PoiPoint } from './poi-match';
 import { NO_BUILDING_FIELDS, POI_REACH_METRES } from './schema';
 import type { BuildingFeature } from './types';
@@ -21,6 +22,61 @@ function footprint(
 }
 
 const at = (poi: PoiPoint['poi'], x: number, z: number): PoiPoint => ({ poi, x, z });
+
+/** A footprint of one `vertices`-vertex ring of `radius` metres about the origin. */
+function round(vertices: number, radius: number): BuildingFeature {
+  const ring = new Float32Array(vertices * 2);
+  for (let v = 0; v < vertices; v++) {
+    ring[v * 2] = radius * Math.cos((2 * Math.PI * v) / vertices);
+    ring[v * 2 + 1] = radius * Math.sin((2 * Math.PI * v) / vertices);
+  }
+  return { ...footprint([]), rings: [ring] };
+}
+
+describe('matchPoisToBuildings stays inside its work budget (#2975, the review of #2996)', () => {
+  // 48 stacked 8,000-vertex footprints: every POI at their middle walks
+  // 384,000 vertices, so the default budget runs out within `shops` POIs.
+  const perPoi = 48 * 8_000;
+  const shops = Math.ceil(MAX_POI_MATCH_WORK / perPoi);
+  const stack = Array.from({ length: 48 }, () => round(8_000, 300));
+  const pois = [
+    ...Array.from({ length: shops }, () => at('shop', 0, 0)),
+    ...Array.from({ length: 50 }, () => at('fuel', 0, 0)),
+  ];
+
+  it('stops at the budget: the matches made stand, the POIs after are dropped, nothing throws', () => {
+    // Not vacuous: 50 fuel stations would be far more work than the budget.
+    expect(perPoi * 50).toBeGreaterThan(MAX_POI_MATCH_WORK);
+    const got = matchPoisToBuildings(stack, pois);
+    // The shops were matched to the first footprint; no fuel station was read.
+    expect(got[0]?.poi).toBe('shop');
+    expect(got.slice(1).every((b) => b.poi === undefined)).toBe(true);
+    // The footprints themselves stand, every one.
+    expect(got).toHaveLength(48);
+  });
+
+  it('control: with no budget, a fuel station is read and outranks the shops', () => {
+    expect(matchPoisToBuildings(stack, pois, Number.POSITIVE_INFINITY)[0]?.poi).toBe('fuel');
+  });
+
+  it('a budget spent before any POI is looked at matches nothing', () => {
+    const got = matchPoisToBuildings([footprint([[0, 0, 10, 10]])], [at('shop', 5, 5)], 0);
+    expect(got[0]?.poi).toBeUndefined();
+    expect(
+      matchPoisToBuildings([footprint([[0, 0, 10, 10]])], [at('shop', 5, 5)], 100)[0]?.poi,
+    ).toBe('shop');
+  });
+
+  it('bucketing counts against the budget: a footprint over 121 cells costs 968 units first', () => {
+    // 320 m a side from 0 is 11 cells of 32 m each way; a cell is 8 units.
+    const square = footprint([[0, 0, 320, 320]]);
+    const poi = [at('shop', 5, 5)];
+    expect(matchPoisToBuildings([square], poi, 900)[0]?.poi).toBeUndefined();
+    // The POI itself is 1 footprint and 4 vertices more.
+    expect(matchPoisToBuildings([square], poi, 968 + 5)[0]?.poi).toBe('shop');
+    expect(matchPoisToBuildings([square], poi, 968 + 4)[0]?.poi).toBeUndefined();
+  });
+});
 
 describe('matchPoisToBuildings (#2975)', () => {
   it('a POI inside a footprint is its, whatever its class', () => {

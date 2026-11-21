@@ -156,6 +156,29 @@ describe('a fuel station the map marks — #2975', () => {
     }
   });
 
+  it('a mapped height is held between the bounds over the floor: never a slab in the sky or in the ground', () => {
+    for (const [height, rise] of [
+      [1_000, FUEL_CANOPY.top.most],
+      [1, FUEL_CANOPY.top.least],
+    ] as const) {
+      const corridor = {
+        ...fixture.corridor,
+        buildings: fixture.corridor.buildings.map((building, index) =>
+          fixture.rows[index] === 'canopy' ? { ...building, heightMetres: height } : building,
+        ),
+      };
+      const canopies = plan({}, corridor).byRow.get('canopy') ?? [];
+      expect(canopies.length).toBeGreaterThan(0);
+      for (const canopy of canopies) {
+        const floor = canopy.base + FOUNDATION_METRES + PLINTH_TOP_METRES;
+        expect(Math.max(...heights(canopy.triangles.trim)) - floor, String(height)).toBeCloseTo(
+          rise,
+          4,
+        );
+      }
+    }
+  });
+
   it('no tree or rock stands under it: its outline is cleared as a building’s is', () => {
     const buildings = mappedBuildingsOf(product.plans);
     for (const canopy of rowOf('canopy')) {

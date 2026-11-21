@@ -316,7 +316,7 @@ function decodeChecked(
   return {
     tile,
     landUse,
-    buildings: matchPoisToBuildings(buildings, pois),
+    buildings: matchPoisToBuildings(buildings, pois, limits.maxPoiMatchWork),
     paths,
     streets,
     places,

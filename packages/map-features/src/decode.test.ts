@@ -35,6 +35,8 @@ import {
   POISON,
   poisTile,
   poisTileOf,
+  POI_MATCH_STORM,
+  poiMatchStormTile,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   ROAD_FIELD_FIXTURE_STREETS,
@@ -716,6 +718,54 @@ describe('decodeTile at each limit', () => {
       expect(dense / tenth).toBeLessThan(25);
     });
   }
+});
+
+describe('decodeTile on a POI-matching storm (#2975, the review of #2996)', () => {
+  /**
+   * Matching costs POIs times the vertices near each, which no refusal bounds.
+   * The storm tile is under every limit; with no work budget, 2,048 POIs took
+   * 8.3 s against 10 ms for the same footprints with none. Asserted, as the
+   * limit cases above are, as a ratio in one process: with the budget it is a
+   * few; without, about two thousand. The bound is 25, as above.
+   */
+  it('2,048 POIs over 48 stacked 8,000-vertex footprints cost a bounded multiple of none', () => {
+    const storm = poiMatchStormTile(MAX_POIS_PER_TILE);
+    const tile = decoded(storm);
+    expect(tile.buildings).toHaveLength(POI_MATCH_STORM.footprints);
+    // The budget admitted a POI or two before it stopped; the tile was not refused.
+    expect(tile.buildings[0]?.poi).toBe('fuel');
+    const withPois = bestOfFive(storm);
+    const without = bestOfFive(poiMatchStormTile(0));
+    console.info(
+      `map-features: the POI storm decoded in ${withPois.toFixed(2)} ms (best of 5); ` +
+        `with no POIs in ${without.toFixed(2)} ms; ${cpus()[0]?.model ?? 'unknown CPU'}`,
+    );
+    expect(withPois / without).toBeLessThan(25);
+  });
+
+  it('control: with the budget lifted, the storm costs far more than the budget allows', () => {
+    const storm = poiMatchStormTile(64);
+    const lifted = { ...DEFAULT_DECODE_LIMITS, maxPoiMatchWork: Number.POSITIVE_INFINITY };
+    const time = (limits: typeof lifted): number => {
+      const started = performance.now();
+      const result = decodeTile(storm, FIXTURE_TILE, FIXTURE_FRAME, limits);
+      if ('reason' in result) throw new Error(result.reason);
+      return performance.now() - started;
+    };
+    time(lifted);
+    expect(time(lifted)).toBeGreaterThan(time(DEFAULT_DECODE_LIMITS));
+  });
+
+  it('the budget is the caller’s limits’: at none, no footprint is given a POI', () => {
+    const none = decodeTile(poisTile(), FIXTURE_TILE, FIXTURE_FRAME, {
+      ...DEFAULT_DECODE_LIMITS,
+      maxPoiMatchWork: 0,
+    });
+    if ('reason' in none) throw new Error(none.reason);
+    expect(none.buildings.every((b) => b.poi === undefined)).toBe(true);
+    // Control: under the default, poisTile's five footprints are.
+    expect(decoded(poisTile()).buildings.filter((b) => b.poi !== undefined)).toHaveLength(5);
+  });
 });
 
 describe('decodeTile on a caller error', () => {
