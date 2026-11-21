@@ -278,7 +278,10 @@ describe('what inference never reads as built-up — #2684', () => {
     for (const [kind, held] of [
       ['aerodrome', 'bare'],
       ['beach', 'bare'],
-      ['heath', 'other'],
+      // A kind the table does not name; a heath until #2976 made it farmland.
+      ['quarry', 'other'],
+      // #2976: a heath is farmland, which inference never reads either.
+      ['heath', 'farmland'],
     ] as const) {
       const fixture = streetSuburbFixture('residential', 'ground', polygon(kind));
       const land = landClassMask(fixture.corridor);
@@ -292,17 +295,18 @@ describe('what inference never reads as built-up — #2684', () => {
   });
 
   // Integration with #2662: a beach is `bare` now, which outranks farmland, so
-  // the mapped-`other` case is a heath.
-  it('keeps a wood a wood where a heath is drawn over it, as before', () => {
+  // the mapped-`other` case was a heath — and since #2976 a heath is farmland,
+  // so it is a kind the table does not name.
+  it('keeps a wood a wood where a mapped-other polygon is drawn over it, as before', () => {
     const fixture = streetSuburbFixture('residential', 'ground', (profile, origin) => [
       landBeside(profile, origin, 'landuse', 'wood', 1_400, 1_800, -5, 60),
-      landBeside(profile, origin, 'landuse', 'heath', 1_400, 1_800, -5, 60),
+      landBeside(profile, origin, 'landuse', 'quarry', 1_400, 1_800, -5, 60),
     ]);
     const land = landClassMask(fixture.corridor);
     expect(classBeside(fixture, land, 1_600, 20)).toBe('wood');
-    // And a heath drawn over farmland leaves it farmland.
+    // And one drawn over farmland leaves it farmland.
     const field = streetSuburbFixture('residential', 'ground', (profile, origin) => [
-      landBeside(profile, origin, 'landuse', 'heath', 1_400, 1_800, -5, 60),
+      landBeside(profile, origin, 'landuse', 'quarry', 1_400, 1_800, -5, 60),
       landBeside(profile, origin, 'landuse', 'farmland', 1_400, 1_800, -5, 60),
     ]);
     expect(classBeside(field, landClassMask(field.corridor), 1_600, 20)).toBe('farmland');

@@ -107,8 +107,16 @@ export type LandClass =
  * `school` is; `village_green` and `allotments` are park; and the ground where
  * nothing grows and no field is fenced is `bare` — `beach`, `sand`,
  * `bare_rock`, `glacier`, the airfield's `aerodrome`, `runway` and `taxiway`,
- * and the built-on `pier`, `platform` and `dam`. `grassland` stays `other`:
- * natural grass, where the procedural world's planting is the right one.
+ * and the built-on `pier`, `platform` and `dam`.
+ *
+ * #2976, the mapped-features audit of 2026-11-20 (the owner's ruling of
+ * 2026-11-15: draw everything that is marked): `grassland` and `heath` are
+ * `farmland`, as `meadow` is. Until then both read as `other`, so the
+ * procedural world — its fields, villages and woods — was drawn on land the
+ * map says is open grass or heather. As farmland each is open ground: pasture
+ * with a few trees, stones, hedgerow trees at its edge, no lot, and a mapped
+ * building on it kept, which `park` (natural ground, but a footprint in a park
+ * is dropped) and `wood` (planted throughout) would not give.
  */
 export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unknown'>>> =
   Object.freeze({
@@ -153,6 +161,8 @@ export const LAND_CLASS_OF_KIND: Readonly<Record<string, Exclude<LandClass, 'unk
     dam: 'bare',
     farmland: 'farmland',
     meadow: 'farmland',
+    grassland: 'farmland',
+    heath: 'farmland',
   });
 
 /**
@@ -378,7 +388,8 @@ export const INFERRED_MIN_JOINS_PER_HECTARE = 0.15;
 /**
  * The share of the 560 m square that is mapped farmland, meadow or farmyard
  * (all `farmland` here) from which the ground reads as rural: **0.15** (ADR
- * 0070 D-1.5). A cue against, which one cue for cancels.
+ * 0070 D-1.5). A cue against, which one cue for cancels. Since #2976 a
+ * mapped grassland or heath counts toward it too, being `farmland`.
  */
 export const INFERRED_RURAL_FARMLAND_SHARE = 0.15;
 
@@ -515,7 +526,8 @@ function isBuiltCode(code: number): boolean {
 }
 
 /**
- * #2684: an `other` cell a land-use polygon covers — a heath, say; since
+ * #2684: an `other` cell a land-use polygon covers — a kind the table does
+ * not name, say (a heath until #2976 made it farmland); since
  * #2662 a beach or an aerodrome is `bare`, its own code — which
  * {@link inferBuiltUp} leaves alone. Held only while the mask is
  * built, and `other` by precedence while it is; every one is `other` again
@@ -1383,9 +1395,9 @@ function paint(
 /**
  * A code's place in the precedence: {@link CODE_MAPPED_OTHER} is above a
  * covered cell no polygon reaches and below every other class, so a wood
- * drawn over a heath is still a wood. That includes #2657's protected-area
- * codes: a national forest's boundary over a heath reads `wood`, as it did
- * before #2684 marked the heath. (A beach is `bare` since #2662, above the
+ * drawn over a polygon of a kind the table does not name is still a wood.
+ * That includes #2657's protected-area codes: a national forest's boundary
+ * over one reads `wood`, as it did before #2684 marked such cells. (A beach is `bare` since #2662, above the
  * protected codes, so a beach inside a national forest stays a beach.)
  */
 function precedence(code: number): number {
@@ -1535,7 +1547,7 @@ export function suburbCues(window: {
  *
  * Never on farmland, meadow, wood, water, park or `bare` ground (#2662: an
  * aerodrome, a beach), nor on any polygon of another kind that classes
- * `other` (a heath): those cells do not hold plain `other`
+ * `other` (a kind the table does not name): those cells do not hold plain `other`
  * ({@link CODE_MAPPED_OTHER}); nor on a protected area's boundary (#2657),
  * whose cells hold its own codes. Rail,
  * industrial and military land is already `built-up` and is not changed.

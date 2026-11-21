@@ -112,8 +112,9 @@ describe('#2662 the kinds, through landClassMask', () => {
       village_green: 'park',
       allotments: 'park',
       ...Object.fromEntries(BARE_KINDS.map((kind) => [kind, 'bare'])),
-      // Natural grass stays the procedural world's.
-      grassland: 'other',
+      // #2976: natural grass and heather are open ground, as a meadow is.
+      grassland: 'farmland',
+      heath: 'farmland',
     };
     const fixture = landUseCorridor(Object.keys(expected));
     const land = landClassMask(fixture.corridor);
@@ -125,7 +126,9 @@ describe('#2662 the kinds, through landClassMask', () => {
   it('names each kind in the table, beside its rule (ADR 0054 D-5.1)', () => {
     for (const kind of BARE_KINDS) expect(LAND_CLASS_OF_KIND[kind], kind).toBe('bare');
     expect(LAND_CLASS_OF_KIND.kindergarten).toBe('built-up');
-    expect(Object.hasOwn(LAND_CLASS_OF_KIND, 'grassland')).toBe(false);
+    // #2976: and natural grass and heather, beside `meadow`.
+    expect(LAND_CLASS_OF_KIND.grassland).toBe('farmland');
+    expect(LAND_CLASS_OF_KIND.heath).toBe('farmland');
   });
 
   it('ranks bare above farmland and below built-up, wood and water', () => {
@@ -208,6 +211,45 @@ describe('#2662 bare ground: nothing grows and no field is fenced', () => {
     expect(cleared.filter((item) => item.kind === 'post')).toStrictEqual(
       grown.filter((item) => item.kind === 'post'),
     );
+  });
+});
+
+describe('#2976 grassland and heath: open ground, as a meadow is', () => {
+  const OPEN = ['grassland', 'heath'] as const;
+
+  it('reads each as farmland through the mask, and as field ground', () => {
+    for (const kind of OPEN) {
+      const land = mask(rectangle(kind, MIDDLE));
+      expect(land.classAt(0, 3_000), kind).toBe('farmland');
+      expect(fieldGround(land, 0, 3_000), kind).toBe(true);
+      expect(nothingGrowsAt(land, 0, 3_000), kind).toBe(false);
+    }
+  });
+
+  it('plants each as a meadow is planted, not as the procedural world', () => {
+    const meadow = scenery(mask(rectangle('meadow', MIDDLE)));
+    // Control: the procedural world on the same ground is not a meadow's planting.
+    expect(scenery(OTHER)).not.toStrictEqual(meadow);
+    expect(meadow.filter((item) => VEGETATION.has(item.kind)).length).toBeGreaterThan(0);
+    for (const kind of OPEN) {
+      expect(scenery(mask(rectangle(kind, MIDDLE))), kind).toStrictEqual(meadow);
+      expect(structures(mask(rectangle(kind, MIDDLE))), kind).toStrictEqual(
+        structures(mask(rectangle('meadow', MIDDLE))),
+      );
+    }
+  });
+
+  it('keeps a building mapped on it, as a park would not', () => {
+    const kept = (kind: string) => {
+      const corridor = {
+        ...corridorOf([rectangle(kind, MIDDLE)]),
+        buildings: [buildingBeside(ROUTE, ORIGIN, [rectangleBeside(3_000, 40, 12, 9)], 6)],
+      };
+      return footprintPlans(corridor, landClassMask(corridor), ROUTE, ORIGIN).verdicts;
+    };
+    for (const kind of OPEN) expect(kept(kind), kind).toMatchObject({ kept: 1 });
+    // Control: the same building in a park is dropped.
+    expect(kept('park')).toMatchObject({ kept: 0, 'on-excluded-land': 1 });
   });
 });
 
