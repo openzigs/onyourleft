@@ -2039,7 +2039,7 @@ describe('the realistic rider moves like a rider — #625', () => {
       }
     });
 
-    it('blends from the ride to the clip by #2475’s share as it falls and rises: every bone part of the way', () => {
+    it('blends from the ride to the clip by the body’s own share as it falls and rises: every bone part of the way', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
       /** Spherical interpolation, the short way: three's `slerp`, written out. */

@@ -828,7 +828,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         crash-look.ts`' times): `RealisticRiderBelt` blends
                         the body toward it by the crash's share whenever a
                         marker carries `crash`, never under reduced motion,
-                        and the stylised world keeps #2475's roll alone.
+                        and the stylised world keeps #2475's roll, which now
+                        carries the bicycle's rebound too
+                        (`crashRebound`, through `crashedRoll`).
                         ⚠️ **That share is the BODY's, not the roll's**
                         (`crashBodyShare`: wholly the clip's from its
                         `thrown` moment until half way back up; by the

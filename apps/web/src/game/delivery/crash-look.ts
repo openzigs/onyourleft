@@ -52,7 +52,8 @@
  * on the riding pose. `GameView` hands the scene how long ago the
  * crash was only when motion is not reduced; under reduced motion the marker
  * carries no crash and the still pose above is drawn unchanged. The stylised
- * world draws no MakeHuman rider and keeps the roll alone.
+ * world draws no MakeHuman rider and keeps the roll, with the bicycle's
+ * rebound ({@link crashRebound}) in it, as every renderer's roll has.
  *
  * ⚠️ **The body's share is not the roll's**, and was until the review of the
  * pictures of 2026-11-21. Blended by the roll's share, the body was still a
@@ -147,7 +148,8 @@ export function crashBodyShare(seconds: number): number | undefined {
 
 /**
  * How far a fallen bicycle first lifts back off the road, in radians: **5°**
- * at the envelope, 2.9° at the top of its one visible bounce. It lands at
+ * at the envelope, 2.38° at the top of its one visible bounce (0.06 s after
+ * it lands). It lands at
  * about 330° a second and leaves at about 87: a quarter of it back, a bicycle
  * on tarmac and not a ball. This project's own number.
  */
