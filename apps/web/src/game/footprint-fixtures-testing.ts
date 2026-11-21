@@ -1615,13 +1615,21 @@ export interface PoiRow {
   readonly poi: PoiClass | undefined;
   readonly footprint: readonly (readonly [number, number])[];
   readonly height: number | null;
+  /**
+   * Where it stands instead of in a place of its own along the road: `metres`
+   * further out than the row named, at the same distance along — a fuel
+   * station's kiosk behind its canopy, as a forecourt has it.
+   */
+  readonly behind?: { readonly row: string; readonly metres: number };
 }
 
 /**
  * #2975's rows, along the road, each footprint's middle {@link POI_ROW_LATERAL}
  * metres out: an untyped shop, an untyped café, an untyped twin of the shop
  * with no POI, a fuel station's canopy with a mapped height and one without,
- * a fuel station's `retail` kiosk, a fuel POI on an untyped footprint too big
+ * a fuel station's `retail` kiosk (behind the first canopy, since the owner's
+ * hold of PR #2996: a station is its canopy AND its shop), a fuel POI on an
+ * untyped footprint too big
  * for a canopy, a mapped house and a mapped garage with a shop's POI, which
  * keep their looks, and a block of flats with a café's.
  */
@@ -1667,6 +1675,8 @@ export const POI_ROWS: readonly PoiRow[] = [
     poi: 'fuel',
     footprint: rectangleBeside(0, 0, 14, 9),
     height: 4.5,
+    // Behind the canopy with a mapped height, 4.5 m of forecourt between them.
+    behind: { row: 'canopy', metres: 16 },
   },
   {
     row: 'fuel-too-big',
@@ -1723,9 +1733,14 @@ export function poiStreetFixture(latitude = FIXTURE_LATITUDE): {
   const buildings: BuildingFeature[] = [];
   const rows: string[] = [];
   POI_ROWS.forEach((each, index) => {
-    const along = 1_000 + index * POI_ROW_METRES;
+    const place =
+      each.behind === undefined
+        ? index
+        : POI_ROWS.findIndex((other) => other.row === each.behind?.row);
+    const along = 1_000 + place * POI_ROW_METRES;
+    const lateral = POI_ROW_LATERAL + (each.behind?.metres ?? 0);
     for (const side of [1, -1]) {
-      const ring = each.footprint.map(([a, n]) => [along + a, side * POI_ROW_LATERAL + n] as const);
+      const ring = each.footprint.map(([a, n]) => [along + a, side * lateral + n] as const);
       buildings.push({
         ...buildingBeside(profile, origin, [ring], each.height),
         buildingType: each.buildingType,

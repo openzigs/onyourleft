@@ -647,12 +647,13 @@ describe('the realistic page’s `map-pois` lever — #2975', () => {
   it('draws the POI street’s shops with shop fronts and its fuel station as a canopy on the product’s page', () => {
     const { plans } = plannedTown(street, parseConfig('?town=pois').leversOff);
     expect(rowOf(plans, 'shop').every((plan) => plan.shop.front)).toBe(true);
-    expect(rowOf(plans, 'canopy').every((plan) => plan.triangles.wall.length === 0)).toBe(true);
+    // A canopy stands on columns in its forecourt: no plinth, as every walled plan has.
+    expect(rowOf(plans, 'canopy').every((plan) => plan.triangles.plinth.length === 0)).toBe(true);
   });
 
   it('plans the POI street, with `levers=-map-pois`, with no shop front and no canopy', () => {
     const { plans } = plannedTown(street, parseConfig('?town=pois&levers=-map-pois').leversOff);
     expect(rowOf(plans, 'shop').some((plan) => plan.shop.front)).toBe(false);
-    expect(rowOf(plans, 'canopy').every((plan) => plan.triangles.wall.length > 0)).toBe(true);
+    expect(rowOf(plans, 'canopy').every((plan) => plan.triangles.plinth.length > 0)).toBe(true);
   });
 });

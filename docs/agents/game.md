@@ -1861,8 +1861,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         house, an outbuilding or a civic block) commercial,
                         a café's awning always, and an untyped one a fuel
                         POI is matched to, ≤ 1 500 m², an open canopy
-                        (`FUEL_CANOPY`: slab on posts, `trim` only, no far
-                        level) (`-map-pois`, `town=pois`);
+                        (`FUEL_CANOPY`: a white slab with a band of colour,
+                        on a column at each pump island, `FUEL_ISLAND`,
+                        over a concrete forecourt out to the road,
+                        `FUEL_FORECOURT`, which is its plan's `driveway`;
+                        slab and columns in `wall` and `roof`, so it has a
+                        far level; its paints `paintTown` leaves)
+                        (`-map-pois`, `town=pois`);
                         since #1792 a mapped `building:material` and, on a
                         pitched roof, `roof:material` on the belt's own
                         surfaces (`MAPPED_WALL_SURFACES`,
