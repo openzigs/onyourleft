@@ -54,6 +54,7 @@ import {
   type LandClassMask,
 } from './land-class';
 import { horizonRelief, standingOnGround, terrainCorridor, type TerrainMesh } from './landform';
+import { poolsInView } from './mapped-pools';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
 import { crashedRoll, type CrashSide } from './delivery/crash-look';
 import {
@@ -685,7 +686,9 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // and the surfaces and bridges built for this stretch of it, from the same
     // corridor the ground and the road are built from.
     // #2661: and the mapped streets crossing over or under the route, with them.
-    water: water(input, corridor, ways, streamBridges, crossings),
+    // #2974: and the channels beside the road laid on this frame's ground,
+    // and the mapped pools round the camera.
+    water: water(input, corridor, ways, streamBridges, crossings, ground, camera, seed),
     // #679: what stands at the lines, in the rider's units, near the rider.
     lines: linesNear(
       input.profile,
@@ -960,9 +963,24 @@ function water(
   ways: Waterways,
   streams: readonly BridgePart[],
   crossings: CrossingsInView,
+  ground: TerrainMesh,
+  camera: CameraPose,
+  seed: number,
 ): WaterFrame {
+  const pools =
+    input.worldCorridor === undefined
+      ? []
+      : poolsInView(
+          input.worldCorridor,
+          input.profile,
+          input.origin,
+          seed,
+          input.landClass ?? NO_LAND_CLASS,
+          camera.x,
+          camera.z,
+        );
   return {
-    surface: waterSurface(input.profile, input.origin, corridor, ways),
+    surface: waterSurface(input.profile, input.origin, corridor, ways, ground, pools),
     bridges: crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts],
     seconds: input.state.elapsed,
   };

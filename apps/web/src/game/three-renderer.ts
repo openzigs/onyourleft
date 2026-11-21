@@ -6017,9 +6017,37 @@ ${phases.join('\n')}
 }
 
 /**
+ * A pool's water — #2974: lighter and bluer than a lake's, the tiled floor
+ * showing through. This repository's own. Marked by `waterways.ts`
+ * §`POOL_WATER_SHORE` in the water's shore weight.
+ */
+export const POOL_WATER_COLOUR = 0x3fa7c4;
+
+/** A pool's coping, its lip and its top — #2974: pale stone. This repository's own. */
+export const POOL_EDGE_COLOUR = 0xd8d2c4;
+
+/** The coping's skirt down to the ground — #2974: the stone in shade. This repository's own. */
+export const POOL_SIDE_COLOUR = 0xa39d90;
+
+/** A colour as a GLSL `vec3` in the working (linear) space, as `Color.setHex` puts a uniform. */
+function linearGlsl(hex: number): string {
+  const colour = new Color(hex);
+  return `vec3(${glslFloat(colour.r)}, ${glslFloat(colour.g)}, ${glslFloat(colour.b)})`;
+}
+
+/** {@link POOL_WATER_COLOUR}, {@link POOL_EDGE_COLOUR} and {@link POOL_SIDE_COLOUR} for the shader. */
+const POOL_WATER_GLSL = linearGlsl(POOL_WATER_COLOUR);
+const POOL_EDGE_GLSL = linearGlsl(POOL_EDGE_COLOUR);
+const POOL_SIDE_GLSL = linearGlsl(POOL_SIDE_COLOUR);
+
+/**
  * The water shader's fragment half: the sky reflected with a Fresnel term,
  * ripples as an analytic normal that scrolls with the ride's clock, and the
- * edges tinted shallow by the geometry's own shore weight.
+ * edges tinted shallow by the geometry's own shore weight. Since #2974 a
+ * shore weight past 1 marks a pool (`waterways.ts` §`POOL_WATER_SHORE`): its
+ * water in {@link POOL_WATER_COLOUR} under the same sky, and its coping in
+ * flat stone, with no sky in it. The flat rung's `MeshBasicMaterial` reads no
+ * weight, and draws a pool in the deep water's one colour.
  *
  * ⚠️ **No texture, and no second pass.** The ripple normal is travelling
  * waves differentiated by hand — {@link WATER_RIPPLES} scaled by
@@ -6055,7 +6083,9 @@ ${waterSlopeGlsl()}
   vec3 r = reflect(-v, n);
   vec3 sky = mix(horizonColour, skyColour, smoothstep(0.0, 0.4, r.y));
   vec3 body = mix(shallowColour, deepColour, smoothstep(0.0, 1.0, vShore));
+  body = vShore > 1.5 ? ${POOL_WATER_GLSL} : body;
   gl_FragColor = vec4(mix(body, sky, fresnel), 1.0);
+  if (vShore > 2.5) gl_FragColor = vec4(vShore > 3.5 ? ${POOL_SIDE_GLSL} : ${POOL_EDGE_GLSL}, 1.0);
   #include <colorspace_fragment>
   #include <fog_fragment>
 }

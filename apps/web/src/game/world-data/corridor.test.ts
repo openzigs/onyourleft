@@ -576,10 +576,10 @@ describe('packing', () => {
     ]).toStrictEqual([null, null, 'gabled', 1890, null, null]);
   });
 
-  it('keeps the water lines through the store, and only the decoder’s kinds (#2659)', async () => {
+  it('keeps the water lines through the store, and only the decoder’s kinds (#2659, #2974)', async () => {
     const decoded = decodeTile(waterLinesTile(), FIXTURE_TILE, FIXTURE_FRAME);
     if ('reason' in decoded) throw new Error(decoded.reason);
-    expect(decoded.waterLines.length).toBe(3);
+    expect(decoded.waterLines.length).toBe(5);
     const back = await unpackCorridorFeatures(
       await packCorridorFeatures({
         landUse: [],
@@ -590,7 +590,13 @@ describe('packing', () => {
         waterLines: decoded.waterLines,
       }),
     );
-    expect(back.waterLines?.map((line) => line.kind)).toStrictEqual(['river', 'stream', 'canal']);
+    expect(back.waterLines?.map((line) => line.kind)).toStrictEqual([
+      'river',
+      'stream',
+      'canal',
+      'ditch',
+      'drain',
+    ]);
     back.waterLines?.forEach((line, index) => {
       const want = decoded.waterLines[index]?.line as Float32Array;
       expect(line.line.length).toBe(want.length);
@@ -603,10 +609,11 @@ describe('packing', () => {
       ...packedCorridorFeatures({ landUse: [], buildings: [], paths: [], streets: [], places: [] }),
       waterLines: [
         { kind: 'stream', line: [0, 0, 100, 100] },
-        { kind: 'ditch' as 'stream', line: [0, 0, 100, 100] },
+        { kind: 'ditch', line: [0, 0, 100, 100] },
+        { kind: 'riverbank' as 'stream', line: [0, 0, 100, 100] },
       ],
     });
-    expect(edited.waterLines?.map((line) => line.kind)).toStrictEqual(['stream']);
+    expect(edited.waterLines?.map((line) => line.kind)).toStrictEqual(['stream', 'ditch']);
     // A corridor with none packs no `waterLines` at all, as it did at version 4.
     const none = packedCorridorFeatures({
       landUse: [],
