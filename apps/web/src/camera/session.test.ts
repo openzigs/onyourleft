@@ -719,6 +719,33 @@ describe('the scan’s own agreement — #2856', () => {
     expect(CAMERA_OFF_AFTER_A_SCAN.explanation).toContain('only to read a code');
   });
 
+  it('does not say the camera was on only for a scan after the rider used it under the camera’s own agreement', async () => {
+    const camera = scriptedCamera();
+    const { controller } = controllerFor(camera);
+    controller.agree(AGREED);
+    await controller.turnOn();
+    controller.turnOff();
+    controller.revoke();
+    // "It has been on only to read a code … No picture was kept or sent" would
+    // be false here: it was on for the Camera screen, which may have kept some.
+    expect(controller.state().problem).toBe('no-consent');
+    expect(controller.notice()).not.toBe(CAMERA_OFF_AFTER_A_SCAN);
+    expect(controller.notice()).toBe(CAMERA_NOTICES['no-consent']);
+  });
+
+  it('names the real fault, not the after-a-scan sentence, when a later scan is refused', async () => {
+    const script: { permission?: 'not-permitted' } = {};
+    const camera = scriptedCamera(script);
+    const { controller } = controllerFor(camera);
+    controller.agreeToScan();
+    await expect(controller.turnOn('environment', 'scan')).resolves.toBeUndefined();
+    controller.turnOff();
+    // The rider withdraws the permission from the system between the two scans.
+    script.permission = 'not-permitted';
+    await expect(controller.turnOn('environment', 'scan')).resolves.toBe('not-permitted');
+    expect(controller.notice()).toBe(CAMERA_NOTICES['not-permitted']);
+  });
+
   it('keeps the sentence a fresh device has when the scan’s camera never came on', async () => {
     const camera = scriptedCamera({ startFails: 'unavailable' });
     const { controller } = controllerFor(camera);
