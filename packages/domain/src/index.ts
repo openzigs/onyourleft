@@ -476,6 +476,7 @@ export {
   ASSUMED_GROSS_EFFICIENCY,
   caloriesFromHeartRate,
   caloriesFromWork,
+  HeartRateCaloriesFold,
   JOULES_PER_KILOCALORIE,
   rideCalories,
 } from './analysis/calories';
@@ -500,6 +501,7 @@ export {
   powerZones,
   SWEET_SPOT_FRACTIONS,
   timeInZones,
+  TimeInZonesFold,
   zoneOf,
 } from './analysis/zones';
 
@@ -572,6 +574,7 @@ export {
   positionAt,
   PROFILE_RESOLUTION_METRES,
   recordedAscent,
+  RecordedAscentFold,
   routeProfile,
 } from './route/profile';
 
