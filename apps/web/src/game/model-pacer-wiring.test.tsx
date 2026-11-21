@@ -53,7 +53,12 @@ import {
 } from '@onyourleft/domain';
 import { encodeControlRequest } from '@onyourleft/sensors/protocol';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
-import { recordingSessionId, workoutId, type WorkoutRecord } from '@onyourleft/store';
+import {
+  recordingSessionId,
+  workoutId,
+  type RiderBody,
+  type WorkoutRecord,
+} from '@onyourleft/store';
 import { ATHLETE_A } from '@onyourleft/store/testing';
 
 import type { PacerPort, PacerStatus } from '../instance/pacer-port';
@@ -591,6 +596,7 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
     async function askedOnLoop(
       race: LapRaceChoice | undefined,
       thresholds?: { readonly power: number; readonly heartRate: number },
+      riderBody?: RiderBody,
     ): Promise<Asked> {
       const asked: Asked = { inputs: [], starts: 0, ends: 0 };
       mounted = await mount(
@@ -603,6 +609,7 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
           renderer={() => Promise.resolve(blankRenderer())}
           now={() => nowMs}
           {...(race === undefined ? {} : { lapRace: race })}
+          {...(riderBody === undefined ? {} : { riderBody })}
         />,
       );
       await settle();
@@ -637,6 +644,17 @@ describe('the AI pacer through the shipped path — #2712, ADR 0072', () => {
       const asked = await askedOnLoop(undefined);
       expect(asked.starts).toBe(1);
       expect(asked.inputs.length).toBeGreaterThan(0);
+    });
+
+    it('sends no rider drawn: a female rider’s pacer state carries none of the calorie inputs (#2839)', async () => {
+      // The owner's room-privacy ruling of 2026-11-20: `riderBody` is the
+      // calorie sex, and leaves only through a room. GameView holds it beside
+      // the state it builds, which the name scan cannot read
+      // (`privacy/calorie-inputs-stay-here.test.ts` §`DRAWS_THE_RIDER`).
+      const asked = await askedOnLoop(undefined, undefined, 'female');
+      expect(asked.inputs.length).toBeGreaterThan(0);
+      const sent = JSON.stringify(asked.inputs);
+      expect(sent).not.toMatch(/riderBody|calorieSex|birthYear|female/);
     });
 
     it('claims no model slot and sends no pacer state in a lap race', async () => {
