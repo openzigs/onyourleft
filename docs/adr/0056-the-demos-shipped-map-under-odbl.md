@@ -416,3 +416,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-8, D-9 (CI bakes only the synthetic fixture), and D-1 to D-11 otherwise. **Status: proposed, in
   force only when the owner rules on #2659**; the PR is not to be merged before that, and this
   entry is to be corrected or struck there if the ruling differs.
+- **2026-11-21** — **PROPOSED, pending the owner's approval on
+  [#2975](https://github.com/openzigs/onyourleft/issues/2975): the demo bundle carries a
+  footprint's POI class.** From #2975 `corridor.ts` §`packedCorridorFeatures` packs, under a
+  footprint's `p`, the class [ADR 0054](0054-towns-from-real-map-data.md)'s entry of this date
+  declares — `shop`, `cafe` or `fuel` — and nothing else of a POI: no name, no brand, no point, no
+  OSM id (packed version 6). **A bundle baked from that build publishes them** under ODbL 1.0, as
+  it publishes every other record in it (D-3), and D-4's §4.6 a offer covers them unchanged. The
+  preset route's record (`apps/web/demo/routes/upstate-climb.bake.json`) is re-recorded for reader
+  version 6. D-2.1's list reads, from #2975, as the 2026-11-15 entry left it, with each footprint's
+  POI class beside its fields. What still stands, unchanged: D-5, D-8, D-9 and D-1 to D-11
+  otherwise. **Status: proposed, in force only when the owner approves #2975**; the PR is not to be
+  merged before that, and this entry is to be corrected or struck there if the ruling differs.

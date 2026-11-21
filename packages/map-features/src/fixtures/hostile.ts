@@ -8,6 +8,7 @@
 
 import {
   MAX_PLACES_PER_TILE,
+  MAX_POIS_PER_TILE,
   MAX_RINGS_PER_POLYGON,
   MAX_TILE_BYTES,
   MAX_FEATURES_PER_LAYER,
@@ -35,7 +36,7 @@ import {
 } from '../schema';
 import type { DecodeRefusal, PlaceFeature } from '../types';
 import { tileOverLimit } from './limits';
-import { BUILDING_FIELDS_SET, EARTH, SIDEWALK_LINE } from './tiles';
+import { BUILDING_FIELDS_SET, EARTH, regularPolygon, SIDEWALK_LINE } from './tiles';
 
 export interface HostileFixture {
   readonly name: string;
@@ -65,6 +66,37 @@ export function millionLineToTile(): Uint8Array {
   return encodeTile([
     EARTH,
     { name: 'roads', features: [{ type: 2, tags: { kind: 'path' }, geometry }] },
+  ]);
+}
+
+/**
+ * #2975, the review of #2996: 48 footprints of 8,000 vertices stacked on one
+ * another and `count` fuel stations at their middle, under every limit the
+ * decoder refuses at (384,000 vertices of 400,000; 8,000 a feature of 8,192;
+ * `count` POIs of 2,048). Every POI is inside every footprint, so a matcher
+ * with no work budget walks all 384,000 vertices once a POI.
+ */
+export const POI_MATCH_STORM = { footprints: 48, verticesEach: 8_000 } as const;
+export function poiMatchStormTile(count: number): Uint8Array {
+  const ring = outerRing(regularPolygon(2048, 2048, 1500, POI_MATCH_STORM.verticesEach));
+  return encodeTile([
+    EARTH,
+    {
+      name: 'buildings',
+      features: Array.from({ length: POI_MATCH_STORM.footprints }, () => ({
+        type: 3 as const,
+        tags: { kind: 'building' },
+        geometry: polygon([ring]),
+      })),
+    },
+    {
+      name: 'pois',
+      features: Array.from({ length: count }, () => ({
+        type: 1 as const,
+        tags: { kind: 'fuel' },
+        geometry: points([[2048, 2048]]),
+      })),
+    },
   ]);
 }
 
@@ -226,6 +258,31 @@ export function placesTileOf(count: number): Uint8Array {
       features: [{ type: 3, tags: { kind: 'building' }, geometry: square }],
     },
     { name: 'places', features },
+  ]);
+}
+
+/**
+ * #2975: one building, then `count` POIs inside it, the first
+ * `MAX_POIS_PER_TILE` bakeries and every one after a fuel station. A fuel
+ * station outranks a shop, so a decoder that read past the bound shows it in
+ * the footprint's class.
+ */
+export function poisTileOf(count: number): Uint8Array {
+  const features: FeatureSpec[] = [];
+  for (let k = 0; k < count; k++) {
+    features.push({
+      type: 1,
+      tags: { kind: k < MAX_POIS_PER_TILE ? 'bakery' : 'fuel' },
+      geometry: points([[110 + (k % 180), 110 + Math.floor(k / 180) * 4]]),
+    });
+  }
+  return encodeTile([
+    EARTH,
+    {
+      name: 'buildings',
+      features: [{ type: 3, tags: { kind: 'building' }, geometry: square }],
+    },
+    { name: 'pois', features },
   ]);
 }
 

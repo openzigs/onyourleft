@@ -355,6 +355,7 @@ import {
   simplifyRing,
   triangulate,
   type BuildingFeature,
+  type PoiClass,
   type Ring,
   type RoofMaterial,
   type RoofShape,
@@ -1286,6 +1287,30 @@ export const AWNING = {
 
 /** The share of awnings that are striped — #1590; the rest are plain. */
 export const AWNING_STRIPED_SHARE = 0.5;
+
+/**
+ * A fuel station's canopy — #2975. Of 161 footprints the map's fuel POIs
+ * matched on 2026-11-21 (`basemap-us-oyl-20261031`, ten US cities), almost
+ * every one carried no building type — OSM's `building=roof`, which the
+ * profile does not keep — at 50 to 1 500 m² and, where mapped, 5 to 7 m tall:
+ * the forecourt's canopy, not its kiosk, whose own footprint beside it is
+ * typed `retail` or `commercial`. So an untyped footprint a fuel POI is
+ * matched to, of at most `maxArea` m², is drawn as an open canopy: no walls,
+ * a slab over its own outline `thickness` deep — its top at its mapped
+ * height, held between `top.least` and `top.most` over the floor, or with
+ * none at `clearance` and `thickness` over it, as a US forecourt's 14 to 16 ft
+ * is — on posts `post` square, `inset` in from the corners of its
+ * rectangle, down to the drawn ground. Painted in the trim, in `trim`, so it
+ * is drawn with the near level only, as a shop front is.
+ */
+export const FUEL_CANOPY = {
+  maxArea: 1_500,
+  clearance: 4.6,
+  thickness: 0.9,
+  top: { least: 4.3, most: 9 },
+  post: 0.45,
+  inset: 1.5,
+} as const;
 
 /**
  * A commercial roof's cornice — #1590: how far it projects past the parapet,
@@ -2918,12 +2943,21 @@ function wallPiece(
   }
 }
 
-/** A flat roof over the rings at `height`, facing up, `u, v` in storeys of plan. */
-function flatRoof(into: number[], rings: readonly Ring[], height: number): void {
+/**
+ * A flat roof over the rings at `height`, facing up, `u, v` in storeys of
+ * plan — or, since #2975, facing `up` as given, in `face`: a canopy's top and
+ * its underside, painted.
+ */
+function flatRoof(
+  into: number[],
+  rings: readonly Ring[],
+  height: number,
+  up: Vec = [0, 1, 0],
+  face: Face = PLAIN,
+): void {
   const indices = triangulate({ rings });
   const flat: number[] = [];
   for (const ring of rings) for (const each of ring) flat.push(each);
-  const up: Vec = [0, 1, 0];
   const at = (index: number): Vec => [
     flat[index * 2] as number,
     height,
@@ -2937,7 +2971,7 @@ function flatRoof(into: number[], rings: readonly Ring[], height: number): void 
     const a = indices[i] as number;
     const b = indices[i + 1] as number;
     const c = indices[i + 2] as number;
-    triangle(into, [at(a), at(b), at(c)], up, [uv(a), uv(b), uv(c)]);
+    triangle(into, [at(a), at(b), at(c)], up, [uv(a), uv(b), uv(c)], face);
   }
 }
 
@@ -5404,6 +5438,7 @@ export function footprintPlans(
       false,
       typed,
       untagged === undefined ? undefined : { untagged, own },
+      options.mappedPois ?? true,
     );
     keeps.set(own, typeof each !== 'string');
     if (typeof each === 'string') {
@@ -6148,6 +6183,21 @@ const FAMILY_USE: Readonly<Record<BuildingFamily, FootprintUse>> = {
 };
 
 /**
+ * The mapped families a POI's class is read over — #2975: none (an untyped
+ * footprint), a shop or an office, a warehouse, and a block of flats, whose
+ * ground floor a shop or a café may be. A mapped house, bungalow or terrace
+ * keeps its look — a hairdresser in a front room is no shop front — and so
+ * do a garage, a shed, a barn and a civic block.
+ */
+const POI_FAMILIES: ReadonlySet<BuildingFamily | undefined> = new Set([
+  undefined,
+  'commercial',
+  'industrial',
+  'residential',
+  'apartments',
+]);
+
+/**
  * A footprint that passed the placement rules, measured — #1635: the first
  * half of a plan, so every kept footprint's ring and eaves are known before
  * any is built, and a party wall can be found between two of them
@@ -6170,6 +6220,10 @@ interface Measured {
   readonly family: Exclude<BuildingFamily, 'residential'> | undefined;
   /** #2023: whether {@link family} was inferred from an untagged footprint. */
   readonly inferred: boolean;
+  /** #2975: the shop, café or fuel station its POI makes it, where that is read. */
+  readonly poi: PoiClass | undefined;
+  /** #2975: whether it is a fuel station's canopy, drawn open ({@link FUEL_CANOPY}). */
+  readonly canopy: boolean;
   readonly storeys: number;
   readonly wallHeight: number;
   /** #1790: how tall a storey of its windows is ({@link storeyMetresOf}). */
@@ -6198,6 +6252,8 @@ function measureFootprint(
   typed = false,
   // #2023: what an untagged footprint is inferred against, and its index in the corridor.
   inference?: { readonly untagged: Untagged; readonly own: number },
+  // #2975: whether its POI class is read (`-map-pois` off).
+  pois = false,
 ): Measured | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
@@ -6307,17 +6363,26 @@ function measureFootprint(
   const mappedFamily = typed
     ? buildingFamilyOf(building.buildingType, building.landmark)
     : undefined;
+  // #2975: a shop, a café or a fuel station the map's POIs put in it is commercial, over the
+  // land's guess and over any inference, but never over a mapped home, outbuilding, farm
+  // building or civic block ({@link POI_FAMILIES}).
+  const poi =
+    pois && !part && building.poi !== undefined && POI_FAMILIES.has(mappedFamily)
+      ? building.poi
+      : undefined;
   const kind =
-    inference === undefined
-      ? { family: mappedFamily, inferred: false }
-      : footprintKindOf(
-          mappedFamily,
-          // A `building_part` stands inside its building and is never inferred a type of its own.
-          mappedFamily === undefined && building.kind === 'building'
-            ? inference.untagged.cuesOf(inference.own, outer, area, urbanClass)
-            : undefined,
-          inference.untagged.rules,
-        );
+    poi !== undefined
+      ? { family: 'commercial' as const, inferred: false }
+      : inference === undefined
+        ? { family: mappedFamily, inferred: false }
+        : footprintKindOf(
+            mappedFamily,
+            // A `building_part` stands inside its building and is never inferred a type of its own.
+            mappedFamily === undefined && building.kind === 'building'
+              ? inference.untagged.cuesOf(inference.own, outer, area, urbanClass)
+              : undefined,
+            inference.untagged.rules,
+          );
   const typedFamily = kind.family;
   // #1637: a terraced block is a shop below and flats above, on any land.
   const use: FootprintUse = terrace
@@ -6364,6 +6429,13 @@ function measureFootprint(
     use,
     family,
     inferred: kind.inferred,
+    poi,
+    // #2975: an untyped footprint a fuel POI is matched to is its forecourt's canopy.
+    canopy:
+      poi === 'fuel' &&
+      building.buildingType === null &&
+      building.landmark === null &&
+      area <= FUEL_CANOPY.maxArea,
     storeys,
     wallHeight,
     storey,
@@ -6493,6 +6565,16 @@ export interface FootprintPlanOptions {
    */
   readonly inferredCommercial?: boolean;
   /**
+   * #2975: a footprint the map's POIs make a shop, a café or a fuel station
+   * (`map-features` §`matchPoisToBuildings`) planned as a shop — #1590's
+   * shop front, sign band and, on a café always, an awning — and a fuel
+   * station's untyped footprint drawn as its open canopy
+   * ({@link FUEL_CANOPY}); `true` by default.
+   * Off, the class is ignored and every plan is as before
+   * (`?levers=-map-pois`).
+   */
+  readonly mappedPois?: boolean;
+  /**
    * #1792: each footprint's mapped `building:colour`, `roof:colour`,
    * `building:material` and `roof:material`, where #1789 carries them,
    * painting and cladding it on the belt's own surfaces and paints
@@ -6603,6 +6685,141 @@ function shareOf(feature: FeatureShare, seeded: number): number {
   return feature === 'seeded' ? seeded : feature;
 }
 
+/**
+ * A fuel station's canopy, planned — #2975 ({@link FUEL_CANOPY}): its slab's
+ * fascia round the drawn outline, its top and its underside, and a post
+ * inside each corner of its rectangle, all `trim`; every other role empty, so
+ * it has no far level, no window, door or shop front. Cleared of trees and
+ * lots as any footprint is, and its shadow cast from its top.
+ */
+function canopyPlanOf(
+  measured: Measured,
+  land: LandClassMask,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+): FootprintPlan {
+  const { building, centroid, drawn, road, segments, urbanClass, lowest, floor, base } = measured;
+  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+  const groundAt = (x: number, z: number): number => {
+    nearestOnRoadSegments(road, segments, x, z, beside);
+    return terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+  };
+  const { clearance, thickness, top: bounds, post, inset } = FUEL_CANOPY;
+  const top =
+    building.heightMetres === null
+      ? floor + clearance + thickness
+      : Math.min(
+          floor + bounds.most,
+          Math.max(floor + bounds.least, lowest + building.heightMetres),
+        );
+  const bottom = top - thickness;
+  const writing = Object.fromEntries(
+    FOOTPRINT_ROLES.map((role) => [role, [] as number[]]),
+  ) as Writing;
+  const into = writing.trim;
+  // The fascia, facing out of each edge of the outline.
+  const outward = signedArea(drawn) > 0 ? 1 : -1;
+  const n = drawn.length / 2;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const ax = drawn[i * 2] as number;
+    const az = drawn[i * 2 + 1] as number;
+    const bx = drawn[j * 2] as number;
+    const bz = drawn[j * 2 + 1] as number;
+    const length = Math.hypot(bx - ax, bz - az);
+    if (length === 0) continue;
+    const ex = (bx - ax) / length;
+    const ez = (bz - az) / length;
+    const u = length / BAY_METRES;
+    const v = thickness / STOREY_METRES;
+    quad(
+      into,
+      [
+        [ax, bottom, az],
+        [bx, bottom, bz],
+        [bx, top, bz],
+        [ax, top, az],
+      ],
+      [ez * outward, 0, -ex * outward],
+      [
+        [0, 0],
+        [u, 0],
+        [u, v],
+        [0, v],
+      ],
+      PAINTED,
+    );
+  }
+  flatRoof(into, [drawn], top, [0, 1, 0], PAINTED);
+  flatRoof(into, [drawn], bottom, [0, -1, 0], PAINTED);
+  // A post inside each corner of its rectangle, where that is under the slab; one at the
+  // middle where none is.
+  const rectangle = minimumAreaRectangle(drawn);
+  const { cx, cz, ux, uz, halfLong, halfShort } = rectangle;
+  const reach = (half: number): number => Math.max(0, half - inset);
+  const spots: Pair[] = [];
+  for (const along of [-1, 1]) {
+    for (const across of [-1, 1]) {
+      const x = cx + ux * along * reach(halfLong) - uz * across * reach(halfShort);
+      const z = cz + uz * along * reach(halfLong) + ux * across * reach(halfShort);
+      if (insideRing(drawn, x, z)) spots.push([x, z]);
+    }
+  }
+  if (spots.length === 0) spots.push([cx, cz]);
+  for (const spot of spots) {
+    box(
+      into,
+      spot,
+      [ux, uz],
+      [post / 2, post / 2],
+      [groundAt(spot[0], spot[1]) - 0.1, bottom, floor],
+      PAINTED,
+      { top: false, bottom: false },
+    );
+  }
+  const triangles = Object.fromEntries(
+    FOOTPRINT_ROLES.map((role) => [role, Float32Array.from(writing[role])]),
+  ) as Record<FootprintRole, Float32Array>;
+  const roofSurface = roofSurfaceOf('flat', share(STREAM_ROOF));
+  return {
+    centroid,
+    footprint: Float32Array.from(drawn),
+    base,
+    storeys: 1,
+    eaves: top,
+    roof: 'flat',
+    roofVariant: 'plain',
+    pitchDegrees: 0,
+    surfaces: { wall: 'render', roof: roofSurface },
+    cladding: { wall: 'photograph', roof: 'photograph', course: 0 },
+    paint: {
+      wall: seededEntry(share(STREAM_PAINT_WALL), paintsOf('render')?.length ?? 1),
+      roof: seededEntry(share(STREAM_PAINT_ROOF), roofPaintsOf(roofSurface, false)?.length ?? 1),
+      trim: seededEntry(share(STREAM_PAINT_TRIM), TRIM_PAINTS.length),
+      door: seededEntry(share(STREAM_PAINT_DOOR), DOOR_PAINTS.length),
+    },
+    garage: false,
+    driveway: NO_RING,
+    dormers: 0,
+    shop: { front: false, awning: false, cornice: false },
+    porch: false,
+    steeple: false,
+    frontStep: undefined,
+    urban: urbanClass,
+    family: measured.family,
+    inferred: false,
+    archetype: 'unknown',
+    buildingArchetype: 'unknown',
+    model: undefined,
+    tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
+    triangles,
+    triangleCount: trianglesOf(into),
+    farTriangleCount: 0,
+  };
+}
+
 /** One measured footprint's plan — the second half of {@link measureFootprint}. */
 function planFootprint(
   measured: Measured,
@@ -6621,6 +6838,8 @@ function planFootprint(
   roofing: RoofSplitting,
   choice: ArchetypeChoice = NO_ARCHETYPE,
 ): FootprintPlan {
+  // #2975: a fuel station's canopy is no building: no walls, roof, door or window.
+  if (measured.canopy) return canopyPlanOf(measured, land, profile, origin, seed);
   const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
     measured;
   const { base, floor, family, inferred } = measured;
@@ -6984,6 +7203,8 @@ function planFootprint(
               ? { awningShare: MAIN_STREET_AWNING_SHARE }
               : {}),
             ...(buildingArchetype === 'strip-front' ? { signed: true } : {}),
+            // #2975: a café's front always has its awning, where one fits.
+            ...(measured.poi === 'cafe' ? { awningShare: 1 } : {}),
           },
         )
       : undefined;

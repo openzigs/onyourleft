@@ -39,6 +39,7 @@ import {
   describeRefusal,
   tileBounds,
   tileBox,
+  POI_CLASSES,
   WATER_LINE_KINDS,
   type Box,
   type BuildingFeature,
@@ -86,12 +87,14 @@ export const READ_TIMEOUT_MS = 120_000;
  * **4** since #1789 (ADR 0054's entry of 2026-11-01), which keeps the twelve
  * building fields a version-3 record never decoded; **5** since #2659 (ADR
  * 0054's entry of 2026-11-15), which keeps the water lines a version-4 record
- * never decoded. The port trusts a record only at exactly this version, so a
- * version-4 row is read again here, and a version-5 row met by version-4 code
- * is read again there, never decoded as its own: that is #1789's rollback,
- * and #2659's, and there is no Dexie schema change.
+ * never decoded; **6** since #2975 (ADR 0054's entry of 2026-11-21), which
+ * keeps each footprint's POI class a version-5 record never decoded. The port
+ * trusts a record only at exactly this version, so a version-5 row is read
+ * again here, and a version-6 row met by version-5 code is read again there,
+ * never decoded as its own: that is #1789's rollback, and #2659's and
+ * #2975's, and there is no Dexie schema change.
  */
-export const CORRIDOR_READER_VERSION = 5;
+export const CORRIDOR_READER_VERSION = 6;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -544,9 +547,9 @@ const PACK_SCALE = 100;
 /**
  * The packed format's version: 2 since #1565 added the streets, 3 since #1632
  * added the places, 4 since #1789 added the building fields, 5 since #2659
- * added the water lines.
+ * added the water lines, 6 since #2975 added a footprint's POI class.
  */
-const PACKED_VERSION = 5;
+const PACKED_VERSION = 6;
 
 /**
  * #1789: each building field's name in the packed format, short because a
@@ -609,6 +612,16 @@ function buildingFieldsOfPacked(
   return out as unknown as BuildingFields;
 }
 
+/**
+ * #2975: a footprint's POI class from its packed `p`, as the decoder's own
+ * constant, or nothing — so a blob edited on the device cannot put another
+ * string into the plan.
+ */
+function poiOfPacked(packed: unknown): Pick<BuildingFeature, 'poi'> {
+  const poi = POI_CLASSES.find((each) => each === packed);
+  return poi === undefined ? {} : { poi };
+}
+
 interface PackedFeatures {
   readonly v: typeof PACKED_VERSION;
   readonly landUse: readonly { layer: 'landuse' | 'water'; kind: string; rings: number[][] }[];
@@ -618,6 +631,11 @@ interface PackedFeatures {
     mh: number | null;
     /** #1789: the building fields that are not `null`, by their packed names. */
     b?: Readonly<Record<string, string | number>>;
+    /**
+     * #2975: its POI class. Absent where it has none, as `b` is, so a corridor
+     * read where no POI is matched packs as it did at version 5 but for its `v`.
+     */
+    p?: string;
     rings: number[][];
   }[];
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
@@ -716,6 +734,7 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
         h: f.heightMetres,
         mh: f.minHeightMetres,
         ...(fields === undefined ? {} : { b: fields }),
+        ...(f.poi === undefined ? {} : { p: f.poi }),
         rings: f.rings.map(toInts),
       };
     }),
@@ -775,6 +794,8 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
       heightMetres: f.h,
       minHeightMetres: f.mh,
       ...buildingFieldsOfPacked(f.b),
+      // #2975: held to the decoder's own classes again, as a building field is.
+      ...poiOfPacked(f.p),
       rings: f.rings.map(fromInts),
     })),
     paths: packed.paths.map((f) => ({
