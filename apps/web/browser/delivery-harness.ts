@@ -68,6 +68,7 @@ import {
 import { deliveryInView } from '../src/game/delivery/in-view';
 import {
   parkedCarStands,
+  PULL_OUT_RUN_METRES,
   startObstacles,
   type Obstacle,
   type ObstacleKind,
@@ -692,7 +693,8 @@ function pullingOutShowcase(): void {
     { kind: 'parked-car', along: RIDER + 10, stands: parkedCarStands('right') },
     {
       kind: 'car-pulling-out',
-      along: RIDER + 20,
+      // It waits its run short of its place: 20 m ahead, as the picture always showed it.
+      along: RIDER + 20 + PULL_OUT_RUN_METRES,
       from: 'right',
       startAfter: 0,
       to: parkedCarStands('right'),

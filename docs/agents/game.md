@@ -1185,7 +1185,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         which texels wear the instance's paint, and its
                         coordinate and the body ride in attributes already
                         bound (14 slots, `DELIVERY_MOST_VERTEX_ATTRIBUTES`);
-                        the stylised world keeps its own car
+                        the stylised world keeps its own car.
+                        ⚠️ **A car pulling out DRIVES out**, and a reviewer
+                        who remembers it crossing sideways at 1.5 m/s is
+                        reading the old file (the owner, on the tablet: it
+                        "just slid sideways onto the road"):
+                        `delivery/obstacles.ts` §`carPullingOut` runs it 8 m
+                        up the road as it comes 2 m across, in 3.2 s, turned
+                        at most 20.6°; what meets the rider is the drawn
+                        car itself, turned (§`obstacleFootprint`, an exact
+                        separating-axis test), and the hold-clear and the
+                        camera read the same rectangle; it stops with its
+                        wheels straight; and `in-view.ts` hands the view
+                        its `DeliveryCarMotion`, which nothing produced
+                        before, so the wheels never rolled. Its indicator is
+                        lit steadily under reduced motion
+                        (`DeliveryDrawInput.steadyIndicators`)
     src/game/delivery/steer.ts, src/game/lanes.ts, src/game/steer-port.ts
                         lane steering in a Delivery round (#1820): three
                         lanes, a steady 0.4 s move between them, keys A and
