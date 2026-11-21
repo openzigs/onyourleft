@@ -204,7 +204,12 @@ export interface SideRoadArm {
 export interface Junction {
   /** The route distance of the junction, on the first lap. */
   readonly along: number;
-  readonly source: 'mapped' | 'village';
+  /**
+   * `'street'` since #2973: no junction at all, but a stretch of a mapped
+   * street off the route (`nearby-streets.ts`), carried as a side road so the
+   * same mesh draws it and the same clearances keep the scenery off it.
+   */
+  readonly source: 'mapped' | 'village' | 'street';
   readonly arms: readonly SideRoadArm[];
 }
 
