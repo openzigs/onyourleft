@@ -89,6 +89,15 @@ import type { ThrowInputPort } from '../delivery/throw-input-port';
 import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
+import { deviceStorage } from './announce-preference';
+import { HIDES_ATTRIBUTE } from './controls-reveal';
+import {
+  readRideChrome,
+  toggleCollapsed,
+  writeRideChrome,
+  type CollapsiblePanel,
+  type RideChromePreference,
+} from './ride-chrome-preference';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
 import type { WorldCorridor } from '../world-data/corridor';
 
@@ -383,6 +392,14 @@ export interface HudPanelProps extends Omit<HudInput, 'units' | 'timeOfDay'> {
   readonly lanes?: LaneInputPort | undefined;
 }
 
+/**
+ * #2600: the attribute that fades a control with *Pause* and *End ride*
+ * (`controls-reveal.ts`). On every control in the actions panel's rows, and on
+ * none of what they SAY — the simulated ride's mark, a re-plan's sentence and
+ * the side camera's line stay drawn, because a reading is not a control.
+ */
+const HIDES = { [HIDES_ATTRIBUTE]: '' } as const;
+
 /** What the ride HUD's two controls say. @see HudCoreProps.labels */
 const RIDE_LABELS = { resume: 'Resume', end: 'End ride' } as const;
 
@@ -414,6 +431,18 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
   // #2080: a loop's lap splits, where a race's standings are; in a race the
   // two share that place and the rider swaps them, standings first.
   const [racePanel, setRacePanel] = useState<'standings' | 'laps'>('standings');
+  // #2600: the controls' auto-hide and the collapsed panels, from this
+  // device as the HUD mounts; a tab pressed mid-ride is kept at once, so the
+  // next ride opens with the same panels collapsed.
+  const [chrome, setChrome] = useState<RideChromePreference>(() => readRideChrome(deviceStorage()));
+  // #2600: a report's reasons or its answer are on show — held drawn, as a
+  // line read rather than pressed (`RoomReport`'s `onOpen`).
+  const [reporting, setReporting] = useState(false);
+  const toggle = (panel: CollapsiblePanel): void => {
+    const next = toggleCollapsed(chrome, panel);
+    setChrome(next);
+    writeRideChrome(deviceStorage(), next);
+  };
   const swapRef = useRef<HTMLButtonElement>(null);
   const swapped = useRef(false);
   useEffect(() => {
@@ -455,6 +484,23 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       units={units}
       timeOfDay={timeOfDay}
       labels={RIDE_LABELS}
+      chrome={{
+        // #2600: a line the actions panel holds to be READ — the simulated
+        // ride's mark (#1992, every frame of the ride), a waiting re-plan's
+        // sentence, the side camera's line, a report's reasons and answer — holds the controls drawn: the
+        // panel is clipped below the trainer's line once they fade, and none of these may go with it.
+        autoHide:
+          chrome.autoHide &&
+          simulated === undefined &&
+          keepPlan === undefined &&
+          sideCamera?.line === undefined &&
+          !reporting,
+        collapsed: chrome.collapsed,
+        onToggle: toggle,
+      }}
+      // #2600: the tab's word for the place a race's standings and a loop's
+      // lap splits share — the race's, while a race runs.
+      afterActionsTab={standingsShown ? 'Race' : 'Laps'}
       touchLock
       // #2385: the route's map is the figure, and so may be drawn as the
       // compact tile, on every ride but a workout's, whose strip is the figure.
@@ -537,6 +583,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
                 type="button"
                 className={`oyl-hud__control oyl-hud__replan ${RIDE_SIZE_CLASS}`}
                 onClick={keepPlan.onKeep}
+                {...HIDES}
               >
                 {REPLAN_KEEP_BUTTON}
               </button>
@@ -547,6 +594,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               type="button"
               className={`oyl-hud__control oyl-hud__replan ${RIDE_SIZE_CLASS}`}
               onClick={onReplansOff}
+              {...HIDES}
             >
               {REPLAN_OFF_BUTTON}
             </button>
@@ -585,6 +633,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
                   type="button"
                   className="oyl-button oyl-button--secondary oyl-hud__side-camera-stop"
                   onClick={sideCamera.onStop}
+                  {...HIDES}
                 >
                   Stop<span className="oyl-visually-hidden"> side camera</span>
                 </button>
@@ -596,6 +645,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               type="button"
               className="oyl-button oyl-button--secondary oyl-hud__follow"
               onClick={ghostStop.onStop}
+              {...HIDES}
             >
               Stop ghost
               <span className="oyl-visually-hidden"> of {ghostStop.rider}</span>
@@ -609,7 +659,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               (`RoomReport.tsx` §"Who it is filed about").
             */}
           {onFollowNext === undefined && report === undefined ? null : (
-            <div className="oyl-hud__room-row">
+            <div className="oyl-hud__room-row" {...HIDES}>
               {onFollowNext === undefined ? null : (
                 <button
                   type="button"
@@ -624,6 +674,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
                   key={report.target.riderId}
                   target={report.target}
                   onReport={report.onReport}
+                  onOpen={setReporting}
                 />
               )}
             </div>

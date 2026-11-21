@@ -37,6 +37,9 @@ import {
 } from './ride-stage';
 
 import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/ride-race';
+import { pacerSayProblem } from '@onyourleft/domain';
+
+import { AI_PACER_LINE } from './ai-pacer-line';
 
 import type { StageMeasurement } from './ride-harness';
 
@@ -620,4 +623,183 @@ test.describe('a lap race’s AI bots line is seen on the HUD at 1024×600 — #
     expect(lines.length, 'the standings carry the line').toBeGreaterThan(0);
     expect(lines.filter(seenLine)).toEqual([]);
   });
+});
+
+/**
+ * THE AI PACER'S LINE, LARGE ENOUGH TO READ WHILE RIDING — #2760's review, on
+ * the owner's word of 2026-11-17: "Might need to make the feedback a bit
+ * larger. I noticed it can be hard to see."
+ *
+ * `ride.html?aipacer=saying` rides with the AI pacer on and a stand-in
+ * instance answering every ask with {@link AI_PACER_LINE}, the longest line a
+ * pacer may say. At 1024×600 and the owner's 1280×800, the line is read back
+ * off the engine: its type at least 1.5 times a notice's (`theme.css`
+ * §`.oyl-hud__pacer-say`) and in Barlow at 700, at most three lines, nothing clipped or
+ * scrolled, its ink at least 4.5:1 on its surface, on top, and over no other
+ * panel and no control, with the anchors on and off. At the old size (the
+ * class's rule deleted) the size assertion goes red.
+ *
+ * ⚠️ **Three lines, not two, at the longest.** The cell is held to 22 rem and
+ * short of the rider's box (`theme.css` §"A notice goes under the primary
+ * panel"), so at 1.2 rem two lines hold about 45 characters with the label;
+ * the 80-character line takes three, measured at both sizes, and is held to
+ * three, whole and clear of every panel and control.
+ */
+interface PacerLineSeen {
+  readonly box: {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  };
+  readonly face: string;
+  readonly fontSize: number;
+  readonly fontWeight: number;
+  readonly noticeSize: number;
+  readonly lines: number;
+  readonly overflows: readonly string[];
+  readonly contrast: number;
+  readonly onTop: boolean;
+}
+
+async function pacerLine(page: Page): Promise<PacerLineSeen | undefined> {
+  return page.evaluate(async () => {
+    const notice = [
+      ...document.querySelectorAll<HTMLElement>('.oyl-hud__notices .oyl-status'),
+    ].find((each) => each.querySelector('.oyl-status__label')?.textContent === 'Your pacer: ');
+    if (notice === undefined) return undefined;
+    const style = getComputedStyle(notice);
+    // Measured in the face it is drawn in, Barlow, not the fallback it swaps from.
+    await document.fonts.load(`${style.fontWeight} ${style.fontSize} Barlow`).catch(() => []);
+    await document.fonts.ready;
+    const barlow =
+      [...document.fonts].find(
+        (face) =>
+          face.family.replaceAll(/['"]/g, '') === 'Barlow' && face.weight === style.fontWeight,
+      )?.status ?? 'absent';
+    const root = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const token = getComputedStyle(document.documentElement).getPropertyValue('--oyl-font-size-sm');
+    const noticeSize = parseFloat(token) * (token.trim().endsWith('rem') ? root : 1);
+    // Its lines: the sentence's text, read a line box at a time. The flex
+    // item round it is one box, so its own rects would say one line.
+    const sentence = notice.querySelector<HTMLElement>(':scope > span:not(.oyl-status__glyph)');
+    const range = document.createRange();
+    if (sentence !== null) range.selectNodeContents(sentence);
+    const lineHeight = parseFloat(style.lineHeight);
+    const tops: number[] = [];
+    for (const rect of range.getClientRects()) {
+      if (rect.width < 1) continue;
+      if (!tops.some((top) => Math.abs(top - rect.top) < lineHeight / 2)) tops.push(rect.top);
+    }
+    const overflows: string[] = [];
+    for (const each of [notice, notice.closest<HTMLElement>('.oyl-hud__notices')]) {
+      if (each === null) continue;
+      if (each.scrollHeight > each.clientHeight + 1 || each.scrollWidth > each.clientWidth + 1) {
+        overflows.push(
+          `${each.className.split(' ')[0] ?? ''} ${String(each.scrollWidth)}×${String(each.scrollHeight)} in ${String(each.clientWidth)}×${String(each.clientHeight)}`,
+        );
+      }
+    }
+    const rgb = (value: string): number[] =>
+      (value.match(/[\d.]+/g) ?? []).slice(0, 3).map((channel) => {
+        const c = Number(channel) / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+    const luminance = (value: string): number => {
+      const [r = 0, g = 0, b = 0] = rgb(value);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ink = luminance(style.color);
+    const surface = luminance(style.backgroundColor);
+    const rect = notice.getBoundingClientRect();
+    const corners = [
+      [rect.left + 4, rect.top + 4],
+      [rect.right - 4, rect.top + 4],
+      [rect.left + 4, rect.bottom - 4],
+      [rect.right - 4, rect.bottom - 4],
+    ];
+    return {
+      box: {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      },
+      face: `${style.fontFamily.split(',')[0]?.replaceAll(/['"]/g, '') ?? ''} ${barlow}`,
+      fontSize: parseFloat(style.fontSize),
+      fontWeight: Number(style.fontWeight),
+      noticeSize,
+      lines: tops.length,
+      overflows,
+      contrast: (Math.max(ink, surface) + 0.05) / (Math.min(ink, surface) + 0.05),
+      onTop: corners.every(([x, y]) => {
+        const hit = document.elementFromPoint(x ?? 0, y ?? 0);
+        return hit !== null && notice.contains(hit);
+      }),
+    };
+  });
+}
+
+test.describe('the AI pacer’s line, large enough to read while riding — #2760', () => {
+  const sizes = [
+    LAPTOP_VIEWPORTS.find((each) => each.width === 1024 && each.height === 600),
+    OVERLAY_VIEWPORTS.find((each) => each.width === 1280 && each.height === 800),
+  ];
+
+  test('the line measured is one the pacer may say, at the longest', () => {
+    expect(pacerSayProblem(AI_PACER_LINE)).toBeUndefined();
+    expect(AI_PACER_LINE).toHaveLength(80);
+  });
+
+  for (const viewport of sizes) {
+    if (viewport === undefined) throw new Error('no 1024×600 or 1280×800 viewport to measure at');
+    test(`1.5× a notice, at most three lines, on top, over no panel or control — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?aipacer=saying');
+      await page.waitForFunction(
+        (line) =>
+          [...document.querySelectorAll('.oyl-hud__notices .oyl-status')].some((each) =>
+            (each.textContent ?? '').includes(line),
+          ),
+        AI_PACER_LINE,
+      );
+      const seen = await pacerLine(page);
+      expect(seen, 'the pacer’s line is on the HUD').toBeDefined();
+      if (seen === undefined) return;
+      console.log(
+        `#2760 the AI pacer's line — ${viewport.name}: ${seen.fontSize.toFixed(1)} px at ${String(seen.fontWeight)} in ${seen.face} (a notice ${seen.noticeSize.toFixed(1)} px), ${String(seen.lines)} lines, ${seen.box.width.toFixed(0)}×${seen.box.height.toFixed(0)} px, ${seen.contrast.toFixed(2)}:1`,
+      );
+      expect(seen.fontSize, 'the line is 1.5 times a notice’s size').toBeGreaterThanOrEqual(
+        seen.noticeSize * 1.5 - 0.05,
+      );
+      expect(seen.fontWeight, 'the line is at the HUD numerals’ weight').toBeGreaterThanOrEqual(
+        700,
+      );
+      expect(seen.face, 'the line is in the HUD numerals’ face, loaded').toBe('Barlow loaded');
+      expect(seen.lines, 'the longest line takes at most three lines').toBeLessThanOrEqual(3);
+      expect(seen.overflows, 'nothing is clipped or scrolled').toEqual([]);
+      expect(seen.contrast, 'its ink on its surface').toBeGreaterThanOrEqual(4.5);
+      expect(seen.onTop, 'the line is what a press lands on').toBe(true);
+      expect(inside(seen.box, viewport), 'the line is off the stage').toBe(true);
+      expect(overlap(seen.box, riderBox(viewport)), 'the line is over the rider').toBe(false);
+      for (const [how, measured] of await bothWays(page)) {
+        await test.step(how, () => {
+          const notices = measured.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          const panels = measured.panels.filter(
+            (each) => each !== notices && each.box.height > 1 && overlap(each.box, seen.box),
+          );
+          expect(panels.map(describeItem)).toEqual([]);
+          const controls = measured.items.filter(
+            (each) => each.name.startsWith('control:') && overlap(each.box, seen.box),
+          );
+          expect(controls.map(describeItem)).toEqual([]);
+        });
+      }
+    });
+  }
 });

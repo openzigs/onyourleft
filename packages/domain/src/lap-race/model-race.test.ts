@@ -22,12 +22,18 @@ import {
   ADR_0071_MOVE_STRATEGY,
   ADR_0073_MOVE_STRATEGY,
   ADR_0074_MOVE_STRATEGY,
+  ADR_0081_MOVE_STRATEGY,
   applyModelMoves,
+  MODEL_TACTICS_ASK_EVERY_MS,
+  MODEL_TACTICS_FIRST_ASK_MS,
   MODEL_TACTICS_HOLD_MS,
   modelMovesInForce,
   modelTacticsAppliedAtMs,
   modelTacticsNextAskAtMs,
+  LAP_RACE_MODEL_MOST_MOVES,
   LAP_RACE_MODEL_MOST_TICKS,
+  MODEL_MOVE_CHOOSERS,
+  modelMoveChooser,
   readLapRaceModelRecord,
   readModelTacticsLogEntry,
   type LapRaceModelRecord,
@@ -44,7 +50,9 @@ import {
   BOT_TACTIC_FLYER_WBAL_SHARE,
   BOT_TACTIC_WBAL_FLOOR,
   botLaunchMetres,
+  decideTactic,
   TACTIC_MEMORY_AT_START,
+  type RaceView,
 } from './tactics';
 import { fullBotEnergy } from './wbal';
 
@@ -106,7 +114,7 @@ describe('a logged decision in force (D-4.2)', () => {
     expect(modelMovesInForce(log, 5_000 + MODEL_TACTICS_HOLD_MS)).toBeUndefined();
   });
 
-  it('is replaced by the next decision, and a late, invalid, refused or failed call applies nothing', () => {
+  it('holds for the bot it names: another bot’s decision leaves it in force, and a late, invalid, refused or failed call applies nothing (#2836, ADR 0081 D-2.5)', () => {
     const log: ModelTacticsLogEntry[] = [
       decision(4_300),
       {
@@ -121,16 +129,52 @@ describe('a logged decision in force (D-4.2)', () => {
       { askedAtMs: 8_000, arrivedAtMs: 13_100, outcome: 'late', reason: 'no-answer' },
     ];
     expect(modelMovesInForce(log, 7_999)).toEqual([{ bot: 0, move: 'attack' }]);
-    expect(modelMovesInForce(log, 8_000)).toEqual([{ bot: 1, move: 'chase' }]);
-    expect(modelMovesInForce(log, 12_999)).toEqual([{ bot: 1, move: 'chase' }]);
-    expect(modelMovesInForce(log, 13_000)).toBeUndefined();
+    // Bot 1's decision applies from 8 s, and bot 0's is still in force beside it.
+    expect(modelMovesInForce(log, 8_000)).toEqual([
+      { bot: 0, move: 'attack' },
+      { bot: 1, move: 'chase' },
+    ]);
+    // Each lapses 10 s after the window it applied in (#2759, ADR 0076 D-11): bot 0's at 15 s.
+    expect(modelMovesInForce(log, 14_999)).toHaveLength(2);
+    expect(modelMovesInForce(log, 15_000)).toEqual([{ bot: 1, move: 'chase' }]);
+    expect(modelMovesInForce(log, 17_999)).toEqual([{ bot: 1, move: 'chase' }]);
+    expect(modelMovesInForce(log, 18_000)).toBeUndefined();
     expect(modelMovesInForce([], 8_000)).toBeUndefined();
   });
 
-  it('asks again at the next 4 s mark after a call settles', () => {
-    expect(modelTacticsNextAskAtMs(4_000)).toBe(8_000);
-    expect(modelTacticsNextAskAtMs(6_400)).toBe(8_000);
-    expect(modelTacticsNextAskAtMs(0)).toBe(4_000);
+  it('is replaced by the next decision for the same bot, whatever order the log is in', () => {
+    expect(MODEL_TACTICS_HOLD_MS).toBe(10_000);
+    const first: ModelTacticsLogEntry = {
+      askedAtMs: 4_000,
+      arrivedAtMs: 4_600,
+      outcome: 'decision',
+      moves: [{ bot: 0, move: 'flyer' }],
+    };
+    const second: ModelTacticsLogEntry = {
+      askedAtMs: 11_000,
+      arrivedAtMs: 11_600,
+      outcome: 'decision',
+      moves: [{ bot: 0, move: 'recover' }],
+    };
+    expect(modelMovesInForce([first, second], 11_999)).toEqual([{ bot: 0, move: 'flyer' }]);
+    expect(modelMovesInForce([first, second], 12_000)).toEqual([{ bot: 0, move: 'recover' }]);
+    expect(modelMovesInForce([second, first], 12_000)).toEqual([{ bot: 0, move: 'recover' }]);
+    // The newer one's hold is its own: 10 s from 12 s.
+    expect(modelMovesInForce([first, second], 21_999)).toEqual([{ bot: 0, move: 'recover' }]);
+    expect(modelMovesInForce([first, second], 22_000)).toBeUndefined();
+    // With no next decision it lapses 10 s after it applied: seeded tactics again.
+    expect(modelMovesInForce([first], 14_999)).toBeDefined();
+    expect(modelMovesInForce([first], 15_000)).toBeUndefined();
+  });
+
+  it('asks again as soon as a call settles, and no sooner than a second after it was asked (#2836, ADR 0081 D-2.1)', () => {
+    expect(MODEL_TACTICS_ASK_EVERY_MS).toBe(1_000);
+    expect(MODEL_TACTICS_FIRST_ASK_MS).toBe(4_000);
+    // A quick answer: the next ask waits for the second to pass.
+    expect(modelTacticsNextAskAtMs(4_000, 4_450)).toBe(5_000);
+    expect(modelTacticsNextAskAtMs(4_000, 5_000)).toBe(5_000);
+    // A slow one: the next goes out when it lands, one call out at a time.
+    expect(modelTacticsNextAskAtMs(4_000, 6_300)).toBe(6_300);
   });
 });
 
@@ -421,12 +465,20 @@ describe('ADR 0073 D-3: every strategy rule lifted, under ADR 0074’s backstop'
   });
 });
 
-describe('ADR 0074: a sprint instinct behind the model’s moves, the race’s own strategy', () => {
+describe('ADR 0074: a sprint instinct behind the model’s moves, the race’s own strategy until version 7', () => {
   const close = { rider: 2_995, 'bot-1': 2_990, 'bot-2': 0, 'bot-3': 0 };
+
+  /** Ridden under ADR 0074's own strategy: since version 7 the race's own is ADR 0081's, built on it. */
+  const under74 = (
+    move: ModelTacticsMove,
+    over: Partial<ModelRaceBot> = {},
+    at: Readonly<Record<string, number>> = MID,
+    atMs = 12_000,
+  ) => ridden(move, over, at, atMs, ADR_0074_MOVE_STRATEGY);
 
   it('launches the kick of a bot the model has not sent on it, inside its launch', () => {
     for (const move of ['sit-in', 'follow', 'attack', 'recover', 'flyer'] as const) {
-      expect(ridden({ bot: 0, move }, {}, close)).toEqual({
+      expect(under74({ bot: 0, move }, {}, close)).toEqual({
         outcome: 'backstop',
         tactics: { tactic: 'kick', sinceMs: 12_000, window: 12 },
       });
@@ -434,11 +486,11 @@ describe('ADR 0074: a sprint instinct behind the model’s moves, the race’s o
   });
 
   it('rides the backstop kick at the kick’s own target, never the effort the model gave another move', () => {
-    const held = ridden({ bot: 0, move: 'sit-in', effort: 'easy' }, {}, close);
+    const held = under74({ bot: 0, move: 'sit-in', effort: 'easy' }, {}, close);
     expect(held.outcome).toBe('backstop');
     expect(held.tactics?.effort).toBeUndefined();
     // A move the model chose keeps its effort.
-    expect(ridden({ bot: 0, move: 'kick', effort: 'easy' }, {}, close).tactics?.effort).toBe(
+    expect(under74({ bot: 0, move: 'kick', effort: 'easy' }, {}, close).tactics?.effort).toBe(
       'easy',
     );
   });
@@ -470,7 +522,7 @@ describe('ADR 0074: a sprint instinct behind the model’s moves, the race’s o
     }
     // Held in the bot's memory, its start kept.
     const kickingBot = { tactics: { tactic: 'kick' as const, sinceMs: 11_000, window: 11 } };
-    expect(ridden({ bot: 0, move: 'sit-in' }, kickingBot, close).tactics).toEqual({
+    expect(under74({ bot: 0, move: 'sit-in' }, kickingBot, close).tactics).toEqual({
       tactic: 'kick',
       sinceMs: 11_000,
       window: 12,
@@ -485,11 +537,11 @@ describe('ADR 0074: a sprint instinct behind the model’s moves, the race’s o
 
   it('still rides a kick the model names, earlier or inside the launch', () => {
     // A lap and more out: launched long.
-    expect(ridden({ bot: 0, move: 'kick' })).toEqual({
+    expect(under74({ bot: 0, move: 'kick' })).toEqual({
       outcome: 'applied',
       tactics: { tactic: 'kick', sinceMs: 12_000, window: 12 },
     });
-    expect(ridden({ bot: 0, move: 'kick', effort: 'threshold' }, {}, close).outcome).toBe(
+    expect(under74({ bot: 0, move: 'kick', effort: 'threshold' }, {}, close).outcome).toBe(
       'applied',
     );
   });
@@ -497,15 +549,196 @@ describe('ADR 0074: a sprint instinct behind the model’s moves, the race’s o
   it('lets the exhausted rule win over the backstop and the model’s kick alike', () => {
     const tired = { energy: { wbalJoules: 0, exhausted: true } };
     for (const move of ['kick', 'sit-in'] as const) {
-      expect(ridden({ bot: 0, move }, tired, close).outcome).toBe('exhausted');
+      expect(under74({ bot: 0, move }, tired, close).outcome).toBe('exhausted');
     }
   });
 
   it('leaves the rest to ADR 0073’s strategy outside the launch', () => {
-    expect(ridden({ bot: 2, move: 'follow', target: 'rider' }).outcome).toBe('bridging');
+    expect(under74({ bot: 2, move: 'follow', target: 'rider' }).outcome).toBe('bridging');
     expect(ADR_0074_MOVE_STRATEGY(ask({ move: 'flyer', lapsLeft: 9, wbalShare: 0 }))).toBe(
       undefined,
     );
+  });
+});
+
+describe('ADR 0081: the model’s sit-in is no opinion, the race’s own strategy (#2836)', () => {
+  const close = { rider: 2_995, 'bot-1': 2_990, 'bot-2': 0, 'bot-3': 0 };
+  const climb = botRacePlan('brisk', raceCourse(LAP, LAPS), SEED, { style: 'climber', ability: 1 });
+
+  /** The climber in seat 0 as its seeded tactics read the race at 12 s: second on the road, a wheel 10 m ahead. */
+  const climberView = (over: Partial<RaceView> = {}): RaceView => ({
+    atMs: 12_000,
+    botIndex: 0,
+    rank: 2,
+    fieldSize: 4,
+    gapAheadMetres: 10,
+    gapBehindMetres: 10,
+    aheadInMove: false,
+    riderGapMetres: 10,
+    riderWattsPerKilogram: 3,
+    lapsLeft: 3,
+    metresToLine: LAP * LAPS - 820,
+    gradeAheadPercent: 6,
+    wheelGapMetres: 10,
+    closingMetresPerSecond: 0,
+    holdWatts: climb.capacity.cpWatts * 0.7,
+    wheelPaceWatts: climb.capacity.cpWatts,
+    draftFactor: 0.65,
+    energy: fullBotEnergy(climb.capacity),
+    capacity: climb.capacity,
+    ...over,
+  });
+
+  /** What the climber rides in the window a model `sit-in` is in force for, under `strategy`. */
+  const rides = (
+    strategy: ModelMoveStrategy | undefined,
+    view: RaceView = climberView(),
+    moves: readonly ModelTacticsMove[] | undefined = [{ bot: 0, move: 'sit-in' }],
+  ) => {
+    const bots = [bot('bot-1', { plan: climb, energy: view.energy }), bot('bot-2'), bot('bot-3')];
+    const applied = applyModelMoves(raceAt(12_000, MID), bots, moves, SEED, strategy);
+    const decided = decideTactic(
+      view,
+      climb.archetype,
+      'canny',
+      (applied.bots[0] as ModelRaceBot).tactics,
+      SEED,
+    );
+    return { applied, bots, decided };
+  };
+
+  it('is the strategy a model race rides', () => {
+    expect(climb.archetype).toBe('climber');
+    const bots = IDS.map((id) => bot(id));
+    const applied = applyModelMoves(raceAt(12_000, MID), bots, [{ bot: 0, move: 'sit-in' }], SEED);
+    expect(applied.outcomes).toEqual(['no-opinion', 'not-named', 'not-named']);
+    // Nothing is written: the same bots, each with the memory it had.
+    expect(applied.bots).toBe(bots);
+  });
+
+  it('lets a climber the model sat in attack on a climb, where ADR 0074’s strategy held it on the wheel', () => {
+    // The owner's race of 2026-11-18: the model's sit-in was written over the seeded choice.
+    const held = rides(ADR_0074_MOVE_STRATEGY);
+    expect(held.applied.outcomes[0]).toBe('applied');
+    expect(held.decided.tactic).toBe('sit-in');
+    // Under ADR 0081 the seeded tactics decide, and a climber attacks a climb.
+    const free = rides(undefined);
+    expect(free.applied.outcomes[0]).toBe('no-opinion');
+    expect(free.decided.tactic).toBe('attack');
+    // Exactly the seeded race's choice: the same as with no decision at all.
+    expect(free.decided).toEqual(rides(undefined, climberView(), undefined).decided);
+  });
+
+  it('never fires off the bot’s terrain: on the flat the seeded tactics sit in, as with no decision', () => {
+    const flat = climberView({ gradeAheadPercent: 0 });
+    const free = rides(undefined, flat);
+    expect(free.decided.tactic).toBe('sit-in');
+    expect(free.decided).toEqual(rides(undefined, flat, undefined).decided);
+  });
+
+  it('never exceeds the body’s limits: the seeded choice is capped as every target is, and a blown bot cannot surge', () => {
+    const free = rides(undefined);
+    expect(free.decided.targetWatts).toBeLessThanOrEqual(climb.capacity.peakWatts);
+    // Nothing of its capacity, its energy or its plan is touched.
+    expect(free.applied.bots[0]?.plan).toBe(climb);
+    expect(free.applied.bots[0]?.energy).toBe(free.bots[0]?.energy);
+    // Blown on the climb: the body's limit is ruled before the strategy, and it rides no harder than CP.
+    const blown = rides(undefined, climberView({ energy: { wbalJoules: 0, exhausted: true } }));
+    expect(blown.applied.outcomes[0]).toBe('exhausted');
+    expect(blown.decided.tactic).not.toBe('attack');
+    expect(blown.decided.targetWatts).toBeLessThanOrEqual(climb.capacity.cpWatts);
+  });
+
+  it('still rides every move the model names, as ADR 0074’s strategy does', () => {
+    for (const move of ['follow', 'attack', 'chase', 'recover', 'flyer', 'kick'] as const) {
+      expect(ridden({ bot: 0, move })).toEqual(
+        ridden({ bot: 0, move }, {}, MID, 12_000, ADR_0074_MOVE_STRATEGY),
+      );
+      expect(ridden({ bot: 0, move }).outcome).toBe('applied');
+    }
+    // A follow of a racer behind is still ridden as sitting in: there the model named a move.
+    expect(ridden({ bot: 0, move: 'follow', target: 1 })).toEqual({
+      outcome: 'marking',
+      tactics: { tactic: 'sit-in', sinceMs: 12_000, window: 12 },
+    });
+  });
+
+  it('is no opinion inside the launch too, where the seeded tactics launch the kick themselves', () => {
+    // Inside its launch a sit-in writes nothing: the bot keeps the memory it had.
+    const waiting = { ...TACTIC_MEMORY_AT_START, window: -1 };
+    expect(ridden({ bot: 0, move: 'sit-in' }, {}, close)).toEqual({
+      outcome: 'no-opinion',
+      tactics: waiting,
+    });
+    // And from that memory the seeded tactics kick, 10 m from the line, as in a seeded race.
+    const sprint = decideTactic(
+      climberView({ metresToLine: 10, lapsLeft: 1, gradeAheadPercent: 0 }),
+      climb.archetype,
+      'canny',
+      waiting,
+      SEED,
+    );
+    expect(sprint.tactic).toBe('kick');
+    const launch = botLaunchMetres('rouleur');
+    const kicking = { tactic: 'kick' as const, sinceMs: 50_000, window: 59 };
+    const holding = { tactics: kicking, readToLineMetres: launch + 40, toLineMetres: launch + 5 };
+    expect(ADR_0081_MOVE_STRATEGY(ask({ move: 'sit-in', ...holding }))).toBe('no-opinion');
+    expect(ADR_0081_MOVE_STRATEGY(ask({ move: 'sit-in', readToLineMetres: 1 }))).toBe('no-opinion');
+    expect(ADR_0081_MOVE_STRATEGY(ask({ move: 'sit-in' }))).toBe('no-opinion');
+    expect(ADR_0081_MOVE_STRATEGY(ask({ move: 'attack' }))).toBeUndefined();
+  });
+
+  it('keeps ADR 0074’s sprint instinct behind every move the model names: inside the launch, or holding a kick, the bot’s own kick', () => {
+    for (const move of ['follow', 'attack', 'chase', 'recover', 'flyer'] as const) {
+      expect(ridden({ bot: 0, move }, {}, close)).toEqual({
+        outcome: 'backstop',
+        tactics: { tactic: 'kick', sinceMs: 12_000, window: 12 },
+      });
+    }
+    const launch = botLaunchMetres('rouleur');
+    const kicking = { tactic: 'kick' as const, sinceMs: 50_000, window: 59 };
+    expect(
+      ADR_0081_MOVE_STRATEGY(
+        ask({
+          move: 'attack',
+          tactics: kicking,
+          readToLineMetres: launch + 40,
+          toLineMetres: launch + 5,
+        }),
+      ),
+    ).toEqual({ outcome: 'backstop', ride: 'kick' });
+  });
+
+  it('names the seat of each outcome, and who chose: the model, the seeded tactics, or the sprint instinct', () => {
+    const race = raceAt(12_000, MID);
+    const finished: ItemRaceState = {
+      ...race,
+      racers: race.racers.map((entry) =>
+        entry.racer.id === 'bot-1'
+          ? { ...entry, racer: { ...entry.racer, finishedAtMs: 11_000 } }
+          : entry,
+      ),
+    };
+    const applied = applyModelMoves(
+      finished,
+      IDS.map((id) => bot(id)),
+      [
+        { bot: 1, move: 'sit-in' },
+        { bot: 2, move: 'attack' },
+      ],
+      SEED,
+    );
+    expect(applied.seats).toEqual([1, 2]);
+    expect(applied.outcomes).toEqual(['no-opinion', 'applied']);
+    expect(applied.outcomes.map(modelMoveChooser)).toEqual(['seeded', 'model']);
+    expect(MODEL_MOVE_CHOOSERS).toEqual(['model', 'seeded', 'instinct']);
+    for (const outcome of ['applied', 'bridging', 'marking'] as const) {
+      expect(modelMoveChooser(outcome)).toBe('model');
+    }
+    expect(modelMoveChooser('backstop')).toBe('instinct');
+    for (const outcome of ['no-decision', 'not-named', 'exhausted', 'no-opinion'] as const) {
+      expect(modelMoveChooser(outcome)).toBe('seeded');
+    }
   });
 });
 
@@ -715,6 +948,50 @@ describe('a stored log entry, read back whole or not at all', () => {
     ];
     for (const value of bad) expect(readModelTacticsLogEntry(value)).toBeUndefined();
   });
+
+  it('reads what a call was about and the model’s reason word, since version 7 (#2836, ADR 0081 D-5)', () => {
+    const asked = {
+      bot: 3,
+      rank: 5,
+      cues: ['on-your-terrain', 'fresh'],
+      menu: [{ move: 'attack' }, { move: 'follow', target: 'rider' }, { move: 'sit-in' }],
+    } as const;
+    const entries: ModelTacticsLogEntry[] = [
+      {
+        askedAtMs: 4_000,
+        arrivedAtMs: 4_600,
+        outcome: 'decision',
+        moves: [{ bot: 3, move: 'attack', effort: 'all-out' }],
+        ...asked,
+        why: 'my-terrain',
+      },
+      { askedAtMs: 5_000, arrivedAtMs: 5_400, outcome: 'invalid', reason: 'off-menu', ...asked },
+      { askedAtMs: 6_000, arrivedAtMs: 6_300, outcome: 'invalid', reason: 'bad-reason', ...asked },
+      { askedAtMs: 7_000, arrivedAtMs: 15_100, outcome: 'late', reason: 'no-answer', ...asked },
+    ];
+    for (const entry of entries) {
+      expect(readModelTacticsLogEntry(JSON.parse(JSON.stringify(entry)))).toEqual(entry);
+    }
+    const good = entries[0] as ModelTacticsLogEntry;
+    const bad: unknown[] = [
+      { ...good, why: 'the model felt like it' },
+      { ...good, why: 7 },
+      { ...good, bot: -1 },
+      { ...good, bot: 'the climber' },
+      { ...good, rank: 0 },
+      { ...good, rank: 9 },
+      { ...good, cues: ['near the park'] },
+      { ...good, cues: 'fresh' },
+      { ...good, menu: [{ move: 'sprint' }] },
+      { ...good, menu: [{ move: 'attack', watts: 400 }] },
+      { ...good, menu: [{ move: 'follow', target: 'pacer' }] },
+      { ...good, menu: Array(5).fill({ move: 'attack' }) },
+      { ...good, said: 'attack now' },
+      // A reason word is a decision's alone.
+      { ...entries[1], why: 'counter' },
+    ];
+    for (const value of bad) expect(readModelTacticsLogEntry(value)).toBeUndefined();
+  });
 });
 
 describe('a stored race record, read back whole or not at all (D-4.4)', () => {
@@ -766,6 +1043,41 @@ describe('a stored race record, read back whole or not at all (D-4.4)', () => {
           uses: [],
         },
       },
+    ];
+    for (const value of bad) expect(readLapRaceModelRecord(value)).toBeUndefined();
+  });
+
+  it('reads who each bot is and every change of move, and a record from before version 7 with neither (#2836)', () => {
+    const explained: LapRaceModelRecord = {
+      ...record,
+      version: 7,
+      bots: [
+        { style: 'climber', personality: 'aggressive', skill: 'crafty' },
+        { style: 'sprinter', personality: 'defensive', skill: 'naive' },
+      ],
+      rode: [
+        { atMs: 5_050, bot: 0, move: 'attack', by: 'seeded' },
+        { atMs: 9_050, bot: 1, move: 'follow', by: 'model' },
+        { atMs: 140_050, bot: 1, move: 'kick', by: 'instinct' },
+      ],
+    };
+    expect(readLapRaceModelRecord(JSON.parse(JSON.stringify(explained)))).toEqual(explained);
+    // An older record has neither, and reads back without them.
+    const older = readLapRaceModelRecord(JSON.parse(JSON.stringify(record)));
+    expect(older).toEqual(record);
+    expect(older).not.toHaveProperty('bots');
+    expect(older).not.toHaveProperty('rode');
+    const bad: unknown[] = [
+      { ...explained, bots: [{ style: 'climber', personality: 'aggressive' }] },
+      { ...explained, bots: [{ style: 'grimpeur', personality: 'aggressive', skill: 'crafty' }] },
+      { ...explained, bots: [{ ...explained.bots?.[0], name: 'Alex' }] },
+      { ...explained, bots: Array(8).fill(explained.bots?.[0]) },
+      { ...explained, bots: 'seven' },
+      { ...explained, rode: [{ atMs: 5_050, bot: 0, move: 'attack', by: 'the owner' }] },
+      { ...explained, rode: [{ atMs: 5_050, bot: 0, move: 'sprint', by: 'model' }] },
+      { ...explained, rode: [{ atMs: -1, bot: 0, move: 'attack', by: 'model' }] },
+      { ...explained, rode: [{ atMs: 5_050, bot: 0, move: 'attack', by: 'model', watts: 400 }] },
+      { ...explained, rode: Array(LAP_RACE_MODEL_MOST_MOVES + 1).fill(explained.rode?.[0]) },
     ];
     for (const value of bad) expect(readLapRaceModelRecord(value)).toBeUndefined();
   });

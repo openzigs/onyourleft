@@ -68,7 +68,11 @@ const squash = (text: string | null | undefined): string =>
 describe('the app’s Backups panel and the admin Backups page say the same thing (#2647)', () => {
   it('draws the same line for every record and the same restore steps, from one fixture', async () => {
     mounted = await mount(
-      <OperateBackupsPanel port={scriptedOperate().port} every={() => () => undefined} />,
+      <OperateBackupsPanel
+        timeZone="UTC"
+        port={scriptedOperate().port}
+        every={() => () => undefined}
+      />,
     );
     await settle();
     const appLines = [...mounted.container.querySelectorAll('.oyl-operate__backups > li')].map(

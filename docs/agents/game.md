@@ -112,6 +112,25 @@ Supported Power Range **minimum** through the ERG writer — never a Stop — an
 trainer lets go or eases** — every test asserts what is sent. Validation 0002 L5, L7, Part R and
 Part S are the hardware steps.
 
+⚠️ **Before any change to a prompt, a schema or the model for the AI bots or the AI pacer, run the
+scoring harness** ([#2838](https://github.com/openzigs/onyourleft/issues/2838)), and again after it,
+before the owner's tablet ride: `node tools/model-tactics-spike/run-harness.mjs all` from `apps/web`,
+on a machine with Ollama on its loopback, or with `--host <ssh host>` for the instance PC. It sends
+**the instance's own prompt and request** (`apps/instance/src/analysis/tactics-prompt.ts`,
+`pacer-prompt.ts`; it keeps no copy) through the shipped race and the shipped pacer director: six
+fixed AI-bot races and one scripted pacer ride, with seeds fixed in the harness only. It prints the
+scores, writes them, numbers only, under `apps/web/tools/model-tactics-spike/results/scores/`, and
+**exits 1 below a pass mark**. The marks and the reason for each are in `harness/bot-score.ts` and
+`harness/pacer-score.ts`; `harness/main.ts` has the commands. It is **not a CI gate**, because CI has
+no model: CI runs only its scoring tests, which ride recorded answers (`harness/recorded/`), and a
+change to the bots' code or the pacer's rules that moves those scores means recording again. **Run it
+three times and take the worst**: a seed fixes the field and each question, but the model's latency
+is booked into race time, so two runs ask at different instants and differ (on 2026-11-18 the same
+prompt rode the flat race to a 16 s quiet run and to a 73 s one). Compare
+timings only between runs on one machine, and score the bots on the instance PC: a machine that
+answers a seven-bot call past the race's 8 s limit (the development Mac took 10.6 s on 2026-11-18)
+rides the seeded race and fails on late answers.
+
 From the layout tree of CLAUDE.md §2, under `apps/web/`:
 
 ```
@@ -1003,6 +1022,24 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         body's limits outside; ADR 0073's strategy, which
                         lifts ADR 0071 D-3.6's rules, with ADR 0074's sprint
                         backstop, behind the `ModelMoveStrategy` seam). Any miss rides seeded. The record goes to `RideFacts.lapRaces`.
+                        Since version 4 (#2759, ADR 0076) a model race deals
+                        its own field, domain `lap-race/model-field.ts`: each
+                        style its legs and a body (mass, strength around the
+                        tier); the seeded race keeps its one-body field
+                        Since version 5 (ADR 0076 D-11) late is past 8 s
+                        and a decision holds 10 s
+                        Since version 7 (#2836, ADR 0081) the race asks about
+                        ONE bot at a time, round the field, a second apart at
+                        most: domain `lap-race/model-tactics.ts`
+                        §`modelTacticsAsk` makes its cue words and a menu of
+                        two to four moves (§`modelTacticsOffer`), the model
+                        picks from the menu with a reason word first, and a
+                        decision holds for that bot alone. A model `sit-in`
+                        is no opinion (`ADR_0081_MOVE_STRATEGY`): the seeded
+                        tactics decide, so a model that only says `sit-in`
+                        rides the seeded race to the bit. The record also
+                        keeps who each bot is, what each call offered and
+                        who chose each move (`model`, `seeded`, `instinct`)
                         ⚠️ Raise `LAP_RACE_BOT_CODE_VERSION` and APPEND a key
                         to `model-race-golden.json` for any change to bot
                         output; never edit an old one
@@ -1355,9 +1392,33 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/hud/hud-layout-preference.ts
                         the panels a rider turns off and the HUD's text size
                         (#2079), kept on the device and read as a ride starts;
-                        never the notices, the controls or the primary readings.
+                        never the notices; the primary readings and the controls
+                        are #2600's, in ride-chrome-preference.ts.
                         Since #2420 also how power is shown: the 3 s average
                         (the default; absent or unknown reads as it) or instant
+    src/game/hud/ride-chrome-preference.ts
+                        #2600: whether the ride controls hide until touched
+                        (on by default; Settings turns it off) and which
+                        panels are tucked away, written by the ride at each
+                        tap; its own key, so the ride never rewrites
+                        hud-layout-preference.ts. controls-reveal.ts FADES
+                        them after 5 s with no input (owner ruling
+                        2026-11-16; hud-surface.a11y.test.ts admits only
+                        `opacity: 0` in the hidden state), then the actions
+                        panel is clipped below the trainer's line; a hidden
+                        control stays focusable and a tap that began hidden
+                        presses none and tucks no panel. Held drawn while
+                        paused, asking to end, a notice stands, the road is
+                        not reaching the trainer, a lap race is finished, a
+                        round's throw buttons or a read-only line is in the
+                        actions panel (HudCore.tsx §controlsHeld).
+                        panel-tabs.ts: tap a panel to tuck it to a tab, tap
+                        the tab to bring it back, tablets only; each panel is
+                        one control named "X panel, shown/hidden", drawn
+                        while open only under keyboard focus. A reading one
+                        panel lends another goes home when that one is
+                        tucked (theme.css §"#2600");
+                        browser/ride-chrome.browser.spec.ts measures it all
     src/game/hud/power-average.ts
                         the HUD's 3 s power (#2420): a time-weighted mean over
                         the ride's clock, fed by the frame loop AFTER
@@ -1446,6 +1507,26 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         on a ride running a race (#1906);
                         `browser/lap-race-hud.browser.spec.ts` holds the
                         layout on the HUD harness's stage, not in a real ride
+    src/game/hud/standings-room.ts, src/game/hud/standings-follow.ts
+                        the room a race's standings have on a tablet (#2599):
+                        the list is as tall as the whole lines that fit above
+                        the actions panel less the owner's 16 px, and scrolls
+                        under a finger where that is short, opening on the
+                        rider's own line. #2837: hidden (#2600), the actions
+                        panel is its trainer's line, and where standings are
+                        drawn theme.css §"#2837" moves that line to the
+                        stage's bottom edge as the panel closes, so the list
+                        GROWS into the room the controls stood on and gives
+                        it back when a touch returns them. The room is read
+                        off the page — the panel's box as drawn — on an
+                        event of the layout's (a resize, a class or style, the
+                        HUD's `data-oyl-controls`, the end of the panel's own
+                        animation or transition), ⚠️ never on a frame. While
+                        the controls are DRAWN the room is #2599's: they are
+                        held drawn by a notice, a held item (ADR 0075 D-5)
+                        and a finished race (`HudCore.tsx` §`controlsHeld`).
+                        `browser/lap-race-hud.browser.spec.ts` §"#2837" and
+                        `ride-chrome.browser.spec.ts` §"#2837" measure it
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost

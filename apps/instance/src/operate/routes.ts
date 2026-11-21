@@ -78,6 +78,7 @@ const LOCAL_STATES = [
   'no-model',
   'bad-model',
   'bad-reasoning',
+  'bad-context',
 ] as const;
 
 /** The operator's analysis settings, as the owner reads them (#2609). Never a key. */

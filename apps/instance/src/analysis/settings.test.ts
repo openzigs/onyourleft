@@ -82,10 +82,41 @@ const ENV_CASES: readonly (readonly [AnalysisModelEnv, string])[] = [
   [{ analysisModelUrl: 'ftp://ollama/v1', analysisModel: 'm' }, 'not-a-url'],
   [{ analysisModelUrl: 'http://ollama:11434/v1?x=1', analysisModel: 'm' }, 'not-base-url'],
   [{ analysisModelUrl: 'http://ollama:11434/v1', analysisModel: 'two words' }, 'bad-model'],
+  // #2840: the model's context, from `.env` only.
+  [
+    {
+      analysisModelUrl: 'http://ollama:11434/v1',
+      analysisModel: 'm',
+      analysisModelContextTokens: '16384',
+    },
+    'on',
+  ],
+  [
+    {
+      analysisModelUrl: 'http://ollama:11434/v1',
+      analysisModel: 'm',
+      analysisModelContextTokens: '16k',
+    },
+    'bad-context',
+  ],
 ];
 
 const stateOf = (settings: ReturnType<typeof readAnalysisModelSettings>): string =>
   settings.kind === 'on' ? 'on' : settings.code;
+
+describe('the model’s context is .env’s under a row that sets the model (#2840)', () => {
+  it('keeps the context .env states when the row names the address and the model', () => {
+    const settings = resolveLocalModel(
+      { ...NOTHING, localUrl: 'http://192.168.1.20:11434/v1', localModel: 'other' },
+      {
+        analysisModelUrl: 'http://ollama:11434/v1',
+        analysisModel: 'm',
+        analysisModelContextTokens: '16384',
+      },
+    );
+    expect(settings).toMatchObject({ kind: 'on', model: 'other', contextTokens: 16_384 });
+  });
+});
 
 describe('no row is .env, for every combination the environment path is read from (#2609)', () => {
   it.each(ENV_CASES.map(([env, state]) => [JSON.stringify(env), env, state] as const))(

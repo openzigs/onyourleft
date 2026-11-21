@@ -24,7 +24,7 @@ import { openServingStore } from '../store/serving.ts';
 import type { OperatorLogEntry } from '../store/sql-store.ts';
 import { MIGRATIONS } from '../store/migrations/index.ts';
 import { athleteFixture, deviceKeyFixture, migrateAllBut } from '../store/testing/index.ts';
-import { unloggedSentence } from './commands.ts';
+import { DETAIL_REFUSED, loggedAfter, unloggedSentence } from './commands.ts';
 import { runCommand } from './run.ts';
 
 let directory: string | undefined;
@@ -218,18 +218,106 @@ describe('the operator CLI writes the operator log (#2602)', () => {
     expect(await cli(data, ['instance-key', 'show'])).toBe(1);
   });
 
-  it('succeeds at migrate and backup whose entry cannot be written: logged false, a line on stderr, exit 0', async () => {
+  it('logs instance-key rotate and rotate-identity with no keys yet as refused, changing nothing (#2618)', async () => {
+    const data = await migrated();
+    expect(await cli(data, ['instance-key', 'rotate'])).toBe(1);
+    expect(await cli(data, ['instance-key', 'rotate-identity'])).toBe(1);
+    expect(brief(await logOf(data)).slice(0, 2)).toEqual([
+      ['instance_key_rotate_identity', null, 'refused'],
+      ['instance_key_rotate', null, 'refused'],
+    ]);
+    expect(await cli(data, ['instance-key', 'show'])).toBe(1);
+  });
+
+  it('succeeds at migrate and backup whose entry cannot be written: logged false, a line on stderr naming SQLite’s code, exit 0', async () => {
     const data = await migrated();
     const before = await logOf(data);
     refuseEveryLogInsert(data);
+    // RAISE(ABORT) in a trigger: SQLITE_CONSTRAINT_TRIGGER.
+    const because = 'SQLite error code 1811';
     expect(await cli(data, ['migrate'])).toBe(0);
     expect(JSON.parse(printed.trim())).toMatchObject({ command: 'migrate', logged: false });
-    expect(complained).toBe(unloggedSentence('migrate'));
+    expect(complained).toBe(unloggedSentence('migrate', because));
     expect(await cli(data, ['backup', join(directory ?? '', 'backups')])).toBe(0);
     expect(JSON.parse(printed.trim())).toMatchObject({ command: 'backup', logged: false });
-    expect(complained).toBe(unloggedSentence('backup'));
+    expect(complained).toBe(unloggedSentence('backup', because));
     // The snapshot was taken all the same, and the log is as it was.
     expect(await readdir(join(directory ?? '', 'backups'))).toHaveLength(1);
     expect(await logOf(data)).toEqual(before);
+  });
+
+  it('succeeds at a restore whose entry cannot be written: logged false, a line on stderr, exit 0 (#2618)', async () => {
+    const data = await migrated();
+    // The snapshot carries the refusing trigger, so the database the restore
+    // puts in place — the one it logs into — refuses its entry.
+    refuseEveryLogInsert(data);
+    const backups = join(directory ?? '', 'backups');
+    expect(await cli(data, ['backup', backups])).toBe(0);
+    const [snapshot] = await readdir(backups);
+    if (snapshot === undefined) throw new Error('the backup took no snapshot');
+    const before = await logOf(data);
+    expect(await cli(data, ['restore', join(backups, snapshot), '--force'])).toBe(0);
+    expect(JSON.parse(printed.trim())).toMatchObject({ logged: false });
+    expect(complained).toBe(unloggedSentence('restore', 'SQLite error code 1811'));
+    // The restored database is in place, and its log as the snapshot had it.
+    expect(await logOf(data)).toEqual(before);
+  });
+});
+
+describe('a file command’s entry never says `failed` for work that succeeded (#2618)', () => {
+  it('writes no entry, and says why, when the detail is outside the action’s vocabulary', async () => {
+    const data = await migrated();
+    const before = await logOf(data);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const done = await loggedAfter(
+        data.database,
+        'migrate',
+        () => Promise.resolve('worked'),
+        () => 'applied=1234567890',
+      );
+      expect(done).toEqual({ value: 'worked', logged: false });
+      expect(err.mock.calls.map(([chunk]) => String(chunk))).toEqual([
+        unloggedSentence('migrate', DETAIL_REFUSED),
+      ]);
+    } finally {
+      err.mockRestore();
+    }
+    // Not a `failed` entry, nor any other.
+    expect(await logOf(data)).toEqual(before);
+  });
+
+  it('keeps work that succeeded a success when the store cannot even be opened, naming SQLite’s code', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'oyl-instance-operator-log-'));
+    // A directory where the database should be: it exists, and SQLite cannot open it.
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const done = await loggedAfter(
+        directory,
+        'migrate',
+        () => Promise.resolve('worked'),
+        () => 'applied=1',
+      );
+      expect(done).toEqual({ value: 'worked', logged: false });
+      expect(err.mock.calls.map(([chunk]) => String(chunk))).toEqual([
+        unloggedSentence('migrate', 'SQLite error code 14'),
+      ]);
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  it('still logs work that threw as `failed`, and throws its error on', async () => {
+    const data = await migrated();
+    const boom = new Error('the work broke');
+    await expect(
+      loggedAfter(
+        data.database,
+        'migrate',
+        () => Promise.reject(boom),
+        () => 'applied=1',
+      ),
+    ).rejects.toBe(boom);
+    expect(brief(await logOf(data))[0]).toEqual(['migrate', null, 'failed']);
   });
 });

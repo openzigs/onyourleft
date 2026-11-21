@@ -264,6 +264,7 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
       templateVersion: 're-plan-1',
       source: 'instance-local',
     },
+    'POST /v1/analysis/replans/warm': { source: 'instance-local' },
     // Phase 2 (#1210): each a body that would change something.
     'POST /v1/auth/display-name': { displayName: 'Edge' },
     'POST /v1/auth/adult': { confirmed: true },

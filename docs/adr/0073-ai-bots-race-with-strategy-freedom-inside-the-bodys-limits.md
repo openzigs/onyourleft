@@ -328,3 +328,38 @@ model race, or taking away a body's limit (D-2), needs one.
   the model names. The model may still name `kick` anywhere, earlier included, and the body's limits
   (D-2) are unchanged. Read ADR 0074 for the rule. This entry only points there; nothing else in this
   ADR changes. (#2710)
+
+- **2026-11-17** — **Once [ADR 0076](0076-ai-bots-race-with-bodies-that-fit-their-style-and-a-spread-of-strength.md) is Accepted, D-5.1 and D-2.5 are superseded by it in part
+  for a model race.** D-5.1's every-style-once deal stands, but a style is no longer dealt apart
+  from the bot's archetype (R-4 in that part): each style brings the pace whose legs fit it and a
+  body to match. On `attack`, `chase`, `flyer` and `kick`, an effort is ridden at the harder of its
+  own target and the move's, so it never softens the move; D-2.5 stands as written on every other
+  move. The body's limits (D-2) and the strategy rules lifted (D-3) are unchanged. Read ADR 0076 for
+  the rule. This entry only points there; nothing else in this ADR changes. (#2759)
+
+- **2026-11-17** — **D-5's input gains the course ahead (#2794).** Once for the race, read from
+  the leading bot on the road the bots ride, the race state may carry `course`: the next climb and
+  the next descent before the line (each 3 % or steeper for 200 m or more, looked for 5 km ahead
+  at most: metres to its start, its length, its average and steepest grade), the metres and the
+  climbing left in the lap, and the average grade of the last 500 m to the line
+  (`@onyourleft/domain` §`ModelTacticsCourse`, `route/course-ahead.ts`). Every field is a number
+  or `null`, never a coordinate or a name, and the reader refuses any other key; it is optional,
+  so a device from before it still asks. The prompt (`tactics-7`) says what it means and how riders
+  race terrain, as guidance (D-5): there is still no attack gate (D-5.3), and the body's limits
+  (D-2) and the answer are unchanged. This entry only records the wider input; nothing else in this
+  ADR changes.
+
+- **2026-11-18** — **Once [ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted, D-3, D-4 and D-5.3 are superseded by it in part
+  for a model race.** The model is asked about one bot at a time and picks from a menu of two to
+  four moves the device made for that bot, so the freedoms D-3 gave are the model's only where the
+  menu offers them: no gamble under the W′ floor (D-3.1), a flyer for a breakaway rider or, late, a
+  rouleur (D-3.2), a `follow` or `chase` of the racer directly ahead (D-3.4), and a kick in the
+  finish window (D-3.5). A menu is a code-computed gate, which D-5.3 had none of. D-4 gains a case:
+  a bot the model answers `sit-in` for rides its seeded tactics, exactly as with no decision in
+  force. **D-2, the body's limits, is unchanged**, and so is D-5.4: the prompt is still guidance
+  about what each move is for. Read ADR 0081 for the rule. This entry only points there; nothing
+  else in this ADR changes. (#2836)
+
+- **2026-11-19** — **[ADR 0081](0081-ai-bots-asked-one-at-a-time-from-a-menu-and-sit-in-is-no-opinion.md) is Accepted**, on the owner's answers
+  to its D-8 (its D-9), so the entry above is in force. This entry only records that; nothing else in
+  this ADR changes. (#2836)

@@ -27,6 +27,7 @@ import {
   createLocalPictureModel,
   GATEWAY_REFUSED,
   GatewayRefusedError,
+  heldAnswerSchema,
   pinnedTo,
   saysWithoutPictures,
 } from './model.ts';
@@ -206,6 +207,103 @@ describe('one turn through the fake server', () => {
     });
     const turn = await connection.turn(request());
     expect(turn.ok && turn.finish).toBe('length');
+  });
+});
+
+describe('a local turn that asks the model not to reason (#2840)', () => {
+  it('sends Ollama’s reasoning_effort "none", and a turn that does not ask sends none', async () => {
+    const model = await fake(
+      { kind: 'text', text: 'A steady ride.' },
+      { kind: 'text', text: 'A steady ride.' },
+    );
+    const connection = createLocalModel({
+      settings: { baseUrl: model.baseUrl, model: 'scripted' },
+      resolve: LOOPBACK,
+    });
+    expect((await connection.turn(request({ thinking: 'off' }))).ok).toBe(true);
+    expect((await connection.turn(request())).ok).toBe(true);
+    expect(model.requests.map((body) => body.reasoning_effort)).toStrictEqual(['none', undefined]);
+  });
+});
+
+describe('a local answer held to a schema, and a tool called by its name (#2841)', () => {
+  const ANSWER_SCHEMA = {
+    type: 'object',
+    properties: { keep: { type: 'boolean', enum: [true] } },
+    required: ['keep'],
+    additionalProperties: false,
+  } as const;
+  const ARGUED: ToolSpec = {
+    name: 'history_search',
+    description: 'Search.',
+    parameters: { type: 'object', properties: { query: { type: 'string' } } },
+  };
+
+  it('sends the schema, with a call by name for each tool that takes no argument, and no tools', async () => {
+    const model = await fake({ kind: 'text', text: '{"keep":true}' });
+    const connection = createLocalModel({
+      settings: { baseUrl: model.baseUrl, model: 'scripted' },
+      resolve: LOOPBACK,
+    });
+    const turn = await connection.turn(
+      request({ answerSchema: ANSWER_SCHEMA, tools: [RIDE_TOOL, ARGUED] }),
+    );
+    expect(turn).toMatchObject({ ok: true, text: '{"keep":true}', calls: [], finish: 'stop' });
+    const body = model.requests[0] ?? {};
+    expect(body).not.toHaveProperty('tools');
+    expect(body.response_format).toMatchObject({
+      type: 'json_schema',
+      json_schema: { schema: heldAnswerSchema(ANSWER_SCHEMA, ['ride_sections']) },
+    });
+  });
+
+  it('holds to the schema alone when no tool may be called by name', () => {
+    expect(heldAnswerSchema(ANSWER_SCHEMA, [])).toBe(ANSWER_SCHEMA);
+    expect(heldAnswerSchema(ANSWER_SCHEMA, ['goals'])).toStrictEqual({
+      anyOf: [
+        ANSWER_SCHEMA,
+        {
+          type: 'object',
+          properties: { look: { type: 'string', enum: ['goals'] } },
+          required: ['look'],
+          additionalProperties: false,
+        },
+      ],
+    });
+  });
+
+  it('hands back a look as the call it is, with no argument, and anything else as text', async () => {
+    const model = await fake(
+      { kind: 'text', text: '{"look":"ride_sections"}' },
+      { kind: 'text', text: '{"look":"history_search"}' },
+      { kind: 'text', text: '{"look":"ride_sections","query":"x"}' },
+    );
+    const connection = createLocalModel({
+      settings: { baseUrl: model.baseUrl, model: 'scripted' },
+      resolve: LOOPBACK,
+    });
+    const held = request({ answerSchema: ANSWER_SCHEMA, tools: [RIDE_TOOL, ARGUED] });
+    expect(await connection.turn(held)).toMatchObject({
+      ok: true,
+      text: '',
+      calls: [{ callId: 'look-1', toolName: 'ride_sections', input: {} }],
+      finish: 'tool-calls',
+    });
+    // A tool that takes an argument is not called by name, nor is a look with more in it.
+    for (const text of ['{"look":"history_search"}', '{"look":"ride_sections","query":"x"}']) {
+      expect(await connection.turn(held)).toMatchObject({ ok: true, text, calls: [] });
+    }
+  });
+
+  it('a turn with no schema is offered its tools as tools, as before', async () => {
+    const model = await fake({ kind: 'text', text: 'A steady ride.' });
+    const connection = createLocalModel({
+      settings: { baseUrl: model.baseUrl, model: 'scripted' },
+      resolve: LOOPBACK,
+    });
+    expect((await connection.turn(request())).ok).toBe(true);
+    expect(model.requests[0]).toHaveProperty('tools');
+    expect(model.requests[0]).not.toHaveProperty('response_format');
   });
 });
 
@@ -413,6 +511,25 @@ describe('the hosted model on the instance’s key (#1097)', () => {
       'hosted-model',
       'hosted-model',
     ]);
+  });
+
+  it('sends no schema and offers its tools as tools, and a look is only text (#2841)', async () => {
+    const model = await fake({ kind: 'text', text: '{"look":"ride_sections"}' });
+    const { fetch } = hostedFetch(model);
+    const connection = createHostedModel({ baseUrl: HOSTED, model: 'm', apiKey: KEY, fetch });
+    const turn = await connection.turn(request({ answerSchema: { type: 'object' } }));
+    expect(turn).toMatchObject({ ok: true, text: '{"look":"ride_sections"}', calls: [] });
+    expect(model.requests[0]).not.toHaveProperty('response_format');
+    expect(model.requests[0]).toHaveProperty('tools');
+  });
+
+  it('sends nothing for a turn that asks the model not to reason (#2840)', async () => {
+    const model = await fake({ kind: 'text', text: 'A steady ride.' });
+    const { fetch } = hostedFetch(model);
+    const connection = createHostedModel({ baseUrl: HOSTED, model: 'm', apiKey: KEY, fetch });
+    expect((await connection.turn(request({ thinking: 'off', temperature: 0.3 }))).ok).toBe(true);
+    expect(model.requests[0]).not.toHaveProperty('reasoning_effort');
+    expect(model.requests[0]?.temperature).toBe(0.3);
   });
 
   it('answers in the same closed failures, never the server’s words', async () => {

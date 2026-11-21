@@ -349,11 +349,12 @@ describe('PR #2518’s trim is invisible — the owner’s ruling of 2026-11-13'
 
   const steepest = steepestShippedClimb();
 
-  it('finds the steepest shipped climb, busy-round’s, in the drawn profile', () => {
-    // 7.1 % on the profile's despiked 10 m grid, which the corridor is drawn
-    // from; the review's 3.18 m in 44 m (7.2 %) read the file's own points.
-    expect(steepest).toBeGreaterThan(0.07);
-    expect(steepest).toBeLessThan(0.1);
+  it('finds the steepest shipped climb, mailbox-round’s, in the drawn profile', () => {
+    // 12.7 % on the profile's despiked 10 m grid, which the corridor is drawn
+    // from (#2367's levels; busy-round's was the steepest before them, at
+    // 7.1 %, where the review's 3.18 m in 44 m (7.2 %) read its own points).
+    expect(steepest).toBeGreaterThan(0.12);
+    expect(steepest).toBeLessThan(0.13);
   });
 
   /** Eyes on a road of `grade` rising along `+z` to a piece at the origin: 2 m above the road, behind it and to its side. */

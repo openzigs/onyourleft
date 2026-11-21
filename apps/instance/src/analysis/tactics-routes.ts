@@ -15,7 +15,14 @@
  * moves answered for it never cross the tunnel's edge readable.
  */
 
-import { MODEL_PACER_SAY_MOST_CHARACTERS, PACER_INTENTS, PACER_PLANS } from '@onyourleft/domain';
+import {
+  BOT_EFFORTS,
+  BOT_TACTICS,
+  MODEL_PACER_SAY_MOST_CHARACTERS,
+  MODEL_TACTICS_REASONS,
+  PACER_INTENTS,
+  PACER_PLANS,
+} from '@onyourleft/domain';
 
 import { errorResponse } from '../errors.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
@@ -44,17 +51,14 @@ const status: Schema = {
 
 const decision: Schema = {
   type: 'object',
+  description:
+    'The model’s pick for the one bot asked about (#2836, ADR 0081): `reason`, why, from its closed list; `move`, one of the moves on the menu the ask offered; and, only when the model named one, `effort`, how hard. No other field, never a target (the menu names it), and never a power.',
   properties: {
-    bots: {
-      type: 'array',
-      items: {
-        type: 'object',
-        description:
-          'One bot’s move: `bot`, its seat; `move`, one of `sit-in`, `follow`, `attack`, `chase`, `recover`, `flyer` and `kick`; and, only when the model named one, `target`: `"rider"` or a seat. No other field, and never a power.',
-      },
-    },
+    reason: { type: 'string', enum: [...MODEL_TACTICS_REASONS] },
+    move: { type: 'string', enum: [...BOT_TACTICS] },
+    effort: { type: 'string', enum: [...BOT_EFFORTS] },
   },
-  required: ['bots'],
+  required: ['reason', 'move'],
   additionalProperties: false,
 };
 
@@ -174,10 +178,12 @@ export const TACTICS_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/analysis/tactics/decide',
     operationId: 'decideBotTactics',
-    summary: `One decision for your AI bots (ADR 0071 D-3): \`input\` is the race as it stands, exactly \`@onyourleft/domain\`’s \`ModelTacticsInput\` — seats, styles, ranks, who is ahead and its move, gaps, W′ shares, drafting, moves and the seconds held, the lull and whether an attack is open, laps and metres to the line, launch distance, grade ahead, your gap, rank and W/kg; no coordinate, no name — at most 4 096 characters. Answers \`bots\`: a move from the closed list of seven for each bot the model named, and a target only of \`rider\` or a seat. **No power, ever.** The model is given no tools, asked for no reasoning, and its text is neither kept nor returned. \`tactics_invalid\` when its answer was not such a decision, \`tactics_failed\` when it gave none in time; on either, and on every refusal, ride the bots’ usual tactics. Takes or refreshes the model race slot as \`start\` does. \`rate_limited\` past ${String(DEFAULT_TACTICS_DECISIONS.limit)} a minute on an instance with the default limits, or while one of yours is out.`,
+    summary: `One decision for ONE of your AI bots (ADR 0071 D-3; one bot a call since #2836, ADR 0081): \`input\` is that bot’s ask, exactly \`@onyourleft/domain\`’s \`ModelTacticsInput\` — the race as it stands (laps, the course ahead of the leading bot since #2794, your rank, gaps and W/kg, and every racing bot’s seat, style, rank, move and gap), the story so far in numbers and closed words (seconds raced, laps left, the break, the lull, how the bots are for energy), and last the bot asked about: its style and strengths, the seconds since its last move, its move, rank, gaps, W′ share, laps and metres to the line, grade ahead and metres to the next climb, its cue words, and the menu of two to four moves your device offers it; no coordinate, no name — at most 4 096 characters. Answers \`reason\`, a word from a closed list, and \`move\`, one from that menu, with an \`effort\` word when the model named one. **No power, ever.** The model is given no tools, asked for no reasoning, and its text is neither kept nor returned. \`tactics_invalid\` when its answer was not such a pick, a move off the menu included, \`tactics_failed\` when it gave none in time; on either, and on every refusal, the bot rides its usual tactics. An ask of the shape sent before #2836 is \`validation_failed\`. Takes or refreshes the model race slot as \`start\` does. \`rate_limited\` past ${String(DEFAULT_TACTICS_DECISIONS.limit)} a minute on an instance with the default limits, or while one of yours is out.`,
     request: {
       type: 'object',
-      properties: { input: { type: 'object', description: 'A `ModelTacticsInput` (#2709).' } },
+      properties: {
+        input: { type: 'object', description: 'A `ModelTacticsInput` (#2709, #2836).' },
+      },
       required: ['input'],
       additionalProperties: false,
     },
@@ -207,7 +213,7 @@ export const TACTICS_ROUTES: readonly Route[] = [
     method: 'POST',
     path: '/v1/analysis/pacer/decide',
     operationId: 'decidePacer',
-    summary: `One decision for your AI pacer (#2712, ADR 0072): \`input\` is the ride as it stands, exactly \`@onyourleft/domain\`’s \`ModelPacerInput\` — the pacer’s W/kg, its plan and intent and the seconds held, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden; no coordinate, no name — at most 1 024 characters. Answers \`plan\` (\`rolling\`, \`even\` or \`climber\`), \`intent\` (\`hold\`, \`lift\` or \`ease\`) and \`say\`, one line of feedback of at most 80 characters with no number, no metric name and no health wording, or "". **No power, ever**, and nothing of it reaches a trainer: the plan and intent move the pacer inside its usual range. The same consent as AI bots, the same model slot (\`POST /v1/analysis/tactics/start\` and \`end\`), the same rate limit and the same model call, with no tools and no reasoning. \`tactics_invalid\` when the model’s answer was not such a decision or its line did not pass, \`tactics_failed\` when it gave none in time; on either, and on every refusal, the pacer rides its usual rule.`,
+    summary: `One decision for your AI pacer (#2712, ADR 0072): \`input\` is the ride as it stands, exactly \`@onyourleft/domain\`’s \`ModelPacerInput\` — the pacer’s W/kg, its plan and intent and the seconds held, your gap to it, your W/kg, whether you are in its draft, the grade ahead, the metres to the finish and the seconds ridden, and since #2760, each only when its sensor is live, your power over 3 s and the last minute with its zone, trend and time at or above threshold, your cadence, and your heart rate with its zone and trend, and up to three of the pacer’s own last lines, and since #2777 where you are against it (\`ahead\`, \`level\` or \`behind\`) and how the gap is moving, and since #2794 the course ahead of the pacer (the next climb and descent, and the climbing left); no coordinate, no name — at most 2 048 characters. Answers \`plan\` (\`rolling\`, \`even\` or \`climber\`), \`intent\` (\`hold\`, \`lift\` or \`ease\`) and \`say\`, one line of feedback of at most 80 characters with no number, no metric name and no health wording, or "". **No power, ever**, and nothing of it reaches a trainer: the plan and intent move the pacer inside its usual range. The same consent as AI bots, the same model slot (\`POST /v1/analysis/tactics/start\` and \`end\`), the same rate limit and the same model call, with no tools and no reasoning. \`tactics_invalid\` when the model’s answer was not such a decision, its line did not pass, or its line said the opposite of its intent, \`tactics_failed\` when it gave none in time; on either, and on every refusal, the pacer rides its usual rule.`,
     request: {
       type: 'object',
       properties: { input: { type: 'object', description: 'A `ModelPacerInput` (#2712).' } },

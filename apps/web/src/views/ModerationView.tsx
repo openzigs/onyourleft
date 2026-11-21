@@ -10,6 +10,7 @@ import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   INVITE_CARD_CAUTION,
+  INVITE_DEVICE_NEEDS_TEXT,
   isConflict,
   MODERATION_REFUSAL_TEXT,
   MAXIMUM_MODERATION_REASON,
@@ -1267,7 +1268,11 @@ export const INVITE_PICTURE_LABEL = 'Invitation and the instance’s card, for t
 /**
  * Inviting a rider (#1190, ADR 0047 D-6 source 3): the code and THIS device's
  * card as one line and one QR code, and the caution that the card is only as
- * trustworthy as the channel the invitation travels through.
+ * trustworthy as the channel the invitation travels through. With the
+ * invitation, what the new rider's device needs before it scans it (#2855):
+ * the same way in to the instance as this device has. It is a status message
+ * beside the invitation, not a line above the button: a section keeps at most
+ * one short line (#1013), and this is two sentences.
  */
 function Invite({ port }: { readonly port: ModerationPort }): JSX.Element {
   const reasonId = useId();
@@ -1315,6 +1320,9 @@ function Invite({ port }: { readonly port: ModerationPort }): JSX.Element {
               {INVITE_CARD_CAUTION}
             </StatusMessage>
           </KeptVisible>
+          <StatusMessage tone="info" label="Before they scan it">
+            {INVITE_DEVICE_NEEDS_TEXT}
+          </StatusMessage>
           <p>
             Send the new rider this line. It works once, until{' '}
             {new Date(outcome.expiresAt * 1000).toISOString().slice(0, 10)}.

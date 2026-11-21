@@ -40,6 +40,14 @@ export const SETUP_CODE_LIFETIME_SECONDS = ADMIN_CODE_LIFETIME_SECONDS;
 /** The log event that says where the code is (`log.ts` §`EVENT_KEYS`). */
 export const SETUP_LOG_EVENT = 'first-run-setup';
 
+/**
+ * The log event for an instance whose address is still the settings
+ * template's example (#2855), with where the page that says what to set is,
+ * when the setup's listener serves it. Written in place of
+ * {@link SETUP_LOG_EVENT}: no code is made. Never the address itself.
+ */
+export const EXAMPLE_ADDRESS_LOG_EVENT = 'example-address';
+
 /** The setup page's address on the loopback listener (ADR 0080 D-1: `localhost`, never `127.0.0.1`). */
 export const setupAddress = (port: number): string => `http://localhost:${String(port)}/setup`;
 
@@ -55,12 +63,39 @@ export type SetupCodeMinted =
   /** The setup is done: nothing minted, and the file removed. */
   | { readonly outcome: 'done' };
 
+/**
+ * A moment as this machine's clock reads it, with its zone named (#2858):
+ * `2026-11-19 05:30 EST`. The machine's own zone unless `timeZone` names one;
+ * in a container with no `TZ` that is UTC, and it says so.
+ */
+export function localTimeText(seconds: number, timeZone?: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    ...(timeZone === undefined ? {} : { timeZone }),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'short',
+  }).formatToParts(new Date(seconds * 1000));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((each) => each.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')} ${part('timeZoneName')}`;
+}
+
 /** The file's text: the code, when it ends, and where to type it. Lines end `\n`. */
-export function setupCodeFileText(code: string, expiresAt: number, port: number): string {
+export function setupCodeFileText(
+  code: string,
+  expiresAt: number,
+  port: number,
+  timeZone?: string,
+): string {
   return [
     code,
     `Type this code at ${setupAddress(port)} on this machine.`,
-    `It works once, until ${new Date(expiresAt * 1000).toISOString()}.`,
+    // #2858: this machine's time with its zone first, and UTC after it for a log to match.
+    `It works once, until ${localTimeText(expiresAt, timeZone)} (${new Date(expiresAt * 1000).toISOString()}).`,
     'A restart of the instance makes a new one.',
   ].join('\n');
 }
@@ -83,6 +118,13 @@ export async function mintSetupCode(
     readonly port: number;
   },
 ): Promise<SetupCodeMinted> {
+  // A start after Finish asks for no code, so it writes no "refused" entry on every restart
+  // (owner, 2026-11-19). `operator setup-code` still asks, and its refusal is logged: the
+  // operator ran it. The transaction below still refuses a setup done in between.
+  if (options.mintedBy === 'start' && ((await store.setupState())?.doneAt ?? null) !== null) {
+    await removeSetupCodeFile(options.directory);
+    return { outcome: 'done' };
+  }
   const { code, sha256 } = await newAdminCode();
   const mintedAt = Math.floor(options.now() / 1000);
   const expiresAt = mintedAt + SETUP_CODE_LIFETIME_SECONDS;

@@ -12,13 +12,13 @@
  * importing it.
  */
 
-import { unixSeconds, watts } from '@onyourleft/domain';
+import { beatsPerMinute, unixSeconds, watts } from '@onyourleft/domain';
 import { athleteId } from '@onyourleft/store';
 import { createStoreHarness, type StoreHarness } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ensureLocalAthlete } from '../local-athlete';
-import { ownThresholdPowerFrom } from './own-threshold';
+import { ownThresholdHeartRateFrom, ownThresholdPowerFrom } from './own-threshold';
 
 const NOW = unixSeconds(1_760_000_000);
 
@@ -63,6 +63,36 @@ describe('ownThresholdPowerFrom — #2077', () => {
         await store.setAthleteThresholds(other, { thresholdPower: watts(310) });
       },
       async (store) => ownThresholdPowerFrom(store)(),
+    );
+
+    expect(read).toBeUndefined();
+  });
+});
+
+describe('ownThresholdHeartRateFrom — #2760', () => {
+  it("reads the local athlete's threshold heart rate, as Settings saved it", async () => {
+    harness = createStoreHarness();
+    const read = await harness.roundTrip(
+      async (store) => {
+        const local = await ensureLocalAthlete(store, NOW);
+        await store.setAthleteThresholds(local.id, { thresholdHeartRate: beatsPerMinute(168) });
+      },
+      async (store) => ownThresholdHeartRateFrom(store)(),
+    );
+
+    expect(read).toBe(beatsPerMinute(168));
+  });
+
+  it("is undefined with none set, and never reads another athlete's row", async () => {
+    harness = createStoreHarness();
+    const read = await harness.roundTrip(
+      async (store) => {
+        await ensureLocalAthlete(store, NOW);
+        const other = athleteId('someone-else');
+        await store.ensureAthlete({ id: other, displayName: 'Bea', createdAt: NOW });
+        await store.setAthleteThresholds(other, { thresholdHeartRate: beatsPerMinute(180) });
+      },
+      async (store) => ownThresholdHeartRateFrom(store)(),
     );
 
     expect(read).toBeUndefined();

@@ -29,7 +29,8 @@ export function vacuumInto(databasePath: string, destination: string): void {
 }
 
 /**
- * Deletes every "back up now" still waiting from a snapshot's own database
+ * Forgets the taking run's own state in a snapshot's database (#2627: named
+ * for both halves). Deletes every "back up now" still waiting
  * (#2606 review L1). The run taking the snapshot serves the one there is, so
  * a restored snapshot must not ask for a backup again. It also deletes every
  * `backup_lease` row (#2606 fourth review): the copy holds the taking run's
@@ -37,7 +38,7 @@ export function vacuumInto(databasePath: string, destination: string): void {
  * for up to five minutes. A database from before migration 0042 has neither
  * table, and nothing to delete.
  */
-export function forgetWaitingRequests(databasePath: string): void {
+export function forgetRunState(databasePath: string): void {
   const database = openDatabase(databasePath);
   try {
     const has = (name: string): boolean =>

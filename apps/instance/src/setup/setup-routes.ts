@@ -61,6 +61,8 @@ export const SETUP_ROUTES: readonly SetupRoute[] = [
   { path: '/setup/backups/now', methods: ['POST'], kind: 'action' },
   { path: '/setup/registration/mode', methods: ['POST'], kind: 'action' },
   { path: '/setup/invite/code', methods: ['POST'], kind: 'action' },
+  { path: '/setup/ai/pull', methods: ['POST'], kind: 'action' },
+  { path: '/setup/ai/use', methods: ['POST'], kind: 'action' },
   { path: '/setup/finish/done', methods: ['POST'], kind: 'action' },
 ];
 

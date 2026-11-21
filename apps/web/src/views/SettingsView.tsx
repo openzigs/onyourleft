@@ -150,6 +150,11 @@ import {
   type HudTextSize,
 } from '../game/hud/hud-layout-preference';
 import {
+  readRideChrome,
+  writeRideChrome,
+  type RideChromePreference,
+} from '../game/hud/ride-chrome-preference';
+import {
   readCuePreference,
   steppedVolume,
   writeCuePreference,
@@ -900,9 +905,9 @@ export function SettingsView({
  * What this device's connection is, as {@link InstancePort.current} reads it:
  * `undefined` until it answers, and kept with the port it answered for, so a
  * new port reads as unanswered until it does (`where-rides-are.ts` does the
- * same for About).
+ * same for About). The More menu's Instance line reads it too (#2859).
  */
-function useInstanceState(port: InstancePort | undefined): InstanceState | undefined {
+export function useInstanceState(port: InstancePort | undefined): InstanceState | undefined {
   const [answer, setAnswer] = useState<
     { readonly port: InstancePort; readonly state: InstanceState } | undefined
   >(undefined);
@@ -2011,6 +2016,13 @@ const HUD_DELIVERY_VIEW_LABELS: Readonly<Record<HudDeliveryView, string>> = {
   everything: 'Everything, as on any ride',
 };
 
+/**
+ * #2600: what the controls' auto-hide is called here. Its first word is no
+ * other choice's here.
+ */
+const RIDE_CONTROLS_AUTO_HIDE_LABEL =
+  'Hide Pause, End ride and the other ride controls until I touch the screen';
+
 /** #2079: what each text size is called here. */
 const HUD_TEXT_SIZE_LABELS: Readonly<Record<HudTextSize, string>> = {
   normal: 'Normal',
@@ -2044,6 +2056,18 @@ function HudLayoutPanel({
 }): JSX.Element {
   const [layout, setLayout] = useState<HudLayoutPreference>(() => readHudLayout(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  // #2600: whether the ride controls hide until touched — its own key, which
+  // the ride writes too (`ride-chrome-preference.ts` says why).
+  const [chrome, setChrome] = useState<RideChromePreference>(() => readRideChrome(storage));
+
+  function keepChrome(next: RideChromePreference): void {
+    setChrome(next);
+    setMessage(
+      writeRideChrome(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
 
   function keep(next: HudLayoutPreference): void {
     setLayout(next);
@@ -2062,14 +2086,18 @@ function HudLayoutPanel({
         help={
           <>
             <p className="oyl-muted">
-              What the game shows while you ride, from your next ride. Power, cadence and heart
-              rate, the ride controls and every notice are always shown. Focus shows one compact
-              readout at the top in place of every reading; a ride in a room, a Delivery round or a
-              lap race keeps the full layout and draws no totals strip. The compact route panel is a
-              small map with the gradient on it, in place of the height profile and the map. The
-              text size applies on tablets held either way, and the totals strip on a tablet on its
-              side or a tall, narrow one held upright: a phone or a short window keeps the normal
-              size, and has no strip, because it has no room for them beside the road.
+              What the game shows while you ride, from your next ride. Every notice is always shown,
+              and so is each panel you have not collapsed. The ride controls hide after a few
+              seconds until you touch the screen, unless you turn that off below. On a tablet each
+              panel, Power, cadence and heart rate included, tucks away when you tap it during the
+              ride and comes back when you tap its tab, and the game remembers which panels you
+              tucked. Focus shows one compact readout at the top in place of every reading; a ride
+              in a room, a Delivery round or a lap race keeps the full layout and draws no totals
+              strip. The compact route panel is a small map with the gradient on it, in place of the
+              height profile and the map. The text size applies on tablets held either way, and the
+              totals strip on a tablet on its side or a tall, narrow one held upright: a phone or a
+              short window keeps the normal size, and has no strip, because it has no room for them
+              beside the road.
             </p>
             <p className="oyl-muted">
               Power changes with every pedal stroke, so by default the game shows the average of the
@@ -2186,6 +2214,19 @@ function HudLayoutPanel({
             {HUD_ROUTE_VIEW_LABELS[view]}
           </label>
         ))}
+      </fieldset>
+      <fieldset className="oyl-hud-layout__group">
+        <legend>Ride controls</legend>
+        <label className="oyl-hud-layout__choice">
+          <input
+            type="checkbox"
+            checked={chrome.autoHide}
+            onChange={(event) => {
+              keepChrome({ ...chrome, autoHide: event.currentTarget.checked });
+            }}
+          />{' '}
+          {RIDE_CONTROLS_AUTO_HIDE_LABEL}
+        </label>
       </fieldset>
       <fieldset className="oyl-hud-layout__group">
         <legend>Size of the numbers</legend>

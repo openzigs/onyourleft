@@ -299,6 +299,7 @@ describe('GET /v1/operate/status carries no secret the instance holds (#2604)', 
       operateStatus: statusSources({
         // The whole server configuration, every secret in it: what is read is the builder's choice.
         server: server.config,
+        remotePath: null,
         keys: {
           show: () => {
             if (held.world === undefined) throw new Error('no world yet');

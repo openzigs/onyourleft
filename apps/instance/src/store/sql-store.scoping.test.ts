@@ -382,6 +382,12 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   confirmOwnerClaim: { notAScopedRead: 'a write; the owner key names no athlete (#2782)' },
   discardOwnerClaim: { notAScopedRead: 'a write; a claim names no athlete (#2782)' },
+  voidUnredeemedOwnerClaimCodes: {
+    notAScopedRead: 'a write; a claim code names no athlete (#2858)',
+  },
+  ownerClaimedAt: {
+    notAScopedRead: 'when the instance’s ONE owner key was claimed (#2858): names no athlete',
+  },
   resetOwnerClaim: {
     notAScopedRead: 'a write, instance-wide: the operator’s reset of the claim (#2782)',
   },
@@ -482,6 +488,7 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   takeBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
   heartbeatBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
+  holdsBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2627)' },
   releaseBackupLease: { notAScopedRead: 'the backup service’s lease on a folder (#2606)' },
   listLoadAthletes: {
     notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',

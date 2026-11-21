@@ -6,20 +6,28 @@ import { gradePercent } from '../quantities';
 import {
   directedPacingFactor,
   directedPowerWatts,
+  flooredDirection,
+  gapTrendOf,
   MODEL_PACER_ANSWER_MOST_CHARACTERS,
   MODEL_PACER_INPUT_MOST_CHARACTERS,
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
+  MODEL_PACER_RECENT_LINES,
   MODEL_PACER_SAY_MOST_CHARACTERS,
   modelPacerAnswerSchema,
+  PACER_AHEAD_FLOOR_S,
   PACER_INTENTS,
   PACER_PLANS,
   pacerDecisionRecord,
   pacerDirectionAt,
+  pacerSayAgainstIntent,
+  pacerSaysEasing,
+  pacerSaysPushing,
   pacerSayProblem,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
+  riderPlaceOf,
   type ModelPacerInput,
   type PacerDecisionRecord,
 } from './model-pacer';
@@ -167,6 +175,91 @@ describe('the pacer state the model is shown — ADR 0072 D-3', () => {
   });
 });
 
+/** The same state with every sensor live and three lines said — #2760. */
+const SENSED: ModelPacerInput = {
+  ...STATE,
+  rider3sWPerKg: 2.6,
+  riderMinuteWPerKg: 2.4,
+  powerZone: 'Tempo',
+  powerTrend: 'fading',
+  aboveThresholdS: 0,
+  cadenceRpm: 62,
+  heartRateBpm: 151,
+  heartRateZone: 'Endurance',
+  heartRateTrend: 'rising',
+  recentLines: ['Nice and steady.', 'Find a lighter gear here.', 'Stay with me.'],
+};
+
+describe('the rider’s own sensors, in the state — #2760', () => {
+  it('reads a state with every sensor, and one with none of them', () => {
+    expect(readModelPacerInput(SENSED)).toEqual({ ok: true, value: SENSED });
+    expect(readModelPacerInput({ ...STATE, cadenceRpm: 90 })).toEqual({
+      ok: true,
+      value: { ...STATE, cadenceRpm: 90 },
+    });
+    expect(readModelPacerInput(STATE).ok).toBe(true);
+  });
+
+  it.each([
+    ['rider3sWPerKg', 41],
+    ['rider3sWPerKg', null],
+    ['riderMinuteWPerKg', -0.1],
+    ['powerZone', 'Zone 9'],
+    ['powerZone', 'Threshold heart'],
+    ['powerTrend', 'falling'],
+    ['aboveThresholdS', 2.5],
+    ['cadenceRpm', 88.5],
+    ['cadenceRpm', 251],
+    ['heartRateBpm', 19],
+    ['heartRateBpm', null],
+    ['heartRateZone', 'Sprint'],
+    ['heartRateTrend', 'fading'],
+    ['recentLines', []],
+    ['recentLines', 'Nice and steady.'],
+    ['recentLines', ['']],
+    ['recentLines', ['Hold 3000 watts.']],
+    ['recentLines', ['Lat 51.5074 is home.']],
+    ['recentLines', ['a', 'b', 'c', 'd']],
+    ['recentLines', [7]],
+    ['riderPlace', 'in front'],
+    ['riderPlace', null],
+    ['gapTrend', 'growing'],
+    ['gapTrend', 0.4],
+  ])('refuses a bad %s (%j), naming the field and never the value', (field, value) => {
+    const read = readModelPacerInput({ ...SENSED, [field]: value });
+    expect(read.ok).toBe(false);
+    expect(read.ok ? undefined : read.problem.field).toBe(`input.${field}`);
+    expect(JSON.stringify(read)).not.toContain('51.5074');
+  });
+
+  it('fits a state with every sensor and the longest lines inside the cap', () => {
+    const longest = '"'.repeat(MODEL_PACER_SAY_MOST_CHARACTERS - 1) + 'a';
+    expect(pacerSayProblem(longest)).toBeUndefined();
+    const widest: ModelPacerInput = {
+      ...SENSED,
+      riderGapM: -999_999.9,
+      gradeAheadPct: -99.9,
+      toFinishM: 999_999,
+      rideS: 86_399,
+      secondsInIntent: 86_399,
+      aboveThresholdS: 86_399,
+      riderWPerKg: 39.9,
+      rider3sWPerKg: 39.9,
+      riderMinuteWPerKg: 39.9,
+      recentLines: Array.from({ length: MODEL_PACER_RECENT_LINES }, () => longest),
+      // #2794: the course ahead at its widest.
+      course: {
+        climb: { inM: 5_000, lengthM: 5_000, avgPct: -100, maxPct: -100 },
+        descent: { inM: 5_000, lengthM: 5_000, avgPct: -100, maxPct: -100 },
+        lapLeftM: 999_999,
+        climbLeftM: 999_999,
+      },
+    };
+    expect(JSON.stringify(widest).length).toBeLessThanOrEqual(MODEL_PACER_INPUT_MOST_CHARACTERS);
+    expect(readModelPacerInput(widest).ok).toBe(true);
+  });
+});
+
 describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
   it('reads a plan, an intent and a line', () => {
     expect(readModelPacerAnswer(answer({}))).toEqual({
@@ -195,7 +288,9 @@ describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
     ['bad-plan', answer({ plan: 'sprint' })],
     ['bad-intent', answer({ intent: 'wait' })],
     ['bad-say', answer({ say: 7 })],
-    ['bad-say', answer({ say: 'Hold 250 watts.' })],
+    ['bad-say', answer({ say: 'Hold 9000 watts.' })],
+    ['bad-say', answer({ say: 'Your heart rate is 150.' })],
+    ['say-against-intent', answer({ intent: 'ease', say: 'I will push on this climb.' })],
     ['too-long', answer({ say: 'a'.repeat(MODEL_PACER_ANSWER_MOST_CHARACTERS) })],
   ])('reads %s as no decision', (reason, text) => {
     expect(readModelPacerAnswer(text)).toEqual({ ok: false, reason });
@@ -230,7 +325,8 @@ describe('the line of feedback — ADR 0072 D-4', () => {
     ['not-a-line', 'Nice.\nNow harder.'],
     ['markup', '<b>Go</b>'],
     ['markup', 'Read more at www.example.org'],
-    ['markup', 'Push to 2 W/kg'],
+    ['markup', 'Push to 2 W/kg / 3 W/kg'],
+    ['number', 'Push to 20 W/kg'],
     ['number', 'Hold three hundred and 5 more.'],
     ['number', 'We are at 51.5074 north.'],
     ['number', 'Two ٣ go'],
@@ -252,6 +348,94 @@ describe('the line of feedback — ADR 0072 D-4', () => {
 
   it('lets the empty line through: it shows nothing', () => {
     expect(pacerSayProblem('')).toBeUndefined();
+  });
+});
+
+describe('a cadence or power figure in the line — ADR 0077 (owner ruling 2026-11-17)', () => {
+  it.each([
+    'Aim for 90 rpm.',
+    'Hold 200 watts.',
+    'Hold around 200 W up this rise.',
+    'Try 3 W/kg up this rise.',
+    'Easy for a minute, stay in this zone with me.',
+    'Settle at 2.8 W/kg, then spin at 95rpm.',
+    'Spin it up to ９０ rpm.',
+    'Hold 30 watts, then 2000 watts, at 30 rpm or 150 rpm.',
+    'Ease to 0.5 W/kg, or ride 10 W/kg.',
+    'One more push at 250 watt.',
+  ])('shows “%s”', (say) => {
+    expect(pacerSayProblem(say)).toBeUndefined();
+  });
+
+  it.each([
+    ['number', 'Your heart rate is 150.'],
+    ['number', 'Heart rate 150 bpm, ease a little.'],
+    ['number', 'Five more, then 5 minutes easy.'],
+    ['number', 'Only 20 km to go.'],
+    ['number', 'Hold 35 km an hour here.'],
+    ['number', 'Stay in zone 4.'],
+    ['markup', 'You are at 90% of threshold.'],
+    ['number', 'Hold 9000 watts.'],
+    ['number', 'Hold 29 watts.'],
+    ['number', 'Hold 2001 W.'],
+    ['number', 'Spin at 5 rpm.'],
+    ['number', 'Spin at 151 rpm.'],
+    ['number', 'Push 11 W/kg.'],
+    ['number', 'Ease to 0.4 W/kg.'],
+    ['number', 'Hold 3.25 W/kg.'],
+    ['number', 'Hold 0.5074 W/kg.'],
+    ['number', 'Hold 200.5 watts.'],
+    ['number', 'Spin at 90.5 rpm.'],
+    ['number', 'Hold 0200 watts.'],
+    ['number', 'Hold 1,200 watts.'],
+    ['number', 'Hold 200-250 watts.'],
+    ['number', 'Hold -200 watts.'],
+    ['number', 'Hold 200 wattage.'],
+    ['number', 'Hold 200 W2.'],
+    ['number', 'Hold a200 W.'],
+    ['number', 'Spin at 90 rpm for 5 more.'],
+    ['number', 'Spin at ٩٠ rpm.'],
+    // A Unicode sign touches the number (review of #2762, finding 1).
+    ['number', 'Hold \u2212200 watts.'],
+    ['number', 'Hold \u00b1200 watts.'],
+    ['number', 'Hold \u2013200 watts.'],
+    ['number', 'Hold \u00d7200 W.'],
+    // The figure in a sentence about something else (finding 2).
+    ['number', 'Heart rate 150 W, ease a little.'],
+    ['number', 'Hold 200 W, keep your BPM steady.'],
+    ['number', 'Hold 200 W while your pulse settles.'],
+    ['number', 'Hold 200 watts for a minute.'],
+    ['number', 'Hold 200 watts for ten more seconds.'],
+    ['number', 'Hold 200 W for an hour.'],
+    ['number', 'Hold 200 W to the next km.'],
+    ['number', 'Hold 200 W for a mile.'],
+    ['number', 'Hold 200 W for one more kilometre.'],
+    ['number', 'Hold 200 W for a few hundred Metres.'],
+    ['number', 'Hold 200 W for a few hundred meters.'],
+    ['number', 'Hold 90 rpm in this zone.'],
+    ['number', 'Hold 200 W in this ＺＯＮＥ.'],
+    // A Roman numeral, which NFKC would turn into letters (finding 3).
+    ['number', 'Stay in zone \u2163.'],
+    ['number', 'Stay in zone \u2173 now.'],
+    ['number', 'Keep it at \u2182.'],
+    ['number', 'Only \u216b more to go.'],
+    ['number', 'Push for \u2172 more.'],
+    ['number', 'Stay in zone IV.'],
+    ['number', 'Stay in zone ii for now.'],
+    ['trademark', 'Hold 200 watts and keep your TSS low.'],
+    ['trademark', 'Aim for 90 rpm, good normalized power.'],
+    ['health-claim', 'Hold 200 watts if you feel no pain.'],
+    ['too-long', `Hold 200 watts ${'a'.repeat(MODEL_PACER_SAY_MOST_CHARACTERS)}`],
+  ])('refuses %s: “%s”', (problem, say) => {
+    expect(pacerSayProblem(say)).toBe(problem);
+  });
+
+  it('reads a cadence or power line as a decision, as the device and the instance do', () => {
+    expect(readModelPacerAnswer(answer({ say: 'Aim for 90 rpm.' }))).toEqual({
+      ok: true,
+      direction: { plan: 'even', intent: 'lift' },
+      say: 'Aim for 90 rpm.',
+    });
   });
 });
 
@@ -327,5 +511,160 @@ describe('the decision log, and the decision in force — ADR 0072 D-5 and D-7',
     ]) {
       expect(readPacerDecisionRecord(bad)).toBeUndefined();
     }
+  });
+});
+
+describe('where the rider is, in words — #2777', () => {
+  it.each([
+    [25, 10, 'ahead'],
+    [20.1, 10, 'ahead'],
+    [20, 10, 'level'],
+    [-3, 10, 'level'],
+    [-20, 10, 'level'],
+    [-20.1, 10, 'behind'],
+    [-250, 8, 'behind'],
+  ] as const)('reads a rider %s m ahead at %s m/s as %s', (gap, speed, place) => {
+    expect(riderPlaceOf(gap, speed)).toBe(place);
+  });
+
+  it('says no place at a standstill, or from a reading that is not a number', () => {
+    expect(riderPlaceOf(40, 0)).toBeUndefined();
+    expect(riderPlaceOf(Number.NaN, 10)).toBeUndefined();
+    expect(riderPlaceOf(40, Number.POSITIVE_INFINITY)).toBeUndefined();
+  });
+
+  it.each([
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: 2 }, 'rider-gaining'],
+    [{ atS: 0, riderGapM: -10 }, { atS: 5, riderGapM: -7 }, 'rider-gaining'],
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: -2 }, 'rider-losing'],
+    [{ atS: 0, riderGapM: 30 }, { atS: 5, riderGapM: 25 }, 'rider-losing'],
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: 1 }, 'steady'],
+    [{ atS: 0, riderGapM: 0 }, { atS: 5, riderGapM: -1 }, 'steady'],
+  ] as const)('reads the gap from %j to %j as %s', (earlier, later, trend) => {
+    expect(gapTrendOf(earlier, later)).toBe(trend);
+  });
+
+  it('says no trend when no time passed', () => {
+    expect(gapTrendOf({ atS: 5, riderGapM: 0 }, { atS: 5, riderGapM: 9 })).toBeUndefined();
+    expect(gapTrendOf({ atS: 6, riderGapM: 0 }, { atS: 5, riderGapM: 9 })).toBeUndefined();
+  });
+
+  it('reads a state that carries both, as the device sends it', () => {
+    const placed: ModelPacerInput = { ...STATE, riderPlace: 'ahead', gapTrend: 'rider-gaining' };
+    expect(readModelPacerInput(placed)).toEqual({ ok: true, value: placed });
+  });
+});
+
+describe('the course ahead, in the state — #2794', () => {
+  const course = {
+    climb: { inM: 300, lengthM: 800, avgPct: 5, maxPct: 8 },
+    descent: null,
+    lapLeftM: null,
+    climbLeftM: 120,
+  };
+
+  it('reads a state with the course ahead, and one from before it with none', () => {
+    const shown: ModelPacerInput = { ...STATE, course };
+    expect(readModelPacerInput(JSON.parse(JSON.stringify(shown)) as unknown)).toEqual({
+      ok: true,
+      value: shown,
+    });
+    expect(readModelPacerInput({ ...STATE, course: { ...course, lapLeftM: 1_250 } }).ok).toBe(true);
+    expect(readModelPacerInput(STATE).ok).toBe(true);
+  });
+
+  it.each([
+    ['null', null],
+    ['a name', { ...course, name: 'Box Hill' }],
+    ['no climbing', { climb: null, descent: null, lapLeftM: null }],
+    ['a hill with a place', { ...course, climb: { ...course.climb, at: 'Box Hill' } }],
+    [
+      'a hill out of reach',
+      { ...course, descent: { inM: 9_000, lengthM: 300, avgPct: -4, maxPct: -6 } },
+    ],
+    ['negative climbing', { ...course, climbLeftM: -1 }],
+    ['a lap as text', { ...course, lapLeftM: '1 km' }],
+  ])('refuses a course with %s, naming the field and never the value', (_, value) => {
+    const read = readModelPacerInput({ ...STATE, course: value });
+    expect(read.ok ? undefined : read.problem.field).toBe('input.course');
+    expect(JSON.stringify(read)).not.toContain('Box Hill');
+  });
+});
+
+describe('the floor under the model’s intent — ADR 0078 (Proposed), #2777', () => {
+  it('rides an ease as hold once the rider has been ahead long enough, keeping the plan', () => {
+    expect(flooredDirection({ plan: 'climber', intent: 'ease' }, PACER_AHEAD_FLOOR_S)).toEqual({
+      plan: 'climber',
+      intent: 'hold',
+    });
+    expect(flooredDirection({ plan: 'even', intent: 'ease' }, 60)).toEqual({
+      plan: 'even',
+      intent: 'hold',
+    });
+  });
+
+  it('rides every other direction as the model chose it, and never lifts', () => {
+    const ease = { plan: 'rolling', intent: 'ease' } as const;
+    expect(flooredDirection(ease, PACER_AHEAD_FLOOR_S - 0.1)).toBe(ease);
+    expect(flooredDirection(ease, undefined)).toBe(ease);
+    for (const intent of ['hold', 'lift'] as const) {
+      const direction = { plan: 'rolling', intent } as const;
+      expect(flooredDirection(direction, 600)).toBe(direction);
+    }
+  });
+});
+
+describe('the line says what the pacer does — #2777', () => {
+  it.each([
+    ['I will push on this climb, stay with me.', 'ease'],
+    ['I will push on this climb, stay with me.', 'hold'],
+    ['I’m going to lift the pace now.', 'hold'],
+    ['Here I come, stay sharp.', 'hold'],
+    ['I’ll chase you down on the climb.', 'ease'],
+    ['Coming past you on this rise!', 'hold'],
+    ['Watch me attack this rise.', 'ease'],
+    ['Let’s pick up the pace together.', 'hold'],
+    ['We will push to the top.', 'ease'],
+    ['I am going to catch you on the descent.', 'ease'],
+    ['I will pu​sh now.', 'ease'],
+    ['I am easing off to let you bridge the gap.', 'lift'],
+    ['I am slowing slightly so you can tuck back in behind me.', 'lift'],
+    ['Waiting for you at the top.', 'lift'],
+    ['Sitting up so you can come back to me.', 'lift'],
+    ['I’ll back off a touch for you.', 'lift'],
+  ] as const)('refuses “%s” under %s', (say, intent) => {
+    // The screen passes every one: the refusal is the intent rule's alone.
+    expect(pacerSayProblem(say)).toBeUndefined();
+    expect(pacerSayAgainstIntent(say, intent)).toBe(true);
+    expect(readModelPacerAnswer(answer({ intent, say }))).toEqual({
+      ok: false,
+      reason: 'say-against-intent',
+    });
+  });
+
+  it.each([
+    ['I will push on this climb, stay with me.', 'lift'],
+    ['I am easing off to let you bridge the gap.', 'ease'],
+    // The issue refuses an easing line only beside `lift`.
+    ['I am easing off to let you bridge the gap.', 'hold'],
+    ['Push through this rise, you are flying.', 'ease'],
+    ['I see you pushing hard, lovely work.', 'ease'],
+    ['I won’t push, take your time.', 'hold'],
+    ['I am not going to push yet.', 'ease'],
+    ['Ease a little and spin a lighter gear.', 'lift'],
+    ['You are easing off, stay with me.', 'lift'],
+    ['Lift your cadence to 90 rpm.', 'ease'],
+    ['Nice and steady, stay on my wheel.', 'ease'],
+    ['If you can, come round me on the next rise.', 'hold'],
+  ] as const)('shows “%s” under %s', (say, intent) => {
+    expect(pacerSayAgainstIntent(say, intent)).toBe(false);
+    expect(readModelPacerAnswer(answer({ intent, say }))).toMatchObject({ ok: true, say });
+  });
+
+  it('reads easing and pushing apart, as the floor needs', () => {
+    expect(pacerSaysEasing('I am easing off to let you bridge the gap.')).toBe(true);
+    expect(pacerSaysPushing('I am easing off to let you bridge the gap.')).toBe(false);
+    expect(pacerSaysPushing('I will push on this climb.')).toBe(true);
+    expect(pacerSaysEasing('I will push on this climb.')).toBe(false);
   });
 });
