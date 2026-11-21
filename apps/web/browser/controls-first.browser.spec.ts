@@ -1410,6 +1410,172 @@ test.describe('#2007 — the route editor’s whole-route buttons do not touch',
 });
 
 /**
+ * #2889's layout review of 2026-11-20 (PR #2978): the open-world start
+ * picker's map, its pin and the pin's buttons, measured as the engine lays
+ * them out.
+ *
+ * - **The map fills its frame.** The canvas MapLibre draws into is as wide and
+ *   as tall as `.oyl-map`, within a pixel's rounding — and still is after the
+ *   window widens from a phone's width to the landscape tablet's, which is
+ *   when a canvas sized once and never again would show as a map in part of
+ *   its box.
+ * - **The pin shows its whole label.** The marker's text fits inside the
+ *   marker's own box: `scrollWidth` within `clientWidth`, and the text's own
+ *   rectangle inside the disc. A word in a 1.75 rem disc read "Star".
+ * - **The pin's buttons do not touch**, as the map's own buttons above them do
+ *   not (#2007's rule), and each is at least the 44 px every button outside a
+ *   ride keeps (`docs/agents/browser-gate.md` §4f; 48 px is for the controls
+ *   pressed during a ride, #669, and this picker is before one).
+ *
+ * The full-page screenshot that raised these also showed the map drawn in the
+ * left 400 px of its box and the rail stopping at the first screen. Neither
+ * happens on a viewport screenshot or in these measurements: a full-page
+ * capture in Chromium re-lays the page at the document's height for one frame,
+ * which a WebGL canvas and a `position: fixed` rail do not survive.
+ */
+test.describe('#2889 — the open-world picker’s map, pin and pin buttons', () => {
+  /** `--oyl-space-sm`, 0.5rem, less a pixel's rounding. */
+  const LEAST_GAP_PIXELS = 7.5;
+  /** Every button outside a ride: `theme.css` §`.oyl-button`'s 44 px. */
+  const LEAST_TARGET_PIXELS = 44;
+
+  /** The map's frame and its canvas, both as the engine laid them out. */
+  async function mapFrame(page: Page): Promise<{
+    frame: { width: number; height: number };
+    canvas: { width: number; height: number };
+  }> {
+    return page.evaluate(() => {
+      const frame = document.querySelector('main .oyl-map');
+      const canvas = frame?.querySelector('canvas');
+      if (!(frame instanceof HTMLElement) || !(canvas instanceof HTMLCanvasElement)) {
+        throw new Error('the picker drew no map canvas');
+      }
+      const box = canvas.getBoundingClientRect();
+      return {
+        frame: { width: frame.clientWidth, height: frame.clientHeight },
+        canvas: { width: box.width, height: box.height },
+      };
+    });
+  }
+
+  function expectFilled(seen: Awaited<ReturnType<typeof mapFrame>>, where: string): void {
+    console.log(
+      `[#2889] ${where}: frame ${String(seen.frame.width)}×${String(seen.frame.height)}, ` +
+        `canvas ${seen.canvas.width.toFixed(1)}×${seen.canvas.height.toFixed(1)}`,
+    );
+    expect(Math.abs(seen.canvas.width - seen.frame.width), `${where}: canvas width`).toBeLessThan(
+      1.5,
+    );
+    expect(
+      Math.abs(seen.canvas.height - seen.frame.height),
+      `${where}: canvas height`,
+    ).toBeLessThan(1.5);
+  }
+
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`on a ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport, 'data=populated');
+      await visit(page, routeById('open-world'));
+      await expect(page.locator('main .oyl-map canvas')).toHaveCount(1);
+      expectFilled(await mapFrame(page), viewport.name);
+
+      const row = page.getByRole('group', { name: 'Place the pin' });
+      await row.getByRole('button', { name: 'Put the pin at the map’s centre' }).click();
+      const marker = page.locator('main .oyl-map .oyl-map__waypoint');
+      await expect(marker).toHaveCount(1);
+      await expect(row.getByRole('button', { name: 'Move the pin west' })).toBeVisible();
+
+      const label = await marker.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const text = range.getBoundingClientRect();
+        return {
+          text: element.textContent ?? '',
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight,
+          inside:
+            text.width > 0 &&
+            text.left >= box.left - 0.5 &&
+            text.right <= box.right + 0.5 &&
+            text.top >= box.top - 0.5 &&
+            text.bottom <= box.bottom + 0.5,
+        };
+      });
+      console.log(`[#2889] ${viewport.name}: pin ${JSON.stringify(label)}`);
+      expect(label.text, 'the pin carries no label').not.toBe('');
+      expect(label.scrollWidth, 'the pin’s label is wider than the pin').toBeLessThanOrEqual(
+        label.clientWidth,
+      );
+      expect(label.scrollHeight, 'the pin’s label is taller than the pin').toBeLessThanOrEqual(
+        label.clientHeight,
+      );
+      expect(label.inside, 'the pin’s label runs outside the pin').toBe(true);
+
+      const buttons = await row.getByRole('button').evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return {
+            name: element.textContent ?? '',
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+          };
+        }),
+      );
+      expect(buttons).toHaveLength(5);
+      const faults: string[] = [];
+      for (const [index, a] of buttons.entries()) {
+        if (a.right - a.left < LEAST_TARGET_PIXELS || a.bottom - a.top < LEAST_TARGET_PIXELS) {
+          faults.push(
+            `${a.name} is ${(a.right - a.left).toFixed(1)}×${(a.bottom - a.top).toFixed(1)} px`,
+          );
+        }
+        for (const b of buttons.slice(index + 1)) {
+          const across = Math.max(b.left - a.right, a.left - b.right);
+          const down = Math.max(b.top - a.bottom, a.top - b.bottom);
+          const apart = Math.max(across, down);
+          if (apart < LEAST_GAP_PIXELS) {
+            faults.push(`${a.name} and ${b.name}: ${apart.toFixed(1)} px apart`);
+          }
+        }
+      }
+      expect(faults, 'pin buttons that touch or are under the target').toEqual([]);
+    });
+  }
+
+  test('the map still fills its frame after the window widens', async ({ page }) => {
+    // A phone-wide window — the tablet's split screen — opened out to the
+    // whole landscape tablet. Upright to landscape is no test of it: the
+    // picker keeps the reading measure, so its map is 651 px wide both ways.
+    const [landscape] = TABLETS;
+    if (landscape === undefined) throw new Error('no landscape tablet');
+    await open(page, PHONE, 'data=populated');
+    await visit(page, routeById('open-world'));
+    await expect(page.locator('main .oyl-map canvas')).toHaveCount(1);
+    const before = await mapFrame(page);
+    expectFilled(before, PHONE.name);
+
+    await page.setViewportSize({ width: landscape.width, height: landscape.height });
+    // The frame widens with the column; wait for that, then for the canvas.
+    await expect.poll(async () => (await mapFrame(page)).frame.width).not.toBe(before.frame.width);
+    await expect
+      .poll(async () => {
+        const seen = await mapFrame(page);
+        return Math.abs(seen.canvas.width - seen.frame.width) < 1.5;
+      })
+      .toBe(true);
+    expectFilled(
+      await mapFrame(page),
+      `${PHONE.name} widened to ${landscape.width}×${landscape.height}`,
+    );
+  });
+});
+
+/**
  * #2065 — the title block costs less than half what it did.
  *
  * Every route in `ALL_ROUTES` is opened in `reflow.html` at the owner's tablet

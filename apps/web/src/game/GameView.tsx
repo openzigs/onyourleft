@@ -213,6 +213,14 @@ import {
 } from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
+import {
+  describeOpenWorldRefusal,
+  isOpenWorldRouteId,
+  type OpenWorldRefusal,
+  type OpenWorldSession,
+  type OpenWorldSessions,
+} from './open-world/ride';
+import type { OpenWorldStart } from './open-world/start';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from './footprint-buildings';
@@ -477,6 +485,17 @@ export interface GamePort {
     signal: AbortSignal,
     progress: (state: CorridorState) => void,
   ): Promise<CorridorState>;
+  /**
+   * The open-world ride — #2896: the start the picker handed over, taken
+   * once as the screen opens, and a session on it that reads the start's
+   * blocks, builds the street graph, snaps the start to a street and hands
+   * back the rolling route's first view as a picker card
+   * (`open-world/session.ts`). Stopped when the ride ends or the screen is
+   * left. ⚠️ An optional member threaded through JSX, so a `main.tsx` that
+   * stopped supplying it is GREEN in `check:wiring`;
+   * `open-world/session-wiring.test.ts` is what goes red.
+   */
+  readonly openWorld?: OpenWorldSessions | undefined;
   /**
    * The rider's live sensor readings, sampled per frame.
    *
@@ -1194,6 +1213,10 @@ export function GameView(props: GameViewProps): JSX.Element {
   const onPreviewEnd = useCallback(() => {
     setPreview(undefined);
   }, []);
+  // #2896: the open-world start, taken ONCE for this screen — here rather than
+  // in `GameScreen`, which a preview remounts, and in an initialiser, which
+  // React's StrictMode runs twice and keeps the first answer of.
+  const [openWorldStart] = useState(() => props.port?.openWorld?.take());
   return (
     <GameScreen
       // ⚠️ A preview is a NEW screen, mounted with no trainer port, room or
@@ -1206,6 +1229,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       given={props}
       asked={simulated}
+      openWorldStart={openWorldStart}
       preview={preview}
       returnTo={returnTo}
       // Offered only on an ordinary screen: the address switch already
@@ -1284,6 +1308,7 @@ function useSimulatedRide(
 function GameScreen({
   given,
   asked,
+  openWorldStart,
   preview,
   returnTo,
   onPreview,
@@ -1291,6 +1316,8 @@ function GameScreen({
 }: {
   readonly given: GameViewProps;
   readonly asked: SimulatedRider | undefined;
+  /** #2896: where an open-world ride starts, when the picker handed one over. */
+  readonly openWorldStart: OpenWorldStart | undefined;
   /** A preview to ride on mount, then hand back with {@link onPreviewEnd}. */
   readonly preview: PreviewAsked | undefined;
   readonly returnTo: string | undefined;
@@ -1312,6 +1339,19 @@ function GameScreen({
    */
   const [circuits, setCircuits] = useState<readonly RidableRoute[]>([]);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
+  /**
+   * #2896: the open-world ride, while its start is read and once it is a
+   * card — never in {@link routes}, so it is never a room's course — or why
+   * it could not begin. `undefined` when the picker handed no start over.
+   */
+  const [openWorld, setOpenWorld] = useState<
+    | { readonly kind: 'reading' }
+    | { readonly kind: 'ready'; readonly route: RidableRoute }
+    | { readonly kind: 'refused'; readonly refusal: OpenWorldRefusal }
+    | undefined
+  >(openWorldStart === undefined ? undefined : { kind: 'reading' });
+  /** #2896: the open-world session under way, for `teardown` to stop when the ride ends. */
+  const openWorldSessionRef = useRef<OpenWorldSession | undefined>(undefined);
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
   // #1010: Home's "next up" opens the game on the route it offered
   // (`shell/routes.ts` §`hrefForGameRoute`); read once, on mount.
@@ -2329,6 +2369,33 @@ function GameScreen({
     };
   }, [port]);
 
+  // #2896: the open-world session, opened on the start the picker handed
+  // over and stopped when this screen goes. Its first view becomes a card,
+  // chosen; a start it could not ride is said, in words naming no place.
+  const openWorldSessions = port?.openWorld;
+  useEffect(() => {
+    if (openWorldStart === undefined || openWorldSessions === undefined) return;
+    const session = openWorldSessions.open(openWorldStart);
+    openWorldSessionRef.current = session;
+    let live = true;
+    setOpenWorld({ kind: 'reading' });
+    void session.ready.then((ready) => {
+      if (!live) return;
+      if (ready.kind === 'ready') {
+        setOpenWorld({ kind: 'ready', route: ready.route });
+        setPicked(ready.route.id);
+      } else if (ready.kind === 'refused') {
+        setOpenWorld({ kind: 'refused', refusal: ready.refusal });
+      }
+    });
+    return () => {
+      live = false;
+      session.stop();
+      if (openWorldSessionRef.current === session) openWorldSessionRef.current = undefined;
+    };
+  }, [openWorldStart, openWorldSessions]);
+  const openWorldRoutes = openWorld?.kind === 'ready' ? [openWorld.route] : [];
+
   /**
    * Releases the screen lock and the GL context.
    *
@@ -2349,6 +2416,10 @@ function GameScreen({
     // ride just as surely as one who pressed the button — validation 0002 L7.
     gradientRef.current?.stop();
     gradientRef.current = undefined;
+    // #2896: an open-world ride's reads end with the ride, as they do when
+    // the screen is left (the effect that opens the session). After the
+    // gradient's release, which is first for #362's reason above.
+    openWorldSessionRef.current?.stop();
     // #2712: the AI pacer's ride ends with the ride: no more asks, and the
     // instance's model slot let go, so write-ups held for it start.
     modelPacerRef.current?.director.end();
@@ -2502,7 +2573,9 @@ function GameScreen({
   const corridorRoute =
     routes === undefined
       ? undefined
-      : ([...levelRoutes, ...routes, ...circuits].find((route) => route.id === picked) ??
+      : ([...openWorldRoutes, ...levelRoutes, ...routes, ...circuits].find(
+          (route) => route.id === picked,
+        ) ??
         routes[0] ??
         circuits[0]);
   useEffect(() => {
@@ -2517,6 +2590,9 @@ function GameScreen({
     if (port?.loadWorldCorridor === undefined || corridorRoute === undefined || !choosing) {
       return;
     }
+    // #2896, ADR 0090 D-1: an open-world ride reads its map block by block
+    // (`open-world/session.ts`), never as a route's corridor.
+    if (isOpenWorldRouteId(corridorRoute.id)) return;
     const controller = new AbortController();
     const shown = (next: CorridorState): void => {
       if (controller.signal.aborted) return;
@@ -3307,7 +3383,7 @@ function GameScreen({
     level !== undefined &&
     (picked === undefined ||
       picked === level.route.id ||
-      ![...(routes ?? []), ...circuits].some((route) => route.id === picked));
+      ![...openWorldRoutes, ...(routes ?? []), ...circuits].some((route) => route.id === picked));
   const onLevelChosen = props.onLevelChosen;
   useEffect(() => {
     if (onLevelChosen === undefined) return;
@@ -4719,6 +4795,14 @@ function GameScreen({
     return (
       <>
         {rideEnded === undefined ? null : <RideEndedNotice ended={rideEnded} />}
+        {openWorld?.kind === 'reading' ? (
+          // #2896: the start's blocks are being read; the card follows.
+          <p role="status">Reading the map round your open-world start…</p>
+        ) : openWorld?.kind === 'refused' ? (
+          // #2896: names the constraint, never the start (ADR 0004 D). Polite,
+          // as every refusal here is: nothing it says interrupts (#394).
+          <p role="status">{describeOpenWorldRefusal(openWorld.refusal, units)}</p>
+        ) : null}
         {raceOver === undefined || props.rooms === undefined ? undefined : (
           // #785: the result of the race this rider just rode, once the room
           // said it was over — and never while it ran.
@@ -4731,7 +4815,10 @@ function GameScreen({
         )}
         <RoutePicker
           // #2362: the level the Delivery picker opened this on, first, as a card.
-          routes={routes === undefined ? undefined : [...levelRoutes, ...routes]}
+          // #2896: and the open-world ride's first view, first of all, once read.
+          routes={
+            routes === undefined ? undefined : [...openWorldRoutes, ...levelRoutes, ...routes]
+          }
           // #940: the card the rider chose, kept here so it survives a ride.
           picked={picked}
           onPick={setPicked}

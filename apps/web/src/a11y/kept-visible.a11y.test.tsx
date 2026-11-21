@@ -330,6 +330,8 @@ const KEPT: Record<RouteId, Kept> = {
   },
   'route-builder': { sentences: [], reason: NOTHING_TUCKED },
   'route-editor': { sentences: [], reason: NOTHING_TUCKED },
+  // #2889: three ways to choose a start, and the press.
+  'open-world': { sentences: [], reason: NOTHING_TUCKED },
   'activity-detail': {
     sentences: [],
     // #805, carried from #831's review: what leaves the device, and when, on

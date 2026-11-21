@@ -1336,6 +1336,8 @@ describe('#1029 — the screen with nothing paired fills its width', () => {
     const links = queryAll<HTMLAnchorElement>(other ?? document, '.oyl-ride-card a');
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['Choose a route', '#/game'],
+      // #2889
+      ['Choose a start', '#/ride/open-world'],
       ['Choose a workout', '#/workouts'],
     ]);
     // Free ride is this screen, so it is not offered here.
