@@ -22,7 +22,9 @@
  * - **One decision**: `POST /v1/analysis/pacer/decide`, carrying
  *   `@onyourleft/domain` §`ModelPacerInput` — the pacer's W/kg, plan and
  *   intent, the rider's gap, W/kg and draft, the grade ahead, the metres to
- *   the finish, the seconds ridden. **No coordinate, no name, no date, no id.**
+ *   the finish, the seconds ridden, and since #2760 the rider's own power,
+ *   cadence and heart rate where the sensor is live, and the model's last
+ *   lines. **No coordinate, no name, no date, no id.**
  *   Back: a plan, an intent and a line, **read again here** by
  *   §`readModelPacerAnswer`, so an instance that answered a power, a bad
  *   word or a field it should not have has answered nothing.

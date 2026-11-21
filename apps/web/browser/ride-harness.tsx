@@ -102,6 +102,7 @@ import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { ModelTacticsPort, TacticsStatus } from '../src/game/lap-race/model-tactics-port';
 import type { PacerPort, PacerStatus } from '../src/instance/pacer-port';
+import type { GameRenderer } from '../src/game/port';
 import { loadBuiltInCircuits } from '../src/game/circuits/circuits';
 import type { GameNotRecordedReason, GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
@@ -113,6 +114,7 @@ import {
   HUD_TEXT_SIZES,
   writeHudLayout,
 } from '../src/game/hud/hud-layout-preference';
+import { COLLAPSIBLE_PANELS, writeRideChrome } from '../src/game/hud/ride-chrome-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
@@ -128,6 +130,7 @@ import { writeDeliveryAssist } from '../src/game/delivery/assist-preference';
 import { writeDeliveryProgress } from '../src/game/delivery/delivery-progress';
 import { deliveryTown } from '../src/game/delivery/delivery-town-testing';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
+import { AI_PACER_LINE } from './ai-pacer-line';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
 import '../src/design/theme.css';
@@ -646,10 +649,19 @@ const POWER_LOST = new URLSearchParams(window.location.search).get('power') === 
  * contacted: `pre-ride.browser.spec.ts` §"#2723" measures the switch, the
  * consent and its button as the owner's ruling on PR #2723 asks.
  */
-const AI_PACER = new URLSearchParams(window.location.search).get('aipacer') === 'offered';
+const AI_PACER_QUERY = new URLSearchParams(window.location.search).get('aipacer');
+const AI_PACER = AI_PACER_QUERY === 'offered';
+/**
+ * `ride.html?aipacer=saying` — #2760's review: the ride rides with the AI
+ * pacer on, the consent already given, and the stand-in instance answers
+ * every ask with {@link AI_PACER_LINE}, so the line is on the HUD for as long
+ * as the ride runs. `ride-notices.browser.spec.ts` §"the AI pacer's line"
+ * measures it.
+ */
+const AI_PACER_SAYING = AI_PACER_QUERY === 'saying';
 
 function aiPacerStandIn(): PacerPort {
-  let consented = false;
+  let consented = AI_PACER_SAYING;
   const status = (): PacerStatus => ({
     kind: 'offered',
     instance: 'https://ride.example',
@@ -667,14 +679,19 @@ function aiPacerStandIn(): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
-    startPacerRide: () => Promise.resolve(false),
-    decidePacer: () => Promise.resolve({ kind: 'failed' }),
+    startPacerRide: () => Promise.resolve(AI_PACER_SAYING),
+    decidePacer: () =>
+      Promise.resolve(
+        AI_PACER_SAYING
+          ? { kind: 'answer', direction: { plan: 'even', intent: 'hold' }, say: AI_PACER_LINE }
+          : { kind: 'failed' },
+      ),
     endPacerRide: () => Promise.resolve(),
   };
 }
 
 const GAME: GamePort = {
-  ...(AI_PACER ? { aiPacer: aiPacerStandIn() } : {}),
+  ...(AI_PACER || AI_PACER_SAYING ? { aiPacer: aiPacerStandIn() } : {}),
   // #2077: a threshold of the rider's own, so the zone indicator is drawn.
   ownThresholdPower: () => Promise.resolve(watts(250)),
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
@@ -709,7 +726,14 @@ const GAME: GamePort = {
           Promise.resolve({ kind: 'ready' as const, corridor: DELIVERY_TOWN.corridor }),
       }),
   loadGhost: () =>
-    Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
+    Promise.resolve(
+      buildGhostTrack({
+        // #2755: `?dropped=on` — the same attempt at a walking pace, so the
+        // rider drops it at once and the race against it is still on.
+        elapsedSeconds: [0, DROPPED ? 36_000 : 3_600],
+        distanceMetres: [0, 36_000],
+      }),
+    ),
   readSensors: () => ({
     rider: POWER_LOST
       ? { power: watts(0), live: false, paired: true }
@@ -839,6 +863,32 @@ const NO_CALORIES = new URLSearchParams(window.location.search).get('calories') 
  */
 const NO_GHOST = new URLSearchParams(window.location.search).get('ghost') === 'none';
 
+/**
+ * `ride.html?dropped=on` — #2755: a ride whose pacer and ghost the rider drops
+ * behind the chase camera at once, so the markers at the world's edge
+ * (`game/off-screen-marker.ts`) are laid over the real HUD. The ghost rides
+ * its attempt at a tenth of the speed, the pacer at 1 W/kg, and the shell is
+ * handed {@link BLANK_WORLD}: a renderer whose view
+ * has a context and draws nothing, because this page measures the HUD and the
+ * markers are DOM — `game.html` owns the scene.
+ */
+const DROPPED = new URLSearchParams(window.location.search).get('dropped') === 'on';
+
+/** {@link DROPPED}'s renderer: a view with a context that draws nothing. */
+const BLANK_WORLD: GameRenderer = {
+  loadRealisticWorld: () => Promise.reject(new Error('the harness loads no realistic world')),
+  create: () => ({
+    hasContext: true,
+    prepare: () => Promise.resolve(),
+    render: () => undefined,
+    setQuality: () => undefined,
+    setRiderKit: () => undefined,
+    setSeason: () => undefined,
+    resize: () => undefined,
+    destroy: () => undefined,
+  }),
+};
+
 const RIDE_TOTALS_NOW: RideTotals = NO_CALORIES
   ? {
       ...RIDE_TOTALS,
@@ -875,6 +925,12 @@ const REFUSED = new URLSearchParams(window.location.search).get('gradient') === 
  * names, so `ride-targets.browser.spec.ts` measures it in this state too.
  */
 const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'yes';
+/** #2600: `?controls=hide` — the ride controls hide until touched, as on a rider's device. */
+const CONTROLS_HIDE = new URLSearchParams(window.location.search).get('controls') === 'hide';
+/** #2600: `?collapsed=route,trainer` — those panels collapsed to their tabs. */
+const COLLAPSED_ASKED = (new URLSearchParams(window.location.search).get('collapsed') ?? '').split(
+  ',',
+);
 
 /**
  * `ride.html?end=asked` — #2349: *End ride* pressed, so the HUD holds the
@@ -1399,7 +1455,11 @@ function measure(): StageMeasurement {
     panels: [
       // #2387: the totals strip, where it is drawn; where a layout has no room
       // for it, it is not displayed, and `givenWay` says so.
-      ...[...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].filter((each) => {
+      // #2600: the layer a panel's keyboard control stands on spans the stage
+      // and catches nothing; it is `ride-chrome.browser.spec.ts`'s to measure.
+      ...[
+        ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer], .oyl-hud__tabs)'),
+      ].filter((each) => {
         if (!each.classList.contains('oyl-hud__totals')) return true;
         if (window.getComputedStyle(each).display !== 'none') return true;
         givenWay.push('the totals strip');
@@ -1649,6 +1709,14 @@ async function run(): Promise<void> {
       climbCallout: !HUD_CALLOUT_OFF,
     });
   }
+  // #2600: the ride controls DRAWN, as every layout here measures them, unless
+  // `?controls=hide` asks for the auto-hide (`ride-chrome.browser.spec.ts`);
+  // and the panels `?collapsed=` names tucked away to their tabs. Hidden, the
+  // controls are the same layout faded and clipped, which that spec measures.
+  writeRideChrome(localStorage, {
+    autoHide: CONTROLS_HIDE,
+    collapsed: COLLAPSIBLE_PANELS.filter((panel) => COLLAPSED_ASKED.includes(panel)),
+  });
   // #940's review: the realistic world's notice, only when the tallest stack was asked for.
   localStorage.removeItem(REALISTIC_WORLD_STORAGE_KEY);
   if (ALL_NOTICES) {
@@ -1664,6 +1732,7 @@ async function run(): Promise<void> {
           capabilities={NO_BLUETOOTH}
           game={GAME}
           gameTrainer={TRAINER}
+          {...(DROPPED ? { gameRenderer: () => Promise.resolve(BLANK_WORLD) } : {})}
           {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
           {...(TACTICS === undefined ? {} : { tactics: TACTICS })}
           {...RACE_PORTS}
@@ -1707,6 +1776,20 @@ async function run(): Promise<void> {
     }
     box.click();
   }
+  // #2760's review: the AI pacer on, its consent already given.
+  if (AI_PACER_SAYING) {
+    const box = await until('the AI pacer switch', () =>
+      labelled<HTMLInputElement>('input[role="switch"]', 'Let the AI on your instance'),
+    );
+    if (!box.checked) box.click();
+    await until('the AI pacer consent to be read', () =>
+      (document.querySelector('.oyl-game__ai-pacer')?.textContent ?? '').includes(
+        'The AI will steer the pacer',
+      )
+        ? true
+        : undefined,
+    );
+  }
   // #2710: a lap race with AI bots, the consent already given. The AI bots
   // switch is drawn once the race is on and the instance has answered.
   if (AI_BOTS_RACING) {
@@ -1726,6 +1809,13 @@ async function run(): Promise<void> {
     labelled<HTMLInputElement>('input[type="number"]', 'Wind speed'),
   );
   type(speed, '40');
+  if (DROPPED) {
+    // #2755: a pacer at 1 W/kg, so a rider at 342 W drops it at once.
+    const intensity = await until('the pacer intensity box', () =>
+      labelled<HTMLInputElement>('input[type="number"]', 'Pacer intensity'),
+    );
+    type(intensity, '1');
+  }
   // #1552: the corridor's read, settled on the picker before the press — the
   // world is fixed at the press (ADR 0054 D-2.4), so a ride started mid-read
   // is a ride with no map data.

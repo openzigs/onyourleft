@@ -284,6 +284,27 @@ export async function startReplan(
   };
 }
 
+/**
+ * A workout ride with re-plans on is starting (#2841): ask the instance to
+ * load its model now, so the ride's first re-plan does not wait for it. One
+ * call, its answer read for nothing but whether a warm-up went out; it sends
+ * the source the ride's re-plans will name and nothing else. Never throws:
+ * a warm-up that fails is a first re-plan that waits, as before.
+ */
+export async function warmReplan(session: () => Promise<JobSession>): Promise<boolean> {
+  try {
+    const opened = await session();
+    if (opened.kind !== 'open') return false;
+    const answer = await opened.channel.call('POST', '/v1/analysis/replans/warm', {
+      token: opened.token,
+      body: { source: REPLAN_SOURCE },
+    });
+    return answer.status === 202 && (answer.body as { warming?: unknown } | null)?.warming === true;
+  } catch {
+    return false;
+  }
+}
+
 /** How a re-plan job ended, as far as this device could read. */
 export type ReplanResult =
   /**

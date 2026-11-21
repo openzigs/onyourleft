@@ -185,6 +185,7 @@ export const LOCAL_MODEL_STATES = [
   'no-model',
   'bad-model',
   'bad-reasoning',
+  'bad-context',
 ] as const;
 export type LocalModelState = (typeof LOCAL_MODEL_STATES)[number];
 

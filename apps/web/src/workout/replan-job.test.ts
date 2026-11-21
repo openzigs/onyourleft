@@ -24,8 +24,11 @@ import {
   REPLAN_SOURCE,
   REPLAN_TEMPLATE_VERSION,
   startReplan,
+  warmReplan,
   type BlockSummary,
 } from './replan-job';
+import type { JobSession } from '../ride-analysis/instance-job';
+
 import { scriptedReplans } from './replan-testing';
 
 const BLOCKS: readonly WorkoutBlock[] = [
@@ -521,5 +524,38 @@ describe('followReplan', () => {
       await followReplan(scripted.session, '../jobs/other', new AbortController().signal),
     ).toEqual({ kind: 'lost' });
     expect(scripted.requests).toEqual([]);
+  });
+});
+
+describe('the warm-up as a workout ride with re-plans starts (#2841)', () => {
+  it('asks the instance once, with the source and nothing else, and reads whether a warm-up went out', async () => {
+    const scripted = scriptedReplans();
+    expect(await warmReplan(() => Promise.resolve(scripted.session))).toBe(false);
+    // The scripted instance answers 404 for it: nothing went out.
+    expect(scripted.requests).toStrictEqual([
+      { method: 'POST', path: '/v1/analysis/replans/warm', body: { source: REPLAN_SOURCE } },
+    ]);
+    const answered = {
+      ...scripted.session,
+      channel: {
+        ...scripted.session.channel,
+        call: () => Promise.resolve({ status: 202, body: { warming: true } }),
+      },
+    };
+    expect(await warmReplan(() => Promise.resolve(answered))).toBe(true);
+  });
+
+  it('sends nothing without a sign-in, and never throws', async () => {
+    const scripted = scriptedReplans();
+    // A closed session, even one that still held a channel, is asked nothing.
+    const closed = { kind: 'closed', text: 'Signed out.', channel: scripted.session.channel };
+    expect(await warmReplan(() => Promise.resolve(closed as JobSession))).toBe(false);
+    expect(await warmReplan(() => Promise.reject(new Error('no keys')))).toBe(false);
+    const broken = {
+      ...scripted.session,
+      channel: { ...scripted.session.channel, call: () => Promise.reject(new Error('gone')) },
+    };
+    expect(await warmReplan(() => Promise.resolve(broken))).toBe(false);
+    expect(scripted.requests).toStrictEqual([]);
   });
 });

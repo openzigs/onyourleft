@@ -86,12 +86,14 @@ import {
 } from '../src/game/hud/hud-layout-preference';
 import { botName, lapRaceStandings, type LapRaceHud } from '../src/game/hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS } from '../src/game/lap-race/choice';
+import { AI_BOTS_RACE_TEXT } from '../src/game/lap-race/ride-race';
 import type { GameState } from '../src/game/simulation';
 import type { LapFigures } from '../src/recording/laps';
 
 // The shipping stylesheet, which is the whole point.
 import '../src/design/theme.css';
 import '../src/design/tailwind.css';
+import { writeRideChrome } from '../src/game/hud/ride-chrome-preference';
 
 /** A box, serialisable, relative to its own stage's top-left corner. */
 export interface Box {
@@ -256,7 +258,7 @@ const RIDER = 'rider';
 const BOTS = Array.from({ length: 11 }, (_, index) => `bot-${String(index + 1).padStart(2, '0')}`);
 const STYLES = BOT_PACING_STYLES;
 
-function holding(race: ItemRaceState, id: string, kind: ItemKind): ItemRaceState {
+function holding(race: ItemRaceState, id: string, kind: ItemKind | null): ItemRaceState {
   return {
     ...race,
     racers: race.racers.map((entry) => (entry.racer.id === id ? { ...entry, held: kind } : entry)),
@@ -350,11 +352,24 @@ const STAGES: readonly {
  * - `corner-back`: the rider last, 8th of 8, holding nothing;
  * - `corner-middle`: the rider 4th of 8, holding a tailwind, so the lines
  *   that give way are on both sides of the rider's own.
+ *
+ * `&controls=hide` — #2837: the ride controls hide until touched (#2600), as
+ * on a rider's device, and `corner-back`'s rider holds NOTHING (the race
+ * deals that stage a tow otherwise), so its controls fade after a few seconds
+ * with no input and its standings take the room they leave.
+ * `corner-middle`'s never do: its rider holds an item, which holds them drawn
+ * (ADR 0075 D-5), so it is the same page's control. `&note=ai` puts the AI bots' sentence under the
+ * standings' summary (#2710), two lines the list then has less room by — the
+ * corner as a race against a rider's own model draws it.
  */
 const SEARCH = new URLSearchParams(window.location.search);
 const CORNER = SEARCH.get('corner') === 'race';
 const TEXT_SIZE = HUD_TEXT_SIZES.find((size) => size === SEARCH.get('text')) ?? 'normal';
 const CORNER_LAYOUT: HudLayoutPreference = { ...DEFAULT_HUD_LAYOUT, textSize: TEXT_SIZE };
+/** #2837: `&controls=hide`. @see CORNER */
+const CONTROLS_HIDE = SEARCH.get('controls') === 'hide';
+/** #2837: `&note=ai`. @see CORNER */
+const AI_NOTE = SEARCH.get('note') === 'ai';
 
 /** A 2 km loop, out 1 km and back, so a lap race has a lap to race and the splits a lap to show. */
 function loop(): RouteProfile {
@@ -404,7 +419,12 @@ function raceOfEight(botsAhead: number): ItemRaceState {
 }
 
 const CORNER_STAGES: readonly { readonly stage: string; readonly race: ItemRaceState }[] = [
-  { stage: 'corner-back', race: raceOfEight(LAP_RACE_MOST_BOTS) },
+  {
+    stage: 'corner-back',
+    race: CONTROLS_HIDE
+      ? holding(raceOfEight(LAP_RACE_MOST_BOTS), RIDER, null)
+      : raceOfEight(LAP_RACE_MOST_BOTS),
+  },
   { stage: 'corner-middle', race: holding(raceOfEight(3), RIDER, 'tailwind') },
 ];
 
@@ -443,7 +463,10 @@ function Corner(): JSX.Element {
             lapSeconds={59 * 60 + 59}
             items={ITEMS}
             lapRace={hudOf(race)}
-            standings={lapRaceStandings(hudOf(race))}
+            standings={{
+              ...lapRaceStandings(hudOf(race)),
+              ...(AI_NOTE ? { note: AI_BOTS_RACE_TEXT.racing } : {}),
+            }}
           />
         </section>
       ))}
@@ -650,6 +673,10 @@ async function run(): Promise<void> {
   // fallback face (on the CI runner's, the large text then had no room for a
   // line until the fonts arrived). The other stages keep the page as it was.
   if (CORNER) await Promise.all([...document.fonts].map((face) => face.load()));
+  // #2600: the ride controls drawn and every panel open, as this page
+  // measures them; `ride-chrome.browser.spec.ts` measures them hidden — and
+  // #2837's `&controls=hide`, the corner's standings as they hide.
+  writeRideChrome(localStorage, { autoHide: CORNER && CONTROLS_HIDE, collapsed: [] });
   flushSync(() => {
     createRoot(container).render(
       <StrictMode>

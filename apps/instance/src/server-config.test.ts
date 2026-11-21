@@ -7,7 +7,12 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { readDiscordTokenFile, readServerConfig, type DiscordTokenFile } from './server-config.ts';
+import {
+  isTemplateOrigin,
+  readDiscordTokenFile,
+  readServerConfig,
+  type DiscordTokenFile,
+} from './server-config.ts';
 
 describe('readServerConfig (#780, #791)', () => {
   it('defaults: compression OFF (ruling Q16), metrics off, a worker per core', () => {
@@ -84,6 +89,43 @@ describe('readServerConfig (#780, #791)', () => {
     for (const origin of ['http://ride.example', 'https://ride.example/path', 'nonsense']) {
       expect(readServerConfig({ origin }, 1).ok, origin).toBe(false);
     }
+  });
+
+  it('knows the template’s example address by reading the template, and no real address for it (#2855)', () => {
+    // The line an owner copies into `.env`: read from the file, so a template
+    // whose example changes without this rule is red here.
+    const template = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    const line = /^OYL_INSTANCE_ORIGIN=(.+)$/m.exec(template)?.[1];
+    expect(line).toBeDefined();
+    const copied = readServerConfig({ origin: line }, 1);
+    // Its shape is right, so the instance starts: it is the setup that does not open.
+    expect(copied.ok && copied.config.origin).toBe('https://onyourleft.your-tailnet.ts.net');
+    expect(isTemplateOrigin(copied.ok ? copied.config.origin : null)).toBe(true);
+    // TAILSCALE_HOSTNAME changed and the tailnet's name left as the example is still the example.
+    for (const origin of [
+      'https://rides.your-tailnet.ts.net',
+      'https://onyourleft-1.your-tailnet.ts.net:8443',
+      'https://onyourleft.your-tailnet.ts.net.',
+      'https://your-tailnet.ts.net',
+    ]) {
+      const read = readServerConfig({ origin }, 1);
+      expect(read.ok && isTemplateOrigin(read.config.origin), origin).toBe(true);
+    }
+    for (const origin of [
+      'https://onyourleft.tail1a2b.ts.net',
+      'https://onyourleft.not-your-tailnet.ts.net',
+      'https://your-tailnet.ts.net.example.org',
+      'https://ride.example',
+      'http://localhost:8787',
+    ]) {
+      const read = readServerConfig({ origin }, 1);
+      expect(read.ok && isTemplateOrigin(read.config.origin), origin).toBe(false);
+    }
+    // No origin at all serves no account, and no setup: nothing to refuse.
+    expect(isTemplateOrigin(null)).toBe(false);
   });
 
   it('refuses a worker count that is not one, and reports every problem', () => {

@@ -72,8 +72,11 @@ function fact(row: OperateRow): JSX.Element {
 
 export function OperateKeysPanel({
   port,
+  timeZone,
 }: {
   readonly port: Pick<OperatePort, 'keys' | 'rotateKey'>;
+  /** The IANA zone its moments are drawn in, named (#2917): the device's, from `OperateView`. */
+  readonly timeZone: string;
 }): JSX.Element {
   const [read, setRead] = useState<OperateKeysRead | undefined>(undefined);
   const [confirming, setConfirming] = useState(false);
@@ -141,7 +144,7 @@ export function OperateKeysPanel({
   }
   const ready = read.state === 'ready' && read.card !== null && read.fingerprint !== null;
   // The state first, then the card and its fingerprint, then the encryption keys.
-  const rows = keyFactRows(read);
+  const rows = keyFactRows(read, timeZone);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-operate-keys">
       {heading}

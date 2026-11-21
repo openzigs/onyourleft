@@ -25,9 +25,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import {
-  BOT_TACTICS,
   kilograms,
   LAP_RACE_BOT_CODE_VERSION,
+  MODEL_TACTICS_REASONS,
   type ModelTacticsInput,
 } from '@onyourleft/domain';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -80,6 +80,9 @@ const SECONDS = 90;
  * version 3's digests of them equal version 2's. The flat circuit under seed 4
  * is the race found earliest apart from ADR 0073's strategy (148 s) and from
  * ADR 0074 without its hold (149 s), so 170 s turns either red at a small cost.
+ * Since version 7 (#2836, ADR 0081) it is also the golden race whose finish a
+ * model `sit-in` leaves to the seeded tactics: ridden under ADR 0074's own
+ * strategy, which wrote that `sit-in`, its digest is another.
  */
 const LAUNCH_RACE: readonly [Circuit, number] = ['flat', 4];
 const LAUNCH_SECONDS = 170;
@@ -90,6 +93,16 @@ const SEALS: Readonly<Record<string, string>> = {
   '1': '265e3b2ac759823edbd007cc1b8d8a19a48b5bdcf2ffd9a5b69e1188a645418d',
   '2': 'b2aa7e152fc7194801420f8e75fcc878bb8fe070d45bdcf4a481f13796d3dc80',
   '3': '786f7d2ec42b745b9de1ac60e6dc6b9ce7b8843eb9109c5838f987b5574fc146',
+  '4': '8c3056a68b988cb9fcadb98d3a62b4b7c41319da6a2cacfadad843d9a45de705',
+  '5': '7a7cde094331f5d9a25b357a965a32c03a91e50fc9a47455685255dcf903a1e9',
+  // #2800: version 6 moves only a bot on a race started off the route's 0 over
+  // a hill, and every golden race is flat and starts at 0 (see GOLDEN_RACES),
+  // so its outcomes, and its seal, are version 5's.
+  '6': '7a7cde094331f5d9a25b357a965a32c03a91e50fc9a47455685255dcf903a1e9',
+  // #2836, ADR 0081: one bot asked about at a time, a decision held for that
+  // bot alone, and a model `sit-in` left to the seeded tactics. The scripted
+  // model answers one bot off its menu, so every outcome is new.
+  '7': 'e9b73c139eed4e579f7a5fd0c74543706f39b59962eeef3e0a87654aa498aa31',
 };
 
 afterEach(() => {
@@ -123,28 +136,43 @@ function startRace(circuit: Circuit, seed: number, model: boolean): LapRaceRide 
   return { ...ride, countdownLeftMs: 0 };
 }
 
-/** The scripted model: each bot a move by its seat and the ask, and a latency that varies, some late. */
+/**
+ * The scripted model: for the bot an ask is about, a move off its menu by its
+ * seat and the ask, and a latency that varies, some late. Since version 5
+ * (#2759, ADR 0076 D-11) one answer in six takes 6.8 s, applied under the 8 s
+ * limit, and one 8.6 s, late. Since version 7 (#2836, ADR 0081) an answer is
+ * for one bot, the other four latencies are a per-bot call's (0.4 to 2.6 s),
+ * and one answer in three is `sit-in`, which leaves the bot to its seeded
+ * tactics.
+ */
 function scripted(
   input: ModelTacticsInput,
   ask: number,
 ): { reply: ModelTacticsReply; afterMs: number } {
+  const { bot, menu } = input.you;
+  const move =
+    (bot + ask) % 3 === 0 ? 'sit-in' : (menu[(bot * 5 + ask) % menu.length]?.move ?? 'sit-in');
   return {
     reply: {
       kind: 'answer',
-      body: {
-        bots: input.bots
-          .filter((view) => (view.bot + ask) % 3 !== 0)
-          .map((view) => ({
-            bot: view.bot,
-            move: BOT_TACTICS[(view.bot * 5 + ask) % BOT_TACTICS.length] as string,
-          })),
-      },
+      body: { reason: MODEL_TACTICS_REASONS[ask % MODEL_TACTICS_REASONS.length], move },
     },
-    afterMs: [1_900, 2_600, 3_300, 5_600][ask % 4] as number,
+    afterMs: [400, 900, 1_300, 2_600, 6_800, 8_600][ask % 6] as number,
   };
 }
 
-const riderWatts = (atMs: number): number => 200 + 80 * Math.sin(atMs / 9_000);
+/**
+ * The rider's power: 200 W, 80 W either side on a 56 s triangle wave. Since
+ * version 5 (#2759) a triangle, not `Math.sin`: `Math.sin` is not exact in
+ * IEEE 754, and at one instant of the flat circuit under seed 1 CI's x64 and an
+ * arm64 Mac gave a bot following the rider powers one bit apart, so the golden
+ * digest differed. A triangle is the four operations alone, the same on every
+ * machine. Versions 1 to 4 were recorded with the sine.
+ */
+const riderWatts = (atMs: number): number => {
+  const phase = ((atMs + 14_000) % 56_000) / 56_000;
+  return 200 + 80 * (phase < 0.5 ? 4 * phase - 1 : 3 - 4 * phase);
+};
 
 /** Ride the race, 100 ms frames, its asks answered by `model` (none: a replay, which asks nothing). */
 function ride(

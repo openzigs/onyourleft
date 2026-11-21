@@ -57,7 +57,7 @@ async function until(done: () => boolean): Promise<void> {
 }
 
 async function show(port: Parameters<typeof OperateKeysPanel>[0]['port']): Promise<void> {
-  mounted = await mount(<OperateKeysPanel port={port} />);
+  mounted = await mount(<OperateKeysPanel timeZone="UTC" port={port} />);
   await until(() => !text().includes('Reading the keys'));
 }
 

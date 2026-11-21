@@ -128,11 +128,14 @@ export type OperateBackupLine =
  * its size, rows, blobs and off-box copy, and its directory's name; or, for a
  * failed run, the error's code.
  */
-export function backupLine(backup: OperateBackupLine): {
+export function backupLine(
+  backup: OperateBackupLine,
+  timeZone: string,
+): {
   readonly moment: string;
   readonly rest: OperateLine;
 } {
-  const moment = momentText(backup.at);
+  const moment = momentText(backup.at, timeZone);
   const age = `${durationText(backup.ageSeconds)} ago`;
   if (backup.outcome === 'failed') {
     return { moment, rest: [`, ${age}: no snapshot was made (`, { code: backup.error }, ').'] };

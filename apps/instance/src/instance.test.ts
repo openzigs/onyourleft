@@ -1207,7 +1207,7 @@ describe('analysis jobs on the running instance — #1095', () => {
       expect(events.at(-1)).toEqual({
         id: events.length,
         kind: 'result',
-        data: { status: 'succeeded', writeUp: 'A steady ride.' },
+        data: { status: 'succeeded', writeUp: 'A steady ride.', templateVersion: '2' },
       });
       expect(model.paths).toStrictEqual(['/v1/chat/completions']);
       expect(
@@ -1798,7 +1798,11 @@ describe('a hosted analysis job on the running instance — #1223', () => {
 
   it('runs end to end with a guard and recorded consent, and every request it sends is masked', async () => {
     const { events, bodies, requests } = await hostedJob({ consent: true, masking: GUARD_BODY });
-    expect(events.at(-1)?.data).toEqual({ status: 'succeeded', writeUp: 'A steady ride.' });
+    expect(events.at(-1)?.data).toEqual({
+      status: 'succeeded',
+      writeUp: 'A steady ride.',
+      templateVersion: '2',
+    });
     // The tools' request and the write-up's: both through the hosted fetch, both masked.
     expect(requests).toHaveLength(2);
     expect(bodies).toHaveLength(2);
@@ -1850,7 +1854,11 @@ describe('a hosted analysis job on the running instance — #1223', () => {
       key: 'own',
       athleteId: RIDER,
     });
-    expect(events.at(-1)?.data).toEqual({ status: 'succeeded', writeUp: 'A steady ride.' });
+    expect(events.at(-1)?.data).toEqual({
+      status: 'succeeded',
+      writeUp: 'A steady ride.',
+      templateVersion: '2',
+    });
     expect(requests).toHaveLength(2);
     for (const body of [...bodies, ...requests.map((request) => JSON.stringify(request))]) {
       expect(personalDetailFaults(body)).toStrictEqual([]);

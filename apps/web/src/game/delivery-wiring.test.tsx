@@ -679,152 +679,131 @@ let withoutRide: Promise<RideResult> | undefined;
 const withRound = (): Promise<RideResult> => (withRoundRide ??= rideOnce(true));
 const without = (): Promise<RideResult> => (withoutRide ??= rideOnce(false));
 
-/**
- * A case that may ride the two shared rides, which the first to ask pays
- * for: about three times both rides together, as `docs/agents/ci.md` §4c
- * asks of a case slow under coverage. The figures, 2026-10-29, the first case
- * paying the round's ride and the DL5 case the plain one: 2 987 ms and
- * 2 252 ms under coverage (nightly 40888263731, AMD EPYC 9V45), 2 347 ms and
- * 1 775 ms without it (`Tests`, 40888263759, AMD EPYC 7763). A filtered run
- * of one of them rides both, 5.2 s.
+/*
+ * #2528, #1688's ruling: no case in this file carries a limit of its own; a slow one is
+ * made cheaper. The cases that ride the two shared rides above each pay for
+ * at most one, the first to ask: on this Mac, Node 26, at a load average near
+ * 2, the round's ride (the first case) 591 ms without coverage and 1 365 ms
+ * with `--coverage`, and the plain one (the DL5 case) 656 ms and 1 353 ms;
+ * every other such case 1 450 ms or less with `--coverage`. They carried a 16 s per-case limit; the
+ * removal changes nothing they run. A filtered run of one case rides both.
  */
-const SHARED_RIDE = { timeout: 16_000 } as const;
 
 describe('a Delivery round inside a game ride — #1816', () => {
-  it(
-    'runs the round the script predicts: every house settled, a delivery, a miss and a crash',
-    SHARED_RIDE,
-    async () => {
-      const ride = await withRound();
-      const tally = roundTally(script.ride.round);
-      // The real ride's HUD shows what the shadow's pure round came to.
-      expect(ride.houses).toEqual({
-        value: '0',
-        detail: `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
-      });
-      expect(ride.score).toEqual({
-        value: String(script.ride.score),
-        detail: `Day ${String(WEEK.day)} of 7`,
-      });
-      // The crash is in the score: fewer points than deliveries.
-      expect(script.crashes).toBeGreaterThan(0);
-      expect(script.ride.score).toBeLessThan(tally.delivered);
-      // The throw control is on the HUD, and the round was said through the one region.
-      expect(ride.throwControl).toBe(true);
-      for (const kind of [
-        'delivery-delivered',
-        'delivery-missed',
-        'delivery-crash',
-        'delivery-round-over',
-      ]) {
-        expect(ride.offered, kind).toContain(kind);
-      }
-      // Each said once, never again (#647's owed rule, `hud/delivery-announce.ts`).
-      const round = ride.said.filter((text) => /^(Delivered|Missed|Crashed|Round over)/.test(text));
-      expect(round.some((text) => text.startsWith('Delivered to the 1st house'))).toBe(true);
-      expect(round.some((text) => text.startsWith('Crashed into'))).toBe(true);
-      expect(round.filter((text) => text.includes('Round over'))).toHaveLength(1);
-      expect(new Set(round).size).toBe(round.length);
-      // Every frame drawn carried the round, and so was held to Delivery's ceiling (DL6b).
-      expect(ride.drawn.length).toBeGreaterThan(100);
-      for (const frame of ride.drawn) {
-        expect(frame.delivery).toBeDefined();
-        expect(villageDrawCallCeiling(frame)).toBe(DELIVERY_VILLAGE_DRAW_CALLS);
-      }
-      // Markers stood on the houses at the start, and were gone once each was settled.
-      expect(ride.drawn[0]?.delivery?.markers.length).toBeGreaterThan(0);
-      expect(ride.drawn.at(-1)?.delivery?.markers).toEqual([]);
-      expect(ride.drawn.some((frame) => (frame.delivery?.parcels.length ?? 0) > 0)).toBe(true);
-      expect(ride.drawn.some((frame) => (frame.delivery?.obstacles.length ?? 0) > 0)).toBe(true);
-    },
-  );
+  it('runs the round the script predicts: every house settled, a delivery, a miss and a crash', async () => {
+    const ride = await withRound();
+    const tally = roundTally(script.ride.round);
+    // The real ride's HUD shows what the shadow's pure round came to.
+    expect(ride.houses).toEqual({
+      value: '0',
+      detail: `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
+    });
+    expect(ride.score).toEqual({
+      value: String(script.ride.score),
+      detail: `Day ${String(WEEK.day)} of 7`,
+    });
+    // The crash is in the score: fewer points than deliveries.
+    expect(script.crashes).toBeGreaterThan(0);
+    expect(script.ride.score).toBeLessThan(tally.delivered);
+    // The throw control is on the HUD, and the round was said through the one region.
+    expect(ride.throwControl).toBe(true);
+    for (const kind of [
+      'delivery-delivered',
+      'delivery-missed',
+      'delivery-crash',
+      'delivery-round-over',
+    ]) {
+      expect(ride.offered, kind).toContain(kind);
+    }
+    // Each said once, never again (#647's owed rule, `hud/delivery-announce.ts`).
+    const round = ride.said.filter((text) => /^(Delivered|Missed|Crashed|Round over)/.test(text));
+    expect(round.some((text) => text.startsWith('Delivered to the 1st house'))).toBe(true);
+    expect(round.some((text) => text.startsWith('Crashed into'))).toBe(true);
+    expect(round.filter((text) => text.includes('Round over'))).toHaveLength(1);
+    expect(new Set(round).size).toBe(round.length);
+    // Every frame drawn carried the round, and so was held to Delivery's ceiling (DL6b).
+    expect(ride.drawn.length).toBeGreaterThan(100);
+    for (const frame of ride.drawn) {
+      expect(frame.delivery).toBeDefined();
+      expect(villageDrawCallCeiling(frame)).toBe(DELIVERY_VILLAGE_DRAW_CALLS);
+    }
+    // Markers stood on the houses at the start, and were gone once each was settled.
+    expect(ride.drawn[0]?.delivery?.markers.length).toBeGreaterThan(0);
+    expect(ride.drawn.at(-1)?.delivery?.markers).toEqual([]);
+    expect(ride.drawn.some((frame) => (frame.delivery?.parcels.length ?? 0) > 0)).toBe(true);
+    expect(ride.drawn.some((frame) => (frame.delivery?.obstacles.length ?? 0) > 0)).toBe(true);
+  });
 
-  it(
-    'sends the trainer the same writes, each grade at the same time, with the round as without it (DL5)',
-    SHARED_RIDE,
-    async () => {
-      const plain = await without();
-      const round = await withRound();
-      // Non-vacuity: the round really ran, with a crash, and the road climbs and falls.
-      expect(round.houses?.value).toBe('0');
-      expect(script.crashes).toBeGreaterThan(0);
-      expect(plain.writes.length).toBeGreaterThan(20);
-      const grades = plain.writes.map((each) => each.parameters.grade);
-      expect(Math.max(...grades)).toBeGreaterThan(1);
-      expect(round.writes).toStrictEqual(plain.writes);
-    },
-  );
+  it('sends the trainer the same writes, each grade at the same time, with the round as without it (DL5)', async () => {
+    const plain = await without();
+    const round = await withRound();
+    // Non-vacuity: the round really ran, with a crash, and the road climbs and falls.
+    expect(round.houses?.value).toBe('0');
+    expect(script.crashes).toBeGreaterThan(0);
+    expect(plain.writes.length).toBeGreaterThan(20);
+    const grades = plain.writes.map((each) => each.parameters.grade);
+    expect(Math.max(...grades)).toBeGreaterThan(1);
+    expect(round.writes).toStrictEqual(plain.writes);
+  });
 
-  it(
-    'sends the grade the plain ride sends on a frame, even when the round’s step faults on it (DL5)',
-    SHARED_RIDE,
-    async () => {
-      // A frame the plain ride writes on, after the first (which writes on the press).
-      const plain = (await without()).writes;
-      const second = plain[1];
-      if (second === undefined) throw new Error('the plain ride wrote once or never');
-      const frame = (second.atMs - START_MS) / FRAME_MS;
-      expect(Number.isInteger(frame)).toBe(true);
-      pending = [];
-      nowMs = START_MS;
-      stubSeed(script.seed);
-      const writes: Write[] = [];
-      mounted = await mount(
-        <GameView
-          port={port()}
-          trainer={trainerPort(writes)}
-          renderer={() => Promise.resolve(capturingRenderer([]))}
-          now={() => nowMs}
-          delivery
-        />,
-      );
-      await settle();
-      await clickThrough(buttonStarting('Ride '));
-      for (let index = 1; index < frame; index += 1) await pump();
-      roundFaults.on = true;
-      try {
-        await expect(pump()).rejects.toThrow('the round faulted');
-      } finally {
-        roundFaults.on = false;
-      }
-      await settle();
-      // The fault stopped the loop, but not before this frame's write.
-      expect(writes).toStrictEqual(plain.slice(0, 2));
-    },
-  );
+  it('sends the grade the plain ride sends on a frame, even when the round’s step faults on it (DL5)', async () => {
+    // A frame the plain ride writes on, after the first (which writes on the press).
+    const plain = (await without()).writes;
+    const second = plain[1];
+    if (second === undefined) throw new Error('the plain ride wrote once or never');
+    const frame = (second.atMs - START_MS) / FRAME_MS;
+    expect(Number.isInteger(frame)).toBe(true);
+    pending = [];
+    nowMs = START_MS;
+    stubSeed(script.seed);
+    const writes: Write[] = [];
+    mounted = await mount(
+      <GameView
+        port={port()}
+        trainer={trainerPort(writes)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 1; index < frame; index += 1) await pump();
+    roundFaults.on = true;
+    try {
+      await expect(pump()).rejects.toThrow('the round faulted');
+    } finally {
+      roundFaults.on = false;
+    }
+    await settle();
+    // The fault stopped the loop, but not before this frame's write.
+    expect(writes).toStrictEqual(plain.slice(0, 2));
+  });
 
-  it(
-    'keeps the week’s counts when the round ends: a fresh reader returns the next day',
-    SHARED_RIDE,
-    async () => {
-      const ride = await withRound();
-      const tally = roundTally(script.ride.round);
-      const next = {
-        day: WEEK.day + 1,
-        houses: WEEK.houses - tally.missed,
-        score: WEEK.score + tally.delivered,
-      };
-      // Kept the moment the round ended, with the ride still going, and as it was after End ride.
-      expect(ride.keptRiding).toEqual(next);
-      expect(ride.keptEnded).toEqual(next);
-      // Counts only (DL11): the stored value is the three numbers.
-      expect(ride.storedKeys).toEqual(['day', 'houses', 'score']);
-    },
-  );
+  it('keeps the week’s counts when the round ends: a fresh reader returns the next day', async () => {
+    const ride = await withRound();
+    const tally = roundTally(script.ride.round);
+    const next = {
+      day: WEEK.day + 1,
+      houses: WEEK.houses - tally.missed,
+      score: WEEK.score + tally.delivered,
+    };
+    // Kept the moment the round ended, with the ride still going, and as it was after End ride.
+    expect(ride.keptRiding).toEqual(next);
+    expect(ride.keptEnded).toEqual(next);
+    // Counts only (DL11): the stored value is the three numbers.
+    expect(ride.storedKeys).toEqual(['day', 'houses', 'score']);
+  });
 
-  it(
-    'runs nothing of Delivery without the option: no round, no field, no throw, no frame, nothing kept',
-    SHARED_RIDE,
-    async () => {
-      const ride = await without();
-      expect(ride.drawn.length).toBeGreaterThan(100);
-      expect(ride.drawn.every((frame) => frame.delivery === undefined)).toBe(true);
-      expect(ride.houses).toBeUndefined();
-      expect(ride.throwControl).toBe(false);
-      expect(ride.offered.filter((kind) => kind.startsWith('delivery-'))).toEqual([]);
-      expect(ride.keptEnded).toEqual(WEEK);
-    },
-  );
+  it('runs nothing of Delivery without the option: no round, no field, no throw, no frame, nothing kept', async () => {
+    const ride = await without();
+    expect(ride.drawn.length).toBeGreaterThan(100);
+    expect(ride.drawn.every((frame) => frame.delivery === undefined)).toBe(true);
+    expect(ride.houses).toBeUndefined();
+    expect(ride.throwControl).toBe(false);
+    expect(ride.offered.filter((kind) => kind.startsWith('delivery-'))).toEqual([]);
+    expect(ride.keptEnded).toEqual(WEEK);
+  });
 
   it('keeps the week as it was when End ride comes before any house is reached (#1857)', async () => {
     stubSeed(script.seed);
@@ -948,6 +927,10 @@ describe('a Delivery round inside a game ride — #1816', () => {
 });
 
 describe('a crash drawn inside a game ride — #2454', () => {
+  // #2528: the cases here that carried a 16 s per-case limit carry none; the
+  // removal changes nothing they run. On this Mac, Node 26, at a load average
+  // near 3, each case takes at most 360 ms without coverage and 1 150 ms with
+  // `--coverage`.
   const DEGREE = Math.PI / 180;
   /** The rider's drawn lean on each frame, in degrees either way. */
   const riderLeans = (drawn: readonly SceneFrame[]): number[] =>
@@ -984,44 +967,40 @@ describe('a crash drawn inside a game ride — #2454', () => {
     details.filter((detail, index) => detail === 'Crashed' && details[index - 1] !== 'Crashed')
       .length;
 
-  it(
-    'draws the rider going down and back up on the bike, and says “Crashed” on the HUD once a crash',
-    SHARED_RIDE,
-    async () => {
-      const round = await withRound();
-      const plain = await without();
-      const leans = riderLeans(round.drawn);
-      // Down: the bicycle on its side (75°), which no ride's own lean comes near (38.7° at most).
-      expect(Math.max(...leans)).toBeGreaterThan(70);
-      // Falling, not cut to the ground: a frame between upright and down.
-      expect(leans.some((lean) => lean > 45 && lean < 70)).toBe(true);
-      // Back up on the bike by the end of the ride, and never down on a ride with no round.
-      expect(leans.at(-1)).toBeLessThan(45);
-      expect(Math.max(...riderLeans(plain.drawn))).toBeLessThan(45);
-      // "Crashed" under the score, at least once and never more often than there were crashes.
-      expect(crashesShown(round.scoreDetails)).toBeGreaterThan(0);
-      expect(crashesShown(round.scoreDetails)).toBeLessThanOrEqual(script.crashes);
-      expect(round.scoreDetails.at(-1)).toMatch(/^Day \d of 7$/u);
-      expect(plain.scoreDetails.every((detail) => detail === undefined)).toBe(true);
-      // #2493: every frame drawn down hands the realistic rider the crash's
-      // time and side, for its crash clip, inside the crash's 1.5 s; a ride
-      // with no round never does.
-      const rider = (frame: SceneFrame): RiderMarker | undefined =>
-        frame.markers.find((marker) => marker.kind === 'rider');
-      const timed = round.drawn.flatMap((frame) => rider(frame)?.crash ?? []);
-      expect(timed.length).toBeGreaterThan(0);
-      for (const crash of timed) {
-        expect(crash.seconds).toBeGreaterThanOrEqual(0);
-        expect(crash.seconds).toBeLessThan(CRASH_SECONDS);
-        expect(Math.abs(crash.side)).toBe(1);
-      }
-      for (const frame of round.drawn) {
-        if (Math.abs(rider(frame)?.lean ?? 0) > 70 * DEGREE)
-          expect(rider(frame)?.crash).toBeDefined();
-      }
-      expect(plain.drawn.every((frame) => rider(frame)?.crash === undefined)).toBe(true);
-    },
-  );
+  it('draws the rider going down and back up on the bike, and says “Crashed” on the HUD once a crash', async () => {
+    const round = await withRound();
+    const plain = await without();
+    const leans = riderLeans(round.drawn);
+    // Down: the bicycle on its side (75°), which no ride's own lean comes near (38.7° at most).
+    expect(Math.max(...leans)).toBeGreaterThan(70);
+    // Falling, not cut to the ground: a frame between upright and down.
+    expect(leans.some((lean) => lean > 45 && lean < 70)).toBe(true);
+    // Back up on the bike by the end of the ride, and never down on a ride with no round.
+    expect(leans.at(-1)).toBeLessThan(45);
+    expect(Math.max(...riderLeans(plain.drawn))).toBeLessThan(45);
+    // "Crashed" under the score, at least once and never more often than there were crashes.
+    expect(crashesShown(round.scoreDetails)).toBeGreaterThan(0);
+    expect(crashesShown(round.scoreDetails)).toBeLessThanOrEqual(script.crashes);
+    expect(round.scoreDetails.at(-1)).toMatch(/^Day \d of 7$/u);
+    expect(plain.scoreDetails.every((detail) => detail === undefined)).toBe(true);
+    // #2493: every frame drawn down hands the realistic rider the crash's
+    // time and side, for its crash clip, inside the crash's 1.5 s; a ride
+    // with no round never does.
+    const rider = (frame: SceneFrame): RiderMarker | undefined =>
+      frame.markers.find((marker) => marker.kind === 'rider');
+    const timed = round.drawn.flatMap((frame) => rider(frame)?.crash ?? []);
+    expect(timed.length).toBeGreaterThan(0);
+    for (const crash of timed) {
+      expect(crash.seconds).toBeGreaterThanOrEqual(0);
+      expect(crash.seconds).toBeLessThan(CRASH_SECONDS);
+      expect(Math.abs(crash.side)).toBe(1);
+    }
+    for (const frame of round.drawn) {
+      if (Math.abs(rider(frame)?.lean ?? 0) > 70 * DEGREE)
+        expect(rider(frame)?.crash).toBeDefined();
+    }
+    expect(plain.drawn.every((frame) => rider(frame)?.crash === undefined)).toBe(true);
+  });
 
   it('draws a still crash pose under reduced motion: down or up, never falling between', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
@@ -1046,172 +1025,154 @@ describe('a crash drawn inside a game ride — #2454', () => {
     for (const sight of sights) expect(sight.detail === 'Crashed').toBe(sight.lean > 74.9);
   });
 
-  it(
-    'keeps a rider who paused while down still down on resume, and gets them back up after',
-    SHARED_RIDE,
-    async () => {
-      const drawn: SceneFrame[] = [];
-      const sights: Sight[] = [];
-      let resumedAt: number | undefined;
-      await rideTheTrace({
-        delivery: true,
-        drawn,
-        onFrame: watching(drawn, sights, async () => {
-          const down = sights.at(-1);
-          if (resumedAt !== undefined || down === undefined || down.lean < 70) return;
-          // Down: pause for longer than a whole crash, and ride on.
-          await clickThrough(buttonStarting('Pause'));
-          // The paused loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
-          pending = [];
-          nowMs += 3_000;
-          await clickThrough(buttonStarting('Resume'));
-          resumedAt = sights.length;
-        }),
-      });
-      expect(resumedAt).toBeDefined();
-      const after = sights.slice(resumedAt);
-      // Still down on the first frame after the pause, and "Crashed" says so…
-      expect(after[0]?.lean).toBeGreaterThan(70);
-      expect(after[0]?.detail).toBe('Crashed');
-      // …then on the way up, still "Crashed", and back on the bike within the
-      // crash's 1.5 s, with "Crashed" gone.
-      const up = after.findIndex((sight) => sight.detail !== 'Crashed');
-      expect(up).toBeGreaterThan(1);
-      expect(up).toBeLessThanOrEqual(8);
-      expect(after.slice(1, up).some((sight) => sight.lean < 70)).toBe(true);
-      expect(after[up]?.lean).toBeLessThan(45);
-      expect(after[up]?.detail).toMatch(/^Day \d of 7$/u);
-    },
-  );
+  it('keeps a rider who paused while down still down on resume, and gets them back up after', async () => {
+    const drawn: SceneFrame[] = [];
+    const sights: Sight[] = [];
+    let resumedAt: number | undefined;
+    await rideTheTrace({
+      delivery: true,
+      drawn,
+      onFrame: watching(drawn, sights, async () => {
+        const down = sights.at(-1);
+        if (resumedAt !== undefined || down === undefined || down.lean < 70) return;
+        // Down: pause for longer than a whole crash, and ride on.
+        await clickThrough(buttonStarting('Pause'));
+        // The paused loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
+        pending = [];
+        nowMs += 3_000;
+        await clickThrough(buttonStarting('Resume'));
+        resumedAt = sights.length;
+      }),
+    });
+    expect(resumedAt).toBeDefined();
+    const after = sights.slice(resumedAt);
+    // Still down on the first frame after the pause, and "Crashed" says so…
+    expect(after[0]?.lean).toBeGreaterThan(70);
+    expect(after[0]?.detail).toBe('Crashed');
+    // …then on the way up, still "Crashed", and back on the bike within the
+    // crash's 1.5 s, with "Crashed" gone.
+    const up = after.findIndex((sight) => sight.detail !== 'Crashed');
+    expect(up).toBeGreaterThan(1);
+    expect(up).toBeLessThanOrEqual(8);
+    expect(after.slice(1, up).some((sight) => sight.lean < 70)).toBe(true);
+    expect(after[up]?.lean).toBeLessThan(45);
+    expect(after[up]?.detail).toMatch(/^Day \d of 7$/u);
+  });
 
-  it(
-    'starts the next ride upright, with no “Crashed”, after a ride ended while down',
-    SHARED_RIDE,
-    async () => {
-      const drawn: SceneFrame[] = [];
-      const sights: Sight[] = [];
-      stubSeed(script.seed);
-      mounted = await mount(
-        <GameView
-          port={port()}
-          renderer={() => Promise.resolve(capturingRenderer(drawn))}
-          now={() => nowMs}
-          delivery
-        />,
-      );
-      await settle();
-      await clickThrough(buttonStarting('Ride '));
-      const watch = watching(drawn, sights);
-      for (let index = 0; index < FRAMES; index += 1) {
-        await pump();
-        await watch(index);
-        if ((sights.at(-1)?.lean ?? 0) > 70) break;
-        const side = script.throws.get(index);
-        if (side !== undefined) await pressThrow(side);
-        const intent = STEERS.get(index);
-        if (intent !== undefined) await pressSteer(intent);
-      }
-      // Down, and the ride ended there.
-      expect(sights.at(-1)?.lean).toBeGreaterThan(70);
-      expect(sights.at(-1)?.detail).toBe('Crashed');
-      await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'End ride'));
-      // The ended loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
-      pending = [];
-      nowMs += 60_000;
-      stubSeed(script.seed);
-      await clickThrough(buttonStarting('Ride '));
-      const next: Sight[] = [];
-      const watchNext = watching(drawn, next);
-      for (let index = 0; index < 5; index += 1) {
-        await pump();
-        await watchNext(index);
-      }
-      expect(next.length).toBeGreaterThan(2);
-      for (const sight of next) {
-        expect(sight.lean).toBeLessThan(45);
-        expect(sight.detail).not.toBe('Crashed');
-      }
-    },
-  );
+  it('starts the next ride upright, with no “Crashed”, after a ride ended while down', async () => {
+    const drawn: SceneFrame[] = [];
+    const sights: Sight[] = [];
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer(drawn))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    const watch = watching(drawn, sights);
+    for (let index = 0; index < FRAMES; index += 1) {
+      await pump();
+      await watch(index);
+      if ((sights.at(-1)?.lean ?? 0) > 70) break;
+      const side = script.throws.get(index);
+      if (side !== undefined) await pressThrow(side);
+      const intent = STEERS.get(index);
+      if (intent !== undefined) await pressSteer(intent);
+    }
+    // Down, and the ride ended there.
+    expect(sights.at(-1)?.lean).toBeGreaterThan(70);
+    expect(sights.at(-1)?.detail).toBe('Crashed');
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    // The ended loop's frame, cancelled: this file's `cancelAnimationFrame` is a no-op.
+    pending = [];
+    nowMs += 60_000;
+    stubSeed(script.seed);
+    await clickThrough(buttonStarting('Ride '));
+    const next: Sight[] = [];
+    const watchNext = watching(drawn, next);
+    for (let index = 0; index < 5; index += 1) {
+      await pump();
+      await watchNext(index);
+    }
+    expect(next.length).toBeGreaterThan(2);
+    for (const sight of next) {
+      expect(sight.lean).toBeLessThan(45);
+      expect(sight.detail).not.toBe('Crashed');
+    }
+  });
 
-  it(
-    'says “Crashed” on the HUD while the world is still being prepared, and stops once it is over',
-    SHARED_RIDE,
-    async () => {
-      const details: (string | undefined)[] = [];
-      stubSeed(script.seed);
-      mounted = await mount(
-        <GameView
-          port={port()}
-          renderer={() => {
-            const plain = capturingRenderer([]);
-            return Promise.resolve({
-              ...plain,
-              create: (canvas, settings) => ({
-                ...plain.create(canvas, settings),
-                // A view that never finishes preparing: the world is never drawn.
-                prepare: () => new Promise<void>(() => undefined),
-              }),
-            });
-          }}
-          now={() => nowMs}
-          delivery
-        />,
-      );
-      await settle();
-      await clickThrough(buttonStarting('Ride '));
-      for (let index = 0; index < FRAMES; index += 1) {
-        await pump();
-        details.push(field('Score')?.detail);
-        const side = script.throws.get(index);
-        if (side !== undefined) await pressThrow(side);
-        const intent = STEERS.get(index);
-        if (intent !== undefined) await pressSteer(intent);
-      }
-      expect(crashesShown(details)).toBeGreaterThan(0);
-      expect(details.at(-1)).toMatch(/^Day \d of 7$/u);
-    },
-  );
+  it('says “Crashed” on the HUD while the world is still being prepared, and stops once it is over', async () => {
+    const details: (string | undefined)[] = [];
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => {
+          const plain = capturingRenderer([]);
+          return Promise.resolve({
+            ...plain,
+            create: (canvas, settings) => ({
+              ...plain.create(canvas, settings),
+              // A view that never finishes preparing: the world is never drawn.
+              prepare: () => new Promise<void>(() => undefined),
+            }),
+          });
+        }}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < FRAMES; index += 1) {
+      await pump();
+      details.push(field('Score')?.detail);
+      const side = script.throws.get(index);
+      if (side !== undefined) await pressThrow(side);
+      const intent = STEERS.get(index);
+      if (intent !== undefined) await pressSteer(intent);
+    }
+    expect(crashesShown(details)).toBeGreaterThan(0);
+    expect(details.at(-1)).toMatch(/^Day \d of 7$/u);
+  });
 });
 
 describe('lane steering inside a game ride — #1853', () => {
-  it(
-    'hands every frame of the round the offset the shadow round steered to, on the steps that ran',
-    SHARED_RIDE,
-    async () => {
-      const ride = await withRound();
-      // One more than were rendered: the first frame is the one the view is prepared with.
-      expect(ride.steered.size).toBe(ride.drawn.length + 1);
-      expect(ride.steered.size).toBeGreaterThan(100);
-      for (const [index, offset] of ride.steered) {
-        expect(offset, `frame ${String(index)}`).toBe(script.steered[index]);
-      }
-      // Non-vacuity: the ride was drawn in every lane, and part-way between them.
-      const drawnAt = new Set(ride.steered.values());
-      for (const lane of LANE_OFFSETS_METRES) expect(drawnAt).toContain(lane);
-      expect(
-        [...drawnAt].some(
-          (offset) => offset !== undefined && !LANE_OFFSETS_METRES.includes(offset),
-        ),
-      ).toBe(true);
-    },
-  );
+  // #2528: the cases here that carried a 16 s per-case limit carry none; the
+  // removal changes nothing they run. On this Mac, Node 26, at a load average
+  // near 3, each case takes at most 132 ms without coverage and 364 ms with
+  // `--coverage`.
+  it('hands every frame of the round the offset the shadow round steered to, on the steps that ran', async () => {
+    const ride = await withRound();
+    // One more than were rendered: the first frame is the one the view is prepared with.
+    expect(ride.steered.size).toBe(ride.drawn.length + 1);
+    expect(ride.steered.size).toBeGreaterThan(100);
+    for (const [index, offset] of ride.steered) {
+      expect(offset, `frame ${String(index)}`).toBe(script.steered[index]);
+    }
+    // Non-vacuity: the ride was drawn in every lane, and part-way between them.
+    const drawnAt = new Set(ride.steered.values());
+    for (const lane of LANE_OFFSETS_METRES) expect(drawnAt).toContain(lane);
+    expect(
+      [...drawnAt].some((offset) => offset !== undefined && !LANE_OFFSETS_METRES.includes(offset)),
+    ).toBe(true);
+  });
 
-  it(
-    'starts the round with obstacles placed for a rider who can steer: some stand in a lane',
-    SHARED_RIDE,
-    async () => {
-      const ride = await withRound();
-      expect(ride.started).toHaveLength(1);
-      const [started] = ride.started as DeliveryRide[];
-      expect(started?.obstacles.some((obstacle) => obstacle.stands !== undefined)).toBe(true);
-      // And from the racing line at the press, as the shadow round was.
-      expect(started?.steer).toEqual(startSteer(lineOffsetAt(racingLine(town.profile), 0)));
-    },
-  );
+  it('starts the round with obstacles placed for a rider who can steer: some stand in a lane', async () => {
+    const ride = await withRound();
+    expect(ride.started).toHaveLength(1);
+    const [started] = ride.started as DeliveryRide[];
+    expect(started?.obstacles.some((obstacle) => obstacle.stands !== undefined)).toBe(true);
+    // And from the racing line at the press, as the shadow round was.
+    expect(started?.steer).toEqual(startSteer(lineOffsetAt(racingLine(town.profile), 0)));
+  });
 
-  it('hands no steered offset to any frame of a ride with no round', SHARED_RIDE, async () => {
+  it('hands no steered offset to any frame of a ride with no round', async () => {
     const ride = await without();
     expect(ride.steered.size).toBeGreaterThan(100);
     expect([...ride.steered.values()].every((each) => each === undefined)).toBe(true);
@@ -1434,6 +1395,10 @@ describe('a gamepad inside a game ride — #1821', () => {
  * simulated controller's clock is advanced by hand between frames.
  */
 describe('a steering controller inside a game ride — #1827', () => {
+  // #2528: the cases here that carried a 16 s per-case limit carry none; the
+  // removal changes nothing they run. On this Mac, Node 26, at a load average
+  // near 3, each case takes at most 657 ms without coverage and 1 087 ms with
+  // `--coverage`.
   /** The simulated controller, playing `steps`, paired; and its clock. */
   async function paired(steps: readonly ControllerStep[]) {
     const rig = openSimulatedController({ spec: steeringController({ script: steps }) });
@@ -1562,52 +1527,48 @@ describe('a steering controller inside a game ride — #1827', () => {
     expect(drawn.at(-1)?.delivery?.parcels).toHaveLength(1);
   });
 
-  it(
-    'sends the trainer the same writes as the plain ride, driven by presses, angles and a malformed burst (DL5)',
-    SHARED_RIDE,
-    async () => {
-      const plain = await without();
-      const burst: ControllerStep[] = Array.from({ length: 40 }, () => ({
-        at: at(6),
-        kind: 'malformed',
-        shape: 'odd-length',
-      }));
-      const rig = await paired([
-        { at: at(2), kind: 'changes', changes: [{ kind: 'press', button: 0x18 }] },
-        { at: at(3), kind: 'changes', changes: [{ kind: 'angle', degrees: 40 }] },
-        { at: at(4), kind: 'changes', changes: [{ kind: 'press', button: 0x50 }] },
-        { at: at(5), kind: 'changes', changes: [{ kind: 'angle', degrees: -40 }] },
-        ...burst,
-        { at: at(7), kind: 'changes', changes: [{ kind: 'angle-unavailable' }] },
-        { at: at(8), kind: 'changes', changes: [{ kind: 'press', button: 0x19 }] },
-        { at: at(9), kind: 'changes', changes: [{ kind: 'press', button: 0x51 }] },
-      ]);
-      pending = [];
-      nowMs = START_MS;
-      localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(WEEK));
-      const writes: Write[] = [];
-      const steered = new Map<number, number | undefined>();
-      await rideTheTrace({
-        delivery: true,
-        trainer: trainerPort(writes),
-        steered,
-        controller: rig.steering,
-        // The controller's clock: a second every five frames, a frame being 0.2 s.
-        onFrame: (index) => {
-          if (index % 5 === 4) rig.bench.advance(seconds(1));
-          return Promise.resolve();
-        },
-      });
-      await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'End ride'));
-      // Non-vacuity: the whole script played, its burst included, and the
-      // controller moved the rider off the shadow's lanes.
-      expect(rig.controller.sent()).toHaveLength(47);
-      expect([...steered].some(([index, offset]) => offset !== script.steered[index])).toBe(true);
-      expect(plain.writes.length).toBeGreaterThan(20);
-      expect(writes).toStrictEqual(plain.writes);
-    },
-  );
+  it('sends the trainer the same writes as the plain ride, driven by presses, angles and a malformed burst (DL5)', async () => {
+    const plain = await without();
+    const burst: ControllerStep[] = Array.from({ length: 40 }, () => ({
+      at: at(6),
+      kind: 'malformed',
+      shape: 'odd-length',
+    }));
+    const rig = await paired([
+      { at: at(2), kind: 'changes', changes: [{ kind: 'press', button: 0x18 }] },
+      { at: at(3), kind: 'changes', changes: [{ kind: 'angle', degrees: 40 }] },
+      { at: at(4), kind: 'changes', changes: [{ kind: 'press', button: 0x50 }] },
+      { at: at(5), kind: 'changes', changes: [{ kind: 'angle', degrees: -40 }] },
+      ...burst,
+      { at: at(7), kind: 'changes', changes: [{ kind: 'angle-unavailable' }] },
+      { at: at(8), kind: 'changes', changes: [{ kind: 'press', button: 0x19 }] },
+      { at: at(9), kind: 'changes', changes: [{ kind: 'press', button: 0x51 }] },
+    ]);
+    pending = [];
+    nowMs = START_MS;
+    localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(WEEK));
+    const writes: Write[] = [];
+    const steered = new Map<number, number | undefined>();
+    await rideTheTrace({
+      delivery: true,
+      trainer: trainerPort(writes),
+      steered,
+      controller: rig.steering,
+      // The controller's clock: a second every five frames, a frame being 0.2 s.
+      onFrame: (index) => {
+        if (index % 5 === 4) rig.bench.advance(seconds(1));
+        return Promise.resolve();
+      },
+    });
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    // Non-vacuity: the whole script played, its burst included, and the
+    // controller moved the rider off the shadow's lanes.
+    expect(rig.controller.sent()).toHaveLength(47);
+    expect([...steered].some(([index, offset]) => offset !== script.steered[index])).toBe(true);
+    expect(plain.writes.length).toBeGreaterThan(20);
+    expect(writes).toStrictEqual(plain.writes);
+  });
 
   it('ignores the controller on a ride in a room, where no round runs (DL9)', async () => {
     const clock = new ManualClock();
@@ -1775,37 +1736,55 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     };
   }
 
-  // Two recorded rides: 5 393 ms under coverage (nightly 40888263731, AMD EPYC
-  // 9V45) and 3 951 ms without it (`Tests`, 40888263759), so about three times
-  // the slower, as `SHARED_RIDE`.
-  it(
-    'stores the same power, cadence, heart rate, distance and moving time with the round as without it',
-    { timeout: 16_000 },
-    async () => {
-      const without = await recordedRide(false);
-      const withRound = await recordedRide(true);
-      // Non-vacuity: a ride was recorded, with power and distance in it, and
-      // the second ran its round to the end while it was.
-      expect(without.recorded.power.length).toBeGreaterThan(20);
-      expect(without.recorded.distance).toBeGreaterThan(0);
-      expect(without.recorded.movingSeconds).toBeGreaterThan(20);
-      expect(without.houses).toBeUndefined();
-      const tally = roundTally(script.ride.round);
-      expect(withRound.houses).toBe(
-        `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
-      );
-      expect(withRound.recorded).toStrictEqual(without.recorded);
-      // #1853, not recorded: the round was steered across the road, and the
-      // stored ride has no field for where across it the rider was.
-      expect(withRound.steered).toBeGreaterThan(3);
-      expect(withRound.names.length).toBeGreaterThan(10);
-      expect(withRound.names.filter((name) => /lateral|lane|steer|across/i.test(name))).toEqual([]);
-      expect([...withRound.names].sort()).toEqual([...without.names].sort());
-    },
-  );
+  // #2528, #1688's ruling: cheaper, never a longer limit. The two recorded
+  // rides were one case: 5 393 ms under coverage on the nightly runner, and on
+  // this Mac, Node 26, 982 ms without coverage and 2 523 ms with it; now
+  // 569–590 ms and 430–434 ms without, 1 426–1 597 ms and 1 141–1 198 ms with
+  // `--coverage`, at a load average near 3. Each
+  // ride is now its own case's, shared as `withRound` and `without` are, so
+  // each case pays for one ride and asserts the same: the plain ride's
+  // non-vacuity in the first, the comparison in the second. A filtered run of
+  // the second alone rides both.
+  type RecordedRide = Awaited<ReturnType<typeof recordedRide>>;
+  let plainRide: Promise<RecordedRide> | undefined;
+  let roundRide: Promise<RecordedRide> | undefined;
+  const plainRecorded = (): Promise<RecordedRide> => (plainRide ??= recordedRide(false));
+  const roundRecorded = (): Promise<RecordedRide> => (roundRide ??= recordedRide(true));
+
+  it('records the plain ride: power, distance and moving time, and no round', async () => {
+    const without = await plainRecorded();
+    // Non-vacuity: a ride was recorded, with power and distance in it.
+    expect(without.recorded.power.length).toBeGreaterThan(20);
+    expect(without.recorded.distance).toBeGreaterThan(0);
+    expect(without.recorded.movingSeconds).toBeGreaterThan(20);
+    expect(without.houses).toBeUndefined();
+  });
+
+  it('stores the same power, cadence, heart rate, distance and moving time with the round as without it', async () => {
+    const without = await plainRecorded();
+    const withRound = await roundRecorded();
+    // Non-vacuity: the plain ride was recorded (the case above), and this
+    // one ran its round to the end while it was.
+    expect(without.recorded.power.length).toBeGreaterThan(20);
+    const tally = roundTally(script.ride.round);
+    expect(withRound.houses).toBe(
+      `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
+    );
+    expect(withRound.recorded).toStrictEqual(without.recorded);
+    // #1853, not recorded: the round was steered across the road, and the
+    // stored ride has no field for where across it the rider was.
+    expect(withRound.steered).toBeGreaterThan(3);
+    expect(withRound.names.length).toBeGreaterThan(10);
+    expect(withRound.names.filter((name) => /lateral|lane|steer|across/i.test(name))).toEqual([]);
+    expect([...withRound.names].sort()).toEqual([...without.names].sort());
+  });
 });
 
 describe('offered in the chooser, with the short round and the no-round fallback — #1818', () => {
+  // #2528: the cases here that carried a 16 s per-case limit carry none; the
+  // removal changes nothing they run. On this Mac, Node 26, at a load average
+  // near 3, each case takes at most 592 ms without coverage and 1 450 ms with
+  // `--coverage`.
   /** A renderer for a ride that chose the realistic world, which does not load here. */
   function realisticNotLoaded(): GameRenderer {
     return {
@@ -1952,30 +1931,26 @@ describe('offered in the chooser, with the short round and the no-round fallback
     }
   });
 
-  it(
-    'rides a shorter round on a route with fewer houses than the day’s, and keeps the day’s count',
-    { timeout: 16_000 },
-    async () => {
-      // A week of eight, and a route with three houses in reach: a round of three.
-      const eight: WeekProgress = { day: 2, houses: 8, score: 4 };
-      localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(eight));
-      await chooseAndRide({
-        corridor: deliveryTown(ROUTE.id, { lastAlong: 300 }).corridor,
-        choose: true,
-        frames: FRAMES,
-      });
-      for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {
-        expect(said).not.toContain(text);
-      }
-      // Every house passed with no throw, so each of the three missed, as the HUD says.
-      expect(field('Houses')).toEqual({ value: '0', detail: '0\u00a0delivered, 3\u00a0missed' });
-      await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'End ride'));
-      // Tomorrow: the day's eight less the three missed, not the round's three less three,
-      // which would have left none and ended the week. Read back by the real reader.
-      expect(readDeliveryProgress(localStorage)).toEqual({ day: 3, houses: 5, score: 4 });
-    },
-  );
+  it('rides a shorter round on a route with fewer houses than the day’s, and keeps the day’s count', async () => {
+    // A week of eight, and a route with three houses in reach: a round of three.
+    const eight: WeekProgress = { day: 2, houses: 8, score: 4 };
+    localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(eight));
+    await chooseAndRide({
+      corridor: deliveryTown(ROUTE.id, { lastAlong: 300 }).corridor,
+      choose: true,
+      frames: FRAMES,
+    });
+    for (const text of [TOO_FEW_HOUSES_TEXT, HOUSES_NOT_READY_TEXT]) {
+      expect(said).not.toContain(text);
+    }
+    // Every house passed with no throw, so each of the three missed, as the HUD says.
+    expect(field('Houses')).toEqual({ value: '0', detail: '0\u00a0delivered, 3\u00a0missed' });
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    // Tomorrow: the day's eight less the three missed, not the round's three less three,
+    // which would have left none and ended the week. Read back by the real reader.
+    expect(readDeliveryProgress(localStorage)).toEqual({ day: 3, houses: 5, score: 4 });
+  });
 
   it.each([
     // #1878: three houses in reach of a week of eight, so the HUD shows 3.
@@ -1984,7 +1959,6 @@ describe('offered in the chooser, with the short round and the no-round fallback
     { cause: 'a route that holds the day’s whole round', lastAlong: undefined, houses: 3 },
   ])(
     'the chooser’s line and the HUD’s Houses agree, or the line says the round may be shorter: $cause',
-    { timeout: 16_000 },
     async ({ lastAlong, houses }) => {
       localStorage.setItem(
         DELIVERY_PROGRESS_STORAGE_KEY,
@@ -2113,7 +2087,6 @@ describe('offered in the chooser, with the short round and the no-round fallback
     },
   ])(
     'says so in words with $cause, rides an ordinary ride, and keeps the week',
-    { timeout: 16_000 },
     async ({ frames, text, ...source }) => {
       await chooseAndRide({ ...source, choose: true, frames });
       // An ordinary ride: no field, no throw control.
@@ -2133,7 +2106,7 @@ describe('offered in the chooser, with the short round and the no-round fallback
     },
   );
 
-  it('takes the notice down once it has stood its time', { timeout: 16_000 }, async () => {
+  it('takes the notice down once it has stood its time', async () => {
     await chooseAndRide({ corridor: undefined, choose: true, frames: 20 });
     expect(notices()).toContain(HOUSES_NOT_READY_TEXT);
     // 15 s of ride, at four steps a frame: 75 frames, and a few over.
@@ -2142,32 +2115,32 @@ describe('offered in the chooser, with the short round and the no-round fallback
     expect(notices()).not.toContain(HOUSES_NOT_READY_TEXT);
   });
 
-  it(
-    'carries the assist setting into the ride: a round of misses keeps its count (#1813)',
-    { timeout: 16_000 },
-    async () => {
-      const assist: DeliveryAssist = { widerWindows: false, obstacles: 'none', noFail: true };
-      localStorage.setItem(DELIVERY_ASSIST_STORAGE_KEY, JSON.stringify(assist));
-      await chooseAndRide({ choose: true, frames: FRAMES });
-      // Every house passed with no throw, so every one missed, as the HUD says.
-      expect(field('Houses')).toEqual({
-        value: '0',
-        detail: `0\u00a0delivered, ${String(WEEK.houses)}\u00a0missed`,
-      });
-      await clickThrough(buttonStarting('End ride'));
-      await clickThrough(endRideAnswer(document, 'End ride'));
-      // No fail: tomorrow's round keeps all three houses. Without the assist,
-      // three misses of three would leave none, and end the week.
-      expect(readDeliveryProgress(localStorage)).toEqual({
-        day: WEEK.day + 1,
-        houses: WEEK.houses,
-        score: WEEK.score,
-      });
-    },
-  );
+  it('carries the assist setting into the ride: a round of misses keeps its count (#1813)', async () => {
+    const assist: DeliveryAssist = { widerWindows: false, obstacles: 'none', noFail: true };
+    localStorage.setItem(DELIVERY_ASSIST_STORAGE_KEY, JSON.stringify(assist));
+    await chooseAndRide({ choose: true, frames: FRAMES });
+    // Every house passed with no throw, so every one missed, as the HUD says.
+    expect(field('Houses')).toEqual({
+      value: '0',
+      detail: `0\u00a0delivered, ${String(WEEK.houses)}\u00a0missed`,
+    });
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(endRideAnswer(document, 'End ride'));
+    // No fail: tomorrow's round keeps all three houses. Without the assist,
+    // three misses of three would leave none, and end the week.
+    expect(readDeliveryProgress(localStorage)).toEqual({
+      day: WEEK.day + 1,
+      houses: WEEK.houses,
+      score: WEEK.score,
+    });
+  });
 });
 
 describe('the course picker: which saved routes can hold a round — #2294', () => {
+  // #2528: the cases here that carried a 16 s per-case limit carry none; the
+  // removal changes nothing they run. On this Mac, Node 26, at a load average
+  // near 3, each case takes at most 163 ms without coverage and 301 ms with
+  // `--coverage`.
   /** A renderer for a ride that chose the realistic world, which does not load here. */
   function realisticNotLoaded(): GameRenderer {
     return {
@@ -2285,83 +2258,71 @@ describe('the course picker: which saved routes can hold a round — #2294', () 
     expect(mounted?.container.querySelector('.oyl-chooser__courses')).toBeNull();
   });
 
-  it(
-    'lists every saved route with its houses once the round is chosen, greying with the reason those that cannot hold one',
-    { timeout: 16_000 },
-    async () => {
-      const asked: string[] = [];
-      await mountThree(asked);
-      await clickThrough(deliverySwitch());
-      await counted();
-      // Every saved route read through the corridor port, after the chosen one's own read.
-      expect(asked.slice(1)).toEqual([ROUTE.id, SHORT.id, UNREAD.id]);
-      const shown = cards();
-      expect(shown.get(ROUTE.name)).toMatchObject({
-        course: 'Delivery: up to 3 houses on the round',
-        greyed: false,
-      });
-      expect(shown.get(SHORT.name)).toMatchObject({
-        course: 'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3',
-        greyed: true,
-      });
-      expect(shown.get(UNREAD.name)).toMatchObject({
-        course: 'No Delivery round on this route: map tiles are off in Settings',
-        greyed: true,
-      });
-      expect(summary()).toBe('1 of your 3 routes can hold today’s Delivery round.');
-      // Switched off, the lines go.
-      await clickThrough(deliverySwitch());
-      expect(courseLines()).toEqual([undefined, undefined, undefined]);
-    },
-  );
+  it('lists every saved route with its houses once the round is chosen, greying with the reason those that cannot hold one', async () => {
+    const asked: string[] = [];
+    await mountThree(asked);
+    await clickThrough(deliverySwitch());
+    await counted();
+    // Every saved route read through the corridor port, after the chosen one's own read.
+    expect(asked.slice(1)).toEqual([ROUTE.id, SHORT.id, UNREAD.id]);
+    const shown = cards();
+    expect(shown.get(ROUTE.name)).toMatchObject({
+      course: 'Delivery: up to 3 houses on the round',
+      greyed: false,
+    });
+    expect(shown.get(SHORT.name)).toMatchObject({
+      course: 'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3',
+      greyed: true,
+    });
+    expect(shown.get(UNREAD.name)).toMatchObject({
+      course: 'No Delivery round on this route: map tiles are off in Settings',
+      greyed: true,
+    });
+    expect(summary()).toBe('1 of your 3 routes can hold today’s Delivery round.');
+    // Switched off, the lines go.
+    await clickThrough(deliverySwitch());
+    expect(courseLines()).toEqual([undefined, undefined, undefined]);
+  });
 
-  it(
-    'says beside the switch, before the press, that a greyed route rides an ordinary ride, and it does',
-    { timeout: 16_000 },
-    async () => {
-      await mountThree();
-      await clickThrough(deliverySwitch());
-      await counted();
-      expect(document.getElementById('oyl-game-delivery-course')).toBeNull();
-      await clickThrough(cards().get(SHORT.name)?.radio);
-      expect(document.getElementById('oyl-game-delivery-course')?.textContent).toBe(
-        'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3. ' +
-          'Ridden with the round on, it is an ordinary ride.',
-      );
-      expect(deliverySwitch()?.getAttribute('aria-describedby')?.split(' ')).toContain(
-        'oyl-game-delivery-course',
-      );
-      await clickThrough(buttonStarting('Ride '));
-      for (let index = 0; index < 20; index += 1) await pump();
-      await settle();
-      // What the card said is what the ride did: no round, in the HUD's own words.
-      expect(field('Houses')).toBeUndefined();
-      expect(said.filter((each) => each === TOO_FEW_HOUSES_TEXT)).toHaveLength(1);
-    },
-  );
+  it('says beside the switch, before the press, that a greyed route rides an ordinary ride, and it does', async () => {
+    await mountThree();
+    await clickThrough(deliverySwitch());
+    await counted();
+    expect(document.getElementById('oyl-game-delivery-course')).toBeNull();
+    await clickThrough(cards().get(SHORT.name)?.radio);
+    expect(document.getElementById('oyl-game-delivery-course')?.textContent).toBe(
+      'No Delivery round on this route: 2 mapped houses in reach, and a round needs 3. ' +
+        'Ridden with the round on, it is an ordinary ride.',
+    );
+    expect(deliverySwitch()?.getAttribute('aria-describedby')?.split(' ')).toContain(
+      'oyl-game-delivery-course',
+    );
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 20; index += 1) await pump();
+    await settle();
+    // What the card said is what the ride did: no round, in the HUD's own words.
+    expect(field('Houses')).toBeUndefined();
+    expect(said.filter((each) => each === TOO_FEW_HOUSES_TEXT)).toHaveLength(1);
+  });
 
   it.each([
     // The day's three on a town of many: the line's count and the HUD's are one.
     { cause: 'the day’s three on a town of many', week: WEEK, line: 3 },
     // A week of eight on the same town: up to eight, and eight on the HUD.
     { cause: 'a day of eight on the same town', week: { day: 2, houses: 8, score: 4 }, line: 8 },
-  ])(
-    'states the round the press then rides: $cause',
-    { timeout: 16_000 },
-    async ({ week, line }) => {
-      localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(week));
-      await mountThree();
-      await clickThrough(deliverySwitch());
-      await counted();
-      expect(cards().get(ROUTE.name)?.course).toBe(
-        `Delivery: up to ${String(line)} houses on the round`,
-      );
-      await clickThrough(buttonStarting('Ride '));
-      for (let index = 0; index < 5; index += 1) await pump();
-      await settle();
-      expect(field('Houses')?.value).toBe(String(line));
-    },
-  );
+  ])('states the round the press then rides: $cause', async ({ week, line }) => {
+    localStorage.setItem(DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify(week));
+    await mountThree();
+    await clickThrough(deliverySwitch());
+    await counted();
+    expect(cards().get(ROUTE.name)?.course).toBe(
+      `Delivery: up to ${String(line)} houses on the round`,
+    );
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 5; index += 1) await pump();
+    await settle();
+    expect(field('Houses')?.value).toBe(String(line));
+  });
 
   it('draws no line where the game has no corridor port: nothing could be counted', async () => {
     writeRealisticWorldChoice(localStorage, true);
@@ -2381,6 +2342,10 @@ describe('the course picker: which saved routes can hold a round — #2294', () 
 });
 
 describe('a built-in level’s parked cars change nothing the trainer is sent — #2362, ADR 0065 D-11', () => {
+  // #2528: the cases here that carried a 16 s or 30 s per-case limit carry
+  // none. Only the first changed (its note says how); on this Mac, Node 26, at
+  // a load average near 3, each case takes at most 373 ms without coverage and
+  // 1 096 ms with `--coverage`.
   /** The synthetic fixture level (D-7.5): never a shipped one, as a ride draws it. */
   const LEVEL = parseLevelFile(
     JSON.parse(
@@ -2740,26 +2705,28 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     return ridden;
   }
 
-  it(
-    'sends the same writes at the same times with the level’s parked cars as with none, a crash among them',
-    { timeout: 30_000 },
-    async () => {
-      const without = await rideLevel('none');
-      const withCars = await rideLevel('normal');
-      // Non-vacuity: both rode a round on the level, and only one of them had obstacles.
-      const [round] = withCars.started as (DeliveryRide | undefined)[];
-      const [bare] = without.started as (DeliveryRide | undefined)[];
-      expect(round?.onLevel).toBe(true);
-      expect(round?.obstacles.some((obstacle) => obstacle.kind === 'parked-car')).toBe(true);
-      expect(bare?.onLevel).toBe(true);
-      expect(bare?.obstacles).toEqual([]);
-      // The rider rode into one, so a crash was counted and said.
-      expect(withCars.offered).toContain('delivery-crash');
-      expect(without.offered).not.toContain('delivery-crash');
-      expect(without.writes.length).toBeGreaterThan(20);
-      expect(withCars.writes).toStrictEqual(without.writes);
-    },
-  );
+  // #2528, #1688's ruling: cheaper, never a longer limit. Both rides are the
+  // level's same 66 s in frames of 1 s, not 330 of 200 ms, as the #2366 case
+  // below: the simulation's steps are fixed at 0.05 s whatever the frame, and
+  // the unsteered rider still rides into the parked car. On this Mac, Node 26,
+  // at a load average near 3: 762 ms → 212–216 ms without coverage, 2 191 ms →
+  // 558–559 ms with `--coverage`.
+  it('sends the same writes at the same times with the level’s parked cars as with none, a crash among them', async () => {
+    const without = await rideLevel('none', LEVEL, CRASHING_SEED, FRAMES, 1_000);
+    const withCars = await rideLevel('normal', LEVEL, CRASHING_SEED, FRAMES, 1_000);
+    // Non-vacuity: both rode a round on the level, and only one of them had obstacles.
+    const [round] = withCars.started as (DeliveryRide | undefined)[];
+    const [bare] = without.started as (DeliveryRide | undefined)[];
+    expect(round?.onLevel).toBe(true);
+    expect(round?.obstacles.some((obstacle) => obstacle.kind === 'parked-car')).toBe(true);
+    expect(bare?.onLevel).toBe(true);
+    expect(bare?.obstacles).toEqual([]);
+    // The rider rode into one, so a crash was counted and said.
+    expect(withCars.offered).toContain('delivery-crash');
+    expect(without.offered).not.toContain('delivery-crash');
+    expect(without.writes.length).toBeGreaterThan(20);
+    expect(withCars.writes).toStrictEqual(without.writes);
+  });
 
   it.each(MOVING_HAZARD_KINDS)(
     'sends the same writes at the same times with a level’s moving hazards as with none, a crash into a %s among them — #2364',
@@ -2844,25 +2811,21 @@ describe('a built-in level’s parked cars change nothing the trainer is sent �
     expect(thrown.writes).toStrictEqual(without.writes);
   });
 
-  it(
-    'builds every frame of the level round with the camera’s eye, moved off the parked car the rider rode into — #2396',
-    { timeout: 30_000 },
-    async () => {
-      steeredInputs.length = 0;
-      cameraInputs.length = 0;
-      const ridden = await rideLevel('normal');
-      expect(ridden.offered).toContain('delivery-crash');
-      // Every frame a round steered carried the eye too: none forgot it.
-      const steered = steeredInputs.flatMap((lateral, index) =>
-        lateral === undefined ? [] : [{ lateral, eye: cameraInputs[index] }],
-      );
-      expect(steered.length).toBeGreaterThan(20);
-      for (const frame of steered) expect(typeof frame.eye).toBe('number');
-      // And passing the car, the eye stood off it, toward the middle of the road.
-      const movedOff = steered.filter(
-        (frame) => frame.eye !== undefined && frame.lateral - frame.eye > 0.5,
-      );
-      expect(movedOff.length).toBeGreaterThan(0);
-    },
-  );
+  it('builds every frame of the level round with the camera’s eye, moved off the parked car the rider rode into — #2396', async () => {
+    steeredInputs.length = 0;
+    cameraInputs.length = 0;
+    const ridden = await rideLevel('normal');
+    expect(ridden.offered).toContain('delivery-crash');
+    // Every frame a round steered carried the eye too: none forgot it.
+    const steered = steeredInputs.flatMap((lateral, index) =>
+      lateral === undefined ? [] : [{ lateral, eye: cameraInputs[index] }],
+    );
+    expect(steered.length).toBeGreaterThan(20);
+    for (const frame of steered) expect(typeof frame.eye).toBe('number');
+    // And passing the car, the eye stood off it, toward the middle of the road.
+    const movedOff = steered.filter(
+      (frame) => frame.eye !== undefined && frame.lateral - frame.eye > 0.5,
+    );
+    expect(movedOff.length).toBeGreaterThan(0);
+  });
 });

@@ -73,6 +73,8 @@ export interface GamepadIntentsProps {
    * give its throw buttons' room back to the road.
    */
   readonly onPadInUse?: ((inUse: boolean) => void) | undefined;
+  /** Told of every press a pad asks something for — #2600: it brings the hidden ride controls back. */
+  readonly onPress?: (() => void) | undefined;
 }
 
 const isThrow = (intent: string): intent is ThrowIntent =>
@@ -80,14 +82,16 @@ const isThrow = (intent: string): intent is ThrowIntent =>
 
 /** @see the module header */
 export function GamepadIntents(props: GamepadIntentsProps): null {
-  const { throwing, steering, items, pads, onPadInUse } = props;
+  const { throwing, steering, items, pads, onPadInUse, onPress } = props;
   const held = useRef(NO_PADS_HELD);
   const throwingRef = useRef(throwing);
   const steeringRef = useRef(steering);
   const itemsRef = useRef(items);
   const padsRef = useRef(pads);
   const inUseRef = useRef(onPadInUse);
+  const pressRef = useRef(onPress);
   useEffect(() => {
+    pressRef.current = onPress;
     throwingRef.current = throwing;
     steeringRef.current = steering;
     itemsRef.current = items;
@@ -103,6 +107,7 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
       const now = (padsRef.current ?? platform).pads();
       const read = readGamepads(held.current, now);
       held.current = read.state;
+      if (read.intents.length > 0) pressRef.current?.();
       for (const intent of read.intents) {
         if (isThrow(intent)) {
           throwingRef.current?.throwParcel(intent);

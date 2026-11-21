@@ -256,6 +256,15 @@
  * is where the sentences that must never be tucked are held to that. And a
  * route's states neither fixture reaches (a ride in progress with a trainer
  * under control, a camera that is on) are not walked here.
+ *
+ * ⚠️ **Re-recorded by #2859, with #2756's wording the owner approved on
+ * 2026-11-18**, on More's populated walk only, one line. The fixture is
+ * connected to an instance, and the More menu's Instance line said "Sign in
+ * to an instance with this device, to ride with other people." on a
+ * connected device, as Settings' card did before #2756. It now says
+ * "Connected to your server at https://ride.example as Rider.", as Settings
+ * does. The empty walk, with nothing connected, keeps the route's own line.
+ * Nothing else is dropped.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';

@@ -57,7 +57,7 @@ describe('the app’s Rooms panel and the admin Rooms page say the same thing (#
   it.each(['code', 'passkey'] as const)(
     'draws the same line for every room, from one fixture (a %s session)',
     async (strength) => {
-      mounted = await mount(<OperateRoomsPanel port={scriptedOperate().port} />);
+      mounted = await mount(<OperateRoomsPanel timeZone="UTC" port={scriptedOperate().port} />);
       await settle();
       const appLines = [...mounted.container.querySelectorAll('.oyl-operate__rooms > li')].map(
         (item) => {

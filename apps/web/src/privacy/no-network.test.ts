@@ -1693,6 +1693,10 @@ describe('the instance is disclosed, class by class — #778', () => {
     // The row used to say it was SENT only to an instance that had not seen
     // the device.
     expect(section).toContain('each time you press connect with a name typed');
+    // #2878: the owner's claim sends it with the sign-in that follows, never with the claim.
+    expect(section).toContain(
+      'or sign in as the owner with one typed after claiming your own server',
+    );
     expect(section).toContain('keeps it with your account only the first time it sees this device');
     expect(section).not.toContain('when it has not seen this device before');
     // #906 item 2: the rename the Instance screen offers sends it too.
@@ -1847,7 +1851,8 @@ const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
     'this app never asks a hosted service for a re-plan',
     'never a second-by-second recording, a position, a date or a name',
     'your instance keeps each request and its answer for 7 days',
-    'during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on',
+    // #2841: the warm-up as a workout starts, the owner's ruling of 2026-11-19.
+    'during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on, and once as the workout starts, naming no ride',
     'switch it off and nothing more is sent',
   ],
   [REPLAN_SECTION]: [
@@ -1860,6 +1865,8 @@ const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
     'and not the time you want to spend in your range, which this app leaves out',
     'no effort check-in is sent',
     'when: during the ride, and only while the switch is on for that ride: as a block begins, and never less than 3 minutes after the last time',
+    // #2841: the warm-up, the owner's ruling of 2026-11-19.
+    'once as the workout starts, it also sends a request that names no ride and carries only which model to use',
     'to whom: the instance you connected',
     'it is never sent in plain text',
     'what your instance keeps: each request',

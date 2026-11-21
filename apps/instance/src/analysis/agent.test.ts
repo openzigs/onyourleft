@@ -9,7 +9,9 @@
  */
 
 import {
+  AGENT_V2_TEMPERATURE,
   ANALYSIS_AGENT_TEMPLATE_V1,
+  ANALYSIS_AGENT_TEMPLATE_V2,
   HISTORY_FENCE_BEGIN,
   HISTORY_FENCE_END,
   MAXIMUM_WRITE_UP_CHARACTERS,
@@ -28,6 +30,7 @@ import {
 } from '../store/testing/index.ts';
 import {
   AGENT_BUDGETS,
+  AGENT_TEMPLATE,
   AGENT_FAILURE_TEXT,
   AGENT_MODEL_CALLS,
   AGENT_TOKEN_BUDGET,
@@ -38,6 +41,7 @@ import {
   type AgentEvent,
   type AgentOptions,
   type AgentOutcome,
+  type AgentUsage,
 } from './agent.ts';
 import {
   calls,
@@ -123,7 +127,7 @@ describe('a write-up with no tool called', () => {
     if (outcome.kind !== 'written') return;
     expect(outcome.writeUp).toBe(PASSING_WRITE_UP);
     expect(outcome.sections).toHaveLength(3);
-    expect(outcome.template).toStrictEqual({ id: 'ride-write-up-agent', version: '1' });
+    expect(outcome.template).toStrictEqual({ id: 'ride-write-up-agent', version: '2' });
     const first = model.requests[0]?.messages[0];
     expect(first?.role === 'user' && first.text).toContain('"kind":"climb"');
     expect(events.filter((event) => event.type === 'section')).toHaveLength(3);
@@ -562,9 +566,9 @@ describe('a model that reasons before it answers (#1268)', () => {
     // The first turn costs 500 + 1 024. The retry is estimated at what is
     // sent, and must fit with all 4 096 it may answer.
     const sent = Math.ceil(
-      (ANALYSIS_AGENT_TEMPLATE_V1.system.length +
+      (AGENT_TEMPLATE.system.length +
         JSON.stringify(AGENT_TOOLS.map((tool) => tool.spec)).length +
-        ANALYSIS_AGENT_TEMPLATE_V1.firstMessage(RIDE_INPUT).length) /
+        AGENT_TEMPLATE.firstMessage(RIDE_INPUT).length) /
         3,
     );
     const fits = 500 + 1_024 + sent + WITH_REASONING;
@@ -585,7 +589,7 @@ describe('a model that reasons before it answers (#1268)', () => {
     const probe = script();
     await run(probe);
     const characters = (request: ModelTurnRequest | undefined) =>
-      ANALYSIS_AGENT_TEMPLATE_V1.system.length +
+      AGENT_TEMPLATE.system.length +
       JSON.stringify(AGENT_TOOLS.map((tool) => tool.spec)).length +
       JSON.stringify(request?.messages ?? []).length;
     // An upper bound on what the third turn is estimated to send.
@@ -877,5 +881,168 @@ describe('end to end through the fake model server and the real connection (no n
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('the model’s context: a run is stopped before a turn would pass it (#2840)', () => {
+  /** The scripted model, told it reads `contextTokens` at once. */
+  const within = (contextTokens: number, model: ScriptedModel): ScriptedModel =>
+    Object.assign(model, { contextTokens });
+
+  it('stops before the first turn when the first turn cannot fit, and sends nothing', async () => {
+    // The first turn alone: the system prompt, the tools, the ride, and the answer's allowance.
+    const model = within(2_048, scriptedModel(text(PASSING_WRITE_UP)));
+    const { outcome } = await run(model);
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'out-of-context' });
+    expect(model.requests).toHaveLength(0);
+  });
+
+  it('runs to a write-up in a context with room for every turn', async () => {
+    const model = within(16_384, scriptedModel(calls(['goals', {}]), text(PASSING_WRITE_UP)));
+    const { outcome } = await run(model);
+    expect(outcome.kind).toBe('written');
+    expect(model.requests).toHaveLength(2);
+  });
+
+  it('stops before the turn a tool result would push past it, and not before', async () => {
+    // The first turn fits; a long goal makes the second too long to fit.
+    const goal = 'I want to ride further. '.repeat(160);
+    await harness.write(async (writer) => {
+      await plantAgentItems(writer, [], { athleteId: A, text: goal });
+    });
+    const reads = await openSqlStore(harness.path);
+    try {
+      const model = within(4_096, scriptedModel(calls(['goals', {}]), text(PASSING_WRITE_UP)));
+      const { outcome } = await run(model, { reads });
+      expect(outcome).toStrictEqual({ kind: 'failed', why: 'out-of-context' });
+      expect(model.requests).toHaveLength(1);
+    } finally {
+      await reads.close();
+    }
+  });
+
+  it('checks nothing when the context is not known', async () => {
+    const model = scriptedModel(text(PASSING_WRITE_UP));
+    expect((await run(model)).outcome.kind).toBe('written');
+  });
+
+  it('says so in a sentence that names no model and quotes nothing', () => {
+    expect(AGENT_FAILURE_TEXT['out-of-context']).toMatch(/more than it can read at once/);
+    expect(AGENT_FAILURE_TEXT['out-of-context']).toMatch(/nothing was kept/);
+  });
+
+  it('counts the reasoning allowance against it, as a reasoning model is answered with it', async () => {
+    // 1 024 to answer and 3 072 to reason: no prompt fits beside them in 4 096.
+    const model = within(
+      4_096,
+      Object.assign(scriptedModel(text(PASSING_WRITE_UP)), {
+        reasoningTokens: AGENT_TURN_REASONING_TOKENS,
+      }),
+    );
+    expect((await run(model)).outcome).toStrictEqual({ kind: 'failed', why: 'out-of-context' });
+    expect(model.requests).toHaveLength(0);
+  });
+});
+
+describe('what a run came to, reported once for the job’s log (#2840)', () => {
+  it('counts turns, tool calls, the tools used, tokens and time on a written run', async () => {
+    const clock = movableClock();
+    const reports: AgentUsage[] = [];
+    const model = scriptedModel(
+      () => {
+        clock.advance(4_000);
+        return calls(['goals', {}], ['goals', {}], ['recent_rides', {}]);
+      },
+      { ...text(PASSING_WRITE_UP), usage: { inputTokens: 1_500, outputTokens: 200 } },
+    );
+    const { outcome } = await run(model, { clock, report: (usage) => reports.push(usage) });
+    expect(outcome.kind).toBe('written');
+    expect(reports).toStrictEqual([
+      {
+        turns: 2,
+        toolCalls: 3,
+        toolsUsed: 2,
+        // `calls` reports 1 000 in and 30 out for its turn.
+        tokensIn: 2_500,
+        tokensOut: 230,
+        milliseconds: 4_000,
+      },
+    ]);
+  });
+
+  it('reports a failed run too, and a tool that does not exist is no tool used', async () => {
+    const reports: AgentUsage[] = [];
+    await run(scriptedModel(calls(['set_resistance', {}])), {
+      budgets: { modelCalls: 2 },
+      report: (usage) => reports.push(usage),
+    });
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ turns: 2, toolCalls: 2, toolsUsed: 0 });
+  });
+});
+
+describe('the template’s temperature reaches the wire (#2840)', () => {
+  it('asks version 2’s low temperature and no reasoning on every turn, and version 1 asks neither', async () => {
+    const server = await startFakeModelServer([
+      { kind: 'tool-calls', calls: [{ name: 'goals', arguments: '{}' }] },
+      { kind: 'text', text: PASSING_WRITE_UP },
+      { kind: 'text', text: PASSING_WRITE_UP },
+    ]);
+    try {
+      const model = createLocalModel({
+        settings: { baseUrl: server.baseUrl, model: 'scripted' },
+        resolve: () => Promise.resolve(['127.0.0.1']),
+      });
+      const common = {
+        job: { athleteId: A, input: RIDE_INPUT },
+        model,
+        reads: store,
+        clock: movableClock(),
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      };
+      const second = await runAnalysisAgent({ ...common, template: ANALYSIS_AGENT_TEMPLATE_V2 });
+      expect(second.kind).toBe('written');
+      expect(server.requests.map((request) => request.temperature)).toStrictEqual([
+        AGENT_V2_TEMPERATURE,
+        AGENT_V2_TEMPERATURE,
+      ]);
+      // And asks the local model not to reason, on every turn.
+      expect(server.requests.map((request) => request.reasoning_effort)).toStrictEqual([
+        'none',
+        'none',
+      ]);
+      await runAnalysisAgent({ ...common, template: ANALYSIS_AGENT_TEMPLATE_V1 });
+      expect(server.requests[2]).not.toHaveProperty('temperature');
+      expect(server.requests[2]).not.toHaveProperty('reasoning_effort');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a stated context reaches the agent through the real connection', () => {
+    const model = createLocalModel({
+      settings: {
+        baseUrl: new URL('http://127.0.0.1:1/v1'),
+        model: 'scripted',
+        contextTokens: 16_384,
+      },
+      resolve: () => Promise.resolve(['127.0.0.1']),
+    });
+    expect(model.contextTokens).toBe(16_384);
+  });
+});
+
+describe('the template a write-up runs (#2840)', () => {
+  it('is version 2, and a run with no template sends its system prompt', async () => {
+    expect(AGENT_TEMPLATE).toBe(ANALYSIS_AGENT_TEMPLATE_V2);
+    const model = scriptedModel(text(PASSING_WRITE_UP));
+    const { outcome } = await run(model);
+    expect(outcome).toMatchObject({ kind: 'written', template: { version: '2' } });
+    expect(model.requests[0]).toMatchObject({
+      system: ANALYSIS_AGENT_TEMPLATE_V2.system,
+      temperature: AGENT_V2_TEMPERATURE,
+      thinking: 'off',
+    });
   });
 });

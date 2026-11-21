@@ -367,3 +367,106 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   holding one malformed, is dropped whole. Read D-5.1's inputs as the route, the plan, the position,
   the wind and the log; `apps/web/src/game/model-pacer-replay.test.tsx` replays a saved ride from
   them, step for step.
+- **2026-11-17** — **The model is shown the rider's own sensors and its own last lines
+  ([#2760](https://github.com/openzigs/onyourleft/issues/2760)).** On the first tablet ride the
+  owner ruled: *"the messages did change. Did not vary much. Also AI should analyze my ride and
+  stats and offer suggestions based on cadence, heart rate, power etc if the stats are
+  available"*. So D-3.4's input is wider, and nothing else in D-1 to D-9 moves:
+  - **What is added to `ModelPacerInput`**, each field **left out when its sensor is not live**,
+    never guessed or zeroed: the rider's W/kg over 3 s (the HUD's average) and over the last
+    minute; its zone, and the whole seconds held at or above threshold, **only of a threshold
+    power the rider set**; whether it is rising, steady or fading over the last minute; cadence
+    in whole rpm; heart rate in whole bpm, its zone **only of a threshold heart rate the rider
+    set**, and whether it is rising, steady or falling. A zone is named by its name in
+    `analysis/zones.ts`. Every one is a number or a word from a closed list, so D-3.4's *no
+    coordinate, no place name, no rider name, no date, no identifier* still holds, and the
+    instance still refuses any key it does not name. The cap is 2 048 characters, from 1 024.
+  - **The model's own last three lines** (`recentLines`) ride in the input so it does not repeat
+    itself. This narrows D-4.4's *"Never kept"* by exactly this: the device holds the last three
+    shown lines **in memory for the ride** and sends them back, sealed, to the same instance's
+    own model with the next asks. They are still never stored, logged or synced; the decision
+    log holds no text; the instance keeps neither the question nor the answer. Each line is read
+    again on the instance by `pacerSayProblem` before any model call, so a line the screen would
+    stop cannot ride back in.
+  - **The prompt is `pacer-2`** (`PACER_PROMPT_VERSION`): coach from what the rider is doing, one
+    thing at a time (ease after a long stretch above threshold, a lighter gear for a low cadence on
+    a climb, a pacing note for power fading against heart rate, encouragement when steady), vary
+    the words, and name heart rate only as effort, never as a health matter. **The temperature is
+    0.7** (`PACER_TEMPERATURE`), above 0 as #2760 asks; it was 0.7 already, and on the owner's PC
+    0.9 varied the lines little more and kept them less on what the rider was doing.
+  - **What does not move.** D-4.2's screen is the same function and the same rules, R-4's *no
+    digits* among them, so a line with a digit voids the answer as before, and the prompt still
+    asks for no number in any form. Whether coaching may carry cadence and power digits is a
+    change to R-4 that #2760 puts to the owner; until the owner rules it stays as it is. The data goes
+    only to the rider's own instance's local model (D-8.1); D-6's trainer guarantee and its
+    tests are unmodified.
+  - **The consent wording (D-1.3) names the new data** — cadence and heart rate, how they trend,
+    their zones, and the pacer's last lines — as does `docs/privacy-policy.md`. It is draft
+    wording for the owner to approve from screenshots, so R-8 stays open.
+  - **A device and an instance on either side of this change.** An instance from before it refuses
+    a state carrying any new field (`validation_failed`), which the device reads as a refusal:
+    the ride's asks end and the pacer rides #92's rule (D-7). Nothing is lost, and nothing reaches
+    the model; deploy the instance first.
+- **2026-11-17** — **R-4's *"no digits"* and D-4.2's *"no digit of any script"* are superseded in
+  part by [ADR 0077](0077-the-ai-pacers-line-may-name-a-cadence-or-power-target.md)**, on the
+  owner's ruling of that day (*"Yes"* to *"allow cadence and power numbers only"*). A line may now
+  carry a cadence or power target — a number with `rpm`, `watt(s)`, `W` or `W/kg` straight after
+  it, at 30 to 150 rpm, 30 to 2 000 W or 0.5 to 10 W/kg — and every other digit still voids the
+  answer. The prompt is `pacer-3`. The preceding entry's *"until the owner rules it stays as it
+  is"* is answered by this. Nothing else in D-4 moves, and this ADR's body is unchanged.
+- **2026-11-17** — **The intent follows the gap, and the line agrees with the intent
+  ([#2777](https://github.com/openzigs/onyourleft/issues/2777)).** On the owner's tablet ride with
+  #2762's build: *"It says it will push yet I am ahead and never see it taking over"*; the saved log
+  had ease 19, hold 12, lift 8 of 39 applied.
+  - **D-3.4's input gains two optional words**, both worked out on the device from the gap it
+    already sends: `riderPlace` (`ahead`, `level` or `behind`, by more than 2 s at the rider's own
+    speed; absent at a standstill) and `gapTrend` (`rider-gaining`, `steady` or `rider-losing`,
+    how the gap moved since the last ask at more than 0.2 m/s; absent on the first ask). Each is a
+    word from a closed list, so D-3.4's *no coordinate, no place name, no rider name, no date, no
+    identifier* holds, and the instance still refuses a key it does not name. An instance from
+    before this change refuses a state with either (`validation_failed`), so, as for #2760,
+    **deploy the instance first**.
+  - **The prompt is `pacer-4`.** It explains which way the gap runs, asks for an intent by rule
+    from `riderPlace` and `gapTrend` (ahead and pulling away: `lift`; ahead otherwise: never
+    `ease`; behind and losing ground: `ease`; behind otherwise: never `lift`; level or in the
+    draft: `hold`), says that coaching the rider to ease is never a reason for the pacer to ease,
+    and drops `pacer-3`'s *"Change intent only every few decisions"*.
+  - **D-4.2 gains a rule, as *"What would make this ADR wrong"* anticipates** (*"the fix is the
+    rule, with the line as its test"*): a line in which the pacer says it will push, lift, chase or
+    come past, beside `ease` or `hold`, or says it is easing, slowing or waiting, beside `lift`,
+    makes the whole answer invalid (`say-against-intent`), read on the instance and again on the
+    device by `@onyourleft/domain` §`readModelPacerAnswer`, so the decision in force stays (R-5).
+    The rule reads the pacer speaking of itself (*I*, *we*, *let's*, or *here I come*, *waiting for
+    you*); advice to the rider (*"ease a little"*, *"push through this rise"*) is not a promise of
+    the pacer's.
+  - **A floor under the intent** — with the rider ahead for 10 s, an `ease` ridden as `hold` — is a
+    change to D-2 and D-5.1, not an amendment, so it is
+    [ADR 0078](0078-a-floor-under-the-ai-pacers-intent.md), **Proposed** for the owner's answer.
+  - **What does not move**: the envelope (D-2.2), the trainer (D-6), the fallback (D-7), the log and
+    `MODEL_PACER_CODE_VERSION` (D-5), and the screen's other rules.
+- **2026-11-17** — **D-3.4's input gains the course ahead
+  ([#2794](https://github.com/openzigs/onyourleft/issues/2794)).** The owner asked that the AI
+  take the terrain into account when it changes pace. The pacer state may carry `course`, read
+  from the pacer's place on the route (`@onyourleft/domain` §`ModelPacerCourse`,
+  `route/course-ahead.ts`): the next climb and the next descent (each 3 % or steeper for 200 m or
+  more, looked for 5 km ahead at most and never past the finish: metres to its start, its length,
+  its average and steepest grade), the climbing left to the finish or, on a loop, in the lap, and
+  on a loop the metres left in the lap. Every field is a number or `null`, so D-3.4's *no
+  coordinate, no place name, no rider name, no date, no identifier* still holds, and the reader
+  refuses any key it does not name; the field is optional, so a device from before it still asks.
+  The prompt is `pacer-5`: where the gap rules (`pacer-4`) leave a choice, ease a little in the
+  last 300 m before a climb so the pacer can hold its pace up it, and lift on a descent or where a
+  climb ends into the flat, and it names the gap and the road ahead among the distances a line
+  may not write, because on the owner's PC easing lines quoted the gap in metres, which the screen
+  voids. **What does not move**: the envelope (D-2.2), the trainer (D-6), the
+  fallback (D-7), the log and `MODEL_PACER_CODE_VERSION` (D-5), the screen (D-4.2) and the gap
+  rules, which still come first.
+- **2026-11-18** — **D-2 is superseded in part a second time, by
+  [ADR 0082](0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**, accepted on the
+  owner's *"Yes to pacer rule"* on #2802. With the rider level with the pacer or in its draft, the
+  device rides `ease` in the last 300 m before a climb and `lift` on a descent and for 200 m over a
+  climb's top, whatever intent the model chose; the plan stays the model's. Under `pacer-5` the
+  model held everywhere in those places. ADR 0078's floor is applied after it and wins. **What does
+  not move**: the envelope (D-2.2), the trainer (D-6), the fallback (D-7), and the log and
+  `MODEL_PACER_CODE_VERSION` (D-5): the log records the direction ridden, so a stored ride replays
+  from the log alone.

@@ -316,3 +316,22 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   still `accentText` on `surfaceOverlay` at 4.52. A primary's edge is `accentText` so that a primary
   standing on the near hill keeps its 3:1 edge (3.16); the brighter fill there is 2.15. The light
   `theme_color` follows `accent`, the fill. `contrast.a11y.test.ts` records each pair.
+- **2026-11-16** — D-2's "the HUD's panels stay **opaque**" is read as *opaque or not drawn*, on
+  the owner's ruling of 2026-11-16 on [#2600](https://github.com/openzigs/onyourleft/issues/2600)
+  via PR #2670 (*"Fade out is better"*): the ride controls that hide until touched fade out, and back
+  in, rather than being clipped away. At rest a HUD control is either drawn on the opaque
+  `hudSurface` the contrast pairs are checked against, or faded to `opacity: 0` and not read at all;
+  it is translucent only for the length of the fade (`--oyl-motion-medium`, none for a rider who
+  asked for less motion). `hud-surface.a11y.test.ts` admits exactly that, `opacity: 0` under
+  `.oyl-hud[data-oyl-controls='hidden']`, and still fails any other `opacity` in the HUD. No panel
+  is ever drawn see-through.
+- **2026-11-17** — The amendment of 2026-11-16 gives the length of the ride controls' fade as
+  `--oyl-motion-medium`, and D-7 says the 200 ms cap stays. Neither is true any longer for that
+  fade: on the owner's report of 2026-11-17 from the tablet on
+  [#2600](https://github.com/openzigs/onyourleft/issues/2600) (*"Not a fade just a pop"*), the
+  controls fade out over `--oyl-motion-hud-fade-out` (800 ms) and back in over
+  `--oyl-motion-hud-fade-in` (250 ms), and the lined actions panel's clip closes over
+  `--oyl-motion-medium` after the fade instead of arriving in one step.
+  [ADR 0075](0075-the-ride-controls-fade-slower-than-the-menus-motion-cap.md) supersedes D-7 in part
+  for that fade. *Opaque or not drawn* still holds: a control is translucent only while it fades,
+  and not at all for a rider who asked for less motion.

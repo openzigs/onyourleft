@@ -199,6 +199,10 @@
   --oyl-motion-short: 120ms;
   --oyl-motion-medium: 200ms;
   --oyl-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  /* The ride controls' fade (#2600, ADR 0075): the two durations above the
+     200 ms cap, read under `.oyl-hud[data-oyl-controls…]` and nowhere else. */
+  --oyl-motion-hud-fade-out: 800ms;
+  --oyl-motion-hud-fade-in: 250ms;
 
   /*
    * The body face — #992. Every word that is not a view's title or
@@ -6148,6 +6152,62 @@ select.oyl-input {
 }
 
 /*
+ * A PACER OR A GHOST OUT OF VIEW — #2755 (`game/off-screen-marker.ts`).
+ *
+ * A marker at the edge of the world nearest to where the pacer is, laid over
+ * the world as the names above are and by the same rule: `layOffScreenMarkers`
+ * puts this layer exactly over `.oyl-game__world`, it is zero-sized until
+ * then, and it is before the HUD in the document, so a panel is over it.
+ * `off-screen-marker.ts` keeps each marker clear of the HUD's panels besides,
+ * and `browser/off-screen-marker.browser.spec.ts` measures that. Never a
+ * target and never read: the HUD's gap field says it as text.
+ */
+.oyl-game__off-screens {
+  height: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 0;
+}
+
+/*
+ * One marker: the HUD's own surface and ink, as a name is, with a border and
+ * an arrow in the colour of whom it points to — set per marker as
+ * `--oyl-off-screen-colour` from `off-screen-marker.ts` §`OFF_SCREEN_COLOURS`,
+ * each held there to 3 : 1 on this surface. Its size is set from there too, so
+ * the box kept clear of the HUD is the box drawn.
+ */
+.oyl-game__off-screen {
+  align-items: center;
+  background: var(--oyl-color-hud-surface);
+  border: 2px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  border-radius: var(--oyl-radius);
+  box-sizing: border-box;
+  color: var(--oyl-color-hud-ink);
+  display: flex;
+  font-size: var(--oyl-font-size-sm);
+  gap: var(--oyl-space-xs);
+  justify-content: center;
+  left: 0;
+  line-height: 1;
+  overflow: hidden;
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+/* A chevron: two sides of a square, turned to point the marker's way. */
+.oyl-game__off-screen-arrow {
+  border-right: 3px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  border-top: 3px solid var(--oyl-off-screen-colour, var(--oyl-color-hud-border));
+  flex: none;
+  height: 0.55em;
+  width: 0.55em;
+}
+
+/*
  * THE STAGE — a ride has the screen (#423).
  *
  * `GameView` puts this class on its root for exactly as long as a ride is
@@ -7303,6 +7363,14 @@ select.oyl-input {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* #2600: the ride controls' fade and the actions panel's closing go
+     entirely, delays included, which the rule above leaves standing
+     (`theme.css` §"#2600: THE RIDE CONTROLS FADE UNTIL TOUCHED"). */
+  .oyl-hud[data-oyl-controls] [data-oyl-hides],
+  .oyl-hud[data-oyl-controls] .oyl-hud__actions {
+    animation: none !important;
   }
 }
 
@@ -9465,6 +9533,31 @@ select.oyl-input {
  */
 .oyl-hud__notices:has(> .oyl-status + .oyl-status) > .oyl-status {
   padding-block: var(--oyl-space-xs);
+}
+
+/*
+ * The AI pacer's line, larger than any other notice — #2760's review, on the
+ * owner's word of 2026-11-17: "Might need to make the feedback a bit larger.
+ * I noticed it can be hard to see." It is the one notice meant to be read
+ * at a glance while pedalling, and the only one that changes every few
+ * seconds, so it alone is set at 1.5 times a notice's size (0.8 rem to
+ * 1.2 rem), in the HUD numerals' face and weight, Barlow at 700. The face is
+ * bundled, so the line wraps the same on every device: in the body's
+ * `system-ui` it took three lines on a Mac and four on the CI runner's
+ * DejaVu Sans (run 44099666536). Its colours are the info
+ * tone's declared pair, unchanged. A line is at most 80 characters (ADR 0072
+ * D-4); in the notices cell's 22 rem, at 1024×600 and 1280×800, about 45 of
+ * them fit on two lines and all 80 on three, measured in the pinned Chromium.
+ * `ride-notices.browser.spec.ts` §"the AI pacer's line" measures the size,
+ * the lines, the contrast and that it covers no panel or control, and goes
+ * red at the old size. Only this notice grows: the shared rule above is
+ * untouched.
+ */
+.oyl-hud__notices .oyl-status.oyl-hud__pacer-say {
+  font-family: var(--oyl-font-family-display);
+  font-size: calc(var(--oyl-font-size-sm) * 1.5);
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 /*
@@ -13500,6 +13593,14 @@ select.oyl-input {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
+  /* #2600: the ride controls' fade and the actions panel's closing go
+     entirely, delays included, which the rule above leaves standing
+     (`theme.css` §"#2600: THE RIDE CONTROLS FADE UNTIL TOUCHED"). */
+  .oyl-hud[data-oyl-controls] [data-oyl-hides],
+  .oyl-hud[data-oyl-controls] .oyl-hud__actions {
+    animation: none !important;
+  }
 }
 
 /*
@@ -14262,4 +14363,296 @@ select.oyl-input {
 
 .oyl-operate__models label {
   gap: var(--oyl-space-sm);
+}
+
+/*
+ * #2600: THE RIDE CONTROLS FADE UNTIL TOUCHED, AND A PANEL TUCKS AWAY.
+ *
+ * HIDDEN, every control that hides (`controls-reveal.ts` §`HIDES_ATTRIBUTE`)
+ * FADES out over `--oyl-motion-hud-fade-out`, and fades back in over
+ * `--oyl-motion-hud-fade-in` when the screen is touched (never on the ride's
+ * first frame: an element mid-fade is painted in its own layer, over a reading
+ * a phone lifts beside the controls) — the owner's ruling of 2026-11-16 on PR
+ * #2670, *"Fade out is better"*. With no trainer's line in it, the actions
+ * panel fades with them, its surface too.
+ *
+ * ⚠️ **The two fade tokens are the ride's, not the menus'.** The owner's
+ * report of 2026-11-17 from the tablet, *"Not a fade just a pop"*: over
+ * `--oyl-motion-medium`'s 200 ms the controls read as gone at once. ADR 0075
+ * lifts ADR 0041 D-5's 200 ms cap for these two tokens and nothing else, and
+ * `theme.a11y.test.ts` §"no motion runs longer than 200 ms" holds them to the
+ * rules here: each at its own number and read nowhere but under
+ * `.oyl-hud[data-oyl-controls…]`.
+ *
+ * ⚠️ **Opaque or not drawn, never see-through at rest.** `opacity` is admitted
+ * in the HUD here and nowhere else (`hud-surface.a11y.test.ts`, ADR 0063's
+ * amendment of 2026-11-16): `opacity: 0`, under the hidden state alone. #94's
+ * contrast is checked against the panel a rider reads, and a faded control is
+ * not read; while it is drawn it is the opaque control the contrast walk
+ * checks. Between the two there is only the fade itself.
+ *
+ * Only AFTER the fade has run is the actions panel CLIPPED to the trainer's
+ * line at its top (`--oyl-hud-actions-kept`, measured by `HudCore.tsx`), or to
+ * nothing with no line — and the clip CLOSES over `--oyl-motion-medium`, so the
+ * panel's emptied surface slides up into the line rather than going in one
+ * step (the owner's report again: held whole and then clipped at once, the
+ * lined panel was the pop). A finger then lands on the road under it rather
+ * than on it — the first touch shows the controls and presses nothing. A clip,
+ * like a fade, leaves a control in the tab order and the accessibility tree.
+ *
+ * The rider who asked for less motion, or whose screen cannot repaint, sees no
+ * fade and no closing: a rule in each of the two blocks that collapse motion
+ * (`prefers-reduced-motion` and `update: slow`) takes every animation here
+ * away, delays included — the blocks' own rule shortens a duration and leaves
+ * a delay standing, so the closing would still wait out the fade — and the
+ * clip comes at once.
+ */
+.oyl-hud[data-oyl-controls='hidden'] [data-oyl-hides],
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions--unlined {
+  animation: oyl-hud-controls-fade-out var(--oyl-motion-hud-fade-out)
+    var(--oyl-motion-ease-standard);
+  opacity: 0;
+}
+
+.oyl-hud[data-oyl-controls-returned] [data-oyl-hides],
+.oyl-hud[data-oyl-controls-returned] .oyl-hud__actions--unlined {
+  animation: oyl-hud-controls-fade-in var(--oyl-motion-hud-fade-in) var(--oyl-motion-ease-standard);
+}
+
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions {
+  clip-path: inset(0 0 calc(100% - var(--oyl-hud-actions-kept, 0px)) 0);
+}
+
+/* The panel the fade runs in is drawn whole until the fade has run, and then
+   its clip closes. The unlined panel's own fade is named first, so this one
+   adds the hold and the closing to it. */
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions:not(.oyl-hud__actions--unlined) {
+  animation:
+    oyl-hud-actions-hold var(--oyl-motion-hud-fade-out) step-end,
+    oyl-hud-actions-close var(--oyl-motion-medium) var(--oyl-motion-ease-standard)
+      var(--oyl-motion-hud-fade-out);
+}
+
+.oyl-hud[data-oyl-controls='hidden'] .oyl-hud__actions.oyl-hud__actions--unlined {
+  animation:
+    oyl-hud-controls-fade-out var(--oyl-motion-hud-fade-out) var(--oyl-motion-ease-standard),
+    oyl-hud-actions-hold var(--oyl-motion-hud-fade-out) step-end,
+    oyl-hud-actions-close var(--oyl-motion-medium) var(--oyl-motion-ease-standard)
+      var(--oyl-motion-hud-fade-out);
+}
+
+@keyframes oyl-hud-controls-fade-out {
+  from {
+    opacity: 1;
+  }
+}
+
+@keyframes oyl-hud-controls-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* #2837: and in its own place, where in a race the rule below moves it. */
+@keyframes oyl-hud-actions-hold {
+  from,
+  to {
+    clip-path: inset(-100vmax);
+    translate: none;
+  }
+}
+
+/* From the panel's own box to the rule's clip, which it ends on — and, in a
+   race (#2837, below), from its own place to the stage's bottom edge. */
+@keyframes oyl-hud-actions-close {
+  from {
+    clip-path: inset(0 0 0 0);
+    translate: none;
+  }
+}
+
+/*
+ * #2837: IN A RACE, THE HIDDEN ACTIONS PANEL IS ITS LINE AT THE STAGE'S
+ * BOTTOM EDGE, AND THE STANDINGS TAKE THE ROOM.
+ *
+ * The owner's tablet race of 2026-11-18, seven bots: *"the position menu
+ * should get bigger when the other one reduces or make it bigger to begin
+ * with. Can only see 3 people."* A race's standings hang over the actions
+ * panel and are as tall as the room above it holds (`standings-room.ts`);
+ * hidden, that panel was clipped to the trainer's line at its TOP, so the
+ * line stood where the panel began and the room under it, where *Pause*,
+ * *End ride* and *Use item* had been, was nobody's.
+ *
+ * So where a race's standings are drawn — a tablet, the media query their
+ * own (§"A RACE'S STANDINGS"); on a phone they are in the document and not on
+ * the stage, and nothing moves — the hidden panel is MOVED down by what the
+ * clip takes off it: the line it keeps is drawn against the stage's bottom
+ * edge, the panel's own bottom, and everything above it is free. The
+ * standings measure the room to the line there and grow into it; a touch
+ * brings the controls back where they were, and the standings give the room
+ * back as they come (`standings-room.ts` §`useStandingsRoom`).
+ *
+ * The move is the closing's: as the clip closes, over `--oyl-motion-medium`,
+ * the panel's top edge comes down to the line and the line rides it, the
+ * bottom edge never moving. Until the fade has run the panel is held in its
+ * own place (the two keyframes above), and a rider who asked for less motion
+ * sees it at the bottom edge at once, as the clip is. With no line to keep it
+ * is clipped to nothing, as on any ride, and the room is the whole panel's.
+ *
+ * ⚠️ **What it does not do, recorded as #419 asks.** While the controls are
+ * DRAWN the room is what it was — on the owner's tablet at the large text,
+ * three lines of eight, the rest under a finger's scroll (#2599) — and they
+ * are held drawn while a notice stands, while the rider holds an item (ADR
+ * 0075 D-5) and once the rider has finished. A ride with no race moves
+ * nothing: its line stays where the panel begins.
+ *
+ * `browser/lap-race-hud.browser.spec.ts` §"#2837" measures it grown, given
+ * back, and — with this rule undone — not grown at all, and holds a phone's
+ * panel in its place; `ride-chrome.browser.spec.ts` §"#2837" holds a ride's
+ * with no race.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud[data-oyl-controls='hidden']:has(> .oyl-hud__standings)
+    .oyl-hud__actions {
+    translate: 0 calc(100% - var(--oyl-hud-actions-kept, 0px));
+  }
+}
+
+/*
+ * The layer an open panel's keyboard control stands on (`panel-tabs.ts` §"A
+ * keyboard and a screen reader"): the whole stage, and catching no touch
+ * itself, so a finger on the road or on a panel under it reaches what it
+ * always did. `> .oyl-hud__tabs` so it outranks the stage's `.oyl-hud > *`,
+ * which hands every panel the pointer back.
+ */
+.oyl-hud__tabs {
+  display: none;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* Drawn on a tablet only (`panel-tabs.ts` §`PANEL_TABS_MEDIA`), by the
+   stylesheet as well as by the HUD, so a window resized to a phone's draws no
+   control in the frame before the HUD has heard of it. */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-hud__tabs {
+    display: block;
+  }
+}
+
+.oyl-game--riding .oyl-hud > .oyl-hud__tabs {
+  pointer-events: none;
+}
+
+/*
+ * A tucked panel's tab, and an open panel's keyboard control while it is
+ * drawn: #669's 48 px both ways, the HUD's own surface and border, the
+ * panel's word. The focus ring is drawn INSIDE, on its own surface (`hudInk`
+ * on `hudSurface`, declared in `tokens.ts`): a ring outside would stand on
+ * a colour nothing checks (#748).
+ */
+.oyl-hud__tab,
+.oyl-hud__tuck {
+  align-items: center;
+  background: var(--oyl-color-hud-surface);
+  border: 2px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-hud-ink);
+  display: inline-flex;
+  font-size: var(--oyl-font-size-sm);
+  justify-content: center;
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0 var(--oyl-space-sm);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.oyl-hud__tab:focus-visible,
+.oyl-hud__tuck:focus-visible {
+  outline: 3px solid var(--oyl-color-hud-ink);
+  outline-offset: -6px;
+}
+
+/*
+ * An open panel's keyboard control: on its layer, at the panel's corner where
+ * `panel-tabs.ts` §`placeTuck` puts it as focus arrives, and clipped to
+ * nothing — undrawn and untouchable, never removed from the tab order — until
+ * the keyboard is on it. A tap on the panel is what a finger presses.
+ */
+.oyl-hud__tuck {
+  position: absolute;
+}
+
+.oyl-hud__tuck:not(:focus-visible) {
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
+/*
+ * A tucked panel is its tab and nothing else, in the panel's own place:
+ * the panel's class keeps its grid area and its corner, and this takes away
+ * its size, its padding and its border, so the tab's own are what is drawn.
+ * On a tablet only, as the tabs are (`panel-tabs.ts` §`PANEL_TABS_MEDIA`).
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud .oyl-hud__panel.oyl-hud__panel--collapsed {
+    border: 0;
+    display: block;
+    height: auto;
+    max-height: none;
+    min-height: 0;
+    padding: 0;
+    /* The tab's width, not the grid area's: a panel the grid stretched would
+       keep the panel's whole width and give none of it back. An area aligned
+       to its end keeps the tab at its end (`justify-self: end` stays). */
+    width: max-content;
+  }
+
+  .oyl-game--riding .oyl-hud .oyl-hud__trainer--collapsed {
+    margin: 0;
+    width: max-content;
+  }
+}
+
+/*
+ * A reading one panel lends another goes home when the other is tucked away:
+ * anchored to a tucked panel, it is drawn over the tab, and a tap on the tab
+ * lands on the reading's own panel and tucks that away instead.
+ *
+ * - On every tablet, *Elapsed* and *Clock* are Readings-panel readings drawn
+ *   on the Power panel's last row (§"THE CLOCK ROW", anchored to it). With the
+ *   Power panel tucked away they are readings in the Readings panel's grid.
+ * - On the 4:3 tablet the Gradient is a Power-panel reading drawn in the
+ *   Readings panel (§"the gradient's cell", anchored to it). With the Readings
+ *   panel tucked away it is a fourth reading in the Power panel's row.
+ */
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__fields--primary.oyl-hud__panel--collapsed)
+    .oyl-hud__fields--secondary
+    > :is(.oyl-hud__field--elapsed, .oyl-hud__field--clock) {
+    flex-direction: column;
+    gap: 0;
+    grid-area: auto;
+    position: static;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) and (height < 50rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__fields--secondary.oyl-hud__panel--collapsed)
+    .oyl-hud__fields--primary {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) max-content;
+  }
+
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__fields--secondary.oyl-hud__panel--collapsed)
+    .oyl-hud__fields--primary
+    > .oyl-hud__field--gradient {
+    grid-area: auto;
+    position: static;
+  }
 }

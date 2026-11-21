@@ -476,6 +476,7 @@ export {
   ASSUMED_GROSS_EFFICIENCY,
   caloriesFromHeartRate,
   caloriesFromWork,
+  HeartRateCaloriesFold,
   JOULES_PER_KILOCALORIE,
   rideCalories,
 } from './analysis/calories';
@@ -500,6 +501,7 @@ export {
   powerZones,
   SWEET_SPOT_FRACTIONS,
   timeInZones,
+  TimeInZonesFold,
   zoneOf,
 } from './analysis/zones';
 
@@ -572,8 +574,37 @@ export {
   positionAt,
   PROFILE_RESOLUTION_METRES,
   recordedAscent,
+  RecordedAscentFold,
   routeProfile,
 } from './route/profile';
+
+// The rolling route (#2895): an open-world ride's profile, which grows ahead
+// along the street graph's default ways, swaps its tail at a junction before
+// the 100 m lock and drops the road far behind (ADR 0087 D-4.1, D-6; ADR 0088
+// D-1). `route/rolling.ts` says what `routeProfile` would not do.
+
+export type {
+  RollingChoice,
+  RollingEdge,
+  RollingJunction,
+  RollingLeg,
+  RollingLegKind,
+  RollingPoint,
+  RollingStreetGraph,
+  RollingWay,
+} from './route/rolling';
+export {
+  JUNCTION_LOCK_METRES,
+  ROLLING_AHEAD_METRES,
+  ROLLING_BEHIND_METRES,
+  ROLLING_DESPIKE_SAMPLES,
+  ROLLING_LEAST_WAY_METRES,
+  ROLLING_MOST_SAMPLES,
+  ROLLING_RESOLUTION_METRES,
+  ROLLING_SLOPE_SAMPLES,
+  RollingRoute,
+  waysOn,
+} from './route/rolling';
 
 // The wind, and the resolution of it against the route's own bearings (#326).
 // Here rather than in the game for the reason `route/wind.ts` gives: the rider
@@ -588,6 +619,22 @@ export {
   tangentialWindMetresPerSecond,
   wind,
 } from './route/wind';
+
+// The course ahead in a few numbers (#2794): the next climb and descent, the
+// climbing left and a stretch's grade, which the AI bots and the AI pacer are
+// both shown. One module, so the two read the road alike.
+
+export type { CourseHill, CourseHills } from './route/course-ahead';
+export {
+  COURSE_AHEAD_MOST_METRES,
+  COURSE_HILL_GRADE_PERCENT,
+  COURSE_HILL_LEAST_METRES,
+  COURSE_ROUNDING_METRES,
+  courseAverageGrade,
+  courseClimbing,
+  courseHillsAhead,
+  isCourseHill,
+} from './route/course-ahead';
 
 // --- Routing (#70) -----------------------------------------------------------
 //
@@ -694,6 +741,7 @@ export { botIsAhead, gapMagnitudeSeconds, pacerGap } from './pacer/gap';
 
 export type {
   ModelPacerAnswer,
+  ModelPacerCourse,
   ModelPacerInput,
   ModelPacerInputProblem,
   ModelPacerInputRead,
@@ -701,15 +749,35 @@ export type {
   PacerDecisionOutcome,
   PacerDecisionRecord,
   PacerDirection,
+  PacerGapReading,
+  PacerGapTrend,
+  PacerHeartRateTrend,
   PacerIntent,
   PacerPlan,
+  PacerPowerTrend,
   PacerSayProblem,
+  RiderPlace,
 } from './pacer/model-pacer';
+
+// ADR 0082: with the rider level or in the draft, the device eases before a
+// climb and lifts on a descent and over the top, under ADR 0078's floor.
+export type { PacerRuleGround, PacerTerrain } from './pacer/terrain-rule';
+export {
+  PACER_BEFORE_CLIMB_M,
+  PACER_OVER_THE_TOP_M,
+  PACER_TERRAINS,
+  pacerSayAgainstRidden,
+  pacerTerrainApplies,
+  pacerTerrainAt,
+  riddenDirection,
+} from './pacer/terrain-rule';
 export {
   CLIMBER_CLIMB_GRADE_PERCENT,
   CLIMBER_DESCENT_GRADE_PERCENT,
   directedPacingFactor,
   directedPowerWatts,
+  flooredDirection,
+  gapTrendOf,
   MODEL_PACER_ANSWER_MOST_CHARACTERS,
   MODEL_PACER_ASK_EVERY_S,
   MODEL_PACER_CODE_VERSION,
@@ -717,20 +785,32 @@ export {
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
   MODEL_PACER_LOG_MOST,
+  MODEL_PACER_RECENT_LINES,
   MODEL_PACER_SAY_MOST_CHARACTERS,
   MODEL_PACER_SAY_SHOWN_S,
   modelPacerAnswerSchema,
+  PACER_AHEAD_FLOOR_S,
   PACER_DECISION_OUTCOMES,
   PACER_EASE,
+  PACER_GAP_TREND_METRES_PER_SECOND,
+  PACER_GAP_TRENDS,
+  PACER_HEART_RATE_TRENDS,
   PACER_INTENTS,
+  PACER_LEVEL_S,
   PACER_LIFT,
   PACER_PLANS,
+  PACER_POWER_TRENDS,
   pacerDecisionRecord,
   pacerDirectionAt,
+  pacerSayAgainstIntent,
+  pacerSaysEasing,
+  pacerSaysPushing,
   pacerSayProblem,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
+  RIDER_PLACES,
+  riderPlaceOf,
 } from './pacer/model-pacer';
 
 // --- Racing your own previous attempt (#93) ----------------------------------

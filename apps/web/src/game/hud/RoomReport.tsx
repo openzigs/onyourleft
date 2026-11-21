@@ -116,6 +116,12 @@ function answerText(answer: RoomReportAnswer): string {
 export function RoomReport(props: {
   readonly target: RoomReportTarget;
   readonly onReport: (riderId: number, reason: RoomReportReason) => Promise<RoomReportAnswer>;
+  /**
+   * #2600: told whether the reasons or the answer are on show, so the ride's
+   * controls are held drawn while they are: the answer is read, not pressed,
+   * and the reasons are a choice in progress.
+   */
+  readonly onOpen?: (open: boolean) => void;
 }): JSX.Element {
   const [phase, setPhase] = useState<Phase>({ kind: 'closed' });
   const said = useRef<HTMLParagraphElement>(null);
@@ -136,6 +142,13 @@ export function RoomReport(props: {
   };
 
   const closed = phase.kind === 'closed';
+  const { onOpen } = props;
+  useEffect(() => {
+    onOpen?.(!closed);
+    return () => {
+      onOpen?.(false);
+    };
+  }, [closed, onOpen]);
   useEffect(() => {
     if (!closed || !restoreFocus.current) return;
     restoreFocus.current = false;

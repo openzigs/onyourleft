@@ -56,6 +56,7 @@ import { Button } from '../design/Button';
 import { readMusicAndMaster, writeMasterMuted } from './audio-mix';
 import { steppedVolume, type CuePreference } from './cue-preference';
 import { deviceStorage, type PreferenceStorage } from './hud/announce-preference';
+import { HIDES_ATTRIBUTE } from './hud/controls-reveal';
 
 export interface SoundControlsProps {
   readonly preference: CuePreference;
@@ -70,7 +71,9 @@ export function SoundControls({ preference, onChange, storage }: SoundControlsPr
   const [masterMuted, setMasterMuted] = useState(() => readMusicAndMaster(store()).masterMuted);
   const silenced = preference.muted || masterMuted;
   return (
-    <div className="oyl-sound" role="group" aria-label="Sounds">
+    // #2600: on the ride HUD the sounds hide with Pause and End ride until
+    // touched (`hud/controls-reveal.ts`); the attribute does nothing elsewhere.
+    <div className="oyl-sound" role="group" aria-label="Sounds" {...{ [HIDES_ATTRIBUTE]: '' }}>
       {/*
         #668: the design system's toggle rather than a hand-built button
         carrying the secondary's class. Until then the pressed state was

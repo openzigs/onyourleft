@@ -22,6 +22,7 @@
 
 import type {
   DeliveryInView,
+  DeliveryMarkerKind,
   DeliveryObstacleKind,
   DeliveryPiece,
   SceneFrame,
@@ -34,8 +35,23 @@ export const DELIVERY_AHEAD_METRES = 10;
 /** How far apart each piece of a kind stands along the road, in metres. */
 export const DELIVERY_SPACING_METRES = 2;
 
-/** Every obstacle kind, in turn. `port.ts` §`DeliveryObstacleKind`. */
-const KINDS: readonly DeliveryObstacleKind[] = ['bin', 'trolley', 'cone', 'parked-car'];
+/**
+ * Every obstacle kind, in turn. `port.ts` §`DeliveryObstacleKind`. #2367: the
+ * moving hazards (#2364) among them, so the page draws the hardest level's
+ * kinds (levels 3 to 6 bring them in).
+ */
+const KINDS: readonly DeliveryObstacleKind[] = [
+  'bin',
+  'trolley',
+  'cone',
+  'parked-car',
+  'dog',
+  'car-pulling-out',
+  'oncoming-rider',
+];
+
+/** #2367: every marker kind, in turn (#2365's mailbox and no-delivery among them). */
+const MARKER_KINDS: readonly DeliveryMarkerKind[] = ['house', 'mailbox', 'no-delivery'];
 
 /** The centreline point nearest `along`, and the road's heading there. */
 function onRoad(
@@ -87,7 +103,10 @@ export function deliveryAhead(
   const each = Array.from({ length: count }, (_, index) => index);
   return {
     parcels: each.map((index) => piece(index, 3, 1.1)),
-    markers: each.map((index) => piece(index, 6, 0)),
+    markers: each.map((index) => ({
+      ...piece(index, 6, 0),
+      kind: MARKER_KINDS[index % MARKER_KINDS.length] as DeliveryMarkerKind,
+    })),
     // #2847: each with its place on the round, as a round's obstacles carry
     // one, so the cars among them wear their bodies and paints, not all the first.
     obstacles: each.map((index) => ({

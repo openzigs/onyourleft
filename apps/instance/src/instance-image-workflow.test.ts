@@ -7,7 +7,9 @@
  * larger runner is billed), every third-party action pinned to a commit, the
  * build tooling's own images pinned by digest, no checkout in the job that
  * proves the bundle needs none, and the verify command the guide gives an
- * operator the same command the workflow runs against the pushed digest.
+ * operator the same command the workflow runs against the pushed digest. And
+ * since #2818, the one command the guide gives a Linux operator for the
+ * bundle's `secrets/` is the only thing that job does to that folder.
  */
 
 import { readFileSync } from 'node:fs';
@@ -99,5 +101,35 @@ describe('the verify command the guide gives is the one the workflow runs', () =
     // On a release tag the identity is the guide's, character for character.
     expect(publish).toContain("refs/tags/v*) ref='refs/tags/v' ;;");
     expect(publish.indexOf('cosign sign --yes')).toBeLessThan(publish.indexOf('cosign verify'));
+  });
+});
+
+describe('the Linux step the guide gives is the one the pull-only job runs (#2818)', () => {
+  // The release bundle ships `secrets/`, so Docker never makes it owned by
+  // root. On Linux it is still the extracting user's, and the instance is uid
+  // 1000: this one command is all the guide asks, and all the job may do.
+  const LINUX_STEP = 'sudo chown 1000 secrets';
+  const START = 'docker compose up -d --wait';
+
+  it('the guide gives it once, as a command to run, before the command that starts the instance', () => {
+    const fenced = [...GUIDE.matchAll(/```bash\n([\s\S]*?)```/g)].map((match) => match[1] ?? '');
+    const giving = fenced.filter((block) => block.split('\n').includes(LINUX_STEP));
+    expect(giving).toHaveLength(1);
+    expect(GUIDE.indexOf(LINUX_STEP)).toBeLessThan(GUIDE.indexOf(START));
+  });
+
+  it('the job runs it on the folder the bundle ships, before it starts the instance, and makes no folder itself', () => {
+    const pullOnly = job('pull-only');
+    expect(pullOnly.split('\n').map((line) => line.trim())).toContain(LINUX_STEP);
+    expect(pullOnly.indexOf(LINUX_STEP)).toBeLessThan(pullOnly.indexOf(START));
+    // A `mkdir` here would hide a bundle that ships no folder: the job would
+    // pass, and an operator's Docker would make it owned by root.
+    expect(pullOnly).not.toMatch(/mkdir[^\n]*secrets/);
+  });
+
+  it('the job reads back, from that folder, the secret key the first start made', () => {
+    const pullOnly = job('pull-only');
+    const readBack = pullOnly.indexOf('sudo test -s secrets/instance-secret-key');
+    expect(readBack).toBeGreaterThan(pullOnly.indexOf(START));
   });
 });

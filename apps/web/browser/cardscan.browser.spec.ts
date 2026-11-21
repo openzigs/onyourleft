@@ -293,7 +293,11 @@ test.describe('#2823 — the owner’s claim QR and its six digits', () => {
       await open(page);
       await scan(page);
       await page.getByRole('button', { name: 'My server’s setup page' }).click();
-
+      // #2878: the optional name, labelled, on the claim step, which still fits.
+      const name = page.getByLabel('The name other riders will see (optional)');
+      await expect(name).toBeVisible();
+      await name.fill('Mara');
+      await expectFits(page, `claim step with its name at ${String(viewport.width)} px`);
       await page.getByRole('button', { name: 'Claim this server' }).click();
       const digits = page.locator('.oyl-instance__compare');
       await expect(digits).toHaveText('482 913');

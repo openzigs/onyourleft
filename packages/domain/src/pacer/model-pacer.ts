@@ -15,9 +15,14 @@
  * {@link ModelPacerInput}: the pacer's advertised W/kg, its plan and intent
  * now and how long it has held the intent, where the rider is against it, the
  * rider's W/kg and whether they are in its draft, the grade ahead, the metres
- * to the finish and the seconds ridden. **Every field is a number, a boolean
- * or a word from a closed list**: there is no field a coordinate, a place
- * name, a rider's name, a date or an identifier could be written into, and
+ * to the finish and the seconds ridden; since #2794, the course ahead
+ * ({@link ModelPacerCourse}: the next climb and descent, and the climbing
+ * left). **Every field is a number, a boolean
+ * or a word from a closed list**, except `recentLines` (#2760): the model's
+ * own last lines, screened free text (§`pacerSayProblem`: no digit but a
+ * cadence or power target, no symbol, and a length), written by the model from a state that holds no
+ * name or place. There is no other field a coordinate, a place name, a rider's name,
+ * a date or an identifier could be written into, and
  * {@link readModelPacerInput} refuses any key it does not name. A problem
  * names the field and the rule, never the value (ADR 0004 D).
  *
@@ -29,8 +34,13 @@
  * does not name makes the whole answer invalid, so a model that writes
  * `"watts": 900` has said nothing; so does a plan or intent outside its list,
  * text that is not JSON, an answer longer than
- * {@link MODEL_PACER_ANSWER_MOST_CHARACTERS}, or a line that fails
- * {@link pacerSayProblem}.
+ * {@link MODEL_PACER_ANSWER_MOST_CHARACTERS}, a line that fails
+ * {@link pacerSayProblem}, or since #2777 a line that says the opposite of
+ * the intent beside it ({@link pacerSayAgainstIntent}).
+ *
+ * Since #2777 the device rides one floor under the model's intent:
+ * {@link flooredDirection}, an `ease` ridden as `hold` once the rider has been
+ * ahead for {@link PACER_AHEAD_FLOOR_S} (ADR 0078, Proposed).
  *
  * ## How an answer is ridden
  *
@@ -54,7 +64,9 @@
  * ride began on the recording's clock.
  */
 
+import { HEART_RATE_ZONE_NAMES, POWER_ZONE_NAMES } from '../analysis/zones';
 import type { GradePercent, Watts } from '../quantities';
+import { isCourseHill, type CourseHill } from '../route/course-ahead';
 import { watts } from '../quantities';
 import {
   flatPowerWatts,
@@ -182,7 +194,162 @@ export interface ModelPacerInput {
   readonly toFinishM: number | null;
   /** Whole seconds ridden. */
   readonly rideS: number;
+  // --- #2760: the rider's own sensors. Each is ABSENT when the sensor is not live. ---
+  /** The rider's W/kg over the last 3 s, as the HUD shows it. */
+  readonly rider3sWPerKg?: number;
+  /** The rider's average W/kg over the last minute of riding. */
+  readonly riderMinuteWPerKg?: number;
+  /** The zone of the 3 s power, of the rider's own threshold, by its name (`POWER_ZONE_NAMES`); absent with none set. */
+  readonly powerZone?: string;
+  /** Whether power is rising, steady or fading over the last minute. */
+  readonly powerTrend?: PacerPowerTrend;
+  /** Whole seconds power has stayed at or above the rider's own threshold, unbroken, until now. */
+  readonly aboveThresholdS?: number;
+  /** Cadence now, whole revolutions a minute. */
+  readonly cadenceRpm?: number;
+  /** Heart rate now, whole beats a minute. */
+  readonly heartRateBpm?: number;
+  /** The zone of the heart rate, of the rider's own threshold heart rate, by its name (`HEART_RATE_ZONE_NAMES`); absent with none set. */
+  readonly heartRateZone?: string;
+  /** Whether heart rate is rising, steady or falling over the last minute. */
+  readonly heartRateTrend?: PacerHeartRateTrend;
+  /**
+   * The model's own last lines this ride, oldest first, so it does not say
+   * them again: at most {@link MODEL_PACER_RECENT_LINES}, each one that
+   * {@link pacerSayProblem} passed. Absent before the first. Held in memory
+   * on the device for the ride and never stored (ADR 0072 D-4.4).
+   */
+  readonly recentLines?: readonly string[];
+  // --- #2777: where the rider is, in words a model cannot read backwards. ---
+  /**
+   * Where the rider is against the pacer, by the time gap at the rider's own
+   * speed ({@link riderPlaceOf}): `ahead` or `behind` by more than
+   * {@link PACER_LEVEL_S}, else `level`. Absent at a standstill.
+   */
+  readonly riderPlace?: RiderPlace;
+  /**
+   * How the gap moved since the last ask ({@link gapTrendOf}), for the rider:
+   * `rider-gaining` (pulling away, or coming back), `steady`, or
+   * `rider-losing` (dropping back, or being caught). Absent on the first ask.
+   */
+  readonly gapTrend?: PacerGapTrend;
+  /**
+   * The road ahead of the pacer (#2794): the next climb and descent, and the
+   * climbing left. Optional, so a device from before it still asks; every
+   * device since sends it.
+   */
+  readonly course?: ModelPacerCourse;
 }
+
+/**
+ * **The course ahead of the pacer**, as the model is shown it (#2794), from
+ * `route/course-ahead.ts`. Metres to 10 m, grades to a whole percent.
+ */
+export interface ModelPacerCourse {
+  /** The next climb (at least 3 % for at least 200 m, within 5 km and before the finish), or `null`. */
+  readonly climb: CourseHill | null;
+  /** The next descent, by the same rule downhill, or `null`. */
+  readonly descent: CourseHill | null;
+  /** On a loop, metres to the end of this lap; `null` on a route with a finish (`toFinishM`). */
+  readonly lapLeftM: number | null;
+  /** Metres of climbing left to the finish, or on a loop to the end of the lap. */
+  readonly climbLeftM: number;
+}
+
+/** Where the rider is against the pacer. A closed list (#2777). */
+export const RIDER_PLACES = ['ahead', 'level', 'behind'] as const;
+export type RiderPlace = (typeof RIDER_PLACES)[number];
+
+/** How the gap moved, for the rider. A closed list (#2777). */
+export const PACER_GAP_TRENDS = ['rider-gaining', 'steady', 'rider-losing'] as const;
+export type PacerGapTrend = (typeof PACER_GAP_TRENDS)[number];
+
+/**
+ * The time gap inside which the rider is `level` with the pacer: **2 s** at
+ * the rider's own speed, either way — a rider in the draft, or about to be.
+ * A feel parameter, the author's choice (#2777).
+ */
+export const PACER_LEVEL_S = 2;
+
+/**
+ * The rate the gap must move at to count as gained or lost: **0.2 m/s**,
+ * about 2 % of a 36 km/h ride. Slower than that is `steady`. The author's
+ * choice (#2777).
+ */
+export const PACER_GAP_TREND_METRES_PER_SECOND = 0.2;
+
+/**
+ * Where a rider `riderGapM` metres ahead of the pacer (below 0, behind) is,
+ * at `riderSpeed` m/s: `undefined` at a standstill, where a time gap is a
+ * division by zero (`pacer/gap.ts`).
+ */
+export function riderPlaceOf(riderGapM: number, riderSpeed: number): RiderPlace | undefined {
+  if (!(riderSpeed > 0) || !Number.isFinite(riderGapM) || !Number.isFinite(riderSpeed)) {
+    return undefined;
+  }
+  const gapSeconds = riderGapM / riderSpeed;
+  if (gapSeconds > PACER_LEVEL_S) return 'ahead';
+  if (gapSeconds < -PACER_LEVEL_S) return 'behind';
+  return 'level';
+}
+
+/** One reading of the gap: the seconds ridden, and the metres the rider is ahead. */
+export interface PacerGapReading {
+  readonly atS: number;
+  readonly riderGapM: number;
+}
+
+/**
+ * How the gap moved from `earlier` to `later`, for the rider, or `undefined`
+ * when no time passed between them.
+ */
+export function gapTrendOf(
+  earlier: PacerGapReading,
+  later: PacerGapReading,
+): PacerGapTrend | undefined {
+  const elapsed = later.atS - earlier.atS;
+  if (!(elapsed > 0)) return undefined;
+  const rate = (later.riderGapM - earlier.riderGapM) / elapsed;
+  if (!Number.isFinite(rate)) return undefined;
+  if (rate > PACER_GAP_TREND_METRES_PER_SECOND) return 'rider-gaining';
+  if (rate < -PACER_GAP_TREND_METRES_PER_SECOND) return 'rider-losing';
+  return 'steady';
+}
+
+/**
+ * How long the rider must have been `ahead` before an `ease` is ridden as
+ * `hold`: **10 s** of riding, three asks in a row (ADR 0078, Proposed).
+ */
+export const PACER_AHEAD_FLOOR_S = 10;
+
+/**
+ * The floor under the model's intent (ADR 0078 D-1, Proposed; #2777): with
+ * the rider `ahead` ({@link riderPlaceOf}, more than {@link PACER_LEVEL_S})
+ * for at least {@link PACER_AHEAD_FLOOR_S}, an `ease` is ridden as `hold`. A
+ * pacer that eases away from a rider who is already ahead never takes over.
+ * Every other direction is ridden as the model chose it, and this never
+ * lifts: the floor stops the wrong way, it does not chase. `aheadForS` is how
+ * long the rider had been ahead when the ask was built, or `undefined` when
+ * they were not.
+ */
+export function flooredDirection(
+  direction: PacerDirection,
+  aheadForS: number | undefined,
+): PacerDirection {
+  if (direction.intent !== 'ease' || aheadForS === undefined) return direction;
+  return aheadForS >= PACER_AHEAD_FLOOR_S ? { plan: direction.plan, intent: 'hold' } : direction;
+}
+
+/** How power moved over the last minute. A closed list. */
+export const PACER_POWER_TRENDS = ['rising', 'steady', 'fading'] as const;
+export type PacerPowerTrend = (typeof PACER_POWER_TRENDS)[number];
+
+/** How heart rate moved over the last minute. A closed list. */
+export const PACER_HEART_RATE_TRENDS = ['rising', 'steady', 'falling'] as const;
+export type PacerHeartRateTrend = (typeof PACER_HEART_RATE_TRENDS)[number];
+
+/** How many of its own last lines the model is shown: **3**. */
+export const MODEL_PACER_RECENT_LINES = 3;
 
 /** A state refused: the field, and the rule it broke. Never the value. */
 export interface ModelPacerInputProblem {
@@ -194,8 +361,11 @@ export type ModelPacerInputRead =
   | { readonly ok: true; readonly value: ModelPacerInput }
   | { readonly ok: false; readonly problem: ModelPacerInputProblem };
 
-/** The longest pacer state accepted, characters of its JSON: **1 024**. One is about 250. */
-export const MODEL_PACER_INPUT_MOST_CHARACTERS = 1_024;
+/**
+ * The longest pacer state accepted, characters of its JSON: **2 048**. One
+ * with every sensor and three lines is about 615; 1 024 until #2760 widened it.
+ */
+export const MODEL_PACER_INPUT_MOST_CHARACTERS = 2_048;
 
 const INPUT_KEYS = [
   'pacerWPerKg',
@@ -209,6 +379,31 @@ const INPUT_KEYS = [
   'toFinishM',
   'rideS',
 ] as const;
+
+/** The fields a state may leave out: each a sensor the rider may not have (#2760). */
+const OPTIONAL_INPUT_KEYS = [
+  'rider3sWPerKg',
+  'riderMinuteWPerKg',
+  'powerZone',
+  'powerTrend',
+  'aboveThresholdS',
+  'cadenceRpm',
+  'heartRateBpm',
+  'heartRateZone',
+  'heartRateTrend',
+  'recentLines',
+  'riderPlace',
+  'gapTrend',
+  'course',
+] as const;
+
+const KNOWN_INPUT_KEYS: readonly string[] = [...INPUT_KEYS, ...OPTIONAL_INPUT_KEYS];
+
+/** The highest cadence a state may say, rpm: well over any rider's. */
+const MOST_CADENCE_RPM = 250;
+/** The heart rates a state may say, bpm: wider than any rider's. */
+const LEAST_HEART_RATE_BPM = 20;
+const MOST_HEART_RATE_BPM = 250;
 
 /** The largest distance a state may say, metres: a route of 1 000 km. */
 const MOST_METRES = 1_000_000;
@@ -247,7 +442,7 @@ export function readModelPacerInput(value: unknown): ModelPacerInputRead {
       `must be at most ${String(MODEL_PACER_INPUT_MOST_CHARACTERS)} characters`,
     );
   }
-  if (Object.keys(value).some((key) => !(INPUT_KEYS as readonly string[]).includes(key))) {
+  if (Object.keys(value).some((key) => !KNOWN_INPUT_KEYS.includes(key))) {
     return refuse('input', 'has a field this pacer state does not');
   }
   const missing = INPUT_KEYS.find((key) => !(key in value));
@@ -282,7 +477,62 @@ export function readModelPacerInput(value: unknown): ModelPacerInputRead {
   ];
   const failed = checks.find(([, ok]) => !ok);
   if (failed !== undefined) return refuse(`input.${failed[0]}`, failed[2]);
+  // #2760: a sensor field is absent or valid; `null` is not "absent".
+  const sensorChecks: readonly (readonly [string, (field: unknown) => boolean, string])[] = [
+    ['rider3sWPerKg', (v) => numberIn(v, 0, MOST_WATTS_PER_KILOGRAM), 'must be watts per kilogram'],
+    [
+      'riderMinuteWPerKg',
+      (v) => numberIn(v, 0, MOST_WATTS_PER_KILOGRAM),
+      'must be watts per kilogram',
+    ],
+    ['powerZone', (v) => oneOf(POWER_ZONE_NAMES, v), 'must be one of the power zones'],
+    ['powerTrend', (v) => oneOf(PACER_POWER_TRENDS, v), 'must be one of the three trends'],
+    ['aboveThresholdS', (v) => wholeIn(v, 0, MOST_SECONDS), 'must be a whole number of seconds'],
+    ['cadenceRpm', (v) => wholeIn(v, 0, MOST_CADENCE_RPM), 'must be whole revolutions a minute'],
+    [
+      'heartRateBpm',
+      (v) => wholeIn(v, LEAST_HEART_RATE_BPM, MOST_HEART_RATE_BPM),
+      'must be whole beats a minute',
+    ],
+    [
+      'heartRateZone',
+      (v) => oneOf(HEART_RATE_ZONE_NAMES, v),
+      'must be one of the heart-rate zones',
+    ],
+    ['heartRateTrend', (v) => oneOf(PACER_HEART_RATE_TRENDS, v), 'must be one of the three trends'],
+    ['recentLines', recentLinesOk, 'must be up to three lines the pacer may say'],
+    ['riderPlace', (v) => oneOf(RIDER_PLACES, v), 'must be one of the three places'],
+    ['gapTrend', (v) => oneOf(PACER_GAP_TRENDS, v), 'must be one of the three trends'],
+    ['course', courseOk, 'must be the course ahead: two hills or null, and metres'],
+  ];
+  const sensorFailed = sensorChecks.find(([key, ok]) => key in value && !ok(value[key]));
+  if (sensorFailed !== undefined) return refuse(`input.${sensorFailed[0]}`, sensorFailed[2]);
   return { ok: true, value: value as unknown as ModelPacerInput };
+}
+
+/** Exactly {@link ModelPacerCourse}'s shape, every number in range (#2794). */
+function courseOk(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (Object.keys(value).sort().join() !== 'climb,climbLeftM,descent,lapLeftM') return false;
+  return (
+    (value.climb === null || isCourseHill(value.climb)) &&
+    (value.descent === null || isCourseHill(value.descent)) &&
+    (value.lapLeftM === null || numberIn(value.lapLeftM, 0, MOST_METRES)) &&
+    numberIn(value.climbLeftM, 0, MOST_METRES)
+  );
+}
+
+/** One to {@link MODEL_PACER_RECENT_LINES} lines, each non-empty and one the screen passes. */
+function recentLinesOk(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= MODEL_PACER_RECENT_LINES &&
+    value.every(
+      (line: unknown) =>
+        typeof line === 'string' && line !== '' && pacerSayProblem(line) === undefined,
+    )
+  );
 }
 
 // --- What the model may answer ---------------------------------------------
@@ -305,11 +555,67 @@ const NOT_A_LINE = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 /** Markup, code, a link or an address: none of it is a sentence. */
 const MARKUP = /[<>{}[\]`*_#|\\~^=@/$%&+]|:\/\/|\bwww\./i;
 /**
- * A digit of any script. No number at all: so no figure the pacer could be
- * read as asking the rider to hold, and no coordinate (CLAUDE.md §6) — the
- * input holds none, and this makes it impossible rather than unlikely.
+ * A digit of any script, once the cadence and power figures are taken out
+ * ({@link CADENCE_OR_POWER}). No other number: so no heart rate, time,
+ * distance, speed, zone or share the pacer could be read as asking the rider
+ * to hold, and no coordinate (CLAUDE.md §6) — the input holds none, and this
+ * makes it impossible rather than unlikely.
  */
 const NUMBER = /\p{N}/u;
+/**
+ * A number written as a number form — a letter-like numeral (`\p{Nl}`) or a
+ * Roman numeral, U+2160 to U+2188 — read before NFKC, which turns `Ⅳ` into
+ * the letters `IV` that {@link NUMBER} cannot see.
+ */
+const NUMBER_FORM = /[\p{Nl}\u2160-\u2188]/u;
+/** A zone named by a bare Roman numeral in ASCII letters: `zone IV`. */
+const ZONE_NUMERAL = /\bzones?\s+[ivxlcdm]+\b/i;
+/**
+ * Words for a quantity that is not a cadence or a power. A line that carries
+ * an admitted figure may name none of them, so the figure is admitted only in
+ * a cadence or power sentence: `Heart rate 150 W` is refused.
+ */
+const OTHER_QUANTITY =
+  /\b(?:heart\s*rates?|bpm|pulses?|minutes?|seconds?|km|miles?|(?:kilo)?met(?:re|er)s?|hours?|zones?)\b|%/i;
+/**
+ * The one kind of figure a line may carry (ADR 0077, the owner's ruling of
+ * 2026-11-17): a cadence or a power target, its number in ASCII digits
+ * (after NFKC) **immediately followed by its unit**, with one space allowed —
+ * `rpm`, `watt`/`watts`, `W` or `W/kg`. No sign, no thousands separator, no
+ * range and no other digit may touch it — a sign of any script, so no
+ * dash (`\p{Pd}`) and no mathematical symbol (`\p{Sm}`: `−`, `±`, `+`) — and
+ * nothing but a non-letter may follow the unit. {@link plausible} then bounds the value; an implausible
+ * one leaves its number behind, so the line is refused as a number.
+ */
+const CADENCE_OR_POWER =
+  /(?<![\p{L}\p{N}\p{Pd}\p{Sm}.,])(\d+(?:\.\d+)?) ?(rpm|watts?|W\/kg|W)(?![\p{L}\p{N}/])/giu;
+/**
+ * The values a cadence or power target may name, inclusive (ADR 0077 D-1):
+ * cadence 30 to 150 rpm and power 30 to 2 000 W, in whole numbers; 0.5 to 10
+ * W/kg, with at most one decimal place. No leading zero.
+ */
+function plausible(value: string, unit: string): boolean {
+  const perKg = unit.toLowerCase() === 'w/kg';
+  if (!(perKg ? /^(?:0|[1-9]\d*)(?:\.\d)?$/ : /^[1-9]\d*$/).test(value)) return false;
+  const n = Number(value);
+  if (perKg) return n >= 0.5 && n <= 10;
+  if (unit.toLowerCase() === 'rpm') return n >= 30 && n <= 150;
+  return n >= 30 && n <= 2000;
+}
+/**
+ * `visible` with each plausible cadence or power target replaced by a space,
+ * and each implausible one by its bare number, which {@link NUMBER} refuses;
+ * and whether any figure was admitted.
+ */
+function withoutCadenceOrPower(visible: string): { rest: string; admitted: boolean } {
+  let admitted = false;
+  const rest = visible.replace(CADENCE_OR_POWER, (_figure: string, value: string, unit: string) => {
+    if (!plausible(value, unit)) return value;
+    admitted = true;
+    return ' ';
+  });
+  return { rest, admitted };
+}
 /**
  * The load-metric trademarks (CLAUDE.md §6, `docs/agents/scope-and-ip.md`):
  * the abbreviations in capitals as words, and the names in any case.
@@ -338,18 +644,84 @@ export function pacerSayProblem(say: string): PacerSayProblem | undefined {
   if (say.length > MODEL_PACER_SAY_MOST_CHARACTERS) return 'too-long';
   if (say === '') return undefined;
   if (NOT_A_LINE.test(say)) return 'not-a-line';
-  const visible = say.replace(INVISIBLE, '').normalize('NFKC');
-  if (MARKUP.test(visible)) return 'markup';
-  if (NUMBER.test(visible)) return 'number';
+  const shown = say.replace(INVISIBLE, '');
+  const visible = shown.normalize('NFKC');
+  const { rest, admitted } = withoutCadenceOrPower(visible);
+  if (MARKUP.test(rest)) return 'markup';
+  if (NUMBER.test(rest) || NUMBER_FORM.test(shown) || ZONE_NUMERAL.test(visible)) return 'number';
+  if (admitted && OTHER_QUANTITY.test(visible)) return 'number';
   if (TRADEMARK_ABBREVIATION.test(visible) || TRADEMARK_NAME.test(visible)) return 'trademark';
   if (MEDICAL.test(visible)) return 'health-claim';
   if (!A_LETTER.test(visible)) return 'no-words';
   return undefined;
 }
 
+// --- #2777: the line says what the pacer does --------------------------------
+
+/**
+ * The pacer speaking of itself — `I`, `I'm`, `I will`, `let me`, `let's`,
+ * `we` — then up to three words before the verb, none a negation and none
+ * `you`: so "I'm going to push" is the pacer's promise, and "I see you
+ * pushing" and "I won't push" are not.
+ */
+const SELF = String.raw`\b(?:i|i'm|i am|i'll|i will|i'd|i would|let me|let's|let us|we|we're|we are|we'll|we will|watch me)(?:\s+(?!(?:not|never|cannot|no|you|your)\b)[a-z]+){0,3}?\s+`;
+/** What the pacer says when it will push, lift, chase or come past. */
+const PUSH_VERB = String.raw`(?:push\w*|lift\w*|chas\w*|attack\w*|surg\w*|accelerat\w*|speed\w*\s+up|pick\w*\s+(?:it\s+up|up|the\s+pace)|ramp\w*\s+(?:it\s+)?up|go(?:ing)?\s+(?:harder|faster)|rid\w*\s+(?:harder|faster)|up\s+the\s+pace|rais\w*\s+the\s+pace|tak\w*\s+over|overtak\w*|pass\w*\s+you|come\s+(?:past|through|round|around)|coming\s+(?:past|through|round|around)|go(?:ing)?\s+past|catch\w*\s+(?:you|up)|reel\w*\s+you|hunt\w*\s+you|clos\w*\s+(?:the\s+gap|you\s+down|in))`;
+/** What the pacer says when it is easing, slowing, waiting or letting the rider come back. */
+const EASE_VERB = String.raw`(?:eas\w*|slow\w*|back\w*\s+off|sit\w*\s+up|drop\w*\s+back|wait\w*|hold\w*\s+back|soft[-\s]?pedal\w*|tak\w*\s+it\s+easy|go(?:ing)?\s+eas(?:y|ier)|let\w*\s+you\s+(?:catch|come|bridge|get\s+back|close|rejoin|tuck))`;
+/** Letting the rider back, said with no subject: only the pacer can mean it. */
+const LET_BACK = String.raw`(?:catch\s+(?:me|up)|come\s+back|bridge|get\s+back|close|rejoin|tuck)`;
+const PUSHES = new RegExp(
+  String.raw`${SELF}${PUSH_VERB}\b|\bhere\s+i\s+come\b|\bcoming\s+(?:past|through|for\s+you|after\s+you)\b|\b(?:chas|reel|hunt)\w*\s+you\b`,
+  'u',
+);
+const EASES = new RegExp(
+  String.raw`${SELF}${EASE_VERB}\b|\b(?:so|for)\s+you\s+(?:can|to)\s+${LET_BACK}\b|\blet\w*\s+you\s+${LET_BACK}\b|\bwaiting\s+for\s+you\b`,
+  'u',
+);
+
+/** The line as the move rules read it: invisible characters out, NFKC, one case, one apostrophe, one space. */
+function forMoves(say: string): string {
+  return say
+    .replace(INVISIBLE, '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u02bc]/gu, "'")
+    .replace(/\s+/gu, ' ');
+}
+
+/** Whether the line says the pacer is easing, slowing, waiting or letting the rider back (#2777). */
+export function pacerSaysEasing(say: string): boolean {
+  return EASES.test(forMoves(say));
+}
+
+/** Whether the line says the pacer will push, lift, chase or come past (#2777). */
+export function pacerSaysPushing(say: string): boolean {
+  return PUSHES.test(forMoves(say));
+}
+
+/**
+ * Whether `say` contradicts `intent` (#2777, the owner's tablet ride of
+ * 2026-11-17: "It says it will push yet I am ahead and never see it taking
+ * over"): a line that says the pacer will push, lift, chase or come past
+ * under `ease` or `hold`, or one that says it is easing under `lift`. Such an
+ * answer is no decision, as a line the screen stops is (ADR 0072 D-4.2), so
+ * the decision in force stays. Read on the instance and again on the device.
+ */
+export function pacerSayAgainstIntent(say: string, intent: PacerIntent): boolean {
+  return intent === 'lift' ? pacerSaysEasing(say) : pacerSaysPushing(say);
+}
+
 /** Why an answer was read as no decision at all. A closed list. */
 export type ModelPacerInvalid =
-  'too-long' | 'not-json' | 'not-an-object' | 'unknown-key' | 'bad-plan' | 'bad-intent' | 'bad-say';
+  | 'too-long'
+  | 'not-json'
+  | 'not-an-object'
+  | 'unknown-key'
+  | 'bad-plan'
+  | 'bad-intent'
+  | 'bad-say'
+  | 'say-against-intent';
 
 /** An answer, read: a direction and a line to show (`''` for none), or why it is none. */
 export type ModelPacerAnswer =
@@ -394,6 +766,9 @@ export function readModelPacerAnswer(text: string): ModelPacerAnswer {
   if (!oneOf(PACER_INTENTS, intent)) return { ok: false, reason: 'bad-intent' };
   if (typeof say !== 'string' || pacerSayProblem(say) !== undefined) {
     return { ok: false, reason: 'bad-say' };
+  }
+  if (pacerSayAgainstIntent(say, intent as PacerIntent)) {
+    return { ok: false, reason: 'say-against-intent' };
   }
   return {
     ok: true,
