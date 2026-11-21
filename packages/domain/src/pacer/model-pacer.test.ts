@@ -6,30 +6,47 @@ import { gradePercent } from '../quantities';
 import {
   directedPacingFactor,
   directedPowerWatts,
-  flooredDirection,
   gapTrendOf,
   MODEL_PACER_ANSWER_MOST_CHARACTERS,
   MODEL_PACER_INPUT_MOST_CHARACTERS,
   MODEL_PACER_LAPSE_S,
   MODEL_PACER_LATE_S,
   MODEL_PACER_RECENT_LINES,
+  MODEL_PACER_REPEAT_MEMORY,
   MODEL_PACER_SAY_MOST_CHARACTERS,
   modelPacerAnswerSchema,
-  PACER_AHEAD_FLOOR_S,
+  PACER_CHASE_MOST,
+  PACER_EASE,
   PACER_INTENTS,
+  PACER_LIFT,
   PACER_PLANS,
-  pacerDecisionRecord,
+  PACER_SAY_SAME_SHARE,
+  PACER_START_RAMP_S,
+  PACER_SURGE_CEILING,
+  PACER_SURGE_HELD_LEAST_S,
+  PACER_SURGE_HELD_MOST_S,
+  PACER_SURGE_LEAST,
+  PACER_SURGE_MOST,
+  PACER_SURGE_WINDOW_S,
+  PACER_WAIT_MOST,
+  pacerAskOutcome,
+  pacerAsRidden,
   pacerDirectionAt,
-  pacerSayAgainstIntent,
+  pacerSayRepeats,
   pacerSaysEasing,
   pacerSaysPushing,
   pacerSayProblem,
+  pacerStartFrom,
+  pacerStartShare,
+  pacerSurgeAt,
   readModelPacerAnswer,
   readModelPacerInput,
   readPacerDecisionRecord,
   riderPlaceOf,
   type ModelPacerInput,
   type PacerDecisionRecord,
+  type PacerIntent,
+  type PacerRuleRecord,
 } from './model-pacer';
 import {
   botPacerPlan,
@@ -51,10 +68,17 @@ const STATE: ModelPacerInput = {
   gradeAheadPct: 4.2,
   toFinishM: 8_000,
   rideS: 300,
+  reason: 'rider-level',
+  byPct: 0,
+  starting: false,
 };
 
 const answer = (fields: Readonly<Record<string, unknown>>): string =>
-  JSON.stringify({ plan: 'even', intent: 'lift', say: 'Stay on my wheel.', ...fields });
+  JSON.stringify({ say: 'Stay on my wheel.', ...fields });
+
+/** What #2777's line rules read for an intent: an easing line beside `lift`, a pushing one beside the others. */
+const saysAgainst = (say: string, intent: PacerIntent): boolean =>
+  intent === 'lift' ? pacerSaysEasing(say) : pacerSaysPushing(say);
 
 describe('a direction is ridden inside #92’s envelope — ADR 0072 D-2', () => {
   it('is #92’s own rule exactly for rolling and hold', () => {
@@ -260,18 +284,10 @@ describe('the rider’s own sensors, in the state — #2760', () => {
   });
 });
 
-describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
-  it('reads a plan, an intent and a line', () => {
-    expect(readModelPacerAnswer(answer({}))).toEqual({
-      ok: true,
-      direction: { plan: 'even', intent: 'lift' },
-      say: 'Stay on my wheel.',
-    });
-    expect(readModelPacerAnswer(answer({ say: '' }))).toEqual({
-      ok: true,
-      direction: { plan: 'even', intent: 'lift' },
-      say: '',
-    });
+describe('what the model may answer — ADR 0072 D-3 and D-4, ADR 0083 D-2', () => {
+  it('reads a line, and nothing else', () => {
+    expect(readModelPacerAnswer(answer({}))).toEqual({ ok: true, say: 'Stay on my wheel.' });
+    expect(readModelPacerAnswer(answer({ say: '' }))).toEqual({ ok: true, say: '' });
   });
 
   it('treats an answer with a power field as no answer at all', () => {
@@ -282,31 +298,54 @@ describe('what the model may answer — ADR 0072 D-3 and D-4', () => {
     expect(readModelPacerAnswer(answer({ resistance: 'max' })).ok).toBe(false);
   });
 
+  it('treats an answer that names a plan or an intent as no answer: the model directs nothing (#2835)', () => {
+    for (const extra of [{ intent: 'lift' }, { plan: 'even' }, { plan: 'even', intent: 'ease' }]) {
+      expect(readModelPacerAnswer(answer(extra))).toEqual({ ok: false, reason: 'unknown-key' });
+    }
+  });
+
+  it('never returns a direction, whatever a model wrote', () => {
+    const read = readModelPacerAnswer(answer({}));
+    expect(Object.keys(read).sort()).toEqual(['ok', 'say']);
+  });
+
   it.each([
-    ['not-json', 'plan: even'],
+    ['not-json', 'say: hello'],
     ['not-an-object', '["even"]'],
-    ['bad-plan', answer({ plan: 'sprint' })],
-    ['bad-intent', answer({ intent: 'wait' })],
     ['bad-say', answer({ say: 7 })],
     ['bad-say', answer({ say: 'Hold 9000 watts.' })],
     ['bad-say', answer({ say: 'Your heart rate is 150.' })],
-    ['say-against-intent', answer({ intent: 'ease', say: 'I will push on this climb.' })],
     ['too-long', answer({ say: 'a'.repeat(MODEL_PACER_ANSWER_MOST_CHARACTERS) })],
-  ])('reads %s as no decision', (reason, text) => {
+  ])('reads %s as no line', (reason, text) => {
     expect(readModelPacerAnswer(text)).toEqual({ ok: false, reason });
   });
 
-  it('says what the server holds the model to: three closed fields and a capped line', () => {
+  it('says what the server holds the model to: one capped line and no other field', () => {
     expect(modelPacerAnswerSchema()).toEqual({
       type: 'object',
       properties: {
-        plan: { type: 'string', enum: ['rolling', 'even', 'climber'] },
-        intent: { type: 'string', enum: ['hold', 'lift', 'ease'] },
         say: { type: 'string', maxLength: MODEL_PACER_SAY_MOST_CHARACTERS },
       },
-      required: ['plan', 'intent', 'say'],
+      required: ['say'],
       additionalProperties: false,
     });
+  });
+});
+
+describe('a line the pacer has just said — #2835', () => {
+  const recent = ['Stay on my wheel.', 'Easing so you can get back on.'];
+
+  it('reads the same words again as a repeat, whatever the case, spacing or punctuation', () => {
+    expect(pacerSayRepeats('Stay on my wheel.', recent)).toBe(true);
+    expect(pacerSayRepeats('stay on  my wheel!', recent)).toBe(true);
+    expect(pacerSayRepeats('Easing, so you can get back on', recent)).toBe(true);
+  });
+
+  it('reads other words, and the empty line, as new', () => {
+    expect(pacerSayRepeats('Stay on my wheel up this climb.', recent)).toBe(false);
+    expect(pacerSayRepeats('Aim for 90 rpm.', recent)).toBe(false);
+    expect(pacerSayRepeats('', [''])).toBe(false);
+    expect(pacerSayRepeats('Stay on my wheel.', [])).toBe(false);
   });
 });
 
@@ -433,38 +472,28 @@ describe('a cadence or power figure in the line — ADR 0077 (owner ruling 2026-
   it('reads a cadence or power line as a decision, as the device and the instance do', () => {
     expect(readModelPacerAnswer(answer({ say: 'Aim for 90 rpm.' }))).toEqual({
       ok: true,
-      direction: { plan: 'even', intent: 'lift' },
       say: 'Aim for 90 rpm.',
     });
   });
 });
 
-describe('the decision log, and the decision in force — ADR 0072 D-5 and D-7', () => {
+describe('what became of an ask for a line — ADR 0072 D-7', () => {
   const ok = readModelPacerAnswer(answer({}));
 
-  it('logs an answer in time as applied, with its direction and no line', () => {
-    const record = pacerDecisionRecord(10, 12.5, ok);
-    expect(record).toEqual({
-      askedAtS: 10,
-      arrivedAtS: 12.5,
-      outcome: 'applied',
-      plan: 'even',
-      intent: 'lift',
-    });
-    expect(JSON.stringify(record)).not.toContain('wheel');
+  it('is applied for an answer in time, and late past the limit, whatever it said', () => {
+    expect(pacerAskOutcome(10, 12.5, ok)).toBe('applied');
+    expect(pacerAskOutcome(10, 10 + MODEL_PACER_LATE_S, ok)).toBe('applied');
+    expect(pacerAskOutcome(10, 10 + MODEL_PACER_LATE_S + 0.05, ok)).toBe('late');
   });
 
-  it('logs a late answer as late, whatever it said', () => {
-    expect(pacerDecisionRecord(10, 10 + MODEL_PACER_LATE_S + 0.05, ok).outcome).toBe('late');
-    expect(pacerDecisionRecord(10, 10 + MODEL_PACER_LATE_S, ok).outcome).toBe('applied');
+  it('is invalid, refused or failed for those answers', () => {
+    expect(pacerAskOutcome(10, 11, readModelPacerAnswer('nope'))).toBe('invalid');
+    expect(pacerAskOutcome(10, 11, 'refused')).toBe('refused');
+    expect(pacerAskOutcome(10, 11, 'failed')).toBe('failed');
   });
+});
 
-  it('logs invalid, refused and failed answers as such', () => {
-    expect(pacerDecisionRecord(10, 11, readModelPacerAnswer('nope')).outcome).toBe('invalid');
-    expect(pacerDecisionRecord(10, 11, 'refused').outcome).toBe('refused');
-    expect(pacerDecisionRecord(10, 11, 'failed').outcome).toBe('failed');
-  });
-
+describe('the decision log of a ride before #2835, and its decision in force — ADR 0072 D-5 and D-7', () => {
   const log: readonly PacerDecisionRecord[] = [
     { askedAtS: 5, arrivedAtS: 7, outcome: 'applied', plan: 'even', intent: 'lift' },
     { askedAtS: 10, arrivedAtS: 12, outcome: 'invalid' },
@@ -476,7 +505,7 @@ describe('the decision log, and the decision in force — ADR 0072 D-5 and D-7',
     expect(pacerDirectionAt([], 100)).toBeUndefined();
   });
 
-  it('applies a decision from its arrival until a newer one replaces it', () => {
+  it('applies a decision from its arrival until a newer one replaces it, with no start ramp', () => {
     expect(pacerDirectionAt(log, 7)).toEqual({ plan: 'even', intent: 'lift' });
     // An invalid answer does not cancel the decision in force.
     expect(pacerDirectionAt(log, 15)).toEqual({ plan: 'even', intent: 'lift' });
@@ -511,6 +540,514 @@ describe('the decision log, and the decision in force — ADR 0072 D-5 and D-7',
     ]) {
       expect(readPacerDecisionRecord(bad)).toBeUndefined();
     }
+  });
+});
+
+describe('the device’s decisions in the log, and the one in force — #2835, ADR 0083 D-5', () => {
+  const WAIT: PacerRuleRecord = {
+    askedAtS: 70,
+    arrivedAtS: 71.5,
+    outcome: 'applied',
+    plan: 'rolling',
+    intent: 'ease',
+    by: 0.12,
+    reason: 'rider-behind',
+    place: 'behind',
+    gapS: -6.8,
+    line: 'shown',
+  };
+  const FAILED: PacerRuleRecord = {
+    askedAtS: 75,
+    arrivedAtS: null,
+    outcome: 'failed',
+    plan: 'rolling',
+    intent: 'lift',
+    by: 0.03,
+    reason: 'rider-ahead',
+    place: 'ahead',
+    gapS: 4.4,
+    line: 'none',
+  };
+  const STOPPED: PacerRuleRecord = {
+    askedAtS: 80,
+    arrivedAtS: 86,
+    outcome: 'late',
+    plan: 'rolling',
+    intent: 'hold',
+    reason: 'rider-level',
+    line: 'none',
+  };
+  const log: readonly PacerDecisionRecord[] = [WAIT, FAILED, STOPPED];
+
+  it('is in force from the ask, not from the answer’s arrival', () => {
+    expect(pacerDirectionAt(log, 69.95)).toBeUndefined();
+    expect(pacerDirectionAt(log, 70)).toEqual({ plan: 'rolling', intent: 'ease', by: 0.12 });
+    expect(pacerDirectionAt(log, 71)).toEqual({ plan: 'rolling', intent: 'ease', by: 0.12 });
+  });
+
+  it('rides a decision whose line failed, was late, or never arrived: the answer costs a line, never the pacing', () => {
+    const lift = { plan: 'rolling', intent: 'lift', by: 0.03 } as const;
+    expect(pacerDirectionAt(log, 75)).toEqual(pacerAsRidden(lift, 75));
+    expect(pacerDirectionAt(log, 79.95)).toEqual(pacerAsRidden(lift, 79.95));
+    expect(pacerDirectionAt(log, 80)).toEqual(
+      pacerAsRidden({ plan: 'rolling', intent: 'hold' }, 80),
+    );
+  });
+
+  it('lapses a decision nothing replaced, counted from its ask', () => {
+    const at = 80 + MODEL_PACER_LAPSE_S - 0.05;
+    expect(pacerDirectionAt(log, at)).toEqual(
+      pacerAsRidden({ plan: 'rolling', intent: 'hold' }, at),
+    );
+    expect(pacerDirectionAt(log, 80 + MODEL_PACER_LAPSE_S)).toBeUndefined();
+  });
+
+  it('rides a decision inside the start ramp from where the rider was, as the log keeps it', () => {
+    const early: PacerRuleRecord = { ...STOPPED, askedAtS: 10, arrivedAtS: 11, startFrom: 0.62 };
+    expect(readPacerDecisionRecord(early)).toEqual(early);
+    expect(pacerDirectionAt([early], 15)).toEqual({
+      plan: 'rolling',
+      intent: 'hold',
+      startFrom: 0.62,
+      startShare: 15 / PACER_START_RAMP_S,
+    });
+  });
+
+  it('rides the surge the seconds ridden give, live and on replay by one function', () => {
+    // A window with a surge in it, found rather than assumed, so the seed may change.
+    // Bounded, so a surge that never comes is a red test and not a hung one.
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
+    let at = PACER_START_RAMP_S;
+    while (at < SEARCH_UNTIL && pacerSurgeAt(at) < PACER_SURGE_LEAST / 2) at += 0.5;
+    expect(at).toBeLessThan(SEARCH_UNTIL);
+    const held: PacerRuleRecord = { ...STOPPED, askedAtS: at - 1, arrivedAtS: at };
+    expect(pacerDirectionAt([held], at)).toEqual({
+      plan: 'rolling',
+      intent: 'hold',
+      surge: pacerSurgeAt(at),
+    });
+  });
+
+  it('logs a decision that asked for no line as `unasked`, and reads it back whole', () => {
+    const quiet: PacerRuleRecord = { ...FAILED, outcome: 'unasked' };
+    expect(readPacerDecisionRecord(quiet)).toEqual(quiet);
+    expect(pacerDirectionAt([quiet], 76)).toEqual(
+      pacerAsRidden({ plan: 'rolling', intent: 'lift', by: 0.03 }, 76),
+    );
+  });
+
+  it('reads each record back whole', () => {
+    for (const record of log) expect(readPacerDecisionRecord(record)).toEqual(record);
+  });
+
+  it('keeps numbers and closed words only: no line, and nothing a place could be written into', () => {
+    for (const record of log) {
+      for (const value of Object.values(record)) {
+        expect(['number', 'string', 'object']).toContain(typeof value);
+        if (typeof value === 'object') expect(value).toBeNull();
+      }
+    }
+    expect(readPacerDecisionRecord({ ...WAIT, say: 'Stay on my wheel.' })).toBeUndefined();
+    expect(readPacerDecisionRecord({ ...WAIT, at: [51.5, -0.12] })).toBeUndefined();
+  });
+
+  it.each([
+    ['a reason outside the list', { ...WAIT, reason: 'felt-like-it' }],
+    ['a line word outside the list', { ...WAIT, line: 'Stay on my wheel.' }],
+    ['a place outside the list', { ...WAIT, place: 'Box Hill' }],
+    ['a share past the envelope', { ...WAIT, by: 0.25 }],
+    ['a lift past the envelope', { ...FAILED, by: 0.12 }],
+    ['a share finer than a hundredth', { ...WAIT, by: 0.123 }],
+    ['a share on a hold', { ...STOPPED, by: 0.05 }],
+    ['an applied ask with no arrival', { ...WAIT, arrivedAtS: null }],
+    ['a line shown for an ask that was not applied', { ...STOPPED, line: 'shown' }],
+    ['an arrival before the ask', { ...WAIT, arrivedAtS: 60 }],
+    ['a gap that is not a number', { ...WAIT, gapS: 'far' }],
+    ['a plan outside the list', { ...WAIT, plan: 'sprint' }],
+    ['an outcome outside the list', { ...WAIT, outcome: 'won' }],
+    ['an unasked decision with an answer', { ...WAIT, outcome: 'unasked', line: 'none' }],
+    ['an unasked decision with a line', { ...FAILED, outcome: 'unasked', line: 'repeat' }],
+    ['a start above the envelope', { ...WAIT, startFrom: 1.2 }],
+    ['a start below nothing', { ...WAIT, startFrom: -0.1 }],
+    ['a start finer than a hundredth', { ...WAIT, startFrom: 0.555 }],
+    ['an old-shape record that was unasked', { askedAtS: 5, arrivedAtS: null, outcome: 'unasked' }],
+  ])('drops a record with %s', (_what, bad) => {
+    expect(readPacerDecisionRecord(bad)).toBeUndefined();
+  });
+});
+
+describe('how far an intent goes — #2835, ADR 0083 D-1', () => {
+  it('eases and lifts by the share the direction carries, on the flat', () => {
+    expect(directedPacingFactor({ plan: 'even', intent: 'ease', by: 0.15 }, 0)).toBeCloseTo(
+      0.85,
+      12,
+    );
+    expect(directedPacingFactor({ plan: 'even', intent: 'lift', by: 0.08 }, 0)).toBeCloseTo(
+      1.08,
+      12,
+    );
+    expect(directedPacingFactor({ plan: 'even', intent: 'hold' }, 0)).toBe(1);
+  });
+
+  it('rides the fixed shares with none, as every ride before #2835 did', () => {
+    expect(directedPacingFactor({ plan: 'even', intent: 'ease' }, 0)).toBeCloseTo(
+      1 - PACER_EASE,
+      12,
+    );
+    expect(directedPacingFactor({ plan: 'even', intent: 'lift' }, 0)).toBeCloseTo(
+      1 + PACER_LIFT,
+      12,
+    );
+  });
+
+  it('can reach the whole of #92’s envelope, and no further, whatever share it is handed', () => {
+    expect(PACER_WAIT_MOST).toBeCloseTo(1 - PACING_FACTOR_FLOOR, 12);
+    expect(PACER_CHASE_MOST).toBeCloseTo(PACING_FACTOR_CEILING - 1, 12);
+    expect(directedPacingFactor({ plan: 'even', intent: 'ease', by: PACER_WAIT_MOST }, 0)).toBe(
+      PACING_FACTOR_FLOOR,
+    );
+    expect(directedPacingFactor({ plan: 'even', intent: 'lift', by: PACER_CHASE_MOST }, 0)).toBe(
+      PACING_FACTOR_CEILING,
+    );
+    for (const by of [0.9, 5, -3, Number.POSITIVE_INFINITY, Number.NaN]) {
+      for (const intent of PACER_INTENTS) {
+        for (const plan of PACER_PLANS) {
+          for (let grade = -25; grade <= 25; grade += 0.5) {
+            const factor = directedPacingFactor({ plan, intent, by }, grade);
+            expect(factor).toBeGreaterThanOrEqual(PACING_FACTOR_FLOOR);
+            expect(factor).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('a gentle start — #2835, ADR 0083 D-3, and the owner’s ruling of 2026-11-20', () => {
+  it('states its figure: 30 s, the owner’s “over about 30 s”', () => {
+    expect(PACER_START_RAMP_S).toBe(30);
+  });
+
+  it('is a straight line from nothing at the start to the whole at 30 s, and nothing after', () => {
+    expect(pacerStartShare(0)).toBe(0);
+    expect(pacerStartShare(15)).toBe(0.5);
+    expect(pacerStartShare(29.95)).toBeCloseTo(0.99833, 4);
+    expect(pacerStartShare(30)).toBeUndefined();
+    expect(pacerStartShare(600)).toBeUndefined();
+    expect(pacerStartShare(-1)).toBeUndefined();
+    expect(pacerStartShare(Number.NaN)).toBeUndefined();
+  });
+
+  it('starts from the rider’s own effort: their W/kg over the pacer’s, held to the ceiling', () => {
+    expect(pacerStartFrom(2.3, 2.3)).toBe(1);
+    expect(pacerStartFrom(1.15, 2.3)).toBe(0.5);
+    expect(pacerStartFrom(0, 2.3)).toBe(0);
+    expect(pacerStartFrom(0.1, 3)).toBe(0.03);
+    expect(pacerStartFrom(6, 2.3)).toBe(PACING_FACTOR_CEILING);
+    expect(pacerStartFrom(null, 2.3)).toBe(0);
+    expect(pacerStartFrom(undefined, 2.3)).toBe(0);
+    expect(pacerStartFrom(Number.NaN, 2.3)).toBe(0);
+    expect(pacerStartFrom(-2, 2.3)).toBe(0);
+    expect(pacerStartFrom(2, 0)).toBe(0);
+  });
+
+  it('rides as hard as the rider at the line, below the envelope if they are, and reaches the target without a step', () => {
+    for (const plan of PACER_PLANS) {
+      for (const intent of PACER_INTENTS) {
+        for (const grade of [-8, -2, 0, 3, 9]) {
+          for (const startFrom of [0, 0.4, 1, PACING_FACTOR_CEILING]) {
+            const direction = { plan, intent, startFrom } as const;
+            const target = directedPacingFactor({ plan, intent }, grade);
+            expect(directedPacingFactor(pacerAsRidden(direction, 0), grade)).toBe(startFrom);
+            expect(directedPacingFactor(pacerAsRidden(direction, 15), grade)).toBeCloseTo(
+              (startFrom + target) / 2,
+              12,
+            );
+            expect(directedPacingFactor(pacerAsRidden(direction, 29.999), grade)).toBeCloseTo(
+              target,
+              4,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it('starts at the bottom of #92’s envelope for a decision from before the ruling, with no start kept', () => {
+    const direction = pacerAsRidden({ plan: 'rolling', intent: 'hold' }, 0);
+    expect(directedPacingFactor(direction, 0)).toBe(PACING_FACTOR_FLOOR);
+  });
+
+  it('is a power the rider’s own W/kg at the pacer’s 75 kg, at the line', () => {
+    const plan = botPacerPlan(2.5);
+    const direction = pacerAsRidden(
+      { plan: 'rolling', intent: 'hold', startFrom: pacerStartFrom(1.5, 2.5) },
+      0,
+    );
+    expect(directedPowerWatts(plan, gradePercent(0), direction)).toBeCloseTo(1.5 * 75, 9);
+  });
+
+  it('holds no surge inside the ramp', () => {
+    for (let at = 0; at < PACER_START_RAMP_S; at += 0.25) expect(pacerSurgeAt(at)).toBe(0);
+    const direction = { plan: 'rolling', intent: 'hold' } as const;
+    expect(pacerAsRidden(direction, 12)).toEqual({ ...direction, startShare: 0.4 });
+  });
+});
+
+describe('a power range, ridden like a person — the owner’s ruling of 2026-11-20', () => {
+  const HOUR = 3_600;
+  const samples = (): number[] => {
+    const out: number[] = [];
+    for (let at = PACER_START_RAMP_S; at < HOUR; at += 0.1) out.push(pacerSurgeAt(at));
+    return out;
+  };
+
+  it('states its range: surges of 4 to 8 % above the target, recoveries half as deep', () => {
+    expect(PACER_SURGE_LEAST).toBe(0.04);
+    expect(PACER_SURGE_MOST).toBe(0.08);
+  });
+
+  it('surges above its target and recovers below it, within the range, in the first hour', () => {
+    const seen = samples();
+    expect(Math.max(...seen)).toBeGreaterThanOrEqual(PACER_SURGE_LEAST);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(PACER_SURGE_MOST);
+    expect(Math.min(...seen)).toBeLessThanOrEqual(-PACER_SURGE_LEAST / 2);
+    expect(Math.min(...seen)).toBeGreaterThanOrEqual(-PACER_SURGE_MOST / 2);
+    // Not every minute: some of the ride is steady.
+    expect(seen.filter((surge) => surge === 0).length / seen.length).toBeGreaterThan(0.3);
+  });
+
+  it('rides some whole windows steady, as a person does not surge every minute', () => {
+    const windows = Math.floor((HOUR - PACER_START_RAMP_S) / PACER_SURGE_WINDOW_S);
+    let steady = 0;
+    for (let window = 0; window < windows; window += 1) {
+      const from = PACER_START_RAMP_S + window * PACER_SURGE_WINDOW_S;
+      let flat = true;
+      for (let at = from; at < from + PACER_SURGE_WINDOW_S; at += 0.5) {
+        if (pacerSurgeAt(at) !== 0) flat = false;
+      }
+      if (flat) steady += 1;
+    }
+    // About one in four, by the hash; neither none nor most.
+    expect(steady).toBeGreaterThan(windows / 8);
+    expect(steady).toBeLessThan(windows / 2);
+  });
+
+  it('never steps: a tenth of a second moves it by no more than an edge’s slope allows', () => {
+    const seen = samples();
+    for (let index = 1; index < seen.length; index += 1) {
+      expect(Math.abs((seen[index] ?? 0) - (seen[index - 1] ?? 0))).toBeLessThanOrEqual(
+        (PACER_SURGE_MOST / 2) * 0.1 + 1e-4,
+      );
+    }
+  });
+
+  it('is the same on every call: a function of the seconds ridden and nothing else', () => {
+    expect(samples()).toEqual(samples());
+    expect(pacerSurgeAt(Number.NaN)).toBe(0);
+  });
+
+  it('never surges away from a rider it is waiting for', () => {
+    const wait = { plan: 'rolling', intent: 'ease', by: 0.12 } as const;
+    for (let at = PACER_START_RAMP_S; at < 600; at += 1) expect(pacerAsRidden(wait, at)).toBe(wait);
+  });
+
+  it('surges a hold and a chase, and moves the pacer’s power by the surge', () => {
+    const SEARCH_UNTIL = PACER_START_RAMP_S + 3600;
+    let at = PACER_START_RAMP_S;
+    while (at < SEARCH_UNTIL && pacerSurgeAt(at) < PACER_SURGE_LEAST - 1e-9) at += 0.5;
+    expect(at).toBeLessThan(SEARCH_UNTIL);
+    const hold = pacerAsRidden({ plan: 'even', intent: 'hold' }, at);
+    expect(hold.surge).toBe(pacerSurgeAt(at));
+    expect(directedPacingFactor(hold, 0)).toBeCloseTo(1 + pacerSurgeAt(at), 12);
+    expect(pacerAsRidden({ plan: 'even', intent: 'lift', by: 0.05 }, at).surge).toBe(
+      pacerSurgeAt(at),
+    );
+  });
+
+  it('never takes the pacer below #92’s floor past the ramp, nor above a surge’s 115 %, whatever it is handed', () => {
+    for (const surge of [0.08, -0.04, 0.5, -3, Number.NaN]) {
+      for (const intent of PACER_INTENTS) {
+        for (const plan of PACER_PLANS) {
+          for (let grade = -25; grade <= 25; grade += 2.5) {
+            const factor = directedPacingFactor({ plan, intent, by: 0.1, surge }, grade);
+            expect(factor).toBeGreaterThanOrEqual(PACING_FACTOR_FLOOR);
+            expect(factor).toBeLessThanOrEqual(PACER_SURGE_CEILING);
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('a surge alone may reach 115 % for 15 s — the owner’s second ruling of 2026-11-20, ADR 0092 D-4', () => {
+  it('states its figures: 115 % at the most, held 15 s at the most', () => {
+    expect(PACER_SURGE_CEILING).toBe(1.15);
+    expect(PACER_SURGE_HELD_MOST_S).toBe(15);
+  });
+
+  it('holds the plan and the chase to 110 % with no surge, at any share and grade', () => {
+    for (const by of [0.1, 0.5, 5, Number.POSITIVE_INFINITY]) {
+      for (const plan of PACER_PLANS) {
+        for (let grade = -25; grade <= 25; grade += 0.5) {
+          for (const intent of PACER_INTENTS) {
+            expect(directedPacingFactor({ plan, intent, by }, grade)).toBeLessThanOrEqual(
+              PACING_FACTOR_CEILING,
+            );
+            expect(directedPacingFactor({ plan, intent, by, surge: 0 }, grade)).toBeLessThanOrEqual(
+              PACING_FACTOR_CEILING,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it('goes above 110 % only by the surge’s own share: the chase and the plan are held before it', () => {
+    for (const surge of [0.001, 0.01, 0.04, 0.08, 0.5]) {
+      const most = Math.min(
+        PACER_SURGE_CEILING,
+        PACING_FACTOR_CEILING * (1 + Math.min(surge, PACER_SURGE_MOST)),
+      );
+      for (const plan of PACER_PLANS) {
+        for (let grade = -25; grade <= 25; grade += 0.5) {
+          for (const intent of PACER_INTENTS) {
+            const factor = directedPacingFactor(
+              { plan, intent, by: PACER_CHASE_MOST, surge },
+              grade,
+            );
+            expect(factor).toBeLessThanOrEqual(most + 1e-12);
+          }
+        }
+      }
+    }
+    // A full surge at the top of the envelope reaches 115 %, and goes no further.
+    expect(
+      directedPacingFactor({ plan: 'climber', intent: 'hold', surge: PACER_SURGE_MOST }, 8),
+    ).toBe(PACER_SURGE_CEILING);
+    expect(
+      directedPacingFactor({ plan: 'even', intent: 'lift', by: PACER_CHASE_MOST, surge: 0.04 }, 0),
+    ).toBeCloseTo(PACING_FACTOR_CEILING * 1.04, 12);
+  });
+
+  it('is above 110 % in a ride only while a surge is ridden, and never for more than 15 s at a time', () => {
+    const SIX_HOURS = 6 * 3_600;
+    const STEP = 0.1;
+    // The top of the envelope before any surge: a climber on a climb, and a chase at its whole share.
+    const tops = [
+      { direction: { plan: 'climber', intent: 'hold' }, grade: 8 },
+      { direction: { plan: 'even', intent: 'lift', by: PACER_CHASE_MOST }, grade: 0 },
+    ] as const;
+    for (const { direction, grade } of tops) {
+      let run = 0;
+      let longest = 0;
+      let highest = 0;
+      let surgingWhileAbove = true;
+      for (let step = 0; step * STEP < SIX_HOURS; step += 1) {
+        const at = step * STEP;
+        const factor = directedPacingFactor(pacerAsRidden(direction, at), grade);
+        highest = Math.max(highest, factor);
+        if (factor > PACING_FACTOR_CEILING + 1e-12) {
+          if (!(pacerSurgeAt(at) > 0)) surgingWhileAbove = false;
+          run += STEP;
+          longest = Math.max(longest, run);
+        } else {
+          run = 0;
+        }
+      }
+      expect(surgingWhileAbove).toBe(true);
+      expect(highest).toBeGreaterThan(PACING_FACTOR_CEILING + 0.03);
+      expect(highest).toBeLessThanOrEqual(PACER_SURGE_CEILING);
+      expect(longest).toBeGreaterThan(PACER_SURGE_HELD_LEAST_S - 1);
+      expect(longest).toBeLessThanOrEqual(PACER_SURGE_HELD_MOST_S + 1e-9);
+    }
+  });
+
+  it('never goes above 110 % inside the start ramp, nor while waiting for a rider', () => {
+    for (let at = 0; at < 3_600; at += 0.5) {
+      if (at < PACER_START_RAMP_S) {
+        for (const startFrom of [0, 1, PACING_FACTOR_CEILING]) {
+          const start = pacerAsRidden({ plan: 'climber', intent: 'lift', by: 0.1, startFrom }, at);
+          expect(directedPacingFactor(start, 8)).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
+        }
+      }
+      const wait = pacerAsRidden({ plan: 'climber', intent: 'ease', by: 0.01 }, at);
+      expect(directedPacingFactor(wait, 8)).toBeLessThanOrEqual(PACING_FACTOR_CEILING);
+    }
+  });
+});
+
+describe('a line said again, or nearly — the owner’s ruling of 2026-11-20', () => {
+  it('states its figures: ten lines remembered, six in ten words in common', () => {
+    expect(MODEL_PACER_REPEAT_MEMORY).toBe(10);
+    expect(PACER_SAY_SAME_SHARE).toBe(0.6);
+  });
+
+  it.each([
+    ['the same words', 'Stay on my wheel.', 'stay on  my WHEEL'],
+    [
+      'nearly the same words',
+      'Easing a little so you can get back on.',
+      'Easing so you can get back on',
+    ],
+    ['the same words reordered', 'Keep it steady, nice work.', 'Nice work, keep it steady.'],
+  ])('is a repeat: %s', (_what, said, before) => {
+    expect(pacerSayRepeats(said, ['Something else entirely here.', before])).toBe(true);
+  });
+
+  it.each([
+    ['a new line', 'Climb starts soon, settle in.', 'Nice work, keep it steady.'],
+    ['a line sharing a phrase', 'Keep it steady up this climb.', 'Nice work, keep it steady.'],
+  ])('is not a repeat: %s', (_what, said, before) => {
+    expect(pacerSayRepeats(said, [before])).toBe(false);
+  });
+
+  it('never calls an empty line a repeat', () => {
+    expect(pacerSayRepeats('', [''])).toBe(false);
+  });
+});
+
+describe('what the pacer is doing, in the state — #2835', () => {
+  it('refuses a state from before the device decided: no reason, no share, no start', () => {
+    for (const key of ['reason', 'byPct', 'starting'] as const) {
+      const without = Object.fromEntries(Object.entries(STATE).filter(([name]) => name !== key));
+      expect(readModelPacerInput(without)).toEqual({
+        ok: false,
+        problem: { field: `input.${key}`, problem: 'is required' },
+      });
+    }
+  });
+
+  it('reads the trends as numbers, each optional', () => {
+    const told = {
+      ...STATE,
+      gapS: -6.8,
+      placeForS: 90,
+      gapDriftM: 12.5,
+      powerDriftPct: -8,
+      cadenceDriftRpm: -4,
+      heartRateDriftBpm: 3,
+    };
+    expect(readModelPacerInput(told)).toEqual({ ok: true, value: told });
+  });
+
+  it.each([
+    ['reason', 'because I felt like it'],
+    ['byPct', 21],
+    ['byPct', 7.5],
+    ['starting', 'yes'],
+    ['gapS', 'far'],
+    ['placeForS', 1.5],
+    ['gapDriftM', null],
+    ['powerDriftPct', 0.5],
+    ['cadenceDriftRpm', 300],
+    ['heartRateDriftBpm', '3'],
+  ])('refuses a bad %s, naming the field and never the value', (field, value) => {
+    const read = readModelPacerInput({ ...STATE, [field]: value });
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.problem.field).toBe(`input.${field}`);
+    expect(JSON.stringify(read.problem)).not.toContain(String(value));
   });
 });
 
@@ -591,29 +1128,6 @@ describe('the course ahead, in the state — #2794', () => {
   });
 });
 
-describe('the floor under the model’s intent — ADR 0078 (Proposed), #2777', () => {
-  it('rides an ease as hold once the rider has been ahead long enough, keeping the plan', () => {
-    expect(flooredDirection({ plan: 'climber', intent: 'ease' }, PACER_AHEAD_FLOOR_S)).toEqual({
-      plan: 'climber',
-      intent: 'hold',
-    });
-    expect(flooredDirection({ plan: 'even', intent: 'ease' }, 60)).toEqual({
-      plan: 'even',
-      intent: 'hold',
-    });
-  });
-
-  it('rides every other direction as the model chose it, and never lifts', () => {
-    const ease = { plan: 'rolling', intent: 'ease' } as const;
-    expect(flooredDirection(ease, PACER_AHEAD_FLOOR_S - 0.1)).toBe(ease);
-    expect(flooredDirection(ease, undefined)).toBe(ease);
-    for (const intent of ['hold', 'lift'] as const) {
-      const direction = { plan: 'rolling', intent } as const;
-      expect(flooredDirection(direction, 600)).toBe(direction);
-    }
-  });
-});
-
 describe('the line says what the pacer does — #2777', () => {
   it.each([
     ['I will push on this climb, stay with me.', 'ease'],
@@ -635,11 +1149,9 @@ describe('the line says what the pacer does — #2777', () => {
   ] as const)('refuses “%s” under %s', (say, intent) => {
     // The screen passes every one: the refusal is the intent rule's alone.
     expect(pacerSayProblem(say)).toBeUndefined();
-    expect(pacerSayAgainstIntent(say, intent)).toBe(true);
-    expect(readModelPacerAnswer(answer({ intent, say }))).toEqual({
-      ok: false,
-      reason: 'say-against-intent',
-    });
+    expect(saysAgainst(say, intent)).toBe(true);
+    // #2835: such a line no longer voids anything on the way in; the device hides it.
+    expect(readModelPacerAnswer(answer({ say }))).toEqual({ ok: true, say });
   });
 
   it.each([
@@ -657,8 +1169,8 @@ describe('the line says what the pacer does — #2777', () => {
     ['Nice and steady, stay on my wheel.', 'ease'],
     ['If you can, come round me on the next rise.', 'hold'],
   ] as const)('shows “%s” under %s', (say, intent) => {
-    expect(pacerSayAgainstIntent(say, intent)).toBe(false);
-    expect(readModelPacerAnswer(answer({ intent, say }))).toMatchObject({ ok: true, say });
+    expect(saysAgainst(say, intent)).toBe(false);
+    expect(readModelPacerAnswer(answer({ say }))).toMatchObject({ ok: true, say });
   });
 
   it('reads easing and pushing apart, as the floor needs', () => {

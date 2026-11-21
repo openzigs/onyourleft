@@ -5,12 +5,14 @@
  *
  * The ride is the shipped director's (`src/game/model-pacer.ts` §`ModelPacer`),
  * a frame at a time: it decides when to ask, what the state is
- * (§`modelPacerInput`, with the rider's sensors), how the gap moved, and how
- * each answer is ridden under ADR 0082's terrain rule and ADR 0078's floor.
- * The harness stands where the instance and the pacer port do: it sends the
- * instance's own request (`production.ts`) to the model and reads the answer
- * with `@onyourleft/domain` §`readModelPacerAnswer`. No rule about what the
- * pacer rides is here; what the gap called for is `pacer-score.ts`'s.
+ * (§`modelPacerInput`, with the rider's sensors), how the gap moved, **what
+ * the pacer rides** (since #2835, ADR 0083: `@onyourleft/domain`
+ * §`pacerRuleDecision`, on the device, whatever the model then says), and
+ * what becomes of each line. The harness stands where the instance and the
+ * pacer port do: it sends the instance's own request (`production.ts`) to the
+ * model and reads the answer with `@onyourleft/domain` §`readModelPacerAnswer`.
+ * No rule about what the pacer rides is here; what the gap called for is
+ * `pacer-score.ts`'s.
  *
  * ## The script ({@link PACER_SCRIPT})
  *
@@ -33,7 +35,7 @@
  *
  * Every number is the script's: no rider, no place. The pacer's own place is
  * scripted too (9 m/s on the level, 6 up, 12 down), because the score is of
- * the intent chosen at each place, not of where the choice would have taken it.
+ * the intent decided at each place, not of where the decision would have taken it.
  *
  * ## The ride never waits, and neither does this
  *
@@ -45,6 +47,7 @@
 import {
   botPacerPlan,
   distanceOnRoute,
+  gapTrendOf,
   gradeAt,
   gradePercent,
   metres,
@@ -55,6 +58,8 @@ import {
   watts,
   type ModelPacerInput,
   type PacerDecisionRecord,
+  type PacerGapReading,
+  type PacerLineOutcome,
   type RouteProfile,
 } from '@onyourleft/domain';
 
@@ -69,7 +74,7 @@ import { northRoute } from '../../../src/game/route-fixtures-testing';
 import type { PacerReply } from '../../../src/instance/pacer-port';
 
 import { seeded, type Ask, type ModelCall } from './model-call';
-import type { PacerLine, PacerRun, PacerStep } from './pacer-score';
+import type { PacerGround, PacerLine, PacerRun, PacerStep } from './pacer-score';
 import type { PacerPromptModule } from './production';
 
 /** A value against the seconds ridden, joined by straight lines. */
@@ -201,10 +206,8 @@ interface Outstanding {
 /** What the model's answer is, as the device is handed it. */
 interface Answered {
   readonly reply: PacerReply;
-  /** Whether the screen stopped the line, and the answer with it. */
+  /** Whether the answer was void: a key it may not carry, or a line the screen stops. */
   readonly voided: boolean;
-  /** Whether the model wrote a line at all. */
-  readonly said: boolean;
 }
 
 /** An answer on its way: when it arrives, and the ask it answers. */
@@ -218,20 +221,24 @@ interface Arriving extends Answered {
 /**
  * What the device is handed for `call`, standing where the instance and the
  * pacer port do: the answer read field by field and its line screened, a
- * text that is no decision as `invalid`, and none as `failed`.
+ * text that is no line as `invalid`, and none as `failed`. An answer that
+ * names a plan, an intent or a power has a key `{"say"}` does not, and is
+ * void (#2835).
  */
 function answered(call: ModelCall): Answered {
-  if (call.text === undefined) return { reply: { kind: 'failed' }, voided: false, said: false };
+  if (call.text === undefined) return { reply: { kind: 'failed' }, voided: false };
   const read = readModelPacerAnswer(call.text);
-  if (read.ok) {
-    return {
-      reply: { kind: 'answer', direction: read.direction, say: read.say },
-      voided: false,
-      said: read.say !== '',
-    };
-  }
-  const voided = read.reason === 'bad-say' || read.reason === 'say-against-intent';
-  return { reply: { kind: 'invalid' }, voided, said: voided };
+  if (read.ok) return { reply: { kind: 'answer', say: read.say }, voided: false };
+  return {
+    reply: { kind: 'invalid' },
+    voided: read.reason === 'unknown-key' || read.reason === 'bad-say',
+  };
+}
+
+/** The director's word for a line as the scores read it: `none` for a void answer is `voided`. */
+function lineOf(logged: PacerLineOutcome, due: Answered): PacerLine {
+  if (logged === 'none') return due.voided ? 'voided' : 'none';
+  return logged;
 }
 
 /** Something a callback puts and the ride's loop takes, once. */
@@ -250,8 +257,8 @@ function slot<T>(): { readonly put: (value: T) => void; readonly take: () => T |
 }
 
 /**
- * Ride `script` with the pacer's decisions from the model, and return it as
- * the scores read it. An ask still out when the ride ends is not a step.
+ * Ride `script` with the pacer's lines from the model and its decisions from
+ * the device, and return it as the scores read it. An ask still out when the ride ends is not a step.
  *
  * @throws {Error} when the script builds a pacer state the instance would
  * refuse: a fault in the script, not an answer to score.
@@ -266,8 +273,16 @@ export async function ridePacerScript(
   const steps: PacerStep[] = [];
   const trace: TraceSample[] = [];
   const asked = slot<Outstanding>();
-  const logged = slot<PacerDecisionRecord>();
+  // Every record the director logs: since the owner's rulings of 2026-11-20
+  // most decisions ask for no line (`unasked`), and a decision made while an
+  // ask is out is logged after it, so the ask's record is found by its time.
+  const logged: PacerDecisionRecord[] = [];
   let arriving: Arriving | undefined;
+  // What each decision was made on, read as the director read it, for the
+  // decisions that ask for no line (#2864): the gap's trend since the decision before.
+  const grounds = new Map<number, PacerGround>();
+  const asks = new Map<number, PacerStep>();
+  let lastGap: PacerGapReading | undefined;
   const director = new ModelPacer(
     {
       startPacerRide: () => Promise.resolve(true),
@@ -281,7 +296,7 @@ export async function ridePacerScript(
         return reply;
       },
     },
-    logged.put,
+    (record) => logged.push(record),
   );
   let pacerAt = PACER_STARTS_AT_METRES;
   const frames = Math.round(script.seconds / FRAME_SECONDS);
@@ -330,35 +345,46 @@ export async function ridePacerScript(
       due.out.settle(due.reply);
       await due.out.settled;
     }
-    const result = director.frame({
+    director.frame({
       riddenSeconds: atS,
-      input: (inForce) =>
-        modelPacerInput({
+      ride: () => {
+        const seen = modelPacerInput({
           state,
           plan,
           profile,
           riderMassKilograms: script.riderKilograms,
-          inForce,
           sensors,
-        }),
+        });
+        const now: PacerGapReading = { atS, riderGapM: seen.riderGapM };
+        grounds.set(atS, {
+          riderPlace: seen.riderPlace,
+          gapTrend: lastGap === undefined ? undefined : gapTrendOf(lastGap, now),
+          riderInDraft: seen.riderInDraft,
+          terrain: modelPacerTerrain(state, profile),
+        });
+        lastGap = now;
+        return { seen, riderSpeed: state.ride.speed };
+      },
       terrain: () => modelPacerTerrain(state, profile),
+      // The pacer's place is the script's: the decision is scored, not ridden.
       direct: () => undefined,
     });
-    const record = logged.take();
+    const record =
+      due === undefined
+        ? undefined
+        : logged.find((each) => each.askedAtS === due.step.askedAtS && each.outcome !== 'unasked');
     if (record !== undefined && due !== undefined) {
-      const line: PacerLine = due.voided
-        ? 'voided'
-        : result.arrived !== undefined
-          ? 'shown'
-          : record.outcome === 'applied' && due.said
-            ? 'hidden'
-            : 'none';
-      steps.push({
+      if (!('reason' in record)) throw new Error('the director logged a record of the model’s');
+      const line = lineOf(record.line, due);
+      asks.set(record.askedAtS, {
         ...due.step,
         outcome: record.outcome,
-        ...(record.outcome === 'applied' ? { ridden: record.intent } : {}),
+        ridden: record.intent,
+        reason: record.reason,
         line,
-        ...(result.arrived === undefined ? {} : { shown: result.arrived }),
+        ...((line === 'shown' || line === 'repeat') && due.reply.kind === 'answer'
+          ? { said: due.reply.say }
+          : {}),
       });
       arriving = undefined;
     }
@@ -391,5 +417,25 @@ export async function ridePacerScript(
     pacerAt += speed * FRAME_SECONDS;
   }
   director.end();
+  // Every decision, oldest first: an ask as its answer came back, and one
+  // that asked for nothing as the device rode it.
+  for (const record of logged) {
+    if (!('reason' in record)) throw new Error('the director logged a record of the model’s');
+    if (record.outcome !== 'unasked') {
+      const step = asks.get(record.askedAtS);
+      if (step !== undefined) steps.push(step);
+      continue;
+    }
+    const ground = grounds.get(record.askedAtS);
+    if (ground === undefined) throw new Error('a decision the harness did not see made');
+    steps.push({
+      askedAtS: record.askedAtS,
+      ground,
+      outcome: 'unasked',
+      ridden: record.intent,
+      reason: record.reason,
+      line: 'none',
+    });
+  }
   return { steps, calls };
 }

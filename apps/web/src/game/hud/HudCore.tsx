@@ -53,6 +53,7 @@ import {
   EMPTY_GAP_KEY,
   MOVING_TIME_KEY,
   givesWayToTheRoom,
+  PACER_POWER_KEY,
   SOLO_DRAFT_KEY,
   hudReadings,
   isDeliveryReading,
@@ -1020,6 +1021,9 @@ function fieldClass(reading: HudReading): string {
     // #2425: a solo ride's draft, drawn on a tablet only (`theme.css`
     // §"A SOLO RIDE'S DRAFT, ON A TABLET ONLY").
     ...(reading.key === SOLO_DRAFT_KEY ? ['oyl-hud__field--solo-draft'] : []),
+    // #2864: the AI pacer's power, drawn on a tablet only, as the solo draft
+    // is (`theme.css` §"THE AI PACER'S POWER, ON A TABLET ONLY").
+    ...(reading.key === PACER_POWER_KEY ? ['oyl-hud__field--pacer-power'] : []),
     // And the wind by name, which gives way to it on a tablet when the pacer
     // and the ghost are drawn too (the same section).
     ...(reading.key === 'wind' ? ['oyl-hud__field--wind'] : []),

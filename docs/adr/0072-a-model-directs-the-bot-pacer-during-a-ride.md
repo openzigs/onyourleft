@@ -470,3 +470,36 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   not move**: the envelope (D-2.2), the trainer (D-6), the fallback (D-7), and the log and
   `MODEL_PACER_CODE_VERSION` (D-5): the log records the direction ridden, so a stored ride replays
   from the log alone.
+- **2026-11-18** — **D-2, D-3.1, D-3.2, D-4.2's last sentence (R-5), D-5.1, D-5.2 and D-7 are
+  superseded in part by [ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md)**, **Proposed**
+  for the owner's answers, on the owner's ruling of that day on
+  [#2835](https://github.com/openzigs/onyourleft/issues/2835) (*"yes fold these in"*, to moving the
+  pacing decision to the device). Under it **the device decides the pacer's intent** each time it
+  asks, by one rule over the gap and the terrain (ADR 0078's floor and ADR 0082's rule are parts of
+  it), with a response that grows with the gap inside this ADR's 80 % to 110 % envelope, and no plan
+  is chosen; **the model is told what the pacer is doing and why and answers `{"say"}` and nothing
+  else**, so a failed, late or void answer costs a line and never the pacing, and the 2026-11-17
+  entry's `say-against-intent` no longer voids anything; the first 60 s are ramped up from the
+  bottom of the envelope; a decision is in force from its ask; the log says where the rider was,
+  which rule set the intent and what became of the line, in numbers and closed words; and
+  `MODEL_PACER_CODE_VERSION` is 2. The prompt is `pacer-6`. **What does not move**: the envelope
+  (D-2.2), no power and no tools (D-3), the input's *no coordinate, no name* (D-3.4), the line's
+  screen and that it is never kept (D-4), the trainer (D-6), the gates and the consent (D-8), and
+  the patent posture (D-9). This ADR's body is unchanged.
+- **2026-11-19** — **[ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md) is Accepted.** The owner answered its D-9 on 2026-11-19, recorded in its
+  D-10 and on [#2864](https://github.com/openzigs/onyourleft/pull/2864), so the previous entry's *"Proposed"* no longer holds. Its R-7 also replaces R-8's
+  switch and status wording: the switch reads *"Let the AI on your server coach you through the
+  pacer"* and, once agreed, *"The AI will coach you on this ride."* This ADR's body is unchanged.
+- **2026-11-20** — **D-2.2 is superseded in part by [ADR 0092](0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md)**, accepted on the owner's
+  ruling of that day on [#2864](https://github.com/openzigs/onyourleft/pull/2864#issuecomment-7052547100)
+  (*"The pacer starts alongside the rider at the rider's speed and builds to its target over about
+  30 s"*). For the first 30 s of a directed ride the pacer ramps from the rider's own effort, which
+  may be below 80 %, down to 0; from 30 s on the envelope is 80 % to 110 % as before, and never above
+  110 % at any time. So the earlier entries' *"the envelope does not move"* holds from 30 s on only.
+  This ADR's body is unchanged.
+- **2026-11-20** — **D-2.2's ceiling is superseded in part by [ADR 0092](0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md) D-4**, on the owner's
+  second ruling of that day on [#2864](https://github.com/openzigs/onyourleft/pull/2864#issuecomment-7054189148) (*"a surge on its own may reach 115 % of the target
+  for at most 15 s; the chase and the plan stay capped at 110 %"*). Past the first 30 s a surge,
+  and nothing else, may take the pacer above 110 %, to 115 %, for at most 15 s at a time; the plan
+  and the intent are held to 110 % before it. So the previous entry's *"never above 110 % at any
+  time"* holds for everything but a surge. This ADR's body is unchanged.

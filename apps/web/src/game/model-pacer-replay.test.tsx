@@ -10,9 +10,14 @@
  * One ride through the shipped path: `GameView` with the real picker, a real
  * ride controller over the simulated FTMS trainer that saves into the real
  * store, the pacer at 2.9 W/kg in a wind, and the AI pacer switched on and
- * consented to through a `GamePort.aiPacer` double whose answers change from
- * ask to ask — and which, for a stretch, gives none, so a decision lapses and
- * the pacer rides #92's own rule until the next one. The ride is saved.
+ * consented to through a `GamePort.aiPacer` double. Since #2835 (ADR 0083)
+ * the direction is the device's own decision, from the gap to a rider whose
+ * power swings either side of the pacer's, ridden up the start ramp from the
+ * rider's own effort for the first 30 s and with its surges after (the
+ * owner's rulings of 2026-11-20); most decisions ask for no line, the double
+ * answers the first ask with one — none of which moves the pacer — and
+ * refuses the next, which ends the ride's decisions, so the one in force
+ * lapses and the pacer rides #92's own rule to the end. The ride is saved.
  *
  * Then, as a consumer would, the ride is read back from the store on its
  * rider's own read (`getActivity`), and the pacer's course re-derived from
@@ -32,10 +37,11 @@ import {
   headwindOnRoute,
   kilograms,
   MODEL_PACER_CODE_VERSION,
+  MODEL_PACER_LAPSE_S,
+  PACER_START_RAMP_S,
   pacerDirectionAt,
   seconds,
   watts,
-  type PacerDirection,
   type RouteProfile,
 } from '@onyourleft/domain';
 import { advanceBot, BOT_AT_START_LINE, type BotCourse } from '@onyourleft/physics';
@@ -82,7 +88,12 @@ vi.mock('./simulation', async (importOriginal) => {
   return { ...actual, GameSimulation: WatchedSimulation };
 });
 
-const FRAME_MS = 230;
+/**
+ * 300 ms frames for 90 s of riding (#2864): since the owner's ruling of
+ * 2026-11-20 a line is asked at most once in 30 s, so the refusal at the
+ * second ask comes up to a minute in, and the ride must outlast its lapse.
+ */
+const FRAME_MS = 300;
 const FRAMES = 300;
 const PACER_INTENSITY = '2.9';
 const WIND_SPEED = '15';
@@ -96,22 +107,17 @@ const CHECKPOINTS: RecordingCheckpointStore = {
   deleteRecordingSession: () => Promise.resolve(true),
 };
 
-/** What the double answers, ask by ask: changing directions, and none for asks 5 to 9. */
-const DIRECTIONS: readonly PacerDirection[] = [
-  { plan: 'climber', intent: 'lift' },
-  { plan: 'even', intent: 'ease' },
-  { plan: 'rolling', intent: 'lift' },
-  { plan: 'climber', intent: 'hold' },
-];
+/**
+ * The ask the double refuses, which ends the ride's decisions: the second,
+ * 30 to 60 s in. Since the owner's ruling of 2026-11-20 most decisions ask for
+ * no line (`unasked`), and those are what the replay rides between the two.
+ */
+const REFUSED_ASK = 1;
 
+/** What the double answers, ask by ask: a line, and then a refusal. */
 function replyTo(ask: number): PacerReply {
-  if (ask >= 5 && ask <= 9) return { kind: 'failed' };
-  if (ask === 11) return { kind: 'invalid' };
-  return {
-    kind: 'answer',
-    direction: DIRECTIONS[ask % DIRECTIONS.length]!,
-    say: 'Stay with me.',
-  };
+  if (ask >= REFUSED_ASK) return { kind: 'refused' };
+  return { kind: 'answer', say: 'Stay with me.' };
 }
 
 let pending: FrameRequestCallback[] = [];
@@ -167,6 +173,7 @@ function aiPacerPort(): PacerPort {
       consented = false;
       return Promise.resolve(status());
     },
+    warmPacer: () => Promise.resolve(true),
     startPacerRide: () => Promise.resolve(true),
     decidePacer: () => {
       const reply = replyTo(asks);
@@ -321,7 +328,7 @@ async function rideAndSave(): Promise<Ridden> {
   await press(toggle('Ride in a wind'));
   await typeInto(labelledStarting('Wind speed'), WIND_SPEED);
   await typeInto(labelledStarting('Wind direction'), WIND_FROM);
-  await press(toggle('Let the AI on your instance steer the pacer'));
+  await press(toggle('Let the AI on your server coach you through the pacer'));
   await press(buttonStarting('Allow the AI pacer'));
   await press(buttonStarting('Ride '));
 
@@ -414,10 +421,29 @@ describe('a directed pacer replays from its saved ride — #2712’s review, ADR
     expect(log.pacerWPerKg).toBe(Number(PACER_INTENSITY));
     expect(log.routeId).toBe(ROUTE_ID);
     expect(log.wind?.fromBearing).toBe(Number(WIND_FROM));
-    // Applied, failed for a stretch and invalid: so the replay rides a
-    // change of direction, a lapse to #92's rule, and a miss.
+    // Applied, decisions that asked for no line, and refused at the end.
+    // Every one carries the device's decision, so the replay rides a change
+    // of direction through lines never asked for, the start ramp from where
+    // the rider was, the surges past it, and after the refusal a lapse to
+    // #92's rule.
     const outcomes = new Set(log.decisions.map((each) => each.outcome));
-    expect([...outcomes].sort()).toStrictEqual(['applied', 'failed', 'invalid']);
+    expect([...outcomes].sort()).toStrictEqual(['applied', 'refused', 'unasked']);
+    expect(log.decisions.filter((each) => each.outcome !== 'unasked')).toHaveLength(
+      REFUSED_ASK + 1,
+    );
+    expect(log.decisions.at(-1)?.outcome).toBe('refused');
+    const decided = log.decisions.map((each) =>
+      'reason' in each ? `${each.intent} ${String(each.by ?? '')}` : 'not the device’s',
+    );
+    expect(decided).not.toContain('not the device’s');
+    expect(new Set(decided).size).toBeGreaterThan(2);
+    const last = log.decisions.at(-1)!;
+    const end = live.at(-1)!.ridden;
+    // The ride outlasts the last decision's lapse, and began inside the ramp.
+    expect(end).toBeGreaterThan(last.askedAtS + MODEL_PACER_LAPSE_S);
+    expect(pacerDirectionAt(log.decisions, end)).toBeUndefined();
+    expect(pacerDirectionAt(log.decisions, 10)?.startShare).toBe(10 / PACER_START_RAMP_S);
+    expect(pacerDirectionAt(log.decisions, 10)?.startFrom).toBeGreaterThan(0);
 
     // The live course, to the bit, from the stored record alone.
     expect(live.length).toBeGreaterThan(200);

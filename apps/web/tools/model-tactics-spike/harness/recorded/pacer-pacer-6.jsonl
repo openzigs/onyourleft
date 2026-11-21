@@ -1,0 +1,60 @@
+{"text":"{\n  \"say\": \"Nice start, let's keep this steady rhythm together.\"\n}","latencyMs":4416,"promptTokens":1732,"outputTokens":22}
+{"text":"{\n  \"say\": \"Great start, just settling into a steady rhythm together.\"\n}","latencyMs":3313,"promptTokens":1766,"outputTokens":21}
+{"text":"{\n  \"say\": \"Keep it up, we have a long road ahead of us.\"\n}","latencyMs":3234,"promptTokens":1782,"outputTokens":23}
+{"text":"{\"say\":\"You're doing great, let's keep this steady pace for a bit longer.\"}","latencyMs":3216,"promptTokens":1796,"outputTokens":23}
+{"text":"{\"say\": \"Nice work, keeping this steady pace together as we start off.\"}","latencyMs":3558,"promptTokens":1812,"outputTokens":19}
+{"text":"{\n  \"say\": \"Great start, keep this steady rhythm as we find our flow.\"\n}","latencyMs":4110,"promptTokens":1814,"outputTokens":23}
+{"text":"{\n  \"say\": \"You're finding a beautiful rhythm, let's maintain this steady pace.\"\n}","latencyMs":3518,"promptTokens":1821,"outputTokens":26}
+{"text":"{\"say\":\"Keep it up, we have a steady flow as we get moving.\"}","latencyMs":3948,"promptTokens":1825,"outputTokens":19}
+{"text":"{\n  \"say\": \"Easing so you can get back on, find your rhythm again.\"\n}","latencyMs":3756,"promptTokens":1820,"outputTokens":23}
+{"text":"{\n  \"say\": \"Easing so you can get back on, just find your rhythm again.\"\n}","latencyMs":3824,"promptTokens":1833,"outputTokens":24}
+{"text":"{\n  \"say\": \"Easing so you can get back on, just keep your rhythm.\"\n}","latencyMs":3868,"promptTokens":1830,"outputTokens":23}
+{"text":"{\n  \"say\": \"Easing so you can get back on, keep your steady rhythm.\"\n}","latencyMs":3955,"promptTokens":1844,"outputTokens":23}
+{"text":"{\n  \"say\": \"Easing so you can get back on, find a steady power you can hold.\"\n}","latencyMs":3641,"promptTokens":1858,"outputTokens":26}
+{"text":"{\n  \"say\": \"Easing so you can get back on, just find a steady effort you can hold.\"\n}","latencyMs":3761,"promptTokens":1865,"outputTokens":27}
+{"text":"{\n  \"say\": \"Easing so you can get back on, keep it steady for now.\"\n}","latencyMs":3675,"promptTokens":1867,"outputTokens":24}
+{"text":"{\n  \"say\": \"Easing so you can get back on, keep that steady effort going.\"\n}","latencyMs":3280,"promptTokens":1866,"outputTokens":24}
+{"text":"{\n  \"say\": \"Easing so you can get back on, keep finding that rhythm.\"\n}","latencyMs":3514,"promptTokens":1864,"outputTokens":23}
+{"text":"{\n  \"say\": \"You're doing great, keep that steady effort going as we head toward the climb.\"\n}","latencyMs":3412,"promptTokens":1841,"outputTokens":28}
+{"text":"{\n  \"say\": \"Great work staying with me, keep that steady rhythm going.\"\n}","latencyMs":3414,"promptTokens":1851,"outputTokens":22}
+{"text":"{\n  \"say\": \"You're making some great progress, keep that steady pace going.\"\n}","latencyMs":3343,"promptTokens":1851,"outputTokens":24}
+{"text":"{\n  \"say\": \"You're putting in some serious work, keep that steady effort for the climb.\"\n}","latencyMs":3569,"promptTokens":1866,"outputTokens":27}
+{"text":"{\n  \"say\": \"Keep up that steady rhythm, you're doing great.\"\n}","latencyMs":3301,"promptTokens":1864,"outputTokens":22}
+{"text":"{\n  \"say\": \"Lifting to come back up to you before the climb starts.\"\n}","latencyMs":3280,"promptTokens":1857,"outputTokens":23}
+{"text":"{\n  \"say\": \"Lifting to close the gap, but keep a steady effort for that climb ahead.\"\n}","latencyMs":3680,"promptTokens":1871,"outputTokens":27}
+{"text":"{\n  \"say\": \"Lifting to close the gap, keep it steady for the climb ahead.\"\n}","latencyMs":3539,"promptTokens":1872,"outputTokens":25}
+{"text":"{\n  \"say\": \"Lifting to bridge the gap, but keep that effort steady for the climb.\"\n}","latencyMs":3752,"promptTokens":1868,"outputTokens":26}
+{"text":"{\n  \"say\": \"Lifting to bridge the gap, hold your current power for the climb.\"\n}","latencyMs":3637,"promptTokens":1872,"outputTokens":25}
+{"text":"{\n  \"say\": \"Lifting to bridge the gap, stay focused on that climb coming up.\"\n}","latencyMs":3542,"promptTokens":1871,"outputTokens":25}
+{"text":"{\n  \"say\": \"Lifting to bridge the gap, but try to settle into a steadier effort.\"\n}","latencyMs":3704,"promptTokens":1872,"outputTokens":27}
+{"text":"{\n  \"say\": \"Lifting to come back up to you, but settle into a steadier effort.\"\n}","latencyMs":3400,"promptTokens":1874,"outputTokens":27}
+{"text":"{\n  \"say\": \"Lifting to close the gap, but settle into a steady effort for that climb.\"\n}","latencyMs":3503,"promptTokens":1872,"outputTokens":27}
+{"text":"{\n  \"say\": \"Lifting to bridge the gap, but find a rhythm you can sustain.\"\n}","latencyMs":3564,"promptTokens":1884,"outputTokens":25}
+{"text":"{\n  \"say\": \"Lifting to close the gap, but find a rhythm you can hold to the top.\"\n}","latencyMs":2885,"promptTokens":1879,"outputTokens":28}
+{"text":"{\n  \"say\": \"Lifting to come back up to you, but try to settle into a steady effort.\"\n}","latencyMs":3177,"promptTokens":1886,"outputTokens":28}
+{"text":"{\n  \"say\": \"Lifting to close the gap, try to settle into a steady effort for the climb.\"\n}","latencyMs":2975,"promptTokens":1883,"outputTokens":28}
+{"text":"{\n  \"say\": \"Power is dipping, so find a steady rhythm you can sustain for the climb.\"\n}","latencyMs":2328,"promptTokens":1866,"outputTokens":26}
+{"text":"{\n  \"say\": \"Easing a touch for the climb ahead, find a rhythm you can sustain.\"\n}","latencyMs":2266,"promptTokens":1874,"outputTokens":25}
+{"text":"{\n  \"say\": \"Easing a bit for the climb, try to find a sustainable rhythm now.\"\n}","latencyMs":2108,"promptTokens":1871,"outputTokens":25}
+{"text":"{\n  \"say\": \"Easing a little more before the climb, find a steady rhythm you can hold.\"\n}","latencyMs":1504,"promptTokens":1866,"outputTokens":26}
+{"text":"{\n  \"say\": \"Easing off now to keep our energy for that climb in 150 m.\"\n}","latencyMs":1865,"promptTokens":1869,"outputTokens":27}
+{"text":"{\n  \"say\": \"Easing a bit more to save our legs for the climb in a moment.\"\n}","latencyMs":1887,"promptTokens":1866,"outputTokens":25}
+{"text":"{\n  \"say\": \"Easing a touch more so we're ready for that climb ahead.\"\n}","latencyMs":1534,"promptTokens":1866,"outputTokens":24}
+{"text":"{\n  \"say\": \"Keep it steady, the climb is right there.\"\n}","latencyMs":1647,"promptTokens":1860,"outputTokens":20}
+{"text":"{\n  \"say\": \"Spin a little quicker, aim for 80 rpm to keep the legs moving.\"\n}","latencyMs":1648,"promptTokens":1846,"outputTokens":27}
+{"text":"{\n  \"say\": \"Your cadence is dropping, try a lighter gear and aim for 80 rpm.\"\n}","latencyMs":1755,"promptTokens":1848,"outputTokens":27}
+{"text":"{\n  \"say\": \"Find a lighter gear and aim for 80 rpm to keep the legs spinning.\"\n}","latencyMs":1592,"promptTokens":1827,"outputTokens":27}
+{"text":"{\"say\": \"Keep that effort steady and try to find a quicker spin now.\"}","latencyMs":1514,"promptTokens":1833,"outputTokens":19}
+{"text":"{\n  \"say\": \"Find a lighter gear and aim for 80 rpm to keep the legs spinning.\"\n}","latencyMs":1571,"promptTokens":1830,"outputTokens":27}
+{"text":"{\n  \"say\": \"Keep it steady and find a quicker spin to keep the legs moving.\"\n}","latencyMs":1677,"promptTokens":1830,"outputTokens":24}
+{"text":"{\"say\": \"Find a lighter gear and aim for 80 rpm to keep the legs moving.\"}","latencyMs":1548,"promptTokens":1828,"outputTokens":23}
+{"text":"{\"say\": \"Shift down to a lighter gear and aim for 80 rpm to keep your legs moving.\"}","latencyMs":1516,"promptTokens":1827,"outputTokens":25}
+{"text":"{\n  \"say\": \"Your cadence is dropping, try a lighter gear and aim for 80 rpm.\"\n}","latencyMs":1819,"promptTokens":1829,"outputTokens":27}
+{"text":"{\n  \"say\": \"Lifting over the top to carry some speed into the descent.\"\n}","latencyMs":1574,"promptTokens":1838,"outputTokens":23}
+{"text":"{\n  \"say\": \"Lifting to carry some speed through this descent.\"\n}","latencyMs":1532,"promptTokens":1834,"outputTokens":20}
+{"text":"{\n  \"say\": \"Pushing hard now to keep our speed up on this downhill.\"\n}","latencyMs":1832,"promptTokens":1821,"outputTokens":23}
+{"text":"{\n  \"say\": \"Keep that speed up as we fly down this section.\"\n}","latencyMs":1705,"promptTokens":1824,"outputTokens":21}
+{"text":"{\n  \"say\": \"Keep your head down and stay tucked as we carry speed through this descent.\"\n}","latencyMs":1749,"promptTokens":1823,"outputTokens":25}
+{"text":"{\"say\": \"Power is dipping, try to settle into a steady effort for the rest of the descent\"}","latencyMs":1708,"promptTokens":1829,"outputTokens":23}
+{"text":"{\n  \"say\": \"Lifting to carry our speed through this descent.\"\n}","latencyMs":1479,"promptTokens":1832,"outputTokens":20}
+{"text":"{\n  \"say\": \"You're doing great, just keep that steady pressure as we fly down this bit.\"\n}","latencyMs":1793,"promptTokens":1804,"outputTokens":28}

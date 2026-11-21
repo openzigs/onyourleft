@@ -25,10 +25,11 @@
  * - **Before a climb over a descent**: a dip that runs into a climb inside
  *   {@link PACER_BEFORE_CLIMB_M} is `before-climb`. The ease is the rule's
  *   reason for existing (save for the climb), and it is the lower of the two.
- * - **ADR 0078's floor over this rule**: {@link riddenDirection} applies the
- *   floor last. The two cannot act on one answer today — the floor needs the
- *   rider `ahead` and this rule refuses `ahead` — and the order makes the
- *   floor win if a later change lets them meet.
+ * - **Never with the rider ahead**: {@link pacerTerrainApplies} refuses
+ *   `ahead`, where the pacer never eases (ADR 0078's floor, which since
+ *   #2835 is part of the one device rule, `device-rule.ts`
+ *   §`pacerRuleDecision`, ADR 0083). That file is where this rule and the
+ *   gap rule are put together.
  */
 
 import {
@@ -38,10 +39,8 @@ import {
 } from '../route/course-ahead';
 import { gradeAt, type RouteProfile } from '../route/profile';
 import {
-  flooredDirection,
   pacerSaysEasing,
   pacerSaysPushing,
-  type PacerDirection,
   type PacerIntent,
   type RiderPlace,
 } from './model-pacer';
@@ -124,35 +123,20 @@ export function pacerTerrainApplies(
   return riderPlace === 'level' || riderInDraft;
 }
 
-/** What the ask an answer replies to was built with: where the rider and the pacer were. */
-export interface PacerRuleGround {
-  readonly terrain: PacerTerrain;
-  readonly riderPlace: RiderPlace | undefined;
-  readonly riderInDraft: boolean;
-  /** How long the rider had been ahead, for ADR 0078's floor; `undefined` when they were not. */
-  readonly aheadForS: number | undefined;
-}
-
 /**
- * The direction the device rides for the model's `chosen` (ADR 0082 D-1):
- * this rule's intent where it applies, then ADR 0078's floor, last, so the
- * floor wins. The plan is always `chosen`'s. Returns `chosen` itself when
- * nothing moved, so a caller can tell.
+ * The intent the pacer rides on `terrain` where the rule applies
+ * ({@link pacerTerrainApplies}), or `undefined` where it has none: `ease`
+ * before a climb, `lift` on a descent and over the top.
  */
-export function riddenDirection(chosen: PacerDirection, ground: PacerRuleGround): PacerDirection {
-  const intent = pacerTerrainApplies(ground.riderPlace, ground.riderInDraft)
-    ? TERRAIN_INTENT[ground.terrain]
-    : undefined;
-  const terrained =
-    intent === undefined || intent === chosen.intent ? chosen : { plan: chosen.plan, intent };
-  return flooredDirection(terrained, ground.aheadForS);
+export function pacerTerrainIntent(terrain: PacerTerrain): PacerIntent | undefined {
+  return TERRAIN_INTENT[terrain];
 }
 
 /**
- * Whether `say` contradicts the intent the device **rode** (ADR 0082 D-3),
- * read only when that differs from the model's: a push under `ease`, an ease
- * under `lift`, and either under `hold`, which neither describes. Such a
- * line is not shown; the direction ridden is still applied and logged.
+ * Whether `say` contradicts the intent the device **rides** (ADR 0082 D-3;
+ * since #2835 read on every line, as the device decides every intent): a
+ * push under `ease`, an ease under `lift`, and either under `hold`, which
+ * neither describes. Such a line is not shown; the pacing is untouched.
  */
 export function pacerSayAgainstRidden(say: string, ridden: PacerIntent): boolean {
   switch (ridden) {

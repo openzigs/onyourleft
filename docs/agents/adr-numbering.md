@@ -12,6 +12,13 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0092 is [ADR 0092](../adr/0092-the-ai-pacers-start-rides-from-the-riders-own-effort-below-the-envelope.md)**, taken by
+  [#2835](https://github.com/openzigs/onyourleft/issues/2835) on 2026-11-20, in its pull request
+  #2864, for the AI pacer's start riding from the rider's own effort, below #92's 80 % floor when the
+  rider is, for the first 30 s; **Accepted** the same day on the owner's ruling on #2864. It
+  supersedes in part ADR 0072 D-2.2 and ADR 0083 D-3.1 and D-7; each gained one dated
+  `## Amendments` entry pointing to it. The next free number is **0093**; the entry below that
+  calls 0092 free was written before it was taken.
   ⚠️ **0089 is [ADR 0089](../adr/0089-the-chase-camera-follows-the-rolling-route-in-an-open-world-ride.md)**,
   taken by [#2888](https://github.com/openzigs/onyourleft/issues/2888) on 2026-11-19 for the fixed
   chase camera in an open-world ride, which follows the rolling route through a junction turn and a
@@ -65,6 +72,12 @@ It has the same authority as the root file. Where the text below says "this file
   one dated `## Amendments` entry pointing to it. 0083 is claimed by #2835's open pull request
   [#2864](https://github.com/openzigs/onyourleft/pull/2864). **The next free number is 0084.** A
   reviewer who remembers this file offering 0081 is reading the old file.
+  ⚠️ **0083 is [ADR 0083](../adr/0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md)**,
+  taken by [#2835](https://github.com/openzigs/onyourleft/issues/2835) on 2026-11-18 for the device
+  deciding the AI pacer's intent and the model writing only the line, **Accepted** on
+  2026-11-19 on the owner's answers to its D-9 (#2864). It supersedes in part ADR 0072, ADR 0078 and ADR 0082, each of which gained one dated
+  `## Amendments` entry pointing to it. **It skipped 0081 on purpose**, leaving it to #2836, which
+  runs beside it and needs an ADR too; the next free number is the one the entries above name.
   ⚠️ **0082 is [ADR 0082](../adr/0082-the-ai-pacer-paces-the-terrain-with-the-rider-on-its-wheel.md)**,
   taken by [#2794](https://github.com/openzigs/onyourleft/issues/2794) on 2026-11-18 for the AI
   pacer pacing the terrain with the rider on its wheel, **Accepted** on the owner's *"Yes to pacer

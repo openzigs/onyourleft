@@ -132,3 +132,19 @@ owner's ride (*"I am ahead and never see it taking over"*) cannot repeat with th
   floor wins** wherever both could act. They cannot both act on one ask today, because ADR 0082 never
   acts with the rider `ahead`. This ADR's D-1.3 line rule is now read through
   `pacerSayAgainstRidden`, which refuses the same lines beside a floored `hold`.
+- **2026-11-18** — **D-1.1's *"for at least 10 s"* and D-2.2 are superseded in part by
+  [ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md)**, **Proposed**. The owner's
+  ruling of that day on [#2835](https://github.com/openzigs/onyourleft/issues/2835), *"yes fold
+  these in"*, accepts a design in which the device decides the pacer's intent and this floor is part
+  of that one rule. Under it **the pacer never eases with the rider ahead, from the first ask**: the
+  rule's only answers for a rider ahead are `lift` and `hold`, so there is no `ease` to ride as
+  `hold` and no 10 s to wait. #2835's body asks that the floor apply at once only on the owner's
+  yes; **that yes is ADR 0083's question R-2 and is still owed**, and this entry does not claim it.
+  D-1.2's *"the floor never lifts"* stands of the floor: it is the gap rule, not the floor, that
+  now chases a rider who has pulled away (ADR 0083 R-3). The log now says which rule set the intent
+  (D-2.2). `flooredDirection` and `PACER_AHEAD_FLOOR_S` are gone from the code. This ADR's body is
+  unchanged.
+- **2026-11-19** — **[ADR 0083](0083-the-device-decides-the-ai-pacers-intent-and-the-model-writes-the-line.md) is Accepted, and R-2's yes is given.** The owner answered ADR 0083's D-9 on
+  2026-11-19, recorded in its D-10 and on [#2864](https://github.com/openzigs/onyourleft/pull/2864): R-2, *no easing while the rider is ahead, from the
+  first ask*, was approved with R-1 (*"Approve both (Recommended)"*). The yes the previous entry
+  called still owed is the owner's. This ADR's body is unchanged.

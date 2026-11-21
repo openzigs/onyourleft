@@ -2145,14 +2145,14 @@ function AiPacerControls(props: { readonly control: AiPacerControl }): JSX.Eleme
   );
 }
 
-/** The AI pacer's words on the chooser — #2712. Draft wording, for the owner's screenshots. */
+/** The AI pacer's words on the chooser — #2712; the switch and the consented line are the owner's of ADR 0083 R-7. */
 const AI_PACER_TEXT = {
-  switch: 'Let the AI on your instance steer the pacer and cheer you on',
+  switch: 'Let the AI on your server coach you through the pacer',
   asking: 'Asking your instance…',
   unavailable: 'Your instance could not be reached. The pacer rides as usual.',
   notOffered: 'Your instance offers you no AI model now. The pacer rides as usual.',
   consented:
-    'The AI will steer the pacer on this ride. Write-ups on your instance wait until the ride ends.',
+    'The AI will coach you on this ride. Write-ups on your server wait until the ride ends.',
   consent: 'Allow the AI pacer',
   withdraw: 'Withdraw consent',
 } as const;
@@ -2170,7 +2170,8 @@ function aiPacerConsentText(instance: string, modelAddress: string): string {
     `power per kilogram, cadence and heart rate, with how they are trending and their zones ` +
     `if you set thresholds, to the AI model at ${modelAddress}, run by your instance ` +
     `${instance}. No place, no name and nothing of your trainer is sent. ` +
-    `The AI picks how the pacer rides and writes a short line for you; it never sets your ` +
+    // #2835, ADR 0083: the AI no longer picks how the pacer rides, so the consent stops saying so.
+    `The app picks how the pacer rides; the AI writes a short line for you and never sets your ` +
     `trainer. The same consent lets AI bots race you. You can withdraw it here at any time.`
   );
 }
