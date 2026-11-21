@@ -419,7 +419,7 @@ describe('the illustrated home — #939', () => {
     ...document.querySelectorAll<HTMLLIElement>('main .oyl-home__rides > li'),
   ];
 
-  it('offers three ride cards, each a heading, a line and ONE link, to the three places a ride starts', async () => {
+  it('offers four ride cards, each a heading, a line and ONE link, to the four places a ride starts', async () => {
     // #1429: once there is a ride — a first open draws none of them.
     await openHome([ride('only', 2)]);
     const found = cards().map((card) => ({
@@ -432,6 +432,8 @@ describe('the illustrated home — #939', () => {
     expect(found).toEqual([
       { heading: 'Free ride', links: [['Start a ride', hrefFor(routeById('ride'))]] },
       { heading: 'Ride a route', links: [['Choose a route', hrefFor(routeById('game'))]] },
+      // #2889: the open-world ride, under a name waiting on the owner.
+      { heading: 'Open world', links: [['Choose a start', hrefFor(routeById('open-world'))]] },
       { heading: 'Workout', links: [['Choose a workout', hrefFor(routeById('workouts'))]] },
     ]);
     expectClean('home, the ride cards');

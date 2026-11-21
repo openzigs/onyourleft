@@ -44,12 +44,17 @@ export interface RecordedMap {
   readonly fits: boolean[];
   /** Every `setStyle`, in order (#672): the palettes it was repainted in. */
   readonly styles: MapViewOptions[];
-  /** Every `zoom`, `pan` and `fitTrack`, in order (#2003), e.g. `'zoom in'`, `'pan north'`, `'fit'`. */
+  /**
+   * Every `zoom`, `pan`, `fitTrack` and `show`, in order (#2003, #2889), e.g.
+   * `'zoom in'`, `'pan north'`, `'fit'`, `'show'`.
+   */
   readonly moves: string[];
   /** Every `setWaypoints`, in order (#2006). */
   readonly waypoints: (readonly MapWaypoint[])[];
   /** What `centre()` answers (#2006). A test moves the view by setting it. */
   centre: GeographicPosition;
+  /** Every place `show` flew to (#2889), in order. */
+  readonly shown: GeographicPosition[];
   /** The handlers the map's owner gave `listen`, which a test fires as the pointer would (#2006). */
   handlers: MapPointerHandlers | undefined;
   destroyed: boolean;
@@ -104,6 +109,7 @@ export function stubMapPort(): StubMapPort {
         moves: [],
         waypoints: [],
         centre: STUB_MAP_CENTRE,
+        shown: [],
         handlers: undefined,
         destroyed: false,
       };
@@ -135,6 +141,10 @@ export function stubMapPort(): StubMapPort {
         },
         centre(): GeographicPosition {
           return record.centre;
+        },
+        show(position: GeographicPosition): void {
+          record.moves.push('show');
+          record.shown.push(position);
         },
         listen(handlers: MapPointerHandlers): void {
           record.handlers = handlers;
