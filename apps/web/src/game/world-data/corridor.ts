@@ -86,12 +86,16 @@ export const READ_TIMEOUT_MS = 120_000;
  * **4** since #1789 (ADR 0054's entry of 2026-11-01), which keeps the twelve
  * building fields a version-3 record never decoded; **5** since #2659 (ADR
  * 0054's entry of 2026-11-15), which keeps the water lines a version-4 record
- * never decoded. The port trusts a record only at exactly this version, so a
- * version-4 row is read again here, and a version-5 row met by version-4 code
- * is read again there, never decoded as its own: that is #1789's rollback,
- * and #2659's, and there is no Dexie schema change.
+ * never decoded; **6** since #2974 (ADR 0054's entry of 2026-11-21), which
+ * keeps the ditches and drains a version-5 record dropped at decode. The port
+ * trusts a record only at exactly this version, so a version-4 row is read
+ * again here, and a version-5 row met by version-4 code is read again there,
+ * never decoded as its own: that is #1789's rollback, and #2659's and #2974's,
+ * and there is no Dexie schema change. #2974 changes no packed field, so the
+ * packed version stays 5: a version-5 build that meets a version-6 row reads
+ * it again, and its unpack holds a blob to its own kinds whatever it holds.
  */
-export const CORRIDOR_READER_VERSION = 5;
+export const CORRIDOR_READER_VERSION = 6;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =

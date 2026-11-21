@@ -18,6 +18,7 @@ import {
   type Landmark,
   type LandUseFeature,
   type StreetFeature,
+  type WaterLineFeature,
 } from '@onyourleft/map-features';
 
 import {
@@ -1090,6 +1091,73 @@ export function parksFixture(latitude = FIXTURE_LATITUDE): {
       buildings: [],
       paths: [],
       streets: [],
+    },
+  };
+}
+
+/**
+ * #2974's owner's page, `town=water`: a level road with the map's water
+ * beside it, from arithmetic and no real place — on the right a stream 20 m
+ * out from 900 to 1 500 m and a river 40 m out from 1 600 to 2 100 m; on the
+ * left a ditch 6 m out, beside the verge, from 900 to 2 100 m, and a drain
+ * crossing the road at 1 300 m, which is not bridged; and from 1 150 to
+ * 1 450 m, on residential land 15 to 70 m out on the left, three back-garden
+ * swimming pools, a round one and a fountain.
+ */
+export function waterFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const line = (
+    kind: WaterLineFeature['kind'],
+    pairs: readonly (readonly [number, number])[],
+  ): WaterLineFeature => ({ kind, line: ringBeside(profile, origin, pairs) });
+  const pool = (kind: string, ring: readonly (readonly [number, number])[]): LandUseFeature => ({
+    layer: 'water',
+    kind,
+    rings: [ringBeside(profile, origin, ring)],
+  });
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'water',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 1_150, 1_450, -15, -70),
+        pool('swimming_pool', rectangleBeside(1_180, -30, 10, 5)),
+        pool('swimming_pool', rectangleBeside(1_230, -45, 12, 6)),
+        pool('swimming_pool', rectangleBeside(1_290, -28, 8, 4)),
+        pool('swimming_pool', polygonBeside(1_350, -40, 3, 12)),
+        pool('fountain', polygonBeside(1_410, -22, 2, 10)),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [],
+      waterLines: [
+        line('stream', [
+          [900, 20],
+          [1_200, 22],
+          [1_500, 20],
+        ]),
+        line('river', [
+          [1_600, 40],
+          [2_100, 40],
+        ]),
+        line('ditch', [
+          [900, -6],
+          [2_100, -6],
+        ]),
+        line('drain', [
+          [1_300, -150],
+          [1_300, 150],
+        ]),
+      ],
     },
   };
 }

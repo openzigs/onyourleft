@@ -297,7 +297,7 @@ describe('#1632 place points: kept, read back, and a row of another reader versi
     expect(placesOf(second)).toStrictEqual(first);
     const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
     expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(CORRIDOR_READER_VERSION).toBe(5);
+    expect(CORRIDOR_READER_VERSION).toBe(6);
     // No name, `wikidata` or population reached the store (ADR 0055 D-3).
     const text = await keptText(route);
     expect(text).toContain('"places"');
