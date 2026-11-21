@@ -136,10 +136,16 @@
  * store change: a ride's facts may carry `lapRaces` (ADR 0071 D-4.4), and
  * `migrations.ts` §`ACTIVITY_LAP_RACES` is its pair, whose `down` drops them.
  *
+ * ⚠️ **Version 23 is #2891's `riddenBlocks`** — the map features of the
+ * blocks an open-world ride read (ADR 0090 D-6), one row per owner and block.
+ * Additive: a new store, and no existing record's shape changes. ODbL 1.0 and
+ * location data, a cache that never leaves the device, so its rollback drops
+ * it and loses nothing of the rider's.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -252,6 +258,13 @@ export const TABLE = {
    * 0054 D-3): never exported, synced or sent.
    */
   worldCorridors: 'worldCorridors',
+  /**
+   * #2891: the map features of the blocks an open-world ride read
+   * (`records.ts` §`RiddenBlockRecord`), one row per owner and block, keyed by
+   * both. ⚠️ **ODbL 1.0 data** and **location data** (ADR 0090 D-6): never
+   * exported, synced or sent.
+   */
+  riddenBlocks: 'riddenBlocks',
 } as const;
 
 /**
@@ -453,6 +466,10 @@ export const INDEX = {
    * lookup needs no index: the primary key is `[owner+routeId]`.
    */
   worldCorridorByOwner: 'owner',
+  /** #2891: `deleteAthlete`'s cascade. `owner`, for {@link INDEX.worldCorridorByOwner}'s reason. */
+  riddenBlockByOwner: 'owner',
+  /** #2891: one owner's ridden blocks, least recently ridden first — the eviction's order. */
+  riddenBlockByOwnerAndRiddenAt: '[owner+riddenAt]',
 } as const;
 
 /**
@@ -1015,6 +1032,29 @@ export const STORES_V21: Readonly<Record<string, string>> = {
  */
 export const STORES_V22: Readonly<Record<string, string>> = {};
 
+/**
+ * Version 23 — #2891's ridden blocks (ADR 0090 D-6), added beside the
+ * twenty-four stores that exist. Additive: a new store, no existing shape
+ * touched, so `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export →
+ * downgrade → re-import, executed by `migrations.test.ts` §"version 23 rolls
+ * back": what a downgrade loses is the ridden blocks, a cache of the basemap
+ * archive that the next open-world ride reads again, and the corridors and
+ * every other table come through.
+ *
+ * ⚠️ **ODbL 1.0 data in an Apache-2.0 package**, kept apart for
+ * {@link STORES_V20}'s reason, and **location data**: which blocks a rider has
+ * ridden says where they ride. The primary key is compound and leads with the
+ * owner, for {@link STORES_V14}'s reason.
+ */
+export const STORES_V23: Readonly<Record<string, string>> = {
+  // The twenty-four stores of versions 1 to 22 are inherited unchanged.
+  [TABLE.riddenBlocks]: [
+    '[owner+block]',
+    INDEX.riddenBlockByOwner,
+    INDEX.riddenBlockByOwnerAndRiddenAt,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -1038,4 +1078,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V20,
   STORES_V21,
   STORES_V22,
+  STORES_V23,
 ];

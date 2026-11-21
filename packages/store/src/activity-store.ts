@@ -166,8 +166,15 @@ import type {
   RouteRecord,
   WorkoutRecord,
   WorldCorridorRecord,
+  RiddenBlockRecord,
 } from './records';
-import { isBirthYear, parseCalorieSex, WORLD_CORRIDOR_FEATURES_LIMIT_BYTES } from './records';
+import {
+  isBirthYear,
+  parseCalorieSex,
+  RIDDEN_BLOCK_FEATURES_LIMIT_BYTES,
+  RIDDEN_BLOCKS_LIMIT,
+  WORLD_CORRIDOR_FEATURES_LIMIT_BYTES,
+} from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
 import { parseMaskedWords } from '@onyourleft/analysis';
 import { MAXIMUM_RIDER_DOCUMENTS, riderTextProblem, tidyRiderText } from './rider-text';
@@ -423,6 +430,11 @@ export interface AthleteDeletionCounts {
    * it is location data and goes with them (ADR 0054 D-6.6).
    */
   readonly worldCorridors: number;
+  /**
+   * The blocks the rider's open-world rides read removed — #2891. A cache,
+   * but which blocks it holds says where the rider rides (ADR 0090 D-6.6).
+   */
+  readonly riddenBlocks: number;
 }
 
 /**
@@ -651,6 +663,10 @@ export class ActivityStore {
 
   get #worldCorridors(): Table<WorldCorridorRecord, [string, string]> {
     return this.#db.table<WorldCorridorRecord, [string, string]>(TABLE.worldCorridors);
+  }
+
+  get #riddenBlocks(): Table<RiddenBlockRecord, [string, number]> {
+    return this.#db.table<RiddenBlockRecord, [string, number]>(TABLE.riddenBlocks);
   }
 
   get #riderTexts(): Table<RiderTextRecord, [string, string, string]> {
@@ -1097,6 +1113,7 @@ export class ActivityStore {
         this.#workoutGoals,
         this.#recentlyDeleted,
         this.#worldCorridors,
+        this.#riddenBlocks,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -1203,6 +1220,12 @@ export class ActivityStore {
           .where(INDEX.worldCorridorByOwner)
           .equals(id)
           .delete();
+        // #2891. The blocks the rider's open-world rides read: which ones
+        // there are says where they ride (ADR 0090 D-6.6).
+        const riddenBlocks = await this.#riddenBlocks
+          .where(INDEX.riddenBlockByOwner)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -1224,6 +1247,7 @@ export class ActivityStore {
           workoutGoals,
           recentlyDeleted,
           worldCorridors,
+          riddenBlocks,
         };
       },
     );
@@ -3159,6 +3183,76 @@ export class ActivityStore {
    */
   async deleteWorldCorridor(owner: AthleteId, routeId: RouteId): Promise<void> {
     await this.#worldCorridors.delete([owner, routeId]);
+  }
+
+  // --- Ridden blocks (#2891) -----------------------------------------------
+
+  /**
+   * Keeps the map features of one block an open-world ride read (`records.ts`
+   * §`RiddenBlockRecord`), **replacing** whatever was kept for that owner and
+   * block, and then drops the owner's least recently ridden blocks past
+   * {@link RIDDEN_BLOCKS_LIMIT} — in the same transaction, so the cache is
+   * never over its bound when the write returns (ADR 0090 D-6.5). Another
+   * owner's blocks are never counted or dropped. ⚠️ ODbL 1.0 location data
+   * that never leaves the device: nothing that exports, syncs or sends may
+   * read it.
+   *
+   * @throws {StoreValidationError} if the record is not a ridden block, or its
+   * features are over {@link RIDDEN_BLOCK_FEATURES_LIMIT_BYTES}; nothing is written.
+   * @throws {StoreReferentialError} if there is no such athlete.
+   */
+  async putRiddenBlock(record: RiddenBlockRecord): Promise<void> {
+    if (record.licence !== 'ODbL-1.0') {
+      throw new StoreValidationError('riddenBlocks.licence: must be ODbL-1.0');
+    }
+    if (!(record.features instanceof Blob)) {
+      throw new StoreValidationError('riddenBlocks.features: must be a Blob');
+    }
+    // The size and the limit, and never the block: which block it is is
+    // location data (ADR 0004 D).
+    if (record.features.size > RIDDEN_BLOCK_FEATURES_LIMIT_BYTES) {
+      throw new StoreValidationError(
+        `riddenBlocks.features: ${String(record.features.size)} bytes is over the limit of ${String(RIDDEN_BLOCK_FEATURES_LIMIT_BYTES)} bytes`,
+      );
+    }
+    if (!Number.isSafeInteger(record.block) || record.block < 0) {
+      throw new StoreValidationError('riddenBlocks.block: must be a non-negative integer');
+    }
+    await this.#db.transaction('rw', [this.#athletes, this.#riddenBlocks], async () => {
+      // An erase that finished while the read was running leaves no athlete:
+      // nothing is kept for them, so nothing of theirs outlives the erase.
+      if ((await this.#athletes.get(record.owner)) === undefined) {
+        throw new StoreReferentialError('cannot keep a ridden block: there is no such athlete');
+      }
+      await this.#riddenBlocks.put(record);
+      const over =
+        (await this.#riddenBlocks.where(INDEX.riddenBlockByOwner).equals(record.owner).count()) -
+        RIDDEN_BLOCKS_LIMIT;
+      if (over > 0) {
+        const oldest = await this.#riddenBlocks
+          .where(INDEX.riddenBlockByOwnerAndRiddenAt)
+          .between([record.owner, Dexie.minKey], [record.owner, Dexie.maxKey])
+          .limit(over)
+          .primaryKeys();
+        await this.#riddenBlocks.bulkDelete(oldest);
+      }
+    });
+  }
+
+  /**
+   * The features kept for one of this owner's ridden blocks, or `undefined`
+   * when none were — which the open-world read answers by asking the archive.
+   */
+  async getRiddenBlock(owner: AthleteId, block: number): Promise<RiddenBlockRecord | undefined> {
+    return this.#riddenBlocks.get([owner, block]);
+  }
+
+  /**
+   * Says one of this owner's blocks was ridden at `riddenAt`, so the eviction
+   * keeps it longer. `false` when the owner keeps no such block.
+   */
+  async markRiddenBlock(owner: AthleteId, block: number, riddenAt: string): Promise<boolean> {
+    return (await this.#riddenBlocks.update([owner, block], { riddenAt })) === 1;
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

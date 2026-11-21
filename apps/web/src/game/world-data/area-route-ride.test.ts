@@ -25,8 +25,13 @@ import { stripComments } from '../../units/no-inline-units';
 
 const SOURCE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
-/** The modules permitted to import the streamed reader: none ships one yet. */
-const AREA_READER_IMPORTERS: readonly string[] = [];
+/**
+ * The modules permitted to import the streamed reader. None of them builds a
+ * reader yet: `world-data/ridden-blocks.ts` (#2891) is the cache the reader
+ * asks before the network, and takes the block's key and the cache's shape
+ * from it.
+ */
+const AREA_READER_IMPORTERS: readonly string[] = [join('world-data', 'ridden-blocks.ts')];
 
 /** The route ride's own read: each must keep to the corridor (ADR 0054 D-2.4). */
 const ROUTE_RIDE_READ = [

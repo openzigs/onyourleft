@@ -52,8 +52,20 @@ import {
 import { createWorldCorridorPort } from '../world-data/corridor-port';
 import { corridorArchiveFrom } from '../world-data/corridor-source';
 
-/** The names that reach the store. Any of them in a module is that module reaching it. */
-const CORRIDOR_NAMES = ['worldCorridors', 'getWorldCorridor', 'WorldCorridorRecord'] as const;
+/**
+ * The names that reach the store. Any of them in a module is that module
+ * reaching it. Since #2891 (ADR 0090 D-6.4) they include the ridden-block
+ * store's, which holds the same kind of data and is held to the same line.
+ */
+const CORRIDOR_NAMES = [
+  'worldCorridors',
+  'getWorldCorridor',
+  'WorldCorridorRecord',
+  'riddenBlocks',
+  'getRiddenBlock',
+  'RiddenBlockRecord',
+  'riddenBlockCache',
+] as const;
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -104,6 +116,15 @@ describe('no instance module names the world corridor store — #1545', () => {
       'WorldCorridorRecord',
     ]);
     expect(corridorNamesIn('const corridor = buildRoute();')).toStrictEqual([]);
+    // #2891: the ridden-block store's names, each found.
+    expect(corridorNamesIn('const kept = await store.getRiddenBlock(owner, block);')).toStrictEqual(
+      ['getRiddenBlock'],
+    );
+    expect(corridorNamesIn("db.table('riddenBlocks')")).toStrictEqual(['riddenBlocks']);
+    expect(corridorNamesIn('type Row = RiddenBlockRecord;')).toStrictEqual(['RiddenBlockRecord']);
+    expect(corridorNamesIn('const cache = riddenBlockCache(options);')).toStrictEqual([
+      'riddenBlockCache',
+    ]);
   });
 
   it('finds none in apps/web/src/instance/ or apps/instance/', () => {
