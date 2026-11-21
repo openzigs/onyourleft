@@ -13,8 +13,11 @@ import { metres, type RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, PathFeature, StreetFeature } from '@onyourleft/map-features';
 
 import {
+  clearOfSideRoads,
   mappedJunctions,
   onSideRoad,
+  sideRoadClearance,
+  UNCACHED_SIDE_ROAD_CLEARANCE,
   SIDE_ROAD_LIFT_METRES,
   SIDE_ROAD_WIDTHS,
   sideRoadsAt,
@@ -379,6 +382,10 @@ describe('a street that never touches the route is drawn — #2973', () => {
       wouldStand += off.scatter.filter((item) =>
         onSideRoad(drawn, item, footprint(item.kind), 0),
       ).length;
+      // #2439's cache keeps exactly what working each answer out afresh keeps, on the streets too.
+      expect(clearOfSideRoads(off.scatter, frame.sideRoads, sideRoadClearance(onSideRoad))).toEqual(
+        clearOfSideRoads(off.scatter, frame.sideRoads, UNCACHED_SIDE_ROAD_CLEARANCE),
+      );
     }
     expect(checked).toBeGreaterThan(0);
     // The control: with the streets undrawn, the same frames stand things on them.
