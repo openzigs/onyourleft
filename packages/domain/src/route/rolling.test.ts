@@ -10,7 +10,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { distanceBetween } from '../geodesy';
-import { altitudeMetres } from '../quantities';
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+} from '../quantities';
 
 import { elevationAt, gradeAt, positionAt, routeProfile, type RouteProfile } from './profile';
 import {
@@ -443,6 +448,127 @@ describe('a rider distance that is not a finite number', () => {
     // And the route still rides on from where it was.
     route.advance(1_000);
     expect(route.end - 1_000).toBeGreaterThanOrEqual(ROLLING_AHEAD_METRES);
+  });
+});
+
+describe('the edge cases the review of #2962 found — #2982', () => {
+  const ground = (east: number) => 100 + east * 0.04;
+  const long: RollingEdge = {
+    id: 'long',
+    from: 'w',
+    to: 'e',
+    points: streetThrough(
+      [
+        [0, 0],
+        [1_500, 0],
+        [3_000, 0],
+      ],
+      ground,
+    ),
+    roadClass: 1,
+  };
+
+  it('reads a rider far past the road held as a reach past its end, so one call samples twice its reach at most', () => {
+    const { route } = eastAlongRow3();
+    const end = route.end;
+    route.advance(1e9);
+    // Twice the reach past the old end, and the samples bounded as ever.
+    expect(route.end).toBeLessThanOrEqual(end + 2 * ROLLING_AHEAD_METRES + 10);
+    expect(route.end).toBeGreaterThanOrEqual(end + 2 * ROLLING_AHEAD_METRES);
+    expect(route.view().positions.length).toBeLessThanOrEqual(ROLLING_MOST_SAMPLES);
+    // And the next call goes on from there.
+    route.advance(1e9);
+    expect(route.end).toBeGreaterThanOrEqual(end + 4 * ROLLING_AHEAD_METRES);
+  });
+
+  it('turns nothing round behind the origin or past the end, and throws nothing', () => {
+    const route = new RollingRoute(graphOf([long]), long);
+    route.advance(1_800);
+    expect(route.origin).toBeGreaterThan(0);
+    const view = route.view();
+    const legs = route.legs;
+    for (const rider of [route.origin - 50, route.end + 50]) {
+      expect(() => {
+        route.uTurn(rider);
+      }).not.toThrow();
+      expect(route.view()).toBe(view);
+      expect(route.legs).toEqual(legs);
+    }
+    // And a caller counting U-turns is told of none.
+    expect(route.uTurns).toBe(0);
+  });
+
+  it('turns the rider back the way they were going on a second U-turn within one sample', () => {
+    const route = new RollingRoute(graphOf([long]), long);
+    route.advance(253);
+    const before = route.view();
+    route.uTurn(253);
+    route.uTurn(255);
+    expect(route.uTurns).toBe(2);
+    const view = route.view();
+    // Up to the turn, nothing moved; past it the rider rides on east, as before both.
+    for (const at of [0, 250, 260, 300, 700, 1_400]) {
+      expect(distanceBetween(readAt(view, route.origin, at).position, placeAt(at, 0))).toBeLessThan(
+        0.01,
+      );
+      expect(readAt(view, route.origin, at).grade).toBeCloseTo(
+        readAt(before, route.origin, at).grade,
+        6,
+      );
+    }
+  });
+
+  it('turns back along the street ridden in on, at a sample where one street meets the next', () => {
+    // A street exactly 200 m long, ridden north into a node on the equator,
+    // where one way goes east and one west: the node is a sample, held by the
+    // street ridden in on and by the way taken after it. The latitude is found
+    // by stepping an ulp at a time until the street is 200 m to the bit.
+    const at = (latitude: number, longitude: number) => ({
+      position: geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude)),
+      elevation: altitudeMetres(0),
+    });
+    const node = at(0, 0);
+    const guess = -200 / ((6_371_008.8 * Math.PI) / 180);
+    let south = guess;
+    for (let step = -400; step <= 400; step += 1) {
+      const latitude = guess * (1 + step * Number.EPSILON);
+      if ((distanceBetween(at(latitude, 0).position, node.position) as number) === 200) {
+        south = latitude;
+        break;
+      }
+    }
+    const ridden: RollingEdge = {
+      id: 'in',
+      from: 's',
+      to: 'm',
+      points: [at(south, 0), node],
+      roadClass: 1,
+    };
+    const east: RollingEdge = {
+      id: 'e',
+      from: 'm',
+      to: 'x',
+      points: [node, at(0, 0.03)],
+      roadClass: 1,
+    };
+    const west: RollingEdge = {
+      id: 'w',
+      from: 'm',
+      to: 'y',
+      points: [node, at(0, -0.03)],
+      roadClass: 1,
+    };
+    const route = new RollingRoute(graphOf([ridden, east, west]), ridden);
+    expect(route.legs[0]?.end).toBe(200);
+    route.uTurn(195);
+    const view = route.view();
+    // Back south down the street ridden in on, never on along the other way west.
+    for (const back of [10, 100, 190]) {
+      expect(readAt(view, route.origin, 200 + back).position.latitude).toBeLessThan(0);
+      expect(Math.abs(readAt(view, route.origin, 200 + back).position.longitude)).toBeLessThan(
+        1e-9,
+      );
+    }
   });
 });
 

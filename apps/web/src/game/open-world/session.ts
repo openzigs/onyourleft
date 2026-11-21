@@ -6,8 +6,8 @@
  * (`world-data/area.ts`, #2890) → a street graph over them
  * (`StreetGraph`, #2894) → the start snapped to a street → a
  * `RollingRoute` (#2895) → its **first view**, handed to the game as a
- * picker card (`ride.ts`). The ride loop past that first view, and the camera
- * tests, are #2982.
+ * picker card (`ride.ts`). The ride loop past that first view follows a fresh
+ * rolling route from the same start (`road.ts`, #2982).
  *
  * ## The start
  *
@@ -74,6 +74,7 @@ import {
   type OpenWorldRefusal,
   type OpenWorldSession,
 } from './ride';
+import { OpenWorldRoad } from './road';
 import type { OpenWorldStart } from './start';
 
 /**
@@ -345,7 +346,8 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
     }
     if (begun.kind !== 'ready' || late) return refused('unavailable');
     // A tile the graph cannot take is refused by `addTile`, never thrown.
-    const route = rollingRouteFrom(streetGraphOf(reader.held(), frame, options.log), frame);
+    const graph = streetGraphOf(reader.held(), frame, options.log);
+    const route = rollingRouteFrom(graph, frame);
     if (route === undefined) return refused('no-street');
     return {
       kind: 'ready',
@@ -355,6 +357,10 @@ export function createOpenWorldSession(options: OpenWorldSessionOptions): OpenWo
         profile: route.view(),
         attempts: 0,
       },
+      // #2982: each ride its own rolling route from the same snapped start, over
+      // the same graph, so its first view is the card's. The snap found a street
+      // once, and the graph has not changed, so it finds the same one again.
+      road: () => new OpenWorldRoad(rollingRouteFrom(graph, frame) as RollingRoute),
     };
   })();
 
