@@ -344,6 +344,70 @@ export function vertexNormals(
   return normals;
 }
 
+/**
+ * How much of a skin tone's light its albedo keeps: **0.72**. @see skinAlbedo
+ */
+export const SKIN_ALBEDO_SHARE = 0.72;
+
+/**
+ * The power a BRIGHT skin tone's colour, taken as a share of its own
+ * luminance, is raised to: **1.4**. @see skinAlbedo
+ */
+export const SKIN_CHROMA = 1.4;
+
+/**
+ * The luminance at and over which a tone is raised to the whole of
+ * {@link SKIN_CHROMA}: **0.45**. A darker tone is raised by less, in
+ * proportion, and black by nothing. @see skinAlbedo
+ */
+export const SKIN_BRIGHT = 0.45;
+
+/** Rec. 709's luminance of a linear colour: what {@link skinAlbedo} weighs a tone by. */
+export const SKIN_LUMINANCE = [0.2126, 0.7152, 0.0722] as const;
+
+/**
+ * A person's skin as the light meets it, from the tone they were given
+ * (`people.ts` §`SKIN_TONES`), both linear RGB — what both people materials
+ * do in GLSL (`three-renderer.ts` §`PEOPLE_COLOUR_GLSL`).
+ *
+ * ## Why a tone is not an albedo
+ *
+ * `SKIN_TONES` are how skin LOOKS — sRGB picked off a screen — and they were
+ * handed to a physically based material as what skin REFLECTS. The lightest,
+ * `0xf1c6a6`, reflects 62 % of the light that way, where the realistic
+ * rider's skin (`rider_kit.py` §`SKIN_TONE`) reflects 36 %; and the realistic
+ * world's tone map (AgX) takes the colour out of whatever is that bright. A
+ * face in the sun was drawn `(197, 182, 169)` from a tone of
+ * `(241, 198, 166)`: pale, grey and waxy, with white hands — the owner's
+ * pictures of PR #2844. The shade side of the same neck was the tone itself,
+ * which is how the fault hid.
+ *
+ * So the albedo is the tone at {@link SKIN_ALBEDO_SHARE} of its luminance,
+ * and its colour — each channel as a share of that luminance — raised to
+ * {@link SKIN_CHROMA}: deeper and redder, as skin lit through is. The lightest
+ * tone then reflects 45 % and the same face is drawn `(189, 162, 144)`. A
+ * grey stays grey. A deep tone is not bright enough for the tone map to
+ * bleach, and the whole power drew its legs brick red: the power falls to 1
+ * with the tone's luminance under {@link SKIN_BRIGHT}, so the deepest keeps
+ * its own colour at 72 % of its light.
+ *
+ * ⚠️ The figures are fitted by eye to the harness's renders in the realistic
+ * world's own light, not derived: change one and look again.
+ *
+ * @test-facing the shader's twin: `people-body.test.ts` holds the GLSL's own
+ * text to this, and every tone to a ceiling the rider's skin is under
+ */
+export function skinAlbedo(tone: readonly [number, number, number]): [number, number, number] {
+  const light = Math.max(
+    tone[0] * SKIN_LUMINANCE[0] + tone[1] * SKIN_LUMINANCE[1] + tone[2] * SKIN_LUMINANCE[2],
+    0.0001,
+  );
+  const chroma = 1 + (SKIN_CHROMA - 1) * Math.min(light / SKIN_BRIGHT, 1);
+  const of = (channel: number): number =>
+    SKIN_ALBEDO_SHARE * light * Math.pow(channel / light, chroma);
+  return [of(tone[0]), of(tone[1]), of(tone[2])];
+}
+
 /** What a part of a person's body wears. The numbers are what a slot carries. */
 export const PersonRegion = { skin: 0, top: 1, bottoms: 2, shoes: 3, hair: 4 } as const;
 

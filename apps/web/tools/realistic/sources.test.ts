@@ -733,11 +733,13 @@ describe('what --check requires of a run’s report — #900 item 2', () => {
     const files = Object.keys(EXPECTED_REPORTS);
     // #2485: and the pack's rider, whose texture's shape is held too; #2495:
     // and the rider, whose eyes' cost is; and #2540's car, and since #2847
-    // the three cars that replaced it; #2839: and the female rider, held to
+    // the three cars that replaced it; and the people (PR #2844), whose skirt
+    // and hands a run must have found; #2839: and the female rider, held to
     // the rider's own figures.
     expect(files.sort()).toEqual(
       [
         REALISTIC_DELIVERY_CAR,
+        REALISTIC_PEOPLE.model,
         'island_tree_02-middle.glb',
         'island_tree_02.glb',
         REALISTIC_RIDER,

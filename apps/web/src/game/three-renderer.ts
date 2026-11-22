@@ -481,6 +481,10 @@ import {
   PHASES,
   RIDE_GAIT_INDEX,
   RIDE_PHASES,
+  SKIN_ALBEDO_SHARE,
+  SKIN_BRIGHT,
+  SKIN_CHROMA,
+  SKIN_LUMINANCE,
   SLOT_REGIONS,
   SLOT_WIDTH,
   animationLayout,
@@ -19549,6 +19553,17 @@ function bakedPeople(scene: Object3D, ride: (crankAngle: number) => SkinnedMesh)
           turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), forward, sign * (held[side] - hang));
           turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), across, -limb.shoulder);
           turnBoneInWorld(boneOf(bones, `lowerarm01.${side}`), across, bent[side] - limb.elbow);
+          // And the whole arm turned in about the upper arm's own length, so
+          // the forearm and hand are carried across the body's front
+          // (`gait.ts` §`LimbAngles.carry`) — not held straight out ahead.
+          turnBoneInWorld(
+            boneOf(bones, `upperarm01.${side}`),
+            boneOf(bones, `lowerarm01.${side}`)
+              .getWorldPosition(new Vector3())
+              .sub(boneOf(bones, `upperarm01.${side}`).getWorldPosition(new Vector3()))
+              .normalize(),
+            -sign * limb.carry,
+          );
           // The leg: hip, knee and ankle, in the body's own sagittal plane.
           turnBoneInWorld(boneOf(bones, `upperleg01.${side}`), across, -limb.hip);
           turnBoneInWorld(boneOf(bones, `lowerleg01.${side}`), across, limb.knee);
@@ -19704,14 +19719,34 @@ function bakedPeople(scene: Object3D, ride: (crankAngle: number) => SkinnedMesh)
   };
 }
 
-/** Packed sRGB `0xRRGGBB` in a float, to linear RGB — the GLSL both people materials share. */
-const PEOPLE_UNPACK = /* glsl */ `
+/**
+ * The colour of a region of a person, from the instance's packed sRGB
+ * `0xRRGGBB` floats — the GLSL both people materials share. `oylUnpack`
+ * brings one to linear RGB; `oylSkinOf` is `people-body.ts` §`skinAlbedo`,
+ * a skin tone as the light meets it; and `oylColourOf` is the one place a
+ * region (`people-body.ts` §`PersonRegion`) is given its colour, the skin's
+ * through `oylSkinOf` and no other's. Exported so `people-body.test.ts` can
+ * run it as text against `skinAlbedo`.
+ */
+export const PEOPLE_COLOUR_GLSL = /* glsl */ `
 vec3 oylUnpack(float packed) {
   float r = floor(packed / 65536.0);
   float g = floor((packed - r * 65536.0) / 256.0);
   float b = packed - r * 65536.0 - g * 256.0;
   vec3 c = vec3(r, g, b) / 255.0;
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+vec3 oylSkinOf(vec3 tone) {
+  float light = max(dot(tone, vec3(${SKIN_LUMINANCE.join(', ')})), 0.0001);
+  float chroma = 1.0 + ${String(SKIN_CHROMA - 1)} * min(light / ${String(SKIN_BRIGHT)}, 1.0);
+  return ${String(SKIN_ALBEDO_SHARE)} * light * pow(tone / light, vec3(chroma));
+}
+vec3 oylColourOf(float region, float skin, float top, float bottoms, float shoes, float hair) {
+  return region < 0.5 ? oylSkinOf(oylUnpack(skin))
+    : region < 1.5 ? oylUnpack(top)
+    : region < 2.5 ? oylUnpack(bottoms)
+    : region < 3.5 ? oylUnpack(shoes)
+    : oylUnpack(hair);
 }
 `;
 
@@ -19771,7 +19806,7 @@ attribute vec4 oylLook;
 attribute vec4 oylMotion;
 varying vec3 vOylColour;
 varying vec2 vOylUv;
-${PEOPLE_UNPACK}
+${PEOPLE_COLOUR_GLSL}
 ${PEOPLE_NORMAL_GLSL}
 ${peopleSlotGlsl(rows)}`,
           'vertex',
@@ -19799,11 +19834,7 @@ vec3 objectNormal = normalize(mix(oylNormalOf(oylPoseA.a), oylNormalOf(oylPoseB.
 #ifdef USE_TANGENT
   vec3 objectTangent = vec3(1.0, 0.0, 0.0);
 #endif
-vOylColour = oylRegion < 0.5 ? oylUnpack(oylLook.x)
-  : oylRegion < 1.5 ? oylUnpack(oylLook.y)
-  : oylRegion < 2.5 ? oylUnpack(oylLook.z)
-  : oylRegion < 3.5 ? oylUnpack(oylLook.w)
-  : oylUnpack(oylMotion.z);`,
+vOylColour = oylColourOf(oylRegion, oylLook.x, oylLook.y, oylLook.z, oylLook.w, oylMotion.z);`,
         'vertex',
         spliced,
       ),
@@ -19864,7 +19895,7 @@ varying vec3 vOylTop;
 varying vec3 vOylBottoms;
 varying vec3 vOylShoes;
 varying vec3 vOylHair;
-${PEOPLE_UNPACK}`,
+${PEOPLE_COLOUR_GLSL}`,
           'vertex',
           spliced,
         ),
@@ -19883,11 +19914,11 @@ vec3 oylFacing = vec3(sin(oylMotion.x), 0.0, cos(oylMotion.x));
 vOylSide = dot(oylFacing, -oylRight);
 vOylHips = oylMotion.yz;
 vOylQuad = vec2(position.x, position.y);
-vOylSkin = oylUnpack(oylLook.x);
-vOylTop = oylUnpack(oylLook.y);
-vOylBottoms = oylUnpack(oylLook.z);
-vOylShoes = oylUnpack(oylLook.w);
-vOylHair = oylUnpack(oylMotion.w);`,
+vOylSkin = oylColourOf(0.0, oylLook.x, oylLook.y, oylLook.z, oylLook.w, oylMotion.w);
+vOylTop = oylColourOf(1.0, oylLook.x, oylLook.y, oylLook.z, oylLook.w, oylMotion.w);
+vOylBottoms = oylColourOf(2.0, oylLook.x, oylLook.y, oylLook.z, oylLook.w, oylMotion.w);
+vOylShoes = oylColourOf(3.0, oylLook.x, oylLook.y, oylLook.z, oylLook.w, oylMotion.w);
+vOylHair = oylColourOf(4.0, oylLook.x, oylLook.y, oylLook.z, oylLook.w, oylMotion.w);`,
         'vertex',
         spliced,
       ),

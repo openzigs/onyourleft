@@ -106,6 +106,7 @@ import { FOLIAGE_TINT, packedInstanceTint } from './instance-tint';
 import {
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_STRUCTURE_ITEMS,
+  REALISTIC_TEXTURE_PIXELS,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { treeSlots } from './tree-levels';
@@ -125,6 +126,7 @@ import {
   REALISTIC_RIDER_CRASH_CLIP,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAP_NAMES,
+  REALISTIC_PEOPLE,
   REALISTIC_RIDER_MAPS,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
@@ -138,7 +140,12 @@ import {
   realisticVegetation,
   type RealisticTrees,
 } from './realistic-assets';
-import { chainLinkFacts, modelFacts, roadsideFacts } from './realistic-bytes-testing';
+import {
+  accessorValues,
+  chainLinkFacts,
+  modelFacts,
+  roadsideFacts,
+} from './realistic-bytes-testing';
 
 /* ============================================================================
  * Running three's `KTX2Loader` under Vitest, for real
@@ -4678,6 +4685,203 @@ describe('the litter and the chain-link, loaded by the product’s own loader �
       drawing.dispose();
     }
   }, 120_000);
+});
+
+/* ============================================================================
+ * The people's atlas — the owner's pictures of PR #2844
+ * ========================================================================== */
+
+/** Where one region of each person reads the atlas: each triangle's middle, and every corner. */
+function peopleReads(region: string): {
+  readonly centroids: { readonly u: number; readonly v: number }[];
+  readonly corners: { readonly u: number; readonly v: number }[];
+}[] {
+  const file = readGlb(join(PUBLIC, 'realistic', REALISTIC_PEOPLE.model));
+  const json = file.json as unknown as {
+    readonly nodes: readonly { readonly name?: string; readonly mesh?: number }[];
+    readonly meshes: readonly {
+      readonly primitives: readonly {
+        readonly attributes: Readonly<Record<string, number>>;
+        readonly indices: number;
+        readonly material: number;
+      }[];
+    }[];
+    readonly materials: readonly { readonly name: string }[];
+  };
+  return json.nodes
+    .filter((node) => node.mesh !== undefined)
+    .sort((a, b) => ((a.name ?? '') < (b.name ?? '') ? -1 : 1))
+    .map((node) => {
+      const centroids: { u: number; v: number }[] = [];
+      const corners: { u: number; v: number }[] = [];
+      (json.meshes[node.mesh as number]?.primitives ?? [])
+        .filter((primitive) => json.materials[primitive.material]?.name === region)
+        .forEach((primitive) => {
+          const uv = accessorValues(
+            file.json,
+            file.binary,
+            primitive.attributes['TEXCOORD_0'] as number,
+          ).values;
+          const index = accessorValues(file.json, file.binary, primitive.indices).values;
+          for (let at = 0; at + 2 < index.length; at += 3) {
+            const three = [index[at], index[at + 1], index[at + 2]] as number[];
+            for (const corner of three) {
+              corners.push({ u: uv[corner * 2] ?? 0, v: uv[corner * 2 + 1] ?? 0 });
+            }
+            centroids.push({
+              u: three.reduce((sum, corner) => sum + (uv[corner * 2] ?? 0), 0) / 3,
+              v: three.reduce((sum, corner) => sum + (uv[corner * 2 + 1] ?? 0), 0) / 3,
+            });
+          }
+        });
+      return { centroids, corners };
+    });
+}
+
+describe('the people’s atlas — the owner’s pictures of PR #2844', () => {
+  /** The atlas decoded through the real loader, read as the shader reads it: a share of a colour. */
+  async function atlasShares(): Promise<
+    (at: { readonly u: number; readonly v: number }) => readonly [number, number, number]
+  > {
+    const renderer = await loadedOn([]);
+    const inner = renderer.compressedRealisticLoaders(device([]), `${ORIGIN}/basis/`);
+    try {
+      const texture = await inner.texture(`${ORIGIN}/realistic/${REALISTIC_PEOPLE.atlas}`);
+      const level = (texture as unknown as { mipmaps: { data: Uint8Array; width: number }[] })
+        .mipmaps[0];
+      if (level === undefined) throw new Error('the people’s atlas has no level 0');
+      const linear = (byte: number): number => {
+        const c = byte / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      };
+      // The atlas is encoded top row first, and glTF's v runs down the picture.
+      return ({ u, v }) => {
+        const x = Math.min(level.width - 1, Math.floor(u * level.width));
+        const y = Math.min(level.width - 1, Math.floor(v * level.width));
+        const at = (y * level.width + x) * 4;
+        // The shader's own arithmetic: a texel holds HALF the share.
+        return [
+          2 * linear(level.data[at] ?? 0),
+          2 * linear(level.data[at + 1] ?? 0),
+          2 * linear(level.data[at + 2] ?? 0),
+        ];
+      };
+    } finally {
+      inner.dispose?.();
+    }
+  }
+
+  /**
+   * Decoded once for the three cases below: the real KTX2Loader's transcode is
+   * the slow part, and a per-case timeout is banned (#1688).
+   */
+  let shareAt: Awaited<ReturnType<typeof atlasShares>>;
+  beforeAll(async () => {
+    const undoing = served();
+    try {
+      shareAt = await atlasShares();
+    } finally {
+      for (const each of undoing.reverse()) each();
+    }
+  });
+
+  /** The atlas's side, in texels (`realistic-budget.ts` §`REALISTIC_TEXTURE_PIXELS`). */
+  const ATLAS_SIDE = REALISTIC_TEXTURE_PIXELS.people;
+
+  const quantile = (values: readonly number[], share: number): number => {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.floor(share * sorted.length))] ?? Number.NaN;
+  };
+  const light = (share: readonly [number, number, number]): number =>
+    0.2126 * share[0] + 0.7152 * share[1] + 0.0722 * share[2];
+
+  it('draws plain skin as the person’s own colour, on the face and the limbs alike, with no shine painted on', () => {
+    const people = peopleReads('skin');
+    expect(people.length).toBe(3);
+    let cast = 0;
+    people.forEach(({ centroids }, person) => {
+      // `process_people.py` §`TILE`: the face's tile is the first quarter
+      // across, the limbs' the seventh eighth; the eyes are past both.
+      const face = centroids.filter((at) => at.u < 0.25).map(shareAt);
+      const limbs = centroids.filter((at) => at.u >= 0.75 && at.u < 0.875).map(shareAt);
+      expect(face.length, `person ${String(person)}`).toBeGreaterThan(100);
+      expect(limbs.length, `person ${String(person)}`).toBeGreaterThan(30);
+      const of = (shares: typeof face, channel: number, share: number): number =>
+        quantile(
+          shares.map((each) => each[channel] as number),
+          share,
+        );
+      const said = [0, 1, 2].map((channel) => ({
+        faceBright: of(face, channel, 0.9),
+        limbsTypical: of(limbs, channel, 0.5),
+        limbsBright: of(limbs, channel, 0.9),
+      }));
+      console.log(`PR #2844: person ${String(person)} skin shares ${JSON.stringify(said)}`);
+      for (const channel of said) {
+        // Plain skin is the person's colour: the limbs' typical triangle is
+        // not lighter than it (a mean's divisor left it a fifth over).
+        expect(channel.limbsTypical).toBeLessThan(1.05);
+        expect(channel.limbsTypical).toBeGreaterThan(0.85);
+        // And the photograph's shine is all but gone: the brightest tenth of
+        // either tile is within a fifth of the person's colour.
+        expect(channel.faceBright).toBeLessThan(1.2);
+        expect(channel.limbsBright).toBeLessThan(1.2);
+      }
+      cast += (said[1]?.limbsTypical ?? 9) - (said[0]?.limbsTypical ?? 0);
+    });
+    // No cool cast: over the three people, plain skin's green is not lifted
+    // clear of its red — which dividing by the MEAN does, by 0.17 in all (the
+    // mean is dragged down by what is dark and red), and the median does not.
+    console.log(
+      `PR #2844: the limbs' green over their red, the three people together: ${cast.toFixed(3)}`,
+    );
+    expect(cast).toBeLessThan(0.06);
+  });
+
+  it('keeps the trousers’ light and shade and none of their photograph’s dye', () => {
+    peopleReads('bottoms').forEach((reads, person) => {
+      // Every corner as well as every middle: a seam's corners are where a
+      // photograph's outline is.
+      const shares = [...reads.centroids, ...reads.corners].map(shareAt);
+      const dye = Math.max(...shares.map((share) => Math.max(...share) - Math.min(...share)));
+      const lights = shares.map(light);
+      console.log(
+        `PR #2844: person ${String(person)} bottoms dye ${dye.toFixed(3)}, light ${Math.min(...lights).toFixed(2)} to ${Math.max(...lights).toFixed(2)}`,
+      );
+      expect(shares.length).toBeGreaterThan(300);
+      // Grey, to what ETC1S keeps of a grey: the person's colour is the only dye.
+      expect(dye).toBeLessThan(0.25);
+      // Light and shade, and neither the black line round a piece nor a fade's white.
+      expect(Math.min(...lights)).toBeGreaterThan(0.45);
+      expect(Math.max(...lights)).toBeLessThan(1.75);
+      // Nor is that line within two texels of a corner, where a filtered
+      // read and the first mip levels reach: the cloth is spread over it.
+      const reach = [-2, -1, 0, 1, 2];
+      const beside = reads.corners.flatMap((corner) =>
+        reach.flatMap((dx) =>
+          reach.map((dy) =>
+            light(shareAt({ u: corner.u + dx / ATLAS_SIDE, v: corner.v + dy / ATLAS_SIDE })),
+          ),
+        ),
+      );
+      console.log(
+        `PR #2844: person ${String(person)} bottoms, least light within two texels of a corner ${Math.min(...beside).toFixed(2)}`,
+      );
+      expect(Math.min(...beside)).toBeGreaterThan(0.3);
+    });
+  });
+
+  it('wears no painted shadow on a jacket’s chest', () => {
+    peopleReads('top').forEach((reads, person) => {
+      const lights = reads.centroids.map(shareAt).map(light);
+      const dark = lights.filter((each) => each < 0.25).length;
+      console.log(
+        `PR #2844: person ${String(person)} top: ${String(dark)} of ${String(lights.length)} triangles under a quarter of its colour`,
+      );
+      // A stripe may be dark; a twentieth of a garment may not.
+      expect(dark / lights.length).toBeLessThan(0.05);
+    });
+  });
 });
 
 describe('the footways, drawn by a view on the loaded world — #2972', () => {
