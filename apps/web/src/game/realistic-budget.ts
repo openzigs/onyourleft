@@ -598,12 +598,14 @@ export const DELIVERY_VILLAGE_FRAME_TRIANGLES = 205_000;
  * §`DELIVERY_REALISTIC_OBSTACLE_TRIANGLES`), so this car's share of
  * {@link DELIVERY_VILLAGE_FRAME_TRIANGLES}' 3 644 of room on the frame of
  * twenty that measured 201 356 is 182 an instance over the stylised car's
- * 1 268. Kenney's sedan was 1 376 (`tools/realistic/sources.ts`
- * §`DELIVERY_CAR_SOURCE`); since its PR met #2512's and #2518's pieces on
- * the same frame (204 514 with the stylised car), its wheels are 120 each,
- * not 166, and it is 1 192, so the frame still fits. ONE level of detail: a
- * second would be more triangles in the roster every instance submits, never
- * fewer.
+ * 1 268. Kenney's sedan was 1 376; since its PR met #2512's and #2518's
+ * pieces on the same frame (204 514 with the stylised car), its wheels were
+ * 120 each, not 166, and it was 1 192, so the frame still fit. Since #2847
+ * (ADR 0085) the three PSX cars, all three together, are 1 222
+ * (`tools/realistic/sources.ts` §`DELIVERY_CAR_SOURCE`): every instance
+ * submits every body, so this ceiling holds the three as it held the one.
+ * ONE level of detail: a second would be more triangles in the roster every
+ * instance submits, never fewer.
  *
  * @test-facing held by `delivery-car.test.ts`, which reads the committed GLB
  * back; the product builds the roster and does not read this number
@@ -1597,7 +1599,10 @@ export function environmentMapBytes(skyWidth: number): number {
  * pinned Chromium, the Mac and tablet Mali GPUs all report), so the next
  * feature has room without packing again. A `mat4` is four slots, anything
  * else one. `three-renderer.ts` §`DELIVERY_PIECE_ATTRIBUTE` says how the belt's
- * obstacles fit: 13 slots with Kenney's car, 10 without.
+ * obstacles fit: 14 slots with the realistic cars, 11 without (as
+ * `delivery-car.test.ts` counts them). #2847's atlas coordinate and body
+ * ride in components of attributes already bound, so the cars' three bodies
+ * and their picture take no slot of their own.
  *
  * @test-facing `delivery-car.test.ts` and `delivery.browser.spec.ts` hold the
  * belt's programs to it; the product does not read it

@@ -504,58 +504,62 @@ describe('a placed house model: the owner’s archive, its record, its members �
   });
 });
 
-describe('Kenney’s Car Kit: the owner’s archive, held to Kenney’s own page — #2540', () => {
+describe('GGBotNet’s PSX Style Cars: the owner’s archive, held to the pack’s own page — #2847', () => {
   const source = SOURCES.find((each) => each.id === DELIVERY_CAR_SOURCE.id) as AssetSource;
-  if (source.origin.from !== 'placed') throw new Error('the car kit is not placed');
+  if (source.origin.from !== 'placed') throw new Error('the car pack is not placed');
   const origin = source.origin;
-  const grant = 'License: (Creative Commons Zero, CC0)';
-  const archiveOf = (licence: string = grant): Uint8Array =>
+  const taken = DELIVERY_CAR_SOURCE.bodies.flatMap((body) => [body.model, ...body.paints]);
+  const archiveOf = (): Uint8Array =>
     zipOf({
-      [DELIVERY_CAR_SOURCE.model]: 'a car',
-      [DELIVERY_CAR_SOURCE.colourMap]: 'a palette',
-      [DELIVERY_CAR_SOURCE.licenceFile]: licence,
-      'Models/GLB format/police.glb': 'not taken',
+      ...Object.fromEntries(taken.map((path) => [path, `bytes of ${path}`])),
+      // The pack's other cars, its sounds and its wheel: in the archive, not taken.
+      'Car 04/Car4.obj': 'a minivan',
+      'Sound effects/Car_Horn.ogg': 'a horn',
+      'Wheel/Wheel.obj': 'a wheel',
     });
-  // The page as Kenney serves it: its licence beside the word "License".
-  const page = '<div><span>License</span><span>Creative Commons CC0</span></div>';
+  // The page as itch.io serves it, its own words and its metadata row.
+  const page =
+    '<p>This game assets is licensed under a CC0 1.0 Universal.</p><tr><td>Asset license</td><td>Creative Commons Zero v1.0 Universal</td></tr>';
   const place = (bytes: Uint8Array): void => {
     mkdirSync(join(raw, source.id), { recursive: true });
     writeFileSync(join(raw, source.id, origin.archive), bytes);
   };
 
-  it('reads Kenney’s page, never the archive, and takes only the sedan, its palette and its licence out of it', async () => {
+  it('reads the pack’s page, never the archive, and takes only the three bodies and their paints out of it', async () => {
     const archive = archiveOf();
     place(archive);
     const { fetch, requested } = fakeWeb({ [source.licencePage]: page });
     const locked = await readSource(source, undefined, runWith(fetch, true));
     expect(requested).toEqual([DELIVERY_CAR_SOURCE.page]);
     expect(locked.licence).toBe('CC0-1.0');
-    expect(locked.evidence).toBe('Creative Commons CC0');
-    expect(locked.authors).toBe('Kenney');
-    expect(locked.files.map((file) => file.path)).toEqual([
-      DELIVERY_CAR_SOURCE.archive,
-      DELIVERY_CAR_SOURCE.model,
-      DELIVERY_CAR_SOURCE.colourMap,
-      DELIVERY_CAR_SOURCE.licenceFile,
+    expect(locked.evidence).toBe('This game assets is licensed under a CC0 1.0 Universal');
+    expect(locked.authors).toBe('GGBotNet');
+    expect(locked.files.map((file) => file.path)).toEqual([DELIVERY_CAR_SOURCE.archive, ...taken]);
+    // The owner's three: the saloon, the hatchback and the station wagon, and no other car.
+    expect(DELIVERY_CAR_SOURCE.bodies.map((body) => body.model)).toEqual([
+      'Car 02/Car2.obj',
+      'Car 03/Car3.obj',
+      'Car 01/Car.obj',
     ]);
     expect(locked.files[0]?.sha256).toBe(sha256(archive));
-    expect(readFileSync(join(raw, source.id, DELIVERY_CAR_SOURCE.model), 'utf8')).toBe('a car');
+    expect(readFileSync(join(raw, source.id, 'Car 02/Car2.obj'), 'utf8')).toBe(
+      'bytes of Car 02/Car2.obj',
+    );
     await expect(readSource(source, locked, runWith(fetch, false))).resolves.toEqual(locked);
   });
 
-  it('refuses a page that does not say CC0, and an archive whose own licence does not', async () => {
+  it('refuses a page that does not say CC0, and an archive that is not the one the lock pins', async () => {
     place(archiveOf());
     const elsewhere = fakeWeb({
-      [source.licencePage]: '<span>License</span><span>Personal use</span>',
+      [source.licencePage]: '<p>Free for personal use. Credit required.</p>',
     });
     await expect(readSource(source, undefined, runWith(elsewhere.fetch, true))).rejects.toThrow(
-      `does not state "Creative Commons CC0"`,
+      'does not state "This game assets is licensed under a CC0 1.0 Universal"',
     );
-    place(archiveOf('License: (Creative Commons Attribution-NonCommercial)'));
     const { fetch } = fakeWeb({ [source.licencePage]: page });
-    await expect(readSource(source, undefined, runWith(fetch, true))).rejects.toThrow(
-      `${source.id}/${DELIVERY_CAR_SOURCE.licenceFile}: it does not state`,
-    );
+    const locked = await readSource(source, undefined, runWith(fetch, true));
+    place(zipOf({ ...Object.fromEntries(taken.map((path) => [path, 'other bytes'])) }));
+    await expect(readSource(source, locked, runWith(fetch, false))).rejects.toThrow(origin.archive);
   });
 });
 
