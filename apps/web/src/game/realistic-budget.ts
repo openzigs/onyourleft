@@ -1538,6 +1538,25 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * small as three dressed people were made; the APK carries the same bytes
  * more, and a browser's first download does not move.
  *
+ * ## The female rider, inside the same 47 MiB — #2839
+ *
+ * #2839 (the owner's request of 2026-11-18) asks for a second rider body
+ * through the pipeline and for its download cost to be stated; this is the
+ * statement. Its branch raised this ceiling from 46 MiB to 47 MiB on its own,
+ * from the same 48 157 070 bytes as the people's models above, and the two
+ * rises met at the same figure. Measured on the committed files: the female
+ * rider's one file (`realistic-assets.ts` §`REALISTIC_RIDER_FEMALE`) adds
+ * **427 668** and the closed hands 404 more in `rider.glb`, and with
+ * everything else since, the set with its transcoder is **49 051 685**,
+ * 231 387 under 47 MiB. She ships NO maps of her own — she wears the rider's
+ * three — which is what keeps the cost to one GLB rather than 1.5 MB.
+ *
+ * ⚠️ **The ceiling itself is the owner's to rule on, as each rise above was,
+ * and this one has not been ruled on**: the issue asks for the body and its
+ * stated cost, not for a figure. As before, the APK carries the same bytes
+ * more, and a browser's first download does not move: the file is outside
+ * the precache, and a ride fetches it only when it draws a female rider.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)

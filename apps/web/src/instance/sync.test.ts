@@ -2759,9 +2759,10 @@ describe('the calorie inputs never leave the device through a sync (#2432)', () 
     world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
     const on = device(world.url);
     await importRides(on, RIDES);
-    await on.harness.write((store) =>
-      store.setAthleteCalorieInputs(LOCAL_ATHLETE, { calorieSex: 'female', birthYear: 1985 }),
-    );
+    await on.harness.write(async (store) => {
+      await store.setAthleteRider(LOCAL_ATHLETE, 'female');
+      await store.setAthleteBirthYear(LOCAL_ATHLETE, 1985);
+    });
 
     // Every body this device sends the instance, on every transport it has.
     const sent: { path: string; body: unknown }[] = [];
@@ -2800,6 +2801,8 @@ describe('the calorie inputs never leave the device through a sync (#2432)', () 
     const everything = JSON.stringify(sent);
     expect(everything).not.toContain('calorieSex');
     expect(everything).not.toContain('birthYear');
+    // The rider drawn is the same word as the sex since 2026-11-20, so it stays too.
+    expect(everything).not.toContain('riderBody');
     expect(everything).not.toContain('"female"');
   }, 60_000);
 });

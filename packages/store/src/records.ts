@@ -63,6 +63,7 @@ import type {
   WorkoutId,
 } from './ids';
 import type { KitColour } from './kit-colour';
+import type { RiderBody } from './rider-body';
 import type { NewStreamSet } from './streams';
 import type { UnitSystem } from './unit-system';
 import type { Visibility } from './visibility';
@@ -253,6 +254,23 @@ export interface AthleteRecord {
    * the machine drawing it.
    */
   readonly kitColour?: KitColour;
+
+  /**
+   * Which rider the trainer game draws for this athlete (#2839).
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #2839 reads back with
+   * no choice, and the one place that substitutes the default is
+   * `apps/web/src/game/rider-body.ts` §`riderBodyFor`.
+   *
+   * ⚠️ **One half of the rider's one Female / Male choice** (the owner's
+   * ruling of 2026-11-20): `setAthleteRider` writes it and {@link calorieSex}
+   * together. A row written before the ruling may hold one without the other,
+   * so read the choice through `rider-body.ts` §`riderChoiceOf`, never this
+   * field alone. It is on the athlete rather than the device for
+   * {@link kitColour}'s reason.
+   */
+  readonly riderBody?: RiderBody;
 
   /**
    * The rider's own words that are always masked before anything is sent to

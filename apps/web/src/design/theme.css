@@ -4606,6 +4606,23 @@ a.oyl-button {
 }
 
 /*
+ * #2839, the owner's ruling of 2026-11-20: the calorie panel's *Sex* is a
+ * reading of the rider choice above, not a control, so a term and its value on
+ * one line of their own, with no `dd` indent.
+ */
+.oyl-calorie-inputs__sex {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: 0 var(--oyl-space-sm);
+  margin: 0;
+}
+
+.oyl-calorie-inputs__sex dd {
+  margin: 0;
+}
+
+/*
  * #669: the ERG form's own sentence — "This trainer accepts … W to … W in steps
  * of … W" — under its row, 8 px below the controls it describes (the row's own
  * gap) rather than a paragraph's 1rem either side. In a flex container margins

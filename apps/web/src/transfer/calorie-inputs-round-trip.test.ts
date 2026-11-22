@@ -50,7 +50,8 @@ describe('the calorie inputs survive export → erase → import (#2432)', () =>
     await harness.write(async (store) => {
       await store.putActivity(ride);
       await store.putStreamSet(streamSetFor(ride, { sampleCount: 60 }));
-      await store.setAthleteCalorieInputs(ATHLETE_A, { calorieSex: 'female', birthYear: 1985 });
+      await store.setAthleteRider(ATHLETE_A, 'female');
+      await store.setAthleteBirthYear(ATHLETE_A, 1985);
     });
 
     const files: DownloadableFile[] = [];
@@ -107,10 +108,11 @@ describe('the calorie inputs survive export → erase → import (#2432)', () =>
         timeZone: 'Europe/London',
       });
       expect(imported.imported).toBe(1);
-      await store.setAthleteCalorieInputs(athleteId(manifest.athlete.id), {
-        calorieSex: manifest.athlete.calorieSex,
-        birthYear: manifest.athlete.birthYear,
-      });
+      const restored = athleteId(manifest.athlete.id);
+      if (manifest.athlete.calorieSex !== undefined) {
+        await store.setAthleteRider(restored, manifest.athlete.calorieSex);
+      }
+      await store.setAthleteBirthYear(restored, manifest.athlete.birthYear);
     });
 
     const back = await harness.read(async (store) => store.getAthlete(ATHLETE_A));

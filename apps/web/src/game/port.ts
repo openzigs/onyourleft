@@ -37,7 +37,7 @@
 
 import type { Billboard } from './billboards';
 import type { PlacedStand } from './gantry';
-import type { KitColour } from '@onyourleft/store';
+import type { KitColour, RiderBody } from '@onyourleft/store';
 
 import type { FootwayPiece } from './footway-surfaces';
 import type { HorizonRelief, TerrainMesh } from './landform';
@@ -341,6 +341,17 @@ export interface RiderMarker {
    * HUD's gap is to. Only ever on a `remote` rider; never an order.
    */
   readonly followed?: boolean | undefined;
+  /**
+   * Which body this rider is drawn as — #2839: the rider's own choice
+   * (Settings), a room's word for another rider, or a simulated rider's seeded
+   * one (`rider-body.ts`). Absent draws the default
+   * (`rider-body.ts` §`riderBodyFor`), which is every rider before #2839.
+   *
+   * ⚠️ **One of two words, and drawing only**: a renderer maps it through
+   * `riderBodyFor`, so nothing else selects a model, and it changes no
+   * distance, speed or draft. `scene.test.ts` §"#2839" reads it off the frame.
+   */
+  readonly body?: RiderBody | undefined;
   /**
    * How this rider's lap-race hit effect looks on this frame — #1902, only
    * while an item's slow-down runs on them (`lap-race/in-view.ts`

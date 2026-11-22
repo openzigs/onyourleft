@@ -22,6 +22,7 @@ import {
   lapId,
   openActivityStore,
   recordingSessionId,
+  riderChoiceOf,
   routeId,
   webCryptoSha256,
   type AthleteRecord,
@@ -174,6 +175,7 @@ import { forgettingOnDelete, type LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
 import type { AthleteKitColourPort } from './athlete/kit-colour-port';
+import type { AthleteRiderBodyPort } from './athlete/rider-body-port';
 import type { MaskedWordsPort } from './athlete/masked-words-port';
 import type { CalorieInputsPort } from './athlete/calorie-inputs-port';
 import { calorieRiderFor } from './athlete/calorie-inputs';
@@ -1142,6 +1144,14 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
 }
 
 /**
+ * The settings screen's write of the rider's one Female / Male choice (#2839,
+ * the owner's ruling of 2026-11-20), over the same connection.
+ */
+function buildAthleteRiderBodyPort(): AthleteRiderBodyPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * The rider's words to mask (#839), over the same connection. A hosted
  * write-up sends the instance the same row before every job (#1251).
  */
@@ -1149,7 +1159,7 @@ function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
-/** The rider's sex and year of birth (#2432), over the same connection. */
+/** The rider's year of birth (#2432), over the same connection. */
 function buildCalorieInputsPort(): CalorieInputsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
@@ -1996,6 +2006,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // substituted, and a default applied here would be a second.
           {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
           athleteKit={buildAthleteKitColourPort()}
+          athleteRider={buildAthleteRiderBodyPort()}
           maskedWords={buildMaskedWordsPort()}
           calorieInputs={buildCalorieInputsPort()}
           riderText={buildRiderTextPort()}
@@ -2013,6 +2024,13 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`
           // §`riderKitFor` is the one place a missing one becomes the house kit.
           {...(athlete?.kitColour === undefined ? {} : { kitColour: athlete.kitColour })}
+          // #2839: which rider is drawn, undefaulted likewise — `game/rider-body.ts`
+          // §`riderBodyFor` is the one place a missing one becomes the default.
+          // ⚠️ Through `riderChoiceOf` (the owner's ruling of 2026-11-20): the
+          // rider's one Female / Male choice is `calorieSex` when it is set,
+          // else `riderBody`, so Settings, the game and the calorie estimate
+          // read a row whose two fields disagree the same way.
+          riderBody={riderChoiceOf(athlete)}
           // ⚠️ The **stored** preference, read before the first paint. The
           // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
           // place — `AppShell`'s own default — so "a row with no setting" and

@@ -21,7 +21,7 @@
  * replacement.
  */
 
-import type { UnitSystem } from '@onyourleft/store';
+import type { RiderBody, UnitSystem } from '@onyourleft/store';
 
 import { billboardsAt, clearOfBillboards, nearestBillboards, type Billboard } from './billboards';
 import { lineStands, linesNear } from './gantry';
@@ -223,6 +223,14 @@ export interface SceneInput {
   readonly botDistance?: number | undefined;
   /** The rider's own previous attempt, when they chose to race one. Optional. */
   readonly ghost?: GhostTrack | undefined;
+  /**
+   * Which body the rider chose (#2839), undefaulted: the rider's own marker
+   * and their ghost's — their own earlier ride — carry it, and a renderer
+   * draws an absent one as the default. @see RiderMarker.body
+   */
+  readonly riderBody?: RiderBody | undefined;
+  /** The pacer's body, seeded for the ride (#2839, `rider-body.ts`). @see RiderMarker.body */
+  readonly botBody?: RiderBody | undefined;
   /**
    * The route's corridor of map features, fixed when the ride started — #1539,
    * ADR 0054. Absent on every ride with none: the stylised world, map tiles
@@ -575,6 +583,8 @@ export interface RaceBotInput {
   readonly laidOut?: boolean | undefined;
   /** Its hit effect, while one runs on it. @see RiderMarker.hit */
   readonly hit?: RaceHitLook | undefined;
+  /** Which body it is drawn as, seeded for the race (#2839). @see RiderMarker.body */
+  readonly body?: RiderBody | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -592,6 +602,8 @@ export interface RemoteRiderInput {
   readonly label?: string | undefined;
   /** The one rider *Follow* chose. @see RiderMarker.followed */
   readonly followed?: boolean | undefined;
+  /** Which body they are drawn as, where the ride knows one (#2839). @see RiderMarker.body */
+  readonly body?: RiderBody | undefined;
 }
 
 /** Builds one frame. */
@@ -1851,6 +1863,8 @@ interface Rider {
   readonly label?: string | undefined;
   /** @see RiderMarker.followed */
   readonly followed?: boolean | undefined;
+  /** @see RiderMarker.body */
+  readonly body?: RiderBody | undefined;
   /** A lap-race bot's lane, across the road, in place of the line. @see RaceBotInput.lateralMetres */
   readonly laned?: number | undefined;
   /** @see RaceBotInput.laidOut */
@@ -1906,6 +1920,7 @@ function ridersOnTheRoad(
       cadence: input.cadence,
       power: input.state.input.live ? input.state.input.power : undefined,
       grade: input.state.grade,
+      body: input.riderBody,
     },
   ];
   const bot = input.state.bot;
@@ -1925,6 +1940,7 @@ function ridersOnTheRoad(
       // #1999: the pacer's simulated power and grade; it has no cadence.
       power: bot?.power,
       grade: bot?.grade,
+      body: input.botBody,
     });
   }
   if (input.ghost !== undefined) {
@@ -1950,6 +1966,8 @@ function ridersOnTheRoad(
       ownSpeed: speed,
       crankAngle: pedalling(at),
       pedalling: speed > 0,
+      // #2839: the ghost is the rider's own earlier ride, so it is their body.
+      body: input.riderBody,
     });
   }
   // #783: every other real rider in the room's drawn set — but only those on
@@ -1986,6 +2004,7 @@ function ridersOnTheRoad(
       lane: remote.riderId % 2 === 0 ? -1 : 1,
       label: remote.label,
       followed: remote.followed,
+      body: remote.body,
     });
   }
   // #1902: a lap race's bots, on the corridor this frame built, for the
@@ -2010,6 +2029,7 @@ function ridersOnTheRoad(
       sway: bot.swayMetresPerSecond,
       laidOut: bot.laidOut,
       hit: bot.hit,
+      body: bot.body,
     });
   }
   // #625: the ride's own clock, which a held or paused ride holds — never a
@@ -2080,7 +2100,9 @@ function ridersOnTheRoad(
     const hit = rider.hit === undefined ? turned : { ...turned, hit: rider.hit };
     // #1971: a lap race's bot says so, apart from the one pacer, for the
     // realistic world's split. Only a race's bots are laned.
-    const cranked = rider.laned === undefined ? hit : { ...hit, racer: true as const };
+    const raced = rider.laned === undefined ? hit : { ...hit, racer: true as const };
+    // #2839: which body, where one was given; absent draws the default.
+    const cranked = rider.body === undefined ? raced : { ...raced, body: rider.body };
     return {
       // #783: the name the room gave them, carried to the frame as words only.
       marker:
