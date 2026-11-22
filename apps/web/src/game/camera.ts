@@ -492,19 +492,30 @@ export interface GroundHeading {
 
 /**
  * How quickly the camera's heading settles onto the road ahead: the time
- * constant of {@link dampedHeading}'s exponential approach, **0.1 s** — #1994.
+ * constant of {@link dampedHeading}'s exponential approach, **0.04 s** — #1994,
+ * #2989.
  *
  * Short on purpose. The heading it settles onto is already continuous
  * (`scene.ts` §`cameraPose` aims at a point ON the road, which moves with the
  * rider), so the damping is not what makes a bend smooth; it is what makes a
  * corridor that jumps — a room's correction, a road that doubles back — a
- * turn instead of a cut. Every tenth of a second here is a tenth of a second
- * the target trails the road through a bend at the rate the road turns:
- * `chase-camera-bend.test.ts` measured the trail at 1.6 m from the centreline
- * through a 90° corner at 30 km/h, against 2.5 m at 0.15 s; 3.5 m is the
- * road's edge.
+ * turn instead of a cut, and {@link CAMERA_MAXIMUM_YAW_RATE} does most of
+ * that. Every hundredth of a second here is a hundredth of a second the
+ * target trails the road through a bend at the rate the road turns, 25 m out.
+ *
+ * ⚠️ **0.1 s until #2989.** A junction drawn from map streets is one node
+ * where two streets meet, sampled every 10 m, and much sharper than the
+ * planner's corner `chase-camera-bend.test.ts` rides: there the undamped
+ * target stays on the drawn path, 2.89 m from the centreline, and a 0.1 s
+ * trail took the drawn one to 3.95 m at 30 km/h and 4.26 m at 40, off the
+ * 3.5 m road (ADR 0089 C-2). Measured at 40 km/h and 60 fps with
+ * `scene.ts` §`easedReach`: 4.16 m at 0.1 s, 3.77 at 0.07, 3.50 at 0.05,
+ * **3.36 at 0.04**, 3.22 at 0.03 (`open-world/rolling-camera.test.ts`). The
+ * price is the camera's turn rate through a jittered junction, which follows
+ * the road more closely: at most 69°/s where it was 60, under C-1's 90°/s
+ * (`drawn-line.test.ts` §`MOST_CAMERA_TURN`).
  */
-export const CAMERA_YAW_SETTLE_SECONDS = 0.1;
+export const CAMERA_YAW_SETTLE_SECONDS = 0.04;
 
 /**
  * The fastest the camera ever turns, in radians a second: **90°/s** — #1994.

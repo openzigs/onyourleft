@@ -1163,10 +1163,12 @@ describe('a ride — nothing beside the street is cut by the near plane (#545)',
       // than `sceneFrame`'s undamped one (`chase-camera-testing.ts`): 22 and
       // 289 on the undamped camera. Re-pinned by #2422, whose camera stands on
       // the drawn path the rider rides, its eye held in from the kerb: 21 and
-      // 298 until then. The cull drops every one of them (above).
+      // 298 until then. Re-pinned by #2989, whose heading settles in 0.04 s
+      // rather than 0.1 s and whose look-ahead eases onto its 25 m: 25 and
+      // 442 until then. The cull drops every one of them (above).
       expect(Object.fromEntries(met.get(WIDEST_LABEL) ?? [])).toEqual({
         person: 25,
-        'mapped building': 442,
+        'mapped building': 432,
       });
     },
     ALL_RIDES_TIMEOUT,
