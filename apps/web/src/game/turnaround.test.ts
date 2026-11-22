@@ -32,7 +32,7 @@ import {
   turnedPose,
   type GroundHeading,
 } from './camera';
-import { drawnLine, uTurnSamples } from './drawn-line';
+import { drawnLine, drawnLineAt, uTurnSamples } from './drawn-line';
 import {
   REVERSAL_AT_METRES,
   hairpinRoute,
@@ -238,6 +238,33 @@ describe('a turnaround at one recorded point — #3045', () => {
     // A bend ridden round over several samples is the spline's, as before.
     for (const bend of [hairpinRoute(10), plannerCornerRoute(143), outAndBackRoute()]) {
       expect(drawnLine(bend).uTurns).toEqual([]);
+    }
+  });
+
+  it('runs the drawn rider at the same pace either side of where the U-turn begins and ends', () => {
+    // The pace is drawn metres per metre of odometer. A step in it at either
+    // end of the U-turn is a step in the drawn rider's speed, about 1.8 cm a
+    // frame at 30 km/h on 60 fps: too small for the jerk bound to see.
+    const line = drawnLine(reversalRoute(180));
+    const resolution: number = line.profile.resolution;
+    const [sample] = line.uTurns;
+    expect(sample).toBeDefined();
+    const h = 1e-4;
+    const paceAt = (distance: number): number => {
+      const before = drawnLineAt(line, metres(distance - h));
+      const after = drawnLineAt(line, metres(distance + h));
+      return Math.hypot(after.x - before.x, after.z - before.z) / (2 * h);
+    };
+    // Each end, and which way from it is outside the U-turn.
+    for (const [end, out] of [
+      [(sample as number) - 1, -1],
+      [(sample as number) + 1, 1],
+    ] as const) {
+      const at = end * resolution;
+      const outside = paceAt(at + out * 0.01);
+      const inside = paceAt(at - out * 0.01);
+      expect(outside).toBeGreaterThan(0.1);
+      expect(Math.abs(inside - outside) / outside).toBeLessThan(0.02);
     }
   });
 
