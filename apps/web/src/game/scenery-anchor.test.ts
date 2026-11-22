@@ -24,6 +24,7 @@ import {
 
 import { billboardsAt } from './billboards';
 import { sideRoadsAt } from './cross-streets';
+import { footprintPlans } from './footprint-buildings';
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { FIELD_SPAN_METRES, fieldSpanMetres } from './landform';
 import {
@@ -38,13 +39,15 @@ import { townAt } from './scenery-cyclists';
 import {
   NO_MAPPED_TOWN,
   SETTLEMENT_SPACING_METRES,
+  lotSpacing,
   lotsAt,
   siteAt,
   siteSpacing,
 } from './settlements';
 import { streetsAt } from './streets';
 import { corridorOrigin, type CorridorOrigin } from './terrain';
-import { NO_URBAN_CLASS } from './urban-class';
+import { NO_URBAN_CLASS, type UrbanClassMap } from './urban-class';
+import type { WorldCorridor } from './world-data/corridor';
 
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
@@ -255,6 +258,69 @@ describe('every generator reads an anchored view in ride distance — #3055', ()
     });
     expect(a?.length).toBeGreaterThan(20);
     expect(b).toEqual(a);
+  });
+
+  /** A city centre's terraced blocks on `profile`, where `urban` says, with nothing mapped. */
+  const terracesOn = (profile: RouteProfile, origin: CorridorOrigin, urban: UrbanClassMap) => {
+    // Built-up everywhere: every block a city centre plans stands.
+    const town: LandClassMask = {
+      ...NO_LAND_CLASS,
+      classAt: () => 'built-up',
+      covered: () => true,
+      bytes: 1,
+    };
+    const corridor: WorldCorridor = {
+      routeId: 'scenery-anchor',
+      origin,
+      covered: () => true,
+      coveredBoxes: [],
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets: [],
+    };
+    return footprintPlans(corridor, town, profile, origin, undefined, urban, {
+      nearbyStreets: false,
+    }).plans;
+  };
+
+  it('builds every terraced block of a city centre in the same place on both', () => {
+    // A city centre's lots are #1637's terraced blocks (`footprint-buildings.ts`
+    // §`terracePlans`), read off `lotSpacing` as `lotsAt` is: one grid for both.
+    const [a, b] = views.map(({ profile, shift, origin }) =>
+      // A city centre from ride distance 8 000 m to 9 000 m, whichever view reads it.
+      terracesOn(profile, origin, {
+        classAt: (along) =>
+          along + shift >= 8_000 && along + shift < 9_000 ? 'city-centre' : 'unknown',
+      }).map((plan) => [
+        plan.storeys,
+        ...placed(origin, { x: plan.centroid.x, y: plan.base, z: plan.centroid.z }),
+      ]),
+    );
+    expect(a?.length).toBeGreaterThan(40);
+    expect(b?.length).toBe(a?.length);
+    // A plan's ring is a `Float32Array`, so its centroid is good to a millimetre or so.
+    for (const [index, block] of (a ?? []).entries()) {
+      const other = b?.[index] ?? [];
+      expect(other[0], `block ${index}`).toBe(block[0]);
+      for (let at = 1; at < block.length; at += 1) {
+        expect(other[at], `block ${index}`).toBeCloseTo(block[at] as number, 2);
+      }
+    }
+  });
+
+  it('builds no terraced block a view’s end cuts short', () => {
+    // The late view starts and ends part-way through a plot: a block there is
+    // a whole plot, or it waits for the view that holds all of it.
+    const { span, shift } = lotSpacing(late);
+    expect(shift % span).toBeGreaterThan(0.5);
+    const blocks = terracesOn(late, views[1].origin, { classAt: () => 'city-centre' });
+    expect(blocks.length).toBeGreaterThan(400);
+    for (const plan of blocks) {
+      // The road runs east, so a block's front is its reach in `x`.
+      const xs = Array.from(plan.footprint).filter((_, index) => index % 2 === 0);
+      expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(span, 1);
+    }
   });
 });
 
