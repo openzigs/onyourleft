@@ -1,8 +1,10 @@
 # ADR 0094: A Delivery crash stops the drawn rider, who gets back on and rides on, on a second distance the trainer never reads
 
-- **Status**: **Proposed**, 2026-11-22. It takes effect only when the owner accepts it on its pull
-  request. Until then ADR 0059 D-2.4 and ADR 0065 D-11 stand as written, and a crash costs points
-  and changes the drawn rider's attitude, nothing else
+- **Status**: **Accepted**, 2026-11-22, by the owner on its pull request
+  [#3017](https://github.com/openzigs/onyourleft/pull/3017), asked one question at a time, with
+  every recommendation of D-11 taken (Q0 to Q6). On Q1 the owner first chose option L (the
+  distance lost) and, once its drift between the felt road and the drawn road was set out, chose
+  the recommended answer: banked and paid out (D-4). Proposed 2026-11-22
 - **Date**: 2026-11-22
 - **Deciders**: **the owner**, on the request quoted in Context (tablet session, 2026-11-21), filed
   as [#3011](https://github.com/openzigs/onyourleft/issues/3011), with the lane note of 2026-11-22

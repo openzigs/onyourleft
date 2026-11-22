@@ -14,8 +14,8 @@ It has the same authority as the root file. Where the text below says "this file
 
   ⚠️ **0094 is [ADR 0094](../adr/0094-a-delivery-crash-stops-the-drawn-rider-and-nothing-reaches-the-trainer.md)**,
   taken by [#3011](https://github.com/openzigs/onyourleft/issues/3011) on 2026-11-22 for a Delivery
-  crash that stops the drawn rider on a second distance the trainer never reads, **Proposed**, on the
-  owner's request of the 2026-11-21 tablet session. It supersedes in part ADR 0059 D-2.4 and ADR 0065
+  crash that stops the drawn rider on a second distance the trainer never reads, **Accepted** by the owner on
+  2026-11-22 on [#3017](https://github.com/openzigs/onyourleft/pull/3017), on the owner's request of the 2026-11-21 tablet session. It supersedes in part ADR 0059 D-2.4 and ADR 0065
   D-11's second sentence, for Delivery rounds only; each gained one dated `## Amendments` entry
   pointing to it. **0092 is claimed** by the open pull request
   [#2864](https://github.com/openzigs/onyourleft/pull/2864), which adds `docs/adr/0092-…`, and
