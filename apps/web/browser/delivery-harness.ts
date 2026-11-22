@@ -961,12 +961,11 @@ function pastCarShowcase(eyeAhead: number, behind: boolean): void {
   });
 }
 
-/** A car of one triangle a part, every role of Kenney's among them — PR #2548. @see programs */
+/** A car of one triangle a part, every role among them — PR #2548; one body of #2847's, at its atlas's middle. @see programs */
 const STAND_IN_CAR: DeliveryCarGeometry = {
   parts: (
     [
       'body',
-      'paint',
       'front-wheel',
       'front-wheel',
       'back-wheel',
@@ -976,14 +975,15 @@ const STAND_IN_CAR: DeliveryCarGeometry = {
     ] as const satisfies readonly DeliveryCarRole[]
   ).map((role, index) => ({
     role,
+    body: 0,
     position: new Float32Array([0, 0.3 * index, 0, 0.5, 0.3 * index, 0, 0, 0.3 * index + 0.3, 0]),
     normal: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
     colour: new Float32Array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
-    pivot: [0, 0.3, index < 4 ? 1.3 : -1.3] as const,
+    uv: new Float32Array([0.25, 0.25, 0.3, 0.25, 0.25, 0.3]),
+    pivot: [0, 0.3, index < 3 ? 1.3 : -1.3] as const,
   })),
-  wheelRadius: 0.3,
-  wheelbase: 2.6,
-  triangles: 8,
+  bodies: [{ name: 'saloon', wheelRadius: 0.3, wheelbase: 2.6 }],
+  triangles: 7,
 };
 
 function programs(

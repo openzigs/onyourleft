@@ -17,11 +17,21 @@ import { sceneFrame, type SceneInput } from '../scene';
 import { atStartLine } from '../simulation';
 import { corridorOrigin } from '../terrain';
 import {
+  CRASH_CLIP_RISE_SECONDS,
+  CRASH_CLIP_SECONDS,
   CRASH_FALL_SECONDS,
   CRASH_LEAN_RADIANS,
+  CRASH_REBOUND_BOUNCE_SECONDS,
+  CRASH_REBOUND_BOUNCES,
+  CRASH_REBOUND_RADIANS,
   CRASH_RISE_AT_SECONDS,
+  CRASH_RISE_SECONDS,
   CRASH_SECONDS,
+  CRASH_THROWN_SECONDS,
+  crashBodyShare,
+  crashClipSeconds,
   crashFrom,
+  crashRebound,
   crashShare,
   crashSideFor,
   crashedRoll,
@@ -80,6 +90,125 @@ describe('the crash’s timeline — crashShare', () => {
       expect(crashShare(time, false)).toBeUndefined();
       expect(crashShare(time, true)).toBeUndefined();
     }
+  });
+});
+
+describe('getting back up is seen, and the clip is played across it — crashClipSeconds', () => {
+  it('takes the rider at least half a second to get back up: thirty frames, not nine', () => {
+    const rising = timeline(false).filter(
+      (share) => share !== undefined && share > 0.02 && share < 0.98,
+    );
+    const falling = Math.round(CRASH_FALL_SECONDS * FPS);
+    // The frames part of the way up, less the fall's own.
+    expect(rising.length - falling).toBeGreaterThanOrEqual(24);
+    expect(CRASH_SECONDS).toBeCloseTo(CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS, 12);
+  });
+
+  it('is the time since the crash until the rise, and the clip’s rise spread over the drawn one', () => {
+    for (const seconds of [0, 0.1, CRASH_THROWN_SECONDS, CRASH_FALL_SECONDS, 0.8]) {
+      expect(crashClipSeconds(seconds)).toBe(seconds);
+    }
+    expect(crashClipSeconds(CRASH_RISE_AT_SECONDS)).toBe(CRASH_RISE_AT_SECONDS);
+    expect(crashClipSeconds(CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS / 2)).toBeCloseTo(
+      CRASH_RISE_AT_SECONDS + CRASH_CLIP_RISE_SECONDS / 2,
+      12,
+    );
+    expect(crashClipSeconds(CRASH_SECONDS)).toBeCloseTo(CRASH_CLIP_SECONDS, 12);
+    // The two rises differ, or this test holds nothing.
+    expect(CRASH_RISE_SECONDS).toBeGreaterThan(CRASH_CLIP_RISE_SECONDS);
+    // Held to the clip's span, and never backwards.
+    expect(crashClipSeconds(CRASH_SECONDS + 5)).toBeCloseTo(CRASH_CLIP_SECONDS, 12);
+    expect(crashClipSeconds(-1)).toBe(0);
+    expect(crashClipSeconds(Number.NaN)).toBe(0);
+    let last = 0;
+    for (let frame = 0; frame <= CRASH_SECONDS * FPS; frame += 1) {
+      const now = crashClipSeconds(frame / FPS);
+      expect(now).toBeGreaterThanOrEqual(last);
+      last = now;
+    }
+  });
+});
+
+describe('the body’s share of the clip is not the roll’s — crashBodyShare', () => {
+  it('is wholly the clip’s from the moment it is thrown until it is back over the saddle', () => {
+    expect(crashBodyShare(0)).toBe(0);
+    expect(crashBodyShare(CRASH_THROWN_SECONDS)).toBe(1);
+    expect(crashBodyShare(CRASH_FALL_SECONDS)).toBe(1);
+    expect(crashBodyShare(CRASH_RISE_AT_SECONDS)).toBe(1);
+    expect(crashBodyShare(CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS / 2)).toBe(1);
+    // Thrown, the bicycle is not a third of the way down: the roll's share would leave the
+    // body two thirds on the saddle while the clip has it leaving.
+    expect(crashShare(CRASH_THROWN_SECONDS, false)).toBeLessThan(0.31);
+    // Eased back onto the ride's pose over the second half of the rise.
+    expect(crashBodyShare(CRASH_RISE_AT_SECONDS + 0.75 * CRASH_RISE_SECONDS)).toBeCloseTo(0.5, 12);
+    expect(crashBodyShare(CRASH_SECONDS - 1e-9)).toBeCloseTo(0, 6);
+  });
+
+  it('leaves the bicycle before the bicycle is down, moves by a bounded amount a frame, and ends with the crash', () => {
+    let largest = 0;
+    let last = 0;
+    for (let frame = 0; frame <= (CRASH_SECONDS + 0.2) * FPS; frame += 1) {
+      const seconds = frame / FPS;
+      const body = crashBodyShare(seconds);
+      const roll = crashShare(seconds, false);
+      // Drawn exactly as long as the crash is.
+      expect(body === undefined).toBe(roll === undefined);
+      if (seconds <= CRASH_FALL_SECONDS) expect(body ?? 0).toBeGreaterThanOrEqual(roll ?? 0);
+      largest = Math.max(largest, Math.abs((body ?? 0) - last));
+      last = body ?? 0;
+    }
+    expect(largest).toBeGreaterThan(0);
+    expect(largest).toBeLessThan(0.15);
+    for (const time of [-0.01, Number.NaN, Number.POSITIVE_INFINITY, CRASH_SECONDS]) {
+      expect(crashBodyShare(time)).toBeUndefined();
+    }
+  });
+});
+
+describe('the bicycle lands with weight — crashRebound', () => {
+  it('lifts a little way back off the road as it lands, and lies still well before the rise', () => {
+    expect(crashRebound(0)).toBe(0);
+    expect(crashRebound(CRASH_FALL_SECONDS / 2)).toBe(0);
+    expect(crashRebound(CRASH_FALL_SECONDS)).toBe(0);
+    const DEGREE = Math.PI / 180;
+    let highest = 0;
+    let largest = 0;
+    let last = 0;
+    for (let frame = 0; frame <= CRASH_SECONDS * FPS; frame += 1) {
+      const lift = crashRebound(frame / FPS);
+      // Off the road, never into it.
+      expect(lift).toBeGreaterThanOrEqual(0);
+      highest = Math.max(highest, lift);
+      largest = Math.max(largest, Math.abs(lift - last));
+      last = lift;
+    }
+    // A bicycle on tarmac, not a ball: between two and four degrees at its highest.
+    expect(highest).toBeGreaterThan(2 * DEGREE);
+    expect(highest).toBeLessThan(4 * DEGREE);
+    expect(highest).toBeLessThan(CRASH_REBOUND_RADIANS);
+    // No jump: under two degrees a frame, coming to rest included.
+    expect(largest).toBeLessThan(2 * DEGREE);
+    // The second bounce is lower than the first, and the third lower again.
+    const top = (bounce: number): number =>
+      crashRebound(CRASH_FALL_SECONDS + (bounce + 0.5) * CRASH_REBOUND_BOUNCE_SECONDS);
+    expect(top(1)).toBeLessThan(top(0) / 3);
+    expect(top(2)).toBeLessThan(top(1) / 3);
+    expect(top(2)).toBeGreaterThan(0);
+    // Still from there on, with a third of a second to spare before the rider starts up.
+    const still = CRASH_FALL_SECONDS + CRASH_REBOUND_BOUNCES * CRASH_REBOUND_BOUNCE_SECONDS;
+    expect(crashRebound(still)).toBe(0);
+    expect(crashRebound(CRASH_RISE_AT_SECONDS)).toBe(0);
+    expect(CRASH_RISE_AT_SECONDS - still).toBeGreaterThan(0.2);
+    expect(crashRebound(Number.NaN)).toBe(0);
+  });
+
+  it('is taken off the lean, on whichever side the bicycle fell', () => {
+    const ride = { bicycle: 0, body: 0 };
+    const lift = 0.05;
+    expect(crashedRoll(ride, 1, 1, lift).bicycle).toBeCloseTo(CRASH_LEAN_RADIANS - lift, 12);
+    expect(crashedRoll(ride, 1, -1, lift).bicycle).toBeCloseTo(-(CRASH_LEAN_RADIANS - lift), 12);
+    // None unless given: #2475's roll, to the bit.
+    expect(crashedRoll(ride, 1, 1)).toEqual({ bicycle: CRASH_LEAN_RADIANS, body: 0 });
   });
 });
 
@@ -186,8 +315,8 @@ describe('a crash drawn on the road — scene.ts §SceneInput.riderCrash', () =>
   });
 
   it('#2493: carries the crash on the rider’s marker for the clip, only when told how long ago, and on nobody else', () => {
-    const played = markers({ riderCrash: { share: 1, side: -1, seconds: 0.8 } });
-    expect(of(played, 'rider').crash).toEqual({ seconds: 0.8, side: -1, share: 1 });
+    const played = markers({ riderCrash: { share: 1, side: -1, seconds: 1.1 } });
+    expect(of(played, 'rider').crash).toEqual({ seconds: 1.1, side: -1, share: 1 });
     expect(of(played, 'bot').crash).toBeUndefined();
     // With no time — reduced motion — the marker is #2475's still pose, exactly.
     const still = markers({ riderCrash: { share: 1, side: -1 } });
@@ -196,6 +325,47 @@ describe('a crash drawn on the road — scene.ts §SceneInput.riderCrash', () =>
       ...of(still, 'rider'),
       crash: undefined,
     });
+  });
+
+  it('lands the bicycle with weight when told how long ago, and never in the still pose', () => {
+    const landing = CRASH_FALL_SECONDS + CRASH_REBOUND_BOUNCE_SECONDS / 2;
+    const lift = crashRebound(landing);
+    expect(lift).toBeGreaterThan(0.03);
+    const bounced = of(markers({ riderCrash: { share: 1, side: -1, seconds: landing } }), 'rider');
+    expect(bounced.lean).toBeCloseTo(-(CRASH_LEAN_RADIANS - lift), 12);
+    // Reduced motion hands no time: the pose is still, on the road.
+    const still = of(markers({ riderCrash: { share: 1, side: -1 } }), 'rider');
+    expect(still.lean).toBeCloseTo(-CRASH_LEAN_RADIANS, 12);
+  });
+
+  it('hands the realistic rider the clip’s own time and the body’s own share, not the roll’s', () => {
+    // Thrown: the bicycle under a third of the way down, the body wholly the clip's.
+    const thrown = of(
+      markers({
+        riderCrash: {
+          share: crashShare(CRASH_THROWN_SECONDS, false) ?? Number.NaN,
+          side: 1,
+          seconds: CRASH_THROWN_SECONDS,
+        },
+      }),
+      'rider',
+    );
+    expect(thrown.crash).toEqual({ seconds: CRASH_THROWN_SECONDS, side: 1, share: 1 });
+    expect(thrown.lean).toBeLessThan(CRASH_LEAN_RADIANS / 3);
+    // Half way up: the bicycle half way, the body still the clip's, at the clip's own half-rise.
+    const halfUp = CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS / 2;
+    const rising = of(
+      markers({
+        riderCrash: { share: crashShare(halfUp, false) ?? Number.NaN, side: 1, seconds: halfUp },
+      }),
+      'rider',
+    );
+    expect(rising.crash?.share).toBe(1);
+    expect(rising.crash?.seconds).toBeCloseTo(
+      CRASH_RISE_AT_SECONDS + CRASH_CLIP_RISE_SECONDS / 2,
+      12,
+    );
+    expect(rising.lean).toBeCloseTo(CRASH_LEAN_RADIANS / 2, 9);
   });
 
   it('#2493: straightens the bars of a steered rider as they fall, and lays the crash over the steered pose', () => {
@@ -210,7 +380,8 @@ describe('a crash drawn on the road — scene.ts §SceneInput.riderCrash', () =>
       'rider',
     );
     expect(half.steer).toBeCloseTo(turned / 2, 12);
-    expect(half.crash).toEqual({ seconds: 0.4, side: 1, share: 0.5 });
+    // The body's share is its own: wholly the clip's since it was thrown.
+    expect(half.crash).toEqual({ seconds: 0.4, side: 1, share: 1 });
     // The clip's marker is the steered still pose with the crash laid on it, nothing dropped.
     const still = of(markers({ ...steering, riderCrash: { share: 0.5, side: 1 } }), 'rider');
     expect({ ...half, crash: undefined }).toEqual({ ...still, crash: undefined });

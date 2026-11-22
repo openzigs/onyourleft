@@ -85,6 +85,7 @@ describe('#2094: the footprint census', () => {
     expect(census.get('worship')).toStrictEqual({
       'on-excluded-land': 1,
       'on-road': 1,
+      'on-street': 0,
       'too-steep': 1,
       'too-small': 0,
       'too-large': 0,

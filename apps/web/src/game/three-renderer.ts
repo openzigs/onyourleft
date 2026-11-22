@@ -226,6 +226,7 @@ import {
   type Material,
   type Object3D,
   type SkinnedMesh,
+  type Skeleton,
   type Texture,
 } from 'three';
 // ⚠️ **Both of these ship inside `three@0.185.1` itself** — MIT, zero runtime
@@ -470,20 +471,29 @@ import {
   type TerrainMesh,
 } from './landform';
 import type { QualitySettings } from './quality';
-import { GAIT_PHASES, GAITS, gaitPose } from './gait';
+import { GAITS, gaitPose } from './gait';
 import {
   ANIMATION_BYTES_PER_TEXEL,
-  ANIMATION_ROWS,
+  GAIT_ROWS,
+  NORMAL_STEPS,
+  PEOPLE_BODIES_MAX,
   PERSON_MAX_TRIANGLES,
-  PersonRegion,
+  PHASES,
   RIDE_GAIT_INDEX,
   RIDE_PHASES,
-  animationRow,
-  clusterDecimate,
-  dressed,
-  regionOf,
-  straightenSeams,
+  SLOT_REGIONS,
+  SLOT_WIDTH,
+  animationLayout,
+  animationTexel,
+  gaitRow,
+  packNormal,
+  regionNamed,
+  slotRows,
+  slotTexel,
   vertexNormals,
+  weld,
+  type AnimationLayout,
+  type PersonRegion,
 } from './people-body';
 import {
   NO_PEOPLE,
@@ -510,6 +520,9 @@ import {
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
   REALISTIC_DELIVERY_CAR,
+  REALISTIC_DELIVERY_CAR_ATLAS,
+  REALISTIC_DELIVERY_CAR_BODIES,
+  REALISTIC_PEOPLE,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_MAP_NAMES,
@@ -557,6 +570,7 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import { NO_FOOTWAYS, type FootwayPiece } from './footway-surfaces';
 import type { Embankment } from './overpasses';
 import {
   GOLF_BUNKERS_PER_GREEN,
@@ -6064,9 +6078,37 @@ ${phases.join('\n')}
 }
 
 /**
+ * A pool's water — #2974: lighter and bluer than a lake's, the tiled floor
+ * showing through. This repository's own. Marked by `waterways.ts`
+ * §`POOL_WATER_SHORE` in the water's shore weight.
+ */
+export const POOL_WATER_COLOUR = 0x3fa7c4;
+
+/** A pool's coping, its lip and its top — #2974: pale stone. This repository's own. */
+export const POOL_EDGE_COLOUR = 0xd8d2c4;
+
+/** The coping's skirt down to the ground — #2974: the stone in shade. This repository's own. */
+export const POOL_SIDE_COLOUR = 0xa39d90;
+
+/** A colour as a GLSL `vec3` in the working (linear) space, as `Color.setHex` puts a uniform. */
+function linearGlsl(hex: number): string {
+  const colour = new Color(hex);
+  return `vec3(${glslFloat(colour.r)}, ${glslFloat(colour.g)}, ${glslFloat(colour.b)})`;
+}
+
+/** {@link POOL_WATER_COLOUR}, {@link POOL_EDGE_COLOUR} and {@link POOL_SIDE_COLOUR} for the shader. */
+const POOL_WATER_GLSL = linearGlsl(POOL_WATER_COLOUR);
+const POOL_EDGE_GLSL = linearGlsl(POOL_EDGE_COLOUR);
+const POOL_SIDE_GLSL = linearGlsl(POOL_SIDE_COLOUR);
+
+/**
  * The water shader's fragment half: the sky reflected with a Fresnel term,
  * ripples as an analytic normal that scrolls with the ride's clock, and the
- * edges tinted shallow by the geometry's own shore weight.
+ * edges tinted shallow by the geometry's own shore weight. Since #2974 a
+ * shore weight past 1 marks a pool (`waterways.ts` §`POOL_WATER_SHORE`): its
+ * water in {@link POOL_WATER_COLOUR} under the same sky, and its coping in
+ * flat stone, with no sky in it. The flat rung's `MeshBasicMaterial` reads no
+ * weight, and draws a pool in the deep water's one colour.
  *
  * ⚠️ **No texture, and no second pass.** The ripple normal is travelling
  * waves differentiated by hand — {@link WATER_RIPPLES} scaled by
@@ -6102,7 +6144,9 @@ ${waterSlopeGlsl()}
   vec3 r = reflect(-v, n);
   vec3 sky = mix(horizonColour, skyColour, smoothstep(0.0, 0.4, r.y));
   vec3 body = mix(shallowColour, deepColour, smoothstep(0.0, 1.0, vShore));
+  body = vShore > 1.5 ? ${POOL_WATER_GLSL} : body;
   gl_FragColor = vec4(mix(body, sky, fresnel), 1.0);
+  if (vShore > 2.5) gl_FragColor = vec4(vShore > 3.5 ? ${POOL_SIDE_GLSL} : ${POOL_EDGE_GLSL}, 1.0);
   #include <colorspace_fragment>
   #include <fog_fragment>
 }
@@ -6941,12 +6985,21 @@ interface RealisticWorld {
    */
   readonly chainLink?: RealisticChainLink;
   /**
-   * Delivery's car — #2540: Kenney's sedan, which a Delivery round's parked
-   * cars are drawn as in this world (`DeliveryBelt`). Absent where a loader
-   * gave a scene without its eight parts (a test's), and then a parked car
-   * is the stylised world's car, drawn in this world's materials.
+   * Delivery's cars — #2847: three PSX bodies and their atlas, which a
+   * Delivery round's parked cars are drawn as in this world (`DeliveryBelt`);
+   * Kenney's sedan from #2540 until then. Absent where a loader gave a scene
+   * without every body's seven parts (a test's), and then a parked car is the
+   * stylised world's car, drawn in this world's materials.
    */
   readonly deliveryCar?: DeliveryCarGeometry;
+  /**
+   * The people on the pavements — the owner's request of 2026-11-18: three
+   * dressed bodies and their atlas (`realistic-assets.ts`
+   * §`REALISTIC_PEOPLE`), which `PeopleBelt` poses and draws. Absent where a
+   * loader gave a scene with no skinned mesh in it (a test's), and then
+   * nobody is drawn near.
+   */
+  readonly people?: RealisticPeople;
 }
 
 /**
@@ -7613,8 +7666,15 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const chainLinkWire = realisticChainLink
       ? texture(() => loaders.texture(realisticUrl(REALISTIC_CHAIN_LINK.wire)))
       : Promise.resolve(undefined);
-    // #2540: Delivery's car, loaded and settled with everything else.
+    // #2540: Delivery's car, loaded and settled with everything else; since
+    // #2847 three of them, and the atlas they wear.
     const deliveryCarScene = model(() => loaders.model(realisticUrl(REALISTIC_DELIVERY_CAR)));
+    const deliveryCarAtlas = texture(() =>
+      loaders.texture(realisticUrl(REALISTIC_DELIVERY_CAR_ATLAS)),
+    );
+    // The people's model and atlas, loaded and settled with everything else.
+    const peopleScene = model(() => loaders.model(realisticUrl(REALISTIC_PEOPLE.model)));
+    const peopleAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_PEOPLE.atlas)));
     // #475: the structures' surfaces, loaded with everything else and settled
     // with it — a world whose buildings could not load is half a world.
     const structureMaps = PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => ({
@@ -7681,6 +7741,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       chainLinkScene,
       chainLinkWire,
       deliveryCarScene,
+      deliveryCarAtlas,
+      peopleScene,
+      peopleAtlas,
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) =>
         each.models.flatMap((one) => [one.scene, one.strip, one.normals, one.middle]),
@@ -7873,8 +7936,23 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       chainLinkPiece === undefined || wireTexture === undefined
         ? undefined
         : { geometry: chainLinkPiece, wire: wireTexture };
-    // #2540: Delivery's car, its parts copied once, or none.
-    const deliveryCar = deliveryCarGeometryOf(await deliveryCarScene);
+    // #2540: Delivery's car, its parts copied once, or none; #2847: three
+    // bodies, and their atlas, in sRGB as every colour map is.
+    const carAtlas = await deliveryCarAtlas;
+    carAtlas.colorSpace = SRGBColorSpace;
+    const carParts = deliveryCarGeometryOf(await deliveryCarScene);
+    const deliveryCar = carParts === undefined ? undefined : { ...carParts, atlas: carAtlas };
+    // The people: their model, if it holds anybody, and their atlas.
+    const peopleModel = await peopleScene;
+    const peopleTexture = await peopleAtlas;
+    peopleTexture.colorSpace = SRGBColorSpace;
+    let anybody = false;
+    peopleModel.traverse((node) => {
+      if ((node as Partial<SkinnedMesh>).isSkinnedMesh === true) anybody = true;
+    });
+    const people: RealisticPeople | undefined = anybody
+      ? { scene: peopleModel, atlas: peopleTexture }
+      : undefined;
     const previous = realisticWorld;
     realisticWorld = {
       sky: skyRead,
@@ -7896,6 +7974,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ...(litter === undefined ? {} : { litter }),
       ...(chainLink === undefined ? {} : { chainLink }),
       ...(deliveryCar === undefined ? {} : { deliveryCar }),
+      ...(people === undefined ? {} : { people }),
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -8125,6 +8204,8 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   world.houses?.atlas.dispose();
   // #1274: the chain-link's wire; its piece's triangles are plain arrays.
   world.chainLink?.wire.dispose();
+  // #2847: the cars' atlas; their triangles are plain arrays.
+  world.deliveryCar?.atlas?.dispose();
   for (const texture of surfaceMapsOf(world)) texture.dispose();
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) releaseRealisticShape(shape);
@@ -11007,6 +11088,110 @@ function sideRoadGeometry(roads: readonly SideRoad[]): BufferGeometry {
 }
 
 /**
+ * Every mapped footway surface and zebra in view — #2972
+ * (`footway-surfaces.ts`): the footways, cycleways, park paths and steps as
+ * ribbons on the ground and the crossings as stripes on the road, coloured a
+ * vertex at a time by kind. **One mesh and one draw call** however many are in
+ * view, and none where a frame holds none; no texture. The realistic world's
+ * alone, because only the realistic world is given a corridor (ADR 0054 D-6).
+ *
+ * Pulled toward the camera in depth (`polygonOffset`), so a ribbon lying a few
+ * centimetres over the ground, and a stripe over the road's marks, never
+ * fights either where the drawn triangles part from the ground's height.
+ *
+ * Rebuilt only when the SET of pieces changes, as {@link PavementBelt} is:
+ * `footway-surfaces.ts` hands every frame the same objects for the same chunks.
+ */
+export class FootwayBelt {
+  readonly #mesh: Mesh;
+  readonly #material: Material;
+  /** The pieces the mesh holds, in the order it holds them. */
+  #held: readonly FootwayPiece[] = [];
+  #shown = true;
+
+  constructor() {
+    this.#material = withAtmosphere(
+      constructed(
+        new MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.92,
+          metalness: 0,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+        }),
+      ),
+    );
+    this.#mesh = new Mesh(new BufferGeometry(), this.#material);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** This frame's footways. */
+  update(pieces: readonly FootwayPiece[]): void {
+    const drawn = this.#shown ? pieces : NO_FOOTWAYS;
+    if (!(drawn.length === this.#held.length && drawn.every((p, i) => p === this.#held[i]))) {
+      this.#held = drawn;
+      const geometry = footwayGeometry(drawn);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = this.#shown && drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#material.dispose();
+  }
+}
+
+/** Every footway piece as one geometry: positions, linear colours and an up normal. */
+function footwayGeometry(pieces: readonly FootwayPiece[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const piece of pieces) {
+    vertices += piece.positions.length / 3;
+    indices += piece.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const piece of pieces) {
+    positions.set(piece.positions, vertex * 3);
+    colours.set(piece.colours, vertex * 3);
+    for (let each = 0; each < piece.indices.length; each += 1) {
+      index[at + each] = (piece.indices[each] as number) + vertex;
+    }
+    vertex += piece.positions.length / 3;
+    at += piece.indices.length;
+  }
+  for (let up = 1; up < normals.length; up += 3) normals[up] = 1;
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * The most pieces of one furniture kind a frame draws: **64**. A village at
  * its fullest has 16 lamp posts and 8 bollards (`streets.ts` §`furnish`), a
  * frame holds two villages at most, and only what is within
@@ -11978,8 +12163,10 @@ export interface DrawnDeliveryPiece {
   readonly kind: DeliveryObstacleKind | DeliveryMarkerKind | undefined;
   /** For a parked car or a car pulling out (#2506), which of its body paints (#2362), an index into its roster of paints; else `undefined`. */
   readonly paint?: number | undefined;
-  /** For a car in a belt drawing Kenney's (#2540), the pose its instance was given; else `undefined`. */
+  /** For a car in a belt drawing the realistic cars (#2540, #2847), the pose its instance was given; else `undefined`. */
   readonly pose?: DeliveryCarPose | undefined;
+  /** For a car in a belt drawing the PSX cars (#2847), which body its instance draws; else `undefined`. */
+  readonly body?: number | undefined;
   /** How large it was drawn: the instance matrix's scale. Above 1 only for a far marker (#2453). */
   readonly scale: number;
 }
@@ -11989,7 +12176,7 @@ export interface DrawnDeliveryPiece {
  * `vec4` — #1814, #2362 and #2540: `x` which of `obstacles.ts`
  * §`OBSTACLE_KINDS` it belongs to, by its index in the roster; `y` 1 where it
  * is a parked car's body, whose colour is the instance's paint; `z` which
- * part of Kenney's car it is ({@link DELIVERY_CAR_PART_CODES}, 0 for none);
+ * part of the realistic cars it is ({@link DELIVERY_CAR_PART_CODES}, 0 for none);
  * and `w` which indicator (0 none, 1 the left, 2 the right).
  *
  * ⚠️ **Packed because WebGL has 16 vertex attribute slots**, and the pinned
@@ -12012,8 +12199,8 @@ const DELIVERY_PIECE_ATTRIBUTE = 'oylPiece';
 const DELIVERY_OBSTACLE_ATTRIBUTE = 'oylObstacle';
 
 /**
- * The vertex attribute packing two more things about each vertex in one
- * `vec2`, each in a component of its own, so #2540's realistic car program
+ * The vertex attribute packing more things about each vertex in one `vec4`,
+ * each in a component of its own, so #2540's realistic car program
  * stays inside `realistic-budget.ts` §`DELIVERY_MOST_VERTEX_ATTRIBUTES` (one
  * slot, where two one-float attributes would take two; see
  * {@link DELIVERY_PIECE_ATTRIBUTE} for why slots are counted):
@@ -12031,6 +12218,10 @@ const DELIVERY_OBSTACLE_ATTRIBUTE = 'oylObstacle';
  *   part's paint, before the output's colour space and the fog, as the
  *   stylised world (no tone mapping) draws every part; 0 changes nothing.
  *   Only a mailbox's diamond carries it.
+ * - `zw`: its coordinate in the cars' atlas — #2847, glTF's (`v` down): a
+ *   car's own, and {@link DELIVERY_ATLAS_WHITE_UV} for every other vertex.
+ *   Here and not three's own `uv`, which would be a fifteenth slot; the
+ *   realistic car program reads it as `MAP_UV` ({@link withDeliveryCarPose}).
  *
  * @see withObstacleKinds
  */
@@ -12086,8 +12277,16 @@ const DELIVERY_OBSTACLE_ORDER = Object.keys(
  * colour from the instance's {@link DELIVERY_OBSTACLE_ATTRIBUTE} instead
  * of the vertex's. Round 5 held three whole cars, one a paint, and every
  * instance of every kind submitted all three.
+ *
+ * Eight since the owner's request of 2026-11-18 ("make the car model
+ * better"): a street of one car in three colours read as one car. The five
+ * added — white, charcoal, bottle green, sand and navy — are what a street's
+ * cars mostly are, and cost the frame nothing: a paint is an instance's colour.
+ * Exported for `delivery-belt.test.ts`, which reads how many there are.
  */
-const PARKED_CAR_PAINTS: readonly number[] = [0x4a6a8c, 0x8f3a30, 0xc4c7cb];
+export const PARKED_CAR_PAINTS: readonly number[] = [
+  0x4a6a8c, 0x8f3a30, 0xc4c7cb, 0xe8e8e4, 0x2e3134, 0x33503a, 0xb8a888, 0x1f2f4a,
+];
 
 /** Whether a kind is drawn with the car's body, and so wears one of {@link PARKED_CAR_PAINTS}: a parked car, and a car pulling out (#2506). */
 function isCarKind(kind: DeliveryObstacleKind): boolean {
@@ -12128,7 +12327,7 @@ function withObstacleKinds<M extends Material>(material: M): M {
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute vec4 ${DELIVERY_PIECE_ATTRIBUTE};\nattribute vec4 ${DELIVERY_OBSTACLE_ATTRIBUTE};\nattribute vec2 ${DELIVERY_PIECE_ALSO_ATTRIBUTE};`,
+        `#include <common>\nattribute vec4 ${DELIVERY_PIECE_ATTRIBUTE};\nattribute vec4 ${DELIVERY_OBSTACLE_ATTRIBUTE};\nattribute vec4 ${DELIVERY_PIECE_ALSO_ATTRIBUTE};`,
         'vertex',
         spliced,
       ),
@@ -12193,7 +12392,11 @@ interface DeliveryPart {
   readonly painted?: boolean;
   /** Each corner's own colour, linear RGB, in place of {@link colour} — #2540, Kenney's car. */
   readonly colours?: Float32Array;
-  /** For Kenney's car (#2540): which part it is, which indicator, and what it turns about. @see withDeliveryCarPose */
+  /** Each corner's atlas coordinate — #2847, the cars'; a part without them samples {@link DELIVERY_ATLAS_WHITE_UV}. */
+  readonly uvs?: Float32Array;
+  /** Which of the cars' bodies it belongs to — #2847; none, for every other part. */
+  readonly body?: number;
+  /** For the realistic cars (#2540, #2847): which part it is, which indicator, and what it turns about. @see withDeliveryCarPose */
   readonly carPart?: number;
   readonly carLamp?: number;
   readonly pivot?: readonly [number, number, number];
@@ -12483,14 +12686,20 @@ function trimmedPart(
     readonly part: DeliveryPart;
     readonly planes: readonly (readonly number[])[];
   }[],
-): { readonly flat: BufferGeometry; readonly colours: Float32Array | undefined } {
+): {
+  readonly flat: BufferGeometry;
+  readonly colours: Float32Array | undefined;
+  readonly uvs: Float32Array | undefined;
+} {
   const position = flat.getAttribute('position') as BufferAttribute;
   const normal = flat.getAttribute('normal') as BufferAttribute;
   const own = part.colours;
+  const ownUvs = part.uvs;
   const hiders = solids.filter((solid) => solid.part !== part && drawnTogether(part, solid.part));
   const positions: number[] = [];
   const normals: number[] = [];
   const colours: number[] = [];
+  const uvs: number[] = [];
   let changed = false;
   for (let first = 0; first < position.count; first += 3) {
     if (hiders.some((solid) => hiddenInside(position.array, first, solid.planes))) {
@@ -12500,6 +12709,7 @@ function trimmedPart(
     positions.push(...position.array.subarray(first * 3, first * 3 + 9));
     normals.push(...normal.array.subarray(first * 3, first * 3 + 9));
     if (own !== undefined) colours.push(...own.subarray(first * 3, first * 3 + 9));
+    if (ownUvs !== undefined) uvs.push(...ownUvs.subarray(first * 2, first * 2 + 6));
   }
   // A part with its own per-corner colours (Kenney's car, #2540) is never one
   // three fans a cap of, so its colours stay in step with what is kept.
@@ -12507,11 +12717,17 @@ function trimmedPart(
     own === undefined && DELIVERY_CAPPED_TYPES.has(part.made.type)
       ? withCapsAsPolygons(positions, normals)
       : { positions, normals };
-  if (!changed && capped.positions.length === positions.length) return { flat, colours: own };
+  if (!changed && capped.positions.length === positions.length) {
+    return { flat, colours: own, uvs: ownUvs };
+  }
   const trimmed = new BufferGeometry();
   trimmed.setAttribute('position', new BufferAttribute(new Float32Array(capped.positions), 3));
   trimmed.setAttribute('normal', new BufferAttribute(new Float32Array(capped.normals), 3));
-  return { flat: trimmed, colours: own === undefined ? undefined : new Float32Array(colours) };
+  return {
+    flat: trimmed,
+    colours: own === undefined ? undefined : new Float32Array(colours),
+    uvs: ownUvs === undefined ? undefined : new Float32Array(uvs),
+  };
 }
 
 /** Whether a part turns on its own, so that what it hides or is hidden by now is not a moment on: Kenney's car's wheels (#2540). */
@@ -12551,7 +12767,9 @@ function deliveryShape(
         });
   const flats = parts.map((part, index) => {
     const flat = whole[index] as BufferGeometry;
-    if (trim === 'keep' || turnsOnItsOwn(part)) return { flat, colours: part.colours };
+    if (trim === 'keep' || turnsOnItsOwn(part)) {
+      return { flat, colours: part.colours, uvs: part.uvs };
+    }
     const trimmed = trimmedPart(part, flat, solids);
     if (trimmed.flat !== flat && flat !== part.made) flat.dispose();
     return trimmed;
@@ -12562,12 +12780,12 @@ function deliveryShape(
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
   const pieces = new Float32Array(vertices * 4);
-  const pivots = new Float32Array(vertices * 3);
-  const more = new Float32Array(vertices * 2);
+  const pivots = new Float32Array(vertices * 4);
+  const more = new Float32Array(vertices * 4);
   const paint = new Color();
   let at = 0;
   parts.forEach((part, index) => {
-    const { flat, colours: own } = flats[index] as (typeof flats)[number];
+    const { flat, colours: own, uvs: ownUvs } = flats[index] as (typeof flats)[number];
     const count = flat.getAttribute('position').count;
     positions.set(flat.getAttribute('position').array, at * 3);
     normals.set(flat.getAttribute('normal').array, at * 3);
@@ -12584,11 +12802,16 @@ function deliveryShape(
       pieces[corner * 4 + 1] = part.painted === true ? 1 : 0;
       pieces[corner * 4 + 2] = part.carPart ?? 0;
       pieces[corner * 4 + 3] = part.carLamp ?? 0;
-      pivots[corner * 3] = part.pivot?.[0] ?? 0;
-      pivots[corner * 3 + 1] = part.pivot?.[1] ?? 0;
-      pivots[corner * 3 + 2] = part.pivot?.[2] ?? 0;
-      more[corner * 2] = part.also ?? -1;
-      more[corner * 2 + 1] = part.untoned === true ? 1 : 0;
+      pivots[corner * 4] = part.pivot?.[0] ?? 0;
+      pivots[corner * 4 + 1] = part.pivot?.[1] ?? 0;
+      pivots[corner * 4 + 2] = part.pivot?.[2] ?? 0;
+      pivots[corner * 4 + 3] = part.body ?? -1;
+      more[corner * 4] = part.also ?? -1;
+      more[corner * 4 + 1] = part.untoned === true ? 1 : 0;
+      // #2847: its atlas coordinate, or the white cell's.
+      const texel = (corner - at) * 2;
+      more[corner * 4 + 2] = ownUvs?.[texel] ?? DELIVERY_ATLAS_WHITE_UV[0];
+      more[corner * 4 + 3] = ownUvs?.[texel + 1] ?? DELIVERY_ATLAS_WHITE_UV[1];
     }
     at += count;
     if (flat !== part.made) flat.dispose();
@@ -12601,11 +12824,12 @@ function deliveryShape(
   geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
   if (parts.some((part) => part.kind !== undefined)) {
     geometry.setAttribute(DELIVERY_PIECE_ATTRIBUTE, new BufferAttribute(pieces, 4));
-    geometry.setAttribute(DELIVERY_PIECE_ALSO_ATTRIBUTE, new BufferAttribute(more, 2));
+    geometry.setAttribute(DELIVERY_PIECE_ALSO_ATTRIBUTE, new BufferAttribute(more, 4));
   }
-  // #2540: Kenney's car's pivots, for withDeliveryCarPose; its parts and indicators are in the piece's `zw`.
+  // #2540: the cars' pivots, and since #2847 each vertex's body in `w`, for
+  // withDeliveryCarPose; its parts and indicators are in the piece's `zw`.
   if (parts.some((part) => part.carPart !== undefined)) {
-    geometry.setAttribute(DELIVERY_CAR_PIVOT_ATTRIBUTE, new BufferAttribute(pivots, 3));
+    geometry.setAttribute(DELIVERY_CAR_PIVOT_ATTRIBUTE, new BufferAttribute(pivots, 4));
   }
   geometry.computeBoundingSphere();
   return geometry;
@@ -13405,8 +13629,8 @@ function obstacleShape(car?: DeliveryCarGeometry, trim = true): BufferGeometry {
   // #2364: the moving hazards' own figures; a car pulling out is drawn as the car below.
   for (const [made, colour] of dogParts()) add('dog', made, colour);
   for (const [made, colour] of oncomingRiderParts()) add('oncoming-rider', made, colour);
-  // #2540: the realistic world's car, Kenney's, where it is given. #2506: a car
-  // pulling out's instance draws it too; its indicators are Kenney's own, lit
+  // #2540, #2847: the realistic world's cars, where they are given. #2506: a car
+  // pulling out's instance draws them too; their indicators are their own, lit
   // by the instance's lamps (DeliveryBelt.update).
   if (car !== undefined) {
     parts.push(
@@ -13459,41 +13683,52 @@ export function deliveryPieceShape(
 
 /**
  * Which part of Delivery's car a part is — #2540, by the GLB node it is read
- * from (`realistic-assets.ts` §`REALISTIC_DELIVERY_CAR`).
+ * from (`realistic-assets.ts` §`REALISTIC_DELIVERY_CAR`). #2847: no part is the
+ * paint any more; a body's paint is its atlas's texels with alpha 1.
  */
 export type DeliveryCarRole =
-  'body' | 'paint' | 'front-wheel' | 'back-wheel' | 'indicator-left' | 'indicator-right';
+  'body' | 'front-wheel' | 'back-wheel' | 'indicator-left' | 'indicator-right';
 
 /** One part of Delivery's car, as {@link deliveryCarGeometryOf} copies it. */
 export interface DeliveryCarPart {
   readonly role: DeliveryCarRole;
+  /** Which body it belongs to — #2847: its index in `realistic-assets.ts` §`REALISTIC_DELIVERY_CAR_BODIES`. */
+  readonly body: number;
   /** Its triangles, unindexed, in the car's own frame: metres, `y` up, its nose along `+z`, its left `+x`. */
   readonly position: Float32Array;
   readonly normal: Float32Array;
   /** Each corner's colour, linear RGB. */
   readonly colour: Float32Array;
-  /** What it turns about: a wheel's hub, and for the rest the car's middle at the hubs' height. */
+  /** Each corner's coordinate in the cars' atlas, glTF's (`v` down) — #2847. */
+  readonly uv: Float32Array;
+  /** What it turns about: a wheel's hub, and for the rest its body's middle at the hubs' height. */
   readonly pivot: readonly [number, number, number];
 }
 
+/** One body of Delivery's cars — #2847: its wheels' radius (their hubs' height) and its wheelbase, which its pose reads. */
+export interface DeliveryCarBody {
+  readonly name: string;
+  readonly wheelRadius: number;
+  readonly wheelbase: number;
+}
+
 /**
- * Delivery's car in the realistic world — #2540: Kenney's CC0 sedan, its
- * parts copied once out of the loader's scene. Its wheels' radius is their
- * hubs' height (a wheel stands on the road), and its wheelbase the distance
- * from its back hubs to its front ones.
+ * Delivery's cars in the realistic world — #2847: the three PSX bodies, their
+ * parts copied once out of the loader's scene, and the atlas they wear (absent
+ * in a test that hands no picture). #2540's one Kenney sedan until then.
  */
 export interface DeliveryCarGeometry {
   readonly parts: readonly DeliveryCarPart[];
-  readonly wheelRadius: number;
-  readonly wheelbase: number;
-  /** Every part's triangles, a wheel's four times: what each obstacle instance submits of it. */
+  /** Each body, by its number. */
+  readonly bodies: readonly DeliveryCarBody[];
+  /** Every part's triangles, every body's: what each obstacle instance submits of them. */
   readonly triangles: number;
+  readonly atlas?: Texture;
 }
 
-/** The car's GLB nodes, by name, and which part each is. @see deliveryCarGeometryOf */
+/** A body's GLB nodes, by the part's name after `<body>-`, and which part each is. @see deliveryCarGeometryOf */
 const DELIVERY_CAR_NODES: Readonly<Record<string, DeliveryCarRole>> = {
   body: 'body',
-  paint: 'paint',
   'wheel-front-left': 'front-wheel',
   'wheel-front-right': 'front-wheel',
   'wheel-back-left': 'back-wheel',
@@ -13503,62 +13738,109 @@ const DELIVERY_CAR_NODES: Readonly<Record<string, DeliveryCarRole>> = {
 };
 
 /**
- * Delivery's car out of the loader's scene — #2540: each of its eight named
+ * Where a vertex that is not a car's samples the cars' atlas — #2847: the
+ * middle of its white cell (the bottom-right of two by two, in glTF's `v`
+ * down), whose alpha 1 keeps the vertex's own colour. Every other obstacle,
+ * and the stylised car where the belt draws it, is given this.
+ */
+export const DELIVERY_ATLAS_WHITE_UV: readonly [number, number] = [0.75, 0.75];
+
+/** A mesh's texture coordinates, unindexed in the order {@link meshGeometryOf} unindexes its corners, or `undefined` where it has none. */
+function meshUvOf(mesh: Mesh): Float32Array | undefined {
+  const geometry = mesh.geometry;
+  if (geometry.getAttribute('uv') === undefined) return undefined;
+  const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
+  const uv = Float32Array.from(flat.getAttribute('uv').array as ArrayLike<number>);
+  if (flat !== geometry) flat.dispose();
+  return uv;
+}
+
+/**
+ * Delivery's cars out of the loader's scene — #2847: for each of
+ * `realistic-assets.ts` §`REALISTIC_DELIVERY_CAR_BODIES`, its seven named
  * nodes' triangles, unindexed, carried by the node's own place into the car's
- * frame (the four wheels are one mesh under four nodes, the right-hand two
- * turned about), with each corner's colour; or `undefined` where any node is
- * missing, carries no colour, or the wheels do not stand front and back.
+ * frame, with each corner's colour and atlas coordinate; or `undefined` where
+ * any node is missing, carries no colour or coordinate, or a body's wheels do
+ * not stand front and back.
  */
 export function deliveryCarGeometryOf(scene: Object3D): DeliveryCarGeometry | undefined {
   const found = new Map<string, Mesh>();
   scene.traverse((node) => {
-    if (
-      (node as Partial<Mesh>).isMesh === true &&
-      Object.hasOwn(DELIVERY_CAR_NODES, node.name) &&
-      !found.has(node.name)
-    ) {
+    if ((node as Partial<Mesh>).isMesh === true && !found.has(node.name)) {
       found.set(node.name, node as Mesh);
     }
   });
-  const names = Object.keys(DELIVERY_CAR_NODES);
-  if (names.some((name) => !found.has(name))) return undefined;
+  const every = REALISTIC_DELIVERY_CAR_BODIES.flatMap((name) =>
+    Object.keys(DELIVERY_CAR_NODES).map((part) => `${name}-${part}`),
+  );
+  if (every.some((each) => !found.has(each))) return undefined;
   scene.updateMatrixWorld(true);
-  const hubOf = (name: string): Vector3 =>
-    new Vector3().setFromMatrixPosition((found.get(name) as Mesh).matrixWorld);
-  const front = hubOf('wheel-front-left');
-  const back = hubOf('wheel-back-left');
-  const wheelRadius = (front.y + back.y) / 2;
-  const wheelbase = front.z - back.z;
-  if (!(wheelRadius > 0) || !(wheelbase > 0)) return undefined;
   const parts: DeliveryCarPart[] = [];
-  for (const name of names) {
-    const mesh = found.get(name) as Mesh;
-    const role = DELIVERY_CAR_NODES[name] as DeliveryCarRole;
-    const copied = meshGeometryOf(mesh);
-    if (copied === undefined) return undefined;
-    const place = mesh.matrixWorld;
-    const turn = new Matrix3().getNormalMatrix(place);
-    const point = new Vector3();
-    for (let at = 0; at < copied.position.length; at += 3) {
-      point.fromArray(copied.position, at).applyMatrix4(place).toArray(copied.position, at);
-      point.fromArray(copied.normal, at).applyMatrix3(turn).normalize().toArray(copied.normal, at);
+  const bodies: DeliveryCarBody[] = [];
+  for (const [body, name] of REALISTIC_DELIVERY_CAR_BODIES.entries()) {
+    const hubOf = (each: string): Vector3 =>
+      new Vector3().setFromMatrixPosition((found.get(`${name}-${each}`) as Mesh).matrixWorld);
+    const front = hubOf('wheel-front-left');
+    const back = hubOf('wheel-back-left');
+    const wheelRadius = (front.y + back.y) / 2;
+    const wheelbase = front.z - back.z;
+    if (!(wheelRadius > 0) || !(wheelbase > 0)) return undefined;
+    bodies.push({ name, wheelRadius, wheelbase });
+    for (const [part, role] of Object.entries(DELIVERY_CAR_NODES)) {
+      const mesh = found.get(`${name}-${part}`) as Mesh;
+      const copied = meshGeometryOf(mesh);
+      const uv = meshUvOf(mesh);
+      if (copied === undefined || uv?.length !== (copied.position.length / 3) * 2) {
+        return undefined;
+      }
+      const place = mesh.matrixWorld;
+      const turn = new Matrix3().getNormalMatrix(place);
+      const point = new Vector3();
+      for (let at = 0; at < copied.position.length; at += 3) {
+        point.fromArray(copied.position, at).applyMatrix4(place).toArray(copied.position, at);
+        point
+          .fromArray(copied.normal, at)
+          .applyMatrix3(turn)
+          .normalize()
+          .toArray(copied.normal, at);
+      }
+      const wheel = role === 'front-wheel' || role === 'back-wheel';
+      const hub = wheel ? hubOf(part) : undefined;
+      parts.push({
+        role,
+        body,
+        position: copied.position,
+        normal: copied.normal,
+        colour: copied.colour,
+        uv,
+        pivot: hub === undefined ? [0, wheelRadius, 0] : [hub.x, hub.y, hub.z],
+      });
     }
-    const wheel = role === 'front-wheel' || role === 'back-wheel';
-    const hub = wheel ? hubOf(name) : undefined;
-    parts.push({
-      role,
-      position: copied.position,
-      normal: copied.normal,
-      colour: copied.colour,
-      pivot: hub === undefined ? [0, wheelRadius, 0] : [hub.x, hub.y, hub.z],
-    });
   }
   return {
     parts,
-    wheelRadius,
-    wheelbase,
+    bodies,
     triangles: parts.reduce((sum, part) => sum + part.position.length / 9, 0),
   };
+}
+
+/**
+ * Which of the cars' bodies a car piece is drawn as — #2847, the issue's
+ * "bodies chosen by seed": by its place on the round, as its paint is
+ * ({@link parkedCarPaint}), so a car keeps its body for the ride and every
+ * view draws the same street. Hashed, not `index % count`, so a body and a
+ * paint do not walk the round in step (eight paints and three bodies would
+ * repeat every 24 cars in the same order).
+ */
+export function deliveryCarBody(
+  piece: Pick<DeliveryObstaclePiece, 'index'>,
+  bodies: number,
+): number {
+  let hash = Math.imul((piece.index ?? 0) ^ 2847, 0x9e37_79b1);
+  hash ^= hash >>> 15;
+  hash = Math.imul(hash, 0x85eb_ca6b);
+  hash ^= hash >>> 13;
+  return (hash >>> 0) % Math.max(1, bodies);
 }
 
 /**
@@ -13588,7 +13870,7 @@ const PARKED_CAR_POSE: DeliveryCarPose = {
 /**
  * A car pulling out's pose when the frame gives it no motion (#2506 with
  * #2540): its two indicators lit, as #2506's own car draws its two lit
- * amber quads, so Kenney's car pulling out shows the same signal in the
+ * amber quads, so a realistic car pulling out shows the same signal in the
  * realistic world. A parked car's lenses stay unlit ({@link PARKED_CAR_POSE}).
  */
 const PULLING_OUT_CAR_POSE: DeliveryCarPose = { ...PARKED_CAR_POSE, left: 1, right: 1 };
@@ -13634,7 +13916,7 @@ export function indicatorLit(seconds: number | undefined): number {
  */
 export function deliveryCarPose(
   motion: DeliveryCarMotion | undefined,
-  car: Pick<DeliveryCarGeometry, 'wheelRadius' | 'wheelbase'>,
+  car: Pick<DeliveryCarBody, 'wheelRadius' | 'wheelbase'>,
 ): DeliveryCarPose {
   if (motion === undefined) return PARKED_CAR_POSE;
   const steer = Math.min(MOST_STEER_RADIANS, Math.max(-MOST_STEER_RADIANS, motion.steerRadians));
@@ -13654,19 +13936,27 @@ export function deliveryCarPose(
   };
 }
 
-/** The vertex attribute holding what a car vertex turns about. @see DeliveryCarPart.pivot */
+/**
+ * The vertex attribute holding what a car vertex turns about, `xyz`
+ * ({@link DeliveryCarPart.pivot}), and — #2847, in `w` — which of the cars'
+ * bodies it is, or `-1` for none: an instance draws only its own body's
+ * ({@link deliveryCarBodyVertexDrawn}).
+ */
 const DELIVERY_CAR_PIVOT_ATTRIBUTE = 'oylCarPivot';
 
 /** The instanced attribute holding each instance's {@link DeliveryCarPose}: roll, steer, pitch, lean. */
 const DELIVERY_CAR_POSE_ATTRIBUTE = 'oylCarPose';
 
-/** The instanced attribute holding each instance's indicators: left, right, each 0 or 1. */
+/**
+ * The instanced attribute holding each instance's indicators, left and right,
+ * each 0 or 1, and — #2847, in `z` — which of the cars' bodies it draws: one
+ * `vec3`, so the bodies cost no vertex attribute slot of their own.
+ */
 const DELIVERY_CAR_LAMPS_ATTRIBUTE = 'oylCarLamps';
 
 /** Which part of the car a vertex is, in {@link DELIVERY_PIECE_ATTRIBUTE}'s `z`: 0 none, 1 the body, 2 a front wheel, 3 a back wheel. @see DELIVERY_CAR_POSE_GLSL */
 const DELIVERY_CAR_PART_CODES: Readonly<Record<DeliveryCarRole, number>> = {
   body: 1,
-  paint: 1,
   'indicator-left': 1,
   'indicator-right': 1,
   'front-wheel': 2,
@@ -13728,7 +14018,7 @@ float oylCarLampLevel( float lamp, vec2 lamps ) {
 `;
 
 /**
- * Teaches the realistic Delivery obstacles' material Kenney's car's pose —
+ * Teaches the realistic Delivery obstacles' material the cars' pose —
  * #2540: each car vertex is turned about its pivot by its instance's
  * {@link DELIVERY_CAR_POSE_ATTRIBUTE} ({@link DELIVERY_CAR_POSE_GLSL}), its
  * normal with it, and an indicator vertex drawn bright or dim by the
@@ -13742,17 +14032,26 @@ float oylCarLampLevel( float lamp, vec2 lamps ) {
  * the pose and the indicators. Only
  * the realistic world's material, which is physically based and so has an
  * `objectNormal`; the stylised world keeps its own car, which has no parts.
+ *
+ * #2847: and a vertex of another body than the instance's is collapsed
+ * (its pivot's `w` against the instance's lamps' `z`), and given `atlas`,
+ * the material wears it as its `map`, read at the piece's packed coordinate
+ * ({@link DELIVERY_PIECE_ALSO_ATTRIBUTE}'s `zw`), its alpha saying where the
+ * vertex's colour — the instance's paint, on a car — shows
+ * ({@link DELIVERY_CAR_ATLAS_GLSL}).
  */
-function withDeliveryCarPose<M extends Material>(material: M): M {
+function withDeliveryCarPose<M extends Material>(material: M, atlas?: Texture): M {
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   const spliced = "#2540's car pose";
+  // #2847: the cars' one picture, worn by every obstacle vertex at its own coordinate.
+  if (atlas !== undefined) (material as unknown as { map: Texture | null }).map = atlas;
   material.onBeforeCompile = (shader, renderer) => {
     earlier(shader, renderer);
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <common>',
-      `#include <common>\nattribute vec3 ${DELIVERY_CAR_PIVOT_ATTRIBUTE};\nattribute vec4 ${DELIVERY_CAR_POSE_ATTRIBUTE};\nattribute vec2 ${DELIVERY_CAR_LAMPS_ATTRIBUTE};\n${DELIVERY_CAR_POSE_GLSL}`,
+      `#include <common>\nattribute vec4 ${DELIVERY_CAR_PIVOT_ATTRIBUTE};\nattribute vec4 ${DELIVERY_CAR_POSE_ATTRIBUTE};\nattribute vec3 ${DELIVERY_CAR_LAMPS_ATTRIBUTE};\n${DELIVERY_CAR_POSE_GLSL}`,
       'vertex',
       spliced,
     );
@@ -13766,30 +14065,87 @@ function withDeliveryCarPose<M extends Material>(material: M): M {
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <begin_vertex>',
-      `#include <begin_vertex>\n\ttransformed = ${DELIVERY_CAR_PIVOT_ATTRIBUTE} + oylCarTurn( transformed - ${DELIVERY_CAR_PIVOT_ATTRIBUTE}, ${DELIVERY_PIECE_ATTRIBUTE}.z, ${DELIVERY_CAR_POSE_ATTRIBUTE} );`,
+      // #2847: and a vertex of another body than the instance's is collapsed. @see deliveryCarBodyVertexDrawn
+      `#include <begin_vertex>\n\ttransformed = ${DELIVERY_CAR_PIVOT_ATTRIBUTE}.xyz + oylCarTurn( transformed - ${DELIVERY_CAR_PIVOT_ATTRIBUTE}.xyz, ${DELIVERY_PIECE_ATTRIBUTE}.z, ${DELIVERY_CAR_POSE_ATTRIBUTE} );\n\ttransformed *= 1.0 - step( -0.5, ${DELIVERY_CAR_PIVOT_ATTRIBUTE}.w ) * step( 0.5, abs( ${DELIVERY_CAR_PIVOT_ATTRIBUTE}.w - ${DELIVERY_CAR_LAMPS_ATTRIBUTE}.z ) );`,
       'vertex',
       spliced,
     );
     shader.vertexShader = replacedOrThrown(
       shader.vertexShader,
       '#include <color_vertex>',
-      `#include <color_vertex>\n\tvColor.xyz *= oylCarLampLevel( ${DELIVERY_PIECE_ATTRIBUTE}.w, ${DELIVERY_CAR_LAMPS_ATTRIBUTE} );`,
+      `#include <color_vertex>\n\tvColor.xyz *= oylCarLampLevel( ${DELIVERY_PIECE_ATTRIBUTE}.w, ${DELIVERY_CAR_LAMPS_ATTRIBUTE}.xy );`,
       'vertex',
       spliced,
     );
+    if (atlas === undefined) return;
+    // #2847: the atlas coordinate is the piece's packed `zw`, not three's own
+    // `uv`, which the geometry does not carry: a slot of its own would be a
+    // fifteenth (realistic-budget.ts §DELIVERY_MOST_VERTEX_ATTRIBUTES).
+    shader.vertexShader = replacedOrThrown(
+      shader.vertexShader,
+      '#include <uv_vertex>',
+      `#ifdef USE_MAP\n#undef MAP_UV\n#define MAP_UV ${DELIVERY_PIECE_ALSO_ATTRIBUTE}.zw\n#endif\n#include <uv_vertex>`,
+      'vertex',
+      spliced,
+    );
+    // #2847: a texel of a body's paint (alpha 1) is the vertex's colour — the
+    // instance's paint, on a car — times its grey; any other texel of a car
+    // (alpha 0) is the pack's own colour, whatever the paint. The white cell
+    // every other vertex samples is alpha 1, so it keeps its own colour. The
+    // texel's alpha is never the fragment's: the material is opaque.
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <map_fragment>',
+        DELIVERY_CAR_ATLAS_GLSL,
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      '\tdiffuseColor.rgb *= mix( vec3( 1.0 ), vColor.rgb, oylAtlas.a );',
+      'fragment',
+      spliced,
+    );
   };
-  material.customProgramCacheKey = () => `${earlierKey}|oyl-delivery-car`;
+  material.customProgramCacheKey = () =>
+    `${earlierKey}|oyl-delivery-car${atlas === undefined ? '' : '-atlas'}`;
   return material;
 }
 
 /**
- * Kenney's car as the obstacle roster's parked car — #2540: each part's
- * triangles in its own colours, the paint taking the instance's
- * ({@link PARKED_CAR_PAINTS}), the indicators glowing, and every vertex
- * marked with its part, its indicator and its pivot for
- * {@link withDeliveryCarPose}. The GLB is made at `obstacles.ts`' footprint
- * (`tools/realistic/sources.ts` §`DELIVERY_CAR_SOURCE`), so it is not fitted
- * again: fitting would move it off its pivots.
+ * How a Delivery obstacle reads the cars' atlas — #2847, in place of three's
+ * `map_fragment`: the texel's colour, and its alpha kept apart as
+ * `oylAtlas.a` for the colour that follows (`color_fragment`'s place).
+ */
+export const DELIVERY_CAR_ATLAS_GLSL = `#ifdef USE_MAP
+\tvec4 oylAtlas = texture2D( map, vMapUv );
+\tdiffuseColor.rgb *= oylAtlas.rgb;
+#else
+\tvec4 oylAtlas = vec4( 1.0 );
+#endif`;
+
+/**
+ * Whether a vertex of a body is drawn by an instance — #2847: a vertex that
+ * names no body (`-1`) is, and one of a body only by an instance of that body.
+ * The vertex shader's rule ({@link withDeliveryCarPose}) restated, so the
+ * jsdom suite can say what an instance draws; `delivery-car.test.ts` holds
+ * the shader's text to it.
+ *
+ * @test-facing the product draws through the shader and does not call this
+ */
+export function deliveryCarBodyVertexDrawn(vertexBody: number, instanceBody: number): boolean {
+  return vertexBody < -0.5 || Math.abs(vertexBody - instanceBody) < 0.5;
+}
+
+/**
+ * The cars as the obstacle roster's parked car — #2540, #2847: each part's
+ * triangles in its own colours and at its own atlas coordinates, a body's and
+ * its wheels' colour the instance's paint ({@link PARKED_CAR_PAINTS}) where
+ * the atlas says paint, the indicators glowing, and every vertex marked with
+ * its part, its indicator, its pivot and its body for
+ * {@link withDeliveryCarPose}. The GLB is made inside `obstacles.ts`'
+ * footprint (`tools/realistic/sources.ts` §`DELIVERY_CAR_SOURCE`), so it is
+ * not fitted again: fitting would move it off its pivots.
  */
 function realisticCarParts(
   car: DeliveryCarGeometry,
@@ -13806,9 +14162,13 @@ function realisticCarParts(
       made,
       colour: 0xffffff,
       colours: part.colour,
+      uvs: part.uv,
+      body: part.body,
       kind,
       ...(also === undefined ? {} : { also }),
-      painted: part.role === 'paint',
+      // #2847: the whole car takes the instance's paint; the atlas's alpha
+      // says which of its texels show it.
+      painted: !indicator,
       glows: indicator,
       carPart: DELIVERY_CAR_PART_CODES[part.role],
       carLamp: part.role === 'indicator-left' ? 1 : part.role === 'indicator-right' ? 2 : 0,
@@ -14008,12 +14368,16 @@ export const DELIVERY_MARKER_TRIANGLES = 180;
  * `realistic-budget.ts` §`DELIVERY_VILLAGE_FRAME_TRIANGLES`' 205 000. It was
  * 1 604 while #2518's trim left out the 48 faces under Kenney's car, and 1 654
  * before its wheels went from 166 triangles to 120: trimmed to fit, not raised
- * (the owner's ruling).
+ * (the owner's ruling). Then **1 640**, #2847: the three PSX bodies, 1 222
+ * (the saloon 320, the hatchback 456 and the wagon 446, each its body, four
+ * wheels and two indicators of 4) in place of Kenney's 1 192, 30 more an
+ * instance and 600 on the frame of twenty: an instance submits all three
+ * bodies and collapses the two it is not ({@link deliveryCarBodyVertexDrawn}).
  *
  * @test-facing `delivery-car.test.ts` holds the geometry to it; the product
  * builds the geometry and does not read this number
  */
-export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_610;
+export const DELIVERY_REALISTIC_OBSTACLE_TRIANGLES = 1_640;
 
 /** Reused by {@link DeliveryBelt.update}, so a frame allocates no matrix. */
 const DELIVERY_MATRIX = new Matrix4();
@@ -14068,12 +14432,12 @@ export class DeliveryBelt {
   );
   /** Which of the paints each obstacle instance wears, for {@link drawn}. */
   readonly #paintOf = new Int8Array(DELIVERY_PIECE_CAPACITY);
-  /** Kenney's car (#2540), where the belt draws it; its parked cars are this file's own otherwise. */
+  /** The realistic cars (#2540, #2847), where the belt draws them; its parked cars are this file's own otherwise. */
   readonly #car: DeliveryCarGeometry | undefined;
   /** Each obstacle instance's {@link DeliveryCarPose}: roll, steer, pitch, lean (#2540). */
   readonly #poses = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 4), 4);
-  /** Each obstacle instance's indicators, left and right, lit 1 or not 0 (#2540). */
-  readonly #lamps = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 2), 2);
+  /** Each obstacle instance's indicators, left and right, lit 1 or not 0 (#2540), and its body (#2847). */
+  readonly #lamps = new InstancedBufferAttribute(new Float32Array(DELIVERY_PIECE_CAPACITY * 3), 3);
   /** #2366: a level's rain, one call, shown only on a frame whose round is in rain. #2508: streaks of width. */
   readonly #rain = new Mesh(
     rainShape(),
@@ -14098,7 +14462,7 @@ export class DeliveryBelt {
   constructor(world: 'stylised' | 'realistic', car?: DeliveryCarGeometry) {
     this.#car = world === 'realistic' ? car : undefined;
     const posed = <M extends Material>(material: M): M =>
-      this.#car === undefined ? material : withDeliveryCarPose(material);
+      this.#car === undefined ? material : withDeliveryCarPose(material, this.#car.atlas);
     this.#materials = decorationMaterials(world);
     const obstacle = decorationMaterials(world);
     const lit = posed(withObstacleKinds(obstacle.lit));
@@ -14265,12 +14629,14 @@ export class DeliveryBelt {
       packed[at * 4 + 2] = DELIVERY_PAINT_COLOUR.b;
       packed[at * 4 + 3] = DELIVERY_OBSTACLE_ORDER.indexOf(piece.kind);
       // #2540: a car's pose, from how it moves; anything else, and a parked car, at rest.
+      // #2847: a car's body, by its place on the round; anything else, the first's.
       if (this.#car !== undefined) {
+        const body = isCarKind(piece.kind) ? deliveryCarBody(piece, this.#car.bodies.length) : 0;
         const pose =
           piece.kind === 'car-pulling-out' && piece.car === undefined
             ? PULLING_OUT_CAR_POSE
             : isCarKind(piece.kind)
-              ? deliveryCarPose(piece.car, this.#car)
+              ? deliveryCarPose(piece.car, this.#car.bodies[body] as DeliveryCarBody)
               : PARKED_CAR_POSE;
         const poses = this.#poses.array as Float32Array;
         const lamps = this.#lamps.array as Float32Array;
@@ -14278,8 +14644,9 @@ export class DeliveryBelt {
         poses[at * 4 + 1] = pose.steer;
         poses[at * 4 + 2] = pose.pitch;
         poses[at * 4 + 3] = pose.lean;
-        lamps[at * 2] = pose.left;
-        lamps[at * 2 + 1] = pose.right;
+        lamps[at * 3] = pose.left;
+        lamps[at * 3 + 1] = pose.right;
+        lamps[at * 3 + 2] = body;
       }
     }
     if (count > 0) {
@@ -14346,12 +14713,13 @@ export class DeliveryBelt {
               steer: poses[at * 4 + 1] as number,
               pitch: poses[at * 4 + 2] as number,
               lean: poses[at * 4 + 3] as number,
-              left: lamps[at * 2] as number,
-              right: lamps[at * 2 + 1] as number,
+              left: lamps[at * 3] as number,
+              right: lamps[at * 3 + 1] as number,
             }
           : undefined;
       drawn.push({
         pose,
+        body: car && this.#car !== undefined ? lamps[at * 3 + 2] : undefined,
         x: matrices[at * 16 + 12] as number,
         y: matrices[at * 16 + 13] as number,
         z: matrices[at * 16 + 14] as number,
@@ -14476,7 +14844,17 @@ export function deliveryProgramsProbe(
 ): { readonly most: number; readonly programs: readonly DeliveryProgramReading[] } {
   const renderer = new WebGLRenderer({ canvas, antialias: false });
   renderer.setSize(64, 32, false);
-  const belt = new DeliveryBelt(world, car);
+  // #2847: a car handed with no atlas is given a white one, so the program
+  // made is the one the realistic world makes, which reads the atlas.
+  const atlas =
+    car === undefined || car.atlas !== undefined
+      ? undefined
+      : new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  if (atlas !== undefined) atlas.needsUpdate = true;
+  const belt = new DeliveryBelt(
+    world,
+    atlas === undefined ? car : ({ ...car, atlas } as DeliveryCarGeometry),
+  );
   const scene = new Scene();
   belt.addTo(scene);
   const piece = { x: 0, y: 0, z: 0, yaw: 0 };
@@ -14511,6 +14889,7 @@ export function deliveryProgramsProbe(
   });
   const most = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) as number;
   belt.dispose();
+  atlas?.dispose();
   renderer.dispose();
   return { most, programs };
 }
@@ -18091,8 +18470,10 @@ export class RealisticRiderBelt {
   /**
    * The body's own fall and get-up in a Delivery crash — #2493: every bone
    * turned from the riding pose `#pose` left toward the crash clip's pose at
-   * `crash.seconds`, by `crash.share` (`delivery/crash-look.ts` §`crashShare`),
-   * and the skeleton's root moved likewise. The clip falls to the rider's
+   * `crash.seconds`, the clip's own time (`delivery/crash-look.ts`
+   * §`crashClipSeconds`), by `crash.share`, the body's own share
+   * (§`crashBodyShare`, not the roll's §`crashShare`), and the skeleton's root
+   * moved likewise. The clip falls to the rider's
    * right; a fall to the left reads each bone's mirror image (its other
    * side's track, `(x, −y, −z, w)`, and the root's `x` negated), which is
    * exact because MakeHuman's skeleton is its own mirror image across `x = 0`.
@@ -18596,22 +18977,29 @@ function cyclistMatrix(
  *
  * ## The bodies: one instanced draw, animated by a texture
  *
- * The rider's MakeHuman body (already loaded, ADR 0026's admitted CC0 base
- * mesh) is cut to at most `people-body.ts` §`PERSON_MAX_TRIANGLES` by
- * `clusterDecimate` when the realistic world is built, and posed by its own
- * skeleton at `gait.ts` §`GAIT_PHASES` phases of a walk and of a run from
- * `gait.ts` §`gaitPose` — a parametric gait in code, the owner's ruling of
- * 2026-10-24 — with each phase's skinned positions and their normals baked
- * into ONE half-float texture ({@link PeopleBelt.animationBytes}, under
- * `people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`). The vertex shader reads a
- * vertex's column at its instance's gait and phase, blending the two nearest
- * phases, so the GPU does no skinning and the sixteen bodies are one call.
- * Each phase is set on the ground by its lowest vertex, so the standing foot
- * is planted; a run's flight lifts it after.
+ * Since the owner's request of 2026-11-18 the bodies are MODELS:
+ * `realistic-assets.ts` §`REALISTIC_PEOPLE`, three people in MakeHuman's own
+ * CC0 clothes (`tools/realistic/blender/process_people.py`), where until then
+ * a person was the rider's body cut by vertex clustering and painted. When
+ * the realistic world is built each is posed by its own skeleton at
+ * `people-body.ts` §`PHASES` phases of a walk and of a run from `gait.ts`
+ * §`gaitPose` — a parametric gait in code, the owner's ruling of 2026-10-24
+ * — with each phase's skinned positions and their normals baked into ONE
+ * half-float texture. The geometry the instances share is numbered corners
+ * and no body: the vertex shader reads its corner out of a second texture at
+ * its instance's body (`people-body.ts` §"One call for three different
+ * bodies"), so the GPU does no skinning, each instance submits one body's
+ * triangles, and the sixteen are one call whoever they are. Both textures
+ * together are {@link PeopleBelt.animationBytes}, under `people-body.ts`
+ * §`PERSON_ANIMATION_MAX_BYTES`. Each phase is set on the ground by its
+ * lowest vertex, so the standing foot is planted; a run's flight lifts it
+ * after.
  *
- * Each instance carries its own look (`people.ts` §`personLook`): skin, top,
- * bottoms, shoes and hair, as packed sRGB, chosen per vertex by the region
- * `people-body.ts` §`regionOf` gave it.
+ * Each instance carries its own look (`people.ts` §`personLook`): which of
+ * the bodies it is, and its skin, top, bottoms, shoes and hair, as packed
+ * sRGB. The atlas holds each garment's photograph as a share of its own mean
+ * colour, so the fragment multiplies the two: the weave, the face and the
+ * hair are the model's, and the colours are the person's.
  *
  * ## The impostors: one more instanced draw
  *
@@ -18626,20 +19014,23 @@ function cyclistMatrix(
  *
  * ## And the scenery cyclists' bodies — #2722
  *
- * A scenery cyclist (`scenery-cyclists.ts`) is this same cut body, seated on
- * the realistic bicycle: `RealisticRiderBelt` §`ridingPose` poses it by the
- * realistic rider's own joints at `people-body.ts` §`RIDE_PHASES` phases of a
- * crank's turn, and each phase is baked into the same texture, after the
- * gaits', in metres of the bicycle's own frame. A cyclist is one more
- * instance of the bodies' draw, at its bicycle's matrix, its phase its crank
- * angle's, in its kit's colours — so the bodies' one call draws them too, and
- * they go when the people are switched off.
+ * A scenery cyclist (`scenery-cyclists.ts`) is the FIRST of these bodies —
+ * the one in the rider's own build — seated on the realistic bicycle:
+ * `RealisticRiderBelt` §`ridingPose` poses the realistic rider's skeleton at
+ * `people-body.ts` §`RIDE_PHASES` phases of a crank's turn, each of the
+ * body's columns is skinned by those bones, by name, and each phase is baked
+ * into the same texture, after the gaits', in metres of the bicycle's own
+ * frame. A cyclist is one more instance of the bodies' draw, at its
+ * bicycle's matrix, its phase its crank angle's, in its kit's colours — so
+ * the bodies' one call draws them too, and they go when the people are
+ * switched off.
  */
 export class PeopleBelt {
   readonly #group = new Group();
   readonly #bodies: InstancedMesh;
   readonly #impostors: InstancedMesh;
-  readonly #animation: DataTexture;
+  readonly #animation: DataTexture | undefined;
+  readonly #slots: DataTexture | undefined;
   readonly #materials: readonly MeshStandardMaterial[];
   /** Per body: skin, top, bottoms, shoes — packed sRGB. */
   readonly #bodyLooks: InstancedBufferAttribute;
@@ -18648,15 +19039,12 @@ export class PeopleBelt {
   readonly #farLooks: InstancedBufferAttribute;
   /** Per impostor: yaw, left hip, right hip, hair (packed). */
   readonly #farMotion: InstancedBufferAttribute;
-  /** The body's triangles, as cut. */
+  /** The most triangles any of the bodies is: what one instance submits. */
   readonly triangles: number;
-  /**
-   * How far a body's clothes stand off it, and its skin, as baked — #1618:
-   * the mean distance, at a unit height, between each vertex as the
-   * animation texture holds it at the walk's first phase and the same vertex
-   * posed bare. Skin moves only beside a hem. For the browser gate's read-back.
-   */
-  readonly standOff: { readonly clothes: number; readonly skin: number };
+  /** How many different bodies the model holds: 0 where it held none. */
+  readonly bodyCount: number;
+  /** Each body's triangles and columns, in the model's order. For the read-back. */
+  readonly each: readonly { readonly triangles: number; readonly columns: number }[];
   readonly #matrix = new Matrix4();
   readonly #position = new Vector3();
   readonly #turn = new Quaternion();
@@ -18669,25 +19057,34 @@ export class PeopleBelt {
   #switchedOn = true;
 
   /**
-   * @param ride #2722: the body seated on the bicycle at a crank angle, its
+   * @param people the people's model and atlas, or `undefined` where the
+   * world loaded none (a test's loader): then nobody is drawn near, and the
+   * impostors are drawn as before.
+   * @param ride #2722: the rider seated on the bicycle at a crank angle, its
    * skeleton posed — `RealisticRiderBelt` §`ridingPose` — for the cyclists'
    * phases of the texture.
    */
-  constructor(body: Object3D, ride: (crankAngle: number) => SkinnedMesh) {
-    const baked = bakedPeople(body, ride);
-    this.triangles = baked.geometry.index === null ? 0 : baked.geometry.index.count / 3;
-    this.standOff = baked.standOff;
-    this.#animation = baked.animation;
+  constructor(people: RealisticPeople | undefined, ride: (crankAngle: number) => SkinnedMesh) {
+    const baked = people === undefined ? undefined : bakedPeople(people.scene, ride);
+    this.triangles = baked?.triangles ?? 0;
+    this.bodyCount = baked?.bodies ?? 0;
+    this.each = baked?.each ?? [];
+    this.#animation = baked?.animation;
+    this.#slots = baked?.slots;
     // #2722: room for the scenery cyclists' bodies after the people's.
     const bodies = PEOPLE_NEAR_MAX + SCENERY_CYCLISTS_MAX;
     this.#bodyLooks = new InstancedBufferAttribute(new Float32Array(bodies * 4), 4);
     this.#bodyMotion = new InstancedBufferAttribute(new Float32Array(bodies * 4), 4);
     this.#bodyLooks.setUsage(DynamicDrawUsage);
     this.#bodyMotion.setUsage(DynamicDrawUsage);
-    baked.geometry.setAttribute('oylLook', this.#bodyLooks);
-    baked.geometry.setAttribute('oylMotion', this.#bodyMotion);
-    const bodyMaterial = peopleBodyMaterial(this.#animation, baked.vertices);
-    this.#bodies = new InstancedMesh(baked.geometry, bodyMaterial, bodies);
+    const geometry = baked?.geometry ?? new BufferGeometry();
+    geometry.setAttribute('oylLook', this.#bodyLooks);
+    geometry.setAttribute('oylMotion', this.#bodyMotion);
+    const bodyMaterial =
+      baked === undefined || people === undefined
+        ? constructed(new MeshStandardMaterial({ color: 0xffffff }))
+        : peopleBodyMaterial(baked, people.atlas);
+    this.#bodies = new InstancedMesh(geometry, bodyMaterial, bodies);
     this.#bodies.instanceMatrix.setUsage(DynamicDrawUsage);
     this.#bodies.count = 0;
     this.#bodies.frustumCulled = false;
@@ -18736,9 +19133,12 @@ export class PeopleBelt {
     return this.#materials;
   }
 
-  /** The animation texture's size in bytes: half-float RGBA. */
+  /** The animation texture's and the slot texture's size in bytes, together: half-float RGBA. */
   get animationBytes(): number {
-    return textureBytesOf(this.#animation);
+    return (
+      (this.#animation === undefined ? 0 : textureBytesOf(this.#animation)) +
+      (this.#slots === undefined ? 0 : textureBytesOf(this.#slots))
+    );
   }
 
   /** Whether the realistic world draws at all — false while the stylised one does. */
@@ -18766,8 +19166,11 @@ export class PeopleBelt {
   /** This frame's people, and since #2722 the scenery cyclists' bodies after them. */
   update(people: PeopleInView | undefined, cyclists: readonly SceneryCyclist[] = []): void {
     const drawn = this.drawing ? (people ?? NO_PEOPLE) : NO_PEOPLE;
-    const riding = this.drawing ? cyclists.slice(0, SCENERY_CYCLISTS_MAX) : [];
-    drawn.near.forEach((person, index) => {
+    // With no model there is no body to draw: nobody near, and no cyclist's.
+    const near = this.bodyCount === 0 ? [] : drawn.near;
+    const riding =
+      this.drawing && this.bodyCount > 0 ? cyclists.slice(0, SCENERY_CYCLISTS_MAX) : [];
+    near.forEach((person, index) => {
       this.#place(this.#bodies, index, person, true);
       this.#bodyLooks.setXYZW(
         index,
@@ -18776,7 +19179,14 @@ export class PeopleBelt {
         person.look.bottoms,
         person.look.shoes,
       );
-      this.#bodyMotion.setXYZW(index, gaitIndex(person.gait), person.phase, person.look.hair, 0);
+      this.#bodyMotion.setXYZW(
+        index,
+        gaitIndex(person.gait),
+        person.phase,
+        person.look.hair,
+        // Which of the model's bodies this person is, by their own seeded share.
+        Math.min(this.bodyCount - 1, Math.floor(person.look.build * this.bodyCount)),
+      );
     });
     drawn.far.forEach((person, index) => {
       this.#place(this.#impostors, index, person, false);
@@ -18791,7 +19201,7 @@ export class PeopleBelt {
       this.#farMotion.setXYZW(index, person.yaw, pose.left.hip, pose.right.hip, person.look.hair);
     });
     riding.forEach((cyclist, at) => {
-      const index = drawn.near.length + at;
+      const index = near.length + at;
       this.#bodies.setMatrixAt(
         index,
         cyclistMatrix(cyclist, this.#matrix, this.#position, this.#turn, this.#roll),
@@ -18801,8 +19211,8 @@ export class PeopleBelt {
       const turn = cyclist.crankAngle / (2 * Math.PI);
       this.#bodyMotion.setXYZW(index, RIDE_GAIT_INDEX, turn - Math.floor(turn), look.hair, 0);
     });
-    const bodies = drawn.near.length + riding.length;
-    this.#cyclistBodies = { first: drawn.near.length, count: riding.length };
+    const bodies = near.length + riding.length;
+    this.#cyclistBodies = { first: near.length, count: riding.length };
     this.#bodies.count = bodies;
     this.#impostors.count = drawn.far.length;
     for (const attribute of [
@@ -18830,7 +19240,8 @@ export class PeopleBelt {
   dispose(): void {
     this.#bodies.geometry.dispose();
     this.#impostors.geometry.dispose();
-    this.#animation.dispose();
+    this.#animation?.dispose();
+    this.#slots?.dispose();
     for (const material of this.#materials) material.dispose();
   }
 }
@@ -18841,13 +19252,77 @@ function textureBytesOf(texture: DataTexture): number {
   return width * height * ANIMATION_BYTES_PER_TEXEL;
 }
 
-/** The body cut, dressed and baked: its geometry, its animation texture, and how many vertices. */
+/**
+ * The people's model as the realistic world loaded it — the owner's request
+ * of 2026-11-18: `realistic-assets.ts` §`REALISTIC_PEOPLE`'s scene, each
+ * person a skinned mesh a region under a skeleton of their own, and the one
+ * atlas they all wear.
+ */
+export interface RealisticPeople {
+  readonly scene: Object3D;
+  readonly atlas: Texture;
+}
+
+/** One person of the model: their skeleton and their parts, a region each. */
+interface PersonSource {
+  readonly name: string;
+  readonly skeleton: Skeleton;
+  readonly parts: { readonly mesh: SkinnedMesh; readonly region: PersonRegion }[];
+}
+
+/**
+ * The people a loaded model holds, in their names' order — so the first is
+ * `person-a`, the rider's own build, whichever order a loader walks the file
+ * in. A skinned mesh whose material is not named for a region is refused:
+ * painted as skin it would be a person with no clothes on.
+ */
+function peopleSourcesOf(scene: Object3D): PersonSource[] {
+  const bySkeleton = new Map<Skeleton, PersonSource>();
+  scene.updateMatrixWorld(true);
+  scene.traverse((node) => {
+    if ((node as Partial<SkinnedMesh>).isSkinnedMesh !== true) return;
+    const mesh = node as SkinnedMesh;
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    const region = regionNamed(material?.name ?? '');
+    if (region === undefined) {
+      throw new Error(`the people's model has a part of no region: ${material?.name ?? ''}`);
+    }
+    let source = bySkeleton.get(mesh.skeleton);
+    if (source === undefined) {
+      // A mesh of several primitives is a group named for the person.
+      const holder = mesh.parent !== null && mesh.parent !== scene ? mesh.parent : mesh;
+      source = { name: holder.name, skeleton: mesh.skeleton, parts: [] };
+      bySkeleton.set(mesh.skeleton, source);
+    }
+    source.parts.push({ mesh, region });
+  });
+  return [...bySkeleton.values()]
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .slice(0, PEOPLE_BODIES_MAX);
+}
+
+/**
+ * A bone's name as the model's file gave it. Three people in one file are
+ * three skeletons of the SAME 24 names, and a loader that keeps node names
+ * unique hands the second `head_1` and the third `head_2`; MakeHuman's own
+ * names end in a letter or a digit with no underscore before it.
+ */
+function plainBoneName(name: string): string {
+  return name.replace(/_\d+$/, '');
+}
+
+/** The people posed and baked: the geometry of slots, the two textures, and what they hold. */
 interface BakedPeople {
   readonly geometry: BufferGeometry;
   readonly animation: DataTexture;
-  readonly vertices: number;
-  /** @see PeopleBelt.standOff */
-  readonly standOff: { readonly clothes: number; readonly skin: number };
+  readonly slots: DataTexture;
+  readonly layout: AnimationLayout;
+  /** How many people the model holds. */
+  readonly bodies: number;
+  /** The most triangles any of them is: what every instance submits. */
+  readonly triangles: number;
+  /** Each person's triangles and columns, in the model's order. */
+  readonly each: readonly { readonly triangles: number; readonly columns: number }[];
 }
 
 /** A bone turned about a WORLD axis through its own joint, by `angle`. */
@@ -18860,292 +19335,373 @@ function turnBoneInWorld(bone: Bone, axis: Vector3, angle: number): void {
   bone.updateMatrixWorld(true);
 }
 
-/**
- * The rider's body cut to a person's, dressed by region, and posed at every
- * phase of both gaits into the animation texture — #1541 — and since #2722
- * seated by `ride` at every phase of a crank's turn after them. @see PeopleBelt
- */
-function bakedPeople(body: Object3D, ride: (crankAngle: number) => SkinnedMesh): BakedPeople {
-  const holder = cloneSkinned(body);
-  let skinned: SkinnedMesh | undefined;
-  holder.traverse((node) => {
-    if ((node as Partial<SkinnedMesh>).isSkinnedMesh === true) skinned = node as SkinnedMesh;
-  });
-  if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
-  const mesh: SkinnedMesh = skinned;
-  holder.updateMatrixWorld(true);
-  const source = mesh.geometry;
-  const position = source.getAttribute('position');
-  const skinIndex = source.getAttribute('skinIndex');
-  const skinWeight = source.getAttribute('skinWeight');
-  const index = source.index;
-  if (index === null) throw new Error('the rider model’s body is not indexed');
-  const vertexCount = position.count;
-  const positions = new Float32Array(vertexCount * 3);
-  const dominant = new Uint16Array(vertexCount);
-  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-    positions[vertex * 3] = position.getX(vertex);
-    positions[vertex * 3 + 1] = position.getY(vertex);
-    positions[vertex * 3 + 2] = position.getZ(vertex);
-    let best = 0;
-    for (let slot = 1; slot < 4; slot += 1) {
-      if (skinWeight.getComponent(vertex, slot) > skinWeight.getComponent(vertex, best)) {
-        best = slot;
-      }
-    }
-    dominant[vertex] = skinIndex.getComponent(vertex, best);
-  }
-  const indices = new Uint32Array(index.count);
-  for (let at = 0; at < index.count; at += 1) indices[at] = index.getX(at);
-  const cut = clusterDecimate(positions, indices, dominant, PERSON_MAX_TRIANGLES);
-  const kept = cut.kept.length;
+/** One person of the model, its vertices gathered into columns. */
+interface PersonColumns {
+  readonly source: PersonSource;
+  /** How many columns. */
+  readonly columns: number;
+  /** For each column, the part and the vertex of it whose place and weights it takes. */
+  readonly from: readonly { readonly mesh: SkinnedMesh; readonly vertex: number }[];
+  /** Each column's rest place, three numbers each, in the model's own units. */
+  readonly rest: Float32Array;
+  /** Three columns a triangle. */
+  readonly triangles: Uint32Array;
+  /** For each triangle's corner: its region and where it is in the atlas. */
+  readonly corners: readonly {
+    readonly region: PersonRegion;
+    readonly u: number;
+    readonly v: number;
+  }[];
+  readonly lowest: number;
+  readonly restHeight: number;
+}
 
-  const bones = new Map<string, Bone>();
-  for (const bone of mesh.skeleton.bones) bones.set(bone.name, bone);
-  const local = (name: string): Vector3 =>
-    mesh.worldToLocal(boneOf(bones, name).getWorldPosition(new Vector3()));
+/** A person's parts read into columns ({@link weld}), triangles over them, and each corner's look. */
+function personColumnsOf(source: PersonSource): PersonColumns {
+  const positions: number[] = [];
+  const owner: { mesh: SkinnedMesh; vertex: number }[] = [];
+  const corners: { region: PersonRegion; u: number; v: number }[] = [];
+  const cornerVertices: number[] = [];
+  for (const { mesh, region } of source.parts) {
+    const position = mesh.geometry.getAttribute('position');
+    const uv = mesh.geometry.getAttribute('uv') as BufferAttribute | undefined;
+    const index = mesh.geometry.index;
+    if (index === null) throw new Error('a part of the people’s model is not indexed');
+    const first = owner.length;
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      positions.push(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
+      owner.push({ mesh, vertex });
+    }
+    for (let at = 0; at < index.count; at += 1) {
+      const vertex = index.getX(at);
+      cornerVertices.push(first + vertex);
+      corners.push({ region, u: uv?.getX(vertex) ?? 0, v: uv?.getY(vertex) ?? 0 });
+    }
+  }
+  const welded = weld(positions);
+  const columns = welded.first.length;
+  const rest = new Float32Array(columns * 3);
   let lowest = Number.POSITIVE_INFINITY;
   let highest = Number.NEGATIVE_INFINITY;
-  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-    lowest = Math.min(lowest, positions[vertex * 3 + 1] as number);
-    highest = Math.max(highest, positions[vertex * 3 + 1] as number);
+  welded.first.forEach((vertex, column) => {
+    for (let axis = 0; axis < 3; axis += 1) {
+      rest[column * 3 + axis] = positions[vertex * 3 + axis] as number;
+    }
+    lowest = Math.min(lowest, rest[column * 3 + 1] as number);
+    highest = Math.max(highest, rest[column * 3 + 1] as number);
+  });
+  return {
+    source,
+    columns,
+    from: [...welded.first].map((vertex) => owner[vertex] as { mesh: SkinnedMesh; vertex: number }),
+    rest,
+    triangles: Uint32Array.from(cornerVertices, (vertex) => welded.column[vertex] as number),
+    corners,
+    lowest,
+    restHeight: highest - lowest || 1,
+  };
+}
+
+/**
+ * The slot texture's half floats: for each body, each triangle's corners in
+ * turn — the column's texel across, its block and the corner's region, and
+ * its place in the atlas. A body's spare slots all stand on its first column.
+ * `most` is the largest body's triangles. Exported so `people-body.test.ts`
+ * can read it back through {@link peopleSlotGlsl}, the shader's own decode.
+ */
+export function peopleSlotData(
+  people: readonly Pick<PersonColumns, 'triangles' | 'corners'>[],
+  layout: AnimationLayout,
+  most: number,
+): Uint16Array {
+  const data = new Uint16Array(SLOT_WIDTH * slotRows(most) * people.length * 4);
+  people.forEach((person, body) => {
+    const base = layout.base[body] ?? 0;
+    for (let slot = 0; slot < most * 3; slot += 1) {
+      const used = slot < person.triangles.length;
+      const column = base + (used ? (person.triangles[slot] as number) : 0);
+      const corner = used ? person.corners[slot] : undefined;
+      const texel = slotTexel(body, slot, most);
+      const at = (texel.y * SLOT_WIDTH + texel.x) * 4;
+      data[at] = DataUtils.toHalfFloat(column % layout.width);
+      data[at + 1] = DataUtils.toHalfFloat(
+        Math.floor(column / layout.width) * SLOT_REGIONS + (corner?.region ?? 0),
+      );
+      data[at + 2] = DataUtils.toHalfFloat(corner?.u ?? 0);
+      data[at + 3] = DataUtils.toHalfFloat(corner?.v ?? 0);
+    }
+  });
+  return data;
+}
+
+/**
+ * The vertex shader's decode of a slot, in GLSL: where a body's slot is in
+ * the slot texture ({@link slotTexel}), and the block, region and column
+ * across its texel's first two numbers carry ({@link peopleSlotData}).
+ * Whole numbers held as floats, so the arithmetic is exact. `rows` is
+ * {@link slotRows} of the largest body. Exported so `people-body.test.ts`
+ * can run it as text against the writer.
+ */
+export function peopleSlotGlsl(rows: number): string {
+  const width = `${String(SLOT_WIDTH)}.0`;
+  const regions = `${String(SLOT_REGIONS)}.0`;
+  return /* glsl */ `
+vec2 oylSlotTexelOf(float body, float slot) {
+  float row = floor(slot / ${width});
+  return vec2(slot - row * ${width}, body * ${String(rows)}.0 + row);
+}
+float oylBlockOf(float packed) {
+  return floor((packed + 0.5) / ${regions});
+}
+float oylRegionOf(float packed) {
+  return floor(packed + 0.5) - oylBlockOf(packed) * ${regions};
+}
+float oylColumnOf(float across) {
+  return floor(across + 0.5);
+}
+`;
+}
+
+/**
+ * The people's model posed at every phase of both gaits into the animation
+ * texture — #1541 — the first of them seated by `ride` at every phase of a
+ * crank's turn after that (#2722), and every body's corners written into the
+ * slot texture. @see PeopleBelt
+ */
+function bakedPeople(scene: Object3D, ride: (crankAngle: number) => SkinnedMesh): BakedPeople {
+  const people = peopleSourcesOf(scene).map(personColumnsOf);
+  if (people.length === 0) throw new Error('the people’s model holds no skinned mesh');
+  const most = Math.max(...people.map((person) => person.triangles.length / 3));
+  if (most > PERSON_MAX_TRIANGLES) {
+    throw new Error(`a person is ${String(most)} triangles, over ${String(PERSON_MAX_TRIANGLES)}`);
   }
-  const restHeight = highest - lowest;
-  const head = local('head');
-  const landmarks = {
-    waistY: local('spine04').y,
-    headY: head.y,
-    headZ: head.z,
-    crownY: highest,
+  const layout = animationLayout(people.map((person) => person.columns));
+  const data = new Uint16Array(layout.width * layout.height * 4);
+  const write = (
+    column: number,
+    gaitAt: number,
+    phase: number,
+    posed: Float32Array,
+    normals: Float32Array,
+    of: number,
+  ): void => {
+    const texel = animationTexel(layout, column, gaitAt, phase);
+    const at = (texel.y * layout.width + texel.x) * 4;
+    for (let axis = 0; axis < 3; axis += 1) {
+      data[at + axis] = DataUtils.toHalfFloat(posed[of * 3 + axis] as number);
+    }
+    data[at + 3] = DataUtils.toHalfFloat(
+      packNormal(
+        normals[of * 3] as number,
+        normals[of * 3 + 1] as number,
+        normals[of * 3 + 2] as number,
+      ),
+    );
   };
 
-  // Each kept vertex's region, then the body dressed by face — #1618: a
-  // seam's vertex drawn once a region, all its copies one column of the
-  // texture, and how far each column's clothes stand off the body.
-  const regions = new Uint8Array(kept);
-  const plain = new Float32Array(kept * 3);
-  for (let vertex = 0; vertex < kept; vertex += 1) {
-    const from = cut.kept[vertex] as number;
-    const bone = mesh.skeleton.bones[dominant[from] as number];
-    regions[vertex] = regionOf(
-      bone?.name ?? '',
-      positions[from * 3 + 1] as number,
-      positions[from * 3 + 2] as number,
-      landmarks,
-    );
-    plain[vertex * 3] = positions[from * 3] as number;
-    plain[vertex * 3 + 1] = positions[from * 3 + 1] as number;
-    plain[vertex * 3 + 2] = positions[from * 3 + 2] as number;
-  }
-  // The modeller's pass of 2026-11-18: the seams between the regions run
-  // straight round the body, where the cut had left each a saw's edge.
-  straightenSeams(plain, cut.indices, regions);
-  const dress = dressed(cut.indices, regions);
-  // The clothes stood off along the rest body's own normals, in the body's
-  // units, BEFORE it is posed: so they bend with the joint they are on.
-  const restNormals = vertexNormals(plain, cut.indices);
-  const clothed = new Float32Array(kept * 3);
-  for (let vertex = 0; vertex < kept; vertex += 1) {
-    const out = (dress.standOff[vertex] as number) * restHeight;
-    for (let axis = 0; axis < 3; axis += 1) {
-      clothed[vertex * 3 + axis] =
-        (plain[vertex * 3 + axis] as number) + (restNormals[vertex * 3 + axis] as number) * out;
-    }
-  }
-
-  // The geometry the instances share: each drawn vertex's column, its region,
-  // and its rest place at unit height (for the bounds only — the shader reads
-  // the texture).
-  const drawn = dress.column.length;
-  const rest = new Float32Array(drawn * 3);
-  const normal = new Float32Array(drawn * 3);
-  const column = new Float32Array(drawn);
-  const region = new Float32Array(drawn);
-  for (let vertex = 0; vertex < drawn; vertex += 1) {
-    const of = dress.column[vertex] as number;
-    rest[vertex * 3] = (clothed[of * 3] as number) / restHeight;
-    rest[vertex * 3 + 1] = ((clothed[of * 3 + 1] as number) - lowest) / restHeight;
-    rest[vertex * 3 + 2] = (clothed[of * 3 + 2] as number) / restHeight;
-    for (let axis = 0; axis < 3; axis += 1) {
-      normal[vertex * 3 + axis] = restNormals[of * 3 + axis] as number;
-    }
-    column[vertex] = of;
-    region[vertex] = dress.region[vertex] as number;
-  }
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(rest, 3));
-  geometry.setAttribute('oylVertex', new BufferAttribute(column, 1));
-  geometry.setAttribute('oylRegion', new BufferAttribute(region, 1));
-  // ⚠️ A `normal` attribute, though the shader reads the texture's normal
-  // rows instead: a standard material over a geometry with none is compiled
-  // FLAT_SHADED by three, whose fragment then takes each triangle's own normal
-  // from screen derivatives and never reads the smooth one the vertex wrote.
-  // That is the faceted face and clothes the owner saw on PR #1615 (#1541).
-  geometry.setAttribute('normal', new BufferAttribute(normal, 3));
-  geometry.setIndex(new BufferAttribute(dress.indices, 1));
-  geometry.computeBoundingSphere();
-
-  // The poses, baked.
-  const ordered = mesh.skeleton.bones;
-  const restQuaternions = ordered.map((bone) => bone.quaternion.clone());
-  const restPositions = ordered.map((bone) => bone.position.clone());
   const across = new Vector3(1, 0, 0);
   const forward = new Vector3(0, 0, 1);
   const up = new Vector3(0, 1, 0);
-  // How far the rest pose holds each arm out from the side, measured — never typed.
-  const abduction = (side: 'L' | 'R'): number => {
-    const shoulder = local(`upperarm01.${side}`);
-    const elbow = local(`lowerarm01.${side}`);
-    return Math.atan2(Math.abs(elbow.x - shoulder.x), shoulder.y - elbow.y);
-  };
-  // And how bent the rest pose holds the elbow.
-  const restElbow = (side: 'L' | 'R'): number => {
-    const shoulder = local(`upperarm01.${side}`);
-    const elbow = local(`lowerarm01.${side}`);
-    const wrist = local(`wrist.${side}`);
-    return elbow.clone().sub(shoulder).angleTo(wrist.clone().sub(elbow));
-  };
-  const held = { L: abduction('L'), R: abduction('R') };
-  const bent = { L: restElbow('L'), R: restElbow('R') };
   // The arms hang this far out from the side when walking.
   const hang = (8 * Math.PI) / 180;
-  const width = kept;
-  const height = ANIMATION_ROWS;
-  const data = new Uint16Array(width * height * 4);
   const scratch = new Vector3();
-  const posed = new Float32Array(kept * 3);
-  const standOff = { clothes: 0, skin: 0 };
-  GAITS.forEach((gait, gaitAt) => {
-    for (let phase = 0; phase < GAIT_PHASES; phase += 1) {
-      ordered.forEach((bone, at) => {
-        bone.quaternion.copy(restQuaternions[at] as Quaternion);
-        bone.position.copy(restPositions[at] as Vector3);
-      });
-      holder.updateMatrixWorld(true);
-      const pose = gaitPose(gait, phase / GAIT_PHASES);
-      for (const [side, limb, sign] of [
-        ['L', pose.left, -1],
-        ['R', pose.right, 1],
-      ] as const) {
-        // The arm down to the side, swung, and its elbow bent.
-        turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), forward, sign * (held[side] - hang));
-        turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), across, -limb.shoulder);
-        turnBoneInWorld(boneOf(bones, `lowerarm01.${side}`), across, bent[side] - limb.elbow);
-        // The leg: hip, knee and ankle, in the body's own sagittal plane.
-        turnBoneInWorld(boneOf(bones, `upperleg01.${side}`), across, -limb.hip);
-        turnBoneInWorld(boneOf(bones, `lowerleg01.${side}`), across, limb.knee);
-        turnBoneInWorld(boneOf(bones, `foot.${side}`), across, -limb.ankle);
-      }
-      // The trunk leans, the head is held level, and the pelvis turns under
-      // shoulders that stay square.
-      turnBoneInWorld(boneOf(bones, 'spine05'), across, pose.lean);
-      turnBoneInWorld(boneOf(bones, 'neck01'), across, -pose.lean);
-      turnBoneInWorld(boneOf(bones, 'root'), up, -pose.pelvisTurn);
-      turnBoneInWorld(boneOf(bones, 'spine05'), up, pose.pelvisTurn);
-      holder.updateMatrixWorld(true);
-      let floor = Number.POSITIVE_INFINITY;
-      for (let vertex = 0; vertex < kept; vertex += 1) {
-        const from = cut.kept[vertex] as number;
-        // #1618: the clothed body, posed by the source vertex's own weights.
-        scratch.set(
-          clothed[vertex * 3] as number,
-          clothed[vertex * 3 + 1] as number,
-          clothed[vertex * 3 + 2],
-        );
-        mesh.applyBoneTransform(from, scratch);
-        posed[vertex * 3] = scratch.x / restHeight;
-        posed[vertex * 3 + 1] = scratch.y / restHeight;
-        posed[vertex * 3 + 2] = scratch.z / restHeight;
-        floor = Math.min(floor, posed[vertex * 3 + 1] as number);
-      }
-      // Planted on the ground, and a run's flight above it.
-      const lift = pose.lift / 1.75 - floor;
-      for (let vertex = 0; vertex < kept; vertex += 1) {
-        posed[vertex * 3 + 1] = (posed[vertex * 3 + 1] as number) + lift;
-      }
-      const normals = vertexNormals(posed, cut.indices);
-      const row = animationRow(gaitAt, phase);
-      for (let vertex = 0; vertex < kept; vertex += 1) {
-        const at = (row * width + vertex) * 4;
-        const normalAt = ((row + ANIMATION_ROWS / 2) * width + vertex) * 4;
-        for (let axis = 0; axis < 3; axis += 1) {
-          data[at + axis] = DataUtils.toHalfFloat(posed[vertex * 3 + axis] as number);
-          data[normalAt + axis] = DataUtils.toHalfFloat(normals[vertex * 3 + axis] as number);
+  people.forEach((person, body) => {
+    const [part] = person.source.parts;
+    if (part === undefined) return;
+    const mesh = part.mesh;
+    const bones = new Map<string, Bone>();
+    for (const bone of person.source.skeleton.bones) bones.set(plainBoneName(bone.name), bone);
+    const local = (name: string): Vector3 =>
+      mesh.worldToLocal(boneOf(bones, name).getWorldPosition(new Vector3()));
+    const ordered = person.source.skeleton.bones;
+    const restQuaternions = ordered.map((bone) => bone.quaternion.clone());
+    const restPositions = ordered.map((bone) => bone.position.clone());
+    // How far the rest pose holds each arm out from the side, measured — never typed.
+    const abduction = (side: 'L' | 'R'): number => {
+      const shoulder = local(`upperarm01.${side}`);
+      const elbow = local(`lowerarm01.${side}`);
+      return Math.atan2(Math.abs(elbow.x - shoulder.x), shoulder.y - elbow.y);
+    };
+    // And how bent the rest pose holds the elbow.
+    const restElbow = (side: 'L' | 'R'): number => {
+      const shoulder = local(`upperarm01.${side}`);
+      const elbow = local(`lowerarm01.${side}`);
+      const wrist = local(`wrist.${side}`);
+      return elbow.clone().sub(shoulder).angleTo(wrist.clone().sub(elbow));
+    };
+    const held = { L: abduction('L'), R: abduction('R') };
+    const bent = { L: restElbow('L'), R: restElbow('R') };
+    const posed = new Float32Array(person.columns * 3);
+    const base = layout.base[body] ?? 0;
+    GAITS.forEach((gait, gaitAt) => {
+      for (let phase = 0; phase < PHASES[gait]; phase += 1) {
+        ordered.forEach((bone, at) => {
+          bone.quaternion.copy(restQuaternions[at] as Quaternion);
+          bone.position.copy(restPositions[at] as Vector3);
+        });
+        scene.updateMatrixWorld(true);
+        const pose = gaitPose(gait, phase / PHASES[gait]);
+        for (const [side, limb, sign] of [
+          ['L', pose.left, -1],
+          ['R', pose.right, 1],
+        ] as const) {
+          // The arm down to the side, swung, and its elbow bent.
+          turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), forward, sign * (held[side] - hang));
+          turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), across, -limb.shoulder);
+          turnBoneInWorld(boneOf(bones, `lowerarm01.${side}`), across, bent[side] - limb.elbow);
+          // The leg: hip, knee and ankle, in the body's own sagittal plane.
+          turnBoneInWorld(boneOf(bones, `upperleg01.${side}`), across, -limb.hip);
+          turnBoneInWorld(boneOf(bones, `lowerleg01.${side}`), across, limb.knee);
+          turnBoneInWorld(boneOf(bones, `foot.${side}`), across, -limb.ankle);
         }
-        data[at + 3] = DataUtils.toHalfFloat(1);
-        data[normalAt + 3] = DataUtils.toHalfFloat(0);
-      }
-      // #1618: at the walk's first phase, how far the baked clothes stand off
-      // the same body posed bare — read back out of the texture's own
-      // half floats, by region.
-      if (gaitAt === 0 && phase === 0) {
-        const at = row * width;
-        const sums = { clothes: 0, skin: 0 };
-        const counts = { clothes: 0, skin: 0 };
-        for (let vertex = 0; vertex < kept; vertex += 1) {
-          const kind = regions[vertex] as number;
-          const into =
-            kind === PersonRegion.skin
-              ? 'skin'
-              : kind === PersonRegion.hair
-                ? undefined
-                : 'clothes';
-          if (into === undefined) continue;
+        // The trunk leans, the head is held level, and the pelvis turns under
+        // shoulders that stay square.
+        turnBoneInWorld(boneOf(bones, 'spine05'), across, pose.lean);
+        turnBoneInWorld(boneOf(bones, 'neck01'), across, -pose.lean);
+        turnBoneInWorld(boneOf(bones, 'root'), up, -pose.pelvisTurn);
+        turnBoneInWorld(boneOf(bones, 'spine05'), up, pose.pelvisTurn);
+        scene.updateMatrixWorld(true);
+        let floor = Number.POSITIVE_INFINITY;
+        for (let column = 0; column < person.columns; column += 1) {
+          const from = person.from[column] as { mesh: SkinnedMesh; vertex: number };
           scratch.set(
-            plain[vertex * 3] as number,
-            plain[vertex * 3 + 1] as number,
-            plain[vertex * 3 + 2],
+            person.rest[column * 3] as number,
+            person.rest[column * 3 + 1] as number,
+            person.rest[column * 3 + 2],
           );
-          mesh.applyBoneTransform(cut.kept[vertex] as number, scratch);
-          const texel = (at + vertex) * 4;
-          sums[into] += Math.hypot(
-            DataUtils.fromHalfFloat(data[texel] as number) - scratch.x / restHeight,
-            DataUtils.fromHalfFloat(data[texel + 1] as number) - lift - scratch.y / restHeight,
-            DataUtils.fromHalfFloat(data[texel + 2] as number) - scratch.z / restHeight,
-          );
-          counts[into] += 1;
+          // Posed by the column's own vertex's weights, a person a unit tall.
+          from.mesh.applyBoneTransform(from.vertex, scratch);
+          posed[column * 3] = scratch.x / person.restHeight;
+          posed[column * 3 + 1] = scratch.y / person.restHeight;
+          posed[column * 3 + 2] = scratch.z / person.restHeight;
+          floor = Math.min(floor, posed[column * 3 + 1] as number);
         }
-        standOff.clothes = counts.clothes === 0 ? 0 : sums.clothes / counts.clothes;
-        standOff.skin = counts.skin === 0 ? 0 : sums.skin / counts.skin;
+        // Planted on the ground, and a run's flight above it.
+        const lift = pose.lift / 1.75 - floor;
+        for (let column = 0; column < person.columns; column += 1) {
+          posed[column * 3 + 1] = (posed[column * 3 + 1] as number) + lift;
+        }
+        const normals = vertexNormals(posed, person.triangles);
+        for (let column = 0; column < person.columns; column += 1) {
+          write(base + column, gaitAt, phase, posed, normals, column);
+        }
       }
-    }
+    });
+    ordered.forEach((bone, at) => {
+      bone.quaternion.copy(restQuaternions[at] as Quaternion);
+      bone.position.copy(restPositions[at] as Vector3);
+    });
+    scene.updateMatrixWorld(true);
   });
-  // #2722: the cyclists' phases — the same clothed vertices, each skinned by
-  // the seated rider's skeleton and put in the bicycle's frame, in metres. No
-  // floor: the bicycle's origin is on the road, where the tyres stand.
+
+  // #2722: the cyclists' phases — the FIRST person, whose build is the
+  // rider's own, each column skinned by the seated rider's skeleton (bone by
+  // name) and put in the bicycle's frame, in metres. No floor: the bicycle's
+  // origin is on the road, where the tyres stand.
+  const cyclist = people[0] as PersonColumns;
+  const boneNames = cyclist.source.skeleton.bones.map((bone) => plainBoneName(bone.name));
+  const weights = cyclist.from.map(({ mesh, vertex }) => {
+    const skinIndex = mesh.geometry.getAttribute('skinIndex');
+    const skinWeight = mesh.geometry.getAttribute('skinWeight');
+    return [0, 1, 2, 3].map((slot) => ({
+      bone: boneNames[skinIndex.getComponent(vertex, slot)] ?? '',
+      weight: skinWeight.getComponent(vertex, slot),
+    }));
+  });
+  const seatedPose = new Float32Array(cyclist.columns * 3);
+  const moved = new Vector3();
+  const skinMatrix = new Matrix4();
   for (let phase = 0; phase < RIDE_PHASES; phase += 1) {
     const seated = ride((2 * Math.PI * phase) / RIDE_PHASES);
-    for (let vertex = 0; vertex < kept; vertex += 1) {
-      scratch.set(
-        clothed[vertex * 3] as number,
-        clothed[vertex * 3 + 1] as number,
-        clothed[vertex * 3 + 2],
-      );
-      seated.applyBoneTransform(cut.kept[vertex] as number, scratch);
-      scratch.applyMatrix4(seated.matrixWorld);
-      posed[vertex * 3] = scratch.x;
-      posed[vertex * 3 + 1] = scratch.y;
-      posed[vertex * 3 + 2] = scratch.z;
-    }
-    const normals = vertexNormals(posed, cut.indices);
-    const row = animationRow(RIDE_GAIT_INDEX, phase);
-    for (let vertex = 0; vertex < kept; vertex += 1) {
-      const at = (row * width + vertex) * 4;
-      const normalAt = ((row + ANIMATION_ROWS / 2) * width + vertex) * 4;
-      for (let axis = 0; axis < 3; axis += 1) {
-        data[at + axis] = DataUtils.toHalfFloat(posed[vertex * 3 + axis] as number);
-        data[normalAt + axis] = DataUtils.toHalfFloat(normals[vertex * 3 + axis] as number);
+    const matrices = new Map<string, Matrix4>();
+    seated.skeleton.bones.forEach((bone, at) => {
+      const inverse = seated.skeleton.boneInverses[at];
+      if (inverse === undefined) return;
+      matrices.set(bone.name, new Matrix4().multiplyMatrices(bone.matrixWorld, inverse));
+    });
+    for (let column = 0; column < cyclist.columns; column += 1) {
+      moved.set(0, 0, 0);
+      let total = 0;
+      for (const { bone, weight } of weights[column] ?? []) {
+        const matrix = matrices.get(bone);
+        if (weight === 0 || matrix === undefined) continue;
+        scratch
+          .set(
+            cyclist.rest[column * 3] as number,
+            cyclist.rest[column * 3 + 1] as number,
+            cyclist.rest[column * 3 + 2],
+          )
+          .applyMatrix4(seated.bindMatrix)
+          .applyMatrix4(skinMatrix.copy(matrix));
+        moved.addScaledVector(scratch, weight);
+        total += weight;
       }
-      data[at + 3] = DataUtils.toHalfFloat(1);
-      data[normalAt + 3] = DataUtils.toHalfFloat(0);
+      if (total > 0) moved.multiplyScalar(1 / total);
+      moved.applyMatrix4(seated.bindMatrixInverse).applyMatrix4(seated.matrixWorld);
+      seatedPose[column * 3] = moved.x;
+      seatedPose[column * 3 + 1] = moved.y;
+      seatedPose[column * 3 + 2] = moved.z;
+    }
+    const normals = vertexNormals(seatedPose, cyclist.triangles);
+    for (let column = 0; column < cyclist.columns; column += 1) {
+      write(column, RIDE_GAIT_INDEX, phase, seatedPose, normals, column);
     }
   }
-  const animation = new DataTexture(data, width, height, RGBAFormat, HalfFloatType);
+  const animation = new DataTexture(data, layout.width, layout.height, RGBAFormat, HalfFloatType);
   animation.minFilter = NearestFilter;
   animation.magFilter = NearestFilter;
   animation.generateMipmaps = false;
   animation.needsUpdate = true;
-  return { geometry, animation, vertices: kept, standOff };
+
+  const rows = slotRows(most);
+  const slotData = peopleSlotData(people, layout, most);
+  const slots = new DataTexture(
+    slotData,
+    SLOT_WIDTH,
+    rows * people.length,
+    RGBAFormat,
+    HalfFloatType,
+  );
+  slots.minFilter = NearestFilter;
+  slots.magFilter = NearestFilter;
+  slots.generateMipmaps = false;
+  slots.needsUpdate = true;
+
+  // The geometry every instance shares holds no body: only numbered corners.
+  // Its positions are a unit box's, for the bounds; the shader reads the textures.
+  const count = most * 3;
+  const slot = new Float32Array(count);
+  const place = new Float32Array(count * 3);
+  const normal = new Float32Array(count * 3);
+  for (let at = 0; at < count; at += 1) {
+    slot[at] = at;
+    place[at * 3] = at % 2 === 0 ? -0.5 : 0.5;
+    place[at * 3 + 1] = at % 3 === 0 ? 0 : 1;
+    place[at * 3 + 2] = at % 5 === 0 ? -0.5 : 0.5;
+    normal[at * 3 + 1] = 1;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(place, 3));
+  geometry.setAttribute('oylSlot', new BufferAttribute(slot, 1));
+  // ⚠️ A `normal` attribute, though the shader reads the texture's normals
+  // instead: a standard material over a geometry with none is compiled
+  // FLAT_SHADED by three, whose fragment then takes each triangle's own normal
+  // from screen derivatives and never reads the smooth one the vertex wrote.
+  // That is the faceted face and clothes the owner saw on PR #1615 (#1541).
+  geometry.setAttribute('normal', new BufferAttribute(normal, 3));
+  geometry.computeBoundingSphere();
+  return {
+    geometry,
+    animation,
+    slots,
+    layout,
+    bodies: people.length,
+    triangles: most,
+    each: people.map((person) => ({
+      triangles: person.triangles.length / 3,
+      columns: person.columns,
+    })),
+  };
 }
 
 /** Packed sRGB `0xRRGGBB` in a float, to linear RGB — the GLSL both people materials share. */
@@ -19160,17 +19716,48 @@ vec3 oylUnpack(float packed) {
 `;
 
 /**
- * The bodies' material — #1541: physically based, its positions and normals
- * read from the animation texture at the instance's gait and phase, its
- * colour the instance's for the vertex's region. @see PeopleBelt
+ * A normal out of the animation texture's fourth number — `people-body.ts`
+ * §`unpackNormal`, in GLSL. Exported so `people-body.test.ts` can run it as
+ * text against `packNormal`.
  */
-function peopleBodyMaterial(animation: DataTexture, vertices: number): MeshStandardMaterial {
+export const PEOPLE_NORMAL_GLSL = /* glsl */ `
+vec3 oylNormalOf(float packed) {
+  float steps = ${String(NORMAL_STEPS)}.0;
+  float at = packed + steps * steps / 2.0;
+  float row = floor((at + 0.5) / steps);
+  vec2 e = vec2(at - row * steps, row) / (steps - 1.0) * 2.0 - 1.0;
+  float y = 1.0 - abs(e.x) - abs(e.y);
+  float fold = max(-y, 0.0);
+  vec3 n = vec3(e.x + (e.x >= 0.0 ? -fold : fold), y, e.y + (e.y >= 0.0 ? -fold : fold));
+  return n / length(n);
+}
+`;
+
+/** Which gait's phases an instance's `oylGait` has, as a GLSL expression. */
+function gaitChoiceGlsl(of: (gaitAt: number) => number, otherwise: number): string {
+  return GAITS.reduceRight(
+    (rest, _gait, gaitAt) => `(oylGait == ${String(gaitAt)} ? ${String(of(gaitAt))} : ${rest})`,
+    String(otherwise),
+  );
+}
+
+/**
+ * The bodies' material — #1541: physically based, its positions and normals
+ * read from the animation texture at the instance's body, gait and phase,
+ * through the slot texture; its colour the instance's for the corner's
+ * region, times the atlas's share of it; cut out where the atlas says the
+ * hair is not. Two-sided, because hair is cards. @see PeopleBelt
+ */
+function peopleBodyMaterial(baked: BakedPeople, atlas: Texture): MeshStandardMaterial {
   const material = constructed(
-    new MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 }),
+    new MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0, side: DoubleSide }),
   );
   const spliced = "#1541's people";
+  const rows = slotRows(baked.triangles);
   material.onBeforeCompile = (shader) => {
-    shader.uniforms['oylAnimation'] = { value: animation };
+    shader.uniforms['oylAnimation'] = { value: baked.animation };
+    shader.uniforms['oylSlots'] = { value: baked.slots };
+    shader.uniforms['oylAtlas'] = { value: atlas };
     shader.vertexShader = replacedOrThrown(
       replacedOrThrown(
         replacedOrThrown(
@@ -19178,31 +19765,37 @@ function peopleBodyMaterial(animation: DataTexture, vertices: number): MeshStand
           '#include <common>',
           /* glsl */ `#include <common>
 uniform highp sampler2D oylAnimation;
-attribute float oylVertex;
-attribute float oylRegion;
+uniform highp sampler2D oylSlots;
+attribute float oylSlot;
 attribute vec4 oylLook;
 attribute vec4 oylMotion;
 varying vec3 vOylColour;
-${PEOPLE_UNPACK}`,
+varying vec2 vOylUv;
+${PEOPLE_UNPACK}
+${PEOPLE_NORMAL_GLSL}
+${peopleSlotGlsl(rows)}`,
           'vertex',
           spliced,
         ),
         '#include <beginnormal_vertex>',
         /* glsl */ `
+vec4 oylCorner = texelFetch(oylSlots, ivec2(oylSlotTexelOf(floor(oylMotion.w + 0.5), floor(oylSlot + 0.5))), 0);
+int oylBlock = int(oylBlockOf(oylCorner.g));
+float oylRegion = oylRegionOf(oylCorner.g);
+int oylColumn = int(oylColumnOf(oylCorner.r));
+vOylUv = oylCorner.ba;
 int oylGait = int(oylMotion.x + 0.5);
-// #2722: a scenery cyclist's ride is baked at fewer phases than a gait.
-int oylPhases = oylGait == ${String(RIDE_GAIT_INDEX)} ? ${String(RIDE_PHASES)} : ${String(GAIT_PHASES)};
+// #2722: a scenery cyclist's ride is the rows after every block, the first body's alone.
+int oylPhases = ${gaitChoiceGlsl((gaitAt) => PHASES[GAITS[gaitAt] as (typeof GAITS)[number]], RIDE_PHASES)};
+int oylBase = oylGait == ${String(RIDE_GAIT_INDEX)}
+  ? ${String(baked.layout.blocks * GAIT_ROWS)}
+  : oylBlock * ${String(GAIT_ROWS)} + ${gaitChoiceGlsl(gaitRow, 0)};
 float oylAt = oylMotion.y * float(oylPhases);
 float oylLow = floor(oylAt);
 float oylBlend = oylAt - oylLow;
-int oylBase = oylGait * ${String(GAIT_PHASES)};
-int oylRowA = oylBase + int(oylLow) % oylPhases;
-int oylRowB = oylBase + (int(oylLow) + 1) % oylPhases;
-int oylColumn = int(oylVertex + 0.5);
-vec3 objectNormal = normalize(mix(
-  texelFetch(oylAnimation, ivec2(oylColumn, oylRowA + ${String(ANIMATION_ROWS / 2)}), 0).xyz,
-  texelFetch(oylAnimation, ivec2(oylColumn, oylRowB + ${String(ANIMATION_ROWS / 2)}), 0).xyz,
-  oylBlend));
+vec4 oylPoseA = texelFetch(oylAnimation, ivec2(oylColumn, oylBase + int(oylLow) % oylPhases), 0);
+vec4 oylPoseB = texelFetch(oylAnimation, ivec2(oylColumn, oylBase + (int(oylLow) + 1) % oylPhases), 0);
+vec3 objectNormal = normalize(mix(oylNormalOf(oylPoseA.a), oylNormalOf(oylPoseB.a), oylBlend));
 #ifdef USE_TANGENT
   vec3 objectTangent = vec3(1.0, 0.0, 0.0);
 #endif
@@ -19215,10 +19808,7 @@ vOylColour = oylRegion < 0.5 ? oylUnpack(oylLook.x)
         spliced,
       ),
       '#include <begin_vertex>',
-      /* glsl */ `vec3 transformed = mix(
-  texelFetch(oylAnimation, ivec2(oylColumn, oylRowA), 0).xyz,
-  texelFetch(oylAnimation, ivec2(oylColumn, oylRowB), 0).xyz,
-  oylBlend);`,
+      /* glsl */ `vec3 transformed = mix(oylPoseA.xyz, oylPoseB.xyz, oylBlend);`,
       'vertex',
       spliced,
     );
@@ -19226,17 +19816,23 @@ vOylColour = oylRegion < 0.5 ? oylUnpack(oylLook.x)
       replacedOrThrown(
         shader.fragmentShader,
         '#include <common>',
-        '#include <common>\nvarying vec3 vOylColour;',
+        '#include <common>\nuniform sampler2D oylAtlas;\nvarying vec3 vOylColour;\nvarying vec2 vOylUv;',
         'fragment',
         spliced,
       ),
       '#include <color_fragment>',
-      '#include <color_fragment>\ndiffuseColor.rgb *= vOylColour;',
+      /* glsl */ `#include <color_fragment>
+vec4 oylTexel = texture2D(oylAtlas, vOylUv);
+// Hair and brows are cards: where the photograph has none, nothing is drawn.
+if (oylTexel.a < 0.5) discard;
+// The atlas holds HALF each part's share of its own mean colour.
+diffuseColor.rgb *= vOylColour * oylTexel.rgb * 2.0;`,
       'fragment',
       spliced,
     );
   };
-  material.customProgramCacheKey = () => `oyl-people-${String(vertices)}`;
+  material.customProgramCacheKey = () =>
+    `oyl-people-${String(baked.layout.width)}-${String(baked.layout.blocks)}-${String(baked.triangles)}`;
   return withAtmosphere(material);
 }
 
@@ -19445,21 +20041,10 @@ export function peopleDrawnOf(view: GameView):
       readonly far: readonly { readonly x: number; readonly z: number; readonly height: number }[];
       readonly triangles: number;
       readonly animationBytes: number;
-      /**
-       * #1618: how many of a body's triangles have corners of two regions —
-       * a colour faded across a triangle; nought where each seam is an edge.
-       */
-      readonly blendedTriangles: number;
-      /** #1618: @see PeopleBelt.standOff */
-      readonly standOff: { readonly clothes: number; readonly skin: number };
-      /**
-       * The modeller's pass of 2026-11-18: how far the top's hem over the
-       * bottoms strays up and down round the body, as a share of its height —
-       * the spread of the rest heights of every vertex drawn once as a top
-       * and once as bottoms. A saw's edge strays by its teeth; a straightened
-       * hem (`people-body.ts` §`straightenSeams`) by a waist's own tilt.
-       */
-      readonly hemSpread: number;
+      /** How many different bodies the model holds, and each one's triangles and columns. */
+      readonly bodies: readonly { readonly triangles: number; readonly columns: number }[];
+      /** Which of those bodies each person drawn near is, in `near`'s order. */
+      readonly worn: readonly number[];
     }
   | undefined {
   const belt = view instanceof ThreeGameView ? view.people : undefined;
@@ -19476,41 +20061,15 @@ export function peopleDrawnOf(view: GameView):
       return { x: at.x, z: at.z, height: scale.y };
     });
   };
-  const geometry = belt.bodies.geometry;
-  const region = geometry.getAttribute('oylRegion');
-  const index = geometry.index;
-  let blendedTriangles = 0;
-  if (index !== null) {
-    for (let at = 0; at + 2 < index.count; at += 3) {
-      const a = region.getX(index.getX(at));
-      if (region.getX(index.getX(at + 1)) !== a || region.getX(index.getX(at + 2)) !== a) {
-        blendedTriangles += 1;
-      }
-    }
-  }
-  // The hem: the columns drawn in both a top and bottoms, by their rest heights.
-  const column = geometry.getAttribute('oylVertex');
-  const rest = geometry.getAttribute('position');
-  const wears = new Map<number, number>();
-  for (let vertex = 0; vertex < column.count; vertex += 1) {
-    const worn = region.getX(vertex);
-    const bit = worn === PersonRegion.top ? 1 : worn === PersonRegion.bottoms ? 2 : 0;
-    wears.set(column.getX(vertex), (wears.get(column.getX(vertex)) ?? 0) | bit);
-  }
-  let [hemLow, hemHigh] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
-  for (let vertex = 0; vertex < column.count; vertex += 1) {
-    if (wears.get(column.getX(vertex)) !== 3) continue;
-    hemLow = Math.min(hemLow, rest.getY(vertex));
-    hemHigh = Math.max(hemHigh, rest.getY(vertex));
-  }
+  const near = read(belt.bodies);
+  const motion = belt.bodies.geometry.getAttribute('oylMotion');
   return {
-    near: read(belt.bodies),
+    near,
     far: read(belt.impostors),
     triangles: belt.triangles,
     animationBytes: belt.animationBytes,
-    blendedTriangles,
-    standOff: belt.standOff,
-    hemSpread: hemHigh - hemLow,
+    bodies: belt.each,
+    worn: near.map((_person, index) => motion.getW(index)),
   };
 }
 
@@ -21100,6 +21659,8 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   'porch-trim': 1,
   // #2206: a spire is shaded as the roof it is built of.
   spire: REALISTIC_ROLE_SHADE.roof,
+  // #2848: a shop's apron is painted, as a driveway is.
+  apron: 1,
 };
 
 /**
@@ -21107,9 +21668,10 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
  * surface's multiplier on the walls, the plinth, the parapet and the chimney;
  * the roof surface's on the roof; the door's paint on the door and the trim's
  * on the trim. Since #1588: a shingled roof's albedo on the roof and a
- * dormer's roof, the walls' paint on a dormer, and none on a driveway or on a
- * clapboard house's plinth, whose colours the shader lays (`facade.ts`
- * §`PAVING`, §`FOUNDATION`) — so their vertex colour is their light alone.
+ * dormer's roof, the walls' paint on a dormer, and none on a driveway, on a
+ * shop's apron (#2848) or on a clapboard house's plinth, whose colours the
+ * shader lays (`facade.ts` §`PAVING`, §`FOUNDATION`) — so their vertex colour
+ * is their light alone.
  * Since #1590 none on a shop's front, sign or awning, which it paints too.
  * Since #1589 a porch's roof is the roof's, and the porch the trim's.
  */
@@ -21130,6 +21692,7 @@ export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
         unpainted
       );
     case 'driveway':
+    case 'apron':
     case 'shopfront':
       return unpainted;
     case 'plinth':
@@ -23952,8 +24515,9 @@ export class MappedBuildingBelt {
     const [red, green, blue] = mappedRolePaint(plan, role);
     const [trimRed, trimGreen, trimBlue] = mappedRolePaint(plan, 'trim');
     // A plan with a plinth stands in the ground at its foot; a raised part
-    // does not, and nor does a driveway, which is laid on the ground.
-    const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway';
+    // does not, and nor does a driveway or, since #2848, an apron, which are
+    // laid on the ground.
+    const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway' && role !== 'apron';
     // #1588: a soffit's and a gutter's underside, in the shade of the wall and the eaves;
     // #1589: a porch's ceiling likewise, and its deck in the shade of its roof;
     // #1590: an awning's underside likewise.
@@ -24749,6 +25313,8 @@ class RealisticDrawing {
   readonly logos: LogoBelt;
   /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
   readonly pavements: PavementBelt;
+  /** #2972: the corridor's mapped footways and zebras. */
+  readonly footways = new FootwayBelt();
   /** What stands on them: lamp posts, bollards, benches and bins — #1536. */
   readonly furniture: FurnitureBelt;
   /**
@@ -24861,7 +25427,7 @@ class RealisticDrawing {
     );
     this.lampModelled = world.roadside !== undefined;
     // #2722: the scenery cyclists' bodies seated by the riders' own pose.
-    this.people = new PeopleBelt(world.body, (crankAngle) => this.riders.ridingPose(crankAngle));
+    this.people = new PeopleBelt(world.people, (crankAngle) => this.riders.ridingPose(crankAngle));
     this.decorations = new DecorationBelt('realistic');
     this.villageHouses = new VillageHouseBelt(world.houses);
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
@@ -24964,6 +25530,7 @@ class RealisticDrawing {
     this.gantries.addTo(scene);
     this.logos.addTo(scene);
     this.pavements.addTo(scene);
+    this.footways.addTo(scene);
     this.furniture.addTo(scene);
     this.people.addTo(scene);
     this.decorations.addTo(scene);
@@ -24981,6 +25548,7 @@ class RealisticDrawing {
     this.gantries.setShown(on);
     this.logos.setShown(on);
     this.pavements.setShown(on);
+    this.footways.setShown(on);
     this.furniture.setShown(on);
     this.people.setShown(on);
     this.decorations.setShown(on);
@@ -25169,6 +25737,7 @@ class RealisticDrawing {
     this.gantries.dispose();
     this.logos.dispose();
     this.pavements.dispose();
+    this.footways.dispose();
     this.furniture.dispose();
     this.people.dispose();
     this.decorations.dispose();
@@ -25932,6 +26501,18 @@ export function decorationKindsOf(view: GameView, kinds: ItemTable): void {
  */
 export function decorationBeltOf(view: GameView): DecorationBelt | undefined {
   return view instanceof ThreeGameView ? view.decorationBelt : undefined;
+}
+
+/**
+ * The realistic world's footway mesh — #2972 (`footway-surfaces.ts`) — or
+ * `undefined` for a view with no realistic world.
+ *
+ * @test-facing read by `realistic-textures.test.ts` §"the footways", which
+ * holds what the belt uploaded to the frame's footways; the view draws the belt
+ * itself in `render`
+ */
+export function footwayMeshOf(view: GameView): Mesh | undefined {
+  return view instanceof ThreeGameView ? view.footwayMesh : undefined;
 }
 
 /**
@@ -26830,6 +27411,8 @@ class ThreeGameView implements GameView {
     // #1535: the village streets, in both worlds; the hidden world's draw nothing.
     this.#realistic?.pavements.update(frame.streets);
     this.#pavements.update(frame.streets);
+    // #2972: and the mapped footways and zebras, in the realistic world only.
+    this.#realistic?.footways.update(frame.footways);
     // #1536: and what stands on them, within reach of the camera.
     this.#realistic?.furniture.update(frame.streets, frame.camera);
     this.#furniture.update(frame.streets, frame.camera);
@@ -27401,6 +27984,11 @@ class ThreeGameView implements GameView {
   doorPathsShown(on: boolean): void {
     this.#realistic?.pavements.switchPathsOn(on);
     this.#pavements.switchPathsOn(on);
+  }
+
+  /** @see footwayMeshOf — the realistic world's, whether or not it is the one drawn. */
+  get footwayMesh(): Mesh | undefined {
+    return this.#realistic?.footways.mesh;
   }
 
   /** @see pavementTrianglesOf — the drawn world's. */

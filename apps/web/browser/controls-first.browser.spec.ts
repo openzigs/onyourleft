@@ -1410,6 +1410,469 @@ test.describe('#2007 — the route editor’s whole-route buttons do not touch',
 });
 
 /**
+ * #2889, PR #2978: the open-world start picker's map, measured as the engine
+ * lays it out and moves it.
+ *
+ * The layout review of 2026-11-20 first:
+ *
+ * - **The map fills its frame.** The canvas MapLibre draws into is as wide and
+ *   as tall as `.oyl-map`, within a pixel's rounding, and it still is after
+ *   the window widens from a phone's width to the landscape tablet's. A canvas
+ *   sized once and never again would show as a map in part of its box.
+ * - **The pin shows no clipped label.** It is a drawn pin, with no text on it
+ *   to clip. A word in a 1.75 rem disc read "Star". Its graphic lies inside
+ *   its own box, and its name is its `aria-label`.
+ *
+ * Then the owner's ruling of the same day, that the map is moved by hand and
+ * carries no rows of text buttons ("they look cheap"):
+ *
+ * - **No text button rows.** No *Move north*, *Whole route* or *Move the pin
+ *   …*, and no `.oyl-map__moves`. The cluster on the map has four icon
+ *   buttons, each 48 × 48 px or larger and inside the map's frame.
+ * - **A click drops the pin** where it lands, with the pin's tip on the point.
+ * - **The wheel zooms** about the pointer, and **a mouse drag pans**.
+ * - **On touch, one finger is left to the page, two fingers pan, and a pinch
+ *   zooms.**
+ * - **On the focused map, arrow keys pan and `=`/`-` zoom.** **On the focused
+ *   pin, an arrow key moves the pin and not the map**, and the move is said
+ *   in the live region.
+ *
+ * Every movement is read off the pin. Where it stands on the canvas is what
+ * the rider sees, and it is not a number the map reports about itself.
+ *
+ * The full-page screenshot that raised the review also showed the map drawn in
+ * the left 400 px of its box and the rail stopping at the first screen.
+ * Neither happens on a viewport screenshot or in these measurements: a
+ * full-page capture in Chromium lays the page out again at the document's
+ * height for one frame, and a WebGL canvas and a `position: fixed` rail do not
+ * come through that intact.
+ */
+test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
+  /** The owner's ruling for this map's buttons. */
+  const LEAST_TARGET_PIXELS = 48;
+  /** `--oyl-space-xs`, 0.25rem, less a pixel's rounding. */
+  const LEAST_GAP_PIXELS = 3.5;
+
+  interface Box {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  }
+
+  /** The map's frame and its canvas, both as the engine laid them out. */
+  async function mapFrame(page: Page): Promise<{
+    frame: { width: number; height: number };
+    canvas: Box;
+  }> {
+    return page.evaluate(() => {
+      const frame = document.querySelector('main .oyl-map');
+      const canvas = frame?.querySelector('canvas');
+      if (!(frame instanceof HTMLElement) || !(canvas instanceof HTMLCanvasElement)) {
+        throw new Error('the picker drew no map canvas');
+      }
+      const box = canvas.getBoundingClientRect();
+      return {
+        frame: { width: frame.clientWidth, height: frame.clientHeight },
+        canvas: { x: box.x, y: box.y, width: box.width, height: box.height },
+      };
+    });
+  }
+
+  function expectFilled(seen: Awaited<ReturnType<typeof mapFrame>>, where: string): void {
+    console.log(
+      `[#2889] ${where}: frame ${String(seen.frame.width)}×${String(seen.frame.height)}, ` +
+        `canvas ${seen.canvas.width.toFixed(1)}×${seen.canvas.height.toFixed(1)}`,
+    );
+    expect(Math.abs(seen.canvas.width - seen.frame.width), `${where}: canvas width`).toBeLessThan(
+      1.5,
+    );
+    expect(
+      Math.abs(seen.canvas.height - seen.frame.height),
+      `${where}: canvas height`,
+    ).toBeLessThan(1.5);
+  }
+
+  /** The pin's tip, from the canvas's top left: where on the map the rider sees it. */
+  async function pinTip(page: Page): Promise<{ x: number; y: number }> {
+    return page.evaluate(() => {
+      const pin = document.querySelector('main .oyl-map__waypoint--pin');
+      const canvas = document.querySelector('main .oyl-map canvas');
+      if (pin === null || canvas === null) throw new Error('no pin on the map');
+      const box = pin.getBoundingClientRect();
+      const origin = canvas.getBoundingClientRect();
+      return { x: box.left + box.width / 2 - origin.left, y: box.bottom - origin.top };
+    });
+  }
+
+  /** How far the pin's tip is from a point on the canvas. */
+  function apart(a: { x: number; y: number }, b: { x: number; y: number }): number {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  /**
+   * Waits until two readings of the pin a moment apart agree: the camera has
+   * stopped. It first waits out MapLibre's 300 ms ease, which begins a frame
+   * after the key or the wheel: read at once, a camera about to move reads
+   * as one standing still.
+   */
+  async function settledPin(page: Page): Promise<{ x: number; y: number }> {
+    await page.waitForTimeout(400);
+    let last = await pinTip(page);
+    await expect
+      .poll(async () => {
+        await page.waitForTimeout(150);
+        const next = await pinTip(page);
+        const still = apart(last, next) < 0.5;
+        last = next;
+        return still;
+      })
+      .toBe(true);
+    return last;
+  }
+
+  async function openPicker(page: Page, viewport: Viewport): Promise<Box> {
+    await open(page, viewport, 'data=populated');
+    await visit(page, routeById('open-world'));
+    await expect(page.locator('main .oyl-map canvas')).toHaveCount(1);
+    return (await mapFrame(page)).canvas;
+  }
+
+  /** Drops the pin with a click at an offset from the map's centre, and returns where it is. */
+  async function dropAt(
+    page: Page,
+    canvas: Box,
+    dx: number,
+    dy: number,
+  ): Promise<{ x: number; y: number }> {
+    await page.mouse.click(canvas.x + canvas.width / 2 + dx, canvas.y + canvas.height / 2 + dy);
+    await expect(page.locator('main .oyl-map__waypoint--pin')).toHaveCount(1);
+    return settledPin(page);
+  }
+
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`fills its frame, draws a whole pin and carries only its icon buttons, on a ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openPicker(page, viewport);
+      expectFilled(await mapFrame(page), viewport.name);
+
+      const gone = [
+        'Move north',
+        'Move west',
+        'Move east',
+        'Move south',
+        'Whole route',
+        'Move the pin north',
+        'Move the pin south',
+        'Move the pin east',
+        'Move the pin west',
+      ];
+      const names = await page
+        .locator('main button')
+        .evaluateAll((elements) => elements.map((element) => element.textContent?.trim() ?? ''));
+      expect(
+        names.filter((name) => gone.includes(name)),
+        'a text button row',
+      ).toEqual([]);
+      await expect(page.locator('main .oyl-map__moves')).toHaveCount(0);
+
+      const cluster = page.getByRole('group', { name: 'Map controls' });
+      await cluster.getByRole('button', { name: 'Put the pin at the map’s centre' }).click();
+      const pin = page.getByRole('button', { name: 'The start pin' });
+      await expect(pin).toHaveCount(1);
+
+      const drawn = await pin.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const art = element.querySelector('svg')?.getBoundingClientRect();
+        return {
+          text: element.textContent ?? '',
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          inside:
+            art !== undefined &&
+            art.width > 0 &&
+            art.left >= box.left - 0.5 &&
+            art.right <= box.right + 0.5 &&
+            art.top >= box.top - 0.5 &&
+            art.bottom <= box.bottom + 0.5,
+        };
+      });
+      console.log(`[#2889] ${viewport.name}: pin ${JSON.stringify(drawn)}`);
+      expect(drawn.text, 'text on the pin, to be clipped').toBe('');
+      expect(drawn.scrollWidth, 'the pin overflows its box').toBeLessThanOrEqual(drawn.clientWidth);
+      expect(drawn.inside, 'the pin’s graphic runs outside the pin').toBe(true);
+
+      const frame = await page.locator('main .oyl-map-frame').boundingBox();
+      if (frame === null) throw new Error('no map frame');
+      const buttons = await cluster.getByRole('button').evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          return {
+            name: element.textContent?.trim() ?? '',
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+          };
+        }),
+      );
+      expect(buttons.map((button) => button.name)).toEqual([
+        'Zoom in',
+        'Zoom out',
+        'Put the pin at the map’s centre',
+        'Recentre the map',
+      ]);
+      const faults: string[] = [];
+      for (const [index, a] of buttons.entries()) {
+        const width = a.right - a.left;
+        const height = a.bottom - a.top;
+        if (width < LEAST_TARGET_PIXELS || height < LEAST_TARGET_PIXELS) {
+          faults.push(`${a.name} is ${width.toFixed(1)}×${height.toFixed(1)} px`);
+        }
+        if (
+          a.left < frame.x ||
+          a.right > frame.x + frame.width ||
+          a.top < frame.y ||
+          a.bottom > frame.y + frame.height
+        ) {
+          faults.push(`${a.name} is not on the map`);
+        }
+        for (const b of buttons.slice(index + 1)) {
+          const across = Math.max(b.left - a.right, a.left - b.right);
+          const down = Math.max(b.top - a.bottom, a.top - b.bottom);
+          if (Math.max(across, down) < LEAST_GAP_PIXELS) {
+            faults.push(`${a.name} and ${b.name} touch`);
+          }
+        }
+      }
+      expect(faults, 'the map’s buttons').toEqual([]);
+    });
+  }
+
+  test('the map still fills its frame after the window widens', async ({ page }) => {
+    // A phone-wide window — the tablet's split screen — opened out to the
+    // whole landscape tablet. Upright to landscape is no test of it: the
+    // picker keeps the reading measure, so its map is 651 px wide both ways.
+    const [landscape] = TABLETS;
+    if (landscape === undefined) throw new Error('no landscape tablet');
+    await openPicker(page, PHONE);
+    const before = await mapFrame(page);
+    expectFilled(before, PHONE.name);
+
+    await page.setViewportSize({ width: landscape.width, height: landscape.height });
+    // The frame widens with the column; wait for that, then for the canvas.
+    await expect.poll(async () => (await mapFrame(page)).frame.width).not.toBe(before.frame.width);
+    await expect
+      .poll(async () => {
+        const seen = await mapFrame(page);
+        return Math.abs(seen.canvas.width - seen.frame.width) < 1.5;
+      })
+      .toBe(true);
+    expectFilled(
+      await mapFrame(page),
+      `${PHONE.name} widened to ${String(landscape.width)}×${String(landscape.height)}`,
+    );
+  });
+
+  test.describe('with a mouse and a keyboard, on the landscape tablet', () => {
+    const [landscape] = TABLETS;
+    if (landscape === undefined) throw new Error('no landscape tablet');
+
+    test('a click drops the pin where it lands', async ({ page }) => {
+      const canvas = await openPicker(page, landscape);
+      const tip = await dropAt(page, canvas, 90, 50);
+      const aimed = { x: canvas.width / 2 + 90, y: canvas.height / 2 + 50 };
+      console.log(`[#2889] click at ${JSON.stringify(aimed)}, pin tip ${JSON.stringify(tip)}`);
+      expect(apart(tip, aimed), 'the pin’s tip from the click').toBeLessThan(3);
+    });
+
+    test('the wheel zooms in about the pointer', async ({ page }) => {
+      const canvas = await openPicker(page, landscape);
+      const pointer = { x: canvas.width / 2, y: canvas.height / 2 };
+      const before = apart(await dropAt(page, canvas, 120, 60), pointer);
+      await page.mouse.move(canvas.x + pointer.x, canvas.y + pointer.y);
+      for (let notch = 0; notch < 3; notch += 1) {
+        await page.mouse.wheel(0, -200);
+      }
+      const after = apart(await settledPin(page), pointer);
+      console.log(
+        `[#2889] wheel: pin ${before.toFixed(1)} → ${after.toFixed(1)} px from the pointer`,
+      );
+      expect(after, 'the pin from the pointer, after the wheel').toBeGreaterThan(before * 1.5);
+    });
+
+    test('a mouse drag pans the map', async ({ page }) => {
+      const canvas = await openPicker(page, landscape);
+      const before = await dropAt(page, canvas, 120, 60);
+      const from = { x: canvas.x + canvas.width / 2 - 100, y: canvas.y + canvas.height / 2 - 40 };
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      for (let step = 1; step <= 10; step += 1) {
+        await page.mouse.move(from.x - step * 12, from.y - step * 6);
+      }
+      await page.mouse.up();
+      const after = await settledPin(page);
+      console.log(`[#2889] drag: pin ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      // A drag of (-120, -60), and inertia may carry it a little further.
+      expect(after.x - before.x, 'across').toBeLessThan(-100);
+      expect(after.y - before.y, 'down').toBeLessThan(-45);
+    });
+
+    test('arrow keys pan the focused map, and = and - zoom it', async ({ page }) => {
+      const canvas = await openPicker(page, landscape);
+      const centre = { x: canvas.width / 2, y: canvas.height / 2 };
+      const start = await dropAt(page, canvas, 120, 60);
+      const map = page.getByRole('application', {
+        name: 'Map for placing the start of an open-world ride.',
+      });
+      await map.focus();
+      await expect(map).toBeFocused();
+
+      await page.keyboard.press('ArrowLeft');
+      const panned = await settledPin(page);
+      console.log(`[#2889] ArrowLeft: pin ${JSON.stringify(start)} → ${JSON.stringify(panned)}`);
+      // The view moves west, so what is on it moves east.
+      expect(panned.x - start.x, 'ArrowLeft').toBeGreaterThan(50);
+
+      const before = apart(panned, centre);
+      await page.keyboard.press('Equal');
+      const zoomedIn = apart(await settledPin(page), centre);
+      expect(zoomedIn, '= zooms in').toBeGreaterThan(before * 1.5);
+      await page.keyboard.press('Minus');
+      const zoomedOut = apart(await settledPin(page), centre);
+      expect(zoomedOut, '- zooms out').toBeLessThan(zoomedIn / 1.5);
+    });
+
+    test('an arrow key on the focused pin moves the pin, says so, and leaves the map', async ({
+      page,
+    }) => {
+      const canvas = await openPicker(page, landscape);
+      const before = await dropAt(page, canvas, 120, 60);
+      const pin = page.getByRole('button', { name: 'The start pin' });
+      await pin.focus();
+      await expect(pin).toBeFocused();
+      await page.keyboard.press('ArrowUp');
+      const said = page.locator('section[aria-labelledby="oyl-open-world-pin"] [role="status"]');
+      await expect(said).toHaveText('Pin moved north.');
+      const after = await settledPin(page);
+      console.log(`[#2889] pin ArrowUp: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      // About 55 m north is under a pixel at the whole-country view. Had the
+      // key reached the map as well, the map would have moved 100 px.
+      expect(Math.abs(after.y - before.y), 'the map moved under the pin').toBeLessThan(10);
+      expect(after.y, 'the pin went south').toBeLessThanOrEqual(before.y + 0.5);
+      await expect(pin).toBeFocused();
+    });
+  });
+
+  test.describe('on a touch screen, on the landscape tablet', () => {
+    test.use({ hasTouch: true });
+    const [landscape] = TABLETS;
+    if (landscape === undefined) throw new Error('no landscape tablet');
+
+    /** One touch gesture from `from` to `to`, a list of fingers each, in ten steps. */
+    async function touch(
+      page: Page,
+      from: readonly { x: number; y: number }[],
+      to: readonly { x: number; y: number }[],
+    ): Promise<void> {
+      const cdp = await page.context().newCDPSession(page);
+      const at = (step: number): { x: number; y: number; id: number }[] =>
+        from.map((finger, id) => {
+          const end = to[id] ?? finger;
+          return {
+            x: finger.x + ((end.x - finger.x) * step) / 10,
+            y: finger.y + ((end.y - finger.y) * step) / 10,
+            id,
+          };
+        });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(0) });
+      for (let step = 1; step <= 10; step += 1) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(step) });
+      }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
+
+    async function pinnedPicker(page: Page): Promise<{
+      canvas: Box;
+      centre: { x: number; y: number };
+      before: { x: number; y: number };
+    }> {
+      if (landscape === undefined) throw new Error('no landscape tablet');
+      const canvas = await openPicker(page, landscape);
+      await page
+        .getByRole('group', { name: 'Map controls' })
+        .getByRole('button', { name: 'Put the pin at the map’s centre' })
+        .click();
+      await expect(page.locator('main .oyl-map__waypoint--pin')).toHaveCount(1);
+      // A pin away from the centre, so a zoom moves it; dropped by a tap.
+      await page.touchscreen.tap(
+        canvas.x + canvas.width / 2 + 110,
+        canvas.y + canvas.height / 2 + 50,
+      );
+      await expect.poll(async () => (await pinTip(page)).x).toBeGreaterThan(canvas.width / 2 + 100);
+      const now = (await mapFrame(page)).canvas;
+      return {
+        canvas: now,
+        centre: { x: now.x + now.width / 2, y: now.y + now.height / 2 },
+        before: await settledPin(page),
+      };
+    }
+
+    test('one finger is left to the page: it does not pan the map', async ({ page }) => {
+      const { centre, before } = await pinnedPicker(page);
+      await touch(
+        page,
+        [{ x: centre.x - 60, y: centre.y - 60 }],
+        [{ x: centre.x - 200, y: centre.y - 60 }],
+      );
+      await page.waitForTimeout(800);
+      const after = await settledPin(page);
+      console.log(`[#2889] one finger: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      expect(apart(after, before), 'one finger panned the map').toBeLessThan(3);
+    });
+
+    test('two fingers pan the map', async ({ page }) => {
+      const { centre, before } = await pinnedPicker(page);
+      await touch(
+        page,
+        [
+          { x: centre.x - 80, y: centre.y - 40 },
+          { x: centre.x - 20, y: centre.y - 40 },
+        ],
+        [
+          { x: centre.x - 200, y: centre.y - 40 },
+          { x: centre.x - 140, y: centre.y - 40 },
+        ],
+      );
+      const after = await settledPin(page);
+      console.log(`[#2889] two fingers: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      expect(after.x - before.x, 'two fingers did not pan the map').toBeLessThan(-80);
+    });
+
+    test('a pinch zooms the map', async ({ page }) => {
+      const { canvas, centre, before } = await pinnedPicker(page);
+      const middle = { x: centre.x - canvas.x, y: centre.y - canvas.y };
+      const near = apart(before, middle);
+      await touch(
+        page,
+        [
+          { x: centre.x - 30, y: centre.y },
+          { x: centre.x + 30, y: centre.y },
+        ],
+        [
+          { x: centre.x - 150, y: centre.y },
+          { x: centre.x + 150, y: centre.y },
+        ],
+      );
+      const after = apart(await settledPin(page), middle);
+      console.log(`[#2889] pinch: pin ${near.toFixed(1)} → ${after.toFixed(1)} px from the middle`);
+      expect(after, 'the pinch did not zoom in').toBeGreaterThan(near * 1.5);
+    });
+  });
+});
+
+/**
  * #2065 — the title block costs less than half what it did.
  *
  * Every route in `ALL_ROUTES` is opened in `reflow.html` at the owner's tablet

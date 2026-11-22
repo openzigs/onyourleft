@@ -228,6 +228,12 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   'route-builder': { kind: 'fixture', marker: '.oyl-main .oyl-scroll-region tbody tr' },
   // #2007: the editor's choice of what to change is drawn only over a route it read.
   'route-editor': { kind: 'fixture', marker: '.oyl-main fieldset' },
+  // #2889: this harness hands the shell no open-world port, so both walks say
+  // the routes and rides cannot be read, beside the pin's buttons.
+  'open-world': {
+    kind: 'none',
+    reason: 'no open-world port is handed to this harness, so it is the same in both walks',
+  },
   'side-camera': {
     kind: 'none',
     reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
@@ -318,6 +324,10 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'activity-detail': { kind: 'none', reason: 'one ride, opened by its id' },
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
   'route-editor': { kind: 'none', reason: 'one saved route, opened by its id' },
+  'open-world': {
+    kind: 'none',
+    reason: 'three ways to choose a start, each saying so when it has nothing (#2889)',
+  },
   more: { kind: 'none', reason: 'a list of pages, never empty (#1429)' },
   games: { kind: 'none', reason: 'a card for each game, never empty (#2292)' },
   'delivery-courses': {

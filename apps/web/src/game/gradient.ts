@@ -182,6 +182,24 @@ export interface GradientSession {
    */
   sample(at: Seconds, distance: number, bounded?: boolean): void;
   /**
+   * Read the grade from `profile` from the next sample on, at the ride
+   * distance `sample` is given minus `origin` — #2982, an open-world ride's
+   * rolling route (`open-world/road.ts`).
+   *
+   * ⚠️ **ADR 0087 D-6, the grade's safety, is the reason this is a method
+   * here and not a new session.** A choice made before the lock, an extension
+   * and the trim change no grade the rider can have been sent (D-6.2, D-6.3),
+   * so the driver goes on as it was: its rate limit and deadband are not
+   * reset, and nothing is written for the change itself. A U-turn changes the
+   * road under the rider at once (D-6.4): with `turned`, the grade written
+   * walks to the new road at `CORRECTION_GRADE_STEP_PERCENT_PER_SECOND`, 1 %
+   * a second, by the path a room's correction already walks (`sample`'s
+   * `bounded`). And so does any other change that moves the grade where the
+   * rider last was by the deadband or more: the walk is for every change the
+   * lock could not prevent, not only the ones a caller named.
+   */
+  follow(profile: RouteProfile, origin: number, turned: boolean): void;
+  /**
    * End the ride and let the trainer go — `control.letGo()`, an FTMS Stop
    * (#372). @see the module note, "Two", for what that does not do.
    *
@@ -195,9 +213,36 @@ export interface GradientSession {
 }
 
 export function createGradientSession(options: GradientSessionOptions): GradientSession {
-  const { profile, control, onChange } = options;
+  const { control, onChange } = options;
 
-  const driver: SimulationDriver = createSimulationDriver({ profile });
+  /**
+   * The road the grade is read from, and the ride distance of its distance
+   * zero: the ride's profile at 0, or the last {@link GradientSession.follow}.
+   */
+  let road: { readonly profile: RouteProfile; readonly origin: number } = {
+    profile: options.profile,
+    origin: 0,
+  };
+  /**
+   * #2982: the driver reads the road it is handed at each sample, so it is
+   * handed one that is always the road followed. A new driver for a new road
+   * would forget its last write, and write again at once, inside its own rate
+   * limit, for a change that by ADR 0087 D-6.2 changes nothing it sent.
+   */
+  const followed = new Proxy({} as RouteProfile, {
+    get: (_target, key) => Reflect.get(road.profile, key) as unknown,
+  });
+  /** The ride distance of the last sample, where {@link GradientSession.follow} compares the roads. */
+  let lastDistance: number | undefined;
+  const roadGrade = (on: { readonly profile: RouteProfile; readonly origin: number }): number => {
+    const distance = lastDistance ?? 0;
+    const raw = gradeAt(on.profile, distanceOnRoute(on.profile, metres(distance - on.origin)));
+    return Number.isFinite(raw)
+      ? Math.max(-MAX_SIMULATED_GRADE_PERCENT, Math.min(MAX_SIMULATED_GRADE_PERCENT, raw))
+      : 0;
+  };
+
+  const driver: SimulationDriver = createSimulationDriver({ profile: followed });
   let fault: string | undefined;
   let stopped = false;
   /** The grade last handed to the writer, and the ride second it was. */
@@ -290,6 +335,7 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       if (stopped) {
         return;
       }
+      lastDistance = distance;
       // A correction's whole walk is owed from its first sample to the moment
       // the trainer is on the road's own grade again — which is usually AFTER
       // the correction: the rider is moved before the road under them turns.
@@ -297,10 +343,7 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       if (owed && sent !== undefined) {
         // #782: toward the road at a bounded rate, on the driver's own clock.
         if (!(at - sent.at >= SIMULATION_SETPOINT_INTERVAL_SECONDS)) return;
-        const raw = gradeAt(profile, distanceOnRoute(profile, metres(distance)));
-        const road = Number.isFinite(raw)
-          ? Math.max(-MAX_SIMULATED_GRADE_PERCENT, Math.min(MAX_SIMULATED_GRADE_PERCENT, raw))
-          : 0;
+        const onRoad = roadGrade(road);
         // ⚠️ The time since the last write is capped at one write interval
         // (#928's review): on a steady climb the driver writes nothing for
         // minutes (its deadband), and a correction's first step measured from
@@ -308,8 +351,8 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
         // after 81 s on the 4 % hill `trainer-wiring.test.tsx` §"#782" rides.
         const elapsed = Math.min(at - sent.at, SIMULATION_SETPOINT_INTERVAL_SECONDS);
         const step = CORRECTION_GRADE_STEP_PERCENT_PER_SECOND * elapsed;
-        const grade = Math.max(sent.grade - step, Math.min(sent.grade + step, road));
-        if (!bounded && grade === road) owed = false;
+        const grade = Math.max(sent.grade - step, Math.min(sent.grade + step, onRoad));
+        if (!bounded && grade === onRoad) owed = false;
         // The driver is told nothing it would believe it wrote, so when this
         // hands back it writes the road afresh rather than trusting a deadband.
         driver.restart();
@@ -323,7 +366,7 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       const setpoint = driver.sample({
         // The one conversion, and the whole of it. @see GradientSession.sample.
         at: unixSeconds(at),
-        distance: metres(distance),
+        distance: metres(distance - road.origin),
       });
       if (setpoint === undefined) {
         // Too soon, unmoved, or the clock did not advance. The ordinary case on
@@ -334,6 +377,21 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       sent = { grade: setpoint.grade, at };
       offer(setpoint.grade);
       changed();
+    },
+
+    follow(profile: RouteProfile, origin: number, turned: boolean): void {
+      const before = road;
+      road = { profile, origin };
+      if (stopped || sent === undefined) return;
+      // ADR 0087 D-6.4: walked, from the grade last written, at 1 % a second.
+      // With nothing written yet there is nothing to walk from, and the first
+      // write is the driver's, as at the start of any ride.
+      if (
+        turned ||
+        Math.abs(roadGrade(road) - roadGrade(before)) >= SIMULATION_GRADE_DEADBAND_PERCENT
+      ) {
+        owed = true;
+      }
     },
 
     stop(): void {

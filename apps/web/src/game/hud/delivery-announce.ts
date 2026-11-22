@@ -216,7 +216,8 @@ export function oweObstacleAhead(
 /**
  * How far ahead a house that must not get a parcel is said, metres — #2365:
  * **45**, so it is said before its throw window opens `throw.ts`
- * §`THROW_WINDOW_BEFORE_METRES` (20 m) ahead of it, two seconds earlier at
+ * §`THROW_WINDOW_BEFORE_METRES` (20 m) ahead of it — a level's own window
+ * (#2931) is no wider, so it opens no sooner — two seconds earlier at
  * 12 m/s, and after the house before it has gone by: the round's houses are
  * at least `targets.ts` §`TARGET_SPACING_METRES` (50 m) apart, so it is the
  * next house. This project's own number.

@@ -39,6 +39,7 @@ import type { Billboard } from './billboards';
 import type { PlacedStand } from './gantry';
 import type { KitColour, RiderBody } from '@onyourleft/store';
 
+import type { FootwayPiece } from './footway-surfaces';
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { ParkDressingInView } from './park-dressing';
 import type { MappedBuildingsInView } from './mapped-buildings';
@@ -141,11 +142,20 @@ export interface RidingInputs {
 
 /** A crash being drawn on a rider — #2493. @see RiderMarker.crash */
 export interface RiderCrashLook {
-  /** Seconds since the crash, by the frames the loop ran. */
+  /**
+   * Where in the crash clip the body is, in the clip's own seconds
+   * (`delivery/crash-look.ts` §`crashClipSeconds`): the time since the crash
+   * until the rider starts back up, and the clip's rise played across the
+   * drawn one from there.
+   */
   readonly seconds: number;
   /** Which way they fall: the rider's right (`1`) or left (`-1`). */
   readonly side: 1 | -1;
-  /** How far into the crash pose they are: 0 on the bike, 1 on the ground. */
+  /**
+   * How far the BODY is blended toward the clip's pose: 0 the ride's, 1 the
+   * clip's (`delivery/crash-look.ts` §`crashBodyShare`). ⚠️ Not the roll's
+   * share, which {@link RiderMarker.lean} already carries.
+   */
   readonly share: number;
 }
 
@@ -480,6 +490,16 @@ export interface SceneFrame {
    * rung's `structureItems`: a street is one mesh, not items.
    */
   readonly streets: readonly VillageStreet[];
+  /**
+   * The corridor's mapped footways in view — #2972 (`footway-surfaces.ts`):
+   * each footway, cycleway, park path and flight of steps a ribbon on the
+   * ground, off the carriageway, the side roads, the water and a village's
+   * pavements (#1620), and a zebra where a mapped crossing crosses the road;
+   * the same objects every frame while the same are in reach, drawn by one
+   * mesh in the realistic world (`three-renderer.ts` §`FootwayBelt`). Empty
+   * with no corridor, which only the realistic world is given (ADR 0054 D-6).
+   */
+  readonly footways: readonly FootwayPiece[];
   /**
    * The people in view — #1541 (`people.ts`): on the village streets'
    * pavements and front paths and the corridor's mapped footways, never on

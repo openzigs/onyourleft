@@ -860,3 +860,6 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     ahead by more than the offer has left, it refuses the code as run out.
   `apps/web/src/camera/side-link-code.ts` §`e` and `side-link.ts`
   §`PhoneSideLink.waitForTabletRead` are the record. (#1110)
+- **2026-11-19** — D-4's consent sentence is superseded in part by
+  [ADR 0084](0084-a-scan-of-the-instances-code-is-agreed-to-in-place-by-a-narrower-agreement.md),
+  for a scan of the instance's code only; this ADR's own pairing scans are unchanged. (#2856)

@@ -223,7 +223,7 @@ describe('demo:bake carries the building fields — #1789, ADR 0056’s entry of
     });
     const { bundle, features } = await readRouteBundle(baked.bytes);
     expect(bundle.readerVersion).toBe(CORRIDOR_READER_VERSION);
-    expect(bundle.features.v).toBe(5);
+    expect(bundle.features.v).toBe(6);
 
     // In the packed bundle, as the file publishes them: short names, an enum
     // as the decoder's constant, a number as a number, and no `b` at all for

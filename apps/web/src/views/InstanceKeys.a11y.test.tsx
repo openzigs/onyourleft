@@ -22,6 +22,8 @@ import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
+import { buttonHierarchyViolations } from '../a11y/button-hierarchy';
+import { SCAN_CONSENT_STATEMENT } from '../camera/consent';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 import { CameraController } from '../camera/session';
 import { scriptedCamera } from '../camera/testing';
@@ -139,6 +141,8 @@ describe('the instance card’s scanner, open (#2785)', () => {
   async function openWithCamera(
     scripted: ReturnType<typeof scriptedInstance>,
     startLabel: string = CARD_SCAN_TEXT.start,
+    /** `false`: a device nobody agreed anything on, which the scan asks in place (#2856). */
+    agreed = true,
   ): Promise<ReturnType<typeof scriptedCamera>> {
     const camera = scriptedCamera();
     const controller = new CameraController({
@@ -146,7 +150,7 @@ describe('the instance card’s scanner, open (#2785)', () => {
       port: camera.port,
       schedule: () => () => undefined,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
+    if (agreed) controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     globalThis.location.hash = '#/settings/instance';
     mounted = await mount(
       <AppShell capabilities={NO_BLUETOOTH} instance={scripted.port} camera={controller} />,
@@ -193,6 +197,49 @@ describe('the instance card’s scanner, open (#2785)', () => {
       (each) => each.textContent === CARD_SCAN_TEXT.close,
     );
     expect(close?.classList.contains('oyl-button')).toBe(true);
+    const paste = queryAll<HTMLButtonElement>(document.body, 'button').find(
+      (each) => each.textContent === CONNECT_FLOW_TEXT.pasteInstead,
+    );
+    expect(paste, 'no paste link').toBeDefined();
+    expect(paste!.disabled || paste!.tabIndex < 0, 'paste left the tab order').toBe(false);
+  });
+
+  /** The scan's question (#2856): its two sentences, the yes they describe, and the no. */
+  function expectQuestion(where: string): void {
+    expect(document.body.textContent, where).toContain(SCAN_CONSENT_STATEMENT);
+    const [yes, no] = [CARD_SCAN_TEXT.agree, CARD_SCAN_TEXT.decline].map((name) =>
+      queryAll<HTMLButtonElement>(document.body, 'button').find(
+        (each) => each.textContent === name,
+      ),
+    );
+    expect(yes, `${where}: no yes`).toBeDefined();
+    expect(no, `${where}: no no`).toBeDefined();
+    for (const each of [yes!, no!]) {
+      expect(each.classList.contains('oyl-button'), where).toBe(true);
+      expect(each.disabled || each.tabIndex < 0, `${where}: left the tab order`).toBe(false);
+    }
+    // It replaced the button pressed, so the focus is on it and not on the page.
+    expect(document.activeElement, where).toBe(yes);
+    expect(buttonHierarchyViolations(document), where).toEqual([]);
+  }
+
+  it('passes the audit connected, with the scan’s question open beside the paste box (#2856)', async () => {
+    const camera = await openWithCamera(
+      scriptedInstance({ connected: true }),
+      CARD_SCAN_TEXT.start,
+      false,
+    );
+    expect(camera.calls).toEqual([]);
+    expectClean('Instance, connected, asked');
+    expectTargets('Instance, connected, asked');
+    expectQuestion('Instance, connected, asked');
+  });
+
+  it('passes the audit on the Connect flow, with the scan’s question open and paste still reachable (#2856)', async () => {
+    const camera = await openWithCamera(scriptedInstance(), CONNECT_FLOW_TEXT.scan, false);
+    expect(camera.calls).toEqual([]);
+    expectClean('Connect, asked');
+    expectQuestion('Connect, asked');
     const paste = queryAll<HTMLButtonElement>(document.body, 'button').find(
       (each) => each.textContent === CONNECT_FLOW_TEXT.pasteInstead,
     );

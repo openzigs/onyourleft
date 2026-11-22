@@ -63,7 +63,8 @@ import {
   VILLAGE_TREE,
 } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
-import { mixedTownFixture } from './footprint-fixtures-testing';
+import { footwaysFixture, mixedTownFixture } from './footprint-fixtures-testing';
+import { footwayTriangles } from './footway-surfaces';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
@@ -71,11 +72,18 @@ import { CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { GameView, RiderMarker, RidingInputs } from './port';
 import { readGlb } from './model-bytes-testing';
 import {
+  CRASH_CLIP_RISE_SECONDS,
+  CRASH_CLIP_SECONDS,
   CRASH_FALL_SECONDS,
   CRASH_RISE_AT_SECONDS,
+  CRASH_RISE_SECONDS,
   CRASH_SECONDS,
+  CRASH_THROWN_SECONDS,
+  crashBodyShare,
+  crashClipSeconds,
   crashShare,
 } from './delivery/crash-look';
+import { riderCrashPose } from '../../tools/realistic/rider-crash';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -2663,7 +2671,18 @@ describe('the realistic rider moves like a rider — #625', () => {
       expect(clip.times).toEqual(
         expect.arrayContaining([expect.closeTo(CRASH_RISE_AT_SECONDS, 6)]),
       );
-      expect(clip.times.at(-1)).toBeCloseTo(CRASH_SECONDS, 6);
+      // Its own end, on the rise it was made on; the drawn rise is longer
+      // (`crash-look.ts` §`crashClipSeconds`).
+      expect(clip.times.at(-1)).toBeCloseTo(CRASH_CLIP_SECONDS, 6);
+      // And `rider_crash.py`'s thrown moment is where `crash-look.ts` says it is.
+      expect(clip.times[1]).toBeCloseTo(CRASH_THROWN_SECONDS, 6);
+      expect(clip.times.at(-2)).toBeCloseTo(CRASH_RISE_AT_SECONDS + CRASH_CLIP_RISE_SECONDS / 2, 6);
+      // What the pipeline makes the clip on is what the file is on, so a
+      // re-run reproduces the committed clip and not one on the drawn rise.
+      const made = riderCrashPose();
+      expect(made.fall).toBeCloseTo(clip.times[2] ?? Number.NaN, 6);
+      expect(made.riseAt).toBeCloseTo(clip.times[3] ?? Number.NaN, 6);
+      expect(made.end).toBeCloseTo(clip.times.at(-1) ?? Number.NaN, 6);
       expect(clip.turns.size).toBe(24);
       expect(clip.rootAt).toHaveLength(clip.times.length * 3);
     });
@@ -2671,10 +2690,20 @@ describe('the realistic rider moves like a rider — #625', () => {
     it('draws the clip’s own pose when the rider is down: every bone the file’s, read back', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
-      // Landed, as the fall ends, and still down as the rise starts: share 1.
-      for (const seconds of [CRASH_FALL_SECONDS, CRASH_RISE_AT_SECONDS]) {
+      // Thrown, part of the way down; landed, as the fall ends; still down as
+      // the rise starts; and half way back up, at the CLIP's half-rise: the
+      // body is wholly the clip's at each (`crash-look.ts` §`crashBodyShare`).
+      const halfUp = CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS / 2;
+      for (const seconds of [
+        CRASH_THROWN_SECONDS,
+        CRASH_FALL_SECONDS,
+        CRASH_RISE_AT_SECONDS,
+        halfUp,
+      ]) {
         const { pose } = drawn(riders, crashMarker(seconds, 1));
-        const key = moment(seconds);
+        const key = moment(
+          seconds === halfUp ? CRASH_RISE_AT_SECONDS + CRASH_CLIP_RISE_SECONDS / 2 : seconds,
+        );
         let worst = 0;
         for (const [name, turns] of clip.turns) {
           worst = Math.max(
@@ -2686,7 +2715,7 @@ describe('the realistic rider moves like a rider — #625', () => {
       }
     });
 
-    it('blends from the ride to the clip by #2475’s share as it falls and rises: every bone part of the way', () => {
+    it('blends from the ride to the clip by the body’s own share as it falls and rises: every bone part of the way', () => {
       const riders = renderer.realisticRidersOfLoadedWorld();
       if (riders === undefined) throw new Error('no world');
       /** Spherical interpolation, the short way: three's `slerp`, written out. */
@@ -2699,12 +2728,15 @@ describe('the realistic rider moves like a rider — #625', () => {
         const [p, q] = [Math.sin((1 - t) * angle), Math.sin(t * angle)];
         return a.map((each, index) => (each * p + (to[index] ?? 0) * q) / Math.sin(angle));
       };
-      for (const seconds of [0.3, 1.35]) {
-        const share = crashShare(seconds, false) ?? Number.NaN;
-        expect(share, String(seconds)).toBeGreaterThan(0.3);
-        expect(share, String(seconds)).toBeLessThan(0.7);
-        const rolled = drawn(riders, crashMarker(seconds, 1, false)).pose;
-        const { pose } = drawn(riders, crashMarker(seconds, 1));
+      // Before it is thrown, and in the second half of the rise: the body's
+      // own share, at the clip's own time.
+      for (const drawnSeconds of [0.12, CRASH_RISE_AT_SECONDS + 0.75 * CRASH_RISE_SECONDS]) {
+        const share = crashBodyShare(drawnSeconds) ?? Number.NaN;
+        expect(share, String(drawnSeconds)).toBeGreaterThan(0.3);
+        expect(share, String(drawnSeconds)).toBeLessThan(0.7);
+        const rolled = drawn(riders, crashMarker(drawnSeconds, 1, false)).pose;
+        const { pose } = drawn(riders, crashMarker(drawnSeconds, 1));
+        const seconds = crashClipSeconds(drawnSeconds);
         const key = clip.times.findIndex((_, index) => seconds < (clip.times[index + 1] ?? 0));
         const along =
           (seconds - (clip.times[key] ?? 0)) /
@@ -2732,7 +2764,8 @@ describe('the realistic rider moves like a rider — #625', () => {
       for (const [name, seconds] of [
         ['fall', 0.3],
         ['down', 0.8],
-        ['rise', 1.35],
+        // Half way up: the clip's `rising` moment.
+        ['rise', CRASH_RISE_AT_SECONDS + CRASH_RISE_SECONDS / 2],
       ] as const) {
         const rolled = drawn(riders, crashMarker(seconds, 1, false)).ends;
         const played = apart(drawn(riders, crashMarker(seconds, 1)).ends, rolled);
@@ -4645,4 +4678,54 @@ describe('the litter and the chain-link, loaded by the product’s own loader �
       drawing.dispose();
     }
   }, 120_000);
+});
+
+describe('the footways, drawn by a view on the loaded world — #2972', () => {
+  /** The world loaded once, in a hook, for #1688's reason (see the feet on the pedals). */
+  let renderer: Renderer;
+  beforeAll(async () => {
+    const undoing = served();
+    try {
+      renderer = await loadedOn(TABLET);
+    } finally {
+      for (const each of undoing.reverse()) each();
+    }
+  });
+
+  it('draws the frame’s footways and zebra in the realistic world, in one mesh, and none in the stylised', async () => {
+    const town = footwaysFixture();
+    const land = landClassMask(town.corridor);
+    const start = atStartLine(town.profile);
+    // Built by the same module graph as the renderer `loadedOn` imported fresh.
+    const scene = await import('./scene');
+    const framed = (): ReturnType<typeof sceneFrame> =>
+      scene.sceneFrame({
+        profile: town.profile,
+        origin: town.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_250) } },
+        worldCorridor: town.corridor,
+        landClass: land,
+      });
+    const top = REALISTIC_LADDER[0];
+    if (top === undefined) throw new Error('no realistic rung');
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    undo.push(() => vi.unstubAllGlobals());
+    const realistic = renderer.threeGameRenderer.create(blindCanvas(), top);
+    const stylised = renderer.threeGameRenderer.create(blindCanvas(), qualitySettings(0));
+    try {
+      const frame = framed();
+      const triangles = footwayTriangles(frame.footways);
+      expect(triangles).toBeGreaterThan(100);
+      realistic.render(framed());
+      const mesh = renderer.footwayMeshOf(realistic);
+      expect(mesh?.visible).toBe(true);
+      expect((mesh?.geometry.index?.count ?? 0) / 3).toBe(triangles);
+      stylised.render(framed());
+      expect(renderer.footwayMeshOf(stylised)?.visible ?? false).toBe(false);
+    } finally {
+      stylised.destroy();
+      realistic.destroy();
+    }
+  });
 });

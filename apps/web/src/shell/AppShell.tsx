@@ -95,6 +95,7 @@ import type { LeaderboardPort } from '../instance/leaderboard-port';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
+import type { OpenWorldStartPort } from '../game/open-world/start-port';
 import type { WorkoutPort } from '../workouts/store-port';
 
 import { CameraIndicator } from '../camera/indicator';
@@ -183,6 +184,7 @@ const SegmentDetailView = lazyView(HISTORY_GROUP, (group) => group.SegmentDetail
 const RoutesView = lazyView(ROUTES_GROUP, (group) => group.RoutesView);
 const RouteBuilderView = lazyView(ROUTES_GROUP, (group) => group.RouteBuilderView);
 const RouteEditorView = lazyView(ROUTES_GROUP, (group) => group.RouteEditorView);
+const OpenWorldStartView = lazyView(RIDE_GROUP, (group) => group.OpenWorldStartView);
 const DevicesView = lazyView(MORE_GROUP, (group) => group.DevicesView);
 const TransferView = lazyView(MORE_GROUP, (group) => group.TransferView);
 const CameraView = lazyView(MORE_GROUP, (group) => group.CameraView);
@@ -514,6 +516,11 @@ export interface AppShellProps {
   /** Saved routes (#73), or `undefined` where this browser has no local store. */
   readonly routes?: RoutePort | undefined;
   /**
+   * Where an open-world ride starts (#2889): the rider's routes and rides,
+   * and the entry the start is handed to. `undefined` with no local store.
+   */
+  readonly openWorld?: OpenWorldStartPort | undefined;
+  /**
    * The routing engine the drawing canvas asks for roads (#70, #71).
    *
    * ⚠️ `undefined` everywhere today, and not by oversight: ADR 0010 D-4 chose
@@ -778,6 +785,15 @@ function viewFor(
           map={props.map}
           basemap={props.basemap}
           routes={props.routes}
+        />
+      );
+    case 'open-world':
+      return (
+        <OpenWorldStartView
+          port={props.openWorld}
+          // #2889: the route planner's map, with one pin on it.
+          map={props.map}
+          basemap={props.basemap}
         />
       );
     case 'route-editor':
