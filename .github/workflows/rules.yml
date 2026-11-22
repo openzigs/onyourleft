@@ -7,7 +7,7 @@
 # review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
 # what makes those statements true. Until it existed they were not.
 #
-# Since #1285 the work is done by jobs side by side -- the SHARDS, nine since
+# Since #1285 the work is done by jobs side by side -- the SHARDS, ten since
 # #3019 -- and one more, `rules`, that does nothing but fail unless every one
 # of them succeeded. `main` requires a status check whose context is exactly
 # "Repository rules", and that last job is the one that carries the name: a
@@ -19,6 +19,7 @@
 #   checks   the bare-clone script checks, format, lint, typecheck, the build,
 #            every checker and its suite, the instance image, the Capacitor
 #            and third-party-notices gates
+#   lint     `pnpm run lint` and its runner's suite, alone since #3019
 #   tests-1 to tests-3
 #            the Vitest suite, divided by Vitest project since #2154 and the
 #            `web` project by path since #3019: `web`'s `src/game/` in
@@ -87,7 +88,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # --- Shard 1 of 9: everything that is not Vitest and not a browser ------------
+  # --- Shard 1 of 10: everything that is not lint, Vitest or a browser ---------
   checks:
     name: Checks
     # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
@@ -122,7 +123,7 @@ jobs:
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
       #
-      # ⚠️ One step below, `Checks, concurrently`, runs twenty-six §4a commands
+      # ⚠️ One step below, `Checks, concurrently`, runs thirty-two §4a commands
       # AT ONCE through scripts/run-concurrently.sh (#651), and a reviewer who
       # remembers one step per command is reading the old file. Those commands
       # are single-threaded and none makes a timing assertion, so side by side
@@ -133,7 +134,7 @@ jobs:
       # by itself, fails the step if ANY command failed, and prints each failed
       # command's whole output again at the end. Its own suite runs first,
       # before anything is trusted to it: a runner that swallowed a failure
-      # would make that step twenty-six gates removed, and look green.
+      # would make that step thirty-two gates removed, and look green.
       - name: Concurrency runner tests
         run: bash scripts/run-concurrently.test.sh
 
@@ -223,12 +224,11 @@ jobs:
       #   there is nothing to install. The version is printed because the
       #   runner's is older than a typical developer's and the two can disagree.
       #
-      #   format:check, lint, typecheck -- docs/agents/commands.md §4a. Since
-      #   #2272 `lint` is scripts/lint.sh: one ESLint process per workspace
-      #   project, one after another, because one process for the whole tree
-      #   ran out of its 4 GB heap here. Each prints its peak heap beside its
-      #   limit. Its suite beside it: a file that falls between the processes,
-      #   or a failing process that is swallowed, is a gate removed.
+      #   format:check, typecheck -- docs/agents/commands.md §4a. ⚠️ NOT `lint`
+      #   since #3019, and a reviewer who remembers it here is reading the old
+      #   file: it was this step's long pole (392 s of a 446 s job on a Xeon
+      #   8573C), the job took up to 510 s of its 720 s stop on `main` on
+      #   2026-11-22, and it is the `lint` shard below now, with its suite.
       #
       #   check-a11y-suite.test.sh -- the accessibility checker (below) decides
       #   what counts as an accessibility test from paths and from
@@ -342,8 +342,6 @@ jobs:
           'check-doc-links tests' 'bash scripts/check-doc-links.test.sh'
           'shellcheck' 'shellcheck --version && shellcheck scripts/*.sh'
           'format:check' 'pnpm run format:check'
-          'lint' 'pnpm run lint'
-          'lint runner tests' 'bash scripts/lint.test.sh'
           'typecheck' 'pnpm run typecheck'
           'accessibility checker tests' 'bash scripts/check-a11y-suite.test.sh'
           'test split' 'pnpm run check:test-split'
@@ -420,7 +418,67 @@ jobs:
       - name: Third-party notices
         run: pnpm run check:notices
 
-  # --- Shards 2 to 4 of 9: everything that is Vitest, in three parts (#2154, #3019)
+  # --- Shard 2 of 10: lint, alone (#3019) -----------------------------------------
+  #
+  # ⚠️ A shard of its own since #3019, and a reviewer who remembers `lint` in
+  # `Checks, concurrently` is reading the old file. It was that step's long
+  # pole, sharing four CPUs with two dozen commands, and the `checks` job took
+  # 336 to 510 s of its 720 s stop on `main` and in the merge queue on
+  # 2026-11-22: inside the stop, but not the five minutes clear of it that
+  # nightly-split.test.ts holds. Since #2272 `lint` is scripts/lint.sh, one
+  # ESLint process per workspace project one after another, because one
+  # process for the whole tree ran out of its 4 GB heap; each prints its peak
+  # heap beside its limit. Its suite beside it: a file that falls between the
+  # processes, or a failing process that is swallowed, is a gate removed.
+  # docs/agents/ci.md section 4c "Three Vitest shards -- #3019" has the
+  # measurements.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    # @see the `checks` shard's stop.
+    timeout-minutes: 12
+    steps:
+      - name: Check out the repository
+        # Pinned to a full commit SHA, as in the `checks` shard, which has the
+        # provenance.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Each shard is its own runner, so each prints its own CPU: a shard's
+      # duration means nothing without it (#866, #864).
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      # The toolchain, exactly as in the `checks` shard: .nvmrc, pnpm from the
+      # `packageManager` field through corepack, and a frozen install with no
+      # dependency cache (3 to 5 s, #651).
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          npm install --global --ignore-scripts corepack@0.36.0
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The runner's suite first, as `Checks, concurrently` runs
+      # run-concurrently.sh's: a runner that swallowed a failure would make
+      # the lint after it green over nothing.
+      - name: Lint runner tests
+        run: bash scripts/lint.test.sh
+
+      - name: Lint
+        run: pnpm run lint
+
+  # --- Shards 3 to 5 of 10: everything that is Vitest, in three parts (#2154, #3019)
   #
   # The accessibility gate and the suite, alone on their runners. Not side by
   # side with anything else: Vitest keeps three of the four CPUs busy and has
@@ -679,7 +737,7 @@ jobs:
       - name: Tests
         run: pnpm run test:required:shard-3
 
-  # --- Shards 5 to 9 of 9: the browser gate (#63), in five parts (#1362, #1720, #2376)
+  # --- Shards 6 to 10 of 10: the browser gate (#63), in five parts (#1362, #1720, #2376)
   #
   # It buys the only assertions in the repository that a real engine makes:
   # that MapLibre initialises against the style we build, that `addProtocol`
@@ -1096,7 +1154,7 @@ jobs:
   # it reports a failure here as `success`.
   rules:
     name: Repository rules
-    needs: [checks, tests-1, tests-2, tests-3, browser-1, browser-2, browser-3, browser-4, browser-5]
+    needs: [checks, lint, tests-1, tests-2, tests-3, browser-1, browser-2, browser-3, browser-4, browser-5]
     if: always()
     runs-on: ubuntu-latest
     # A checkout and one bash script: seconds. Five minutes is a stop.
