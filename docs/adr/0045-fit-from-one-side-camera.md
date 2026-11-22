@@ -932,7 +932,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   until an angle's measured 95 % limits of agreement are within ±3° on the engine that produced it
   (#3027), and that angle is then rendered to 1°; **D-9** is reversed for this section: a published
   range measured while pedalling may stand beside the rider's reading of the same measure, in text,
-  never compared; **P5** admits one value, the knee's maximum extension; and **D-5**'s *"The model
+  never compared; **P5** admits one value, the knee's maximum extension, so D-1's rows for ADR 0030
+  D-3 and R1, D-8's sentence for each angle and D-12's record now count five angles where they say
+  four; and **D-5**'s *"The model
   stays in the worker"* now has the rider's instance (the default) and an opted-in hosted model on
   the rider's own key beside it. Markers stay excluded, now as a rule. D-0, the rest of D-2, D-6,
   D-7, D-8's lists, D-10 and D-12 stand. The body above is not edited. (#3034)

@@ -27,9 +27,14 @@
     nearest 5°"* (conditionally, D-2), **D-9** (a published range kept away from the rider's number,
     D-3 here), **D-2 rule P5** (an angle only at a named crank event, for one value: D-4 here), and
     **D-5**'s bullet *"The model stays in the worker"* (D-6 here); with them the parts of ADR 0045
-    D-1, D-8 and D-11 that restate those four, which D-1 lists
+    D-1, D-8 and D-11 that restate those four, which D-1 lists; and, for the fifth angle D-4 adds,
+    the rows of ADR 0045 **D-1** that supersede ADR 0030 D-3 and relax R1 *"for exactly the four
+    angles"*, **D-8**'s *"Each of the four angles has a sentence"* and **D-12**'s *"the four
+    angles"* in the record
   - [ADR 0030](0030-what-the-app-may-say-about-a-body.md) **D-6** and **R10**, for the Fit check
-    section only (D-3 here). **R5 and R6 stand**, and so does every other rule of ADR 0030
+    section only (D-3 here); and **D-3** and **R1**, for the knee's maximum extension only, on the
+    same terms ADR 0045 D-1 superseded them for its four angles (D-4 here). **R5 and R6 stand**, and
+    so does every other rule of ADR 0030
   - [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md) **D-1** (one path, for
     the side analysis only), **D-5**'s *"What the service is sent, in full"* (one fixed question)
     and **D-7** (two consents), to admit a fit check's pictures on the same path (D-7 here)
@@ -41,8 +46,9 @@
   **D-5**'s rule (BDC proven sampled) and its *"Cadence comes from the pose stream, never from a
   sensor"*, **D-6**, **D-7** (one surface), **D-8**'s caveat, R6 rules and word lists (*within*,
   *outside*, *above* and *below* included), **D-10** (the write-up), **D-12** (no picture stored)
-  and **D-13**; ADR 0030 **D-1** to **D-5**, **D-7**, **D-8** and **R1 to R9** as amended, **R5**
-  and **R6** in particular, and **D-4** (nothing frontal-plane); ADR 0050 **D-2** (sealed or not
+  and **D-13**; ADR 0030 **D-1**, **D-2**, **D-4**, **D-5**, **D-7**, **D-8** and **R2 to R9** as
+  amended, **R5** and **R6** in particular, and **D-4** (nothing frontal-plane), and ADR 0030 **D-3**
+  and **R1** for everything but the five fit angles; ADR 0050 **D-2** (sealed or not
   sent), **D-3**, **D-4** (never stored), **D-6**, **D-8** (stripping), **D-9** (the allowance and
   one at a time) and **D-10**; [ADR 0031](0031-model-licences-and-the-hosted-model-hole.md) **D-3**
   and **D-4** (D-8 here); [ADR 0033](0033-side-camera-link.md) **D-3** and **D-6**;
@@ -168,11 +174,13 @@ and how a fit check's pictures travel. **D-8** is OpenRouter. **D-9** restates w
 | ADR 0045 **D-9**, and the row of ADR 0045 **D-1** that keeps ADR 0030 R10 and D-6 | **Superseded** for the Fit check section (D-3): a published range, cited in the same sentence, may stand beside the rider's reading of the same measure, dynamic beside dynamic only, with no verdict |
 | ADR 0030 **D-6** and **R10** | **Superseded on the Fit check section only** (D-3). Everywhere else they stand as written, and D-6's refusal to use the healthcare-professional notification carve-out stands everywhere |
 | ADR 0045 **D-2, rule P5** | **Superseded for one value**: the knee's maximum extension over the stroke may be reported (D-4). Every other angle stays at a named event; no minimum, no range over the stroke (a maximum minus a minimum) and no flexibility, mobility or range-of-motion category, anywhere |
+| ADR 0030 **D-3** and **R1**, as ADR 0045 **D-1** relaxed them for *"exactly the four angles"* ADR 0045 D-3 defines | **Widened by one value** (D-4): the knee's maximum extension is a fifth angle that may be rendered as a standing value, on the same surface (ADR 0045 D-7), with D-8's caveat in the same sentence, as the four are. Everywhere else ADR 0030 D-3 and R1 stand as ADR 0045 D-1 left them, a limb angle, a segment length and a body dimension included |
+| ADR 0045 **D-8**'s *"Each of the four angles has a sentence"* and **D-12**'s *"the four angles"* in the record | **Read as five** (D-4): the maximum extension has a sentence of that shape and is stored as one more angle, with its count, spread and reason. Nothing else in D-8 or D-12 changes |
 | ADR 0045 **D-5**, *"The model stays in the worker"* | **Superseded in part**: a fit check's pose may also be found on the rider's instance, by a local model there (the default when the rider has one), or by a hosted model on the rider's own key, opted in (D-6). The tablet's own model stays available |
 | ADR 0045 **D-8**'s caveat, R6 rules and word lists | **Stand.** D-2 changes the error figure the caveat quotes once one is measured; the verdict and direction lists, *within*, *outside*, *above*, *below*, *high* and *low* included, bind every range sentence too (D-3) |
 | ADR 0045 **D-11**, item (ii)'s *"no range comparison"* and condition 5's *"no range comparison"* | **Restated by D-3**: a range stands beside a reading; no sentence compares them. Condition 6's acceptance stands, and D-3 records the regulatory reasons of ADR 0030 D-6 as a risk now taken (D-3, last bullet) |
 | ADR 0045 **D-13**, *"Something reads `worldLandmarks`, a height or a marker"* | **Stands, and is made a rule** for markers by D-5: no marker, ever |
-| ADR 0050 **D-1**, **D-5** (*"What the service is sent, in full"*) and **D-7** | **Widened** to a fit check's pictures on the same sealed path, under every one of ADR 0050's other rules, with a fit question of its own and a third switch of its own (D-7) |
+| ADR 0050 **D-1**, **D-5** (*"What the service is sent, in full"*) and **D-7** | **Widened** to a fit check's pictures on the same sealed path, under every one of ADR 0050's other rules, with a fit question of its own and two switches of its own, one for the instance and one under it for a hosted model (D-7) |
 | ADR 0031 **D-3** and **D-4** | **Stand** (D-8) |
 
 ### D-2 — Rounding: 5° until an angle is measured within ±3°, then 1° for that angle on that engine
@@ -267,6 +275,11 @@ and how a fit check's pictures travel. **D-8** is OpenRouter. **D-9** restates w
   joint) and no flexibility, mobility or range-of-motion category** is reported, by any angle, on any
   surface or in any write-up. #1065's key test on the output type gains the one field, and its
   mutation (adding a minimum, or a range field) still turns it red.
+- **ADR 0030 D-3 and R1 widen with it.** ADR 0045 D-1 superseded ADR 0030 D-3 and relaxed R1 *"for
+  exactly the four angles D-3 defines"*. This decision adds the maximum extension to that set, on
+  the same terms: rendered only on ADR 0045 D-7's surface, with the caveat in the same sentence.
+  ADR 0045 D-8's *"each of the four angles has a sentence"* and D-12's *"the four angles"* in the
+  record read as five. No other quantity becomes a standing value of the body (D-1).
 - **Why this is still not (e).** Spike 0020 §2.2: reporting a joint's extreme of motion *"is still not
   'assessing mobility' on the claim's words, because nothing is said about what the rider can
   reach"*; a range over the stroke, a category, or a comparison against what a body should manage
@@ -304,7 +317,10 @@ and how a fit check's pictures travel. **D-8** is OpenRouter. **D-9** restates w
 ### D-6 — Where a fit check's pose is found: the instance's own model by default, the tablet's, or a hosted one opted in
 
 - **On the rider's instance, by a local pose model**: the default for a rider with an instance, the
-  owner's *"The local pose model on the instance stays the default"*. Which model, and whether one
+  owner's *"The local pose model on the instance stays the default"*. ⚠️ *The author's reading*:
+  *"default"* is the engine chosen once pictures may go, not consent to send them. As ADR 0050 D-1
+  has it for the side analysis, nothing of a fit check is sent to the instance until the rider has
+  switched on the fit check's instance switch (D-7); until then the tablet's model runs. Which model, and whether one
   meets ADR 0045 D-0 and D-2 here, is #3033's measurement. A dedicated pose model (the owner's note
   names RTMPose-m) is committed or downloaded weights, so its licence is
   [ADR 0031](0031-model-licences-and-the-hosted-model-hole.md) D-2's question when it is chosen,
@@ -321,10 +337,10 @@ and how a fit check's pictures travel. **D-8** is OpenRouter. **D-9** restates w
   analysis's is.
 - **The record names the engine**, so D-2's rounding and a later reader can tell which produced it.
 
-### D-7 — A fit check's pictures on ADR 0050's path: sealed, never stored, on the rider's own key, behind a switch of their own
+### D-7 — A fit check's pictures on ADR 0050's path: sealed, never stored, on the rider's own key, behind switches of their own
 
-> **The rule.** A fit check's pictures may go to the rider's own instance, to be looked at there by
-> its local pose model or, when the rider has switched it on, sent on to a hosted model on the
+> **The rule.** A fit check's pictures may go to the rider's own instance, when the rider has
+> switched it on for a fit check, to be looked at there by its local pose model or, when the rider has switched it on, sent on to a hosted model on the
 > rider's own key, **under every rule of ADR 0050** except the three this decision widens.
 
 - **What stands, word for word**: sealed or not sent (ADR 0050 D-2), what the tunnel can see and the
@@ -337,9 +353,18 @@ and how a fit check's pictures travel. **D-8** is OpenRouter. **D-9** restates w
   fit check only. ADR 0050 D-5's *"one fixed question"* becomes one fixed question **per purpose**:
   the side analysis keeps `SIDE_POSE_QUESTION`, and a fit check sends a fit question of its own,
   a constant of this repository's source that asks for landmark points (D-6) and carries nothing of
-  the rider's. ADR 0050 D-7's two switches gain a **third** (below).
-- **Its own switch, off by default.** ⚠️ *The author's choice*: a hosted model for a fit check has
-  its own consent, separate from ADR 0050's hosted consent and the write-up's, given on the device
+  the rider's. ADR 0050 D-7's two switches gain **two of a fit check's own** (below).
+- **The instance leg has its own switch too, off by default.** ⚠️ *The author's choice*, for the
+  reason the next bullet gives for the hosted leg: ADR 0050 D-1 sends nothing until the rider
+  switches it on, and its first consent is worded for the side analysis, so it does not cover a fit
+  check. A fit check's pictures go to the instance only behind a consent of their own, beside its
+  own sentence on the device, stored and forgotten as ADR 0050 D-7 stores and forgets its first. It
+  says, in words the owner approves before merge, that pictures of the rider's body go to their
+  instance during each fit check and are not kept there.
+- **The hosted leg has its own switch, off by default.** ⚠️ *The author's choice*: a hosted model
+  for a fit check has its own consent, separate from ADR 0050's hosted consent and the write-up's.
+  It sits under the fit check's instance switch and is withdrawn with it, as ADR 0050 D-7's second
+  sits under its first. It is given on the device
   and stored there as ADR 0050 D-6 and D-7 store theirs, forgotten on *Erase this device* and on
   disconnecting. It names the service by the host of the rider's own key (ADR 0050 D-7) and says, in
   words the owner approves before merge, that **pictures of the rider's body at home go to that
@@ -406,7 +431,7 @@ As #3034 listed, and unchanged by any decision above:
 
 | Work | What it inherits |
 |---|---|
-| **An implementation issue: the privacy policy and the fit consent** (to file after merge) | D-7: the policy's section for a fit check's pictures, to the instance and, switched on, to the chosen service; the third switch, off by default; the consent's words, for the owner's approval before merge; their test against the policy, as `camera/instance-pose-policy.test.ts` holds ADR 0050's |
+| **An implementation issue: the privacy policy and the fit consent** (to file after merge) | D-7: the policy's section for a fit check's pictures, to the instance and, switched on, to the chosen service; the fit check's two switches, both off by default, the hosted one under the instance one; the consent's words, for the owner's approval before merge; their test against the policy, as `camera/instance-pose-policy.test.ts` holds ADR 0050's |
 | **An implementation issue: OpenRouter on the hosted picture path** (to file after merge) | D-8: the path proven against OpenRouter with the two models, a picture of nobody, recorded; no vendor name in the app |
 | [#3033](https://github.com/openzigs/onyourleft/issues/3033) | D-5: markerless arms only. D-6: points, not angles, from every engine. D-7: sizes and rates as ADR 0050 has them, or a later ADR |
 | [#3027](https://github.com/openzigs/onyourleft/issues/3027) | D-2: 95 % limits of agreement per angle and per engine, with the devices, build and date |
@@ -440,7 +465,7 @@ As #3034 listed, and unchanged by any decision above:
   *"within"*, *"outside"* or *"normal"*, or one colour that changes with the reading, would turn it
   into the diagnostic threshold the FDA guidance names. D-3's text-only rule and ADR 0045 D-8's lists
   are what stand between the two.
-- **Pictures of a rider's body at home may go to a company**, with the third switch on, under its
+- **Pictures of a rider's body at home may go to a company**, with the fit check's hosted switch on, under its
   terms, and neither the instance nor this project can delete them. ADR 0050 D-7's erase-screen
   line already says so for the side analysis, and the policy will say it for a fit check.
 - **No marker means the best published agreement is out of reach.** ±3° may not be reached

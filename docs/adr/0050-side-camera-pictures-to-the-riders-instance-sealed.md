@@ -575,7 +575,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
 - **2026-11-22** — **D-1, D-5's "What the service is sent, in full" and D-7 are widened by
   [ADR 0095](0095-what-a-fit-grade-side-camera-may-report-and-use.md)** D-7, on the owner's answer
   to Q4 of [#3034](https://github.com/openzigs/onyourleft/issues/3034) that day: a fit check's
-  pictures may go on this path, to the instance's local model or, behind a third switch of their
-  own, off by default, to a hosted model on the rider's own key, with a fit question of their own.
+  pictures may go on this path, behind two switches of their own, both off by default: one to the
+  instance's local model, which ADR 0050's first consent does not cover, and one under it to a
+  hosted model on the rider's own key, with a fit question of their own.
   D-2, D-3, D-4, D-6, D-8, D-9 (one at a time, the allowance not raised) and D-10 stand, and ADR
   0031 D-4 stands: the app names no vendor (ADR 0095 D-8). The body above is not edited. (#3034)
