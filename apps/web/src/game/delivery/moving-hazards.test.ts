@@ -166,16 +166,23 @@ function ride(
   return { warnedAt, crashedAt };
 }
 
-/** One hazard alone, ridden from out of its sight to past it. */
+/**
+ * One hazard alone, ridden from out of its sight to past it: whether the rider
+ * touches it. #3036: `ride`'s loop, stepped through `stepObstacles` as the
+ * simulation steps it, but it says no warnings, which this answer never read,
+ * and stops at the first touch, after which the answer cannot change.
+ */
 function rideAlone(hazard: Obstacle, speed: number, lateral: number): boolean {
-  const { crashedAt } = ride(
-    [hazard],
-    speed,
-    lateral,
-    hazard.along - MOVING_HAZARD_SIGHT_METRES - 1,
-    hazard.along + 5,
-  );
-  return crashedAt.size > 0;
+  const obstacles = [hazard];
+  let state = startObstacles(obstacles);
+  const to = hazard.along + 5;
+  for (let along = hazard.along - MOVING_HAZARD_SIGHT_METRES - 1; along < to;) {
+    along += speed * DELIVERY_TICK_SECONDS;
+    const step = stepObstacles(state, { rider: { along, lateral, speed }, obstacles });
+    if (step.crashes.length > 0) return true;
+    state = step.state;
+  }
+  return false;
 }
 
 describe('the moving hazards are placed on a level — #2364', () => {
@@ -229,12 +236,16 @@ describe('every moving hazard is avoidable — #2364, ADR 0065 D-10.8', () => {
     const hit = new Set<ObstacleKind>();
     for (const hazard of PLACEMENTS.flat().filter(isMoving)) {
       for (const speed of SPEEDS) {
-        const crashes = LANE_OFFSETS_METRES.map((lane) => rideAlone(hazard, speed, lane));
-        expect(
-          crashes.includes(false),
-          `a ${hazard.kind} leaves no clear lane at ${String(speed)} m/s`,
-        ).toBe(true);
-        if (crashes.includes(true)) hit.add(hazard.kind);
+        // #3036: the lanes in order, up to the first clear one, which is all
+        // the clear-lane answer needs; every lane while this kind has not yet
+        // been seen to meet a lane, so the hit set below reads what it read.
+        let clear = false;
+        for (const lane of LANE_OFFSETS_METRES) {
+          if (rideAlone(hazard, speed, lane)) hit.add(hazard.kind);
+          else clear = true;
+          if (clear && hit.has(hazard.kind)) break;
+        }
+        expect(clear, `a ${hazard.kind} leaves no clear lane at ${String(speed)} m/s`).toBe(true);
       }
     }
     // Each kind is a hazard: somewhere, at some speed, a lane meets it.
