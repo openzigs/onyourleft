@@ -4,7 +4,8 @@
 /**
  * #2982 through the real game screen: an open-world ride ridden **past its
  * first view**, on hilly synthetic streets, with a trainer that takes the
- * road's grade. Everything is read back from what a consumer was handed —
+ * road's grade, and the path it is drawn along eased across each new view
+ * (#2989). Everything is read back from what a consumer was handed —
  * the profile and distances `sceneFrame` was given each frame, and the grades
  * the trainer was asked for — never from the road itself.
  *
@@ -40,6 +41,7 @@ import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
+import { drawnLine } from '../drawn-line';
 import { GameView, type GamePort, type RidableRoute } from '../GameView';
 import type { GameRenderer } from '../port';
 import type { SceneInput } from '../scene';
@@ -277,6 +279,21 @@ describe('an open-world ride past its first view — #2982', () => {
         ),
       ).toBeLessThan(15);
     }
+    // #2989: the scene was handed the road's drawn path on every frame, on
+    // that frame's own view; and on each new view's first frame a path eased
+    // in from the one drawn before, not the new view's own line, so the
+    // change moves neither the drawn rider nor the camera.
+    for (const input of inputs) {
+      expect(input.drawnPath?.profile).toBe(input.profile);
+    }
+    let changes = 0;
+    for (let index = 1; index < inputs.length; index += 1) {
+      const input = inputs[index] as SceneInput;
+      if (input.profile === (inputs[index - 1] as SceneInput).profile) continue;
+      changes += 1;
+      expect(input.drawnPath, `frame ${index}`).not.toBe(drawnLine(input.profile));
+    }
+    expect(changes).toBeGreaterThanOrEqual(2);
     // The simulation's grade is the view's at the rider: the hill the physics
     // rode is the hill drawn.
     for (const input of inputs) {

@@ -1,0 +1,94 @@
+{
+  "need": 400,
+  "leadUsedByThePage": 200,
+  "readMsMax": 2170.5,
+  "planLatencyMsMax": 2581.4,
+  "tilesPerHour": {
+    "random, block 1, 30 km/h": {
+      "min": 21,
+      "median": 33,
+      "max": 46
+    },
+    "random, block 1, 40 km/h": {
+      "min": 25,
+      "median": 42,
+      "max": 54
+    },
+    "random, block 2, 30 km/h": {
+      "min": 32,
+      "median": 52,
+      "max": 68
+    },
+    "random, block 2, 40 km/h": {
+      "min": 36,
+      "median": 60,
+      "max": 76
+    },
+    "random, block 4, 30 km/h": {
+      "min": 64,
+      "median": 96,
+      "max": 128
+    },
+    "random, block 4, 40 km/h": {
+      "min": 64,
+      "median": 96,
+      "max": 144
+    },
+    "staircase, block 1, 30 km/h": {
+      "min": 77,
+      "median": 83,
+      "max": 88
+    },
+    "staircase, block 1, 40 km/h": {
+      "min": 102,
+      "median": 109,
+      "max": 114
+    },
+    "staircase, block 2, 30 km/h": {
+      "min": 104,
+      "median": 116,
+      "max": 124
+    },
+    "staircase, block 2, 40 km/h": {
+      "min": 140,
+      "median": 152,
+      "max": 164
+    },
+    "staircase, block 4, 30 km/h": {
+      "min": 144,
+      "median": 160,
+      "max": 192
+    },
+    "staircase, block 4, 40 km/h": {
+      "min": 192,
+      "median": 208,
+      "max": 240
+    }
+  },
+  "leadAt40kmh": {
+    "as measured on this machine, block 1": {
+      "readyAfterMs": 4752,
+      "leadMetresMax": 60
+    },
+    "as measured on this machine, block 2": {
+      "readyAfterMs": 4752,
+      "leadMetresMax": 60
+    },
+    "at 3x this machine, block 1": {
+      "readyAfterMs": 14256,
+      "leadMetresMax": 170
+    },
+    "at 3x this machine, block 2": {
+      "readyAfterMs": 14256,
+      "leadMetresMax": 170
+    },
+    "at 5x this machine, block 1": {
+      "readyAfterMs": 23760,
+      "leadMetresMax": 270
+    },
+    "at 5x this machine, block 2": {
+      "readyAfterMs": 23760,
+      "leadMetresMax": 270
+    }
+  }
+}

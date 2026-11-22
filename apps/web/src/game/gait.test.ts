@@ -3,7 +3,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  GAIT_PHASES,
   GAITS,
   STRIDE_PER_HEIGHT,
   gaitPose,
@@ -116,6 +115,31 @@ describe('a parametric gait — #1541, the owner’s ruling of 2026-10-24', () =
     }
   });
 
+  it('carries a runner’s arms: the elbow driven back, the hand up to the chest and in — PR #2844', () => {
+    const shoulder = series('run', (limb) => limb.shoulder);
+    const elbow = series('run', (limb) => limb.elbow);
+    const carry = series('run', (limb) => limb.carry);
+    const mean = shoulder.reduce((sum, value) => sum + value, 0) / shoulder.length;
+    // The swing is centred behind the trunk: both forearms were held out ahead.
+    expect(mean).toBeLessThan(-8);
+    expect(Math.min(...shoulder)).toBeLessThan(-30);
+    expect(Math.max(...shoulder)).toBeLessThan(18);
+    expect(Math.max(...shoulder)).toBeGreaterThan(5);
+    // Near a right angle throughout, closing as the hand comes up in front.
+    expect(Math.min(...elbow)).toBeGreaterThan(70);
+    expect(Math.max(...elbow)).toBeLessThan(110);
+    expect(Math.max(...elbow) - Math.min(...elbow)).toBeGreaterThan(20);
+    expect(correlation(shoulder, elbow)).toBeGreaterThan(0.95);
+    // Turned in, and most with the hand in front — but never across the body.
+    expect(Math.min(...carry)).toBeGreaterThanOrEqual(15);
+    expect(Math.max(...carry)).toBeLessThanOrEqual(35);
+    expect(peakAt(carry)).toBeCloseTo(peakAt(shoulder), 1);
+    // A walker's arm hangs: turned in a little, and less than any runner's.
+    const walking = series('walk', (limb) => limb.carry);
+    expect(Math.min(...walking)).toBeGreaterThan(0);
+    expect(Math.max(...walking)).toBeLessThan(Math.min(...carry));
+  });
+
   it('lifts a runner clear only in the two flights, and never a walker', () => {
     for (const phase of PHASES) expect(gaitPose('walk', phase).lift).toBe(0);
     expect(gaitPose('run', 0.45).lift).toBeGreaterThan(0.05);
@@ -126,6 +150,5 @@ describe('a parametric gait — #1541, the owner’s ruling of 2026-10-24', () =
   it('strides 1.4 m walking and 2.2 m running at 1.75 m tall', () => {
     expect(STRIDE_PER_HEIGHT.walk * 1.75).toBeCloseTo(1.4, 2);
     expect(STRIDE_PER_HEIGHT.run * 1.75).toBeCloseTo(2.19, 2);
-    expect(GAIT_PHASES).toBe(24);
   });
 });

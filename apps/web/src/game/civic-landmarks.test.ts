@@ -488,6 +488,8 @@ describe('#1795: the lever, and a town with no town hall', () => {
       town.origin,
       undefined,
       urbanClassMap(town.corridor, land, town.profile),
+      // Since #2848 the shops' aprons are off: the plans before #1795 had none.
+      { shopAprons: false },
     );
     expect(planFingerprint(plans)).toBe(MIXED_TOWN_BEFORE_1795);
   });

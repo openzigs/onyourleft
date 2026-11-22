@@ -846,12 +846,14 @@ describe('the archetypes’ variants and the lever — #1785', () => {
 
   it('plans every footprint as `origin/main` did with `-roof-variants`, and chooses no variant', () => {
     for (const name of ['mixed', 'houses'] as const) {
-      // Since #1786 its dormers are off too: `main` had neither.
+      // Since #1786 its dormers are off too: `main` had neither. Nor, since #2848, the
+      // shops' aprons.
       const off = planned(towns[name], {
         roofVariants: false,
         dormerVariants: false,
         archetypePorches: false,
         commercialArchetypes: false,
+        shopAprons: false,
       });
       expect(off.every((plan) => plan.roofVariant === 'plain')).toBe(true);
       expect(planFingerprint(off)).toBe(MAIN_FINGERPRINTS[name]);

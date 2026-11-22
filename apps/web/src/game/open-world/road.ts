@@ -50,6 +50,16 @@
  * grade the rider can have been sent, so its view is handed on as an extension
  * is.
  *
+ * ## What a change means for the drawn path
+ *
+ * Every view's line is solved over the whole view, so a new view's line can
+ * differ from the last one's near the rider: by 0.74 m at the camera's target
+ * for a junction choice made just before the lock. {@link OpenWorldRoad.drawnPath}
+ * eases a new view's line in from the path last drawn over the next
+ * `line-ease.ts` §`LINE_EASE_METRES` ridden, so a choice moves neither the
+ * drawn rider nor the camera on the frame it is made (ADR 0089 C-6, #2989). A
+ * U-turn's line is drawn at once: the road under the rider changed.
+ *
  * Nothing here reads a clock, writes to a trainer or names a place: the
  * position goes to the reader, which keeps only its block (ADR 0090 R-1).
  */
@@ -62,7 +72,9 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { drawnLine, type DrawnLine } from '../drawn-line';
 import type { GameState } from '../simulation';
+import { easeWeight, easedLine, heldLine, type HeldLine } from './line-ease';
 
 /**
  * How little road may be held ahead of the rider before the route is advanced:
@@ -126,6 +138,10 @@ export class OpenWorldRoad {
   #view: OpenWorldRoadView;
   #uTurns: number;
   #graphVersion: number | undefined;
+  /** The path last handed out by {@link drawnPath}, on {@link view}: what the screen drew. */
+  #drawn: DrawnLine | undefined;
+  /** The path being eased from, and the ride distance the ease began at. @see drawnPath */
+  #easing: { readonly from: HeldLine; readonly at: number } | undefined;
 
   constructor(route: RollingRoute, hooks: OpenWorldRoadHooks = {}) {
     this.route = route;
@@ -165,7 +181,34 @@ export class OpenWorldRoad {
     if (profile === this.#view.profile) return undefined;
     const turned = route.uTurns !== this.#uTurns;
     this.#uTurns = route.uTurns;
+    // #2989: the new view's line is eased in from the path last drawn, from
+    // here; after a U-turn that path is on a road the rider has left.
+    const drawn = this.#drawn;
+    this.#easing =
+      turned || drawn === undefined || !Number.isFinite(rider)
+        ? undefined
+        : { from: heldLine(drawn, this.#view.origin), at: rider };
+    this.#drawn = undefined;
     this.#view = { profile, origin: route.origin, turned };
     return this.#view;
+  }
+
+  /**
+   * The path the riders are drawn along and the camera follows on
+   * {@link view}, for a rider drawn at ride distance `rider` — #2989: the
+   * view's own line (`drawn-line.ts` §`drawnLine`), or, for
+   * `line-ease.ts` §`LINE_EASE_METRES` ridden after a view changed, that line
+   * eased in from the path drawn before the change. `GameView` hands it to
+   * the scene (`scene.ts` §`SceneInput.drawnPath`).
+   */
+  drawnPath(rider: number): DrawnLine {
+    const view = this.#view;
+    const line = drawnLine(view.profile);
+    const easing = this.#easing;
+    const weight = easing === undefined ? 1 : easeWeight(rider - easing.at);
+    if (easing !== undefined && !(weight < 1)) this.#easing = undefined;
+    const drawn = easing === undefined ? line : easedLine(easing.from, line, view.origin, weight);
+    this.#drawn = drawn;
+    return drawn;
   }
 }

@@ -19,7 +19,7 @@ import {
   SIDE_ANALYSER_STORAGE_KEY,
 } from '../camera/side-analyser';
 import type { FrameKeep } from '../camera/keep';
-import { frameLeaksIn } from '../camera/notice';
+import { CAMERA_NOTICES, CAMERA_OFF_AFTER_A_SCAN, frameLeaksIn } from '../camera/notice';
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 import {
@@ -182,6 +182,26 @@ describe('the consent flow', () => {
     // the port has not been touched.
     expect(button('Turn the camera on')).toBeUndefined();
     expect(camera.calls).toStrictEqual([]);
+  });
+
+  it('still asks for its own agreement, and says what the camera was on for, after a scan agreed to in place — #2856', async () => {
+    // The Connect screen's scan asks a narrower agreement of its own
+    // (`CardScanner.tsx`). This screen finds the device as it would have:
+    // not agreed, nothing to turn on — and no longer told "never been on".
+    const camera = scriptedCamera();
+    const controller = controllerFor(camera);
+    controller.agreeToScan();
+    await controller.turnOn('environment', 'scan');
+    controller.turnOff();
+    const before = camera.calls.length;
+
+    mounted = await mount(<CameraView controller={controller} />);
+    expect(document.body.textContent).toContain(BYSTANDER_SENTENCE);
+    expect(button('Allow the camera')).toBeDefined();
+    expect(button('Turn the camera on')).toBeUndefined();
+    expect(document.body.textContent).toContain(CAMERA_OFF_AFTER_A_SCAN.explanation);
+    expect(document.body.textContent).not.toContain(CAMERA_NOTICES['no-consent'].explanation);
+    expect(camera.calls).toHaveLength(before);
   });
 
   it('refuses until the rider has acknowledged it', async () => {

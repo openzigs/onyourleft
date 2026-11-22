@@ -437,6 +437,8 @@ export interface CarNodeFacts {
   readonly mesh: number;
   /** Its mesh's triangles in the node's own frame, unindexed, as {@link roadsideFacts} reads them. */
   readonly geometry: RoadsideFacts;
+  /** Its `TEXCOORD_0`, unindexed, two floats a vertex, glTF's `v` down — #2847; empty where it has none. */
+  readonly uv: Float32Array;
 }
 
 /** The committed car: every node, and what the file declares besides — #2540. */
@@ -491,6 +493,7 @@ export function deliveryCarFacts(path: string): DeliveryCarFacts {
     const positions = of('POSITION');
     const normals = of('NORMAL');
     const colours = of('COLOR_0');
+    const coordinates = of('TEXCOORD_0');
     const order =
       primitive.indices === undefined
         ? Array.from({ length: positions.values.length / 3 }, (_, at) => at)
@@ -498,7 +501,12 @@ export function deliveryCarFacts(path: string): DeliveryCarFacts {
     const position = new Float32Array(order.length * 3);
     const normal = new Float32Array(order.length * 3);
     const colour = new Float32Array(colours.size === 0 ? 0 : order.length * 3);
+    const uv = new Float32Array(coordinates.size === 0 ? 0 : order.length * 2);
     order.forEach((vertex, at) => {
+      if (coordinates.size !== 0) {
+        uv[at * 2] = coordinates.values[vertex * 2] as number;
+        uv[at * 2 + 1] = coordinates.values[vertex * 2 + 1] as number;
+      }
       for (let axis = 0; axis < 3; axis += 1) {
         position[at * 3 + axis] = positions.values[vertex * 3 + axis] as number;
         normal[at * 3 + axis] = normals.values[vertex * 3 + axis] as number;
@@ -514,6 +522,7 @@ export function deliveryCarFacts(path: string): DeliveryCarFacts {
       translation: [tx, ty, tz],
       rotation: [rx, ry, rz, rw],
       mesh: node.mesh ?? -1,
+      uv,
       geometry: {
         position,
         normal,

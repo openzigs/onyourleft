@@ -6,10 +6,13 @@
  *
  * Three ways, each producing the same start (`game/open-world/start.ts`):
  *
- * - **A pin on the map.** A tap drops it and a drag moves it, on the route
- *   planner's map (`map/MapPanel.tsx` §`editing`). The keyboard's way is the
- *   buttons: *Put the pin at the map's centre*, then four nudges of about
- *   55 m each (WCAG 2.2 SC 2.1.1 and 2.5.7).
+ * - **A pin on the map.** A tap drops it and a drag moves it, on a map moved
+ *   by hand (`map/MapPanel.tsx` §`editing.direct`, the owner's ruling of
+ *   2026-11-20): the wheel, a pinch, a drag, and arrow keys and `+`/`-` on
+ *   the focused map. The keyboard's way to the pin is the map's *Put the pin
+ *   at the map's centre* button, then the arrow keys on the focused pin, a
+ *   nudge of about 55 m each (WCAG 2.2 SC 2.1.1 and 2.5.7). Each drop and
+ *   move is said in a polite live region, by direction and never by place.
  * - **A saved route's start**, its first point.
  * - **A past ride's start**, its first recorded position, read only when the
  *   ride is chosen. The list is the rider's own (`start-port.ts`).
@@ -36,6 +39,7 @@ import type { GeographicPosition, UnixSeconds } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
+import { VisuallyHidden } from '../design/VisuallyHidden';
 import { formatStartedAt } from '../format';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
 import type {
@@ -47,11 +51,11 @@ import {
   describeStartRefusal,
   nudgePin,
   openWorldStart,
+  startCoverage,
   type OpenWorldStartOutcome,
-  type PinNudge,
 } from '../game/open-world/start';
 import type { BasemapConfig } from '../map/basemap';
-import { MapPanel } from '../map/MapPanel';
+import { MapPanel, type MapDirect } from '../map/MapPanel';
 import { useOnline } from '../map/online';
 import type { MapPointerHandlers, MapPort, MapView, MapWaypoint } from '../map/port';
 import { readMapTilesChoice } from '../map/tiles-preference';
@@ -75,8 +79,19 @@ export const START_NEEDS_TILES_TEXT =
   'An open-world ride reads the map as you ride, and map tiles are off in Settings. Turn them on ' +
   'to start one.';
 
+/** What the pin's section says when this browser has no map to drop it on (#2985). */
+export const START_NO_MAP_TEXT =
+  'There is no map in this browser to drop a pin on. Start from a saved route or a past ride.';
+
+/** What the screen says when a past ride's start could not be read from the device (#2985). */
+export const START_RIDE_UNREAD_TEXT =
+  'That ride could not be read on this device. Choose it again, or start from the pin or a saved route.';
+
 /** The pin's marker, as the map draws it. */
 const PIN_ID = 'open-world-pin';
+
+/** The pin's accessible name, on the map where it takes focus. */
+export const PIN_NAME = 'The start pin';
 
 /** Which start the rider chose, and what it came to. */
 type Chosen =
@@ -92,7 +107,8 @@ type Chosen =
       readonly source: 'ride';
       readonly id: string;
       readonly name: string;
-      readonly outcome: OpenWorldStartOutcome | 'reading';
+      /** `unread`: the store refused the read (#2985), which is not a ride with no position. */
+      readonly outcome: OpenWorldStartOutcome | 'reading' | 'unread';
     };
 
 type MapEngine =
@@ -104,8 +120,6 @@ type Listed<T> =
   | { readonly kind: 'reading' }
   | { readonly kind: 'read'; readonly items: T }
   | { readonly kind: 'failed' };
-
-const NUDGES: readonly PinNudge[] = ['north', 'south', 'east', 'west'];
 
 function rideLabel(ride: RideStartChoice): string {
   return `${ride.name}, ${formatStartedAt(ride.startedAt as UnixSeconds, ride.timeZone)}`;
@@ -133,6 +147,8 @@ export function OpenWorldStartView({
 }: OpenWorldStartViewProps): JSX.Element {
   const [engine, setEngine] = useState<MapEngine>({ kind: 'loading' });
   const [tiles] = useState(() => readMapTilesChoice(preferences ?? deviceStorage()));
+  /** Where a pin may stand: the build's own archive's coverage (#2985). */
+  const coverage = useMemo(() => startCoverage(basemap), [basemap]);
   const online = useOnline();
   const [pin, setPin] = useState<GeographicPosition | undefined>(undefined);
   const [chosen, setChosen] = useState<Chosen>({ source: 'none' });
@@ -142,6 +158,14 @@ export function OpenWorldStartView({
   const [mapView, setMapView] = useState<MapView | undefined>(undefined);
   /** The ride whose start is being read, so a slower earlier read cannot overwrite a later choice. */
   const reading = useRef<string | undefined>(undefined);
+  /**
+   * What the live region last said about the pin, and a count so the same
+   * words said twice are a new node and are heard twice.
+   */
+  const [said, setSaid] = useState<{ readonly words: string; readonly count: number }>({
+    words: '',
+    count: 0,
+  });
 
   useEffect(() => {
     if (map === undefined) return undefined;
@@ -183,25 +207,70 @@ export function OpenWorldStartView({
     };
   }, [port]);
 
-  const placePin = useCallback((position: GeographicPosition) => {
-    reading.current = undefined;
-    setPin(position);
-    setChosen({ source: 'pin', outcome: openWorldStart(position, 'pin') });
-  }, []);
+  const placePin = useCallback(
+    (position: GeographicPosition, words: string) => {
+      reading.current = undefined;
+      setPin(position);
+      setChosen({ source: 'pin', outcome: openWorldStart(position, 'pin', coverage) });
+      setSaid((last) => ({ words, count: last.count + 1 }));
+    },
+    [coverage],
+  );
+
+  const outcome = chosen.source === 'none' ? undefined : chosen.outcome;
+  const start = typeof outcome === 'object' && outcome.kind === 'start' ? outcome.start : undefined;
+  /** Where the pin stands: the dropped pin, or the chosen route's or ride's start. */
+  const pinAt =
+    chosen.source === 'none' || chosen.source === 'pin' ? pin : (start?.position ?? undefined);
 
   const pointer: MapPointerHandlers = {
-    tap: placePin,
+    tap: (position) => {
+      placePin(position, 'Pin dropped.');
+    },
     moveWaypoint: (_id, position) => {
-      placePin(position);
+      placePin(position, 'Pin moved.');
     },
     // There is no line to pull on this map.
     dragLine: () => undefined,
+    nudgeWaypoint: (_id, direction) => {
+      if (pinAt !== undefined) placePin(nudgePin(pinAt, direction), `Pin moved ${direction}.`);
+    },
   };
   const markers = useMemo(
     (): readonly MapWaypoint[] =>
-      pin === undefined ? [] : [{ id: PIN_ID, position: pin, label: 'S' }],
-    [pin],
+      pinAt === undefined ? [] : [{ id: PIN_ID, position: pinAt, label: PIN_NAME, kind: 'pin' }],
+    [pinAt],
   );
+  const direct = useMemo(
+    (): MapDirect => ({
+      actions: [
+        {
+          label: 'Put the pin at the map’s centre',
+          icon: 'pin',
+          act: (view) => {
+            placePin(view.centre(), 'Pin put at the map’s centre.');
+          },
+        },
+        {
+          label: 'Recentre the map',
+          icon: 'recentre',
+          act: (view) => {
+            if (pinAt === undefined) {
+              view.fitTrack();
+            } else {
+              view.show(pinAt);
+            }
+          },
+        },
+      ],
+    }),
+    [placePin, pinAt],
+  );
+  // A chosen route's or ride's start is flown to, so the rider sees where it is.
+  const shownStart = chosen.source === 'route' || chosen.source === 'ride' ? start : undefined;
+  useEffect(() => {
+    if (shownStart !== undefined) mapView?.show(shownStart.position);
+  }, [shownStart, mapView]);
   const onView = useCallback((view: MapView | undefined) => {
     setMapView(view);
   }, []);
@@ -218,22 +287,12 @@ export function OpenWorldStartView({
       },
       () => {
         if (reading.current === ride.id) {
-          setChosen({
-            source: 'ride',
-            id: ride.id,
-            name: ride.name,
-            outcome: { kind: 'refused', refusal: 'no-position' },
-          });
+          setChosen({ source: 'ride', id: ride.id, name: ride.name, outcome: 'unread' });
         }
       },
     );
   };
 
-  const outcome = chosen.source === 'none' ? undefined : chosen.outcome;
-  const start =
-    outcome !== undefined && outcome !== 'reading' && outcome.kind === 'start'
-      ? outcome.start
-      : undefined;
   const words = chosenWords(chosen);
   const source = chosen.source === 'none' ? 'pin' : chosen.source;
 
@@ -241,7 +300,9 @@ export function OpenWorldStartView({
     <>
       <section aria-labelledby="oyl-open-world-pin">
         <h2 id="oyl-open-world-pin">Drop a pin</h2>
-        {map === undefined ? null : engine.kind === 'failed' ? (
+        {map === undefined ? (
+          <p className="oyl-muted">{START_NO_MAP_TEXT}</p>
+        ) : engine.kind === 'failed' ? (
           <p className="oyl-muted">
             The map could not be loaded on this device. Start from a saved route or a past ride.
           </p>
@@ -257,42 +318,20 @@ export function OpenWorldStartView({
               track={undefined}
               subject="start"
               offline={!online}
-              editing={{ waypoints: markers, pointer, emptyView: EMPTY_PLANNER_VIEW, onView }}
+              editing={{
+                waypoints: markers,
+                pointer,
+                emptyView: EMPTY_PLANNER_VIEW,
+                onView,
+                direct,
+              }}
             />
           </>
         )}
-        {/*
-          The keyboard's way to every gesture: drop the pin where the map is
-          looking, then nudge it. A control that cannot act is absent, not
-          disabled (`design/Button.tsx`).
-        */}
-        {mapView === undefined && pin === undefined ? null : (
-          <div className="oyl-map__moves" role="group" aria-label="Place the pin">
-            {mapView === undefined ? null : (
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  placePin(mapView.centre());
-                }}
-              >
-                Put the pin at the map’s centre
-              </Button>
-            )}
-            {pin === undefined
-              ? null
-              : NUDGES.map((direction) => (
-                  <Button
-                    key={direction}
-                    variant="secondary"
-                    onClick={() => {
-                      placePin(nudgePin(pin, direction));
-                    }}
-                  >
-                    {`Move the pin ${direction}`}
-                  </Button>
-                ))}
-          </div>
-        )}
+        {/* Each drop and move of the pin, said by direction and never by place (ADR 0004 D). */}
+        <div role="status">
+          {said.count === 0 ? null : <VisuallyHidden key={said.count}>{said.words}</VisuallyHidden>}
+        </div>
       </section>
 
       <section aria-labelledby="oyl-open-world-route">
@@ -366,6 +405,10 @@ export function OpenWorldStartView({
             <p>Choose a start: a pin, a saved route or a past ride.</p>
           ) : outcome === 'reading' ? (
             <p>Reading where that ride started…</p>
+          ) : outcome === 'unread' ? (
+            <StatusMessage tone="warning" label="Cannot read that ride">
+              {START_RIDE_UNREAD_TEXT}
+            </StatusMessage>
           ) : outcome.kind === 'refused' ? (
             <StatusMessage tone="warning" label="Cannot start there">
               {describeStartRefusal(outcome.refusal, source)}

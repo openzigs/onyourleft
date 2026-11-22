@@ -11,7 +11,10 @@ import { describe, expect, it } from 'vitest';
 import {
   JUNCTION_LOCK_METRES,
   RollingRoute,
+  degreesLatitude,
+  degreesLongitude,
   distanceBetween,
+  geographicPosition,
   gradePercent,
   metres,
   metresPerSecond,
@@ -22,7 +25,10 @@ import {
 } from '@onyourleft/domain';
 import { gridGraph, roughGround } from '@onyourleft/domain/rolling-testing';
 
+import { drawnLine, drawnLineAt } from '../drawn-line';
 import type { GameState } from '../simulation';
+import { corridorOrigin, localGroundPosition, type CorridorOrigin } from '../terrain';
+import { LINE_EASE_METRES } from './line-ease';
 import { OPEN_WORLD_REACH_FLOOR_METRES, OpenWorldRoad, alongRoad, alongView } from './road';
 
 const COLUMNS = [0, 180, 410, 600, 870, 1_050, 1_330, 1_520, 1_790, 2_000, 2_260, 2_450];
@@ -139,5 +145,81 @@ describe('a ride state on a view — #2982', () => {
     expect(along.ride.speed).toBe(state.ride.speed);
     expect(along.elapsed).toBe(state.elapsed);
     expect(along.input).toBe(state.input);
+  });
+});
+
+describe('the path an open-world ride is drawn along — #2989', () => {
+  /** The place `road`'s drawn path is at ride distance `ride`, in the local metres of `frame`. */
+  function placeOn(road: OpenWorldRoad, ride: number, frame: CorridorOrigin) {
+    const at = drawnLineAt(road.drawnPath(ride), alongView(road.view, ride));
+    // `terrain.ts` §`localGroundPosition` inverted, out of the view's own frame.
+    const own = corridorOrigin(road.view.profile);
+    const perDegree = (origin: CorridorOrigin): number =>
+      localGroundPosition(
+        origin,
+        geographicPosition(
+          degreesLatitude(origin.latitude),
+          degreesLongitude(origin.longitude - 1),
+        ),
+      ).x;
+    const perDegreeNorth = localGroundPosition(
+      own,
+      geographicPosition(degreesLatitude(own.latitude + 1), degreesLongitude(own.longitude)),
+    ).z;
+    return localGroundPosition(
+      frame,
+      geographicPosition(
+        degreesLatitude(own.latitude + at.z / perDegreeNorth),
+        degreesLongitude(own.longitude - at.x / perDegree(own)),
+      ),
+    );
+  }
+
+  /** A road ridden to `ride` as the loop rides one: followed and drawn every 10 m. */
+  function riddenTo(ride: number): OpenWorldRoad {
+    const road = grid();
+    for (let at = 0; at <= ride; at += 10) {
+      road.follow(at);
+      road.drawnPath(at);
+    }
+    return road;
+  }
+
+  it('is the view’s own line on a view nobody has drawn a path on', () => {
+    const road = grid();
+    const rider = road.view.profile.totalDistance - OPEN_WORLD_REACH_FLOOR_METRES + 1;
+    // A change before any path was drawn on the view has nothing to ease from.
+    expect(road.follow(rider)).toBeDefined();
+    expect(road.drawnPath(rider)).toBe(drawnLine(road.view.profile));
+  });
+
+  it('eases a choice’s new line in over the ease, from the path drawn the frame before', () => {
+    const ride = 1_500;
+    const road = riddenTo(ride);
+    const frame = corridorOrigin(road.view.profile);
+    const before = placeOn(road, ride, frame);
+    const junction = road.route
+      .junctionsAfter(ride)
+      .find((each) => each.distance - ride > JUNCTION_LOCK_METRES);
+    if (junction === undefined) throw new Error('no junction ahead outside the lock');
+    const way = junction.ways.find((each) => each.edge.id !== junction.taken)?.edge.id as string;
+    expect(road.route.choose(junction.distance, way, ride)).toBe('swapped');
+    expect(road.follow(ride)).toBeDefined();
+    const own = drawnLine(road.view.profile);
+    expect(road.drawnPath(ride)).not.toBe(own);
+    // On the frame of the change: where it was drawn the frame before.
+    const after = placeOn(road, ride, frame);
+    expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeLessThan(1e-3);
+    // Ridden on, the view's own line, and from then on.
+    expect(road.drawnPath(ride + LINE_EASE_METRES - 1)).not.toBe(own);
+    expect(road.drawnPath(ride + LINE_EASE_METRES)).toBe(own);
+    expect(road.drawnPath(ride + LINE_EASE_METRES + 1)).toBe(own);
+  });
+
+  it('draws a U-turn’s line at once: the road under the rider changed', () => {
+    const road = riddenTo(900);
+    road.route.uTurn(900);
+    expect(road.follow(900)?.turned).toBe(true);
+    expect(road.drawnPath(900)).toBe(drawnLine(road.view.profile));
   });
 });

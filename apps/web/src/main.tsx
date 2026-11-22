@@ -79,6 +79,7 @@ import { hrefFor, matchHash, routeById } from './shell/routes';
 import { createOpenWorldEntry } from './game/open-world/entry';
 import { lazyOpenWorldSessions } from './game/open-world/session-lazy';
 import { openWorldStartPort, type OpenWorldStartPort } from './game/open-world/start-port';
+import { startCoverage } from './game/open-world/start';
 import { NO_LAUNCH, type LaunchPort } from './shell/launch-port';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
@@ -668,6 +669,31 @@ function buildMatchPort(): MatchPort {
 }
 
 /**
+ * The open-world ride's way in — #2889. ONE for the tab: the picker hands the
+ * start to it and the open-world session (#2896) takes it, in memory only.
+ */
+const openWorldEntry = createOpenWorldEntry();
+
+/**
+ * Where an open-world ride starts — #2889: the local athlete's own routes and
+ * rides (`start-port.ts` scopes every read on the owner), and the entry the
+ * start is handed to before the trainer game opens, and the coverage of the
+ * build's own basemap archive.
+ */
+function buildOpenWorldStartPort(): OpenWorldStartPort {
+  return openWorldStartPort({
+    store: localStore(),
+    owner: LOCAL_ATHLETE,
+    entry: openWorldEntry,
+    opened: () => {
+      globalThis.location.hash = hrefFor(routeById('game'));
+    },
+    // #2985: the published archive's US boxes, or none for a self-hoster's own.
+    coverage: startCoverage(browserBasemapConfig()),
+  });
+}
+
+/**
  * The routes screen's port (#73).
  *
  * Unconditional, like the segments screen's and for the same reasons: importing
@@ -681,28 +707,6 @@ function buildMatchPort(): MatchPort {
  * another athlete's anything. `ActivityStore` satisfies it structurally, like
  * the five ports above.
  */
-/**
- * The open-world ride's way in — #2889. ONE for the tab: the picker hands the
- * start to it and the open-world session (#2896) takes it, in memory only.
- */
-const openWorldEntry = createOpenWorldEntry();
-
-/**
- * Where an open-world ride starts — #2889: the local athlete's own routes and
- * rides (`start-port.ts` scopes every read on the owner), and the entry the
- * start is handed to before the trainer game opens.
- */
-function buildOpenWorldStartPort(): OpenWorldStartPort {
-  return openWorldStartPort({
-    store: localStore(),
-    owner: LOCAL_ATHLETE,
-    entry: openWorldEntry,
-    opened: () => {
-      globalThis.location.hash = hrefFor(routeById('game'));
-    },
-  });
-}
-
 function buildRoutePort(corridors: WorldCorridorPort): RoutePort {
   // #1539: a saved route's corridor is read after the save, never before it.
   return { store: readingCorridorOnSave(localStore(), corridors), athleteId: LOCAL_ATHLETE };

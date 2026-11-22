@@ -21,7 +21,10 @@
  *   §`ThrowState.inFlight`): the step that lands it takes it out.
  * - **Every obstacle on the round is drawn**, waiting off its kerb until it
  *   is set going, then crossing, then off the far kerb (`obstacles.ts`
- *   §`obstacleAcross`).
+ *   §`obstacleAcross`). A car pulling out is drawn driving out
+ *   (`obstacles.ts` §`carPullingOut`): turned along its path, with the
+ *   motion the realistic world poses its wheels, body and indicator from
+ *   (`port.ts` §`DeliveryCarMotion`), which nothing handed the view before.
  *
  * And only what stands on the frame's corridor: a piece whose distance along
  * the route is outside the corridor's span is not drawn, rather than drawn
@@ -82,7 +85,13 @@ import type {
 } from '../port';
 import type { CorridorPoint, RoadCorridor } from '../terrain';
 
-import { obstacleAcross, obstacleAlong, type Obstacle, type ObstacleState } from './obstacles';
+import {
+  carPullingOut,
+  obstacleAcross,
+  obstacleAlong,
+  type Obstacle,
+  type ObstacleState,
+} from './obstacles';
 import type { Round } from './round';
 import type { DeliveryTarget } from './targets';
 import {
@@ -142,6 +151,12 @@ export interface DeliveryDrawInput {
    * Nought unless given.
    */
   readonly sinceStep?: number;
+  /**
+   * Whether a car's indicator is drawn lit steadily rather than flashing:
+   * what `GameView` hands under `prefers-reduced-motion`
+   * (`port.ts` §`DeliveryCarMotion.indicatorSeconds`). Flashing unless given.
+   */
+  readonly steadyIndicators?: boolean;
 }
 
 /** A place on the corridor, and which way the road runs there. */
@@ -255,6 +270,31 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
     // #2364: another rider is drawn where they have ridden to.
     const at = onCorridor(centre, obstacleAlong(obstacle, seconds));
     if (at === undefined) return;
+    // A car pulling out is drawn DRIVING out: turned along its path, its
+    // wheels rolling and steered, its road-side indicator on.
+    if (obstacle.kind === 'car-pulling-out' && obstacle.to !== undefined) {
+      const car = carPullingOut(obstacle, seconds);
+      obstacles.push({
+        // A turn toward the rider's right is a yaw the other way. @see placed
+        ...placed(at, car.across, 0, -car.heading),
+        kind: obstacle.kind,
+        index,
+        car: {
+          travelledMetres: car.travelled,
+          speedMetresPerSecond: car.speed,
+          // Its wheels are straight until it is set going.
+          steerRadians: started === undefined ? 0 : car.steer,
+          braking: car.braking,
+          indicator: obstacle.from === 'left' ? 'right' : 'left',
+          // It flashes from when the car is set going; lit steadily until
+          // then, and throughout under reduced motion.
+          ...(started === undefined || input.steadyIndicators === true
+            ? {}
+            : { indicatorSeconds: seconds }),
+        },
+      });
+      return;
+    }
     obstacles.push({
       ...placed(at, obstacleAcross(obstacle, seconds), 0, obstacleTurn(obstacle)),
       kind: obstacle.kind,
@@ -272,7 +312,9 @@ export function deliveryInView(input: DeliveryDrawInput): DeliveryInView {
  * dusk, metres — #2366: **40**. At `obstacles.ts`
  * §`AVOIDABLE_FASTEST_METRES_PER_SECOND` (12 m/s) that is 3.4 s before the
  * house's throw window closes (`throw.ts` §`THROW_WINDOW_AFTER_METRES`), and
- * the window opens 20 m after the marker shows. This project's own number,
+ * the window opens 20 m after the marker shows; a level's own narrower window
+ * (#2931) closes up to a metre sooner and opens later, so at least 3.3 s
+ * (`weather.test.ts` sweeps each shipped level's own). This project's own number,
  * for the owner's approval in #2366's pull request.
  */
 export const LOW_LIGHT_REVEAL_METRES = 40;

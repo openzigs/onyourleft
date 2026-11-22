@@ -429,6 +429,54 @@ describe('a U-turn mid-street', () => {
   });
 });
 
+describe('the next junction alone — #2898', () => {
+  it('is the first of every junction after the rider, at every distance, through a choice and a U-turn', () => {
+    const { route } = eastAlongRow3();
+    const check = (from: number, to: number): void => {
+      for (let rider = from; rider <= to; rider += 7) {
+        expect(route.nextJunctionAfter(rider), `at ${rider}`).toEqual(
+          route.junctionsAfter(rider)[0],
+        );
+      }
+    };
+    check(-20, 1_500);
+    // A junction's exact distance is not after it.
+    const first = route.junctionsAfter(0)[0] as RollingJunction;
+    expect(route.nextJunctionAfter(first.distance)).toEqual(
+      route.junctionsAfter(first.distance)[0],
+    );
+    expect(route.nextJunctionAfter(first.distance)?.distance).toBeGreaterThan(first.distance);
+    const next = route.junctionsAfter(700)[0] as RollingJunction;
+    const other = next.ways.find((way) => way.edge.id !== next.taken)?.edge.id as string;
+    expect(route.choose(next.distance, other, 700)).toBe('swapped');
+    check(700, 2_400);
+    route.advance(1_300);
+    route.uTurn(1_300);
+    check(1_300, 3_000);
+    for (const rider of [Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]) {
+      expect(route.nextJunctionAfter(rider)).toEqual(route.junctionsAfter(rider)[0]);
+    }
+  });
+
+  it('works out the ways on for one junction, not for every one in the 2 km ahead', () => {
+    const { graph } = gridGraph(COLUMNS, ROWS, roughGround, 3);
+    let asked = 0;
+    const counted = {
+      edgesFrom: (node: string) => {
+        asked += 1;
+        return graph.edgesFrom(node);
+      },
+    };
+    const route = new RollingRoute(counted, edgeFrom(graph, '0,3', 'h0,3'));
+    route.advance(300);
+    expect(route.junctionsAfter(300).length).toBeGreaterThan(5);
+    asked = 0;
+    expect(route.nextJunctionAfter(300)).toBeDefined();
+    // Every node on this grid is a junction, so the first leg past the rider ends at one.
+    expect(asked).toBe(1);
+  });
+});
+
 describe('a rider distance that is not a finite number', () => {
   const notFinite = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
 

@@ -442,18 +442,38 @@ export class RollingRoute {
   junctionsAfter(rider: number): readonly RollingJunction[] {
     const found: RollingJunction[] = [];
     for (let index = 0; index < this.#legs.length - 1; index += 1) {
-      const leg = this.#legs[index] as Leg;
-      if (leg.end <= rider || !leg.atNode) continue;
-      const { ways, defaultWay } = this.#waysAfter(leg);
-      if (ways.length < 2 || defaultWay === undefined) continue;
-      found.push({
-        distance: leg.end,
-        ways,
-        defaultWay: defaultWay.edge.id,
-        taken: (this.#legs[index + 1] as Leg).edge.id,
-      });
+      const junction = this.#junctionAfterLeg(index, rider);
+      if (junction !== undefined) found.push(junction);
     }
     return found;
+  }
+
+  /**
+   * The first of {@link junctionsAfter}, found without building the others —
+   * #2898: the HUD's junction prompt asks for it every frame, and the 2 km
+   * ahead can hold a dozen junctions, each of which costs a walk of the graph
+   * and a bearing for every way on. The legs are in ride order and each ends
+   * where the next starts, so the first leg that ends past the rider is found
+   * by halving, and the ways on are worked out only for the legs from there
+   * to the first junction.
+   */
+  nextJunctionAfter(rider: number): RollingJunction | undefined {
+    const last = this.#legs.length - 1;
+    // The first index in [0, last) whose leg does not end at or before the
+    // rider: `junctionsAfter`'s own test, negated, so a rider that is not a
+    // number finds what that finds.
+    let low = 0;
+    let high = last;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((this.#legs[middle] as Leg).end <= rider) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = low; index < last; index += 1) {
+      const junction = this.#junctionAfterLeg(index, rider);
+      if (junction !== undefined) return junction;
+    }
+    return undefined;
   }
 
   /**
@@ -563,6 +583,20 @@ export class RollingRoute {
       positions: this.#positions.slice(),
     };
     return this.#view;
+  }
+
+  /** The junction at the end of leg `index`, if it is one after `rider` with two or more ways on. */
+  #junctionAfterLeg(index: number, rider: number): RollingJunction | undefined {
+    const leg = this.#legs[index] as Leg;
+    if (leg.end <= rider || !leg.atNode) return undefined;
+    const { ways, defaultWay } = this.#waysAfter(leg);
+    if (ways.length < 2 || defaultWay === undefined) return undefined;
+    return {
+      distance: leg.end,
+      ways,
+      defaultWay: defaultWay.edge.id,
+      taken: (this.#legs[index + 1] as Leg).edge.id,
+    };
   }
 
   #waysAfter(leg: Leg): ReturnType<typeof waysOn> {

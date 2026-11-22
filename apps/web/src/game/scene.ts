@@ -54,8 +54,15 @@ import {
   type LandClassMask,
 } from './land-class';
 import { horizonRelief, standingOnGround, terrainCorridor, type TerrainMesh } from './landform';
+import { poolsInView } from './mapped-pools';
 import { easedPlace, MAX_LAG_METRES, steadyTurnSpeed, type EasedPlace } from './bend-easing';
-import { crashedRoll, type CrashSide } from './delivery/crash-look';
+import {
+  crashBodyShare,
+  crashClipSeconds,
+  crashedRoll,
+  crashRebound,
+  type CrashSide,
+} from './delivery/crash-look';
 import {
   BOT_TURN_SPEED_FLOOR,
   LANE_CHANGE_TURN_SPEED_FLOOR,
@@ -120,14 +127,19 @@ import {
 import {
   boardsClearOfSideRoads,
   clearOfSideRoads,
+  levelCrossings,
   mappedJunctions,
+  mappedTracks,
   onSideRoad,
   SIDE_ROAD_SCENERY_MARGIN_METRES,
   sideRoadClearance,
   sideRoadsAt,
+  joinedJunctions,
   type SideRoad,
 } from './cross-streets';
+import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
+import { nearbyStreets, nearbyStreetsAt } from './nearby-streets';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
@@ -341,6 +353,22 @@ export interface SceneInput {
    */
   readonly uneased?: boolean | undefined;
   /**
+   * The path the riders are drawn along and the camera follows, where it is
+   * not `drawn-line.ts` §`drawnLine` of {@link profile} — #2989. An
+   * open-world ride's road eases a new view's line in from the one drawn
+   * before it (`open-world/line-ease.ts`), so that a junction choice made
+   * before the lock moves neither the drawn rider nor the camera (ADR 0089
+   * C-6). Read only where the riders are drawn on a path at all
+   * (@see easingLine). A path on {@link profile}, always: `road.ts`
+   * §`drawnPath` builds it on the view the frame is handed.
+   *
+   * ⚠️ **Optional the UNSAFE way round**: absent is the view's own line, so a
+   * `GameView` that stopped supplying it would draw the jump C-6 rules out,
+   * and green. `open-world/ride-loop-wiring.test.tsx` reads it back off the
+   * frames the renderer is handed.
+   */
+  readonly drawnPath?: DrawnLine | undefined;
+  /**
    * Leaves the trees, shrubs and rocks standing on a settlement's ground, as
    * every frame did before #1534 — the browser gate's control, and nothing
    * else. Absent, or `false`, clears them (`settlements.ts`
@@ -405,6 +433,20 @@ export interface SceneInput {
    * nothing else. Optional the safe way round, for {@link centreline}'s reason.
    */
   readonly parkDressingOff?: boolean | undefined;
+  /**
+   * #2973's nearby streets left undrawn: only the route, its junctions'
+   * stubs and its overpasses' roads (`nearby-streets.ts`) — the realistic
+   * page's `-nearby-streets` lever, and nothing else. Optional the safe way
+   * round, for {@link centreline}'s reason.
+   */
+  readonly nearbyStreetsOff?: boolean | undefined;
+  /**
+   * #2972's mapped footways, cycleways, park paths, steps and zebras left
+   * undrawn (`footway-surfaces.ts`) — the realistic page's `-footways` lever,
+   * the tablet's cost pair, and nothing else. Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly footwaysOff?: boolean | undefined;
   /**
    * Where a Delivery round has steered the rider across the road, in metres
    * right of the centre line — #1820, `delivery/steer.ts`
@@ -585,7 +627,30 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     (corridor.centre[0] as CorridorPoint).along,
     (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
     riderDistance,
-    junctions ?? [],
+    // #2660: and a level crossing wherever a mapped railway crosses at grade,
+    // drawn with them and kept clear of the scenery as they are.
+    input.worldCorridor === undefined
+      ? []
+      : joinedJunctions(
+          joinedJunctions(
+            junctions ?? [],
+            levelCrossings(
+              input.worldCorridor,
+              input.profile,
+              input.origin,
+              seed,
+              input.landClass ?? NO_LAND_CLASS,
+            ),
+          ),
+          // #2695: and a mapped track or bridleway, drawn unpaved.
+          mappedTracks(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+          ),
+        ),
     input.landClass ?? NO_LAND_CLASS,
   );
   // #459, #2661: the streams' bridges and the mapped overpasses and
@@ -595,8 +660,23 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   const ways = waterways(input.profile, seed, input.landClass ?? NO_LAND_CLASS);
   const streamBridges = bridgeParts(input.profile, input.origin, corridor, ways);
   const crossings = crossingsInView(input, corridor, seed, riderDistance, streamBridges.length);
+  // #2973: and the mapped streets that never touch the route, out to the fog —
+  // side roads too, so the same mesh draws them and the scenery keeps off them.
+  const nearby =
+    input.worldCorridor === undefined || input.nearbyStreetsOff === true
+      ? NO_SIDE_ROADS
+      : nearbyStreetsAt(
+          nearbyStreets(input.worldCorridor, input.profile, input.origin),
+          input.profile,
+          input.origin,
+          seed,
+          riderDistance,
+          input.landClass ?? NO_LAND_CLASS,
+        );
   const sideRoads =
-    crossings.roads.length === 0 ? crossSideRoads : [...crossSideRoads, ...crossings.roads];
+    crossings.roads.length === 0 && nearby.length === 0
+      ? crossSideRoads
+      : [...crossSideRoads, ...crossings.roads, ...nearby];
   const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
   // #1535: the village streets along exactly the stretch of road this frame
   // drew, for `scenery`'s reason — and outside the structures' budget,
@@ -668,11 +748,35 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     billboards,
     sideRoads,
     streets,
+    // #2972: the corridor's mapped footways drawn as surfaces round the camera,
+    // off those streets' pavements (#1620), and a zebra where one crosses the road.
+    footways:
+      input.worldCorridor === undefined || input.footwaysOff === true
+        ? NO_FOOTWAYS
+        : footwaysInView(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+            camera.x,
+            camera.z,
+            streets,
+          ),
     // #1541: the people on those streets' pavements and the corridor's
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.
     // #2728: each on the ground drawn under them, and nobody on the drawn water.
-    people: people(input, streets, camera, seed, sideRoads, ground),
+    people: people(
+      input,
+      streets,
+      camera,
+      seed,
+      nearby.length === 0
+        ? sideRoads
+        : [...crossSideRoads, ...crossings.roads, ...withinPeopleReach(nearby, camera)],
+      ground,
+    ),
     // #2722: and the other cyclists on the road, kept clear of the rider.
     ...cyclistsOf(placedCyclists(input, corridor, riders)),
     terrain: {
@@ -685,7 +789,9 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // and the surfaces and bridges built for this stretch of it, from the same
     // corridor the ground and the road are built from.
     // #2661: and the mapped streets crossing over or under the route, with them.
-    water: water(input, corridor, ways, streamBridges, crossings),
+    // #2974: and the channels beside the road laid on this frame's ground,
+    // and the mapped pools round the camera.
+    water: water(input, corridor, ways, streamBridges, crossings, ground, camera, seed),
     // #679: what stands at the lines, in the rider's units, near the rider.
     lines: linesNear(
       input.profile,
@@ -694,6 +800,40 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       lineStands(input.profile, input.units ?? 'metric'),
     ),
   };
+}
+
+/** No side roads: a frame with no nearby street. */
+const NO_SIDE_ROADS: readonly SideRoad[] = [];
+
+/**
+ * How far past {@link PEOPLE_FAR_METRES} of the camera a nearby street still
+ * reaches the people, in metres: **64** — `people.ts` §`besideSideRoads` files
+ * a segment in every 32 m cell within its half-width and a margin of it, and
+ * reads only the cell a person stands in, so a segment farther than this
+ * shares a cell with nobody drawn.
+ */
+const PEOPLE_STREET_SLACK_METRES = 64;
+
+/**
+ * The nearby streets within reach of anyone drawn — #2973: `people.ts`
+ * §`besideSideRoads` files every segment it is handed every frame, and a
+ * town's streets out to the fog are thousands; the people are all within
+ * {@link PEOPLE_FAR_METRES} of the camera, so the rest change nobody's place.
+ */
+function withinPeopleReach(
+  roads: readonly SideRoad[],
+  camera: { readonly x: number; readonly z: number },
+): readonly SideRoad[] {
+  const reach = PEOPLE_FAR_METRES + PEOPLE_STREET_SLACK_METRES;
+  return roads.filter((road) => {
+    const s = road.segments;
+    for (let at = 0; at + 1 < s.length; at += 2) {
+      if (Math.hypot((s[at] as number) - camera.x, (s[at + 1] as number) - camera.z) <= reach) {
+        return true;
+      }
+    }
+    return false;
+  });
 }
 
 /**
@@ -960,9 +1100,24 @@ function water(
   ways: Waterways,
   streams: readonly BridgePart[],
   crossings: CrossingsInView,
+  ground: TerrainMesh,
+  camera: CameraPose,
+  seed: number,
 ): WaterFrame {
+  const pools =
+    input.worldCorridor === undefined
+      ? []
+      : poolsInView(
+          input.worldCorridor,
+          input.profile,
+          input.origin,
+          seed,
+          input.landClass ?? NO_LAND_CLASS,
+          camera.x,
+          camera.z,
+        );
   return {
-    surface: waterSurface(input.profile, input.origin, corridor, ways),
+    surface: waterSurface(input.profile, input.origin, corridor, ways, ground, pools),
     bridges: crossings.parts.length === 0 ? streams : [...streams, ...crossings.parts],
     seconds: input.state.elapsed,
   };
@@ -1345,7 +1500,10 @@ interface RoadTarget {
  * metre at a time to the first that does, then halved six times between it
  * and the metre beyond, so the target slides along the road by centimetres
  * from one frame to the next rather than stepping a metre. Where none does,
- * the nearest.
+ * the nearest. Since #2989 the full look-ahead is not a hard cap: the search
+ * starts {@link CAMERA_TARGET_EASE_METRES} past it and the look-ahead is
+ * eased onto it ({@link easedReach}), so the target's speed along the road
+ * does not change at once where the bend stops binding.
  */
 function roadTarget(
   corridor: RoadCorridor,
@@ -1392,30 +1550,63 @@ function roadTarget(
     const across = dx * tangent.headingZ - dz * tangent.headingX;
     return Math.abs(Math.atan2(across, along)) <= RIDER_OFF_AXIS_RADIANS;
   };
-  let reach = CAMERA_TARGET_AHEAD_METRES;
-  let point = at(reach);
-  if (keepsRider(point)) return point;
-  while (reach > CAMERA_TARGET_NEAREST_METRES) {
-    const beyond = reach;
-    reach = Math.max(CAMERA_TARGET_NEAREST_METRES, reach - 1);
-    point = at(reach);
-    if (keepsRider(point)) {
-      let near = reach;
-      let far = beyond;
-      for (let halving = 0; halving < 6; halving += 1) {
-        const middle = (near + far) / 2;
-        const tried = at(middle);
-        if (keepsRider(tried)) {
-          near = middle;
-          point = tried;
-        } else {
-          far = middle;
+  // The farthest that keeps the rider, looked for past the full look-ahead
+  // by the ease's width, then eased onto it (@see easedReach).
+  const farthest = (): number => {
+    let reach = CAMERA_TARGET_AHEAD_METRES + CAMERA_TARGET_EASE_METRES;
+    if (keepsRider(at(reach))) return reach;
+    while (reach > CAMERA_TARGET_NEAREST_METRES) {
+      const beyond = reach;
+      reach = Math.max(CAMERA_TARGET_NEAREST_METRES, reach - 1);
+      if (keepsRider(at(reach))) {
+        let near = reach;
+        let far = beyond;
+        for (let halving = 0; halving < 6; halving += 1) {
+          const middle = (near + far) / 2;
+          if (keepsRider(at(middle))) near = middle;
+          else far = middle;
         }
+        return near;
       }
-      return point;
     }
-  }
-  return point;
+    return reach;
+  };
+  return at(Math.max(CAMERA_TARGET_NEAREST_METRES, easedReach(farthest())));
+}
+
+/**
+ * How wide the ease is between the look-ahead a bend allows and the full
+ * {@link CAMERA_TARGET_AHEAD_METRES}, metres: **4** — #2989. @see easedReach
+ *
+ * ⚠️ **Why there is one.** Through a bend the look-ahead is the farthest
+ * that keeps the rider near the frame's middle, and it grows fast as the
+ * rider comes out: the target slides along the road several times the
+ * rider's speed. Capped hard at 25 m, it stopped sliding in one frame where
+ * the cap took over, and the target's step changed by 0.30 m from one 60 fps
+ * frame to the next at 30 km/h and 0.45 m at 40, through a junction drawn
+ * from map streets — over ADR 0089 C-4's 0.25 m (#2989,
+ * `open-world/rolling-camera.test.ts`). Measured at 40 km/h against the width:
+ * 0.136 m at 1 m, 0.122 m at 2 m, **0.095 m at 4 m**, 0.086 m at 6 m. Past
+ * 4 m it buys little, and the look-ahead it gives up just short of the cap
+ * is at most a quarter of the width: 1 m.
+ */
+const CAMERA_TARGET_EASE_METRES = 4;
+
+/**
+ * The look-ahead for a bend that allows `allowed`: the lesser of it and
+ * {@link CAMERA_TARGET_AHEAD_METRES}, eased where the two are within
+ * {@link CAMERA_TARGET_EASE_METRES} of each other — #2989. A quadratic smooth
+ * minimum: exactly the lesser outside the ease, at most a quarter of the
+ * width under it inside, and with a slope that runs from one to nought
+ * across it, so the look-ahead's rate changes over the ease rather than at
+ * once. On a straight, where the bend allows more than the full look-ahead
+ * and the width, it is the full 25 m.
+ */
+function easedReach(allowed: number): number {
+  const full = CAMERA_TARGET_AHEAD_METRES;
+  const width = CAMERA_TARGET_EASE_METRES;
+  const near = Math.max(width - Math.abs(full - allowed), 0) / width;
+  return Math.min(full, allowed) - (near * near * width) / 4;
 }
 
 /**
@@ -1578,7 +1769,7 @@ export function placedRiders(input: SceneInput, corridor: RoadCorridor): readonl
 function easingLine(input: SceneInput): DrawnLine | undefined {
   if (input.centreline === true || input.uneased === true) return undefined;
   if (input.steeredLateral !== undefined || input.raceBots !== undefined) return undefined;
-  return drawnLine(input.profile);
+  return input.drawnPath ?? drawnLine(input.profile);
 }
 
 /**
@@ -1844,7 +2035,16 @@ function ridersOnTheRoad(
     // #2454: the rider's own crash in a Delivery round, drawn as a fall and a
     // getting back up, on top of the lean the ride asks for.
     const crash = rider.kind === 'rider' ? input.riderCrash : undefined;
-    const roll = crash === undefined ? ridden : crashedRoll(ridden, crash.share, crash.side);
+    // The bicycle lands with weight, where motion is not reduced. @see crashRebound
+    const roll =
+      crash === undefined
+        ? ridden
+        : crashedRoll(
+            ridden,
+            crash.share,
+            crash.side,
+            crash.seconds === undefined ? 0 : crashRebound(crash.seconds),
+          );
     // #2494: the bars turned by the steer the drawn path's turn asks for —
     // #2493: and let go of as the rider falls, straight on the ground and back
     // as they rise, as the stroke is.
@@ -1858,10 +2058,19 @@ function ridersOnTheRoad(
     // Under a millionth of a radian is straight: `leanAt` leaves 10⁻¹⁹ on a straight.
     const steered = Math.abs(steer) < 1e-6 ? placed : { ...placed, steer };
     // #2493: and the body's own part of it, where motion is not reduced.
+    // The clip on its own times, and the body's own share of it, which is not
+    // the roll's. @see crashBodyShare
     const marker =
       crash?.seconds === undefined
         ? steered
-        : { ...steered, crash: { seconds: crash.seconds, side: crash.side, share: crash.share } };
+        : {
+            ...steered,
+            crash: {
+              seconds: crashClipSeconds(crash.seconds),
+              side: crash.side,
+              share: crashBodyShare(crash.seconds) ?? crash.share,
+            },
+          };
     // #546: in a bend tight enough for the inside pedal to strike, every
     // rider's cranks — the rider's own included, by the owner's ruling — are
     // DRAWN parked with the outside pedal down. @see drawnCrankAngle
