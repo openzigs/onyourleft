@@ -1431,8 +1431,9 @@ test.describe('#2007 — the route editor’s whole-route buttons do not touch',
  *   buttons, each 48 × 48 px or larger and inside the map's frame.
  * - **A click drops the pin** where it lands, with the pin's tip on the point.
  * - **The wheel zooms** about the pointer, and **a mouse drag pans**.
- * - **On touch, one finger is left to the page, two fingers pan, and a pinch
- *   zooms.**
+ * - **On touch, one finger drags the map, two fingers pan, a pinch zooms, and
+ *   a tap after a drag still drops the pin.** Until #3014 one finger was left
+ *   to the page, and the owner found on the tablet that a drag did nothing.
  * - **On the focused map, arrow keys pan and `=`/`-` zoom.** **On the focused
  *   pin, an arrow key moves the pin and not the map**, and the move is said
  *   in the live region.
@@ -1880,11 +1881,11 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
       });
     }
 
-    test('one finger is left to the page: it scrolls the page and does not pan the map', async ({
+    test('one finger drags the map, and a tap after it still drops the pin (#3014)', async ({
       page,
     }) => {
-      const { centre, before } = await pinnedPicker(page);
-      // From the top, so the page has room to scroll down under the swipe.
+      const { before } = await pinnedPicker(page);
+      // From the top, so a page that took the swipe would have room to scroll.
       await page.evaluate(() => {
         globalThis.scrollTo(0, 0);
         let box = document.querySelector('main .oyl-map')?.parentElement ?? null;
@@ -1894,21 +1895,32 @@ test.describe('#2889 — the open-world picker’s map, moved by hand', () => {
         }
       });
       const top = await pageScrolled(page);
-      // A finger drawn up the map: the page should scroll down by about as much.
-      await touch(
-        page,
-        [{ x: centre.x - 60, y: centre.y + 80 }],
-        [{ x: centre.x - 60, y: centre.y - 120 }],
-      );
-      await page.waitForTimeout(800);
+      // Where the map is now: the scroll may have moved it on the screen.
+      const canvas = (await mapFrame(page)).canvas;
+      const centre = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 };
+      // A finger drawn up the map, (-60, -160): a swipe that scrolled the
+      // page while one finger was left to it.
+      const drag = { x: -60, y: -160 };
+      const from = { x: centre.x + 30, y: centre.y + 100 };
+      await touch(page, [from], [{ x: from.x + drag.x, y: from.y + drag.y }]);
       const after = await settledPin(page);
       const scrolled = (await pageScrolled(page)) - top;
       console.log(
-        `[#2889] one finger: ${JSON.stringify(before)} → ${JSON.stringify(after)}, ` +
+        `[#3014] one finger: ${JSON.stringify(before)} → ${JSON.stringify(after)}, ` +
           `page scrolled ${scrolled.toFixed(1)} px`,
       );
-      expect(apart(after, before), 'one finger panned the map').toBeLessThan(3);
-      expect(scrolled, 'one finger did not scroll the page').toBeGreaterThan(50);
+      // The pin stands still on the ground, so it moves on the screen exactly
+      // as the map's centre does. Lifted, the finger is 90 px from there, so a
+      // drag that dropped the pin instead of panning fails this too.
+      const carried = { x: before.x + drag.x, y: before.y + drag.y };
+      expect(apart(after, carried), 'one finger did not carry the map with it').toBeLessThan(20);
+      expect(Math.abs(scrolled), 'the drag scrolled the page as well').toBeLessThan(3);
+
+      const aimed = { x: canvas.width / 2 - 70, y: canvas.height / 2 - 40 };
+      await page.touchscreen.tap(canvas.x + aimed.x, canvas.y + aimed.y);
+      const tip = await settledPin(page);
+      console.log(`[#3014] tap at ${JSON.stringify(aimed)}, pin tip ${JSON.stringify(tip)}`);
+      expect(apart(tip, aimed), 'the pin’s tip from the tap').toBeLessThan(3);
     });
 
     test('two fingers pan the map', async ({ page }) => {

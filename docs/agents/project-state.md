@@ -218,9 +218,9 @@ one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence — ⚠️ **this 
 which took 6.10.0 with the browser gate re-run; the bump added `bidi-js` and `require-from-string`
 to that closure, both MIT, so the sentence above still describes it; and **6.10.0 until #756**,
 which took 6.11.2 with the browser gate re-run and changed no dependency of `maplibre-gl` at all;
-⚠️ since #2889 `apps/web/src/map/touch-pan.ts` replaces one **private** member of it,
-`dragPan._touchPan._shouldBePrevented`, only while it is a function (#2985), so a bump re-runs
-`controls-first.browser.spec.ts` §"#2889" on touch)
+⚠️ from #2889 until #3014 `apps/web/src/map/touch-pan.ts` replaced one **private** member of it,
+`dragPan._touchPan._shouldBePrevented`; since #3014 nothing does, and one finger pans the
+open-world picker's map with MapLibre's own touch pan)
 and — also since #63 —
 `@playwright/test` 1.63.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
