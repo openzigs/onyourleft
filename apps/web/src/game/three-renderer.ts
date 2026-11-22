@@ -571,6 +571,7 @@ import {
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
+import { NO_FOOTWAYS, type FootwayPiece } from './footway-surfaces';
 import type { Embankment } from './overpasses';
 import {
   GOLF_BUNKERS_PER_GREEN,
@@ -6032,9 +6033,37 @@ ${phases.join('\n')}
 }
 
 /**
+ * A pool's water — #2974: lighter and bluer than a lake's, the tiled floor
+ * showing through. This repository's own. Marked by `waterways.ts`
+ * §`POOL_WATER_SHORE` in the water's shore weight.
+ */
+export const POOL_WATER_COLOUR = 0x3fa7c4;
+
+/** A pool's coping, its lip and its top — #2974: pale stone. This repository's own. */
+export const POOL_EDGE_COLOUR = 0xd8d2c4;
+
+/** The coping's skirt down to the ground — #2974: the stone in shade. This repository's own. */
+export const POOL_SIDE_COLOUR = 0xa39d90;
+
+/** A colour as a GLSL `vec3` in the working (linear) space, as `Color.setHex` puts a uniform. */
+function linearGlsl(hex: number): string {
+  const colour = new Color(hex);
+  return `vec3(${glslFloat(colour.r)}, ${glslFloat(colour.g)}, ${glslFloat(colour.b)})`;
+}
+
+/** {@link POOL_WATER_COLOUR}, {@link POOL_EDGE_COLOUR} and {@link POOL_SIDE_COLOUR} for the shader. */
+const POOL_WATER_GLSL = linearGlsl(POOL_WATER_COLOUR);
+const POOL_EDGE_GLSL = linearGlsl(POOL_EDGE_COLOUR);
+const POOL_SIDE_GLSL = linearGlsl(POOL_SIDE_COLOUR);
+
+/**
  * The water shader's fragment half: the sky reflected with a Fresnel term,
  * ripples as an analytic normal that scrolls with the ride's clock, and the
- * edges tinted shallow by the geometry's own shore weight.
+ * edges tinted shallow by the geometry's own shore weight. Since #2974 a
+ * shore weight past 1 marks a pool (`waterways.ts` §`POOL_WATER_SHORE`): its
+ * water in {@link POOL_WATER_COLOUR} under the same sky, and its coping in
+ * flat stone, with no sky in it. The flat rung's `MeshBasicMaterial` reads no
+ * weight, and draws a pool in the deep water's one colour.
  *
  * ⚠️ **No texture, and no second pass.** The ripple normal is travelling
  * waves differentiated by hand — {@link WATER_RIPPLES} scaled by
@@ -6070,7 +6099,9 @@ ${waterSlopeGlsl()}
   vec3 r = reflect(-v, n);
   vec3 sky = mix(horizonColour, skyColour, smoothstep(0.0, 0.4, r.y));
   vec3 body = mix(shallowColour, deepColour, smoothstep(0.0, 1.0, vShore));
+  body = vShore > 1.5 ? ${POOL_WATER_GLSL} : body;
   gl_FragColor = vec4(mix(body, sky, fresnel), 1.0);
+  if (vShore > 2.5) gl_FragColor = vec4(vShore > 3.5 ? ${POOL_SIDE_GLSL} : ${POOL_EDGE_GLSL}, 1.0);
   #include <colorspace_fragment>
   #include <fog_fragment>
 }
@@ -10940,6 +10971,110 @@ function sideRoadGeometry(roads: readonly SideRoad[]): BufferGeometry {
   geometry.setAttribute('normal', new BufferAttribute(normals, 3));
   geometry.setAttribute(ROAD_ACROSS_ATTRIBUTE, new BufferAttribute(across, 1));
   geometry.setAttribute(ROAD_REACH_ATTRIBUTE, new BufferAttribute(new Float32Array(vertices), 1));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * Every mapped footway surface and zebra in view — #2972
+ * (`footway-surfaces.ts`): the footways, cycleways, park paths and steps as
+ * ribbons on the ground and the crossings as stripes on the road, coloured a
+ * vertex at a time by kind. **One mesh and one draw call** however many are in
+ * view, and none where a frame holds none; no texture. The realistic world's
+ * alone, because only the realistic world is given a corridor (ADR 0054 D-6).
+ *
+ * Pulled toward the camera in depth (`polygonOffset`), so a ribbon lying a few
+ * centimetres over the ground, and a stripe over the road's marks, never
+ * fights either where the drawn triangles part from the ground's height.
+ *
+ * Rebuilt only when the SET of pieces changes, as {@link PavementBelt} is:
+ * `footway-surfaces.ts` hands every frame the same objects for the same chunks.
+ */
+export class FootwayBelt {
+  readonly #mesh: Mesh;
+  readonly #material: Material;
+  /** The pieces the mesh holds, in the order it holds them. */
+  #held: readonly FootwayPiece[] = [];
+  #shown = true;
+
+  constructor() {
+    this.#material = withAtmosphere(
+      constructed(
+        new MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.92,
+          metalness: 0,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+        }),
+      ),
+    );
+    this.#mesh = new Mesh(new BufferGeometry(), this.#material);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** This frame's footways. */
+  update(pieces: readonly FootwayPiece[]): void {
+    const drawn = this.#shown ? pieces : NO_FOOTWAYS;
+    if (!(drawn.length === this.#held.length && drawn.every((p, i) => p === this.#held[i]))) {
+      this.#held = drawn;
+      const geometry = footwayGeometry(drawn);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = this.#shown && drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#material.dispose();
+  }
+}
+
+/** Every footway piece as one geometry: positions, linear colours and an up normal. */
+function footwayGeometry(pieces: readonly FootwayPiece[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const piece of pieces) {
+    vertices += piece.positions.length / 3;
+    indices += piece.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const piece of pieces) {
+    positions.set(piece.positions, vertex * 3);
+    colours.set(piece.colours, vertex * 3);
+    for (let each = 0; each < piece.indices.length; each += 1) {
+      index[at + each] = (piece.indices[each] as number) + vertex;
+    }
+    vertex += piece.positions.length / 3;
+    at += piece.indices.length;
+  }
+  for (let up = 1; up < normals.length; up += 3) normals[up] = 1;
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
   geometry.setIndex(new BufferAttribute(index, 1));
   geometry.computeBoundingSphere();
   return geometry;
@@ -17808,8 +17943,10 @@ export class RealisticRiderBelt {
   /**
    * The body's own fall and get-up in a Delivery crash — #2493: every bone
    * turned from the riding pose `#pose` left toward the crash clip's pose at
-   * `crash.seconds`, by `crash.share` (`delivery/crash-look.ts` §`crashShare`),
-   * and the skeleton's root moved likewise. The clip falls to the rider's
+   * `crash.seconds`, the clip's own time (`delivery/crash-look.ts`
+   * §`crashClipSeconds`), by `crash.share`, the body's own share
+   * (§`crashBodyShare`, not the roll's §`crashShare`), and the skeleton's root
+   * moved likewise. The clip falls to the rider's
    * right; a fall to the left reads each bone's mirror image (its other
    * side's track, `(x, −y, −z, w)`, and the root's `x` negated), which is
    * exact because MakeHuman's skeleton is its own mirror image across `x = 0`.
@@ -21021,6 +21158,8 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   'porch-trim': 1,
   // #2206: a spire is shaded as the roof it is built of.
   spire: REALISTIC_ROLE_SHADE.roof,
+  // #2848: a shop's apron is painted, as a driveway is.
+  apron: 1,
 };
 
 /**
@@ -21028,9 +21167,10 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
  * surface's multiplier on the walls, the plinth, the parapet and the chimney;
  * the roof surface's on the roof; the door's paint on the door and the trim's
  * on the trim. Since #1588: a shingled roof's albedo on the roof and a
- * dormer's roof, the walls' paint on a dormer, and none on a driveway or on a
- * clapboard house's plinth, whose colours the shader lays (`facade.ts`
- * §`PAVING`, §`FOUNDATION`) — so their vertex colour is their light alone.
+ * dormer's roof, the walls' paint on a dormer, and none on a driveway, on a
+ * shop's apron (#2848) or on a clapboard house's plinth, whose colours the
+ * shader lays (`facade.ts` §`PAVING`, §`FOUNDATION`) — so their vertex colour
+ * is their light alone.
  * Since #1590 none on a shop's front, sign or awning, which it paints too.
  * Since #1589 a porch's roof is the roof's, and the porch the trim's.
  */
@@ -21051,6 +21191,7 @@ export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
         unpainted
       );
     case 'driveway':
+    case 'apron':
     case 'shopfront':
       return unpainted;
     case 'plinth':
@@ -23873,8 +24014,9 @@ export class MappedBuildingBelt {
     const [red, green, blue] = mappedRolePaint(plan, role);
     const [trimRed, trimGreen, trimBlue] = mappedRolePaint(plan, 'trim');
     // A plan with a plinth stands in the ground at its foot; a raised part
-    // does not, and nor does a driveway, which is laid on the ground.
-    const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway';
+    // does not, and nor does a driveway or, since #2848, an apron, which are
+    // laid on the ground.
+    const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway' && role !== 'apron';
     // #1588: a soffit's and a gutter's underside, in the shade of the wall and the eaves;
     // #1589: a porch's ceiling likewise, and its deck in the shade of its roof;
     // #1590: an awning's underside likewise.
@@ -24670,6 +24812,8 @@ class RealisticDrawing {
   readonly logos: LogoBelt;
   /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
   readonly pavements: PavementBelt;
+  /** #2972: the corridor's mapped footways and zebras. */
+  readonly footways = new FootwayBelt();
   /** What stands on them: lamp posts, bollards, benches and bins — #1536. */
   readonly furniture: FurnitureBelt;
   /**
@@ -24885,6 +25029,7 @@ class RealisticDrawing {
     this.gantries.addTo(scene);
     this.logos.addTo(scene);
     this.pavements.addTo(scene);
+    this.footways.addTo(scene);
     this.furniture.addTo(scene);
     this.people.addTo(scene);
     this.decorations.addTo(scene);
@@ -24902,6 +25047,7 @@ class RealisticDrawing {
     this.gantries.setShown(on);
     this.logos.setShown(on);
     this.pavements.setShown(on);
+    this.footways.setShown(on);
     this.furniture.setShown(on);
     this.people.setShown(on);
     this.decorations.setShown(on);
@@ -25090,6 +25236,7 @@ class RealisticDrawing {
     this.gantries.dispose();
     this.logos.dispose();
     this.pavements.dispose();
+    this.footways.dispose();
     this.furniture.dispose();
     this.people.dispose();
     this.decorations.dispose();
@@ -25853,6 +26000,18 @@ export function decorationKindsOf(view: GameView, kinds: ItemTable): void {
  */
 export function decorationBeltOf(view: GameView): DecorationBelt | undefined {
   return view instanceof ThreeGameView ? view.decorationBelt : undefined;
+}
+
+/**
+ * The realistic world's footway mesh — #2972 (`footway-surfaces.ts`) — or
+ * `undefined` for a view with no realistic world.
+ *
+ * @test-facing read by `realistic-textures.test.ts` §"the footways", which
+ * holds what the belt uploaded to the frame's footways; the view draws the belt
+ * itself in `render`
+ */
+export function footwayMeshOf(view: GameView): Mesh | undefined {
+  return view instanceof ThreeGameView ? view.footwayMesh : undefined;
 }
 
 /**
@@ -26751,6 +26910,8 @@ class ThreeGameView implements GameView {
     // #1535: the village streets, in both worlds; the hidden world's draw nothing.
     this.#realistic?.pavements.update(frame.streets);
     this.#pavements.update(frame.streets);
+    // #2972: and the mapped footways and zebras, in the realistic world only.
+    this.#realistic?.footways.update(frame.footways);
     // #1536: and what stands on them, within reach of the camera.
     this.#realistic?.furniture.update(frame.streets, frame.camera);
     this.#furniture.update(frame.streets, frame.camera);
@@ -27322,6 +27483,11 @@ class ThreeGameView implements GameView {
   doorPathsShown(on: boolean): void {
     this.#realistic?.pavements.switchPathsOn(on);
     this.#pavements.switchPathsOn(on);
+  }
+
+  /** @see footwayMeshOf — the realistic world's, whether or not it is the one drawn. */
+  get footwayMesh(): Mesh | undefined {
+    return this.#realistic?.footways.mesh;
   }
 
   /** @see pavementTrianglesOf — the drawn world's. */

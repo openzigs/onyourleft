@@ -213,6 +213,20 @@ import {
 } from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
+import {
+  describeOpenWorldRefusal,
+  isOpenWorldRouteId,
+  type OpenWorldRefusal,
+  type OpenWorldSession,
+  type OpenWorldSessions,
+} from './open-world/ride';
+import {
+  alongRoad,
+  alongView,
+  type OpenWorldRoad,
+  type OpenWorldRoadView,
+} from './open-world/road';
+import type { OpenWorldStart } from './open-world/start';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
 import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from './footprint-buildings';
@@ -347,6 +361,7 @@ import {
 import { createPowerAverage, type PowerAverage } from './hud/power-average';
 import {
   ghostDistanceAt,
+  metres,
   pacerGap,
   type BeatsPerMinute,
   type BotPacerPlan,
@@ -478,6 +493,17 @@ export interface GamePort {
     signal: AbortSignal,
     progress: (state: CorridorState) => void,
   ): Promise<CorridorState>;
+  /**
+   * The open-world ride — #2896: the start the picker handed over, taken
+   * once as the screen opens, and a session on it that reads the start's
+   * blocks, builds the street graph, snaps the start to a street and hands
+   * back the rolling route's first view as a picker card
+   * (`open-world/session.ts`). Stopped when the ride ends or the screen is
+   * left. ⚠️ An optional member threaded through JSX, so a `main.tsx` that
+   * stopped supplying it is GREEN in `check:wiring`;
+   * `open-world/session-wiring.test.ts` is what goes red.
+   */
+  readonly openWorld?: OpenWorldSessions | undefined;
   /**
    * The rider's live sensor readings, sampled per frame.
    *
@@ -1175,6 +1201,30 @@ export function drawnAlongPath(
 }
 
 /**
+ * The road a ride reads its profile from — #2982. @see GameStage's
+ * `rideRoadRef`. `follower` is an open-world ride's road, and absent on every
+ * other ride, whose profile and origin are fixed for it.
+ */
+interface RideRoad extends Pick<OpenWorldRoadView, 'profile' | 'origin'> {
+  readonly follower?: OpenWorldRoad | undefined;
+}
+
+/** Before any ride: no profile has been read, and nothing reads this one. */
+const NO_RIDE_ROAD: RideRoad = {
+  profile: {
+    loop: false,
+    resolution: metres(10),
+    totalDistance: metres(0),
+    totalAscent: metres(0),
+    totalDescent: metres(0),
+    elevations: [],
+    grades: [],
+    positions: [],
+  },
+  origin: 0,
+};
+
+/**
  * The game screen — and, when the fragment asks for one (#1992), the same
  * screen ridden by a simulated rider: `simulated-rider.ts` says how it is
  * asked for. Keyed on the choice, so changing it is a new screen and a ride
@@ -1195,6 +1245,10 @@ export function GameView(props: GameViewProps): JSX.Element {
   const onPreviewEnd = useCallback(() => {
     setPreview(undefined);
   }, []);
+  // #2896: the open-world start, taken ONCE for this screen — here rather than
+  // in `GameScreen`, which a preview remounts, and in an initialiser, which
+  // React's StrictMode runs twice and keeps the first answer of.
+  const [openWorldStart] = useState(() => props.port?.openWorld?.take());
   return (
     <GameScreen
       // ⚠️ A preview is a NEW screen, mounted with no trainer port, room or
@@ -1207,6 +1261,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       given={props}
       asked={simulated}
+      openWorldStart={openWorldStart}
       preview={preview}
       returnTo={returnTo}
       // Offered only on an ordinary screen: the address switch already
@@ -1285,6 +1340,7 @@ function useSimulatedRide(
 function GameScreen({
   given,
   asked,
+  openWorldStart,
   preview,
   returnTo,
   onPreview,
@@ -1292,6 +1348,8 @@ function GameScreen({
 }: {
   readonly given: GameViewProps;
   readonly asked: SimulatedRider | undefined;
+  /** #2896: where an open-world ride starts, when the picker handed one over. */
+  readonly openWorldStart: OpenWorldStart | undefined;
   /** A preview to ride on mount, then hand back with {@link onPreviewEnd}. */
   readonly preview: PreviewAsked | undefined;
   readonly returnTo: string | undefined;
@@ -1313,6 +1371,31 @@ function GameScreen({
    */
   const [circuits, setCircuits] = useState<readonly RidableRoute[]>([]);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
+  /**
+   * #2896: the open-world ride, while its start is read and once it is a
+   * card — never in {@link routes}, so it is never a room's course — or why
+   * it could not begin. `undefined` when the picker handed no start over.
+   */
+  const [openWorld, setOpenWorld] = useState<
+    | { readonly kind: 'reading' }
+    | { readonly kind: 'ready'; readonly route: RidableRoute }
+    | { readonly kind: 'refused'; readonly refusal: OpenWorldRefusal }
+    | undefined
+  >(openWorldStart === undefined ? undefined : { kind: 'reading' });
+  /** #2896: the open-world session under way, for `teardown` to stop when the ride ends. */
+  const openWorldSessionRef = useRef<OpenWorldSession | undefined>(undefined);
+  /** #2982: the ready session's road, a new one for each ride on its card. */
+  const openWorldRoadRef = useRef<(() => OpenWorldRoad) | undefined>(undefined);
+  /**
+   * #2982: the road this ride reads its profile from, and the ride distance
+   * of that profile's distance zero. On every ride but an open-world one it
+   * is the chosen route at 0 for the whole ride; on an open-world ride it is
+   * the rolling route's view, which the loop follows (`open-world/road.ts`)
+   * and hands to the simulation, the trainer's grade, the scene and the HUD
+   * on one frame. The state is the HUD's copy of it.
+   */
+  const rideRoadRef = useRef<RideRoad>(NO_RIDE_ROAD);
+  const [rideRoad, setRideRoad] = useState<RideRoad | undefined>(undefined);
   // #940: which card is chosen. `undefined` is the first route — `StageChooser.tsx`.
   // #1010: Home's "next up" opens the game on the route it offered
   // (`shell/routes.ts` §`hrefForGameRoute`); read once, on mount.
@@ -2327,6 +2410,35 @@ function GameScreen({
     };
   }, [port]);
 
+  // #2896: the open-world session, opened on the start the picker handed
+  // over and stopped when this screen goes. Its first view becomes a card,
+  // chosen; a start it could not ride is said, in words naming no place.
+  const openWorldSessions = port?.openWorld;
+  useEffect(() => {
+    if (openWorldStart === undefined || openWorldSessions === undefined) return;
+    const session = openWorldSessions.open(openWorldStart);
+    openWorldSessionRef.current = session;
+    let live = true;
+    setOpenWorld({ kind: 'reading' });
+    void session.ready.then((ready) => {
+      if (!live) return;
+      if (ready.kind === 'ready') {
+        openWorldRoadRef.current = ready.road;
+        setOpenWorld({ kind: 'ready', route: ready.route });
+        setPicked(ready.route.id);
+      } else if (ready.kind === 'refused') {
+        setOpenWorld({ kind: 'refused', refusal: ready.refusal });
+      }
+    });
+    return () => {
+      live = false;
+      session.stop();
+      openWorldRoadRef.current = undefined;
+      if (openWorldSessionRef.current === session) openWorldSessionRef.current = undefined;
+    };
+  }, [openWorldStart, openWorldSessions]);
+  const openWorldRoutes = openWorld?.kind === 'ready' ? [openWorld.route] : [];
+
   /**
    * Releases the screen lock and the GL context.
    *
@@ -2347,6 +2459,10 @@ function GameScreen({
     // ride just as surely as one who pressed the button — validation 0002 L7.
     gradientRef.current?.stop();
     gradientRef.current = undefined;
+    // #2896: an open-world ride's reads end with the ride, as they do when
+    // the screen is left (the effect that opens the session). After the
+    // gradient's release, which is first for #362's reason above.
+    openWorldSessionRef.current?.stop();
     // #2712: the AI pacer's ride ends with the ride: no more asks, and the
     // instance's model slot let go, so write-ups held for it start.
     modelPacerRef.current?.director.end();
@@ -2500,7 +2616,9 @@ function GameScreen({
   const corridorRoute =
     routes === undefined
       ? undefined
-      : ([...levelRoutes, ...routes, ...circuits].find((route) => route.id === picked) ??
+      : ([...openWorldRoutes, ...levelRoutes, ...routes, ...circuits].find(
+          (route) => route.id === picked,
+        ) ??
         routes[0] ??
         circuits[0]);
   useEffect(() => {
@@ -2515,6 +2633,9 @@ function GameScreen({
     if (port?.loadWorldCorridor === undefined || corridorRoute === undefined || !choosing) {
       return;
     }
+    // #2896, ADR 0090 D-1: an open-world ride reads its map block by block
+    // (`open-world/session.ts`), never as a route's corridor.
+    if (isOpenWorldRouteId(corridorRoute.id)) return;
     const controller = new AbortController();
     const shown = (next: CorridorState): void => {
       if (controller.signal.aborted) return;
@@ -2606,7 +2727,16 @@ function GameScreen({
       delivery = false,
       lapRace: LapRaceChoice | undefined = undefined,
     ): Promise<void> => {
-      const profile = route.profile;
+      // #2982: an open-world ride rides a rolling route of its own from the
+      // session's snapped start, whose first view is the card's, and follows
+      // it past that view. A card whose session has gone is no ride, and nor
+      // is one in a room: a room's road is the room's.
+      const onOpenWorld = isOpenWorldRouteId(route.id);
+      const openRoad = onOpenWorld ? openWorldRoadRef.current?.() : undefined;
+      if (onOpenWorld && (openRoad === undefined || props.roomId !== undefined)) {
+        return;
+      }
+      const profile = openRoad?.view.profile ?? route.profile;
       // #2293, ADR 0064 D-8.1: a built-in circuit is a solo race against bots
       // and nothing else — never a free ride, a preview, a round or a room's
       // ride. A press on one that would not race is refused HERE, before
@@ -2715,6 +2845,7 @@ function GameScreen({
       const deliveryWanted =
         onLevel ||
         (!onCircuit &&
+          !onOpenWorld &&
           (props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash))));
       // #784: the room entered on the picker's panel — but only for a ride
       // started from the panel, on the room's own road: a rider in a room who
@@ -2852,6 +2983,10 @@ function GameScreen({
         ),
       });
       simulationRef.current = simulation;
+      // #2982: the road this ride reads, from its first frame. @see rideRoadRef
+      rideRoadRef.current =
+        openRoad === undefined ? { profile, origin: 0 } : { ...openRoad.view, follower: openRoad };
+      setRideRoad(rideRoadRef.current);
       // #2712, ADR 0072: the AI pacer, on a solo ride with a pacer whose
       // rider switched it on and consented — never in a room, a race or a
       // simulated ride. Every ask is logged with the recording under the ride.
@@ -2895,13 +3030,15 @@ function GameScreen({
       // — of the RECORDING, if there is one (`trainer-port.ts`
       // §`GameTrainerPort.courseLine`). Beside the simulation, so `teardown`
       // ends exactly the laps this began.
-      courseRef.current = profile;
+      // #2982: and an open-world ride is no course: it has no line, no lap and
+      // no part lap, so the recording under it has none.
+      courseRef.current = onOpenWorld ? undefined : profile;
       lapsDoneRef.current = 0;
       lapProgressSecondRef.current = undefined;
       lapOwedRef.current = undefined;
       setLapNotice(undefined);
       setRideLaps([]);
-      props.trainer?.courseLine?.({ kind: 'started' });
+      if (!onOpenWorld) props.trainer?.courseLine?.({ kind: 'started' });
       // ⚠️ #362: the line that makes #90's whole gradient path reachable from a
       // ride. `createSimulationDriver` and `createSimulationWriter` were both
       // written, both unit-tested and both green, and nothing under `apps/`
@@ -3250,7 +3387,21 @@ function GameScreen({
       }
       startingRef.current = true;
       try {
-        await begin(route, ghost, pacer, air, sitting, riderGhost, delivery, lapRace);
+        // #2982: an open-world ride is ridden alone, on no saved route: no ghost
+        // of the rider's or another's, no pacer (whose course is built once,
+        // from a road that moves under it, `simulation.ts` §`followRoad`), and
+        // no Delivery round, which needs a town's mapped houses.
+        const alone = isOpenWorldRouteId(route.id);
+        await begin(
+          route,
+          ghost && !alone,
+          alone ? undefined : pacer,
+          air,
+          sitting,
+          riderGhost === true && !alone,
+          delivery === true && !alone,
+          lapRace,
+        );
       } finally {
         startingRef.current = false;
       }
@@ -3305,7 +3456,7 @@ function GameScreen({
     level !== undefined &&
     (picked === undefined ||
       picked === level.route.id ||
-      ![...(routes ?? []), ...circuits].some((route) => route.id === picked));
+      ![...openWorldRoutes, ...(routes ?? []), ...circuits].some((route) => route.id === picked));
   const onLevelChosen = props.onLevelChosen;
   useEffect(() => {
     if (onLevelChosen === undefined) return;
@@ -3529,6 +3680,25 @@ function GameScreen({
         }
         stepsRun = simulation.advanceTo(at, sensors.rider).steps;
       }
+      // #2982: an open-world ride's road, followed past its first view. AFTER
+      // the step, from where it left the rider, and BEFORE anything below reads
+      // a profile, so the simulation, the trainer's grade, the scene and the
+      // HUD all read one view on this frame. @see rideRoadRef
+      const following = rideRoadRef.current.follower;
+      const followed = following?.follow(simulation.state.ride.distance);
+      if (following !== undefined && followed !== undefined) {
+        rideRoadRef.current = { ...followed, follower: following };
+        simulation.followRoad(followed.profile, followed.origin);
+        // ADR 0087 D-6: a U-turn's grade is walked at 1 % a second; nothing
+        // else here changes a grade the rider was sent. `gradient.ts` §`follow`.
+        gradientRef.current?.follow(followed.profile, followed.origin, followed.turned);
+        slopesRef.current = slopesOf(followed.profile);
+        setRideRoad(rideRoadRef.current);
+      }
+      const road = rideRoadRef.current;
+      // The ride as a reader of `road.profile` reads it: its odometer at the
+      // view's own distance. The simulation's own state is the ride's.
+      const onRoad = alongRoad(simulation.state, road.origin);
       if (roomRaceNow?.kind === 'running') {
         const dt = Math.max(0, (at - lastFrameAt) / 1000);
         const power = sensors.rider.live ? (sensors.rider.power as number) : 0;
@@ -3687,21 +3857,26 @@ function GameScreen({
       // #2420: spoken power is the power the HUD shows, 3 s or instant as the
       // rider chose (owner ruling, 2026-11-09), from the same average.
       const readings = hudReadings({
-        state: simulation.state,
-        profile: chosen.profile,
+        state: onRoad,
+        profile: road.profile,
         cadence: sensors.cadence,
         heartRate: sensors.heartRate,
         units: unitsRef.current,
         shownPower: { view: powerViewRef.current, average: powerAverageRef.current.average },
       });
       // #399: "to go" is the HUD's own reading, parsed — see `remainingFrom`.
-      const remaining = remainingFrom(readings, spokenDistanceUnit(unitsRef.current));
+      // #2982: never on an open-world ride, which goes nowhere in particular:
+      // its view's end is only how far the road is held, which a new view moves.
+      const remaining =
+        road.follower === undefined
+          ? remainingFrom(readings, spokenDistanceUnit(unitsRef.current))
+          : undefined;
       // #399: a climb or a descent ahead, from the SAME wrapped position the
       // strip and the plan view use (`climb-ahead.ts` says why that matters).
       const slope = slopeEvent(slopeAnnouncedRef.current, {
         slopes: slopesRef.current,
-        profile: chosen.profile,
-        distance: simulation.state.ride.distance,
+        profile: road.profile,
+        distance: onRoad.ride.distance,
         // #1440: the step of the rider's own units nearest the one stored.
         lead: announcementsRef.current.enabled
           ? climbLeadIn(announcementsRef.current.climbLeadMetres, unitsRef.current)
@@ -3890,14 +4065,15 @@ function GameScreen({
       // times, distance and climb are the row the ride's page will list, and
       // its averages are that row's but for a reading still on its way as the
       // line was crossed — and with nothing recording there is no lap, and
-      // nothing is said.
-      const crossed = courseLineEvent(
-        chosen.profile,
-        lapsDoneRef.current,
-        simulation.state.ride.distance,
-      );
-      if (crossed !== undefined) {
-        lapsDoneRef.current = courseLapsDone(chosen.profile, simulation.state.ride.distance);
+      // nothing is said. #2982: an open-world ride is no course, and has no
+      // line and no laps (`begin` keeps no {@link courseRef} for one).
+      const course = courseRef.current;
+      const crossed =
+        course === undefined
+          ? undefined
+          : courseLineEvent(course, lapsDoneRef.current, simulation.state.ride.distance);
+      if (course !== undefined && crossed !== undefined) {
+        lapsDoneRef.current = courseLapsDone(course, simulation.state.ride.distance);
         const laps = trainerPortRef.current?.courseLine?.(crossed);
         if (laps !== undefined) {
           setRideLaps(laps);
@@ -3920,9 +4096,9 @@ function GameScreen({
       // its next checkpoint, and a flush is seconds apart. After the line's
       // event, so the stretch said is the new lap's and not the old one's end.
       const second = Math.floor(simulation.state.elapsed);
-      if (second !== lapProgressSecondRef.current) {
+      if (course !== undefined && second !== lapProgressSecondRef.current) {
         lapProgressSecondRef.current = second;
-        const progress = courseProgressEvent(chosen.profile, simulation.state.ride.distance);
+        const progress = courseProgressEvent(course, simulation.state.ride.distance);
         if (progress !== undefined) {
           trainerPortRef.current?.courseLine?.(progress);
         }
@@ -3996,7 +4172,7 @@ function GameScreen({
         cuesRef.current?.cue('distance');
       }
 
-      const origin = corridorOrigin(chosen.profile);
+      const origin = corridorOrigin(road.profile);
       // ⚠️ **Where to DRAW them, which is not where the newest step left them**
       // — #323. The simulation ticks twenty times a second and this loop runs
       // sixty, so reading the state's own distances here drew each position
@@ -4210,18 +4386,24 @@ function GameScreen({
         // #2494: how fast the sway moved over the frame, which turns the bars.
         const steeredSwayRate = swaySeconds > 0 ? (steeredSway - swayBefore) / swaySeconds : 0;
         const unturned = sceneFrame({
-          profile: chosen.profile,
+          // #2982: the view followed this frame, and every distance on it read at
+          // the view's own: an open-world ride's odometer less its origin.
+          profile: road.profile,
           origin,
           // #679: the board before a line reads in the rider's own units.
           units: unitsRef.current,
-          state: simulation.state,
-          riderDistance:
+          state: onRoad,
+          riderDistance: alongView(
+            road,
             raceDrawn?.riderDistance ?? roomRaceDrawn?.riderDistance ?? drawn.riderDistance,
+          ),
           // #237: the bot's odometer, from the state the simulation just
           // advanced. `SceneInput.botDistance` was declared and optional and
           // never supplied, which is why a built, tested and green pacer drew
           // nothing on a real 47.53 km route.
-          ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
+          ...(drawn.botDistance === undefined
+            ? {}
+            : { botDistance: alongView(road, drawn.botDistance) }),
           ghost: ghostRef.current,
           // #245: the rung's scenery budget, so a throttling phone stops
           // *placing* the scenery it is about to stop drawing. @see
@@ -4717,6 +4899,14 @@ function GameScreen({
     return (
       <>
         {rideEnded === undefined ? null : <RideEndedNotice ended={rideEnded} />}
+        {openWorld?.kind === 'reading' ? (
+          // #2896: the start's blocks are being read; the card follows.
+          <p role="status">Reading the map round your open-world start…</p>
+        ) : openWorld?.kind === 'refused' ? (
+          // #2896: names the constraint, never the start (ADR 0004 D). Polite,
+          // as every refusal here is: nothing it says interrupts (#394).
+          <p role="status">{describeOpenWorldRefusal(openWorld.refusal, units)}</p>
+        ) : null}
         {raceOver === undefined || props.rooms === undefined ? undefined : (
           // #785: the result of the race this rider just rode, once the room
           // said it was over — and never while it ran.
@@ -4729,7 +4919,10 @@ function GameScreen({
         )}
         <RoutePicker
           // #2362: the level the Delivery picker opened this on, first, as a card.
-          routes={routes === undefined ? undefined : [...levelRoutes, ...routes]}
+          // #2896: and the open-world ride's first view, first of all, once read.
+          routes={
+            routes === undefined ? undefined : [...openWorldRoutes, ...levelRoutes, ...routes]
+          }
           // #940: the card the rider chose, kept here so it survives a ride.
           picked={picked}
           onPick={setPicked}
@@ -5066,9 +5259,11 @@ function GameScreen({
           live region: the HUD's gap field says the same as text. */}
       <div ref={offScreenRef} className="oyl-game__off-screens" aria-hidden="true" />
       <HudPanel
-        profile={chosen.profile}
+        // #2982: the view the loop followed, and the ride on it at its own
+        // distance — the profile and the odometer every reader in the loop read.
+        profile={rideRoad?.profile ?? chosen.profile}
         announcement={announcement}
-        state={state}
+        state={rideRoad === undefined ? state : alongRoad(state, rideRoad.origin)}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
         // #1111: the RECORDER's moving time — never the simulation's

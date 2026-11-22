@@ -202,6 +202,15 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     //   builds a `z/x/y` URL), and the retained record has no `Range` field.
     //   The words name it.
     //
+    // - **The open-world ride's streamed read (#2896, ADR 0090 R-7)**: the
+    //   blocks round the rider, requested at the start and then block by
+    //   block as the ride goes on, so the requests follow where the rider
+    //   rides, privacy zones included (R-3). Re-checked for #2896: the read
+    //   goes through the same `corridor-source.ts` source, so every request is
+    //   still a byte range of the ONE archive file, and the retained record
+    //   still has no `Range` field. The answer does not change; the words
+    //   name it.
+    //
     // ⚠️ `apps/mobile/RELEASE.md` §8 re-checks before every tag that the
     // retention is still what this row and the privacy policy say — the plan
     // decides the period, and a Business plan keeps 31 days.
@@ -212,7 +221,7 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     shared: false,
     optional: true,
     purposes: ['App functionality'],
-    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). With the realistic world chosen, choosing or saving a route also requests that route’s tiles from the same host, once for that route, as byte ranges of the same file, and never the tiles near the rider’s privacy zones (#1539). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account. Connecting to an instance (#777), which a rider chooses to do, also sends the IP address with each request to it: this project’s own instance does not write the address to its log or its database and holds it in memory only, for at most an hour, to limit how many requests one address can make; Cloudflare, which carries that instance’s traffic through Cloudflare Tunnel, keeps the same record of each request — the IP address, the time, and the device or browser type — that this project’s Cloudflare account can see for up to 7 days. This project does not use or share that record either, and does not link it to the rider’s account there',
+    why: 'the ride map requests tiles from tiles.openzigs.com by default (#534; a rider can turn that off in Settings). With the realistic world chosen, choosing or saving a route also requests that route’s tiles from the same host, once for that route, as byte ranges of the same file, and never the tiles near the rider’s privacy zones (#1539). An open-world ride requests the tiles round the rider from the same host as it goes, block by block, as byte ranges of the same file, so for as long as the ride lasts the requests follow where the rider rides, near their privacy zones too (#2896). Cloudflare, which serves that host for this project, keeps a record of each map request — the IP address, the time, and the device or browser type, not which part of the map — that this project’s Cloudflare account can see for up to 7 days in its standard HTTP analytics, which cannot be switched off (#558). The map is one file and each tile is picked out of it by a byte range that the record does not include, so the location it holds is what an IP address says. This project does not use or share that record, and it is not linked to any ride or account. Connecting to an instance (#777), which a rider chooses to do, also sends the IP address with each request to it: this project’s own instance does not write the address to its log or its database and holds it in memory only, for at most an hour, to limit how many requests one address can make; Cloudflare, which carries that instance’s traffic through Cloudflare Tunnel, keeps the same record of each request — the IP address, the time, and the device or browser type — that this project’s Cloudflare account can see for up to 7 days. This project does not use or share that record either, and does not link it to the rider’s account there',
   },
   {
     // ⚠️ **Re-answered by #784, and the answer CHANGED — collected: true.** A

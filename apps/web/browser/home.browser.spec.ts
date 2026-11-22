@@ -355,7 +355,7 @@ test.describe('#1010 — the pictures are the cards, and every word is on a soli
   for (const viewport of FOLD_VIEWPORTS) {
     test(viewport.name, async ({ page }) => {
       const seen = await openAt(page, viewport);
-      expect(seen.rideCards).toHaveLength(3);
+      expect(seen.rideCards).toHaveLength(4);
       const next = seen.nextUp;
       expect(next, 'Next up was not drawn').toBeDefined();
       expect(next?.words.length ?? 0).toBeGreaterThanOrEqual(3);
@@ -444,7 +444,7 @@ test.describe('#1010 — the pictures are the cards, and every word is on a soli
     page,
   }) => {
     const seen = await open(page, 390, 844, { query: '?band=overlay' });
-    expect(seen.rideCards).toHaveLength(3);
+    expect(seen.rideCards).toHaveLength(4);
     for (const card of seen.rideCards) {
       const onArt = card.words.filter((line) => overlaps(line, card.art));
       console.log(
@@ -792,6 +792,8 @@ test.describe('the ride cards — each one `.oyl-button` link at 44×44', () => 
       expect(seen.rideCards.map((card) => card.linkText)).toEqual([
         'Start a ride',
         'Choose a route',
+        // #2889: the open-world ride's start.
+        'Choose a start',
         'Choose a workout',
       ]);
       const widths = seen.rideCards.map((card) => card.card.width);

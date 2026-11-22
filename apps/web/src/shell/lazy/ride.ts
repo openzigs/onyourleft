@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The Ride group's views — Ride, the trainer game and Workouts.
+ * The Ride group's views — Ride, the trainer game, Workouts and the
+ * open-world ride's start (#2889).
  *
  * One module per navigation group (#674), so the bundler writes each group
  * into a chunk of its own that `AppShell` loads with `import()` only when a
@@ -13,3 +14,4 @@
 export { RideView } from '../../views/RideView';
 export { GameView } from '../../game/GameView';
 export { WorkoutsView } from '../../views/WorkoutsView';
+export { OpenWorldStartView } from '../../views/OpenWorldStartView';
