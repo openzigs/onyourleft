@@ -21,7 +21,7 @@
  * ## What leaves
  *
  * A consent's `instance` and `modelAddress`, exactly as the status named them;
- * the race state `model-race.ts` §`modelTacticsInputOf` built and the
+ * one bot's ask `model-race.ts` §`askLapRaceModel` built (#2836) and the
  * instance's own reader checked on the device (no coordinate, no name, no
  * date, no identifier); and the start and end of a race, which carry nothing.
  *
@@ -89,7 +89,7 @@ export interface ModelTacticsPort {
   withdrawTacticsConsent(): Promise<TacticsStatus>;
   /** `POST /v1/analysis/tactics/start`: the race takes the model slot and warms the model. */
   startTacticsRace(): Promise<ModelTacticsReply>;
-  /** `POST /v1/analysis/tactics/decide` on one race state. */
+  /** `POST /v1/analysis/tactics/decide` on one bot's ask (#2836). */
   decideTactics(input: ModelTacticsInput): Promise<ModelTacticsReply>;
   /** `POST /v1/analysis/tactics/end`: the slot let go. Settles; says nothing. */
   endTacticsRace(): Promise<void>;

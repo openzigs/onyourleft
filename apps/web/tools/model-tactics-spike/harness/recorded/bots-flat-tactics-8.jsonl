@@ -1,0 +1,48 @@
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"attack\",\"effort\":\"threshold\"}","latencyMs":2066,"promptTokens":1634,"outputTokens":16}
+{"text":"{\"reason\": \"cover-move\", \"move\": \"follow\", \"effort\": \"tempo\"}","latencyMs":1202,"promptTokens":1627,"outputTokens":21}
+{"text":"{\"reason\": \"save-legs\", \"move\": \"sit-in\"}","latencyMs":948,"promptTokens":1629,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\",\"effort\":\"tempo\"}","latencyMs":1077,"promptTokens":1641,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":1011,"promptTokens":1643,"outputTokens":13}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1149,"promptTokens":1635,"outputTokens":16}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1078,"promptTokens":1628,"outputTokens":16}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"attack\",\"effort\":\"threshold\"}","latencyMs":945,"promptTokens":1642,"outputTokens":16}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1211,"promptTokens":1628,"outputTokens":16}
+{"text":"{\"reason\":\"save-legs\",\"move\":\"sit-in\"}","latencyMs":942,"promptTokens":1630,"outputTokens":14}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":931,"promptTokens":1648,"outputTokens":13}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":1021,"promptTokens":1649,"outputTokens":13}
+{"text":"{\"reason\":\"save-legs\",\"move\":\"sit-in\"}","latencyMs":1077,"promptTokens":1630,"outputTokens":14}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1178,"promptTokens":1633,"outputTokens":16}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"attack\",\"effort\":\"threshold\"}","latencyMs":982,"promptTokens":1647,"outputTokens":16}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1167,"promptTokens":1629,"outputTokens":16}
+{"text":"{\"reason\": \"save-legs\", \"move\": \"sit-in\"}","latencyMs":991,"promptTokens":1631,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":996,"promptTokens":1645,"outputTokens":13}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":897,"promptTokens":1649,"outputTokens":13}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1207,"promptTokens":1639,"outputTokens":16}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1209,"promptTokens":1645,"outputTokens":16}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":1105,"promptTokens":1650,"outputTokens":13}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1226,"promptTokens":1635,"outputTokens":16}
+{"text":"{\"reason\":\"save-legs\",\"move\":\"sit-in\"}","latencyMs":928,"promptTokens":1636,"outputTokens":14}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":995,"promptTokens":1650,"outputTokens":13}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":887,"promptTokens":1649,"outputTokens":13}
+{"text":"{\"reason\": \"cover-move\", \"move\": \"follow\", \"effort\": \"tempo\"}","latencyMs":1289,"promptTokens":1636,"outputTokens":21}
+{"text":"{\"reason\": \"save-legs\", \"move\": \"sit-in\"}","latencyMs":1085,"promptTokens":1631,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"attack\",\"effort\":\"threshold\"}","latencyMs":1098,"promptTokens":1647,"outputTokens":16}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1338,"promptTokens":1642,"outputTokens":16}
+{"text":"{\"reason\": \"save-legs\", \"move\": \"sit-in\"}","latencyMs":990,"promptTokens":1635,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":919,"promptTokens":1651,"outputTokens":13}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":955,"promptTokens":1649,"outputTokens":13}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1187,"promptTokens":1629,"outputTokens":16}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1153,"promptTokens":1620,"outputTokens":16}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\",\"effort\":\"threshold\"}","latencyMs":1055,"promptTokens":1619,"outputTokens":17}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1143,"promptTokens":1617,"outputTokens":16}
+{"text":"{\"reason\":\"save-legs\",\"move\":\"sit-in\"}","latencyMs":921,"promptTokens":1624,"outputTokens":14}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\",\"effort\":\"tempo\"}","latencyMs":1213,"promptTokens":1622,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\"}","latencyMs":1017,"promptTokens":1619,"outputTokens":13}
+{"text":"{\"reason\": \"cover-move\", \"move\": \"follow\", \"effort\": \"tempo\"}","latencyMs":1314,"promptTokens":1615,"outputTokens":21}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1220,"promptTokens":1623,"outputTokens":16}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\",\"effort\":\"tempo\"}","latencyMs":1112,"promptTokens":1618,"outputTokens":17}
+{"text":"{\"reason\": \"cover-move\", \"move\": \"follow\", \"effort\": \"tempo\"}","latencyMs":1298,"promptTokens":1623,"outputTokens":21}
+{"text":"{\"reason\": \"save-legs\", \"move\": \"sit-in\"}","latencyMs":1049,"promptTokens":1625,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\",\"effort\":\"tempo\"}","latencyMs":1052,"promptTokens":1635,"outputTokens":17}
+{"text":"{\"reason\":\"my-terrain\",\"move\":\"flyer\",\"effort\":\"tempo\"}","latencyMs":1073,"promptTokens":1624,"outputTokens":17}
+{"text":"{\"reason\":\"cover-move\",\"move\":\"follow\",\"effort\":\"tempo\"}","latencyMs":1093,"promptTokens":1618,"outputTokens":16}

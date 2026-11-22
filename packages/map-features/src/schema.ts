@@ -26,7 +26,7 @@
  * {@link WATER_LINE_KINDS} — by their `kind` alone.
  */
 
-import type { BuildingFields } from './types';
+import type { BuildingFields, StreetRoadFields } from './types';
 
 /** The layers decoded, in the order their features are returned. */
 export const READ_LAYERS = ['landuse', 'water', 'buildings', 'roads', 'places'] as const;
@@ -57,6 +57,46 @@ export const KEY_IS_TUNNEL = 'is_tunnel';
  * in `places`, and looked up nowhere else.
  */
 export const KEY_POPULATION_RANK = 'population_rank';
+
+/*
+ * ## The road fields (#2892, ADR 0091 D-2)
+ *
+ * Three keys of a `roads` feature that the open-world street graph reads, and
+ * nothing else new: `oneway`, `access` and `is_link`. Protomaps writes them
+ * at z15 in our archive (spike 0040 §1). They are looked up **in `roads`
+ * alone**, as the building fields are in `buildings` alone, and kept only on
+ * a street. No string from the tile is kept: a value is compared byte for
+ * byte with the lists below and what is kept is a constant of the decoder's
+ * own. A value the lists do not name — another string, a number where a
+ * string belongs, a string where a boolean belongs — is read as the field's
+ * default (`NO_ROAD_FIELDS`) and counted in `DecodedTile.roadValuesDefaulted`,
+ * never thrown and never refused. `name`, `ref`, `network*`, `shield_text*`,
+ * `service` and `min_zoom` stay unread (D-2).
+ */
+
+/** A street's one-way flag: an OSM `oneway` string. */
+export const KEY_ONEWAY = 'oneway';
+/** A street's access: an OSM `access` string, read only to tell `no` or `private` from open. */
+export const KEY_ACCESS = 'access';
+/** Whether a street is a `*_link`: a boolean. */
+export const KEY_IS_LINK = 'is_link';
+
+/**
+ * The `oneway` strings the decoder recognises (ADR 0091 D-2): `yes` runs along
+ * the line's vertex order, `-1` against it, and `no` is the default. Any other
+ * value is the default and counted.
+ */
+export const ONEWAY_VALUES = ['yes', '-1', 'no'] as const;
+
+/** The `access` strings that close a street to a rider (ADR 0091 D-3). */
+export const CLOSED_ACCESS_VALUES = ['no', 'private'] as const;
+
+/**
+ * The `access` strings recognised as open: the four spike 0040 §1 saw at z15
+ * besides the two closed ones. Any other string, or a value of another type,
+ * is open too, as ADR 0091 D-2 says, and counted.
+ */
+export const OPEN_ACCESS_VALUES = ['yes', 'permissive', 'destination', 'customers'] as const;
 
 /** MVT geometry types (spec 2.1 §4.3.4). */
 export const GEOMETRY_POINT = 1;
@@ -97,16 +137,25 @@ export const LAYER_KEPT_GEOMETRIES: Readonly<Record<ReadLayer, readonly number[]
 };
 
 /**
- * The `water` line `kind`s kept — #2659. Protomaps v4 writes a waterway line
- * with its `waterway` tag as its `kind` and no `kind_detail`
- * (protomaps/basemaps `Water.java`, read 2026-11-15): `river`, `stream`,
- * `canal`, `ditch` and `drain`. The first three are kept. **A ditch and a
- * drain are not**: a road crosses one in a culvert, which is invisible from a
- * bicycle (`apps/web/src/game/waterways.ts` §"What there is not"), and the
- * archive marks no culvert on a line — so one kept would be a bridge over
- * every roadside drain. Any other `kind`, or none, drops the line unread.
+ * The `water` line `kind`s kept — #2659, and since #2974 all five. Protomaps
+ * v4 writes a waterway line with its `waterway` tag as its `kind` and no
+ * `kind_detail` (protomaps/basemaps `Water.java`, read 2026-11-15 and again
+ * 2026-11-21): `river`, `stream`, `canal`, `ditch` and `drain`. Until #2974 a
+ * ditch and a drain were dropped here, because a road crosses one in a
+ * culvert and the archive marks no culvert on a line; now they are kept for
+ * where one runs BESIDE the road, and `apps/web/src/game/waterways.ts`
+ * bridges only {@link BRIDGED_WATER_LINE_KINDS}. Any other `kind`, or none,
+ * drops the line unread.
  */
-export const WATER_LINE_KINDS = ['river', 'stream', 'canal'] as const;
+export const WATER_LINE_KINDS = ['river', 'stream', 'canal', 'ditch', 'drain'] as const;
+
+/**
+ * The water line `kind`s a road crosses on a bridge — #2659. A ditch or a
+ * drain passes under it in a culvert, which is invisible from a bicycle
+ * (`apps/web/src/game/waterways.ts` §"What there is not"), so one bridged
+ * would be a bridge over every roadside drain.
+ */
+export const BRIDGED_WATER_LINE_KINDS = ['river', 'stream', 'canal'] as const;
 
 /** The `buildings.kind` values kept. Address points and anything else are dropped. */
 export const BUILDING_KINDS = ['building', 'building_part'] as const;
@@ -395,4 +444,15 @@ export const NO_BUILDING_FIELDS: BuildingFields = {
   roofMaterial: null,
   startYear: null,
   landmark: null,
+};
+
+/**
+ * Every road field at its default (#2892): not one-way, open, not a link. What
+ * a street gets for a field the tile does not carry, or carries a value the
+ * lists above do not name.
+ */
+export const NO_ROAD_FIELDS: StreetRoadFields = {
+  oneway: 'no',
+  access: 'open',
+  isLink: false,
 };

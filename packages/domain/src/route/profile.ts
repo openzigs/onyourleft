@@ -338,51 +338,125 @@ function accumulated(
   values: readonly number[],
   threshold: number,
 ): { ascent: number; descent: number } {
-  let ascent = 0;
-  let descent = 0;
+  const run = new AscentRun(threshold);
+  for (const value of values) run.add(value);
+  return run.closed();
+}
+
+/**
+ * {@link accumulated}'s run rule, one value at a time, so that a recording can
+ * be counted as it grows rather than from the start again (#2283). The one
+ * implementation of the rule: {@link accumulated} is this over a whole list.
+ */
+class AscentRun {
+  ascent = 0;
+  descent = 0;
+  /** How many values have been added. */
+  readings = 0;
   // Before the first confirmed run there is no direction yet, so both the
   // lowest and the highest point so far are candidate pivots.
-  let low = values[0] as number;
-  let high = values[0] as number;
-  let direction = 0;
-  let pivot = values[0] as number;
-  let extreme = values[0] as number;
-  for (const value of values) {
-    if (direction === 0) {
-      if (value < low) low = value;
-      if (value > high) high = value;
-      if (value - low > threshold) {
-        direction = 1;
-        pivot = low;
-        extreme = value;
-      } else if (high - value > threshold) {
-        direction = -1;
-        pivot = high;
-        extreme = value;
+  #low = 0;
+  #high = 0;
+  #direction = 0;
+  #pivot = 0;
+  #extreme = 0;
+
+  readonly threshold: number;
+
+  constructor(threshold: number) {
+    this.threshold = threshold;
+  }
+
+  add(value: number): void {
+    if (this.readings === 0) {
+      this.#low = value;
+      this.#high = value;
+      this.#pivot = value;
+      this.#extreme = value;
+    }
+    this.readings += 1;
+    const threshold = this.threshold;
+    if (this.#direction === 0) {
+      if (value < this.#low) this.#low = value;
+      if (value > this.#high) this.#high = value;
+      if (value - this.#low > threshold) {
+        this.#direction = 1;
+        this.#pivot = this.#low;
+        this.#extreme = value;
+      } else if (this.#high - value > threshold) {
+        this.#direction = -1;
+        this.#pivot = this.#high;
+        this.#extreme = value;
       }
-    } else if (direction === 1) {
-      if (value > extreme) extreme = value;
-      else if (extreme - value > threshold) {
-        ascent += extreme - pivot;
-        direction = -1;
-        pivot = extreme;
-        extreme = value;
+    } else if (this.#direction === 1) {
+      if (value > this.#extreme) this.#extreme = value;
+      else if (this.#extreme - value > threshold) {
+        this.ascent += this.#extreme - this.#pivot;
+        this.#direction = -1;
+        this.#pivot = this.#extreme;
+        this.#extreme = value;
       }
     } else {
-      if (value < extreme) extreme = value;
-      else if (value - extreme > threshold) {
-        descent += pivot - extreme;
-        direction = 1;
-        pivot = extreme;
-        extreme = value;
+      if (value < this.#extreme) this.#extreme = value;
+      else if (value - this.#extreme > threshold) {
+        this.descent += this.#pivot - this.#extreme;
+        this.#direction = 1;
+        this.#pivot = this.#extreme;
+        this.#extreme = value;
       }
     }
   }
-  // The run in progress when the route ended is a real one; closing it is not
-  // rounding up. Without this every route loses its final climb.
-  if (direction === 1) ascent += extreme - pivot;
-  if (direction === -1) descent += pivot - extreme;
-  return { ascent, descent };
+
+  /** The totals with the run in progress closed, leaving this run as it was. */
+  closed(): { ascent: number; descent: number } {
+    let ascent = this.ascent;
+    let descent = this.descent;
+    // The run in progress when the route ended is a real one; closing it is not
+    // rounding up. Without this every route loses its final climb.
+    if (this.#direction === 1) ascent += this.#extreme - this.#pivot;
+    if (this.#direction === -1) descent += this.#pivot - this.#extreme;
+    return { ascent, descent };
+  }
+
+  copy(): AscentRun {
+    const next = new AscentRun(this.threshold);
+    next.ascent = this.ascent;
+    next.descent = this.descent;
+    next.readings = this.readings;
+    next.#low = this.#low;
+    next.#high = this.#high;
+    next.#direction = this.#direction;
+    next.#pivot = this.#pivot;
+    next.#extreme = this.#extreme;
+    return next;
+  }
+}
+
+/**
+ * {@link recordedAscent}, one altitude reading at a time — #2283: the ride
+ * HUD's climb, counted as the recording grows rather than from its first
+ * sample again every second. {@link recordedAscent} is this over a whole
+ * channel, so the two cannot disagree.
+ */
+export class RecordedAscentFold {
+  #run = new AscentRun(ASCENT_THRESHOLD_METRES);
+
+  /** The next slot's altitude; a gap, or a value that is not finite, is skipped. */
+  add(altitude: number | undefined): void {
+    if (altitude !== undefined && Number.isFinite(altitude)) this.#run.add(altitude);
+  }
+
+  /** What {@link recordedAscent} gives for the readings added so far. */
+  get ascent(): Metres | undefined {
+    return this.#run.readings < 2 ? undefined : metres(this.#run.closed().ascent);
+  }
+
+  /** Another fold that has had the same readings, and goes on alone. */
+  copy(): RecordedAscentFold {
+    const next = new RecordedAscentFold();
+    next.#run = this.#run.copy();
+    return next;
+  }
 }
 
 /**
@@ -398,13 +472,9 @@ function accumulated(
  * measured, and a badge counting it as nought would say otherwise.
  */
 export function recordedAscent(altitudes: readonly (number | undefined)[]): Metres | undefined {
-  const values = altitudes.filter(
-    (value): value is number => value !== undefined && Number.isFinite(value),
-  );
-  if (values.length < 2) {
-    return undefined;
-  }
-  return metres(accumulated(values, ASCENT_THRESHOLD_METRES).ascent);
+  const fold = new RecordedAscentFold();
+  for (const altitude of altitudes) fold.add(altitude);
+  return fold.ascent;
 }
 
 /**

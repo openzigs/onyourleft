@@ -78,6 +78,7 @@ import {
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_WORDMARK,
   REALISTIC_HOUSE_ATLAS,
+  REALISTIC_PEOPLE,
   REALISTIC_ROADSIDE_MODEL_NAMES,
   REALISTIC_ROADSIDE_MODELS,
   REALISTIC_CHAIN_LINK,
@@ -1512,6 +1513,53 @@ export const DELIVERY_CAR_SOURCE = {
 } as const;
 
 /**
+ * What the people on the pavements wear — the owner's request of 2026-11-18,
+ * under ADR 0026's amendment of the same date: garments, shoes and hair out
+ * of MakeHuman's own CC0 system assets pack, the archive the rider's skin and
+ * eyebrow already come from ({@link SYSTEM_ASSETS_ARCHIVE}), each on its own
+ * `makehuman_system`, CC0 row of the pack's page, read 2026-11-18. `type` is
+ * the page's type column and the archive's directory.
+ *
+ * ⚠️ **Nothing that prints a mark is worn as it came.** The pack's
+ * `male_casualsuit02`, `male_casualsuit04`, `female_casualsuit01` and
+ * `female_casualsuit02` carry MakeHuman's own wordmark across the chest and
+ * are not taken; `male_casualsuit06` carries it smaller, on a plain white
+ * shirt, and `blender/process_people.py` §`PAINT_OVER` paints it out before
+ * anything reads the picture (ADR 0049 D-6).
+ */
+export const PEOPLE_GARMENTS: readonly { readonly type: string; readonly name: string }[] = [
+  { type: 'clothes', name: 'male_casualsuit06' },
+  { type: 'clothes', name: 'female_elegantsuit01' },
+  { type: 'clothes', name: 'male_casualsuit05' },
+  { type: 'clothes', name: 'shoes05' },
+  { type: 'clothes', name: 'shoes01' },
+  { type: 'clothes', name: 'shoes02' },
+  { type: 'hair', name: 'short02' },
+  { type: 'hair', name: 'ponytail01' },
+  { type: 'hair', name: 'short01' },
+];
+
+/** The people's second skin, beside the rider's `young_caucasian_male`: the same pack's, for the woman. */
+export const PEOPLE_SECOND_SKIN = {
+  name: 'young_caucasian_female',
+  picture: 'young_lightskinned_female_diffuse.png',
+} as const;
+
+/** The script that makes the people, and what its run is asked for. */
+export const PEOPLE_SCRIPT = 'blender/process_people.py';
+/**
+ * How many triangles each person is cut to: **1 800**, inside
+ * `people-body.ts` §`PERSON_MAX_TRIANGLES` (2 000), which leaves three of
+ * them room in the people's animation texture
+ * (`people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`).
+ */
+export const PEOPLE_TRIANGLES = 1_800;
+/** The side of the people's atlas, in pixels. */
+export const PEOPLE_ATLAS_PIXELS = 1024;
+/** The picture `process_people.py` writes beside its GLB, before `encode-ktx2.ts`. */
+export const PEOPLE_ATLAS_MADE = 'people_atlas.png';
+
+/**
  * Every upstream input. Why each one, briefly — `docs/spikes/0005` has the
  * rest, and #474 the vegetation's own reasons:
  *
@@ -1656,6 +1704,24 @@ export const SOURCES: readonly AssetSource[] = [
           asset: { type: 'eyebrows', name: 'eyebrow001' },
           mustContain: MAKEHUMAN_CC0_HEADER,
         },
+        // The people's skin, garments and hair (PEOPLE_GARMENTS), each on its own row.
+        {
+          path: `skins/${PEOPLE_SECOND_SKIN.name}/${PEOPLE_SECOND_SKIN.picture}`,
+          asset: { type: 'skins', name: PEOPLE_SECOND_SKIN.name },
+        },
+        ...PEOPLE_GARMENTS.flatMap(({ type, name }) => [
+          {
+            path: `${type}/${name}/${name}.obj`,
+            asset: { type, name },
+            mustContain: MAKEHUMAN_CC0_HEADER,
+          },
+          {
+            path: `${type}/${name}/${name}.mhclo`,
+            asset: { type, name },
+            mustContain: MAKEHUMAN_CC0_HEADER,
+          },
+          { path: `${type}/${name}/${name}_diffuse.png`, asset: { type, name } },
+        ]),
       ],
     },
   }, // #1585: the house models, placed by the owner (HOUSE_MODEL_SOURCES).
@@ -2311,6 +2377,27 @@ export const OUTPUTS: readonly OutputSpec[] = [
       ],
     },
     modified: `the body mesh only, in an athletic, lean build — MakeHuman’s own macro targets at its default gender, age and ethnic mix with muscle at 85 % and weight at 25 % — its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, smooth-shaded, each foot below the ankle drawn out onto its own convex hull as a cycling shoe, collapse-decimated to what a modelled helmet, glasses and eyes leave of 8 998 triangles, with texture coordinates and tangents and no colour of its own; and the helmet (a plain shell with closed vents, and straps laid along the head) and glasses (forward-facing lenses, and arms along the temples) built round the head’s own vertices, with an eyeball in each socket (#2495) — the front of a ball at the centre and radius of MakeHuman’s own CC0 eye helper, looking along its own eye bone, drawn in a pupil, an iris and a white from the numbers in ${RIDER_KIT}, ${String(RIDER_EYE_TRIANGLES)} triangles — one mesh coloured per vertex; in its rest pose; and one animation, crash (#2493): the skeleton posed at each of the moments in ${RIDER_CRASH} — thrown, landed, down and rising, between the riding pose at the start and the end — on the timeline of src/game/delivery/crash-look.ts and from the riding joints src/game/bicycle.ts gives (read by ${RIDER_CRASH_POSE}), as src/game/three-renderer.ts poses the rider, every bone's rotation and the root's position at each. The clip is this repository's own work, derived from no other product or motion capture, and dedicated CC0-1.0 as the kit is`,
+  },
+  // The people on the pavements (the owner's request of 2026-11-18): three
+  // dressed bodies in one GLB, and the one atlas they wear.
+  {
+    file: REALISTIC_PEOPLE.model,
+    from: 'makehuman',
+    recipe: {
+      how: 'blender',
+      script: PEOPLE_SCRIPT,
+      args: [String(PEOPLE_TRIANGLES), String(PEOPLE_ATLAS_PIXELS), PEOPLE_ATLAS_MADE],
+      alsoReads: ['makehuman-system-assets'],
+      alsoWrites: [
+        {
+          file: REALISTIC_PEOPLE.atlas,
+          made: PEOPLE_ATLAS_MADE,
+          ktx2: { encoding: 'colour', origin: 'top-left' },
+          modified: `the people's one atlas, made in the same run by ${PIPELINE_DIRECTORY}${PEOPLE_SCRIPT}: for each of the three people a row of tiles — MakeHuman's CC0 system skins young_caucasian_male and young_caucasian_female (the face in one tile, the neck, arms and legs in another), the garments' and shoes' own photographs (male_casualsuit06, female_elegantsuit01, male_casualsuit05; shoes05, shoes01, shoes02), the hair's (short02, ponytail01, short01) and eyebrow001 — each cropped to what its faces use, box-filtered down to its tile, cut to the texels its faces cover and DIVIDED by its own mean colour and halved, so it holds the weave, the features and the strands as a share of a colour the renderer supplies; the hair's and the brows' own opacity in alpha, everything else opaque; the eyes and the scalp one flat tone each. MakeHuman's own wordmark, which male_casualsuit06 prints on its chest, back and sleeve, is painted out before the picture is read, and no photograph's corner (which carries its publisher's address) is inside a tile`,
+        },
+      ],
+    },
+    modified: `three people for the pavements, each MakeHuman's base mesh in a build of its own — MakeHuman’s own macro targets at its default age and ethnic mix: the rider's own build (gender 50 %, muscle 85 %, weight 25 %), a woman (gender 0 %, muscle 50 %, weight 50 %) and a man (gender 100 %, muscle 50 %, weight 50 %) — dressed in MakeHuman's own CC0 garments, shoes, hair and eyebrows, each fitted through its own .mhclo as MakeHuman fits a proxy (a weighted mean of three base vertices and an offset scaled by the body) and skinned by the same three vertices' weights; the base vertices each garment hides dropped; the eyes the base mesh's own eye helpers; the head under the hair drawn as hair; the skeleton reduced from 163 bones to the rider's 24 with each dropped bone’s weights merged into its nearest kept ancestor; each part (head, limbs, top, bottoms, shoes, hair) collapse-decimated to its share of ${String(PEOPLE_TRIANGLES)} triangles a person, and its texture coordinates moved into the people's atlas; three skinned meshes in the rest pose, a primitive a region (skin, top, bottoms, shoes, hair), with no picture and no colour of their own. Nobody is posed here: src/game/three-renderer.ts poses each from src/game/gait.ts when a ride begins`,
   },
   // #2485: the pack's rider — the bake half of #681. The same body, cut to
   // about 2 000 triangles, and its vertices posed at every phase of a crank

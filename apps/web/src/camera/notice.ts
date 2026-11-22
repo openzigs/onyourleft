@@ -5,8 +5,9 @@
  * nothing else may be said** (#382,
  * [ADR 0029](../../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-8).
  *
- * Five states, five fixed sentences, and **no interpolation anywhere in this
- * file**. That is the whole design, and it is the enforcement half of D-8:
+ * Five states, five fixed sentences (and since #2856 a second one for
+ * `no-consent`, {@link CAMERA_OFF_AFTER_A_SCAN}), and **no interpolation
+ * anywhere in this file**. That is the whole design, and it is the enforcement half of D-8:
  *
  * > a message about imagery may name **that there was an image** and **what
  * > went wrong with it**, and must never carry the image, a part of it, a
@@ -96,13 +97,39 @@ export const CAMERA_NOTICES: Readonly<Record<CameraProblemKind, CameraNotice>> =
 };
 
 /**
+ * `no-consent`'s notice once this device's camera HAS been on, to read a code
+ * and for nothing else — #2856.
+ *
+ * A scan of the instance's code asks its own, narrower agreement where the
+ * rider pressed it (`consent.ts` §`SCAN_CONSENT_STATEMENT`), so the camera can
+ * have been on with the camera itself still not agreed to. *"It has never
+ * been on"* is then false, on the one screen that says what this camera has
+ * done, so `session.ts` §`notice` answers with this instead. The problem is
+ * still `no-consent`, which is why this is not a sixth kind.
+ *
+ * ⚠️ Draft wording for the owner to approve.
+ */
+export const CAMERA_OFF_AFTER_A_SCAN: CameraNotice = {
+  title: CAMERA_NOTICES['no-consent'].title,
+  explanation:
+    'It stays off until you turn it on. It has been on only to read a code, when you said it ' +
+    'could. No picture was kept or sent, and there is nothing on this device to remove.',
+  instruction: null,
+  recoverable: true,
+};
+
+/**
  * Every sentence a camera notice can say — #1013. The Camera screen keeps a
  * notice on the screen whole (`data-oyl-kept-visible`), and
  * `a11y/kept-visible.a11y.test.tsx` bounds that mark by this list.
  */
-export const CAMERA_NOTICE_SENTENCES: readonly string[] = Object.values(CAMERA_NOTICES).flatMap(
-  (notice) => [notice.explanation, ...(notice.instruction === null ? [] : [notice.instruction])],
-);
+export const CAMERA_NOTICE_SENTENCES: readonly string[] = [
+  ...Object.values(CAMERA_NOTICES),
+  CAMERA_OFF_AFTER_A_SCAN,
+].flatMap((notice) => [
+  notice.explanation,
+  ...(notice.instruction === null ? [] : [notice.instruction]),
+]);
 
 /** The notice for a kind. Total, so there is no `undefined` to render. */
 export function cameraNotice(kind: CameraProblemKind): CameraNotice {

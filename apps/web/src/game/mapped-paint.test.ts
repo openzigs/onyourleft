@@ -348,9 +348,12 @@ describe('#1792: an untagged town plans as before', () => {
     }
     const land = landClassMask(town.corridor);
     const urban = urbanClassMap(town.corridor, land, town.profile);
+    // Since #2848 the shops' aprons are off: the plans before #1792 had none.
     const plan = (options: FootprintPlanOptions) =>
-      footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, options)
-        .plans;
+      footprintPlans(town.corridor, land, town.profile, town.origin, undefined, urban, {
+        shopAprons: false,
+        ...options,
+      }).plans;
     const on = plan({});
     const off = plan({ mappedPaint: false });
     expect(planFingerprint(on)).toBe(MIXED_TOWN_BEFORE_1792);

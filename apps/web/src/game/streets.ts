@@ -636,6 +636,31 @@ function citySide(here: PavementSide, side: 1 | -1): boolean {
   return here === 'unknown' || here === 'none' || onSide(here, side);
 }
 
+/**
+ * Whether a city centre's pavement is laid on `side` of the road at `along`
+ * — #1637's rule, the one {@link streetsAt} lays a city's street by: the
+ * ride's urban class there is `city-centre`, and the map puts no sidewalk on
+ * the other side only. With no class there is none. #2848's aprons
+ * (`shop-aprons.ts`) stop at the back of it, {@link CITY_PAVEMENT_WIDTH_METRES}
+ * out from the kerb's face.
+ *
+ * ⚠️ The rule, not the mesh: a city's pavement is also broken over a side
+ * road's mouth and on water, where an apron is not laid either.
+ */
+export function cityPavementOn(
+  profile: RouteProfile,
+  urban: UrbanClassMap | undefined,
+  sides: PavementSides,
+  along: number,
+  side: 1 | -1,
+): boolean {
+  return (
+    urban !== undefined &&
+    urban.classAt(distanceOnRoute(profile, along)) === 'city-centre' &&
+    citySide(sides.sideAt(along), side)
+  );
+}
+
 /** Half the span of road a mapped side road's mouth takes from a city's pavement on `side`; 0 for none. */
 function mouthHalfOf(junction: Junction, side: 1 | -1): number {
   let half = 0;
@@ -694,7 +719,7 @@ function cityStreetOf(
       side,
       start,
       end,
-      (along) => city(along) && citySide(sides.sideAt(along), side),
+      (along) => cityPavementOn(profile, urban, sides, along, side),
       mouths,
       walks,
       urban,

@@ -691,6 +691,114 @@ export function buildingFieldControlTile(): Uint8Array {
   return buildingFieldTileWith(undefined);
 }
 
+/**
+ * One hostile value under one road field's key (#2892, ADR 0091 D-2). Every
+ * one must decode to the field's default (`schema.ts` §`NO_ROAD_FIELDS`) and
+ * be counted once in `DecodedTile.roadValuesDefaulted`; none is a refusal.
+ */
+export interface RoadFieldCase {
+  /** Names the key and the value's shape; never a 64 KiB value itself. */
+  readonly name: string;
+  readonly key: 'oneway' | 'access' | 'is_link';
+  readonly value: TagValue;
+}
+
+/** Values of no road field's shape, under each key. */
+function roadCommonCases(key: RoadFieldCase['key']): RoadFieldCase[] {
+  return [
+    { name: `${key}: a 64 KiB string`, key, value: LONG_STRING },
+    { name: `${key}: a value shaped like markup`, key, value: MARKUP },
+    { name: `${key}: an empty string`, key, value: '' },
+    { name: `${key}: a fraction`, key, value: 2.5 },
+  ];
+}
+
+/** Every hostile road-field case: the wrong type, an unknown string, an enum out of range. */
+export const HOSTILE_ROAD_FIELD_CASES: readonly RoadFieldCase[] = [
+  { name: 'oneway: reversible, an OSM value outside the list', key: 'oneway', value: 'reversible' },
+  { name: 'oneway: YES, in capitals (no case folding)', key: 'oneway', value: 'YES' },
+  { name: 'oneway: "yes" with a space after it', key: 'oneway', value: 'yes ' },
+  { name: 'oneway: "1", a string never parsed', key: 'oneway', value: '1' },
+  { name: 'oneway: the number 1, the wrong type', key: 'oneway', value: 1 },
+  { name: 'oneway: the number -1, the wrong type', key: 'oneway', value: -1 },
+  { name: 'oneway: a bool, the wrong type', key: 'oneway', value: true },
+  { name: 'access: an unknown string', key: 'access', value: 'zz_not_listed' },
+  { name: 'access: NO, in capitals (no case folding)', key: 'access', value: 'NO' },
+  { name: 'access: a number, the wrong type', key: 'access', value: 0 },
+  { name: 'access: a bool, the wrong type', key: 'access', value: false },
+  { name: 'is_link: "true", a string where a bool belongs', key: 'is_link', value: 'true' },
+  { name: 'is_link: "yes", a string where a bool belongs', key: 'is_link', value: 'yes' },
+  { name: 'is_link: the number 1, the wrong type', key: 'is_link', value: 1 },
+  ...(['oneway', 'access', 'is_link'] as const).flatMap(roadCommonCases),
+];
+
+/** The control street with every road field set, the case's street if any, a plain street, a footway. */
+function roadFieldTileWith(hostile: FeatureSpec | undefined): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'roads',
+      features: [
+        {
+          type: 2,
+          tags: {
+            kind: 'major_road',
+            kind_detail: 'primary',
+            oneway: 'yes',
+            access: 'private',
+            is_link: true,
+          },
+          geometry: line([
+            [
+              [100, 600],
+              [4000, 600],
+            ],
+          ]),
+        },
+        ...(hostile === undefined ? [] : [hostile]),
+        {
+          type: 2,
+          tags: { kind: 'minor_road' },
+          geometry: line([
+            [
+              [100, 1800],
+              [4000, 1800],
+            ],
+          ]),
+        },
+        {
+          type: 2,
+          tags: { kind: 'path', kind_detail: 'sidewalk' },
+          geometry: line([SIDEWALK_LINE]),
+        },
+      ],
+    },
+  ]);
+}
+
+/**
+ * The tile a road-field case is decoded from: a control street with every
+ * field set, the case's street carrying only the hostile value under its key,
+ * a plain street and a footway. The case's street is the second street.
+ */
+export function roadFieldCaseTile(fieldCase: RoadFieldCase): Uint8Array {
+  return roadFieldTileWith({
+    type: 2,
+    tags: { kind: 'minor_road', [fieldCase.key]: fieldCase.value },
+    geometry: line([
+      [
+        [100, 1200],
+        [4000, 1200],
+      ],
+    ]),
+  });
+}
+
+/** {@link roadFieldCaseTile}'s tile without the case's street: what the rest must decode to. */
+export function roadFieldControlTile(): Uint8Array {
+  return roadFieldTileWith(undefined);
+}
+
 function indexOfSequence(haystack: Uint8Array, needle: Uint8Array): number {
   outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
     for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer;

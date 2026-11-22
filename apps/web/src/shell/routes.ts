@@ -45,6 +45,7 @@ export type RouteId =
   | 'route-editor'
   | 'workouts'
   | 'game'
+  | 'open-world'
   | 'games'
   | 'delivery-courses'
   | 'lap-race-courses'
@@ -495,6 +496,33 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
 };
 
 /**
+ * Where an open-world ride starts — #2889: a pin on the map, a saved route's
+ * start or a past ride's start (`views/OpenWorldStartView.tsx`).
+ *
+ * **Not in {@link ROUTES}**, for {@link ROUTE_BUILDER_ROUTE}'s reason: it is
+ * reached from its card on Home (`home/ride-choices.tsx`), and a link in the
+ * Ride group's row beside *Trainer game* would read as a second game screen.
+ * In {@link ALL_ROUTES}, so the accessibility suite audits it unasked.
+ *
+ * ⚠️ **"Open world" is a proposed name**, waiting on the owner (#2889): Home's
+ * *Free ride* already means a ride with no route and no workout, so the mode
+ * needs a name of its own.
+ */
+export const OPEN_WORLD_ROUTE: RouteDefinition = {
+  id: 'open-world',
+  group: 'ride',
+  layout: 'prose',
+  path: '/ride/open-world',
+  navLabel: 'Open world',
+  title: 'Open world: choose a start',
+  summary: 'Drop a pin, or start where a saved route or a past ride starts.',
+  help: [
+    'An open-world ride follows the streets from where you start, and the map is read as you ' +
+      'ride. Your start stays on this device.',
+  ],
+};
+
+/**
  * Editing a saved route, keeping its line — #2007.
  *
  * **Not in {@link ROUTES}**, for {@link ROUTE_BUILDER_ROUTE}'s reason: it is
@@ -792,6 +820,7 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ROUTE_EDITOR_ROUTE,
+  OPEN_WORLD_ROUTE,
   ACTIVITY_DETAIL_ROUTE,
   SEGMENT_DETAIL_ROUTE,
   NOT_FOUND_ROUTE,

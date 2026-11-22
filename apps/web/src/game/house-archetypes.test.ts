@@ -189,7 +189,8 @@ function fingerprint(plans: readonly FootprintPlan[], withPaint = true): string 
     for (const role of FOOTPRINT_ROLES) {
       const floats = each.triangles[role];
       // #2206: a role most plans leave empty, so a plan written before it hashes as it did.
-      if (role === 'spire' && floats.length === 0) continue;
+      // #2848: and an apron, likewise.
+      if ((role === 'spire' || role === 'apron') && floats.length === 0) continue;
       const bits = new Uint32Array(floats.buffer, floats.byteOffset, floats.length);
       mix(bits.length);
       for (const word of bits) mix(word);
@@ -499,8 +500,12 @@ describe('the fallback and the lever — #1782', () => {
 
   it('plans every footprint as `origin/main` did with the lever off', () => {
     // Since #1783 the mixed town's main-street blocks are an archetype of their own, behind
-    // their own lever: `main` had none, so it is off too.
-    const off = { houseArchetypes: false, commercialArchetypes: false } as const;
+    // their own lever: `main` had none, so it is off too. And since #2848 the shops' aprons.
+    const off = {
+      houseArchetypes: false,
+      commercialArchetypes: false,
+      shopAprons: false,
+    } as const;
     const offPlans = plan(mixed, off);
     expect(offPlans.every((each) => each.archetype === 'unknown')).toBe(true);
     expect(fingerprint(offPlans)).toBe(MAIN_FINGERPRINTS.mixed);

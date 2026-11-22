@@ -8,6 +8,10 @@
  * round as without is `delivery-wiring.test.tsx`'s, through the real ride.
  */
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PreferenceStorage } from '../hud/announce-preference';
@@ -17,7 +21,10 @@ import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './assist-prefe
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery-progress';
 import { deliveryTown } from './delivery-town-testing';
 import { LEVEL_PROGRESS_STORAGE_KEY, NO_LEVEL_FINISHED, readLevelProgress } from './level-progress';
+import { parseLevelFile } from './levels/level-file';
 import {
+  AVOIDABLE_FASTEST_METRES_PER_SECOND,
+  AVOIDABLE_SLOWEST_METRES_PER_SECOND,
   CRASH_SCORE_DELTA,
   MOVING_HAZARD_KINDS,
   MOVING_HAZARD_SIGHT_METRES,
@@ -41,6 +48,7 @@ import {
   nextHouse,
   startDeliveryRide,
   stepDeliveryRide,
+  throwSideOn,
   type DeliveryRide,
 } from './ride-round';
 import { deliveryInView } from './in-view';
@@ -52,11 +60,13 @@ import {
   type RoundOutcome,
   type WeekProgress,
 } from './round';
-import type { DeliveryTarget } from './targets';
+import { TARGET_MOST_FROM_ROAD_METRES, type DeliveryTarget } from './targets';
 import {
   ASSISTED_THROW_SCALE,
   CARRIAGEWAY_HALF_WIDTH_METRES,
+  DEFAULT_THROW_WINDOW,
   DELIVERY_TICK_SECONDS,
+  PARCEL_FLIGHT_SECONDS,
   PARCEL_FLIGHT_TICKS,
   PARCEL_THROW_SPEED_METRES_PER_SECOND,
   TARGET_CATCH_RADIUS_METRES,
@@ -114,21 +124,22 @@ function started(storage = storageOf(), riderDistance = 0): DeliveryRide {
 
 const SPEED = 8;
 
-/** Ride `ride` on at {@link SPEED}, one step a call, to `along`, throwing `throwTo` on the first. */
+/** Ride `ride` on at `speed`, one step a call, to `along`, throwing `throwTo` on the first. */
 function rideTo(
   ride: DeliveryRide,
   along: number,
   throwTo?: 'left' | 'right',
+  speed = SPEED,
 ): { ride: DeliveryRide; crashes: number } {
   let now = ride;
   let crashes = 0;
   let first = true;
   while (now.along < along - 1e-9) {
-    const next = Math.min(along, now.along + SPEED * DELIVERY_TICK_SECONDS);
+    const next = Math.min(along, now.along + speed * DELIVERY_TICK_SECONDS);
     const stepped = stepDeliveryRide(now, {
       ticks: 1,
       along: next,
-      speed: SPEED,
+      speed,
       ...(first && throwTo !== undefined ? { throwTo } : {}),
     });
     first = false;
@@ -138,10 +149,10 @@ function rideTo(
   return { ride: now, crashes };
 }
 
-/** Where to throw from for a parcel at {@link SPEED} to land on `target`'s step. */
-function throwPoint(target: ThrowTarget): number {
+/** Where to throw from for a parcel at `speed` to land on `target`'s step. */
+function throwPoint(target: ThrowTarget, speed = SPEED): number {
   const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
-  return target.along - SPEED * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+  return target.along - speed * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
 }
 
 /** The ride with no obstacle on it, so a test of the throw is not also one of a crash. */
@@ -1060,4 +1071,271 @@ describe('a round on a built-in level — #2362, ADR 0065', () => {
       expect(storage.items.has(LEVEL_PROGRESS_STORAGE_KEY)).toBe(false);
     });
   });
+});
+
+describe('a level’s own throw window — #2931, ADR 0065 D-4.1', () => {
+  /** Narrower than the throw's own at both edges: 10 m before a house and half a metre past it. */
+  const NARROW = { beforeMetres: 10, afterMetres: 0.5 } as const;
+  const LEVEL = {
+    houses: FIRST_DAY_HOUSES,
+    hazardsPerKilometre: { static: 0, moving: 0 },
+    lengthMetres: 2_000,
+    id: 'test-level',
+    throwWindow: NARROW,
+  } as const;
+
+  function onLevel(storage = storageOf()): DeliveryRide {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 0,
+      storage,
+      level: LEVEL,
+    });
+    if (ride === undefined) throw new Error('the town gave no round');
+    return withoutObstacles(ride);
+  }
+
+  /**
+   * Thrown from `short` metres before the round's first house, at the speed
+   * that carries the parcel exactly onto its step, and ridden on at that speed
+   * until the parcel is down: what the round made of it.
+   */
+  function thrownFrom(ride: DeliveryRide, short: number): DeliveryRide {
+    const first = ride.throwTargets[0] as ThrowTarget;
+    const speed =
+      short /
+      ((CARRIAGEWAY_HALF_WIDTH_METRES + first.clear) / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+    const aimed = rideTo(ride, first.along - short).ride;
+    let now = stepDeliveryRide(aimed, {
+      ticks: 1,
+      along: aimed.along + speed * DELIVERY_TICK_SECONDS,
+      speed,
+      throwTo: first.side,
+    }).ride;
+    expect(now.throws.inFlight).toHaveLength(1);
+    while (now.throws.inFlight.length > 0) {
+      now = stepDeliveryRide(now, {
+        ticks: 1,
+        along: now.along + speed * DELIVERY_TICK_SECONDS,
+        speed,
+      }).ride;
+    }
+    return now;
+  }
+
+  it('starts a level’s round with its file’s window, and a rider’s own route with the throw’s', () => {
+    expect(onLevel().throwWindow).toStrictEqual(NARROW);
+    expect(started().throwWindow).toStrictEqual(DEFAULT_THROW_WINDOW);
+    expect(DEFAULT_THROW_WINDOW).toStrictEqual({
+      beforeMetres: THROW_WINDOW_BEFORE_METRES,
+      afterMetres: THROW_WINDOW_AFTER_METRES,
+    });
+  });
+
+  it('delivers on a level only from inside its window, and on a rider’s own route as before', () => {
+    const level = onLevel();
+    const first = level.throwTargets[0] as ThrowTarget;
+    // Just outside the level's opening edge: the parcel lands on the step, and is wasted.
+    const early = thrownFrom(level, NARROW.beforeMetres + 0.5);
+    expect(early.round.houses[first.position]).toBe('missed');
+    expect(early.score).toBe(0);
+    // Just inside it: a delivery.
+    const inside = thrownFrom(level, NARROW.beforeMetres - 0.5);
+    expect(inside.round.houses[first.position]).toBe('delivered');
+    expect(inside.score).toBe(1);
+    // A rider's own route keeps the throw's own window: the same early throw delivers, as one
+    // from just inside the default's opening edge does, and one from just outside it does not.
+    const own = withoutObstacles(started());
+    const ownFirst = own.throwTargets[0] as ThrowTarget;
+    for (const short of [NARROW.beforeMetres + 0.5, THROW_WINDOW_BEFORE_METRES - 0.5]) {
+      expect(thrownFrom(own, short).round.houses[ownFirst.position], `${String(short)} m`).toBe(
+        'delivered',
+      );
+    }
+    expect(
+      thrownFrom(own, THROW_WINDOW_BEFORE_METRES + 0.5).round.houses[ownFirst.position],
+    ).not.toBe('delivered');
+  });
+
+  it('counts a house missed where the level’s window closes, and the assist scales that edge', () => {
+    const level = onLevel();
+    const first = level.throwTargets[0] as ThrowTarget;
+    const atClose = rideTo(level, first.along + NARROW.afterMetres).ride;
+    expect(atClose.round.houses[first.position]).toBe('expecting');
+    const past = rideTo(atClose, first.along + NARROW.afterMetres + 0.2).ride;
+    expect(past.round.houses[first.position]).toBe('missed');
+    // A rider's own route, at the same place, is still inside its house's window.
+    const own = withoutObstacles(started());
+    const ownFirst = own.throwTargets[0] as ThrowTarget;
+    const ownPast = rideTo(own, ownFirst.along + NARROW.afterMetres + 0.2).ride;
+    expect(ownPast.round.houses[ownFirst.position]).toBe('expecting');
+    // The assist's wider windows, read from the device, scale the level's closing edge.
+    const assist: DeliveryAssist = { obstacles: 'normal', widerWindows: true, noFail: false };
+    const wider = onLevel(storageOf({ [DELIVERY_ASSIST_STORAGE_KEY]: assist }));
+    const scaled = NARROW.afterMetres * ASSISTED_THROW_SCALE;
+    expect(scaled).toBeLessThan(THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE);
+    const inWider = rideTo(wider, first.along + scaled - 0.1).ride;
+    expect(inWider.round.houses[first.position]).toBe('expecting');
+    expect(rideTo(inWider, first.along + scaled + 0.2).ride.round.houses[first.position]).toBe(
+      'missed',
+    );
+    // The ride's end counts it the same way.
+    expect(endDeliveryRide(rideTo(level, first.along + NARROW.afterMetres + 0.2).ride).missed).toBe(
+      1,
+    );
+    expect(endDeliveryRide(rideTo(level, first.along + NARROW.afterMetres).ride).missed).toBe(0);
+  });
+
+  it('ends a ride past the level’s closing edge with its house missed, a parcel thrown from inside still in the air', () => {
+    const level = onLevel();
+    const first = level.throwTargets[0] as ThrowTarget;
+    const seconds =
+      (CARRIAGEWAY_HALF_WIDTH_METRES + first.clear) / PARCEL_THROW_SPEED_METRES_PER_SECOND;
+    // Thrown from inside the level's window, slowly enough that it is still in the air when the
+    // rider is 0.7 m past the house: past the level's closing edge, inside the throw's own.
+    const short = NARROW.beforeMetres - 0.5;
+    const past = first.along + 0.7;
+    expect(past - first.along).toBeGreaterThan(NARROW.afterMetres);
+    expect(past - first.along).toBeLessThan(THROW_WINDOW_AFTER_METRES);
+    const speed = (short + 2) / seconds;
+    const aimed = rideTo(level, first.along - short).ride;
+    const riding = rideTo(aimed, past, first.side, speed).ride;
+    // The step waits for the parcel thrown from inside the window, so the house is not yet counted.
+    expect(riding.throws.inFlight).toHaveLength(1);
+    expect(riding.round.houses[first.position]).toBe('expecting');
+    // The ride ends here: the parcel cannot land, and the level's window has closed behind it.
+    expect(endDeliveryRide(riding)).toMatchObject({ delivered: 0, missed: 1 });
+  });
+
+  it('waits for no parcel thrown from outside the level’s window before counting its house missed', () => {
+    const level = onLevel();
+    const first = level.throwTargets[0] as ThrowTarget;
+    const seconds =
+      (CARRIAGEWAY_HALF_WIDTH_METRES + first.clear) / PARCEL_THROW_SPEED_METRES_PER_SECOND;
+    // Thrown half a metre outside the level's opening edge, at a speed that brings it to the
+    // step's depth within the catch radius: inside the throw's own window, it would be caught.
+    const short = NARROW.beforeMetres + 0.5;
+    const speed = (short - 0.5) / seconds;
+    const aimed = rideTo(level, first.along - short).ride;
+    const thrown = rideTo(aimed, first.along + NARROW.afterMetres + 0.2, first.side, speed).ride;
+    // Still in the air past the level's closing edge, and the house is missed now, not when it lands.
+    expect(thrown.throws.inFlight).toHaveLength(1);
+    expect(thrown.round.houses[first.position]).toBe('missed');
+    // The same throw on a rider's own route is a delivery.
+    const own = withoutObstacles(started());
+    const ownFirst = own.throwTargets[0] as ThrowTarget;
+    const ownSpeed =
+      (short - 0.5) /
+      ((CARRIAGEWAY_HALF_WIDTH_METRES + ownFirst.clear) / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+    const ownAimed = rideTo(own, ownFirst.along - short).ride;
+    const ownThrown = rideTo(ownAimed, ownFirst.along + 2, ownFirst.side, ownSpeed).ride;
+    expect(ownThrown.round.houses[ownFirst.position]).toBe('delivered');
+  });
+
+  it('counts the next house down to where the level’s window opens, not the throw’s', () => {
+    const level = onLevel();
+    const first = level.targets[0] as DeliveryTarget;
+    expect(nextHouse(level)?.metres).toBeCloseTo(first.distance - NARROW.beforeMetres, 6);
+    // Inside the throw's own window and short of the level's: still a distance.
+    const short = rideTo(level, first.distance - NARROW.beforeMetres - 3).ride;
+    expect(nextHouse(short)?.metres).toBeCloseTo(3, 6);
+    const own = withoutObstacles(started());
+    const ownFirst = own.targets[0] as DeliveryTarget;
+    expect(nextHouse(rideTo(own, ownFirst.distance - NARROW.beforeMetres - 3).ride)?.metres).toBe(
+      0,
+    );
+    // At the level's opening edge, nought.
+    expect(nextHouse(rideTo(level, first.distance - NARROW.beforeMetres).ride)?.metres).toBe(0);
+  });
+
+  it('resolves a throw at the next house past the level’s closing edge, as the throw control asks — #1810', () => {
+    /** The round with its second house turned to the other side, so the two are told apart. */
+    const apart = (ride: DeliveryRide): DeliveryRide => {
+      const [first, second] = ride.throwTargets as [ThrowTarget, ThrowTarget];
+      const other = first.side === 'left' ? 'right' : 'left';
+      return { ...ride, throwTargets: [first, { ...second, side: other }] };
+    };
+    // The first house still expecting a parcel, the rider just past the level's closing edge.
+    const level = apart(onLevel());
+    const [first, second] = level.throwTargets as [ThrowTarget, ThrowTarget];
+    const past = { ...level, along: first.along + NARROW.afterMetres + 0.1 };
+    expect(past.round.houses[first.position]).toBe('expecting');
+    expect(throwSideOn(past, 'next-house')).toBe(second.side);
+    expect(throwSideOn({ ...level, along: first.along + NARROW.afterMetres }, 'next-house')).toBe(
+      first.side,
+    );
+    // A rider's own route, the same way past its house, still throws at it.
+    const own = apart(withoutObstacles(started()));
+    const ownFirst = own.throwTargets[0] as ThrowTarget;
+    expect(
+      throwSideOn({ ...own, along: ownFirst.along + NARROW.afterMetres + 0.1 }, 'next-house'),
+    ).toBe(ownFirst.side);
+    expect(throwSideOn(past, 'left')).toBe('left');
+  });
+
+  /** The shipped levels' rounds, read from their files as the app reads them. */
+  const SHIPPED = readdirSync(fileURLToPath(new URL('./levels/data/', import.meta.url)))
+    .filter((name) => name.endsWith('.json'))
+    .map((name) =>
+      parseLevelFile(
+        JSON.parse(
+          readFileSync(
+            join(fileURLToPath(new URL('./levels/data/', import.meta.url)), name),
+            'utf8',
+          ),
+        ),
+        name.slice(0, -5),
+      ),
+    );
+
+  it('reaches the deepest step a round may pick from every shipped level’s window, at the fastest avoidable speed', () => {
+    expect(SHIPPED).toHaveLength(6);
+    // A parcel to the deepest step flies the whole flight, carried on at the rider's speed.
+    const carried = AVOIDABLE_FASTEST_METRES_PER_SECOND * PARCEL_FLIGHT_SECONDS;
+    expect(TARGET_MOST_FROM_ROAD_METRES / PARCEL_THROW_SPEED_METRES_PER_SECOND).toBeCloseTo(
+      PARCEL_FLIGHT_SECONDS,
+      9,
+    );
+    for (const file of SHIPPED) {
+      expect(file.round.throwWindow.beforeMetres, file.id).toBeGreaterThanOrEqual(
+        carried - TARGET_CATCH_RADIUS_METRES,
+      );
+    }
+  });
+
+  for (const speed of [AVOIDABLE_SLOWEST_METRES_PER_SECOND, AVOIDABLE_FASTEST_METRES_PER_SECOND]) {
+    it(`delivers every house on every shipped level, thrown on time at ${String(speed)} m/s with its own window`, () => {
+      for (const file of SHIPPED) {
+        const ride = startDeliveryRide({
+          buildings: town.buildings,
+          profile: town.profile,
+          origin: town.origin,
+          riderDistance: 0,
+          lineOffset: 0,
+          storage: storageOf(),
+          level: { ...file.round, lengthMetres: file.lengthMetres, id: file.id },
+        });
+        if (ride === undefined) throw new Error('the town gave no round');
+        expect(ride.throwWindow, file.id).toStrictEqual(file.round.throwWindow);
+        let now = withoutObstacles(ride);
+        for (const target of ride.throwTargets) {
+          now = rideTo(now, throwPoint(target, speed), undefined, speed).ride;
+          now = rideTo(
+            now,
+            now.along + speed * PARCEL_FLIGHT_SECONDS + 0.1,
+            target.side,
+            speed,
+          ).ride;
+          expect(
+            now.round.houses[target.position],
+            `${file.id}, house ${String(target.position)}`,
+          ).toBe('delivered');
+        }
+        expect(now.outcome?.delivered, file.id).toBe(ride.throwTargets.length);
+      }
+    });
+  }
 });
