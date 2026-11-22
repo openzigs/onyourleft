@@ -216,7 +216,8 @@ Inside the proved, DTLS-encrypted `control` channel, after the `welcome`, each e
 random bytes** and a **random 128-bit pairing id** the tablet chooses. Each end derives the pairing
 key with HKDF-SHA-256 over both contributions and the pairing id, and imports it into `crypto.subtle`
 as a **non-extractable** key. The raw bytes are then dropped from memory. Neither end alone chooses
-the key.
+the key. On a pairing introduced through the instance, this exchange waits until the rider has
+confirmed D-3.2's check on both devices.
 
 This is the one place a key crosses the link, so it supersedes ADR 0033 D-3's never-sent *"a device
 key"* for this message and no other. It carries no athlete id, no name and no device identity.
@@ -229,6 +230,7 @@ Every other entry on that list stands.
 | **The tablet waits** | With the side-camera screen open and at least one remembered phone, the tablet opens D-1's native listener and **advertises it on the LAN by DNS-SD** (Android's network service discovery). The service instance name is random for each advertisement and carries no device name, pairing id or athlete. It advertises only while that screen is open |
 | **The phone looks** | With side-camera mode open and at least one remembered tablet, the phone browses for the service for at most two minutes, then says it cannot find the tablet and offers to scan its code |
 | **Each proves it holds the key** | Over the connection, the tablet sends a fresh 32-byte nonce, the phone answers with its own and an HMAC over both under a key derived from the pairing key, and the tablet answers with an HMAC of its own. No pairing id crosses in clear: the tablet tries each remembered key it holds, which is a short list. A failed proof closes the connection before anything else is read |
+| **Connections to the waiting listener** | ⚠️ **Not D-1.3's rule**, because this listener is long-lived and advertised. It takes **one connection at a time**. Each must complete the proof within **2 seconds** and in at most **4 KiB** across all of its messages, or it is closed. A failed connection **does not void the listener**: three strikes would let a router's port scan, or any stranger, shut every waiting tablet. Instead, after each failed connection the listener accepts nothing for **1 second**, so a stranger cannot hold it or flood it, and the phone keeps retrying for its two minutes. Guessing is not what this bounds: the proof is an HMAC under a 256-bit key |
 | **The session keys** | Per-direction AES-GCM keys derived with HKDF from the pairing key and both nonces, so each session's keys are new. D-1.3's counter and replay rules apply |
 | **Then as today** | The tablet sends a fresh WebRTC offer, **with a fresh ADR 0033 D-4 one-time secret**, over the sealed socket. The phone answers over it. The socket closes, and the link is ADR 0033's from the first `ping` on |
 
@@ -272,6 +274,7 @@ The table ADR 0033 did not need, because nothing outlived a session:
 | **A stranger on the same Wi-Fi pairs with the tablet or the phone** | **Yes.** It holds no pairing key, so its proof fails and the connection closes before anything else is read |
 | **A stranger on the same Wi-Fi advertises a fake tablet** | **Yes, as far as pairing.** The phone connects, and the fake cannot prove the key, so the phone closes the connection. The phone learns nothing new, and the fake learns only a nonce and an HMAC it cannot use: no pairing id crosses in clear |
 | **A stranger learns that a remembered tablet is waiting** | **No, and it is stated.** The DNS-SD service type is visible on the LAN while the screen is open. The instance name is random, so it does not identify the tablet from one session to the next. It does say that an On Your Left tablet is waiting for its side camera |
+| **A stranger connects to the waiting listener again and again** | **Partly.** Each connection is closed within 2 seconds or at 4 KiB, and the listener pauses 1 second after each failure, so nothing is exhausted and nothing is learnt. Failures never void the listener, so a port scan does not shut it. ⚠️ A stranger who keeps connecting can delay the real phone until its two-minute browse ends. The phone then offers the scan (D-1), which is the safe direction |
 | **A stranger records a session and replays it** | **Yes.** Session keys are derived from fresh nonces from both ends, and D-1.3's counters reject a replay |
 | **The pairing key is read from a device** | **Partly.** It is non-extractable to the page, so a script running in the page cannot read the bytes. It is not in Android's hardware keystore, so a person with a rooted device can. ⚠️ Such a person already has the rider's rides |
 | **A lost device keeps working** | **Until it is forgotten** (D-2.5). The rider is told how on the record's own row |
@@ -291,10 +294,10 @@ The table ADR 0033 did not need, because nothing outlived a session:
 
 | | |
 |---|---|
-| **The message** | The same fields as the offer and answer codes (ADR 0033 D-1's table, and D-1's listener fields left out) and nothing else, through the instance's sealed requests (ADR 0047 D-7 and D-8), so the tunnel's edge reads none of it |
+| **The message** | The same fields as the offer and answer codes (ADR 0033 D-1's table, and D-1's listener fields left out), plus, for a first introduction, D-3.2's commitment in the offer, nonce in the answer and one reveal message, and nothing else. They travel through the instance's sealed requests (ADR 0047 D-7 and D-8), so the tunnel's edge reads none of it |
 | **Who can read it** | **Any device of the athlete's that asks, and the instance itself**, for a first introduction. ADR 0047 D-10: *"End-to-end means device-to-instance, not device-to-device."* For a **remembered pair**, each message is also sealed between the two devices under keys derived from the pairing key (D-2.3), so the instance relays bytes it cannot read or change |
 | **Where it waits** | **In the instance's memory only**, never in its database or a log. At most one offer per tablet, deleted when read, gone after **two minutes**, and bounded in size. The read filters on the owning athlete **and** the tablet's offer, which is `CLAUDE.md`'s cross-athlete rule |
-| **Through which client module** | `instance/instance-transport.ts`, the one module ADR 0036 D-3 (a) and `no-network.test.ts` (#777) admit for instance traffic, on its existing `fetch` or its room socket (#782). **No new permitted call** |
+| **Through which client module** | `instance/instance-transport.ts`, the one module ADR 0036 D-3 (a) and `no-network.test.ts` (#777) admit for instance traffic, on its existing sealed `fetch` **only**. **Not its room socket (#782)**, which ADR 0047 records as not sealed (*"The owner ruled the room sockets are not sealed"*), so the tunnel's edge would read the offer, the answer and ADR 0033 D-4's one-time secret. *The author's choice*: the phone and the tablet poll the sealed request for the two minutes an offer lives, rather than unseal a socket. **No new permitted call** |
 
 #### D-3.2 — The rider's two steps, and the check on a first introduction
 
@@ -305,14 +308,49 @@ The table ADR 0033 did not need, because nothing outlived a session:
    the device list already shows. The rider taps one. The tablet posts its offer, the phone posts its
    answer, and they connect on the LAN.
 
-**A first introduction shows a four-digit check on both screens**, derived from both DTLS
-fingerprints, and the rider taps *They match* on the tablet. *The author's choice*, and Q7 asks the
-owner. The reason: the instance carries the fingerprints, and **a home instance is usually on the
-same LAN**, so a hostile or compromised instance could put its own fingerprints in both messages
-and sit between the phone and the tablet. It would then receive **pictures the client never chose
-to send it**, which is the one thing ADR 0036 D-3 (d) forbids and the one thing ADR 0050's two
-consents exist to gate. The check makes that interposition visible. A remembered pair needs no
-check, because the instance cannot change what it relays (D-3.1).
+**A first introduction shows a four-digit check on both screens, and the rider confirms it on
+both devices.** *The author's choice*, and Q7 asks the owner. The reason: the instance carries the
+fingerprints, and **a home instance is usually on the same LAN**, so a hostile or compromised
+instance could put its own fingerprints in both messages and sit between the phone and the tablet.
+It would then receive **pictures the client never chose to send it**, which is the one thing
+ADR 0036 D-3 (d) forbids and the one thing ADR 0050's two consents exist to gate. The instance also
+holds ADR 0033 D-4's one-time secret, because the secret travels in the offer, so on this path that
+secret proves nothing about who is at the other end. **The check is this path's only defence**, and
+these rules make it one.
+
+**The digits are committed before they can be chosen.** A check over the two fingerprints alone
+can be ground: the instance sees the tablet's fingerprint first, hands the phone a certificate made
+in advance, sees the phone's fingerprint, and then makes certificates for the tablet's side (about
+10^4 of them, well under a second) until both screens show the same digits. The check is therefore
+built as Bluetooth's numeric comparison and ZRTP's hash commitment are, in a fixed order:
+
+| Step | What is sent, and when |
+|---|---|
+| **1. The tablet commits** | The offer carries `C = SHA-256("oyl-side-commit" ‖ Nt ‖ fpT)`, where `Nt` is 16 fresh random bytes the tablet keeps and `fpT` is its DTLS fingerprint. `Nt` is not sent |
+| **2. The phone answers** | Only after it holds `C`, the phone draws 16 fresh random bytes `Np` and sends them in the answer beside `fpP`, its fingerprint |
+| **3. The tablet reveals** | Only after it holds the answer, the tablet sends `Nt` in one reveal message. One answer per offer: a second is refused, and the offer is spent |
+| **4. Each checks and shows** | The phone recomputes `C` from `Nt` and the fingerprint of the peer it actually completed DTLS with, and ends the attempt if it differs. Each device shows the first four decimal digits of `SHA-256("oyl-side-check" ‖ fpT ‖ fpP ‖ Nt ‖ Np)`, over the fingerprints of its own DTLS session |
+
+An interposing instance must commit to its tablet-side nonce before it sees the phone's `Np`, and
+must send its phone-side `Np` before it sees the tablet's `Nt`, so it cannot steer either screen's
+digits. It is right by chance **once in 10,000 attempts**, and each attempt is a check the rider
+sees. A mismatch on either device, or *They don't match*, ends the attempt on that device, voids
+the offer and says that the connection may not be private.
+
+**Both devices gate on the rider, and the phone gates first.** The phone is the device that sends
+pictures, so a check only the tablet enforces defends nothing: an instance could play the tablet
+towards the phone and receive pictures whatever the tablet showed. On a first introduction:
+
+- **The phone** shows the digits and asks the rider to tap *They match* **on the phone**. Until
+  then it refuses `start`, turns no camera on and sends no frame, whatever its DTLS peer sends.
+  It handles only the join (ADR 0033 D-4's one-time secret and the `welcome`) and `ping`, and
+  neither the secret nor the `welcome` unlocks it.
+- **The tablet** shows the same digits and sends no `start` until the rider taps *They match* on
+  the tablet.
+- **D-2.2's key is made only after both taps**, so a remembered pairing is never made with an
+  interposer.
+
+A remembered pair needs no check, because the instance cannot change what it relays (D-3.1).
 
 #### D-3.3 — Threat table for pairing through the instance
 
@@ -320,10 +358,12 @@ check, because the instance cannot change what it relays (D-3.1).
 |---|---|
 | **A rider with no instance loses something** | **No.** D-1 and D-2 work with no instance, and the two-scan path stays (ADR 0036 D-3 (a)) |
 | **A picture goes through the instance** | **Yes, by construction.** The instance carries signalling only, and ADR 0033 D-4's candidate rule still refuses every non-host candidate, so no path through the instance can be offered. ADR 0050 is a separate path, behind its own consents, and this ADR does not touch it |
-| **The instance interposes between the two devices** | **Yes for a remembered pair**, by D-2's sealing. **Yes, if the rider checks, for a first introduction**, by D-3.2's four-digit check. ⚠️ A rider who taps *They match* without looking is not defended, and ADR 0047 D-10 says what a compromised box already holds |
+| **The instance interposes between the two devices** | **Yes for a remembered pair**, by D-2's sealing. **Yes, if the rider checks on both devices, for a first introduction**, by D-3.2's committed four-digit check, which the phone enforces before it films and the tablet before it sends `start`. ⚠️ A rider who taps *They match* without looking is not defended, and ADR 0047 D-10 says what a compromised box already holds |
+| **The instance grinds certificates until both screens show the same digits** | **Yes.** The tablet commits to its nonce before the phone draws its own, and reveals it only after the answer (D-3.2), so a certificate made after seeing either fingerprint does not move the digits. What is left is a guess, right once in 10,000 attempts, and each attempt is shown |
+| **The instance plays the tablet towards the phone and takes the pictures** | **Yes, by D-3.2's phone gate.** The phone refuses `start` and sends no frame until the rider confirms the digits on the phone. Holding the one-time secret, which the instance relays, unlocks nothing |
 | **Another athlete on the same instance pairs with this tablet** | **Yes.** The ready list and the offer are filtered on the owning athlete, and a test enumerates the reads as `activity-store.scoping.test.ts` does |
 | **Someone signed in as the athlete on another device pairs it** | **Partly.** They are the athlete, as far as the instance knows. They would appear in the tablet's ready list by their device's name, and the rider chooses. ADR 0047 D-10's *"a device"* row is how one is revoked |
-| **The tunnel's edge reads the connection details** | **Yes.** Sealed requests (ADR 0047). The details are private LAN addresses and fingerprints in any case, and never a location |
+| **The tunnel's edge reads the connection details** | **Yes.** Sealed requests only (ADR 0047), never the unsealed room socket (D-3.1). The details are private LAN addresses and fingerprints in any case, and never a location |
 | **The instance keeps a record of the pairing** | **Yes, it keeps none.** Memory only, two minutes, deleted on read (D-3.1). The pairing key never reaches it |
 | **The instance is used when the rider has none** | **No.** Without a signed-in session on both devices the option is not shown |
 
@@ -395,8 +435,9 @@ policy changes in the pull request that sends that byte.** This ADR changes neit
   forget its tablet first, and the Forget control says so.
 - **A waiting tablet is visible on the home network**, by port while a code is shown and by DNS-SD
   while a remembered tablet waits.
-- **A first introduction through the instance asks the rider to compare four digits**, which is a
-  tap beside a scan the owner wanted gone.
+- **A first introduction through the instance asks the rider to compare four digits and tap
+  *They match* on both devices**, including the phone on its tripod. That is two taps where the
+  owner wanted a scan gone, and the phone's tap cannot be dropped (D-3.2).
 - **Three ways to pair**, each with its own words on screen when it cannot be used.
 
 ### Reversing it
@@ -415,7 +456,7 @@ once the owner accepts this ADR, and none is filed before that:
 |---|---|
 | **One scan** | D-1 entire; D-4's wording on the pairing screen; D-5's gate (first), the policy and Data Safety rows, the manifest row. It owns the native plugin's `listen` and `dial` |
 | **Remembered pairing** | D-2 entire; the plugin's DNS-SD advertisement and browse; the `ERASE_REMOVES` line; the policy row. It needs the one-scan issue's plugin |
-| **Pairing through the instance** | D-3 entire, on both sides: the instance's memory-only rendezvous with its athlete-scoping test, and the client's ready list and four-digit check, through `instance-transport.ts` |
+| **Pairing through the instance** | D-3 entire, on both sides: the instance's memory-only rendezvous with its athlete-scoping test, and the client's ready list and committed four-digit check with its gate on both devices, through `instance-transport.ts`'s sealed `fetch` |
 | **The system camera** | D-4's wording, if the owner wants it before the one-scan issue lands |
 | [#733](https://github.com/openzigs/onyourleft/issues/733) | The owner's device check: pair the Pixel 8 and the Pixel Tablet with one scan, then again the next session with none |
 
@@ -462,8 +503,10 @@ Each has a recommendation, and the ADR as written follows every one.
    and the last-used date is shown (D-2.5).
 6. **Are the pairing records the device's, removed by the device erase, never exported, never sent
    to the instance?** *Recommended: yes* (D-2.4).
-7. **A four-digit check on both screens for a first introduction through the instance?**
-   *Recommended: yes*, and none for a remembered pair (D-3.2).
+7. **A committed four-digit check on both screens, confirmed on both devices, for a first
+   introduction through the instance?** *Recommended: yes*, and none for a remembered pair
+   (D-3.2). Six digits, as Bluetooth uses, would cut a lucky guess from 1 in 10^4 to 1 in 10^6 at
+   the cost of two more digits to compare.
 8. **The system camera: the in-app scanner only, with the sentence in D-4 beside the code?**
    *Recommended: yes*, and the sentence as drafted.
 9. **Bump the code's prefix to `OYLSIDE2` for a code that carries listener fields**, so that a phone
