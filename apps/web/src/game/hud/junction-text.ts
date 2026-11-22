@@ -128,7 +128,7 @@ export interface JunctionAnnounced {
   readonly owed: string | undefined;
 }
 
-/** @unwired the open-world ride session (#2896) starts each ride from it; it does not exist yet. */
+/** Nothing said yet: `GameView` starts each open-world ride from it (#3013). */
 export const NO_JUNCTION_ANNOUNCED: JunctionAnnounced = Object.freeze({
   junction: undefined,
   chosen: undefined,
@@ -140,10 +140,9 @@ export const NO_JUNCTION_ANNOUNCED: JunctionAnnounced = Object.freeze({
  * This frame's junction event, if one is owed, from the prompt as the rider
  * stands now (`JunctionChoice.prompt`).
  *
- * @unwired the open-world ride session (#2896) offers it to `announce.ts`
- * every frame, beside the ride's other events; that session does not exist
- * yet. `JunctionChoicePrompt.a11y.test.tsx` drives it into the HUD's region as
- * the session will.
+ * `GameView` offers it to `announce.ts` every frame of an open-world ride,
+ * beside the ride's other events (#3013). `JunctionChoicePrompt.a11y.test.tsx`
+ * drives it into the HUD's region as `GameView` does.
  */
 export function junctionEvent(
   announced: JunctionAnnounced,
@@ -174,8 +173,7 @@ export function junctionEvent(
  * The state after the announcer said `kind` this frame: a junction sentence
  * said is owed no longer.
  *
- * @unwired the open-world ride session (#2896) hands back each frame's
- * `Announcement.kind`; that session does not exist yet.
+ * `GameView` hands back each frame's `Announcement.kind` (#3013).
  */
 export function junctionSpoken(
   announced: JunctionAnnounced,

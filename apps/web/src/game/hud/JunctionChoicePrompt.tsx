@@ -59,8 +59,8 @@
  * root (D-5.2), and `JunctionChoicePrompt.test.tsx` rides the behavioural ride
  * once more with the turn taken by a tap (D-5.3).
  *
- * Mounted only on a ride that hands the HUD a junction: the open-world ride
- * session (#2896), which does not exist yet.
+ * Mounted only on a ride that hands the HUD a junction: an open-world ride,
+ * which `GameView` hands it (#3013).
  */
 
 import { useEffect, useRef, type JSX, type ReactNode } from 'react';
