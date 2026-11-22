@@ -2135,3 +2135,47 @@ describe('power as a 3 s average or instant — #2420', () => {
     expect(pick(effort('instant'), ZONE_KEY)).toBe('6');
   });
 });
+
+/**
+ * #3056: an open-world ride's profile is the rolling view of the road held round
+ * the rider (`HudInput.openEnded`), which a new view replaces every 2–3 km. A
+ * place in that view is not how much of the ride is done, so the strip states
+ * no share of it at all — in the sentence or in the name a screen reader reads.
+ */
+describe('an open-ended ride — #3056', () => {
+  const along = (input: HudInput, fraction: number): HudInput => ({
+    ...input,
+    state: {
+      ...input.state,
+      ride: {
+        speed: metresPerSecond(6),
+        distance: metres((input.profile.totalDistance as number) * fraction),
+      },
+    },
+  });
+  const strip = (input: HudInput, openEnded?: boolean) =>
+    profileReading(input.state, input.profile, input.lapSeconds, openEnded);
+
+  it('states no percentage anywhere in the view, in the sentence or the accessible name', () => {
+    for (const fraction of [0, 0.16, 0.38, 1]) {
+      const reading = strip(along(baseInput(), fraction), true);
+      expect(reading.text).toBe('Open road');
+      expect(reading.label).toBe('Road profile, open road');
+    }
+  });
+
+  it('states no lap or lap time either, whatever shape the view has', () => {
+    const reading = strip({ ...along(loopInput(), 1.25), lapSeconds: 65 }, true);
+    expect(reading.text).toBe('Open road');
+    expect(reading.label).toBe('Road profile, open road');
+  });
+
+  it('still draws the marker at the rider’s place in the view', () => {
+    expect(strip(along(baseInput(), 0.38), true).position).toBeCloseTo(0.38, 6);
+  });
+
+  it('leaves a route ride exactly as it was', () => {
+    expect(strip(along(baseInput(), 0.38), false).text).toBe('38% complete');
+    expect(strip(along(baseInput(), 0.38)).label).toBe('Route profile, 38 per cent complete');
+  });
+});
