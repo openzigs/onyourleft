@@ -88,7 +88,12 @@ import type { UnitSystem } from '@onyourleft/store';
 
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { VisuallyHidden } from '../../design/VisuallyHidden';
-import { pressesOfWays, type JunctionPrompt, type TurnPress } from '../open-world/junction-choice';
+import {
+  pressesOfWays,
+  type JunctionPrompt,
+  type TurnNotice,
+  type TurnPress,
+} from '../open-world/junction-choice';
 import { turnOfKey, turnOfSymbol, type TurnSymbol } from '../open-world/turn-input';
 import { HIDES_ATTRIBUTE } from './controls-reveal';
 import { CONTROL_MINIMUM_PIXELS } from './HudCore';
@@ -99,6 +104,7 @@ import {
   JUNCTION_LOCKED_LINE,
   JUNCTION_PROMPT_TITLE,
   lockLine,
+  TURN_NOTICE_WORDS,
   U_TURN_NAME,
   wayWord,
 } from './junction-text';
@@ -113,6 +119,11 @@ export interface JunctionInput {
   readonly prompt: JunctionPrompt | undefined;
   /** One press, from the screen, a key or a pad: `JunctionChoice.press` at the rider's distance. */
   readonly press: (press: TurnPress) => void;
+  /**
+   * The turn notice standing (`JunctionChoice.notice`), drawn in the pop-up
+   * in place of the junction for as long as it stands (#3058).
+   */
+  readonly notice?: TurnNotice | undefined;
 }
 
 export interface JunctionChoicePromptProps {
@@ -266,6 +277,8 @@ function size(): { readonly minWidth: number; readonly minHeight: number } {
  *
  * Nothing at all while no junction is within the prompt's reach, and nothing
  * once the choice has been final for {@link JUNCTION_LOCKED_SHOWN_MILLISECONDS}.
+ * While a turn notice stands (#3058) it is that notice's words alone:
+ * *Turning round*, *Dead end: turning round* or *No junction yet*.
  */
 export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Element | null {
   const { junction, touchLocked, units } = props;
@@ -283,6 +296,23 @@ export function JunctionChoicePrompt(props: JunctionChoicePromptProps): JSX.Elem
       clearTimeout(timer);
     };
   }, [lockedAt]);
+  // #3058: a U-turn, a dead end's turn-round or a press with no junction
+  // near, said in words where the junction's ways stand, for as long as it
+  // stands. The region says it too (`junction-text.ts` §`junctionEvent`).
+  const notice = junction.notice;
+  if (notice !== undefined) {
+    return (
+      <div className="oyl-hud__junction-popup">
+        <div className="oyl-hud__junction-prompt">
+          <div className="oyl-hud__junction-head">
+            <p className="oyl-hud__junction-title" data-oyl-notice={notice.kind}>
+              {TURN_NOTICE_WORDS[notice.kind].shown}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (shown === undefined || goneFor === shown.distance) return null;
 
   const described = touchLocked ? NOTE_ID : undefined;
