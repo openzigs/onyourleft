@@ -213,15 +213,23 @@ const BOUNDARIES: readonly Boundary[] = [
   },
   {
     module: 'world-data/corridor-source.ts',
-    what: 'byte ranges of the basemap archive around a route, asked for when the rider chooses or saves the route for the realistic world (#1539)',
+    what: 'byte ranges of the basemap archive around a route, asked for when the rider chooses or saves the route for the realistic world (#1539); and, in an open-world ride, the blocks round the rider, which follow the rider block by block for as long as the ride goes on (#2896, ADR 0090 D-4)',
     // ⚠️ Departing, and the first boundary whose payload carries NO
     // coordinate and is still a location. ADR 0054 D-6.2: a tile range is a
     // coarse location — the host can tell which z15 tiles were read, about
     // 0.8–1.1 km across — and it travels as byte offsets in a `Range` header,
     // not as a pair, so the walk below cannot fire on it. What protects the
-    // rider is that no tile touching a privacy zone is asked for at all
-    // (D-6.3); the case below maps each requested tile back to its bounds and
-    // checks every corner and edge point against the zone.
+    // rider on a ROUTE ride is that no tile touching a privacy zone is asked
+    // for at all (D-6.3); the case below maps each requested tile back to its
+    // bounds and checks every corner and edge point against the zone.
+    // ⚠️ #2896, ADR 0090 R-7: an OPEN-WORLD ride reads through this module
+    // too, and its read is a sequence that follows the rider: the start's
+    // block and the eight round it, then each block the rider rides into
+    // (D-2, D-4). It reads inside a privacy zone the same way as outside one
+    // (R-3, the owner's Q2), so the hole the case below checks is a route
+    // ride's alone; what an open-world read may ask for is a function of the
+    // rider's block and nothing else (R-1), which
+    // `game/world-data/area.test.ts` holds.
     direction: 'departing',
   },
   {

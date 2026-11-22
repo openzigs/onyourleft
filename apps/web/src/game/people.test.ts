@@ -14,8 +14,10 @@ import type { LandUseFeature, PathFeature, StreetFeature } from '@onyourleft/map
 
 import { mappedJunctions, type Junction } from './cross-streets';
 
+import { HOUSE_KIT } from './bicycle';
 import { STRIDE_PER_HEIGHT } from './gait';
 import {
+  CLOTHES,
   NO_PEOPLE,
   PEOPLE_FAR_MAX,
   PEOPLE_FAR_METRES,
@@ -942,5 +944,45 @@ describe('a mapped footway on every land-use kind our archive emits — #1946', 
     for (const named of Object.keys(DENSITY_BEFORE_1946)) expect(kinds).toContain(named);
     expect(lineOf('commercial').perMetre).toBeGreaterThan(lineOf('residential').perMetre);
     expect(lineOf('residential').perMetre).toBeGreaterThan(lineOf('farmland').perMetre);
+  });
+});
+
+/** An sRGB `0xrrggbb`'s CIELAB (D65) `a*` and `b*`: its hue and chroma, with the lightness left out. */
+function chroma(hex: number): readonly [number, number] {
+  const linear = (channel: number): number => {
+    const c = channel / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const r = linear((hex >> 16) & 0xff);
+  const g = linear((hex >> 8) & 0xff);
+  const b = linear(hex & 0xff);
+  const f = (t: number): number => (t > 216 / 24389 ? Math.cbrt(t) : ((24389 / 27) * t + 16) / 116);
+  const x = f((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047);
+  const y = f(0.2126 * r + 0.7152 * g + 0.0722 * b);
+  const z = f((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883);
+  return [500 * (x - y), 200 * (y - z)];
+}
+
+describe('nobody on the pavement wears the rider’s jersey — the owner’s request of 2026-11-18', () => {
+  // `scenery-cyclists.test.ts` §"no scenery cyclist wears the house kit" says
+  // why the distance is chromatic and why it is 15. A person's clothes are
+  // held to the JERSEY alone: the kit's other half is a near-black, and a
+  // street's clothes are rightly full of greys and blacks.
+  it('holds every colour a top or bottoms may be 15 chromatic ΔE*ab from the house kit’s jersey', () => {
+    const [ja, jb] = chroma(HOUSE_KIT.jersey);
+    const near = CLOTHES.filter((colour) => {
+      const [a, b] = chroma(colour);
+      return Math.hypot(a - ja, b - jb) < 15;
+    }).map((colour) => colour.toString(16).padStart(6, '0'));
+    expect(near).toEqual([]);
+    // Every person's clothes come out of that list, so every person is held.
+    for (let hash = 1; hash < 400; hash += 7) {
+      const look = personLook(hash * 2_654_435_761);
+      expect(CLOTHES).toContain(look.top);
+      expect(CLOTHES).toContain(look.bottoms);
+      // And who they are, of the model's bodies, is a share of their own.
+      expect(look.build).toBeGreaterThanOrEqual(0);
+      expect(look.build).toBeLessThan(1);
+    }
   });
 });

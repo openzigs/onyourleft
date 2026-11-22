@@ -3,11 +3,11 @@
 /**
  * #2975's rollback: a row this build keeps, met by the build before it.
  *
- * #2975 moved `CORRIDOR_READER_VERSION` from 5 to 6 and changed no Dexie
- * schema, so checking out the previous build leaves version-6 rows in a store
- * whose code reads only version 5. This runs the port `main.tsx` builds as
+ * #2975 moved `CORRIDOR_READER_VERSION` from 7 to 8 and changed no Dexie
+ * schema, so checking out the previous build leaves version-8 rows in a store
+ * whose code reads only version 7. This runs the port `main.tsx` builds as
  * that code would: the corridor module is the real one but for its reader
- * version, which is 5. The row is written by the real version-6 pack, with
+ * version, which is 7. The row is written by the real version-8 pack, with
  * footprints' POI classes. It must be read again, never handed to the ride
  * and never thrown into it.
  */
@@ -34,12 +34,12 @@ import { buildArchive, countingSource } from './archive-testing';
 import { createWorldCorridorPort, routeDigestOf } from './corridor-port';
 import { corridorArchiveFrom } from './corridor-source';
 
-/** The build before #2975 read only version 5. */
-const PREVIOUS_READER_VERSION = 5;
+/** The build before #2975 read only version 7. */
+const PREVIOUS_READER_VERSION = 7;
 
 vi.mock('../game/world-data/corridor', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../game/world-data/corridor')>()),
-  CORRIDOR_READER_VERSION: 5,
+  CORRIDOR_READER_VERSION: 7,
 }));
 
 const ARCHIVE_URL = 'https://tiles.example.org/basemap-us-test.pmtiles';
@@ -58,8 +58,8 @@ afterEach(async () => {
   await harness.destroy();
 });
 
-it('the previous build reads a version-6 row, with POI classes, again, and hands the ride a corridor rather than an error', async () => {
-  // The mock is the previous build: the port sees version 5.
+it('the previous build reads a version-8 row, with POI classes, again, and hands the ride a corridor rather than an error', async () => {
+  // The mock is the previous build: the port sees version 7.
   expect(CORRIDOR_READER_VERSION).toBe(PREVIOUS_READER_VERSION);
   const route = routeFor(ATHLETE_A);
   await harness.write((s) => s.putRoute(route));
@@ -70,8 +70,8 @@ it('the previous build reads a version-6 row, with POI classes, again, and hands
   ).map((tile) => ({ x: tile.x, y: tile.y, bytes: poisTile() }));
   const source = countingSource(await buildArchive({ tiles }));
 
-  // This build's row: reader version 6, and a blob the real pack wrote at
-  // packed version 6, with the POI classes a version-5 reader never kept.
+  // This build's row: reader version 8, and a blob the real pack wrote at
+  // packed version 7, with the POI classes a version-7 reader never kept.
   const decoded = decodeTile(poisTile(), FIXTURE_TILE, FIXTURE_FRAME);
   if ('reason' in decoded) throw new Error(decoded.reason);
   // Not vacuous: the row holds footprints with a class.
@@ -90,7 +90,7 @@ it('the previous build reads a version-6 row, with POI classes, again, and hands
       routeId: route.id,
       routeDigest: await routeDigestOf(route.profile.positions),
       archive: { url: ARCHIVE_URL, identity: '"fixture-1"' },
-      readerVersion: 6,
+      readerVersion: 8,
       halfWidthMetres: CORRIDOR_HALF_WIDTH_METRES,
       readAt: '2026-11-02T12:00:00.000Z',
       tiles: covered.map((tile) => ({ x: tile.x, y: tile.y, state: 'covered' as const })),

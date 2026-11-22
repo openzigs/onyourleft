@@ -37,6 +37,7 @@ import {
   corridorTileCover,
   decodeTile,
   describeRefusal,
+  RAIL_KIND_DETAILS,
   tileBounds,
   tileBox,
   POI_CLASSES,
@@ -46,10 +47,13 @@ import {
   type BuildingFieldName,
   type BuildingFields,
   type CorridorFrame,
+  type DecodedStreetFeature,
+  type DecodedTile,
   type DecodeRefusal,
   type LandUseFeature,
   type PathFeature,
   type PlaceFeature,
+  type RailFeature,
   type StreetFeature,
   type StreetGrade,
   type TileId,
@@ -87,14 +91,19 @@ export const READ_TIMEOUT_MS = 120_000;
  * **4** since #1789 (ADR 0054's entry of 2026-11-01), which keeps the twelve
  * building fields a version-3 record never decoded; **5** since #2659 (ADR
  * 0054's entry of 2026-11-15), which keeps the water lines a version-4 record
- * never decoded; **6** since #2975 (ADR 0054's entry of 2026-11-21), which
- * keeps each footprint's POI class a version-5 record never decoded. The port
- * trusts a record only at exactly this version, so a version-5 row is read
- * again here, and a version-6 row met by version-5 code is read again there,
- * never decoded as its own: that is #1789's rollback, and #2659's and
- * #2975's, and there is no Dexie schema change.
+ * never decoded; **6** since #2660, which keeps the railway lines a version-5
+ * record never decoded; **7** since #2974 (ADR 0054's entry of 2026-11-21),
+ * which keeps the ditches and drains a version-6 record dropped at decode;
+ * **8** since #2975 (ADR 0054's entry of 2026-11-21), which keeps each
+ * footprint's POI class a version-7 record never decoded. The port trusts a
+ * record only at exactly this version, so a version-7 row is read again here,
+ * and a version-8 row met by version-7 code is read again there, never decoded
+ * as its own: that is #1789's rollback, and #2659's, #2660's, #2974's and
+ * #2975's, and there is no Dexie schema change. #2974 changed no packed field,
+ * so the packed version stayed 6 at reader 7; #2975 adds one, so it is 7 at
+ * reader 8.
  */
-export const CORRIDOR_READER_VERSION = 6;
+export const CORRIDOR_READER_VERSION = 8;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -139,6 +148,11 @@ export interface WorldCorridor {
    * Optional for {@link places}' reason: absent is none.
    */
   readonly waterLines?: readonly WaterLineFeature[];
+  /**
+   * #2660: the railway lines, read by `level-crossings.ts` for where one
+   * crosses the route at grade. Optional for {@link places}' reason: absent is none.
+   */
+  readonly rails?: readonly RailFeature[];
 }
 
 /** One tile of a corridor, and why it holds what it holds. */
@@ -361,6 +375,20 @@ export interface CorridorFeatures {
    * hand — a test's, a level's — need no edit: absent is none. Every read sets it.
    */
   readonly waterLines?: readonly WaterLineFeature[];
+  /** #2660: the railway lines. Optional for {@link waterLines}' reason. Every read sets it. */
+  readonly rails?: readonly RailFeature[];
+}
+
+/**
+ * One decoded tile's streets, with their road fields — #2896: the open-world
+ * street graph is built a tile at a time (`StreetGraph.addTile`), and clips
+ * each tile's streets to that tile's own box, so it needs them per tile and
+ * not joined as {@link CorridorFeatures.streets} are. The same objects as
+ * those, so holding both costs the arrays and nothing more.
+ */
+export interface TileStreets {
+  readonly tile: TileId;
+  readonly streets: readonly DecodedStreetFeature[];
 }
 
 /** What {@link readCorridorTiles} came to. */
@@ -370,6 +398,8 @@ export type CorridorRead =
       readonly identity: string;
       readonly tiles: readonly CorridorTile[];
       readonly features: CorridorFeatures;
+      /** Every decoded tile's streets, in the plan's order (#2896). */
+      readonly tileStreets: readonly TileStreets[];
     }
   | { readonly kind: 'wrong-schema' }
   /** The archive could not be opened, or not one tile came back: nothing to keep. */
@@ -455,7 +485,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     // queue's order at the end, so the features' order is the plan's and not
     // the order the tiles happened to arrive in. Two reads of one archive then
     // pack to the same bytes, which the demo's bake is checked against.
-    const decodedTiles: (CorridorFeatures | undefined)[] = [];
+    const decodedTiles: (DecodedTile | undefined)[] = [];
     let done = 0;
     let arrived = 0;
     const of = queue.length;
@@ -515,6 +545,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     const streets: StreetFeature[] = [];
     const places: PlaceFeature[] = [];
     const waterLines: WaterLineFeature[] = [];
+    const rails: RailFeature[] = [];
     for (const decoded of decodedTiles) {
       if (decoded === undefined) continue;
       for (const feature of decoded.landUse) landUse.push(feature);
@@ -523,16 +554,22 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
       for (const feature of decoded.streets) streets.push(feature);
       for (const feature of decoded.places) places.push(feature);
       for (const feature of decoded.waterLines ?? []) waterLines.push(feature);
+      for (const feature of decoded.rails ?? []) rails.push(feature);
     }
     const tiles = plan.tiles.map((tile) => {
       const state = states.get(key(tile));
       return state === undefined ? tile : { x: tile.x, y: tile.y, state };
     });
+    const tileStreets: TileStreets[] = [];
+    for (const decoded of decodedTiles) {
+      if (decoded !== undefined) tileStreets.push({ tile: decoded.tile, streets: decoded.streets });
+    }
     return {
       kind: 'read',
       identity: opening.identity,
       tiles,
-      features: { landUse, buildings, paths, streets, places, waterLines },
+      features: { landUse, buildings, paths, streets, places, waterLines, rails },
+      tileStreets,
     };
   } finally {
     whole.done();
@@ -547,9 +584,10 @@ const PACK_SCALE = 100;
 /**
  * The packed format's version: 2 since #1565 added the streets, 3 since #1632
  * added the places, 4 since #1789 added the building fields, 5 since #2659
- * added the water lines, 6 since #2975 added a footprint's POI class.
+ * added the water lines, 6 since #2660 added the railway lines, 7 since #2975
+ * added a footprint's POI class.
  */
-const PACKED_VERSION = 6;
+const PACKED_VERSION = 7;
 
 /**
  * #1789: each building field's name in the packed format, short because a
@@ -633,7 +671,7 @@ interface PackedFeatures {
     b?: Readonly<Record<string, string | number>>;
     /**
      * #2975: its POI class. Absent where it has none, as `b` is, so a corridor
-     * read where no POI is matched packs as it did at version 5 but for its `v`.
+     * read where no POI is matched packs as it did at version 6 but for its `v`.
      */
     p?: string;
     rings: number[][];
@@ -655,6 +693,12 @@ interface PackedFeatures {
    * lines packs as it did at version 4 but for its `v`.
    */
   readonly waterLines?: readonly { kind: WaterLineFeature['kind']; line: number[] }[];
+  /**
+   * #2660: a railway line's detail, grade and line. Absent where a corridor has
+   * none, as {@link waterLines} are, so a corridor with no railway packs as it
+   * did at version 5 but for its `v`.
+   */
+  readonly rails?: readonly { detail: RailFeature['kindDetail']; g: StreetGrade; line: number[] }[];
 }
 
 const toInts = (values: Float32Array): number[] =>
@@ -761,6 +805,15 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
       : {
           waterLines: features.waterLines.map((f) => ({ kind: f.kind, line: toInts(f.line) })),
         }),
+    ...(features.rails === undefined || features.rails.length === 0
+      ? {}
+      : {
+          rails: features.rails.map((f) => ({
+            detail: f.kindDetail,
+            g: f.grade,
+            line: toInts(f.line),
+          })),
+        }),
   };
 }
 
@@ -821,6 +874,14 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
     waterLines: (packed.waterLines ?? [])
       .filter((f) => (WATER_LINE_KINDS as readonly string[]).includes(f.kind))
       .map((f) => ({ kind: f.kind, line: fromInts(f.line) })),
+    // #2660: held to the decoder's own details and grades again, as the water lines are.
+    rails: (packed.rails ?? [])
+      .filter((f) => (RAIL_KIND_DETAILS as readonly string[]).includes(f.detail))
+      .map((f) => ({
+        kindDetail: f.detail,
+        grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
+        line: fromInts(f.line),
+      })),
   };
 }
 
@@ -873,5 +934,6 @@ export function worldCorridorOf(
     streets: features.streets,
     places: features.places,
     waterLines: features.waterLines ?? [],
+    rails: features.rails ?? [],
   };
 }

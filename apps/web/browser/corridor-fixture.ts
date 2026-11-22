@@ -109,6 +109,7 @@ export const CORRIDOR_FIXTURE_VERDICTS: FootprintVerdicts = {
   kept: 5,
   'on-excluded-land': 1,
   'on-road': 0,
+  'on-street': 0,
   'too-steep': 1,
   'too-small': 0,
   'too-large': 0,

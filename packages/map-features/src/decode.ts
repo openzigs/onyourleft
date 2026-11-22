@@ -53,6 +53,8 @@ import {
   PLACE_KINDS,
   POI_CLASS_OF_KIND,
   READ_LAYERS,
+  RAIL_KIND,
+  RAIL_KIND_DETAILS,
   STREET_KINDS,
   WATER_LINE_KINDS,
   GEOMETRY_LINE,
@@ -70,6 +72,7 @@ import type {
   LandUseFeature,
   PathFeature,
   PlaceFeature,
+  RailFeature,
   Ring,
   StreetAccess,
   StreetGrade,
@@ -288,6 +291,7 @@ function decodeChecked(
   const streets: DecodedStreetFeature[] = [];
   const places: PlaceFeature[] = [];
   const waterLines: WaterLineFeature[] = [];
+  const rails: RailFeature[] = [];
   const pois: PoiPoint[] = [];
   const counts = { roadValuesDefaulted: 0 };
   for (const layer of framed) {
@@ -307,7 +311,7 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths, streets, places, waterLines, pois },
+        { landUse, buildings, paths, streets, places, waterLines, rails, pois },
         counts,
       );
     }
@@ -321,6 +325,7 @@ function decodeChecked(
     streets,
     places,
     waterLines,
+    rails,
     roadValuesDefaulted: counts.roadValuesDefaulted,
   };
 }
@@ -533,14 +538,16 @@ interface Sinks {
   readonly streets: DecodedStreetFeature[];
   readonly places: PlaceFeature[];
   readonly waterLines: WaterLineFeature[];
+  readonly rails: RailFeature[];
   readonly pois: PoiPoint[];
 }
 
 /**
  * Which sink a `roads` feature goes to (#1565): a footway first - #1551's
- * set, unchanged - then a street, else none, and its geometry is never read.
+ * set, unchanged - then a street, then (#2660) a railway kept as track, else
+ * none, and its geometry is never read.
  */
-function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | null {
+function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | 'rails' | null {
   if (kind === FOOTWAY_KIND || (FOOTWAY_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
     return 'paths';
   }
@@ -550,6 +557,9 @@ function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' 
     (OTHER_STREET_KIND_DETAILS as readonly string[]).includes(kindDetail)
   ) {
     return 'streets';
+  }
+  if (kind === RAIL_KIND && (RAIL_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
+    return 'rails';
   }
   return null;
 }
@@ -610,7 +620,8 @@ function decodeFeature(
     return;
   }
   const kind = attributes.kind;
-  // #2659: a water line is a river, a stream or a canal, or it is not read.
+  // #2659, #2974: a water line is a river, a stream, a canal, a ditch or a
+  // drain, or it is not read.
   const waterLine = layer.name === 'water' && type === GEOMETRY_LINE;
   if (waterLine && !(WATER_LINE_KINDS as readonly (string | null)[]).includes(kind)) return;
   if (kind === null && layer.name !== 'water') return;
@@ -657,7 +668,13 @@ function decodeFeature(
       }
       for (const line of parts as Float32Array[]) {
         if (road === 'paths') sinks.paths.push({ kind: kind as string, kindDetail, line });
-        else
+        else if (road === 'rails') {
+          sinks.rails.push({
+            kindDetail: kindDetail as RailFeature['kindDetail'],
+            grade: gradeOf(attributes),
+            line,
+          });
+        } else
           sinks.streets.push({
             kind: kind as string,
             kindDetail,

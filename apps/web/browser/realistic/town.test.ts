@@ -44,6 +44,7 @@ import {
   mappedPaintStreetFixture,
   mappedRoofStreetFixture,
   mixedTownFixture,
+  neighbourhoodFixture,
   planFingerprint,
   poiStreetFixture,
   typedStreetFixture,
@@ -614,6 +615,35 @@ describe('the realistic page’s `inferred-barns` lever — #2024', () => {
   });
 });
 
+describe('the realistic page’s `shop-aprons` lever — #2848', () => {
+  const street = commercialStreetFixture();
+
+  it('lays an apron before every main-street block on the product’s page', () => {
+    const { plans } = plannedTown(street, parseConfig('?town=commercial').leversOff);
+    const blocks = plans.filter((plan) => plan.buildingArchetype === 'main-street');
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.every((plan) => plan.apron.length > 0 && plan.triangles.apron.length > 0)).toBe(
+      true,
+    );
+  });
+
+  it('plans every footprint with none, and otherwise as the product does, with `levers=-shop-aprons`', () => {
+    const on = plannedTown(street, parseConfig('?town=commercial').leversOff).plans;
+    const off = plannedTown(
+      street,
+      parseConfig('?town=commercial&levers=-shop-aprons').leversOff,
+    ).plans;
+    expect(off.length).toBe(on.length);
+    off.forEach((plan, index) => {
+      expect(plan.apron).toHaveLength(0);
+      for (const role of FOOTPRINT_ROLES) {
+        if (role === 'apron') expect(plan.triangles[role]).toHaveLength(0);
+        else expect(plan.triangles[role]).toStrictEqual(on[index]?.triangles[role]);
+      }
+    });
+  });
+});
+
 describe('the realistic page’s `inferred-commercial` lever — #2026', () => {
   const street = untaggedStreetFixture();
   const shopsOf = (plans: readonly FootprintPlan[]): FootprintPlan[] =>
@@ -655,5 +685,42 @@ describe('the realistic page’s `map-pois` lever — #2975', () => {
     const { plans } = plannedTown(street, parseConfig('?town=pois&levers=-map-pois').leversOff);
     expect(rowOf(plans, 'shop').some((plan) => plan.shop.front)).toBe(false);
     expect(rowOf(plans, 'canopy').every((plan) => plan.triangles.plinth.length > 0)).toBe(true);
+  });
+});
+
+describe('the realistic page’s `nearby-streets` lever — #2973', () => {
+  const town = neighbourhoodFixture();
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+  /** The page's town and a frame of it for `query`, as `realistic-harness.ts` builds them. */
+  const page = (query: string) => {
+    const config = parseConfig(query);
+    const { land, plans, urban } = plannedTown(town, config.leversOff);
+    const frame = rideFrame({
+      profile: town.profile,
+      origin: town.origin,
+      distance: 1_500,
+      elapsed: 1,
+      rung: top,
+      peopleOff: true,
+      nearbyStreetsOff: config.leversOff.includes('nearby-streets'),
+      town: {
+        corridor: town.corridor,
+        land,
+        buildings: mappedBuildingsOf(plans),
+        lots: mappedTown(town.corridor, plans, urban),
+      },
+    });
+    return {
+      plans,
+      streets: frame.sideRoads.filter((road) => road.junction.source === 'street'),
+    };
+  };
+
+  it('draws the streets off the route and drops the footprint the map draws over one', () => {
+    const product = page('?town=streets');
+    expect(product.streets.length).toBeGreaterThan(0);
+    const control = page('?town=streets&levers=-nearby-streets');
+    expect(control.streets).toEqual([]);
+    expect(product.plans.length).toBe(control.plans.length - 1);
   });
 });

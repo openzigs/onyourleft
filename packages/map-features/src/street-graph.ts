@@ -55,8 +55,9 @@
  * {@link describeStreetGraphRefusal} names the constraint and its limit and
  * never a coordinate, a tile id or a block id (ADR 0004 D).
  *
- * Pure: no platform API, no clock, no worker. The web app runs it in a worker
- * of its own.
+ * Pure: no platform API, no clock, no worker. The web app's open-world session
+ * (`apps/web/src/game/open-world/session.ts`, #2896) builds it on the main
+ * thread, once, at the start; moving it to a worker is owed to #2990.
  */
 
 import { tileBox } from './cover';

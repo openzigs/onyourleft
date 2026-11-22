@@ -541,6 +541,74 @@ describe('a fuel station the map marks — #2975', () => {
   });
 });
 
+describe('a shop’s apron beside the map’s POIs — #2848 and #2975', () => {
+  const { profile, origin } = fixture;
+  /** An untyped footprint `along` the road, near enough it for an apron, with this POI. */
+  const nearTheRoad = (along: number, poi: 'shop' | 'cafe' | 'fuel' | undefined, lateral = 12) => ({
+    ...buildingBeside(profile, origin, [rectangleBeside(along, lateral, 10, 8)], 6),
+    buildingType: null,
+    ...(poi === undefined ? {} : { poi }),
+  });
+
+  it('a shop or a café the map marks has an apron, exactly as a mapped shop does; its twin with none has none', () => {
+    const [shop, cafe, twin] = plan(
+      {},
+      {
+        ...fixture.corridor,
+        buildings: [
+          nearTheRoad(1_100, 'shop'),
+          nearTheRoad(1_200, 'cafe'),
+          nearTheRoad(1_300, undefined),
+        ],
+      },
+    ).plans as [FootprintPlan, FootprintPlan, FootprintPlan];
+    for (const each of [shop, cafe]) {
+      expect(each.apron.length).toBeGreaterThan(0);
+      expect(trianglesIn(each, 'apron')).toBeGreaterThan(0);
+    }
+    expect(twin.apron).toHaveLength(0);
+    // The same footprint mapped a shop has the same apron: the POI takes #2848's rule as it is.
+    const [mapped] = plan(
+      {},
+      {
+        ...fixture.corridor,
+        buildings: [{ ...nearTheRoad(1_100, undefined), buildingType: 'retail' as const }],
+      },
+    ).plans as [FootprintPlan];
+    expect(Array.from(shop.apron)).toStrictEqual(Array.from(mapped.apron));
+  });
+
+  it('a fuel station’s canopy has no apron, and no shop’s apron is laid on its forecourt', () => {
+    for (const canopy of [...rowOf('canopy'), ...rowOf('canopy-no-height')]) {
+      expect(canopy.apron).toHaveLength(0);
+      expect(trianglesIn(canopy, 'apron')).toBe(0);
+    }
+    // A canopy near enough the road for an apron, were it a shop.
+    const [near] = plan({}, { ...fixture.corridor, buildings: [nearTheRoad(1_180, 'fuel')] })
+      .plans as [FootprintPlan];
+    expect(near.driveway).toHaveLength(8);
+    expect(near.apron).toHaveLength(0);
+    // Three shops between a canopy and the road, on the forecourt it lays out to the road.
+    const shops = [1_165, 1_180, 1_195].map((along) => nearTheRoad(along, 'shop'));
+    const canopyOf = (poi: 'fuel' | undefined) => nearTheRoad(1_180, poi, 30);
+    const planned = (poi: 'fuel' | undefined): readonly FootprintPlan[] =>
+      plan({}, { ...fixture.corridor, buildings: [canopyOf(poi), ...shops] }).plans;
+    // The control: with no fuel POI there is no forecourt, and the shops have their aprons.
+    const control = planned(undefined).slice(1);
+    expect(control.filter((shop) => shop.apron.length > 0).length).toBeGreaterThan(0);
+    const [canopy, ...after] = planned('fuel') as [FootprintPlan, ...FootprintPlan[]];
+    expect(canopy.driveway).toHaveLength(8);
+    expect(canopy.apron).toHaveLength(0);
+    for (const shop of after) {
+      for (let at = 0; at < shop.apron.length; at += 2) {
+        expect(
+          insideRing(canopy.driveway, shop.apron[at] as number, shop.apron[at + 1] as number),
+        ).toBe(false);
+      }
+    }
+  });
+});
+
 describe('`-map-pois` — #2975', () => {
   it('plans every footprint as it is planned with no POI at all, byte for byte', () => {
     const off = plan({ mappedPois: false }).plans;

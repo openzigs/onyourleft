@@ -572,3 +572,35 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
 - **2026-11-12** — **D-3's step out of realism is held while a Delivery round runs.** This is a
   decision, not an amendment, and is made by [ADR 0068](0068-a-delivery-round-holds-the-realistic-worlds-floor.md),
   which supersedes that part of D-3 and no other ([#2513](https://github.com/openzigs/onyourleft/issues/2513)).
+- **2026-11-18** — **The people on the pavements wear MakeHuman's own clothes, shoes and hair.**
+  ⚠️ **Written by the pull request that took them, and waiting on the owner's confirmation.** The
+  2026-09-28 entry above ends *"Clothes packs were not ruled in"*. On 2026-11-18 the owner asked,
+  *"can we get better pedestrian models and make the car model better"*, and then, *"can we use a
+  real model for the pedestrian. find a free one to use or a couple"*. This entry reads that as the
+  ruling the earlier one lacked, for exactly this much: the **clothes, shoes, hair and second skin
+  inside MakeHuman's own system assets pack** — the archive that entry already admits and
+  `inputs.lock.json` already pins by its digest (`b542127a…0107`), from which the rider's skin and
+  eyebrow come. It admits no new source and no new archive. What the pull request found and relied on:
+  - **Each asset's own row** on the pack's page,
+    `static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html`, read
+    on the evening of 2026-11-18 (`inputs.lock.json` dates the read in UTC, 2026-11-19), reads **author `makehuman_system`, licence CC0**: the clothes `male_casualsuit06`,
+    `female_elegantsuit01`, `male_casualsuit05`, `shoes05`, `shoes01` and `shoes02`; the hair
+    `short02`, `ponytail01` and `short01`; and the skin `young_caucasian_female`. The pipeline
+    refuses a file unless its own asset's row does (`sources.ts` §`systemAssetVerdict`), and each
+    text file among them carries the header the 2026-09-28 entry quotes.
+  - **The same premise as that entry, and no wider**: the same author under the same CC0 grant.
+    The site's other clothes and hair packs are by community authors and are NOT under this entry;
+    admitting one is still the superseding ADR D-4 names.
+  - ⚠️ **Nobody wears a mark.** The pack's `male_casualsuit02`, `male_casualsuit04`,
+    `female_casualsuit01` and `female_casualsuit02` print MakeHuman's own wordmark across the chest
+    and are not taken. `male_casualsuit06` prints it smaller, on a plain white shirt, and
+    `apps/web/tools/realistic/blender/process_people.py` §`PAINT_OVER` paints it out before
+    anything reads the picture — the remedy ADR 0049's 2026-10-23 entry names for branding in a
+    bundled picture. Every photograph's corner carries its publisher's address, and none is inside
+    a tile of the shipped atlas. If the owner would sooner that shirt were not worn at all, the
+    people are two and not three until another plain garment is found.
+  - **What ships**: `apps/web/public/realistic/people.glb` and `people_atlas_1024.ktx2`
+    (`realistic-assets.ts` §`REALISTIC_PEOPLE`), 391 045 bytes, which takes D-6's build ceiling
+    from 46 MiB to 47 (`realistic-budget.ts` §`REALISTIC_BUILD_BYTES`) — a rise the owner has not
+    ruled on either, and is asked to with this entry.
+  Nothing else in this ADR's decisions changes. ADR 0049 carries the matching entry.

@@ -38,6 +38,9 @@
  * ⚠️ **Location data** (ADR 0004 D): nothing here formats a message. It reads
  * #1539's bounded features and only the three fields `PathFeature` carries.
  *
+ * Since #2972 the footways are drawn, by `footway-surfaces.ts`, from
+ * {@link footwayNetwork}'s lines; this file still draws nothing.
+ *
  * Pure, built once a ride (cached on the corridor object), and names no
  * rendering library.
  */

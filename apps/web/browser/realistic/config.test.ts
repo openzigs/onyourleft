@@ -27,6 +27,7 @@ import {
   landmarkCivicWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
+  shopApronsWithLevers,
   LAYERS,
   LEVERS,
   parseConfig,
@@ -481,6 +482,17 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     ).toBe(false);
     expect(configQuery(parseConfig('?town=commercial&levers=-commercial-archetypes'))).toBe(
       `?levers=${encodeURIComponent('-commercial-archetypes')}&town=commercial`,
+    );
+  });
+
+  it('lays an apron before each mapped shop, as the product does, unless #2848’s lever takes it out', () => {
+    expect(LEVERS).toContain('shop-aprons');
+    expect(shopApronsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(shopApronsWithLevers(LEVERS.filter((lever) => lever !== 'shop-aprons'))).toBe(true);
+    expect(shopApronsWithLevers(parseConfig('?levers=-shop-aprons').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=commercial&levers=-shop-aprons'))).toBe(
+      `?levers=${encodeURIComponent('-shop-aprons')}&town=commercial`,
     );
   });
 
