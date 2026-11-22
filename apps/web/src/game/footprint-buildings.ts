@@ -24,7 +24,10 @@
  * 1. **Kind.** `building` and `building_part`; a `building_part` with a
  *    `min_height` stands on that height and has no plinth.
  * 2. **Land** (#1546): any of the centroid and the footprint's vertices on a
- *    mapped wood, water or park, and it is dropped — `on-excluded-land`. A
+ *    mapped wood, water or park, and it is dropped — `on-excluded-land`.
+ *    #2696 (proposed): a park that is a yard — `land-class.ts`
+ *    §`YARD_KINDS`, a garden, a lawn, a village green, allotments — is not
+ *    one here, so a house touching its own mapped garden is built. A
  *    building inside a mapped park is dropped deliberately: the owner's rule
  *    (ADR 0054 D-5.2) is categorical, and D-5.2's one possible exception is
  *    not taken. #2657: a protected area's boundary (`land-class.ts`
@@ -432,7 +435,13 @@ import {
 } from './house-archetypes';
 import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
-import { insidePark, kindAt, type LandClass, type LandClassMask } from './land-class';
+import {
+  insidePark,
+  kindAt,
+  parkProperNear,
+  type LandClass,
+  type LandClassMask,
+} from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { onOpenWater, waterways } from './waterways';
 import {
@@ -6233,10 +6242,13 @@ function measureFootprint(
   // protected area's boundary (a national forest round a whole town) is not
   // a wood, so a footprint on it is built — ADR 0054's 2026-11-15 amendment.
   // #2754: a beach inside a park is a beach, and still inside the park.
+  // #2696 (ADR 0054's entry of 2026-11-19, proposed): a park that is a yard
+  // — a garden, a lawn, a village green, allotments — drops no footprint.
   const excluded = (x: number, z: number): boolean => {
     const here = land.classAt(x, z);
     if (here === 'bare') return insidePark(corridor, x, z);
-    return (here === 'wood' || here === 'water' || here === 'park') && !land.protectedArea(x, z);
+    if (here === 'park') return !land.protectedArea(x, z) && parkProperNear(corridor, x, z);
+    return (here === 'wood' || here === 'water') && !land.protectedArea(x, z);
   };
   if (excluded(centroid.x, centroid.z)) return 'on-excluded-land';
   for (let i = 0; i + 1 < outer.length; i += 2) {

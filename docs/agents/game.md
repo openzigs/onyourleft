@@ -1674,7 +1674,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         outranks a park or a town drawn round it
                         (`BARE_KINDS_OVER_LAND`), and a footprint on it in
                         a mapped park (not a protected area's boundary,
-                        #2657) is still dropped (`insidePark`).
+                        #2657) is still dropped (`insidePark`). ⚠️ **Since
+                        #2696 (proposed) a yard is not a park here**: a
+                        footprint touching a `garden`, `grass`,
+                        `village_green` or `allotments` (`land-class.ts`
+                        §`YARD_KINDS`) is kept; rule 2 drops it only where a
+                        park that is not a yard is within half a mask cell
+                        (§`parkProperNear`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
@@ -2129,7 +2135,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         transparency. Every
                         scatter item, structure and billboard in view is kept
                         off it (`clearOfSideRoads`), and a village's pavement
-                        is broken at its crossroads with dropped kerbs
+                        is broken at its crossroads with dropped kerbs.
+                        ⚠️ **Since #2660 a level crossing** wherever a mapped
+                        railway (`WorldCorridor.rails`) crosses the route at
+                        grade (§`levelCrossings`): ballast and two rails a
+                        side road's length off each side, the rails carried
+                        across the carriageway, in the same mesh under the
+                        same frame bound — no crossbuck, signal or barrier
     src/game/nearby-streets.ts
                         nearby streets (#2973) — the mapped `ground` streets
                         off the route drawn out to the fog (400 m): a street
