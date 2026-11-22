@@ -40,6 +40,7 @@ import {
   RAIL_KIND_DETAILS,
   tileBounds,
   tileBox,
+  POI_CLASSES,
   WATER_LINE_KINDS,
   type Box,
   type BuildingFeature,
@@ -92,15 +93,17 @@ export const READ_TIMEOUT_MS = 120_000;
  * 0054's entry of 2026-11-15), which keeps the water lines a version-4 record
  * never decoded; **6** since #2660, which keeps the railway lines a version-5
  * record never decoded; **7** since #2974 (ADR 0054's entry of 2026-11-21),
- * which keeps the ditches and drains a version-6 record dropped at decode. The
- * port trusts a record only at exactly this version, so a version-6 row is read
- * again here, and a version-7 row met by version-6 code is read again there,
- * never decoded as its own: that is #1789's rollback, and #2659's, #2660's and
- * #2974's, and there is no Dexie schema change. #2974 changes no packed field,
- * so the packed version stays 6: a version-6 build that meets a version-7 row
- * reads it again, and its unpack holds a blob to its own kinds whatever it holds.
+ * which keeps the ditches and drains a version-6 record dropped at decode;
+ * **8** since #2975 (ADR 0054's entry of 2026-11-21), which keeps each
+ * footprint's POI class a version-7 record never decoded. The port trusts a
+ * record only at exactly this version, so a version-7 row is read again here,
+ * and a version-8 row met by version-7 code is read again there, never decoded
+ * as its own: that is #1789's rollback, and #2659's, #2660's, #2974's and
+ * #2975's, and there is no Dexie schema change. #2974 changed no packed field,
+ * so the packed version stayed 6 at reader 7; #2975 adds one, so it is 7 at
+ * reader 8.
  */
-export const CORRIDOR_READER_VERSION = 7;
+export const CORRIDOR_READER_VERSION = 8;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -581,9 +584,10 @@ const PACK_SCALE = 100;
 /**
  * The packed format's version: 2 since #1565 added the streets, 3 since #1632
  * added the places, 4 since #1789 added the building fields, 5 since #2659
- * added the water lines, 6 since #2660 added the railway lines.
+ * added the water lines, 6 since #2660 added the railway lines, 7 since #2975
+ * added a footprint's POI class.
  */
-const PACKED_VERSION = 6;
+const PACKED_VERSION = 7;
 
 /**
  * #1789: each building field's name in the packed format, short because a
@@ -646,6 +650,16 @@ function buildingFieldsOfPacked(
   return out as unknown as BuildingFields;
 }
 
+/**
+ * #2975: a footprint's POI class from its packed `p`, as the decoder's own
+ * constant, or nothing — so a blob edited on the device cannot put another
+ * string into the plan.
+ */
+function poiOfPacked(packed: unknown): Pick<BuildingFeature, 'poi'> {
+  const poi = POI_CLASSES.find((each) => each === packed);
+  return poi === undefined ? {} : { poi };
+}
+
 interface PackedFeatures {
   readonly v: typeof PACKED_VERSION;
   readonly landUse: readonly { layer: 'landuse' | 'water'; kind: string; rings: number[][] }[];
@@ -655,6 +669,11 @@ interface PackedFeatures {
     mh: number | null;
     /** #1789: the building fields that are not `null`, by their packed names. */
     b?: Readonly<Record<string, string | number>>;
+    /**
+     * #2975: its POI class. Absent where it has none, as `b` is, so a corridor
+     * read where no POI is matched packs as it did at version 6 but for its `v`.
+     */
+    p?: string;
     rings: number[][];
   }[];
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
@@ -759,6 +778,7 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
         h: f.heightMetres,
         mh: f.minHeightMetres,
         ...(fields === undefined ? {} : { b: fields }),
+        ...(f.poi === undefined ? {} : { p: f.poi }),
         rings: f.rings.map(toInts),
       };
     }),
@@ -827,6 +847,8 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
       heightMetres: f.h,
       minHeightMetres: f.mh,
       ...buildingFieldsOfPacked(f.b),
+      // #2975: held to the decoder's own classes again, as a building field is.
+      ...poiOfPacked(f.p),
       rings: f.rings.map(fromInts),
     })),
     paths: packed.paths.map((f) => ({

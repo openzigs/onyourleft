@@ -33,6 +33,7 @@ import {
   HOSTILE_FIXTURES,
   lakeTile,
   placesTile,
+  poisTile,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   sidewalkTile,
@@ -557,8 +558,9 @@ describe('packing', () => {
       true,
       false,
     ]);
-    // 5 since #2659 added the water lines, 6 since #2660 added the railway lines.
-    expect(packed.v).toBe(6);
+    // 5 since #2659 added the water lines, 6 since #2660 added the railway lines,
+    // 7 since #2975 added the POI class.
+    expect(packed.v).toBe(7);
   });
 
   it('holds a packed building field to its rule again: what the decoder would not keep is null (#1789)', () => {
@@ -589,6 +591,49 @@ describe('packing', () => {
       building.wallColour,
       building.landmark,
     ]).toStrictEqual([null, null, 'gabled', 1890, null, null]);
+  });
+
+  it('keeps each footprint’s POI class through the store, and only the decoder’s three (#2975)', async () => {
+    const decoded = decodeTile(poisTile(), FIXTURE_TILE, FIXTURE_FRAME);
+    if ('reason' in decoded) throw new Error(decoded.reason);
+    const classes = decoded.buildings.map((building) => building.poi);
+    expect(classes).toContain('fuel');
+    const back = await unpackCorridorFeatures(
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: decoded.buildings,
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+    expect(back.buildings.map((building) => building.poi)).toStrictEqual(classes);
+    // A footprint with none packs no `p` and reads back with no key.
+    const packed = packedCorridorFeatures({
+      landUse: [],
+      buildings: decoded.buildings,
+      paths: [],
+      streets: [],
+      places: [],
+    });
+    expect(packed.buildings.map((building) => building.p)).toStrictEqual(classes);
+    expect(back.buildings.filter((building) => 'poi' in building)).toHaveLength(
+      classes.filter((poi) => poi !== undefined).length,
+    );
+    // A blob edited on the device cannot put another string into the plan.
+    const edited = corridorFeaturesOfPacked({
+      ...packed,
+      buildings: [
+        { kind: 'building', h: null, mh: null, p: 'zz_not_a_class', rings: [] },
+        { kind: 'building', h: null, mh: null, p: 'toString', rings: [] },
+        { kind: 'building', h: null, mh: null, p: 'cafe', rings: [] },
+      ],
+    });
+    expect(edited.buildings.map((building) => building.poi)).toStrictEqual([
+      undefined,
+      undefined,
+      'cafe',
+    ]);
   });
 
   it('keeps the water lines through the store, and only the decoder’s kinds (#2659, #2974)', async () => {

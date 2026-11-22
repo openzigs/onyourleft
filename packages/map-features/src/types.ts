@@ -14,6 +14,7 @@
 import type {
   BUILDING_TYPES,
   LANDMARKS,
+  PoiClass,
   RAIL_KIND_DETAILS,
   ROOF_MATERIALS,
   ROOF_ORIENTATIONS,
@@ -84,6 +85,14 @@ export interface BuildingFeature extends PolygonFeature, BuildingFields {
   readonly heightMetres: number | null;
   /** Metres, `null` when the tile carries none. */
   readonly minHeightMetres: number | null;
+  /**
+   * #2975: a shop, a café or a fuel station, where a `pois` point of that
+   * class falls in it or within `schema.ts` §`POI_REACH_METRES` of it — on a
+   * `building` only, never a `building_part`. Absent where none does, and on
+   * a footprint built by hand. The POI's name, brand and point are never
+   * kept: this is all that is.
+   */
+  readonly poi?: PoiClass;
 }
 
 /**

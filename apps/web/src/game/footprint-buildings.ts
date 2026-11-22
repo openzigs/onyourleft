@@ -372,6 +372,7 @@ import {
   simplifyRing,
   triangulate,
   type BuildingFeature,
+  type PoiClass,
   type Ring,
   type RoofMaterial,
   type RoofShape,
@@ -1345,6 +1346,85 @@ export const AWNING = {
 
 /** The share of awnings that are striped — #1590; the rest are plain. */
 export const AWNING_STRIPED_SHARE = 0.5;
+
+/**
+ * A fuel station's canopy — #2975. Of 161 footprints the map's fuel POIs
+ * matched on 2026-11-21 (`basemap-us-oyl-20261031`, ten US cities), almost
+ * every one carried no building type — OSM's `building=roof`, which the
+ * profile does not keep — at 50 to 1 500 m² and, where mapped, 5 to 7 m tall:
+ * the forecourt's canopy, not its kiosk, whose own footprint beside it is
+ * typed `retail` or `commercial`. So an untyped footprint a fuel POI is
+ * matched to, of at most `maxArea` m², is drawn as an open canopy: no walls,
+ * a slab over its own outline `thickness` deep — its top at its mapped
+ * height, held between `top.least` and `top.most` over the floor, or with
+ * none at `clearance` and `thickness` over it, as a US forecourt's 14 to 16 ft
+ * is — on columns `post` square, one at each pump island
+ * ({@link FUEL_ISLAND}), down to the drawn ground.
+ *
+ * ⚠️ **White, with a band of colour** — the owner's hold of PR #2996 on
+ * 2026-11-21: a slab in a seeded trim paint (bottle green, navy, grey) on
+ * four corner posts over grass read as a carport. `paint` is what every
+ * canopy wears, which `paintTown` does not move: `wall` and `trim` the white
+ * entries of `building-paint.ts` §`WALL_PAINTS.render` and §`TRIM_PAINTS`,
+ * and `bands` the entries of §`DOOR_PAINTS` its fascia's band and its pumps
+ * are seeded among (red, blue, green, ochre). The band runs round the fascia
+ * `band.inset` in from its top and bottom, `band.proud` of it.
+ */
+export const FUEL_CANOPY = {
+  maxArea: 1_500,
+  clearance: 4.6,
+  thickness: 0.9,
+  top: { least: 4.3, most: 9 },
+  post: 0.45,
+  band: { inset: 0.22, proud: 0.03 },
+  paint: { wall: 0, trim: 0, bands: [0, 1, 2, 5] },
+} as const;
+
+/**
+ * A canopy's pump islands — #2975: one every `spacing` metres of its long
+ * side, at most `most`, each a kerb `width` wide and `kerb` high over the
+ * forecourt, sunk `sunk` into the drawn ground, across the canopy; and on it
+ * a pump either side of the column, `pump.fromColumn` from it or as near the
+ * canopy's edge as `inset` allows, never nearer the column than `pump.clear`.
+ * A pump is `pump.length` along the island and `pump.width` across it: a body
+ * to `pump.body` over the kerb and a head, `pump.headInset` narrower all
+ * round, to `pump.head` — a US dispenser's 7 ft. The kerb runs `end` past
+ * each pump.
+ */
+export const FUEL_ISLAND = {
+  spacing: 8,
+  most: 4,
+  width: 1.2,
+  kerb: 0.15,
+  sunk: 0.1,
+  inset: 1,
+  end: 0.5,
+  pump: {
+    length: 1.1,
+    width: 0.55,
+    body: 1.45,
+    head: 2.1,
+    headInset: 0.05,
+    fromColumn: 1.7,
+    clear: 0.15,
+  },
+} as const;
+
+/**
+ * A canopy's forecourt — #2975: concrete (`CLAD_PAVING`) `lift` over the
+ * drawn ground, `margin` round the canopy's rectangle and out to `short` of
+ * the carriageway's edge where that is within `reach`; laid in pieces of
+ * `piece` metres, each corner on the ground beneath it, and in at most
+ * `most` triangles (larger pieces on a larger forecourt).
+ */
+export const FUEL_FORECOURT = {
+  margin: 3,
+  reach: 30,
+  short: 0.1,
+  lift: 0.05,
+  piece: 4,
+  most: 160,
+} as const;
 
 /**
  * A commercial roof's cornice — #1590: how far it projects past the parapet,
@@ -2977,12 +3057,21 @@ function wallPiece(
   }
 }
 
-/** A flat roof over the rings at `height`, facing up, `u, v` in storeys of plan. */
-function flatRoof(into: number[], rings: readonly Ring[], height: number): void {
+/**
+ * A flat roof over the rings at `height`, facing up, `u, v` in storeys of
+ * plan — or, since #2975, facing `up` as given, in `face`: a canopy's top and
+ * its underside, painted.
+ */
+function flatRoof(
+  into: number[],
+  rings: readonly Ring[],
+  height: number,
+  up: Vec = [0, 1, 0],
+  face: Face = PLAIN,
+): void {
   const indices = triangulate({ rings });
   const flat: number[] = [];
   for (const ring of rings) for (const each of ring) flat.push(each);
-  const up: Vec = [0, 1, 0];
   const at = (index: number): Vec => [
     flat[index * 2] as number,
     height,
@@ -2996,7 +3085,7 @@ function flatRoof(into: number[], rings: readonly Ring[], height: number): void 
     const a = indices[i] as number;
     const b = indices[i + 1] as number;
     const c = indices[i + 2] as number;
-    triangle(into, [at(a), at(b), at(c)], up, [uv(a), uv(b), uv(c)]);
+    triangle(into, [at(a), at(b), at(c)], up, [uv(a), uv(b), uv(c)], face);
   }
 }
 
@@ -5469,6 +5558,7 @@ export function footprintPlans(
       false,
       typed,
       untagged === undefined ? undefined : { untagged, own },
+      options.mappedPois ?? true,
     );
     keeps.set(own, typeof each !== 'string');
     if (typeof each === 'string') {
@@ -5513,7 +5603,10 @@ export function footprintPlans(
     );
     plans.push(plan);
     // #1792: a mapped colour is the building's own, which no neighbour moves it off.
-    pinned.push(mappedPaint ? pinnedPaintOf(plan, each.building) : NOT_PINNED);
+    // #2975: and a canopy's white, its band and its pumps are a canopy's own.
+    pinned.push(
+      each.canopy ? CANOPY_PINNED : mappedPaint ? pinnedPaintOf(plan, each.building) : NOT_PINNED,
+    );
     // #2848: a shop's front, for its apron once every porch and driveway is placed.
     if (takesApron(each)) {
       fronts.push({
@@ -5590,10 +5683,12 @@ interface ShopFront {
  * a commercial footprint no cue takes. A mapped type sets the use over the
  * land's guess ({@link FAMILY_USE}), so a shop mapped (or inferred, #2026) on
  * any land is one, and a mapped house, garage or shed on commercial land is
- * not.
+ * not. #2975: a shop or café the map's POIs make one is commercial, so takes
+ * one as any other shop does; a fuel station's canopy is no shop front and
+ * takes none, and no apron is laid on its forecourt, which is a driveway.
  */
 function takesApron(each: Measured): boolean {
-  return each.use === 'commercial' && !each.part;
+  return each.use === 'commercial' && !each.part && !each.canopy;
 }
 
 /**
@@ -5931,7 +6026,12 @@ function seededEntry(share: number, count: number): number {
 interface PinnedPaint {
   readonly wall: boolean;
   readonly roof: boolean;
+  /** #2975: its trim and its door too, so `paintTown` leaves the plan as it is. */
+  readonly every?: boolean;
 }
+
+/** A fuel station's canopy's paints — #2975: all four its own ({@link FUEL_CANOPY}'s `paint`). */
+const CANOPY_PINNED: PinnedPaint = { wall: true, roof: true, every: true };
 
 /** Neither paint is a mapped colour: an untagged plan's, a terraced block's, and `-mapped-paint`. */
 const NOT_PINNED: PinnedPaint = { wall: false, roof: false };
@@ -6096,9 +6196,11 @@ function paintTown(
         nearestWearer(near, (other) => other.paint.door === entry),
       ),
     };
-    let candidate: FootprintPlan = { ...plan, paint };
+    // #2975: a canopy keeps all four of its paints, whoever stands beside it.
+    const kept = fixed.every === true;
+    let candidate: FootprintPlan = kept ? plan : { ...plan, paint };
     const combinations = TRIM_PAINTS.length * DOOR_PAINTS.length;
-    for (let step = 1; alike(candidate) && step < combinations; step += 1) {
+    for (let step = 1; !kept && alike(candidate) && step < combinations; step += 1) {
       candidate = {
         ...plan,
         paint: {
@@ -6427,6 +6529,21 @@ const FAMILY_USE: Readonly<Record<BuildingFamily, FootprintUse>> = {
 };
 
 /**
+ * The mapped families a POI's class is read over — #2975: none (an untyped
+ * footprint), a shop or an office, a warehouse, and a block of flats, whose
+ * ground floor a shop or a café may be. A mapped house, bungalow or terrace
+ * keeps its look — a hairdresser in a front room is no shop front — and so
+ * do a garage, a shed, a barn and a civic block.
+ */
+const POI_FAMILIES: ReadonlySet<BuildingFamily | undefined> = new Set([
+  undefined,
+  'commercial',
+  'industrial',
+  'residential',
+  'apartments',
+]);
+
+/**
  * A footprint that passed the placement rules, measured — #1635: the first
  * half of a plan, so every kept footprint's ring and eaves are known before
  * any is built, and a party wall can be found between two of them
@@ -6449,6 +6566,10 @@ interface Measured {
   readonly family: Exclude<BuildingFamily, 'residential'> | undefined;
   /** #2023: whether {@link family} was inferred from an untagged footprint. */
   readonly inferred: boolean;
+  /** #2975: the shop, café or fuel station its POI makes it, where that is read. */
+  readonly poi: PoiClass | undefined;
+  /** #2975: whether it is a fuel station's canopy, drawn open ({@link FUEL_CANOPY}). */
+  readonly canopy: boolean;
   readonly storeys: number;
   readonly wallHeight: number;
   /** #1790: how tall a storey of its windows is ({@link storeyMetresOf}). */
@@ -6479,6 +6600,8 @@ function measureFootprint(
   typed = false,
   // #2023: what an untagged footprint is inferred against, and its index in the corridor.
   inference?: { readonly untagged: Untagged; readonly own: number },
+  // #2975: whether its POI class is read (`-map-pois` off).
+  pois = false,
 ): Measured | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
@@ -6593,17 +6716,26 @@ function measureFootprint(
   const mappedFamily = typed
     ? buildingFamilyOf(building.buildingType, building.landmark)
     : undefined;
+  // #2975: a shop, a café or a fuel station the map's POIs put in it is commercial, over the
+  // land's guess and over any inference, but never over a mapped home, outbuilding, farm
+  // building or civic block ({@link POI_FAMILIES}).
+  const poi =
+    pois && !part && building.poi !== undefined && POI_FAMILIES.has(mappedFamily)
+      ? building.poi
+      : undefined;
   const kind =
-    inference === undefined
-      ? { family: mappedFamily, inferred: false }
-      : footprintKindOf(
-          mappedFamily,
-          // A `building_part` stands inside its building and is never inferred a type of its own.
-          mappedFamily === undefined && building.kind === 'building'
-            ? inference.untagged.cuesOf(inference.own, outer, area, urbanClass)
-            : undefined,
-          inference.untagged.rules,
-        );
+    poi !== undefined
+      ? { family: 'commercial' as const, inferred: false }
+      : inference === undefined
+        ? { family: mappedFamily, inferred: false }
+        : footprintKindOf(
+            mappedFamily,
+            // A `building_part` stands inside its building and is never inferred a type of its own.
+            mappedFamily === undefined && building.kind === 'building'
+              ? inference.untagged.cuesOf(inference.own, outer, area, urbanClass)
+              : undefined,
+            inference.untagged.rules,
+          );
   const typedFamily = kind.family;
   // #1637: a terraced block is a shop below and flats above, on any land.
   const use: FootprintUse = terrace
@@ -6650,6 +6782,13 @@ function measureFootprint(
     use,
     family,
     inferred: kind.inferred,
+    poi,
+    // #2975: an untyped footprint a fuel POI is matched to is its forecourt's canopy.
+    canopy:
+      poi === 'fuel' &&
+      building.buildingType === null &&
+      building.landmark === null &&
+      area <= FUEL_CANOPY.maxArea,
     storeys,
     wallHeight,
     storey,
@@ -6779,6 +6918,16 @@ export interface FootprintPlanOptions {
    */
   readonly inferredCommercial?: boolean;
   /**
+   * #2975: a footprint the map's POIs make a shop, a café or a fuel station
+   * (`map-features` §`matchPoisToBuildings`) planned as a shop — #1590's
+   * shop front, sign band and, on a café always, an awning — and a fuel
+   * station's untyped footprint drawn as its open canopy
+   * ({@link FUEL_CANOPY}); `true` by default.
+   * Off, the class is ignored and every plan is as before
+   * (`?levers=-map-pois`).
+   */
+  readonly mappedPois?: boolean;
+  /**
    * #1792: each footprint's mapped `building:colour`, `roof:colour`,
    * `building:material` and `roof:material`, where #1789 carries them,
    * painting and cladding it on the belt's own surfaces and paints
@@ -6903,6 +7052,384 @@ function shareOf(feature: FeatureShare, seeded: number): number {
   return feature === 'seeded' ? seeded : feature;
 }
 
+/**
+ * A fuel station's canopy, planned — #2975 ({@link FUEL_CANOPY}), and what
+ * makes it read as a station from the saddle rather than as a carport:
+ *
+ * - **The slab**, white: its fascia round the drawn outline and its underside
+ *   in `wall`, painted, and its deck in `roof` — the far level's roles, so it
+ *   stands at any distance and does not appear from nothing at
+ *   `MAPPED_BUILDING_NEAR_METRES`. A band of colour ({@link FUEL_CANOPY}'s
+ *   `band`, in `door`) runs round the fascia: a colour and no more, as a sign
+ *   band is (`building-paint.ts` §`SIGN_PAINTS`: no text, brand or logo).
+ * - **The pump islands** ({@link FUEL_ISLAND}), in a row along its rectangle's
+ *   long side, each across it: a white kerb, a column from it to the slab
+ *   (`wall`, so the far slab stands on something) and a pump either side of
+ *   the column, its body in the band's colour and its head white.
+ * - **The forecourt** ({@link FUEL_FORECOURT}), in `driveway`: concrete laid
+ *   on the drawn ground under the canopy and `margin` round it, and out to
+ *   the carriageway's edge where the road is within `reach`. Its outline is
+ *   the plan's `driveway`, so it is cleared of trees and lots as one is.
+ *
+ * No window, door, shop front or plinth. Inside
+ * {@link FOOTPRINT_MAX_TRIANGLES} at any outline: the slab, the columns, the
+ * islands and the band are at most 516 triangles at `FOOTPRINT_MAX_VERTICES`
+ * (48) sides and {@link FUEL_ISLAND}'s four islands, and the forecourt is
+ * laid in what they leave. The underside is drawn with the near level only
+ * (in `trim`) where the far level's walls and roof would pass
+ * {@link FOOTPRINT_MAX_FAR_TRIANGLES}.
+ */
+function canopyPlanOf(
+  measured: Measured,
+  land: LandClassMask,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  driveways: RingGrid,
+): FootprintPlan {
+  const { building, centroid, drawn, road, segments, urbanClass, lowest, floor, base } = measured;
+  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+  const groundAt = (x: number, z: number): number => {
+    nearestOnRoadSegments(road, segments, x, z, beside);
+    return terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+  };
+  const { clearance, thickness, top: bounds, post, band } = FUEL_CANOPY;
+  const top =
+    building.heightMetres === null
+      ? floor + clearance + thickness
+      : Math.min(
+          floor + bounds.most,
+          Math.max(floor + bounds.least, lowest + building.heightMetres),
+        );
+  const bottom = top - thickness;
+  const writing = Object.fromEntries(
+    FOOTPRINT_ROLES.map((role) => [role, [] as number[]]),
+  ) as Writing;
+  const count = (): number =>
+    FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0);
+
+  // Its rectangle: `u` along its long side, `v` across it.
+  const { cx, cz, ux, uz, halfLong, halfShort } = minimumAreaRectangle(drawn);
+  const vx = -uz;
+  const vz = ux;
+  const at = (a: number, b: number): Pair => [cx + ux * a + vx * b, cz + uz * a + vz * b];
+
+  // The islands' middles, where each is under the slab; one at the middle where none is.
+  const islands = Math.max(
+    1,
+    Math.min(FUEL_ISLAND.most, Math.round((2 * halfLong) / FUEL_ISLAND.spacing)),
+  );
+  const spots: Pair[] = [];
+  for (let island = 0; island < islands; island += 1) {
+    const spot = at(((island + 0.5) / islands) * 2 * halfLong - halfLong, 0);
+    if (insideRing(drawn, spot[0], spot[1])) spots.push(spot);
+  }
+  if (spots.length === 0) spots.push([cx, cz]);
+  const grounds = spots.map((spot) => groundAt(spot[0], spot[1]));
+
+  // 1. The slab: the fascia, facing out of each edge of the outline, and the deck.
+  const outward = signedArea(drawn) > 0 ? 1 : -1;
+  const n = drawn.length / 2;
+  /** Each edge's fascia from `low` to `high`, `proud` of the outline, into `into`. */
+  const fascia = (into: number[], low: number, high: number, proud: number): void => {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ax = drawn[i * 2] as number;
+      const az = drawn[i * 2 + 1] as number;
+      const bx = drawn[j * 2] as number;
+      const bz = drawn[j * 2 + 1] as number;
+      const length = Math.hypot(bx - ax, bz - az);
+      if (length === 0) continue;
+      const nx = ((bz - az) / length) * outward;
+      const nz = (-(bx - ax) / length) * outward;
+      const u = length / BAY_METRES;
+      const v = (high - low) / STOREY_METRES;
+      quad(
+        into,
+        [
+          [ax + nx * proud, low, az + nz * proud],
+          [bx + nx * proud, low, bz + nz * proud],
+          [bx + nx * proud, high, bz + nz * proud],
+          [ax + nx * proud, high, az + nz * proud],
+        ],
+        [nx, 0, nz],
+        [
+          [0, 0],
+          [u, 0],
+          [u, v],
+          [0, v],
+        ],
+        PAINTED,
+      );
+    }
+  };
+  fascia(writing.wall, bottom, top, 0);
+  flatRoof(writing.roof, [drawn], top);
+  // 2. A column at each island, from under its kerb to the slab.
+  spots.forEach((spot, index) => {
+    box(
+      writing.wall,
+      spot,
+      [ux, uz],
+      [post / 2, post / 2],
+      [(grounds[index] as number) - FUEL_ISLAND.sunk, bottom, floor],
+      PAINTED,
+      { top: false, bottom: false },
+    );
+  });
+  // The underside: the far level's too, where its walls and roof have the room.
+  const underside: number[] = [];
+  flatRoof(underside, [drawn], bottom, [0, -1, 0], PAINTED);
+  const far =
+    trianglesOf(writing.wall) + trianglesOf(writing.roof) + trianglesOf(underside) <=
+    FOOTPRINT_MAX_FAR_TRIANGLES;
+  const under = far ? writing.wall : writing.trim;
+  for (const each of underside) under.push(each);
+
+  // 3. The islands: a kerb, and a pump either side of the column.
+  const { pump } = FUEL_ISLAND;
+  const pumpAt = Math.max(
+    post / 2 + pump.length / 2 + pump.clear,
+    Math.min(pump.fromColumn, halfShort - FUEL_ISLAND.inset - pump.length / 2),
+  );
+  const islandHalf = pumpAt + pump.length / 2 + FUEL_ISLAND.end;
+  spots.forEach((spot, index) => {
+    const ground = grounds[index] as number;
+    const kerb = ground + FUEL_FORECOURT.lift + FUEL_ISLAND.kerb;
+    box(
+      writing.trim,
+      spot,
+      [vx, vz],
+      [islandHalf, FUEL_ISLAND.width / 2],
+      [ground - FUEL_ISLAND.sunk, kerb, floor],
+      PAINTED,
+      { top: true, bottom: false },
+    );
+    for (const side of [-1, 1]) {
+      const centre: Pair = [spot[0] + vx * pumpAt * side, spot[1] + vz * pumpAt * side];
+      box(
+        writing.door,
+        centre,
+        [vx, vz],
+        [pump.length / 2, pump.width / 2],
+        [kerb, kerb + pump.body, floor],
+        PAINTED,
+        { top: true, bottom: false },
+      );
+      box(
+        writing.trim,
+        centre,
+        [vx, vz],
+        [pump.length / 2 - pump.headInset, pump.width / 2 - pump.headInset],
+        [kerb + pump.body, kerb + pump.head, floor],
+        PAINTED,
+        { top: true, bottom: false },
+      );
+    }
+  });
+
+  // 4. The band of colour round the fascia.
+  fascia(writing.door, bottom + band.inset, top - band.inset, band.proud);
+
+  // 5. The forecourt: under the canopy and its margin round it, and out to the road's edge,
+  // in the triangles the rest has left.
+  const { a0, a1, b0, b1, across, along } = forecourtOf(
+    { at, halfLong, halfShort },
+    (x, z) => (nearestOnRoadSegments(road, segments, x, z, beside) ? beside.distance : undefined),
+    FOOTPRINT_MAX_TRIANGLES - count(),
+  );
+  const metres = (i: number, j: number): Pair => [
+    ((a1 - a0) * i) / across,
+    ((b1 - b0) * j) / along,
+  ];
+  const corner = (i: number, j: number): Vec => {
+    const [a, b] = metres(i, j);
+    const [x, z] = at(a0 + a, b0 + b);
+    return [x, groundAt(x, z) + FUEL_FORECOURT.lift, z];
+  };
+  const paving = plainIn([CLAD_PAVING, 0, a1 - a0, -1]);
+  for (let i = 0; i < across; i += 1) {
+    for (let j = 0; j < along; j += 1) {
+      quad(
+        writing.driveway,
+        [corner(i, j), corner(i + 1, j), corner(i + 1, j + 1), corner(i, j + 1)],
+        [0, 1, 0],
+        UNMAPPED,
+        paving,
+        [metres(i, j), metres(i + 1, j), metres(i + 1, j + 1), metres(i, j + 1)],
+      );
+    }
+  }
+  const driveway = Float32Array.of(...at(a0, b0), ...at(a1, b0), ...at(a1, b1), ...at(a0, b1));
+  // Placed, so the plans after this one keep their driveways off it.
+  driveways.add(driveway);
+
+  const triangles = Object.fromEntries(
+    FOOTPRINT_ROLES.map((role) => [role, Float32Array.from(writing[role])]),
+  ) as Record<FootprintRole, Float32Array>;
+  const roofSurface = roofSurfaceOf('flat', share(STREAM_ROOF));
+  return {
+    centroid,
+    footprint: Float32Array.from(drawn),
+    base,
+    storeys: 1,
+    eaves: top,
+    roof: 'flat',
+    roofVariant: 'plain',
+    pitchDegrees: 0,
+    surfaces: { wall: 'render', roof: roofSurface },
+    cladding: { wall: 'photograph', roof: 'photograph', course: 0 },
+    // A canopy is white whatever stands beside it (`paintTown` leaves it), and its band and
+    // its pumps one of the colours a forecourt is dressed in.
+    paint: {
+      wall: FUEL_CANOPY.paint.wall,
+      roof: seededEntry(share(STREAM_PAINT_ROOF), roofPaintsOf(roofSurface, false)?.length ?? 1),
+      trim: FUEL_CANOPY.paint.trim,
+      door: FUEL_CANOPY.paint.bands[
+        seededEntry(share(STREAM_PAINT_DOOR), FUEL_CANOPY.paint.bands.length)
+      ] as number,
+    },
+    garage: false,
+    driveway,
+    // #2848: a canopy is no shop front, so it has no apron (`takesApron`).
+    apron: NO_RING,
+    dormers: 0,
+    shop: { front: false, awning: false, cornice: false },
+    porch: false,
+    steeple: false,
+    frontStep: undefined,
+    urban: urbanClass,
+    family: measured.family,
+    inferred: false,
+    archetype: 'unknown',
+    buildingArchetype: 'unknown',
+    model: undefined,
+    tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
+    triangles,
+    triangleCount: count(),
+    farTriangleCount: trianglesOf(writing.wall) + trianglesOf(writing.roof),
+  };
+}
+
+/** A forecourt's paving, planned: its bounds in its canopy's rectangle's axes, and its pieces. */
+interface Forecourt {
+  readonly a0: number;
+  readonly a1: number;
+  readonly b0: number;
+  readonly b1: number;
+  /** How many pieces it is laid in along `a`, and along `b`. */
+  readonly across: number;
+  readonly along: number;
+}
+
+/**
+ * A canopy's forecourt — #2975 ({@link FUEL_FORECOURT}): its rectangle and
+ * the margin round it, the side nearest the road moved out to `short` of the
+ * carriageway's edge — measured where that side comes nearest it, so a
+ * forecourt askew to the road touches it at one corner and never crosses it —
+ * where that is within `reach`, and in where the margin would have crossed
+ * it. `distance` is how far a point is from the drawn road's middle. Laid in
+ * pieces of `piece` metres, or as many times larger as keeps it within
+ * `room` triangles and its own `most`.
+ */
+function forecourtOf(
+  canopy: {
+    readonly at: (a: number, b: number) => Pair;
+    readonly halfLong: number;
+    readonly halfShort: number;
+  },
+  distance: (x: number, z: number) => number | undefined,
+  room: number,
+): Forecourt {
+  const { margin, reach, short, piece, most } = FUEL_FORECOURT;
+  const a = canopy.halfLong + margin;
+  const b = canopy.halfShort + margin;
+  // Each side's two ends, as `a, b` pairs, and the step out of it.
+  const sides: readonly { readonly ends: readonly [Pair, Pair]; readonly out: Pair }[] = [
+    {
+      ends: [
+        [a, -b],
+        [a, b],
+      ],
+      out: [1, 0],
+    },
+    {
+      ends: [
+        [-a, -b],
+        [-a, b],
+      ],
+      out: [-1, 0],
+    },
+    {
+      ends: [
+        [-a, b],
+        [a, b],
+      ],
+      out: [0, 1],
+    },
+    {
+      ends: [
+        [-a, -b],
+        [a, -b],
+      ],
+      out: [0, -1],
+    },
+  ];
+  const target = ROAD_WIDTH_METRES / 2 + short;
+  /** How far the side `index`, moved `t` out, is from the carriageway's edge at its nearest. */
+  const gap = (index: number, t: number): number => {
+    const side = sides[index] as (typeof sides)[number];
+    let least = Number.POSITIVE_INFINITY;
+    const [[a0, b0], [a1, b1]] = side.ends;
+    for (const share of [0, 0.5, 1]) {
+      const [x, z] = canopy.at(
+        a0 + (a1 - a0) * share + side.out[0] * t,
+        b0 + (b1 - b0) * share + side.out[1] * t,
+      );
+      least = Math.min(least, distance(x, z) ?? Number.POSITIVE_INFINITY);
+    }
+    return least - target;
+  };
+  // The side that faces the road: the one whose middle is nearest it. (Two sides share the
+  // corner nearest the road, and moving the wrong one out brings nothing nearer.)
+  let nearest = 0;
+  let nearestGap = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < sides.length; index += 1) {
+    const { ends } = sides[index] as (typeof sides)[number];
+    const [x, z] = canopy.at((ends[0][0] + ends[1][0]) / 2, (ends[0][1] + ends[1][1]) / 2);
+    const left = distance(x, z) ?? Number.POSITIVE_INFINITY;
+    if (left < nearestGap) {
+      nearest = index;
+      nearestGap = left;
+    }
+  }
+  // Out by what is left to the road, which never passes it: a distance falls no faster than `t`.
+  let t = 0;
+  if (Number.isFinite(nearestGap)) {
+    for (let step = 0; step < 16; step += 1) {
+      const left = gap(nearest, t);
+      if (Math.abs(left) < 0.01) break;
+      t += left;
+    }
+    if (!(t >= -margin && t <= reach) || gap(nearest, t) < -0.05) t = 0;
+  }
+  const out = (sides[nearest] as (typeof sides)[number]).out;
+  const a0 = -a - (out[0] === -1 ? t : 0);
+  const a1 = a + (out[0] === 1 ? t : 0);
+  const b0 = -b - (out[1] === -1 ? t : 0);
+  const b1 = b + (out[1] === 1 ? t : 0);
+  // Two triangles is the least it can be: one piece.
+  const limit = Math.max(2, Math.min(room, most));
+  let size: number = piece;
+  for (;;) {
+    const across = Math.max(1, Math.ceil((a1 - a0) / size));
+    const along = Math.max(1, Math.ceil((b1 - b0) / size));
+    if (2 * across * along <= limit) return { a0, a1, b0, b1, across, along };
+    size *= 1.5;
+  }
+}
+
 /** One measured footprint's plan — the second half of {@link measureFootprint}. */
 function planFootprint(
   measured: Measured,
@@ -6921,6 +7448,10 @@ function planFootprint(
   roofing: RoofSplitting,
   choice: ArchetypeChoice = NO_ARCHETYPE,
 ): FootprintPlan {
+  // #2975: a fuel station's canopy is no building: no walls, roof, door or window.
+  if (measured.canopy) {
+    return canopyPlanOf(measured, land, profile, origin, seed, others.driveways);
+  }
   const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
     measured;
   const { base, floor, family, inferred } = measured;
@@ -7284,6 +7815,8 @@ function planFootprint(
               ? { awningShare: MAIN_STREET_AWNING_SHARE }
               : {}),
             ...(buildingArchetype === 'strip-front' ? { signed: true } : {}),
+            // #2975: a café's front always has its awning, where one fits.
+            ...(measured.poi === 'cafe' ? { awningShare: 1 } : {}),
           },
         )
       : undefined;

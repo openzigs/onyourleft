@@ -10,8 +10,8 @@
  * `mapped-roof-shape`, since #1791 `building-type`, since #2021 `steeples`,
  * since #2023 `inferred-outbuildings`, since #2024 `inferred-barns`, since
  * #2026 `inferred-commercial`, since #1792 `mapped-paint`, since #1793
- * `start-year`, since #1794 `landmark-churches`, since #1795 `landmark-civic`
- * and since #2973 `nearby-streets`.
+ * `start-year`, since #1794 `landmark-churches`, since #1795 `landmark-civic`,
+ * since #2973 `nearby-streets` and since #2975 `map-pois`.
  * Its own module so that a test reads the plans the page draws, and a lever
  * parsed but not handed to the planner is a red test (`town.test.ts`).
  */
@@ -43,6 +43,7 @@ import {
   landmarkChurchesWithLevers,
   landmarkCivicWithLevers,
   mappedPaintWithLevers,
+  mappedPoisWithLevers,
   nearbyStreetsWithLevers,
   mappedRoofShapeWithLevers,
   roofVariantsWithLevers,
@@ -102,7 +103,8 @@ export function plannedTown(
     // steeple, #2023: an untagged footprint's inferred garage or shed, #2024: its inferred
     // barn, #2026: its inferred shop, #1792: the mapped colours and materials, #1793: a
     // mapped house's start year, #1794: a place of worship's church, #1795: a town
-    // hall's and a school's block, and #2848: a shop's apron, unless their lever is off.
+    // hall's and a school's block, #2848: a shop's apron, and #2975: the map's POIs,
+    // unless their lever is off.
     {
       splitRoofs: splitRoofsWithLevers(leversOff),
       houseArchetypes: houseArchetypesWithLevers(leversOff),
@@ -121,6 +123,7 @@ export function plannedTown(
       landmarkChurches: landmarkChurchesWithLevers(leversOff),
       landmarkCivic: landmarkCivicWithLevers(leversOff),
       shopAprons: shopApronsWithLevers(leversOff),
+      mappedPois: mappedPoisWithLevers(leversOff),
       // #2973: and no footprint on a mapped street drawn off the route, unless that lever is off.
       nearbyStreets: nearbyStreetsWithLevers(leversOff),
     },

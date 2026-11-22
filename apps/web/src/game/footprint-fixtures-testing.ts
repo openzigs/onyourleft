@@ -17,6 +17,7 @@ import {
   type BuildingType,
   type Landmark,
   type LandUseFeature,
+  type PoiClass,
   type StreetFeature,
   type WaterLineFeature,
 } from '@onyourleft/map-features';
@@ -2025,6 +2026,165 @@ export function typedStreetFixture(latitude = FIXTURE_LATITUDE): {
     origin,
     corridor: {
       routeId: 'typed-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 950, end, -70, 70)],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+    rows,
+  };
+}
+
+/** One footprint of {@link poiStreetFixture}: what it is mapped as, and the POI class matched to it. */
+export interface PoiRow {
+  readonly row: string;
+  readonly buildingType: BuildingType | null;
+  readonly poi: PoiClass | undefined;
+  readonly footprint: readonly (readonly [number, number])[];
+  readonly height: number | null;
+  /**
+   * Where it stands instead of in a place of its own along the road: `metres`
+   * further out than the row named, at the same distance along — a fuel
+   * station's kiosk behind its canopy, as a forecourt has it.
+   */
+  readonly behind?: { readonly row: string; readonly metres: number };
+}
+
+/**
+ * #2975's rows, along the road, each footprint's middle {@link POI_ROW_LATERAL}
+ * metres out: an untyped shop, an untyped café, an untyped twin of the shop
+ * with no POI, a fuel station's canopy with a mapped height and one without,
+ * a fuel station's `retail` kiosk (behind the first canopy, since the owner's
+ * hold of PR #2996: a station is its canopy AND its shop), a fuel POI on an
+ * untyped footprint too big
+ * for a canopy, a mapped house and a mapped garage with a shop's POI, which
+ * keep their looks, and a block of flats with a café's.
+ */
+export const POI_ROWS: readonly PoiRow[] = [
+  {
+    row: 'shop',
+    buildingType: null,
+    poi: 'shop',
+    footprint: rectangleBeside(0, 0, 14, 10),
+    height: 4,
+  },
+  {
+    row: 'cafe',
+    buildingType: null,
+    poi: 'cafe',
+    footprint: rectangleBeside(0, 0, 14, 10),
+    height: 4,
+  },
+  {
+    row: 'no-poi',
+    buildingType: null,
+    poi: undefined,
+    footprint: rectangleBeside(0, 0, 14, 10),
+    height: 4,
+  },
+  {
+    row: 'canopy',
+    buildingType: null,
+    poi: 'fuel',
+    footprint: rectangleBeside(0, 0, 24, 14),
+    height: 6.4,
+  },
+  {
+    row: 'canopy-no-height',
+    buildingType: null,
+    poi: 'fuel',
+    footprint: rectangleBeside(0, 0, 20, 12),
+    height: null,
+  },
+  {
+    row: 'kiosk',
+    buildingType: 'retail',
+    poi: 'fuel',
+    footprint: rectangleBeside(0, 0, 14, 9),
+    height: 4.5,
+    // Behind the canopy with a mapped height, 4.5 m of forecourt between them.
+    behind: { row: 'canopy', metres: 16 },
+  },
+  {
+    row: 'fuel-too-big',
+    buildingType: null,
+    poi: 'fuel',
+    footprint: rectangleBeside(0, 0, 50, 34),
+    height: 6,
+  },
+  {
+    row: 'house',
+    buildingType: 'house',
+    poi: 'shop',
+    footprint: rectangleBeside(0, 0, 12, 8.5),
+    height: 6.5,
+  },
+  {
+    row: 'garage',
+    buildingType: 'garage',
+    poi: 'shop',
+    footprint: rectangleBeside(0, 0, 7, 6),
+    height: 3,
+  },
+  {
+    row: 'flats',
+    buildingType: 'apartments',
+    poi: 'cafe',
+    footprint: rectangleBeside(0, 0, 24, 14),
+    height: 9.5,
+  },
+];
+
+/** How far out each of {@link POI_ROWS}' footprints' middles stands, metres. */
+export const POI_ROW_LATERAL = 26;
+
+/** How far apart {@link POI_ROWS} stand along the road, metres. */
+export const POI_ROW_METRES = 60;
+
+/**
+ * #2975's fixture: {@link POI_ROWS} along a level road from 1 000 m, both
+ * sides, on residential land, each footprint carrying its POI class as the
+ * decoder writes it (`BuildingFeature.poi`), for the owner's look pair
+ * (`?town=pois` against `levers=-map-pois`) and for the plans to be asserted
+ * over. `rows` names each footprint of the corridor, in its order. Nothing
+ * here is a real place.
+ */
+export function poiStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+  readonly rows: readonly string[];
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  const rows: string[] = [];
+  POI_ROWS.forEach((each, index) => {
+    const place =
+      each.behind === undefined
+        ? index
+        : POI_ROWS.findIndex((other) => other.row === each.behind?.row);
+    const along = 1_000 + place * POI_ROW_METRES;
+    const lateral = POI_ROW_LATERAL + (each.behind?.metres ?? 0);
+    for (const side of [1, -1]) {
+      const ring = each.footprint.map(([a, n]) => [along + a, side * lateral + n] as const);
+      buildings.push({
+        ...buildingBeside(profile, origin, [ring], each.height),
+        buildingType: each.buildingType,
+        ...(each.poi === undefined ? {} : { poi: each.poi }),
+      });
+      rows.push(each.row);
+    }
+  });
+  const end = 1_000 + POI_ROWS.length * POI_ROW_METRES;
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'poi-street',
       origin,
       covered: () => true,
       coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],

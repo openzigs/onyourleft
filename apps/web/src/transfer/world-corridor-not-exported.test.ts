@@ -42,6 +42,7 @@ import {
   FIXTURE_TILE,
   PLACE_SENTINEL,
   placesTile,
+  poisTile,
   streetsTile,
   waterLinesTile,
 } from '@onyourleft/map-features/testing';
@@ -162,6 +163,20 @@ async function packedWaterLines(): Promise<Blob> {
   });
 }
 
+/** A corridor's features as the product packs them, holding footprints' POI classes (#2975). */
+async function packedPois(): Promise<Blob> {
+  const decoded = decodeTile(poisTile(), FIXTURE_TILE, FIXTURE_FRAME);
+  if ('reason' in decoded) throw new Error(decoded.reason);
+  expect(decoded.buildings.some((building) => building.poi !== undefined)).toBe(true);
+  return packCorridorFeatures({
+    landUse: [],
+    buildings: decoded.buildings,
+    paths: [],
+    streets: [],
+    places: [],
+  });
+}
+
 /** A corridor's features as the product packs them, holding its decoded railway lines (#2660). */
 async function packedRails(): Promise<Blob> {
   const decoded = decodeTile(streetsTile(), FIXTURE_TILE, FIXTURE_FRAME);
@@ -182,6 +197,7 @@ const PACKED = {
   'decoded places': packedPlaces,
   'decoded building fields': packedBuildingFields,
   'decoded water lines': packedWaterLines,
+  'decoded POI classes': packedPois,
   'decoded railway lines': packedRails,
 } as const;
 
@@ -193,6 +209,7 @@ describe('the account export carries no world corridor — #1545', () => {
     ['fit', 'decoded places'],
     ['gpx', 'decoded building fields'],
     ['tcx', 'decoded water lines'],
+    ['fit', 'decoded POI classes'],
     ['gpx', 'decoded railway lines'],
   ] as const)(
     'finds no trace of one in any file of a %s export, its features the %s',

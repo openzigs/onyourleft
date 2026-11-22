@@ -4,10 +4,14 @@
  * What this package reads of a Protomaps Basemap v4 tile, and nothing else
  * (ADR 0054 D-2.2, as ADR 0055 D-1 supersedes it in part; #1538's P-4).
  *
- * Five layers and, of each, only the fields placement needs. `pois` is never
- * read: it carries names, and the world names no place. `places` is read since
- * ADR 0055 (#1632) for its `kind`, `kind_detail` and `population_rank` and its
- * point, and for nothing else.
+ * Six layers and, of each, only the fields placement needs. `places` is read
+ * since ADR 0055 (#1632) for its `kind`, `kind_detail` and `population_rank`
+ * and its point, and for nothing else. `pois` is read since #2975 (ADR 0054's
+ * entry of 2026-11-21) for its `kind` alone and its point, and only to tell a
+ * footprint it falls in that it is a shop, a café or a fuel station
+ * ({@link POI_CLASS_OF_KIND}): the world still names no place, so no POI's
+ * name, brand, `kind_detail` or id is ever decoded, and its point is never
+ * handed out.
  * `name`, every `name:*`, `pmap:*`, `wikidata`, `population`, `capital`,
  * `addr_housenumber`, `sort_rank`, `layer` and the feature `id` are **not
  * decoded at all**: the decoder looks a key up only to compare it with the
@@ -28,8 +32,12 @@
 
 import type { BuildingFields, StreetRoadFields } from './types';
 
-/** The layers decoded, in the order their features are returned. */
-export const READ_LAYERS = ['landuse', 'water', 'buildings', 'roads', 'places'] as const;
+/**
+ * The layers decoded, in the order their features are returned. `pois` comes
+ * after `buildings`: its points are matched to the footprints already decoded
+ * (#2975).
+ */
+export const READ_LAYERS = ['landuse', 'water', 'buildings', 'roads', 'places', 'pois'] as const;
 export type ReadLayer = (typeof READ_LAYERS)[number];
 
 /**
@@ -121,6 +129,7 @@ export const LAYER_GEOMETRY_TYPES: Readonly<Record<ReadLayer, readonly number[]>
   buildings: [GEOMETRY_POINT, GEOMETRY_POLYGON],
   roads: [GEOMETRY_LINE],
   places: [GEOMETRY_POINT, GEOMETRY_LINE, GEOMETRY_POLYGON],
+  pois: [GEOMETRY_POINT, GEOMETRY_LINE, GEOMETRY_POLYGON],
 };
 
 /**
@@ -134,6 +143,7 @@ export const LAYER_KEPT_GEOMETRIES: Readonly<Record<ReadLayer, readonly number[]
   buildings: [GEOMETRY_POLYGON],
   roads: [GEOMETRY_LINE],
   places: [GEOMETRY_POINT],
+  pois: [GEOMETRY_POINT],
 };
 
 /**
@@ -249,6 +259,136 @@ export const PLACE_KIND_DETAILS = [
  */
 export const MIN_POPULATION_RANK = 1;
 export const MAX_POPULATION_RANK = 18;
+
+/*
+ * ## The POI classes (#2975, ADR 0054's entry of 2026-11-21)
+ *
+ * A `pois` point is read for its `kind` alone — Protomaps v4 writes an OSM
+ * `amenity`, `shop` or `tourism` value there as it is (`Pois.java`) — and
+ * only to give the footprint it stands in one of three looks. Every POI is
+ * written at z15 (`setZoomRange(min(minZoom, 15), 15)`), so the corridor's
+ * z15 tiles hold them all. A named polygon (a shop mapped on its building, a
+ * fuel station's forecourt) is written as a point on its surface; an unnamed
+ * one is not written at all.
+ *
+ * Measured on 2026-11-21 on nine z15 tiles of `basemap-us-oyl-20261031`:
+ * every feature of the layer was a point, and the densest tile (midtown
+ * Manhattan) held 2,584, of which most are trees, crossings and street
+ * furniture and 754 are of a class below. The keys besides the names were `kind`, `kind_detail`,
+ * `min_zoom`, `elevation`, `iata` and `script2`; only `kind` is looked up.
+ */
+
+/** What a POI makes of the footprint it falls in: its three looks. */
+export const POI_CLASSES = ['shop', 'cafe', 'fuel'] as const;
+export type PoiClass = (typeof POI_CLASSES)[number];
+
+/**
+ * Which `kind`s are which class. A shop: a `shop` value whose premises have a
+ * shop window on the street. A café: somewhere to eat or drink, which gets an
+ * awning. A fuel station: `fuel`. Any other kind — a tree, a crossing, a bus
+ * stop, a hotel, a car dealer — drops the point unread. A `Map`, not an
+ * object, so a kind such as `constructor` is never found on a prototype.
+ */
+export const POI_CLASS_OF_KIND: ReadonlyMap<string, PoiClass> = new Map<string, PoiClass>([
+  ...(
+    [
+      'alcohol',
+      'bakery',
+      'bank',
+      'beauty',
+      'beverages',
+      'bicycle',
+      'books',
+      'butcher',
+      'charity',
+      'cheese',
+      'chemist',
+      'chocolate',
+      'clothes',
+      'coffee',
+      'computer',
+      'confectionery',
+      'convenience',
+      'copyshop',
+      'cosmetics',
+      'deli',
+      'department_store',
+      'doityourself',
+      'dry_cleaning',
+      'electronics',
+      'fabric',
+      'fashion',
+      'florist',
+      'furniture',
+      'gift',
+      'greengrocer',
+      'grocery',
+      'hairdresser',
+      'hardware',
+      'hifi',
+      'jewelry',
+      'laundry',
+      'mobile_phone',
+      'music',
+      'newsagent',
+      'optician',
+      'outdoor',
+      'pastry',
+      'perfumery',
+      'pet',
+      'pharmacy',
+      'photo',
+      'post_office',
+      'retail',
+      'second_hand',
+      'shoes',
+      'sports',
+      'stationery',
+      'supermarket',
+      'tea',
+      'tobacco',
+      'toys',
+      'travel_agency',
+      'variety_store',
+      'video_games',
+      'wine',
+    ] as const
+  ).map((kind) => [kind, 'shop'] as const),
+  ...(
+    [
+      'bar',
+      'biergarten',
+      'cafe',
+      'fast_food',
+      'food_court',
+      'ice_cream',
+      'pub',
+      'restaurant',
+    ] as const
+  ).map((kind) => [kind, 'cafe'] as const),
+  ['fuel', 'fuel'],
+]);
+
+/**
+ * When two POIs fall in one footprint, the class it takes: a fuel station's
+ * over a café's over a shop's, so a forecourt shop is still a fuel station
+ * and a strip with one café gets the café's awning.
+ */
+export const POI_CLASS_RANK: Readonly<Record<PoiClass, number>> = { shop: 0, cafe: 1, fuel: 2 };
+
+/**
+ * How far outside a footprint's outer ring a POI may stand and still be its,
+ * metres, where no footprint holds it. A shop or a café is mapped as a node
+ * inside its building or at its door, so **3** m. A fuel station is mapped as
+ * its forecourt, which Protomaps writes as a point on the forecourt's surface
+ * — under the canopy or on the tarmac between it and the kiosk — so **30** m,
+ * to the nearest footprint.
+ */
+export const POI_REACH_METRES: Readonly<Record<PoiClass, number>> = {
+  shop: 3,
+  cafe: 3,
+  fuel: 30,
+};
 
 /** The MVT layer version this decoder reads (spec 2.1). */
 export const MVT_VERSION = 2;
