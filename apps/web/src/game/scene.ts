@@ -129,6 +129,7 @@ import {
   withLevelCrossings,
   type SideRoad,
 } from './cross-streets';
+import { footwaysInView, NO_FOOTWAYS } from './footway-surfaces';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
@@ -408,6 +409,13 @@ export interface SceneInput {
    */
   readonly parkDressingOff?: boolean | undefined;
   /**
+   * #2972's mapped footways, cycleways, park paths, steps and zebras left
+   * undrawn (`footway-surfaces.ts`) — the realistic page's `-footways` lever,
+   * the tablet's cost pair, and nothing else. Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly footwaysOff?: boolean | undefined;
+  /**
    * Where a Delivery round has steered the rider across the road, in metres
    * right of the centre line — #1820, `delivery/steer.ts`
    * §`steeredLateralFor`. It takes the racing line's place for the RIDER
@@ -683,6 +691,21 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     billboards,
     sideRoads,
     streets,
+    // #2972: the corridor's mapped footways drawn as surfaces round the camera,
+    // off those streets' pavements (#1620), and a zebra where one crosses the road.
+    footways:
+      input.worldCorridor === undefined || input.footwaysOff === true
+        ? NO_FOOTWAYS
+        : footwaysInView(
+            input.worldCorridor,
+            input.profile,
+            input.origin,
+            seed,
+            input.landClass ?? NO_LAND_CLASS,
+            camera.x,
+            camera.z,
+            streets,
+          ),
     // #1541: the people on those streets' pavements and the corridor's
     // footways, near the rider, at the ride's own clock.
     // #1619: and off the side roads, drawn or mapped, as off the road.

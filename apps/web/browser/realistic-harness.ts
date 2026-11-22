@@ -83,6 +83,8 @@ import {
   parksFixture,
   railFixture,
   yardsFixture,
+  // #2972's suburb of sidewalks, a cycleway and a zebra, and its park's paths and steps.
+  footwaysFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -595,7 +597,10 @@ async function run(): Promise<void> {
                                           : // #2696: houses touching yards.
                                             config.town === 'yards'
                                             ? yardsFixture(latitude)
-                                            : undefined;
+                                            : // #2972: the mapped footways drawn.
+                                              config.town === 'footways'
+                                              ? footwaysFixture(latitude)
+                                              : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -807,6 +812,8 @@ async function run(): Promise<void> {
       countrysideOff: countrysideWithLevers(config.leversOff),
       // #2685's pair: the golf courses and cemeteries as their planting alone.
       parkDressingOff: config.leversOff.includes('park-dressing'),
+      // #2972's pair: the mapped footways and zebras undrawn.
+      footwaysOff: config.leversOff.includes('footways'),
       // #1972: a lap race's bots in the pacer's place, on the scenery-free
       // frame `LAP_RACE_SCENE_DRAW_CALLS` is the ceiling of.
       ...(config.race === undefined
