@@ -104,6 +104,11 @@ function frameAt(distance: number) {
     origin: ORIGIN,
     state: { ...START, ride: { ...START.ride, distance: metres(distance) } },
     worldCorridor: CORRIDOR,
+    // #2973: each crossing's street run on past its stub would double the side
+    // roads of every frame, and the uncached reference's work with them. What
+    // the cache keeps does not depend on which side roads there are, and
+    // `nearby-streets.test.ts` holds the cache to the reference on the streets.
+    nearbyStreetsOff: true,
   });
 }
 

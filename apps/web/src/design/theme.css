@@ -7019,6 +7019,24 @@ select.oyl-input {
 }
 
 /*
+ * The scan's own question (#2856), where *Scan a code* was pressed: its two
+ * sentences, then the yes, then the no, in a column at every width, so the no
+ * is never beside the yes (`cardscan.browser.spec.ts`). The sentences keep a
+ * reading measure.
+ */
+.oyl-card-scan__ask {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-card-scan__ask > p {
+  margin: 0;
+  max-width: 32rem;
+}
+
+/*
  * The Moderation screen (#955). An account id is one unbroken word of up to
  * 128 characters, and a rider's name and a report's reason come from other
  * riders: each breaks where it must rather than widen a 320 px page
@@ -8828,12 +8846,15 @@ select.oyl-input {
 
    #1810: and so is the throw control's, while the touch lock is on.
 
-   #1901: and the lap race's item control's, likewise. */
+   #1901: and the lap race's item control's, likewise.
+
+   #2898: and the junction prompt's, likewise. */
 .oyl-hud__trainer,
 .oyl-hud__side-camera,
 .oyl-hud__plan-change,
 .oyl-hud__throw-note,
-.oyl-hud__item-note {
+.oyl-hud__item-note,
+.oyl-hud__junction-note {
   margin: 0;
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
@@ -8897,6 +8918,112 @@ select.oyl-input {
 .oyl-hud__item .oyl-hud__control[aria-disabled='true'] {
   cursor: not-allowed;
   color: var(--oyl-color-hud-ink-muted);
+}
+
+/* #2898: AN OPEN-WORLD RIDE'S JUNCTION PROMPT, under *Pause* and *End ride*
+   where a round's throws stand: every way on from the next junction as a
+   ride-time control at #94's 72 px floor (set inline from
+   CONTROL_MINIMUM_PIXELS), each with an arrow pointing the way's own
+   direction, its name, *Default* and *Chosen* in words, and its key and pad
+   hints; over them its title and how far until the choice is final, and the
+   U-turn beside them. The ways wrap, as the throws do,
+   rather than overflow a landscape phone's narrow actions panel. In the
+   HUD's own ink on the panel's opaque surface: no backing of its own.
+   `junction-prompt.browser.spec.ts` measures its targets on a tablet; no ride
+   shows it until #2896, which measures where it lands on the stage. */
+.oyl-hud__junction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--oyl-space-sm);
+  margin-block-start: var(--oyl-space-sm);
+}
+
+.oyl-hud__junction-prompt {
+  display: grid;
+  justify-items: start;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__junction-note {
+  flex-basis: 100%;
+}
+
+/* Its own width, never `.oyl-hud__control`'s `flex: 1`, which comes later. */
+.oyl-hud__junction > .oyl-hud__junction-u-turn {
+  flex: none;
+}
+
+.oyl-hud__junction-u-turn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-title,
+.oyl-hud__junction-lock {
+  margin: 0;
+  color: var(--oyl-color-hud-ink);
+  font-size: var(--oyl-font-size-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-hud__junction-title {
+  font-weight: 700;
+}
+
+.oyl-hud__junction-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.oyl-hud__junction-way {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* *Default* and *Chosen* on one line under the way's name, smaller, so a way
+   that is both is no taller than one that is either. */
+.oyl-hud__junction-marks {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* The way chosen says so in words; bold and a heavier edge are the glance's
+   half, never the only signal (SC 1.4.1). */
+.oyl-hud__junction-way--chosen {
+  font-weight: 700;
+  border-width: 3px;
+}
+
+/* Once the choice is final the ways carry `aria-disabled`, never `disabled`,
+   for the item control's reason above: they stay in the tab order and still
+   show which way the ride goes, so their ink is the HUD's full ink. */
+.oyl-hud__junction-way[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.oyl-hud__junction-hints,
+.oyl-hud__junction-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-hud__junction-hint kbd {
+  font-family: inherit;
 }
 
 /*

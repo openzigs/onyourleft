@@ -59,12 +59,21 @@ import { isNativeShell, platformCapacitor } from '../../support/capacitor';
 import { navigatorGamepads, type GamepadPort } from '../gamepad-port';
 import type { ItemInputPort } from '../lap-race/item-input-port';
 import type { SteerInputPort } from '../steer-port';
+import type { TurnPress } from '../open-world/junction-choice';
+import { NO_TURN_PADS_HELD, readTurnPads } from '../open-world/turn-input';
 
 export interface GamepadIntentsProps {
   readonly throwing?: ThrowInputPort | undefined;
   readonly steering?: SteerInputPort | undefined;
   /** A lap race's item use: a throw button asks for it. @see the module header */
   readonly items?: ItemInputPort | undefined;
+  /**
+   * An open-world ride's turns — #2898: each turn button that goes down
+   * (`turn-input.ts` §`readTurnPads`, ADR 0088 D-3: face buttons 2, 0, 1 and 3
+   * for left, straight, right and U-turn, and the shell's numbered 4, 3 and 2)
+   * is one press, handed here. Absent, no pad turns.
+   */
+  readonly turning?: ((press: TurnPress) => void) | undefined;
   /** The pads to poll. Absent is the platform's, through `window`. */
   readonly pads?: GamepadPort | undefined;
   /**
@@ -82,8 +91,10 @@ const isThrow = (intent: string): intent is ThrowIntent =>
 
 /** @see the module header */
 export function GamepadIntents(props: GamepadIntentsProps): null {
-  const { throwing, steering, items, pads, onPadInUse, onPress } = props;
+  const { throwing, steering, items, turning, pads, onPadInUse, onPress } = props;
   const held = useRef(NO_PADS_HELD);
+  const turnsHeld = useRef(NO_TURN_PADS_HELD);
+  const turningRef = useRef(turning);
   const throwingRef = useRef(throwing);
   const steeringRef = useRef(steering);
   const itemsRef = useRef(items);
@@ -95,6 +106,7 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
     throwingRef.current = throwing;
     steeringRef.current = steering;
     itemsRef.current = items;
+    turningRef.current = turning;
     padsRef.current = pads;
     inUseRef.current = onPadInUse;
   });
@@ -107,7 +119,12 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
       const now = (padsRef.current ?? platform).pads();
       const read = readGamepads(held.current, now);
       held.current = read.state;
-      if (read.intents.length > 0) pressRef.current?.();
+      // #2898: the turn buttons, read beside the round's, each press once.
+      const turns = readTurnPads(turnsHeld.current, now);
+      turnsHeld.current = turns.state;
+      const pressed = read.intents.length > 0 || turns.presses.length > 0;
+      if (pressed) pressRef.current?.();
+      for (const turn of turns.presses) turningRef.current?.(turn);
       for (const intent of read.intents) {
         if (isThrow(intent)) {
           throwingRef.current?.throwParcel(intent);
@@ -116,7 +133,7 @@ export function GamepadIntents(props: GamepadIntentsProps): null {
       }
       const connected = now.some((pad) => pad?.connected === true);
       // #2514: in use from its first press, until no pad is connected.
-      if (inUse !== (connected && (inUse || read.intents.length > 0))) {
+      if (inUse !== (connected && (inUse || pressed))) {
         inUse = !inUse;
         inUseRef.current?.(inUse);
       }
