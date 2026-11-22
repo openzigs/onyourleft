@@ -32,9 +32,11 @@
  * the road ridden. `open-world-cannot-reach-trainer.test.ts` holds it.
  *
  * @unwired the open-world ride session (#2896) constructs this when it starts
- * a ride, and the junction prompt (#2898) draws {@link JunctionChoice.prompt};
- * neither exists yet. The behavioural ride in `junction-choice.test.ts` drives
- * it as they will.
+ * a ride and hands the HUD its prompt and its press; it does not exist yet. The
+ * HUD's junction prompt (`hud/JunctionChoicePrompt.tsx`, #2898) draws
+ * {@link JunctionChoice.prompt} and labels its ways with
+ * {@link pressesOfWays}. The behavioural rides in `junction-choice.test.ts`
+ * and `hud/JunctionChoicePrompt.test.tsx` drive it as the session will.
  */
 
 import { JUNCTION_LOCK_METRES, type RollingRoute, type RollingWay } from '@onyourleft/domain';
@@ -44,6 +46,9 @@ import { JUNCTION_LOCK_METRES, type RollingRoute, type RollingWay } from '@onyou
  * **250 m** (ADR 0088 D-1.2, answered by the owner in D-9 Q2). With two
  * junctions closer than this, the second's prompt appears as the first is
  * passed, because only the next junction is ever prompted.
+ *
+ * @test-facing `junction-choice.test.ts` holds the prompt to appearing at
+ * exactly this distance; {@link createJunctionChoice} reads it here.
  */
 export const JUNCTION_PROMPT_METRES = 250;
 
@@ -51,6 +56,12 @@ export const JUNCTION_PROMPT_METRES = 250;
 export const TURN_PRESSES = ['left', 'straight', 'right', 'u-turn'] as const;
 
 export type TurnPress = (typeof TURN_PRESSES)[number];
+
+/** A press that chooses a way at a junction: every press but the U-turn. */
+export type WayPress = Exclude<TurnPress, 'u-turn'>;
+
+/** The presses that choose a way, in the order the prompt names them. */
+export const WAY_PRESSES: readonly WayPress[] = ['left', 'straight', 'right'];
 
 /** What the prompt shows for the next junction (#2898 draws it). */
 export interface JunctionPrompt {
@@ -93,7 +104,7 @@ const DIRECT_CHOICE_MAX_WAYS = 3;
  * - **Left and right, with more than three: a step** one way round the
  *   junction, stopping at its ends.
  */
-function wayForPress(press: 'left' | 'straight' | 'right', shown: JunctionPrompt): string {
+function wayForPress(press: WayPress, shown: JunctionPrompt): string {
   const { ways, chosen, defaultWay } = shown;
   if (press === 'straight') return defaultWay;
   // A prompted junction has at least two ways on (`junctionsAfter`), so each
@@ -110,6 +121,27 @@ function wayForPress(press: 'left' | 'straight' | 'right', shown: JunctionPrompt
   return (step as RollingWay).edge.id;
 }
 
+/**
+ * Which presses take each way of the junction `shown` prompts, as they stand
+ * now: for each way's edge id, every press that would choose it, in
+ * {@link WAY_PRESSES}'s order, and none for a way no single press reaches
+ * (with more than three ways on, one further round than a step).
+ *
+ * Built from {@link wayForPress} itself, never a copy of its rule (#2898,
+ * from the review of #2964): since the owner's inward-step ruling, which
+ * press takes which way is not positional, so the prompt labels each way it
+ * draws, and sends each tap, from this.
+ */
+export function pressesOfWays(shown: JunctionPrompt): ReadonlyMap<string, readonly WayPress[]> {
+  const presses = new Map<string, WayPress[]>(shown.ways.map((way) => [way.edge.id, []]));
+  for (const press of WAY_PRESSES) presses.get(wayForPress(press, shown))?.push(press);
+  return presses;
+}
+
+/**
+ * @unwired the open-world ride session (#2896) holds one for its ride and
+ * hands the HUD its prompt and its press; it does not exist yet.
+ */
 export interface JunctionChoice {
   /** The prompt for the next junction, or `undefined` while none is within {@link JUNCTION_PROMPT_METRES}. */
   prompt(rider: number): JunctionPrompt | undefined;
@@ -117,10 +149,18 @@ export interface JunctionChoice {
   press(press: TurnPress, rider: number): void;
 }
 
-/** The junction choice for an open-world ride on `route`. */
+/**
+ * The junction choice for an open-world ride on `route`.
+ *
+ * @unwired the open-world ride session (#2896) constructs it when a ride
+ * starts; it does not exist yet. The behavioural rides construct it as the
+ * session will.
+ */
 export function createJunctionChoice(route: RollingRoute): JunctionChoice {
   const prompt = (rider: number): JunctionPrompt | undefined => {
-    const next = route.junctionsAfter(rider)[0];
+    // Only the next junction is ever prompted, and this runs every frame:
+    // `nextJunctionAfter` builds that one and none of the others ahead (#2898).
+    const next = route.nextJunctionAfter(rider);
     if (next === undefined || next.distance - rider > JUNCTION_PROMPT_METRES) return undefined;
     const toLock = Math.max(0, next.distance - rider - JUNCTION_LOCK_METRES);
     return {

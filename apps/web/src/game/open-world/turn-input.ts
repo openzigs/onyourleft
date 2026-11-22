@@ -40,10 +40,11 @@
  * the pad layout's name (`gamepad-port.ts`, which imports nothing), and types.
  * `open-world-cannot-reach-trainer.test.ts` holds it.
  *
- * @unwired the open-world ride session (#2896) reads the keyboard, the pads
- * and the controller through these, and the junction prompt (#2898) maps its
- * symbols through {@link turnOfSymbol}; neither exists yet. The tests drive
- * each table as they will.
+ * The HUD reads the keys and the pads through these (#2898): the junction
+ * prompt (`hud/JunctionChoicePrompt.tsx`) takes the turn keys and maps its
+ * symbols through {@link turnOfSymbol}, and `hud/GamepadIntents.tsx` reads the
+ * pads' turn buttons. The controller's half waits for the open-world ride
+ * session (#2896), whose declarations say so.
  */
 
 import type { OpenBikeControlEvent } from '@onyourleft/sensors/protocol';
@@ -134,7 +135,12 @@ export function readTurnPads(
   return { state: { held }, presses };
 }
 
-/** OpenBikeControl v1's Navigation buttons, by id. */
+/**
+ * OpenBikeControl v1's Navigation buttons, by id.
+ *
+ * @unwired the open-world ride session (#2896) reads a paired controller's
+ * events through {@link readTurnController}; it does not exist yet.
+ */
 export const TURN_CONTROLLER_BUTTONS: Readonly<Record<number, TurnPress>> = Object.freeze({
   0x10: 'straight',
   0x11: 'u-turn',
@@ -145,11 +151,15 @@ export const TURN_CONTROLLER_BUTTONS: Readonly<Record<number, TurnPress>> = Obje
 /** The controller's Navigation buttons held down, as its last events left them. */
 export type TurnControllerState = ReadonlySet<number>;
 
+/** @unwired the open-world ride session (#2896) starts a ride's controller from it; it does not exist yet. */
 export const NO_TURN_CONTROLLER_HELD: TurnControllerState = Object.freeze(new Set<number>());
 
 /**
  * A controller's events as presses: one for each Navigation button that goes
  * down, none for a button already down, and none for a steer or an angle.
+ *
+ * @unwired the open-world ride session (#2896) hands each press to the
+ * junction choice; it does not exist yet.
  */
 export function readTurnController(
   state: TurnControllerState,

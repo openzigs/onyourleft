@@ -254,6 +254,10 @@ export default defineConfig({
         // and its control with none. `street-map-harness.tsx` says what it
         // counts and what it does not prove.
         'street-map': 'browser/street-map.html',
+        // #2898: the ride HUD's junction prompt, handed a real junction
+        // choice on a rolling route over a synthetic grid.
+        // `junction-prompt-harness.tsx` says what it does not prove.
+        'junction-prompt': 'browser/junction-prompt.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

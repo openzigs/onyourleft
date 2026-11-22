@@ -17,8 +17,9 @@
  * as Delivery's and the lap race's tests call it. Its own cases (every import
  * spelling, barrels, workers, failing closed on what it cannot follow) are in
  * Delivery's test; this file holds the open world's roots and D-5.2's three
- * plantings. The prompt's modules and its on-screen symbols (#2898) will live
- * under `game/open-world/` and are walked the day they land.
+ * plantings. The prompt and its on-screen symbols (#2898) live in the HUD,
+ * beside the controls of every other mode, so they are named
+ * ({@link PROMPT_MODULES}) rather than walked by directory.
  *
  * What it cannot see is a trainer reached at run time, through a value handed
  * in. That half is the behavioural ride in `junction-choice.test.ts`.
@@ -50,9 +51,20 @@ const WEB_ROOT = 'apps/web/src/game/open-world';
  */
 const PACKAGE_MODULES = ['packages/domain/src/route/rolling.ts'] as const;
 
+/**
+ * The junction prompt (#2898): its view, with the on-screen turn symbols of
+ * D-3.1, its words and sentences, and the pad reader that hands it a pad's
+ * turns. In `game/hud/`, so named.
+ */
+const PROMPT_MODULES = [
+  'apps/web/src/game/hud/JunctionChoicePrompt.tsx',
+  'apps/web/src/game/hud/junction-text.ts',
+  'apps/web/src/game/hud/GamepadIntents.tsx',
+] as const;
+
 /** Every non-test module of the mode. A root directory that is not there throws. */
 function openWorldModules(): string[] {
-  return [...modulesUnder(WEB_ROOT), ...PACKAGE_MODULES];
+  return [...modulesUnder(WEB_ROOT), ...PACKAGE_MODULES, ...PROMPT_MODULES];
 }
 
 /** The roots that are themselves trainer-control writers, by the #1807 rules. */
@@ -103,6 +115,7 @@ describe('junction choice cannot reach the trainer-command seam (ADR 0088 D-5.2,
       `${WEB_ROOT}/junction-choice.ts`,
       `${WEB_ROOT}/turn-input.ts`,
       'packages/domain/src/route/rolling.ts',
+      ...PROMPT_MODULES,
     ]) {
       expect(roots).toContain(path);
     }
@@ -153,6 +166,19 @@ describe('junction choice cannot reach the trainer-command seam (ADR 0088 D-5.2,
     expect(throughInput).toContain(
       `${input} → packages/domain/src/index.ts → packages/domain/src/trainer/simulation.ts`,
     );
+  });
+
+  it('is red for the prompt importing game/gradient.ts', () => {
+    const entry = 'apps/web/src/game/hud/JunctionChoicePrompt.tsx';
+    const original = plantedOver({})(entry) as string;
+    const found = seamViolations(
+      [entry],
+      forbiddenInTheTree(),
+      plantedOver({
+        [entry]: `${original}\nimport { createGradientSession } from '../gradient';\nvoid createGradientSession;\n`,
+      }),
+    );
+    expect(found).toContain(`${entry} → apps/web/src/game/gradient.ts`);
   });
 
   it('is red for a root that defines a trainer-control writer', () => {
