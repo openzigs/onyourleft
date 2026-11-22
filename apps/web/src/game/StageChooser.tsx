@@ -90,7 +90,7 @@ import { DAYS_IN_WEEK, FEWEST_DELIVERY_HOUSES, type WeekProgress } from './deliv
 import { corridorStateText, type CorridorState } from './world-data/corridor';
 import { BOT_TIER_TEXT } from './hud/lap-race-hud';
 import { LAP_RACE_MOST_BOTS, LAP_RACE_MOST_LAPS, type LapRaceChoice } from './lap-race/choice';
-import { isOpenWorldRouteId } from './open-world/ride';
+import { isOpenWorldRouteId } from './open-world/route-id';
 import {
   PREVIEW_DEFAULT_WATTS,
   PREVIEW_MAXIMUM_WATTS,
