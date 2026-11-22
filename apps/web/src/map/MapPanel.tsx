@@ -103,6 +103,19 @@
  * The markers take no focus, and the map stays `role="img"`: the planner's
  * list is the keyboard's way to every one of these gestures.
  *
+ * ## The open-world start picker's map is moved by hand — #2889
+ *
+ * `editing.direct` is the owner's ruling of 2026-11-20 on the start picker:
+ * fully interactive, and no rows of text buttons ("they look cheap"). So that
+ * map is the control itself (`port.ts` §`MapCreateOptions.direct`): the
+ * canvas takes focus and answers arrow keys and `+`/`-`, the wheel and a pinch
+ * zoom it, a drag pans it, and its pin takes focus and answers arrow keys. The
+ * buttons left are a small cluster in the map's top right corner — zoom in,
+ * zoom out and the caller's own actions — as 48 px icon buttons with names. It
+ * has no *Whole route*: there is no route on that map. Its words are not
+ * `role="img"`'s, because the canvas inside is focusable: the name and the
+ * keyboard help are the canvas's own.
+ *
  * ## Offline is a fourth state, on a route's page
  *
  * `offline` (#2003): the streets come from the archive over the network and
@@ -112,9 +125,11 @@
  * streets to fetch, so offline changes nothing for them.
  */
 
-import { useEffect, useRef, type JSX } from 'react';
+import { LocateFixed, MapPinPlus, Minus, Plus } from 'lucide-react';
+import { useEffect, useId, useRef, type JSX } from 'react';
 
 import { Button } from '../design/Button';
+import { VisuallyHidden } from '../design/VisuallyHidden';
 import { basemapStyle, MAP_COLOURS, type BasemapConfig } from './basemap';
 import type { MapPointerHandlers, MapPort, MapView, MapWaypoint } from './port';
 import { createThemedMap } from './themed-map';
@@ -128,7 +143,32 @@ export interface MapEditing {
   readonly emptyView: TrackBounds;
   /** The live map, and `undefined` once it is gone: the planner reads its centre. */
   readonly onView?: ((view: MapView | undefined) => void) | undefined;
+  /**
+   * A map moved by hand, with a cluster of icon buttons on it instead of rows
+   * of text buttons under it (#2889). @see MapDirect
+   */
+  readonly direct?: MapDirect | undefined;
 }
+
+/** One of a direct map's own buttons (#2889): its name, its icon, and what it does. */
+export interface MapAction {
+  readonly label: string;
+  readonly icon: 'pin' | 'recentre';
+  readonly act: (view: MapView) => void;
+}
+
+/** The open-world start picker's map (#2889). */
+export interface MapDirect {
+  /** After *Zoom in* and *Zoom out*, in this order. */
+  readonly actions: readonly MapAction[];
+}
+
+/** The keyboard's help on a direct map (#2889), read as the canvas's description. */
+export const DIRECT_MAP_KEYS_TEXT =
+  'Arrow keys move the map, and plus and minus zoom it. Tab to the pin and use the arrow keys ' +
+  'to move it.';
+
+const ACTION_ICONS = { pin: MapPinPlus, recentre: LocateFixed } as const;
 
 export interface MapPanelProps {
   /**
@@ -246,12 +286,11 @@ const WORDS: Readonly<
       'This build has no basemap, so there is no map to tap. The controls below make every ' +
       'change by distance along the route.',
   },
-  // #2889: the open-world ride's start, a pin with keys to place and nudge it.
+  // #2889: the open-world ride's start, a pin dropped and moved on the map.
   start: {
     label: () => 'Map for placing the start of an open-world ride.',
     noRenderer:
-      'This browser cannot draw a map: it needs WebGL. The buttons below place and move the ' +
-      'pin, or start from a saved route or a past ride.',
+      'This browser cannot draw a map: it needs WebGL. Start from a saved route or a past ride.',
     noBasemap:
       'This build has no basemap, so there is no map to place a pin on. Start from a saved ' +
       'route or a past ride.',
@@ -288,7 +327,10 @@ export function MapPanel({
   const view = useRef<MapView | undefined>(undefined);
   const words = WORDS[subject];
   const editable = editing !== undefined;
-  const movable = explorable || editable;
+  const direct = editing?.direct;
+  const directMap = direct !== undefined;
+  const movable = (explorable || editable) && !directMap;
+  const keysId = useId();
   // The planner's latest handlers and callback, read at the gesture (#2006).
   const latest = useRef(editing);
   latest.current = editing;
@@ -305,6 +347,9 @@ export function MapPanel({
     !unreachable;
   const parts = track?.coordinates.length ?? 0;
   const label = words.label(parts);
+  // A direct map's name is the canvas's, given at creation. Only that map's:
+  // the planner's label changes with every leg, and must not rebuild its map.
+  const directLabel = directMap ? label : undefined;
 
   /**
    * Create the map — once per basemap, **not** once per track.
@@ -333,8 +378,9 @@ export function MapPanel({
         style: basemapStyle(basemap, { tiles, theme }),
         trackColour: MAP_COLOURS[theme].track,
       }),
-      movable,
+      explorable || editable,
       editable,
+      directLabel === undefined ? undefined : { label: directLabel, describedBy: keysId },
     );
     view.current = created;
     fittedOnce.current = false;
@@ -349,6 +395,9 @@ export function MapPanel({
         dragLine: (from, to) => {
           latest.current?.pointer.dragLine(from, to);
         },
+        nudgeWaypoint: (id, direction) => {
+          latest.current?.pointer.nudgeWaypoint?.(id, direction);
+        },
       });
       latest.current?.onView?.(created);
     }
@@ -357,7 +406,7 @@ export function MapPanel({
       created.destroy();
       view.current = undefined;
     };
-  }, [drawable, port, basemap, tiles, movable, editable]);
+  }, [drawable, port, basemap, tiles, explorable, editable, directLabel, keysId]);
 
   /**
    * Put the line on it, and put a different line on it when the rider asks.
@@ -400,6 +449,64 @@ export function MapPanel({
 
   if (unreachable) {
     return <p className="oyl-muted">{MAP_OFFLINE_TEXT}</p>;
+  }
+
+  if (direct !== undefined) {
+    return (
+      <>
+        {/*
+          The frame holds the map and its buttons, so the buttons sit on the
+          map without being inside MapLibre's container, where a press would
+          also reach the map's own handlers.
+        */}
+        <div className="oyl-map-frame">
+          <div className="oyl-map oyl-map--direct" ref={container} />
+          <div className="oyl-map__controls" role="group" aria-label="Map controls">
+            <Button
+              variant="secondary"
+              className="oyl-map__control"
+              onClick={() => {
+                view.current?.zoom('in');
+              }}
+            >
+              <Plus aria-hidden="true" focusable="false" size={22} />
+              <VisuallyHidden>Zoom in</VisuallyHidden>
+            </Button>
+            <Button
+              variant="secondary"
+              className="oyl-map__control"
+              onClick={() => {
+                view.current?.zoom('out');
+              }}
+            >
+              <Minus aria-hidden="true" focusable="false" size={22} />
+              <VisuallyHidden>Zoom out</VisuallyHidden>
+            </Button>
+            {direct.actions.map(({ label: name, icon, act }) => {
+              const Icon = ACTION_ICONS[icon];
+              return (
+                <Button
+                  key={name}
+                  variant="secondary"
+                  className="oyl-map__control"
+                  onClick={() => {
+                    if (view.current !== undefined) act(view.current);
+                  }}
+                >
+                  <Icon aria-hidden="true" focusable="false" size={22} />
+                  <VisuallyHidden>{name}</VisuallyHidden>
+                </Button>
+              );
+            })}
+          </div>
+          <p id={keysId} className="oyl-visually-hidden">
+            {DIRECT_MAP_KEYS_TEXT}
+          </p>
+        </div>
+        {/* Directly under the map, as ordinary text: see the module note and ODbL §4.3. */}
+        <p className="oyl-map__attribution">{basemap.attribution}</p>
+      </>
+    );
   }
 
   return (

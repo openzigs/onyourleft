@@ -983,9 +983,10 @@ describe('a crash drawn inside a game ride — #2454', () => {
     expect(crashesShown(round.scoreDetails)).toBeLessThanOrEqual(script.crashes);
     expect(round.scoreDetails.at(-1)).toMatch(/^Day \d of 7$/u);
     expect(plain.scoreDetails.every((detail) => detail === undefined)).toBe(true);
-    // #2493: every frame drawn down hands the realistic rider the crash's
-    // time and side, for its crash clip, inside the crash's 1.5 s; a ride
-    // with no round never does.
+    // #2493: every frame drawn down hands the realistic rider its place in
+    // the crash clip, in the clip's own seconds (crashClipSeconds), and its
+    // side, inside the crash's CRASH_SECONDS (1.8 s); a ride with no round
+    // never does.
     const rider = (frame: SceneFrame): RiderMarker | undefined =>
       frame.markers.find((marker) => marker.kind === 'rider');
     const timed = round.drawn.flatMap((frame) => rider(frame)?.crash ?? []);
@@ -1050,7 +1051,7 @@ describe('a crash drawn inside a game ride — #2454', () => {
     expect(after[0]?.lean).toBeGreaterThan(70);
     expect(after[0]?.detail).toBe('Crashed');
     // …then on the way up, still "Crashed", and back on the bike within the
-    // crash's 1.5 s, with "Crashed" gone.
+    // crash's CRASH_SECONDS (1.8 s), with "Crashed" gone.
     const up = after.findIndex((sight) => sight.detail !== 'Crashed');
     expect(up).toBeGreaterThan(1);
     expect(up).toBeLessThanOrEqual(8);

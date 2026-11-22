@@ -137,16 +137,25 @@ export const LAYER_KEPT_GEOMETRIES: Readonly<Record<ReadLayer, readonly number[]
 };
 
 /**
- * The `water` line `kind`s kept — #2659. Protomaps v4 writes a waterway line
- * with its `waterway` tag as its `kind` and no `kind_detail`
- * (protomaps/basemaps `Water.java`, read 2026-11-15): `river`, `stream`,
- * `canal`, `ditch` and `drain`. The first three are kept. **A ditch and a
- * drain are not**: a road crosses one in a culvert, which is invisible from a
- * bicycle (`apps/web/src/game/waterways.ts` §"What there is not"), and the
- * archive marks no culvert on a line — so one kept would be a bridge over
- * every roadside drain. Any other `kind`, or none, drops the line unread.
+ * The `water` line `kind`s kept — #2659, and since #2974 all five. Protomaps
+ * v4 writes a waterway line with its `waterway` tag as its `kind` and no
+ * `kind_detail` (protomaps/basemaps `Water.java`, read 2026-11-15 and again
+ * 2026-11-21): `river`, `stream`, `canal`, `ditch` and `drain`. Until #2974 a
+ * ditch and a drain were dropped here, because a road crosses one in a
+ * culvert and the archive marks no culvert on a line; now they are kept for
+ * where one runs BESIDE the road, and `apps/web/src/game/waterways.ts`
+ * bridges only {@link BRIDGED_WATER_LINE_KINDS}. Any other `kind`, or none,
+ * drops the line unread.
  */
-export const WATER_LINE_KINDS = ['river', 'stream', 'canal'] as const;
+export const WATER_LINE_KINDS = ['river', 'stream', 'canal', 'ditch', 'drain'] as const;
+
+/**
+ * The water line `kind`s a road crosses on a bridge — #2659. A ditch or a
+ * drain passes under it in a culvert, which is invisible from a bicycle
+ * (`apps/web/src/game/waterways.ts` §"What there is not"), so one bridged
+ * would be a bridge over every roadside drain.
+ */
+export const BRIDGED_WATER_LINE_KINDS = ['river', 'stream', 'canal'] as const;
 
 /** The `buildings.kind` values kept. Address points and anything else are dropped. */
 export const BUILDING_KINDS = ['building', 'building_part'] as const;
@@ -178,6 +187,27 @@ export const FOOTWAY_KIND_DETAILS = [
  * `pier` and `aeroway` are not streets and are dropped.
  */
 export const STREET_KINDS = ['highway', 'major_road', 'minor_road'] as const;
+
+/** The `roads.kind` of a railway line in Protomaps v4 (#2660). */
+export const RAIL_KIND = 'rail';
+
+/**
+ * The `kind_detail` values that make a {@link RAIL_KIND} line a railway kept
+ * as track — #2660, read from docs.protomaps.com/basemaps/layers on
+ * 2026-11-19, where a line's `kind_detail` is its OSM `railway` value: a main
+ * line (`rail`), light rail, narrow gauge, a preserved line and a disused one,
+ * which keeps its rails. **Not** a `subway`, which runs underground, a
+ * `monorail` or a `funicular`, which are not ballasted track, a `tram`, which
+ * runs in a street rather than across it, or a `miniature` park railway. Any
+ * other detail, or none, drops the line unread.
+ */
+export const RAIL_KIND_DETAILS = [
+  'rail',
+  'light_rail',
+  'narrow_gauge',
+  'preserved',
+  'disused',
+] as const;
 
 /** The `roads.kind` kept only where its `kind_detail` says it is a street (#1565). */
 export const OTHER_ROAD_KIND = 'other';

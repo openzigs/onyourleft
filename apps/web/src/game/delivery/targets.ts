@@ -148,7 +148,10 @@ export const TARGET_SPACING_METRES = 2 * TARGET_WINDOW_HALF_METRES + TARGET_GAP_
  *   the step's depth, so it takes nothing off the reach either.
  * - **Inside the window.** A parcel reaching the deepest step flies 1.2 s, so
  *   a rider throws `1.2 × speed` before the house, inside
- *   `THROW_WINDOW_BEFORE_METRES` (20 m) at any speed to 60 km/h.
+ *   `THROW_WINDOW_BEFORE_METRES` (20 m) at any speed to 60 km/h. A level's
+ *   own narrower window (#2931) still holds it at
+ *   `obstacles.ts` §`AVOIDABLE_FASTEST_METRES_PER_SECOND`
+ *   (`ride-round.test.ts` §"a level's own throw window").
  *
  * A pick returning only houses a parcel can be delivered to is
  * `targets.test.ts`' (#1856), riding a round through `ride-round.ts`.

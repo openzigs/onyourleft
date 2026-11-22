@@ -34,6 +34,7 @@
  * | 5a⁗ | this ride is not being recorded: its recording could not start | event (#2381) | the owner's ruling of 2026-11-08 | **yes** — #2381 |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
+ * | 5c′ | an open-world ride's next junction: its ways and default, a choice made, and the lock | event (#2898) | ADR 0088 D-3 | **yes** — #2898, the module note says why |
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
  * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
@@ -67,6 +68,7 @@
  * | `not-recording` | `GameView` | `GameTrainerPort.recordGameRide` answering `false` or throwing at the press of *Ride* (#2381) |
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
+ * | `junction` | nothing yet: the open-world ride session (#2896) feeds it | `hud/junction-announce.ts` §`junctionEvent` (#2898) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
  * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
@@ -320,6 +322,7 @@ export type AnnouncementEvent =
   | { readonly kind: 'not-recording'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string }
+  | { readonly kind: 'junction'; readonly text: string }
   | { readonly kind: 'hold-changed'; readonly text: string }
   | { readonly kind: 'plan-changed'; readonly text: string }
   | { readonly kind: 'lap-ended'; readonly text: string }
@@ -361,6 +364,12 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'not-recording',
   'screen-off-risk',
   'erg-held',
+  // #2898: an open-world ride's next junction (ADR 0088 D-3). Rank 5c′: below
+  // every fault and status, which say what the machine is doing, and above the
+  // workout's own sentences, a lap and every game's, because a junction's
+  // choice is final 100 m before it: a sentence a window late is a turn
+  // missed. Owed until said, one sentence at a time (`junction-announce.ts`).
+  'junction',
   // #1240: the heart-rate hold's sentence, BELOW every trainer and workout
   // fault and below a held *Set* (ADR 0048 D-12). Announcements on only, at
   // most once a minute — `workout/hold-text.ts` §`holdAnnouncement`.
@@ -425,6 +434,12 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   // #2365: a house ahead that must not get a parcel, ALWAYS said, for the same
   // reason: ADR 0065 D-10.5 tells it apart in words, never by sight alone.
   'delivery-skip-house',
+  // #2898: an open-world junction ahead, a choice made and the lock, ALWAYS
+  // said: ADR 0088 D-3 has the prompt announced when it appears and when it
+  // locks, and the prompt is a status message (SC 4.1.3), so a setting that is
+  // off by default must not silence it. Proposed in #2898's pull request, for
+  // the owner; reversing it is the membership of this array.
+  'junction',
   // #1812: and no other Delivery kind. The owner's ruling of 2026-10-28: a
   // delivery, a miss, a crash and the round's end follow the setting. Rank 5g.
   // #1904: and no lap-race kind, on that ruling. Rank 5h.

@@ -49,6 +49,7 @@ import {
   DELIVERY_OBSTACLE_TRIANGLES,
   DELIVERY_PIECE_CAPACITY,
   DeliveryBelt,
+  PARKED_CAR_PAINTS,
   deliveryObstacleVertexDrawn,
   deliveryPieceShape,
   MARKER_MOST_SCALE,
@@ -992,7 +993,7 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     belt.dispose();
   });
 
-  it('paints its cars in three body colours from ONE car in the geometry, each instance its own paint by its place on the round (round 6)', () => {
+  it('paints its cars in eight body colours from ONE car in the geometry, each instance its own paint by its place on the round (round 6)', () => {
     const belt = new DeliveryBelt('stylised');
     const geometry = belt.meshOf('obstacles').geometry;
     // One car: every vertex's kind is one of the drawn roster's, none a second
@@ -1022,7 +1023,10 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
     }
     expect(paintedBody).toBe(car.filter((each) => each.paint === body).length);
 
-    const cars = [0, 1, 2, 3, 4].map((index) => ({
+    // Eight paints since the owner's request of 2026-11-18, where there were three.
+    expect(PARKED_CAR_PAINTS.length).toBe(8);
+    expect(new Set(PARKED_CAR_PAINTS).size).toBe(8);
+    const cars = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => ({
       x: 0,
       y: 0,
       z: 10 * index,
@@ -1031,17 +1035,19 @@ describe('a parked car looks like one — #2362, the owner’s ruling on PR #237
       index,
     }));
     belt.update({ parcels: [], markers: [], obstacles: cars });
-    expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([0, 1, 2, 0, 1]);
+    expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 0, 1,
+    ]);
     expect(belt.drawn('obstacles').every((each) => each.kind === 'parked-car')).toBe(true);
-    // The instances' paints, as uploaded: three different colours, the fourth the first's.
+    // The instances' paints, as uploaded: eight different colours, the ninth the first's.
     const paints = geometry.getAttribute('oylObstacle');
     const rgb = (at: number): string =>
       [paints.getX(at), paints.getY(at), paints.getZ(at)].map((each) => each.toFixed(4)).join(',');
-    expect(new Set([0, 1, 2].map(rgb)).size).toBe(3);
-    expect(rgb(3)).toBe(rgb(0));
+    expect(new Set([0, 1, 2, 3, 4, 5, 6, 7].map(rgb)).size).toBe(8);
+    expect(rgb(8)).toBe(rgb(0));
     // The same car, a frame later and the first off the road: still its own paint.
     belt.update({ parcels: [], markers: [], obstacles: cars.slice(1) });
-    expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([1, 2, 0, 1]);
+    expect(belt.drawn('obstacles').map((each) => each.paint)).toEqual([1, 2, 3, 4, 5, 6, 7, 0, 1]);
     // #2506: a car pulling out draws this car's body, so it wears a paint too, by its place.
     belt.update({
       parcels: [],

@@ -21,6 +21,7 @@ import {
   CROSSING_OBSTACLE_KINDS,
   LEVEL_STANDING_KINDS,
   levelObstacleMix,
+  MOVING_HAZARD_KINDS,
   FEWER_OBSTACLES_KEEP_ONE_IN,
   type Obstacle,
   obstacleAcross,
@@ -472,7 +473,7 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
     for (const level of ROUNDS) expect(level.round.hazardsPerKilometre.static).toBeGreaterThan(0);
   });
 
-  it('places the level’s density, every one standing, a parked car or a bin, a car only at the kerb', () => {
+  it('places the level’s density, every static one standing, a parked car or a bin, a car only at the kerb', () => {
     const kinds = new Set<string>();
     const carLanes = new Set<number>();
     for (const level of ROUNDS) {
@@ -497,6 +498,13 @@ describe('a level’s obstacles: parked cars and bins, standing — #2362, ADR 0
           }
         });
         for (const obstacle of placed) {
+          // #2367: a level that asks for moving hazards (#2364) places them in
+          // the same stretches; they never stand, and a level asking for none places none.
+          if (MOVING_HAZARD_KINDS.includes(obstacle.kind)) {
+            expect(level.round.hazardsPerKilometre.moving, level.id).toBeGreaterThan(0);
+            expect(obstacle.stands, level.id).toBeUndefined();
+            continue;
+          }
           expect(obstacle.stands, level.id).toBeDefined();
           expect(LEVEL_STANDING_KINDS).toContain(obstacle.kind);
           kinds.add(obstacle.kind);

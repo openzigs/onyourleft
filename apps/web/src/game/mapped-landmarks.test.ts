@@ -365,6 +365,8 @@ describe('#1794: the lever, and a town with no church', () => {
       town.origin,
       undefined,
       urbanClassMap(town.corridor, land, town.profile),
+      // Since #2848 the shops' aprons are off: the plans before #1794 had none.
+      { shopAprons: false },
     );
     expect(planFingerprint(plans)).toBe(MIXED_TOWN_BEFORE_1794);
   });
